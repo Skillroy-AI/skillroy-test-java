@@ -158,8 +158,8 @@ table above. "Java 8 test JVM" = the module's own tests also run on Java 8 (`-Dj
 | Design docs (`docs/design/`) | `phase1-contracts.md` as built, with the Phase 1.x, Phase 2 and Phase 3 passages marked "(1.x, built 2026-10-02)", "(Phase 2, built 2026-10-02)" and "(Phase 3, built 2026-10-03)". `phase2-contracts.md` and `phase3-contracts.md` as built (2026-10-03: every deviation of the build and every fix of the review marked in place). Overview: roadmap with Phase 1.x, Phases 2 and 3 built, the new Phase 4 and Phase 7 | Phase 4's contract, when BS8 has passed |
 | Research notes (`docs/research/`) | Round 1 carried over, finding ids unchanged; `embedded-browser-spi` and `vision-input` new (2026-10-02). Pruned of local-environment detail | None |
 | Security review | Run 2026-10-02 on the pre-port tree: 34 confirmed findings (4 medium, 30 low); the fixes H1-H3 are built (Phase 1.x). The Phase 2 code review of 2026-10-03 had a secrets-and-safety lens (below) | Repeat the review before the first release |
-| Spikes | BS7 done. BS1 answered for Java 8 and Java 25 targets on Linux, parts open. BS2 answered in part. BS4 answered, parts open. BS3, BS5, BS6 open. BS8-BS12 new, not started | See "Base spikes" |
-| CI for this repo | Not chosen. `ci/Dockerfile` and `ci/run-in-linux.sh` are what a pipeline would run | Needs a JDK 8, a JDK >= 25 and Xvfb on the build agents; Chromium and the JCEF natives from Phase 4 |
+| Spikes | BS7 done. **BS8 run 2026-10-06, passed with conditions** (`spikes/BS8/RESULT.md`). BS1 answered for Java 8 and Java 25 targets on Linux, parts open. BS2 answered in part. BS4 answered, parts open. BS3, BS5, BS6 open. BS9-BS12 new, not started | See "Base spikes" |
+| CI for this repo | Not chosen. `ci/Dockerfile` and `ci/run-in-linux.sh` are what a pipeline would run; since 2026-10-06 the image holds Chromium's run-time libraries and the runner takes `SKILLROY_PLATFORM` | Needs a JDK 8, a JDK >= 25 and Xvfb on the build agents; the JCEF natives (152 MB per platform) in the Maven cache for the Phase 4 profile |
 
 ### What the end-to-end review fixed (2026-10-02)
 
@@ -217,7 +217,7 @@ re-run. BS8 comes from `research/embedded-browser-spi.md` R4 (B9); BS9-BS12 from
 | BS5 | Playwright attaches over CDP to an already-running Chromium safely | Open |
 | BS6 | `SqlGuard` accepts and rejects correctly across SQL dialects | Open (the agent-side statement guard of `data.query` is a different, simpler check and is built) |
 | BS7 | `javac --release 8` still works on current JDKs | Done 2026-10-01 |
-| BS8 | A real JCEF browser runs in the Linux test image and the in-process DevTools path works | New, not started; comes before Phase 4 |
+| BS8 | A real JCEF browser runs in the Linux test image and the in-process DevTools path works | **Run 2026-10-06, passed with conditions**: both rendering modes on a Java 25 target, off-screen on a Java 8 target; the DevTools channel verified; Chromium 152's first-run terms dialog must be pre-accepted; `Target.getTargetInfo` does not answer (the main frame id is the target id); windowed JCEF on Java 8 creates no browser. `spikes/BS8/RESULT.md` |
 | BS9 | Robot input on the test display and on a desktop session | New, not started; comes before Phase 7 |
 | BS10 | Routed in-JVM dispatch behaves like Robot | New, not started |
 | BS11 | `PAINT` capture is deterministic | New, not started |
@@ -382,7 +382,35 @@ module's `target/`).
   enumeration of browsers.
 - **Record.** The image's package list (Chromium's runtime libraries), the extracted size of the natives, start-up
   time.
-- **State.** Not started. The downloads it needs are listed under "Environment notes".
+- **Result (2026-10-06): passed with conditions**; the write-up is `spikes/BS8/RESULT.md`, the probe and its runner
+  `spikes/BS8/` (a standalone Maven project, not a reactor module). In short:
+  - **The image hosts JCEF 152** (jcefmaven 152.0.6, Chromium 152.0.7977.83) once fifteen Chromium run-time
+    libraries are added (done in `ci/Dockerfile`; `ldd` clean); Mesa's software OpenGL was already there. Both
+    rendering modes work under the WM-less Xvfb on a Java 25 target; off-screen works on a Java 8 target;
+    **windowed on Java 8 creates no native browser** (no error logged; cause open). The same holds for the x86-64
+    image under emulation, a few times slower.
+  - **Condition 1: Chromium 152's first-run "Additional Terms of Service" dialog blocks `CefInitialize`** until
+    accepted; every stock attempt hung there. Accepting writes two empty sentinel files, `First Run` and
+    `EULA Accepted`, into the root cache path; pre-creating them skips the dialog. The Phase 4 web host does this.
+  - **The in-process DevTools channel works as the research read it**: `Runtime.evaluate` with a result (p50
+    0.1-0.4 ms in process), `awaitPromise`, error and rejection shapes, `Page.*` and `Runtime.consoleAPICalled`
+    events, `Page.addScriptToEvaluateOnNewDocument` at document start, `Input.dispatchMouseEvent`,
+    `Page.captureScreenshot` in both modes, `Emulation.setDeviceMetricsOverride` on a hidden 1 x 1 browser. Futures
+    complete on the EDT in off-screen mode and on a CEF thread in windowed mode. One evaluation of about twenty
+    timed out, mostly right after a navigation: every call is bounded and a read may be retried.
+  - **Condition 2: `Target.getTargetInfo` and `Target.getTargets` do not answer** through this page-level client;
+    the CDP target id is the main frame's id from `Page.getFrameTree`, which equals the `/json/list` entry.
+  - **Condition 3: a page with a `srcdoc` iframe never finished loading** (the renderer idles); plain pages and a
+    `data:`-URL iframe load. The sample pages avoid `srcdoc`.
+  - A browser whose component is not showing is not created until `createImmediately()`; its viewport is 1 x 1
+    until overridden; its first DevTools client can report `Client is closed` and must be re-fetched (F9).
+  - `printAll` throws `IllegalStateException` for the off-screen JOGL canvas and paints the windowed canvas blank:
+    a `PAINT` capture has to guard embedded-browser components; `web.bitmap` is the evidence image.
+  - Reflective enumeration (`CefApp.self -> clients_ -> getAllBrowser()`, `settings_`) works on jcefmaven 152.0.6.
+  - Weight: natives 152 MB (x86-64) / 168 MB (arm64) as a Maven artifact, 376-469 MB extracted, extracted once in
+    about 2.5 s; a host with two browsers takes 0.3-0.6 GB of JVM RSS plus 0.5-0.8 GB in seven helper processes.
+  - Chromium's cache root must be on the container's own file system (lock files and sockets), not on a directory
+    shared with the host.
 
 ### BS9-BS12 Vision and human-like input
 
@@ -642,7 +670,9 @@ Decision B9: one in-process SPI that wraps both JCEF and reflective JxBrowser ac
 plan of a JxBrowser-only module that could be tested against a stand-in only: JCEF is open source, so a real
 embedded browser can run in the public image.
 
-- [ ] BS8 passed (JCEF in the Linux test image)
+- [x] BS8 passed with conditions (JCEF in the Linux test image; 2026-10-06; `spikes/BS8/RESULT.md`): windowed and
+  off-screen on Java 25, off-screen on Java 8; the sentinel files, the target id and the `srcdoc` finding are
+  conditions the contract carries
 - [ ] `skillroy-cdp`: connect wrapper, liveness probe, external deadline, page mapping by target id, readiness, tracing
 - [ ] The `WebEngineAdapter` / `WebBrowser` SPI in `skillroy-agent-api` (`…agent.api.spi.web`), optional operations
   behind `WebCapability` flags; `BrowserRegistryAdapter` made technology-neutral
@@ -799,11 +829,13 @@ Kept generic on purpose: nothing here names a machine, a user or a local path.
 - The build is run offline (`-o`) once the local Maven repository is filled.
 - Downloads still to come, authorised by the owner in general terms ("install what is needed"):
   - BS5: a Chromium binary and Playwright's driver bundle (about 194 MB, extracted on first use).
-  - BS8 and Phase 4: the JCEF natives for Linux x86-64 (about 152 MB per platform), declared as a test-scope Maven
-    dependency behind a profile so that a build without them still works and the build stays offline-capable; and
-    Chromium's runtime libraries in the image (NSS, ATK, X extensions, fonts and similar; for off-screen mode a
-    software GL). The exact package list is part of BS8.
-  - Each needs a licence check when it is adopted (`licence-audit.md` §8).
+  - BS8 and Phase 4: **done for BS8 on 2026-10-06**: the JCEF natives for Linux x86-64 and arm64 (152 and 168 MB)
+    are in the local Maven cache (the spike's own POM declares them; the Phase 4 sample will do the same behind the
+    profile `jcef`), and Chromium's fifteen run-time libraries are in the image (`ci/Dockerfile`; the list is in
+    `spikes/BS8/RESULT.md` §3 and `licence-audit.md` §7). Also downloaded for the spike, kept outside the repository:
+    a Linux aarch64 Temurin JDK 8, so that an arm64 build of the image (`SKILLROY_PLATFORM=linux/arm64`) can run
+    the Java 8 configurations natively on an arm64 development machine.
+  - Each needs a licence check when it is adopted (`licence-audit.md` §8); the spike's artifacts are listed there.
 
 ## Walls
 
@@ -835,8 +867,12 @@ The review items of the end-to-end review, now decided (gap numbers refer to the
 
 1. **The push**, when the owner says (the commit of 2026-10-06 is local); the repeated security review before the
    first public release.
-2. **BS8, then Phase 4, contract first**: JCEF in the Linux image, then `skillroy-cdp`, the web SPI and
-   `skillroy-agent-web`; write the Phase 4 contract in the manner of Phases 2 and 3 before the code.
+2. **Phase 4, contract first**: BS8 is done (2026-10-06, passed with conditions) and the contract is written
+   (`design/phase4-contracts.md`, specified, not built; its fifteen provisional answers are B21, on the interview
+   page). Next: the owner's answers to B21, then the build in the manner of Phases 2 and 3 (implementers in isolated
+   copies by module, review with sceptics, matrix, as-built docs). Before the build: write the §14.1 changes into the
+   Phase 1-3 contracts and the design overview. Open from BS8: why windowed JCEF 152 on a Java 8 target creates no
+   browser, and why a `srcdoc` iframe never loads in the image.
 3. **Phase 5 groundwork that needs no model key**: the `InferenceGateway` SPI shape and the `inference.` seams are
    reserved; everything live waits for B7 (a wall).
 4. **Investigate the display-test flake** (`HostSafetyDisplayTest` on 2026-10-02 and `WindowActivationDisplayTest` on

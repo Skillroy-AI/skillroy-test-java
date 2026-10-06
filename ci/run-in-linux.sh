@@ -25,9 +25,12 @@
 #   SKILLROY_JDK8_HOME  optional Linux x86-64 JDK 8 directory, mounted read-only at /opt/jdk8
 #   SKILLROY_MAVEN_HOME optional Maven home to mount (default: the host mvn's own "Maven home")
 #   SKILLROY_NO_XVFB=1  run without Xvfb (headless)
+#   SKILLROY_PLATFORM   the image platform (default linux/amd64, the project's CI architecture; linux/arm64 runs an
+#                       arm64 build of the image natively on an arm64 development machine)
 set -euo pipefail
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 image="${SKILLROY_CI_IMAGE:-skillroy-test-java-ci:local}"
+platform="${SKILLROY_PLATFORM:-linux/amd64}"
 m2="${SKILLROY_M2:-$HOME/.m2}"
 # Maven is pure Java: reuse the host installation ("Maven home" as reported by mvn itself) instead of baking one in.
 mvn_home="${SKILLROY_MAVEN_HOME:-$(mvn -v 2>/dev/null | sed -n 's/^Maven home: //p')}"
@@ -39,8 +42,8 @@ if [ -n "$mvn_home" ] && [ -d "$mvn_home" ]; then
 fi
 if [ -n "${SKILLROY_JDK8_HOME:-}" ]; then mounts+=(-v "$SKILLROY_JDK8_HOME:/opt/jdk8:ro"); fi
 if [ "${SKILLROY_NO_XVFB:-0}" = "1" ]; then
-  exec docker run --rm --init --platform linux/amd64 "${mounts[@]}" "${env[@]}" "$image" "$@"
+  exec docker run --rm --init --platform "$platform" "${mounts[@]}" "${env[@]}" "$image" "$@"
 fi
 # --init: xvfb-run waits for a signal from Xvfb that never arrives when xvfb-run itself is PID 1.
-exec docker run --rm --init --platform linux/amd64 "${mounts[@]}" "${env[@]}" "$image" \
+exec docker run --rm --init --platform "$platform" "${mounts[@]}" "${env[@]}" "$image" \
   xvfb-run -a -s "-screen 0 1024x768x24 -nolisten tcp" "$@"

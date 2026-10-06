@@ -1,7 +1,9 @@
 # Dependency licence audit
 
-Audit date: 2026-10-02, updated 2026-10-03 for Phase 2 and 2026-10-06 for the holder's name and the publication
-metadata of the root POM. Version audited: 0.1.0-SNAPSHOT, all 17 reactor modules.
+Audit date: 2026-10-02, updated 2026-10-03 for Phase 2, 2026-10-06 for the holder's name and the publication
+metadata of the root POM, and later on 2026-10-06 for the test image's Chromium run-time libraries (spike BS8, section 7)
+and the artifacts spike BS8 used (section 8). Version audited: 0.1.0-SNAPSHOT, all 17 reactor modules; the spike project
+under `spikes/BS8/` is not a reactor module and distributes nothing.
 Intended licence of the project: Apache-2.0.
 
 This is an engineering inventory built from primary sources that are available locally: the `<licenses>` element of
@@ -221,7 +223,8 @@ audited.
 ## 7. Test image
 
 `ci/Dockerfile` builds the image used for display tests and cross-JDK tests: `FROM eclipse-temurin:25-jdk`, then
-one `apt-get install --no-install-recommends` of ten Debian packages, then `ENV LANG=C.UTF-8`. The image is used
+one `apt-get install --no-install-recommends` of ten Debian packages (since 2026-10-06 twenty-five: the fifteen
+run-time libraries of an embedded Chromium, second table below), then `ENV LANG=C.UTF-8`. The image is used
 for testing and is not redistributed. The facts below come from an image built from that Dockerfile and inspected on
 2026-10-02 (Temurin 25.0.4.1; the base archive was Ubuntu 26.04, so the `.deb` packages come from the Ubuntu
 archive). The tag `25-jdk` moves, so versions will differ on later builds.
@@ -246,7 +249,33 @@ Packages named in the Dockerfile (licences as stated in each package's `copyrigh
 | `fonts-dejavu-core` | 2.37-8build1 | `bitstream-vera` and `GPL-2+` as listed | per file, see left |
 | `procps` | 2:4.0.4-9ubuntu1 | GPL-2.0+, LGPL-2.0+, LGPL-2.1+ as listed | per file, see left |
 
-Four of these (`libfreetype6`, `fontconfig`, `fonts-dejavu-core`, `procps`) were already present in the base image.
+Added on 2026-10-06 for spike BS8 and Phase 4 (the libraries `ldd` reported missing for `libcef.so`, `libjcef.so` and
+`jcef_helper` of jcefmaven 152.0.6; versions as installed in the image built that day; licences as the Ubuntu archive
+states them for these well-known libraries, each to be confirmed from its `copyright` file before the image is ever
+published):
+
+| Package | Version inspected | Licence as commonly stated | SPDX |
+|---|---|---|---|
+| `libnss3` | 2:3.120-1ubuntu2.1 | MPL-2.0 | not determined locally |
+| `libnspr4` | 2:4.38.2-1ubuntu1 | MPL-2.0 | not determined locally |
+| `libatk1.0-0t64` | 2.60.4-0ubuntu0.1 | LGPL-2.0+ | not determined locally |
+| `libatk-bridge2.0-0t64` | 2.60.4-0ubuntu0.1 | LGPL-2.0+ | not determined locally |
+| `libatspi2.0-0t64` | 2.60.4-0ubuntu0.1 | LGPL-2.0+ | not determined locally |
+| `libcups2t64` | 2.4.16-1ubuntu1.3 | Apache-2.0 (with the GPL/LGPL exception notices of CUPS) | not determined locally |
+| `libdbus-1-3` | 1.16.2-2ubuntu4 | AFL-2.1 or GPL-2.0+ | not determined locally |
+| `libglib2.0-0t64` | 2.88.0-1ubuntu0.1 | LGPL-2.1+ | not determined locally |
+| `libcairo2` | 1.18.4-3 | LGPL-2.1 or MPL-1.1 | not determined locally |
+| `libpango-1.0-0` | 1.57.0-1 | LGPL-2.0+ | not determined locally |
+| `libasound2t64` | 1.2.15.3-1ubuntu1.1 | LGPL-2.1+ | not determined locally |
+| `libxcomposite1` | 1:0.4.6-1build1 | permissive X.Org style | not determined locally |
+| `libxdamage1` | 1:1.1.7-1 | permissive X.Org style | not determined locally |
+| `libxfixes3` | 1:6.0.0-2build2 | permissive X.Org style | not determined locally |
+| `libxkbcommon0` | 1.13.1-1 | MIT/X11 | not determined locally |
+
+With them the image holds 212 packages (dpkg). They are test infrastructure: nothing of them is linked into a project
+artifact, and the agent never loads them (the target application's own embedded browser does).
+
+Four of the original ten (`libfreetype6`, `fontconfig`, `fonts-dejavu-core`, `procps`) were already present in the base image.
 The install command added 58 packages in all: the six named packages that were missing plus 52 dependencies
 installed automatically (X libraries, Mesa, LLVM, nettle, libelf, libsensors and others). Their copyright files
 list mostly MIT/Expat and X.Org permissive licences, with BSD, ISC and Apache-2.0 (including the LLVM exception)
@@ -277,7 +306,7 @@ licence is claimed here beyond what `docs/DECISIONS.md` already records (cited i
 | JSqlParser | SQL guard allow-list | not audited | not audited |
 | MCP Java SDK | MCP server in the controller | not audited | not audited |
 | Anthropic Java SDK | Authoring planner and resolvers | not audited | not audited |
-| JCEF | Embedded-browser SPI (research note) | not audited | not audited |
+| JCEF (jcefmaven 152.0.6: `me.friwi:jcefmaven` Apache-2.0, `me.friwi:jcef-api` BSD-3-Clause, `me.friwi:jcef-natives-linux-amd64` and `jcef-natives-linux-arm64` BSD plus Chromium's third-party notices, `me.friwi:jogl-all` and `gluegen-rt` 2.4.0 BSD; transitively `commons-compress` 1.28.0, `commons-io`, `commons-lang3`, `commons-codec` Apache-2.0, `gson` 2.11.0 Apache-2.0, `error_prone_annotations` Apache-2.0) | Spike BS8 (`spikes/BS8/`, a standalone project, run 2026-10-06); the Phase 4 web host sample behind the profile `jcef` | licences read from the POMs on Maven Central and from the bundle's `LICENSE.txt`, `jogl.LICENSE.txt`, `gluegen.LICENSE.txt` on 2026-10-06 (research note `embedded-browser-spi` F2); sample and test scope only, never in a distribution | used by the spike; to be audited in the main tables when the Phase 4 sample is built |
 | JxBrowser | Optional reflective module | Commercial licence needed at run time (B9); the base ships no vendor code | not audited; never bundled |
 | snakeyaml-engine, victools jsonschema-generator | Controller schema and YAML (design table) | not audited | not audited |
 | Jetty 12 | Servlet transport for a remote MCP controller | not audited | not audited |
