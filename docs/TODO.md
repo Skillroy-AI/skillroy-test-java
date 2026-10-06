@@ -33,7 +33,23 @@ twice in a row (tables below). **On 2026-10-06** the owner answered every open q
 confirmed, with two vetoes inside B19 built the same day (a masking threshold per environment, `masking.minLengthInText`
 in `credentials.yaml`; no base rule on names in binding values), the holder's name went into every header, and the
 initial commit was made (not pushed). After those changes the native reactor was green (2132 tests, 0 failures, 0
-errors, 285 skipped, JDK 26, headless); the Linux matrix was not re-run for them.
+errors, 285 skipped, JDK 26, headless). **Later on 2026-10-06** the committed tree (commit `efb48b7`) was run through
+the Linux matrix once (first table below): the two whole-reactor legs green at the first attempt (2156 tests each), the
+agent-side leg green at the second attempt after one display-test focus failure of the kind recorded as the open flake
+(now two occurrences, both on a Java 8 test JVM; see "Open flake" below). This is the Phase 3 tree's second clean run
+and the first run with the 2026-10-06 masking change in the image.
+
+Verification of the committed tree (`efb48b7`, the Phase 3 tree with the 2026-10-06 changes), on 2026-10-06:
+
+| Configuration | Command (from the repo root) | Result |
+|---|---|---|
+| Linux image (JDK 25.0.4.1), targets on Java 25 | `ci/run-in-linux.sh mvn -o -q clean verify -Dskillroy.headless=false` | 2156 / 0 / 0 / 4, 587 s, run once |
+| Linux image, targets on Java 8 (1.8.0_492) | the same plus `-Dskillroy.it.targetJava=/opt/jdk8/bin/java` | 2156 / 0 / 0 / 4, 557 s, run once |
+| Linux image, agent-side modules, test JVMs and targets on Java 8 | the Java 8 command plus `-Djvm=/opt/jdk8/bin/java`, `-pl` the nine agent-side modules | first run: one failure, `WindowActivationDisplayTest.activateWindowOnTheFocusedWindowJustClicks` ("timed out after 30000 ms waiting for the test frame is the focused window"; the build stopped at the Swing module after 164 s with 785 tests run); second run: 1038 / 0 / 0 / 4, 188 s |
+
+The two whole-reactor legs gained two tests since the Phase 3 runs (2154 -> 2156: the `masking.minLengthInText` tests of
+2026-10-06). The four skips are the usual ones. The agent-side failure is the second occurrence of the display-test focus
+flake (details under "Open flake" below); the machine was otherwise idle apart from the emulated container itself.
 
 Verification of the merged main tree after Phase 2, on 2026-10-03 (before and after the review's fixes):
 
@@ -81,11 +97,22 @@ The 2 skips in the image are the two headless-only tests of the Swing module. Ja
 25.0.4.1 (image), 1.8.0_492 (mounted JDK 8). The image runs x86-64 under emulation on the development machine, so
 the times are slow. Java 21 targets are no longer run (B3).
 
-- **Open flake (one in three).** In the first agent-side run on Java 8,
+- **Open flake (two occurrences, 2026-10-02 and 2026-10-06; both on a Java 8 test JVM).** In the first agent-side run on
+  Java 8 of 2026-10-02,
   `HostSafetyDisplayTest.componentRungClicksOnlyWithFocusAndAlwaysRemovesItsListener` failed with "timed out after
   30000 ms waiting for the test frame is the focused window", and the build stopped at the Swing module. It did not
   repeat in the next two runs. The machine was running other builds at the time. The cause has not been
-  investigated, so this is an open flake, not "no flake".
+  investigated, so this is an open flake, not "no flake". **On 2026-10-06** the agent-side leg failed the same way once
+  more, in another test: `WindowActivationDisplayTest.activateWindowOnTheFocusedWindowJustClicks` waited 30 s for the test
+  frame to be the focused window after `toFront()` + `requestFocus()` on the EDT; the preceding test had shown and
+  disposed a second frame ("Focus thief") that held the focus. Its BS4 report in the same JVM shows the same activation
+  succeeding in 0-2 ms a dozen times before. The rerun was green. Pattern so far: both failures are on the Java 8 test
+  JVM under the WM-less Xvfb, both wait for a frame to become the focused window after another window held or took the
+  focus, and the Java 25 test JVMs have never shown it (six whole-reactor legs since 2026-10-02). Hypotheses to check
+  when it is investigated: an `XSetInputFocus` ignored by the X server because the Java 8 toolkit passes a stale
+  timestamp after the focused window was destroyed, or a `FocusIn` event the toolkit drops; the test-side mitigation
+  would be to re-issue `toFront()` + `requestFocus()` once a second while waiting, and the same retry could join the
+  `COMPONENT` rung's window activation (a small amendment, not taken here).
 - **First run on a Java 25 target.** The end-to-end acceptance passed in every load-mode variant on a Java 25
   target and on a Java 8 target. With it the B4 gate and the Phase 1 exit item "target on Java 25" are met, and
   BS1's "Java 25 target" is answered for Linux: `JAVAAGENT`, `JAVAAGENT` through `JAVA_TOOL_OPTIONS`, `ATTACH` and
@@ -812,7 +839,9 @@ The review items of the end-to-end review, now decided (gap numbers refer to the
    `skillroy-agent-web`; write the Phase 4 contract in the manner of Phases 2 and 3 before the code.
 3. **Phase 5 groundwork that needs no model key**: the `InferenceGateway` SPI shape and the `inference.` seams are
    reserved; everything live waits for B7 (a wall).
-4. **Investigate the display-test flake** (`HostSafetyDisplayTest`, one failure in three agent-side runs on
+4. **Investigate the display-test flake** (`HostSafetyDisplayTest` on 2026-10-02 and `WindowActivationDisplayTest` on
+   2026-10-06, both on the Java 8 test JVM; the hypotheses and the retry mitigation are under "Open flake" in "Status at
+   a glance"; `HostSafetyDisplayTest`, one failure in three agent-side runs on
    Java 8 on 2026-10-02; not seen in the four agent-side runs since), on an otherwise idle machine; and the
    garbage-collection-dependent abort of `SwingDisplayTest.refBecomesStaleOnceTheComponentIsCollected` seen once
    under emulation on 2026-10-03.
