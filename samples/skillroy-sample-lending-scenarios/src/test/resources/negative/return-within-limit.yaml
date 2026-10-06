@@ -1,0 +1,62 @@
+# Negative (phase2-contracts.md 13.4): scenario A with the assistant's condition turned round (a limit of at least the
+# deposit). Every slot resolves and every verifier passes, but the oracle computes NONE, not SUPERVISOR_PROMPT: the
+# must_equal guard fails the bind as RESOLUTION_FAILED, reason GUARD, before the desk is touched. Without the guard
+# the scenario would have run into a failed expectPrompt.
+scenario: return-within-limit
+pack: lending
+tags: [resolution, returns]
+requires: [lending.input, lending.state, lending.loan, lending.loan.authorisations, lending.prompt,
+           lending.prompt.answer, lending.slip]
+resolve:
+  systemMax:
+    query: SystemLimit
+    args: { type: RETURN }
+  item:
+    query: LendableItem
+    args: { deposit: { between: ["20.00", "200.00"], lte: $systemMax } }
+    strategy: [sql]
+    verify: lending.deposit
+  assistant:
+    query: StaffWithPermission
+    args: { perform: [SIGN_ON, RETURN], limit: { type: RETURN, gte: $item.deposit }, interactiveSignOn: true }
+    verify: lending.access.check
+    credential: { realm: staff, key: code }
+  supervisor:
+    query: StaffWithPermission
+    args: { perform: [RETURN_OVERRIDE], limit: { type: RETURN, gte: $item.deposit },
+            distinctFrom: [$assistant.code] }
+    verify: lending.access.check
+    credential: { realm: staff, key: code }
+  keys:
+    query: ActionKey
+    args: { actions: [RETURN, DUE] }
+oracle:
+  auth:
+    fn: ExpectedAuthorisation
+    args: { staffLimit: $assistant.limits.RETURN, systemMax: $systemMax, amount: $item.deposit }
+    must_equal: SUPERVISOR_PROMPT              # a binding under which no supervisor is needed is rejected, not run
+  returnLine: { fn: Money.negate, args: [$item.deposit] }
+steps:
+  - signOn: { staff: $assistant }
+  - expect: { "state.name": IDLE, "state.staff.code": $assistant.code }
+  - key: { action: $keys.RETURN }
+  - expect: { "state.name": RETURN, "state.returnMode": true }
+  - scan: { item: $item }
+  - expectPrompt: { id: supervisor-required, within: 10s }    # its text is captured, not asserted
+  - authorise: { staff: $supervisor }
+  - expect:
+      "loan.lines[code=$item.code].returned": true
+      "loan.lines[code=$item.code].amount": $oracle.returnLine
+      "loan.authorisations[kind=RETURN_OVERRIDE].staffCode": $supervisor.code
+  - key: { action: $keys.DUE }
+  - expect: { "state.name": DEPOSIT, "loan.total": $oracle.returnLine }
+  - deposit: {}                                               # a return hands the deposit back: no amount
+  - waitFor: { topic: loan.posted, within: 10s, capture: { slot: loan, fields: { id: loanId, total: total } } }
+verify:
+  - { "state.name": IDLE }
+  - db.loan: { where: { id: $loan.id }, staff_code: $assistant.code, total: $oracle.returnLine }
+  - db.loan_line: { where: { loan_id: $loan.id, item_code: $item.code }, returned: true, amount: $oracle.returnLine }
+  - db.loan_authorisation: { where: { loan_id: $loan.id }, kind: RETURN_OVERRIDE, staff_code: $supervisor.code }
+  - { "slip.last.text": { contains: $item.title } }
+on_prompt: { unexpected: fail }
+timeouts: { step: 30s }

@@ -1,0 +1,5 @@
+scenario: mini-pass
+pack: mini
+steps:
+  - call: { primitive: mini.poke }
+  - expect: { "app.mini.state": IDLE }

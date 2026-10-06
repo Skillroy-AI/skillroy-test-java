@@ -1,0 +1,10 @@
+target/
+.DS_Store
+.idea/
+*.iml
+.vscode/
+run-output/
+*.log
+# Secrets of an environment (phase2-contracts.md 4): never committed.
+credentials.yaml
+*.credentials.yaml

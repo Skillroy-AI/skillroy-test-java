@@ -1,0 +1,90 @@
+#!/bin/sh
+#
+# Copyright 2026 Mike Mills.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# skillroy: the command line front end of skillroy-test-java. Needs a Java 25 or newer runtime.
+#
+#   skillroy --help                the commands and the exit codes
+#   skillroy <command> --help      the options of one command
+#
+# Environment:
+#   JAVA_HOME           the Java runtime to use; without it, java on the PATH
+#   SKILLROY_JAVA_OPTS  extra JVM options for the CLI itself (for example -Xmx256m), split at spaces
+#
+# The commands that use the JDK attach API (jvms, attach) get --add-modules jdk.attach when the runtime has that
+# module; a runtime image without it still runs every other command. Exit code 69: no usable Java runtime.
+
+# The installation directory is the parent of this script's directory; symbolic links to the script are followed.
+script=$0
+while [ -h "$script" ]; do
+  target=$(ls -ld "$script" | sed 's/^.* -> //')
+  case $target in
+    /*) script=$target ;;
+    *) script=$(dirname "$script")/$target ;;
+  esac
+done
+home=$(cd "$(dirname "$script")/.." && pwd -P) || exit 69
+
+if [ -n "${JAVA_HOME:-}" ]; then
+  java=$JAVA_HOME/bin/java
+  if [ ! -x "$java" ]; then
+    echo "skillroy: JAVA_HOME is '$JAVA_HOME', which has no executable bin/java" >&2
+    exit 69
+  fi
+else
+  java=$(command -v java 2>/dev/null) || java=
+  if [ -z "$java" ]; then
+    echo "skillroy: no java on the PATH; install a Java 25 or newer runtime or set JAVA_HOME" >&2
+    exit 69
+  fi
+fi
+
+# The runtime's release file; absent when java is reached through a link such as /usr/bin/java.
+release=$(dirname "$(dirname "$java")")/release
+
+# A runtime older than Java 25 cannot load the CLI's classes: say so plainly when its release file tells.
+if [ -f "$release" ]; then
+  version=$(sed -n 's/^JAVA_VERSION="\([^"]*\)".*/\1/p' "$release")
+  major=${version%%.*}
+  case $major in
+    '' | *[!0-9]*) ;;
+    *)
+      if [ "$major" -lt 25 ]; then
+        echo "skillroy: $java is Java $version; the CLI needs Java 25 or newer (set JAVA_HOME)" >&2
+        exit 69
+      fi
+      ;;
+  esac
+fi
+
+has_attach_module() {
+  if [ -f "$release" ] && grep -q '^MODULES=' "$release"; then
+    grep -q '^MODULES=.*[" ]jdk\.attach[" ]' "$release"
+  else
+    "$java" --list-modules 2>/dev/null | grep -q '^jdk\.attach@'
+  fi
+}
+
+modules=
+case ${1:-} in
+  jvms | attach)
+    if has_attach_module; then
+      modules='--add-modules jdk.attach'
+    fi
+    ;;
+esac
+
+# Word splitting of SKILLROY_JAVA_OPTS and modules is intended.
+exec "$java" ${SKILLROY_JAVA_OPTS:-} $modules -cp "$home/lib/*" ai.skillroy.testjava.cli.Main "$@"

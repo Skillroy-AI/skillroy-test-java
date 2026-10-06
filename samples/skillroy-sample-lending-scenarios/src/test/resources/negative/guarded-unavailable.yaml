@@ -1,0 +1,12 @@
+# Contract section 10, item 5: a guarded expectation on a capability that is UNAVAILABLE on every Phase 1 target (the
+# opt-in ROBOT click rung) is skipped, so the run is DEGRADED rather than PASS.
+scenario: guarded-unavailable
+pack: lending
+launchProperties: { lending.seed: A }
+resolve:
+  assistant: { fixture: { code: "100" }, credential: { realm: staff, key: code } }
+steps:
+  - signOn: { staff: $assistant }
+  - expect: { "state.name": IDLE }
+  - expect: { "state.name": { equals: IDLE, capability: swing.click.robot } }
+timeouts: { step: 30s }

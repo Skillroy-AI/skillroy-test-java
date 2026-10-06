@@ -1,0 +1,178 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Copyright 2026 Mike Mills.
+
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+
+      http://www.apache.org/licenses/LICENSE-2.0
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>ai.skillroy</groupId>
+    <artifactId>skillroy-test-java-parent</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+    <relativePath>../../pom.xml</relativePath>
+  </parent>
+
+  <artifactId>skillroy-cli</artifactId>
+  <name>skillroy-cli</name>
+  <description>
+    Command line front end: list JVMs, attach, inspect, call primitives, compile and run scenarios. Assembles
+    target/skillroy-cli/ (bin/skillroy plus lib/*.jar) and target/skillroy-cli.zip.
+  </description>
+
+  <properties>
+    <!-- Controller side: Java 25. -->
+    <maven.compiler.release>25</maven.compiler.release>
+    <!-- Where the integration tests find the real agent home (unpacked from skillroy-agent-dist). -->
+    <skillroy.cli.it.agentHome>${project.build.directory}/it-agent-home/skillroy-agent</skillroy.cli.it.agentHome>
+  </properties>
+
+  <dependencies>
+    <dependency>
+      <groupId>ai.skillroy</groupId>
+      <artifactId>skillroy-protocol</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>ai.skillroy</groupId>
+      <artifactId>skillroy-controller</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>ai.skillroy</groupId>
+      <artifactId>skillroy-scenario</artifactId>
+    </dependency>
+    <!-- credentials.yaml for run and resolve (the credentials option). -->
+    <dependency>
+      <groupId>ai.skillroy</groupId>
+      <artifactId>skillroy-data</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-jar-plugin</artifactId>
+        <configuration>
+          <archive>
+            <manifest>
+              <mainClass>ai.skillroy.testjava.cli.Main</mainClass>
+              <!-- Implementation-Version, printed by the CLI's version option. -->
+              <addDefaultImplementationEntries>true</addDefaultImplementationEntries>
+            </manifest>
+          </archive>
+        </configuration>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-assembly-plugin</artifactId>
+        <configuration>
+          <finalName>skillroy-cli</finalName>
+          <appendAssemblyId>false</appendAssemblyId>
+          <!-- Build outputs only: attaching a classifier-less zip would replace this module's jar artifact. -->
+          <attach>false</attach>
+        </configuration>
+        <executions>
+          <!-- target/skillroy-cli/ : bin/skillroy and lib/*.jar, runnable in place. -->
+          <execution>
+            <id>cli-dir</id>
+            <phase>package</phase>
+            <goals>
+              <goal>single</goal>
+            </goals>
+            <configuration>
+              <descriptors>
+                <descriptor>src/assembly/cli-dir.xml</descriptor>
+              </descriptors>
+            </configuration>
+          </execution>
+          <!-- target/skillroy-cli.zip : the same content under a top-level skillroy-cli/ directory. -->
+          <execution>
+            <id>cli-zip</id>
+            <phase>package</phase>
+            <goals>
+              <goal>single</goal>
+            </goals>
+            <configuration>
+              <descriptors>
+                <descriptor>src/assembly/cli-zip.xml</descriptor>
+              </descriptors>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+      <!-- The attach integration test loads the real agent home into a child JVM. -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-dependency-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>it-agent-home</id>
+            <phase>pre-integration-test</phase>
+            <goals>
+              <goal>unpack</goal>
+            </goals>
+            <configuration>
+              <artifactItems>
+                <artifactItem>
+                  <groupId>ai.skillroy</groupId>
+                  <artifactId>skillroy-agent-dist</artifactId>
+                  <version>${project.version}</version>
+                  <type>zip</type>
+                  <outputDirectory>${project.build.directory}/it-agent-home</outputDirectory>
+                </artifactItem>
+              </artifactItems>
+              <overWriteSnapshots>true</overWriteSnapshots>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+      <!-- *IT classes run the assembled bin/skillroy after the package phase. -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-failsafe-plugin</artifactId>
+        <configuration>
+          <systemPropertyVariables>
+            <skillroy.cli.it.dist>${project.build.directory}/skillroy-cli</skillroy.cli.it.dist>
+            <skillroy.cli.it.zip>${project.build.directory}/skillroy-cli.zip</skillroy.cli.it.zip>
+            <skillroy.cli.it.agentHome>${skillroy.cli.it.agentHome}</skillroy.cli.it.agentHome>
+            <!-- DistributionNoticesIT compares the licence files in the distribution with the root ones. -->
+            <skillroy.root.dir>${skillroy.root.dir}</skillroy.root.dir>
+          </systemPropertyVariables>
+          <!-- As for the unit tests: the launched CLI must not find a developer's own credentials. -->
+          <excludedEnvironmentVariables>
+            <param>SKILLROY_CREDENTIALS</param>
+          </excludedEnvironmentVariables>
+        </configuration>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <configuration>
+          <!-- run and resolve locate credentials.yaml through this variable too: a developer's own must not reach
+               the tests, which name their files with the credentials option. -->
+          <excludedEnvironmentVariables>
+            <param>SKILLROY_CREDENTIALS</param>
+          </excludedEnvironmentVariables>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+</project>

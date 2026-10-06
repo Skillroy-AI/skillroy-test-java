@@ -1,0 +1,24 @@
+# Amendments A28/A29: a COMPONENT click whose focus cannot arrive falls back to the ACTION rung. The prompt's OK
+# button is painted and not focusable, so the COMPONENT rung can never focus it, on any display; the click
+# (clickRung COMPONENT, not strict, so with fallback ACTION) still answers the prompt through the ACTION rung, and the
+# run ends DEGRADED with the fall-back listed, although every expectation holds.
+scenario: click-fallback-degraded
+pack: lending
+requires: [lending.input, lending.prompt, swing.click.component]
+launchProperties: { lending.seed: A }
+ui: { clickRung: COMPONENT }
+resolve:
+  assistant: { fixture: { code: "100" }, credential: { realm: staff, key: code } }
+  item:      { fixture: { code: YRD-001, barcode: "5000000000017" } }
+steps:
+  - signOn: { staff: $assistant }
+  - scan: { item: $item }
+  - scan: { barcode: "0000000000000" }
+  - expectPrompt: { text: Unknown item }
+  - waitFor: { topic: window.opened, match: { modal: true } }
+  - click: { by: { name: OK }, focusTimeoutMs: 1000, await: { topic: input.requested, match: { state: LOAN } } }
+  - expect: { "state.name": LOAN, "loan.lines[code=$item.code].qty": 1 }
+  - key: { action: DUE }
+  - deposit: { amount: "3.50" }
+  - expect: { "state.name": IDLE, "loan.open": false }
+timeouts: { step: 30s }

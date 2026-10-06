@@ -1,0 +1,349 @@
+{
+  "bindingsVersion": 1,
+  "scenarioId": "borrow-2-waive-1-slip",
+  "envId": "seed-b",
+  "pack": "lending",
+  "packVersion": "0.3.0",
+  "planHash": "sha256:f5d993d1a5cc938b6b4f38d4e4703be02c99d3d71e3df73cb515d25ba33e9498",
+  "resolveHash": "sha256:230844f8e74f7927167f534bc20a6abb1725b1eb9126c039e07207c2458e4b21",
+  "env": {
+    "fingerprint": "sha256:f13ef74b54cc11e3cdc4875b35119fe1c728e4121517cb91ed273b5ea5bb6cc5",
+    "components": {
+      "lending.schema": "sha256:f8e03d38af714e3af3af6542a10c70a8acb6157e8f00dda21f7903e379e58504",
+      "lending.seed": "B",
+      "lending.site": "TOOL LIBRARY - CANAL STREET",
+      "skillroy.fingerprint": "1",
+      "skillroy.protocolMajor": "0"
+    }
+  },
+  "resolutions": {
+    "assistant": {
+      "query": "StaffWithPermission",
+      "args": {
+        "interactiveSignOn": true,
+        "perform": [
+          "SIGN_ON"
+        ]
+      },
+      "argsHash": "sha256:0dade4955e16865a96f0abcbbaddc6c403787e8f05b35ec6cbc9ae6db200c363",
+      "value": {
+        "code": "4711",
+        "limits": {
+          "RETURN": "15.00"
+        },
+        "permissions": [
+          "RETURN",
+          "SIGN_ON"
+        ]
+      },
+      "credential": {
+        "realm": "staff",
+        "id": "4711"
+      },
+      "strategy": "CANONICAL_SQL",
+      "provenance": {
+        "resolver": "lending.sql.StaffWithPermission",
+        "statements": [
+          {
+            "channel": "agent",
+            "source": "lending",
+            "sql": "SELECT s.code AS code, s.auto_sign_on AS auto_sign_on, (SELECT MAX(rl.amount) FROM staff_role sr JOIN role_cap rl ON rl.role_id = sr.role_id WHERE sr.staff_code = s.code AND rl.kind = ?) AS limit_amount FROM staff s WHERE s.active = TRUE ORDER BY s.code",
+            "params": [
+              "RETURN"
+            ],
+            "rowCount": 7,
+            "truncated": false
+          },
+          {
+            "channel": "agent",
+            "source": "lending",
+            "sql": "SELECT DISTINCT rp.permission AS permission FROM staff_role sr JOIN role_permission rp ON rp.role_id = sr.role_id WHERE sr.staff_code = ? ORDER BY permission",
+            "params": [
+              "4711"
+            ],
+            "rowCount": 2,
+            "truncated": false
+          },
+          {
+            "channel": "agent",
+            "source": "lending",
+            "sql": "SELECT DISTINCT rp.permission AS permission FROM staff_role sr JOIN role_permission rp ON rp.role_id = sr.role_id WHERE sr.staff_code = ? ORDER BY permission",
+            "params": [
+              "4712"
+            ],
+            "rowCount": 1,
+            "truncated": false
+          },
+          {
+            "channel": "agent",
+            "source": "lending",
+            "sql": "SELECT DISTINCT rp.permission AS permission FROM staff_role sr JOIN role_permission rp ON rp.role_id = sr.role_id WHERE sr.staff_code = ? ORDER BY permission",
+            "params": [
+              "4715"
+            ],
+            "rowCount": 2,
+            "truncated": false
+          },
+          {
+            "channel": "agent",
+            "source": "lending",
+            "sql": "SELECT DISTINCT rp.permission AS permission FROM staff_role sr JOIN role_permission rp ON rp.role_id = sr.role_id WHERE sr.staff_code = ? ORDER BY permission",
+            "params": [
+              "4716"
+            ],
+            "rowCount": 0,
+            "truncated": false
+          },
+          {
+            "channel": "agent",
+            "source": "lending",
+            "sql": "SELECT DISTINCT rp.permission AS permission FROM staff_role sr JOIN role_permission rp ON rp.role_id = sr.role_id WHERE sr.staff_code = ? ORDER BY permission",
+            "params": [
+              "4720"
+            ],
+            "rowCount": 3,
+            "truncated": false
+          },
+          {
+            "channel": "agent",
+            "source": "lending",
+            "sql": "SELECT DISTINCT rp.permission AS permission FROM staff_role sr JOIN role_permission rp ON rp.role_id = sr.role_id WHERE sr.staff_code = ? ORDER BY permission",
+            "params": [
+              "4790"
+            ],
+            "rowCount": 3,
+            "truncated": false
+          }
+        ],
+        "calls": [],
+        "candidates": 1,
+        "candidatesTruncated": false,
+        "rejected": []
+      },
+      "verifier": [
+        {
+          "id": "lending.access.check",
+          "passed": true,
+          "reason": "SIGN_ON permitted; limit 15.00; asked for a password"
+        }
+      ],
+      "confidence": 1.0,
+      "approval": {
+        "state": "APPROVED",
+        "by": "approve"
+      },
+      "llm": null
+    },
+    "rule": {
+      "query": "ActiveWaiverRuleWithTriggers",
+      "args": {
+        "exclusiveItems": true,
+        "kind": "BORROW_N_WAIVE_M"
+      },
+      "argsHash": "sha256:c03d826cb7248486a0df548149b89938083f2ee9aa9906a307a567e1366ca5a0",
+      "value": {
+        "borrowQty": 2,
+        "code": "B2W1-CYCLE",
+        "items": [
+          {
+            "barcode": "4006000000028",
+            "code": "T1002",
+            "deposit": "0.79",
+            "inductionRequired": false,
+            "perDay": false,
+            "title": "Tyre levers"
+          },
+          {
+            "barcode": "4006000000011",
+            "code": "T1001",
+            "deposit": "0.89",
+            "inductionRequired": false,
+            "perDay": false,
+            "title": "Bike pump"
+          },
+          {
+            "barcode": "4006000000127",
+            "code": "T1013",
+            "deposit": "1.15",
+            "inductionRequired": false,
+            "perDay": false,
+            "title": "Puncture repair kit"
+          }
+        ],
+        "kind": "BORROW_N_WAIVE_M",
+        "waivedQty": 1
+      },
+      "strategy": "CANONICAL_SQL",
+      "provenance": {
+        "resolver": "lending.sql.ActiveWaiverRuleWithTriggers",
+        "statements": [
+          {
+            "channel": "agent",
+            "source": "lending",
+            "sql": "SELECT r.id, r.code, r.kind, r.borrow_qty, r.waived_qty, r.starts_on, r.ends_on, i.code, i.barcode, i.title, i.deposit, i.per_day, i.induction_required FROM waiver_rule r JOIN waiver_rule_item ri ON ri.rule_id = r.id JOIN item i ON i.code = ri.item_code WHERE r.active = TRUE AND r.kind = ? AND i.active = TRUE AND i.barcode IS NOT NULL ORDER BY r.id, i.deposit, i.code",
+            "params": [
+              "BORROW_N_WAIVE_M"
+            ],
+            "rowCount": 5,
+            "truncated": false
+          }
+        ],
+        "calls": [
+          {
+            "primitive": "app.state",
+            "params": {}
+          }
+        ],
+        "candidates": 1,
+        "candidatesTruncated": false,
+        "rejected": []
+      },
+      "verifier": [
+        {
+          "id": "lending.waiver.evaluate",
+          "passed": true,
+          "reason": "the desk waives 0.79 for 3 units of T1002 under B2W1-CYCLE"
+        }
+      ],
+      "confidence": 1.0,
+      "approval": {
+        "state": "APPROVED",
+        "by": "approve"
+      },
+      "llm": null
+    },
+    "item": {
+      "query": "ItemsTriggering",
+      "args": {
+        "rule": {
+          "borrowQty": 2,
+          "code": "B2W1-CYCLE",
+          "items": [
+            {
+              "barcode": "4006000000028",
+              "code": "T1002",
+              "deposit": "0.79",
+              "inductionRequired": false,
+              "perDay": false,
+              "title": "Tyre levers"
+            },
+            {
+              "barcode": "4006000000011",
+              "code": "T1001",
+              "deposit": "0.89",
+              "inductionRequired": false,
+              "perDay": false,
+              "title": "Bike pump"
+            },
+            {
+              "barcode": "4006000000127",
+              "code": "T1013",
+              "deposit": "1.15",
+              "inductionRequired": false,
+              "perDay": false,
+              "title": "Puncture repair kit"
+            }
+          ],
+          "kind": "BORROW_N_WAIVE_M",
+          "waivedQty": 1
+        }
+      },
+      "argsHash": "sha256:5eba3443864a4f117a28e9156be0272ae880295b5df86a8f3db31e6b3b32f19a",
+      "value": {
+        "barcode": "4006000000028",
+        "code": "T1002",
+        "deposit": "0.79",
+        "title": "Tyre levers"
+      },
+      "strategy": "CANONICAL_JAVA",
+      "provenance": {
+        "resolver": "lending.java.ItemsTriggering",
+        "statements": [],
+        "calls": [],
+        "candidates": 1,
+        "candidatesTruncated": false,
+        "rejected": []
+      },
+      "verifier": [
+        {
+          "id": "lending.deposit",
+          "passed": true,
+          "reason": "a scan of 4006000000028 finds T1002 at 0.79, active, counted, no induction check"
+        }
+      ],
+      "confidence": 1.0,
+      "approval": {
+        "state": "APPROVED",
+        "by": "approve"
+      },
+      "llm": null
+    },
+    "keys": {
+      "query": "ActionKey",
+      "args": {
+        "actions": [
+          "DUE"
+        ]
+      },
+      "argsHash": "sha256:dcd69978e27cd104973cc5dd044597be60885af119f869b5bb363efaf39649b2",
+      "value": {
+        "DUE": "DUE"
+      },
+      "strategy": "CANONICAL_JAVA",
+      "provenance": {
+        "resolver": "lending.java.ActionKey",
+        "statements": [],
+        "calls": [],
+        "candidates": 1,
+        "candidatesTruncated": false,
+        "rejected": []
+      },
+      "verifier": [
+        {
+          "id": "swing.find",
+          "passed": true,
+          "reason": "the window has one key for each of [DUE]"
+        }
+      ],
+      "confidence": 1.0,
+      "approval": {
+        "state": "APPROVED",
+        "by": "approve"
+      },
+      "llm": null
+    }
+  },
+  "oracles": {
+    "needed": {
+      "fn": "LoanFromTrigger",
+      "inputsHash": "sha256:8139a73435dae97d68db055d95765f0a012c0bbd50a92c66a76719a08c19344c",
+      "value": {
+        "code": "T1002",
+        "qty": 3,
+        "unitDeposit": "0.79"
+      }
+    },
+    "waiver": {
+      "fn": "ExpectedWaiver",
+      "inputsHash": "sha256:02cf1a292b76582953153b8f875422a4d5e1a8410c48d5da768a5974624edd40",
+      "value": {
+        "amount": "0.79",
+        "ruleCode": "B2W1-CYCLE",
+        "waivedUnits": 1
+      },
+      "crossCheck": {
+        "check": "lending.waiver.evaluate",
+        "tolerance": "0.00"
+      }
+    },
+    "due": {
+      "fn": "ExpectedTotals",
+      "inputsHash": "sha256:e9dc7da1591db114e3aac3e5feb3761ee2aa52f7b52e847cea4fe2f021949a40",
+      "value": {
+        "subtotal": "2.37",
+        "total": "1.58",
+        "waiverTotal": "0.79"
+      }
+    }
+  }
+}

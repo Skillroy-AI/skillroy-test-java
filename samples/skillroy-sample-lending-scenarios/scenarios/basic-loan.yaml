@@ -1,0 +1,34 @@
+# A basic loan through the desk's own inputs (lending.input): sign on, scan two garden spades, press DUE, take the
+# deposit.
+# Seed A fixtures: assistant 100 (its password comes from credentials.yaml); YRD-001 at 3.50, in no active waiver
+# rule.
+scenario: basic-loan
+pack: lending
+tags: [smoke]
+requires: [lending.input, lending.state, lending.loan, lending.slip]
+launchProperties: { lending.seed: A }
+resolve:
+  assistant: { fixture: { code: "100" }, credential: { realm: staff, key: code } }
+  item:      { fixture: { code: YRD-001, barcode: "5000000000017", deposit: "3.50" } }
+steps:
+  - signOn: { staff: $assistant }
+  - expect: { "state.name": IDLE, "state.staff.code": $assistant.code }
+  - scan: { item: $item, times: 2 }
+  - expect:
+      "loan.lines[code=$item.code].qty": 2
+      "loan.lines[code=$item.code].unitDeposit": $item.deposit
+      "loan.total": "7.00"
+  - key: { action: DUE }
+  - expect: { "state.name": DEPOSIT }
+  - deposit: { amount: "10.00" }
+  - expect: { "loan.authorisations": { size: 0, capability: lending.loan.authorisations } }
+verify:
+  - { "state.name": IDLE }
+  - { "loan.open": false }
+  - { "loan.total": "7.00" }
+  - { "loan.change": "3.00" }
+  - { "loan.deposits[0].amount": "10.00" }
+  - { "slip.last.text": { contains: "DEPOSIT DUE" } }
+on_prompt: { unexpected: fail }
+artifacts: [capture]
+timeouts: { step: 30s }

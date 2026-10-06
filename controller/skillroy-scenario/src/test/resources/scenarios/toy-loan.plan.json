@@ -1,0 +1,300 @@
+{
+  "planVersion": 3,
+  "scenarioId": "toy-loan",
+  "pack": "toy",
+  "packVersion": "1.0.0",
+  "sourceHash": "sha256:2510571a26b73d12977a12fb854b88742af920358564adb62133c8123f9b94f0",
+  "inference": "none",
+  "requires": [
+    "toy.input",
+    "toy.state | toy.legacy"
+  ],
+  "slots": [
+    {
+      "name": "assistant",
+      "kind": "fixture",
+      "value": {
+        "code": "100"
+      },
+      "credential": {
+        "realm": "staff",
+        "key": "code"
+      }
+    },
+    {
+      "name": "item",
+      "kind": "fixture",
+      "value": {
+        "code": "YRD-001",
+        "barcode": "5000000000017",
+        "deposit": "3.50"
+      }
+    }
+  ],
+  "oracles": [],
+  "resolutionGraph": [
+    "assistant",
+    "item"
+  ],
+  "steps": [
+    {
+      "id": "s1",
+      "verb": "signOn",
+      "source": {
+        "line": 11
+      },
+      "calls": [
+        {
+          "primitive": "toy.input",
+          "args": {
+            "source": "Entry",
+            "value": "$assistant.code"
+          },
+          "sync": "READY",
+          "timeoutMs": 10000
+        },
+        {
+          "primitive": "toy.input",
+          "args": {
+            "source": "Entry",
+            "value": "$assistant.password"
+          },
+          "sync": "READY",
+          "timeoutMs": 10000
+        }
+      ],
+      "expect": []
+    },
+    {
+      "id": "s2",
+      "verb": "enter",
+      "source": {
+        "line": 12
+      },
+      "calls": [
+        {
+          "primitive": "toy.input",
+          "args": {
+            "source": "Entry",
+            "value": "$item.barcode"
+          },
+          "sync": "READY",
+          "timeoutMs": 10000
+        }
+      ],
+      "expect": []
+    },
+    {
+      "id": "s3",
+      "verb": "expect",
+      "source": {
+        "line": 13
+      },
+      "calls": [],
+      "expect": [
+        {
+          "path": "loan.lines[code=$item.code].qty",
+          "matcher": {
+            "equals": 1
+          }
+        }
+      ]
+    },
+    {
+      "id": "s4",
+      "verb": "key",
+      "source": {
+        "line": 14
+      },
+      "calls": [
+        {
+          "primitive": "toy.input",
+          "args": {
+            "source": "Key.DUE"
+          },
+          "sync": "READY",
+          "timeoutMs": 10000
+        }
+      ],
+      "expect": []
+    },
+    {
+      "id": "s5",
+      "verb": "click",
+      "source": {
+        "line": 15
+      },
+      "calls": [
+        {
+          "primitive": "swing.click",
+          "args": {
+            "by": {
+              "action": "DEPOSIT"
+            }
+          },
+          "sync": "SETTLE",
+          "timeoutMs": 10000
+        }
+      ],
+      "expect": []
+    },
+    {
+      "id": "s6",
+      "verb": "type",
+      "source": {
+        "line": 16
+      },
+      "calls": [
+        {
+          "primitive": "swing.type",
+          "args": {
+            "by": {
+              "name": "entry"
+            },
+            "enter": true,
+            "text": "7.00"
+          },
+          "sync": "SETTLE",
+          "timeoutMs": 10000
+        }
+      ],
+      "expect": []
+    },
+    {
+      "id": "s7",
+      "verb": "waitFor",
+      "source": {
+        "line": 17
+      },
+      "calls": [
+        {
+          "primitive": "sync.await",
+          "args": {
+            "timeoutMs": 5000,
+            "topics": "loan.posted"
+          },
+          "sync": "NONE",
+          "timeoutMs": 6000
+        }
+      ],
+      "expect": []
+    },
+    {
+      "id": "s8",
+      "verb": "expect",
+      "source": {
+        "line": 18
+      },
+      "calls": [],
+      "expect": [
+        {
+          "path": "loan.authorisations",
+          "matcher": {
+            "size": 0
+          },
+          "capability": "toy.loan.authorisations"
+        }
+      ]
+    },
+    {
+      "id": "s9",
+      "verb": "mark",
+      "source": {
+        "line": 19
+      },
+      "calls": [
+        {
+          "primitive": "trace.mark",
+          "args": {
+            "label": "loan done"
+          },
+          "sync": "NONE",
+          "timeoutMs": 10000
+        }
+      ],
+      "expect": []
+    },
+    {
+      "id": "s10",
+      "verb": "call",
+      "source": {
+        "line": 20
+      },
+      "calls": [
+        {
+          "primitive": "toy.emit",
+          "args": {
+            "id": "$item.code"
+          },
+          "sync": "EVENT",
+          "timeoutMs": 10000,
+          "await": {
+            "topics": "toy.done,toy.failed",
+            "match": {
+              "id": "$item.code",
+              "zone": "A"
+            },
+            "timeoutMs": 2000
+          }
+        }
+      ],
+      "expect": []
+    },
+    {
+      "id": "s11",
+      "verb": "call",
+      "source": {
+        "line": 25
+      },
+      "calls": [
+        {
+          "primitive": "toy.poke",
+          "args": {},
+          "sync": "EVENT",
+          "timeoutMs": 10000,
+          "await": {
+            "topics": "toy.poked",
+            "match": null,
+            "timeoutMs": 10000
+          }
+        }
+      ],
+      "expect": []
+    }
+  ],
+  "verify": [
+    {
+      "path": "state.name",
+      "matcher": {
+        "equals": "IDLE"
+      }
+    },
+    {
+      "path": "loan.total",
+      "matcher": {
+        "gte": "3.50"
+      }
+    }
+  ],
+  "cleanup": [
+    {
+      "primitive": "toy.input",
+      "args": {
+        "source": "Key.SIGN_OFF"
+      },
+      "sync": "NONE",
+      "timeoutMs": 5000
+    }
+  ],
+  "launchProperties": {
+    "toy.seed": "A"
+  },
+  "artifacts": [
+    "capture"
+  ],
+  "onPrompt": {
+    "unexpected": "fail"
+  },
+  "stepTimeoutMs": 10000,
+  "bindTimeoutMs": 60000
+}

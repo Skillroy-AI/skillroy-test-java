@@ -1,0 +1,7 @@
+# In-process test modules, discovered through ServiceLoader on the core's own class loader.
+ai.skillroy.testjava.agent.core.fixture.CoreTestModule
+ai.skillroy.testjava.agent.core.fixture.OrderingModules$OrderA
+ai.skillroy.testjava.agent.core.fixture.OrderingModules$Failing
+ai.skillroy.testjava.agent.core.fixture.OrderingModules$NeedsMissing
+ai.skillroy.testjava.agent.core.fixture.OrderingModules$OrderB
+ai.skillroy.testjava.agent.core.fixture.OrderingModules$DuplicateOrderB

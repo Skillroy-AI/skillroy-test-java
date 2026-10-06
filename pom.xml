@@ -1,0 +1,433 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Copyright 2026 Mike Mills.
+
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+
+      http://www.apache.org/licenses/LICENSE-2.0
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>ai.skillroy</groupId>
+  <artifactId>skillroy-test-java-parent</artifactId>
+  <version>0.1.0-SNAPSHOT</version>
+  <packaging>pom</packaging>
+
+  <name>skillroy-test-java</name>
+  <description>
+    AI-driven scenario testing of Java desktop applications from inside the JVM: a Java 8 in-JVM agent and a
+    Java 25 controller.
+  </description>
+  <inceptionYear>2026</inceptionYear>
+
+  <licenses>
+    <license>
+      <name>Apache License, Version 2.0</name>
+      <url>https://www.apache.org/licenses/LICENSE-2.0.txt</url>
+      <distribution>repo</distribution>
+    </license>
+  </licenses>
+
+  <url>https://github.com/Skillroy-AI/skillroy-test-java</url>
+  <developers>
+    <developer>
+      <name>Mike Mills</name>
+      <email>mike.mills@skillroy.ai</email>
+    </developer>
+  </developers>
+  <scm>
+    <connection>scm:git:https://github.com/Skillroy-AI/skillroy-test-java.git</connection>
+    <developerConnection>scm:git:git@github.com:Skillroy-AI/skillroy-test-java.git</developerConnection>
+    <url>https://github.com/Skillroy-AI/skillroy-test-java</url>
+  </scm>
+
+  <modules>
+    <module>agent/skillroy-protocol</module>
+    <module>agent/skillroy-agent-api</module>
+    <module>agent/skillroy-agent-bootstrap</module>
+    <module>agent/skillroy-agent-core</module>
+    <module>agent/skillroy-agent-swing</module>
+    <module>agent/skillroy-agent-data</module>
+    <module>agent/skillroy-agent-dist</module>
+    <module>controller/skillroy-controller</module>
+    <module>controller/skillroy-data</module>
+    <module>controller/skillroy-scenario</module>
+    <module>controller/skillroy-junit</module>
+    <module>controller/skillroy-cli</module>
+    <module>samples/skillroy-sample-lending-app</module>
+    <module>samples/skillroy-sample-lending-agent</module>
+    <module>samples/skillroy-sample-lending-pack</module>
+    <module>samples/skillroy-sample-lending-scenarios</module>
+  </modules>
+
+  <properties>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
+    <!-- Reproducible builds: fixed timestamp for every archive entry. -->
+    <project.build.outputTimestamp>2026-10-01T00:00:00Z</project.build.outputTimestamp>
+
+    <!-- The reactor root (home of LICENSE and NOTICE) as seen from a module: every module sits two directories below
+         it, which is also what its <relativePath>../../pom.xml</relativePath> says. -->
+    <skillroy.root.dir>${project.basedir}/../..</skillroy.root.dir>
+
+    <!-- Every module sets this explicitly: 8 for agent-side modules, 25 for controller-side modules. -->
+    <maven.compiler.release>25</maven.compiler.release>
+
+    <!-- Test JVM settings. Tests that need a display run with -Dskillroy.headless=false under ci/run-in-linux.sh. -->
+    <skillroy.headless>true</skillroy.headless>
+    <!-- Extra test JVM arguments a module or a command line may add without replacing the argLine. -->
+    <skillroy.test.extraArgLine></skillroy.test.extraArgLine>
+
+    <!-- Library versions. -->
+    <jackson.version>2.22.3</jackson.version>
+    <hsqldb.version>2.7.4</hsqldb.version>
+    <junit.version>5.14.4</junit.version>
+
+    <!-- Plugin versions. -->
+    <maven-assembly-plugin.version>3.8.0</maven-assembly-plugin.version>
+    <maven-clean-plugin.version>3.5.0</maven-clean-plugin.version>
+    <maven-compiler-plugin.version>3.16.0</maven-compiler-plugin.version>
+    <maven-dependency-plugin.version>3.11.0</maven-dependency-plugin.version>
+    <maven-deploy-plugin.version>3.1.4</maven-deploy-plugin.version>
+    <maven-enforcer-plugin.version>3.6.3</maven-enforcer-plugin.version>
+    <maven-failsafe-plugin.version>3.6.0</maven-failsafe-plugin.version>
+    <maven-install-plugin.version>3.2.0</maven-install-plugin.version>
+    <maven-jar-plugin.version>3.5.1</maven-jar-plugin.version>
+    <maven-resources-plugin.version>3.5.0</maven-resources-plugin.version>
+    <maven-surefire-plugin.version>3.6.0</maven-surefire-plugin.version>
+
+    <!-- Build environment required by the enforcer. -->
+    <skillroy.build.minMaven>3.9</skillroy.build.minMaven>
+    <skillroy.build.minJava>25</skillroy.build.minJava>
+  </properties>
+
+  <dependencyManagement>
+    <dependencies>
+      <!-- Internal modules. -->
+      <dependency>
+        <groupId>ai.skillroy</groupId>
+        <artifactId>skillroy-protocol</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>ai.skillroy</groupId>
+        <artifactId>skillroy-agent-api</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>ai.skillroy</groupId>
+        <artifactId>skillroy-agent-bootstrap</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>ai.skillroy</groupId>
+        <artifactId>skillroy-agent-core</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>ai.skillroy</groupId>
+        <artifactId>skillroy-agent-swing</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>ai.skillroy</groupId>
+        <artifactId>skillroy-agent-data</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>ai.skillroy</groupId>
+        <artifactId>skillroy-agent-dist</artifactId>
+        <version>${project.version}</version>
+        <type>zip</type>
+      </dependency>
+      <dependency>
+        <groupId>ai.skillroy</groupId>
+        <artifactId>skillroy-controller</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>ai.skillroy</groupId>
+        <artifactId>skillroy-data</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>ai.skillroy</groupId>
+        <artifactId>skillroy-scenario</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>ai.skillroy</groupId>
+        <artifactId>skillroy-junit</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>ai.skillroy</groupId>
+        <artifactId>skillroy-cli</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>ai.skillroy</groupId>
+        <artifactId>skillroy-sample-lending-app</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>ai.skillroy</groupId>
+        <artifactId>skillroy-sample-lending-agent</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>ai.skillroy</groupId>
+        <artifactId>skillroy-sample-lending-pack</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+
+      <!-- Controller side: YAML and plan files. -->
+      <dependency>
+        <groupId>com.fasterxml.jackson.core</groupId>
+        <artifactId>jackson-databind</artifactId>
+        <version>${jackson.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.fasterxml.jackson.dataformat</groupId>
+        <artifactId>jackson-dataformat-yaml</artifactId>
+        <version>${jackson.version}</version>
+      </dependency>
+
+      <!-- Sample application database and test database of the data channels; the jdk8 classifier runs on a Java 8
+           target. -->
+      <dependency>
+        <groupId>org.hsqldb</groupId>
+        <artifactId>hsqldb</artifactId>
+        <version>${hsqldb.version}</version>
+        <classifier>jdk8</classifier>
+      </dependency>
+
+      <!-- Tests: JUnit 5 (Java 8 baseline; JUnit 6 needs Java 17 and cannot run agent-side tests). -->
+      <dependency>
+        <groupId>org.junit</groupId>
+        <artifactId>junit-bom</artifactId>
+        <version>${junit.version}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+
+  <build>
+    <pluginManagement>
+      <plugins>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-clean-plugin</artifactId>
+          <version>${maven-clean-plugin.version}</version>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-resources-plugin</artifactId>
+          <version>${maven-resources-plugin.version}</version>
+          <executions>
+            <!-- Every jar carries the project's LICENSE and NOTICE as META-INF/LICENSE and META-INF/NOTICE. This is an
+                 execution of its own (not a <resources> entry) so that modules which declare resources of their own
+                 get the files too. The source is the reactor root (skillroy.root.dir). The fixed
+                 project.build.outputTimestamp is applied to the jar entries by maven-jar-plugin. -->
+            <execution>
+              <id>copy-legal-files</id>
+              <phase>process-resources</phase>
+              <goals>
+                <goal>copy-resources</goal>
+              </goals>
+              <configuration>
+                <outputDirectory>${project.build.outputDirectory}/META-INF</outputDirectory>
+                <resources>
+                  <resource>
+                    <directory>${skillroy.root.dir}</directory>
+                    <includes>
+                      <include>LICENSE</include>
+                      <include>NOTICE</include>
+                    </includes>
+                  </resource>
+                </resources>
+              </configuration>
+            </execution>
+          </executions>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-compiler-plugin</artifactId>
+          <version>${maven-compiler-plugin.version}</version>
+          <configuration>
+            <release>${maven.compiler.release}</release>
+            <testRelease>${maven.compiler.release}</testRelease>
+            <encoding>${project.build.sourceEncoding}</encoding>
+            <compilerArgs>
+              <!-- Release 8 is obsolete on current JDKs; the warning is expected and suppressed. -->
+              <arg>-Xlint:-options</arg>
+            </compilerArgs>
+          </configuration>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-surefire-plugin</artifactId>
+          <version>${maven-surefire-plugin.version}</version>
+          <configuration>
+            <argLine>-Djava.awt.headless=${skillroy.headless} ${skillroy.test.extraArgLine}</argLine>
+            <trimStackTrace>false</trimStackTrace>
+          </configuration>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-failsafe-plugin</artifactId>
+          <version>${maven-failsafe-plugin.version}</version>
+          <configuration>
+            <argLine>-Djava.awt.headless=${skillroy.headless} ${skillroy.test.extraArgLine}</argLine>
+            <trimStackTrace>false</trimStackTrace>
+          </configuration>
+          <executions>
+            <execution>
+              <id>integration-tests</id>
+              <goals>
+                <goal>integration-test</goal>
+                <goal>verify</goal>
+              </goals>
+            </execution>
+          </executions>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-jar-plugin</artifactId>
+          <version>${maven-jar-plugin.version}</version>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-assembly-plugin</artifactId>
+          <version>${maven-assembly-plugin.version}</version>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-install-plugin</artifactId>
+          <version>${maven-install-plugin.version}</version>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-dependency-plugin</artifactId>
+          <version>${maven-dependency-plugin.version}</version>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-deploy-plugin</artifactId>
+          <version>${maven-deploy-plugin.version}</version>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-enforcer-plugin</artifactId>
+          <version>${maven-enforcer-plugin.version}</version>
+        </plugin>
+      </plugins>
+    </pluginManagement>
+
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-enforcer-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>enforce-build-environment</id>
+            <goals>
+              <goal>enforce</goal>
+            </goals>
+            <configuration>
+              <rules>
+                <requireMavenVersion>
+                  <version>[${skillroy.build.minMaven},)</version>
+                </requireMavenVersion>
+                <requireJavaVersion>
+                  <version>[${skillroy.build.minJava},)</version>
+                </requireJavaVersion>
+              </rules>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+
+  <profiles>
+    <!-- Pass -Dskillroy.it.targetJava=<java executable> through to test JVMs, only when it is set. -->
+    <profile>
+      <id>pass-it-target-java</id>
+      <activation>
+        <property>
+          <name>skillroy.it.targetJava</name>
+        </property>
+      </activation>
+      <build>
+        <pluginManagement>
+          <plugins>
+            <plugin>
+              <groupId>org.apache.maven.plugins</groupId>
+              <artifactId>maven-surefire-plugin</artifactId>
+              <configuration>
+                <systemPropertyVariables>
+                  <skillroy.it.targetJava>${skillroy.it.targetJava}</skillroy.it.targetJava>
+                </systemPropertyVariables>
+              </configuration>
+            </plugin>
+            <plugin>
+              <groupId>org.apache.maven.plugins</groupId>
+              <artifactId>maven-failsafe-plugin</artifactId>
+              <configuration>
+                <systemPropertyVariables>
+                  <skillroy.it.targetJava>${skillroy.it.targetJava}</skillroy.it.targetJava>
+                </systemPropertyVariables>
+              </configuration>
+            </plugin>
+          </plugins>
+        </pluginManagement>
+      </build>
+    </profile>
+    <!-- Pass -Dskillroy.agent.home=<dir> through to test JVMs, only when it is set. -->
+    <profile>
+      <id>pass-agent-home</id>
+      <activation>
+        <property>
+          <name>skillroy.agent.home</name>
+        </property>
+      </activation>
+      <build>
+        <pluginManagement>
+          <plugins>
+            <plugin>
+              <groupId>org.apache.maven.plugins</groupId>
+              <artifactId>maven-surefire-plugin</artifactId>
+              <configuration>
+                <systemPropertyVariables>
+                  <skillroy.agent.home>${skillroy.agent.home}</skillroy.agent.home>
+                </systemPropertyVariables>
+              </configuration>
+            </plugin>
+            <plugin>
+              <groupId>org.apache.maven.plugins</groupId>
+              <artifactId>maven-failsafe-plugin</artifactId>
+              <configuration>
+                <systemPropertyVariables>
+                  <skillroy.agent.home>${skillroy.agent.home}</skillroy.agent.home>
+                </systemPropertyVariables>
+              </configuration>
+            </plugin>
+          </plugins>
+        </pluginManagement>
+      </build>
+    </profile>
+  </profiles>
+</project>

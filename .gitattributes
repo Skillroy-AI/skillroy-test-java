@@ -1,0 +1,5 @@
+# Committed plans and bindings files are compared byte for byte by tests (PlansUpToDateTest,
+# BindingsUpToDateTest), and sourceHash covers the scenario text: keep every text file on LF on every platform.
+* text=auto eol=lf
+*.png binary
+*.jar binary

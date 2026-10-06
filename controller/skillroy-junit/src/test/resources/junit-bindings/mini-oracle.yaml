@@ -1,0 +1,6 @@
+scenario: mini-oracle
+pack: mini
+oracle:
+  same: { fn: Echo, args: IDLE, must_equal: IDLE }
+steps:
+  - expect: { "app.mini.state": $oracle.same }

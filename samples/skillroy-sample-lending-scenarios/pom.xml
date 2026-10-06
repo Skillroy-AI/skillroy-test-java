@@ -1,0 +1,235 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Copyright 2026 Mike Mills.
+
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+
+      http://www.apache.org/licenses/LICENSE-2.0
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>ai.skillroy</groupId>
+    <artifactId>skillroy-test-java-parent</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+    <relativePath>../../pom.xml</relativePath>
+  </parent>
+
+  <artifactId>skillroy-sample-lending-scenarios</artifactId>
+  <name>skillroy-sample-lending-scenarios</name>
+  <description>
+    Scenarios against the sample lending desk, their committed plans, and the end-to-end tests in all load modes.
+  </description>
+
+  <properties>
+    <!-- Controller side: Java 25. -->
+    <maven.compiler.release>25</maven.compiler.release>
+    <!-- Where the end-to-end tests find the agent home and the target's class path (assembled below). -->
+    <skillroy.it.agentHome>${project.build.directory}/skillroy-agent</skillroy.it.agentHome>
+    <skillroy.it.targetLib>${project.build.directory}/it-target</skillroy.it.targetLib>
+    <!-- The assembled launcher of the reactor's CLI module, and the lending pack jar it is given. -->
+    <skillroy.it.cliDist>${project.basedir}/../../controller/skillroy-cli/target/skillroy-cli</skillroy.it.cliDist>
+    <skillroy.it.packJar>${project.build.directory}/it-cli/skillroy-sample-lending-pack.jar</skillroy.it.packJar>
+  </properties>
+
+  <dependencies>
+    <dependency>
+      <groupId>ai.skillroy</groupId>
+      <artifactId>skillroy-sample-lending-pack</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>ai.skillroy</groupId>
+      <artifactId>skillroy-junit</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>ai.skillroy</groupId>
+      <artifactId>skillroy-data</artifactId>
+    </dependency>
+    <!-- The agent home (zip); never on a class path. The exclusion keeps the agent jars the zip is assembled from
+         off the test class path: the controller reaches the agent only through the agent home, as it would in a
+         real installation. Declared so that the reactor builds it first. -->
+    <dependency>
+      <groupId>ai.skillroy</groupId>
+      <artifactId>skillroy-agent-dist</artifactId>
+      <type>zip</type>
+      <scope>test</scope>
+      <exclusions>
+        <exclusion>
+          <groupId>*</groupId>
+          <artifactId>*</artifactId>
+        </exclusion>
+      </exclusions>
+    </dependency>
+    <!-- The target's jars. Copied into target/it-target and the agent home below; declared so that the reactor
+         builds them first. They are not used on the controller's class path. -->
+    <dependency>
+      <groupId>ai.skillroy</groupId>
+      <artifactId>skillroy-sample-lending-app</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>ai.skillroy</groupId>
+      <artifactId>skillroy-sample-lending-agent</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <!-- The assembled command-line launcher (controller/skillroy-cli/target/skillroy-cli) that the end-to-end checks
+         run once per target Java. Declared so that the reactor builds it first; never on the class path. -->
+    <dependency>
+      <groupId>ai.skillroy</groupId>
+      <artifactId>skillroy-cli</artifactId>
+      <scope>test</scope>
+      <exclusions>
+        <exclusion>
+          <groupId>*</groupId>
+          <artifactId>*</artifactId>
+        </exclusion>
+      </exclusions>
+    </dependency>
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <!-- Assembles what the end-to-end tests launch, after package and before the integration tests:
+           target/skillroy-agent/   the agent home from the skillroy-agent-dist zip, plus the lending module in modules/
+           target/it-target/        the target's class path: the lending application, HSQLDB, and (for EMBEDDED) the
+                                    lending module jar, which holds the plugin class. -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-dependency-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>unpack-agent-home</id>
+            <phase>pre-integration-test</phase>
+            <goals>
+              <goal>unpack</goal>
+            </goals>
+            <configuration>
+              <artifactItems>
+                <artifactItem>
+                  <groupId>ai.skillroy</groupId>
+                  <artifactId>skillroy-agent-dist</artifactId>
+                  <version>${project.version}</version>
+                  <type>zip</type>
+                  <outputDirectory>${project.build.directory}</outputDirectory>
+                </artifactItem>
+              </artifactItems>
+              <overWriteReleases>true</overWriteReleases>
+              <overWriteSnapshots>true</overWriteSnapshots>
+            </configuration>
+          </execution>
+          <execution>
+            <id>lending-module-into-agent-home</id>
+            <phase>pre-integration-test</phase>
+            <goals>
+              <goal>copy</goal>
+            </goals>
+            <configuration>
+              <artifactItems>
+                <artifactItem>
+                  <groupId>ai.skillroy</groupId>
+                  <artifactId>skillroy-sample-lending-agent</artifactId>
+                  <version>${project.version}</version>
+                  <outputDirectory>${skillroy.it.agentHome}/modules</outputDirectory>
+                  <destFileName>skillroy-sample-lending-agent.jar</destFileName>
+                </artifactItem>
+              </artifactItems>
+              <overWriteReleases>true</overWriteReleases>
+              <overWriteSnapshots>true</overWriteSnapshots>
+            </configuration>
+          </execution>
+          <execution>
+            <id>lending-pack-for-the-launcher</id>
+            <phase>pre-integration-test</phase>
+            <goals>
+              <goal>copy</goal>
+            </goals>
+            <configuration>
+              <artifactItems>
+                <artifactItem>
+                  <groupId>ai.skillroy</groupId>
+                  <artifactId>skillroy-sample-lending-pack</artifactId>
+                  <version>${project.version}</version>
+                  <destFileName>skillroy-sample-lending-pack.jar</destFileName>
+                </artifactItem>
+              </artifactItems>
+              <outputDirectory>${project.build.directory}/it-cli</outputDirectory>
+              <overWriteReleases>true</overWriteReleases>
+              <overWriteSnapshots>true</overWriteSnapshots>
+            </configuration>
+          </execution>
+          <execution>
+            <id>target-class-path</id>
+            <phase>pre-integration-test</phase>
+            <goals>
+              <goal>copy</goal>
+            </goals>
+            <configuration>
+              <artifactItems>
+                <artifactItem>
+                  <groupId>ai.skillroy</groupId>
+                  <artifactId>skillroy-sample-lending-app</artifactId>
+                  <version>${project.version}</version>
+                  <destFileName>skillroy-sample-lending-app.jar</destFileName>
+                </artifactItem>
+                <artifactItem>
+                  <groupId>org.hsqldb</groupId>
+                  <artifactId>hsqldb</artifactId>
+                  <version>${hsqldb.version}</version>
+                  <classifier>jdk8</classifier>
+                  <destFileName>hsqldb.jar</destFileName>
+                </artifactItem>
+                <artifactItem>
+                  <groupId>ai.skillroy</groupId>
+                  <artifactId>skillroy-sample-lending-agent</artifactId>
+                  <version>${project.version}</version>
+                  <destFileName>skillroy-sample-lending-agent.jar</destFileName>
+                </artifactItem>
+              </artifactItems>
+              <outputDirectory>${skillroy.it.targetLib}</outputDirectory>
+              <overWriteReleases>true</overWriteReleases>
+              <overWriteSnapshots>true</overWriteSnapshots>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+      <!-- Executions (integration-test, verify) and argLine come from the parent's pluginManagement. -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-failsafe-plugin</artifactId>
+        <configuration>
+          <systemPropertyVariables>
+            <skillroy.it.buildDir>${project.build.directory}</skillroy.it.buildDir>
+            <skillroy.it.moduleDir>${project.basedir}</skillroy.it.moduleDir>
+            <skillroy.it.cliDist>${skillroy.it.cliDist}</skillroy.it.cliDist>
+            <skillroy.it.packJar>${skillroy.it.packJar}</skillroy.it.packJar>
+          </systemPropertyVariables>
+        </configuration>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <configuration>
+          <systemPropertyVariables>
+            <skillroy.it.moduleDir>${project.basedir}</skillroy.it.moduleDir>
+          </systemPropertyVariables>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+</project>

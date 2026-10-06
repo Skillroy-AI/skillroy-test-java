@@ -1,0 +1,13 @@
+# Negative (contract section 10, item 4): an expectation that cannot hold (two garden spades scanned, three expected).
+# Fails as ASSERTION with a UI snapshot and a PNG capture, and leaves a loan open for the pack's recover.
+scenario: wrong-expectation
+pack: lending
+launchProperties: { lending.seed: A }
+resolve:
+  assistant: { fixture: { code: "100" }, credential: { realm: staff, key: code } }
+  item:      { fixture: { code: YRD-001, barcode: "5000000000017" } }
+steps:
+  - signOn: { staff: $assistant }
+  - scan: { item: $item, times: 2 }
+  - expect: { "loan.lines[code=$item.code].qty": 3 }
+timeouts: { step: 5s }

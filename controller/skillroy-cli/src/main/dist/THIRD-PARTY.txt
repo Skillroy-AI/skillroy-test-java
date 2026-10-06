@@ -1,0 +1,53 @@
+Third-party software in the Skillroy Test (Java) command line distribution
+============================================================================
+
+The project's own code in this distribution (bin/skillroy and the lib/skillroy-*.jar files) is licensed under the
+Apache License, Version 2.0; see LICENSE and NOTICE at the top level of this distribution.
+
+The jars below are third-party software. They are in lib/, they are copied here unmodified, and each carries the
+licence and attribution files its authors ship inside the jar (META-INF/LICENSE, META-INF/NOTICE and the others
+named in the second table). Please keep the jars as they are: do not repack, shade or minimise them.
+
+Redistributed artifacts
+-----------------------
+
+Each line is: Maven coordinates (group:artifact:version), SPDX licence identifier, file in this distribution.
+The line format is read by a test; see "Keeping this file correct" below.
+
+com.fasterxml.jackson.core:jackson-annotations:2.22             Apache-2.0   lib/jackson-annotations-2.22.jar
+com.fasterxml.jackson.core:jackson-core:2.22.3                  Apache-2.0   lib/jackson-core-2.22.3.jar
+com.fasterxml.jackson.core:jackson-databind:2.22.3              Apache-2.0   lib/jackson-databind-2.22.3.jar
+com.fasterxml.jackson.dataformat:jackson-dataformat-yaml:2.22.3 Apache-2.0   lib/jackson-dataformat-yaml-2.22.3.jar
+org.yaml:snakeyaml:2.5                                          Apache-2.0   lib/snakeyaml-2.5.jar
+
+Attributions
+------------
+
+Jackson (the four com.fasterxml.jackson jars): Copyright 2007-, Tatu Saloranta; developed by a community of
+developers. Licensed under the Apache License, Version 2.0. See META-INF/NOTICE and META-INF/LICENSE inside each jar.
+
+SnakeYAML: YAML 1.1 parser and emitter for Java, https://bitbucket.org/snakeyaml/snakeyaml. Licensed under the
+Apache License, Version 2.0. The jar contains no licence file of its own; its manifest (Bundle-License) and its
+embedded POM name that licence. The licence text is the LICENSE file at the top level of this distribution.
+
+Components embedded in jackson-core
+-----------------------------------
+
+The jackson-core jar contains code from the following projects, each under its own permissive licence. The
+licence texts are the files named below, inside the jar; they must stay with it.
+
+Each line is: component, SPDX licence identifier, file inside lib/jackson-core-2.22.3.jar.
+
+  FastDoubleParser (shaded copy, by Werner Randelshofer)       MIT           META-INF/FastDoubleParser-LICENSE
+  Schubfach number writing code (by Raffaello Giulietti)       MIT           META-INF/Schubfach-LICENSE
+  fast_double_parser (by Daniel Lemire, in FastDoubleParser)   BSL-1.0       META-INF/FastDoubleParser-ThirdParty-LICENSE
+  fast_float (in FastDoubleParser)                             MIT           META-INF/FastDoubleParser-ThirdParty-LICENSE
+  bigint (by Tim Buktu, in FastDoubleParser)                   BSD-2-Clause  META-INF/FastDoubleParser-ThirdParty-LICENSE
+
+Keeping this file correct
+-------------------------
+
+A test over the assembled distribution (DistributionNoticesIT in the skillroy-cli module) fails the build when this
+file and lib/ disagree: a third-party jar in lib/ that is not listed above (or a listed one that is gone or has
+another version), a licence outside the allowed list, a licence or notice file inside a jar that is not mentioned
+here, or a missing LICENSE, NOTICE or THIRD-PARTY.txt. Change the dependencies, then update this file.

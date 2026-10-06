@@ -1,0 +1,191 @@
+/*
+ * Copyright 2026 Mike Mills.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package ai.skillroy.testjava.scenario;
+
+import ai.skillroy.testjava.data.SecretMask;
+
+import ai.skillroy.testjava.protocol.Json;
+
+import java.io.BufferedWriter;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.time.Clock;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * Writes {@code run.jsonl}: one compact JSON object per line, flushed per line so that a crash keeps what happened.
+ * Every record starts with {@code "type"} and {@code "t"} (milliseconds since the run started); a record holding a
+ * value the JSON codec rejects is written as {@code {"type", "t", "unwritable": reason, "fields": [names]}}. Types:
+ * {@code run-start}, {@code pack} (version note), {@code requires}, {@code launchProperties}, {@code preflight},
+ * {@code bind}, {@code call}, {@code sync}, {@code fidelity} (a UI call that ran at a lower fidelity than requested,
+ * amendment A29), {@code prompt}, {@code expect}, {@code evidence}, {@code artifact}, {@code cleanup},
+ * {@code recover}, {@code run-end}, and from Phase 2 {@code fingerprint}, {@code resolver}, {@code verifier},
+ * {@code resolve}, {@code oracle}, {@code guard}, {@code capture}, {@code db}, {@code ledger}. Every record passes
+ * through the run's {@link SecretMask} first (amendment A25, phase2-contracts.md 11.4).
+ *
+ * <p>Best effort: a write error disables the log and is never thrown into the run. Used by one executor thread.
+ */
+final class RunLog implements AutoCloseable {
+
+    /** The file name inside the output directory. */
+    static final String FILE = "run.jsonl";
+
+    /** The nesting the JSON codec writes at most. */
+    private static final int MAX_DEPTH = 200;
+
+    private final Clock clock;
+    private final long startMs;
+    private BufferedWriter out;
+    private String error;
+    private SecretMask mask = SecretMask.NONE;
+
+    private RunLog(BufferedWriter out, Clock clock) {
+        this.out = out;
+        this.clock = clock;
+        this.startMs = clock.millis();
+    }
+
+    /** A log writing to {@code dir/run.jsonl} (replacing an old one), or a no-op log when {@code dir} is null. */
+    static RunLog open(Path dir, Clock clock) {
+        if (dir == null) {
+            return new RunLog(null, clock);
+        }
+        try {
+            Files.createDirectories(dir);
+            return new RunLog(Files.newBufferedWriter(dir.resolve(FILE), StandardCharsets.UTF_8), clock);
+        } catch (IOException e) {
+            RunLog log = new RunLog(null, clock);
+            log.error = e.toString();
+            return log;
+        }
+    }
+
+    /** Sets the mask every later record passes through. */
+    void mask(SecretMask secretMask) {
+        this.mask = secretMask == null ? SecretMask.NONE : secretMask;
+    }
+
+    /**
+     * Appends one record; {@code fields} are written after {@code type} and {@code t} in their own order, with the
+     * run's secrets masked. The mask sees the record in the form the JSON codec writes it ({@link #jsonForm}), so
+     * that a set, an array or a record a pack built (verifier evidence, call params) is masked like a list or a
+     * text. A record the codec cannot write (NaN, nesting deeper than 200) keeps its field names only, since its
+     * values could not be masked.
+     */
+    void write(String type, Map<String, ?> fields) {
+        if (out == null) {
+            return;
+        }
+        Map<String, Object> record = new LinkedHashMap<>();
+        record.put("type", type);
+        record.put("t", clock.millis() - startMs);
+        String line;
+        try {
+            if (fields != null) {
+                @SuppressWarnings("unchecked")
+                Map<String, ?> masked = (Map<String, ?>) mask.apply(jsonForm(fields, 0));
+                record.putAll(masked);
+            }
+            line = Json.write(record);
+        } catch (RuntimeException e) {
+            line = Json.write(fields("type", type, "t", record.get("t"), "unwritable", mask.apply(e.toString()),
+                    "fields", fields == null ? List.of() : new ArrayList<>(fields.keySet())));
+        }
+        try {
+            out.write(line);
+            out.write('\n');
+            out.flush();
+        } catch (IOException e) {
+            error = e.toString();
+            closeQuietly();
+        }
+    }
+
+    /** The first write error, or null. */
+    String error() {
+        return error;
+    }
+
+    @Override
+    public void close() {
+        closeQuietly();
+    }
+
+    private void closeQuietly() {
+        if (out != null) {
+            try {
+                out.close();
+            } catch (IOException e) {
+                if (error == null) {
+                    error = e.toString();
+                }
+            }
+            out = null;
+        }
+    }
+
+    /**
+     * The value as the JSON codec writes it, for the mask: maps (keys as text) and lists are copied, strings, numbers,
+     * booleans and null kept as they are, and anything else (a set or another collection, an array, a record, any
+     * other object) replaced by the codec's own reading of it ({@link Values#normalise}): an array where it writes
+     * an array, its text where it writes a text.
+     *
+     * @throws RuntimeException for a value the codec rejects, or nesting deeper than 200
+     */
+    static Object jsonForm(Object value, int depth) {
+        if (depth > MAX_DEPTH) {
+            throw new IllegalArgumentException("nesting deeper than " + MAX_DEPTH);
+        }
+        if (value == null || value instanceof String || value instanceof Number || value instanceof Boolean) {
+            return value;
+        }
+        if (value instanceof Map<?, ?> map) {
+            Map<String, Object> copy = new LinkedHashMap<>();
+            for (Map.Entry<?, ?> e : map.entrySet()) {
+                copy.put(String.valueOf(e.getKey()), jsonForm(e.getValue(), depth + 1));
+            }
+            return copy;
+        }
+        if (value instanceof List<?> list) {
+            List<Object> copy = new ArrayList<>(list.size());
+            for (Object item : list) {
+                copy.add(jsonForm(item, depth + 1));
+            }
+            return copy;
+        }
+        return Values.normalise(value);
+    }
+
+    /** Builds a field map in insertion order: {@code fields("step", "s1", "ok", true)}. */
+    static Map<String, Object> fields(Object... keyValues) {
+        Map<String, Object> map = new LinkedHashMap<>();
+        for (int i = 0; i + 1 < keyValues.length; i += 2) {
+            map.put(String.valueOf(keyValues[i]), keyValues[i + 1]);
+        }
+        return map;
+    }
+
+    /** Json text with a newline, for tests and evidence files. */
+    static String pretty(Object value) {
+        return Json.writePretty(value);
+    }
+}

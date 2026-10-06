@@ -1,0 +1,16 @@
+# Negative (contract section 10, item 5): fails while a loan is open and a prompt is waiting (an unknown item was
+# scanned and the expectation on the prompt is wrong). The pack's recover must answer the prompt, cancel the loan and
+# sign off, so that the next scenario passes without a restart.
+scenario: prompt-left-open
+pack: lending
+launchProperties: { lending.seed: A }
+resolve:
+  assistant: { fixture: { code: "100" }, credential: { realm: staff, key: code } }
+  item:      { fixture: { code: YRD-001, barcode: "5000000000017" } }
+steps:
+  - signOn: { staff: $assistant }
+  - scan: { item: $item }
+  - scan: { barcode: "0000000000000" }
+  - expectPrompt: { text: Unknown item }
+  - expect: { "prompt.text": "Item not for loan" }
+timeouts: { step: 5s }

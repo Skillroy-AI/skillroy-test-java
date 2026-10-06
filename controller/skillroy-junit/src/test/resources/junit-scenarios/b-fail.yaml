@@ -1,0 +1,5 @@
+scenario: mini-fail
+pack: mini
+steps:
+  - expect: { "app.mini.state": BUSY }
+timeouts: { step: 200ms }

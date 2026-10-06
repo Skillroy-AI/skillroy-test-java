@@ -1,0 +1,110 @@
+package ai.skillroy.testjava.controller.fixture;
+
+import java.io.File;
+import java.io.OutputStream;
+import java.lang.management.ManagementFactory;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.Properties;
+
+/**
+ * Test fixture (Java 8 source, compiled by the tests with --release 8): a trivial target JVM. Arguments are key=value:
+ * stderr=TEXT prints TEXT to stderr; exit=N exits with N; hang=true makes a normal shutdown hang (a shutdown hook
+ * that never returns); embedded=true starts FakeTargetAgent in EMBEDDED mode;
+ * grandchild=JAVA starts one more JVM of this class (reporting to REPORT.grandchild); report=FILE writes what this JVM
+ * sees (pid, properties, environment) as a properties file. Then it blocks until it is killed.
+ */
+public final class ChildMain {
+
+    private ChildMain() {
+    }
+
+    public static void main(String[] args) throws Exception {
+        Map<String, String> a = new LinkedHashMap<String, String>();
+        for (String arg : args) {
+            int eq = arg.indexOf('=');
+            if (eq > 0) {
+                a.put(arg.substring(0, eq), arg.substring(eq + 1));
+            }
+        }
+        if (a.containsKey("stderr")) {
+            System.err.println(a.get("stderr"));
+            System.err.flush();
+        }
+        if (a.containsKey("exit")) {
+            System.exit(Integer.parseInt(a.get("exit")));
+        }
+        if ("true".equals(a.get("hang"))) {
+            Runtime.getRuntime().addShutdownHook(new Thread(new Runnable() {
+                public void run() {
+                    Object forever = new Object();
+                    synchronized (forever) {
+                        while (true) {
+                            try {
+                                forever.wait();
+                            } catch (InterruptedException ignored) {
+                                // Keep hanging: this JVM only ends when it is killed.
+                            }
+                        }
+                    }
+                }
+            }, "child-hang"));
+        }
+        if ("true".equals(a.get("embedded"))) {
+            Class<?> agent = Class.forName("ai.skillroy.testjava.controller.fixture.FakeTargetAgent");
+            agent.getMethod("startEmbedded").invoke(null);
+        }
+        String grandchildReport = null;
+        if (a.containsKey("grandchild") && a.containsKey("report")) {
+            grandchildReport = a.get("report") + ".grandchild";
+            ProcessBuilder builder = new ProcessBuilder(a.get("grandchild"), "-cp",
+                    System.getProperty("java.class.path"), ChildMain.class.getName(), "report=" + grandchildReport);
+            builder.redirectErrorStream(true);
+            builder.redirectOutput(new File(grandchildReport + ".log"));
+            builder.start();
+        }
+        if (a.containsKey("report")) {
+            Properties p = new Properties();
+            p.setProperty("pid", ManagementFactory.getRuntimeMXBean().getName().split("@")[0]);
+            StringBuilder joined = new StringBuilder();
+            for (String arg : args) {
+                joined.append(joined.length() == 0 ? "" : " ").append(arg);
+            }
+            p.setProperty("args", joined.toString());
+            put(p, "java.specification.version", System.getProperty("java.specification.version"));
+            put(p, "sun.java.command", System.getProperty("sun.java.command"));
+            put(p, "prop.child.flag", System.getProperty("child.flag"));
+            put(p, "prop.skillroy.agent.enabled", System.getProperty("skillroy.agent.enabled"));
+            put(p, "prop.skillroy.agent.discoveryDir", System.getProperty("skillroy.agent.discoveryDir"));
+            put(p, "env.JAVA_TOOL_OPTIONS", System.getenv("JAVA_TOOL_OPTIONS"));
+            put(p, "env.CHILD_ENV", System.getenv("CHILD_ENV"));
+            put(p, "env.HOME", System.getenv("HOME"));
+            put(p, "grandchildReport", grandchildReport);
+            Path target = Paths.get(a.get("report"));
+            Path temporary = Paths.get(a.get("report") + ".tmp");
+            OutputStream out = Files.newOutputStream(temporary);
+            try {
+                p.store(out, null);
+            } finally {
+                out.close();
+            }
+            Files.move(temporary, target, StandardCopyOption.ATOMIC_MOVE);
+        }
+        Object lock = new Object();
+        synchronized (lock) {
+            while (true) {
+                lock.wait();
+            }
+        }
+    }
+
+    private static void put(Properties p, String key, String value) {
+        if (value != null) {
+            p.setProperty(key, value);
+        }
+    }
+}

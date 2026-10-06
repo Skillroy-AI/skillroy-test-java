@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Copyright 2026 Mike Mills.
+
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+
+      http://www.apache.org/licenses/LICENSE-2.0
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>ai.skillroy</groupId>
+    <artifactId>skillroy-test-java-parent</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+    <relativePath>../../pom.xml</relativePath>
+  </parent>
+
+  <artifactId>skillroy-agent-bootstrap</artifactId>
+  <name>skillroy-agent-bootstrap</name>
+  <description>
+    The -javaagent / attach jar: parses options, applies the main-class guard, builds the agent class loader and
+    starts the runtime. Depends on nothing, not even the protocol module.
+  </description>
+
+  <properties>
+    <!-- Agent side: Java 8 language and API, no dependencies at all. -->
+    <maven.compiler.release>8</maven.compiler.release>
+    <skillroy.bootstrap.class>ai.skillroy.testjava.agent.bootstrap.AgentBootstrap</skillroy.bootstrap.class>
+  </properties>
+
+  <dependencies>
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-jar-plugin</artifactId>
+        <configuration>
+          <archive>
+            <manifestEntries>
+              <Premain-Class>${skillroy.bootstrap.class}</Premain-Class>
+              <Agent-Class>${skillroy.bootstrap.class}</Agent-Class>
+              <Launcher-Agent-Class>${skillroy.bootstrap.class}</Launcher-Agent-Class>
+              <Can-Retransform-Classes>true</Can-Retransform-Classes>
+              <Can-Redefine-Classes>true</Can-Redefine-Classes>
+              <Can-Set-Native-Method-Prefix>true</Can-Set-Native-Method-Prefix>
+            </manifestEntries>
+          </archive>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+</project>

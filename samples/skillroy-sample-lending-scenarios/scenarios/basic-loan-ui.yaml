@@ -1,0 +1,48 @@
+# The same basic loan driven through the window: typing into the entry field and clicking keypad keys, which are
+# icon-only and found by their action ({action: DUE}, a locator the lending agent module adds). A UI step waits for
+# the desk's own event through its "await:" (the step ends when the event has arrived and the UI is quiet); one
+# explicit "waitFor" remains where the desk publishes two events in turn. The scenario never sleeps.
+# Clicks use the COMPONENT rung (focus first, activating the window when it lost the focus) and fall back to the
+# ACTION rung only if the focus does not arrive, which the run would report as degraded fidelity. focusTimeoutMs
+# leaves room for window activation on a display without a window manager.
+# Seed A fixtures: assistant 100 (its password comes from credentials.yaml); YRD-001 at 3.50, in no active waiver
+# rule.
+scenario: basic-loan-ui
+pack: lending
+tags: [smoke, ui]
+requires: [swing.tree, swing.click.action, swing.click.component, lending.state, lending.loan, lending.slip]
+launchProperties: { lending.seed: A }
+ui: { clickRung: COMPONENT }
+resolve:
+  assistant: { fixture: { code: "100" }, credential: { realm: staff, key: code } }
+  item:      { fixture: { code: YRD-001, barcode: "5000000000017", deposit: "3.50" } }
+steps:
+  - type:
+      by: { name: entry }
+      text: $assistant.code
+      enter: true
+      await: { topic: input.requested, match: { state: PASSWORD } }
+  - type:
+      by: { name: entry }
+      text: $assistant.password
+      enter: true
+      await: { topic: input.requested, match: { state: IDLE } }
+  - expect: { "state.staff.code": $assistant.code }
+  - type: { by: { name: entry }, text: $item.barcode, enter: true,
+            await: { topic: input.requested, match: { state: LOAN } } }
+  - type: { by: { name: entry }, text: $item.barcode, enter: true,
+            await: { topic: input.requested, match: { state: LOAN } } }
+  - expect: { "loan.lines[code=$item.code].qty": 2, "loan.total": "7.00" }
+  - click: { by: { action: DUE }, focusTimeoutMs: 5000, await: { topic: input.requested, match: { state: DEPOSIT } } }
+  - type: { by: { name: entry }, text: "10.00" }
+  - click: { by: { action: DEPOSIT }, focusTimeoutMs: 5000, await: { topic: loan.posted, match: { total: "7.00" } } }
+  - waitFor: { topic: input.requested, match: { state: IDLE } }
+  - expect: { "loan.change": "3.00", "slip.last.text": { contains: "CHANGE" } }
+  - click: { by: { action: SIGN_OFF }, focusTimeoutMs: 5000,
+             await: { topic: input.requested, match: { state: SIGNED_OFF } } }
+verify:
+  - { "state.name": SIGNED_OFF }
+  - { "loan.total": "7.00" }
+  - { "slip.last.text": { contains: "DEPOSIT DUE" } }
+on_prompt: { unexpected: fail }
+timeouts: { step: 30s }

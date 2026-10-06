@@ -1,0 +1,4 @@
+scenario: mini-error
+pack: mini
+requires: [mini.missing]
+steps: []

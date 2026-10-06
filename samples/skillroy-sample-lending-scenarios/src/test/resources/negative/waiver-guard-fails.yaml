@@ -1,0 +1,62 @@
+# Negative (phase3-contracts.md 10.4): scenario B with a guard on the waiver that cannot hold (nothing waived, where
+# one group of the trigger item always waives one deposit). Every slot resolves, every verifier passes and the
+# cross-check agrees with the desk's dry run, but the must_equal guard fails the bind as RESOLUTION_FAILED, reason
+# GUARD, before the desk is touched: the cross-check (binder step 8) runs before the guard (step 9).
+scenario: waiver-guard-fails
+pack: lending
+tags: [resolution, waivers, slip]
+requires: [lending.input, lending.state, lending.loan, lending.slip]
+resolve:
+  assistant:
+    query: StaffWithPermission
+    args: { perform: [SIGN_ON], interactiveSignOn: true }
+    verify: lending.access.check
+    credential: { realm: staff, key: code }
+  rule:
+    query: ActiveWaiverRuleWithTriggers
+    args: { kind: BORROW_N_WAIVE_M, exclusiveItems: true }
+    strategy: [sql]
+    verify: lending.waiver.evaluate
+  item:
+    query: ItemsTriggering
+    args: { rule: $rule }
+    verify: lending.deposit
+  keys:
+    query: ActionKey
+    args: { actions: [DUE] }
+oracle:
+  needed: { fn: LoanFromTrigger, args: { rule: $rule, item: $item } }
+  waiver:
+    fn: ExpectedWaiver
+    args: { rule: $rule, lines: [$oracle.needed] }
+    must_equal: { ruleCode: $rule.code, amount: "0.00", waivedUnits: 0 }   # cannot hold: one group waives one
+    crossCheck: { check: lending.waiver.evaluate, tolerance: "0.00" }   # a disagreement is ORACLE_SUSPECT
+  due: { fn: ExpectedTotals, args: { lines: [$oracle.needed], waivers: [$oracle.waiver.amount] } }
+steps:
+  - signOn: { staff: $assistant }
+  - expect: { "state.name": IDLE, "state.staff.code": $assistant.code }
+  - quantity: { n: $oracle.needed.qty }
+  - scan: { item: $item }
+  - expect: { "state.name": LOAN, "loan.lines[code=$item.code].qty": $oracle.needed.qty }
+  - key: { action: $keys.DUE }
+  - expect:
+      "state.name": DEPOSIT
+      "loan.waivers[ruleCode=$rule.code].amount": $oracle.waiver.amount
+      "loan.waiverTotal": $oracle.waiver.amount
+      "loan.total": $oracle.due.total
+  - deposit: { amount: $oracle.due.total }
+  - waitFor: { topic: loan.posted, within: 10s, capture: { slot: loan, fields: { id: loanId, total: total } } }
+  - waitFor: { topic: slip.printed, within: 10s, capture: { slot: slip, fields: { loanId: loanId } } }
+verify:
+  - { "state.name": IDLE }
+  - db.loan: { where: { id: $loan.id }, staff_code: $assistant.code, total: $oracle.due.total }
+  - db.loan_line: { where: { loan_id: $loan.id }, item_code: $item.code, qty: $oracle.needed.qty,
+                    amount: $oracle.due.subtotal }
+  - db.loan_waiver: { where: { loan_id: $loan.id }, rule_code: $rule.code, "sum(amount)": $oracle.waiver.amount }
+  - { "slip.last.loanId": $slip.loanId }
+  - { "slip.last.text": { contains: $rule.code } }
+  - { "slip.last.text": { contains: $item.title } }
+  - { "devices[id=printer].state.last.loanId": $slip.loanId }
+  - { "devices[id=printer].state.last.text": { contains: $rule.code } }
+on_prompt: { unexpected: fail }
+timeouts: { step: 30s }

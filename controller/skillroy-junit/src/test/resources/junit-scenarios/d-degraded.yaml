@@ -1,0 +1,4 @@
+scenario: mini-degraded
+pack: mini
+steps:
+  - expect: { "app.mini.state": { equals: IDLE, capability: mini.optional } }

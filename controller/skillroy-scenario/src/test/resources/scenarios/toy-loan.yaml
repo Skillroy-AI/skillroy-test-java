@@ -1,0 +1,31 @@
+# A loan on the toy pack: compiled by PlanCompilerTest and compared with toy-loan.plan.json.
+scenario: toy-loan
+pack: toy
+tags: [smoke]
+requires: [toy.input, "toy.state | toy.legacy"]
+launchProperties: { toy.seed: A }
+resolve:
+  assistant: { fixture: { code: "100" }, credential: { realm: staff, key: code } }
+  item:      { fixture: { code: YRD-001, barcode: "5000000000017", deposit: "3.50" } }
+steps:
+  - signOn: { staff: $assistant }
+  - enter: { value: $item.barcode }
+  - expect: { "loan.lines[code=$item.code].qty": 1 }
+  - key: { action: DUE }
+  - click: { by: { action: DEPOSIT } }
+  - type: { by: { name: entry }, text: "7.00", enter: true }
+  - waitFor: { topic: loan.posted, within: 5s }
+  - expect: { "loan.authorisations": { size: 0, capability: toy.loan.authorisations } }
+  - mark: loan done
+  - call:
+      primitive: toy.emit
+      args: { id: $item.code }
+      sync: EVENT
+      await: { topics: [toy.done, toy.failed], match: { zone: A, id: $item.code }, within: 2s }
+  - call: { primitive: toy.poke, sync: EVENT, await: { topic: toy.poked } }
+verify:
+  - { "state.name": IDLE }
+  - { "loan.total": { gte: "3.50" } }
+on_prompt: { unexpected: fail }
+artifacts: [capture]
+timeouts: { step: 10s }

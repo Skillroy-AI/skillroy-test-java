@@ -1,0 +1,350 @@
+package ai.skillroy.testjava.controller.fixture;
+
+import ai.skillroy.testjava.protocol.Auth;
+import com.sun.net.httpserver.HttpExchange;
+import com.sun.net.httpserver.HttpHandler;
+import com.sun.net.httpserver.HttpServer;
+
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.lang.instrument.Instrumentation;
+import java.lang.management.ManagementFactory;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
+import java.nio.charset.Charset;
+import java.nio.file.FileSystems;
+import java.nio.file.Files;
+import java.nio.file.LinkOption;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.attribute.PosixFilePermission;
+import java.nio.file.attribute.PosixFilePermissions;
+import java.nio.file.attribute.UserPrincipal;
+import java.security.SecureRandom;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Properties;
+import java.util.Set;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadFactory;
+
+/**
+ * Test fixture (Java 8 source, compiled by the tests with --release 8): a minimal stand-in for the real agent that
+ * follows contract §2 as far as the controller can observe it: options from system properties, the options file
+ * (t=) and the argument string; the enabled gate per load mode; the main-class guard; fakeFail=TEXT to simulate a
+ * start failure (skillroy.agent.error plus a "[skillroy]" line on stderr); an idempotent re-run that re-publishes
+ * and keeps its token and nonce (amendment A15); the per-user default discovery directory, created owner-only, and
+ * the refusal of an untrusted one (amendment A3); GET /ping with HMAC authentication through the shared Auth class
+ * (hardening item H2: hello MAC checked, reply signed with X-Skillroy-Mac and X-Skillroy-Session, a session id per
+ * start), Host and Origin checks; the discovery file (with sessionId), token file and system properties. The test
+ * fixtures copy Auth into this agent's jar.
+ */
+public final class FakeTargetAgent {
+
+    private static final Charset UTF8 = Charset.forName("UTF-8");
+
+    private static HttpServer server;
+    private static String token;
+    private static String nonce;
+    private static String sessionId;
+    private static String loadMode;
+    private static String tokenFile;
+    private static String discoveryFile;
+    private static int port;
+    private static long startTime;
+    private static String pid;
+
+    private FakeTargetAgent() {
+    }
+
+    public static void premain(String args, Instrumentation inst) {
+        start(args, "JAVAAGENT");
+    }
+
+    public static void agentmain(String args, Instrumentation inst) {
+        start(args, "ATTACH");
+    }
+
+    public static boolean startEmbedded() {
+        return start(null, "EMBEDDED");
+    }
+
+    private static synchronized boolean start(String args, String mode) {
+        try {
+            if (server != null) {
+                publish();
+                return true;
+            }
+            Map<String, String> argMap = parse(args);
+            Map<String, String> options = new HashMap<String, String>();
+            for (String name : System.getProperties().stringPropertyNames()) {
+                if (name.startsWith("skillroy.agent.")) {
+                    options.put(name.substring("skillroy.agent.".length()), System.getProperty(name));
+                }
+            }
+            String file = argMap.containsKey("t") ? argMap.get("t") : argMap.get("config");
+            if (file != null) {
+                Properties p = new Properties();
+                InputStream in = new FileInputStream(file);
+                try {
+                    p.load(in);
+                } finally {
+                    in.close();
+                }
+                for (String name : p.stringPropertyNames()) {
+                    options.put(name, p.getProperty(name));
+                }
+            }
+            options.putAll(argMap);
+            boolean enabled;
+            if ("ATTACH".equals(mode)) {
+                enabled = "true".equals(options.get("enabled"));
+            } else {
+                enabled = "true".equals(System.getProperty("skillroy.agent.enabled"))
+                        || "true".equalsIgnoreCase(System.getenv("SKILLROY_AGENT_ENABLED"));
+            }
+            if (!enabled) {
+                return false;
+            }
+            String guard = options.get("mainClassGuard");
+            if ("JAVAAGENT".equals(mode) && guard != null
+                    && !String.valueOf(System.getProperty("sun.java.command")).startsWith(guard)) {
+                return false;
+            }
+            if (options.containsKey("fakeFail")) {
+                throw new IllegalStateException(options.get("fakeFail"));
+            }
+            String dir = options.containsKey("discoveryDir") ? options.get("discoveryDir")
+                    : System.getProperty("java.io.tmpdir") + File.separator + "skillroy-"
+                    + userSegment(System.getProperty("user.name"));
+            prepareDirectory(Paths.get(dir));
+            token = options.containsKey("token") ? options.get("token") : hex(32);
+            nonce = options.containsKey("nonce") ? options.get("nonce") : hex(16);
+            loadMode = mode;
+            sessionId = Auth.newSessionId();
+            HttpServer s = HttpServer.create(new InetSocketAddress(InetAddress.getByName("127.0.0.1"), 0), 0);
+            s.setExecutor(Executors.newCachedThreadPool(new ThreadFactory() {
+                public Thread newThread(Runnable r) {
+                    Thread t = new Thread(r, "skillroy-http-fake");
+                    t.setDaemon(true);
+                    return t;
+                }
+            }));
+            s.createContext("/", new HttpHandler() {
+                public void handle(HttpExchange exchange) throws IOException {
+                    serve(exchange);
+                }
+            });
+            s.start();
+            server = s;
+            port = s.getAddress().getPort();
+            pid = ManagementFactory.getRuntimeMXBean().getName().split("@")[0];
+            startTime = ManagementFactory.getRuntimeMXBean().getStartTime();
+            String base = dir + File.separator + "skillroy-" + pid + "-" + startTime;
+            tokenFile = base + ".token";
+            writeOwnerOnly(Paths.get(tokenFile), token);
+            discoveryFile = base + ".json";
+            writeOwnerOnly(Paths.get(discoveryFile), "{\"pid\":" + pid + ",\"startTimeMs\":" + startTime
+                    + ",\"port\":" + port + ",\"tokenFile\":" + quote(tokenFile) + ",\"nonce\":" + quote(nonce)
+                    + ",\"protocol\":\"0.2\",\"loadMode\":" + quote(mode) + ",\"mainCommand\":"
+                    + quote(String.valueOf(System.getProperty("sun.java.command"))) + ",\"sessionId\":"
+                    + quote(sessionId) + "}");
+            publish();
+            Runtime.getRuntime().addShutdownHook(new Thread(new Runnable() {
+                public void run() {
+                    try {
+                        Files.deleteIfExists(Paths.get(discoveryFile));
+                        Files.deleteIfExists(Paths.get(tokenFile));
+                    } catch (IOException ignored) {
+                        // best effort
+                    }
+                }
+            }, "skillroy-fake-shutdown"));
+            return true;
+        } catch (Throwable t) {
+            System.setProperty("skillroy.agent.error", String.valueOf(t));
+            System.err.println("[skillroy] agent failed to start: " + t);
+            System.err.flush();
+            return false;
+        }
+    }
+
+    private static void publish() {
+        System.setProperty("skillroy.agent.port", String.valueOf(port));
+        System.setProperty("skillroy.agent.nonce", nonce);
+        System.setProperty("skillroy.agent.tokenFile", tokenFile);
+        System.setProperty("skillroy.agent.protocol", "0.2");
+        System.setProperty("skillroy.agent.session", sessionId);
+        System.setProperty("skillroy.agent.loadMode", loadMode);
+        System.setProperty("skillroy.agent.discoveryFile", discoveryFile);
+    }
+
+    private static void serve(HttpExchange exchange) throws IOException {
+        try {
+            String host = exchange.getRequestHeaders().getFirst("Host");
+            String path = exchange.getRequestURI().getRawPath();
+            String query = exchange.getRequestURI().getRawQuery();
+            String echo = null;
+            if (query != null) {
+                for (String pair : query.split("&")) {
+                    if (pair.startsWith("nonce=")) {
+                        echo = pair.substring("nonce=".length());
+                    }
+                }
+            }
+            Auth.Credentials credentials;
+            try {
+                credentials = Auth.parseAuthorization(Auth.onlyValue(exchange.getRequestHeaders()
+                        .get(Auth.HEADER_AUTHORIZATION)));
+            } catch (IllegalArgumentException e) {
+                credentials = null;
+            }
+            boolean ping = "/ping".equals(path);
+            boolean ok = ping ? Auth.verifyHello(token, echo, credentials)
+                    : Auth.verifyRequest(token, sessionId, credentials, exchange.getRequestMethod(),
+                    path + (query == null ? "" : "?" + query), Auth.EMPTY_BODY_SHA256);
+            if (!ok) {
+                exchange.getResponseHeaders().add(Auth.HEADER_WWW_AUTHENTICATE, Auth.SCHEME);
+                reply(exchange, 401, "{}", null);
+                return;
+            }
+            String replyNonce = ping ? echo : credentials.nonce();
+            if (!("127.0.0.1:" + port).equals(host) && !("localhost:" + port).equals(host)) {
+                reply(exchange, 403, "{}", replyNonce);
+                return;
+            }
+            if (exchange.getRequestHeaders().getFirst("Origin") != null) {
+                reply(exchange, 403, "{}", replyNonce);
+                return;
+            }
+            if (!ping) {
+                reply(exchange, 404, "{}", replyNonce);
+                return;
+            }
+            reply(exchange, 200, "{\"nonce\":" + quote(echo) + ",\"clientNonce\":" + quote(echo) + ",\"agentNonce\":"
+                    + quote(nonce) + ",\"sessionId\":" + quote(sessionId) + ",\"protocol\":\"0.2\",\"pid\":" + pid
+                    + ",\"startTimeMs\":" + startTime + ",\"loadMode\":" + quote(loadMode)
+                    + ",\"ready\":true,\"readOnly\":false}", replyNonce);
+        } finally {
+            exchange.close();
+        }
+    }
+
+    /** Sends a reply; signed (X-Skillroy-Mac, X-Skillroy-Session) unless {@code replyNonce} is null (a 401). */
+    private static void reply(HttpExchange exchange, int status, String body, String replyNonce) throws IOException {
+        byte[] bytes = body.getBytes(UTF8);
+        if (replyNonce != null) {
+            exchange.getResponseHeaders().add(Auth.HEADER_MAC, Auth.responseMac(token, sessionId, replyNonce, status,
+                    Auth.sha256hex(bytes)));
+            exchange.getResponseHeaders().add(Auth.HEADER_SESSION, sessionId);
+        }
+        exchange.getResponseHeaders().add("Content-Type", "application/json");
+        exchange.sendResponseHeaders(status, bytes.length);
+        OutputStream out = exchange.getResponseBody();
+        try {
+            out.write(bytes);
+        } finally {
+            out.close();
+        }
+    }
+
+    private static Map<String, String> parse(String args) {
+        Map<String, String> map = new HashMap<String, String>();
+        if (args == null) {
+            return map;
+        }
+        for (String pair : args.split(";")) {
+            int eq = pair.indexOf('=');
+            if (eq > 0) {
+                map.put(pair.substring(0, eq).trim(), pair.substring(eq + 1).trim());
+            }
+        }
+        return map;
+    }
+
+    /** The user name reduced to [A-Za-z0-9._-] (other characters dropped; null gives ""), as in A3. */
+    private static String userSegment(String user) {
+        return user == null ? "" : user.replaceAll("[^A-Za-z0-9._-]", "");
+    }
+
+    /**
+     * Contract amendment A3: creates a missing discovery directory owner-only; on POSIX file systems refuses an
+     * existing one that belongs to another user or is writable by group or others, or is named by a symbolic link of
+     * another user.
+     */
+    private static void prepareDirectory(Path dir) throws IOException {
+        boolean posix = FileSystems.getDefault().supportedFileAttributeViews().contains("posix");
+        if (!Files.exists(dir, LinkOption.NOFOLLOW_LINKS)) {
+            Path parent = dir.toAbsolutePath().getParent();
+            if (parent != null) {
+                Files.createDirectories(parent);
+            }
+            if (posix) {
+                Files.createDirectory(dir, PosixFilePermissions.asFileAttribute(
+                        PosixFilePermissions.fromString("rwx------")));
+            } else {
+                Files.createDirectory(dir);
+            }
+            return;
+        }
+        if (!Files.isDirectory(dir)) {
+            throw new IOException("discovery directory refused, not a directory: " + dir);
+        }
+        if (!posix) {
+            return;
+        }
+        String me = System.getProperty("user.name");
+        boolean knownUser = me != null && !"?".equals(me);
+        if (Files.isSymbolicLink(dir) && knownUser
+                && !Files.getOwner(dir, LinkOption.NOFOLLOW_LINKS).getName().equals(me)) {
+            throw new IOException("discovery directory refused, a symbolic link of another user: " + dir);
+        }
+        Set<PosixFilePermission> permissions = Files.getPosixFilePermissions(dir);
+        if (permissions.contains(PosixFilePermission.GROUP_WRITE)
+                || permissions.contains(PosixFilePermission.OTHERS_WRITE)) {
+            throw new IOException("discovery directory refused, writable by group or others: " + dir);
+        }
+        UserPrincipal owner = Files.getOwner(dir);
+        if (knownUser && !owner.getName().equals(me)) {
+            throw new IOException("discovery directory refused, owned by " + owner.getName() + ": " + dir);
+        }
+    }
+
+    private static void writeOwnerOnly(Path path, String content) throws IOException {
+        Files.deleteIfExists(path);
+        if (FileSystems.getDefault().supportedFileAttributeViews().contains("posix")) {
+            Files.createFile(path, PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rw-------")));
+        } else {
+            Files.createFile(path);
+        }
+        Files.write(path, content.getBytes(UTF8));
+    }
+
+    private static String hex(int bytes) {
+        byte[] buffer = new byte[bytes];
+        new SecureRandom().nextBytes(buffer);
+        StringBuilder text = new StringBuilder();
+        for (byte b : buffer) {
+            text.append(String.format("%02x", b & 0xff));
+        }
+        return text.toString();
+    }
+
+    private static String quote(String text) {
+        StringBuilder out = new StringBuilder("\"");
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (c == '"' || c == '\\') {
+                out.append('\\').append(c);
+            } else if (c < 0x20) {
+                out.append(String.format("\\u%04x", (int) c));
+            } else {
+                out.append(c);
+            }
+        }
+        return out.append('"').toString();
+    }
+}

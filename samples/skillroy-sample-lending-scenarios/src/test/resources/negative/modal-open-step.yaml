@@ -1,0 +1,18 @@
+# Amendment A30: a step's input that a modal dialog blocks fails as ASSERTION, not as an environment error: the
+# application shows something the scenario did not expect to be in the way. The prompt is open (and expected), and
+# the next step clicks the main window's DUE key behind it; the failure names the dialog and its text.
+scenario: modal-open-step
+pack: lending
+requires: [lending.input, lending.prompt, swing.click.action]
+launchProperties: { lending.seed: A }
+resolve:
+  assistant: { fixture: { code: "100" }, credential: { realm: staff, key: code } }
+  item:      { fixture: { code: YRD-001, barcode: "5000000000017" } }
+steps:
+  - signOn: { staff: $assistant }
+  - scan: { item: $item }
+  - scan: { barcode: "0000000000000" }
+  - expectPrompt: { text: Unknown item }
+  - waitFor: { topic: window.opened, match: { modal: true } }
+  - click: { by: { action: DUE } }
+timeouts: { step: 30s }

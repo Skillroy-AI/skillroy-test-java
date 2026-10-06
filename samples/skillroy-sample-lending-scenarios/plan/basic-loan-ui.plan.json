@@ -1,0 +1,447 @@
+{
+  "planVersion": 3,
+  "scenarioId": "basic-loan-ui",
+  "pack": "lending",
+  "packVersion": "0.3.0",
+  "sourceHash": "sha256:5cab62f6250f86264386dc8451aa4fb3836cbaa135c132a2567a99bb7a53dba7",
+  "inference": "none",
+  "requires": [
+    "swing.tree",
+    "swing.click.action",
+    "swing.click.component",
+    "lending.state",
+    "lending.loan",
+    "lending.slip"
+  ],
+  "slots": [
+    {
+      "name": "assistant",
+      "kind": "fixture",
+      "value": {
+        "code": "100"
+      },
+      "credential": {
+        "realm": "staff",
+        "key": "code"
+      }
+    },
+    {
+      "name": "item",
+      "kind": "fixture",
+      "value": {
+        "code": "YRD-001",
+        "barcode": "5000000000017",
+        "deposit": "3.50"
+      }
+    }
+  ],
+  "oracles": [],
+  "resolutionGraph": [
+    "assistant",
+    "item"
+  ],
+  "steps": [
+    {
+      "id": "s1",
+      "verb": "type",
+      "source": {
+        "line": 20
+      },
+      "calls": [
+        {
+          "primitive": "swing.type",
+          "args": {
+            "by": {
+              "name": "entry"
+            },
+            "enter": true,
+            "text": "$assistant.code"
+          },
+          "sync": "EVENT",
+          "timeoutMs": 30000,
+          "await": {
+            "topics": "input.requested",
+            "match": {
+              "state": "PASSWORD"
+            },
+            "timeoutMs": 30000
+          }
+        },
+        {
+          "primitive": "swing.settle",
+          "args": {
+            "timeoutMs": 30000
+          },
+          "sync": "NONE",
+          "timeoutMs": 32000
+        }
+      ],
+      "expect": []
+    },
+    {
+      "id": "s2",
+      "verb": "type",
+      "source": {
+        "line": 25
+      },
+      "calls": [
+        {
+          "primitive": "swing.type",
+          "args": {
+            "by": {
+              "name": "entry"
+            },
+            "enter": true,
+            "text": "$assistant.password"
+          },
+          "sync": "EVENT",
+          "timeoutMs": 30000,
+          "await": {
+            "topics": "input.requested",
+            "match": {
+              "state": "IDLE"
+            },
+            "timeoutMs": 30000
+          }
+        },
+        {
+          "primitive": "swing.settle",
+          "args": {
+            "timeoutMs": 30000
+          },
+          "sync": "NONE",
+          "timeoutMs": 32000
+        }
+      ],
+      "expect": []
+    },
+    {
+      "id": "s3",
+      "verb": "expect",
+      "source": {
+        "line": 30
+      },
+      "calls": [],
+      "expect": [
+        {
+          "path": "state.staff.code",
+          "matcher": {
+            "equals": "$assistant.code"
+          }
+        }
+      ]
+    },
+    {
+      "id": "s4",
+      "verb": "type",
+      "source": {
+        "line": 31
+      },
+      "calls": [
+        {
+          "primitive": "swing.type",
+          "args": {
+            "by": {
+              "name": "entry"
+            },
+            "enter": true,
+            "text": "$item.barcode"
+          },
+          "sync": "EVENT",
+          "timeoutMs": 30000,
+          "await": {
+            "topics": "input.requested",
+            "match": {
+              "state": "LOAN"
+            },
+            "timeoutMs": 30000
+          }
+        },
+        {
+          "primitive": "swing.settle",
+          "args": {
+            "timeoutMs": 30000
+          },
+          "sync": "NONE",
+          "timeoutMs": 32000
+        }
+      ],
+      "expect": []
+    },
+    {
+      "id": "s5",
+      "verb": "type",
+      "source": {
+        "line": 33
+      },
+      "calls": [
+        {
+          "primitive": "swing.type",
+          "args": {
+            "by": {
+              "name": "entry"
+            },
+            "enter": true,
+            "text": "$item.barcode"
+          },
+          "sync": "EVENT",
+          "timeoutMs": 30000,
+          "await": {
+            "topics": "input.requested",
+            "match": {
+              "state": "LOAN"
+            },
+            "timeoutMs": 30000
+          }
+        },
+        {
+          "primitive": "swing.settle",
+          "args": {
+            "timeoutMs": 30000
+          },
+          "sync": "NONE",
+          "timeoutMs": 32000
+        }
+      ],
+      "expect": []
+    },
+    {
+      "id": "s6",
+      "verb": "expect",
+      "source": {
+        "line": 35
+      },
+      "calls": [],
+      "expect": [
+        {
+          "path": "loan.lines[code=$item.code].qty",
+          "matcher": {
+            "equals": 2
+          }
+        },
+        {
+          "path": "loan.total",
+          "matcher": {
+            "equals": "7.00"
+          }
+        }
+      ]
+    },
+    {
+      "id": "s7",
+      "verb": "click",
+      "source": {
+        "line": 36
+      },
+      "calls": [
+        {
+          "primitive": "swing.click",
+          "args": {
+            "activateWindow": true,
+            "by": {
+              "action": "DUE"
+            },
+            "fallback": "ACTION",
+            "focusTimeoutMs": 5000,
+            "rung": "COMPONENT"
+          },
+          "sync": "EVENT",
+          "timeoutMs": 30000,
+          "await": {
+            "topics": "input.requested",
+            "match": {
+              "state": "DEPOSIT"
+            },
+            "timeoutMs": 30000
+          }
+        },
+        {
+          "primitive": "swing.settle",
+          "args": {
+            "timeoutMs": 30000
+          },
+          "sync": "NONE",
+          "timeoutMs": 32000
+        }
+      ],
+      "expect": []
+    },
+    {
+      "id": "s8",
+      "verb": "type",
+      "source": {
+        "line": 37
+      },
+      "calls": [
+        {
+          "primitive": "swing.type",
+          "args": {
+            "by": {
+              "name": "entry"
+            },
+            "text": "10.00"
+          },
+          "sync": "SETTLE",
+          "timeoutMs": 30000
+        }
+      ],
+      "expect": []
+    },
+    {
+      "id": "s9",
+      "verb": "click",
+      "source": {
+        "line": 38
+      },
+      "calls": [
+        {
+          "primitive": "swing.click",
+          "args": {
+            "activateWindow": true,
+            "by": {
+              "action": "DEPOSIT"
+            },
+            "fallback": "ACTION",
+            "focusTimeoutMs": 5000,
+            "rung": "COMPONENT"
+          },
+          "sync": "EVENT",
+          "timeoutMs": 30000,
+          "await": {
+            "topics": "loan.posted",
+            "match": {
+              "total": "7.00"
+            },
+            "timeoutMs": 30000
+          }
+        },
+        {
+          "primitive": "swing.settle",
+          "args": {
+            "timeoutMs": 30000
+          },
+          "sync": "NONE",
+          "timeoutMs": 32000
+        }
+      ],
+      "expect": []
+    },
+    {
+      "id": "s10",
+      "verb": "waitFor",
+      "source": {
+        "line": 39
+      },
+      "calls": [
+        {
+          "primitive": "sync.await",
+          "args": {
+            "match": {
+              "state": "IDLE"
+            },
+            "timeoutMs": 30000,
+            "topics": "input.requested"
+          },
+          "sync": "NONE",
+          "timeoutMs": 31000
+        }
+      ],
+      "expect": []
+    },
+    {
+      "id": "s11",
+      "verb": "expect",
+      "source": {
+        "line": 40
+      },
+      "calls": [],
+      "expect": [
+        {
+          "path": "loan.change",
+          "matcher": {
+            "equals": "3.00"
+          }
+        },
+        {
+          "path": "slip.last.text",
+          "matcher": {
+            "contains": "CHANGE"
+          }
+        }
+      ]
+    },
+    {
+      "id": "s12",
+      "verb": "click",
+      "source": {
+        "line": 41
+      },
+      "calls": [
+        {
+          "primitive": "swing.click",
+          "args": {
+            "activateWindow": true,
+            "by": {
+              "action": "SIGN_OFF"
+            },
+            "fallback": "ACTION",
+            "focusTimeoutMs": 5000,
+            "rung": "COMPONENT"
+          },
+          "sync": "EVENT",
+          "timeoutMs": 30000,
+          "await": {
+            "topics": "input.requested",
+            "match": {
+              "state": "SIGNED_OFF"
+            },
+            "timeoutMs": 30000
+          }
+        },
+        {
+          "primitive": "swing.settle",
+          "args": {
+            "timeoutMs": 30000
+          },
+          "sync": "NONE",
+          "timeoutMs": 32000
+        }
+      ],
+      "expect": []
+    }
+  ],
+  "verify": [
+    {
+      "path": "state.name",
+      "matcher": {
+        "equals": "SIGNED_OFF"
+      }
+    },
+    {
+      "path": "loan.total",
+      "matcher": {
+        "equals": "7.00"
+      }
+    },
+    {
+      "path": "slip.last.text",
+      "matcher": {
+        "contains": "DEPOSIT DUE"
+      }
+    }
+  ],
+  "cleanup": [],
+  "launchProperties": {
+    "lending.seed": "A"
+  },
+  "artifacts": [],
+  "onPrompt": {
+    "unexpected": "fail"
+  },
+  "stepTimeoutMs": 30000,
+  "ui": {
+    "clickRung": "COMPONENT",
+    "strict": false
+  },
+  "bindTimeoutMs": 60000
+}

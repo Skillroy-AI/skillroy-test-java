@@ -1,0 +1,341 @@
+/*
+ * Copyright 2026 Mike Mills.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package ai.skillroy.testjava.agent.data;
+
+import ai.skillroy.testjava.agent.api.spi.DataSourceProvider;
+import ai.skillroy.testjava.agent.api.spi.MaskPolicy;
+import ai.skillroy.testjava.agent.api.spi.QueryResult;
+import ai.skillroy.testjava.protocol.ErrorCodes;
+import ai.skillroy.testjava.protocol.Json;
+import ai.skillroy.testjava.protocol.RpcException;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+
+import javax.sql.rowset.serial.SerialBlob;
+import javax.sql.rowset.serial.SerialClob;
+import java.math.BigDecimal;
+import java.sql.Connection;
+import java.sql.SQLException;
+import java.sql.Timestamp;
+import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
+
+import static ai.skillroy.testjava.agent.data.FakeAgentContext.args;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+
+/** data.query with providers that execute the statement themselves (DataSourceProvider.query). */
+class ProviderQueryFormTest {
+
+    private static TestDb db;
+
+    private FakeAgentContext ctx;
+
+    @BeforeAll
+    static void createDatabase() throws SQLException {
+        db = TestDb.create();
+    }
+
+    @AfterAll
+    static void dropDatabase() throws SQLException {
+        db.close();
+    }
+
+    @BeforeEach
+    void install() throws Exception {
+        ctx = new FakeAgentContext();
+        new DataModule().install(ctx);
+    }
+
+    private Object query(String source, String sql, Object... more) throws Exception {
+        Map<String, Object> args = args("source", source, "sql", sql);
+        args.putAll(args(more));
+        return ctx.call("data.query", args);
+    }
+
+    @Test
+    void queryFormIsTriedFirstWithTheGuardedStatementAndOneExtraRow() throws Exception {
+        TestDb.StatementProvider provider = db.new StatementProvider("api", true);
+        ctx.spi.register(DataSourceProvider.class, provider);
+        ctx.remainingMs = 7300;
+        Object value = query("api", "SELECT code, credit FROM person WHERE active = ? ORDER BY code ;",
+                "params", Arrays.asList(true), "maxRows", 1L);
+        assertEquals("{\"columns\":[{\"name\":\"CODE\",\"type\":null},{\"name\":\"CREDIT\",\"type\":null}],"
+                + "\"rows\":[[\"100\",\"250.00\"]],\"rowCount\":1,\"truncated\":true}", Json.write(value));
+        assertEquals("SELECT code, credit FROM person WHERE active = ? ORDER BY code ", provider.lastSql);
+        assertEquals(Arrays.asList((Object) Boolean.TRUE), provider.lastParams);
+        assertEquals(2, provider.lastMaxRows);
+        assertEquals(7300L, provider.lastTimeoutMs);
+        assertEquals(0, provider.opens.get());
+    }
+
+    @Test
+    void withoutColumnNamesTheColumnsAreC1ToCn() throws Exception {
+        ctx.spi.register(DataSourceProvider.class, db.new StatementProvider("anon", false));
+        Object value = query("anon", "SELECT code, name, born FROM person WHERE code = ?", "params",
+                Arrays.asList("100"));
+        assertEquals("{\"columns\":[{\"name\":\"c1\",\"type\":null},{\"name\":\"c2\",\"type\":null},"
+                + "{\"name\":\"c3\",\"type\":null}],\"rows\":[[\"100\",\"Ada\",\"1990-05-17\"]],\"rowCount\":1,"
+                + "\"truncated\":false}", Json.write(value));
+    }
+
+    @Test
+    void noRowsAndNoNamesGiveNoColumns() throws Exception {
+        ctx.spi.register(DataSourceProvider.class, new FixedProvider("fixed",
+                new QueryResult(null, null, Collections.<List<Object>>emptyList(), false)));
+        assertEquals("{\"columns\":[],\"rows\":[],\"rowCount\":0,\"truncated\":false}",
+                Json.write(query("fixed", "SELECT 1")));
+    }
+
+    @Test
+    void typesAreReportedWhenGivenAndRaggedRowsArePadded() throws Exception {
+        List<List<Object>> rows = new ArrayList<List<Object>>();
+        rows.add(Arrays.<Object>asList(1, "a"));
+        rows.add(Arrays.<Object>asList(2, "b", "extra"));
+        rows.add(Arrays.<Object>asList(3));
+        ctx.spi.register(DataSourceProvider.class, new FixedProvider("ragged",
+                new QueryResult(Arrays.asList("ID", null), Arrays.asList("INTEGER"), rows, false)));
+        assertEquals("{\"columns\":[{\"name\":\"ID\",\"type\":\"INTEGER\"},{\"name\":\"c2\",\"type\":null},"
+                + "{\"name\":\"c3\",\"type\":null}],\"rows\":[[1,\"a\",null],[2,\"b\",\"extra\"],[3,null,null]],"
+                + "\"rowCount\":3,\"truncated\":false}", Json.write(query("ragged", "SELECT 1")));
+    }
+
+    @Test
+    void typesWithoutNames() throws Exception {
+        ctx.spi.register(DataSourceProvider.class, new FixedProvider("typed",
+                new QueryResult(null, Arrays.asList("VARCHAR", "DATE"),
+                        Collections.singletonList(Arrays.<Object>asList("x", LocalDate.of(2026, 1, 2))), false)));
+        assertEquals("{\"columns\":[{\"name\":\"c1\",\"type\":\"VARCHAR\"},{\"name\":\"c2\",\"type\":\"DATE\"}],"
+                + "\"rows\":[[\"x\",\"2026-01-02\"]],\"rowCount\":1,\"truncated\":false}",
+                Json.write(query("typed", "SELECT 1")));
+    }
+
+    @Test
+    void theAgentEnforcesMaxRowsAndTruncatedItself() throws Exception {
+        List<List<Object>> rows = new ArrayList<List<Object>>();
+        for (int i = 1; i <= 500; i++) {
+            rows.add(Arrays.<Object>asList(i));
+        }
+        FixedProvider ignoresTheLimit = new FixedProvider("greedy", new QueryResult(null, null, rows, false));
+        ctx.spi.register(DataSourceProvider.class, ignoresTheLimit);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> value = (Map<String, Object>) query("greedy", "SELECT n FROM numbers");
+        assertEquals(200L, value.get("rowCount"));
+        assertEquals(Boolean.TRUE, value.get("truncated"));
+        assertEquals(201, ignoresTheLimit.lastMaxRows);
+
+        value = (Map<String, Object>) query("greedy", "SELECT n FROM numbers", "maxRows", 500L);
+        assertEquals(200L, value.get("rowCount"));
+
+        FixedProvider exact = new FixedProvider("exact", new QueryResult(null, null, rows.subList(0, 3), false));
+        ctx.spi.register(DataSourceProvider.class, exact);
+        value = (Map<String, Object>) query("exact", "SELECT n FROM numbers", "maxRows", 3L);
+        assertEquals(3L, value.get("rowCount"));
+        assertEquals(Boolean.FALSE, value.get("truncated"));
+
+        FixedProvider says = new FixedProvider("says", new QueryResult(null, null, rows.subList(0, 3), true));
+        ctx.spi.register(DataSourceProvider.class, says);
+        value = (Map<String, Object>) query("says", "SELECT n FROM numbers", "maxRows", 10L);
+        assertEquals(3L, value.get("rowCount"));
+        assertEquals(Boolean.TRUE, value.get("truncated"));
+    }
+
+    @Test
+    void cellValuesAreConvertedLikeJdbcValues() throws Exception {
+        List<Object> cells = Arrays.<Object>asList(new BigDecimal("12.50"),
+                Timestamp.valueOf("2026-10-01 10:15:30.5"), new java.util.Date(0), new byte[] {1, 2, 3},
+                Integer.valueOf(7), Float.valueOf(0.25f), Double.NaN, new SerialClob("text".toCharArray()),
+                new SerialBlob(new byte[] {9}), Arrays.asList(1, 2), null, true, 3L, "s");
+        ctx.spi.register(DataSourceProvider.class, new FixedProvider("mixed",
+                new QueryResult(null, null, Collections.singletonList(cells), false)));
+        @SuppressWarnings("unchecked")
+        Map<String, Object> value = (Map<String, Object>) query("mixed", "SELECT *");
+        assertEquals("[[\"12.50\",\"2026-10-01T10:15:30.5\",\"1970-01-01T00:00:00Z\",\"base64:AQID\",7,0.25,\"NaN\","
+                + "\"text\",\"base64:CQ==\",\"[1, 2]\",null,true,3,\"s\"]]", Json.write(value.get("rows")));
+    }
+
+    @Test
+    void masksApplyToProviderRowsWithSyntheticColumnNames() throws Exception {
+        final List<String> columns = Collections.synchronizedList(new ArrayList<String>());
+        ctx.spi.register(MaskPolicy.class, (sourceId, column, value) -> {
+            columns.add(sourceId + "/" + column);
+            return "c2".equals(column) ? "masked" : value;
+        });
+        ctx.spi.register(DataSourceProvider.class, db.new StatementProvider("anon", false));
+        @SuppressWarnings("unchecked")
+        Map<String, Object> value = (Map<String, Object>) query("anon",
+                "SELECT code, name FROM person WHERE code = '200'");
+        assertEquals("[[\"200\",\"masked\"]]", Json.write(value.get("rows")));
+        assertEquals(Arrays.asList("anon/c1", "anon/c2"), columns);
+    }
+
+    @Test
+    void nullFromQueryFallsBackToOpen() throws Exception {
+        final AtomicInteger queries = new AtomicInteger();
+        final TestDb.JdbcProvider jdbc = db.new JdbcProvider("both");
+        ctx.spi.register(DataSourceProvider.class, new DataSourceProvider() {
+            @Override
+            public String id() {
+                return "both";
+            }
+
+            @Override
+            public String describe() {
+                return "query() declines, open() serves";
+            }
+
+            @Override
+            public QueryResult query(String sql, List<Object> params, int maxRows, long timeoutMs) {
+                queries.incrementAndGet();
+                return null;
+            }
+
+            @Override
+            public Connection open() throws SQLException {
+                return jdbc.open();
+            }
+        });
+        assertEquals("[[\"Grace\"]]", Json.write(((Map<?, ?>) query("both",
+                "SELECT name FROM person WHERE code = ?", "params", Arrays.asList("200"))).get("rows")));
+        assertEquals(1, queries.get());
+        assertEquals(1, jdbc.opens.get());
+        assertEquals(true, jdbc.spy.allClosed());
+    }
+
+    @Test
+    void queryFailuresAreMapped() throws Exception {
+        ctx.spi.register(DataSourceProvider.class, new ThrowingProvider("sql",
+                new SQLException("table missing", "42S02", 942)));
+        RpcException e = ctx.fails("data.query", args("source", "sql", "sql", "SELECT x FROM y"));
+        assertEquals(ErrorCodes.INTERNAL_ERROR, e.error().code());
+        assertEquals("42S02", e.error().data().get("sqlState"));
+        assertEquals(942L, e.error().data().get("errorCode"));
+        // S22: the provider did not opt in, so its text is withheld (DriverTextTest covers the opt-in)
+        assertEquals(Boolean.TRUE, e.error().data().get("messageWithheld"));
+        assertEquals("query on data source 'sql' failed: sqlState=42S02, errorCode=942 (java.sql.SQLException)",
+                e.error().message());
+
+        RpcException own = new RpcException(ErrorCodes.NOT_READY, "warming up");
+        ctx.spi.register(DataSourceProvider.class, new ThrowingProvider("rpc", own));
+        assertSame(own, ctx.fails("data.query", args("source", "rpc", "sql", "SELECT 1")));
+
+        ctx.spi.register(DataSourceProvider.class, new ThrowingProvider("bug", new IllegalStateException("bad")));
+        e = ctx.fails("data.query", args("source", "bug", "sql", "SELECT 1"));
+        assertEquals(ErrorCodes.INTERNAL_ERROR, e.error().code());
+        assertEquals(IllegalStateException.class.getName(), e.error().data().get("exception"));
+        assertEquals(Boolean.TRUE, e.error().data().get("messageWithheld"));
+        assertNull(e.error().data().get("sqlState"), "no SQLException in the cause chain");
+        assertNull(e.error().data().get("errorCode"));
+        assertEquals("query on data source 'bug' failed in query() (java.lang.IllegalStateException)",
+                e.error().message());
+
+        ctx.spi.register(DataSourceProvider.class, new ThrowingProvider("checked", new java.io.IOException("io")));
+        e = ctx.fails("data.query", args("source", "checked", "sql", "SELECT 1"));
+        assertEquals(java.io.IOException.class.getName(), e.error().data().get("exception"));
+    }
+
+    @Test
+    void anUnreadableLargeObjectIsAnSqlFailure() throws Exception {
+        SerialClob freed = new SerialClob("gone".toCharArray());
+        freed.free();
+        ctx.spi.register(DataSourceProvider.class, new FixedProvider("stale",
+                new QueryResult(null, null, Collections.singletonList(Arrays.<Object>asList(freed)), false)));
+        RpcException e = ctx.fails("data.query", args("source", "stale", "sql", "SELECT 1"));
+        assertEquals(ErrorCodes.INTERNAL_ERROR, e.error().code());
+        assertEquals("javax.sql.rowset.serial.SerialException", e.error().data().get("exception"));
+    }
+
+    @Test
+    void anInterruptedProviderEndsTheCallAsInterrupted() {
+        ctx.spi.register(DataSourceProvider.class, new ThrowingProvider("slow", new InterruptedException("stop")));
+        InterruptedException e = assertThrows(InterruptedException.class, () -> query("slow", "SELECT 1"));
+        assertEquals("stop", e.getMessage());
+    }
+
+    @Test
+    void maxRowsZeroAsksTheProviderForOneRowAndKeepsNone() throws Exception {
+        TestDb.StatementProvider provider = db.new StatementProvider("api", true);
+        ctx.spi.register(DataSourceProvider.class, provider);
+        Object value = query("api", "SELECT code FROM person", "maxRows", 0L);
+        assertEquals(1, provider.lastMaxRows);
+        assertEquals("{\"columns\":[{\"name\":\"CODE\",\"type\":null}],\"rows\":[],\"rowCount\":0,\"truncated\":true}",
+                Json.write(value));
+    }
+
+    /** Returns a fixed result from query(). */
+    static final class FixedProvider implements DataSourceProvider {
+        private final String id;
+        private final QueryResult result;
+        volatile int lastMaxRows;
+
+        FixedProvider(String id, QueryResult result) {
+            this.id = id;
+            this.result = result;
+        }
+
+        @Override
+        public String id() {
+            return id;
+        }
+
+        @Override
+        public String describe() {
+            return "fixed rows";
+        }
+
+        @Override
+        public QueryResult query(String sql, List<Object> params, int maxRows, long timeoutMs) {
+            lastMaxRows = maxRows;
+            return result;
+        }
+    }
+
+    /** Throws from query(). */
+    static final class ThrowingProvider implements DataSourceProvider {
+        private final String id;
+        private final Exception failure;
+
+        ThrowingProvider(String id, Exception failure) {
+            this.id = id;
+            this.failure = failure;
+        }
+
+        @Override
+        public String id() {
+            return id;
+        }
+
+        @Override
+        public String describe() {
+            return "fails";
+        }
+
+        @Override
+        public QueryResult query(String sql, List<Object> params, int maxRows, long timeoutMs) throws Exception {
+            throw failure;
+        }
+    }
+}

@@ -1,0 +1,9 @@
+# Negative (contract section 10, item 5): requires a capability no target has. Fails as PRECONDITION_FAILED before
+# any step runs.
+scenario: missing-capability
+pack: lending
+requires: [lending.input, lending.teleport]
+resolve:
+  assistant: { fixture: { code: "100" }, credential: { realm: staff, key: code } }
+steps:
+  - signOn: { staff: $assistant }

@@ -1,0 +1,19 @@
+# Amendment A29 with strict: the same click as click-fallback-degraded, but the scenario allows no fall-back. The
+# COMPONENT rung cannot focus the prompt's painted OK button, so the click does not fire and the step fails as
+# ASSERTION ("click did not fire"); the pack's recover answers the prompt and signs off.
+scenario: click-strict-fails
+pack: lending
+requires: [lending.input, lending.prompt, swing.click.component]
+launchProperties: { lending.seed: A }
+ui: { clickRung: COMPONENT, strict: true }
+resolve:
+  assistant: { fixture: { code: "100" }, credential: { realm: staff, key: code } }
+  item:      { fixture: { code: YRD-001, barcode: "5000000000017" } }
+steps:
+  - signOn: { staff: $assistant }
+  - scan: { item: $item }
+  - scan: { barcode: "0000000000000" }
+  - expectPrompt: { text: Unknown item }
+  - waitFor: { topic: window.opened, match: { modal: true } }
+  - click: { by: { name: OK }, focusTimeoutMs: 1000, await: { topic: input.requested, match: { state: LOAN } } }
+timeouts: { step: 30s }
