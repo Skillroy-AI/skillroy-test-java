@@ -1,13 +1,14 @@
 # Decisions: base framework
 
-Decisions for the base framework (`skillroy-test-java`), as of 2026-10-06 (B1-B20). The project owner answered B1-B14 on
+Decisions for the base framework (`skillroy-test-java`), as of 2026-10-06 (B1-B21). The project owner answered B1-B14 on
 2026-10-02; each entry records the answer, what it changed, and what the build has established. B15 and B16 follow
 from those answers. B17 and B18 were taken without the owner, on the evidence of the security review and of the
 end-to-end review, B19 as the answers to the open questions of the Phase 2 contract and B20 as those of the Phase 3
 contract. On 2026-10-06 the owner confirmed all four, with two vetoes inside B19 (Q10 and Q14, both in the form "the
 base stays restrictive by default; a private overlay may override it"), and answered what was still open in B1, B2,
-B10 and B12. No decision is provisional any more. Every decision stays changeable until the first public release,
-at a cost that grows with the code written on it.
+B10 and B12. **B21** (the answers to the fifteen questions of the Phase 4 contract) was taken without the owner later
+on 2026-10-06 and is the one provisional decision; it is on the owner interview page. Every decision stays changeable
+until the first public release, at a cost that grows with the code written on it.
 Decisions that concern one tenant application live in that tenant's private repo, not here.
 
 **How to answer.** One message is enough, for example: `B17 ok, B18 R4 wait for credentials.yaml, B19 ok`.
@@ -51,6 +52,7 @@ review items of the end-to-end review, and `Sn` the confirmed findings of the se
 | B18 | Review items R2-R4 | `MODAL_OPEN` is `FAIL` / `ASSERTION`; stale discovery files are removed; fixture secrets are masked | Taken without the owner 2026-10-02; **confirmed by the owner 2026-10-06** | Built and verified 2026-10-02 (A30, A23, A25) | |
 | B19 | Phase 2 contract answers and additions | The answers to Q1-Q15 of the Phase 2 contract (§17): among them A34 (`secretParams`), the sample's loopback database listener and the `autoSignOn` field; and the sample's limit table renamed `role_cap` | Taken without the owner 2026-10-02; **confirmed by the owner 2026-10-06 with two vetoes**: Q10 (names in binding values are a pack's own choice; the sample keeps them out) and Q14 (the masking threshold is a setting per environment, `masking.minLengthInText`, default 8) | Built and verified 2026-10-02 (Phase 2); the two vetoes built 2026-10-06 | |
 | B20 | Phase 3 contract answers | The eight questions of `design/phase3-contracts.md` §14, answered by the orchestrator | Taken without the owner 2026-10-03, **confirmed by the owner 2026-10-06**: no `$env.now`; controller-side aggregates; `ORACLE_SUSPECT` is `ERROR` in every mode; the cross-check is recorded in the bindings file; plan version 3; the desk's date stays out of the fingerprint; scenario A's bindings are regenerated once; the `devices` fact root | Built and verified 2026-10-03 (the Phase 3 matrix in `TODO.md`) | |
+| B21 | Phase 4 contract answers | The fifteen questions of `design/phase4-contracts.md` §15, answered by the orchestrator | **Taken without the owner 2026-10-06, provisional**: the script library in `skillroy-protocol`; `skillroy-cdp` optional; the JCEF web host behind the profile `jcef`; frames in the first cut; six read primitives not mutating; frozen-target recovery by opt-in; BS5 against JCEF's Chromium; `auto` path policy; plan version 4; web evidence always; JxBrowser 7, 8 and 9; every rendering mode BS8 cleared; the configured port read from private state; `data:` pages; the image's new packages | Specified only (`design/phase4-contracts.md`); BS8 run 2026-10-06 | The owner's confirmation or vetoes (the interview page) |
 
 Phase 1 details are fixed in `design/phase1-contracts.md`; the same file carries the Phase 1.x specification
 (A17-A33, H1-H3). Phase 2 details are fixed in `design/phase2-contracts.md`, whose open questions B19 answers. What
@@ -906,11 +908,45 @@ removes the `devices` root and scenario B's two assertions through it.
 
 ---
 
+## B21 Phase 4 contract answers (provisional, 2026-10-06)
+
+**From:** the questions of the Phase 4 contract (`design/phase4-contracts.md` §15), answered by the orchestrator on
+2026-10-06 without the owner so that the Phase 4 build can start; they produced the contract's decisions D48-D58.
+**Not yet confirmed.** The questions are on the owner interview page in the form of B19 and B20; an id the owner does
+not mention keeps the answer recorded here.
+**Question.** Fifteen points the contract could have decided either way.
+
+| Q | Question | Answer | Veto form offered |
+|---|---|---|---|
+| Q1 | Where does the shared JavaScript library (aria walker, DOM actions, tap buffer) live? | In `skillroy-protocol` as `WebLib`, read by the agent module and by `skillroy-cdp`, so that both paths return identical shapes (D48) | `B21 Q1 veto`: the agent module owns it and `skillroy-cdp` keeps a tested copy |
+| Q2 | Is `skillroy-cdp` (Playwright, a 194 MB driver bundle) optional? | Yes: found by `ServiceLoader<WebPath>`; the CLI distribution and the JUnit glue ship without Playwright (D49) | `B21 Q2 veto`: a hard dependency of the executor |
+| Q3 | A second sample target (the JCEF web host, three modules) in `samples/` behind the profile `jcef`? | Yes, the natives as a test-scope Maven dependency selected by platform (D50) | `B21 Q3 veto`: a repository of its own |
+| Q4 | Frames in the first cut? | Yes: `web.browsers` lists frames and every verb takes a `frame` key; one frame model (D56) | `B21 Q4 veto`: main frame only |
+| Q5 | Which `web.*` primitives are mutating? | The reads are not (`ariaSnapshot`, `dom.text`, `waitFlag`, `bitmap`, `browsers`, `cdp.status`); the rest are (D51) | `B21 Q5 veto`: everything that runs script is mutating |
+| Q6 | May the CDP attach reload a page target that does not answer the liveness probe? | By scenario opt-in only (`web: {frozenTargets: reload}`); the default fails and names the target; `close` is refused (D52) | `B21 Q6 veto`: never, or by default |
+| Q7 | BS5's target: JCEF's Chromium in the image, or a stock Chromium download? | JCEF's Chromium; a stock-Chromium run is a documented manual procedure (D53) | `B21 Q7 veto`: Playwright's Chromium in the image as well |
+| Q8 | Path policy `auto` by default, `cdp` and `agent` as pins, an unusable pinned path `PRECONDITION_FAILED`? | Yes to all three | `B21 Q8 veto`: `agent` by default, `cdp` by opt-in |
+| Q9 | Plan version 4? | Yes; the reader accepts 1-4 (D58) | `B21 Q9 veto`: keep 3 |
+| Q10 | Web evidence on failure always when the target has a browser? | Yes: a Swing failure may have a web cause | `B21 Q10 veto`: only for plans with a web verb |
+| Q11 | JxBrowser lines covered by the one adapter? | 7, 8 and 9 (B9); the descriptor keeps them apart | `B21 Q11 veto`: drop 7 |
+| Q12 | Rendering modes in the public acceptance? | Every mode BS8 cleared | `B21 Q12 veto`: windowed only |
+| Q13 | May the `jcef` adapter read private state to report the configured debug port? | Yes, as a fact; `UNKNOWN` when refused; nothing is set | `B21 Q13 veto`: only a port a pack names in the options |
+| Q14 | The web host's pages as `data:` URLs? | Yes; a loopback server can come later | `B21 Q14 veto`: a loopback server now |
+| Q15 | The image's fifteen new packages and the natives in the Maven cache: acceptable CI weight? | Yes | `B21 Q15 veto`: the web acceptance leaves the public image |
+
+**What it changed.** The Phase 4 contract (`design/phase4-contracts.md`) and, through its §14.1, the Phase 1, 2 and 3
+contracts and the design overview once the build starts. **State of the build.** Nothing of Phase 4 is built; the
+contract is specified and BS8 was run (`TODO.md`, `spikes/BS8/RESULT.md`). **Blocks.** The Phase 4 build may start on
+these answers; a veto that arrives after code exists costs what the veto column says.
+
+---
+
 ## Questions for the owner
 
-None open as of 2026-10-06. The owner answered the five questions of the previous version of this section: the
-holder's name, the remote and the first commit (B1); the domain behind the groupId (B2); the lending desk stays as it
-is (B10); the push-back on the click rung stands (B12); B17, B18 and B20 confirmed; B19 confirmed with Q10 and Q14
-vetoed in the form "the base stays restrictive by default; a private overlay may override it". Three resources the
-owner will provide are recorded under "Walls" in `TODO.md`: a model provider API key when Phase 5 starts, a JxBrowser
-licence, and later a Windows 11 host (also usable under WSL2). The next questions arrive with the Phase 4 contract.
+Open as of 2026-10-06 (afternoon): **B21**, the fifteen provisional answers of the Phase 4 contract, in the table above;
+the owner answers them on the interview page (the same form as for B19 and B20: confirm all, or name the vetoes). The
+owner answered every earlier question on 2026-10-06: the holder's name, the remote and the first commit (B1); the domain
+behind the groupId (B2); the lending desk stays as it is (B10); the push-back on the click rung stands (B12); B17, B18 and
+B20 confirmed; B19 confirmed with Q10 and Q14 vetoed in the form "the base stays restrictive by default; a private overlay
+may override it". Three resources the owner will provide are recorded under "Walls" in `TODO.md`: a model provider API
+key when Phase 5 starts, a JxBrowser licence, and later a Windows 11 host (also usable under WSL2).

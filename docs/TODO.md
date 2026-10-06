@@ -37,7 +37,9 @@ errors, 285 skipped, JDK 26, headless). **Later on 2026-10-06** the committed tr
 the Linux matrix once (first table below): the two whole-reactor legs green at the first attempt (2156 tests each), the
 agent-side leg green at the second attempt after one display-test focus failure of the kind recorded as the open flake
 (now two occurrences, both on a Java 8 test JVM; see "Open flake" below). This is the Phase 3 tree's second clean run
-and the first run with the 2026-10-06 masking change in the image.
+and the first run with the 2026-10-06 masking change in the image. **Later the same day** spike BS8 was run (passed with
+conditions; `spikes/BS8/RESULT.md`) and **the Phase 4 contract was written** (`design/phase4-contracts.md`, specified,
+not built; its fifteen provisional answers are decision B21, on the owner interview page).
 
 Verification of the committed tree (`efb48b7`, the Phase 3 tree with the 2026-10-06 changes), on 2026-10-06:
 
@@ -154,8 +156,8 @@ table above. "Java 8 test JVM" = the module's own tests also run on Java 8 (`-Dj
 | Platform | Controller side on Java 25 (`--release 25`, B3); agent side on Java 8 (B4). The Linux test image is JDK 25 (Temurin 25.0.4.1); the previous JDK 21 image is no longer used. Native development JDK is 26 | none |
 | Git and publication | The initial commit was made on 2026-10-06 (everything in the tree, one commit, DCO sign-off); nothing pushed. The remote `Skillroy-AI/skillroy-test-java` is private for now. `LICENSE` (Apache-2.0), `NOTICE`, `CONTRIBUTING.md` (DCO sign-off, no CLA) and the header in every source file (`ci/license-headers.sh`, with the holder's name since 2026-10-06) exist; the root POM carries the publication metadata | Push when the owner says; before the first public release, the repeated security review |
 | Licence audit | `docs/licence-audit.md`: everything the project distributes, bundles or depends on is compatible with Apache-2.0. The packaging gaps (licence files inside the jars and zips, third-party attribution in the CLI distribution, a `<licenses>` element in the root pom) are closed (Phase 1.x, built 2026-10-02) | none |
-| Decisions | B1-B14 answered by the owner 2026-10-02; B15 and B16 follow from the answers; B17-B20, taken without the owner, were confirmed by the owner on 2026-10-06, with two vetoes inside B19 (Q10, Q14) built the same day | None until the Phase 4 contract |
-| Design docs (`docs/design/`) | `phase1-contracts.md` as built, with the Phase 1.x, Phase 2 and Phase 3 passages marked "(1.x, built 2026-10-02)", "(Phase 2, built 2026-10-02)" and "(Phase 3, built 2026-10-03)". `phase2-contracts.md` and `phase3-contracts.md` as built (2026-10-03: every deviation of the build and every fix of the review marked in place). Overview: roadmap with Phase 1.x, Phases 2 and 3 built, the new Phase 4 and Phase 7 | Phase 4's contract, when BS8 has passed |
+| Decisions | B1-B14 answered by the owner 2026-10-02; B15 and B16 follow from the answers; B17-B20, taken without the owner, were confirmed by the owner on 2026-10-06, with two vetoes inside B19 (Q10, Q14) built the same day; **B21** (the Phase 4 contract's fifteen answers) taken without the owner later on 2026-10-06, provisional | The owner's answer to B21 (the interview page) |
+| Design docs (`docs/design/`) | `phase1-contracts.md` as built, with the Phase 1.x, Phase 2 and Phase 3 passages marked "(1.x, built 2026-10-02)", "(Phase 2, built 2026-10-02)" and "(Phase 3, built 2026-10-03)". `phase2-contracts.md` and `phase3-contracts.md` as built (2026-10-03: every deviation of the build and every fix of the review marked in place). Overview: roadmap with Phase 1.x, Phases 2 and 3 built, the new Phase 4 and Phase 7. **`phase4-contracts.md` specified 2026-10-06, not built** | Write the §14.1 changes into the Phase 1-3 contracts and the overview when the Phase 4 build starts; as-built pass after it |
 | Research notes (`docs/research/`) | Round 1 carried over, finding ids unchanged; `embedded-browser-spi` and `vision-input` new (2026-10-02). Pruned of local-environment detail | None |
 | Security review | Run 2026-10-02 on the pre-port tree: 34 confirmed findings (4 medium, 30 low); the fixes H1-H3 are built (Phase 1.x). The Phase 2 code review of 2026-10-03 had a secrets-and-safety lens (below) | Repeat the review before the first release |
 | Spikes | BS7 done. **BS8 run 2026-10-06, passed with conditions** (`spikes/BS8/RESULT.md`). BS1 answered for Java 8 and Java 25 targets on Linux, parts open. BS2 answered in part. BS4 answered, parts open. BS3, BS5, BS6 open. BS9-BS12 new, not started | See "Base spikes" |
@@ -666,6 +668,7 @@ evening; a second run of the fixed tree is the first thing to do next session.
 
 ### Phase 4: embedded web views, CDP and the in-process SPI
 
+**Contract: `docs/design/phase4-contracts.md`** (specified 2026-10-06, not built; B21 holds its provisional answers).
 Decision B9: one in-process SPI that wraps both JCEF and reflective JxBrowser access. This replaces the earlier
 plan of a JxBrowser-only module that could be tested against a stand-in only: JCEF is open source, so a real
 embedded browser can run in the public image.
@@ -850,8 +853,8 @@ Work that cannot proceed without the project owner, or without something only th
 
 Not walls any more: the licence, the holder's name, the first commit and the remote (B1), the final names and the
 domain behind the groupId (B2) and the sample domain with its deposits (B10) are decided. B17-B20 are confirmed
-(2026-10-06), and the two vetoes inside B19 are built. No question for the owner is open; the next ones arrive with
-the Phase 4 contract.
+(2026-10-06), and the two vetoes inside B19 are built. Open for the owner: B21, the fifteen provisional answers of the
+Phase 4 contract (`DECISIONS.md`, the interview page).
 
 The review items of the end-to-end review, now decided (gap numbers refer to the table above):
 

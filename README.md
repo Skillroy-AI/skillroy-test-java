@@ -39,9 +39,11 @@ cost ledger that asserts zero model calls in `replay`. The sample's scenario A p
 with one YAML file. Phase 3 (2026-10-03) added oracle cross-checks against the application's own dry run, reported as
 `ORACLE_SUSPECT` when they disagree (a guarded cross-check that cannot run degrades the outcome instead), aggregates in
 stored-row checks, a `devices` fact root for peripherals, and the sample's scenario B, in which a quantity waiver rule
-applies and the printed slip shows the waiver. Not yet built: model-authored resolution and the rest of the model
-layer, the interactive session service, vision-driven input, embedded web views, bytecode hooks and the fluent Java
-API.
+applies and the printed slip shows the waiver. **Phase 4** (embedded web views: Playwright over CDP from the
+controller and an in-process SPI with reflective JCEF and JxBrowser adapters) is specified on 2026-10-06 and not yet
+built; its spike BS8 ran a real JCEF browser in the Linux test image the same day. Not yet built: the Phase 4
+modules, model-authored resolution and the rest of the model layer, the interactive session service, vision-driven
+input, bytecode hooks and the fluent Java API.
 
 ## Where to look
 
@@ -52,6 +54,8 @@ API.
 | Phase 1 contract (wire protocol, agent SPI, primitives, CLI, sample application), as built, Phase 1.x included | [docs/design/phase1-contracts.md](docs/design/phase1-contracts.md) |
 | Phase 2 contract (resolution, bindings, credentials, stored-row checks, sample scenario A), as built | [docs/design/phase2-contracts.md](docs/design/phase2-contracts.md) |
 | Phase 3 contract (oracle cross-checks with `ORACLE_SUSPECT`, stored-row aggregates, the `devices` fact root, sample scenario B), as built | [docs/design/phase3-contracts.md](docs/design/phase3-contracts.md) |
+| Phase 4 contract (embedded web views: `skillroy-cdp`, the web SPI, `skillroy-agent-web` with the `jcef` and `jxbrowser` adapters, the adapter contract kit), specified, not built | [docs/design/phase4-contracts.md](docs/design/phase4-contracts.md) |
+| Spike BS8 (JCEF in the Linux test image), run 2026-10-06 | [spikes/BS8/RESULT.md](spikes/BS8/RESULT.md) |
 | Design overview, all phases | [docs/design/base-framework-design.md](docs/design/base-framework-design.md) |
 | Research notes | [docs/research/](docs/research/) |
 | Licence, notices, dependency licence audit | [LICENSE](LICENSE), [NOTICE](NOTICE), [docs/licence-audit.md](docs/licence-audit.md) |
