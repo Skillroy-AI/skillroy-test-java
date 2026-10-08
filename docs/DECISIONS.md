@@ -1,6 +1,6 @@
 # Decisions: base framework
 
-Decisions for the base framework (`skillroy-test-java`), as of 2026-10-07 (B1-B22). The project owner answered B1-B14
+Decisions for the base framework (`skillroy-test-java`), as of 2026-10-08 (B1-B23). The project owner answered B1-B14
 on 2026-10-02; each entry records the answer, what it changed, and what the build has established. B15 and B16 follow
 from those answers. B17 and B18 were taken without the owner, on the evidence of the security review and of the
 end-to-end review, B19 as the answers to the open questions of the Phase 2 contract and B20 as those of the Phase 3
@@ -9,7 +9,9 @@ base stays restrictive by default; a private overlay may override it"), and answ
 B10 and B12. **B21** (the answers to the fifteen questions of the Phase 4 contract) was taken without the owner later
 on 2026-10-06 and **confirmed by the owner on 2026-10-07** without a veto. **B22** (the eleven decisions the Phase 4
 build and its review took on their own, the contract's D59-D69) was taken without the owner on 2026-10-07 and
-**confirmed by the owner the same evening** (`B22 ok`), so no decision is provisional. Every decision stays changeable
+**confirmed by the owner the same evening** (`B22 ok`). **B23** (the eighteen provisional answers of the Phase 5
+contract, `design/phase5-contracts.md` §17) was taken without the owner on 2026-10-08 and is **provisional** until the
+owner answers it (the interview page). Every decision stays changeable
 until the first public release, at a cost that grows with the code written on it. Decisions that concern one tenant
 application live in that tenant's private repo, not here.
 
@@ -56,6 +58,7 @@ review items of the end-to-end review, and `Sn` the confirmed findings of the se
 | B20 | Phase 3 contract answers | The eight questions of `design/phase3-contracts.md` §14, answered by the orchestrator | Taken without the owner 2026-10-03, **confirmed by the owner 2026-10-06**: no `$env.now`; controller-side aggregates; `ORACLE_SUSPECT` is `ERROR` in every mode; the cross-check is recorded in the bindings file; plan version 3; the desk's date stays out of the fingerprint; scenario A's bindings are regenerated once; the `devices` fact root | Built and verified 2026-10-03 (the Phase 3 matrix in `TODO.md`) | |
 | B21 | Phase 4 contract answers | The fifteen questions of `design/phase4-contracts.md` §15, answered by the orchestrator | Taken without the owner 2026-10-06; **confirmed by the owner 2026-10-07** (all fifteen): the script library in `skillroy-protocol`; `skillroy-cdp` optional; the JCEF web host behind the profile `jcef`; frames in the first cut; six read primitives not mutating; frozen-target recovery by opt-in; BS5 against JCEF's Chromium; `auto` path policy; plan version 4; web evidence always; JxBrowser 7, 8 and 9; every rendering mode BS8 cleared; the configured port read from private state; `data:` pages; the image's new packages | Specified 2026-10-06; built, reviewed and fixed 2026-10-07 (`design/phase4-contracts.md` as built); the build took the decisions D59-D69; the runs in `TODO.md` | D59-D69, taken without the owner, stand unless the owner objects (a possible B22) |
 | B22 | Phase 4 build decisions | D59-D69 of `design/phase4-contracts.md` §14, taken by the orchestrator during the build and the review | Taken without the owner 2026-10-07; **confirmed by the owner 2026-10-07** (`B22 ok`, all eleven): the trace policy; the narrowed re-probe; the probe's loading rule; the JCEF re-send rule; one outstanding drain; the CDP viewport override on its own session; the endpoint ownership check; the `web.browsers` floor; `BrowserExtras`; `Invocation.secretParams()`; the JCEF raw channel | Built and tested 2026-10-07; verified in the Linux matrix (`TODO.md`) | |
+| B23 | Phase 5 contract answers | The eighteen questions of `design/phase5-contracts.md` §17, answered by the orchestrator | Taken without the owner 2026-10-08, **provisional**: the nightly job writes `APPROVED` and the pull request is the review; `approve` reuses an unchanged verified tier (b) value; confidence and row bounds as gates beside the verifier; the strict `SqlGuard`; committed masked recordings so that CI needs no key; refusal fallbacks on; the MCP server read-only by default, destructive never; the planner as the `claude` CLI headless; triage as a separate command; plan version 5; the `call` verb; `REQUIRED` approval on exports; budget exhaustion as `RESOLUTION_FAILED`; prompts not logged by default; Sonnet/Opus/Haiku by role; verbs as the session's tools; three new controller-side dependencies; `inference.yaml` beside `credentials.yaml` | Specified 2026-10-08 (`design/phase5-contracts.md`, not built); spikes BS6 and BS13 started the same night | All eighteen, until the owner answers (`B23 ok` or `B23 Qn veto`) |
 
 Phase 1 details are fixed in `design/phase1-contracts.md`; the same file carries the Phase 1.x specification
 (A17-A33, H1-H3). Phase 2 details are fixed in `design/phase2-contracts.md`, whose open questions B19 answers. What
@@ -990,9 +993,44 @@ the build.** Built 2026-10-07. **Blocks.** Nothing.
 
 ---
 
+## B23 Phase 5 contract answers (provisional, 2026-10-08)
+
+**From:** the questions of the Phase 5 contract (`design/phase5-contracts.md` §17), answered by the orchestrator on
+2026-10-08 without the owner so that the groundwork (spikes BS6 and BS13) and, on the owner's word, the build can
+start; they produced the contract's decisions D70-D87 (§16). **Provisional** until the owner answers, through the
+interview page (`B23 ok`, or `B23 Qn veto` per row; named veto forms as the contract states them).
+**Question.** Eighteen points the contract could have decided either way.
+
+| Q | Question | Provisional answer | Veto form offered |
+|---|---|---|---|
+| Q1 | Who approves the nightly job's bindings? | The job writes `APPROVED by re-resolve:<jobId>`; the pull request review is the gate (D75) | `B23 Q1 veto`: files written `REQUIRED`, approved by hand afterwards |
+| Q2 | Does `approve` reuse an unchanged, verified tier (b) value without a model call? | Yes, by default (`--reuse-bindings`, D82) | `B23 Q2 veto`: always re-resolve |
+| Q3 | Tier (b) gates beyond the verifier: confidence ≥ 0.8 and the model's row bounds? | Both, the threshold a setting | `B23 Q3 veto`: the verifier alone |
+| Q4 | `SqlGuard` strictness: no set operations, a function allow-list, values as parameters that must match the query's arguments, `ORDER BY` completed with the key? | Yes to all (D73) | `B23 Q4 veto`, naming the rule (`… functions`, `… union`, `… params`) |
+| Q5 | Committed, masked recordings of model exchanges so that CI needs no key? | Yes (D71) | `B23 Q5 veto`: recordings outside the repository |
+| Q6 | Refusal fallbacks on by default, both model names in the ledger? | On (D84) | `B23 Q6 veto`: off |
+| Q7 | The MCP server read-only by default, mutating by flag, destructive never? | Yes (D76) | `B23 Q7 veto`, naming the change |
+| Q8 | The planner as the `claude` CLI headless (B3), tested with a substitute executable? | Yes (D77) | `B23 Q8 veto`: a planner loop on the gateway |
+| Q9 | Triage as a separate command, never inside `run`? | Yes (D78) | `B23 Q9 veto`: `run --triage` |
+| Q10 | Plan version 5, the sample's bindings regenerated once? | Yes (D81) | `B23 Q10 veto`: keep 4 |
+| Q11 | The base verb `call`? | Yes (D80) | `B23 Q11 veto`: the export refuses raw calls |
+| Q12 | An exported tier (b) slot is `REQUIRED` unless `--approved-by` is given? | Yes | `B23 Q12 veto`: always `REQUIRED` |
+| Q13 | Budget exhaustion as `RESOLUTION_FAILED` / `BUDGET`? | Yes (D74) | `B23 Q13 veto`: `ENVIRONMENT` |
+| Q14 | Prompts not logged by default (`inference.jsonl` holds metadata and masked structured answers)? | Yes (D83) | `B23 Q14 veto`: masked prompts always logged |
+| Q15 | Model defaults: Sonnet for resolvers, sessions and summaries; Opus for the planner; Haiku for labels; Fable never; images off until Phase 7? | Yes (D84) | `B23 Q15 veto`, naming the class to change |
+| Q16 | The session's default tools are the pack's verbs, base primitives opt-in? | Yes (D87) | `B23 Q16 veto`: base primitives by default |
+| Q17 | Three new controller-side dependencies (Anthropic Java SDK, JSqlParser, MCP Java SDK) in the CLI distribution? | Yes | `B23 Q17 veto`, naming the piece to keep out |
+| Q18 | `inference.yaml` beside `credentials.yaml`, committed, no secret; the key only in the environment? | Yes | `B23 Q18 veto`: options and properties only |
+
+**What it changes.** The Phase 5 contract and, through its §16.1, the Phase 1-4 contracts and the design overview
+(written in when the build starts). **State of the build.** Nothing is built; the contract is specified. **Blocks.**
+The Phase 5 build waits for the owner's word on B23 as the Phase 4 build waited for B21, unless the owner has asked
+for progress on the provisional answers.
+
 ## Questions for the owner
 
-None open as of the evening of 2026-10-07: the owner confirmed **B21** (the fifteen answers of the Phase 4 contract)
+**B23** is open as of 2026-10-08: the eighteen provisional answers of the Phase 5 contract, on the interview page.
+Before it, none was open as of the evening of 2026-10-07: the owner confirmed **B21** (the fifteen answers of the Phase 4 contract)
 and **B22** (the eleven decisions of the Phase 4 build, D59-D69) on 2026-10-07 through the interview page, both
 without a veto. The owner answered every earlier
 question on 2026-10-06: the holder's name, the remote and the first commit (B1); the domain behind the groupId (B2);

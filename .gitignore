@@ -8,3 +8,5 @@ run-output/
 # Secrets of an environment (phase2-contracts.md 4): never committed.
 credentials.yaml
 *.credentials.yaml
+# Agent worktrees the desktop app creates for isolated agents; never part of the tree.
+.claude/worktrees/

@@ -21,12 +21,12 @@ today nothing calls a model: the binding modes are built without one, and the in
 a later phase. Vision-driven input, where a model looks at the screen and the framework turns what it decides into
 recorded, replayable steps, is a planned bolt-on that the design keeps room for and does not build yet.
 
-**Status (2026-10-07):** Phase 1, Phase 1.x, Phase 2 and Phase 3 are built and verified, and Phase 4 is built, reviewed
-and fixed; nothing is released and nothing is published. Phase 1 is the thin vertical slice: the agent (core, Swing and
+**Status (2026-10-08):** Phase 1, Phase 1.x, Phase 2 and Phase 3 are built and verified, Phase 4 is built, reviewed
+and fixed, and the Phase 5 contract (the AI layer) is specified, not built; nothing is released and nothing is published. Phase 1 is the thin vertical slice: the agent (core, Swing and
 data modules), the controller, the scenario compiler and executor, JUnit glue, a CLI, and a bundled sample application,
 the lending desk of a tool library, with its agent module, domain pack and scenarios. Its gates are a Java 8 target and
 a Java 25 target, in every load mode; the numbers (tests, configurations, runtimes) are kept in
-[docs/TODO.md](docs/TODO.md). All twenty-one decisions are answered ([docs/DECISIONS.md](docs/DECISIONS.md)); the
+[docs/TODO.md](docs/TODO.md). B1 to B22 are answered and B23, the Phase 5 contract's provisional answers, is open for the owner ([docs/DECISIONS.md](docs/DECISIONS.md)); the
 initial commit was made on 2026-10-06, and the repository is not yet pushed or published. **Phase 1.x**
 added a set of contract amendments and the hardening that followed from a security review of the control channel: an
 agent-owned HTTP listener, keyed request and reply authentication instead of a bearer token on the wire, and the
@@ -57,6 +57,7 @@ the fluent Java API.
 | Phase 2 contract (resolution, bindings, credentials, stored-row checks, sample scenario A), as built | [docs/design/phase2-contracts.md](docs/design/phase2-contracts.md) |
 | Phase 3 contract (oracle cross-checks with `ORACLE_SUSPECT`, stored-row aggregates, the `devices` fact root, sample scenario B), as built | [docs/design/phase3-contracts.md](docs/design/phase3-contracts.md) |
 | Phase 4 contract (embedded web views: `skillroy-cdp`, the web SPI, `skillroy-agent-web` with the `jcef` and `jxbrowser` adapters, the adapter contract kit, the web host sample), as built | [docs/design/phase4-contracts.md](docs/design/phase4-contracts.md) |
+| Phase 5 contract (the AI layer: the `InferenceGateway` SPI with its Claude, recorded and scripted implementations, model-written SQL behind `SqlGuard`, approval and budgets, batch re-resolution, `skillroy-mcp`, the planner, triage, the interactive profile), specified 2026-10-08, not built; its questions are decision B23, provisional | [docs/design/phase5-contracts.md](docs/design/phase5-contracts.md) |
 | Spike BS8 (JCEF in the Linux test image), run 2026-10-06; spike BS5 (Playwright over CDP), met by the Phase 4 acceptance, with the manual procedure against a stock Chromium | [spikes/BS8/RESULT.md](spikes/BS8/RESULT.md), [spikes/BS5/README.md](spikes/BS5/README.md) |
 | Design overview, all phases | [docs/design/base-framework-design.md](docs/design/base-framework-design.md) |
 | Research notes | [docs/research/](docs/research/) |

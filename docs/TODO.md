@@ -1,10 +1,10 @@
 # TODO: base framework
 
 What exists, what was proven and what is open for the base framework (`skillroy-test-java`), as of
-2026-10-07. Decisions are in `DECISIONS.md` (B1-B22); the design is in `docs/design/` (Phase 1 and Phase 1.x as
+2026-10-08. Decisions are in `DECISIONS.md` (B1-B23); the design is in `docs/design/` (Phase 1 and Phase 1.x as
 built in `phase1-contracts.md`, Phase 2 as built in `phase2-contracts.md`, Phase 3 as built in
-`phase3-contracts.md`, Phase 4 as built in `phase4-contracts.md`); research notes are in `docs/research/`; the
-dependency licence audit is `docs/licence-audit.md`.
+`phase3-contracts.md`, Phase 4 as built in `phase4-contracts.md`, Phase 5 specified in `phase5-contracts.md`);
+research notes are in `docs/research/`; the dependency licence audit is `docs/licence-audit.md`.
 
 ## Status at a glance
 
@@ -61,6 +61,16 @@ attempts against a frozen page all ended with `FROZEN_TARGETS` within the deadli
 earlier runs of that copy found defects that only a real JCEF shows, fixed before those runs (section "Phase 4 code
 review" below), and display-test flakes of the Swing module ("Open flake"). The orchestrator's Linux matrix of the
 final tree is the table that follows.
+
+**On the night of 2026-10-07 to 2026-10-08 the Phase 5 contract was written** (`design/phase5-contracts.md`, specified,
+not built): the `InferenceGateway` SPI with typed content parts and its Claude, recorded and scripted implementations,
+tier (b) SQL behind `SqlGuard` with masking before any prompt, approval and budgets, batch re-resolution, `skillroy-mcp`,
+the planner through the `claude` CLI, triage, and the interactive profile (`ExecutorSession`, `StepJournal`, the export,
+the session service); CI and replay never need a model key. Its eighteen provisional answers are decision **B23**, on
+the owner interview page. Two spikes started the same night as the contract's gates: BS6 (`SqlGuard` across dialects on
+JSqlParser) and BS13 (the Claude API facts the contract relies on, checked live with the owner's key). The small Phase 4
+follow-ups (gaps 38, 40, 45 and, if cheap, 42) went to implementers as Phase 4.x amendments A35-A38, and the display-test
+focus flake to an investigator; their results are recorded below as they land.
 
 Verification of the Phase 4 tree (2026-10-07). The final tree is the one after the review's fix wave; each Linux leg
 runs twice in a row (the exit criterion's "twice in a row without a flake"), on the amd64 image, which an arm64
@@ -209,11 +219,11 @@ table above. "Java 8 test JVM" = the module's own tests also run on Java 8 (`-Dj
 | Platform | Controller side on Java 25 (`--release 25`, B3); agent side on Java 8 (B4). The Linux test image is JDK 25 (Temurin 25.0.4.1); the previous JDK 21 image is no longer used. Native development JDK is 26 | none |
 | Git and publication | The initial commit was made on 2026-10-06 (everything in the tree, one commit, DCO sign-off); nothing pushed. The remote `Skillroy-AI/skillroy-test-java` is private for now. `LICENSE` (Apache-2.0), `NOTICE`, `CONTRIBUTING.md` (DCO sign-off, no CLA) and the header in every source file (`ci/license-headers.sh`, with the holder's name since 2026-10-06) exist; the root POM carries the publication metadata | Push when the owner says; before the first public release, the repeated security review |
 | Licence audit | `docs/licence-audit.md`: everything the project distributes, bundles or depends on is compatible with Apache-2.0. The packaging gaps (licence files inside the jars and zips, third-party attribution in the CLI distribution, a `<licenses>` element in the root pom) are closed (Phase 1.x, built 2026-10-02). Updated 2026-10-07 for Phase 4: the Playwright and JCEF sets (in no distribution), the new modules, and the agent home's seventh jar, inspected | none |
-| Decisions | B1-B14 answered by the owner 2026-10-02; B15 and B16 follow from the answers; B17-B20, taken without the owner, were confirmed by the owner on 2026-10-06, with two vetoes inside B19 (Q10, Q14) built the same day; **B21** (the Phase 4 contract's fifteen answers) taken without the owner later on 2026-10-06 and confirmed by the owner on 2026-10-07. The Phase 4 build took D59-D69 without the owner (`DECISIONS.md`, "Questions for the owner") | None open; D59-D69 stand unless the owner objects (a possible B22) |
-| Design docs (`docs/design/`) | `phase1-contracts.md` as built, with the Phase 1.x, Phase 2, Phase 3 and Phase 4 passages marked "(1.x, built 2026-10-02)", "(Phase 2, built 2026-10-02)", "(Phase 3, built 2026-10-03)" and "(Phase 4, built 2026-10-07)". `phase2-contracts.md` and `phase3-contracts.md` as built (2026-10-03: every deviation of the build and every fix of the review marked in place; their Phase 4 passages marked built). **`phase4-contracts.md` as built 2026-10-07** (specified 2026-10-06; every deviation of the build and every fix of the review marked in place, the decisions of the build D59-D69). Overview: roadmap with Phases 1.x to 4 built, §3.8 as built | Record the final tree's matrix (the table at the top) |
+| Decisions | B1-B14 answered by the owner 2026-10-02; B15 and B16 follow from the answers; B17-B20, taken without the owner, were confirmed by the owner on 2026-10-06, with two vetoes inside B19 (Q10, Q14) built the same day; **B21** (the Phase 4 contract's fifteen answers) taken without the owner later on 2026-10-06 and confirmed by the owner on 2026-10-07; **B22** (D59-D69, the Phase 4 build's decisions) confirmed the same evening. **B23** (the Phase 5 contract's eighteen answers, D70-D87) taken without the owner on 2026-10-08, provisional | B23 open on the interview page (`B23 ok` or `B23 Qn veto`) |
+| Design docs (`docs/design/`) | `phase1-contracts.md` as built, with the Phase 1.x, Phase 2, Phase 3 and Phase 4 passages marked "(1.x, built 2026-10-02)", "(Phase 2, built 2026-10-02)", "(Phase 3, built 2026-10-03)" and "(Phase 4, built 2026-10-07)". `phase2-contracts.md` and `phase3-contracts.md` as built (2026-10-03: every deviation of the build and every fix of the review marked in place; their Phase 4 passages marked built). **`phase4-contracts.md` as built 2026-10-07** (specified 2026-10-06; every deviation of the build and every fix of the review marked in place, the decisions of the build D59-D69). **`phase5-contracts.md` specified 2026-10-08, not built** (D70-D87; its §16.1 lists the changes to the earlier contracts, to be written in when the build starts). Overview: roadmap with Phases 1.x to 4 built and the Phase 5 contract noted, §3.8 as built | Write the §16.1 marks into the Phase 1-4 contracts and the overview when the Phase 5 build starts |
 | Research notes (`docs/research/`) | Round 1 carried over, finding ids unchanged; `embedded-browser-spi` and `vision-input` new (2026-10-02). Pruned of local-environment detail | None |
 | Security review | Run 2026-10-02 on the pre-port tree: 34 confirmed findings (4 medium, 30 low); the fixes H1-H3 are built (Phase 1.x). The Phase 2 code review of 2026-10-03 had a secrets-and-safety lens (below) | Repeat the review before the first release |
-| Spikes | BS7 done. **BS8 run 2026-10-06, passed with conditions** (`spikes/BS8/RESULT.md`). **BS5 met 2026-10-07** by the Phase 4 acceptance against JCEF's Chromium (D53; the stock-Chromium run is the manual procedure `spikes/BS5/README.md`). BS1 answered for Java 8 and Java 25 targets on Linux, parts open. BS2 answered in part. BS4 answered, parts open. BS3, BS6 open. BS9-BS12 new, not started | See "Base spikes" |
+| Spikes | BS7 done. **BS8 run 2026-10-06, passed with conditions** (`spikes/BS8/RESULT.md`). **BS5 met 2026-10-07** by the Phase 4 acceptance against JCEF's Chromium (D53; the stock-Chromium run is the manual procedure `spikes/BS5/README.md`). BS1 answered for Java 8 and Java 25 targets on Linux, parts open. BS2 answered in part. BS4 answered, parts open. BS3 open. **BS6 and BS13 started 2026-10-08** as the Phase 5 contract's gates (results below when they land). BS9-BS12 new, not started | See "Base spikes" |
 | CI for this repo | Not chosen. `ci/Dockerfile` and `ci/run-in-linux.sh` are what a pipeline would run; since 2026-10-06 the image holds Chromium's run-time libraries and the runner takes `SKILLROY_PLATFORM`; the Phase 4 matrix adds `-Pjcef` to every leg | Needs a JDK 8, a JDK >= 25 and Xvfb on the build agents; for the profile `jcef` the JCEF natives (152 MB per platform) and Playwright's jars (the driver bundle about 204 MB) in the Maven cache |
 
 ### What the end-to-end review fixed (2026-10-02)
@@ -271,13 +281,14 @@ re-run. BS8 comes from `research/embedded-browser-spi.md` R4 (B9); BS9-BS12 from
 | BS3 | Byte Buddy retransformation with inline Advice and a bootstrap `Spy`; original bytes restored on detach | Open; partly shown in round 1 on toy programs |
 | BS4 | Which Swing input rungs work on an Xvfb display with no window manager | **Answered** for Java 8 and 21 (before the switch); the end-to-end check built on it passed on Java 8 and Java 25 targets. Open: the ROBOT rung (not built; see BS9), a large-sample focus statistic, the display-test flake |
 | BS5 | Playwright attaches over CDP to an already-running Chromium safely | **Met 2026-10-07 by the Phase 4 acceptance** against JCEF's Chromium in the image (D53): 50 of 50 attach attempts against a frozen page ended with `FROZEN_TARGETS` within the deadline, the slowest in about 2.02 s. A stock-Chromium run is a manual procedure, `spikes/BS5/README.md` |
-| BS6 | `SqlGuard` accepts and rejects correctly across SQL dialects | Open (the agent-side statement guard of `data.query` is a different, simpler check and is built) |
+| BS6 | `SqlGuard` accepts and rejects correctly across SQL dialects | **Started 2026-10-08** on JSqlParser 5.4 with accept and reject corpora per dialect (`spikes/BS6/`); the gate of the Phase 5 tier (b) resolver (P5 §5.3). The agent-side statement guard of `data.query` is a different, simpler check and is built |
 | BS7 | `javac --release 8` still works on current JDKs | Done 2026-10-01 |
 | BS8 | A real JCEF browser runs in the Linux test image and the in-process DevTools path works | **Run 2026-10-06, passed with conditions**: both rendering modes on a Java 25 target, off-screen on a Java 8 target; the DevTools channel verified; Chromium 152's first-run terms dialog must be pre-accepted; `Target.getTargetInfo` does not answer (the main frame id is the target id); windowed JCEF on Java 8 creates no browser. `spikes/BS8/RESULT.md`. Since Phase 4 (2026-10-07): the timeouts and the unanswered `Target.*` calls were JCEF's client losing an answer that arrives early, which the `jcef` adapter avoids (D69) |
 | BS9 | Robot input on the test display and on a desktop session | New, not started; comes before Phase 7 |
 | BS10 | Routed in-JVM dispatch behaves like Robot | New, not started |
 | BS11 | `PAINT` capture is deterministic | New, not started |
 | BS12 | Grounding accuracy and cost of a vision loop on the sample | New, not started; needs live model calls (B7) |
+| BS13 | The Claude API facts the Phase 5 contract relies on (structured output, strict tools, effort, caching minimums and TTLs, token counting, the Batch API, the fallback parameter, error mapping, the `claude` CLI's headless envelope), checked live once; the three Phase 5 dependency sets resolved and listed for the licence audit | **Started 2026-10-08** (`spikes/BS13/`); needs the model key, which the owner provided in the operator's environment for the live checks (never in a file of this repository) |
 
 ### BS1 Attach matrix on stock JVMs
 
@@ -873,9 +884,14 @@ The review's reports, verdicts, briefs and implementer reports are with the sess
 
 ### Phase 5: AI layer
 
+**Contract: `docs/design/phase5-contracts.md`** (specified 2026-10-08, not built; its eighteen answers are B23, provisional;
+decisions D70-D87). The items below are the roadmap's; the contract makes each precise (its §1 scope, §15 acceptance). Gates
+before the build: spike BS6 (the guard's corpora) and spike BS13 (the API facts), both started 2026-10-08; the owner's word on
+B23 as for B21, unless progress on the provisional answers is asked for.
+
 - [ ] `skillroy-inference` (created here, above `skillroy-scenario`); the `InferenceGateway` SPI with typed content
   parts (text, image, tool use, tool result) and the Claude implementation (B7)
-- [ ] Tier (b) resolvers: model-authored SQL behind `SqlGuard` (BS6 passed); `MaskPolicy` applied before any prompt
+- [ ] Tier (b) resolvers: model-authored SQL behind `SqlGuard` (BS6 passed first); masking before any prompt (P5 §6)
 - [ ] Approve flow on first use; budget meter per scenario and per nightly job
 - [ ] Nightly batch re-resolve that opens a PR with the bindings diff; `skillroy-cli re-resolve`
 - [ ] `skillroy-mcp`: tool projection of the catalogue plus domain tool packs, stdio transport
@@ -883,6 +899,7 @@ The review's reports, verdicts, briefs and implementer reports are with the sess
 - [ ] Interactive profile (B15): the executor's single-call entry and the step journal (names `ExecutorSession`,
   `StepJournal` reserved by the Phase 2 contract), export of a journal to scenario steps and bindings, the session
   service, a per-session budget
+- [ ] A recorded gateway and committed recordings, so that the whole layer is tested in CI and the Linux image with no model key (P5 §4.2, §14.5)
 - [ ] **Exit:** a new sample scenario authored from a one-paragraph brief is reviewed, committed and replays green
   in CI; the nightly job stays under budget with prompt-cache hits above 80%; an interactive session on the sample
   is exported from its journal as a scenario that replays with zero model calls.
@@ -1062,7 +1079,7 @@ Work that cannot proceed without the project owner, or without something only th
 | Wall | Decision | What waits |
 |---|---|---|
 | The push | B1 | The initial commit exists (2026-10-06); the push to the private remote `Skillroy-AI/skillroy-test-java` waits for the owner's word. History is permanent once pushed |
-| Model provider API key | B7 | Anything live in Phase 5, so all of Phase 5 beyond interfaces and replay; after it the live parts of Phase 7 and BS12. The owner (2026-10-06): available when Phase 5 starts |
+| Model provider API key | B7 | Was: anything live in Phase 5. **Provided by the owner on 2026-10-07 for live checks**, in the operator's own environment only (never a file of this repository, never a property, never a command line; the contract's §2.3): BS13 runs on it. The Phase 5 build's live profile (`inference-live`) and the recording profile need it on the machine that runs them; CI never does |
 | A JxBrowser licence | B9 | Real verification of the `jxbrowser` adapter. The adapter exists (built 2026-10-07) and passes the contract kit against the neutral fake, plainly and with the init-script chaining option; the kit (`skillroy-agent-web`'s `test-jar`) runs against the real product only in a repository that holds a licence, outside this repo, through a `WebAdapterFixture` over a real engine. That run also settles three member names of the descriptor and whether some vendor calls can block (gaps 41 and 47). Phase 4 reached its public exit without it. The owner (2026-10-06): a licence is available, so that verification can follow in the private overlay's repository |
 | A Windows host | B13, Phase 6 | Verification of the fixes S7 and S15 (not verified on Windows); the Windows path of Phase 6. The owner (2026-10-06): later, a Windows 11 machine, which also runs the tenant layers' testing under Windows and under WSL2 |
 
@@ -1070,7 +1087,8 @@ Not walls any more: the licence, the holder's name, the first commit and the rem
 domain behind the groupId (B2) and the sample domain with its deposits (B10) are decided. B17-B20 are confirmed
 (2026-10-06), and the two vetoes inside B19 are built. B21 (the fifteen answers of the Phase 4 contract) was
 confirmed by the owner on 2026-10-07, and so was B22 (the eleven decisions the Phase 4 build took without the
-owner, D59-D69) the same evening; nothing is open for the owner.
+owner, D59-D69) the same evening. **Open for the owner: B23**, the eighteen provisional answers of the Phase 5
+contract (2026-10-08), on the interview page.
 
 The review items of the end-to-end review, now decided (gap numbers refer to the table above):
 
@@ -1090,8 +1108,12 @@ The review items of the end-to-end review, now decided (gap numbers refer to the
    licence (the wall "A JxBrowser licence"); why windowed JCEF on a Java 8 target creates no browser (unverified since
    BS8, gap 44) and why a `srcdoc` iframe never loads in the image; then the open gaps 35-47, first the `web.waitFlag`
    parity (gap 38) and the redundant sequence reads (gap 45). D59-D69 are B22, confirmed by the owner on 2026-10-07.
-3. **Phase 5 groundwork that needs no model key**: the `InferenceGateway` SPI shape and the `inference.` seams are
-   reserved; everything live waits for B7 (a wall).
+3. **Phase 5**: the contract is specified (`design/phase5-contracts.md`, 2026-10-08). Next: the owner's B23 answers; the
+   results of BS6 and BS13 written into the contract (§5.3 and §4.1 say what each may change); the three dependency
+   sets audited into `licence-audit.md`; then the build in the Phase 2-4 manner (the §16.1 marks into the earlier
+   contracts first), wave 1 the modules that need no key (the SPI and the recorded gateway, `SqlGuard`, the contributor
+   and the tier (b) resolver, approval and budgets, `ExecutorSession` and the journal, plan version 5), wave 2 the
+   commands (`re-resolve`, `mcp`, `author`, `triage`, `session`) and the sample's scenarios C and D with their recordings.
 4. **Investigate the display-test flakes** (`HostSafetyDisplayTest` on 2026-10-02 and `WindowActivationDisplayTest`
    on 2026-10-06, both on the Java 8 test JVM; `ModalBlockingDisplayTest` and `ComponentFallbackDisplayTest` in 4 of 7
    runs on 2026-10-07, on a Java 25 test JVM in the arm64 image; the hypotheses and the retry mitigation are under
