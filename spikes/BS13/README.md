@@ -59,10 +59,11 @@ java -jar $J spend        # sums target/results/*.json
 
 Single live items: `models`, `count` and `errors` cost nothing (metadata, token counts, refused requests);
 `structured`, `tools`, `thinking sonnet`, `thinking opus` (one Opus call), `fallbacks`, `cache` and `batch` spend a
-little. Run `cache` before `batch` and within the hour: the batch requests reuse the one-hour cache entry `cache`
-writes. `batch` polls every 15 s for at most 20 minutes (`-Dbs13.batchWaitMinutes`, `-Dbs13.batchPollMs`); a batch
-that has not ended by then is collected later with `batch <msgbatch id>`. `count` reports the token sizes of the cache
-prefixes; `-Dbs13.shortRules=<n>` changes the short one (default 9 rules).
+little. Run `cache` before `batch` all the same: whether the batch reads the entry `cache` wrote is one of the facts
+recorded (on 2026-10-08 it did not; the second batch request read the first's). `batch` polls every 15 s for at most
+20 minutes (`-Dbs13.batchWaitMinutes`, `-Dbs13.batchPollMs`); a batch that has not ended by then is collected later
+with `batch <msgbatch id>`. `count` reports the token sizes of the cache prefixes; `-Dbs13.shortRules=<n>` changes the
+short one (default 9 rules).
 
 ## The Claude Code CLI (item 10)
 
