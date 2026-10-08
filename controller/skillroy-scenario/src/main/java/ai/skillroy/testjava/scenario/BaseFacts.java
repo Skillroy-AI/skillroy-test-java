@@ -17,9 +17,13 @@
 package ai.skillroy.testjava.scenario;
 
 import ai.skillroy.testjava.controller.AgentConnection;
+import ai.skillroy.testjava.controller.AgentLostException;
+import ai.skillroy.testjava.controller.AgentRpcException;
 import ai.skillroy.testjava.controller.CallOptions;
+import ai.skillroy.testjava.protocol.ErrorCodes;
 import ai.skillroy.testjava.scenario.pack.FactProvider;
 
+import java.time.Clock;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -40,6 +44,15 @@ import java.util.TreeMap;
  *       {@code device.state {id}} per device, in id order ({@code devices[id=printer].state.last.text}). A
  *       {@code device.state} that fails fails the fact read, as any fact read does. Read-only: reading the root
  *       costs one call per device plus one, and a scenario that does not name it pays nothing.</li>
+ *   <li>{@code web} (phase4-contracts.md 6.2): {@code {browsers: [{ref, adapter, url, title?, visibleInSwing,
+ *       component?, rendering, viewport?, cdpTargetId?, tag?, frames, text?}]}} from {@code web.browsers} (the
+ *       entry's other members are left out) and, for each browser whose {@code capabilities} list {@code EVALUATE},
+ *       one {@code web.dom.text {browser, maxChars: 4000}} into {@code text}
+ *       ({@code web.browsers[url~pattern].text: {contains: …}}). The whole read is bounded by 10 s; a text read that
+ *       fails, or that the budget no longer allows, leaves {@code text} out (and is reported, so that the executor
+ *       logs it) while the root still resolves; a failing {@code web.browsers} fails the read. In a run the
+ *       executor reads through the run's chosen web path with the usual fall-back ({@link PlanExecutor}); this
+ *       class's own provider reads from the agent.</li>
  * </ul>
  *
  * <p>A pack's own root of the same name takes precedence over a base root. Stateless; safe from any thread.
@@ -47,14 +60,46 @@ import java.util.TreeMap;
 public final class BaseFacts {
 
     /** The base root names. */
-    public static final List<String> ROOTS = List.of("app", "ui", "dialogs", "caps", "devices");
+    public static final List<String> ROOTS = List.of("app", "ui", "dialogs", "caps", "devices", "web");
 
     private static final CallOptions READ = CallOptions.defaults().withTimeoutMs(10_000L);
+
+    /** The budget of one read of the root {@code web}. */
+    static final long WEB_BUDGET_MS = 10_000L;
+
+    /** The characters of page text the root {@code web} reads per browser. */
+    static final long WEB_TEXT_CHARS = 4000L;
+
+    /** The members of a {@code web.browsers} entry the root {@code web} keeps, in this order. */
+    static final List<String> WEB_KEYS = List.of("ref", "adapter", "url", "title", "visibleInSwing", "component",
+            "rendering", "viewport", "cdpTargetId", "tag", "frames");
+
+    /** Reads one {@code web.*} primitive's value for the root {@code web}. */
+    @FunctionalInterface
+    interface WebReads {
+        /**
+         * @param timeoutMs the call's budget, at least 1
+         * @throws Exception the read's failure: an {@code AgentRpcException} with the agent's code, a lost agent, or
+         *     any failure of another path
+         */
+        Object read(AgentConnection agent, String primitive, Map<String, Object> params, long timeoutMs)
+                throws Exception;
+    }
+
+    /** Told that the root left a browser's {@code text} out, and why. */
+    @FunctionalInterface
+    interface TextOmitted {
+        void omitted(String ref, String reason);
+    }
+
+    /** The root's reads straight from the agent. */
+    static final WebReads AGENT_READS = (agent, primitive, params, timeoutMs) -> agent.call(primitive, params,
+            CallOptions.defaults().withTimeoutMs(Math.max(1L, Math.min(timeoutMs, WEB_BUDGET_MS)))).value();
 
     private BaseFacts() {
     }
 
-    /** The five base providers, in {@link #ROOTS} order. */
+    /** The six base providers, in {@link #ROOTS} order. */
     public static List<FactProvider> all() {
         return List.of(
                 provider("app", agent -> agent.call("app.state", Map.of(), READ).value()),
@@ -79,7 +124,81 @@ public final class BaseFacts {
                     });
                     return list;
                 }),
-                provider("devices", BaseFacts::devices));
+                provider("devices", BaseFacts::devices),
+                web(AGENT_READS, Clock.systemUTC(), (ref, reason) -> {
+                }));
+    }
+
+    /**
+     * The root {@code web} reading through {@code reads}, bounded by {@code clock}, telling {@code omitted} about
+     * every {@code text} it leaves out.
+     */
+    static FactProvider web(WebReads reads, Clock clock, TextOmitted omitted) {
+        return provider("web", agent -> web(agent, reads, clock, omitted));
+    }
+
+    /**
+     * {@code {browsers: [...]}}: each {@code web.browsers} entry reduced to {@link #WEB_KEYS}, with {@code text} for
+     * a browser that has {@code EVALUATE}, within one 10 s budget.
+     *
+     * @throws Exception the failure of {@code web.browsers}, or a lost agent
+     */
+    private static Object web(AgentConnection agent, WebReads reads, Clock clock, TextOmitted omitted)
+            throws Exception {
+        long deadline = clock.millis() + WEB_BUDGET_MS;
+        Object value = reads.read(agent, "web.browsers", Map.of(), WEB_BUDGET_MS);
+        Object listed = value instanceof Map<?, ?> map ? map.get("browsers") : null;
+        List<Object> browsers = new ArrayList<>();
+        if (listed instanceof List<?> entries) {
+            for (Object entry : entries) {
+                if (!(entry instanceof Map<?, ?> browser)) {
+                    continue;
+                }
+                Map<String, Object> fact = new LinkedHashMap<>();
+                for (String key : WEB_KEYS) {
+                    if (browser.containsKey(key)) {
+                        fact.put(key, browser.get(key));
+                    }
+                }
+                Object ref = browser.get("ref");
+                if (ref != null && browser.get("capabilities") instanceof List<?> capabilities
+                        && capabilities.contains("EVALUATE")) {
+                    text(agent, reads, clock, omitted, deadline, String.valueOf(ref), fact);
+                }
+                browsers.add(fact);
+            }
+        }
+        Map<String, Object> root = new LinkedHashMap<>();
+        root.put("browsers", browsers);
+        return root;
+    }
+
+    /** One browser's {@code text}, or nothing when the read fails or the budget is spent. */
+    private static void text(AgentConnection agent, WebReads reads, Clock clock, TextOmitted omitted, long deadline,
+                             String ref, Map<String, Object> fact) throws AgentLostException, InterruptedException {
+        long remaining = deadline - clock.millis();
+        if (remaining <= 0) {
+            omitted.omitted(ref, "the root's " + WEB_BUDGET_MS + " ms budget was spent");
+            return;
+        }
+        Map<String, Object> params = new LinkedHashMap<>();
+        params.put("browser", ref);
+        params.put("maxChars", WEB_TEXT_CHARS);
+        try {
+            Object value = reads.read(agent, "web.dom.text", params, remaining);
+            if (value instanceof Map<?, ?> map && map.get("text") != null) {
+                fact.put("text", map.get("text"));
+            } else {
+                omitted.omitted(ref, "web.dom.text answered no text");
+            }
+        } catch (AgentLostException | InterruptedException e) {
+            throw e;
+        } catch (AgentRpcException e) {
+            omitted.omitted(ref, "web.dom.text failed: " + ErrorCodes.name(e.error().code()) + ": "
+                    + e.error().message());
+        } catch (Exception e) {
+            omitted.omitted(ref, "web.dom.text failed: " + (e.getMessage() == null ? e.toString() : e.getMessage()));
+        }
     }
 
     /**

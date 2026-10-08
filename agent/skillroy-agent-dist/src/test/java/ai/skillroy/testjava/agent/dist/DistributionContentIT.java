@@ -42,7 +42,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * The exact content of the assembled agent home, as a directory and as a zip: the six jars, and the licence files
+ * The exact content of the assembled agent home, as a directory and as a zip: the seven jars, and the licence files
  * at the top level. Every jar carries the licence files in {@code META-INF}, and nothing in a jar is third-party
  * code (the root NOTICE says so).
  */
@@ -57,6 +57,7 @@ class DistributionContentIT {
             "lib/skillroy-protocol.jar",
             "modules/skillroy-agent-data.jar",
             "modules/skillroy-agent-swing.jar",
+            "modules/skillroy-agent-web.jar",
             "skillroy-agent-bootstrap.jar"));
 
     private static File base;

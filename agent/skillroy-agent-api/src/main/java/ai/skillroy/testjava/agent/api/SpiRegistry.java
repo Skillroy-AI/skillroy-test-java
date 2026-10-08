@@ -19,8 +19,8 @@ package ai.skillroy.testjava.agent.api;
 import java.util.List;
 
 /**
- * Typed registry of SPI implementations (the interfaces in {@code ai.skillroy.testjava.agent.api.spi}). Lets a domain
- * module plug into generic modules without either depending on the other.
+ * Typed registry of SPI implementations (the interfaces in {@code ai.skillroy.testjava.agent.api.spi} and its
+ * sub-package {@code spi.web}). Lets a domain module plug into generic modules without either depending on the other.
  *
  * <p>Implementations are thread-safe; lookups see a consistent snapshot.
  */

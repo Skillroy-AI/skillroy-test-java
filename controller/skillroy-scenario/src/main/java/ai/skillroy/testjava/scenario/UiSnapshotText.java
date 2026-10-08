@@ -23,7 +23,10 @@ import java.util.Set;
 
 /**
  * Renders a {@code swing.snapshot} value and an {@code app.state} value as compact indented text for failure messages
- * and reports, for example:
+ * and reports, and after the Swing windows the {@code WEB} surface (phase4-contracts.md 6.2): one block per embedded
+ * browser that is visible in Swing, headed {@code [web <ref>] <title> <url> (<adapter>, <rendering>, <path>)} and
+ * followed by the nodes of its {@code web.ariaSnapshot}, one line {@code role "name" [value]} per node, indented one
+ * level per depth; a hidden browser is one line {@code [web <ref> hidden] <title> <url>}. For example:
  *
  * <pre>
  * app:
@@ -31,16 +34,34 @@ import java.util.Set;
  * - window "Lending Desk" [ref=h1]
  *   - textbox "entry" [ref=h5]
  *   - button "DUE" [ref=h12] (disabled)
+ * [web h20] Borrow data:text/html;base64,PCFkb2N0eXBlIGh0bWw+... (jcef, WINDOWED, cdp)
+ *   heading "Borrow"
+ *   textbox "Item" [hammer]
+ *   button "Borrow"
+ * [web h21 hidden] Back data:text/html;base64,PCFkb2N0eXBlIGh0bWw+...
  * </pre>
  *
  * <p>Unnamed panels, scroll panes and unknown containers are not shown; their children move up a level. The text is
- * capped by a character budget and ends with a note of how many lines were left out. Every value taken from the
- * target (role, name, text, ref, value, application-state keys and values) is put on one line with its control
- * characters made visible ({@code Values.printableLine}), because the text ends up in terminals and reports.
+ * capped by a character budget, which the web blocks share, and ends with a note of how many lines were left out.
+ * Every value taken from the target (role, name, text, ref, value, application-state keys and values, a browser's
+ * title and URL) is put on one line with its control characters made visible ({@code Values.printableLine}), because
+ * the text ends up in terminals and reports.
  *
  * <p>Stateless; safe from any thread.
  */
 public final class UiSnapshotText {
+
+    /**
+     * One embedded browser for the {@code WEB} surface.
+     *
+     * @param browser its entry of the {@code web.browsers} value ({@code ref}, {@code title}, {@code url},
+     *     {@code adapter}, {@code rendering}, {@code visibleInSwing}, …)
+     * @param aria the {@code web.ariaSnapshot} value ({@code {nodes, truncated}}) of a visible browser, or null when
+     *     it was not read or the read failed
+     * @param path the web path that read it ({@code cdp} or {@code agent}), or null
+     */
+    public record WebView(Map<?, ?> browser, Object aria, String path) {
+    }
 
     /** The default character budget (roughly a thousand tokens). */
     public static final int DEFAULT_BUDGET = 4000;
@@ -48,6 +69,8 @@ public final class UiSnapshotText {
     private static final Set<String> CONTAINERS = Set.of("panel", "scrollpane", "unknown");
     private static final int MAX_NODES = 5000;
     private static final int MAX_TEXT = 80;
+    /** The deepest aria node shown; the walker's own depth is bounded by its node count. */
+    private static final int MAX_DEPTH = 100;
 
     private UiSnapshotText() {
     }
@@ -64,6 +87,15 @@ public final class UiSnapshotText {
      * @return the text, possibly empty; never longer than {@code maxChars} plus the omission note
      */
     public static String render(Object snapshot, Object appState, int maxChars) {
+        return render(snapshot, appState, List.of(), maxChars);
+    }
+
+    /**
+     * As {@link #render(Object, Object, int)}, followed by the {@code WEB} surface of {@code web} in the given order.
+     *
+     * @param web the embedded browsers, or null or empty for none (a target without {@code web.browsers})
+     */
+    public static String render(Object snapshot, Object appState, List<WebView> web, int maxChars) {
         int budget = Math.max(100, maxChars);
         List<String> lines = new ArrayList<>();
         if (appState instanceof Map<?, ?> app && !app.isEmpty()) {
@@ -82,6 +114,13 @@ public final class UiSnapshotText {
             }
             if (Boolean.TRUE.equals(snap.get("truncated")) || nodes[0] >= MAX_NODES) {
                 lines.add("(snapshot truncated)");
+            }
+        }
+        if (web != null) {
+            for (WebView view : web) {
+                if (view != null && view.browser() != null) {
+                    web(view, lines);
+                }
             }
         }
         StringBuilder out = new StringBuilder();
@@ -148,6 +187,76 @@ public final class UiSnapshotText {
         if (n.get("children") instanceof List<?> children) {
             for (Object child : children) {
                 node(child, childDepth, lines, nodes);
+            }
+        }
+    }
+
+    /** One browser of the {@code WEB} surface: its header line and, when visible, its aria nodes. */
+    private static void web(WebView view, List<String> lines) {
+        Map<?, ?> b = view.browser();
+        boolean visible = Boolean.TRUE.equals(b.get("visibleInSwing"));
+        StringBuilder head = new StringBuilder("[web ").append(oneLine(text(b.get("ref")), MAX_TEXT));
+        if (!visible) {
+            head.append(" hidden");
+        }
+        head.append(']');
+        String title = text(b.get("title"));
+        if (!title.isEmpty()) {
+            head.append(' ').append(oneLine(title, MAX_TEXT));
+        }
+        String url = text(b.get("url"));
+        if (!url.isEmpty()) {
+            head.append(' ').append(oneLine(url, MAX_TEXT));
+        }
+        if (!visible) {
+            lines.add(head.toString());
+            return;
+        }
+        List<String> about = new ArrayList<>();
+        for (Object part : new Object[] {b.get("adapter"), b.get("rendering"), view.path()}) {
+            String value = text(part);
+            if (!value.isEmpty()) {
+                about.add(oneLine(value, MAX_TEXT));
+            }
+        }
+        if (!about.isEmpty()) {
+            head.append(" (").append(String.join(", ", about)).append(')');
+        }
+        lines.add(head.toString());
+        if (view.aria() instanceof Map<?, ?> aria) {
+            int[] nodes = {0};
+            if (aria.get("nodes") instanceof List<?> list) {
+                for (Object node : list) {
+                    ariaNode(node, 1, lines, nodes);
+                }
+            }
+            if (Boolean.TRUE.equals(aria.get("truncated")) || nodes[0] >= MAX_NODES) {
+                lines.add("  (aria snapshot truncated)");
+            }
+        }
+    }
+
+    /** {@code role "name" [value]}, indented two spaces per depth, then the children one level deeper. */
+    private static void ariaNode(Object raw, int depth, List<String> lines, int[] nodes) {
+        if (!(raw instanceof Map<?, ?> n) || nodes[0] >= MAX_NODES || depth > MAX_DEPTH) {
+            return;
+        }
+        nodes[0]++;
+        String role = text(n.get("role"));
+        StringBuilder line = new StringBuilder("  ".repeat(depth)).append(oneLine(role.isEmpty() ? "generic" : role,
+                MAX_TEXT));
+        String name = text(n.get("name"));
+        if (!name.isEmpty()) {
+            line.append(" \"").append(oneLine(name, MAX_TEXT)).append('"');
+        }
+        Object value = n.get("value");
+        if (value != null && !text(value).isEmpty()) {
+            line.append(" [").append(oneLine(text(value), MAX_TEXT)).append(']');
+        }
+        lines.add(line.toString());
+        if (n.get("children") instanceof List<?> children) {
+            for (Object child : children) {
+                ariaNode(child, depth + 1, lines, nodes);
             }
         }
     }

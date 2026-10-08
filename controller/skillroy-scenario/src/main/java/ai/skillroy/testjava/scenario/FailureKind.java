@@ -34,15 +34,16 @@ public enum FailureKind {
      */
     ORACLE_SUSPECT,
     /**
-     * An ack, ready or settle wait expired, or a primitive timed out; carries edtState, dialogs and app state
-     * [FAIL].
+     * An ack, ready or settle wait expired, a primitive timed out, or a {@code webWaitFlag} flag did not turn true;
+     * carries edtState, dialogs and app state [FAIL].
      */
     SYNC_TIMEOUT,
     /**
      * An expectation did not hold (a {@code db} check's row count, row values or aggregates included), a step's input
      * was rejected or its target not found or ambiguous, a modal dialog the scenario did not expect blocked a step's
-     * input (MODAL_OPEN), a base UI verb's call did not fire, or an unexpected prompt was failed by the prompt policy
-     * [FAIL].
+     * input (MODAL_OPEN), a base UI verb's call did not fire, an unexpected prompt was failed by the prompt policy, a
+     * script run in an embedded web page threw (SCRIPT_ERROR), or the browser of a {@code web.*} call closed during
+     * the step (STALE_HANDLE) [FAIL] (phase4-contracts.md 8.1).
      */
     ASSERTION,
     /** The agent was lost and the target restarted (new pid for the same main command) [ERROR]. */

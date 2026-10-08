@@ -17,6 +17,7 @@
 package ai.skillroy.testjava.scenario;
 
 import ai.skillroy.testjava.scenario.resolve.CredentialSpec;
+import ai.skillroy.testjava.scenario.web.WebSettings;
 
 import java.time.Duration;
 import java.util.LinkedHashMap;
@@ -48,11 +49,14 @@ import java.util.Map;
  *     applies and {@code plan.json} carries no {@code ui})
  * @param oracles {@code oracle:} in file order (phase2-contracts.md 3.1)
  * @param bindTimeoutMs {@code timeouts.bind} in milliseconds (default 60000, at most 600000)
+ * @param web {@code web:} (phase4-contracts.md 7.2), or null when the scenario has no such key (then
+ *     {@link WebSettings#DEFAULT} applies and {@code plan.json} carries no {@code web})
  */
 public record Scenario(String id, String pack, List<String> tags, List<String> requires,
                        Map<String, String> launchProperties, List<Slot> slots, List<Step> steps, List<Verify> verify,
                        Map<String, Object> onPrompt, List<String> artifacts, long stepTimeoutMs, String sourceName,
-                       String sourceHash, UiSettings ui, List<OracleEntry> oracles, long bindTimeoutMs) {
+                       String sourceHash, UiSettings ui, List<OracleEntry> oracles, long bindTimeoutMs,
+                       WebSettings web) {
 
     /** The step timeout when {@code timeouts.step} is absent. */
     public static final long DEFAULT_STEP_TIMEOUT_MS = 10_000L;
@@ -63,6 +67,15 @@ public record Scenario(String id, String pack, List<String> tags, List<String> r
         if (bindTimeoutMs <= 0) {
             bindTimeoutMs = Plan.DEFAULT_BIND_TIMEOUT_MS;
         }
+    }
+
+    /** A scenario without the Phase 4 key {@code web}. */
+    public Scenario(String id, String pack, List<String> tags, List<String> requires,
+                    Map<String, String> launchProperties, List<Slot> slots, List<Step> steps, List<Verify> verify,
+                    Map<String, Object> onPrompt, List<String> artifacts, long stepTimeoutMs, String sourceName,
+                    String sourceHash, UiSettings ui, List<OracleEntry> oracles, long bindTimeoutMs) {
+        this(id, pack, tags, requires, launchProperties, slots, steps, verify, onPrompt, artifacts, stepTimeoutMs,
+                sourceName, sourceHash, ui, oracles, bindTimeoutMs, null);
     }
 
     /** A scenario without the Phase 2 keys {@code oracle} and {@code timeouts.bind}. */
@@ -86,6 +99,11 @@ public record Scenario(String id, String pack, List<String> tags, List<String> r
     /** The settings that apply: {@link #ui()}, or {@link UiSettings#DEFAULT} when the key is absent. */
     public UiSettings effectiveUi() {
         return ui != null ? ui : UiSettings.DEFAULT;
+    }
+
+    /** The web settings that apply: {@link #web()}, or {@link WebSettings#DEFAULT} when the key is absent. */
+    public WebSettings effectiveWeb() {
+        return web != null ? web : WebSettings.DEFAULT;
     }
 
     /** {@code timeouts.bind}. */

@@ -51,13 +51,15 @@ final class CompileCommand implements Command {
             YAML file. A plan is rewritten only when its content changed. Load and compile errors are reported as
             file:line: reason, and give exit code 2; the other scenarios are still compiled.
             --check writes nothing: it compiles each scenario and compares the result with the plan file that is
-            there; a missing or different plan is reported as stale and gives exit code 1.""",
+            there; a missing or different plan is reported as stale and gives exit code 1. The compiler's notes
+            (what it added that the scenario did not say, such as web.cdp in requires for web.path: cdp) are
+            printed to stderr as file: note: text.""",
             List.of(OptionSpec.value(OUT, "dir", "write (or, with --check, look for) the plans in this directory"),
                     OptionSpec.flag(CHECK, "write nothing; fail if a plan is missing or stale"),
                     Packs.OPTION_SPEC,
-                    OptionSpec.flag("--json", "print {\"plans\":[{source, scenarioId, plan, status, error?}]}\n"
-                            + "as JSON; status is written, unchanged, up-to-date, stale,\n"
-                            + "missing or error")),
+                    OptionSpec.flag("--json", "print {\"plans\":[{source, scenarioId, plan, status, error?,\n"
+                            + "notes?}]} as JSON; status is written, unchanged,\n"
+                            + "up-to-date, stale, missing or error")),
             1, CommandSpec.UNLIMITED);
 
     @Override
@@ -87,6 +89,7 @@ final class CompileCommand implements Command {
                 report.add(entry);
                 Scenario scenario;
                 Plan plan;
+                List<String> notes;
                 try {
                     scenario = ScenarioLoader.load(yaml);
                     DomainPack pack;
@@ -95,7 +98,12 @@ final class CompileCommand implements Command {
                     } catch (ScenarioException e) {
                         throw e.locate(scenario.id(), 0);
                     }
-                    plan = PlanCompiler.compile(scenario, pack);
+                    PlanCompiler.Compiled compiled = PlanCompiler.compileWithNotes(scenario, pack);
+                    plan = compiled.plan();
+                    notes = compiled.notes();
+                    for (String note : notes) {
+                        cli.err().println(yaml + ": note: " + note);
+                    }
                 } catch (ScenarioException e) {
                     errors++;
                     String message = ScenarioFiles.describe(yaml, e);
@@ -137,6 +145,9 @@ final class CompileCommand implements Command {
                     status = "written";
                 }
                 entry.put("status", status);
+                if (!notes.isEmpty()) {
+                    entry.put("notes", notes);
+                }
                 if (!json) {
                     cli.out().println(String.format("%-10s %s  (%s, pack %s %s)", status, planFile, scenario.id(),
                             plan.pack(), plan.packVersion()));

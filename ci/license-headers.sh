@@ -20,7 +20,7 @@
 #   ci/license-headers.sh            list the files without a header; exit 1 if there are any
 #   ci/license-headers.sh --apply    add the header to those files
 #
-# Covered: *.java, *.xml, *.sh, *.properties, Dockerfile and the CLI launcher script.
+# Covered: *.java, *.js, *.xml, *.sh, *.properties, Dockerfile and the CLI launcher script.
 # Not covered: documentation, scenario YAML and plan JSON (a plan carries the hash of its YAML), service files
 # and other test resources.
 set -euo pipefail
@@ -53,7 +53,7 @@ header() {
 
 kind_of() {
   case "$1" in
-    *.java) echo java ;;
+    *.java|*.js) echo java ;;
     *.xml) echo xml ;;
     *.sh|*.properties|*/Dockerfile|*/src/main/sh/*) echo hash ;;
     *) echo none ;;
@@ -89,7 +89,7 @@ while IFS= read -r -d '' file; do
     echo "missing: ${file#"$repo"/}"
   fi
 done < <(find "$repo" \( -name .git -o -name target -o -name .idea -o -name .vscode -o -name node_modules \) -prune \
-           -o -type f \( -name '*.java' -o -name '*.xml' -o -name '*.sh' -o -name '*.properties' \
+           -o -type f \( -name '*.java' -o -name '*.js' -o -name '*.xml' -o -name '*.sh' -o -name '*.properties' \
                          -o -name Dockerfile -o -path '*/src/main/sh/*' \) -print0)
 
 if [ "$mode" = "--apply" ]; then

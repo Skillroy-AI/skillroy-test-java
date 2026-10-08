@@ -1,9 +1,9 @@
 # TODO: base framework
 
 What exists, what was proven and what is open for the base framework (`skillroy-test-java`), as of
-2026-10-06. Decisions are in `DECISIONS.md` (B1-B20); the design is in `docs/design/` (Phase 1 and Phase 1.x as
+2026-10-07. Decisions are in `DECISIONS.md` (B1-B22); the design is in `docs/design/` (Phase 1 and Phase 1.x as
 built in `phase1-contracts.md`, Phase 2 as built in `phase2-contracts.md`, Phase 3 as built in
-`phase3-contracts.md`); research notes are in `docs/research/`; the
+`phase3-contracts.md`, Phase 4 as built in `phase4-contracts.md`); research notes are in `docs/research/`; the
 dependency licence audit is `docs/licence-audit.md`.
 
 ## Status at a glance
@@ -40,6 +40,43 @@ agent-side leg green at the second attempt after one display-test focus failure 
 and the first run with the 2026-10-06 masking change in the image. **Later the same day** spike BS8 was run (passed with
 conditions; `spikes/BS8/RESULT.md`) and **the Phase 4 contract was written** (`design/phase4-contracts.md`, specified,
 not built; its fifteen provisional answers are decision B21, on the owner interview page).
+
+**On 2026-10-07** the owner confirmed B21 (all fifteen answers, no veto), and **Phase 4 was built, reviewed and fixed
+the same day** (`design/phase4-contracts.md`, now as built; the decisions the build took are its D59-D69). The method
+was that of Phases 2 and 3. Seven implementers worked in isolated copies of the tree (the web SPI; the script library;
+the controller side; `skillroy-cdp`; the web host and its agent module; `skillroy-agent-web` with the kit, the
+distribution and the `PAINT` guard; the web host's pack, scenarios and end-to-end acceptance), integrated into the main
+tree by file list in that order; the tree before the last of them went through a code review of three lenses with a
+sceptic each (section "Phase 4 code review" below); a fix wave of three implementers (the agent's web module,
+`skillroy-cdp`, the executor) closed every confirmed finding; then the documents were brought to as-built. Natively
+(JDK 26, headless) the integrated tree before the last implementer and the fixes was green with the profile `jcef`
+(2513 tests, 0 failures, 0 errors, 290 skipped; 199 s), and so was the final tree after the fix wave (2701 / 0 / 0 /
+383; 222 s). The implementer who built the acceptance ran it in the Linux image on its copy, before the fix wave, which
+is the evidence before the matrix: with `-Pjcef` and `-pl` the three web host modules `-am` (most of the reactor), the
+amd64 image with a Java 25 target 2169 / 0 / 0 / 16 (783 s), an arm64 build of the image natively with a Java 25
+target 2169 / 0 / 0 / 16 (547 s) and with a Java 8 target 2169 / 0 / 0 / 44 (487 s), and the web host's modules with
+their upstream agent modules on a Java 8 test JVM (arm64) 694 tests, 16 skipped (29 s; the twelve windowed kit tests
+among them); the kit against real JCEF passed 12 of 12 off screen and 11 with one skipped windowed, and the 50 attach
+attempts against a frozen page all ended with `FROZEN_TARGETS` within the deadline (the slowest about 2.02 s). The
+earlier runs of that copy found defects that only a real JCEF shows, fixed before those runs (section "Phase 4 code
+review" below), and display-test flakes of the Swing module ("Open flake"). The orchestrator's Linux matrix of the
+final tree is the table that follows.
+
+Verification of the Phase 4 tree (2026-10-07). The final tree is the one after the review's fix wave; each Linux leg
+runs twice in a row (the exit criterion's "twice in a row without a flake"), on the amd64 image, which an arm64
+development machine runs under emulation:
+
+| Configuration | Command (from the repo root) | Result |
+|---|---|---|
+| Native, JDK 26, headless, the integrated tree before the last implementer and the fix wave | `mvn -o -q verify -Pjcef` | 2513 tests, 0 failures, 0 errors, 290 skipped; 199 s |
+| Native, JDK 26, headless, the final tree | `mvn -o -q verify -Pjcef` | 2701 tests, 0 failures, 0 errors, 383 skipped; 222 s |
+| Linux image (JDK 25), targets on Java 25 | `ci/run-in-linux.sh mvn -o -q clean verify -Pjcef -Dskillroy.jcef.platform=linux-amd64 -Dskillroy.headless=false` | run 1: 2725 / 0 / 0 / 17, 1094 s; run 2: 2725 / 0 / 0 / 16, 1057 s |
+| Linux image, targets on Java 8 | `ci/run-in-linux.sh mvn -o -q verify` with the same flags, plus `-Dskillroy.it.targetJava=/opt/jdk8/bin/java` | run 1: 2725 / 0 / 0 / 44, 919 s; run 2: 2725 / 0 / 0 / 44, 911 s |
+| Linux image, agent side, test JVMs and targets on Java 8 | the Java 8 command plus `-Djvm=/opt/jdk8/bin/java`, `-pl` the twelve agent-side modules: the nine of the earlier tables, `skillroy-agent-web`, `skillroy-sample-web-host` and `skillroy-sample-web-host-agent` | run 1: 1342 / 0 / 0 / 20, 246 s; run 2, first attempt: one failure, the open focus flake (`WindowActivationDisplayTest.activateWindowOnTheFocusedWindowJustClicks`, third occurrence, 30 s wait for the frame to be the focused window; the build stopped at the Swing module after 153 s with 875 tests run); second attempt: 1342 / 0 / 0 / 20, 252 s |
+
+The native skips are the display tests and the end-to-end checks, which need the Linux image. The web acceptance
+(`WebHostEndToEndIT`, `CdpAttachSoakIT` and the kit against real JCEF) runs in the first two Linux legs, the kit's
+off-screen half on a Java 8 test JVM in the third.
 
 Verification of the committed tree (`efb48b7`, the Phase 3 tree with the 2026-10-06 changes), on 2026-10-06:
 
@@ -99,7 +136,8 @@ The 2 skips in the image are the two headless-only tests of the Swing module. Ja
 25.0.4.1 (image), 1.8.0_492 (mounted JDK 8). The image runs x86-64 under emulation on the development machine, so
 the times are slow. Java 21 targets are no longer run (B3).
 
-- **Open flake (two occurrences, 2026-10-02 and 2026-10-06; both on a Java 8 test JVM).** In the first agent-side run on
+- **Open flake (three occurrences on a Java 8 test JVM, 2026-10-02, 2026-10-06 and 2026-10-07; on 2026-10-07 four
+  more in other tests, on a Java 25 test JVM in the arm64 image).** In the first agent-side run on
   Java 8 of 2026-10-02,
   `HostSafetyDisplayTest.componentRungClicksOnlyWithFocusAndAlwaysRemovesItsListener` failed with "timed out after
   30000 ms waiting for the test frame is the focused window", and the build stopped at the Swing module. It did not
@@ -114,7 +152,18 @@ the times are slow. Java 21 targets are no longer run (B3).
   when it is investigated: an `XSetInputFocus` ignored by the X server because the Java 8 toolkit passes a stale
   timestamp after the focused window was destroyed, or a `FocusIn` event the toolkit drops; the test-side mitigation
   would be to re-issue `toFront()` + `requestFocus()` once a second while waiting, and the same retry could join the
-  `COMPONENT` rung's window activation (a small amendment, not taken here).
+  `COMPONENT` rung's window activation (a small amendment, not taken here). **On 2026-10-07**, in the Linux runs of the
+  Phase 4 acceptance on its implementer's copy, two other display tests of the Swing module failed on focus in 4 of 7
+  runs on the arm64 build of the image, which runs natively: `ModalBlockingDisplayTest` and
+  `ComponentFallbackDisplayTest`; each passed alone and in the reruns. Those runs had a Java 25 test JVM, so the
+  pattern above no longer holds for Java 8 alone: what the failures share is a frame that must become the focused
+  window under the WM-less Xvfb; the faster arm64 image may make the race likelier. Not a flake, and recorded here
+  because it looked like one: the `AttachIT` failures of the CLI module (a 401 on `/ping`) in partial builds that day
+  were the stale-snapshot build trap under "Environment notes", fixed in the build.
+  **Third occurrence, 2026-10-07:** `WindowActivationDisplayTest.activateWindowOnTheFocusedWindowJustClicks` failed
+  the same way in the second round of the Phase 4 matrix (the agent-side leg on the Java 8 test JVM stopped at the
+  Swing module after 153 s with 875 tests run); the rerun is recorded in the Phase 4 table. The Java 25 test JVMs of
+  the amd64 image have still never shown it.
 - **First run on a Java 25 target.** The end-to-end acceptance passed in every load-mode variant on a Java 25
   target and on a Java 8 target. With it the B4 gate and the Phase 1 exit item "target on Java 25" are met, and
   BS1's "Java 25 target" is answered for Linux: `JAVAAGENT`, `JAVAAGENT` through `JAVA_TOOL_OPTIONS`, `ATTACH` and
@@ -148,20 +197,24 @@ table above. "Java 8 test JVM" = the module's own tests also run on Java 8 (`-Dj
 | `skillroy-sample-lending-agent` | yes | yes | module, primitives, listener slot, widgets, plugin |
 | `skillroy-sample-lending-pack` | yes | n/a | verbs, facts, recovery |
 | `skillroy-sample-lending-scenarios` | yes | targets only | committed plans up to date (4 plan tests); §10 acceptance, 19 checks per load mode, 21 tests with the JUnit glue's three dynamic tests, 84 end-to-end tests (`LendingEndToEndIT`) |
+| `skillroy-agent-web` (Phase 4) | yes | yes | the module (install, capabilities, index, selection, primitives, events and taps) against scripted adapters; both adapters against the fake JCEF and the JxBrowser fake; the contract kit (`test-jar`) in four fake runs; 160 tests after the fix wave |
+| `skillroy-cdp` (Phase 4) | yes | n/a (Java 25) | the probe against a fake DevTools server, the attach and the path with Playwright replaced by fakes; no test starts a driver or a browser; 105 tests |
+| `skillroy-sample-web-host`, `-web-host-agent` (Phase 4, profile `jcef`) | yes | yes | options, sentinels, pages, registry, the agent module's seeds; with a display the host itself and the kit against real JCEF, one surefire execution per rendering mode |
+| `skillroy-sample-web-host-scenarios` (Phase 4, profile `jcef`) | yes | targets only | committed plans up to date, the pack; with a display the end-to-end acceptance (`WebHostEndToEndIT`, eight launches) and the frozen-target soak (`CdpAttachSoakIT`) |
 
 | Area | State | Next step |
 |---|---|---|
 | Repo split | Done 2026-10-01. This repo holds only tenant-neutral material; after the port the neutrality check printed "base repo is clean" | Run it again after the documentation update and before every commit |
-| Sample application | Replaced 2026-10-02 (B10): the sample lending desk, modules `skillroy-sample-lending-{app,agent,pack,scenarios}`, domain id `lending`, scenarios `basic-loan` and `basic-loan-ui`. The whole code base and the docs were swept for the first sample's vocabulary | B10's remaining question (a desk that takes deposits) is the owner's |
+| Sample application | Replaced 2026-10-02 (B10): the sample lending desk, modules `skillroy-sample-lending-{app,agent,pack,scenarios}`, domain id `lending`, scenarios `basic-loan` and `basic-loan-ui`. The whole code base and the docs were swept for the first sample's vocabulary. Since Phase 4 (2026-10-07) a second sample target, the JCEF web host (`skillroy-sample-web-host`, `-web-host-agent`, `-web-host-scenarios`, behind the Maven profile `jcef`), hosts embedded browsers for the web acceptance | None (the owner kept the desk as it is, 2026-10-06) |
 | Platform | Controller side on Java 25 (`--release 25`, B3); agent side on Java 8 (B4). The Linux test image is JDK 25 (Temurin 25.0.4.1); the previous JDK 21 image is no longer used. Native development JDK is 26 | none |
 | Git and publication | The initial commit was made on 2026-10-06 (everything in the tree, one commit, DCO sign-off); nothing pushed. The remote `Skillroy-AI/skillroy-test-java` is private for now. `LICENSE` (Apache-2.0), `NOTICE`, `CONTRIBUTING.md` (DCO sign-off, no CLA) and the header in every source file (`ci/license-headers.sh`, with the holder's name since 2026-10-06) exist; the root POM carries the publication metadata | Push when the owner says; before the first public release, the repeated security review |
-| Licence audit | `docs/licence-audit.md`: everything the project distributes, bundles or depends on is compatible with Apache-2.0. The packaging gaps (licence files inside the jars and zips, third-party attribution in the CLI distribution, a `<licenses>` element in the root pom) are closed (Phase 1.x, built 2026-10-02) | none |
-| Decisions | B1-B14 answered by the owner 2026-10-02; B15 and B16 follow from the answers; B17-B20, taken without the owner, were confirmed by the owner on 2026-10-06, with two vetoes inside B19 (Q10, Q14) built the same day; **B21** (the Phase 4 contract's fifteen answers) taken without the owner later on 2026-10-06, provisional | The owner's answer to B21 (the interview page) |
-| Design docs (`docs/design/`) | `phase1-contracts.md` as built, with the Phase 1.x, Phase 2 and Phase 3 passages marked "(1.x, built 2026-10-02)", "(Phase 2, built 2026-10-02)" and "(Phase 3, built 2026-10-03)". `phase2-contracts.md` and `phase3-contracts.md` as built (2026-10-03: every deviation of the build and every fix of the review marked in place). Overview: roadmap with Phase 1.x, Phases 2 and 3 built, the new Phase 4 and Phase 7. **`phase4-contracts.md` specified 2026-10-06, not built** | Write the §14.1 changes into the Phase 1-3 contracts and the overview when the Phase 4 build starts; as-built pass after it |
+| Licence audit | `docs/licence-audit.md`: everything the project distributes, bundles or depends on is compatible with Apache-2.0. The packaging gaps (licence files inside the jars and zips, third-party attribution in the CLI distribution, a `<licenses>` element in the root pom) are closed (Phase 1.x, built 2026-10-02). Updated 2026-10-07 for Phase 4: the Playwright and JCEF sets (in no distribution), the new modules, and the agent home's seventh jar, inspected | none |
+| Decisions | B1-B14 answered by the owner 2026-10-02; B15 and B16 follow from the answers; B17-B20, taken without the owner, were confirmed by the owner on 2026-10-06, with two vetoes inside B19 (Q10, Q14) built the same day; **B21** (the Phase 4 contract's fifteen answers) taken without the owner later on 2026-10-06 and confirmed by the owner on 2026-10-07. The Phase 4 build took D59-D69 without the owner (`DECISIONS.md`, "Questions for the owner") | None open; D59-D69 stand unless the owner objects (a possible B22) |
+| Design docs (`docs/design/`) | `phase1-contracts.md` as built, with the Phase 1.x, Phase 2, Phase 3 and Phase 4 passages marked "(1.x, built 2026-10-02)", "(Phase 2, built 2026-10-02)", "(Phase 3, built 2026-10-03)" and "(Phase 4, built 2026-10-07)". `phase2-contracts.md` and `phase3-contracts.md` as built (2026-10-03: every deviation of the build and every fix of the review marked in place; their Phase 4 passages marked built). **`phase4-contracts.md` as built 2026-10-07** (specified 2026-10-06; every deviation of the build and every fix of the review marked in place, the decisions of the build D59-D69). Overview: roadmap with Phases 1.x to 4 built, §3.8 as built | Record the final tree's matrix (the table at the top) |
 | Research notes (`docs/research/`) | Round 1 carried over, finding ids unchanged; `embedded-browser-spi` and `vision-input` new (2026-10-02). Pruned of local-environment detail | None |
 | Security review | Run 2026-10-02 on the pre-port tree: 34 confirmed findings (4 medium, 30 low); the fixes H1-H3 are built (Phase 1.x). The Phase 2 code review of 2026-10-03 had a secrets-and-safety lens (below) | Repeat the review before the first release |
-| Spikes | BS7 done. **BS8 run 2026-10-06, passed with conditions** (`spikes/BS8/RESULT.md`). BS1 answered for Java 8 and Java 25 targets on Linux, parts open. BS2 answered in part. BS4 answered, parts open. BS3, BS5, BS6 open. BS9-BS12 new, not started | See "Base spikes" |
-| CI for this repo | Not chosen. `ci/Dockerfile` and `ci/run-in-linux.sh` are what a pipeline would run; since 2026-10-06 the image holds Chromium's run-time libraries and the runner takes `SKILLROY_PLATFORM` | Needs a JDK 8, a JDK >= 25 and Xvfb on the build agents; the JCEF natives (152 MB per platform) in the Maven cache for the Phase 4 profile |
+| Spikes | BS7 done. **BS8 run 2026-10-06, passed with conditions** (`spikes/BS8/RESULT.md`). **BS5 met 2026-10-07** by the Phase 4 acceptance against JCEF's Chromium (D53; the stock-Chromium run is the manual procedure `spikes/BS5/README.md`). BS1 answered for Java 8 and Java 25 targets on Linux, parts open. BS2 answered in part. BS4 answered, parts open. BS3, BS6 open. BS9-BS12 new, not started | See "Base spikes" |
+| CI for this repo | Not chosen. `ci/Dockerfile` and `ci/run-in-linux.sh` are what a pipeline would run; since 2026-10-06 the image holds Chromium's run-time libraries and the runner takes `SKILLROY_PLATFORM`; the Phase 4 matrix adds `-Pjcef` to every leg | Needs a JDK 8, a JDK >= 25 and Xvfb on the build agents; for the profile `jcef` the JCEF natives (152 MB per platform) and Playwright's jars (the driver bundle about 204 MB) in the Maven cache |
 
 ### What the end-to-end review fixed (2026-10-02)
 
@@ -203,7 +256,8 @@ low; none high or critical), 1 rejected. The confirmed findings are S1-S34; `DEC
 
 ## Base spikes
 
-Results so far come from the Phase 1 tests and the end-to-end review; no `spikes/BS<n>/` directories exist yet.
+Results so far come from the Phase 1 tests, the end-to-end review and the Phase 4 acceptance; `spikes/BS8/` holds
+BS8's probe and write-up and `spikes/BS5/README.md` BS5's manual procedure.
 Thresholds marked "proposed" are starting points, not facts from research. Research references such as
 `attach F1` mean finding `F1` in `docs/research/attach-instrumentation.md`. Measurements marked "before the switch"
 were made with the first sample application and the controller on Java 21; they stay as measurements and are not
@@ -216,10 +270,10 @@ re-run. BS8 comes from `research/embedded-browser-spi.md` R4 (B9); BS9-BS12 from
 | BS2 | The control channel survives a soak; the agent is isolated from the host class path | **Answered in part**: 3-minute soak per JDK (before the switch, on the JDK server), bounds and isolation tested; the agent's own listener (H1) is built and its per-call cost measured (1.4-5 ms). Open: the one-hour soak, loader collectability, a soak on the agent's own listener. Finding: about 45 ms per call on the JDK HTTP server on Java 8 and Java 21 targets; absent on a Java 25 target; gone with H1 |
 | BS3 | Byte Buddy retransformation with inline Advice and a bootstrap `Spy`; original bytes restored on detach | Open; partly shown in round 1 on toy programs |
 | BS4 | Which Swing input rungs work on an Xvfb display with no window manager | **Answered** for Java 8 and 21 (before the switch); the end-to-end check built on it passed on Java 8 and Java 25 targets. Open: the ROBOT rung (not built; see BS9), a large-sample focus statistic, the display-test flake |
-| BS5 | Playwright attaches over CDP to an already-running Chromium safely | Open |
+| BS5 | Playwright attaches over CDP to an already-running Chromium safely | **Met 2026-10-07 by the Phase 4 acceptance** against JCEF's Chromium in the image (D53): 50 of 50 attach attempts against a frozen page ended with `FROZEN_TARGETS` within the deadline, the slowest in about 2.02 s. A stock-Chromium run is a manual procedure, `spikes/BS5/README.md` |
 | BS6 | `SqlGuard` accepts and rejects correctly across SQL dialects | Open (the agent-side statement guard of `data.query` is a different, simpler check and is built) |
 | BS7 | `javac --release 8` still works on current JDKs | Done 2026-10-01 |
-| BS8 | A real JCEF browser runs in the Linux test image and the in-process DevTools path works | **Run 2026-10-06, passed with conditions**: both rendering modes on a Java 25 target, off-screen on a Java 8 target; the DevTools channel verified; Chromium 152's first-run terms dialog must be pre-accepted; `Target.getTargetInfo` does not answer (the main frame id is the target id); windowed JCEF on Java 8 creates no browser. `spikes/BS8/RESULT.md` |
+| BS8 | A real JCEF browser runs in the Linux test image and the in-process DevTools path works | **Run 2026-10-06, passed with conditions**: both rendering modes on a Java 25 target, off-screen on a Java 8 target; the DevTools channel verified; Chromium 152's first-run terms dialog must be pre-accepted; `Target.getTargetInfo` does not answer (the main frame id is the target id); windowed JCEF on Java 8 creates no browser. `spikes/BS8/RESULT.md`. Since Phase 4 (2026-10-07): the timeouts and the unanswered `Target.*` calls were JCEF's client losing an answer that arrives early, which the `jcef` adapter avoids (D69) |
 | BS9 | Robot input on the test display and on a desktop session | New, not started; comes before Phase 7 |
 | BS10 | Routed in-JVM dispatch behaves like Robot | New, not started |
 | BS11 | `PAINT` capture is deterministic | New, not started |
@@ -351,6 +405,17 @@ module's `target/`).
 - **Does not prove.** Compatibility with the older Chromium inside any particular embedded web view. That pairing
   is checked where such a target exists. A JCEF sample started with a debug port (BS8) could later serve as the
   target and exercise the CDP path and the in-process path against one embedded browser.
+- **Result (2026-10-07): met** by the Phase 4 acceptance against JCEF's Chromium 152 in the image (decision D53,
+  `design/phase4-contracts.md` §12.2 item 6): the web host sample is that target, and `CdpAttachSoakIT` runs once per
+  target Java against a host of its own with a debug port. 50 calls of `CdpAttach.connect` against a page in an
+  endless loop each ended with `FROZEN_TARGETS` naming it, within the 30 s deadline: slowest and mean 2017 and 2007 ms
+  on the arm64 image with a Java 25 target, 2014 and 2007 ms with a Java 8 target, 2021 and 2010 ms on the amd64 image.
+  Connecting without the probe ended with `TIMEOUT` after about 10 s, the driver gone: the external deadline, not the
+  probe, prevents the hang. The opt-in `RELOAD` recovered a stalled page (busy in chunks with yields between them;
+  the attach succeeded after 8.2 to 9.0 s) but not a page in an endless loop (`FROZEN_TARGETS` after about 18 s).
+  Screenshots over CDP are part of the acceptance's failure evidence; tracing was checked outside the build, against
+  a headless Chromium 148, by the review and its fix wave. The run against a stock Chromium is the manual procedure
+  `spikes/BS5/README.md`.
 
 ### BS6 `SqlGuard` across dialects
 
@@ -413,6 +478,16 @@ module's `target/`).
     about 2.5 s; a host with two browsers takes 0.3-0.6 GB of JVM RSS plus 0.5-0.8 GB in seven helper processes.
   - Chromium's cache root must be on the container's own file system (lock files and sockets), not on a directory
     shared with the host.
+- **Since Phase 4 (2026-10-07)**, from the kit and the end-to-end acceptance against the web host
+  (`design/phase4-contracts.md` §9.1, §10.3): the "one evaluation in twenty" that timed out and the `Target.*` calls
+  that never answered were JCEF 152's `CefDevToolsClient` losing an answer that arrives before the call's message id;
+  the `jcef` adapter talks over JCEF's raw DevTools methods with a message observer of its own and has lost no answer
+  since (D69). A browser that is not showing is not rendered: windowed its screenshot never answers, off screen it
+  holds the background colour only, so its `bitmap()` is refused. Windowed rendering restores a cleared viewport
+  asynchronously. A `Page.enable` still in flight when a navigation commits misses that navigation's
+  `frameNavigated`. The bare `Exception in thread "AWT-EventQueue-0"` lines a host prints off screen are JCEF's own
+  (`CefClient.onGotFocus` re-entering until the stack overflows). A `data:` page ignores a change of its fragment.
+  Still open: why windowed JCEF on a Java 8 target creates no browser, and why a `srcdoc` iframe never loads.
 
 ### BS9-BS12 Vision and human-like input
 
@@ -668,7 +743,11 @@ evening; a second run of the fixed tree is the first thing to do next session.
 
 ### Phase 4: embedded web views, CDP and the in-process SPI
 
-**Contract: `docs/design/phase4-contracts.md`** (specified 2026-10-06, not built; B21 holds its provisional answers).
+**Contract: `docs/design/phase4-contracts.md`** (specified 2026-10-06; B21 holds its answers, confirmed by the owner
+2026-10-07; as built since 2026-10-07). **Built 2026-10-07** by seven implementers in isolated copies, integrated into
+the main tree, reviewed through three lenses with sceptics and corrected by a fix wave (section below). The contract's
+§14.1 changes were written into the Phase 1-3 contracts and the design overview before the code and are marked built
+since.
 Decision B9: one in-process SPI that wraps both JCEF and reflective JxBrowser access. This replaces the earlier
 plan of a JxBrowser-only module that could be tested against a stand-in only: JCEF is open source, so a real
 embedded browser can run in the public image.
@@ -676,20 +755,121 @@ embedded browser can run in the public image.
 - [x] BS8 passed with conditions (JCEF in the Linux test image; 2026-10-06; `spikes/BS8/RESULT.md`): windowed and
   off-screen on Java 25, off-screen on Java 8; the sentinel files, the target id and the `srcdoc` finding are
   conditions the contract carries
-- [ ] `skillroy-cdp`: connect wrapper, liveness probe, external deadline, page mapping by target id, readiness, tracing
-- [ ] The `WebEngineAdapter` / `WebBrowser` SPI in `skillroy-agent-api` (`…agent.api.spi.web`), optional operations
-  behind `WebCapability` flags; `BrowserRegistryAdapter` made technology-neutral
-- [ ] `skillroy-agent-web`: the `web.*` primitives written once against the SPI, and two reflective adapters, `jcef`
+- [x] `skillroy-cdp`: connect wrapper, liveness probe, external deadline, page mapping by target id, readiness, tracing.
+  As built (P4 §5): `CdpAttach` runs every Playwright call of an attach on one platform thread under the external
+  deadline; `TargetProbe` refuses an endpoint that serves none of the target's browsers (D65); `CdpWebPath` serves the
+  web verbs, traces into a private directory (D59) and sets the viewport override on its own CDP session (D64); an
+  optional module found through `ServiceLoader<WebPath>` (D49)
+- [x] The `WebEngineAdapter` / `WebBrowser` SPI in `skillroy-agent-api` (`…agent.api.spi.web`), optional operations
+  behind `WebCapability` flags; `BrowserRegistryAdapter` made technology-neutral. As built (P4 §3): plus
+  `enumerationNotes()`, and `Invocation.secretParams()` in the agent API (D68)
+- [x] `skillroy-agent-web`: the `web.*` primitives written once against the SPI, and two reflective adapters, `jcef`
   (on `CefBrowser.getDevToolsClient()`, no debug port needed) and `jxbrowser` (lines 7, 8 and 9); no vendor code
-  and no compile-time dependency
-- [ ] A small JCEF sample module behind a Maven profile; the adapter contract kit published as a test artifact
-- [ ] Every web verb has a CDP implementation and an in-process implementation; the one used is recorded
-- [ ] BS5 passed
-- [ ] **Exit:** over 50 runs, attach to a running Chromium with a deliberately frozen page target completes or
+  and no compile-time dependency. As built (P4 §4): thirteen primitives; descriptor-driven adapters (D54), the `jcef`
+  one on JCEF's raw DevTools channel where it resolves (D69); the jar holds 155 classes and nothing outside
+  `ai/skillroy/` and `META-INF/` (`licence-audit.md` §3)
+- [x] A small JCEF sample module behind a Maven profile; the adapter contract kit published as a test artifact. As
+  built (P4 §9, §10): three modules behind the profile `jcef` (the web host, its agent module, its pack and scenarios);
+  the kit is `skillroy-agent-web`'s `test-jar`, passing against the fake JCEF (both channels) and the JxBrowser fake
+  (plain and chained), and against real JCEF in the image in the acceptance implementer's runs, before the fix wave:
+  12 of 12 off screen and 11 with one skipped windowed on Java 25, 12 of 12 off screen on a Java 8 test JVM; on the
+  final tree it runs in the matrix at the top
+- [x] Every web verb has a CDP implementation and an in-process implementation; the one used is recorded. As built
+  (P4 §5.2, §6.1, §8.2): the CDP path serves every `web.*` primitive but `web.browsers`, `web.cdp.status` and
+  `web.reload` (always the agent's) and hands a call with secret parameters to the agent; every web call record
+  carries `path`, every fall-back a `web.fallback` record
+- [x] BS5 passed: met by the acceptance against JCEF's Chromium, D53; manual procedure in `spikes/BS5/README.md`
+- [x] **Exit:** over 50 runs, attach to a running Chromium with a deliberately frozen page target completes or
   aborts within the external deadline; one `web.*` scenario passes over CDP against a stock Chromium; the adapter
   contract kit passes against a real JCEF browser in the Linux image; the `jxbrowser` adapter's reflection plumbing
   passes against a neutral fake. Running the kit against the real JxBrowser needs a licence and happens outside
-  this repo. `INPUT` and `RAW_PROTOCOL` stay reserved.
+  this repo. `INPUT` and `RAW_PROTOCOL` stay reserved. As run (P4 §12.2, the criteria made precise there): every item
+  passed in the Linux runs of the acceptance's implementer, on the arm64 image with a Java 25 and a Java 8 target and
+  on the amd64 image with a Java 25 target; the CDP scenario W1 ran against JCEF's Chromium (D53), over CDP and over
+  the agent from one committed plan. "Twice in a row without a flake" on the final tree is the matrix at the top
+- [x] **Code review** (2026-10-07): three lenses, each verified by a sceptic; 27 findings and six more from the
+  sceptics, every one confirmed, none refuted; each fixed by the fix wave or answered by a contract amendment, two
+  with a residual left open (gaps 42 and 47; section below)
+- [x] **As built** (2026-10-07): `design/phase4-contracts.md`, the Phase 1-3 contracts' Phase 4 passages, the design
+  overview, `DECISIONS.md` (B21), `README.md` and `licence-audit.md` state what the code does
+
+### Phase 4 code review (2026-10-07)
+
+The method of Phases 2 and 3: three lenses, each run by one reviewer on the integrated tree before the acceptance's
+implementer landed, and each verified by a sceptic who tried to refute every finding with probes in a copy of the tree
+and added what the lens had missed. **Contract fit** (L1): 5 findings (0 high, 1 medium, 4 low) and one added (N1,
+low). **Host safety and secrets** (L2): 13 findings (2 high, 3 medium, 8 low; the sceptic raised F3 to high) and four
+added (N1 medium, N2-N4 low). **Tests and determinism** (L3): 9 findings (0 high, 5 medium, 4 low) and one added (N1,
+low). Every finding was confirmed, many with changes to the proposed fix; none was refuted. Five pairs were one item
+seen through two lenses (the re-probe, the probe's class loading, the core's `secretParams` test, the kit's EDT
+watchdog, a timer race in the probe's test), which leaves 28 distinct items. The most important:
+
+- **A traced CDP run wrote typed secrets in clear into the run's output directory** (L2 F1, high). Playwright appends
+  its live trace (page snapshots with the values of input fields, console text) to files in the directory it is given
+  and never deletes them, on passing runs too, and a later failing run's `failure/web-trace.zip` carried an earlier
+  run's secrets. Now the CDP path traces into a private, owner-only directory it deletes at close, and the executor
+  decides at step 1a, before the path opens, whether a call may carry a secret, and then opens it without tracing
+  (D59).
+- **The JCEF adapter sent calls again after Chromium's "Inspected target navigated or closed"** (L2 F2, high), which
+  it took for a closed client: clicks ran twice, abandoned calls ran in the page after the caller's timeout, and a
+  second init script stayed on the application's client. Now only a call the client refused before sending it is sent
+  again, and only one of the adapter's own reads; the module retries its reads after a navigation (D62).
+- **An abandoned tap drain lost the events it had taken** (L2 F3, raised to high: a wrong `FAIL` whenever a tapped page
+  stays busy for a second or two right after firing, reproduced on both paths against a real Chromium). Now one drain
+  per page is outstanding and a late one is published; the same rule for `web.waitFlag`'s polls closed L2 F4, abandoned
+  57 KB evaluations piling up in the application's DevTools client (D63).
+- **Every `window.opened` ran a whole probe cycle with a Swing walk** while any adapter was `UNAVAILABLE` (L1 F1 =
+  L2 F5, medium), which in a JCEF application means on every window and dialog; now only the adapters that can have
+  changed are probed, cheaply (D60), and a re-probe in flight during `uninstall` can no longer revive a detached adapter
+  (L1 N1).
+- **From the tests lens**: the adapters' threads restarted after `detach()` when a callback came late (L3 F2;
+  `AdapterThreads.close()` is terminal now); kit item 1 could not fail with either fake (L1 F5 = L3 F3; it now checks
+  initialisation and package scope against a host that loaded only the gate, D61); the kit's EDT watchdog forgave a
+  block in an event listener (L3 F1 = L2 F12); no test proved that the dispatcher fills `Invocation.secretParams()` (L3
+  F4 = L2 F11). `TargetProbeTest` had a cold-JVM time bound and two racing timers (L3 F5; L2 N1 = L3 N1).
+- Smaller: the shape of the `NOT_FOUND` data (L1 F3); a stale `DevToolsActivePort` file, or a foreign process on the
+  port, attaching the run to another browser (L1 F4, D65); a JCEF older than 2024-01, served on neither path (L1 F2, a
+  contract amendment); an attach left open by an unexpected failure (L2 F6); `web.bitmap` starting AWT in a target
+  without a user interface (L2 F7); a dropped post stopping the re-probe for good (L2 F8); unbounded JxBrowser calls
+  (L2 F9); taps and init scripts left behind in pages (L2 F10); `clear: true` pinning the viewport on the CDP path
+  (L2 F13, D64); a `web.trace` success record without a trace (L2 N2); fakes too kind to show F2 and F3 (L2 N3); client
+  replacement on real JCEF, which the fakes cannot show (L2 N4); the kit's violation checks charged to the next test
+  (L3 F7); threads compared by name (L3 F8); the untested Java 8 strategy mark (L3 F9).
+
+**The fix wave**, three implementers in isolated copies, each change with a test, checked by mutation (the test fails
+when the old behaviour is put back):
+
+- *The agent's web module and one agent-core test* (agent-web 160 tests, agent-core 186): L1 F1, F3, F4 (the agent's
+  half), F5 and N1; L2 F2-F5, F7-F12, N3 and N4; L3 F1-F4 and F6-F9. It merged the acceptance implementer's agent-web
+  changes and fixed their residual: `subscribe()` now waits for the page's `Page.enable` and `Runtime.enable` answers.
+  Left open: a time-based rate limit on the re-probe (gap 42), bounds on JxBrowser's observer registration and
+  `cdpEndpoints` (gap 47). Three checks that need real JCEF (init scripts added once per client, the `subscribe()`
+  wait, kit item 5's judged console event) were made by the kit's run in the final tree's matrix (table at the top):
+  the first round showed that the reload by script the kit first used never happens on a `data:` page (Chromium
+  refuses a renderer-initiated navigation of such a document), so the kit now navigates through the fixture; after
+  that change the kit passed in every leg of both rounds.
+- *`skillroy-cdp`* (105 tests, 11 new): L2 F1 (the private trace directory), F3 (the drain publishes from inside the
+  Playwright operation), F6 and F13 (the override on the path's own session); L1 F4's second half (the endpoint must
+  serve the target's browsers); L3 F5 and L2 N1 = L3 N1. Checked against Chrome for Testing 148 headless outside the
+  build.
+- *The executor* (`skillroy-scenario`, 447 tests, 22 new): L2 F1's executor half (`SecretParamsForecast`: the trace is
+  withheld at step 1a when a call may carry a secret, by the provenance rule of the call's `secretParams`) and L2 N2 (a
+  `web.trace` record of success only for a non-empty file).
+- *The orchestrator*: the contract amendments the verdicts asked for (among them L1 F2's), and the CLI POM's test
+  dependency on the distribution zip (the build trap under "Environment notes").
+
+**What the runs against real JCEF found** (the acceptance's implementer, on its copy, before the fix wave; each fixed
+or written into the contract): JCEF 152's `CefDevToolsClient` loses an answer that arrives before the call's message
+id (kit items 3, 4, 9 and 11 timed out), so the `jcef` adapter talks over JCEF's raw channel (D69); a hidden browser is
+not rendered, so its `bitmap()` is refused and kit item 8 accepts that; windowed rendering restores a cleared viewport
+asynchronously, so `clearResize` waits for it; a `Page.enable` in flight when a navigation commits misses its
+`frameNavigated`, so the kit's fixture waits for the answer; `RELOAD` recovers a stalled page but not an endless loop;
+the web host's `#freeze` and `#stall` cannot be reached on `data:` pages, so the soak starts its loops by evaluation;
+the bare `Exception in thread "AWT-EventQueue-0"` lines are JCEF's own; `cdpTargetId` is known without a port; with a
+port the CDP path serves W2's `web.resize`; and for an expression that throws, `web.waitFlag` keeps polling on the
+agent but fails at once over CDP (gap 38).
+
+The review's reports, verdicts, briefs and implementer reports are with the session's working files (2026-10-07).
 
 ### Phase 5: AI layer
 
@@ -763,7 +943,9 @@ change that fits before Phase 2. "Closed (built)" means the change was built in 
 (2026-10-02) and the contract states it as built. "P2 §n" is a section of `design/phase2-contracts.md`, whose
 §15 takes gaps 4, 12 (partly), 20 (partly), 25 and 27 and defers 9-11, 13, 18, 19, 21, 22, 24 and 28 past Phase 2
 without a new phase; their Phase column still shows where they were first placed. "Closed (built)" marks the gaps
-Phase 1.x closed on 2026-10-02; they stay in the table until the merged tree's verification is recorded.
+Phase 1.x closed on 2026-10-02; they stay in the table until the merged tree's verification is recorded. Gaps 34-47
+were recorded by Phase 4 (`design/phase4-contracts.md` §13, which also says what Phase 4 did for gaps 21, 22, 28 and
+31); "P4 §n" is a section of that contract.
 
 Closed by Phase 1, and therefore no longer listed: the provider-executed form of `DataSourceProvider`,
 `SyncPolicy.promptTopics`, cleanup calls and `recover`, `DomainPack.preflight()`, guarded expectations with
@@ -806,6 +988,20 @@ reflectively callable `EmbeddedAgent.start`, and redaction of secrets in JVM arg
 | 31 | `ROBOT` type mode, `OPTION_VALUE` dismissal, `swing.events` | In the design's catalogue, not in the Phase 1 contract | Add them to the contract when their phase starts | 6 |
 | 32 | Hook catalogue: an `enabled` flag per hook | A pack catalogues a target and leaves it off | In the design (§2.6); build with the hooks module | 6 |
 | 33 | Third-party isolation when the host ships an older copy of the same library | The agent loader is child-first only for the agent's own package prefix | Relocate under that prefix; covered by the added BS3 case | 6 |
+| 34 | A `PAINT` capture must guard embedded-browser components | BS8: `printAll` throws for an off-screen JCEF canvas and paints a windowed one blank, so a Swing capture of a window with such a browser would fail | The guard: the capture paints part by part, a part that throws becomes a placeholder listed in `skipped` (P1 §6) | closed (built, Phase 4) |
+| 35 | A browser with no view and no seed is invisible | JxBrowser has no process-wide list of browsers: an engine whose browser is in no window is found only through a seed (browser-spi §F23) | The pack's `BrowserRegistryAdapter` hands it in (P4 §9.2 is the example); nothing more in the base | later, if a target needs it |
+| 36 | `web.dom.click` is a DOM click, not a pointer click | `el.click()` fires no `pointerdown`, `mousedown` or `mouseup`; a page that listens for those does not react | `INPUT` (reserved) and `web.pointer` with the vision bolt-on | 7 |
+| 37 | `web.resize` cannot change a windowed browser's Swing bounds | It sets a protocol-level viewport override; a page that measures its component sees the override only | `applied: COMPONENT` is reserved for a variant that resizes the component | later |
+| 38 | `web.waitFlag` answers an expression that throws differently on the two paths | The agent polls on and answers `ready: false` with `lastError` (the base verb then ends `SYNC_TIMEOUT`); the CDP path fails at once with `SCRIPT_ERROR` (`ASSERTION`) | Choose one behaviour for both paths (P4 §4.2) | next amendment |
+| 39 | A hidden JCEF browser has no bitmap | Chromium renders nothing for a browser that is not showing, so `web.bitmap` on such a browser is refused with `CAPABILITY_UNAVAILABLE` (the SPI as specified promised a bitmap whatever the view's state) | None in the base (a technology limit); the aria snapshot and the page text of such a browser still read | open |
+| 40 | The SPI has no reload and no bitmap source | `web.reload` and the bitmap's `source` use the module-internal `BrowserExtras` of the built-in adapters; a third-party adapter is reloaded through `location.reload()` and reports `VENDOR` (D67) | A default method on `WebBrowser`, source- and binary-compatible | later amendment |
+| 41 | Three member names of the JxBrowser descriptor are unverified | `getChromeVersion` or `CHROME_VERSION_MAJOR`, `FrameLoadFailed.error` or `errorCode`, and `Browser.set` matched by its parameter count could not be checked without the product (P4 §4.5) | The contract kit against the real product, in a repository that holds a licence | wall (a JxBrowser licence) |
+| 42 | No rate limit on the re-probe after `window.opened` | The re-probe is coalesced and cheap (probes only, no Swing walk), and the review's proposed one-a-second limit was not built (P4 §4.1) | A time-based limit, if a target with many windows shows the cost | later |
+| 43 | A JCEF older than 2024-01 is served on neither path | Without `getDevToolsClient` the adapter is `UNAVAILABLE` and reports no endpoint, so not even a configured port is used (P4 §4.5) | An amendment that reports the port of such a JCEF for the CDP path alone | later, if a target needs it |
+| 44 | Windowed JCEF on a Java 8 target is unverified | BS8: no native browser was created, no error logged; the strategy says "windowed, Java 8: unverified" | Find the cause (BS8's open question) | open |
+| 45 | A call the CDP path serves reads the agent's sequence three times | The path reads `lastSeq` before and after the primitive and the executor reads it as well (P4 §5.2) | Drop the path's two reads | later (small) |
+| 46 | A killed JVM leaves a traced CDP path's trace directory | The private, owner-only `skillroy-cdp-trace-*` directory is deleted at close; a JVM killed meanwhile leaves it in the temporary directory (P4 §6.4) | Delete stale ones at the next open, or accept and document (done) | accepted |
+| 47 | JxBrowser's observer registration and `cdpEndpoints` call the vendor without a bound | Every other vendor call of the adapter runs on its own threads with a bound; whether `on`, `set` and the endpoint read can block needs the product (P4 §4.5) | Bound them as the accessors are, once a run against the product shows the need | with gap 41 |
 
 Small items for the module owners, none of them a contract matter: `swing.snapshot` shows Swing's own made-up
 names such as `null.layeredPane`; module version strings are inconsistent (`0.1.0` and `0.1.0-SNAPSHOT`); in
@@ -829,16 +1025,35 @@ Kept generic on purpose: nothing here names a machine, a user or a local path.
   variable `SKILLROY_JDK8_HOME`. Its host path must never be written into a file of this repo.
 - On an arm64 development machine the image runs under emulation: a whole-reactor run takes about 7 to 8 minutes
   (407 s and 467 s on 2026-10-02).
-- The build is run offline (`-o`) once the local Maven repository is filled.
-- Downloads still to come, authorised by the owner in general terms ("install what is needed"):
-  - BS5: a Chromium binary and Playwright's driver bundle (about 194 MB, extracted on first use).
-  - BS8 and Phase 4: **done for BS8 on 2026-10-06**: the JCEF natives for Linux x86-64 and arm64 (152 and 168 MB)
-    are in the local Maven cache (the spike's own POM declares them; the Phase 4 sample will do the same behind the
-    profile `jcef`), and Chromium's fifteen run-time libraries are in the image (`ci/Dockerfile`; the list is in
-    `spikes/BS8/RESULT.md` §3 and `licence-audit.md` §7). Also downloaded for the spike, kept outside the repository:
-    a Linux aarch64 Temurin JDK 8, so that an arm64 build of the image (`SKILLROY_PLATFORM=linux/arm64`) can run
-    the Java 8 configurations natively on an arm64 development machine.
-  - Each needs a licence check when it is adopted (`licence-audit.md` §8); the spike's artifacts are listed there.
+- The build is run offline (`-o`) once the local Maven repository is filled. **Never `mvn install` this project.**
+  A partial build runs with `-am` (`mvn -o verify -pl <module> -am`), and a module whose tests need the agent home
+  declares `skillroy-agent-dist` (type `zip`, test scope, every transitive dependency excluded) as a test dependency,
+  so that `-am` builds the distribution in the same reactor. The trap this avoids, found 2026-10-07: a partial build of
+  the CLI module, which lacked that declaration, took the zip from a stale snapshot in the local Maven repository and
+  unpacked jars older than the HMAC handshake into its test agent home, so that `AttachIT` failed with a 401 on
+  `/ping`. The CLI POM declares the zip now, as the lending and the web host scenarios POMs do, and the stale
+  snapshots were deleted.
+- Downloads, authorised by the owner in general terms ("install what is needed"), all done:
+  - BS8 and Phase 4: the JCEF natives for Linux x86-64 and arm64 (152 and 168 MB) are in the local Maven cache (the
+    web host modules declare them behind the profile `jcef`, `-Dskillroy.jcef.platform` choosing one), and
+    Chromium's fifteen run-time libraries are in the image (`ci/Dockerfile`; the list is in `spikes/BS8/RESULT.md` §3
+    and `licence-audit.md` §7). Also kept outside the repository: a Linux aarch64 Temurin JDK 8, so that an arm64
+    build of the image can run the Java 8 configurations natively on an arm64 development machine.
+  - Phase 4: Playwright Java 1.63.0 with its driver and driver bundle (the bundle about 204 MB) in the local Maven
+    cache. No browser is downloaded: BS5 is met against JCEF's Chromium (D53), and the manual stock-Chromium procedure
+    (`spikes/BS5/README.md`) uses a Chromium its user provides.
+  - Their licences are audited in `licence-audit.md` §5 (Playwright and JCEF moved there from §8 when Phase 4 built
+    them); §8 lists what is still planned.
+- **Images.** `skillroy-test-java-ci:local` is the image `ci/Dockerfile` builds for amd64, the project's CI
+  architecture; since BS8 it holds Chromium's run-time libraries, so it also runs the profile `jcef`. An arm64
+  development machine runs it under emulation. An arm64 build of the same Dockerfile (here tagged
+  `skillroy-test-java-ci:bs8-arm64`, chosen with `SKILLROY_CI_IMAGE` and `SKILLROY_PLATFORM=linux/arm64`) runs
+  natively and several times faster; it needs `-Dskillroy.jcef.platform=linux-arm64` and, for the Java 8
+  configurations, a Linux aarch64 JDK 8 as `SKILLROY_JDK8_HOME`.
+- **Playwright's driver** is extracted by the first `Playwright.create` of a JVM, about 140 MB on Linux x86-64 and
+  136 MB on arm64, into `PLAYWRIGHT_DRIVER_TMPDIR` or else the Java temporary directory, and is deleted at the JVM's
+  exit. The web host acceptance points it at its module's `target/playwright-driver` and extracts it once per test JVM
+  (0.7 to 1.7 s in the runs of 2026-10-07).
 
 ## Walls
 
@@ -848,13 +1063,14 @@ Work that cannot proceed without the project owner, or without something only th
 |---|---|---|
 | The push | B1 | The initial commit exists (2026-10-06); the push to the private remote `Skillroy-AI/skillroy-test-java` waits for the owner's word. History is permanent once pushed |
 | Model provider API key | B7 | Anything live in Phase 5, so all of Phase 5 beyond interfaces and replay; after it the live parts of Phase 7 and BS12. The owner (2026-10-06): available when Phase 5 starts |
-| A JxBrowser licence | B9 | Real verification of the `jxbrowser` adapter, by the contract kit in a repository that holds a licence, outside this repo. Phase 4 reaches its public exit without it. The owner (2026-10-06): a licence is available, so that verification can follow the Phase 4 build in the private overlay's repository |
+| A JxBrowser licence | B9 | Real verification of the `jxbrowser` adapter. The adapter exists (built 2026-10-07) and passes the contract kit against the neutral fake, plainly and with the init-script chaining option; the kit (`skillroy-agent-web`'s `test-jar`) runs against the real product only in a repository that holds a licence, outside this repo, through a `WebAdapterFixture` over a real engine. That run also settles three member names of the descriptor and whether some vendor calls can block (gaps 41 and 47). Phase 4 reached its public exit without it. The owner (2026-10-06): a licence is available, so that verification can follow in the private overlay's repository |
 | A Windows host | B13, Phase 6 | Verification of the fixes S7 and S15 (not verified on Windows); the Windows path of Phase 6. The owner (2026-10-06): later, a Windows 11 machine, which also runs the tenant layers' testing under Windows and under WSL2 |
 
 Not walls any more: the licence, the holder's name, the first commit and the remote (B1), the final names and the
 domain behind the groupId (B2) and the sample domain with its deposits (B10) are decided. B17-B20 are confirmed
-(2026-10-06), and the two vetoes inside B19 are built. Open for the owner: B21, the fifteen provisional answers of the
-Phase 4 contract (`DECISIONS.md`, the interview page).
+(2026-10-06), and the two vetoes inside B19 are built. B21 (the fifteen answers of the Phase 4 contract) was
+confirmed by the owner on 2026-10-07, and so was B22 (the eleven decisions the Phase 4 build took without the
+owner, D59-D69) the same evening; nothing is open for the owner.
 
 The review items of the end-to-end review, now decided (gap numbers refer to the table above):
 
@@ -868,19 +1084,16 @@ The review items of the end-to-end review, now decided (gap numbers refer to the
 
 ## Next steps I would take
 
-1. **The push**, when the owner says (the commit of 2026-10-06 is local); the repeated security review before the
-   first public release.
-2. **Phase 4, contract first**: BS8 is done (2026-10-06, passed with conditions) and the contract is written
-   (`design/phase4-contracts.md`, specified, not built; its fifteen provisional answers are B21, on the interview
-   page). Next: the owner's answers to B21, then the build in the manner of Phases 2 and 3 (implementers in isolated
-   copies by module, review with sceptics, matrix, as-built docs). Before the build: write the §14.1 changes into the
-   Phase 1-3 contracts and the design overview. Open from BS8: why windowed JCEF 152 on a Java 8 target creates no
-   browser, and why a `srcdoc` iframe never loads in the image.
+1. **The push**, when the owner says (the commits of 2026-10-06 and the Phase 4 commit of 2026-10-07 are local);
+   the repeated security review before the first public release.
+2. **Phase 4 follow-ups**: the JxBrowser kit run in the private repository that holds the
+   licence (the wall "A JxBrowser licence"); why windowed JCEF on a Java 8 target creates no browser (unverified since
+   BS8, gap 44) and why a `srcdoc` iframe never loads in the image; then the open gaps 35-47, first the `web.waitFlag`
+   parity (gap 38) and the redundant sequence reads (gap 45). D59-D69 are B22, confirmed by the owner on 2026-10-07.
 3. **Phase 5 groundwork that needs no model key**: the `InferenceGateway` SPI shape and the `inference.` seams are
    reserved; everything live waits for B7 (a wall).
-4. **Investigate the display-test flake** (`HostSafetyDisplayTest` on 2026-10-02 and `WindowActivationDisplayTest` on
-   2026-10-06, both on the Java 8 test JVM; the hypotheses and the retry mitigation are under "Open flake" in "Status at
-   a glance"; `HostSafetyDisplayTest`, one failure in three agent-side runs on
-   Java 8 on 2026-10-02; not seen in the four agent-side runs since), on an otherwise idle machine; and the
-   garbage-collection-dependent abort of `SwingDisplayTest.refBecomesStaleOnceTheComponentIsCollected` seen once
-   under emulation on 2026-10-03.
+4. **Investigate the display-test flakes** (`HostSafetyDisplayTest` on 2026-10-02 and `WindowActivationDisplayTest`
+   on 2026-10-06, both on the Java 8 test JVM; `ModalBlockingDisplayTest` and `ComponentFallbackDisplayTest` in 4 of 7
+   runs on 2026-10-07, on a Java 25 test JVM in the arm64 image; the hypotheses and the retry mitigation are under
+   "Open flake" in "Status at a glance"), on an otherwise idle machine; and the garbage-collection-dependent abort of
+   `SwingDisplayTest.refBecomesStaleOnceTheComponentIsCollected` seen once under emulation on 2026-10-03.

@@ -1,0 +1,8 @@
+# Negative (phase4-contracts.md 9.3): an expression that throws in the page fails as ASSERTION with SCRIPT_ERROR.
+scenario: script-error
+pack: webhost
+steps:
+  - call:
+      primitive: web.evaluate
+      args: { by: { tag: front }, expression: "(function () { throw new Error('webhost negative'); })()" }
+timeouts: { step: 10s }

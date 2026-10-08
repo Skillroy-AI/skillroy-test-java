@@ -1,0 +1,8 @@
+# Negative (phase4-contracts.md 9.3): web.path pinned to cdp against a host started without a remote-debugging port
+# ends as ERROR / PRECONDITION_FAILED naming web.cdp; no step runs.
+scenario: cdp-without-port
+pack: webhost
+web: { path: cdp, browser: { tag: front } }
+steps:
+  - webClick: { role: button, name: Borrow }
+timeouts: { step: 10s }

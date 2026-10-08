@@ -268,44 +268,50 @@ class Phase3CompileTest {
                 + "  item: { query: Item, args: { deposit: { lte: $env.now } } }\nsteps: []\n");
     }
 
+    /**
+     * Phase 4 (phase4-contracts.md 7.3) raised the written version to 4; the version 3 rules stand: a version 3 plan
+     * still reads, and the Phase 3 keys still need version 3.
+     */
     @Test
-    void version3IsWrittenVersions1To3AreReadAndOthersRefused() throws Exception {
+    void version4IsWrittenVersions1To4AreReadAndOthersRefused() throws Exception {
         Plan plan = compile(waivers(negWith("{ check: toy.negate.check, tolerance: \"0.00\" }"), PLAIN_CHECK));
-        assertEquals(3, plan.planVersion());
-        assertEquals(3, Plan.VERSION);
-        String v3 = plan.toJsonText();
-        assertEquals(v3, Plan.parse(v3).toJsonText());
-        for (String version : List.of("0", "4", "-1")) {
-            ScenarioException e = assertThrows(ScenarioException.class, () -> Plan.parse(v3.replace(
-                    "\"planVersion\": 3", "\"planVersion\": " + version)));
-            assertTrue(e.getMessage().contains("not supported (expected 1, 2 or 3)"), e.getMessage());
+        assertEquals(4, plan.planVersion());
+        assertEquals(4, Plan.VERSION);
+        String v4 = plan.toJsonText();
+        assertEquals(v4, Plan.parse(v4).toJsonText());
+        for (String version : List.of("0", "5", "-1")) {
+            ScenarioException e = assertThrows(ScenarioException.class, () -> Plan.parse(v4.replace(
+                    "\"planVersion\": 4", "\"planVersion\": " + version)));
+            assertTrue(e.getMessage().contains("not supported (expected 1, 2, 3 or 4)"), e.getMessage());
         }
-        String v2 = v3.replace("\"planVersion\": 3", "\"planVersion\": 2");
+        String v3 = v4.replace("\"planVersion\": 4", "\"planVersion\": 3");
+        assertEquals(v4, Plan.parse(v3).toJsonText(), "a version 3 plan with cross-checks is read as version 4");
+        String v2 = v4.replace("\"planVersion\": 4", "\"planVersion\": 2");
         ScenarioException crossCheck = assertThrows(ScenarioException.class, () -> Plan.parse(v2));
         assertTrue(crossCheck.getMessage().contains("'crossCheck' needs a version 3 plan"), crossCheck.getMessage());
         Plan withoutCheck = compile(waivers("{ fn: Negate, args: [$item.deposit] }",
                 "{ where: { loan_id: $item.loan }, sum(amount): \"0.99\" }"));
-        String v2Aggregates = withoutCheck.toJsonText().replace("\"planVersion\": 3", "\"planVersion\": 2");
+        String v2Aggregates = withoutCheck.toJsonText().replace("\"planVersion\": 4", "\"planVersion\": 2");
         ScenarioException aggregates = assertThrows(ScenarioException.class, () -> Plan.parse(v2Aggregates));
         assertTrue(aggregates.getMessage().contains("'aggregates' needs a version 3 plan"), aggregates.getMessage());
 
         Plan phase2 = compile(waivers("{ fn: Negate, args: [$item.deposit] }", PLAIN_CHECK));
-        Plan read = Plan.parse(phase2.toJsonText().replace("\"planVersion\": 3", "\"planVersion\": 2"));
-        assertEquals(3, read.planVersion(), "a version 2 plan is read as version 3");
+        Plan read = Plan.parse(phase2.toJsonText().replace("\"planVersion\": 4", "\"planVersion\": 2"));
+        assertEquals(4, read.planVersion(), "a version 2 plan is read as version 4");
         assertNull(read.oracle("neg").crossCheck(), "without cross-checks");
         assertEquals(Map.of(), ((RowCheck) read.verify().get(0)).aggregates(), "and without aggregates");
         assertEquals(phase2.resolveHash(), read.resolveHash());
         Plan v1 = SecretMaskTest.version1(compile("scenario: t\npack: toy\nsteps: []\n"), Map.of());
-        assertEquals(3, v1.planVersion(), "a version 1 plan is read as version 3");
+        assertEquals(4, v1.planVersion(), "a version 1 plan is read as version 4");
     }
 
     @Test
     void theSecretFixtureRuleAppliesToVersion2AndLater() throws Exception {
         Plan plan = compile("scenario: t\npack: toy\nresolve:\n  vault: { fixture: { label: main } }\nsteps: []\n");
         String text = plan.toJsonText().replace("\"label\": \"main\"", "\"secret\": \"main\"");
-        for (String version : List.of("2", "3")) {
+        for (String version : List.of("2", "3", "4")) {
             ScenarioException e = assertThrows(ScenarioException.class, () -> Plan.parse(text.replace(
-                    "\"planVersion\": 3", "\"planVersion\": " + version)), version);
+                    "\"planVersion\": 4", "\"planVersion\": " + version)), version);
             assertTrue(e.getMessage().contains("the fixture field 'secret' looks secret"), e.getMessage());
         }
         Plan v1 = SecretMaskTest.version1(plan, Map.of("label", "secret"));
@@ -348,6 +354,6 @@ class Phase3CompileTest {
         assertEquals(PHASE2_RESOLVE_HASH, compile(BinderTest.YAML).resolveHash(),
                 "an oracle without a cross-check is written exactly as in Phase 2 (4: the hash does not change)");
         assertEquals(PHASE2_RESOLVE_HASH, Plan.parse(compile(BinderTest.YAML).toJsonText().replace(
-                "\"planVersion\": 3", "\"planVersion\": 2")).resolveHash(), "and a version 2 plan of it alike");
+                "\"planVersion\": 4", "\"planVersion\": 2")).resolveHash(), "and a version 2 plan of it alike");
     }
 }

@@ -1,0 +1,31 @@
+# Scenario W1 (phase4-contracts.md 9.3): the loan form of the web host's front page, driven with the base web verbs.
+# The page's own events are tapped first; the fills and the click act on the page; the click's step ends when the page
+# signals the loan with its event webhost.borrowed (the tap publishes it as web.tap), whose detail is captured; the
+# page text and the captured item and quantity are checked; then a page event sets the item and the page's state is
+# awaited. web.path stays at auto: with a remote-debugging port the same plan runs over CDP, without one through the
+# agent in the host's JVM. Nothing sleeps.
+scenario: borrow-in-page
+pack: webhost
+tags: [web]
+requires: [web.browsers, web.evaluate, web.events]
+web: { browser: { tag: front } }
+steps:
+  - webTap: { patterns: [webhost.*] }
+  - webFill: { selector: "#item", text: hammer }
+  - webFill: { selector: "#qty", text: "2" }
+  - webClick:
+      role: button
+      name: Borrow
+      await:
+        topic: web.tap
+        match: { name: webhost.borrowed }
+        capture: { slot: borrowed, fields: { item: detail.item, qty: detail.qty } }
+  - expect:
+      "web.browsers[tag=front].text": { contains: "borrowed hammer x 2" }
+      "webhost.front.status": "borrowed $borrowed.item x $borrowed.qty"
+  - webDispatch: { name: webhost.setItem, detail: { item: saw } }
+  - webWaitFlag: { expression: "document.getElementById('item').value === 'saw'" }
+verify:
+  - { "webhost.front.status": "borrowed hammer x 2" }
+  - { "webhost.front.visibleInSwing": true }
+timeouts: { step: 30s }

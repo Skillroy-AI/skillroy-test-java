@@ -1,0 +1,8 @@
+# Negative (phase4-contracts.md 9.3): a webClick on a role and name nothing on the page has fails as ASSERTION with
+# NOT_FOUND, with the web evidence of the front page (its aria snapshot names the Borrow button).
+scenario: no-such-button
+pack: webhost
+web: { browser: { tag: front } }
+steps:
+  - webClick: { role: button, name: Return }
+timeouts: { step: 10s }

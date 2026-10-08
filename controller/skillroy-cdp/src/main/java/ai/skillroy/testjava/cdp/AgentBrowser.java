@@ -1,0 +1,64 @@
+/*
+ * Copyright 2026 Mike Mills.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package ai.skillroy.testjava.cdp;
+
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * One entry of the agent's {@code web.browsers} value (phase4-contracts.md section 4.2), as far as the CDP path needs
+ * it: the ref, the selection keys and the CDP target id.
+ *
+ * @param ref the browser's ref
+ * @param nativeId the technology's own id as text, or null
+ * @param url the main frame's URL ("" when none)
+ * @param title the title, or null when the agent omitted it
+ * @param closed whether the browser is closed
+ * @param visibleInSwing whether its component is showing
+ * @param cdpTargetId the CDP target id, or null when the agent does not know it
+ * @param tag the pack's tag of the browser, or null
+ */
+record AgentBrowser(String ref, String nativeId, String url, String title, boolean closed, boolean visibleInSwing,
+                    String cdpTargetId, String tag) {
+
+    /** The entries of a {@code web.browsers} value ({@code {browsers: [...]}}); entries without a ref are skipped. */
+    static List<AgentBrowser> parse(Object value) {
+        if (!(value instanceof Map<?, ?> m) || !(m.get("browsers") instanceof List<?> list)) {
+            return List.of();
+        }
+        List<AgentBrowser> out = new ArrayList<>();
+        for (Object item : list) {
+            if (!(item instanceof Map<?, ?> b) || !(b.get("ref") instanceof String ref) || ref.isEmpty()) {
+                continue;
+            }
+            out.add(new AgentBrowser(ref, text(b.get("nativeId")), b.get("url") == null ? "" : String.valueOf(
+                    b.get("url")), text(b.get("title")), Boolean.TRUE.equals(b.get("closed")),
+                    Boolean.TRUE.equals(b.get("visibleInSwing")), text(b.get("cdpTargetId")), text(b.get("tag"))));
+        }
+        return Collections.unmodifiableList(out);
+    }
+
+    private static String text(Object value) {
+        if (value == null) {
+            return null;
+        }
+        String s = String.valueOf(value);
+        return s.isEmpty() ? null : s;
+    }
+}

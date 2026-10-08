@@ -20,6 +20,8 @@ import ai.skillroy.testjava.data.yaml.StrictYaml;
 import ai.skillroy.testjava.data.yaml.YamlException;
 import ai.skillroy.testjava.scenario.resolve.CredentialSpec;
 import ai.skillroy.testjava.scenario.resolve.Strategy;
+import ai.skillroy.testjava.scenario.web.FrozenTargetPolicy;
+import ai.skillroy.testjava.scenario.web.WebSettings;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -40,17 +42,25 @@ import java.util.regex.Pattern;
  * shape: unknown top-level keys, a step that is not a single-key map, a bad duration, a slot that is neither a
  * fixture nor a query, a reserved slot or oracle name, an {@code llm-*} strategy, an oracle's {@code crossCheck}
  * that is neither a check id nor a mapping {@code {check, tolerance?, capability?}} (phase3-contracts.md 3.1) and a
- * {@code db.<table>} verify item with other keys are errors naming the key and line. Verbs, expectations, query kinds,
- * verifiers, oracle functions, cross-checks, aggregates and tables are checked later, by the compiler, against the
- * pack. The YAML is read by {@link StrictYaml}, the reader {@code credentials.yaml} uses.
+ * {@code db.<table>} verify item with other keys are errors naming the key and line, and so is a {@code web} key
+ * (phase4-contracts.md 7.2) with an unknown key or a bad value, including {@code frozenTargets: close}, which Phase 4
+ * refuses (decision D52). Verbs, expectations, query kinds, verifiers, oracle functions, cross-checks, aggregates and
+ * tables are checked later, by the compiler, against the pack. The YAML is read by {@link StrictYaml}, the reader
+ * {@code credentials.yaml} uses.
  *
  * <p>Stateless; safe from any thread.
  */
 public final class ScenarioLoader {
 
-    /** The top-level keys, in documentation order ({@code ui} is amendment A29, {@code oracle} Phase 2). */
+    /**
+     * The top-level keys, in documentation order ({@code ui} is amendment A29, {@code oracle} Phase 2, {@code web}
+     * Phase 4).
+     */
     public static final List<String> KEYS = List.of("scenario", "pack", "tags", "requires", "launchProperties",
-            "resolve", "oracle", "steps", "verify", "on_prompt", "artifacts", "timeouts", "ui");
+            "resolve", "oracle", "steps", "verify", "on_prompt", "artifacts", "timeouts", "ui", "web");
+
+    /** The keys of {@code web} (phase4-contracts.md 7.2). */
+    private static final List<String> WEB_KEYS = List.of("path", "browser", "frozenTargets", "trace");
 
     /** Names a slot or an oracle may not have (phase2-contracts.md 3.3). */
     public static final Set<String> RESERVED_NAMES = Set.of("oracle", "env", "run", "db", "secret", "credentials",
@@ -124,8 +134,9 @@ public final class ScenarioLoader {
             throw r.error("timeouts", "'timeouts.bind' must be at most 10m, found " + bindTimeoutMs + " ms");
         }
         UiSettings ui = r.ui();
+        WebSettings web = r.web();
         return new Scenario(id, pack, tags, requires, launchProperties, slots, steps, verify, onPrompt, artifacts,
-                stepTimeoutMs, sourceName, sourceHash(yaml), ui, oracles, bindTimeoutMs);
+                stepTimeoutMs, sourceName, sourceHash(yaml), ui, oracles, bindTimeoutMs, web);
     }
 
     /** {@code "sha256:"} plus the lower-case hex SHA-256 of the bytes, as written to {@code plan.json}. */
@@ -566,6 +577,68 @@ public final class ScenarioLoader {
                 strict = b;
             }
             return new UiSettings(rung, strict);
+        }
+
+        /**
+         * {@code web: {path?: auto|cdp|agent, browser?: {url|tag|title|nativeId: text}, frozenTargets?: fail|reload,
+         * trace?: bool}} (phase4-contracts.md 7.2); null when the key is absent. The enumerated values are accepted in
+         * any case; {@code frozenTargets: close} is refused (decision D52).
+         */
+        WebSettings web() throws ScenarioException {
+            if (!root.containsKey("web")) {
+                return null;
+            }
+            Object value = root.get("web");
+            if (!(value instanceof Map<?, ?> map)) {
+                throw error("web", "'web' must be a mapping such as {path: auto, browser: {tag: front}}, found "
+                        + describe(value));
+            }
+            for (Object key : map.keySet()) {
+                if (!WEB_KEYS.contains(key)) {
+                    throw errorAt(doc.keyLine(map, (String) key), "unknown key 'web." + key + "'; allowed: "
+                            + String.join(", ", WEB_KEYS));
+                }
+            }
+            WebSettings defaults = WebSettings.DEFAULT;
+            WebSettings.Path path = defaults.path();
+            if (map.containsKey("path")) {
+                path = map.get("path") instanceof String s ? WebGrammar.path(s) : null;
+                if (path == null) {
+                    throw errorAt(doc.keyLine(map, "path"), "'web.path' must be auto, cdp or agent, found "
+                            + describe(map.get("path")));
+                }
+            }
+            Map<String, Object> browser = null;
+            if (map.containsKey("browser")) {
+                String problem = WebGrammar.byProblem("web.browser", map.get("browser"));
+                if (problem != null) {
+                    throw errorAt(doc.keyLine(map, "browser"), problem);
+                }
+                Map.Entry<?, ?> only = ((Map<?, ?>) map.get("browser")).entrySet().iterator().next();
+                browser = new LinkedHashMap<>();
+                browser.put(String.valueOf(only.getKey()), only.getValue());
+            }
+            FrozenTargetPolicy frozen = defaults.frozenTargets();
+            if (map.containsKey("frozenTargets")) {
+                frozen = map.get("frozenTargets") instanceof String s ? WebGrammar.frozenTargets(s) : null;
+                if (frozen == FrozenTargetPolicy.CLOSE) {
+                    throw errorAt(doc.keyLine(map, "frozenTargets"), "'web.frozenTargets' "
+                            + WebGrammar.CLOSE_REFUSED);
+                }
+                if (frozen == null) {
+                    throw errorAt(doc.keyLine(map, "frozenTargets"), "'web.frozenTargets' must be fail or reload,"
+                            + " found " + describe(map.get("frozenTargets")));
+                }
+            }
+            boolean trace = defaults.trace();
+            if (map.containsKey("trace")) {
+                if (!(map.get("trace") instanceof Boolean b)) {
+                    throw errorAt(doc.keyLine(map, "trace"), "'web.trace' must be true or false, found "
+                            + describe(map.get("trace")));
+                }
+                trace = b;
+            }
+            return new WebSettings(path, browser, frozen, defaults.attachDeadline(), trace);
         }
 
         /** {@code timeouts.<key>}: {@code step} (default 10 s) or {@code bind} (default 60 s). */

@@ -1,0 +1,246 @@
+{
+  "planVersion": 4,
+  "scenarioId": "borrow-in-page",
+  "pack": "webhost",
+  "packVersion": "0.1.0",
+  "sourceHash": "sha256:b3d940b74b0e9915ca6b51a86c98082d3ae271cbdd53388bdaa03d16b77776f1",
+  "inference": "none",
+  "requires": [
+    "web.browsers",
+    "web.evaluate",
+    "web.events"
+  ],
+  "slots": [
+    {
+      "name": "borrowed",
+      "kind": "capture",
+      "step": "s4",
+      "fields": [
+        "item",
+        "qty"
+      ]
+    }
+  ],
+  "oracles": [],
+  "resolutionGraph": [],
+  "steps": [
+    {
+      "id": "s1",
+      "verb": "webTap",
+      "source": {
+        "line": 13
+      },
+      "calls": [
+        {
+          "primitive": "web.tap",
+          "args": {
+            "by": {
+              "tag": "front"
+            },
+            "patterns": [
+              "webhost.*"
+            ]
+          },
+          "sync": "NONE",
+          "timeoutMs": 30000
+        }
+      ],
+      "expect": []
+    },
+    {
+      "id": "s2",
+      "verb": "webFill",
+      "source": {
+        "line": 14
+      },
+      "calls": [
+        {
+          "primitive": "web.dom.fill",
+          "args": {
+            "by": {
+              "tag": "front"
+            },
+            "selector": "#item",
+            "text": "hammer"
+          },
+          "sync": "SETTLE",
+          "timeoutMs": 30000
+        }
+      ],
+      "expect": []
+    },
+    {
+      "id": "s3",
+      "verb": "webFill",
+      "source": {
+        "line": 15
+      },
+      "calls": [
+        {
+          "primitive": "web.dom.fill",
+          "args": {
+            "by": {
+              "tag": "front"
+            },
+            "selector": "#qty",
+            "text": "2"
+          },
+          "sync": "SETTLE",
+          "timeoutMs": 30000
+        }
+      ],
+      "expect": []
+    },
+    {
+      "id": "s4",
+      "verb": "webClick",
+      "source": {
+        "line": 16
+      },
+      "calls": [
+        {
+          "primitive": "web.dom.click",
+          "args": {
+            "by": {
+              "tag": "front"
+            },
+            "name": "Borrow",
+            "role": "button"
+          },
+          "sync": "EVENT",
+          "timeoutMs": 30000,
+          "await": {
+            "topics": "web.tap",
+            "match": {
+              "name": "webhost.borrowed"
+            },
+            "timeoutMs": 30000
+          },
+          "capture": {
+            "slot": "borrowed",
+            "fields": {
+              "item": "detail.item",
+              "qty": "detail.qty"
+            }
+          }
+        },
+        {
+          "primitive": "swing.settle",
+          "args": {
+            "timeoutMs": 30000
+          },
+          "sync": "NONE",
+          "timeoutMs": 32000
+        }
+      ],
+      "expect": []
+    },
+    {
+      "id": "s5",
+      "verb": "expect",
+      "source": {
+        "line": 23
+      },
+      "calls": [],
+      "expect": [
+        {
+          "path": "web.browsers[tag=front].text",
+          "matcher": {
+            "contains": "borrowed hammer x 2"
+          }
+        },
+        {
+          "path": "webhost.front.status",
+          "matcher": {
+            "equals": "borrowed $borrowed.item x $borrowed.qty"
+          }
+        }
+      ]
+    },
+    {
+      "id": "s6",
+      "verb": "webDispatch",
+      "source": {
+        "line": 26
+      },
+      "calls": [
+        {
+          "primitive": "web.dispatchEvent",
+          "args": {
+            "by": {
+              "tag": "front"
+            },
+            "detail": {
+              "item": "saw"
+            },
+            "name": "webhost.setItem"
+          },
+          "sync": "SETTLE",
+          "timeoutMs": 30000
+        }
+      ],
+      "expect": []
+    },
+    {
+      "id": "s7",
+      "verb": "webWaitFlag",
+      "source": {
+        "line": 27
+      },
+      "calls": [
+        {
+          "primitive": "web.waitFlag",
+          "args": {
+            "by": {
+              "tag": "front"
+            },
+            "expression": "document.getElementById('item').value === 'saw'"
+          },
+          "sync": "NONE",
+          "timeoutMs": 30000
+        }
+      ],
+      "expect": []
+    }
+  ],
+  "verify": [
+    {
+      "path": "webhost.front.status",
+      "matcher": {
+        "equals": "borrowed hammer x 2"
+      }
+    },
+    {
+      "path": "webhost.front.visibleInSwing",
+      "matcher": {
+        "equals": true
+      }
+    }
+  ],
+  "cleanup": [
+    {
+      "primitive": "web.tap",
+      "args": {
+        "by": {
+          "tag": "front"
+        },
+        "patterns": []
+      },
+      "sync": "NONE",
+      "timeoutMs": 30000
+    }
+  ],
+  "launchProperties": {},
+  "artifacts": [],
+  "onPrompt": {},
+  "stepTimeoutMs": 30000,
+  "web": {
+    "path": "auto",
+    "browser": {
+      "tag": "front"
+    },
+    "frozenTargets": "fail",
+    "trace": false
+  },
+  "bindTimeoutMs": 60000
+}

@@ -18,6 +18,9 @@ package ai.skillroy.testjava.agent.api;
 
 import ai.skillroy.testjava.protocol.JsonView;
 
+import java.util.Collections;
+import java.util.List;
+
 /**
  * One call of a primitive: its arguments plus the call metadata the dispatcher extracted from {@code params._meta}.
  * Gives primitives typed parameter access and their remaining time budget without seeing the JSON-RPC envelope.
@@ -40,4 +43,16 @@ public interface Invocation {
 
     /** Time left before the dispatcher reports TIMEOUT, in milliseconds; never negative. */
     long remainingMs();
+
+    /**
+     * The names of the top-level parameters the caller marked as secret in {@code _meta.secretParams} (contract
+     * amendment A34), in the order given, without duplicates; empty when it named none. The dispatcher already keeps
+     * those values out of the call's error answer and of the log lines written on the call's threads; this read-only
+     * accessor lets a module keep them out of what it publishes later on its own, outside the call (an embedded page's
+     * console output that echoes a filled value, phase4-contracts.md section 4.3). It changes nothing the core does.
+     * The default (an invocation made outside the dispatcher) is empty.
+     */
+    default List<String> secretParams() {
+        return Collections.emptyList();
+    }
 }

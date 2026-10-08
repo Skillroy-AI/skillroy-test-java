@@ -31,14 +31,19 @@ import ai.skillroy.testjava.protocol.RpcResult;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * A minimal in-process agent for the glue tests (no HTTP, so no authentication): the {@code mini} application is
- * always IDLE, and its window never takes focus, so a COMPONENT click fires only through its ACTION fall-back.
+ * always IDLE, and its window never takes focus, so a COMPONENT click fires only through its ACTION fall-back. Its web
+ * module clicks whatever it is asked to; a test declares the web capabilities it wants in {@link #extra}.
  */
 final class MiniAgent implements AgentConnection {
 
+    /** Capabilities beside {@code mini.state}. */
+    final Map<String, Capability> extra = new ConcurrentHashMap<>();
     final AtomicInteger calls = new AtomicInteger();
     volatile boolean closed;
     /** What {@code mini.echo} answers; null echoes the text it is given. */
@@ -58,6 +63,8 @@ final class MiniAgent implements AgentConnection {
             case "mini.poke" -> Map.of();
             case "mini.echo" -> Map.of("text", echoAnswer != null ? echoAnswer : String.valueOf(params.get("text")));
             case "swing.settle" -> Map.of("settled", true, "ms", 1L);
+            case "evt.query" -> Map.of("events", List.of(), "lastSeq", 1L, "oldestSeq", 1L);
+            case "web.dom.click" -> Map.of("matched", 1L, "fidelity", "DOM");
             case "swing.click" -> !"COMPONENT".equals(params.get("rung"))
                     ? Map.of("rung", "ACTION", "fired", true, "fidelity", "FULL")
                     : "ACTION".equals(params.get("fallback"))
@@ -77,8 +84,9 @@ final class MiniAgent implements AgentConnection {
 
     @Override
     public CapabilityMatrix capabilities() {
-        return new CapabilityMatrix(Map.of("mini.state", new Capability("mini.state", CapabilityState.OK, null,
-                null)));
+        Map<String, Capability> all = new TreeMap<>(extra);
+        all.put("mini.state", new Capability("mini.state", CapabilityState.OK, null, null));
+        return new CapabilityMatrix(all);
     }
 
     @Override

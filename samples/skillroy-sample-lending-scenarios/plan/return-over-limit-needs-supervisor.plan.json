@@ -1,5 +1,5 @@
 {
-  "planVersion": 3,
+  "planVersion": 4,
   "scenarioId": "return-over-limit-needs-supervisor",
   "pack": "lending",
   "packVersion": "0.3.0",

@@ -74,6 +74,12 @@ import java.util.function.UnaryOperator;
  * {@code --json} each result also carries the bind's {@code crossChecks} (the {@code crosscheck} records it emitted,
  * also when it then failed) and its {@code skipped} list (empty when the bind failed). ORACLE_SUSPECT is an ERROR
  * like any other.
+ *
+ * <p>Phase 4 (phase4-contracts.md 6.1, 8.2): the executor finds web paths through the loader of the {@code --pack}
+ * jars, so a {@code --pack} jar holding the CDP path (with Playwright's jars) makes it available to {@code web.path:
+ * auto} and {@code cdp}; with {@code --json} each result carries {@code web}: the {@code web.path} record of the run
+ * ({@code path}, {@code reason}, {@code cdp}, {@code libHash}, {@code policy}), its {@code calls} (step, index,
+ * primitive, the {@code path} that served it, ok) and its {@code fallbacks}, or null for a plan without web calls.
  */
 final class RunCommand implements Command {
 
@@ -91,7 +97,9 @@ final class RunCommand implements Command {
             .json file is a committed plan and runs as it is, with the pack it names. All files are loaded and
             compiled before anything runs: a load or compile error is reported as file:line: reason and gives exit
             code 2. With --out each scenario writes run.jsonl, bindings.json, cost-ledger.jsonl and, when it fails,
-            failure/ (UI snapshot, capture, events) into <out>/<scenario-id>/.
+            failure/ (UI snapshot, capture, events, embedded browsers) into <out>/<scenario-id>/. Web verbs go
+            through the CDP path when a --pack jar provides it and the scenario's web.path allows it, else through
+            the agent; --json shows which, per result and per web call.
             Slots are bound by --mode: replay (default) reads <bindings>/<env>/<scenario-id>.bindings.json and
             re-runs the verifiers; approve resolves, asks (or --yes) and writes that file; live resolves now and
             writes nothing unless --write-bindings. Credentials come from credentials.yaml (--credentials).
@@ -204,7 +212,7 @@ final class RunCommand implements Command {
                 for (Loaded input : loaded) {
                     Path dir = out == null ? null : out.resolve(input.plan().scenarioId());
                     PlanExecutor.Resolved ran = new PlanExecutor(input.pack(), target.client(),
-                            base.withOutputDir(dir)).runWithOutcome(input.plan());
+                            base.withOutputDir(dir), packs.loader()).runWithOutcome(input.plan());
                     RunResult result = ran.result();
                     results.add(result);
                     progress.println(scrub.apply(describe(result, dir)));
@@ -290,7 +298,11 @@ final class RunCommand implements Command {
         } catch (ScenarioException e) {
             throw e.locate(scenario.id(), 0);
         }
-        return new Loaded(file, PlanCompiler.compile(scenario, pack), pack);
+        PlanCompiler.Compiled compiled = PlanCompiler.compileWithNotes(scenario, pack);
+        for (String note : compiled.notes()) {
+            err.println("skillroy run: note: " + file + ": " + note);
+        }
+        return new Loaded(file, compiled.plan(), pack);
     }
 
     static RunOptions.DegradedAs degradedAs(String text) throws UsageException {
@@ -403,6 +415,8 @@ final class RunCommand implements Command {
         // that completed.
         json.put("crossChecks", new ArrayList<Object>(ran.crossChecks()));
         json.put("skipped", outcome == null ? List.of() : outcome.skipped());
+        // phase4-contracts.md 8.2: the web path the run chose and the path of every web call, or null.
+        json.put("web", ran.web());
         json.put("outputDir", dir == null ? null : dir.toString());
         json.put("detail", result.detail());
         List<Object> steps = new ArrayList<>();

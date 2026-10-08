@@ -235,6 +235,7 @@ public final class CoreTestModule implements AgentModule {
                     public Object invoke(Invocation inv) {
                         Object value = inv.args().get("value");
                         TestState.LEAK_SEEN.add(value);
+                        TestState.LEAK_SECRET_NAMES.add(inv.secretParams());
                         ctx.log().info("typed " + value + " into the entry");
                         ctx.log().warn("echo failed", new IllegalArgumentException("value " + value,
                                 new IllegalStateException("cause " + value)));

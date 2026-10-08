@@ -1,0 +1,257 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Copyright 2026 Mike Mills.
+
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+
+      http://www.apache.org/licenses/LICENSE-2.0
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>ai.skillroy</groupId>
+    <artifactId>skillroy-test-java-parent</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+    <relativePath>../../pom.xml</relativePath>
+  </parent>
+
+  <!-- Built only with the profile "jcef" (root POM). -->
+  <artifactId>skillroy-sample-web-host-scenarios</artifactId>
+  <name>skillroy-sample-web-host-scenarios</name>
+  <description>
+    Domain pack 'webhost' for the sample web host, the scenarios against it with their committed plans, and the
+    end-to-end acceptance of the web verbs over the in-process path and over CDP (phase4-contracts.md 9.3, 12.2).
+  </description>
+
+  <properties>
+    <!-- Controller side: Java 25. -->
+    <maven.compiler.release>25</maven.compiler.release>
+    <!-- What the end-to-end tests launch and use, assembled below before the integration tests. -->
+    <skillroy.it.agentHome>${project.build.directory}/skillroy-agent</skillroy.it.agentHome>
+    <skillroy.it.targetLib>${project.build.directory}/it-target</skillroy.it.targetLib>
+    <skillroy.it.cliDist>${project.basedir}/../../controller/skillroy-cli/target/skillroy-cli</skillroy.it.cliDist>
+    <skillroy.it.cliCdp>${project.build.directory}/it-cli/cdp</skillroy.it.cliCdp>
+    <skillroy.it.packJar>${project.build.directory}/${project.build.finalName}.jar</skillroy.it.packJar>
+    <!-- One natives install directory per platform, shared by every launch (jcefmaven extracts about 450 MB into it
+         once) and kept on the module's target directory; each launch gets a fresh cache directory of its own. -->
+    <skillroy.it.jcefInstall>${project.build.directory}/jcef-bundle-${skillroy.jcef.platform}</skillroy.it.jcefInstall>
+    <!-- Playwright extracts its driver (about 140 MB) once per JVM; under target/ rather than the system's temporary
+         directory, so that the extraction stays inside the build. -->
+    <skillroy.it.playwrightTmp>${project.build.directory}/playwright-driver</skillroy.it.playwrightTmp>
+    <!-- Which launches of WebHostEndToEndIT run: empty for all, else a comma-separated list of their labels
+         (javaagent-osr-port, attach-windowed-noport, ...), for a developer who wants one. -->
+    <skillroy.it.launches></skillroy.it.launches>
+  </properties>
+
+  <dependencies>
+    <!-- The pack: the step library's base verbs, the facts and the sync policy. -->
+    <dependency>
+      <groupId>ai.skillroy</groupId>
+      <artifactId>skillroy-scenario</artifactId>
+    </dependency>
+    <!-- The CDP path: on the tests' class path, so that the executor finds it through ServiceLoader<WebPath> and the
+         frozen-target test can drive it directly. Declared before the web host, so that the version of a library both
+         bring (gson) is the one Playwright declares. -->
+    <dependency>
+      <groupId>ai.skillroy</groupId>
+      <artifactId>skillroy-cdp</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>ai.skillroy</groupId>
+      <artifactId>skillroy-data</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <!-- The agent home (zip); never on a class path (the exclusion keeps the agent jars it is assembled from off the
+         test class path). Declared so that the reactor builds it first. -->
+    <dependency>
+      <groupId>ai.skillroy</groupId>
+      <artifactId>skillroy-agent-dist</artifactId>
+      <type>zip</type>
+      <scope>test</scope>
+      <exclusions>
+        <exclusion>
+          <groupId>*</groupId>
+          <artifactId>*</artifactId>
+        </exclusion>
+      </exclusions>
+    </dependency>
+    <!-- The target: the web host with jcefmaven and its dependencies, and the natives of the platform. Copied into
+         target/it-target below (the host's run-time class path); never used by the tests' own JVM. -->
+    <dependency>
+      <groupId>ai.skillroy</groupId>
+      <artifactId>skillroy-sample-web-host</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>me.friwi</groupId>
+      <artifactId>jcef-natives-${skillroy.jcef.platform}</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <!-- The sample's agent module; copied into the agent home's modules/ below. -->
+    <dependency>
+      <groupId>ai.skillroy</groupId>
+      <artifactId>skillroy-sample-web-host-agent</artifactId>
+      <scope>test</scope>
+      <exclusions>
+        <exclusion>
+          <groupId>*</groupId>
+          <artifactId>*</artifactId>
+        </exclusion>
+      </exclusions>
+    </dependency>
+    <!-- The assembled command-line launcher (controller/skillroy-cli/target/skillroy-cli) that the end-to-end checks
+         run once per target Java. Declared so that the reactor builds it first; never on the class path. -->
+    <dependency>
+      <groupId>ai.skillroy</groupId>
+      <artifactId>skillroy-cli</artifactId>
+      <scope>test</scope>
+      <exclusions>
+        <exclusion>
+          <groupId>*</groupId>
+          <artifactId>*</artifactId>
+        </exclusion>
+      </exclusions>
+    </dependency>
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <!-- Assembles what the end-to-end tests launch, after package and before the integration tests:
+           target/skillroy-agent/  the agent home from the skillroy-agent-dist zip, plus the web host module in modules/
+           target/it-target/       the web host's run-time class path: the host, jcefmaven and its dependencies, and
+                                   the natives of skillroy.jcef.platform
+           target/it-cli/cdp/      the jars the launcher's pack option needs for the CDP path: skillroy-cdp, Playwright
+           (this module's own jar is the pack jar the launcher is given). -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-dependency-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>unpack-agent-home</id>
+            <phase>pre-integration-test</phase>
+            <goals>
+              <goal>unpack</goal>
+            </goals>
+            <configuration>
+              <artifactItems>
+                <artifactItem>
+                  <groupId>ai.skillroy</groupId>
+                  <artifactId>skillroy-agent-dist</artifactId>
+                  <version>${project.version}</version>
+                  <type>zip</type>
+                  <outputDirectory>${project.build.directory}</outputDirectory>
+                </artifactItem>
+              </artifactItems>
+              <overWriteReleases>true</overWriteReleases>
+              <overWriteSnapshots>true</overWriteSnapshots>
+            </configuration>
+          </execution>
+          <execution>
+            <id>web-host-module-into-agent-home</id>
+            <phase>pre-integration-test</phase>
+            <goals>
+              <goal>copy</goal>
+            </goals>
+            <configuration>
+              <artifactItems>
+                <artifactItem>
+                  <groupId>ai.skillroy</groupId>
+                  <artifactId>skillroy-sample-web-host-agent</artifactId>
+                  <version>${project.version}</version>
+                  <outputDirectory>${skillroy.it.agentHome}/modules</outputDirectory>
+                  <destFileName>skillroy-sample-web-host-agent.jar</destFileName>
+                </artifactItem>
+              </artifactItems>
+              <overWriteReleases>true</overWriteReleases>
+              <overWriteSnapshots>true</overWriteSnapshots>
+            </configuration>
+          </execution>
+          <execution>
+            <id>target-class-path</id>
+            <phase>pre-integration-test</phase>
+            <goals>
+              <goal>copy-dependencies</goal>
+            </goals>
+            <configuration>
+              <outputDirectory>${skillroy.it.targetLib}</outputDirectory>
+              <includeScope>test</includeScope>
+              <!-- The host and its run-time dependencies (jcefmaven's: jcef-api, JOGL and GlueGen, commons-*, gson,
+                   error_prone_annotations), and the natives. Nothing of the controller side. (The plugin drops the
+                   white space around the commas.) -->
+              <includeArtifactIds>
+                skillroy-sample-web-host, jcefmaven, jcef-api, jogl-all, gluegen-rt, commons-compress, commons-codec,
+                commons-io, commons-lang3, gson, error_prone_annotations, jcef-natives-${skillroy.jcef.platform}
+              </includeArtifactIds>
+              <overWriteReleases>true</overWriteReleases>
+              <overWriteSnapshots>true</overWriteSnapshots>
+            </configuration>
+          </execution>
+          <execution>
+            <id>cdp-for-the-launcher</id>
+            <phase>pre-integration-test</phase>
+            <goals>
+              <goal>copy-dependencies</goal>
+            </goals>
+            <configuration>
+              <outputDirectory>${skillroy.it.cliCdp}</outputDirectory>
+              <includeScope>test</includeScope>
+              <!-- skillroy-cdp and what it brings beyond the launcher's own lib/ (phase4-contracts.md 12.2). -->
+              <includeArtifactIds>
+                skillroy-cdp, playwright, driver, driver-bundle, gson, jspecify, opentest4j
+              </includeArtifactIds>
+              <overWriteReleases>true</overWriteReleases>
+              <overWriteSnapshots>true</overWriteSnapshots>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+      <!-- Executions (integration-test, verify) and argLine come from the parent's pluginManagement. -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-failsafe-plugin</artifactId>
+        <configuration>
+          <!-- A launch that hangs in CEF's native code cannot be interrupted: the fork is ended instead. -->
+          <forkedProcessTimeoutInSeconds>5400</forkedProcessTimeoutInSeconds>
+          <systemPropertyVariables>
+            <skillroy.it.buildDir>${project.build.directory}</skillroy.it.buildDir>
+            <skillroy.it.moduleDir>${project.basedir}</skillroy.it.moduleDir>
+            <skillroy.it.cliDist>${skillroy.it.cliDist}</skillroy.it.cliDist>
+            <skillroy.it.cliCdp>${skillroy.it.cliCdp}</skillroy.it.cliCdp>
+            <skillroy.it.packJar>${skillroy.it.packJar}</skillroy.it.packJar>
+            <skillroy.it.jcefInstall>${skillroy.it.jcefInstall}</skillroy.it.jcefInstall>
+            <skillroy.it.jcefPlatform>${skillroy.jcef.platform}</skillroy.it.jcefPlatform>
+            <skillroy.it.launches>${skillroy.it.launches}</skillroy.it.launches>
+            <!-- Read by skillroy-cdp's Playwright factory (as the environment variable of the same meaning). -->
+            <playwright.driver.tmpdir>${skillroy.it.playwrightTmp}</playwright.driver.tmpdir>
+          </systemPropertyVariables>
+        </configuration>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <configuration>
+          <systemPropertyVariables>
+            <skillroy.it.moduleDir>${project.basedir}</skillroy.it.moduleDir>
+          </systemPropertyVariables>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+</project>

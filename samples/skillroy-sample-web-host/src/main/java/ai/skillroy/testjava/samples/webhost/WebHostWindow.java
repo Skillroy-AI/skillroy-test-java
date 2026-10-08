@@ -1,0 +1,125 @@
+/*
+ * Copyright 2026 Mike Mills.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+
+package ai.skillroy.testjava.samples.webhost;
+
+import java.awt.BorderLayout;
+import java.awt.CardLayout;
+import java.awt.Component;
+import java.awt.FlowLayout;
+import java.awt.event.ActionEvent;
+import java.awt.event.ActionListener;
+import java.awt.event.WindowAdapter;
+import java.awt.event.WindowEvent;
+import java.util.logging.Logger;
+import javax.swing.JButton;
+import javax.swing.JFrame;
+import javax.swing.JLabel;
+import javax.swing.JPanel;
+import javax.swing.WindowConstants;
+
+/**
+ * The host's one window: a {@link JFrame} titled {@value #TITLE} with a bar on top (a {@link JButton}
+ * {@value #SWAP} that shows the other card, and a label "Showing: front|back") and a {@link CardLayout} of the two
+ * browsers' components below it, card {@code front} shown and card {@code back} hidden. The two browser components
+ * are named after their cards.
+ *
+ * <p>Kept out of {@link WebHostApp} so that nothing of Swing is loaded before the CEF application is built.
+ * Confined to the event dispatch thread: every method must be called there.
+ */
+final class WebHostWindow {
+
+    /** The frame's title. */
+    static final String TITLE = "Web host";
+    /** The swap button's text. */
+    static final String SWAP = "Swap";
+    static final int WIDTH = 900;
+    static final int HEIGHT = 700;
+
+    private static final Logger LOG = Logger.getLogger(WebHostApp.class.getName());
+
+    private final JFrame frame = new JFrame(TITLE);
+    private final CardLayout cards = new CardLayout();
+    private final JPanel deck = new JPanel(cards);
+    private final JLabel showing = new JLabel();
+    private String current;
+
+    private WebHostWindow(Component front, Component back, final Runnable closeRequested) {
+        frame.setName("webhost");
+        frame.setDefaultCloseOperation(WindowConstants.DO_NOTHING_ON_CLOSE);
+        frame.addWindowListener(new WindowAdapter() {
+            @Override
+            public void windowClosing(WindowEvent e) {
+                closeRequested.run();
+            }
+        });
+        JButton swap = new JButton(SWAP);
+        swap.setName("swap");
+        swap.addActionListener(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                swap();
+            }
+        });
+        showing.setName("showing");
+        JPanel bar = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        bar.add(swap);
+        bar.add(showing);
+        deck.setName("deck");
+        front.setName(WebHostPages.FRONT);
+        back.setName(WebHostPages.BACK);
+        deck.add(front, WebHostPages.FRONT);
+        deck.add(back, WebHostPages.BACK);
+        frame.getContentPane().add(bar, BorderLayout.NORTH);
+        frame.getContentPane().add(deck, BorderLayout.CENTER);
+        frame.setSize(WIDTH, HEIGHT);
+        frame.setLocation(0, 0);
+        show(WebHostPages.FRONT);
+        frame.setVisible(true);
+    }
+
+    /** Builds the window and shows it with the front card visible. EDT only. */
+    static WebHostWindow open(Component front, Component back, Runnable closeRequested) {
+        return new WebHostWindow(front, back, closeRequested);
+    }
+
+    /** Shows the other card. EDT only. */
+    void swap() {
+        show(WebHostPages.FRONT.equals(current) ? WebHostPages.BACK : WebHostPages.FRONT);
+        LOG.info("web host: showing the " + current + " card");
+    }
+
+    /** @return the card shown: {@code front} or {@code back}. EDT only. */
+    String showing() {
+        return current;
+    }
+
+    JFrame frame() {
+        return frame;
+    }
+
+    /** Disposes of the frame. EDT only. */
+    void dispose() {
+        frame.dispose();
+    }
+
+    private void show(String card) {
+        cards.show(deck, card);
+        current = card;
+        showing.setText("Showing: " + card);
+    }
+}

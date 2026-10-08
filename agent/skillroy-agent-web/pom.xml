@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Copyright 2026 Mike Mills.
+
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+
+      http://www.apache.org/licenses/LICENSE-2.0
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>ai.skillroy</groupId>
+    <artifactId>skillroy-test-java-parent</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+    <relativePath>../../pom.xml</relativePath>
+  </parent>
+
+  <artifactId>skillroy-agent-web</artifactId>
+  <name>skillroy-agent-web</name>
+  <description>
+    Agent module 'web': the web.* primitives over embedded browsers, written once against the embedded-browser SPI,
+    with the two built-in reflective adapters (jcef, jxbrowser). No vendor artifact in any scope. The test-jar is the
+    adapter contract kit (package ai.skillroy.testjava.agent.web.kit) and the neutral fake.
+  </description>
+
+  <properties>
+    <!-- Agent side: Java 8 language and API, no third-party dependencies. -->
+    <maven.compiler.release>8</maven.compiler.release>
+  </properties>
+
+  <dependencies>
+    <dependency>
+      <groupId>ai.skillroy</groupId>
+      <artifactId>skillroy-agent-api</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>ai.skillroy</groupId>
+      <artifactId>skillroy-protocol</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <resources>
+      <!-- Only the version file is filtered; the descriptors and the service registration are copied as they are
+           (filtering would rewrite ${...} in them). -->
+      <resource>
+        <directory>src/main/resources</directory>
+        <filtering>true</filtering>
+        <includes>
+          <include>**/web-module.properties</include>
+        </includes>
+      </resource>
+      <resource>
+        <directory>src/main/resources</directory>
+        <filtering>false</filtering>
+        <excludes>
+          <exclude>**/web-module.properties</exclude>
+        </excludes>
+      </resource>
+    </resources>
+    <plugins>
+      <!-- The test-jar carries the project's LICENSE and NOTICE as the main jar does (the parent copies them into
+           the main output directory only). -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-resources-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>copy-legal-files-into-test-jar</id>
+            <phase>process-test-resources</phase>
+            <goals>
+              <goal>copy-resources</goal>
+            </goals>
+            <configuration>
+              <outputDirectory>${project.build.testOutputDirectory}/META-INF</outputDirectory>
+              <resources>
+                <resource>
+                  <directory>${skillroy.root.dir}</directory>
+                  <includes>
+                    <include>LICENSE</include>
+                    <include>NOTICE</include>
+                  </includes>
+                </resource>
+              </resources>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+      <!-- The adapter contract kit (phase4-contracts.md 10.1) is published as this module's test-jar: the kit's base
+           class, its fixture interface, its pages and the neutral fake. A technology's test module depends on it
+           with <type>test-jar</type>. -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-jar-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>adapter-contract-kit</id>
+            <goals>
+              <goal>test-jar</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+</project>

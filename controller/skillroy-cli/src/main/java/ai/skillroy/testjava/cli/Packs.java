@@ -36,7 +36,9 @@ import java.util.ServiceConfigurationError;
  * The domain packs available to {@code compile} and {@code run}: those on the CLI's class path plus those in
  * {@code --pack} jars (or class directories), all found with {@code ServiceLoader<DomainPack>}. The jars are loaded
  * by one {@link URLClassLoader} whose parent is the CLI's loader, so a pack sees the scenario API the CLI itself
- * uses. The loader stays open while scenarios run (a pack loads classes lazily) and is closed with this object.
+ * uses. The loader stays open while scenarios run (a pack loads classes lazily) and is closed with this object. The
+ * executor looks for a controller-side web path ({@code ServiceLoader<WebPath>}, phase4-contracts.md 6.1) through
+ * the same loader, so the CDP path arrives as {@code --pack} jars too (decision D49).
  *
  * <p>Not thread-safe; one command uses one instance.
  */
@@ -48,7 +50,8 @@ final class Packs implements AutoCloseable {
     static final OptionSpec OPTION_SPEC = OptionSpec.repeatable(OPTION, "jar",
             "a jar (or class directory) with more domain packs, found\n"
                     + "with ServiceLoader, or any other jar the run needs\n"
-                    + "(a JDBC driver); packs on the class path are always\nfound");
+                    + "(a JDBC driver, the CDP web path with Playwright's\n"
+                    + "jars); packs on the class path are always found");
 
     private final URLClassLoader jarLoader;
     private final ClassLoader loader;

@@ -30,6 +30,8 @@ public final class ErrorCodes {
             // framework codes; phase1-contracts.md section 5 says when each is raised
             TIMEOUT = -32001, FORBIDDEN_THREAD = -32002, STALE_HANDLE = -32003, MODAL_OPEN = -32004,
             INPUT_REJECTED = -32005, NOT_FOUND = -32006, AMBIGUOUS = -32007,
+            // a script the agent ran in an embedded web page threw (Phase 4, phase4-contracts.md section 8.1)
+            SCRIPT_ERROR = -32008,
             CAPABILITY_DEGRADED = -32010, CAPABILITY_UNAVAILABLE = -32011,
             HOOK_VERIFY_FAILED = -32020, CONFIRM_REQUIRED = -32030, READ_ONLY = -32031, NOT_READY = -32032,
             // the agent's pools are full, or an earlier timed-out call of the same primitive is still running (S30)
@@ -65,6 +67,8 @@ public final class ErrorCodes {
                 return "NOT_FOUND";
             case AMBIGUOUS:
                 return "AMBIGUOUS";
+            case SCRIPT_ERROR:
+                return "SCRIPT_ERROR";
             case CAPABILITY_DEGRADED:
                 return "CAPABILITY_DEGRADED";
             case CAPABILITY_UNAVAILABLE:

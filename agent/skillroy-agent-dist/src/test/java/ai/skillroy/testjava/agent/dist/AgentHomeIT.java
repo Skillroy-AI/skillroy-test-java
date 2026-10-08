@@ -75,7 +75,8 @@ class AgentHomeIT {
         for (String lib : new String[] {"skillroy-protocol.jar", "skillroy-agent-api.jar", "skillroy-agent-core.jar"}) {
             assertTrue(new File(home, "lib/" + lib).isFile(), lib);
         }
-        for (String module : new String[] {"skillroy-agent-swing.jar", "skillroy-agent-data.jar"}) {
+        for (String module : new String[] {"skillroy-agent-swing.jar", "skillroy-agent-data.jar",
+                "skillroy-agent-web.jar"}) {
             assertTrue(new File(home, "modules/" + module).isFile(), module);
         }
         work = new File(base, "target/it-work").getAbsoluteFile();

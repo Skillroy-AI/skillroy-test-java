@@ -1,0 +1,21 @@
+# Scenario W2 (phase4-contracts.md 9.3): the browser in the web host's hidden back card, which the Swing tree holds
+# but does not show. Its viewport is set (a browser that was never shown has none worth the name), its text is read
+# through the fact roots, and a page event reaches it; the page's state is awaited each time. Nothing sleeps.
+scenario: hidden-browser-reachable
+pack: webhost
+tags: [web, hidden]
+requires: [web.browsers, web.evaluate, web.resize]
+web: { browser: { tag: back } }
+steps:
+  - webResize: { width: 1024, height: 768 }
+  - webWaitFlag: { expression: "innerWidth === 1024 && innerHeight === 768" }
+  - expect:
+      "web.browsers[tag=back].visibleInSwing": false
+      "web.browsers[tag=back].text": { contains: "Back page" }
+      "webhost.back.visibleInSwing": false
+  - webDispatch: { name: webhost.setItem, detail: { item: saw } }
+  - webWaitFlag: { expression: "document.getElementById('item').value === 'saw'" }
+verify:
+  - { "web.browsers[tag=back].title": "Back page" }
+  - { "webhost.back.page": back }
+timeouts: { step: 30s }

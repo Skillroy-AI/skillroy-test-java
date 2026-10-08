@@ -34,6 +34,7 @@ import ai.skillroy.testjava.protocol.RpcException;
 import ai.skillroy.testjava.protocol.RpcResult;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -283,15 +284,17 @@ final class Dispatcher {
         }
         String correlationId = meta.str("correlationId", null);
         String traceparent = meta.str("traceparent", null);
-        return run(method, primitive, policy, argsView, correlationId, traceparent, timeoutMs, secrets);
+        return run(method, primitive, policy, argsView, correlationId, traceparent, timeoutMs, secrets,
+                secretNames(meta, args));
     }
 
     private Object run(final String method, final Primitive primitive, ThreadPolicy policy, JsonView args,
-                       String correlationId, String traceparent, long timeoutMs, SecretParams secrets) {
+                       String correlationId, String traceparent, long timeoutMs, SecretParams secrets,
+                       List<String> secretNames) {
         CallScope scope = new CallScope(correlationId, traceparent, secrets);
         long start = System.nanoTime();
         final Invocation invocation = new CallInvocation(args, correlationId, traceparent, ctx,
-                start + TimeUnit.MILLISECONDS.toNanos(timeoutMs));
+                start + TimeUnit.MILLISECONDS.toNanos(timeoutMs), secretNames);
         final Call call = new Call(start);
         final CoreThreadBroker.Guarded<Object> task = new CoreThreadBroker.Guarded<Object>(new Callable<Object>() {
             @Override
@@ -459,6 +462,24 @@ final class Dispatcher {
         }
     }
 
+    /**
+     * The names in {@code _meta.secretParams} that name a top-level argument of the call (A34; the list was checked
+     * by {@link SecretParams#of} before), in request order, without duplicates.
+     */
+    private static List<String> secretNames(JsonView meta, Map<String, Object> args) {
+        Object names = meta.raw().get(Protocol.META_SECRET_PARAMS);
+        if (!(names instanceof List)) {
+            return Collections.emptyList();
+        }
+        List<String> out = new ArrayList<String>();
+        for (Object name : (List<?>) names) {
+            if (name instanceof String && args.containsKey(name) && !out.contains(name)) {
+                out.add((String) name);
+            }
+        }
+        return Collections.unmodifiableList(out);
+    }
+
     /** The {@link Invocation} of one call. */
     private static final class CallInvocation implements Invocation {
         private final JsonView args;
@@ -466,14 +487,21 @@ final class Dispatcher {
         private final String traceparent;
         private final AgentContext context;
         private final long deadlineNanos;
+        private final List<String> secretNames;
 
         CallInvocation(JsonView args, String correlationId, String traceparent, AgentContext context,
-                       long deadlineNanos) {
+                       long deadlineNanos, List<String> secretNames) {
             this.args = args;
             this.correlationId = correlationId;
             this.traceparent = traceparent;
             this.context = context;
             this.deadlineNanos = deadlineNanos;
+            this.secretNames = secretNames;
+        }
+
+        @Override
+        public List<String> secretParams() {
+            return secretNames;
         }
 
         @Override

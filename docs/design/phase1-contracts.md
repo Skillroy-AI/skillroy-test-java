@@ -29,6 +29,12 @@ Phase 1 …"). The detail of each change, and the reason, is in `phase2-contract
 modes, the run's Phase 2 outputs, the CLI's new options and commands, the sample's primitives `lending.deposit` and
 `lending.limits` and its scenario A.
 
+**Phase 3 and Phase 4.** The changes that `phase3-contracts.md` §13.1 and `phase4-contracts.md` §14.1 ask for are
+written into the sections they change in the same way, marked **(Phase 3, built 2026-10-03; P3 §n …)** and **(Phase 4,
+built 2026-10-07; P4 §n …)**. The Phase 4 passages were written in on 2026-10-07 before the code, marked "(Phase 4,
+specified 2026-10-06, not yet built)" at the time, and corrected to what the code does after the build the same day;
+the detail of each, and everything else Phase 4 added, is in `phase4-contracts.md`.
+
 Phase 1 delivers: protocol, agent SPI, bootstrap, core, Swing module, data module, controller (client, attach,
 launcher, discovery, capability matrix), scenario compiler/executor, JUnit glue, a CLI, the sample lending desk
 (application, agent module, domain pack, scenarios) and an end-to-end test in every load mode (§10).
@@ -121,6 +127,7 @@ skillroy-agent/
   skillroy-agent-bootstrap.jar     # the -javaagent / loadAgent jar; also on the host class path in EMBEDDED mode
   lib/skillroy-protocol.jar  lib/skillroy-agent-api.jar  lib/skillroy-agent-core.jar
   modules/skillroy-agent-swing.jar  modules/skillroy-agent-data.jar      # plus any domain module jars dropped in
+  modules/skillroy-agent-web.jar   # (Phase 4, built 2026-10-07; P4 §2.1, §11)
 ```
 
 Jar names inside the home carry **no version** (the bootstrap must be found by a stable name; attach re-runs
@@ -128,7 +135,8 @@ Jar names inside the home carry **no version** (the bootstrap must be found by a
 of the reactor carries `META-INF/LICENSE` and `META-INF/NOTICE` (copied from the repository root by a shared
 `maven-resources-plugin` execution; the root pom declares `<licenses>` Apache-2.0 and `<inceptionYear>`), and the
 agent home directory and zip carry both files at the top level; an integration test checks the exact file list of
-the home and that its six jars hold only `ai/skillroy/` and `META-INF/` entries.
+the home and that its six jars (Phase 4, built 2026-10-07; P4 §2.1, §11: seven, with `modules/skillroy-agent-web.jar`;
+the test is `DistributionContentIT`) hold only `ai/skillroy/` and `META-INF/` entries.
 
 ### 2.2 Class loaders
 
@@ -536,6 +544,8 @@ public final class ErrorCodes {
         CAPABILITY_DEGRADED = -32010, CAPABILITY_UNAVAILABLE = -32011,
         HOOK_VERIFY_FAILED = -32020, CONFIRM_REQUIRED = -32030, READ_ONLY = -32031, NOT_READY = -32032,
         BUSY = -32033;                                   // S30 (1.x, built 2026-10-02): see "Bounded dispatch" in §5
+    // (Phase 4, built 2026-10-07; P4 §8.1: SCRIPT_ERROR = -32008, a script the agent ran in a page threw;
+    // data {browser, message, stack})
     public static String name(int code);
 }
 
@@ -572,6 +582,10 @@ public final class Topics {                           // generic topics; domain 
         WINDOW_OPENED = "window.opened", WINDOW_CLOSED = "window.closed",
         INPUT_ACKED = "input.acked", INPUT_REQUESTED = "input.requested", INPUT_REJECTED = "input.rejected",
         PROMPT_WAITING = "prompt.waiting", STATE_CHANGED = "state.changed", TRACE_MARK = "trace.mark", GAP = "gap";
+    // (Phase 4, built 2026-10-07; P4 §4.3: the constants WEB_LOAD, WEB_READY, WEB_CONSOLE, WEB_TAP, WEB_CLOSED and
+    // WEB_BROWSERS_CHANGED, published with source "web": web.load {browser, url, kind, frameKey?, error?},
+    // web.ready {browser, url, signal, name?}, web.console {browser, level, text, source?, line?, truncated?},
+    // web.tap {browser, name, detail?, truncated?}, web.closed {browser}, web.browsers.changed {added, removed})
 }
 
 /** One entry of GET /schema. */
@@ -690,6 +704,9 @@ public interface Invocation {
     String correlationId();  String traceparent();
     AgentContext context();
     long remainingMs();                        // time left before the dispatcher reports TIMEOUT
+    List<String> secretParams();               // (Phase 4, built 2026-10-07; P4 §4.3, D68: the names the request's
+                                               // _meta.secretParams gave (A34), in order, without duplicates,
+                                               // read-only; a default method, empty outside the dispatcher)
 }
 
 /** Convenience: Primitives.of(spec, inv -> value). */
@@ -860,6 +877,11 @@ public interface ProductionMarker { String productionReason(); }
 
 /** Applied to every value data.query returns before it leaves the JVM. */
 public interface MaskPolicy { Object mask(String sourceId, String column, Object value); }
+
+// (Phase 4, built 2026-10-07; P4 §3: package …agent.api.spi.web adds WebEngineAdapter, one per embedded-browser
+// technology, which turns seeds into WebBrowser handles, and the technology-neutral BrowserRegistryAdapter,
+// Collection<BrowserSeed> seeds(), for browsers the Swing-tree scan cannot see; a domain module registers either
+// with AgentContext.spi() during install)
 ```
 
 **S34 host code on agent threads (1.x, built 2026-10-02).** Agent threads are daemon threads in the agent's thread
@@ -1249,7 +1271,7 @@ without the key behaves exactly as in Phase 1.
 | `agent.info` | – | `{protocol, agentVersion, pid, startTimeMs, loadMode, instrumentation:bool, readOnly, ready, javaVersion, modules:[{id, version, state: INSTALLED\|FAILED\|UNINSTALLED, message?, readyMessage?}], options:{…token and nonce removed, secret values redacted…}, threads:{workers:{active,max}, callers:{active,max}, abandoned:{<primitive>: n}}}`. **(1.x, built 2026-10-02)** S30: `threads` is new. S14: `modules` also lists modules that could not be loaded |
 | `agent.capabilities` | `reprobe?:bool` | `{capabilities:{id:{state,reason,strategy}}}`; spec timeout 60000 |
 | `agent.log` | `n?:int (100, at most 2000)` | `{lines:[…]}` |
-| `agent.disable` (destructive) | – | `{stopping:true}`; after replying: uninstall modules in reverse order, publish `agent.stopping`, stop the server, delete discovery files, clear the discovery system properties and restore the ones an operator had set (**S9, 1.x, built 2026-10-02**, §2.5). No thread of the core or of the generic modules remains (a domain module may keep one bounded daemon thread to finish removing a listener, §9.2); a later attach starts a fresh agent with a new nonce and a new session id (**H2, 1.x, built 2026-10-02**) |
+| `agent.disable` (destructive) | – | `{stopping:true}`; after replying: uninstall modules in reverse order, publish `agent.stopping`, stop the server, delete discovery files, clear the discovery system properties and restore the ones an operator had set (**S9, 1.x, built 2026-10-02**, §2.5). No thread of the core or of the generic modules remains (a domain module may keep one bounded daemon thread to finish removing a listener, §9.2; (Phase 4, built 2026-10-07; P4 §2.4: the web module's tap poller ends at uninstall, and a built-in web adapter's threads end for good at `detach()`, so that a late callback of the technology starts none)); a later attach starts a fresh agent with a new nonce and a new session id (**H2, 1.x, built 2026-10-02**) |
 | `jvm.info` | – | `{javaVersion, javaVendor, vmName, pid, uptimeMs, mainCommand, inputArguments:[…], headless: string\|null, osName, osArch, user, heap:{used,max}}` (`mainCommand` and `inputArguments` redacted) |
 | `jvm.threads` | `stacks?:bool, nameContains?:string, maxDepth?:int (20)` | `{threads:[{id,name,state,daemon,stack?:[…]}]}` |
 | `jvm.properties` | `names:[string]` (at most 50) | `{properties:{name:value\|null}}`: only the named system properties, never a dump; secret values as `<redacted>` |
@@ -1325,7 +1347,7 @@ the accessible name first.
 | `swing.key` (mutating) | `key` (`KeyEvent.VK_` name without prefix, e.g. `ENTER`, `ESCAPE`, `F2`), `target?:ref\|by` (default: focus owner, else active window, else topmost modal dialog, else first showing window), `modifiers?:[SHIFT\|CTRL\|ALT\|META]`, `force?:bool (false)` | `{dispatchedTo:ref}` |
 | `swing.dialogs` | – | `{dialogs:[{ref,title,modal,text,buttons:[{ref?,text}],extractor}]}`; modeless dialogs are listed too; `extractor` is `generic` when no registered extractor claims the dialog. **A27 (1.x, built 2026-10-02):** in-window dialogs follow the window dialogs, each with `inWindow: true` and `window`, see "Dialogs that are not windows"; window dialogs keep their shape (no `inWindow` key) |
 | `swing.dismiss` (mutating) | `dialog?:ref` (a showing `java.awt.Dialog`, or **A27 (1.x, built 2026-10-02)** the root of an in-window dialog; default: the topmost modal dialog window, else the in-window dialog when it is the only dialog showing), `button?:string` (button text or name, exact then case-insensitive), `close?:bool` | `{dismissedBy: BUTTON_ACTION\|CLOSE, button?}`. `button` goes through the ACTION click rung; several matches are `AMBIGUOUS`. `close` delivers a `WINDOW_CLOSING` event to the dialog (what the title-bar close box does, so the dialog's own close handling runs); `dispose()` and `setVisible(false)` are never called, because they leave application dialogs without an answer. With neither, a dialog with exactly one button has it pressed; otherwise `INVALID_PARAMS` with `data.buttons`. Without `dialog`: no dialog at all is `NOT_FOUND`; several dialogs of which none is a modal window is `AMBIGUOUS` with `data.dialogs` (window dialogs first, then in-window ones); a `dialog` ref that is neither kind is `INVALID_PARAMS` with `{param: "dialog", ref}` |
-| `swing.capture` | `target?:ref (active window, else topmost modal dialog, else first showing window)`, `mode?: PAINT (PAINT)` | `{format:"png", width, height, base64}`; anything larger than 4096 x 4096 is scaled down keeping the aspect ratio |
+| `swing.capture` | `target?:ref (active window, else topmost modal dialog, else first showing window)`, `mode?: PAINT (PAINT)` | `{format:"png", width, height, base64}`; anything larger than 4096 x 4096 is scaled down keeping the aspect ratio. (Phase 4, built 2026-10-07; P4 §2.5, §14.1: `PAINT` guards embedded-browser components (BS8: a JOGL canvas throws): when the target's `printAll` throws, the image is painted again part by part, a part whose `printAll` throws on its own becomes a crossed placeholder rectangle, the heavyweight descendants are printed on their own on top, and the result gains `skipped: [{ref, className, error}]` when it is not empty) |
 | `swing.edtState` | – | `{dispatchThreadAlive, edtBlocked, awtStarted, modalDialogs:[ref], windowCount, focusOwner?:ref}` (thread `CALLER`, never blocks on the EDT for more than 500 ms; `edtBlocked:true` if the marker does not run). It names no capability and answers without starting the toolkit: before the application has started AWT it reports `{dispatchThreadAlive:false, edtBlocked:false, awtStarted:false, modalDialogs:[], windowCount:0}`. `modalDialogs` lists dialog windows only, not in-window dialogs (A27) |
 | `swing.settle` | `timeoutMs?:int (5000, at most 120000), quietMs?:int (50)` | `{settled:bool, ms}`: two consecutive EDT marker round trips with no `window.opened`/`window.closed` in between and for `quietMs` after. It answers `settled:false` before the call budget runs out instead of letting the dispatcher report `TIMEOUT` |
 
@@ -1776,8 +1798,9 @@ timeouts: { step: 30s }
 ```
 
 These eleven top-level keys, plus `ui` below and, since Phase 2, `oracle` (Phase 2, built 2026-10-02; P2 §3), are
-the only ones (`ScenarioLoader.KEYS`, thirteen entries; twelve in Phase 1.x); an unknown key is an error that names
-the key and its line.
+the only ones (`ScenarioLoader.KEYS`, thirteen entries; twelve in Phase 1.x;
+(Phase 4, built 2026-10-07; P4 §7.2: fourteen with `web`, which sets the web path, a default browser, frozen-target
+recovery and tracing)); an unknown key is an error that names the key and its line.
 
 **A29 the twelfth key, `ui` (1.x, built 2026-10-02).**
 
@@ -1998,6 +2021,7 @@ errors):
 | `waitFor: {topic, match?, within?}` | `sync.await`; `within` defaults to the step timeout and is at most 119 s (the agent caps a call at 120 s). The executor adds `since`: the `seq.before` of the last call before it that was not a wait, a mark or a `swing.settle` (**A32, 1.x, built 2026-10-02:** no `swing.settle` call moves `since`, whether the executor emitted it for an `await` or a scenario sent it through `call`; the settle cannot be the action the wait refers to). A wait on a prompt topic counts as handling the prompt |
 | `expect: {path: matcher, …}` | no calls; the expectations are attached to the step |
 | `mark: label` or `{label, attrs?}` | `trace.mark` |
+| `webClick`, `webFill`, `webDispatch`, `webWaitFlag`, `webResize`, `webTap` (Phase 4, built 2026-10-07; P4 §7.1) | `web.dom.click`, `web.dom.fill`, `web.dispatchEvent` and `web.resize` (SETTLE; with `await`, EVENT then a settle call, as A32), `web.waitFlag` (NONE; `timeoutMs` at most 119000), `web.tap` (NONE; a cleanup call removes it), each on the web path of P4 §6.1 |
 
 SETTLE covers the event-dispatch thread only. A UI step whose effect is produced by an application thread is
 followed by a `waitFor` on the application's own event (the sample's `basic-loan-ui` does this after every such
@@ -2032,7 +2056,9 @@ So under `ui: {clickRung: COMPONENT}` an unfocusable target degrades to an ACTIO
 fidelity; with `strict: true`, for the scenario or for one step, the click does not fire and the step fails (§8.5).
 
 Base facts (consulted after the pack's own roots; (Phase 3, built 2026-10-03; P3 §3.4: a fifth root
-`devices`, every `DeviceAdapter` as `{id, kind, actions, state}` sorted by id): `app` = the `app.state` value
+`devices`, every `DeviceAdapter` as `{id, kind, actions, state}` sorted by id);
+(Phase 4, built 2026-10-07; P4 §6.2: a sixth root `web` after `devices`, `web.browsers[]` built from `web.browsers` with
+each page's `text`, read through the run's web path; a pack root named `web` hides it)): `app` = the `app.state` value
 `{providerId: {…}}`; `ui` = the `swing.snapshot` value `{seq, truncated, windows}`; `dialogs` = the list inside
 `swing.dialogs` (`dialogs[0].text`); `caps` = `agent.capabilities` as a list of `{id, state, reason, strategy}` sorted
 by id, because an id with dots cannot be a path field (`caps[id=swing.tree].state`).
@@ -2130,7 +2156,10 @@ Run sequence:
 
 1. check `plan.requires` against the capability matrix (`PRECONDITION_FAILED` naming each unmet id and its reason)
    and `plan.launchProperties` through `jvm.properties` (`PRECONDITION_FAILED` naming the property, the expected and
-   the actual value);
+   the actual value); (Phase 4, built 2026-10-07; P4 §6.1: then step 1a, only when the plan has a `web.*` call and
+   never in `resolve`: the web path, `cdp` or `agent`, is selected by the scenario's `web.path` and recorded in a
+   `web.path` record; when the scenario traces, the executor decides here whether a call may carry a secret and then
+   opens the path without tracing, P4 §6.4)
 2. run the pack's `preflight()` checks (`ENVIRONMENT`);
 3. bind slots (`Binder`; Phase 1: fixtures only) and check every reference in the plan; an unresolvable `$ref` is
    `RESOLUTION_FAILED` before any step touches the application;
@@ -2142,7 +2171,14 @@ Run sequence:
 6. evaluate `verify`.
 
 A JSON-RPC error from a step call is `ERROR` / `ENVIRONMENT`, except `INPUT_REJECTED`, `NOT_FOUND`, `AMBIGUOUS` and
-`MODAL_OPEN` (`FAIL` / `ASSERTION`) and `TIMEOUT` (`FAIL` / `SYNC_TIMEOUT`). **A30 (1.x, built 2026-10-02; decision
+`MODAL_OPEN` (`FAIL` / `ASSERTION`) and `TIMEOUT` (`FAIL` / `SYNC_TIMEOUT`).
+(Phase 4, built 2026-10-07; P4 §8.1: `SCRIPT_ERROR` and, from a web verb, `STALE_HANDLE` join `NOT_FOUND` and
+`AMBIGUOUS` as `FAIL` / `ASSERTION`; a base `webWaitFlag` that did not turn ready is `FAIL` / `SYNC_TIMEOUT`; a web
+verb's `CAPABILITY_UNAVAILABLE` and `INVALID_PARAMS`, and the CDP path's failures, are `ERROR` / `ENVIRONMENT`; a pinned
+web path that is absent, whose `web.cdp` is not `OK` or whose `open()` gives a reason is `ERROR` /
+`PRECONDITION_FAILED`, and one whose attach fails `ERROR` / `ENVIRONMENT`; a call the CDP path served fails with the
+agent's codes and maps the same way.)
+**A30 (1.x, built 2026-10-02; decision
 B18):** `MODAL_OPEN` from a step call is `FAIL` / `ASSERTION`, like `INPUT_REJECTED` (it used to be `ERROR` /
 `ENVIRONMENT`): the application is showing something the scenario did not expect. The agent's `MODAL_OPEN` data
 carries the dialog's ref and title but no text, so the executor makes one bounded `swing.dialogs` call to find it;
@@ -2210,9 +2246,9 @@ removed):
 
 | File | Content |
 |---|---|
-| `run.jsonl` | one JSON object per line, flushed per line, each with `type` and `t` (ms since run start). Types: `run-start`, `pack`, `requires`, `launchProperties`, `preflight`, `bind`, `call` (params, result, duration; **(Phase 2, built 2026-10-02)** A34: also `secretParams`, the names a step call carried in `_meta.secretParams`, omitted when empty), `sync`, `prompt`, `expect`, `evidence`, `artifact`, `cleanup`, `recover`, `fidelity` (**A29, 1.x, built 2026-10-02**), `run-end`. The Phase 2 record types are P2 §11.3 |
+| `run.jsonl` | one JSON object per line, flushed per line, each with `type` and `t` (ms since run start). Types: `run-start`, `pack`, `requires`, `launchProperties`, `preflight`, `bind`, `call` (params, result, duration; **(Phase 2, built 2026-10-02)** A34: also `secretParams`, the names a step call carried in `_meta.secretParams`, omitted when empty; (Phase 4, built 2026-10-07; P4 §8.2: a `web.*` call also carries `path`, `cdp` or `agent`, after `primitive`; the web record types are P4 §8.2)), `sync`, `prompt`, `expect`, `evidence`, `artifact`, `cleanup`, `recover`, `fidelity` (**A29, 1.x, built 2026-10-02**), `run-end`. The Phase 2 record types are P2 §11.3 |
 | `bindings.json` | `{scenarioId, planHash, resolutions:{slot:{strategy, value}}}`, the Phase 1 subset of the design's shape. **(Phase 2, built 2026-10-02)** written when the bind ends and again at run end, in the shape of P2 §11.3 (with `resolveHash`, `mode`, `envId`, `env`, `oracles`, `captured`, and per slot its credential reference, never a joined field) |
-| `failure/` (failures during steps or verify; never after the agent is lost) | `snapshot.json`, `app-state.json`, `dialogs.json`, `events.json` (the last 200 events) and `capture.png` (when `swing.capture.paint` is OK). The UI as indented text is also in `RunResult.detail.snapshot` |
+| `failure/` (failures during steps or verify; never after the agent is lost) | `snapshot.json`, `app-state.json`, `dialogs.json`, `events.json` (the last 200 events) and `capture.png` (when `swing.capture.paint` is OK). The UI as indented text is also in `RunResult.detail.snapshot`. (Phase 4, built 2026-10-07; P4 §6.4: for a target with an indexed browser also `web-browsers.json` and, for each browser visible in Swing, at most four, `web-<ref>-aria.json` and `web-<ref>.png`, or `web-<ref>-error.txt` for a failed read; `web-trace.zip` when the scenario traced the CDP path and no call may carry a secret; P4 §6.2: `RunResult.detail.snapshot` renders a `WEB` surface after the Swing windows) |
 | `artifacts/capture.png` | kept on success when the scenario lists `artifacts: [capture]` |
 
 **A25 fixture secrets masked (1.x, built 2026-10-02; decision B18).** A fixture field whose key
@@ -2703,3 +2739,7 @@ and B4: these are the two gates; a Java 21 target is no longer run). The runs ar
 application and the controller on Java 21: 52 of 52 checks green on a Java 8 target and on a Java 21 target, twice
 each, with no flake. One false positive was found and fixed while 1.x was integrated: the run log's relative
 timestamp happened to equal the password (`"t":1111`), which is why check 18 searches strings only.
+
+(Phase 4, built 2026-10-07; P4 §12.2: this section is unchanged, except that the load-mode checks now find the module
+`web` installed in every agent beside `swing`, `data` and `lending`; the acceptance of the embedded web views,
+`WebHostEndToEndIT` against the web host sample under the Maven profile `jcef`, is P4 §12.2.)

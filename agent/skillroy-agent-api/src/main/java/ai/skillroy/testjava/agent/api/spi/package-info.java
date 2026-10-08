@@ -17,7 +17,11 @@
 /**
  * Service provider interfaces through which a domain module teaches the generic agent about one target application:
  * readiness, threads, state, widget names, locators, actions, dialogs, data sources, devices, production detection,
- * masking and secret keys for redaction. Implementations are registered with {@code AgentContext.spi()} during
- * {@code AgentModule.install}.
+ * masking and secret keys for redaction. Embedded browsers have a sub-package of their own,
+ * {@code ai.skillroy.testjava.agent.api.spi.web}: a domain module implements its
+ * {@link ai.skillroy.testjava.agent.api.spi.web.BrowserRegistryAdapter} (seeds for browsers the Swing-tree scan
+ * cannot see) and, for an embedded-browser technology the agent does not know, a
+ * {@link ai.skillroy.testjava.agent.api.spi.web.WebEngineAdapter}. Implementations are registered with
+ * {@code AgentContext.spi()} during {@code AgentModule.install}.
  */
 package ai.skillroy.testjava.agent.api.spi;

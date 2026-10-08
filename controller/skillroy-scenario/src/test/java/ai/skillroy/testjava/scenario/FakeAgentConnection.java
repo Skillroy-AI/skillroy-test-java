@@ -140,6 +140,66 @@ final class FakeAgentConnection implements AgentConnection {
         return this;
     }
 
+    /** A 1 x 1 PNG, as {@code web.bitmap} and {@code swing.capture} answer with base64. */
+    static final String PNG_1X1 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9aw"
+            + "AAAABJRU5ErkJggg==";
+
+    /**
+     * A {@code web.browsers} entry as the agent's web module lists it (phase4-contracts.md 4.2): adapter
+     * {@code jcef}, rendering {@code WINDOWED}, {@code EVALUATE}, {@code FRAMES} and {@code BITMAP}, the target id
+     * {@code T-<tag>}, one main frame.
+     */
+    static Map<String, Object> browser(String ref, String tag, boolean visible) {
+        Map<String, Object> browser = new LinkedHashMap<>();
+        browser.put("ref", ref);
+        browser.put("adapter", "jcef");
+        browser.put("nativeId", ref.substring(1));
+        browser.put("url", "data:text/html," + tag);
+        browser.put("title", tag + " page");
+        browser.put("closed", false);
+        browser.put("visibleInSwing", visible);
+        if (visible) {
+            browser.put("component", "h2");
+        }
+        browser.put("rendering", "WINDOWED");
+        browser.put("viewport", Map.of("w", 800L, "h", 600L));
+        browser.put("capabilities", List.of("EVALUATE", "FRAMES", "BITMAP"));
+        browser.put("cdpTargetId", "T-" + tag);
+        browser.put("tag", tag);
+        browser.put("frames", List.of(Map.of("key", "F-" + tag, "name", "", "url", "data:text/html," + tag,
+                "main", true)));
+        return browser;
+    }
+
+    /**
+     * The agent's web module (phase4-contracts.md 4): two browsers, {@code h7} (tag {@code front}, visible in Swing)
+     * and {@code h9} (tag {@code back}, hidden); the web capabilities OK except {@code web.cdp}, which a test adds
+     * when it wants an endpoint; every {@code web.*} primitive answering as the module does for a page that
+     * cooperates. Tests replace single handlers.
+     */
+    FakeAgentConnection withWeb() {
+        capabilities("web.browsers", "web.evaluate", "web.events", "web.initScript", "web.resize", "web.bitmap");
+        value("web.browsers", Map.of("browsers", List.of(browser("h7", "front", true), browser("h9", "back",
+                false))));
+        on("web.dom.click", params -> Map.of("matched", 1L, "clicked", Map.of("role", "button", "name", "Borrow",
+                "tag", "BUTTON"), "fidelity", "DOM"));
+        on("web.dom.fill", params -> Map.of("matched", 1L, "filled", Map.of("tag", "INPUT", "type", "text"),
+                "typed", (long) String.valueOf(params.get("text")).length()));
+        on("web.dispatchEvent", params -> Map.of("dispatched", true));
+        on("web.tap", params -> Map.of("installed", (long) ((List<?>) params.get("patterns")).size(), "timing",
+                "DOCUMENT_START"));
+        on("web.waitFlag", params -> Map.of("ready", true, "ms", 5L, "polls", 1L));
+        on("web.resize", params -> Map.of("applied", "OVERRIDE", "viewport", Map.of("w", 1024L, "h", 768L)));
+        on("web.dom.text", params -> Map.of("text", "page of " + params.get("browser"), "truncated", false));
+        on("web.ariaSnapshot", params -> Map.of("nodes", List.of(Map.of("role", "heading", "name", "Borrow",
+                "level", 1L), Map.of("role", "textbox", "name", "Item", "value", "hammer"), Map.of("role", "button",
+                "name", "Borrow")), "truncated", false));
+        on("web.bitmap", params -> Map.of("format", "png", "width", 1L, "height", 1L, "base64", PNG_1X1, "source",
+                "PROTOCOL"));
+        on("web.evaluate", params -> Map.of("json", "1", "typeofResult", "number"));
+        return this;
+    }
+
     synchronized FakeAgentConnection property(String name, Object value) {
         properties.put(name, value);
         return this;

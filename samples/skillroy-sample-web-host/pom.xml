@@ -1,0 +1,169 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Copyright 2026 Mike Mills.
+
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+
+      http://www.apache.org/licenses/LICENSE-2.0
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>ai.skillroy</groupId>
+    <artifactId>skillroy-test-java-parent</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+    <relativePath>../../pom.xml</relativePath>
+  </parent>
+
+  <!-- Built only with the profile "jcef" (root POM), which also manages the jcef versions used here. -->
+  <artifactId>skillroy-sample-web-host</artifactId>
+  <name>skillroy-sample-web-host</name>
+  <description>
+    The sample web host: a small Swing application that embeds JCEF (jcefmaven) with two browsers in a card layout
+    and one without a view, as a target with embedded web views. Knows nothing about the framework.
+  </description>
+
+  <properties>
+    <!-- Java 8 target application. -->
+    <maven.compiler.release>8</maven.compiler.release>
+  </properties>
+
+  <dependencies>
+    <dependency>
+      <groupId>me.friwi</groupId>
+      <artifactId>jcefmaven</artifactId>
+    </dependency>
+    <!-- The natives of one platform (skillroy.jcef.platform), about 150 MB: only a running browser needs them, so they
+         are a test dependency (the display tests here; the acceptance puts them on the host's class path). jcefmaven
+         extracts them once into the install directory; nothing is downloaded. -->
+    <dependency>
+      <groupId>me.friwi</groupId>
+      <artifactId>jcef-natives-${skillroy.jcef.platform}</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <!-- The adapter contract kit (the agent module's test-jar) and the adapter it is run against here, the jcef
+         adapter of the agent module (phase4-contracts.md 10.3): test scope only; the host itself knows nothing of the
+         framework. -->
+    <dependency>
+      <groupId>ai.skillroy</groupId>
+      <artifactId>skillroy-agent-web</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>ai.skillroy</groupId>
+      <artifactId>skillroy-agent-web</artifactId>
+      <type>test-jar</type>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-jar-plugin</artifactId>
+        <configuration>
+          <archive>
+            <manifest>
+              <!-- jcefmaven, its dependencies and the natives must be on the class path as well. -->
+              <mainClass>ai.skillroy.testjava.samples.webhost.WebHostApp</mainClass>
+            </manifest>
+          </archive>
+        </configuration>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <configuration>
+          <!-- A test that starts CEF and hangs in native code cannot be interrupted: the fork is ended instead. -->
+          <forkedProcessTimeoutInSeconds>900</forkedProcessTimeoutInSeconds>
+          <environmentVariables>
+            <!-- Off-screen rendering (JOGL) on Java 16+ needs these exports. The launcher of Java 9 and newer reads
+                 JDK_JAVA_OPTIONS; Java 8 ignores it (and would refuse the flags), so a Java 8 test JVM (-Djvm=...)
+                 still starts. They stay out of the shared argLine and skillroy.test.extraArgLine on purpose. The
+                 launcher splits the value at any white space, line breaks included; Java 9+ prints a "Picked up
+                 JDK_JAVA_OPTIONS" note when it starts. -->
+            <JDK_JAVA_OPTIONS>
+              --add-exports java.base/java.lang=ALL-UNNAMED
+              --add-exports java.desktop/sun.awt=ALL-UNNAMED
+              --add-exports java.desktop/sun.java2d=ALL-UNNAMED
+            </JDK_JAVA_OPTIONS>
+          </environmentVariables>
+        </configuration>
+        <executions>
+          <!-- CEF can be initialised once per JVM and each surefire execution forks a JVM of its own: a test class that
+               starts a host (WebHostApp.launch) gets an execution of its own, and the default execution, which may
+               hold at most one such class, excludes the classes named *DisplayTest. (reuseForks=false would give
+               every class its own JVM too, but surefire 3.6.0 then runs no test at all when -Djvm names a JVM other
+               than Maven's, as the Java 8 leg of the matrix does.) -->
+          <execution>
+            <id>default-test</id>
+            <configuration>
+              <excludes>
+                <exclude>**/*DisplayTest.java</exclude>
+                <exclude>**/*$*</exclude>
+              </excludes>
+            </configuration>
+          </execution>
+          <execution>
+            <id>display</id>
+            <goals>
+              <goal>test</goal>
+            </goals>
+            <configuration>
+              <includes>
+                <include>**/WebHostDisplayTest.java</include>
+              </includes>
+            </configuration>
+          </execution>
+          <!-- The adapter contract kit against this host's JCEF, one JVM per rendering mode; the property tells each
+               class that it runs in its own execution. -->
+          <execution>
+            <id>kit-off-screen</id>
+            <goals>
+              <goal>test</goal>
+            </goals>
+            <configuration>
+              <includes>
+                <include>**/JcefKitOffScreenDisplayTest.java</include>
+              </includes>
+              <systemPropertyVariables>
+                <skillroy.kit.execution>off-screen</skillroy.kit.execution>
+              </systemPropertyVariables>
+            </configuration>
+          </execution>
+          <execution>
+            <id>kit-windowed</id>
+            <goals>
+              <goal>test</goal>
+            </goals>
+            <configuration>
+              <includes>
+                <include>**/JcefKitWindowedDisplayTest.java</include>
+              </includes>
+              <systemPropertyVariables>
+                <skillroy.kit.execution>windowed</skillroy.kit.execution>
+              </systemPropertyVariables>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+</project>

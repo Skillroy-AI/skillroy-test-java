@@ -39,10 +39,17 @@ import java.util.Map;
  * {@code bind}, {@code call}, {@code sync}, {@code fidelity} (a UI call that ran at a lower fidelity than requested,
  * amendment A29), {@code prompt}, {@code expect}, {@code evidence}, {@code artifact}, {@code cleanup},
  * {@code recover}, {@code run-end}, and from Phase 2 {@code fingerprint}, {@code resolver}, {@code verifier},
- * {@code resolve}, {@code oracle}, {@code guard}, {@code capture}, {@code db}, {@code ledger}. Every record passes
- * through the run's {@link SecretMask} first (amendment A25, phase2-contracts.md 11.4).
+ * {@code resolve}, {@code oracle}, {@code guard}, {@code capture}, {@code db}, {@code ledger}, and from Phase 4
+ * (phase4-contracts.md 8.2) {@code web.path} (once per run with web calls: the path chosen and why, the CDP attach's
+ * details, the script library's hash), {@code web.fallback} (a call the chosen path could not serve went to the
+ * agent), {@code web.recover} (written by the CDP path through its run context), {@code fact} (a value the
+ * {@code web} fact root left out) and {@code web.close} (only when closing the path failed). A {@code call} record of
+ * a {@code web.*} primitive carries {@code path}. Every record passes through the run's {@link SecretMask} first
+ * (amendment A25, phase2-contracts.md 11.4).
  *
- * <p>Best effort: a write error disables the log and is never thrown into the run. Used by one executor thread.
+ * <p>Best effort: a write error disables the log and is never thrown into the run. Used by the executor's thread;
+ * {@link #write} is synchronised because a web path may append a record through its run context from a thread of
+ * its own.
  */
 final class RunLog implements AutoCloseable {
 
@@ -91,7 +98,7 @@ final class RunLog implements AutoCloseable {
      * text. A record the codec cannot write (NaN, nesting deeper than 200) keeps its field names only, since its
      * values could not be masked.
      */
-    void write(String type, Map<String, ?> fields) {
+    synchronized void write(String type, Map<String, ?> fields) {
         if (out == null) {
             return;
         }
@@ -126,7 +133,7 @@ final class RunLog implements AutoCloseable {
     }
 
     @Override
-    public void close() {
+    public synchronized void close() {
         closeQuietly();
     }
 

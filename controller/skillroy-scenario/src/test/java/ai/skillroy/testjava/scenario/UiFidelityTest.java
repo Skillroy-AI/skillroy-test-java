@@ -111,8 +111,10 @@ class UiFidelityTest {
         assertFalse(plan.toJsonText().contains("\"ui\""), plan.toJsonText());
         assertEquals(UiSettings.DEFAULT, ScenarioLoader.load(scenario(null, "  - mark: x\n")
                 .getBytes(StandardCharsets.UTF_8), "t.yaml").effectiveUi());
-        assertEquals(13, ScenarioLoader.KEYS.size(), "ui (A29) and oracle (Phase 2) make thirteen top-level keys");
+        assertEquals(14, ScenarioLoader.KEYS.size(), "ui (A29), oracle (Phase 2) and web (Phase 4) make fourteen"
+                + " top-level keys");
         assertEquals("ui", ScenarioLoader.KEYS.get(12));
+        assertEquals("web", ScenarioLoader.KEYS.get(13));
         assertTrue(assertThrows(IllegalArgumentException.class, () -> new UiSettings("ROBOT", false)).getMessage()
                 .contains("ACTION or COMPONENT"));
     }

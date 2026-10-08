@@ -1,0 +1,589 @@
+/*
+ * Copyright 2026 Mike Mills.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package ai.skillroy.testjava.cdp;
+
+import ai.skillroy.testjava.controller.AgentRpcException;
+import ai.skillroy.testjava.controller.CallOptions;
+import ai.skillroy.testjava.protocol.ErrorCodes;
+import ai.skillroy.testjava.protocol.Event;
+import ai.skillroy.testjava.protocol.RpcResult;
+import ai.skillroy.testjava.protocol.web.WebLib;
+import ai.skillroy.testjava.scenario.web.WebPathException;
+import ai.skillroy.testjava.scenario.web.WebSettings;
+import com.microsoft.playwright.Frame;
+import com.microsoft.playwright.Locator;
+import com.microsoft.playwright.Page;
+import com.microsoft.playwright.PlaywrightException;
+import com.microsoft.playwright.TimeoutError;
+import com.microsoft.playwright.options.AriaRole;
+import com.microsoft.playwright.options.ScreenshotType;
+import com.microsoft.playwright.options.WaitForSelectorState;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+
+import java.util.Base64;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.regex.Pattern;
+
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+/**
+ * {@link CdpWebPath#call} for every served primitive against fake Playwright pages (no driver, no browser): the
+ * shared library's scripts and argument objects, the result shapes, the agent's sequence in {@code seqBefore} and
+ * {@code seqAfter}, the path's own events, the errors with the agent's codes, and the fall-backs to the agent.
+ */
+class CdpWebPathCallTest {
+
+    private FakeAgent agent;
+    private FakeWorld world;
+    private FakeWorld.FakePage front;
+    private FakeWorld.FakePage back;
+    private CdpWebPath path;
+
+    @BeforeEach
+    void open() throws Exception {
+        world = new FakeWorld();
+        front = world.page("T1", "data:text/html,front", "Front page");
+        back = world.page("T2", "data:text/html,back", "Back page");
+        agent = new FakeAgent().value("web.cdp.status", FakeAgent.status(9222))
+                .value("web.browsers", Map.of("browsers", List.of(
+                        FakeAgent.browser("b-front", "T1", "front", true, "data:text/html,front"),
+                        FakeAgent.browser("b-back", "T2", "back", false, "data:text/html,back"),
+                        FakeAgent.browser("b-detached", null, "detached", false, "data:text/html,detached"))));
+        TargetProbe probe = new TargetProbe(CdpEndpoint.local(9222), "FakeChrome/152", "1.3", List.of(
+                new TargetProbe.Target("T1", "page", front.url, "Front page", "ws://t1", true, 2, null),
+                new TargetProbe.Target("T2", "page", back.url, "Back page", "ws://t2", true, 2, null)), 4);
+        path = new CdpWebPath((e, o, ids) -> probe, (e, o, p) -> world.attach(p, o), false);
+        assertNull(path.open(agent, WebSettings.DEFAULT, null));
+    }
+
+    @AfterEach
+    void close() {
+        path.close();
+    }
+
+    private RpcResult call(String primitive, Map<String, Object> args) throws Exception {
+        return path.call(primitive, args, CallOptions.defaults());
+    }
+
+    private AgentRpcException rpcError(String primitive, Map<String, Object> args) {
+        return assertThrows(AgentRpcException.class, () -> call(primitive, args));
+    }
+
+    private String unsupported(String primitive, Map<String, Object> args, CallOptions options) {
+        return assertThrows(WebPathException.class, () -> path.call(primitive, args, options)).getMessage();
+    }
+
+    private static Map<String, Object> map(Object... kv) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        for (int i = 0; i < kv.length; i += 2) {
+            m.put((String) kv[i], kv[i + 1]);
+        }
+        return m;
+    }
+
+    @Test
+    void evaluateAnswersTheWrapperValueWithTheAgentsSequence() throws Exception {
+        front.engine = a -> {
+            agent.publish();
+            return FakeWorld.ok("{\"json\":\"2\",\"typeofResult\":\"number\",\"truncated\":false}");
+        };
+        long before = agent.lastSeq();
+        RpcResult r = call("web.evaluate", map("expression", "1+1"));
+        assertEquals(Map.of("json", "2", "typeofResult", "number"), r.value());
+        assertEquals(before, r.seqBefore(), "the agent's lastSeq before the call");
+        assertEquals(before + 1, r.seqAfter(), "and after it");
+        assertTrue(r.events().isEmpty(), "the path publishes nothing on the agent's bus");
+        assertEquals("controller", r.thread());
+        assertEquals(Scripts.evaluate("1+1", false), front.evaluated.get(0), "the default browser's page");
+        assertTrue(back.evaluated.isEmpty());
+        for (FakeAgent.Call c : agent.callsTo("evt.query")) {
+            assertEquals(Map.of("since", Long.MAX_VALUE, "limit", 1L), c.params());
+        }
+    }
+
+    @Test
+    void awaitPromiseAndTruncationAreCarried() throws Exception {
+        back.engine = a -> FakeWorld.ok("{\"json\":\"\\\"aaa\",\"typeofResult\":\"string\",\"truncated\":true}");
+        RpcResult r = call("web.evaluate", map("expression", "p", "awaitPromise", true, "browser", "b-back"));
+        assertEquals(Map.of("json", "\"aaa", "typeofResult", "string", "truncated", true), r.value());
+        assertEquals(Scripts.evaluate("p", true), back.evaluated.get(0));
+    }
+
+    @Test
+    void aThrownScriptIsScriptErrorNamingTheBrowser() {
+        front.engine = a -> Map.of("__scriptError", Map.of("message", "Error: boom", "stack", "Error: boom\n at x"));
+        AgentRpcException e = rpcError("web.evaluate", map("expression", "boom()"));
+        assertEquals("web.evaluate", e.method());
+        assertEquals(ErrorCodes.SCRIPT_ERROR, e.error().code());
+        assertEquals(Map.of("browser", "b-front", "message", "Error: boom", "stack", "Error: boom\n at x"),
+                e.error().data());
+    }
+
+    @Test
+    void theReadsCallTheLibraryWithTheSharedArgumentObjects() throws Exception {
+        front.engine = a -> FakeWorld.ok(Map.of("nodes", List.of(Map.of("role", "button", "name", "Borrow")),
+                "truncated", false));
+        RpcResult aria = call("web.ariaSnapshot", map());
+        assertEquals(Map.of("nodes", List.of(Map.of("role", "button", "name", "Borrow")), "truncated", false),
+                aria.value());
+        assertEquals(Scripts.call("aria", null, 2000L, true), front.evaluated.get(0));
+        call("web.ariaSnapshot", map("maxNodes", 50_000, "interestingOnly", false));
+        assertEquals(Scripts.call("aria", null, 20_000L, false), front.evaluated.get(1), "capped at 20000");
+
+        front.engine = a -> FakeWorld.ok(Map.of("text", "hello", "truncated", false));
+        assertEquals(Map.of("text", "hello", "truncated", false), call("web.dom.text", map()).value());
+        assertEquals(Scripts.call("domText", map("selector", "body", "maxChars", 10_000L)), front.evaluated.get(2));
+        call("web.dom.text", map("selector", "#status", "maxChars", 500_000));
+        assertEquals(Scripts.call("domText", map("selector", "#status", "maxChars", 100_000L)),
+                front.evaluated.get(3));
+    }
+
+    @Test
+    void aReadWhoseContextANavigationDestroyedIsEvaluatedOnceMore() throws Exception {
+        AtomicInteger n = new AtomicInteger();
+        front.engine = a -> {
+            if (n.incrementAndGet() == 1) {
+                throw new PlaywrightException("Execution context was destroyed, most likely because of a navigation");
+            }
+            return FakeWorld.ok(Map.of("text", "after", "truncated", false));
+        };
+        assertEquals(Map.of("text", "after", "truncated", false), call("web.dom.text", map()).value());
+        assertEquals(2, n.get());
+        n.set(0);
+        front.engine = a -> {
+            n.incrementAndGet();
+            throw new PlaywrightException("Execution context was destroyed, most likely because of a navigation");
+        };
+        AgentRpcException e = rpcError("web.dom.click", map("selector", "#borrow"));
+        assertEquals(ErrorCodes.INTERNAL_ERROR, e.error().code());
+        assertEquals("the CDP call failed: Execution context was destroyed, most likely because of a navigation",
+                e.error().message());
+        assertEquals(1, n.get(), "a mutating call is never evaluated twice");
+    }
+
+    @Test
+    void clickWaitsForActionabilityThenLetsTheLibraryAct() throws Exception {
+        Map<String, Object> clicked = Map.of("matched", 1L, "clicked", Map.of("role", "button", "name", "Borrow",
+                "tag", "BUTTON"), "fidelity", "DOM");
+        front.engine = a -> FakeWorld.ok(clicked);
+        RpcResult r = call("web.dom.click", map("selector", "#borrow"));
+        assertEquals(clicked, r.value());
+        assertEquals(List.of("css=#borrow"), front.locators);
+        Locator.WaitForOptions wait = front.waits.get(0);
+        assertEquals(WaitForSelectorState.VISIBLE, wait.state);
+        assertTrue(wait.timeout > 5000 && wait.timeout <= 9000, "the budget less a reserve: " + wait.timeout);
+        assertEquals(Scripts.call("domClick", map("selector", "#borrow")), front.evaluated.get(0));
+
+        call("web.dom.click", map("role", "button", "name", "Borrow", "index", 1, "expectVisible", false));
+        Object[] role = front.roles.get(0);
+        assertEquals(AriaRole.BUTTON, role[0]);
+        Frame.GetByRoleOptions options = (Frame.GetByRoleOptions) role[1];
+        assertEquals("Borrow", options.name);
+        assertEquals(Boolean.TRUE, options.exact);
+        assertEquals(Boolean.TRUE, options.includeHidden, "a hidden element may be the target");
+        assertEquals(List.of(1), front.nths);
+        assertEquals(WaitForSelectorState.ATTACHED, front.waits.get(1).state);
+        assertEquals(Scripts.call("domClick", map("role", "button", "name", "Borrow", "index", 1,
+                "expectVisible", false)), front.evaluated.get(1));
+
+        call("web.dom.click", map("role", "button", "name", map("regex", "^bor", "ignoreCase", true)));
+        Pattern name = (Pattern) ((Frame.GetByRoleOptions) front.roles.get(1)[1]).name;
+        assertEquals("^bor", name.pattern());
+        assertTrue((name.flags() & Pattern.CASE_INSENSITIVE) != 0);
+
+        call("web.dom.click", map("role", "no-such-role", "name", "x"));
+        assertEquals(3, front.waits.size(), "no locator for an unknown role: the library decides");
+    }
+
+    @Test
+    void aFailedActionabilityWaitIsNotAnErrorButAClosedPageIs() {
+        front.waitFailure = new PlaywrightException("Error: strict mode violation: locator('button') resolved to 2"
+                + " elements");
+        front.engine = a -> FakeWorld.ok(Map.of("__error", "AMBIGUOUS", "data", Map.of("candidates", List.of())));
+        AgentRpcException ambiguous = rpcError("web.dom.click", map("role", "button"));
+        assertEquals(ErrorCodes.AMBIGUOUS, ambiguous.error().code(), "the library reports it in its own terms");
+
+        front.waitFailure = new TimeoutError("Timeout 9000ms exceeded.");
+        front.engine = a -> FakeWorld.ok(Map.of("__error", "NOT_FOUND", "data", Map.of("selector", "#gone")));
+        assertEquals(ErrorCodes.NOT_FOUND, rpcError("web.dom.click", map("selector", "#gone")).error().code());
+
+        front.waitFailure = new PlaywrightException("Target page, context or browser has been closed");
+        AgentRpcException stale = rpcError("web.dom.click", map("selector", "#x"));
+        assertEquals(ErrorCodes.STALE_HANDLE, stale.error().code());
+        assertEquals("the browser closed during the step", stale.error().message());
+    }
+
+    @Test
+    void fillAndDispatchPassTheSharedArgumentObjects() throws Exception {
+        front.engine = a -> FakeWorld.ok(Map.of("matched", 1L, "filled", Map.of("tag", "INPUT", "type", "text"),
+                "typed", 6L));
+        call("web.dom.fill", map("selector", "#item", "text", "hammer", "clear", true, "enter", false));
+        assertEquals(Scripts.call("domFill", map("selector", "#item", "text", "hammer", "clear", true,
+                "enter", false)), front.evaluated.get(0));
+        AgentRpcException noText = rpcError("web.dom.fill", map("selector", "#item"));
+        assertEquals(ErrorCodes.INVALID_PARAMS, noText.error().code());
+        assertEquals(Map.of("param", "text"), noText.error().data());
+
+        front.engine = a -> FakeWorld.ok(Map.of("dispatched", true));
+        assertEquals(Map.of("dispatched", true), call("web.dispatchEvent", map("name", "webhost.setItem", "detail",
+                map("item", "saw"))).value());
+        assertEquals(Scripts.call("dispatch", map("name", "webhost.setItem", "detail", map("item", "saw"))),
+                front.evaluated.get(1));
+        call("web.dispatchEvent", map("name", "x", "target", "#form"));
+        assertEquals(Scripts.call("dispatch", map("target", "#form", "name", "x")), front.evaluated.get(2));
+        assertEquals(ErrorCodes.INVALID_PARAMS, rpcError("web.dispatchEvent", map("name", " ")).error().code());
+    }
+
+    @Test
+    void secretParametersReadOnlyModeAndUnknownPrimitivesGoToTheAgent() throws Exception {
+        assertEquals("a call with secret parameters is served by the agent, which redacts them in its records",
+                unsupported("web.dom.fill", map("selector", "#pin", "text", "1234"),
+                        CallOptions.defaults().withSecretParams(List.of("text"))));
+        assertTrue(front.evaluated.isEmpty());
+        assertEquals("the CDP path does not serve web.browsers", unsupported("web.browsers", map(), null));
+        assertEquals("the CDP path does not serve web.reload", unsupported("web.reload", map(), null));
+
+        agent.readOnly = true;
+        assertNull(path.open(agent, WebSettings.DEFAULT, null));
+        assertEquals("the target is in read-only mode: the agent answers web.dom.click",
+                unsupported("web.dom.click", map("selector", "#b"), null));
+        front.engine = a -> FakeWorld.ok(Map.of("text", "read", "truncated", false));
+        assertEquals(Map.of("text", "read", "truncated", false), call("web.dom.text", map()).value(),
+                "the reads are served in read-only mode (D51)");
+    }
+
+    @Test
+    void theSelectionPicksThePageOrFallsBack() throws Exception {
+        back.engine = a -> FakeWorld.ok(Map.of("text", "back", "truncated", false));
+        assertEquals("back", ((Map<?, ?>) call("web.dom.text", map("by", map("url", "back$"))).value()).get("text"));
+        assertEquals("back", ((Map<?, ?>) call("web.dom.text", map("by", map("tag", "back"))).value()).get("text"));
+        assertEquals("back", ((Map<?, ?>) call("web.dom.text", map("by", map("title", "^Back"))).value())
+                .get("text"));
+        assertEquals("browser b-detached (browser b-detached) has no CDP target id",
+                unsupported("web.dom.text", map("browser", "b-detached"), null));
+        assertEquals("no CDP page matches by.url nowhere",
+                unsupported("web.dom.text", map("by", map("url", "nowhere")), null));
+        back.closed = true;
+        assertEquals("no CDP page has the target id T2 of browser b-back",
+                unsupported("web.dom.text", map("browser", "b-back"), null));
+    }
+
+    @Test
+    void aFrameKeyIsMappedThroughThePagesFrameTree() throws Exception {
+        Map<String, Object> child = map("id", "F2", "parentId", "T1", "url", "data:text/html,child", "urlFragment",
+                "#part", "name", "kid");
+        front.frameTree = map("frameTree", map("frame", map("id", "T1", "url", front.url), "childFrames",
+                List.of(map("frame", child))));
+        front.child("data:text/html,child#part", "kid", a -> FakeWorld.ok(Map.of("text", "in the frame",
+                "truncated", false)));
+        front.child("data:text/html,other", "kid", a -> FakeWorld.ok(Map.of("text", "wrong", "truncated", false)));
+        assertEquals("in the frame", ((Map<?, ?>) call("web.dom.text", map("frame", "F2")).value()).get("text"));
+        front.engine = a -> FakeWorld.ok(Map.of("text", "main", "truncated", false));
+        assertEquals("main", ((Map<?, ?>) call("web.dom.text", map("frame", "T1")).value()).get("text"));
+        assertEquals("frame F9 is not in the page's frame tree",
+                unsupported("web.dom.text", map("frame", "F9"), null));
+    }
+
+    @Test
+    void aTapIsAPageInitScriptAndThePollerPublishesTapAndReadyEventsOnThePathsOwnSequence() throws Exception {
+        front.engine = a -> FakeWorld.ok(Map.of("installed", 1L));
+        RpcResult r = call("web.tap", map("patterns", List.of("webhost.*")));
+        assertEquals(Map.of("installed", 1L, "timing", "DOCUMENT_START"), r.value());
+        assertEquals(List.of(WebLib.tapInstaller(List.of("webhost.*"), "window")), front.initScripts);
+        assertEquals(Scripts.call("tap", List.of("webhost.*"), "window"), front.evaluated.get(0));
+        assertTrue(back.initScripts.isEmpty(), "only the selected browser is tapped, as on the agent path");
+
+        String drain = Scripts.call("drain");
+        front.engine = a -> drain.equals(a[0]) ? FakeWorld.ok(Map.of("events", List.of(
+                map("name", "webhost.borrowed", "detail", map("item", "hammer", "qty", 2L)),
+                map("name", "webhost.big", "detail", "cut", "truncated", true)), "dropped", 0L))
+                : FakeWorld.ok(Map.of("installed", 0L));
+        path.pollOnce();
+        List<Event> taps = path.eventsSince(0, "web.tap");
+        assertEquals(2, taps.size());
+        assertEquals(Map.of("browser", "b-front", "name", "webhost.borrowed", "detail", Map.of("item", "hammer",
+                "qty", 2L)), taps.get(0).payload());
+        assertEquals(Map.of("browser", "b-front", "name", "webhost.big", "detail", "cut", "truncated", true),
+                taps.get(1).payload());
+        List<Event> ready = path.eventsSince(0, "web.ready");
+        assertEquals(Map.of("browser", "b-front", "url", front.url, "signal", "TAP", "name", "webhost.borrowed"),
+                ready.get(0).payload());
+        assertEquals(List.of(1L, 2L, 3L, 4L), path.eventsSince(0, "*").stream().map(Event::seq).toList(),
+                "the path's own sequence");
+        assertEquals("cdp", taps.get(0).source());
+        assertEquals(4, path.lastEventSeq());
+        assertEquals(2, path.eventsSince(2, "web.*").size());
+        assertTrue(path.eventsSince(4, null).isEmpty());
+
+        assertEquals(Map.of("installed", 0L, "timing", "DOCUMENT_START"),
+                call("web.tap", map("patterns", List.of())).value());
+        assertEquals(1, front.initScriptsRemoved.get(), "the init script is cancelled");
+        int evaluations = front.evaluated.size();
+        int pumps = world.pumps.get();
+        path.pollOnce();
+        assertEquals(evaluations, front.evaluated.size(), "nothing to drain");
+        assertEquals(pumps + 1, world.pumps.get(), "a browser-level call lets Playwright deliver page events");
+        assertEquals(ErrorCodes.INVALID_PARAMS, rpcError("web.tap", map("patterns", List.of("a"), "target",
+                "body")).error().code());
+        assertEquals(ErrorCodes.INVALID_PARAMS, rpcError("web.tap", map()).error().code());
+    }
+
+    @Test
+    void thePollerRunsOnItsOwnWhileThePathIsOpen() throws Exception {
+        CdpWebPath polling = new CdpWebPath((e, o, ids) -> new TargetProbe(CdpEndpoint.local(9222), "FakeChrome/152",
+                "1.3", List.of(), 1), (e, o, p) -> world.attach(p, o), true);
+        try {
+            assertNull(polling.open(agent, WebSettings.DEFAULT, null));
+            String drain = Scripts.call("drain");
+            AtomicInteger drains = new AtomicInteger();
+            front.engine = a -> {
+                if (!drain.equals(a[0])) {
+                    return FakeWorld.ok(Map.of("installed", 1L));
+                }
+                return FakeWorld.ok(Map.of("events", drains.incrementAndGet() == 1
+                        ? List.of(map("name", "webhost.ready")) : List.of(), "dropped", 0L));
+            };
+            polling.call("web.tap", map("patterns", List.of("webhost.*")), CallOptions.defaults());
+            Event tapped = polling.awaitEvent(0, "web.tap", java.time.Duration.ofSeconds(5));
+            assertEquals(Map.of("browser", "b-front", "name", "webhost.ready"), tapped.payload());
+            assertNull(polling.awaitEvent(polling.lastEventSeq(), "web.tap", java.time.Duration.ofMillis(300)),
+                    "drained once, delivered once");
+            assertTrue(drains.get() >= 2, "it keeps polling: " + drains.get());
+        } finally {
+            polling.close();
+        }
+        int drainsAfterClose = front.evaluated.size();
+        assertNull(polling.awaitEvent(polling.lastEventSeq(), "*", java.time.Duration.ofMillis(300)));
+        assertEquals(drainsAfterClose, front.evaluated.size(), "the poller stopped with the path");
+        assertEquals(Scripts.call("tap", List.of(), "window"), front.evaluated.get(front.evaluated.size() - 1),
+                "close removed the tap from the page");
+    }
+
+    @Test
+    void waitFlagWaitsInPlaywrightAndAnswersReadyFalseOnTimeout() throws Exception {
+        front.waitForFunction = a -> FakeWorld.handle(true);
+        RpcResult r = call("web.waitFlag", map("expression", "window.webhostReady === true"));
+        Map<?, ?> v = (Map<?, ?>) r.value();
+        assertEquals(true, v.get("ready"));
+        assertTrue((Long) v.get("polls") >= 1);
+        Object[] args = front.waitForFunctions.get(0);
+        assertEquals(Scripts.flag("window.webhostReady === true"), args[0]);
+        Frame.WaitForFunctionOptions o = (Frame.WaitForFunctionOptions) args[2];
+        assertEquals(50.0, o.pollingInterval);
+        assertTrue(o.timeout <= 10_000 - 250, "before the call's own bound: " + o.timeout);
+        Event flag = path.eventsSince(0, "web.ready").get(0);
+        assertEquals(Map.of("browser", "b-front", "url", front.url, "signal", "FLAG"), flag.payload());
+
+        front.waitForFunction = a -> {
+            throw new TimeoutError("Timeout 500ms exceeded.");
+        };
+        RpcResult late = call("web.waitFlag", map("expression", "false", "timeoutMs", 500, "pollMs", 5));
+        assertEquals(false, ((Map<?, ?>) late.value()).get("ready"));
+        Frame.WaitForFunctionOptions o2 = (Frame.WaitForFunctionOptions) front.waitForFunctions.get(1)[2];
+        assertEquals(20.0, o2.pollingInterval, "pollMs is at least 20");
+        assertEquals(500.0, o2.timeout);
+        assertEquals(1, path.eventsSince(0, "web.ready").size(), "no FLAG when not ready");
+
+        front.waitForFunction = a -> FakeWorld.handle(Map.of("__scriptError", Map.of("message",
+                "ReferenceError: x is not defined", "stack", "")));
+        assertEquals(ErrorCodes.SCRIPT_ERROR, rpcError("web.waitFlag", map("expression", "x")).error().code());
+        assertEquals(ErrorCodes.INVALID_PARAMS, rpcError("web.waitFlag", map("expression", "1", "timeoutMs", -1))
+                .error().code());
+    }
+
+    @Test
+    void resizeIsAnOverrideOnThePagesOwnSessionAndClearRemovesItOnThatSession() throws Exception {
+        assertEquals(Shapes.resizeValue(1024, 768), call("web.resize", map("width", 1024, "height", 768,
+                "browser", "b-back")).value());
+        assertEquals(Map.of("w", 1024L, "h", 768L), back.metrics, "the page reads the override");
+        call("web.resize", map("width", 800, "height", 600, "browser", "b-back"));
+        assertEquals(List.of("Emulation.setDeviceMetricsOverride", "Emulation.setDeviceMetricsOverride"),
+                back.emulation.stream().map(c -> c[0]).toList());
+        assertEquals(map("width", 1024L, "height", 768L, "deviceScaleFactor", 0L, "mobile", false),
+                back.emulation.get(0)[1], "the parameters the in-process adapter sends");
+
+        assertEquals(Shapes.resizeValue(1, 1), call("web.resize", map("clear", true, "browser", "b-back")).value(),
+                "the override is removed, not pinned: the page reads its own 1 x 1 viewport again");
+        assertNull(back.metrics);
+        Object[] removal = back.emulation.get(2);
+        assertEquals("Emulation.clearDeviceMetricsOverride", removal[0]);
+        assertSame(back.emulation.get(0)[2], removal[2], "removed on the session that set it (Chromium ignores a"
+                + " removal from another session)");
+        assertEquals(Shapes.resizeValue(1, 1), call("web.resize", map("clear", true, "browser", "b-back")).value());
+        assertEquals(3, back.emulation.size(), "nothing to remove the second time");
+        assertTrue(back.resized.isEmpty(), "Playwright's setViewportSize, whose override cannot be removed, is unused");
+        assertTrue(front.emulation.isEmpty());
+
+        back.innerSize = Map.of("w", "unreadable");
+        assertEquals(Map.of("applied", "OVERRIDE"), call("web.resize", map("clear", true, "browser", "b-back"))
+                .value(), "a size that cannot be read is left out, as the agent path leaves it out");
+        AgentRpcException bad = rpcError("web.resize", map("width", 0, "height", 10));
+        assertEquals(Map.of("param", "width"), bad.error().data());
+        assertEquals(Map.of("param", "height"), rpcError("web.resize", map("width", 10)).error().data());
+        assertEquals(ErrorCodes.INVALID_PARAMS, rpcError("web.resize", map("width", 20_000, "height", 10))
+                .error().code());
+    }
+
+    @Test
+    void closeRemovesTheOverridesThePathLeftInPlace() throws Exception {
+        call("web.resize", map("width", 1024, "height", 768, "browser", "b-back"));
+        call("web.resize", map("width", 640, "height", 480));
+        call("web.resize", map("clear", true));
+        int frontCalls = front.emulation.size();
+        path.close();
+        assertNull(back.metrics, "an override outlives the session that set it, so close removes it");
+        assertEquals("Emulation.clearDeviceMetricsOverride", back.emulation.get(1)[0]);
+        assertSame(back.emulation.get(0)[2], back.emulation.get(1)[2], "on the session that set it");
+        assertEquals(frontCalls, front.emulation.size(), "an override the scenario removed is not removed again");
+    }
+
+    @Test
+    void aDrainThatOutlivesItsPollStillPublishesTheEventsItTookAndNoSecondDrainIsSent() throws Exception {
+        front.engine = a -> FakeWorld.ok(Map.of("installed", 1L));
+        call("web.tap", map("patterns", List.of("webhost.*")));
+        String drain = Scripts.call("drain");
+        CountDownLatch inPage = new CountDownLatch(1);
+        CountDownLatch pageFree = new CountDownLatch(1);
+        AtomicInteger drains = new AtomicInteger();
+        front.engine = a -> {
+            if (!drain.equals(a[0])) {
+                return FakeWorld.ok(Map.of("installed", 0L));
+            }
+            drains.incrementAndGet();
+            inPage.countDown();
+            // the page fired the event, then stays busy (a long handler, a modal dialog) past the poll's bound
+            pageFree.await();
+            return FakeWorld.ok(Map.of("events", List.of(map("name", "webhost.borrowed")), "dropped", 0L));
+        };
+        long start = System.nanoTime();
+        path.pollOnce();
+        long ms = (System.nanoTime() - start) / 1_000_000;
+        assertTrue(inPage.await(5, TimeUnit.SECONDS), "the drain reached the page");
+        assertTrue(ms >= CdpWebPath.POLL_BUDGET_MS - 50, "the poll gave up after its bound: " + ms + " ms");
+        assertTrue(path.eventsSince(0, "web.tap").isEmpty(), "nothing yet: the page is busy");
+        path.pollOnce();
+        assertEquals(1, drains.get(), "no second drain while the first is outstanding");
+        assertEquals("an earlier CDP operation has not returned (a page may be frozen)",
+                unsupported("web.dom.text", map(), null));
+
+        pageFree.countDown();
+        Event tapped = path.awaitEvent(0, "web.tap", java.time.Duration.ofSeconds(10));
+        assertNotNull(tapped, "the late drain's events are published, not dropped");
+        assertEquals(Map.of("browser", "b-front", "name", "webhost.borrowed"), tapped.payload());
+        assertEquals(Map.of("browser", "b-front", "url", front.url, "signal", "TAP", "name", "webhost.borrowed"),
+                path.awaitEvent(0, "web.ready", java.time.Duration.ofSeconds(10)).payload());
+        assertEquals(1, drains.get());
+    }
+
+    @Test
+    void bitmapIsAProtocolScreenshotScaledAboveMaxWidth() throws Exception {
+        front.png = ShapesTest.png(2000, 1000, 0xff102030);
+        Map<?, ?> v = (Map<?, ?>) call("web.bitmap", map("maxWidth", 500)).value();
+        assertEquals(500L, v.get("width"));
+        assertEquals(250L, v.get("height"));
+        assertEquals("PROTOCOL", v.get("source"));
+        assertArrayEquals(new int[] {500, 250}, Png.size(Base64.getDecoder().decode((String) v.get("base64"))));
+        assertEquals(ScreenshotType.PNG, front.screenshots.get(0).type);
+        assertTrue(front.screenshots.get(0).timeout <= 20_000, "web.bitmap's budget is 20 s");
+        assertEquals(2000L, ((Map<?, ?>) call("web.bitmap", map()).value()).get("width"), "4096 by default");
+    }
+
+    @Test
+    void aCallThatOutlivesItsBudgetIsTimeoutAndLaterCallsFallBackUntilThePageReturns() throws Exception {
+        CountDownLatch release = new CountDownLatch(1);
+        front.engine = a -> {
+            release.await();
+            return FakeWorld.ok("{\"json\":\"1\",\"typeofResult\":\"number\"}");
+        };
+        long start = System.nanoTime();
+        AgentRpcException e = assertThrows(AgentRpcException.class, () -> path.call("web.evaluate",
+                map("expression", "1"), CallOptions.defaults().withTimeoutMs(300L)));
+        long ms = (System.nanoTime() - start) / 1_000_000;
+        assertEquals(ErrorCodes.TIMEOUT, e.error().code());
+        assertEquals("web.evaluate did not complete within 300 ms over CDP", e.error().message());
+        assertEquals(Map.of("timeoutMs", 300L, "path", "cdp"), e.error().data());
+        assertTrue(ms < 300 + 2000, "bounded: " + ms + " ms");
+        assertEquals("an earlier CDP operation has not returned (a page may be frozen)",
+                unsupported("web.dom.text", map(), null));
+        release.countDown();
+        front.engine = a -> FakeWorld.ok(Map.of("text", "free", "truncated", false));
+        long until = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        RpcResult r = null;
+        while (r == null && System.nanoTime() < until) {
+            try {
+                r = call("web.dom.text", map());
+            } catch (WebPathException busy) {
+                Thread.onSpinWait();
+            }
+        }
+        assertEquals(Map.of("text", "free", "truncated", false), r.value());
+    }
+
+    @Test
+    void theAgentsSequenceMustBeReadableBeforeTheCall() {
+        agent.error("evt.query", ErrorCodes.INTERNAL_ERROR, "ring gone");
+        assertEquals("the agent's evt.query failed: INTERNAL_ERROR: ring gone",
+                unsupported("web.dom.text", map(), null));
+        assertTrue(front.evaluated.isEmpty());
+    }
+
+    @Test
+    void invalidParametersAreInvalidParams() {
+        AgentRpcException e = rpcError("web.evaluate", map());
+        assertEquals(ErrorCodes.INVALID_PARAMS, e.error().code());
+        assertEquals("expression is required", e.error().message());
+        assertEquals(Map.of("param", "expression"), e.error().data());
+        assertEquals(Map.of("param", "awaitPromise"), rpcError("web.evaluate", map("expression", "1",
+                "awaitPromise", "yes")).error().data());
+        assertEquals(Map.of("param", "maxNodes"), rpcError("web.ariaSnapshot", map("maxNodes", "many")).error()
+                .data());
+        assertEquals(Map.of("param", "maxChars"), rpcError("web.dom.text", map("maxChars", -1)).error().data());
+        assertTrue(agent.callsTo("web.browsers").size() <= 1, "parameters are checked before the agent is asked");
+    }
+
+    @Test
+    void loadEventsOfThePagesArePublishedOnThePathsOwnSequence() {
+        front.fireLoad();
+        List<Event> loads = path.eventsSince(0, "web.load");
+        assertEquals(Map.of("browser", "b-front", "url", front.url, "kind", "LOAD_FINISHED", "cdpTargetId", "T1"),
+                loads.get(0).payload());
+        assertEquals(Map.of("browser", "b-front", "url", front.url, "signal", "LOAD"),
+                path.eventsSince(0, "web.ready").get(0).payload());
+        Frame main = front.main;
+        for (var listener : front.navigationListeners) {
+            listener.accept(main);
+        }
+        assertEquals("NAVIGATED", path.eventsSince(0, "web.load").get(1).payload().get("kind"));
+        Page popup = world.page("T9", "data:,popup", "Popup").page;
+        assertFalse(world.pageListeners.isEmpty(), "new pages are watched as they appear");
+        world.pageListeners.get(0).accept(popup);
+    }
+}

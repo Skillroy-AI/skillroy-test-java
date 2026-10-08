@@ -48,6 +48,9 @@ public final class TestState {
     public static final AtomicInteger STUCK_RUNNING = new AtomicInteger();
     /** The {@code value} argument each call of coretest's {@code test.leak} received (amendment A34). */
     public static final List<Object> LEAK_SEEN = Collections.synchronizedList(new ArrayList<Object>());
+    /** What {@code Invocation.secretParams()} gave each call of coretest's {@code test.leak} (Phase 4, A34). */
+    public static final List<List<String>> LEAK_SECRET_NAMES = Collections.synchronizedList(
+            new ArrayList<List<String>>());
     /** What coretest's {@code test.leak.slow} waits for, ignoring interrupts (amendment A34, a timed-out call). */
     public static volatile CountDownLatch leakRelease = new CountDownLatch(1);
     /** The class loaders the jar fixture modules were installed from. */
@@ -58,6 +61,7 @@ public final class TestState {
 
     public static void reset() {
         LEAK_SEEN.clear();
+        LEAK_SECRET_NAMES.clear();
         leakRelease = new CountDownLatch(1);
         INSTALLED.clear();
         UNINSTALLED.clear();

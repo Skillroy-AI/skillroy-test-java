@@ -59,12 +59,14 @@
     <module>agent/skillroy-agent-core</module>
     <module>agent/skillroy-agent-swing</module>
     <module>agent/skillroy-agent-data</module>
+    <module>agent/skillroy-agent-web</module>
     <module>agent/skillroy-agent-dist</module>
     <module>controller/skillroy-controller</module>
     <module>controller/skillroy-data</module>
     <module>controller/skillroy-scenario</module>
     <module>controller/skillroy-junit</module>
     <module>controller/skillroy-cli</module>
+    <module>controller/skillroy-cdp</module>
     <module>samples/skillroy-sample-lending-app</module>
     <module>samples/skillroy-sample-lending-agent</module>
     <module>samples/skillroy-sample-lending-pack</module>
@@ -147,6 +149,19 @@
       </dependency>
       <dependency>
         <groupId>ai.skillroy</groupId>
+        <artifactId>skillroy-agent-web</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <!-- The adapter contract kit and the neutral fake (phase4-contracts.md 10). A managed entry matches on its type,
+           so the test-jar needs an entry of its own. -->
+      <dependency>
+        <groupId>ai.skillroy</groupId>
+        <artifactId>skillroy-agent-web</artifactId>
+        <version>${project.version}</version>
+        <type>test-jar</type>
+      </dependency>
+      <dependency>
+        <groupId>ai.skillroy</groupId>
         <artifactId>skillroy-agent-dist</artifactId>
         <version>${project.version}</version>
         <type>zip</type>
@@ -174,6 +189,11 @@
       <dependency>
         <groupId>ai.skillroy</groupId>
         <artifactId>skillroy-cli</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>ai.skillroy</groupId>
+        <artifactId>skillroy-cdp</artifactId>
         <version>${project.version}</version>
       </dependency>
       <dependency>
@@ -363,6 +383,49 @@
   </build>
 
   <profiles>
+    <!-- The web host samples (phase4-contracts.md, sections 9 and 11): built only with -Pjcef, so that a build without
+         the profile neither sees the modules nor needs JCEF's natives (about 150 MB per platform) in the Maven cache.
+         skillroy.jcef.platform selects the natives artifact (linux-amd64, linux-arm64, macosx-arm64, ...); set it on
+         the command line for another platform, e.g. -Dskillroy.jcef.platform=linux-arm64 for an arm64 image. -->
+    <profile>
+      <id>jcef</id>
+      <properties>
+        <skillroy.jcef.platform>linux-amd64</skillroy.jcef.platform>
+        <!-- jcefmaven 152.0.6 wraps java-cef 17e805a, CEF 152.0.6 and Chromium 152.0.7977.83; jcef-api and the natives
+             are versioned by that release tag, not by the jcefmaven number. -->
+        <jcefmaven.version>152.0.6</jcefmaven.version>
+        <jcef.tag>jcef-17e805a+cef-152.0.6+g708dc14+chromium-152.0.7977.83</jcef.tag>
+      </properties>
+      <modules>
+        <module>samples/skillroy-sample-web-host</module>
+        <module>samples/skillroy-sample-web-host-agent</module>
+        <module>samples/skillroy-sample-web-host-scenarios</module>
+      </modules>
+      <dependencyManagement>
+        <dependencies>
+          <dependency>
+            <groupId>ai.skillroy</groupId>
+            <artifactId>skillroy-sample-web-host</artifactId>
+            <version>${project.version}</version>
+          </dependency>
+          <dependency>
+            <groupId>ai.skillroy</groupId>
+            <artifactId>skillroy-sample-web-host-agent</artifactId>
+            <version>${project.version}</version>
+          </dependency>
+          <dependency>
+            <groupId>me.friwi</groupId>
+            <artifactId>jcefmaven</artifactId>
+            <version>${jcefmaven.version}</version>
+          </dependency>
+          <dependency>
+            <groupId>me.friwi</groupId>
+            <artifactId>jcef-natives-${skillroy.jcef.platform}</artifactId>
+            <version>${jcef.tag}</version>
+          </dependency>
+        </dependencies>
+      </dependencyManagement>
+    </profile>
     <!-- Pass -Dskillroy.it.targetJava=<java executable> through to test JVMs, only when it is set. -->
     <profile>
       <id>pass-it-target-java</id>

@@ -1,0 +1,8 @@
+# Negative (phase4-contracts.md 9.3): a webClick that matches more than one element fails as ASSERTION with
+# AMBIGUOUS and the candidates. The page has one button, so the selector names the form's two inputs.
+scenario: two-inputs
+pack: webhost
+web: { browser: { tag: front } }
+steps:
+  - webClick: { selector: "#loan input" }
+timeouts: { step: 10s }

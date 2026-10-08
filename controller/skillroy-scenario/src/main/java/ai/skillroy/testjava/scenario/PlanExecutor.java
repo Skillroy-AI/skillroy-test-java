@@ -26,6 +26,7 @@ import ai.skillroy.testjava.data.DataChannels;
 import ai.skillroy.testjava.data.DataException;
 import ai.skillroy.testjava.data.SecretMask;
 import ai.skillroy.testjava.protocol.Capability;
+import ai.skillroy.testjava.protocol.CapabilityState;
 import ai.skillroy.testjava.protocol.ErrorCodes;
 import ai.skillroy.testjava.protocol.Event;
 import ai.skillroy.testjava.protocol.Json;
@@ -49,6 +50,9 @@ import ai.skillroy.testjava.scenario.resolve.ColumnKind;
 import ai.skillroy.testjava.scenario.resolve.CostLedger;
 import ai.skillroy.testjava.scenario.resolve.StoredColumn;
 import ai.skillroy.testjava.scenario.resolve.StoredTable;
+import ai.skillroy.testjava.scenario.web.AgentWebPath;
+import ai.skillroy.testjava.scenario.web.WebRunContext;
+import ai.skillroy.testjava.scenario.web.WebSettings;
 
 import java.io.IOException;
 import java.math.BigDecimal;
@@ -65,7 +69,9 @@ import java.time.temporal.ChronoField;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -73,6 +79,8 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.BiPredicate;
+import java.util.stream.Stream;
 
 /**
  * Runs a {@link Plan} against one agent (contract section 8.5). Written only against {@link AgentConnection}, so it
@@ -142,7 +150,29 @@ import java.util.Set;
  * <p>A lost agent is final: once a call reports {@link AgentLostException}, no further call is made, not even a
  * cleanup call or the pack's {@code recover} (hardening H2, client latch).
  *
- * <p>Not thread-safe: one executor runs one plan at a time on the calling thread; it starts no threads.
+ * <p>Web views (phase4-contracts.md 6, 8): a plan with a {@code web.*} call chooses its web path after the
+ * capability check and before the pre-flight (step 1a; not in {@link #resolve}): the agent's in-process path, or the
+ * CDP path that {@code ServiceLoader<WebPath>} finds through the class loader that loads the domain packs (see the
+ * constructors), as {@code web.path} says; a pinned {@code cdp} that cannot be used ends the run before any step as
+ * PRECONDITION_FAILED (ENVIRONMENT for an attach that threw). Every {@code web.*} call (steps and cleanup) goes to the
+ * chosen path when it serves the primitive and to the agent otherwise, a refused call is recorded as
+ * {@code web.fallback}, and its {@code call} record carries {@code path}. A wait on a {@code web.*} topic reads the
+ * path's own events as well as the agent's bus. The base fact root {@code web} reads through the same path. A
+ * failure gets, besides the Phase 1 evidence, {@code failure/web-browsers.json} and, for each browser visible in
+ * Swing (at most four, ref order), {@code web-<ref>-aria.json} and {@code web-<ref>.png} or
+ * {@code web-<ref>-error.txt}, the path's trace as {@code failure/web-trace.zip} when the scenario set
+ * {@code web.trace}, and the browsers in the UI text ({@link UiSnapshotText}). A trace holds the pages as they were,
+ * which the secret mask cannot read: when a step or cleanup call of the plan may announce a secret parameter (A34;
+ * {@link SecretParamsForecast}, decided before the path opens), the path is opened without tracing and
+ * {@code web.trace {skipped: true, reason: secrets}} is recorded; a trace is not kept either when a call announced
+ * one all the same, and {@code web.trace {ok: true}} is recorded only for a trace file the path wrote. The path is
+ * closed when the run ends, however it ends. SCRIPT_ERROR from a step call is FAIL / ASSERTION; STALE_HANDLE from a
+ * {@code web.*} call is FAIL / ASSERTION ("the browser closed during the step"); a {@code webWaitFlag} whose flag
+ * did not turn true is FAIL / SYNC_TIMEOUT; a non-agent path's failure outside the agent's error codes is ERROR /
+ * ENVIRONMENT.
+ *
+ * <p>Not thread-safe: one executor runs one plan at a time on the calling thread; it starts no threads (a web path
+ * may run threads of its own).
  */
 public final class PlanExecutor {
 
@@ -158,26 +188,75 @@ public final class PlanExecutor {
             "failure/app-state.json", "failure/dialogs.json", "failure/capture.png", "failure/events.json", "failure",
             "artifacts/capture.png", "artifacts");
 
+    /** The prefix of the web evidence files in {@code failure/} (phase4-contracts.md 6.4). */
+    private static final String WEB_EVIDENCE_PREFIX = "web-";
+
+    /** The most browsers whose aria snapshot and bitmap a failure keeps. */
+    private static final int WEB_EVIDENCE_BROWSERS = 4;
+
     private final DomainPack pack;
     private final AgentConnection agent;
     private final RunOptions options;
+    private final ClassLoader webPathLoader;
+    /**
+     * Whether a step or cleanup call of the plan may announce a secret parameter (A34), asked before the web path
+     * opens, with the caller's bindings (null when the run binds the plan).
+     */
+    private final BiPredicate<Plan, Bindings> secretsForecast;
     private final Map<String, FactProvider> facts = new LinkedHashMap<>();
+    /** True when the pack has a fact root named {@code web}, which then hides the base root. */
+    private final boolean packWebRoot;
 
     /**
+     * An executor that finds web paths ({@code ServiceLoader<WebPath>}) through the thread's context class loader at
+     * run time, the loader the CLI and the JUnit glue set or use for the domain packs.
+     *
      * @param pack the pack the plan was compiled with
      * @param agent the connection to the target's agent; not closed by the executor
      * @param options run options; null means {@link RunOptions#defaults()}
      */
     public PlanExecutor(DomainPack pack, AgentConnection agent, RunOptions options) {
+        this(pack, agent, options, null);
+    }
+
+    /**
+     * @param pack the pack the plan was compiled with
+     * @param agent the connection to the target's agent; not closed by the executor
+     * @param options run options; null means {@link RunOptions#defaults()}
+     * @param webPathLoader the class loader that loads the domain packs, through which {@code ServiceLoader<WebPath>}
+     *     finds a controller-side web path such as the CDP path of {@code skillroy-cdp} (phase4-contracts.md 6.1,
+     *     D49); null means the thread's context class loader when the run starts
+     */
+    public PlanExecutor(DomainPack pack, AgentConnection agent, RunOptions options, ClassLoader webPathLoader) {
+        this(pack, agent, options, webPathLoader, null);
+    }
+
+    /**
+     * The four-argument executor with another forecast of secret parameters: the tests of the trace guard at failure
+     * time give one that misses a secret.
+     *
+     * @param secretsForecast whether a step or cleanup call of the plan may announce a secret parameter, given the
+     *     plan and the caller's bindings (null when the run binds the plan); null means {@link SecretParamsForecast}
+     *     with the environment id of {@code options}
+     */
+    PlanExecutor(DomainPack pack, AgentConnection agent, RunOptions options, ClassLoader webPathLoader,
+                 BiPredicate<Plan, Bindings> secretsForecast) {
         this.pack = Objects.requireNonNull(pack, "pack");
         this.agent = Objects.requireNonNull(agent, "agent");
         this.options = options == null ? RunOptions.defaults() : options;
+        this.webPathLoader = webPathLoader;
+        String envId = this.options.bind().envId();
+        this.secretsForecast = secretsForecast != null ? secretsForecast
+                : (plan, provided) -> SecretParamsForecast.mayAnnounce(plan, provided, envId);
         List<FactProvider> packFacts = pack.facts();
+        boolean webRoot = false;
         if (packFacts != null) {
             for (FactProvider fact : packFacts) {
                 facts.putIfAbsent(fact.root(), fact);
+                webRoot |= "web".equals(fact.root());
             }
         }
+        this.packWebRoot = webRoot;
         for (FactProvider fact : BaseFacts.all()) {
             facts.putIfAbsent(fact.root(), fact);
         }
@@ -214,7 +293,7 @@ public final class PlanExecutor {
     public Resolved runWithOutcome(Plan plan) {
         Run run = new Run(Objects.requireNonNull(plan, "plan"), null, false);
         RunResult result = run.execute();
-        return new Resolved(result, run.outcome, run.crossCheckRecords);
+        return new Resolved(result, run.outcome, run.crossCheckRecords, run.webSummary);
     }
 
     /**
@@ -244,20 +323,60 @@ public final class PlanExecutor {
      *     (phase3-contracts.md 8.2, 9): as {@code run.jsonl} holds them (the run's secrets masked), without
      *     {@code type} and {@code t}; so a bind that failed after an agreeing check, or as ORACLE_SUSPECT, still
      *     reports them. Empty when none ran or was skipped; never null; unmodifiable
+     * @param web the run's web summary (phase4-contracts.md 8.2, for {@code run --json}): the {@code web.path}
+     *     record's fields ({@code path, reason?, cdp?, libHash, policy}), then {@code calls} ({@code {step, index,
+     *     primitive, path, ok}} per {@code web.*} call, cleanup calls with step {@code cleanup}) and
+     *     {@code fallbacks} (the {@code web.fallback} records without {@code type} and {@code t}); masked;
+     *     null when the plan has no {@code web.*} call or the run ended before the path was chosen
      */
-    public record Resolved(RunResult result, BindOutcome outcome, List<Map<String, Object>> crossChecks) {
+    public record Resolved(RunResult result, BindOutcome outcome, List<Map<String, Object>> crossChecks,
+                           Map<String, Object> web) {
 
         /** Copies the records. */
         @SuppressWarnings("unchecked")
         public Resolved {
             crossChecks = crossChecks == null ? List.of() : (List<Map<String, Object>>) Plan.freeze(crossChecks);
+            web = web == null ? null : (Map<String, Object>) Plan.freeze(web);
+        }
+
+        /** The Phase 3 shape: no web summary. */
+        public Resolved(RunResult result, BindOutcome outcome, List<Map<String, Object>> crossChecks) {
+            this(result, outcome, crossChecks, null);
         }
 
         /** The Phase 2 shape: the records are those of the outcome's bind ({@code crossChecks} of its bindings). */
         public Resolved(RunResult result, BindOutcome outcome) {
             this(result, outcome, outcome == null ? List.of() : outcome.bindings().crossChecks().values().stream()
-                    .map(CrossCheckOutcome::toJson).toList());
+                    .map(CrossCheckOutcome::toJson).toList(), null);
         }
+    }
+
+    /**
+     * Ref order (phase4-contracts.md 6.4): by the text before a ref's trailing digits, then by the number they form
+     * ({@code h2} before {@code h10}), then as text.
+     */
+    static int compareRefs(String a, String b) {
+        int ia = digitsStart(a);
+        int ib = digitsStart(b);
+        int prefix = a.substring(0, ia).compareTo(b.substring(0, ib));
+        if (prefix != 0) {
+            return prefix;
+        }
+        String da = a.substring(ia).replaceFirst("^0+(?=\\d)", "");
+        String db = b.substring(ib).replaceFirst("^0+(?=\\d)", "");
+        if (da.length() != db.length()) {
+            return Integer.compare(da.length(), db.length());
+        }
+        int digits = da.compareTo(db);
+        return digits != 0 ? digits : a.compareTo(b);
+    }
+
+    private static int digitsStart(String ref) {
+        int i = ref.length();
+        while (i > 0 && Character.isDigit(ref.charAt(i - 1)) && ref.charAt(i - 1) < 128) {
+            i--;
+        }
+        return i;
     }
 
     /** The SQL-standard timestamp text: seconds always, the fraction only when it is not zero, no trailing zeros. */
@@ -357,6 +476,25 @@ public final class PlanExecutor {
         private long lastActionSeq;
         private long promptCursor;
         private long lastSeenSeq;
+        /** The web path's sequence number before the last step call that was not a wait, a settle or a mark. */
+        private long lastActionPathSeq;
+        /** The run's web side: the chosen path, its calls and waits (created when the log is open). */
+        private WebRun web;
+        /** The run's web summary for {@link Resolved#web()}, masked; null without web calls. */
+        private Map<String, Object> webSummary;
+        /** The fact providers of this run: the executor's, with the base root {@code web} reading through the path. */
+        private final Map<String, FactProvider> runFacts = new LinkedHashMap<>();
+        /** Fact and fall-back notes written once each. */
+        private final Set<String> noted = new HashSet<>();
+        /** What fact providers read through: web calls go to the run's web path. */
+        private final AgentConnection factConnection = new FactConnection();
+        /** True once a call of the run announced a secret parameter (A34): no web trace is kept then. */
+        private boolean secretsSent;
+        /**
+         * True when a call of the plan may announce a secret parameter, so that the web path was opened without
+         * tracing (phase4-contracts.md 6.4).
+         */
+        private boolean traceWithheld;
 
         Run(Plan plan, Bindings provided, boolean bindOnly) {
             this.plan = plan;
@@ -367,6 +505,10 @@ public final class PlanExecutor {
                     : plan.stepTimeoutMs();
             this.ledger = options.bind().ledger();
             this.ledgerStart = ledger.size();
+            runFacts.putAll(facts);
+            if (!packWebRoot) {
+                runFacts.put("web", BaseFacts.web(BaseFacts.AGENT_READS, options.clock(), this::textOmitted));
+            }
         }
 
         /** Reads the pack's policies; inside the run's try block so that a pack failure becomes ENVIRONMENT. */
@@ -424,12 +566,14 @@ public final class PlanExecutor {
         RunResult execute() {
             clearOldOutputs();
             log = RunLog.open(options.outputDir(), options.clock());
+            web = new WebRun(agent, log, options.clock(), webPathLoader);
             try {
                 mask = secretMask();
                 log.mask(mask);
                 return executeLogged();
             } finally {
-                // Also when an Error from pack code passes through: the file must not stay open.
+                // Also when an Error from pack code passes through: the web path, the file and the channels close.
+                web.close();
                 log.close();
                 if (data != null) {
                     data.close();
@@ -456,6 +600,9 @@ public final class PlanExecutor {
                 init();
                 checkRequires();
                 checkLaunchProperties();
+                if (!bindOnly) {
+                    selectWebPath();
+                }
                 runPreflight();
                 bind();
                 checkSources();
@@ -495,6 +642,9 @@ public final class PlanExecutor {
                 if (failure != null && stepsStarted && !agentLost && options.captureOnFailure()) {
                     collectEvidence(detail);
                 }
+                if (failure != null && stepsStarted && options.captureOnFailure()) {
+                    saveWebTrace();
+                }
                 if (failure == null) {
                     keepArtifacts();
                 }
@@ -509,6 +659,9 @@ public final class PlanExecutor {
             }
             // Otherwise (D30, Q11): a failure before the start mark sends nothing more to the target, and run.jsonl
             // has neither a cleanup nor a recover record.
+            web.close();
+            Map<String, Object> summary = web.summary();
+            webSummary = summary == null ? null : logged(summary);
             if (bindings != null && options.outputDir() != null) {
                 try {
                     writeBindings(options.outputDir().resolve("bindings.json"));
@@ -595,6 +748,20 @@ public final class PlanExecutor {
             if (dir == null) {
                 return;
             }
+            // phase4-contracts.md 6.4: the web evidence files are named after the browsers' refs.
+            Path failure = dir.resolve("failure");
+            if (Files.isDirectory(failure)) {
+                try (Stream<Path> files = Files.list(failure)) {
+                    for (Path file : files.toList()) {
+                        if (file.getFileName().toString().startsWith(WEB_EVIDENCE_PREFIX)
+                                && Files.isRegularFile(file)) {
+                            Files.deleteIfExists(file);
+                        }
+                    }
+                } catch (IOException | RuntimeException e) {
+                    // Best effort, as below.
+                }
+            }
             for (String name : OUTPUT_FILES) {
                 try {
                     Files.deleteIfExists(dir.resolve(name));
@@ -671,6 +838,180 @@ public final class PlanExecutor {
                 throw new Abort(Status.ERROR, FailureKind.PRECONDITION_FAILED, null, "launch property "
                         + first.get("property") + ": expected '" + first.get("expected") + "', actual " + actualText
                         + (mismatches.size() > 1 ? " (and " + (mismatches.size() - 1) + " more)" : ""), detail);
+            }
+        }
+
+        /**
+         * Step 1a (phase4-contracts.md 6.1): for a plan with a {@code web.*} call, the web path that serves it,
+         * recorded once as {@code web.path}. A pinned {@code cdp} that cannot be used ends the run before any step.
+         *
+         * <p>A trace records the pages as they are, a typed secret included, and the run's mask cannot read it
+         * (phase4-contracts.md 6.4). So when the scenario asks for one and a step or cleanup call of the plan may
+         * announce a secret parameter ({@link SecretParamsForecast}: decided now, from the plan and the caller's
+         * bindings, before the bind), the path is opened without tracing, and once a path opens that way
+         * {@code web.trace {skipped: true, reason: secrets}} records it. A forecast that fails withholds the trace too
+         * (and the record names the failure).
+         */
+        private void selectWebPath() throws Abort, AgentLostException, InterruptedException {
+            if (!hasWebCalls()) {
+                return;
+            }
+            WebSettings settings = plan.effectiveWeb();
+            String forecastError = null;
+            if (settings.trace()) {
+                try {
+                    traceWithheld = secretsForecast.test(plan, provided);
+                } catch (RuntimeException | StackOverflowError e) {
+                    traceWithheld = true;
+                    forecastError = e.toString();
+                }
+            }
+            if (traceWithheld) {
+                settings = new WebSettings(settings.path(), settings.defaultBrowser(), settings.frozenTargets(),
+                        settings.attachDeadline(), false);
+            }
+            try {
+                web.select(settings, caps, new WebContext());
+            } catch (WebRun.SelectionFailure e) {
+                throw new Abort(Status.ERROR, e.kind, null, e.getMessage(), new LinkedHashMap<>(e.detail));
+            }
+            if (traceWithheld && web.hasOpenedPath()) {
+                Map<String, Object> record = RunLog.fields("skipped", true, "reason", "secrets");
+                if (forecastError != null) {
+                    record.put("error", forecastError);
+                }
+                log.write("web.trace", record);
+            }
+        }
+
+        /** True when a step or cleanup call of the plan is a {@code web.*} primitive. */
+        private boolean hasWebCalls() {
+            Stream<Plan.Call> calls = Stream.concat(plan.steps().stream().flatMap(step -> step.calls().stream()),
+                    plan.cleanup().stream());
+            return calls.anyMatch(call -> WebRun.isWeb(call.primitive()));
+        }
+
+        /**
+         * What a web path may know about the run (the contract's {@code RunContext}): the run's output directory, and
+         * a record appender for {@code run.jsonl} (the record's {@code type} names it; the log adds the time and the
+         * mask).
+         */
+        private final class WebContext implements WebRunContext {
+
+            @Override
+            public Path artifactsDir() {
+                return options.outputDir();
+            }
+
+            @Override
+            public void record(Map<String, Object> record) {
+                if (record == null) {
+                    return;
+                }
+                Map<String, Object> fields = new LinkedHashMap<>(record);
+                Object type = fields.remove("type");
+                log.write(type == null ? "web" : String.valueOf(type), fields);
+            }
+        }
+
+        /**
+         * The connection fact providers read through (phase4-contracts.md 6.2): a {@code web.*} call goes to the
+         * run's web path with the fall-back rules (a refused read is recorded once per primitive and reason), every
+         * other call and wait to the agent. A non-agent path's failure outside the agent's error codes is an
+         * {@link IllegalStateException}, which fails the fact read as any other failure does.
+         */
+        private final class FactConnection implements AgentConnection {
+
+            @Override
+            public RpcResult call(String method, Map<String, Object> params)
+                    throws AgentRpcException, AgentLostException {
+                return call(method, params, CallOptions.defaults());
+            }
+
+            @Override
+            public RpcResult call(String method, Map<String, Object> params, CallOptions callOptions)
+                    throws AgentRpcException, AgentLostException {
+                if (!WebRun.isWeb(method)) {
+                    return agent.call(method, params, callOptions);
+                }
+                try {
+                    return web.call(currentStep == null ? "fact" : currentStep, method,
+                            params == null ? Map.of() : params, callOptions == null ? CallOptions.defaults()
+                                    : callOptions, true, lastSeenSeq, new String[1]).result();
+                } catch (WebRun.PathFailure e) {
+                    throw new IllegalStateException(e.getMessage(), e);
+                }
+            }
+
+            @Override
+            public Event await(String topics, long sinceSeq, Map<String, Object> match, Duration timeout)
+                    throws AgentRpcException, AgentLostException {
+                return agent.await(topics, sinceSeq, match, timeout);
+            }
+
+            @Override
+            public CapabilityMatrix capabilities() throws AgentLostException {
+                return agent.capabilities();
+            }
+
+            @Override
+            public List<ai.skillroy.testjava.protocol.PrimitiveDescriptor> schema() throws AgentLostException {
+                return agent.schema();
+            }
+
+            @Override
+            public Map<String, Object> ping() throws AgentLostException {
+                return agent.ping();
+            }
+
+            @Override
+            public boolean isLost() {
+                return agent.isLost();
+            }
+
+            /** The connection is the caller's: never closed here. */
+            @Override
+            public void close() {
+            }
+        }
+
+        /** A browser's {@code text} the root {@code web} left out: logged once per browser and reason. */
+        private void textOmitted(String ref, String reason) {
+            if (noted.add("text\n" + ref + "\n" + reason)) {
+                log.write("fact", RunLog.fields("root", "web", "browser", ref, "field", "text", "ok", false,
+                        "reason", reason));
+            }
+        }
+
+        /**
+         * {@code failure/web-trace.zip} (phase4-contracts.md 6.4): the opened path's trace, when the scenario set
+         * {@code web.trace} and the run writes outputs; recorded as {@code web.trace}: {@code {ok: true, file}} only
+         * when the path wrote the file, {@code {ok: false, reason}} when it wrote none (its tracing never started,
+         * say) and {@code {ok: false, error}} when it failed. A trace is a binary archive the secret mask cannot
+         * read: a path opened without tracing because a call may announce a secret parameter
+         * ({@link #selectWebPath}) has none, and, the second guard, a trace is not kept when a call of the run
+         * announced one all the same (A34): a filled password would be in its page snapshots.
+         */
+        private void saveWebTrace() {
+            if (!plan.effectiveWeb().trace() || traceWithheld || !web.hasOpenedPath()
+                    || options.outputDir() == null) {
+                return;
+            }
+            if (secretsSent) {
+                log.write("web.trace", RunLog.fields("skipped", true, "reason", "secrets"));
+                return;
+            }
+            Path dir = options.outputDir().resolve("failure");
+            try {
+                Files.createDirectories(dir);
+                if (web.saveTrace(dir.resolve("web-trace.zip"))) {
+                    log.write("web.trace", RunLog.fields("ok", true, "file", "failure/web-trace.zip"));
+                } else {
+                    log.write("web.trace", RunLog.fields("ok", false, "reason", "the " + web.pathId()
+                            + " path wrote no trace"));
+                }
+            } catch (Exception | LinkageError e) {
+                log.write("web.trace", RunLog.fields("ok", false, "error", e.toString()));
             }
         }
 
@@ -938,6 +1279,7 @@ public final class PlanExecutor {
             Plan.Step step = plan.steps().get(stepIndex);
             String stepId = step.id();
             boolean baseUi = BaseSteps.UI_VERBS.contains(step.verb()) && !packVerbs.contains(step.verb());
+            boolean baseWeb = BaseSteps.WEB_VERBS.contains(step.verb()) && !packVerbs.contains(step.verb());
             Map<String, Object> params;
             AwaitSpec await;
             try {
@@ -955,47 +1297,134 @@ public final class PlanExecutor {
                 params.put("since", lastActionSeq);
             }
             List<String> secretParams = secretParams(call);
+            secretsSent |= !secretParams.isEmpty();
             String correlationId = plan.scenarioId() + "/" + stepId + "/" + (callIndex + 1);
+            CallOptions callOptions = options(call.timeoutMs(), correlationId).withSecretParams(secretParams);
+            boolean webCall = WebRun.isWeb(call.primitive());
+            String[] servedBy = new String[1];
             long t0 = options.clock().millis();
             RpcResult result;
+            long agentSince;
+            long pathSince;
+            boolean fromPath = false;
             try {
-                result = agent.call(call.primitive(), params, options(call.timeoutMs(), correlationId)
-                        .withSecretParams(secretParams));
+                if (webCall) {
+                    WebRun.Served served = web.call(stepId, call.primitive(), params, callOptions, false, lastSeenSeq,
+                            servedBy);
+                    result = served.result();
+                    agentSince = served.agentSince();
+                    pathSince = served.pathSince();
+                } else if (isAwait && web.combines(AwaitRules.topicsText(params.get("topics")))) {
+                    // phase4-contracts.md 6.3: a waitFor on a web topic reads the path's events and the agent's bus.
+                    WebRun.Waited waited = combinedAwait(params, t0);
+                    fromPath = waited.fromPath();
+                    agentSince = lastActionSeq;
+                    pathSince = lastActionPathSeq;
+                    result = new RpcResult(waited.event().toJson(), List.of(), agentSince, fromPath ? lastSeenSeq
+                            : Math.max(lastSeenSeq, waited.event().seq()), options.clock().millis() - t0,
+                            "controller");
+                } else {
+                    pathSince = web.pathSeqNow();
+                    result = agent.call(call.primitive(), params, callOptions);
+                    agentSince = result.seqBefore();
+                }
             } catch (AgentRpcException e) {
                 Map<String, Object> record = RunLog.fields("step", stepId, "index", callIndex + 1, "primitive",
-                        call.primitive(), "params", params, "ok", false, "error", e.error().toJson(),
-                        "durationMs", options.clock().millis() - t0);
+                        call.primitive());
+                if (webCall) {
+                    record.put("path", servedBy[0]);
+                    web.noteCall(stepId, callIndex + 1, call.primitive(), servedBy[0], false);
+                }
+                record.putAll(RunLog.fields("params", params, "ok", false, "error", e.error().toJson(), "durationMs",
+                        options.clock().millis() - t0));
                 if (!secretParams.isEmpty()) {
                     record.put("secretParams", secretParams);
                 }
                 log.write("call", record);
                 throw rpcFailure(e, stepId, call.primitive(), params);
+            } catch (WebRun.PathFailure e) {
+                Map<String, Object> record = RunLog.fields("step", stepId, "index", callIndex + 1, "primitive",
+                        call.primitive(), "path", servedBy[0], "params", params, "ok", false, "error", e.getMessage(),
+                        "durationMs", options.clock().millis() - t0);
+                if (!secretParams.isEmpty()) {
+                    record.put("secretParams", secretParams);
+                }
+                log.write("call", record);
+                web.noteCall(stepId, callIndex + 1, call.primitive(), servedBy[0], false);
+                throw new Abort(Status.ERROR, FailureKind.ENVIRONMENT, stepId, e.getMessage(), RunLog.fields(
+                        "primitive", call.primitive(), "path", servedBy[0], "params", params));
             }
-            noteSeq(result.seqAfter());
+            boolean agentServed = !webCall || AgentWebPath.ID.equals(servedBy[0]);
+            if (agentServed && !fromPath) {
+                noteSeq(result.seqAfter());
+            }
             Map<String, Object> record = RunLog.fields("step", stepId, "index", callIndex + 1, "primitive",
-                    call.primitive(), "params", params, "ok", true, "value", result.value(), "events",
+                    call.primitive());
+            if (webCall) {
+                record.put("path", servedBy[0]);
+            }
+            record.putAll(RunLog.fields("params", params, "ok", true, "value", result.value(), "events",
                     result.events().size(), "seq", seq(result), "durationMs", options.clock().millis() - t0,
-                    "thread", result.thread());
+                    "thread", result.thread()));
+            if (fromPath) {
+                record.put("eventSource", web.pathId());
+            }
             if (!secretParams.isEmpty()) {
                 record.put("secretParams", secretParams);
             }
             log.write("call", record);
+            if (webCall) {
+                web.noteCall(stepId, callIndex + 1, call.primitive(), servedBy[0], true);
+            }
             boolean isSettle = "swing.settle".equals(call.primitive());
             if (!isAwait && !isSettle && !"trace.mark".equals(call.primitive())) {
-                lastActionSeq = result.seqBefore();
+                lastActionSeq = agentSince;
+                lastActionPathSeq = pathSince;
             }
             noteFidelity(step, call, result.value());
             if (baseUi) {
                 checkFired(step, call, result.value());
-                if (isSettle) {
-                    checkSettled(step, call, params, result.value());
-                }
             }
-            Event ended = applySync(call, await, result.seqBefore(), stepId);
+            if ((baseUi || baseWeb) && isSettle) {
+                checkSettled(step, call, params, result.value());
+            }
+            if (baseWeb && "web.waitFlag".equals(call.primitive())) {
+                checkWaitFlag(step, call, params, result.value());
+            }
+            Event ended = applySync(call, await, agentSince, pathSince, stepId);
             if (call.capture() != null) {
                 capture(step, call, isAwait ? awaitedEvent(result.value()) : ended);
             }
-            checkPrompts(stepIndex, callIndex, handledUpTo(call, result));
+            checkPrompts(stepIndex, callIndex, handledUpTo(call, result, agentSince, fromPath));
+        }
+
+        /**
+         * A {@code sync.await} call on a web topic while a non-agent web path serves the run: the executor waits on
+         * the path's events and the agent's bus itself (since the last action on each). No event in time is the
+         * agent's own TIMEOUT error, so that it is reported exactly as on the agent path; a rejected wait is the
+         * agent's error.
+         */
+        private WebRun.Waited combinedAwait(Map<String, Object> params, long t0)
+                throws AgentRpcException, AgentLostException, Abort {
+            String topics = AwaitRules.topicsText(params.get("topics"));
+            long since = params.get("since") instanceof Number n ? n.longValue() : lastActionSeq;
+            long timeoutMs = params.get("timeoutMs") instanceof Number n ? Math.max(1L, n.longValue()) : 10_000L;
+            @SuppressWarnings("unchecked")
+            Map<String, Object> match = params.get("match") instanceof Map<?, ?> m ? (Map<String, Object>) m : null;
+            WebRun.Waited waited;
+            try {
+                waited = web.await(topics, since, lastActionPathSeq, match, timeoutMs);
+            } catch (RuntimeException e) {
+                throw new Abort(Status.ERROR, FailureKind.ENVIRONMENT, currentStep, "waiting for event (" + topics
+                        + ") failed: " + e, RunLog.fields("primitive", "sync.await", "error", e.toString()));
+            }
+            if (waited == null) {
+                throw new AgentRpcException("sync.await", new RpcError(ErrorCodes.TIMEOUT, "no matching event within "
+                        + timeoutMs + " ms", RunLog.fields("lastSeq", lastSeenSeq, "topics", topics, "since", since,
+                        "pathSince", lastActionPathSeq, "timeoutMs", timeoutMs, "waitedMs",
+                        options.clock().millis() - t0)));
+            }
+            return waited;
         }
 
         /**
@@ -1145,16 +1574,42 @@ public final class PlanExecutor {
         }
 
         /**
+         * The {@code web.waitFlag} call of the base verb {@code webWaitFlag}: a flag that did not turn true
+         * ({@code ready} not true) within the primitive's wait is SYNC_TIMEOUT, as an expired settle is.
+         */
+        private void checkWaitFlag(Plan.Step step, Plan.Call call, Map<String, Object> params, Object value)
+                throws Abort {
+            if (value instanceof Map<?, ?> v && Boolean.TRUE.equals(v.get("ready"))) {
+                return;
+            }
+            Object ms = value instanceof Map<?, ?> v && v.get("ms") != null ? v.get("ms")
+                    : params.get("timeoutMs") != null ? params.get("timeoutMs") : call.timeoutMs();
+            Map<String, Object> detail = RunLog.fields("primitive", call.primitive(), "sync", "NONE", "expression",
+                    params.get("expression"), "waitFlag", value);
+            detail.putAll(diagnostics());
+            String expression = Values.printableLine(Values.stringOf(params.get("expression")));
+            throw new Abort(Status.FAIL, FailureKind.SYNC_TIMEOUT, step.id(), step.verb() + ": the flag did not turn"
+                    + " true within " + ms + " ms: " + (expression.length() <= 200 ? expression
+                    : expression.substring(0, 197) + "..."), detail);
+        }
+
+        /**
          * The highest sequence number of a prompt this call itself dealt with: for a wait on a prompt topic the event
          * it returned, for any other prompt-handling call everything published before the call ran (the prompt it
-         * answered was open by then; one it raised comes later). -1 for a call that handles no prompt.
+         * answered was open by then; one it raised comes later). -1 for a call that handles no prompt, and for a wait
+         * a web path's own event ended (its number is not the agent's, and the path publishes no prompt).
+         *
+         * @param agentBefore the agent's sequence number before the call
          */
-        private long handledUpTo(Plan.Call call, RpcResult result) {
+        private long handledUpTo(Plan.Call call, RpcResult result, long agentBefore, boolean fromPath) {
             if (!call.handlesPrompt()) {
                 return -1;
             }
             if (!"sync.await".equals(call.primitive())) {
-                return result.seqBefore();
+                return agentBefore;
+            }
+            if (fromPath) {
+                return -1;
             }
             if (result.value() instanceof Map<?, ?> event && event.get("seq") instanceof Long seq) {
                 noteSeq(seq);
@@ -1169,8 +1624,13 @@ public final class PlanExecutor {
             detail.put("params", params);
             String message = primitive + " failed: " + ErrorCodes.name(error.code()) + ": " + error.message();
             return switch (error.code()) {
-                case ErrorCodes.INPUT_REJECTED, ErrorCodes.NOT_FOUND, ErrorCodes.AMBIGUOUS ->
+                // phase4-contracts.md 8.1: a script the page ran threw; the page did not do what the step expected.
+                case ErrorCodes.INPUT_REJECTED, ErrorCodes.NOT_FOUND, ErrorCodes.AMBIGUOUS, ErrorCodes.SCRIPT_ERROR ->
                         new Abort(Status.FAIL, FailureKind.ASSERTION, stepId, message, detail);
+                case ErrorCodes.STALE_HANDLE -> WebRun.isWeb(primitive)
+                        ? new Abort(Status.FAIL, FailureKind.ASSERTION, stepId, primitive + " failed: the browser"
+                                + " closed during the step (STALE_HANDLE: " + error.message() + ")", detail)
+                        : new Abort(Status.ERROR, FailureKind.ENVIRONMENT, stepId, message, detail);
                 case ErrorCodes.MODAL_OPEN -> {
                     String dialog = modalDialog(error, detail);
                     yield new Abort(Status.FAIL, FailureKind.ASSERTION, stepId, message + dialog, detail);
@@ -1221,18 +1681,20 @@ public final class PlanExecutor {
          * Applies the call's sync.
          *
          * @param await the call's await spec with its references resolved (EVENT only, else null)
-         * @param since the call's {@code seq.before}
+         * @param since the agent's sequence number before the call ({@code seq.before} of an agent call)
+         * @param pathSince the web path's sequence number before the call (used when the wait reads the path's
+         *     events, phase4-contracts.md 6.3)
          * @return the event that ended an EVENT wait, else null
          */
-        private Event applySync(Plan.Call call, AwaitSpec await, long since, String stepId)
+        private Event applySync(Plan.Call call, AwaitSpec await, long since, long pathSince, String stepId)
                 throws Abort, AgentLostException {
             switch (call.sync()) {
                 case NONE -> {
                 }
                 case ACK -> {
                     if (sync.ackTopic() != null) {
-                        awaitTopic("ack", sync.ackTopic(), null, since, timeout(sync.ackTimeout(), call), call,
-                                stepId);
+                        awaitTopic("ack", sync.ackTopic(), null, since, pathSince, timeout(sync.ackTimeout(), call),
+                                call, stepId);
                     } else {
                         log.write("sync", RunLog.fields("step", stepId, "primitive", call.primitive(), "mode", "ACK",
                                 "ok", true, "note", "the pack has no ack topic"));
@@ -1240,18 +1702,18 @@ public final class PlanExecutor {
                 }
                 case READY -> {
                     if (sync.ackTopic() != null) {
-                        awaitTopic("ack", sync.ackTopic(), null, since, timeout(sync.ackTimeout(), call), call,
-                                stepId);
+                        awaitTopic("ack", sync.ackTopic(), null, since, pathSince, timeout(sync.ackTimeout(), call),
+                                call, stepId);
                     }
                     if (!sync.readyTopics().isEmpty()) {
-                        awaitTopic("ready", String.join(",", sync.readyTopics()), null, since,
+                        awaitTopic("ready", String.join(",", sync.readyTopics()), null, since, pathSince,
                                 timeout(sync.readyTimeout(), call), call, stepId);
                     }
                 }
                 case SETTLE -> settle(call, stepId);
                 case EVENT -> {
-                    return awaitTopic("event", await.topics(), await.match(), since, await.timeoutMs(), call,
-                            stepId);
+                    return awaitTopic("event", await.topics(), await.match(), since, pathSince, await.timeoutMs(),
+                            call, stepId);
                 }
                 default -> throw new IllegalStateException("unknown sync " + call.sync());
             }
@@ -1265,24 +1727,39 @@ public final class PlanExecutor {
         /**
          * Awaits the first event on {@code topics} (whose payload holds every {@code match} entry, when not null)
          * since {@code since}; none within {@code timeoutMs} is SYNC_TIMEOUT with the diagnostics in the detail, and
-         * an error from the wait itself (a topic filter the agent rejects, for instance) is ENVIRONMENT.
+         * an error from the wait itself (a topic filter the agent rejects, for instance) is ENVIRONMENT. While a
+         * non-agent web path serves the run, a wait whose topics can match a {@code web.*} topic also reads the
+         * path's own events since {@code pathSince} (phase4-contracts.md 6.3); the record then carries
+         * {@code pathSince} and {@code source} (the path's id when its event ended the wait, {@code eventSeq} being
+         * the path's own sequence number then; {@code agent} otherwise).
          */
-        private Event awaitTopic(String wait, String topics, Map<String, Object> match, long since, long timeoutMs,
-                                 Plan.Call call, String stepId) throws Abort, AgentLostException {
+        private Event awaitTopic(String wait, String topics, Map<String, Object> match, long since, long pathSince,
+                                 long timeoutMs, Plan.Call call, String stepId) throws Abort, AgentLostException {
             long t0 = options.clock().millis();
+            boolean combined = web.combines(topics);
             Map<String, Object> waitFields = RunLog.fields("wait", wait, "topics", topics);
             if (match != null) {
                 waitFields.put("match", match);
             }
             waitFields.putAll(RunLog.fields("since", since, "timeoutMs", timeoutMs));
+            if (combined) {
+                waitFields.put("pathSince", pathSince);
+            }
             Map<String, Object> record = RunLog.fields("step", stepId, "primitive", call.primitive(), "mode",
                     call.sync().name());
             record.putAll(waitFields);
             Map<String, Object> detail = RunLog.fields("primitive", call.primitive(), "sync", call.sync().name());
             detail.putAll(waitFields);
             Event event;
+            boolean fromPath = false;
             try {
-                event = agent.await(topics, since, match, Duration.ofMillis(timeoutMs));
+                if (combined) {
+                    WebRun.Waited waited = web.await(topics, since, pathSince, match, timeoutMs);
+                    event = waited == null ? null : waited.event();
+                    fromPath = waited != null && waited.fromPath();
+                } else {
+                    event = agent.await(topics, since, match, Duration.ofMillis(timeoutMs));
+                }
             } catch (RuntimeException | AgentRpcException e) {
                 record.putAll(RunLog.fields("ok", false, "error", e.toString()));
                 log.write("sync", record);
@@ -1292,13 +1769,18 @@ public final class PlanExecutor {
             }
             record.putAll(RunLog.fields("ok", event != null, "eventSeq", event == null ? null : event.seq(), "topic",
                     event == null ? null : event.topic(), "ms", options.clock().millis() - t0));
+            if (combined && event != null) {
+                record.put("source", fromPath ? web.pathId() : AgentWebPath.ID);
+            }
             log.write("sync", record);
             if (event == null) {
                 detail.putAll(diagnostics());
                 throw new Abort(Status.FAIL, FailureKind.SYNC_TIMEOUT, stepId, "no " + describe(wait, topics, match)
                         + " within " + timeoutMs + " ms after " + call.primitive(), detail);
             }
-            noteSeq(event.seq());
+            if (!fromPath) {
+                noteSeq(event.seq());
+            }
             return event;
         }
 
@@ -1484,9 +1966,9 @@ public final class PlanExecutor {
                 Expectation expectation = (Expectation) check;
                 try {
                     ExpectationPath path = ExpectationPath.parse(expectation.path()).bind(bindings::lookupPublic);
-                    if (!facts.containsKey(path.root())) {
+                    if (!runFacts.containsKey(path.root())) {
                         throw new Abort(Status.ERROR, FailureKind.ENVIRONMENT, stepId, "no fact provider for root '"
-                                + path.root() + "' of " + expectation.path() + "; roots: " + facts.keySet(),
+                                + path.root() + "' of " + expectation.path() + "; roots: " + runFacts.keySet(),
                                 RunLog.fields("path", expectation.path()));
                     }
                     active.add(new Bound(expectation, path, bindings.substitutePublic(expectation.matcher())));
@@ -1809,7 +2291,7 @@ public final class PlanExecutor {
 
         private Object[] fetch(String root) throws AgentLostException, InterruptedException {
             try {
-                return new Object[] {facts.get(root).fetch(agent)};
+                return new Object[] {runFacts.get(root).fetch(factConnection)};
             } catch (AgentLostException | InterruptedException e) {
                 throw e;
             } catch (Exception e) {
@@ -1841,9 +2323,17 @@ public final class PlanExecutor {
             writeJson(dir, "snapshot.json", snapshot);
             Object appState = evidence("app.state", Map.of(), DIAGNOSTIC_TIMEOUT_MS, lost);
             writeJson(dir, "app-state.json", appState);
-            if (snapshot != null || appState != null) {
+            Object browsers = webBrowsers(lost);
+            List<UiSnapshotText.WebView> views = webViews(browsers, lost);
+            if (snapshot != null || appState != null || !views.isEmpty()) {
                 // Masked as values first, so that a secret the UI shows never reaches the text unquoted.
-                detail.put("snapshot", UiSnapshotText.render(mask.apply(snapshot), mask.apply(appState)));
+                List<UiSnapshotText.WebView> masked = new ArrayList<>();
+                for (UiSnapshotText.WebView view : views) {
+                    masked.add(new UiSnapshotText.WebView((Map<?, ?>) mask.apply(view.browser()),
+                            mask.apply(view.aria()), view.path()));
+                }
+                detail.put("snapshot", UiSnapshotText.render(mask.apply(snapshot), mask.apply(appState), masked,
+                        UiSnapshotText.DEFAULT_BUDGET));
             }
             if (dir == null) {
                 return;
@@ -1860,6 +2350,151 @@ public final class PlanExecutor {
             if (probe instanceof Map<?, ?> p && p.get("lastSeq") instanceof Long lastSeq) {
                 writeJson(dir, "events.json", evidence("evt.query", RunLog.fields("since",
                         Math.max(0, lastSeq - EVENT_EVIDENCE), "limit", EVENT_EVIDENCE), DIAGNOSTIC_TIMEOUT_MS, lost));
+            }
+            writeWebEvidence(dir, browsers, lost);
+        }
+
+        /**
+         * The {@code web.browsers} value for the evidence (phase4-contracts.md 6.4) when the target's
+         * {@code web.browsers} capability is present and not UNAVAILABLE and it lists at least one browser; else null.
+         */
+        private Object webBrowsers(boolean[] lost) {
+            Capability capability = caps == null ? null : caps.get("web.browsers");
+            if (capability == null || capability.state() == CapabilityState.UNAVAILABLE) {
+                return null;
+            }
+            WebRead read = webEvidence("web.browsers", Map.of(), 10_000L, lost);
+            if (read == null || !(read.value() instanceof Map<?, ?> value)
+                    || !(value.get("browsers") instanceof List<?> list) || list.isEmpty()) {
+                return null;
+            }
+            return read.value();
+        }
+
+        /** The browsers of {@code web.browsers} in ref order. */
+        private List<Map<?, ?>> browsersInRefOrder(Object browsers) {
+            List<Map<?, ?>> out = new ArrayList<>();
+            if (browsers instanceof Map<?, ?> value && value.get("browsers") instanceof List<?> list) {
+                for (Object item : list) {
+                    if (item instanceof Map<?, ?> browser && browser.get("ref") != null) {
+                        out.add(browser);
+                    }
+                }
+            }
+            out.sort(Comparator.comparing(b -> String.valueOf(b.get("ref")), PlanExecutor::compareRefs));
+            return out;
+        }
+
+        /**
+         * The {@code WEB} surface (phase4-contracts.md 6.2): every browser in ref order, a visible one with its
+         * {@code web.ariaSnapshot {maxNodes: 200, interestingOnly: true}} read through the run's web path.
+         */
+        private List<UiSnapshotText.WebView> webViews(Object browsers, boolean[] lost) {
+            List<UiSnapshotText.WebView> views = new ArrayList<>();
+            for (Map<?, ?> browser : browsersInRefOrder(browsers)) {
+                if (!Boolean.TRUE.equals(browser.get("visibleInSwing"))) {
+                    views.add(new UiSnapshotText.WebView(browser, null, null));
+                    continue;
+                }
+                WebRead aria = webEvidence("web.ariaSnapshot", RunLog.fields("browser", String.valueOf(
+                        browser.get("ref")), "maxNodes", 200L, "interestingOnly", true), 10_000L, lost);
+                views.add(new UiSnapshotText.WebView(browser, aria == null ? null : aria.value(),
+                        aria == null ? null : aria.path()));
+            }
+            return views;
+        }
+
+        /**
+         * The web evidence files (phase4-contracts.md 6.4): {@code web-browsers.json}, and for each browser visible in
+         * Swing, at most four in ref order, {@code web-<ref>-aria.json} ({@code web.ariaSnapshot {maxNodes: 2000}})
+         * and {@code web-<ref>.png} ({@code web.bitmap}), or {@code web-<ref>-error.txt} with the error code of each
+         * read that failed. Nothing when the target has no indexed browser.
+         */
+        private void writeWebEvidence(Path dir, Object browsers, boolean[] lost) {
+            if (browsers == null) {
+                return;
+            }
+            writeJson(dir, "web-browsers.json", browsers);
+            int kept = 0;
+            for (Map<?, ?> browser : browsersInRefOrder(browsers)) {
+                if (kept >= WEB_EVIDENCE_BROWSERS || lost[0] || agentLost) {
+                    break;
+                }
+                if (!Boolean.TRUE.equals(browser.get("visibleInSwing"))) {
+                    continue;
+                }
+                kept++;
+                String ref = String.valueOf(browser.get("ref"));
+                String name = WEB_EVIDENCE_PREFIX + fileSafe(ref);
+                List<String> errors = new ArrayList<>();
+                WebRead aria = webEvidence("web.ariaSnapshot", RunLog.fields("browser", ref, "maxNodes", 2000L),
+                        10_000L, lost, errors);
+                if (aria != null) {
+                    writeJson(dir, name + "-aria.json", aria.value());
+                }
+                WebRead bitmap = webEvidence("web.bitmap", RunLog.fields("browser", ref), 20_000L, lost, errors);
+                if (bitmap != null) {
+                    writePng(dir.resolve(name + ".png"), bitmap.value());
+                }
+                if (!errors.isEmpty()) {
+                    writeText(dir, name + "-error.txt", String.join("\n", errors) + "\n");
+                }
+            }
+        }
+
+        /** A web read for the evidence or the surface, and the path that served it. */
+        private record WebRead(Object value, String path) {
+        }
+
+        private WebRead webEvidence(String primitive, Map<String, Object> params, long timeoutMs, boolean[] lost) {
+            return webEvidence(primitive, params, timeoutMs, lost, new ArrayList<>());
+        }
+
+        /**
+         * One web read through the run's web path (the fall-back rules apply), logged as an {@code evidence} record;
+         * null when it failed, its {@code <primitive>: <CODE> (<code>): <message>} line then added to {@code errors}.
+         */
+        private WebRead webEvidence(String primitive, Map<String, Object> params, long timeoutMs, boolean[] lost,
+                                    List<String> errors) {
+            if (lost[0] || agentLost) {
+                return null;
+            }
+            String[] servedBy = new String[1];
+            try {
+                WebRun.Served served = web.call(currentStep == null ? "evidence" : currentStep, primitive, params,
+                        options(timeoutMs, null), true, lastSeenSeq, servedBy);
+                log.write("evidence", RunLog.fields("kind", primitive, "ok", true, "path", served.path()));
+                return new WebRead(served.result().value(), served.path());
+            } catch (AgentRpcException e) {
+                RpcError error = e.error();
+                errors.add(primitive + ": " + ErrorCodes.name(error.code()) + " (" + error.code() + "): "
+                        + error.message());
+                log.write("evidence", RunLog.fields("kind", primitive, "ok", false, "path", servedBy[0], "error",
+                        error.toJson()));
+            } catch (AgentLostException e) {
+                lost[0] = true;
+                agentLost = true;
+                log.write("evidence", RunLog.fields("kind", primitive, "ok", false, "error", e.toString()));
+            } catch (WebRun.PathFailure | RuntimeException e) {
+                errors.add(primitive + ": " + e.getMessage());
+                log.write("evidence", RunLog.fields("kind", primitive, "ok", false, "path", servedBy[0], "error",
+                        e.toString()));
+            }
+            return null;
+        }
+
+        /** A ref as part of a file name: letters, digits, {@code -} and {@code _}; anything else becomes {@code _}. */
+        private static String fileSafe(String ref) {
+            String safe = ref.replaceAll("[^A-Za-z0-9_-]", "_");
+            return safe.isEmpty() ? "_" : safe.length() > 64 ? safe.substring(0, 64) : safe;
+        }
+
+        private void writeText(Path dir, String name, String text) {
+            try {
+                Files.createDirectories(dir);
+                Files.write(dir.resolve(name), mask.apply(text).getBytes(StandardCharsets.UTF_8));
+            } catch (IOException e) {
+                log.write("evidence", RunLog.fields("file", name, "ok", false, "error", e.toString()));
             }
         }
 
@@ -1942,29 +2577,72 @@ public final class PlanExecutor {
                     continue;
                 }
                 Map<String, Object> params = null;
+                boolean webCall = WebRun.isWeb(call.primitive());
+                String[] servedBy = new String[1];
                 try {
                     @SuppressWarnings("unchecked")
                     Map<String, Object> substituted = (Map<String, Object>) cleanupBindings.substitute(call.args());
                     params = substituted;
                     AwaitSpec await = AwaitRules.resolve(call.await(), cleanupBindings, stepTimeoutMs);
-                    RpcResult result = agent.call(call.primitive(), params, options(call.timeoutMs(), null)
-                            .withSecretParams(secretParams(call)));
-                    noteSeq(result.seqAfter());
-                    applySync(call, await, result.seqBefore(), "cleanup");
-                    log.write("cleanup", RunLog.fields("primitive", call.primitive(), "params", params, "ok", true,
-                            "value", result.value()));
+                    List<String> secretParams = secretParams(call);
+                    secretsSent |= !secretParams.isEmpty();
+                    CallOptions callOptions = options(call.timeoutMs(), null).withSecretParams(secretParams);
+                    RpcResult result;
+                    long agentSince;
+                    long pathSince;
+                    if (webCall) {
+                        // phase4-contracts.md 6.1: cleanup's web calls (webTap's removal) take the run's path too.
+                        WebRun.Served served = web.call("cleanup", call.primitive(), params, callOptions, false,
+                                lastSeenSeq, servedBy);
+                        result = served.result();
+                        agentSince = served.agentSince();
+                        pathSince = served.pathSince();
+                        if (AgentWebPath.ID.equals(served.path())) {
+                            noteSeq(result.seqAfter());
+                        }
+                        web.noteCall("cleanup", calls.indexOf(call) + 1, call.primitive(), served.path(), true);
+                    } else {
+                        pathSince = web.pathSeqNow();
+                        result = agent.call(call.primitive(), params, callOptions);
+                        agentSince = result.seqBefore();
+                        noteSeq(result.seqAfter());
+                    }
+                    applySync(call, await, agentSince, pathSince, "cleanup");
+                    Map<String, Object> record = RunLog.fields("primitive", call.primitive());
+                    if (webCall) {
+                        record.put("path", servedBy[0]);
+                    }
+                    record.putAll(RunLog.fields("params", params, "ok", true, "value", result.value()));
+                    log.write("cleanup", record);
                 } catch (AgentLostException e) {
                     lostNow = true;
                     agentLost = true;
-                    log.write("cleanup", RunLog.fields("primitive", call.primitive(), "params", params, "ok", false,
-                            "error", e.toString()));
+                    log.write("cleanup", cleanupFailure(call, servedBy[0], params, e.toString()));
                 } catch (AgentRpcException e) {
-                    log.write("cleanup", RunLog.fields("primitive", call.primitive(), "params", params, "ok", false,
-                            "error", e.error().toJson()));
-                } catch (Abort | ResolutionException | RuntimeException e) {
-                    log.write("cleanup", RunLog.fields("primitive", call.primitive(), "params", params, "ok", false,
-                            "error", e.getMessage() == null ? e.toString() : e.getMessage()));
+                    noteCleanupFailure(call, calls, servedBy[0]);
+                    log.write("cleanup", cleanupFailure(call, servedBy[0], params, e.error().toJson()));
+                } catch (Abort | ResolutionException | WebRun.PathFailure | RuntimeException e) {
+                    noteCleanupFailure(call, calls, servedBy[0]);
+                    log.write("cleanup", cleanupFailure(call, servedBy[0], params, e.getMessage() == null
+                            ? e.toString() : e.getMessage()));
                 }
+            }
+        }
+
+        /** A failed cleanup call's record; a {@code web.*} call names the path it went to. */
+        private Map<String, Object> cleanupFailure(Plan.Call call, String path, Map<String, Object> params,
+                                                   Object error) {
+            Map<String, Object> record = RunLog.fields("primitive", call.primitive());
+            if (WebRun.isWeb(call.primitive())) {
+                record.put("path", path);
+            }
+            record.putAll(RunLog.fields("params", params, "ok", false, "error", error));
+            return record;
+        }
+
+        private void noteCleanupFailure(Plan.Call call, List<Plan.Call> calls, String path) {
+            if (WebRun.isWeb(call.primitive()) && path != null) {
+                web.noteCall("cleanup", calls.indexOf(call) + 1, call.primitive(), path, false);
             }
         }
 

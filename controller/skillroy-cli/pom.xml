@@ -63,6 +63,21 @@
       <artifactId>junit-jupiter</artifactId>
       <scope>test</scope>
     </dependency>
+    <!-- The agent home the attach integration test unpacks (below). Declared so that the reactor builds the
+         distribution first: a build of this module alone (-pl ... -am) would otherwise unpack whatever zip the local
+         repository holds, possibly a stale one. Not used on the class path. -->
+    <dependency>
+      <groupId>ai.skillroy</groupId>
+      <artifactId>skillroy-agent-dist</artifactId>
+      <type>zip</type>
+      <scope>test</scope>
+      <exclusions>
+        <exclusion>
+          <groupId>*</groupId>
+          <artifactId>*</artifactId>
+        </exclusion>
+      </exclusions>
+    </dependency>
   </dependencies>
 
   <build>

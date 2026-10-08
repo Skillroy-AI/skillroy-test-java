@@ -66,7 +66,7 @@ class ResolutionCompileTest {
     @Test
     void theToyResolveScenarioCompilesToAPlanOfTheCurrentVersion() throws Exception {
         Plan plan = compile(BinderTest.YAML);
-        assertEquals(3, plan.planVersion(), "Phase 3 writes version 3 (phase3-contracts.md 4)");
+        assertEquals(4, plan.planVersion(), "Phase 4 writes version 4 (phase4-contracts.md 7.3)");
         assertEquals("none", plan.inference());
         assertEquals(List.of("toy.item"), plan.requires(), "the verifiers' capability ids are added");
         Plan.Slot item = plan.slot("item");
@@ -89,14 +89,14 @@ class ResolutionCompileTest {
     }
 
     @Test
-    void versionsOneToThreeAreReadOthersAreRefused() throws Exception {
-        String v2 = compile(BinderTest.YAML).toJsonText().replace("\"planVersion\": 3", "\"planVersion\": 2");
-        assertEquals(3, Plan.parse(v2).planVersion(), "a version 2 plan is read as version 3");
-        ScenarioException four = assertThrows(ScenarioException.class, () -> Plan.parse(v2.replace(
-                "\"planVersion\": 2", "\"planVersion\": 4")));
-        assertTrue(four.getMessage().contains("not supported"), four.getMessage());
+    void versionsOneToFourAreReadOthersAreRefused() throws Exception {
+        String v2 = compile(BinderTest.YAML).toJsonText().replace("\"planVersion\": 4", "\"planVersion\": 2");
+        assertEquals(4, Plan.parse(v2).planVersion(), "a version 2 plan is read as version 4");
+        ScenarioException five = assertThrows(ScenarioException.class, () -> Plan.parse(v2.replace(
+                "\"planVersion\": 2", "\"planVersion\": 5")));
+        assertTrue(five.getMessage().contains("not supported"), five.getMessage());
         Plan v1 = SecretMaskTest.version1(compile("scenario: t\npack: toy\nsteps: []\n"), Map.of());
-        assertEquals(3, v1.planVersion(), "a version 1 plan is read as version 3");
+        assertEquals(4, v1.planVersion(), "a version 1 plan is read as version 4");
         Plan legacy = SecretMaskTest.version1(compile("scenario: t\npack: toy\nresolve:\n  a: { fixture: 1 }\n"
                 + "steps: []\n"), Map.of());
         assertEquals("none", legacy.inference());

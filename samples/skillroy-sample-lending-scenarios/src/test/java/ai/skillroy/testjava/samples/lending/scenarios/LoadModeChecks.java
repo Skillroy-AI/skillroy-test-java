@@ -209,7 +209,8 @@ abstract class LoadModeChecks {
             Map<?, ?> module = (Map<?, ?>) m;
             modules.put(String.valueOf(module.get("id")), module.get("state"));
         }
-        assertEquals(Map.of("swing", "INSTALLED", "data", "INSTALLED", "lending", "INSTALLED"), modules);
+        assertEquals(Map.of("swing", "INSTALLED", "data", "INSTALLED", "lending", "INSTALLED", "web", "INSTALLED"),
+                modules);
 
         CapabilityMatrix caps = client().capabilities();
         if (mode().loadMode == LoadMode.EMBEDDED) {
@@ -756,7 +757,7 @@ abstract class LoadModeChecks {
             assertEquals(mode().loadMode.name(), info.get("loadMode"), "still the original agent");
             List<String> ids = ((List<?>) info.get("modules")).stream().map(m -> String.valueOf(((Map<?, ?>) m)
                     .get("id"))).sorted().toList();
-            assertEquals(List.of("data", "lending", "swing"), ids, "one of each module");
+            assertEquals(List.of("data", "lending", "swing", "web"), ids, "one of each module");
             assertEquals(2L, lendingState(second).get("engineListeners"), "the window's listener and one agent's");
         }
         assertEquals(2L, lendingState(client()).get("engineListeners"));

@@ -1,0 +1,280 @@
+/*
+ * Copyright 2026 Mike Mills.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package ai.skillroy.testjava.agent.web;
+
+import ai.skillroy.testjava.agent.api.AgentContext;
+import ai.skillroy.testjava.agent.api.spi.web.WebBrowser;
+import ai.skillroy.testjava.agent.api.spi.web.WebCapability;
+import ai.skillroy.testjava.agent.api.spi.web.WebEvent;
+import ai.skillroy.testjava.agent.api.spi.web.WebEventListener;
+import ai.skillroy.testjava.agent.api.spi.web.WebSubscription;
+
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.IdentityHashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.function.BiConsumer;
+
+/**
+ * Publishes what the adapters observe on the agent's event bus (phase4-contracts.md section 4.3), source
+ * {@value WebTopics#SOURCE}. One subscription per browser, made when the browser first enters the index and cancelled
+ * when it leaves or the module is uninstalled:
+ * <ul>
+ *   <li>{@code LOAD_FINISHED}, {@code LOAD_FAILED}, {@code NAVIGATED}: {@code web.load {browser, url, frameKey?, kind,
+ *       error?}}; a {@code LOAD_FINISHED} of the main frame (no frame key) also publishes {@code web.ready {browser,
+ *       url, signal: LOAD}}; every one wakes a read waiting for the retry of section 4.2;</li>
+ *   <li>{@code CONSOLE}: {@code web.console {browser, level, text, source?, line?}}, the text with secrets hidden
+ *       ({@link Secrets}) and then cut at {@link WebPrimitives#CONSOLE_TEXT_MAX} characters ({@code truncated: true}
+ *       when cut); the source URL is masked the same way;</li>
+ *   <li>{@code CLOSED}: {@code web.closed {browser}}, at most once per browser (also when a rebuild finds a browser
+ *       closed or gone from the technology's list).</li>
+ * </ul>
+ * When a browser enters the index its CDP target id is read once in the background and cached, so that a later
+ * {@code web.browsers} can report it while the page cannot answer (a frozen renderer).
+ *
+ * <p>{@link #close()} (the module's uninstall, before the adapters are detached) cancels every subscription the
+ * bridge made and refuses new ones, also one a rebuild in flight would make, so that no subscription of a detached
+ * adapter survives the uninstall.
+ *
+ * <p>The listener runs on the adapter's threads (with JCEF off-screen, possibly the EDT): it only builds a small map
+ * and publishes, which never blocks; it never throws into the adapter. Thread-safe.
+ */
+final class EventBridge implements BrowserIndex.Listener {
+
+    private final AgentContext ctx;
+    private final Secrets secrets;
+    /** The entries the bridge subscribed to and has not cancelled; guarded by this. */
+    private final Set<Entry> subscribed = Collections.newSetFromMap(new IdentityHashMap<Entry, Boolean>());
+    /** Set by {@link #close()}; guarded by this. */
+    private boolean closed;
+    private volatile Taps taps;
+
+    EventBridge(AgentContext ctx, Secrets secrets) {
+        this.ctx = ctx;
+        this.secrets = secrets;
+    }
+
+    void taps(Taps t) {
+        this.taps = t;
+    }
+
+    @Override
+    public void entered(final Entry e) {
+        synchronized (this) {
+            if (closed) {
+                return;
+            }
+        }
+        WebSubscription s = null;
+        try {
+            s = e.browser().subscribe(new Listener(e));
+        } catch (Throwable t) {
+            ctx.log().warn("web: could not subscribe to the events of browser " + e.ref + ": " + t);
+        }
+        boolean refused;
+        synchronized (this) {
+            refused = closed;
+            if (!refused) {
+                e.subscription = s;
+                subscribed.add(e);
+            }
+        }
+        if (refused) {
+            cancelQuietly(e, s); // closed while subscribing: nothing of it stays
+            return;
+        }
+        prefetchTargetId(e);
+        if (Selection.isClosed(e.browser())) {
+            closed(e);
+        }
+    }
+
+    @Override
+    public void left(Entry e) {
+        cancel(e);
+        if (Selection.isClosed(e.browser())) {
+            closed(e);
+        }
+        Taps t = taps;
+        if (t != null) {
+            t.forget(e);
+        }
+    }
+
+    /** Cancels the browser's subscription (idempotent). */
+    void cancel(Entry e) {
+        WebSubscription s;
+        synchronized (this) {
+            s = e.subscription;
+            e.subscription = null;
+            subscribed.remove(e);
+        }
+        cancelQuietly(e, s);
+    }
+
+    /**
+     * Cancels every subscription the bridge made and refuses new ones, also those a rebuild in flight is making (the
+     * module's uninstall). Idempotent; never throws.
+     */
+    void close() {
+        List<Entry> all;
+        synchronized (this) {
+            closed = true;
+            all = new ArrayList<Entry>(subscribed);
+        }
+        for (Entry e : all) {
+            cancel(e);
+        }
+    }
+
+    private void cancelQuietly(Entry e, WebSubscription s) {
+        if (s != null) {
+            try {
+                s.cancel();
+            } catch (Throwable t) {
+                ctx.log().warn("web: cancelling the subscription of browser " + e.ref + " failed: " + t);
+            }
+        }
+    }
+
+    /** Publishes {@code web.closed} once for the browser. */
+    void closed(Entry e) {
+        if (e.closedPublished.compareAndSet(false, true)) {
+            Map<String, Object> payload = new LinkedHashMap<String, Object>();
+            payload.put("browser", e.ref);
+            ctx.events().publish(WebTopics.CLOSED, WebTopics.SOURCE, payload);
+        }
+    }
+
+    /** Publishes {@code web.ready {browser, url, signal, name?}}. */
+    void ready(Entry e, String url, String signal, String name) {
+        Map<String, Object> payload = new LinkedHashMap<String, Object>();
+        payload.put("browser", e.ref);
+        payload.put("url", url == null ? "" : url);
+        payload.put("signal", signal);
+        if (name != null) {
+            payload.put("name", name);
+        }
+        ctx.events().publish(WebTopics.READY, WebTopics.SOURCE, payload);
+    }
+
+    private void prefetchTargetId(final Entry e) {
+        WebBrowser b = e.browser();
+        try {
+            if (!b.capabilities().contains(WebCapability.CDP_TARGET_ID)) {
+                return;
+            }
+            CompletableFuture<String> f = b.cdpTargetId();
+            if (f != null) {
+                f.whenComplete(new BiConsumer<String, Throwable>() {
+                    @Override
+                    public void accept(String id, Throwable failure) {
+                        if (id != null && failure == null) {
+                            e.cachedTargetId = id;
+                        }
+                    }
+                });
+            }
+        } catch (Throwable t) {
+            // the id is read again by web.browsers
+        }
+    }
+
+    private void onEvent(Entry e, WebEvent event) {
+        switch (event.kind()) {
+            case LOAD_FINISHED:
+            case LOAD_FAILED:
+            case NAVIGATED:
+                Map<String, Object> load = new LinkedHashMap<String, Object>();
+                load.put("browser", e.ref);
+                load.put("url", event.url() == null ? "" : event.url());
+                if (event.frameKey() != null) {
+                    load.put("frameKey", event.frameKey());
+                }
+                load.put("kind", event.kind().name());
+                if (event.error() != null) {
+                    load.put("error", event.error());
+                }
+                ctx.events().publish(WebTopics.LOAD, WebTopics.SOURCE, load);
+                if (event.kind() == WebEvent.Kind.LOAD_FINISHED && event.frameKey() == null) {
+                    ready(e, event.url(), "LOAD", null);
+                }
+                e.loads.loaded();
+                break;
+            case CONSOLE:
+                Map<String, Object> console = new LinkedHashMap<String, Object>();
+                console.put("browser", e.ref);
+                console.put("level", event.level() == null ? "log" : event.level());
+                // Masked before it is cut, so that a cut never leaves part of a secret: a value straddling the
+                // first cut lies beyond the second one.
+                String text = event.text() == null ? "" : event.text();
+                boolean cut = false;
+                int first = WebPrimitives.CONSOLE_TEXT_MAX + WebPrimitives.CONSOLE_REDACTION_MARGIN;
+                if (text.length() > first) {
+                    text = text.substring(0, first);
+                    cut = true;
+                }
+                text = secrets.redact(text);
+                if (text.length() > WebPrimitives.CONSOLE_TEXT_MAX) {
+                    text = text.substring(0, WebPrimitives.CONSOLE_TEXT_MAX);
+                    cut = true;
+                }
+                console.put("text", text);
+                if (event.source() != null && !event.source().isEmpty()) {
+                    console.put("source", secrets.redact(event.source()));
+                }
+                if (event.line() > 0) {
+                    console.put("line", Long.valueOf(event.line()));
+                }
+                if (cut) {
+                    console.put("truncated", Boolean.TRUE);
+                }
+                ctx.events().publish(WebTopics.CONSOLE, WebTopics.SOURCE, console);
+                break;
+            case CLOSED:
+                closed(e);
+                break;
+            default:
+                break;
+        }
+    }
+
+    /** The subscription's listener for one browser. */
+    private final class Listener implements WebEventListener {
+        private final Entry entry;
+
+        Listener(Entry entry) {
+            this.entry = entry;
+        }
+
+        @Override
+        public void onEvent(WebBrowser browser, WebEvent event) {
+            if (event == null) {
+                return;
+            }
+            try {
+                EventBridge.this.onEvent(entry, event);
+            } catch (Throwable t) {
+                // never into the adapter's thread
+            }
+        }
+    }
+}

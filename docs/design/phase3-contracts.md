@@ -209,7 +209,9 @@ aggregate, which is "executed wrongly" by P2 §5's version rule.
 | `requires` | as Phase 2, plus the `requires()` of every **unguarded** cross-check |
 | key order | the Phase 2 order; `crossCheck` is the last key of an oracle entry |
 
-**Version rules.** The compiler always writes version 3. The reader accepts versions 1, 2 and 3; a version 1 or 2
+**Version rules.** The compiler always writes version 3 (Phase 4, built 2026-10-07; P4 §7.3, D58: version 4
+supersedes 3 as the written version; the reader accepts 1 to 4, reads a version 3 plan as version 4 without `web`
+and refuses `web` below version 4). The reader accepts versions 1, 2 and 3; a version 1 or 2
 plan is read as version 3 without cross-checks and without aggregates (as built a version 2 plan that carries one of
 the new keys is refused: "'crossCheck' needs a version 3 plan", "'aggregates' needs a version 3 plan"); any other
 version is refused ("planVersion N is not supported (expected 1, 2 or 3)"). A test pins the `resolveHash` of a
@@ -228,6 +230,9 @@ oracle changes what a binding was accepted under, and a reviewer should re-appro
 ```java
 public record Plan(/* … Phase 2 components … */) {
     public static final int VERSION = 3;                        // reads 1, 2 and 3
+    // (Phase 4, built 2026-10-07; P4 §7.3: VERSION 4, reads 1 to 4; Plan and Scenario gain a last component
+    // WebSettings web, null when the YAML has no web key (effectiveWeb() then answers WebSettings.DEFAULT), and keep
+    // the Phase 3 constructors)
     public record Oracle(String name, String fn, Object args, Object mustEqual, boolean hasMustEqual,
                          CrossCheckSpec crossCheck /*nullable*/) {
         public Oracle(String name, String fn, Object args, Object mustEqual, boolean hasMustEqual); // Phase 2: null

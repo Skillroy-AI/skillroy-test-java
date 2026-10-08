@@ -83,6 +83,11 @@ import java.util.stream.Stream;
  * ORACLE_SUSPECT (an oracle and its cross-check disagree, phase3-contracts.md 9) are ERROR and throw
  * {@link ScenarioRunException}.
  *
+ * <p>Web paths (phase4-contracts.md 6.1, D49): the executor looks for a controller-side web path
+ * ({@code ServiceLoader<WebPath>}) through the same class loader that finds the packs, so a suite that puts the CDP
+ * path ({@code skillroy-cdp}) on its test class path gets it for {@code web.path: auto} and {@code cdp}; without it
+ * the web verbs go through the agent. Nothing about that changes how an outcome is reported.
+ *
  * <p>The connection is obtained lazily inside each test and is never closed here: the caller owns it. Tests run on
  * JUnit's thread; scenarios against one target must not run concurrently.
  */
@@ -217,7 +222,7 @@ public final class ScenarioTests {
             }
             RunOptions runOptions = options.outputDir() == null ? options
                     : options.withOutputDir(options.outputDir().resolve(scenario.id()));
-            report(new PlanExecutor(chosen, agent, runOptions).run(plan), options.degradedAs());
+            report(new PlanExecutor(chosen, agent, runOptions, loader).run(plan), options.degradedAs());
         });
     }
 

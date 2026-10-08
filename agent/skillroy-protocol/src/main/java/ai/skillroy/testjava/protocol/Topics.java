@@ -32,6 +32,10 @@ public final class Topics {
             INPUT_ACKED = "input.acked", INPUT_REQUESTED = "input.requested", INPUT_REJECTED = "input.rejected",
             PROMPT_WAITING = "prompt.waiting", STATE_CHANGED = "state.changed", TRACE_MARK = "trace.mark", GAP = "gap";
 
+    /** The embedded web view topics of the web module (phase4-contracts.md section 4.3), source {@code web}. */
+    public static final String WEB_LOAD = "web.load", WEB_READY = "web.ready", WEB_CONSOLE = "web.console",
+            WEB_TAP = "web.tap", WEB_CLOSED = "web.closed", WEB_BROWSERS_CHANGED = "web.browsers.changed";
+
     private Topics() {
     }
 }

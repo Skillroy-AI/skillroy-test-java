@@ -533,8 +533,10 @@ schema differs compiles its own plans from the same YAML.
 **Version rules.**
 
 - The compiler always writes version 2 (Phase 3, built 2026-10-03: version 3, with `crossCheck` on
-  an oracle entry and `aggregates` on a `db` element; the reader accepts 1, 2 and 3; P3 §4). The sample's committed
-  plans are regenerated.
+  an oracle entry and `aggregates` on a `db` element; the reader accepts 1, 2 and 3; P3 §4)
+  (Phase 4, built 2026-10-07; P4 §7.3, D58: version 4, with the scenario key `web` and the web verbs' calls; the
+  reader accepts 1 to 4, reads a version 3 plan as version 4 without `web` and refuses `web` below version 4). The
+  sample's committed plans are regenerated.
 - The reader accepts versions 1 and 2. A version 1 plan is read as version 2 with `inference: none`, no oracles, an
   empty graph and `bindTimeoutMs` 60000. Any other version is refused (`ScenarioException`, CLI exit 2). As built
   (2026-10-02), the reader also refuses a version 2 plan whose `inference` is anything but `none` ("needs the
@@ -570,6 +572,7 @@ public record RowCheck(String table, String source, String sql, List<Param> para
 public record Plan(/* … Phase 1 components …; verify becomes List<Check> */
                    String inference, List<Oracle> oracles, List<String> resolutionGraph, long bindTimeoutMs) {
     public static final int VERSION = 2;
+    // (Phase 4, built 2026-10-07; P4 §7.3: VERSION is 4, after 3 in Phase 3, P3 §4.1)
     public record Slot(String name, String kind, Object value /*fixture*/, QuerySpec query /*query*/,
                        CredentialSpec credential /*nullable*/, CaptureDecl capture /*capture*/) {
         public Slot(String name, String kind, Object value);          // the Phase 1 constructor: a fixture
@@ -1457,8 +1460,8 @@ ends with a newline; no timestamps, no host names, no paths, no secrets):
 Rules:
 
 - **Only query slots and oracles are recorded.** Fixture slots are in the plan; captured slots belong to a run. (Phase
-  3, specified 2026-10-03, not yet built; P3 §8.3) An oracle entry gains the informational key `crossCheck` when the
-  plan has one; `bindingsVersion` stays 1.
+  3, built 2026-10-03; P3 §8.3) An oracle entry gains the informational key `crossCheck` when the plan has one;
+  `bindingsVersion` stays 1.
 - **Record to file.** The file is the JSON of `BindingsFile` with these names: `Resolution.provenance.resolverId`
   -> `provenance.resolver`; `Resolution.verified` -> `verifier`, each `VerifierResult.verifierId` -> `id`;
   `Rejected.resolverId` -> `resolver`; `Resolution.usage` -> `llm`; `Resolution.slot` is the map key. Every other
@@ -1642,6 +1645,12 @@ In the bindings directory: the bindings file, only in `approve` and in `live` wi
 
 (Phase 3, built 2026-10-03; P3 §8.2) `run.jsonl` gains a `crosscheck` record, the `bind` record a
 `skipped` list, and the `db` record `aggregates`; the run's `bindings.json` records each oracle's cross-check outcome.
+
+(Phase 4, built 2026-10-07; P4 §8.2: `run.jsonl` gains `web.path` (once per run with web calls: path, reason, CDP
+attach, library hash, the scenario's policy), `web.fallback` (per fall-back to the agent path, naming the path that
+refused the call), `web.recover` (per frozen-target recovery), `web.trace` (what became of the trace), `web.close` (a
+path that failed to close), `fact` (a `text` the `web` root left out), `path` on every `call` record of a `web.*`
+primitive, and `pathSince` and `source` on the `sync` record of a wait that read a path's events.)
 
 ### 11.4 What is never written
 

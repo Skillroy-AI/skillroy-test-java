@@ -1,15 +1,17 @@
 # Decisions: base framework
 
-Decisions for the base framework (`skillroy-test-java`), as of 2026-10-06 (B1-B21). The project owner answered B1-B14 on
-2026-10-02; each entry records the answer, what it changed, and what the build has established. B15 and B16 follow
+Decisions for the base framework (`skillroy-test-java`), as of 2026-10-07 (B1-B22). The project owner answered B1-B14
+on 2026-10-02; each entry records the answer, what it changed, and what the build has established. B15 and B16 follow
 from those answers. B17 and B18 were taken without the owner, on the evidence of the security review and of the
 end-to-end review, B19 as the answers to the open questions of the Phase 2 contract and B20 as those of the Phase 3
 contract. On 2026-10-06 the owner confirmed all four, with two vetoes inside B19 (Q10 and Q14, both in the form "the
 base stays restrictive by default; a private overlay may override it"), and answered what was still open in B1, B2,
 B10 and B12. **B21** (the answers to the fifteen questions of the Phase 4 contract) was taken without the owner later
-on 2026-10-06 and is the one provisional decision; it is on the owner interview page. Every decision stays changeable
-until the first public release, at a cost that grows with the code written on it.
-Decisions that concern one tenant application live in that tenant's private repo, not here.
+on 2026-10-06 and **confirmed by the owner on 2026-10-07** without a veto. **B22** (the eleven decisions the Phase 4
+build and its review took on their own, the contract's D59-D69) was taken without the owner on 2026-10-07 and
+**confirmed by the owner the same evening** (`B22 ok`), so no decision is provisional. Every decision stays changeable
+until the first public release, at a cost that grows with the code written on it. Decisions that concern one tenant
+application live in that tenant's private repo, not here.
 
 **How to answer.** One message is enough, for example: `B17 ok, B18 R4 wait for credentials.yaml, B19 ok`.
 Any id not mentioned keeps what is recorded here. What genuinely needs the owner is collected in the last section,
@@ -34,13 +36,13 @@ review items of the end-to-end review, and `Sn` the confirmed findings of the se
 |---|---|---|---|---|---|
 | B1 | Licence and publication | Apache-2.0; DCO sign-off, no CLA; pre-publication checklist below | Apache-2.0, DCO, no CLA, as recommended. 2026-10-06: the holder is Mike Mills; the remote is `Skillroy-AI/skillroy-test-java`, private for now; everything in one initial commit, pushed later | `LICENSE`, `NOTICE`, `CONTRIBUTING.md`, the source headers (with the holder's name since 2026-10-06), the dependency audit and the packaged notices exist. The initial commit was made on 2026-10-06; nothing pushed | The push, when the owner says; the repeated security review before the first public release |
 | B2 | Coordinates and naming | groupId `ai.skillroy`, artifacts `skillroy-*`, package root `ai.skillroy.testjava`, version `0.1.0-SNAPSHOT`, property prefix `skillroy.` | ok: final as proposed; the sample domain id is now `lending`; the domain behind the groupId confirmed 2026-10-06 | In every module | |
-| B3 | Controller and build platform | Java 21 bytecode on any JDK >= 21; Maven 3.9; Playwright Java; planner via `claude -p` | Controller on **Java 25** (`--release 25`, build JDK >= 25); the rest as recommended. Gates: a Java 8 target and a Java 25 target | Baseline and Maven built; Playwright and planner are design only | |
+| B3 | Controller and build platform | Java 21 bytecode on any JDK >= 21; Maven 3.9; Playwright Java; planner via `claude -p` | Controller on **Java 25** (`--release 25`, build JDK >= 25); the rest as recommended. Gates: a Java 8 target and a Java 25 target | Baseline and Maven built; Playwright Java 1.63.0 in use since Phase 4 (2026-10-07), in the optional `skillroy-cdp`; the planner is design only | |
 | B4 | Agent baseline | Java 8 bytecode via `--release 8`; no third-party classes visible to the host; targets 8-25; gates on JDK 8 and JDK 25 | ok | Built. The Java 25 gate can now be run; its result is in `TODO.md` | |
 | B5 | DSL surface | YAML + committed `plan.json` + fluent Java; no Gherkin | ok | YAML and committed plans are built, and since Phase 2 (2026-10-02) committed bindings files per environment; the fluent Java API is not | |
 | B6 | CI and LLM policy | Replay-only CI with zero LLM calls asserted; nightly batch re-resolve opens a PR; $0.50 per scenario | ok; the owner adds that interactive use may use inference at run time (B15) | Replay-only CI with zero model calls asserted is built (Phase 2, 2026-10-02): the cost ledger check of every `replay` run and the JUnit stream's trailing `skillroy: zero model calls` test. The nightly re-resolve and the budget are not built | |
 | B7 | Model access | Claude API; thin `InferenceGateway` SPI now, Claude the only implementation shipped; Opus-class / Sonnet-class / Haiku-class per task | ok | Design only | |
 | B8 | Optional third-party pieces | Byteman module optional and its jar never bundled; JNA optional (emulated attach only); jattach located at run time, not redistributed | ok | None of the three is in the build | |
-| B9 | Embedded-browser scope | Keep a reflective `skillroy-agent-jxbrowser` module in the base | Not the default: **one in-process SPI that wraps both JCEF and reflective JxBrowser access**, in one module `skillroy-agent-web` | Design only (Phase 4) | Spike BS8 (JCEF in the Linux test image) |
+| B9 | Embedded-browser scope | Keep a reflective `skillroy-agent-jxbrowser` module in the base | Not the default: **one in-process SPI that wraps both JCEF and reflective JxBrowser access**, in one module `skillroy-agent-web` | Built 2026-10-07 (Phase 4): the web SPI, `skillroy-agent-web` with the `jcef` and `jxbrowser` adapters, the contract kit, and the JCEF web host behind the profile `jcef`; spike BS8 passed with conditions 2026-10-06 | The `jxbrowser` adapter against the real product, in a repository that holds a licence (`TODO.md`, "Walls") |
 | B10 | Sample application | Keep the domain of the first sample application | Not the default: the sample must come from a non-commercial domain. It is now the **lending desk** (domain id `lending`) | Built: four modules; the whole repository was swept. Since Phase 2 the desk can also serve its database on a loopback port when asked (`lending.dbPort`, B19); its behaviour is unchanged. 2026-10-06: the owner finds the desk far enough from commerce; the deposits stay | |
 | B11 | Artifacts and observability | Files only now; OTel export in Phase 6 | ok | `run.jsonl`, `bindings.json`, failure evidence and JUnit XML are built; Phase 2 (2026-10-02) added `cost-ledger.jsonl` per run and the committed bindings files (`bindings/<env>/<scenario>.bindings.json`), and extended `run.jsonl` and `bindings.json` | |
 | B12 | Default input fidelity | Semantic rung for data entry; action rung as the default click; component rung, with window activation, for UI-verification steps; Robot opt-in | The `COMPONENT` rung is built in and stays. Push-back on the default only: `ACTION` stays the primitive default, `COMPONENT` is opt-in per scenario | Built: the rung, the scenario setting `ui` and the fall-back (A28, A29, 2026-10-02). The owner accepted the push-back 2026-10-06 | |
@@ -52,7 +54,8 @@ review items of the end-to-end review, and `Sn` the confirmed findings of the se
 | B18 | Review items R2-R4 | `MODAL_OPEN` is `FAIL` / `ASSERTION`; stale discovery files are removed; fixture secrets are masked | Taken without the owner 2026-10-02; **confirmed by the owner 2026-10-06** | Built and verified 2026-10-02 (A30, A23, A25) | |
 | B19 | Phase 2 contract answers and additions | The answers to Q1-Q15 of the Phase 2 contract (§17): among them A34 (`secretParams`), the sample's loopback database listener and the `autoSignOn` field; and the sample's limit table renamed `role_cap` | Taken without the owner 2026-10-02; **confirmed by the owner 2026-10-06 with two vetoes**: Q10 (names in binding values are a pack's own choice; the sample keeps them out) and Q14 (the masking threshold is a setting per environment, `masking.minLengthInText`, default 8) | Built and verified 2026-10-02 (Phase 2); the two vetoes built 2026-10-06 | |
 | B20 | Phase 3 contract answers | The eight questions of `design/phase3-contracts.md` §14, answered by the orchestrator | Taken without the owner 2026-10-03, **confirmed by the owner 2026-10-06**: no `$env.now`; controller-side aggregates; `ORACLE_SUSPECT` is `ERROR` in every mode; the cross-check is recorded in the bindings file; plan version 3; the desk's date stays out of the fingerprint; scenario A's bindings are regenerated once; the `devices` fact root | Built and verified 2026-10-03 (the Phase 3 matrix in `TODO.md`) | |
-| B21 | Phase 4 contract answers | The fifteen questions of `design/phase4-contracts.md` §15, answered by the orchestrator | **Taken without the owner 2026-10-06, provisional**: the script library in `skillroy-protocol`; `skillroy-cdp` optional; the JCEF web host behind the profile `jcef`; frames in the first cut; six read primitives not mutating; frozen-target recovery by opt-in; BS5 against JCEF's Chromium; `auto` path policy; plan version 4; web evidence always; JxBrowser 7, 8 and 9; every rendering mode BS8 cleared; the configured port read from private state; `data:` pages; the image's new packages | Specified only (`design/phase4-contracts.md`); BS8 run 2026-10-06 | The owner's confirmation or vetoes (the interview page) |
+| B21 | Phase 4 contract answers | The fifteen questions of `design/phase4-contracts.md` §15, answered by the orchestrator | Taken without the owner 2026-10-06; **confirmed by the owner 2026-10-07** (all fifteen): the script library in `skillroy-protocol`; `skillroy-cdp` optional; the JCEF web host behind the profile `jcef`; frames in the first cut; six read primitives not mutating; frozen-target recovery by opt-in; BS5 against JCEF's Chromium; `auto` path policy; plan version 4; web evidence always; JxBrowser 7, 8 and 9; every rendering mode BS8 cleared; the configured port read from private state; `data:` pages; the image's new packages | Specified 2026-10-06; built, reviewed and fixed 2026-10-07 (`design/phase4-contracts.md` as built); the build took the decisions D59-D69; the runs in `TODO.md` | D59-D69, taken without the owner, stand unless the owner objects (a possible B22) |
+| B22 | Phase 4 build decisions | D59-D69 of `design/phase4-contracts.md` §14, taken by the orchestrator during the build and the review | Taken without the owner 2026-10-07; **confirmed by the owner 2026-10-07** (`B22 ok`, all eleven): the trace policy; the narrowed re-probe; the probe's loading rule; the JCEF re-send rule; one outstanding drain; the CDP viewport override on its own session; the endpoint ownership check; the `web.browsers` floor; `BrowserExtras`; `Invocation.secretParams()`; the JCEF raw channel | Built and tested 2026-10-07; verified in the Linux matrix (`TODO.md`) | |
 
 Phase 1 details are fixed in `design/phase1-contracts.md`; the same file carries the Phase 1.x specification
 (A17-A33, H1-H3). Phase 2 details are fixed in `design/phase2-contracts.md`, whose open questions B19 answers. What
@@ -91,11 +94,13 @@ groupId is confirmed (B2).
   file without the header and exits non-zero; with `--apply` it adds the header. It covers `*.java`, `*.xml`,
   `*.sh`, `*.properties`, the `Dockerfile` and the CLI launcher; it does not cover documentation, scenario YAML,
   plan JSON or service files.
-- `docs/licence-audit.md`: the dependency licence audit of all 16 reactor modules, including test dependencies,
-  build plugins and the test image. Its result: everything the project distributes, bundles or depends on is
-  compatible with distributing the project under Apache-2.0. The agent contains no third-party code; the CLI
-  distribution is the only place third-party code is redistributed (four Jackson jars and SnakeYAML, all
-  Apache-2.0); JUnit (EPL-2.0) is test-only; HSQLDB is used by the sample and by tests and is not bundled.
+- `docs/licence-audit.md`: the dependency licence audit of all 21 reactor modules and the root POM (18 modules in
+  every build; the three web host samples only with the Maven profile `jcef`), including test dependencies, build
+  plugins and the test image. Its result: everything the project distributes, bundles or depends on is compatible
+  with distributing the project under Apache-2.0. The agent contains no third-party code; the CLI distribution is the
+  only place third-party code is redistributed (four Jackson jars and SnakeYAML, all Apache-2.0); JUnit (EPL-2.0) is
+  test-only; HSQLDB is used by the sample and by tests and is not bundled; Playwright (the optional `skillroy-cdp`)
+  and JCEF (the web host samples) are in no distribution.
 
 **Closed inside B1 (2026-10-06).**
 1. **The copyright holder's legal name:** Mike Mills. The one line was replaced in `NOTICE` (which also carries the
@@ -188,13 +193,15 @@ recommended. Consequences:
 Jackson 2.22 (`jackson-databind`, `jackson-dataformat-yaml`) and JUnit 5.14; nothing else. Measured before the
 switch, on the Java 21 baseline: the reactor built and passed natively on JDK 26 (1303 tests, headless) and on a
 real JDK 21 in the Linux test image (1315 tests, with a display). The runs on the Java 25 baseline are recorded in
-`TODO.md`. Playwright and the `claude -p` planner are not used yet, so those two choices are still free of code.
+`TODO.md`. The `claude -p` planner is not used yet, so that choice is still free of code. Since Phase 4 (2026-10-07)
+Playwright Java 1.63.0 is in use, in the optional `skillroy-cdp` (Phase 4 contract, D49), and the reactor has 18
+modules plus the three web host samples behind the Maven profile `jcef`.
 **If you choose otherwise.** Gradle: rewrite the build files, same module layout. Back to a Java 21 baseline: the
 release properties in the POMs, the launcher's version check and the image, a mechanical change as long as no
 controller code has come to need a newer API; the controller would run on JDK 21 again.
 Node sidecar: adds a Node runtime and an IPC seam inside `skillroy-cdp`. Agent SDK sidecar: adds a TypeScript
 component in Phase 5.
-**Blocks.** Baseline and build tool: nothing now (in use). Playwright choice: Phase 4. Planner choice: Phase 5.
+**Blocks.** Baseline, build tool and Playwright: nothing now (in use). Planner choice: Phase 5.
 
 ## B4 Agent baseline
 
@@ -367,7 +374,12 @@ design adopts the "Proposed SPI" and the recommendations R0-R7 of `research/embe
 - For Phase 4 planning: an application outside this repository that already hosts JCEF can inform the adapter;
   nothing from it is copied here.
 
-**State.** Design only; nothing of this is built. The SPI goes into the design and the contract before the code.
+**State (2026-10-07).** Built as Phase 4 (`design/phase4-contracts.md` as built; B21 holds that contract's answers):
+the SPI in `skillroy-agent-api`; `skillroy-agent-web` with the two reflective adapters, the `jcef` one on JCEF's raw
+DevTools channel (the contract's D69); the contract kit as that module's `test-jar`; and the JCEF web host behind the
+profile `jcef`. The kit passed against real JCEF in the Linux image and against the neutral fakes; the `jxbrowser`
+adapter waits for a run against the real product in a repository that holds a licence. BS8 passed with conditions on
+2026-10-06.
 **If you choose otherwise.** (a) returns to a JxBrowser-only module and leaves JCEF to the CDP path, which needs
 a debug port that not every host opens. (b) moves the in-process path out of the base altogether; the base loses
 its in-process fallback for web views and Phase 4 shrinks to `skillroy-cdp` plus the SPI.
@@ -908,12 +920,14 @@ removes the `devices` root and scenario B's two assertions through it.
 
 ---
 
-## B21 Phase 4 contract answers (provisional, 2026-10-06)
+## B21 Phase 4 contract answers (confirmed 2026-10-07)
 
 **From:** the questions of the Phase 4 contract (`design/phase4-contracts.md` §15), answered by the orchestrator on
 2026-10-06 without the owner so that the Phase 4 build can start; they produced the contract's decisions D48-D58.
-**Not yet confirmed.** The questions are on the owner interview page in the form of B19 and B20; an id the owner does
-not mention keeps the answer recorded here.
+**Confirmed by the owner on 2026-10-07** through the interview page (`B21 ok`, no veto). The owner's accompanying notes
+restate the principle behind the B19 vetoes (a base default may be restrictive as long as a private overlay can
+override it: short test credentials, names of fictitious staff in scenarios) and the later Windows 11 host, also
+used under WSL2 (`TODO.md`, "Walls").
 **Question.** Fifteen points the contract could have decided either way.
 
 | Q | Question | Answer | Veto form offered |
@@ -935,18 +949,57 @@ not mention keeps the answer recorded here.
 | Q15 | The image's fifteen new packages and the natives in the Maven cache: acceptable CI weight? | Yes | `B21 Q15 veto`: the web acceptance leaves the public image |
 
 **What it changed.** The Phase 4 contract (`design/phase4-contracts.md`) and, through its §14.1, the Phase 1, 2 and 3
-contracts and the design overview once the build starts. **State of the build.** Nothing of Phase 4 is built; the
-contract is specified and BS8 was run (`TODO.md`, `spikes/BS8/RESULT.md`). **Blocks.** The Phase 4 build may start on
-these answers; a veto that arrives after code exists costs what the veto column says.
+contracts and the design overview (written in before the build, marked built since). **State of the build.** Specified
+2026-10-06; built, reviewed and fixed on 2026-10-07 on these answers: seven implementers in isolated copies, a code
+review through three lenses with a sceptic each (contract fit 5 findings: 1 medium, 4 low; host safety and secrets 13:
+2 high, 3 medium, 8 low, one medium raised to high by its sceptic; tests and determinism 9: 5 medium, 4 low; and six
+more from the sceptics; every one confirmed, none refuted), and a fix wave of three implementers. The contract is as
+built, and `TODO.md` has the runs. The build and the review took eleven decisions of their own, recorded in the
+contract's §14: D59 the trace (kept out of the run's output directory, withheld when a call may carry a secret), D60
+the re-probe after `window.opened`, D61 the probe's loading rule, D62 the JCEF re-send rule, D63 one outstanding
+drain, D64 the CDP path's viewport override, D65 the endpoint's ownership, D66 the floor of `web.browsers`, D67
+`BrowserExtras` for reload and the bitmap's source, D68 `Invocation.secretParams()` and console masking, D69 the JCEF
+raw DevTools channel. BS8 was run on 2026-10-06 (`TODO.md`, `spikes/BS8/RESULT.md`); BS5 is met by the acceptance
+against JCEF's Chromium (Q7, D53). **Blocks.** Nothing.
+
+---
+
+## B22 Phase 4 build decisions (confirmed 2026-10-07)
+
+**From:** the decisions taken while building and reviewing Phase 4 on 2026-10-07 without the owner, recorded as
+D59-D69 in `design/phase4-contracts.md` §14 (each with the alternatives rejected and the reason). **Confirmed by the
+owner on 2026-10-07** through the interview page (`B22 ok`, all eleven, after first vetoing D59 and then withdrawing
+the veto). **Question.** Eleven points the build could have decided either way.
+
+| D | Question | Answer | Veto form offered |
+|---|---|---|---|
+| D59 | Where does a Playwright trace go, and when is one taken? | A private directory of the CDP path, deleted when the path closes; never started when the plan may carry a secret; `failure/web-trace.zip` is the only trace a run keeps | `B22 D59 veto`: a trace whenever a scenario asks, secrets the author's care |
+| D60 | When does the agent re-probe for a browser engine that starts late? | After `window.opened`, only the adapters whose technology is present but not loaded yet, cheaply; a full cycle on a change; an absent technology only by an explicit reprobe | `B22 D60 veto`: no re-probe after `window.opened` |
+| D61 | How much may an adapter's probe load from the application's loader? | The gate class must already be loaded; resolution may then load, never initialise, the technology's other classes, within its packages; the kit proves no static initialiser runs | `B22 D61 veto`: UNAVAILABLE until every class the descriptor names is loaded |
+| D62 | May the JCEF adapter re-send a protocol call? | Only its own reads that the client refused before sending, once, while the caller waits; never an evaluation or a mutating call | `B22 D62 veto`: nothing is ever re-sent |
+| D63 | How are tapped page events drained when a page is busy? | At most one outstanding drain per page (and one `web.waitFlag` poll); a late answer is published, never dropped | `B22 D63 veto`: a longer bound and dropped events |
+| D64 | How does the CDP path resize a page? | `Emulation.setDeviceMetricsOverride` on the path's own session, removed by `clear` and at the end of the run (Playwright's `setViewportSize` cannot be undone) | `B22 D64 veto`: `web.resize` by the agent path only |
+| D65 | May the CDP path attach to whatever answers at the port? | No: `open()` refuses an endpoint whose `/json/list` names none of the target's browsers; a `DevToolsActivePort` file older than the JVM is ignored | `B22 D65 veto`: attach to whatever answers |
+| D66 | What does `web.browsers` report before any browser exists? | Never worse than DEGRADED while an adapter is present, so the call that rebuilds the index is never refused | `B22 D66 veto`: UNAVAILABLE until a browser exists |
+| D67 | Does the SPI gain `reload` and a bitmap-source accessor? | Not in Phase 4: a module-internal interface for the built-in adapters; a third-party browser reloads through `location.reload()` and reports `VENDOR` | `B22 D67 veto`: SPI default methods now |
+| D68 | May a module learn which parameters of a call are secret? | Yes, `Invocation.secretParams()` filled by the dispatcher from `_meta.secretParams` (an A34 extension), so the web module masks by value | `B22 D68 veto`: masking by key only |
+| D69 | Which DevTools channel does the JCEF adapter use? | JCEF's raw channel, correlating answers itself; the public client is the existence check and the fallback (JCEF 152's client loses an answer that arrives before its id) | `B22 D69 veto`: the public client only, lost answers accepted |
+
+**What it changed.** Each is built and tested (the review's fix wave; `TODO.md`, "Phase 4 code review"). **State of
+the build.** Built 2026-10-07. **Blocks.** Nothing.
 
 ---
 
 ## Questions for the owner
 
-Open as of 2026-10-06 (afternoon): **B21**, the fifteen provisional answers of the Phase 4 contract, in the table above;
-the owner answers them on the interview page (the same form as for B19 and B20: confirm all, or name the vetoes). The
-owner answered every earlier question on 2026-10-06: the holder's name, the remote and the first commit (B1); the domain
-behind the groupId (B2); the lending desk stays as it is (B10); the push-back on the click rung stands (B12); B17, B18 and
-B20 confirmed; B19 confirmed with Q10 and Q14 vetoed in the form "the base stays restrictive by default; a private overlay
-may override it". Three resources the owner will provide are recorded under "Walls" in `TODO.md`: a model provider API
-key when Phase 5 starts, a JxBrowser licence, and later a Windows 11 host (also usable under WSL2).
+None open as of the evening of 2026-10-07: the owner confirmed **B21** (the fifteen answers of the Phase 4 contract)
+and **B22** (the eleven decisions of the Phase 4 build, D59-D69) on 2026-10-07 through the interview page, both
+without a veto. The owner answered every earlier
+question on 2026-10-06: the holder's name, the remote and the first commit (B1); the domain behind the groupId (B2);
+the lending desk stays as it is (B10); the push-back on the click rung stands (B12); B17, B18 and B20 confirmed; B19
+confirmed with Q10 and Q14 vetoed in the form "the base stays restrictive by default; a private overlay may override
+it". Three resources the owner will provide are recorded under "Walls" in `TODO.md`: a model provider API key when
+Phase 5 starts, a JxBrowser licence, and later a Windows 11 host (also usable under WSL2).
+
+The eleven decisions the Phase 4 build took without the owner are B22 above (`design/phase4-contracts.md` §14,
+D59-D69), confirmed.

@@ -98,7 +98,9 @@ final class SwingPrimitives {
         list.add(Primitives.of(PrimitiveSpec.builder("swing.capture")
                 .description("PAINT capture of a window or component (printAll into an image; works when the "
                         + "window is covered). Default target: the active window, else the topmost modal dialog, "
-                        + "else the first showing window. Scaled down to fit 4096 x 4096.")
+                        + "else the first showing window. Scaled down to fit 4096 x 4096. A component whose printing "
+                        + "throws (an embedded browser's GL canvas) is painted as a placeholder rectangle and listed "
+                        + "in 'skipped'.")
                 .param("target", "string", false, "ref of the window or component to capture")
                 .param("mode", "string", false, "PAINT (default; the only mode in this version)")
                 .capability(SwingModule.CAP_CAPTURE_PAINT).build(), new Primitives.Body() {
@@ -394,6 +396,7 @@ final class SwingPrimitives {
         }
         String ref = a.str("target");
         final Component target = ref == null ? null : ctx.handles().resolve(ref, Component.class);
+        final Object[] skipped = new Object[1];
         BufferedImage image = Edt.read(ctx, inv.remainingMs(), new Callable<BufferedImage>() {
             @Override
             public BufferedImage call() {
@@ -406,7 +409,14 @@ final class SwingPrimitives {
                     throw Errors.invalid(view.describe(c) + " is not showing", Errors.data("ref", view.ref(c),
                             "reason", "not showing"));
                 }
-                return Capture.paint(c);
+                List<Capture.Skipped> parts = new ArrayList<Capture.Skipped>();
+                BufferedImage painted = Capture.paint(c, parts);
+                if (!parts.isEmpty()) {
+                    synchronized (skipped) {
+                        skipped[0] = skippedJson(view, parts);
+                    }
+                }
+                return painted;
             }
         });
         byte[] png = Capture.png(image);
@@ -415,7 +425,28 @@ final class SwingPrimitives {
         m.put("width", Long.valueOf(image.getWidth()));
         m.put("height", Long.valueOf(image.getHeight()));
         m.put("base64", Base64.getEncoder().encodeToString(png));
+        synchronized (skipped) {
+            if (skipped[0] != null) {
+                m.put("skipped", skipped[0]);
+            }
+        }
         return m;
+    }
+
+    /**
+     * {@code [{ref, className, error}]} of the parts a capture painted as placeholders (P4 sections 2.5 and 14.1).
+     * EDT only.
+     */
+    static List<Map<String, Object>> skippedJson(ComponentView view, List<Capture.Skipped> parts) {
+        List<Map<String, Object>> out = new ArrayList<Map<String, Object>>();
+        for (Capture.Skipped s : parts) {
+            Map<String, Object> one = new LinkedHashMap<String, Object>();
+            one.put("ref", view.ref(s.component));
+            one.put("className", s.component.getClass().getName());
+            one.put("error", s.error);
+            out.add(one);
+        }
+        return out;
     }
 
     private Object settle(Invocation inv) throws Exception {

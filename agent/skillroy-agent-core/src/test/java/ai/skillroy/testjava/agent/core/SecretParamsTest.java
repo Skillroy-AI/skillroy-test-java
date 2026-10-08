@@ -292,6 +292,23 @@ class SecretParamsTest {
     }
 
     @Test
+    void theDispatcherHandsThePrimitiveTheNamesOfItsSecretTopLevelParams() throws Exception {
+        // Phase 4: the web module masks console output by the values of the named params, which it learns from
+        // Invocation.secretParams(): the names in request order, each once, only those naming a top-level argument.
+        start();
+        agent.result("test.leak", withMeta(map("value", LONG, "mode", "ok", "event", map("x", "y")),
+                "secretParams", Arrays.asList("mode", "missing", "value", "mode", "event.x")));
+        agent.result("test.leak", map("value", LONG));
+        agent.result("test.leak", withMeta(map("value", LONG), "correlationId", "c-1"));
+        assertEquals(3, TestState.LEAK_SECRET_NAMES.size());
+        final List<String> named = TestState.LEAK_SECRET_NAMES.get(0);
+        assertEquals(Arrays.asList("mode", "value"), named);
+        assertThrows(UnsupportedOperationException.class, () -> named.add("other"), "read-only");
+        assertEquals(Collections.<String>emptyList(), TestState.LEAK_SECRET_NAMES.get(1), "no _meta");
+        assertEquals(Collections.<String>emptyList(), TestState.LEAK_SECRET_NAMES.get(2), "no secretParams");
+    }
+
+    @Test
     void anApplicationEventWhoseValuesEqualAShortSecretReachesEveryReaderAsPublished() throws Exception {
         // A four-digit PIN equal to a year: the application's event of the same call holds a timestamp, an amount
         // and a code with those digits, and a wait, a query and the result see them as published.

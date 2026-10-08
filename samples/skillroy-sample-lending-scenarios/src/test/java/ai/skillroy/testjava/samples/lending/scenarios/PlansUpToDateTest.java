@@ -270,7 +270,8 @@ class PlansUpToDateTest {
     }
 
     /**
-     * Scenario B's committed plan as phase3-contracts.md 4 and 10.4 describe it: version 3 and pack 0.3.0, four query
+     * Scenario B's committed plan as phase3-contracts.md 4 and 10.4 describe it, written as version 4 since Phase 4
+     * (phase4-contracts.md 7.3; the only difference to its version 3 form) and pack 0.3.0, four query
      * slots in file order and two captures (the posted loan and the printed slip, in that order), the waiver rule
      * resolved by SQL and verified by the desk's dry run, three oracles of which {@code waiver} alone carries the
      * cross-check (tolerance {@code "0.00"}, unguarded, so its capability is in {@code requires}), the stored-row
@@ -280,7 +281,7 @@ class PlansUpToDateTest {
     @Test
     void scenarioBsPlanHasTheWaiverModel() throws Exception {
         Plan plan = Plan.read(ScenarioB.plan());
-        assertEquals(3, plan.planVersion());
+        assertEquals(4, plan.planVersion());
         assertEquals("0.3.0", plan.packVersion());
         assertEquals(List.of("assistant/query", "rule/query", "item/query", "keys/query", "loan/capture",
                 "slip/capture"), plan.slots().stream().map(sl -> sl.name() + "/" + sl.kind()).toList());

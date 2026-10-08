@@ -64,6 +64,10 @@
       <artifactId>skillroy-agent-data</artifactId>
     </dependency>
     <dependency>
+      <groupId>ai.skillroy</groupId>
+      <artifactId>skillroy-agent-web</artifactId>
+    </dependency>
+    <dependency>
       <groupId>org.junit.jupiter</groupId>
       <artifactId>junit-jupiter</artifactId>
       <scope>test</scope>

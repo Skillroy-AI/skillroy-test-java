@@ -1,5 +1,5 @@
 {
-  "planVersion": 3,
+  "planVersion": 4,
   "scenarioId": "basic-loan",
   "pack": "lending",
   "packVersion": "0.3.0",

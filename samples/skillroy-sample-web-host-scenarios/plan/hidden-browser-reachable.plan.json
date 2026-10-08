@@ -1,0 +1,162 @@
+{
+  "planVersion": 4,
+  "scenarioId": "hidden-browser-reachable",
+  "pack": "webhost",
+  "packVersion": "0.1.0",
+  "sourceHash": "sha256:354f6a572678890657f2ac75bf09af090d2dfe52ffeb17c5843daab8d6b14a8f",
+  "inference": "none",
+  "requires": [
+    "web.browsers",
+    "web.evaluate",
+    "web.resize"
+  ],
+  "slots": [],
+  "oracles": [],
+  "resolutionGraph": [],
+  "steps": [
+    {
+      "id": "s1",
+      "verb": "webResize",
+      "source": {
+        "line": 10
+      },
+      "calls": [
+        {
+          "primitive": "web.resize",
+          "args": {
+            "by": {
+              "tag": "back"
+            },
+            "height": 768,
+            "width": 1024
+          },
+          "sync": "SETTLE",
+          "timeoutMs": 30000
+        }
+      ],
+      "expect": []
+    },
+    {
+      "id": "s2",
+      "verb": "webWaitFlag",
+      "source": {
+        "line": 11
+      },
+      "calls": [
+        {
+          "primitive": "web.waitFlag",
+          "args": {
+            "by": {
+              "tag": "back"
+            },
+            "expression": "innerWidth === 1024 && innerHeight === 768"
+          },
+          "sync": "NONE",
+          "timeoutMs": 30000
+        }
+      ],
+      "expect": []
+    },
+    {
+      "id": "s3",
+      "verb": "expect",
+      "source": {
+        "line": 12
+      },
+      "calls": [],
+      "expect": [
+        {
+          "path": "web.browsers[tag=back].visibleInSwing",
+          "matcher": {
+            "equals": false
+          }
+        },
+        {
+          "path": "web.browsers[tag=back].text",
+          "matcher": {
+            "contains": "Back page"
+          }
+        },
+        {
+          "path": "webhost.back.visibleInSwing",
+          "matcher": {
+            "equals": false
+          }
+        }
+      ]
+    },
+    {
+      "id": "s4",
+      "verb": "webDispatch",
+      "source": {
+        "line": 16
+      },
+      "calls": [
+        {
+          "primitive": "web.dispatchEvent",
+          "args": {
+            "by": {
+              "tag": "back"
+            },
+            "detail": {
+              "item": "saw"
+            },
+            "name": "webhost.setItem"
+          },
+          "sync": "SETTLE",
+          "timeoutMs": 30000
+        }
+      ],
+      "expect": []
+    },
+    {
+      "id": "s5",
+      "verb": "webWaitFlag",
+      "source": {
+        "line": 17
+      },
+      "calls": [
+        {
+          "primitive": "web.waitFlag",
+          "args": {
+            "by": {
+              "tag": "back"
+            },
+            "expression": "document.getElementById('item').value === 'saw'"
+          },
+          "sync": "NONE",
+          "timeoutMs": 30000
+        }
+      ],
+      "expect": []
+    }
+  ],
+  "verify": [
+    {
+      "path": "web.browsers[tag=back].title",
+      "matcher": {
+        "equals": "Back page"
+      }
+    },
+    {
+      "path": "webhost.back.page",
+      "matcher": {
+        "equals": "back"
+      }
+    }
+  ],
+  "cleanup": [],
+  "launchProperties": {},
+  "artifacts": [],
+  "onPrompt": {},
+  "stepTimeoutMs": 30000,
+  "web": {
+    "path": "auto",
+    "browser": {
+      "tag": "back"
+    },
+    "frozenTargets": "fail",
+    "trace": false
+  },
+  "bindTimeoutMs": 60000
+}

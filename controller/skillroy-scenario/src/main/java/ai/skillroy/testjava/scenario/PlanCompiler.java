@@ -40,6 +40,7 @@ import ai.skillroy.testjava.scenario.resolve.StoredColumn;
 import ai.skillroy.testjava.scenario.resolve.StoredTable;
 import ai.skillroy.testjava.scenario.resolve.Strategy;
 import ai.skillroy.testjava.scenario.resolve.Verifier;
+import ai.skillroy.testjava.scenario.web.WebSettings;
 
 import java.io.IOException;
 import java.lang.reflect.Type;
@@ -87,7 +88,14 @@ import java.util.TreeSet;
  * a check that accepts one, and an unguarded check's {@code requires()} join {@code requires} (a guarded one adds
  * nothing); a {@code db} check's {@code sum(c)}, {@code min(c)} and {@code max(c)} keys are aggregates over an
  * {@code INTEGER} or {@code DECIMAL} column, written as {@code aggregates} with sorted keys, while any other key with
- * the form of a function call is refused; {@code $env.now} is refused (decision D39). Plans are written as version 3.
+ * the form of a function call is refused; {@code $env.now} is refused (decision D39).
+ *
+ * <p>Phase 4 (phase4-contracts.md 7): the scenario's {@code web} key is copied into the plan (only when the YAML has
+ * it, as {@code ui} is); a scenario with a base web verb ({@code webClick}, {@code webFill}, {@code webDispatch},
+ * {@code webWaitFlag}, {@code webResize}, {@code webTap}, by name, also when a pack overrides it) gets
+ * {@code web.evaluate} and {@code web.browsers} added to {@code requires}, and one with {@code web.path: cdp} gets
+ * {@code web.cdp}, with a compile-time note ({@link #compileWithNotes}) when its {@code requires:} did not list it.
+ * Plans are written as version 4.
  *
  * <p>Stateless; safe from any thread, provided the pack's step library is.
  */
@@ -134,7 +142,35 @@ public final class PlanCompiler {
      *     different pack
      */
     public static Plan compile(Scenario scenario, DomainPack pack) throws ScenarioException {
-        return new Compilation(scenario, pack).run();
+        return compileWithNotes(scenario, pack).plan();
+    }
+
+    /**
+     * A compiled plan and the compiler's notes: what it added or assumed that the scenario did not say, and that is
+     * not an error (phase4-contracts.md 7.2: {@code web.cdp} added to {@code requires} for {@code web.path: cdp}).
+     *
+     * @param plan the plan, as {@link #compile(Scenario, DomainPack)} returns it
+     * @param notes one sentence each, in the order they arose; empty when there is nothing to say
+     */
+    public record Compiled(Plan plan, List<String> notes) {
+
+        /** Copies the notes. */
+        public Compiled {
+            Objects.requireNonNull(plan, "plan");
+            notes = notes == null ? List.of() : List.copyOf(notes);
+        }
+    }
+
+    /**
+     * Compiles a loaded scenario and returns the notes with the plan; the plan is the one
+     * {@link #compile(Scenario, DomainPack)} gives.
+     *
+     * @throws ScenarioException as {@link #compile(Scenario, DomainPack)}
+     */
+    public static Compiled compileWithNotes(Scenario scenario, DomainPack pack) throws ScenarioException {
+        Compilation compilation = new Compilation(scenario, pack);
+        Plan plan = compilation.run();
+        return new Compiled(plan, compilation.notes);
     }
 
     /**
@@ -200,6 +236,7 @@ public final class PlanCompiler {
         private final Map<String, Scenario.Slot> declared = new LinkedHashMap<>();
         private final Map<String, Captured> captured = new LinkedHashMap<>();
         private final Set<String> oracleNames = new LinkedHashSet<>();
+        private final List<String> notes = new ArrayList<>();
 
         Compilation(Scenario scenario, DomainPack pack) throws ScenarioException {
             this.scenario = scenario;
@@ -300,6 +337,7 @@ public final class PlanCompiler {
                         new Plan.CaptureDecl(capture.stepId(), new ArrayList<>(capture.fields()))));
             }
             checkReferences(slots, oracles, steps, verify, cleanup);
+            webRequires(added);
             for (String id : added) {
                 if (!requires.contains(id)) {
                     requires.add(id);
@@ -308,7 +346,29 @@ public final class PlanCompiler {
             return new Plan(Plan.VERSION, scenario.id(), pack.id(), String.valueOf(pack.version()),
                     scenario.sourceHash(), new ArrayList<>(requires), slots, steps, verify, cleanup,
                     scenario.launchProperties(), scenario.artifacts(), scenario.onPrompt(), scenario.stepTimeoutMs(),
-                    scenario.ui(), Plan.INFERENCE_NONE, oracles, graph, scenario.bindTimeoutMs());
+                    scenario.ui(), Plan.INFERENCE_NONE, oracles, graph, scenario.bindTimeoutMs(), scenario.web());
+        }
+
+        /**
+         * phase4-contracts.md 7.2: a base web verb needs {@code web.evaluate} (the agent path runs the script
+         * library through it) and {@code web.browsers} (the CDP path maps refs to targets through it);
+         * {@code web.path: cdp} needs {@code web.cdp}, and a scenario that did not list it is told so.
+         */
+        private void webRequires(Set<String> added) {
+            for (Scenario.Step step : scenario.steps()) {
+                if (BaseSteps.WEB_VERBS.contains(step.verb())) {
+                    added.add("web.browsers");
+                    added.add("web.evaluate");
+                    break;
+                }
+            }
+            if (scenario.effectiveWeb().path() == WebSettings.Path.CDP) {
+                added.add("web.cdp");
+                if (!scenario.requires().contains("web.cdp")) {
+                    notes.add("web.path is cdp: the capability web.cdp was added to requires (list it there to say"
+                            + " so in the scenario)");
+                }
+            }
         }
 
         // ------------------------------------------------------------------ slots and oracles
@@ -1125,6 +1185,11 @@ public final class PlanCompiler {
             @Override
             public UiSettings ui() {
                 return scenario.effectiveUi();
+            }
+
+            @Override
+            public WebSettings web() {
+                return scenario.effectiveWeb();
             }
 
             @Override

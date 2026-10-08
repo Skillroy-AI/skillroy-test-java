@@ -17,6 +17,7 @@
 package ai.skillroy.testjava.agent.api;
 
 import ai.skillroy.testjava.agent.api.spi.ThreadPolicyProvider;
+import ai.skillroy.testjava.protocol.JsonView;
 import ai.skillroy.testjava.protocol.LoadMode;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -28,9 +29,13 @@ import java.util.concurrent.Callable;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** Default methods of the API: {@code AgentContext.option} (A20) and {@code ThreadPolicyProvider.available} (A19). */
+/**
+ * Default methods of the API: {@code AgentContext.option} (A20), {@code ThreadPolicyProvider.available} (A19) and
+ * {@code Invocation.secretParams} (A34, phase4-contracts.md section 4.3).
+ */
 class DefaultMethodsTest {
 
     private static final String LIVE = "skillroy.agent.defaultMethodsTest.live";
@@ -75,6 +80,39 @@ class DefaultMethodsTest {
             }
         };
         assertTrue(provider.available());
+    }
+
+    @Test
+    void anInvocationNamesNoSecretParametersByDefault() {
+        Invocation invocation = new Invocation() {
+            @Override
+            public JsonView args() {
+                return JsonView.of(null);
+            }
+
+            @Override
+            public String correlationId() {
+                return null;
+            }
+
+            @Override
+            public String traceparent() {
+                return null;
+            }
+
+            @Override
+            public AgentContext context() {
+                return null;
+            }
+
+            @Override
+            public long remainingMs() {
+                return 0;
+            }
+        };
+        assertTrue(invocation.secretParams().isEmpty());
+        assertThrows(UnsupportedOperationException.class, () -> invocation.secretParams().add("text"),
+                "the default list is read-only");
     }
 
     /** A context whose only real member is {@link AgentContext#options()}. */

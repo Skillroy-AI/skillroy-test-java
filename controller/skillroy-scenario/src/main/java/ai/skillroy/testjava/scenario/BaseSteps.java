@@ -78,6 +78,33 @@ import java.util.TreeSet;
  * call fails with MODAL_OPEN), {@code activateWindow: true} lets the COMPONENT rung bring the target's window to the
  * front first.
  *
+ * <p>The base web verbs (phase4-contracts.md 7.1) drive an embedded web view through the {@code web.*} primitives,
+ * whichever path serves them (the agent's in-process path or the controller's CDP path, P4 6.1). Each selects its
+ * browser with {@code browser:} (a {@code by} object: {@code {url}}, {@code {tag}}, {@code {title}} or
+ * {@code {nativeId}}), else with the scenario's {@code web.browser} (both compile to the primitive's {@code by};
+ * without either the agent picks the single showing browser), and a frame with {@code frame:} (a frame key):
+ *
+ * <ul>
+ *   <li>{@code webClick: {selector | role + name, index?, expectVisible?, browser?, frame?, await?}} ->
+ *       {@code web.dom.click}, SETTLE; {@code name} is a text (exact after trimming) or {@code {regex, ignoreCase?}}.
+ *       </li>
+ *   <li>{@code webFill: {… as webClick, text, clear?, enter?}} -> {@code web.dom.fill}, SETTLE; a {@code text} from
+ *       a joined credential field is announced as {@code _meta.secretParams} (A34) by the executor, as for
+ *       {@code type}.</li>
+ *   <li>{@code webDispatch: {name, detail?, target?, browser?, frame?, await?}} -> {@code web.dispatchEvent},
+ *       SETTLE.</li>
+ *   <li>{@code webWaitFlag: {expression, timeoutMs?, pollMs?, browser?, frame?}} -> {@code web.waitFlag}, NONE (the
+ *       primitive waits; {@code timeoutMs} at most 119 s, the call's timeout 1 s more).</li>
+ *   <li>{@code webResize: {width, height | clear: true, browser?, await?}} -> {@code web.resize}, SETTLE.</li>
+ *   <li>{@code webTap: {patterns, target?, browser?}} -> {@code web.tap}, NONE, with the cleanup call
+ *       {@code web.tap {patterns: []}} on the same browser and target.</li>
+ * </ul>
+ *
+ * <p>{@code await:} on {@code webClick}, {@code webFill}, {@code webDispatch} and {@code webResize} follows A32: the
+ * primitive call with sync EVENT, then a {@code swing.settle} call with sync NONE (a page action may open a Swing
+ * dialog). Every step of a scenario with a base web verb adds {@code web.evaluate} and {@code web.browsers} to the
+ * plan's {@code requires} (the compiler does it).
+ *
  * <p>Unknown argument keys are errors. Stateless; safe from any thread.
  */
 public final class BaseSteps implements StepLibrary {
@@ -85,9 +112,22 @@ public final class BaseSteps implements StepLibrary {
     /** The shared instance. */
     public static final BaseSteps INSTANCE = new BaseSteps();
 
-    /** The base verbs in documentation order. */
+    /** The base verbs in documentation order (the web verbs since Phase 4). */
     public static final List<String> VERBS = List.of("call", "click", "type", "press", "dismiss", "waitFor",
-            "expect", "mark");
+            "expect", "mark", "webClick", "webFill", "webDispatch", "webWaitFlag", "webResize", "webTap");
+
+    /** The base web verbs (phase4-contracts.md 7.1). */
+    static final Set<String> WEB_VERBS = Set.of("webClick", "webFill", "webDispatch", "webWaitFlag", "webResize",
+            "webTap");
+
+    /** The longest {@code timeoutMs} of {@code webWaitFlag}: the agent caps a call at 120 s. */
+    static final long MAX_WAIT_FLAG_MS = 119_000L;
+
+    /** The largest width or height {@code webResize} accepts (phase4-contracts.md 4.2). */
+    static final long MAX_VIEWPORT = 16_384L;
+
+    /** The shortest poll interval of {@code webWaitFlag} (phase4-contracts.md 4.2). */
+    static final long MIN_POLL_MS = 20L;
 
     private static final Set<String> VERB_SET = Collections.unmodifiableSet(new LinkedHashSet<>(VERBS));
 
@@ -166,8 +206,268 @@ public final class BaseSteps implements StepLibrary {
                 yield List.of();
             }
             case "mark" -> mark(args);
+            case "webClick" -> webAction(verb, args, ctx, "web.dom.click", false);
+            case "webFill" -> webAction(verb, args, ctx, "web.dom.fill", true);
+            case "webDispatch" -> webDispatch(args, ctx);
+            case "webWaitFlag" -> webWaitFlag(args, ctx);
+            case "webResize" -> webResize(args, ctx);
+            case "webTap" -> webTap(args, ctx);
             default -> throw new ScenarioException("unknown base verb '" + verb + "'; base verbs: " + VERBS);
         };
+    }
+
+    // ------------------------------------------------------------------------------------------------ web verbs
+
+    /** {@code webClick} and {@code webFill}: the element by selector or by role and name, then the fill's text. */
+    private static List<PlannedCall> webAction(String verb, Object args, CompileContext ctx, String primitive,
+                                               boolean fill) throws ScenarioException {
+        List<String> allowed = new ArrayList<>(List.of("selector", "role", "name", "index", "expectVisible",
+                "browser", "frame", "await"));
+        if (fill) {
+            allowed.addAll(List.of("text", "clear", "enter"));
+        }
+        Map<String, Object> a = map(verb, args, allowed, false);
+        AwaitArg await = verbAwait(verb, a);
+        Map<String, Object> params = new LinkedHashMap<>();
+        browser(verb, a, params, ctx);
+        frame(verb, a, params);
+        element(verb, a, params);
+        if (fill) {
+            Object text = a.get("text");
+            if (text == null || text instanceof Map || text instanceof List) {
+                throw new ScenarioException(verb + ": 'text' must be a string, found " + ScenarioLoader.describe(text));
+            }
+            params.put("text", text instanceof String ? text : Values.stringOf(text));
+            flag(verb, a, "clear", params);
+            flag(verb, a, "enter", params);
+        }
+        return webCalls(primitive, params, await, ctx);
+    }
+
+    /** {@code webDispatch}: a {@code CustomEvent} with an optional detail, on the window or a selected element. */
+    private static List<PlannedCall> webDispatch(Object args, CompileContext ctx) throws ScenarioException {
+        String verb = "webDispatch";
+        Map<String, Object> a = map(verb, args, List.of("name", "detail", "target", "browser", "frame", "await"),
+                false);
+        AwaitArg await = verbAwait(verb, a);
+        Map<String, Object> params = new LinkedHashMap<>();
+        browser(verb, a, params, ctx);
+        frame(verb, a, params);
+        params.put("name", text(verb, a, "name", "the event's name"));
+        if (a.containsKey("detail")) {
+            params.put("detail", a.get("detail"));
+        }
+        if (a.containsKey("target")) {
+            params.put("target", text(verb, a, "target", "a CSS selector"));
+        }
+        return webCalls("web.dispatchEvent", params, await, ctx);
+    }
+
+    /**
+     * {@code webWaitFlag}: the primitive evaluates the expression until it is truthy; sync NONE. Without
+     * {@code timeoutMs} the primitive waits for the call's budget, the step timeout.
+     */
+    private static List<PlannedCall> webWaitFlag(Object args, CompileContext ctx) throws ScenarioException {
+        String verb = "webWaitFlag";
+        Map<String, Object> a = map(verb, args, List.of("expression", "timeoutMs", "pollMs", "browser", "frame"),
+                false);
+        Map<String, Object> params = new LinkedHashMap<>();
+        browser(verb, a, params, ctx);
+        frame(verb, a, params);
+        params.put("expression", text(verb, a, "expression", "a JavaScript expression"));
+        long callTimeoutMs = 0;
+        if (a.containsKey("timeoutMs")) {
+            long ms = Durations.toMillis(a.get("timeoutMs"), verb + ".timeoutMs");
+            if (ms > MAX_WAIT_FLAG_MS) {
+                throw new ScenarioException(verb + ".timeoutMs must be at most " + MAX_WAIT_FLAG_MS + " ms (the agent"
+                        + " caps a call at 120 s), found " + ms + " ms");
+            }
+            params.put("timeoutMs", ms);
+            callTimeoutMs = ms + 1000;
+        }
+        if (a.containsKey("pollMs")) {
+            if (!(a.get("pollMs") instanceof Long poll) || poll < MIN_POLL_MS) {
+                throw new ScenarioException(verb + ": 'pollMs' must be a whole number of " + MIN_POLL_MS + " or more,"
+                        + " found " + ScenarioLoader.describe(a.get("pollMs")));
+            }
+            params.put("pollMs", poll);
+        }
+        return List.of(new PlannedCall("web.waitFlag", params, Sync.NONE, callTimeoutMs));
+    }
+
+    /** {@code webResize}: a viewport override of {@code width} x {@code height}, or {@code clear: true}. */
+    private static List<PlannedCall> webResize(Object args, CompileContext ctx) throws ScenarioException {
+        String verb = "webResize";
+        Map<String, Object> a = map(verb, args, List.of("width", "height", "clear", "browser", "await"), false);
+        AwaitArg await = verbAwait(verb, a);
+        Map<String, Object> params = new LinkedHashMap<>();
+        browser(verb, a, params, ctx);
+        String usage = verb + ": give 'width' and 'height' (1 to " + MAX_VIEWPORT + "), or 'clear: true'";
+        if (a.containsKey("clear")) {
+            if (!Boolean.TRUE.equals(a.get("clear")) || a.containsKey("width") || a.containsKey("height")) {
+                throw new ScenarioException(usage);
+            }
+            params.put("clear", true);
+        } else {
+            if (!a.containsKey("width") || !a.containsKey("height")) {
+                throw new ScenarioException(usage);
+            }
+            for (String key : List.of("width", "height")) {
+                if (!(a.get(key) instanceof Long n) || n < 1 || n > MAX_VIEWPORT) {
+                    throw new ScenarioException(verb + ": '" + key + "' must be a whole number from 1 to "
+                            + MAX_VIEWPORT + ", found " + ScenarioLoader.describe(a.get(key)));
+                }
+                params.put(key, n);
+            }
+        }
+        return webCalls("web.resize", params, await, ctx);
+    }
+
+    /**
+     * {@code webTap}: the page events to tap, sync NONE, and the cleanup call that removes the tap from the same
+     * browser and target when the scenario ends.
+     */
+    private static List<PlannedCall> webTap(Object args, CompileContext ctx) throws ScenarioException {
+        String verb = "webTap";
+        Map<String, Object> a = map(verb, args, List.of("patterns", "target", "browser"), false);
+        Map<String, Object> params = new LinkedHashMap<>();
+        browser(verb, a, params, ctx);
+        Object raw = a.get("patterns");
+        List<String> patterns = new ArrayList<>();
+        if (raw instanceof String one && !one.isBlank()) {
+            patterns.add(one.strip());
+        } else if (raw instanceof List<?> list && !list.isEmpty()
+                && list.stream().allMatch(p -> p instanceof String text && !text.isBlank())) {
+            list.forEach(p -> patterns.add(((String) p).strip()));
+        } else {
+            throw new ScenarioException(verb + ": 'patterns' must be a list of event names or globs such as"
+                    + " [app.ready, app.*], found " + ScenarioLoader.describe(raw));
+        }
+        params.put("patterns", patterns);
+        if (a.containsKey("target")) {
+            String target = a.get("target") instanceof String t ? t.strip().toLowerCase(Locale.ROOT) : null;
+            if (!"window".equals(target) && !"document".equals(target)) {
+                throw new ScenarioException(verb + ": 'target' must be window or document, found "
+                        + ScenarioLoader.describe(a.get("target")));
+            }
+            params.put("target", target);
+        }
+        Map<String, Object> removal = new LinkedHashMap<>(params);
+        removal.put("patterns", List.of());
+        ctx.addCleanup(new PlannedCall("web.tap", removal, Sync.NONE, 0));
+        return List.of(new PlannedCall("web.tap", params, Sync.NONE, 0));
+    }
+
+    /**
+     * The calls of a web verb that acts on the page: the primitive with SETTLE, or, with an {@code await}, the
+     * primitive with EVENT followed by a {@code swing.settle} call (sync NONE) bounded by the step timeout (A32).
+     */
+    private static List<PlannedCall> webCalls(String primitive, Map<String, Object> params, AwaitArg await,
+                                              CompileContext ctx) {
+        return uiCalls(primitive, params, await, ctx);
+    }
+
+    /**
+     * The step's {@code browser} (a {@code by} object), else the scenario's {@code web.browser}, as the primitive's
+     * {@code by}; nothing when there is neither.
+     */
+    private static void browser(String verb, Map<String, Object> a, Map<String, Object> params, CompileContext ctx)
+            throws ScenarioException {
+        if (a.containsKey("browser")) {
+            String problem = WebGrammar.byProblem("browser", a.get("browser"));
+            if (problem != null) {
+                throw new ScenarioException(verb + ": " + problem);
+            }
+            params.put("by", a.get("browser"));
+            return;
+        }
+        Map<String, Object> fallback = ctx.web() == null ? null : ctx.web().defaultBrowser();
+        if (fallback != null) {
+            params.put("by", new LinkedHashMap<>(fallback));
+        }
+    }
+
+    private static void frame(String verb, Map<String, Object> a, Map<String, Object> params)
+            throws ScenarioException {
+        if (a.containsKey("frame")) {
+            params.put("frame", text(verb, a, "frame", "a frame key"));
+        }
+    }
+
+    /**
+     * {@code selector}, or {@code role} with {@code name} ({@code index} and {@code expectVisible} with either):
+     * the element of {@code web.dom.click} and {@code web.dom.fill}.
+     */
+    private static void element(String verb, Map<String, Object> a, Map<String, Object> params)
+            throws ScenarioException {
+        boolean selector = a.containsKey("selector");
+        if (selector == a.containsKey("role")) {
+            throw new ScenarioException(verb + ": give exactly one of 'selector' (a CSS selector) or 'role' with"
+                    + " 'name' (an ARIA role and the accessible name)");
+        }
+        if (selector) {
+            if (a.containsKey("name")) {
+                throw new ScenarioException(verb + ": 'name' goes with 'role', not with 'selector'");
+            }
+            params.put("selector", text(verb, a, "selector", "a CSS selector"));
+        } else {
+            params.put("role", text(verb, a, "role", "an ARIA role such as button or textbox"));
+            if (!a.containsKey("name")) {
+                throw new ScenarioException(verb + ": 'role' needs 'name' (the accessible name: a text, or {regex,"
+                        + " ignoreCase?})");
+            }
+            params.put("name", accessibleName(verb, a.get("name")));
+        }
+        if (a.containsKey("index")) {
+            if (!(a.get("index") instanceof Long index) || index < 0) {
+                throw new ScenarioException(verb + ": 'index' must be a whole number of 0 or more, found "
+                        + ScenarioLoader.describe(a.get("index")));
+            }
+            params.put("index", index);
+        }
+        flag(verb, a, "expectVisible", params);
+    }
+
+    /** A text (exact after trimming and collapsing whitespace) or {@code {regex, ignoreCase?}}. */
+    private static Object accessibleName(String verb, Object value) throws ScenarioException {
+        if (value instanceof String text && !text.isBlank()) {
+            return text;
+        }
+        if (value instanceof Map<?, ?> map && map.get("regex") instanceof String regex && !regex.isBlank()
+                && map.keySet().stream().allMatch(k -> "regex".equals(k) || "ignoreCase".equals(k))
+                && (!map.containsKey("ignoreCase") || map.get("ignoreCase") instanceof Boolean)) {
+            Map<String, Object> name = new LinkedHashMap<>();
+            name.put("regex", regex);
+            if (map.containsKey("ignoreCase")) {
+                name.put("ignoreCase", map.get("ignoreCase"));
+            }
+            return name;
+        }
+        throw new ScenarioException(verb + ": 'name' must be a text or {regex, ignoreCase?} (ignoreCase true or"
+                + " false), found " + ScenarioLoader.describe(value));
+    }
+
+    /** The argument {@code key} as a non-empty string. */
+    private static String text(String verb, Map<String, Object> a, String key, String what)
+            throws ScenarioException {
+        if (!(a.get(key) instanceof String text) || text.isBlank()) {
+            throw new ScenarioException(verb + ": '" + key + "' must be " + what + " (a non-empty string), found "
+                    + ScenarioLoader.describe(a.get(key)));
+        }
+        return text;
+    }
+
+    /** The optional boolean argument {@code key}, copied to the params when present. */
+    private static void flag(String verb, Map<String, Object> a, String key, Map<String, Object> params)
+            throws ScenarioException {
+        if (!a.containsKey(key)) {
+            return;
+        }
+        if (!(a.get(key) instanceof Boolean b)) {
+            throw new ScenarioException(verb + ": '" + key + "' must be true or false, found "
+                    + ScenarioLoader.describe(a.get(key)));
+        }
+        params.put(key, b);
     }
 
     private static List<PlannedCall> call(Object args) throws ScenarioException {

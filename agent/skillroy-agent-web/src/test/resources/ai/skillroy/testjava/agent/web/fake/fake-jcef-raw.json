@@ -1,0 +1,195 @@
+{
+  "format": 1,
+  "adapter": "jcef",
+  "gate": "ai.skillroy.testjava.agent.web.fake.cef.FakeCefApp",
+  "roles": {
+    "app": {
+      "class": "ai.skillroy.testjava.agent.web.fake.cef.FakeCefApp",
+      "for": "core"
+    },
+    "app.getState": {
+      "class": "ai.skillroy.testjava.agent.web.fake.cef.FakeCefApp",
+      "method": "getState",
+      "static": true,
+      "for": "core"
+    },
+    "app.getVersion": {
+      "class": "ai.skillroy.testjava.agent.web.fake.cef.FakeCefApp",
+      "method": "getVersion",
+      "for": "version"
+    },
+    "app.self": {
+      "class": "ai.skillroy.testjava.agent.web.fake.cef.FakeCefApp",
+      "field": "self",
+      "static": true,
+      "access": "private",
+      "for": "walk"
+    },
+    "app.clients": {
+      "class": "ai.skillroy.testjava.agent.web.fake.cef.FakeCefApp",
+      "field": "clients_",
+      "access": "private",
+      "for": "walk"
+    },
+    "app.settings": {
+      "class": "ai.skillroy.testjava.agent.web.fake.cef.FakeCefApp",
+      "field": "settings_",
+      "access": "private",
+      "for": "settings"
+    },
+    "client": {
+      "class": "ai.skillroy.testjava.agent.web.fake.cef.FakeCefClient",
+      "for": "core"
+    },
+    "client.getAllBrowser": {
+      "class": "ai.skillroy.testjava.agent.web.fake.cef.FakeCefClient",
+      "method": "getAllBrowser",
+      "access": "private",
+      "for": "walk"
+    },
+    "browser": {
+      "class": "ai.skillroy.testjava.agent.web.fake.cef.FakeCefBrowser",
+      "for": "core"
+    },
+    "browser.getDevToolsClient": {
+      "class": "ai.skillroy.testjava.agent.web.fake.cef.FakeCefBrowser",
+      "method": "getDevToolsClient",
+      "for": "devtools"
+    },
+    "browser.getIdentifier": {
+      "class": "ai.skillroy.testjava.agent.web.fake.cef.FakeCefBrowser",
+      "method": "getIdentifier",
+      "for": "core"
+    },
+    "browser.getURL": {
+      "class": "ai.skillroy.testjava.agent.web.fake.cef.FakeCefBrowser",
+      "method": "getURL",
+      "for": "core"
+    },
+    "browser.getUIComponent": {
+      "class": "ai.skillroy.testjava.agent.web.fake.cef.FakeCefBrowser",
+      "method": "getUIComponent",
+      "for": "core"
+    },
+    "browser.reload": {
+      "class": "ai.skillroy.testjava.agent.web.fake.cef.FakeCefBrowser",
+      "method": "reload",
+      "for": "reload"
+    },
+    "browser.reloadIgnoreCache": {
+      "class": "ai.skillroy.testjava.agent.web.fake.cef.FakeCefBrowser",
+      "method": "reloadIgnoreCache",
+      "for": "reload"
+    },
+    "browser.windowed": {
+      "class": "ai.skillroy.testjava.agent.web.fake.cef.FakeCefBrowserWr",
+      "match": "name",
+      "for": "rendering"
+    },
+    "browser.offscreen": {
+      "class": "ai.skillroy.testjava.agent.web.fake.cef.FakeCefBrowserOsr",
+      "match": "name",
+      "for": "rendering"
+    },
+    "devtools": {
+      "class": "ai.skillroy.testjava.agent.web.fake.cef.FakeDevToolsClient",
+      "for": "devtools"
+    },
+    "devtools.execute": {
+      "class": "ai.skillroy.testjava.agent.web.fake.cef.FakeDevToolsClient",
+      "method": "executeDevToolsMethod",
+      "params": [
+        "java.lang.String",
+        "java.lang.String"
+      ],
+      "for": "devtools"
+    },
+    "devtools.addEventListener": {
+      "class": "ai.skillroy.testjava.agent.web.fake.cef.FakeDevToolsClient",
+      "method": "addEventListener",
+      "params": [
+        "ai.skillroy.testjava.agent.web.fake.cef.FakeDevToolsClient$EventListener"
+      ],
+      "for": "devtools"
+    },
+    "devtools.removeEventListener": {
+      "class": "ai.skillroy.testjava.agent.web.fake.cef.FakeDevToolsClient",
+      "method": "removeEventListener",
+      "params": [
+        "ai.skillroy.testjava.agent.web.fake.cef.FakeDevToolsClient$EventListener"
+      ],
+      "for": "devtools"
+    },
+    "devtools.isClosed": {
+      "class": "ai.skillroy.testjava.agent.web.fake.cef.FakeDevToolsClient",
+      "method": "isClosed",
+      "for": "devtools"
+    },
+    "devtools.listener": {
+      "class": "ai.skillroy.testjava.agent.web.fake.cef.FakeDevToolsClient$EventListener",
+      "interface": true,
+      "for": "devtools"
+    },
+    "settings.remoteDebuggingPort": {
+      "class": "ai.skillroy.testjava.agent.web.fake.cef.FakeCefSettings",
+      "field": "remote_debugging_port",
+      "for": "settings"
+    },
+    "settings.windowless": {
+      "class": "ai.skillroy.testjava.agent.web.fake.cef.FakeCefSettings",
+      "field": "windowless_rendering_enabled",
+      "for": "settings"
+    },
+    "settings.rootCachePath": {
+      "class": "ai.skillroy.testjava.agent.web.fake.cef.FakeCefSettings",
+      "field": "root_cache_path",
+      "for": "cachePath"
+    },
+    "settings.cachePath": {
+      "class": "ai.skillroy.testjava.agent.web.fake.cef.FakeCefSettings",
+      "field": "cache_path",
+      "for": "cachePath"
+    },
+    "version.chrome": {
+      "class": "ai.skillroy.testjava.agent.web.fake.cef.FakeCefApp$FakeCefVersion",
+      "method": "getChromeVersion",
+      "for": "version",
+      "alternatives": [
+        {
+          "class": "ai.skillroy.testjava.agent.web.fake.cef.FakeCefApp$FakeCefVersion",
+          "field": "CHROME_VERSION_MAJOR"
+        }
+      ]
+    },
+    "raw.execute": {
+      "class": "ai.skillroy.testjava.agent.web.fake.cef.FakeCefBrowserBase",
+      "method": "executeDevToolsMethod",
+      "params": [
+        "java.lang.String",
+        "java.lang.String"
+      ],
+      "access": "private",
+      "for": "raw"
+    },
+    "raw.addObserver": {
+      "class": "ai.skillroy.testjava.agent.web.fake.cef.FakeCefBrowserBase",
+      "method": "addDevToolsMessageObserver",
+      "params": [
+        "ai.skillroy.testjava.agent.web.fake.cef.FakeDevToolsMessageObserver"
+      ],
+      "access": "private",
+      "for": "raw"
+    },
+    "raw.observer": {
+      "class": "ai.skillroy.testjava.agent.web.fake.cef.FakeDevToolsMessageObserver",
+      "interface": true,
+      "for": "raw"
+    },
+    "raw.dispose": {
+      "class": "ai.skillroy.testjava.agent.web.fake.cef.FakeRegistration",
+      "method": "dispose",
+      "access": "private",
+      "for": "raw"
+    }
+  }
+}

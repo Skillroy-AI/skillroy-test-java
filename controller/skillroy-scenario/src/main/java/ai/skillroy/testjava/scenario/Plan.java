@@ -28,6 +28,8 @@ import ai.skillroy.testjava.scenario.pack.Sync;
 import ai.skillroy.testjava.scenario.resolve.ColumnKind;
 import ai.skillroy.testjava.scenario.resolve.CredentialSpec;
 import ai.skillroy.testjava.scenario.resolve.Strategy;
+import ai.skillroy.testjava.scenario.web.FrozenTargetPolicy;
+import ai.skillroy.testjava.scenario.web.WebSettings;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -39,9 +41,11 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.regex.Pattern;
 
@@ -52,21 +56,23 @@ import java.util.regex.Pattern;
  * order, no timestamps, no absolute paths, nothing from an environment), so compiling the same YAML with the same pack
  * version gives byte-identical files.
  *
- * <p>Shape, version 3 (phase2-contracts.md 5, phase3-contracts.md 4): {@code planVersion, scenarioId, pack,
- * packVersion, sourceHash, inference, requires, slots, oracles, resolutionGraph, steps[{id, verb, source{line},
- * calls[{primitive, args, sync, timeoutMs, await?, handlesPrompt?, capture?}], expect[]}], verify, cleanup,
- * launchProperties, artifacts, onPrompt, stepTimeoutMs, ui?, bindTimeoutMs}}. A slot is {@code fixture}
- * ({@code value}, optional {@code credential}), {@code query} ({@code query, args, strategy?, verify, credential?}) or
- * {@code capture} ({@code step, fields}); an oracle is {@code {name, fn, args, mustEqual?, crossCheck?}}; an element
- * of {@code verify} or of a step's {@code expect} is an {@link Expectation} ({@code path}) or a {@link RowCheck}
- * ({@code db}, with {@code aggregates} from version 3). {@code "ui"} is written only when the scenario has the key
- * (amendment A29).
+ * <p>Shape, version 4 (phase2-contracts.md 5, phase3-contracts.md 4, phase4-contracts.md 7.3): {@code planVersion,
+ * scenarioId, pack, packVersion, sourceHash, inference, requires, slots, oracles, resolutionGraph, steps[{id, verb,
+ * source{line}, calls[{primitive, args, sync, timeoutMs, await?, handlesPrompt?, capture?}], expect[]}], verify,
+ * cleanup, launchProperties, artifacts, onPrompt, stepTimeoutMs, ui?, web?, bindTimeoutMs}}. A slot is
+ * {@code fixture} ({@code value}, optional {@code credential}), {@code query} ({@code query, args, strategy?, verify,
+ * credential?}) or {@code capture} ({@code step, fields}); an oracle is {@code {name, fn, args, mustEqual?,
+ * crossCheck?}}; an element of {@code verify} or of a step's {@code expect} is an {@link Expectation} ({@code path})
+ * or a {@link RowCheck} ({@code db}, with {@code aggregates} from version 3). {@code "ui"} is written only when the
+ * scenario has the key (amendment A29), and so is {@code "web"} ({@code {path, browser?, frozenTargets, trace}},
+ * version 4: the web path policy, the default browser, the frozen-target policy and CDP tracing).
  *
- * <p>The reader accepts versions 1, 2 and 3 (decision D41). A version 1 plan is read as version 3 with
+ * <p>The reader accepts versions 1 to 4 (decisions D41, D58). A version 1 plan is read as version 4 with
  * {@code inference: none}, no oracles, an empty graph and {@code bindTimeoutMs} 60000; a version 2 plan is read as
- * version 3 without cross-checks and aggregates (the keys {@code crossCheck} and {@code aggregates} need version 3);
- * any other version is refused. A plan of version 2 or later may not hold a fixture field whose key looks secret (a
- * hand-edited plan cannot bring a secret back; a version 1 plan relies on the masking of amendment A25).
+ * version 4 without cross-checks and aggregates (the keys {@code crossCheck} and {@code aggregates} need version 3);
+ * a version 3 plan is read as version 4 without {@code web} (the key needs version 4); any other version is refused.
+ * A plan of version 2 or later may not hold a fixture field whose key looks secret (a hand-edited plan cannot bring a
+ * secret back; a version 1 plan relies on the masking of amendment A25).
  *
  * <p>Immutable (every nested value is a deep unmodifiable copy); safe to share between threads.
  *
@@ -89,15 +95,17 @@ import java.util.regex.Pattern;
  * @param oracles the oracles, in file order
  * @param resolutionGraph fixture and query slot names and {@code oracle.<name>} in evaluation order
  * @param bindTimeoutMs the bind budget in milliseconds ({@code timeouts.bind}, default 60000)
+ * @param web the scenario's {@code web} settings (phase4-contracts.md 7.2), or null when it has none (then
+ *     {@link WebSettings#DEFAULT} applies, see {@link #effectiveWeb()}, and {@code plan.json} carries no {@code web})
  */
 public record Plan(int planVersion, String scenarioId, String pack, String packVersion, String sourceHash,
                    List<String> requires, List<Slot> slots, List<Step> steps, List<Check> verify,
                    List<Call> cleanup, Map<String, String> launchProperties, List<String> artifacts,
                    Map<String, Object> onPrompt, long stepTimeoutMs, UiSettings ui, String inference,
-                   List<Oracle> oracles, List<String> resolutionGraph, long bindTimeoutMs) {
+                   List<Oracle> oracles, List<String> resolutionGraph, long bindTimeoutMs, WebSettings web) {
 
-    /** The plan format version this code writes; it reads 1, 2 and 3 (phase3-contracts.md 4). */
-    public static final int VERSION = 3;
+    /** The plan format version this code writes; it reads 1 to 4 (phase4-contracts.md 7.3). */
+    public static final int VERSION = 4;
 
     /** {@code inference} of every Phase 2 plan. */
     public static final String INFERENCE_NONE = "none";
@@ -114,13 +122,20 @@ public record Plan(int planVersion, String scenarioId, String pack, String packV
 
     private static final Set<String> TOP_KEYS_V2;
 
+    /** Version 4 adds {@code web} (phase4-contracts.md 7.3). */
+    private static final Set<String> TOP_KEYS_V4;
+
     static {
         Set<String> keys = new HashSet<>(TOP_KEYS_V1);
         keys.addAll(List.of("inference", "oracles", "resolutionGraph", "bindTimeoutMs"));
         TOP_KEYS_V2 = Set.copyOf(keys);
+        keys.add("web");
+        TOP_KEYS_V4 = Set.copyOf(keys);
     }
 
     private static final Set<String> UI_KEYS = Set.of("clickRung", "strict");
+
+    private static final Set<String> WEB_KEYS = Set.of("path", "browser", "frozenTargets", "trace");
 
     private static final Set<String> AWAIT_KEYS = Set.of("topics", "match", "timeoutMs");
 
@@ -146,6 +161,17 @@ public record Plan(int planVersion, String scenarioId, String pack, String packV
         if (bindTimeoutMs <= 0) {
             bindTimeoutMs = DEFAULT_BIND_TIMEOUT_MS;
         }
+    }
+
+    /** A plan of a scenario without the {@code web} key (the Phase 3 shape). */
+    public Plan(int planVersion, String scenarioId, String pack, String packVersion, String sourceHash,
+                List<String> requires, List<Slot> slots, List<Step> steps, List<Check> verify,
+                List<Call> cleanup, Map<String, String> launchProperties, List<String> artifacts,
+                Map<String, Object> onPrompt, long stepTimeoutMs, UiSettings ui, String inference,
+                List<Oracle> oracles, List<String> resolutionGraph, long bindTimeoutMs) {
+        this(planVersion, scenarioId, pack, packVersion, sourceHash, requires, slots, steps, verify, cleanup,
+                launchProperties, artifacts, onPrompt, stepTimeoutMs, ui, inference, oracles, resolutionGraph,
+                bindTimeoutMs, null);
     }
 
     /** A plan of a scenario without the {@code ui} key and without query slots or oracles (the Phase 1 shape). */
@@ -474,6 +500,11 @@ public record Plan(int planVersion, String scenarioId, String pack, String packV
         }
     }
 
+    /** The web settings that apply: {@link #web()}, or {@link WebSettings#DEFAULT} when the scenario has none. */
+    public WebSettings effectiveWeb() {
+        return web != null ? web : WebSettings.DEFAULT;
+    }
+
     /** True when the plan has a query slot or an oracle: its bind reads or writes a bindings file (8.1). */
     public boolean needsBindings() {
         if (!oracles.isEmpty()) {
@@ -560,7 +591,26 @@ public record Plan(int planVersion, String scenarioId, String pack, String packV
         if (ui != null) {
             json.put("ui", ui.toJson());
         }
+        if (web != null) {
+            json.put("web", webJson(web));
+        }
         json.put("bindTimeoutMs", bindTimeoutMs);
+        return json;
+    }
+
+    /**
+     * The {@code web} object of {@code plan.json}: {@code {path, browser?, frozenTargets, trace}}, the enumerated
+     * values in lower case as the scenario writes them, the browser's key sorted; a new map on each call. The attach
+     * deadline is not a scenario key and is not written.
+     */
+    static Map<String, Object> webJson(WebSettings web) {
+        Map<String, Object> json = new LinkedHashMap<>();
+        json.put("path", web.path().name().toLowerCase(Locale.ROOT));
+        if (web.defaultBrowser() != null) {
+            json.put("browser", new TreeMap<>(web.defaultBrowser()));
+        }
+        json.put("frozenTargets", web.frozenTargets().name().toLowerCase(Locale.ROOT));
+        json.put("trace", web.trace());
         return json;
     }
 
@@ -604,14 +654,14 @@ public record Plan(int planVersion, String scenarioId, String pack, String packV
 
     /**
      * @throws IOException if the file cannot be read
-     * @throws ScenarioException if it is not a valid version 1, 2 or 3 plan
+     * @throws ScenarioException if it is not a valid plan of version 1 to 4
      */
     public static Plan read(Path file) throws IOException, ScenarioException {
         return parse(Files.readString(file, StandardCharsets.UTF_8));
     }
 
     /**
-     * @throws ScenarioException if the text is not a valid version 1, 2 or 3 plan
+     * @throws ScenarioException if the text is not a valid plan of version 1 to 4
      */
     public static Plan parse(String text) throws ScenarioException {
         Map<String, Object> json;
@@ -629,20 +679,23 @@ public record Plan(int planVersion, String scenarioId, String pack, String packV
      * matchers, slot and oracle shapes, the resolution graph, the generated SQL of row checks (through the statement
      * guard), and, for version 2 and later, that no fixture field key looks secret. Unknown keys are rejected,
      * because a later plan version may need them to run correctly: an oracle's {@code crossCheck} and a {@code db}
-     * element's {@code aggregates} need version 3.
+     * element's {@code aggregates} need version 3, the top-level {@code web} needs version 4.
      *
-     * @throws ScenarioException if a key is missing, unknown or of the wrong type, or the version is not 1, 2 or 3
+     * @throws ScenarioException if a key is missing, unknown or of the wrong type, or the version is not 1 to 4
      */
     public static Plan fromJson(Map<String, Object> json) throws ScenarioException {
         PlanReader r = new PlanReader(json);
         if (!(json.get("planVersion") instanceof Long rawVersion) || rawVersion < 1 || rawVersion > VERSION) {
-            throw r.error("planVersion " + json.get("planVersion") + " is not supported (expected 1, 2 or " + VERSION
-                    + ")");
+            throw r.error("planVersion " + json.get("planVersion") + " is not supported (expected 1, 2, 3 or "
+                    + VERSION + ")");
         }
         boolean v2OrLater = rawVersion >= 2;
         r.version = rawVersion.intValue();
         for (String key : json.keySet()) {
-            if (!(v2OrLater ? TOP_KEYS_V2 : TOP_KEYS_V1).contains(key)) {
+            if ("web".equals(key) && rawVersion < 4) {
+                throw r.error("'web' needs a version 4 plan");
+            }
+            if (!(rawVersion >= 4 ? TOP_KEYS_V4 : v2OrLater ? TOP_KEYS_V2 : TOP_KEYS_V1).contains(key)) {
                 throw r.error("unknown key '" + key + "'" + (v2OrLater ? "" : " in a version 1 plan"));
             }
         }
@@ -728,7 +781,8 @@ public record Plan(int planVersion, String scenarioId, String pack, String packV
                 r.str(json, "sourceHash"), r.strings(json, "requires"), slots, steps, verify, cleanup,
                 launchProperties, r.strings(json, "artifacts"), r.object(json, "onPrompt"),
                 r.positive(json, "stepTimeoutMs"), json.get("ui") == null ? null : r.ui(r.object(json, "ui")),
-                inference, oracles, graph, bindTimeoutMs);
+                inference, oracles, graph, bindTimeoutMs, json.containsKey("web") ? r.web(r.object(json, "web"))
+                        : null);
     }
 
     private static Set<String> stepIds(List<Step> steps) {
@@ -809,7 +863,7 @@ public record Plan(int planVersion, String scenarioId, String pack, String packV
         private static final Set<String> EXPECTATION_KEYS = Set.of("path", "matcher", "capability");
 
         private String id;
-        /** The plan's own version (1, 2 or 3); keys of a later version are refused. */
+        /** The plan's own version (1 to 4); keys of a later version are refused. */
         private int version = VERSION;
 
         /** Errors name the scenario id as soon as the JSON holds one. */
@@ -1112,6 +1166,44 @@ public record Plan(int planVersion, String scenarioId, String pack, String packV
             } catch (IllegalArgumentException e) {
                 throw error("ui: " + e.getMessage());
             }
+        }
+
+        /**
+         * The {@code web} object (version 4): {@code path} ({@code auto}, {@code cdp} or {@code agent}),
+         * {@code browser} (optional: a {@code by} object with exactly one of {@code url}, {@code tag}, {@code title},
+         * {@code nativeId}), {@code frozenTargets} ({@code fail} or {@code reload}; {@code close} is refused in Phase
+         * 4, decision D52) and {@code trace} (a boolean), all four checked as the scenario loader checks them.
+         */
+        WebSettings web(Map<String, Object> json) throws ScenarioException {
+            for (String key : json.keySet()) {
+                if (!WEB_KEYS.contains(key)) {
+                    throw error("web: unknown key '" + key + "'");
+                }
+            }
+            WebSettings.Path path = WebGrammar.path(str(json, "path"));
+            if (path == null) {
+                throw error("web: 'path' must be auto, cdp or agent, found \"" + json.get("path") + "\"");
+            }
+            Map<String, Object> browser = null;
+            if (json.containsKey("browser")) {
+                String problem = WebGrammar.byProblem("browser", json.get("browser"));
+                if (problem != null) {
+                    throw error("web: " + problem);
+                }
+                browser = object(json, "browser");
+            }
+            String frozen = str(json, "frozenTargets");
+            FrozenTargetPolicy policy = WebGrammar.frozenTargets(frozen);
+            if (policy == FrozenTargetPolicy.CLOSE) {
+                throw error("web: 'frozenTargets' " + WebGrammar.CLOSE_REFUSED);
+            }
+            if (policy == null) {
+                throw error("web: 'frozenTargets' must be fail or reload, found \"" + frozen + "\"");
+            }
+            if (!(json.get("trace") instanceof Boolean trace)) {
+                throw error("web: 'trace' must be a boolean");
+            }
+            return new WebSettings(path, browser, policy, WebSettings.DEFAULT.attachDeadline(), trace);
         }
 
         /** An element of verify or expect: {@code db} makes a row check, {@code path} an expectation. */

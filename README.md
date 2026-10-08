@@ -21,13 +21,13 @@ today nothing calls a model: the binding modes are built without one, and the in
 a later phase. Vision-driven input, where a model looks at the screen and the framework turns what it decides into
 recorded, replayable steps, is a planned bolt-on that the design keeps room for and does not build yet.
 
-**Status (2026-10-06):** Phase 1, Phase 1.x and Phase 2 are built and verified; nothing is released and nothing is
-published. Phase 1 is the thin vertical slice: the agent (core, Swing and data modules), the controller, the scenario
-compiler and executor, JUnit glue, a CLI, and a bundled sample application, the lending desk of a tool library, with
-its agent module, domain pack and scenarios. Its gates are a Java 8 target and a Java 25 target, in every load mode;
-the numbers (tests, configurations, runtimes) are kept in [docs/TODO.md](docs/TODO.md). All twenty decisions are
-answered ([docs/DECISIONS.md](docs/DECISIONS.md)); the initial commit was made on 2026-10-06, and the repository is
-not yet pushed or published. **Phase 1.x**
+**Status (2026-10-07):** Phase 1, Phase 1.x, Phase 2 and Phase 3 are built and verified, and Phase 4 is built, reviewed
+and fixed; nothing is released and nothing is published. Phase 1 is the thin vertical slice: the agent (core, Swing and
+data modules), the controller, the scenario compiler and executor, JUnit glue, a CLI, and a bundled sample application,
+the lending desk of a tool library, with its agent module, domain pack and scenarios. Its gates are a Java 8 target and
+a Java 25 target, in every load mode; the numbers (tests, configurations, runtimes) are kept in
+[docs/TODO.md](docs/TODO.md). All twenty-one decisions are answered ([docs/DECISIONS.md](docs/DECISIONS.md)); the
+initial commit was made on 2026-10-06, and the repository is not yet pushed or published. **Phase 1.x**
 added a set of contract amendments and the hardening that followed from a security review of the control channel: an
 agent-owned HTTP listener, keyed request and reply authentication instead of a bearer token on the wire, and the
 fixes of the review's other findings (the one path that needs a Windows host is not verified on Windows). **Phase 2**
@@ -39,11 +39,13 @@ cost ledger that asserts zero model calls in `replay`. The sample's scenario A p
 with one YAML file. Phase 3 (2026-10-03) added oracle cross-checks against the application's own dry run, reported as
 `ORACLE_SUSPECT` when they disagree (a guarded cross-check that cannot run degrades the outcome instead), aggregates in
 stored-row checks, a `devices` fact root for peripherals, and the sample's scenario B, in which a quantity waiver rule
-applies and the printed slip shows the waiver. **Phase 4** (embedded web views: Playwright over CDP from the
-controller and an in-process SPI with reflective JCEF and JxBrowser adapters) is specified on 2026-10-06 and not yet
-built; its spike BS8 ran a real JCEF browser in the Linux test image the same day. Not yet built: the Phase 4
-modules, model-authored resolution and the rest of the model layer, the interactive session service, vision-driven
-input, bytecode hooks and the fluent Java API.
+applies and the printed slip shows the waiver. **Phase 4** (2026-10-07) added embedded web views: every web verb of
+a scenario runs either over CDP, with Playwright attached to the remote-debugging port of the embedded Chromium, or in
+process, through one SPI with reflective JCEF and JxBrowser adapters, and each step records which path served it. A
+second sample target, a small JCEF web host behind the Maven profile `jcef`, runs one committed scenario over both
+paths, and an adapter contract kit runs against real JCEF in the Linux test image. Not yet built: model-authored
+resolution and the rest of the model layer, the interactive session service, vision-driven input, bytecode hooks and
+the fluent Java API.
 
 ## Where to look
 
@@ -54,8 +56,8 @@ input, bytecode hooks and the fluent Java API.
 | Phase 1 contract (wire protocol, agent SPI, primitives, CLI, sample application), as built, Phase 1.x included | [docs/design/phase1-contracts.md](docs/design/phase1-contracts.md) |
 | Phase 2 contract (resolution, bindings, credentials, stored-row checks, sample scenario A), as built | [docs/design/phase2-contracts.md](docs/design/phase2-contracts.md) |
 | Phase 3 contract (oracle cross-checks with `ORACLE_SUSPECT`, stored-row aggregates, the `devices` fact root, sample scenario B), as built | [docs/design/phase3-contracts.md](docs/design/phase3-contracts.md) |
-| Phase 4 contract (embedded web views: `skillroy-cdp`, the web SPI, `skillroy-agent-web` with the `jcef` and `jxbrowser` adapters, the adapter contract kit), specified, not built | [docs/design/phase4-contracts.md](docs/design/phase4-contracts.md) |
-| Spike BS8 (JCEF in the Linux test image), run 2026-10-06 | [spikes/BS8/RESULT.md](spikes/BS8/RESULT.md) |
+| Phase 4 contract (embedded web views: `skillroy-cdp`, the web SPI, `skillroy-agent-web` with the `jcef` and `jxbrowser` adapters, the adapter contract kit, the web host sample), as built | [docs/design/phase4-contracts.md](docs/design/phase4-contracts.md) |
+| Spike BS8 (JCEF in the Linux test image), run 2026-10-06; spike BS5 (Playwright over CDP), met by the Phase 4 acceptance, with the manual procedure against a stock Chromium | [spikes/BS8/RESULT.md](spikes/BS8/RESULT.md), [spikes/BS5/README.md](spikes/BS5/README.md) |
 | Design overview, all phases | [docs/design/base-framework-design.md](docs/design/base-framework-design.md) |
 | Research notes | [docs/research/](docs/research/) |
 | Licence, notices, dependency licence audit | [LICENSE](LICENSE), [NOTICE](NOTICE), [docs/licence-audit.md](docs/licence-audit.md) |
@@ -64,12 +66,17 @@ input, bytecode hooks and the fluent Java API.
 ## Layout
 
 ```
-agent/        Java 8, runs inside the target JVM, no third-party classes
+agent/        Java 8, runs inside the target JVM, no third-party classes; agent/skillroy-agent-web holds the web.*
+              primitives and the reflective jcef and jxbrowser adapters, and its test-jar the adapter contract kit
 controller/   Java 25: attach and client, data channels and credentials (controller/skillroy-data), scenario
-              compiler, resolution and executor, JUnit glue, CLI
+              compiler, resolution and executor, JUnit glue, CLI; controller/skillroy-cdp is the optional CDP path
+              (Playwright), which no other module depends on
 samples/      the sample lending desk: the issue desk of a tool library, a small Swing application with an engine
               thread, custom widgets, modal prompts and an embedded database; plus its agent module, domain pack
-              and scenarios (skillroy-sample-lending-app, -agent, -pack, -scenarios)
+              and scenarios (skillroy-sample-lending-app, -agent, -pack, -scenarios); and, behind the Maven profile
+              jcef, the web host: a small Swing application with embedded JCEF browsers, its agent module, pack and
+              scenarios (skillroy-sample-web-host, -web-host-agent, -web-host-scenarios)
+spikes/       BS8 (JCEF in the Linux test image) and BS5 (the manual procedure against a stock Chromium)
 ci/           Linux test image (Xvfb), runner script, licence-header check
 docs/         design, research, decisions, todo, dependency licence audit
 ```
@@ -104,6 +111,21 @@ SKILLROY_JDK8_HOME=/path/to/linux-x64-jdk8 ci/run-in-linux.sh mvn -o -q verify \
 
 Adding `-Djvm=/opt/jdk8/bin/java` also runs the test JVMs themselves on Java 8. Use it for the agent-side modules
 only (`-pl agent/skillroy-protocol,agent/skillroy-agent-api,…`); the controller-side tests need Java 25.
+
+The web host and its two companions are built only with the Maven profile `jcef`. Their tests need the JCEF natives
+of one platform (about 152 MB for Linux x86-64) in the local Maven repository: `-Dskillroy.jcef.platform` picks them
+(default `linux-amd64`; `linux-arm64` for an arm64 build of the image), and nothing is downloaded at test time. The
+web acceptance (the contract kit against real JCEF, the end-to-end checks over both paths and the frozen-target soak)
+needs a display, so it runs in the Linux image:
+
+```bash
+mvn -q verify -Pjcef        # natively, once: fills the local repository (natives, Playwright) and builds everything
+ci/run-in-linux.sh mvn -o -q verify -Pjcef -Dskillroy.jcef.platform=linux-amd64 -Dskillroy.headless=false
+```
+
+With `-Dskillroy.it.targetJava=/opt/jdk8/bin/java` the web host is launched on Java 8, where only off-screen rendering
+is run. Never `mvn install` this project: build one module with `mvn -o verify -pl <module> -am`, so that the agent
+distribution its tests unpack comes from the same build ([docs/TODO.md](docs/TODO.md), "Environment notes").
 
 ## Try the CLI against the sample lending desk
 
@@ -147,12 +169,31 @@ when the files differ, as these two do. `skillroy --help` lists the commands and
 `skillroy call` is the way to call a primitive by hand: every request and reply is HMAC-signed with the token,
 which never travels, so plain `curl` with a bearer token no longer works (the agent answers 401).
 
+## Embedded web views
+
+A scenario drives the web views a Swing application embeds with the base verbs `webClick`, `webFill`, `webDispatch`,
+`webWaitFlag`, `webResize` and `webTap` (a click and a fill by CSS selector or by role and name, a page event, a wait
+for a condition in the page, a viewport size, and the page events to listen for), and the scenario key `web` chooses
+the path (`auto`, `cdp` or `agent`), a default browser and what to do with a frozen page. With `auto`, a run takes the
+CDP path when the target's browser engine was started with a remote-debugging port and `skillroy-cdp` is on the class
+path, and the in-process path otherwise; every web call in `run.jsonl` names the path that served it.
+
+`skillroy-cdp` is optional (decision D49): the executor, the JUnit glue and the CLI do not depend on it, and the CLI
+distribution ships without Playwright. A Maven suite declares it as a dependency. The CLI takes it as `--pack` jars,
+one option per jar, together with Playwright's jars from the local Maven repository: `skillroy-cdp-0.1.0-SNAPSHOT.jar`,
+`playwright-1.63.0.jar`, `driver-1.63.0.jar`, `driver-bundle-1.63.0.jar`, `gson-2.14.0.jar`, `jspecify-1.0.1.jar`
+and `opentest4j-1.3.0.jar`. Without them the same command runs the web verbs through the agent. Playwright extracts its
+driver (about 140 MB) on first use in each JVM, and never downloads a browser: it attaches to the one the application
+runs.
+
 ## Extending it to a real application
 
 The base knows nothing about any particular application. An application gets:
 
 - an **agent module** (`AgentModule`, Java 8) that adapts its threads, widgets, dialogs, data connection and
-  input channel through the SPIs in `skillroy-agent-api`, and adds its own primitives;
+  input channel through the SPIs in `skillroy-agent-api`, and adds its own primitives; for embedded browsers that the
+  Swing tree cannot show, a `BrowserRegistryAdapter` hands their seeds to the agent (the web host's agent module is the
+  example);
 - a **domain pack** (`DomainPack`, Java 25) with scenario verbs and facts, and, since Phase 2, its query kinds,
   resolvers, verifiers and oracles (`DomainPack.resolution()`), an environment fingerprinter (`fingerprinter()`), the
   tables stored-row checks may read (`storedTables()`) and the masks for rows read over JDBC (`rowMasks()`).

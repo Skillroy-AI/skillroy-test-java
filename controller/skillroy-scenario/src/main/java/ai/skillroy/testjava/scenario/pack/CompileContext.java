@@ -18,6 +18,7 @@ package ai.skillroy.testjava.scenario.pack;
 
 import ai.skillroy.testjava.scenario.UiSettings;
 import ai.skillroy.testjava.scenario.resolve.CredentialSpec;
+import ai.skillroy.testjava.scenario.web.WebSettings;
 
 import java.util.Set;
 
@@ -68,6 +69,16 @@ public interface CompileContext {
      */
     default UiSettings ui() {
         return UiSettings.DEFAULT;
+    }
+
+    /**
+     * The scenario's {@code web} settings (phase4-contracts.md 7.2), {@link WebSettings#DEFAULT} when it has no
+     * {@code web} key. The base web verbs take their default browser from it ({@code web.browser}, compiled into the
+     * primitive's {@code by} parameter when the step names no {@code browser} of its own); a pack verb that drives a
+     * web view may do the same.
+     */
+    default WebSettings web() {
+        return WebSettings.DEFAULT;
     }
 
     /**

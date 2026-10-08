@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Front page</title>
+<style>
+body{margin:16px;font:16px sans-serif;background:#e6efff}
+label{display:inline-block;width:6em}
+#status{min-height:1.4em;font-weight:bold}
+iframe{width:420px;height:64px;background:#fff}
+</style>
+</head>
+<body id="webhost-front">
+<h1>Front page</h1>
+<form id="loan">
+<p><label for="item">Item</label> <input id="item" name="item" type="text" autocomplete="off"></p>
+<p><label for="qty">Quantity</label> <input id="qty" name="qty" type="number" min="1" step="1"></p>
+<p><button id="borrow" type="button">Borrow</button></p>
+</form>
+<p id="status" role="status"></p>
+<iframe id="terms" name="terms" title="Loan terms"
+ src="data:text/html,<title>Front terms</title><p>Loans run for seven days.</p>"></iframe>
+<script>
+(function () {
+  'use strict';
+  var win = window;
+  var page = document.body.id.replace('webhost-', '');
+  var proto = EventTarget.prototype;
+  var nativeAdd = proto.addEventListener;
+  var nativeRemove = proto.removeEventListener;
+  var tracked = [];
+  function capture(options) {
+    return typeof options === 'object' && options !== null ? !!options.capture : !!options;
+  }
+  function indexOf(type, listener, useCapture) {
+    for (var i = 0; i < tracked.length; i++) {
+      var t = tracked[i];
+      if (t.type === type && t.listener === listener && t.capture === useCapture) {
+        return i;
+      }
+    }
+    return -1;
+  }
+  proto.addEventListener = function addEventListener(type, listener, options) {
+    if (this === win && typeof type === 'string' && type.indexOf('webhost.') === 0 && listener
+        && indexOf(type, listener, capture(options)) < 0) {
+      tracked.push({type: type, listener: listener, capture: capture(options)});
+    }
+    return nativeAdd.apply(this == null ? win : this, arguments);
+  };
+  proto.removeEventListener = function removeEventListener(type, listener, options) {
+    var i = this === win ? indexOf(type, listener, capture(options)) : -1;
+    if (i >= 0) {
+      tracked.splice(i, 1);
+    }
+    return nativeRemove.apply(this == null ? win : this, arguments);
+  };
+  win.webhostDiagnostics = function () {
+    return {listeners: tracked.length, dispatchWrapped: Object.prototype.hasOwnProperty.call(win, 'dispatchEvent')};
+  };
+  win.webhostReady = false;
+  win.webhostFrozen = false;
+
+  var item = document.getElementById('item');
+  var qty = document.getElementById('qty');
+  var status = document.getElementById('status');
+  var logged = item.value;
+  function logItem() {
+    if (item.value !== logged) {
+      logged = item.value;
+      console.log('webhost ' + page + ' item: ' + logged);
+    }
+  }
+  function fire(name, detail) {
+    win.dispatchEvent(new CustomEvent(name, {detail: detail}));
+  }
+  // URL fragments, acted on only when the fragment changes to them (hashchange), never at load: a reload keeps the
+  // fragment and must bring back a responsive page.
+  //   #freeze  sets window.webhostFrozen = true, then runs a busy loop for ever (the frozen target).
+  //   #stall   blocks the main thread in chunks of 30 s of busy work with a zero-delay setTimeout yield between
+  //            chunks, for ever: unresponsive to a 2 s probe, but a navigation is processed at a yield.
+  function stall() {
+    var end = Date.now() + 30000;
+    while (Date.now() < end) {
+      // busy work
+    }
+    setTimeout(stall, 0);
+  }
+  item.addEventListener('input', logItem);
+  item.addEventListener('change', logItem);
+  document.getElementById('loan').addEventListener('submit', function (e) {
+    e.preventDefault();
+  });
+  document.getElementById('borrow').addEventListener('click', function () {
+    var n = qty.valueAsNumber;
+    var detail = {item: item.value, qty: isFinite(n) ? n : 0};
+    status.textContent = 'borrowed ' + detail.item + ' x ' + detail.qty;
+    fire('webhost.borrowed', detail);
+  });
+  win.addEventListener('webhost.setItem', function (e) {
+    var d = e.detail;
+    var value = d !== null && typeof d === 'object' ? d.item : d;
+    item.value = value === undefined || value === null ? '' : String(value);
+    logItem();
+  });
+  win.addEventListener('webhost.reset', function () {
+    item.value = '';
+    qty.value = '';
+    status.textContent = '';
+    logItem();
+  });
+  win.addEventListener('hashchange', function () {
+    if (location.hash === '#freeze') {
+      win.webhostFrozen = true;
+      console.log('webhost ' + page + ' frozen');
+      for (;;) {
+        // never returns
+      }
+    }
+    if (location.hash === '#stall') {
+      console.log('webhost ' + page + ' stalling');
+      stall();
+    }
+  });
+  win.addEventListener('load', function () {
+    fire('webhost.ready', {page: page});
+    setTimeout(function () {
+      win.webhostReady = true;
+    }, 300);
+  });
+})();
+</script>
+</body>
+</html>
