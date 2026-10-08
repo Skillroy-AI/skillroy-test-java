@@ -17,6 +17,7 @@
 package ai.skillroy.testjava.samples.lending.scenarios;
 
 import ai.skillroy.testjava.data.yaml.StrictYaml;
+import ai.skillroy.testjava.junit.ScenarioSource;
 import ai.skillroy.testjava.protocol.Json;
 import ai.skillroy.testjava.samples.lending.pack.LendingPack;
 import ai.skillroy.testjava.scenario.PlanCompiler;
@@ -37,6 +38,7 @@ import java.util.stream.Stream;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Phase 5 acceptance 15.1 item 11 (phase5-contracts.md 10.2, 13.3) with the sample's verb schemas (9.5, 14.1): the
@@ -67,10 +69,27 @@ class ScenarioSchemaCommittedTest {
     void everyCommittedScenarioIsValidAgainstThePacksSchema() throws Exception {
         Map<String, Object> schema = ScenarioSchema.generate(pack, List.of());
         List<Path> files = everyScenario();
-        assertEquals(16, files.size(), "the five committed scenarios and the eleven negative ones");
+        assertEquals(17, files.size(), "the six committed scenarios and the eleven negative ones");
         for (Path yaml : files) {
             assertEquals(List.of(), ScenarioSchema.validate(schema, document(yaml)), yaml.getFileName().toString());
         }
+    }
+
+    /**
+     * Scenario C's authoring record ({@code <id>.authoring.json}, phase5-contracts.md 10.2 item 7, 14.3) is committed
+     * beside its YAML and is not a scenario: neither these tests nor the JUnit glue's directory source, which run every
+     * committed scenario, take it for one.
+     */
+    @Test
+    void theAuthoringRecordBesideScenarioCIsNotAScenario() throws Exception {
+        assertTrue(Files.isRegularFile(ScenarioC.authoring()), "committed beside " + ScenarioC.YAML);
+        assertEquals(ScenarioC.yaml().getParent(), ScenarioC.authoring().getParent());
+        assertFalse(PlansUpToDateTest.committedScenarios().contains(ScenarioC.authoring()));
+        assertTrue(PlansUpToDateTest.committedScenarios().contains(ScenarioC.yaml()));
+        List<String> glue = ScenarioSource.directory(ScenarioC.yaml().getParent()).entries().stream()
+                .map(ScenarioSource.Entry::name).toList();
+        assertEquals(PlansUpToDateTest.committedScenarios().stream().map(p -> p.getFileName().toString()).toList(),
+                glue, "the glue runs the committed YAML files, and nothing else of the directory");
     }
 
     /**

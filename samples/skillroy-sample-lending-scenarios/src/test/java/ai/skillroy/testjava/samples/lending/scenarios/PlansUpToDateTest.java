@@ -18,6 +18,7 @@ package ai.skillroy.testjava.samples.lending.scenarios;
 
 import ai.skillroy.testjava.protocol.Json;
 import ai.skillroy.testjava.samples.lending.pack.LendingPack;
+import ai.skillroy.testjava.scenario.Expectation;
 import ai.skillroy.testjava.scenario.Plan;
 import ai.skillroy.testjava.scenario.PlanCompiler;
 import ai.skillroy.testjava.scenario.ScenarioLoader;
@@ -69,8 +70,11 @@ class PlansUpToDateTest {
     void everyCommittedPlanMatchesItsScenario() throws Exception {
         List<Path> scenarios = committedScenarios();
         assertEquals(List.of("basic-loan-ui.yaml", "basic-loan.yaml", "borrow-2-waive-1-slip.yaml",
-                "return-over-limit-needs-supervisor.yaml", "supervisor-return-llm-sql.yaml"), scenarios.stream()
-                .map(p -> p.getFileName().toString()).toList());
+                "return-over-limit-needs-supervisor.yaml", "return-refunds-deposit.yaml",
+                "supervisor-return-llm-sql.yaml"), scenarios.stream().map(p -> p.getFileName().toString()).toList());
+        // skillroy author writes <out>/plan/<id>.plan.json; a scenario it wrote into scenarios/ has its plan moved here
+        // with the others, so that a plan's default bindings root (D31: beside its directory) is bindings/.
+        assertFalse(Files.exists(moduleDir().resolve("scenarios").resolve("plan")), "the committed plans are in plan/");
         boolean update = Boolean.getBoolean("skillroy.plans.update");
         List<String> stale = new ArrayList<>();
         for (Path yaml : scenarios) {
@@ -372,6 +376,95 @@ class PlansUpToDateTest {
                 .filter(s -> ScenarioD.MODEL_SLOT.equals(s.get("name"))).findFirst().orElseThrow();
         assertEquals(List.of("llm-sql"), supervisor.remove("strategy"));
         assertEquals(expected, d, "scenario A's plan but for the supervisor's strategy");
+    }
+
+    /**
+     * Scenario C's committed plan (phase5-contracts.md 14.3, 13.2), as the planner wrote it and the review kept it:
+     * version 5 with pack 0.4.0 and no model ({@code inference: none}); two query slots in file order, both by
+     * committed SQL only (no {@code llm-sql}): the item, verified by the desk's deposit lookup, and the assistant who
+     * may sign on and take a return of the item's deposit, asked for a password, verified by the desk's access check,
+     * with the staff credential; the two postings captured in turn; one oracle, the refund (the deposit negated); the
+     * evaluation order; the verifiers' capabilities as its whole {@code requires} (the planner wrote none); the steps'
+     * verbs in order, the deposits without an amount (each settles what is due); the three stored-row checks over the
+     * two postings; the sign-off cleanup, unexpected prompts failing the run, and no date anywhere.
+     */
+    @Test
+    void scenarioCsPlanHasTheReturnModel() throws Exception {
+        Plan plan = Plan.read(ScenarioC.plan());
+        assertEquals(ScenarioC.ID, plan.scenarioId());
+        assertEquals(5, plan.planVersion());
+        assertEquals("0.4.0", plan.packVersion());
+        assertEquals(Plan.INFERENCE_NONE, plan.inference(), "tier (a) only: no model binds it");
+        assertEquals(List.of("item/query", "assistant/query", "lent/capture", "returned/capture"), plan.slots()
+                .stream().map(sl -> sl.name() + "/" + sl.kind()).toList());
+        List<Plan.Slot> queries = plan.slots().stream().filter(sl -> sl.query() != null).toList();
+        assertEquals(ScenarioC.QUERY_SLOTS, queries.stream().map(Plan.Slot::name).toList());
+        assertEquals(List.of("LendableItem", "StaffWithPermission"), queries.stream().map(sl -> sl.query().query())
+                .toList());
+        for (Plan.Slot slot : queries) {
+            assertEquals(List.of("sql"), slot.query().strategy(), slot.name() + ": committed SQL only, no llm-sql");
+        }
+        Plan.Slot item = plan.slot("item");
+        assertEquals(Map.of("perDay", false), item.query().args());
+        assertEquals(List.of("lending.deposit"), item.query().verify());
+        assertNull(item.credential());
+        Plan.Slot assistant = plan.slot("assistant");
+        assertEquals(Map.of("interactiveSignOn", true, "limit", Map.of("gte", "$item.deposit", "type", "RETURN"),
+                "perform", List.of("SIGN_ON", "RETURN")), assistant.query().args(), "within the item's deposit");
+        assertEquals(List.of("lending.access.check"), assistant.query().verify());
+        assertEquals(new CredentialSpec("staff", "code"), assistant.credential());
+        assertEquals(new Plan.CaptureDecl("s5", List.of("id")), plan.slot("lent").capture());
+        assertEquals(new Plan.CaptureDecl("s11", List.of("id")), plan.slot("returned").capture());
+        assertEquals(ScenarioC.GRAPH, plan.resolutionGraph());
+        assertEquals(List.of("refund/Money.negate/$item.deposit"), plan.oracles().stream().map(o -> o.name() + "/"
+                + o.fn() + "/" + o.args()).toList());
+        assertTrue(plan.oracles().stream().noneMatch(o -> o.hasMustEqual() || o.crossCheck() != null),
+                "no guard and no cross-check");
+        assertEquals(List.of("lending.access.check", "lending.deposit"), plan.requires(),
+                "the verifiers' capabilities: the planner wrote no requires");
+
+        assertEquals(ScenarioC.VERBS, plan.steps().stream().map(Plan.Step::verb).toList());
+        assertEquals(List.of(Map.of("source", "Entry", "value", "$assistant.code"), Map.of("source", "Entry", "value",
+                "$assistant.password")), plan.steps().get(0).calls().stream().map(Plan.Call::args).toList());
+        assertEquals(List.of(Map.of("source", "Barcode", "value", "$item.barcode")), plan.steps().get(1).calls()
+                .stream().map(Plan.Call::args).toList());
+        assertEquals(List.of(Map.of("source", "Key.DUE"), Map.of("source", "Key.DEPOSIT"), Map.of("source",
+                "Key.RETURN"), Map.of("source", "Key.DUE"), Map.of("source", "Key.DEPOSIT")), plan.steps().stream()
+                .filter(st -> List.of("key", "deposit").contains(st.verb())).map(st -> st.calls().get(0).args())
+                .toList(), "the keys in turn; a deposit without an amount settles what is due");
+        List<Plan.Step> waits = plan.steps().stream().filter(st -> st.verb().equals("waitFor")).toList();
+        assertEquals(List.of(CaptureSpec.of("lent", Map.of("id", "loanId")), CaptureSpec.of("returned",
+                Map.of("id", "loanId"))), waits.stream().map(st -> st.calls().get(0).capture()).toList(),
+                "the lent posting, then the return posting");
+        assertTrue(waits.stream().allMatch(st -> st.calls().get(0).primitive().equals("sync.await")
+                && "loan.posted".equals(st.calls().get(0).args().get("topics"))), String.valueOf(waits));
+        assertEquals(List.of("loan.returning", "loan.total", "loan.id", "loan.returning", "loan.lines",
+                "loan.lines.0.code", "loan.lines.0.returned", "loan.total", "loan.deposits.0.amount", "loan.change",
+                "slip.last.loanId", "slip.last.text", "slip.last.text"), plan.steps().stream()
+                .flatMap(st -> st.expect().stream()).map(c -> ((Expectation) c).path()).toList(),
+                "the facts the steps expect, in order");
+
+        List<RowCheck> db = plan.verify().stream().filter(c -> c instanceof RowCheck).map(c -> (RowCheck) c).toList();
+        assertEquals(plan.verify().size(), db.size(), "every check of verify reads stored rows");
+        assertEquals(List.of("loan", "loan", "loan_line"), db.stream().map(RowCheck::table).toList());
+        assertEquals(List.of(
+                "SELECT id, staff_code, posted_at, total FROM loan WHERE id = ? ORDER BY id",
+                "SELECT id, staff_code, posted_at, total FROM loan WHERE id = ? ORDER BY id",
+                "SELECT loan_id, line_no, item_code, qty, unit_deposit, amount, returned FROM loan_line"
+                        + " WHERE loan_id = ? ORDER BY loan_id, line_no"), db.stream().map(RowCheck::sql).toList());
+        assertEquals(List.of("$lent.id", "$returned.id", "$returned.id"), db.stream().map(r -> r.params().get(0)
+                .value()).toList(), "the lent posting's row, then the return posting's");
+        assertTrue(db.stream().allMatch(r -> r.params().size() == 1 && Map.of("equals", 1L).equals(r.rows())
+                && r.aggregates().isEmpty()), "one row each, no aggregate");
+        assertEquals(List.of(Map.of("total", Map.of("equals", "$item.deposit")), Map.of("total", Map.of("equals",
+                "$oracle.refund")), Map.of("amount", Map.of("equals", "$oracle.refund"), "item_code", Map.of("equals",
+                "$item.code"), "returned", Map.of("equals", true))), db.stream().map(RowCheck::expect).toList());
+        assertEquals(List.of(Map.of("source", "Key.SIGN_OFF")), plan.cleanup().stream().map(Plan.Call::args)
+                .toList());
+        assertEquals(Map.of("unexpected", "fail"), plan.onPrompt());
+        assertTrue(plan.needsBindings());
+        assertFalse(ScenarioB.ISO_DATE.matcher(plan.toJsonText()).find(), "no date in the plan");
+        assertEquals(plan.resolveHash(), PlanCompiler.compile(ScenarioC.yaml(), new LendingPack()).resolveHash());
     }
 
     /** The first {@code swing.click} call of a plan. */

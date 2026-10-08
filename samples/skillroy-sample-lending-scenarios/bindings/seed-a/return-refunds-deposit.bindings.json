@@ -1,0 +1,188 @@
+{
+  "bindingsVersion": 1,
+  "scenarioId": "return-refunds-deposit",
+  "envId": "seed-a",
+  "pack": "lending",
+  "packVersion": "0.4.0",
+  "planHash": "sha256:4f5ad7221be885999ed2b998fb1865aa260c181fe1aa94e7ef8ed14774d44e7f",
+  "resolveHash": "sha256:831f5486f799f8e43e141896e718a897563be20521fdbf0ab13ca53e9777ccd1",
+  "env": {
+    "fingerprint": "sha256:ba8e0fe3089ab50e4f708f73e42e1dd914456472429f1b67cfc538ad75f08944",
+    "components": {
+      "lending.schema": "sha256:f8e03d38af714e3af3af6542a10c70a8acb6157e8f00dda21f7903e379e58504",
+      "lending.seed": "A",
+      "lending.site": "TOOL LIBRARY - MILL LANE",
+      "skillroy.fingerprint": "1",
+      "skillroy.protocolMajor": "0"
+    }
+  },
+  "resolutions": {
+    "item": {
+      "query": "LendableItem",
+      "args": {
+        "perDay": false
+      },
+      "argsHash": "sha256:9a91f5a20cd8830275cbb1fbd447da3e76eda9affa505a47778848255940a42c",
+      "value": {
+        "barcode": "5000000000062",
+        "code": "HND-003",
+        "deposit": "0.99",
+        "title": "Screwdriver set"
+      },
+      "strategy": "CANONICAL_SQL",
+      "provenance": {
+        "resolver": "lending.sql.LendableItem",
+        "statements": [
+          {
+            "channel": "agent",
+            "source": "lending",
+            "sql": "SELECT code, barcode, title, deposit FROM item WHERE active = TRUE AND barcode IS NOT NULL AND per_day = ? AND deposit >= CAST(? AS DECIMAL(10,2)) AND deposit <= CAST(? AS DECIMAL(10,2)) ORDER BY deposit, code",
+            "params": [
+              false,
+              "0",
+              "99999999.99"
+            ],
+            "rowCount": 11,
+            "truncated": false
+          }
+        ],
+        "calls": [],
+        "candidates": 1,
+        "candidatesTruncated": false,
+        "rejected": []
+      },
+      "verifier": [
+        {
+          "id": "lending.deposit",
+          "passed": true,
+          "reason": "a scan of 5000000000062 finds HND-003 at 0.99, active, counted"
+        }
+      ],
+      "confidence": 1.0,
+      "approval": {
+        "state": "APPROVED",
+        "by": "approve"
+      },
+      "llm": null
+    },
+    "assistant": {
+      "query": "StaffWithPermission",
+      "args": {
+        "interactiveSignOn": true,
+        "limit": {
+          "gte": "0.99",
+          "type": "RETURN"
+        },
+        "perform": [
+          "SIGN_ON",
+          "RETURN"
+        ]
+      },
+      "argsHash": "sha256:324ab8b1e05c301ecce0d4d67547861e06dc1e4f3000b83f6282d1e3283875e7",
+      "value": {
+        "code": "100",
+        "limits": {
+          "RETURN": "20.00"
+        },
+        "permissions": [
+          "RETURN",
+          "SIGN_ON"
+        ]
+      },
+      "credential": {
+        "realm": "staff",
+        "id": "100"
+      },
+      "strategy": "CANONICAL_SQL",
+      "provenance": {
+        "resolver": "lending.sql.StaffWithPermission",
+        "statements": [
+          {
+            "channel": "agent",
+            "source": "lending",
+            "sql": "SELECT s.code AS code, s.auto_sign_on AS auto_sign_on, (SELECT MAX(rl.amount) FROM staff_role sr JOIN role_cap rl ON rl.role_id = sr.role_id WHERE sr.staff_code = s.code AND rl.kind = ?) AS limit_amount FROM staff s WHERE s.active = TRUE ORDER BY s.code",
+            "params": [
+              "RETURN"
+            ],
+            "rowCount": 6,
+            "truncated": false
+          },
+          {
+            "channel": "agent",
+            "source": "lending",
+            "sql": "SELECT DISTINCT rp.permission AS permission FROM staff_role sr JOIN role_permission rp ON rp.role_id = sr.role_id WHERE sr.staff_code = ? ORDER BY permission",
+            "params": [
+              "100"
+            ],
+            "rowCount": 2,
+            "truncated": false
+          },
+          {
+            "channel": "agent",
+            "source": "lending",
+            "sql": "SELECT DISTINCT rp.permission AS permission FROM staff_role sr JOIN role_permission rp ON rp.role_id = sr.role_id WHERE sr.staff_code = ? ORDER BY permission",
+            "params": [
+              "101"
+            ],
+            "rowCount": 1,
+            "truncated": false
+          },
+          {
+            "channel": "agent",
+            "source": "lending",
+            "sql": "SELECT DISTINCT rp.permission AS permission FROM staff_role sr JOIN role_permission rp ON rp.role_id = sr.role_id WHERE sr.staff_code = ? ORDER BY permission",
+            "params": [
+              "104"
+            ],
+            "rowCount": 0,
+            "truncated": false
+          },
+          {
+            "channel": "agent",
+            "source": "lending",
+            "sql": "SELECT DISTINCT rp.permission AS permission FROM staff_role sr JOIN role_permission rp ON rp.role_id = sr.role_id WHERE sr.staff_code = ? ORDER BY permission",
+            "params": [
+              "200"
+            ],
+            "rowCount": 3,
+            "truncated": false
+          },
+          {
+            "channel": "agent",
+            "source": "lending",
+            "sql": "SELECT DISTINCT rp.permission AS permission FROM staff_role sr JOIN role_permission rp ON rp.role_id = sr.role_id WHERE sr.staff_code = ? ORDER BY permission",
+            "params": [
+              "300"
+            ],
+            "rowCount": 3,
+            "truncated": false
+          }
+        ],
+        "calls": [],
+        "candidates": 1,
+        "candidatesTruncated": false,
+        "rejected": []
+      },
+      "verifier": [
+        {
+          "id": "lending.access.check",
+          "passed": true,
+          "reason": "SIGN_ON and RETURN permitted; RETURN of 0.99 allowed; limit 20.00; asked for a password"
+        }
+      ],
+      "confidence": 1.0,
+      "approval": {
+        "state": "APPROVED",
+        "by": "approve"
+      },
+      "llm": null
+    }
+  },
+  "oracles": {
+    "refund": {
+      "fn": "Money.negate",
+      "inputsHash": "sha256:9adeac8d0ab502c1cc76ea7adf1f1b43f3442246e0b67d50fcb442c32852d3cd",
+      "value": "-0.99"
+    }
+  }
+}

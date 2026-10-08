@@ -86,8 +86,9 @@ import java.util.concurrent.atomic.AtomicInteger;
  * {@code EngineEvents}): {@code lending.input} (posted to the engine's inbox and acknowledged when the engine takes
  * it), {@code lending.state}, {@code lending.loan}, {@code lending.prompt}, {@code lending.prompt.answer},
  * {@code lending.slip}, {@code lending.access.check}, {@code lending.deposit}, {@code lending.limits},
- * {@code lending.waiver.evaluate}, {@code app.state}, {@code swing.find} (the pack's key actions), {@code trace.mark}
- * and {@code evt.query}; the engine's callbacks become the events the pack's sync policy waits on
+ * {@code lending.waiver.evaluate}, {@code app.state}, {@code swing.find} (the pack's key actions), {@code trace.mark},
+ * {@code evt.query} and {@code sync.await} (as the agent's core primitive answers it, for a plan's {@code waitFor});
+ * the engine's callbacks become the events the pack's sync policy waits on
  * ({@code input.acked}, {@code input.requested}, {@code prompt.waiting}, {@code state.changed},
  * {@code loan.posted}, {@code slip.printed}). Every other method is {@code METHOD_NOT_FOUND} ({@code swing.snapshot}
  * among them: the snapshot text of a session is then the application state alone).
@@ -329,6 +330,7 @@ final class HeadlessDesk implements AgentConnection {
                 case "swing.find" -> find(p);
                 case "trace.mark" -> map("seq", publish(Topics.TRACE_MARK, new LinkedHashMap<>(p)));
                 case "evt.query" -> query(p);
+                case "sync.await" -> syncAwait(p);
                 default -> throw new RpcException(ErrorCodes.METHOD_NOT_FOUND, "unknown method " + method);
             };
         } catch (RpcException e) {
@@ -375,6 +377,32 @@ final class HeadlessDesk implements AgentConnection {
             publish(Topics.INPUT_ACKED, map("source", s));
         }
         return map("accepted", true, "acked", acked, "ackMs", 0L);
+    }
+
+    /**
+     * {@code sync.await}, as the agent's core primitive answers it: the first event after {@code since} whose topic
+     * matches {@code topics} (a glob or a list of globs) and whose payload has the {@code match} entries, as its JSON,
+     * or {@code TIMEOUT} with the newest sequence number after {@code timeoutMs} (default 10 s).
+     */
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> syncAwait(Map<String, Object> p) throws AgentRpcException {
+        Object topics = p.get("topics");
+        String globs = topics instanceof List<?> list ? String.join(",", list.stream().map(String::valueOf).toList())
+                : topics instanceof String s ? s : null;
+        if (globs == null) {
+            throw invalid("topics", "is missing");
+        }
+        if (!(p.get("since") instanceof Number since)) {
+            throw invalid("since", "is missing");
+        }
+        long timeoutMs = p.get("timeoutMs") instanceof Number n ? n.longValue() : 10_000L;
+        Map<String, Object> match = p.get("match") instanceof Map<?, ?> m ? (Map<String, Object>) m : null;
+        Event event = await(globs, since.longValue(), match, Duration.ofMillis(timeoutMs));
+        if (event == null) {
+            throw new RpcException(ErrorCodes.TIMEOUT, "no matching event within " + timeoutMs + " ms", map(
+                    "lastSeq", seq(), "topics", globs, "since", since.longValue(), "timeoutMs", timeoutMs));
+        }
+        return event.toJson();
     }
 
     private Map<String, Object> answer(Map<String, Object> p) {

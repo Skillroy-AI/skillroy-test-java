@@ -29,8 +29,10 @@ import org.junit.jupiter.api.TestClassOrder;
  * Phase 2 and Phase 3 (phase2-contracts.md 14.2, phase3-contracts.md 11.2): once per load mode and seed, the checks of
  * {@link ResolutionChecks} run scenario A and scenario B ({@code borrow-2-waive-1-slip}: the waiver, its oracle
  * cross-checked against the desk's dry run, the wrong oracle reported as ORACLE_SUSPECT) with the committed YAML,
- * plans and bindings; once per target Java, {@link PerTargetJavaChecks} covers the controller-side JDBC channel
- * against the desk's own database listener (both scenarios) and the assembled launcher.
+ * plans and bindings, and replay scenario C ({@code return-refunds-deposit}, authored by the planner: a return that
+ * hands the deposit back, phase5-contracts.md 14.3, 15.2 item 3); once per target Java, {@link PerTargetJavaChecks}
+ * covers the controller-side JDBC channel against the desk's own database listener (scenarios A and B) and the
+ * assembled launcher.
  *
  * <p>Needs a display (each mode's checks are skipped when headless); run it with
  * {@code ci/run-in-linux.sh mvn -o verify -pl samples/skillroy-sample-lending-scenarios -Dskillroy.headless=false}, and

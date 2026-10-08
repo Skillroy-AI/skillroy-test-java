@@ -1,0 +1,35 @@
+# Authored by the planner (skillroy author) on 2026-10-08T21:08:45.799600225Z with claude-opus-5-5; session 51e8b7a3-f492-4e43-971e-33139a86376d; model cost $0.8007093999999999.
+# Review this scenario and its plan before you commit them; its bindings are approved by a person (skillroy resolve).
+# Brief:
+#   A borrower returns the only item of a loan on the same day it was lent. The desk takes the item back, hands the deposit back in cash, and prints a slip for the return. Choose an item that needs no induction and an assistant who may lend and take returns within the item's deposit. Check the stored loan line is marked returned, the loan's total is back to zero, and the slip shows the deposit handed back.
+scenario: return-refunds-deposit
+pack: lending
+tags:
+  - return
+  - deposit
+  - slip
+resolve:
+  item: { query: LendableItem, strategy: sql, args: { perDay: false }, verify: lending.deposit }
+  assistant: { query: StaffWithPermission, strategy: sql, args: { perform: [SIGN_ON, RETURN], limit: { type: RETURN, gte: $item.deposit }, interactiveSignOn: true }, verify: lending.access.check, credential: { realm: staff, key: code } }
+oracle:
+  refund: { fn: Money.negate, args: $item.deposit }
+steps:
+  - { signOn: { staff: $assistant } }
+  - { scan: { item: $item } }
+  - { key: { action: DUE } }
+  - { deposit: {} }
+  - { waitFor: { topic: loan.posted, capture: { slot: lent, fields: { id: loanId } } } }
+  - { expect: { loan.returning: false, loan.total: $item.deposit } }
+  - { key: { action: RETURN } }
+  - { scan: { item: $item } }
+  - { key: { action: DUE } }
+  - { deposit: {} }
+  - { waitFor: { topic: loan.posted, capture: { slot: returned, fields: { id: loanId } } } }
+  - { expect: { loan.id: $returned.id, loan.returning: true, loan.lines: { size: 1 }, loan.lines.0.code: $item.code, loan.lines.0.returned: true, loan.total: $oracle.refund, loan.deposits.0.amount: $oracle.refund, loan.change: "0.00", slip.last.loanId: $returned.id, slip.last.text: { contains: RETURN } } }
+  - { expect: { slip.last.text: { contains: $oracle.refund } } }
+verify:
+  - { db.loan: { where: { id: $lent.id }, rows: 1, total: $item.deposit } }
+  - { db.loan: { where: { id: $returned.id }, rows: 1, total: $oracle.refund } }
+  - { db.loan_line: { where: { loan_id: $returned.id }, rows: 1, item_code: $item.code, returned: true, amount: $oracle.refund } }
+on_prompt:
+  unexpected: fail

@@ -1,0 +1,480 @@
+{
+  "planVersion": 5,
+  "scenarioId": "return-refunds-deposit",
+  "pack": "lending",
+  "packVersion": "0.4.0",
+  "sourceHash": "sha256:d561aa696958027cf913693717255b8a4d5bb0f02cf64db8f3c208c178928ff2",
+  "inference": "none",
+  "requires": [
+    "lending.access.check",
+    "lending.deposit"
+  ],
+  "slots": [
+    {
+      "name": "item",
+      "kind": "query",
+      "query": "LendableItem",
+      "args": {
+        "perDay": false
+      },
+      "strategy": [
+        "sql"
+      ],
+      "verify": [
+        "lending.deposit"
+      ]
+    },
+    {
+      "name": "assistant",
+      "kind": "query",
+      "query": "StaffWithPermission",
+      "args": {
+        "interactiveSignOn": true,
+        "limit": {
+          "gte": "$item.deposit",
+          "type": "RETURN"
+        },
+        "perform": [
+          "SIGN_ON",
+          "RETURN"
+        ]
+      },
+      "strategy": [
+        "sql"
+      ],
+      "verify": [
+        "lending.access.check"
+      ],
+      "credential": {
+        "realm": "staff",
+        "key": "code"
+      }
+    },
+    {
+      "name": "lent",
+      "kind": "capture",
+      "step": "s5",
+      "fields": [
+        "id"
+      ]
+    },
+    {
+      "name": "returned",
+      "kind": "capture",
+      "step": "s11",
+      "fields": [
+        "id"
+      ]
+    }
+  ],
+  "oracles": [
+    {
+      "name": "refund",
+      "fn": "Money.negate",
+      "args": "$item.deposit"
+    }
+  ],
+  "resolutionGraph": [
+    "item",
+    "assistant",
+    "oracle.refund"
+  ],
+  "steps": [
+    {
+      "id": "s1",
+      "verb": "signOn",
+      "source": {
+        "line": 17
+      },
+      "calls": [
+        {
+          "primitive": "lending.input",
+          "args": {
+            "source": "Entry",
+            "value": "$assistant.code"
+          },
+          "sync": "READY",
+          "timeoutMs": 10000
+        },
+        {
+          "primitive": "lending.input",
+          "args": {
+            "source": "Entry",
+            "value": "$assistant.password"
+          },
+          "sync": "READY",
+          "timeoutMs": 10000
+        }
+      ],
+      "expect": []
+    },
+    {
+      "id": "s2",
+      "verb": "scan",
+      "source": {
+        "line": 18
+      },
+      "calls": [
+        {
+          "primitive": "lending.input",
+          "args": {
+            "source": "Barcode",
+            "value": "$item.barcode"
+          },
+          "sync": "READY",
+          "timeoutMs": 10000
+        }
+      ],
+      "expect": []
+    },
+    {
+      "id": "s3",
+      "verb": "key",
+      "source": {
+        "line": 19
+      },
+      "calls": [
+        {
+          "primitive": "lending.input",
+          "args": {
+            "source": "Key.DUE"
+          },
+          "sync": "READY",
+          "timeoutMs": 10000
+        }
+      ],
+      "expect": []
+    },
+    {
+      "id": "s4",
+      "verb": "deposit",
+      "source": {
+        "line": 20
+      },
+      "calls": [
+        {
+          "primitive": "lending.input",
+          "args": {
+            "source": "Key.DEPOSIT"
+          },
+          "sync": "READY",
+          "timeoutMs": 10000
+        }
+      ],
+      "expect": []
+    },
+    {
+      "id": "s5",
+      "verb": "waitFor",
+      "source": {
+        "line": 21
+      },
+      "calls": [
+        {
+          "primitive": "sync.await",
+          "args": {
+            "timeoutMs": 10000,
+            "topics": "loan.posted"
+          },
+          "sync": "NONE",
+          "timeoutMs": 11000,
+          "capture": {
+            "slot": "lent",
+            "fields": {
+              "id": "loanId"
+            }
+          }
+        }
+      ],
+      "expect": []
+    },
+    {
+      "id": "s6",
+      "verb": "expect",
+      "source": {
+        "line": 22
+      },
+      "calls": [],
+      "expect": [
+        {
+          "path": "loan.returning",
+          "matcher": {
+            "equals": false
+          }
+        },
+        {
+          "path": "loan.total",
+          "matcher": {
+            "equals": "$item.deposit"
+          }
+        }
+      ]
+    },
+    {
+      "id": "s7",
+      "verb": "key",
+      "source": {
+        "line": 23
+      },
+      "calls": [
+        {
+          "primitive": "lending.input",
+          "args": {
+            "source": "Key.RETURN"
+          },
+          "sync": "READY",
+          "timeoutMs": 10000
+        }
+      ],
+      "expect": []
+    },
+    {
+      "id": "s8",
+      "verb": "scan",
+      "source": {
+        "line": 24
+      },
+      "calls": [
+        {
+          "primitive": "lending.input",
+          "args": {
+            "source": "Barcode",
+            "value": "$item.barcode"
+          },
+          "sync": "READY",
+          "timeoutMs": 10000
+        }
+      ],
+      "expect": []
+    },
+    {
+      "id": "s9",
+      "verb": "key",
+      "source": {
+        "line": 25
+      },
+      "calls": [
+        {
+          "primitive": "lending.input",
+          "args": {
+            "source": "Key.DUE"
+          },
+          "sync": "READY",
+          "timeoutMs": 10000
+        }
+      ],
+      "expect": []
+    },
+    {
+      "id": "s10",
+      "verb": "deposit",
+      "source": {
+        "line": 26
+      },
+      "calls": [
+        {
+          "primitive": "lending.input",
+          "args": {
+            "source": "Key.DEPOSIT"
+          },
+          "sync": "READY",
+          "timeoutMs": 10000
+        }
+      ],
+      "expect": []
+    },
+    {
+      "id": "s11",
+      "verb": "waitFor",
+      "source": {
+        "line": 27
+      },
+      "calls": [
+        {
+          "primitive": "sync.await",
+          "args": {
+            "timeoutMs": 10000,
+            "topics": "loan.posted"
+          },
+          "sync": "NONE",
+          "timeoutMs": 11000,
+          "capture": {
+            "slot": "returned",
+            "fields": {
+              "id": "loanId"
+            }
+          }
+        }
+      ],
+      "expect": []
+    },
+    {
+      "id": "s12",
+      "verb": "expect",
+      "source": {
+        "line": 28
+      },
+      "calls": [],
+      "expect": [
+        {
+          "path": "loan.id",
+          "matcher": {
+            "equals": "$returned.id"
+          }
+        },
+        {
+          "path": "loan.returning",
+          "matcher": {
+            "equals": true
+          }
+        },
+        {
+          "path": "loan.lines",
+          "matcher": {
+            "size": 1
+          }
+        },
+        {
+          "path": "loan.lines.0.code",
+          "matcher": {
+            "equals": "$item.code"
+          }
+        },
+        {
+          "path": "loan.lines.0.returned",
+          "matcher": {
+            "equals": true
+          }
+        },
+        {
+          "path": "loan.total",
+          "matcher": {
+            "equals": "$oracle.refund"
+          }
+        },
+        {
+          "path": "loan.deposits.0.amount",
+          "matcher": {
+            "equals": "$oracle.refund"
+          }
+        },
+        {
+          "path": "loan.change",
+          "matcher": {
+            "equals": "0.00"
+          }
+        },
+        {
+          "path": "slip.last.loanId",
+          "matcher": {
+            "equals": "$returned.id"
+          }
+        },
+        {
+          "path": "slip.last.text",
+          "matcher": {
+            "contains": "RETURN"
+          }
+        }
+      ]
+    },
+    {
+      "id": "s13",
+      "verb": "expect",
+      "source": {
+        "line": 29
+      },
+      "calls": [],
+      "expect": [
+        {
+          "path": "slip.last.text",
+          "matcher": {
+            "contains": "$oracle.refund"
+          }
+        }
+      ]
+    }
+  ],
+  "verify": [
+    {
+      "db": "loan",
+      "source": "lending",
+      "sql": "SELECT id, staff_code, posted_at, total FROM loan WHERE id = ? ORDER BY id",
+      "params": [
+        {
+          "kind": "INTEGER",
+          "value": "$lent.id"
+        }
+      ],
+      "rows": {
+        "equals": 1
+      },
+      "expect": {
+        "total": {
+          "equals": "$item.deposit"
+        }
+      }
+    },
+    {
+      "db": "loan",
+      "source": "lending",
+      "sql": "SELECT id, staff_code, posted_at, total FROM loan WHERE id = ? ORDER BY id",
+      "params": [
+        {
+          "kind": "INTEGER",
+          "value": "$returned.id"
+        }
+      ],
+      "rows": {
+        "equals": 1
+      },
+      "expect": {
+        "total": {
+          "equals": "$oracle.refund"
+        }
+      }
+    },
+    {
+      "db": "loan_line",
+      "source": "lending",
+      "sql": "SELECT loan_id, line_no, item_code, qty, unit_deposit, amount, returned FROM loan_line WHERE loan_id = ? ORDER BY loan_id, line_no",
+      "params": [
+        {
+          "kind": "INTEGER",
+          "value": "$returned.id"
+        }
+      ],
+      "rows": {
+        "equals": 1
+      },
+      "expect": {
+        "amount": {
+          "equals": "$oracle.refund"
+        },
+        "item_code": {
+          "equals": "$item.code"
+        },
+        "returned": {
+          "equals": true
+        }
+      }
+    }
+  ],
+  "cleanup": [
+    {
+      "primitive": "lending.input",
+      "args": {
+        "source": "Key.SIGN_OFF"
+      },
+      "sync": "READY",
+      "timeoutMs": 10000
+    }
+  ],
+  "launchProperties": {},
+  "artifacts": [],
+  "onPrompt": {
+    "unexpected": "fail"
+  },
+  "stepTimeoutMs": 10000,
+  "bindTimeoutMs": 60000
+}

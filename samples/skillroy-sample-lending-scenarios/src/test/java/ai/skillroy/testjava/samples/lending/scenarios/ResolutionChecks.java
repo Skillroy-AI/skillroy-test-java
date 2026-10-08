@@ -92,11 +92,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeFalse;
 
 /**
- * Phase 2 and Phase 3 end to end (phase2-contracts.md 14.2, phase3-contracts.md 11.2): the checks of
- * {@code ResolutionChecks} against one sample lending desk launched on {@link #env()}'s seed with the agent loaded in
- * {@link #mode()}, through the real {@code PlanExecutor}, {@code Binder} and {@code AgentClient} over HTTP, with the
- * committed YAML, plans and bindings of scenarios A and B. The target is launched without any scenario-specific
- * property: which seed it runs is the environment's business, and the same committed plans run on both.
+ * Phase 2 and Phase 3 end to end (phase2-contracts.md 14.2, phase3-contracts.md 11.2), and scenario C's item of
+ * Phase 5 (phase5-contracts.md 15.2 item 3): the checks of {@code ResolutionChecks} against one sample lending desk
+ * launched on {@link #env()}'s seed with the agent loaded in {@link #mode()}, through the real {@code PlanExecutor},
+ * {@code Binder} and {@code AgentClient} over HTTP, with the committed YAML, plans and bindings of scenarios A, B and
+ * C. The target is launched without any scenario-specific property: which seed it runs is the environment's business,
+ * and the same committed plans run on both.
  *
  * <ol>
  *   <li>{@link #liveResolvesTheTableOf13_4AndLeavesTheDeskUntouched()}: P2 item 1;</li>
@@ -113,6 +114,8 @@ import static org.junit.jupiter.api.Assumptions.assumeFalse;
  *   <li>{@link #aWrongOracleIsOracleSuspectAndNothingIsSent()}: P3 item 6;</li>
  *   <li>{@link #aGuardedCrossCheckThatCannotRunMakesTheRunDegraded()}: the guarded form of P3 10.4;</li>
  *   <li>{@link #scenarioBStillRunsAfterTheWrongOracle()}: P3 item 7;</li>
+ *   <li>{@link #scenarioCReplaysGreenAndTheReturnIsStored()}: P5 item 3, scenario C, which the planner
+ *       authored;</li>
  *   <li>{@link #noPasswordIsWrittenAsAValue()}: P2 item 10 and P3 item 8, over the outputs of every check
  *       above;</li>
  *   <li>{@link #theNextScenarioStillRuns()}: P2 item 11.</li>
@@ -139,6 +142,8 @@ abstract class ResolutionChecks {
     Path replayDir;
     /** The output directory of check 10's {@code replay} run of scenario B, whose calls P3 item 8 looks at (A34). */
     Path replayDirB;
+    /** The output directory of the {@code replay} run of scenario C, whose calls item 10 looks at too (A34). */
+    Path replayDirC;
 
     abstract LendingTarget.Mode mode();
 
@@ -414,27 +419,27 @@ abstract class ResolutionChecks {
     }
 
     /**
-     * Item 10 (and P3 item 8): no file under the output directories of the checks before this one (scenario A's and
-     * scenario B's), no written bindings file, neither scenario's plan, no {@code RunResult} and no JUnit XML
-     * rendered from them holds the password of a staff member those scenarios signed on or authorised with as a
+     * Item 10 (and P3 item 8): no file under the output directories of the checks before this one (scenario A's,
+     * scenario B's and scenario C's), no written bindings file, no scenario's plan, no {@code RunResult} and no JUnit
+     * XML rendered from them holds the password of a staff member those scenarios signed on or authorised with as a
      * value (a JSON string value, an XML attribute value or text token, a whitespace-delimited token). With A34 the
      * same holds for the agent's own log after those runs (every line, split on whitespace and quotes), and in the
      * {@code replay} run of check 3 every {@code lending.input} call that entered a password (recorded as
      * {@code <redacted>}: the assistant's sign-on and the supervisor's authorisation) carried
      * {@code _meta.secretParams: ["value"]}, and no other {@code lending.input} call did; so in scenario B's
-     * {@code replay} run of check 10 (its assistant's sign-on only). Without the credentials, a
+     * {@code replay} run of check 10 and in scenario C's (their assistant's sign-on only). Without the credentials, a
      * {@code replay} run is ENVIRONMENT naming {@code staff/<code>} and a {@code live} run is ALL_REJECTED with
      * "no credential".
      */
     @Test
-    @Order(14)
+    @Order(15)
     void noPasswordIsWrittenAsAValue() throws Exception {
         ScenarioA.Expected expected = ScenarioA.expected(env());
         Set<String> passwords = Set.copyOf(List.of(expected.assistantPassword(), expected.supervisorPassword(),
-                ScenarioB.expected(env()).assistantPassword()));
+                ScenarioB.expected(env()).assistantPassword(), ScenarioC.expected(env()).assistantPassword()));
         Path xml = ItEnv.runDir("resolution", slug() + "/junit-report.xml");
         new JunitXmlReporter().write(xml, "lending-resolution-" + slug(), results, null);
-        List<Path> files = new ArrayList<>(List.of(xml, ScenarioA.plan(), ScenarioB.plan()));
+        List<Path> files = new ArrayList<>(List.of(xml, ScenarioA.plan(), ScenarioB.plan(), ScenarioC.plan()));
         for (Path output : outputs) {
             if (Files.isDirectory(output)) {
                 try (Stream<Path> walk = Files.walk(output)) {
@@ -481,6 +486,8 @@ abstract class ResolutionChecks {
         assertPasswordInputsAnnounced(replayDir, Plan.read(ScenarioA.plan()), List.of("signOn", "authorise"));
         assertNotNull(replayDirB, "check 10's replay ran");
         assertPasswordInputsAnnounced(replayDirB, Plan.read(ScenarioB.plan()), List.of("signOn"));
+        assertNotNull(replayDirC, "scenario C's replay ran");
+        assertPasswordInputsAnnounced(replayDirC, Plan.read(ScenarioC.plan()), List.of("signOn"));
 
         Runs.Outcome replay = Runs.run(client(), Plan.read(ScenarioA.plan()), runDir("replay-no-credentials"),
                 bind(BindMode.REPLAY).withCredentials(Credentials.empty()));
@@ -500,7 +507,7 @@ abstract class ResolutionChecks {
 
     /** Item 11: after the failures above, a scenario still passes without a restart. */
     @Test
-    @Order(15)
+    @Order(16)
     void theNextScenarioStillRuns() throws Exception {
         Runs.Outcome next = env() == Env.SEED_A
                 ? Runs.run(client(), Runs.committed("basic-loan"), runDir("basic-loan-after"), bind(BindMode.REPLAY))
@@ -741,6 +748,43 @@ abstract class ResolutionChecks {
                 bind(BindMode.REPLAY));
         results.add(again.result());
         Runs.assertPassedWithoutSleeping(again);
+        assertSignedOffAndQuiet(-1);
+    }
+
+    // ------------------------------------------------------------------ scenario C (phase5-contracts.md 15.2)
+
+    /**
+     * P5 item 3 (phase5-contracts.md 15.2, 14.3): scenario C, which the planner authored, replays green on this
+     * environment. Its committed plan is the one its YAML compiles to, and its {@code .authoring.json} is beside the
+     * YAML; the plan runs in {@code replay} with the committed bindings and passes: the executor never paused, every
+     * expectation and {@code db} check held at its first attempt (over the agent channel), no resolver ran, each
+     * slot's verifier ran once and no model was called, and the return is stored ({@link ScenarioC#assertReplayed}:
+     * the two postings in the {@code db} checks, the desk's last posting and its last two slips read back through the
+     * agent). The slip the desk's printer holds ({@code device.state}, the base root {@code devices}) is the return's
+     * and names the refund.
+     */
+    @Test
+    @Order(14)
+    void scenarioCReplaysGreenAndTheReturnIsStored() throws Exception {
+        Plan plan = Plan.read(ScenarioC.plan());
+        assertEquals(PlanCompiler.compile(ScenarioC.yaml(), Runs.PACK).toJsonText(), plan.toJsonText(),
+                "its plan and the committed one are identical");
+        assertTrue(Files.isRegularFile(ScenarioC.authoring()), "its .authoring.json is present beside the YAML");
+        Runs.Outcome outcome = Runs.run(client(), plan, runDir("c-replay"), bind(BindMode.REPLAY));
+        replayDirC = outcome.dir();
+        results.add(outcome.result());
+        Runs.assertPassedWithoutSleeping(outcome);
+        ItEnv.timing("java=" + java + " mode=" + mode().slug + " env=" + env().id + " scenario=" + ScenarioC.ID
+                + " ms=" + outcome.result().duration().toMillis());
+        ScenarioC.assertReplayed(outcome, env(), "agent", client());
+        assertTrue(ledger.isEmpty(), "no model call in this target's runs");
+        Map<String, Object> bindings = Json.parseObject(Files.readString(outcome.dir().resolve("bindings.json")));
+        Object returnedId = ((Map<?, ?>) ((Map<?, ?>) bindings.get("captured")).get("returned")).get("id");
+        Map<?, ?> printed = (Map<?, ?>) LoadModeChecks.value(client().call("device.state", Map.of("id", "printer"),
+                CALL)).get("last");
+        assertEquals(returnedId, printed.get("loanId"), String.valueOf(printed));
+        String text = String.valueOf(printed.get("text"));
+        assertTrue(text.contains("RETURN " + returnedId) && text.contains(ScenarioC.expected(env()).refund()), text);
         assertSignedOffAndQuiet(-1);
     }
 
