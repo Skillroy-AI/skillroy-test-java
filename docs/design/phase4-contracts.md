@@ -1769,7 +1769,10 @@ Chromium refuses a renderer-initiated navigation of such a document; the kit now
 (4.x, A37, built 2026-10-08: item 12 makes the kit thirteen tests. Against real JCEF it runs only in the Linux image
 under the profile `jcef`, in the web host's two kit executions, and it had not been run when A37 was built: the
 orchestrator's matrix runs it. `CefBrowser.reload()` of the web host's `data:` pages is what frozen-target recovery
-already used, §5.3.)
+already used, §5.3. Run 2026-10-08 in the first Phase 5 matrix: item 12 failed on the kit's `DOCUMENT_MARK` script, whose
+value was the window (`Object.defineProperty` returns its object) and which `Runtime.evaluate` by value refuses ("Object
+reference chain is too long"); the expression now ends with a string, and the off-screen kit passes 13 of 13 on a Java 8
+and on a Java 25 test JVM.)
 
 ---
 

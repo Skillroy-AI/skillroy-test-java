@@ -54,9 +54,13 @@ public final class KitScripts {
     public static final String INIT_NOW = "typeof window.__kitInit";
     /** What the page's inline script saw of the marker while the document was parsed. */
     public static final String INIT_AT_PARSE = "document.documentElement.getAttribute('data-init-at-parse')";
-    /** Marks the current document (item 12): a non-enumerable property that a new document does not have. */
-    public static final String DOCUMENT_MARK =
-            "Object.defineProperty(window, '__kitMark', {value: 'set', configurable: true, enumerable: false})";
+    /**
+     * Marks the current document (item 12): a non-enumerable property that a new document does not have. The
+     * expression ends with a string, since an engine that evaluates by value cannot serialise what
+     * {@code Object.defineProperty} returns (the window; Chromium: "Object reference chain is too long").
+     */
+    public static final String DOCUMENT_MARK = "(Object.defineProperty(window, '__kitMark', "
+            + "{value: 'set', configurable: true, enumerable: false}), 'set')";
     /** "string" while the document is the one {@link #DOCUMENT_MARK} marked, else "undefined". */
     public static final String DOCUMENT_MARK_NOW = "typeof window.__kitMark";
 

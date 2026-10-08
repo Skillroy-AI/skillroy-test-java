@@ -59,7 +59,7 @@ review items of the end-to-end review, and `Sn` the confirmed findings of the se
 | B21 | Phase 4 contract answers | The fifteen questions of `design/phase4-contracts.md` §15, answered by the orchestrator | Taken without the owner 2026-10-06; **confirmed by the owner 2026-10-07** (all fifteen): the script library in `skillroy-protocol`; `skillroy-cdp` optional; the JCEF web host behind the profile `jcef`; frames in the first cut; six read primitives not mutating; frozen-target recovery by opt-in; BS5 against JCEF's Chromium; `auto` path policy; plan version 4; web evidence always; JxBrowser 7, 8 and 9; every rendering mode BS8 cleared; the configured port read from private state; `data:` pages; the image's new packages | Specified 2026-10-06; built, reviewed and fixed 2026-10-07 (`design/phase4-contracts.md` as built); the build took the decisions D59-D69; the runs in `TODO.md` | D59-D69, taken without the owner, stand unless the owner objects (a possible B22) |
 | B22 | Phase 4 build decisions | D59-D69 of `design/phase4-contracts.md` §14, taken by the orchestrator during the build and the review | Taken without the owner 2026-10-07; **confirmed by the owner 2026-10-07** (`B22 ok`, all eleven): the trace policy; the narrowed re-probe; the probe's loading rule; the JCEF re-send rule; one outstanding drain; the CDP viewport override on its own session; the endpoint ownership check; the `web.browsers` floor; `BrowserExtras`; `Invocation.secretParams()`; the JCEF raw channel | Built and tested 2026-10-07; verified in the Linux matrix (`TODO.md`) | |
 | B23 | Phase 5 contract answers | The eighteen questions of `design/phase5-contracts.md` §17, answered by the orchestrator | Taken without the owner 2026-10-08, **provisional**: the nightly job writes `APPROVED` and the pull request is the review; `approve` reuses an unchanged verified tier (b) value; confidence and row bounds as gates beside the verifier; the strict `SqlGuard`; committed masked recordings so that CI needs no key; refusal fallbacks on; the MCP server read-only by default, destructive never; the planner as the `claude` CLI headless; triage as a separate command; plan version 5; the `call` verb; `REQUIRED` approval on exports; budget exhaustion as `RESOLUTION_FAILED`; prompts not logged by default; Sonnet/Opus/Haiku by role; verbs as the session's tools; three new controller-side dependencies; `inference.yaml` beside `credentials.yaml` | Specified 2026-10-08 (`design/phase5-contracts.md`, not built); spikes BS6 and BS13 started the same night | All eighteen, until the owner answers (`B23 ok` or `B23 Qn veto`) |
-| B24 | Phase 5 build decisions | D88-D94 of `design/phase5-contracts.md` §16, taken by the orchestrator during the build on 2026-10-08 | Taken without the owner 2026-10-08, **provisional**: the Anthropic Java SDK pinned to its current line (2.70.0, MIT) with the client built explicitly and the gateway retrying within its own deadline, MCP as `mcp-core` + `mcp-json-jackson2`; a `confirm` argument of any call sent as `_meta.confirm`; a tier (b) row completed by the pack's `ValueLoader`; the inference record in the ledger entry's details; a verb/primitive tool-name collision resolved by the suffix `_primitive`; the rationale and rejections through `ResolveContext` seams into the provenance and the bindings file; a credential declarable for a session's resolve | Built 2026-10-08 (waves 1, 2a, 2b, 2c; `TODO.md`) | All seven, until the owner answers (`B24 ok` or `B24 Dnn veto`) |
+| B24 | Phase 5 build decisions | D88-D95 of `design/phase5-contracts.md` §16, taken by the orchestrator during the build on 2026-10-08 | Taken without the owner 2026-10-08, **provisional**: the Anthropic Java SDK pinned to its current line (2.70.0, MIT) with the client built explicitly and the gateway retrying within its own deadline, MCP as `mcp-core` + `mcp-json-jackson2`; a `confirm` argument of any call sent as `_meta.confirm`; a tier (b) row completed by the pack's `ValueLoader`; the inference record in the ledger entry's details; a verb/primitive tool-name collision resolved by the suffix `_primitive`; the rationale and rejections through `ResolveContext` seams into the provenance and the bindings file; a credential declarable for a session's resolve; the CLI session recovering the target when it closes after a mutating call | Built 2026-10-08 (waves 1, 2a, 2b, 2c, the matrix fix; `TODO.md`) | All eight, until the owner answers (`B24 ok` or `B24 Dnn veto`) |
 
 Phase 1 details are fixed in `design/phase1-contracts.md`; the same file carries the Phase 1.x specification
 (A17-A33, H1-H3). Phase 2 details are fixed in `design/phase2-contracts.md`, whose open questions B19 answers. What
@@ -1030,7 +1030,7 @@ for progress on the provisional answers.
 
 ## B24 Phase 5 build decisions (provisional, 2026-10-08)
 
-**From:** the decisions taken while building Phase 5 on 2026-10-08 without the owner, recorded as D88-D94 in
+**From:** the decisions taken while building Phase 5 on 2026-10-08 without the owner, recorded as D88-D95 in
 `design/phase5-contracts.md` §16 (each with the alternatives rejected and the reason). **Provisional** until the owner
 answers through the interview page (`B24 ok`, or `B24 Dnn veto`). **Question.** Seven points the build could have decided
 either way.
@@ -1044,6 +1044,7 @@ either way.
 | D92 | A verb and a domain primitive that would share a tool name? | Both offered, the primitive with the suffix `_primitive` | `B24 D92 veto`: refuse the start, or hide the primitive |
 | D93 | How do a proposal's rationale and rejections reach the provenance and the file? | `ResolveContext.rationale` and `reject` seams; the bindings file writes `provenance.rationale` last and omits it when null | `B24 D93 veto`: notes only |
 | D94 | May a session's resolve declare a credential for a slot? | Yes (`session resolve … --credential <realm>.<key>`; the tools' half open) | `B24 D94 veto`: no credential from a session |
+| D95 | Should the CLI's `session` recover the target when it closes after a mutating call (as a run does)? | Yes, always (`recoverOnClose` on; the MCP server keeps its own option) | `B24 D95 veto`: leave the target as the person left it |
 
 **What it changed.** Each is built and tested (`TODO.md`, "Phase 5"). **Blocks.** Nothing; provisional.
 
@@ -1052,7 +1053,7 @@ either way.
 ## Questions for the owner
 
 **B23** (the Phase 5 contract's eighteen provisional answers, one withdrawn) and **B24** (the seven decisions the Phase 5
-build took, D88-D94) are open as of 2026-10-08, on the interview page.
+build took, D88-D95) are open as of 2026-10-08, on the interview page.
 Before it, none was open as of the evening of 2026-10-07: the owner confirmed **B21** (the fifteen answers of the Phase 4 contract)
 and **B22** (the eleven decisions of the Phase 4 build, D59-D69) on 2026-10-07 through the interview page, both
 without a veto. The owner answered every earlier

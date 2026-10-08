@@ -927,7 +927,11 @@ night of 2026-10-07 to 2026-10-08, integrated into the main tree by file list.
 - [x] A36: a call the CDP path serves reads the agent's sequence once, not three times (gap 45); built 2026-10-08
 - [x] A37: `WebBrowser.reload(boolean)` and `bitmapSource()` as SPI default methods, `BitmapSource`, `BrowserExtras`
   deleted, the built-in adapters override, kit item 12 (gap 40); built 2026-10-08, agent-api 110 and agent-web 172 tests
-  green natively; kit item 12 against real JCEF waits for the next Linux matrix
+  green natively. **Kit item 12 against real JCEF ran in the first Phase 5 matrix (arm64 image, 2026-10-08) and failed on
+  the kit's own script**: `DOCUMENT_MARK` returned the window (the value of `Object.defineProperty`), which Chromium's
+  `Runtime.evaluate` by value refuses ("Object reference chain is too long"); the expression now ends with a string and
+  the fake answers it the same way. After the fix the kit's off-screen execution passes in the image, 13 of 13, on a
+  Java 8 and on a Java 25 test JVM
 - [x] A38: the re-probe after `window.opened` at most once a second, on the worker, nothing dropped (gap 42); built
   2026-10-08 (`WindowOpenedPaceTest`)
 - [x] A39: the `COMPONENT` rung's window activation re-issues `toFront()` + `requestFocus()` once a second while it waits,
@@ -964,9 +968,14 @@ pack's allow-list, verb schemas and `ValueLoader`s, scenario D with its plan and
 desk, `InferenceEndToEndIT` for the image; `skillroy-mcp` (the server over stdio on the MCP Java SDK 2.0.1); the CLI's
 `re-resolve`, `mcp`, `author`, `triage` and `session` commands, the inference options of `run` and `resolve`, the
 approval screen's tier (b) lines, `inference.jsonl`, the distribution (48.7 MB, 43 jars, `THIRD-PARTY.txt` with the MIT
-texts) and the runner's key pass-through. The build took decisions D88-D94 (`DECISIONS.md` B24, provisional). The
-contract carries an "As built" note under every section the build changed. What was run is in the table below and
-under "Status at a glance".
+texts) and the runner's key pass-through. The build took decisions D88-D95 (`DECISIONS.md` B24, provisional). The
+contract carries an "As built" note under every section the build changed. **The first Linux matrix of the committed
+tree (arm64 image, 2026-10-08)** found two failures in `InferenceEndToEndIT`, whose checks run only with a display and
+so had never run before: a test that expected `approve` with the reuse rule to rewrite an identical bindings file
+(approve step 8 leaves it alone; the test now asserts that), and the export's replay signing on to a desk the `session`
+command had left signed on (the desk took the staff code for an item); the CLI session now closes with
+`recoverOnClose` on (D95). The class then passed in full in the image (88 cases on the four load modes and two seeds,
+the two repaired checks green on both seeds). What was run is in the table below and under "Status at a glance".
 
 - [x] `skillroy-inference` (created here, above `skillroy-scenario`); the `InferenceGateway` SPI with typed content
   parts (text, image, tool use, tool result, and an opaque part) and the Claude implementation (B7); built 2026-10-08,

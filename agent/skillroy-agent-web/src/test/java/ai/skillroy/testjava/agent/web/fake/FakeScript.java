@@ -369,7 +369,7 @@ public final class FakeScript {
         }
         if (KitScripts.DOCUMENT_MARK.equals(e)) {
             doc.hidden.put("__kitMark", "set");
-            return UNDEFINED;
+            return "set";
         }
         if (KitScripts.DOCUMENT_MARK_NOW.equals(e)) {
             return doc.hidden.containsKey("__kitMark") ? "string" : "undefined";

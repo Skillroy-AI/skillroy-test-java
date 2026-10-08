@@ -221,8 +221,10 @@ final class SessionCommand implements Command {
                 BindOptions bind = BindOptions.defaults().withMode(BindMode.LIVE).withEnvId(settings.envId())
                         .withBindingsRoot(settings.root()).withCredentials(credentials).withLedger(ledger)
                         .withInference(inference);
+                // Recover on close (D95): the desk is left as a run leaves it, so that the export replays at once.
                 SessionOptions options = SessionOptions.defaults(dir).withClock(clock).withBind(bind)
-                        .withReadOnly(args.flag(READ_ONLY)).withWebPathLoader(packs.loader()).withId(sessionId);
+                        .withReadOnly(args.flag(READ_ONLY)).withRecoverOnClose(true)
+                        .withWebPathLoader(packs.loader()).withId(sessionId);
                 ExecutorSession session;
                 try {
                     session = ExecutorSession.open(pack, target.client(), options);

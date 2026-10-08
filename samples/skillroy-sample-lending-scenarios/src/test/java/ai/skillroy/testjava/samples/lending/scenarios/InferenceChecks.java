@@ -83,6 +83,7 @@ import java.util.stream.Stream;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeFalse;
@@ -266,7 +267,11 @@ abstract class InferenceChecks {
         BindOutcome reused = Binder.bind(Plan.read(ScenarioD.plan()), Runs.PACK, client(), approve(root,
                 ScriptedAnswers.recorded(ScriptedAnswers.recordings()), again), BindListener.NONE);
         assertTrue(again.isEmpty(), "model calls: 0 with the reuse rule: " + again.entries());
-        assertEquals(committed, Files.readString(reused.written(), StandardCharsets.UTF_8), "the identical file");
+        // The identical file is left alone (approve step 8 writes nothing when the text is unchanged): the outcome
+        // names no written file, its file is the committed one and the first call's file is untouched on disk.
+        assertNull(reused.written(), "an unchanged file is not rewritten");
+        assertEquals(committed, reused.file().toJsonText(), "the identical file");
+        assertEquals(committed, Files.readString(outcome.written(), StandardCharsets.UTF_8), "untouched on disk");
         assertSignedOffAndQuiet(seq);
     }
 
