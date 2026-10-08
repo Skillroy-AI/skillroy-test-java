@@ -84,6 +84,26 @@ in the contract). The final tree's matrix is the first table below. Owed to a li
 key's workspace id ("Walls"): the planner-authored sample scenario C, live recordings in place of the scripted
 stand-ins, the live profiles and the live acceptance of the contract's §15.3.
 
+Verification of the final Phase 5 tree (`e7acd61`, the tree after the review's fix wave), 2026-10-08: the arm64 image
+natively twice in a row, then the amd64 image under emulation once, three legs each; the counts are the main tree's own
+(the summariser now ignores the agents' worktrees and the spikes):
+
+| Configuration | Command (from the repo root) | Result |
+|---|---|---|
+| Native, JDK 26, headless (`7a0b4c7`) | `mvn -o -q verify` | 3968 tests, 0 failures, 0 errors, 367 skipped (surefire and failsafe reports together; the image-only classes skip) |
+| arm64 image (JDK 25), targets on Java 25 | `ci/run-in-linux.sh mvn -o -q clean verify -Pjcef -Dskillroy.jcef.platform=linux-arm64 -Dskillroy.headless=false` | run 1: 4101 / 0 / 0 / 68, 817 s; run 2: stopped at `skillroy-mcp` after 253 s on one error, `ScenarioRunPolicyTest.aRunOnAClientsBehalfEvaluatesExpectationsOnMaskedValues` (the MCP client's 20 s request timeout: a defect of the SDK's stdio transport under load, found, fixed and explained below under "Status at a glance"); on the fixed tree (`7a0b4c7`, `SerialSends`) the leg ran twice more: 4102 / 0 / 0 / 68, 820 s, and 4102 / 0 / 0 / 69, 835 s |
+| arm64 image, targets on Java 8 (aarch64 JDK 8u504) | the same plus `-Dskillroy.it.targetJava=/opt/jdk8/bin/java` | run 1: 4101 / 0 / 0 / 96, 737 s; run 2: 4101 / 0 / 0 / 96, 745 s |
+| arm64 image, agent side, test JVMs and targets on Java 8 | the Java 8 command plus `-Djvm=/opt/jdk8/bin/java`, `-pl` the twelve agent-side modules | run 1: 1380 / 0 / 0 / 21, 176 s; run 2: 1380 / 0 / 0 / 21, 187 s |
+| amd64 image (JDK 25, emulated), targets on Java 25 | the arm64 command with `linux-amd64` and `-Dskillroy.test.extraArgLine=-Djdk.lang.Process.launchMechanism=FORK` | 4101 / 0 / 0 / 68, 1231 s |
+| amd64 image, targets on Java 8 (1.8.0_492) | the same plus `-Dskillroy.it.targetJava=/opt/jdk8/bin/java` | 4101 / 0 / 0 / 96, 1063 s |
+| amd64 image, agent side, test JVMs and targets on Java 8 | the Java 8 command plus `-Djvm=/opt/jdk8/bin/java`, `-pl` the twelve agent-side modules | 1380 / 0 / 0 / 21, 261 s |
+
+The whole-reactor legs run the end-to-end acceptance of every phase, Phase 5's `InferenceEndToEndIT` included (its 88
+cases on the four load modes and two seeds, among them the MCP server as a subprocess, which since the fix wave sends the
+allow-list check's statements through the target's `data.query` at start, the session command's export replayed, and
+the secret scan last), and the web host's kit against real JCEF off screen and windowed; the agent-side leg runs the
+kit's off-screen half on a Java 8 test JVM (item 12 among them).
+
 Verification of the Phase 5 tree, first round (2026-10-08): the committed build (`7e18e0c`) on the arm64 image natively,
 then the tree with that round's three fixes (`a6ed6e9`) on the amd64 image under emulation. The arm64 counts of this
 round are not recorded: the summariser also counted the test reports of the review agents' worktrees inside the tree
@@ -221,6 +241,20 @@ the times are slow. Java 21 targets are no longer run (B3).
   The two key focus logs and the run summaries are kept with the session notes. Open: the native reason for (2); the
   garbage-collection-dependent skip of `SwingDisplayTest.refBecomesStaleOnceTheComponentIsCollected`, seen in 3 of 60
   runs.
+- **A transport defect that looked like a flake (one occurrence in the matrix, 2026-10-08; once more natively during
+  the fix wave): found and fixed.** In the third arm64 run of the final Phase 5 tree the whole-reactor leg stopped at
+  `skillroy-mcp`: `ScenarioRunPolicyTest.aRunOnAClientsBehalfEvaluatesExpectationsOnMaskedValues` ended with the MCP
+  Java SDK client's 20 s request timeout while `skillroy_scenario_run` ran a plan in process. The investigation
+  reproduced it under CPU load (3 of 15 runs; 0 of 14 without load) and found the cause in the SDK's stdio transport
+  (2.0.1): its outgoing sink refuses a second thread while another is still putting a message in, drops that message
+  ("Failed to enqueue message") and, when the dropped message is an answer, ends the transport's loop without a word;
+  the server sends from two kinds of thread (the tool call's thread: the answer and one `resources/list_changed` per
+  resource a run registers; the SDK's reading thread: the answers to `ping`, `tools/list`, `resources/list`), so under
+  load even alternating calls collide. The server-side call itself never took more than 272 ms over 844 calls. Fixed
+  by `SerialSends`, a wrapper that serialises every session's sends under one lock (`SkillroyMcpServer.transport`);
+  `SerialSendsTest` fails 5 of 5 without the wrapper and passes 20 of 20 under load with it; the two classes then ran
+  20 times under load with 0 unanswered requests and 0 drops. Worth reporting upstream; the wrapper goes when the SDK
+  fixes it. The leg was run twice more on the fixed tree, green both times (table above).
 - **First run on a Java 25 target.** The end-to-end acceptance passed in every load-mode variant on a Java 25
   target and on a Java 8 target. With it the B4 gate and the Phase 1 exit item "target on Java 25" are met, and
   BS1's "Java 25 target" is answered for Linux: `JAVAAGENT`, `JAVAAGENT` through `JAVA_TOOL_OPTIONS`, `ATTACH` and
@@ -1342,14 +1376,18 @@ The review items of the end-to-end review, now decided (gap numbers refer to the
    the repeated security review before the first public release.
 2. **Phase 4 follow-ups**: the JxBrowser kit run in the private repository that holds the
    licence (the wall "A JxBrowser licence"); why windowed JCEF on a Java 8 target creates no browser (unverified since
-   BS8, gap 44) and why a `srcdoc` iframe never loads in the image; then the open gaps 35-47, first the `web.waitFlag`
-   parity (gap 38) and the redundant sequence reads (gap 45). D59-D69 are B22, confirmed by the owner on 2026-10-07.
-3. **Phase 5**: the contract is specified (`design/phase5-contracts.md`, 2026-10-08). Next: the owner's B23 answers; the
-   results of BS6 and BS13 written into the contract (§5.3 and §4.1 say what each may change); the three dependency
-   sets audited into `licence-audit.md`; then the build in the Phase 2-4 manner (the §16.1 marks into the earlier
-   contracts first), wave 1 the modules that need no key (the SPI and the recorded gateway, `SqlGuard`, the contributor
-   and the tier (b) resolver, approval and budgets, `ExecutorSession` and the journal, plan version 5), wave 2 the
-   commands (`re-resolve`, `mcp`, `author`, `triage`, `session`) and the sample's scenarios C and D with their recordings.
+   BS8, gap 44) and why a `srcdoc` iframe never loads in the image; then the open gaps of the table above (38, 40, 42
+   and 45 were closed by the Phase 4.x amendments on 2026-10-08; gap 48 is new). D59-D69 are B22, confirmed by the
+   owner on 2026-10-07.
+3. **Phase 5 is built, reviewed and fixed** (`design/phase5-contracts.md`, 2026-10-08, on the provisional answers B23;
+   the build's and the review's decisions are B24). Next: the owner's word on B23 and B24 (the interview page; a veto
+   is a change to built behaviour); then, once the key's workspace id exists ("Walls"): the live part of BS13, the live
+   acceptance of P5 §15.3 with the profiles `inference-live` and `inference-record` built in the same change (D110),
+   scenario D's tier (b) requests re-recorded live (the stand-in assertions loosened as the recordings README lists
+   them), the planner-authored scenario C (`skillroy author` against the desk, reviewed and committed), and the nightly
+   job's cache-hit figure recorded here. Open from the review, not fixed: the table-unaware personal rule (L2 F10, a
+   documented over-masking), a row mask whose effect depends on the value (not found by the start probe), a verb that
+   compiles with none of the probe argument sets (offered as is), key nullability of allow-listed tables (unchecked).
 4. **The display-test focus flake is explained and mitigated** (2026-10-08, A39; "Open flake" under "Status at a
    glance"). Still open there: the native reason why the Java 8 toolkit thread does not flush an EDT-issued focus request
    while idle, and the garbage-collection-dependent skip of `SwingDisplayTest.refBecomesStaleOnceTheComponentIsCollected`
