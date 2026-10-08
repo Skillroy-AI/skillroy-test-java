@@ -72,7 +72,7 @@ JSqlParser) and BS13 (the Claude API facts the contract relies on, checked live 
 follow-ups (gaps 38, 40, 45 and, if cheap, 42) went to implementers as Phase 4.x amendments A35-A38, and the display-test
 focus flake to an investigator. **The flake is explained and mitigated** (A39, below: 14 failed runs of 50 before, 0 of 60 after), and the amendments A35-A38 are built.
 
-**Phase 5 was then built the same night on the provisional B23 answers** (the method of Phases 2 to 4: eight
+**Phase 5 was then built the same night on the then provisional B23 answers, confirmed by the owner the next morning** (the method of Phases 2 to 4: eight
 implementers in isolated worktrees, integrated by file list in waves, the native reactor green after every wave; the
 decisions the build took are D88-D95, B24), **run through the Linux matrix** (first round: three failures in checks that
 had never run before, fixed; tables below), **reviewed through the three lenses, each verified by a sceptic** (33 distinct
@@ -80,8 +80,8 @@ items, among them five rated high: a model client could run any primitive confir
 key with a stray character could leak through a provider exception, a session check was an oracle on masked values, the
 allow-list was never checked against the schema, triage sent row samples unmasked by column; section "Phase 5 code
 review" below), **and fixed by four fixers** (decisions D96-D103 and D110; the review's as-built and "fix wave" notes are
-in the contract). The final tree's matrix is the first table below. Owed to a live model, until the owner supplies the
-key's workspace id ("Walls"): the planner-authored sample scenario C, live recordings in place of the scripted
+in the contract). The final tree's matrix is the first table below. Owed to a live model until the end of 2026-10-08, when the owner's working key arrived ("Walls"), and the next
+session's work: the planner-authored sample scenario C, live recordings in place of the scripted
 stand-ins, the live profiles and the live acceptance of the contract's §15.3.
 
 Verification of the final Phase 5 tree (`e7acd61`, the tree after the review's fix wave), 2026-10-08: the arm64 image
@@ -304,7 +304,7 @@ table above. "Java 8 test JVM" = the module's own tests also run on Java 8 (`-Dj
 | Design docs (`docs/design/`) | `phase1-contracts.md` as built, with the Phase 1.x, Phase 2, Phase 3 and Phase 4 passages marked "(1.x, built 2026-10-02)", "(Phase 2, built 2026-10-02)", "(Phase 3, built 2026-10-03)" and "(Phase 4, built 2026-10-07)". `phase2-contracts.md` and `phase3-contracts.md` as built (2026-10-03: every deviation of the build and every fix of the review marked in place; their Phase 4 passages marked built). **`phase4-contracts.md` as built 2026-10-07** (specified 2026-10-06; every deviation of the build and every fix of the review marked in place, the decisions of the build D59-D69). **`phase5-contracts.md` specified 2026-10-08, not built** (D70-D87; its §16.1 lists the changes to the earlier contracts, to be written in when the build starts). Overview: roadmap with Phases 1.x to 4 built and the Phase 5 contract noted, §3.8 as built | Write the §16.1 marks into the Phase 1-4 contracts and the overview when the Phase 5 build starts |
 | Research notes (`docs/research/`) | Round 1 carried over, finding ids unchanged; `embedded-browser-spi` and `vision-input` new (2026-10-02). Pruned of local-environment detail | None |
 | Security review | Run 2026-10-02 on the pre-port tree: 34 confirmed findings (4 medium, 30 low); the fixes H1-H3 are built (Phase 1.x). The Phase 2 code review of 2026-10-03 had a secrets-and-safety lens (below) | Repeat the review before the first release |
-| Spikes | BS7 done. **BS8 run 2026-10-06, passed with conditions** (`spikes/BS8/RESULT.md`). **BS5 met 2026-10-07** by the Phase 4 acceptance against JCEF's Chromium (D53; the stock-Chromium run is the manual procedure `spikes/BS5/README.md`). BS1 answered for Java 8 and Java 25 targets on Linux, parts open. BS2 answered in part. BS4 answered, parts open. BS3 open. **BS6 passed 2026-10-08** and **BS13 ran its offline part 2026-10-08** (the live part waits for the key's workspace id), both as the Phase 5 contract's gates. BS9-BS12 new, not started | See "Base spikes" |
+| Spikes | BS7 done. **BS8 run 2026-10-06, passed with conditions** (`spikes/BS8/RESULT.md`). **BS5 met 2026-10-07** by the Phase 4 acceptance against JCEF's Chromium (D53; the stock-Chromium run is the manual procedure `spikes/BS5/README.md`). BS1 answered for Java 8 and Java 25 targets on Linux, parts open. BS2 answered in part. BS4 answered, parts open. BS3 open. **BS6 passed 2026-10-08** and **BS13 ran its offline part 2026-10-08** (the live part is the next session's: the owner's workspace-scoped key works since the end of 2026-10-08), both as the Phase 5 contract's gates. BS9-BS12 new, not started | See "Base spikes" |
 | CI for this repo | Not chosen. `ci/Dockerfile` and `ci/run-in-linux.sh` are what a pipeline would run; since 2026-10-06 the image holds Chromium's run-time libraries and the runner takes `SKILLROY_PLATFORM`; the Phase 4 matrix adds `-Pjcef` to every leg | Needs a JDK 8, a JDK >= 25 and Xvfb on the build agents; for the profile `jcef` the JCEF natives (152 MB per platform) and Playwright's jars (the driver bundle about 204 MB) in the Maven cache |
 
 ### What the end-to-end review fixed (2026-10-02)
@@ -1003,12 +1003,12 @@ night of 2026-10-07 to 2026-10-08, integrated into the main tree by file list.
 
 ### Phase 5: AI layer
 
-**Contract: `docs/design/phase5-contracts.md`** (specified 2026-10-08, not built; its eighteen answers are B23, provisional;
-decisions D70-D87). The items below are the roadmap's; the contract makes each precise (its §1 scope, §15 acceptance). Gates
-before the build: spike BS6 (the guard's corpora) and spike BS13 (the API facts), both started 2026-10-08; the owner's word on
-B23 as for B21, unless progress on the provisional answers is asked for.
+**Contract: `docs/design/phase5-contracts.md`** (specified and built 2026-10-08; its answers B23 and the decisions of its
+build and review, B24, confirmed by the owner on 2026-10-08; decisions D70-D104 and D110). The items below are the
+roadmap's; the contract makes each precise (its §1 scope, §15 acceptance). The gates before the build were spike BS6 (the
+guard's corpora, passed) and spike BS13 (the API facts; its live part waits for the first live session).
 
-**Build, wave 1 (2026-10-08, on the provisional B23; two implementers in isolated worktrees, integrated by file list):**
+**Build, wave 1 (2026-10-08, on the then provisional B23; two implementers in isolated worktrees, integrated by file list):**
 the executor side of `skillroy-scenario` (`CallRunner` extracted from the executor, `ExecutorSession`, `StepJournal`
 with its file and export, `ScenarioSchema` and `Schemas`, plan version 5 with the sample's plans and bindings
 regenerated, `SqlAllowList`/`SqlDialect`, the `DomainPack` and `StepLibrary` additions, `llm-sql` accepted when a pack
@@ -1041,7 +1041,7 @@ the two repaired checks green on both seeds). What was run is in the table below
 
 - [x] `skillroy-inference` (created here, above `skillroy-scenario`); the `InferenceGateway` SPI with typed content
   parts (text, image, tool use, tool result, and an opaque part) and the Claude implementation (B7); built 2026-10-08,
-  the live gateway unexercised (the key's workspace id)
+  the live gateway unexercised (the owner's working key arrived at the end of 2026-10-08: the live run is next)
 - [x] Tier (b) resolvers: model-authored SQL behind `SqlGuard` (BS6 passed first); masking before any prompt (P5 §6);
   built 2026-10-08, proven end to end against stand-in recordings
 - [x] Approve flow on first use; budget meter per scenario and per nightly job (and per session); built 2026-10-08
@@ -1057,7 +1057,7 @@ the two repaired checks green on both seeds). What was run is in the table below
 - [x] A recorded gateway and committed recordings, so that the whole layer is tested in CI and the Linux image with no
   model key (P5 §4.2, §14.5); built 2026-10-08; the committed recordings are scripted stand-ins until the key works
 - [ ] **Exit:** a new sample scenario authored from a one-paragraph brief is reviewed, committed and replays green
-  in CI (**owed**: needs the live planner, so the key's workspace id); the nightly job stays under budget with
+  in CI (**owed**: needs the live planner; the owner's key works since the end of 2026-10-08); the nightly job stays under budget with
   prompt-cache hits above 80% (**owed**: a live run; the job's mechanics are proven against the recorded gateway); an
   interactive session on the sample is exported from its journal as a scenario that replays with zero model calls
   (**met headlessly** 2026-10-08, `SessionExportTest`; in the image by `InferenceEndToEndIT`).
@@ -1349,7 +1349,7 @@ Work that cannot proceed without the project owner, or without something only th
 | Wall | Decision | What waits |
 |---|---|---|
 | The push | B1 | The initial commit exists (2026-10-06); the push to the private remote `Skillroy-AI/skillroy-test-java` waits for the owner's word. History is permanent once pushed |
-| Model provider API key | B7 | Was: anything live in Phase 5. **Provided by the owner on 2026-10-07 for live checks**, in the operator's own environment only (never a file of this repository, never a property, never a command line; the contract's §2.3). **Found 2026-10-08 (BS13):** the key is an organisation-level key, and the API refuses every request from such a key with HTTP 400 unless it carries the header `anthropic-workspace-id`; no workspace id is set in the environment. **Waits for the owner:** the workspace id (exported as `ANTHROPIC_WORKSPACE_ID`, from the provider's console) or a workspace-scoped key under the same variable. Until then every live item of BS13 (§15.3 of the contract), the sample's recordings and the planner's authoring run are not run; everything else of Phase 5 proceeds against the recorded and scripted gateways. The live profile (`inference-live`) and the recording profile (`inference-record`) of the contract are specified, not built (D110, the review's fix wave of 2026-10-08): they are built in the same change as their first live run, once the workspace id exists; the route that exists is `record: true` in `inference.yaml`; CI never records or runs live |
+| Model provider API key | B7 | **Resolved 2026-10-08.** The first key (organisation-level) was refused by the API without an `anthropic-workspace-id` header (BS13, 2026-10-08), so nothing live ran that night: BS13's live part, the sample's live recordings, the planner's authoring run and the live acceptance (§15.3) stayed owed, the profiles marked not built (D110). At the end of 2026-10-08 the owner created a workspace-scoped key, exported as `ANTHROPIC_API_KEY` in the operator's own environment only (never a file of this repository, never a property, never a command line; the contract's §2.3); the models endpoint answers it with no workspace header. The live items are the next session's ("Next steps"). |
 | A JxBrowser licence | B9 | Real verification of the `jxbrowser` adapter. The adapter exists (built 2026-10-07) and passes the contract kit against the neutral fake, plainly and with the init-script chaining option; the kit (`skillroy-agent-web`'s `test-jar`) runs against the real product only in a repository that holds a licence, outside this repo, through a `WebAdapterFixture` over a real engine. That run also settles three member names of the descriptor and whether some vendor calls can block (gaps 41 and 47). Phase 4 reached its public exit without it. The owner (2026-10-06): a licence is available, so that verification can follow in the private overlay's repository |
 | A Windows host | B13, Phase 6 | Verification of the fixes S7 and S15 (not verified on Windows); the Windows path of Phase 6. The owner (2026-10-06): later, a Windows 11 machine, which also runs the tenant layers' testing under Windows and under WSL2 |
 
@@ -1357,8 +1357,8 @@ Not walls any more: the licence, the holder's name, the first commit and the rem
 domain behind the groupId (B2) and the sample domain with its deposits (B10) are decided. B17-B20 are confirmed
 (2026-10-06), and the two vetoes inside B19 are built. B21 (the fifteen answers of the Phase 4 contract) was
 confirmed by the owner on 2026-10-07, and so was B22 (the eleven decisions the Phase 4 build took without the
-owner, D59-D69) the same evening. **Open for the owner: B23**, the eighteen provisional answers of the Phase 5
-contract (2026-10-08), on the interview page.
+owner, D59-D69) the same evening. B23 (the Phase 5 contract's answers) and B24 (the decisions of its build and review) were confirmed by the owner
+on 2026-10-08, every row.
 
 The review items of the end-to-end review, now decided (gap numbers refer to the table above):
 
@@ -1379,9 +1379,8 @@ The review items of the end-to-end review, now decided (gap numbers refer to the
    BS8, gap 44) and why a `srcdoc` iframe never loads in the image; then the open gaps of the table above (38, 40, 42
    and 45 were closed by the Phase 4.x amendments on 2026-10-08; gap 48 is new). D59-D69 are B22, confirmed by the
    owner on 2026-10-07.
-3. **Phase 5 is built, reviewed and fixed** (`design/phase5-contracts.md`, 2026-10-08, on the provisional answers B23;
-   the build's and the review's decisions are B24). Next: the owner's word on B23 and B24 (the interview page; a veto
-   is a change to built behaviour); then, once the key's workspace id exists ("Walls"): the live part of BS13, the live
+3. **Phase 5 is built, reviewed and fixed** (`design/phase5-contracts.md`, 2026-10-08; B23 and B24 confirmed by the
+   owner on 2026-10-08). Next, with the owner's workspace-scoped key (it works; "Walls"): the live part of BS13, the live
    acceptance of P5 §15.3 with the profiles `inference-live` and `inference-record` built in the same change (D110),
    scenario D's tier (b) requests re-recorded live (the stand-in assertions loosened as the recordings README lists
    them), the planner-authored scenario C (`skillroy author` against the desk, reviewed and committed), and the nightly

@@ -18,8 +18,8 @@ disagree on a Phase 4 detail, this file wins.
 The Phase 4.x amendments A35-A38 (2026-10-08; gaps 38, 45, 40 and 42) are §16, and their passages are marked in place
 "(4.x, A3n, built 2026-10-08)".
 Passages that Phase 5 changes (`phase5-contracts.md` §16.1) were written in before its code and marked
-"(Phase 5, built 2026-10-08 on provisional B23; P5 §n)"; the build of 2026-10-08 (on the provisional B23 answers, with its
-own decisions B24) marked each of them "(Phase 5, built 2026-10-08 on provisional B23; P5 §n)".
+"(Phase 5, built 2026-10-08; P5 §n)"; the build of 2026-10-08 marked each of them "(Phase 5, built 2026-10-08; P5 §n)"; its answers B23 and its
+decisions B24 were confirmed by the owner on 2026-10-08.
 
 **What it builds on.** The Phase 1 contract as built (with Phase 1.x), the Phase 2 and Phase 3 contracts as built,
 the design overview §3.8 (two paths, one SPI, the module and its two adapters), decision B9 (one SPI wrapping JCEF
@@ -1219,7 +1219,7 @@ base `web` root and a pack's alike, reads through a connection of the run that s
 (with the fall-back rules) and everything else to the agent; pre-flight, the binder, prompt policies and `recover` use
 the plain agent connection.
 
-(Phase 5, built 2026-10-08 on provisional B23; P5 §12.2) `ExecutorSession.open` opens the web path as a run does, with
+(Phase 5, built 2026-10-08; P5 §12.2) `ExecutorSession.open` opens the web path as a run does, with
 this section's selection: `SessionOptions.web` carries the settings that the scenario's `web` key carries, and
 `SessionOptions.webPathLoader` is the class loader that finds the `WebPath` providers. `close` closes the path.
 
