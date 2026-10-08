@@ -257,7 +257,11 @@ final class Analyzer {
 
     final TreeSet<String> tablesRead = new TreeSet<>();
     final TreeSet<String> columnsRead = new TreeSet<>();
+    /** The text of every string literal, in the order walked (rule 6: a value of the query's arguments is a ?). */
+    final List<String> literals = new ArrayList<>();
     int parameters;
+    /** Every reference to a personal column (directly or through a derived column) so far: what a subquery reads. */
+    private int personalReferences;
     private int tableReferences;
     private int sourceIds;
 
@@ -770,6 +774,9 @@ final class Analyzer {
         if (r.col().origin() != null) {
             columnsRead.add(r.col().origin());
         }
+        if (r.col().personal()) {
+            personalReferences++;
+        }
         return new Info(r.col().personal(), false, true);
     }
 
@@ -923,11 +930,11 @@ final class Analyzer {
                     .or(expr(d.getRightExpression(), scope, use, depth));
             case NotExpression n -> expr(n.getExpression(), scope, use, depth);
             case ExistsExpression ex when ex.getRightExpression() instanceof Select sub ->
-                    subquery(sub, scope, Use.FILTER, depth);
+                    predicate(sub, scope, use, depth);
             case AnyComparisonExpression any when any.getSelect() != null ->
-                    subquery(any.getSelect(), scope, Use.FILTER, depth);
+                    predicate(any.getSelect(), scope, use, depth);
             // A scalar subquery's value goes where the enclosing expression's goes (the taint follows it).
-            case ParenthesedSelect sub -> subquery(sub, scope, use, depth);
+            case ParenthesedSelect sub -> scalar(sub, scope, use, depth);
             case CaseExpression ce -> caseExpression(ce, scope, use, depth);
             case CastExpression ce -> cast(ce, scope, use, depth);
             case TranscodingFunction tf -> convert(tf, scope, use, depth);
@@ -967,6 +974,7 @@ final class Analyzer {
             throw new GuardViolation(Reason.LITERAL, "a string literal of " + v.getValue().length()
                     + " characters (at most " + MAX_STRING + ")");
         }
+        literals.add(v.getValue().replace("''", "'"));
         return Info.NONE;
     }
 
@@ -1032,9 +1040,36 @@ final class Analyzer {
         Info left = expr(in.getLeftExpression(), scope, use, depth);
         Expression right = in.getRightExpression();
         if (right instanceof Select sub) {
-            return left.or(subquery(sub, scope, Use.FILTER, depth));
+            return left.or(predicate(sub, scope, use, depth));
         }
         return left.or(expr(right, scope, use, depth));
+    }
+
+    /**
+     * A predicate subquery ({@code EXISTS}, {@code IN}, {@code ANY}/{@code ALL}): its select list goes nowhere, so it is
+     * walked as a filter, but its truth goes where the enclosing expression's value goes. Inside a select list or a
+     * derived column it carries one bit of every personal column it references (in its select list, its WHERE, its
+     * joins, its nested subqueries, or correlated to the enclosing query), so it is tainted with them (rule 4: a
+     * personal value never reaches a candidate, not even as {@code CASE WHEN EXISTS (… name LIKE 'A%') …}); as a filter
+     * it is not.
+     */
+    private Info predicate(Select sub, Scope scope, Use use, int depth) throws GuardViolation {
+        int before = personalReferences;
+        subquery(sub, scope, Use.FILTER, depth);
+        return new Info(use != Use.FILTER && personalReferences > before, false, false);
+    }
+
+    /**
+     * A scalar subquery: its value goes where the enclosing expression's goes, carrying the personal flag of what it
+     * selects and, inside a select list or a derived column, of every personal column it references elsewhere too
+     * ({@code (SELECT COUNT(*) FROM staff s2 WHERE s2.code = s.code AND s2.name LIKE 'A%')} is the {@code EXISTS}
+     * form's bit by other means).
+     */
+    private Info scalar(Select sub, Scope scope, Use use, int depth) throws GuardViolation {
+        int before = personalReferences;
+        Info value = subquery(sub, scope, use, depth);
+        return use != Use.FILTER && personalReferences > before ? new Info(true, value.aggregate(), value.bare())
+                : value;
     }
 
     private Info subquery(Select sub, Scope scope, Use use, int depth) throws GuardViolation {

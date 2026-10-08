@@ -16,10 +16,18 @@
 
 package ai.skillroy.testjava.mcp;
 
+import ai.skillroy.testjava.controller.AgentLostException;
 import ai.skillroy.testjava.protocol.Json;
+import ai.skillroy.testjava.scenario.BindException;
+import ai.skillroy.testjava.scenario.BindingsFile;
+import ai.skillroy.testjava.scenario.ExecutorSession;
+import ai.skillroy.testjava.scenario.Origin;
 import ai.skillroy.testjava.scenario.Plan;
 import ai.skillroy.testjava.scenario.PlanCompiler;
 import ai.skillroy.testjava.scenario.StepJournal;
+import ai.skillroy.testjava.scenario.resolve.Approval;
+import ai.skillroy.testjava.scenario.resolve.Resolution;
+import ai.skillroy.testjava.scenario.resolve.Strategy;
 import io.modelcontextprotocol.spec.McpError;
 import io.modelcontextprotocol.spec.McpSchema;
 import org.junit.jupiter.api.Test;
@@ -42,9 +50,10 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * phase5-contracts.md 9.3, 12.2-12.4: the session tools (check, observe, note, export with its three files),
- * {@code skillroy_scenario_run} with its run directory and resources, and {@code skillroy_session_ask} through the
- * actor seam (absent without a factory).
+ * phase5-contracts.md 9.3, 12.2-12.4, 13.4: the session tools (check, observe, note, export with its three files, a
+ * model-found binding always exported {@code REQUIRED}, D97), {@code skillroy_scenario_run} with its run directory and
+ * resources, {@code skillroy_session_ask} through the actor seam (absent without a factory), and
+ * {@code skillroy_resolve} through the actor when there is one.
  */
 class SessionToolsTest {
 
@@ -88,8 +97,8 @@ class SessionToolsTest {
                     Map.of("category", "tools"), "strategy", null)).isError());
             assertFalse(fx.call("desk_enter", Map.of("value", "$item.code")).isError());
             assertFalse(fx.call("skillroy_session_observe", args("path", "desk.mode")).isError());
-            McpSchema.CallToolResult result = fx.call("skillroy_session_export", args("scenarioId", "desk-session",
-                    "approvedBy", null));
+            McpSchema.CallToolResult result = fx.call("skillroy_session_export", Map.of("scenarioId",
+                    "desk-session"));
             String report = McpFixture.text(result);
             assertFalse(result.isError(), report);
             assertTrue(report.contains("Exported session sess-1 as desk-session: 2 steps"), "the verb step and the"
@@ -109,6 +118,63 @@ class SessionToolsTest {
                     .get("planHash"), "the bindings belong to that plan");
             McpSchema.CallToolResult bad = fx.call("skillroy_session_export", args("scenarioId", "Not An Id"));
             assertTrue(bad.isError(), McpFixture.text(bad));
+        }
+    }
+
+    /**
+     * Decision D97: over MCP a model-found (tier (b)) binding is exported {@code REQUIRED} whatever label the client
+     * sends; the schema no longer has {@code approvedBy}, and one sent anyway is ignored and said so.
+     */
+    @Test
+    void anExportOverMcpWritesAModelFoundBindingRequiredWhateverApprovedBySays() throws Exception {
+        try (McpFixture fx = new McpFixture(dir); TierB tierB = new TierB("scripted-mcp-export", fx.desk)) {
+            fx.start(fx.options().mutating(true).inference(tierB.settings).build());
+            assertFalse(((Map<?, ?>) fx.tool("skillroy_session_export").inputSchema().get("properties"))
+                    .containsKey("approvedBy"), "the tool takes no approver");
+            McpSchema.CallToolResult resolved = fx.call("skillroy_resolve", args("slot", "item", "kind", "Item",
+                    "args", Map.of("category", "tools"), "strategy", List.of("llm-sql")));
+            assertFalse(resolved.isError(), McpFixture.text(resolved));
+            assertEquals("LLM_SQL", ((Map<?, ?>) McpFixture.json(resolved).get("resolution")).get("strategy"));
+            assertFalse(fx.call("desk_enter", Map.of("value", "$item.code")).isError());
+            McpSchema.CallToolResult export = fx.call("skillroy_session_export", args("scenarioId",
+                    "desk-model-found", "approvedBy", "a model"));
+            String report = McpFixture.text(export);
+            assertFalse(export.isError(), report);
+            assertTrue(report.contains("approvedBy is not taken over MCP"), report);
+            BindingsFile file = BindingsFile.read(BindingsFile.locate(fx.out.resolve("bindings"), "seed-a",
+                    "desk-model-found"));
+            Resolution item = file.resolutions().get("item");
+            assertEquals(Strategy.LLM_SQL, item.strategy());
+            assertEquals(Approval.State.REQUIRED, item.approval().state(), "the client's label approves nothing");
+            assertFalse("a model".equals(item.approval().by()), item.approval().toString());
+        }
+    }
+
+    /**
+     * phase5-contracts.md 13.4: with an actor (a session service), {@code skillroy_resolve} goes through the actor's
+     * metered entry, made on first use; without one, the session resolves.
+     */
+    @Test
+    void resolveGoesThroughTheActorWhenTheServerHasOne() throws Exception {
+        AtomicInteger resolves = new AtomicInteger();
+        AtomicReference<String> slot = new AtomicReference<>();
+        try (McpFixture fx = new McpFixture(dir)) {
+            fx.start(fx.options().actor((session, options) -> new FakeActor(session) {
+                @Override
+                public Resolution resolve(ExecutorSession s, String name, String kind, Map<String, Object> args,
+                                          List<String> strategy, Origin origin)
+                        throws BindException, AgentLostException, InterruptedException {
+                    resolves.incrementAndGet();
+                    slot.set(name);
+                    return super.resolve(s, name, kind, args, strategy, origin);
+                }
+            }).build());
+            McpSchema.CallToolResult result = fx.call("skillroy_resolve", args("slot", "item", "kind", "Item",
+                    "args", Map.of("category", "tools"), "strategy", null));
+            assertFalse(result.isError(), McpFixture.text(result));
+            assertEquals(1, resolves.get(), "through the actor");
+            assertEquals("item", slot.get());
+            assertEquals("$item", McpFixture.json(result).get("reference"), "joined the session's bindings");
         }
     }
 

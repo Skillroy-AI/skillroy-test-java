@@ -21,8 +21,11 @@ import ai.skillroy.testjava.controller.AgentLostException;
 import ai.skillroy.testjava.controller.AgentRpcException;
 import ai.skillroy.testjava.controller.CallOptions;
 import ai.skillroy.testjava.controller.CapabilityMatrix;
+import ai.skillroy.testjava.data.DataChannels;
+import ai.skillroy.testjava.data.DataException;
 import ai.skillroy.testjava.inference.prompt.PromptMask;
 import ai.skillroy.testjava.inference.spi.ToolSpec;
+import ai.skillroy.testjava.inference.sql.AllowListCheck;
 import ai.skillroy.testjava.inference.sql.SqlGuard;
 import ai.skillroy.testjava.inference.tools.ToolProjection;
 import ai.skillroy.testjava.inference.tools.WorkflowTools;
@@ -32,11 +35,13 @@ import ai.skillroy.testjava.protocol.PrimitiveDescriptor;
 import ai.skillroy.testjava.scenario.ExecutorSession;
 import ai.skillroy.testjava.scenario.FailureKind;
 import ai.skillroy.testjava.scenario.Origin;
+import ai.skillroy.testjava.scenario.Plan;
 import ai.skillroy.testjava.scenario.ScenarioSchema;
 import ai.skillroy.testjava.scenario.SessionOpenException;
 import ai.skillroy.testjava.scenario.SessionOptions;
 import ai.skillroy.testjava.scenario.StepJournal;
 import ai.skillroy.testjava.scenario.pack.DomainPack;
+import ai.skillroy.testjava.scenario.resolve.ContributionException;
 import ai.skillroy.testjava.scenario.resolve.SqlAllowList;
 import io.modelcontextprotocol.json.McpJsonMapper;
 import io.modelcontextprotocol.json.jackson2.JacksonMcpJsonMapperSupplier;
@@ -59,6 +64,7 @@ import java.time.Clock;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -66,6 +72,7 @@ import java.util.Objects;
 import java.util.OptionalInt;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.TreeSet;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -83,13 +90,18 @@ import java.util.stream.Stream;
  * {@code skillroy mcp} command builds the {@link ServerOptions} and calls it, tests use {@link #start} and
  * {@link #close}.
  *
- * <p>At start the server reads the target's capability matrix and catalogue once, projects the tools with
- * {@code ToolProjection} ({@code Policy.readOnly()}, or {@code Policy.mutating()} with {@code mutating}) and the
- * workflow tools of {@code WorkflowTools}, refuses a name collision, and opens one {@link ExecutorSession} for its life
- * (read-only unless mutating; its journal is the server's record). A tool that is not listed cannot be called: never a
- * destructive primitive, nothing of {@code agent.*}, no module upload, no {@code data.query} on a source without an
- * allow-list (and the statement passes {@code SqlGuard}), never a {@code confirm} on the client's behalf. Every pack
- * verb and primitive runs through the session entry with {@code Origin.person("mcp")}.
+ * <p>At start the server reads the target's capability matrix and catalogue once, checks every SQL allow-list of the
+ * pack against its source's schema and the pack's row masks when the target offers {@code data.query}
+ * ({@code AllowListCheck}, decision D100: a list that does not match refuses the start), projects the tools with
+ * {@code ToolProjection} ({@code Policy.readOnly()}, or {@code Policy.mutating(allowEvaluate)} with {@code mutating})
+ * and the workflow tools of {@code WorkflowTools}, refuses a name collision, and opens one {@link ExecutorSession} for
+ * its life (read-only unless mutating; its journal is the server's record). A tool that is not listed cannot be called:
+ * never a destructive primitive, nothing of {@code agent.*}, no module upload, {@code web.evaluate} and
+ * {@code web.waitFlag} only when a person opted in, no {@code data.query} on a source without an allow-list (and the
+ * statement passes {@code SqlGuard} over the list less its personal and row-masked columns, {@link DataQueryLists}),
+ * never a {@code confirm} on the client's behalf, no pack verb whose calls reach any of those; a scenario run for a
+ * client is checked against the same projection first ({@link PlanPolicy}). Every pack verb and primitive runs through
+ * the session entry with {@code Origin.person("mcp")}.
  *
  * <p>Answers are text: the value as pretty JSON through the session's secret mask and the prompt mask, cut at 25000
  * characters with {@code [truncated: N more]}; an image (a capture, a bitmap) is written to {@code <out>/mcp/<n>.png}
@@ -112,6 +124,11 @@ public final class SkillroyMcpServer implements AutoCloseable {
     public static final int EXIT_CLIENT_CLOSED = 0;
     /** The exit code when the agent was lost. */
     public static final int EXIT_AGENT_LOST = 3;
+    /**
+     * The exit code when the client broke the protocol: a line longer than the stdin bridge takes ends the server as a
+     * failure, after the calls in flight were answered.
+     */
+    public static final int EXIT_PROTOCOL_ERROR = 1;
     /** The server's name in {@code initialize}. */
     public static final String SERVER_NAME = "skillroy";
     /** The server's version in {@code initialize}. */
@@ -126,6 +143,11 @@ public final class SkillroyMcpServer implements AutoCloseable {
     static final Duration BUSY_WAIT = Duration.ofMinutes(10);
     /** How long the end of the server waits for the answers in flight, and then for the call holding the session. */
     static final Duration DRAIN = Duration.ofSeconds(10);
+    /**
+     * How long the allow-list check at the start may take in all: a session bind's budget, which a tier (b) bind's
+     * check and prompt catalogue share.
+     */
+    static final Duration ALLOW_LIST_CHECK = Duration.ofMillis(Plan.DEFAULT_BIND_TIMEOUT_MS);
 
     private static final String JSON = "application/json";
     private static final String JSONL = "application/jsonl";
@@ -157,12 +179,19 @@ public final class SkillroyMcpServer implements AutoCloseable {
     private CapabilityMatrix capabilities;
     private Map<String, PrimitiveDescriptor> primitives;
     private Map<String, SqlAllowList> allowLists;
+    /** By source, the list {@code data_query}'s guard reads ({@link DataQueryLists}); a source absent reads nothing. */
+    private Map<String, SqlAllowList> dataQueryLists;
+    /** The allow-listed sources the check at the start could not reach: {@code data_query} reads none of them. */
+    private Set<String> uncheckedSources = Set.of();
+    private PlanPolicy planPolicy;
     private Map<String, Object> profile;
     private List<ToolSpec> tools;
     private final Map<String, Target> targets = new LinkedHashMap<>();
     private final Map<String, String> verbTools = new TreeMap<>();
     /** Tool name to the primitive it names, for every primitive named with the suffix (D92). */
     private final Map<String, String> renamed = new TreeMap<>();
+    /** Tool name to {verb, why} for every verb not offered because its calls reach what is never offered (D96). */
+    private final Map<String, String[]> withheld = new TreeMap<>();
     private volatile ExecutorSession session;
     private Masking masking;
     private ToolCalls calls;
@@ -200,9 +229,10 @@ public final class SkillroyMcpServer implements AutoCloseable {
      * stderr. What {@code skillroy mcp} calls.
      *
      * @return {@value #EXIT_CLIENT_CLOSED} when the client closed the stream, {@value #EXIT_AGENT_LOST} when the agent
-     *     was lost
+     *     was lost, {@value #EXIT_PROTOCOL_ERROR} when the client broke the protocol
      * @throws SessionOpenException ENVIRONMENT (or PRECONDITION_FAILED) when the server cannot start: the output
-     *     directory, a tool name collision, the session's pre-flight or web path
+     *     directory, an SQL allow-list that does not match its source's schema or lets a model read a column a row
+     *     mask alters, a tool name collision, the session's pre-flight or web path
      * @throws AgentLostException if the agent is gone at start
      * @throws InterruptedException if the thread is interrupted
      */
@@ -315,12 +345,22 @@ public final class SkillroyMcpServer implements AutoCloseable {
             lists.putIfAbsent(list.source(), list);
         }
         allowLists = java.util.Collections.unmodifiableMap(lists);
+        uncheckedSources = checkAllowLists(lists.values(), given);
+        Map<String, SqlAllowList> readable = new TreeMap<>();
+        for (SqlAllowList list : lists.values()) {
+            SqlAllowList copy = uncheckedSources.contains(list.source()) ? null
+                    : DataQueryLists.forDataQuery(list, rowMasksOf(pack));
+            if (copy != null) {
+                readable.put(list.source(), copy);
+            }
+        }
+        dataQueryLists = java.util.Collections.unmodifiableMap(readable);
         project();
         profile = profile();
         SessionOptions effective = effectiveSession(given);
         session = ExecutorSession.open(pack, agent, effective);
         calls = new ToolCalls(this);
-        pipe = new StdioPipe(in, out, this::clientClosed);
+        pipe = new StdioPipe(in, out, this::inputEnded);
         McpJsonMapper mapper = new JacksonMcpJsonMapperSupplier().get();
         StdioServerTransportProvider transport = new StdioServerTransportProvider(mapper, pipe.serverIn(),
                 pipe.serverOut());
@@ -342,6 +382,46 @@ public final class SkillroyMcpServer implements AutoCloseable {
         pipe.start();
         log.info("serving " + tools.size() + " tools (" + (mutating ? "mutating" : "read-only") + ") for pack "
                 + pack.id() + " " + pack.version() + ", session " + session.id() + ", output " + outDir);
+    }
+
+    /**
+     * The allow-list check at the start (phase5-contracts.md 5.2, 9.3; decision D100): when the target offers
+     * {@code data.query}, each list goes through {@link AllowListCheck#check} (the source's columns must be exactly the
+     * list's readable and other columns, and no row mask may alter a readable one) before {@code data_query} is
+     * offered, since the guard's rule 4 trusts {@code otherColumns} to name every column a table has. The statements
+     * run through the data channel the session's binds use, within {@link #ALLOW_LIST_CHECK} in all.
+     *
+     * @return the sources whose list could not be checked (the source not served, a timeout, the statement refused
+     *     before it ran, a channel that failed otherwise): {@code data_query} reads none of them (logged)
+     * @throws SessionOpenException ENVIRONMENT for a list the check refuses, naming the table and the columns, never a
+     *     value
+     * @throws AgentLostException if the agent is gone
+     * @throws InterruptedException if the thread is interrupted
+     */
+    private Set<String> checkAllowLists(Collection<SqlAllowList> lists, SessionOptions given)
+            throws SessionOpenException, AgentLostException, InterruptedException {
+        if (lists.isEmpty() || !primitives.containsKey(DATA_QUERY)) {
+            return Set.of();
+        }
+        Set<String> unchecked = new TreeSet<>();
+        List<ai.skillroy.testjava.data.RowMask> masks = rowMasksOf(pack);
+        long deadline = System.nanoTime() + ALLOW_LIST_CHECK.toNanos();
+        try (DataChannels data = DataChannels.of(agent, given.bind().credentials(), masks)) {
+            for (SqlAllowList list : lists) {
+                long left = TimeUnit.NANOSECONDS.toMillis(deadline - System.nanoTime());
+                try {
+                    AllowListCheck.check(list, data, masks, Duration.ofMillis(Math.max(1L, left)));
+                } catch (ContributionException e) {
+                    throw new SessionOpenException(FailureKind.ENVIRONMENT, given.bind().credentials().mask()
+                            .apply("pack " + pack.id() + ": data_query cannot be offered: " + e.getMessage()), null);
+                } catch (DataException | RuntimeException e) {
+                    unchecked.add(list.source());
+                    log.info("data_query does not read source " + list.source() + ": its allow-list could not be"
+                            + " checked against the source's schema (" + e.getMessage() + ")");
+                }
+            }
+        }
+        return java.util.Collections.unmodifiableSet(unchecked);
     }
 
     private static List<SqlAllowList> allowListsOf(DomainPack pack) {
@@ -402,15 +482,19 @@ public final class SkillroyMcpServer implements AutoCloseable {
      * pack's verbs). A primitive whose tool name a verb of the pack would take carries the suffix {@code _primitive}
      * there, in every mode (D92: {@code lending_deposit} is the verb, {@code lending_deposit_primitive} the read
      * primitive {@code lending.deposit}); the renamed ones are logged once and listed by {@code skillroy_catalogue}.
+     * A verb whose compiled calls reach what the server never offers is not offered either (D96,
+     * {@link PlanPolicy#verbRefusal}); the withheld ones are logged once and listed by {@code skillroy_catalogue}.
      * Any other collision (two verbs, two primitives, a workflow tool) refuses the start.
      */
     private void project() throws SessionOpenException {
-        ToolProjection.Policy policy = mutating ? ToolProjection.Policy.mutating() : ToolProjection.Policy.readOnly();
+        ToolProjection.Policy policy = mutating ? ToolProjection.Policy.mutating(options.allowEvaluate())
+                : ToolProjection.Policy.readOnly(options.allowEvaluate());
         List<ToolSpec> projected;
         Set<String> verbNames;
         try {
             projected = ToolProjection.project(new ArrayList<>(primitives.values()), pack, policy);
             verbNames = ToolProjection.verbToolNames(pack);
+            planPolicy = PlanPolicy.of(new ArrayList<>(primitives.values()), pack, policy);
         } catch (IllegalArgumentException e) {
             throw new SessionOpenException(FailureKind.ENVIRONMENT, "the tools cannot be projected: "
                     + e.getMessage(), null);
@@ -448,6 +532,11 @@ public final class SkillroyMcpServer implements AutoCloseable {
                 add(all, t, new PrimitiveTarget(d));
             } else {
                 String verb = verbByTool.get(t.name());
+                String refusal = planPolicy.verbRefusal(pack, verb);
+                if (refusal != null) {
+                    withheld.put(t.name(), new String[] {verb, refusal});
+                    continue;
+                }
                 add(all, t, new VerbTarget(verb));
                 verbTools.put(verb, t.name());
             }
@@ -457,6 +546,12 @@ public final class SkillroyMcpServer implements AutoCloseable {
             renamed.forEach((tool, primitive) -> lines.add(tool + " (" + primitive + ")"));
             log.info("primitives named with " + ToolProjection.PRIMITIVE_SUFFIX + " because a verb of pack " + pack.id()
                     + " takes their plain tool name: " + String.join(", ", lines));
+        }
+        if (!withheld.isEmpty()) {
+            List<String> lines = new ArrayList<>();
+            withheld.forEach((tool, why) -> lines.add(tool + " (" + why[0] + " " + why[1] + ")"));
+            log.info("verbs of pack " + pack.id() + " not offered because their calls reach what this server never"
+                    + " offers: " + String.join("; ", lines));
         }
         tools = List.copyOf(all);
     }
@@ -647,8 +742,19 @@ public final class SkillroyMcpServer implements AutoCloseable {
         }
     }
 
-    private void clientClosed() {
-        end(EXIT_CLIENT_CLOSED, "the client closed the stream");
+    /**
+     * The client's stream ended ({@code protocolError} null), or the stdin bridge stopped reading it on a protocol
+     * error (a line longer than it takes): the server ends, with {@value #EXIT_CLIENT_CLOSED} or
+     * {@value #EXIT_PROTOCOL_ERROR}.
+     */
+    private void inputEnded(String protocolError) {
+        if (protocolError == null) {
+            end(EXIT_CLIENT_CLOSED, "the client closed the stream");
+            return;
+        }
+        log.info("the client broke the protocol: " + protocolError + "; ending with exit code "
+                + EXIT_PROTOCOL_ERROR);
+        end(EXIT_PROTOCOL_ERROR, "the client broke the protocol: " + protocolError);
     }
 
     private void end(int code, String reason) {
@@ -723,7 +829,8 @@ public final class SkillroyMcpServer implements AutoCloseable {
                 sessionLock.unlock();
             }
         }
-        log.info("ended: " + endReason.get() + (pipe == null ? "" : " (" + pipe.counts() + ")"));
+        log.info("ended: " + endReason.get() + (pipe == null ? "" : " (" + pipe.counts() + "; at most "
+                + pipe.peakQueuedBytes() + " bytes waited for the transport)"));
     }
 
     // ------------------------------------------------------------------------------------------------ for the tools
@@ -756,6 +863,16 @@ public final class SkillroyMcpServer implements AutoCloseable {
         return allowLists;
     }
 
+    /** By source, what {@code data_query} may read (D99): the allow-lists less their personal and masked columns. */
+    Map<String, SqlAllowList> dataQueryLists() {
+        return dataQueryLists;
+    }
+
+    /** What a scenario run for the client may call: this server's own projection (D96). */
+    PlanPolicy planPolicy() {
+        return planPolicy;
+    }
+
     /** The verb's tool name, or null when verbs are not offered. */
     String verbTool(String verb) {
         return verbTools.get(verb);
@@ -766,16 +883,53 @@ public final class SkillroyMcpServer implements AutoCloseable {
         return java.util.Collections.unmodifiableMap(renamed);
     }
 
-    /** The guard of an allow-listed source, made on first use and closed with the server. */
+    /**
+     * Tool name to {verb, why}, by tool name, for every verb the policy would offer but whose calls reach what the
+     * server never offers (D96).
+     */
+    Map<String, String[]> withheldVerbs() {
+        return java.util.Collections.unmodifiableMap(withheld);
+    }
+
+    /**
+     * The guard of an allow-listed source, over the list {@code data_query} reads ({@link DataQueryLists}), made on
+     * first use and closed with the server.
+     */
     SqlGuard guard(String source) throws ToolError {
-        SqlAllowList list = allowLists.get(source);
-        if (list == null) {
+        if (allowLists.get(source) == null) {
             throw new ToolError("source '" + source + "' has no SQL allow-list");
+        }
+        if (uncheckedSources.contains(source)) {
+            throw new ToolError("data_query: source '" + source + "' is not read here: its allow-list could not be"
+                    + " checked against the source's schema when the server started (the server's log says why)");
+        }
+        SqlAllowList list = dataQueryLists.get(source);
+        if (list == null) {
+            throw new ToolError("data_query: source '" + source + "' has no table data_query may read: each table's"
+                    + " key or every readable column is personal or masked");
         }
         try {
             return guards.computeIfAbsent(source, s -> new SqlGuard(list));
         } catch (IllegalArgumentException e) {
             throw new ToolError("data_query: source '" + source + "' cannot be guarded: " + e.getMessage());
+        }
+    }
+
+    /**
+     * The actor that {@code skillroy_resolve} goes through (phase5-contracts.md 13.4: a resolve of a session that has
+     * a session service is metered on the session's budget): the actor of {@code skillroy_session_ask}, made on first
+     * use, when the server has an actor factory; null without one, or when it cannot be made (the session resolves
+     * then, as it does without a gateway; logged).
+     */
+    SessionActor resolvingActor() {
+        if (options.actor() == null) {
+            return null;
+        }
+        try {
+            return actor();
+        } catch (ToolError e) {
+            log.info("skillroy_resolve resolves on the session itself: " + e.getMessage());
+            return null;
         }
     }
 
@@ -919,10 +1073,11 @@ public final class SkillroyMcpServer implements AutoCloseable {
         return list;
     }
 
+    /** The scenario schema of this pack, its base verb {@code call} limited to what this server offers (D96). */
     private Object scenarioSchema() {
         Object schema = scenarioSchema;
         if (schema == null) {
-            schema = ScenarioSchema.generate(pack, new ArrayList<>(primitives.values()));
+            schema = ScenarioSchema.generate(pack, new ArrayList<>(primitives.values()), planPolicy.callable());
             scenarioSchema = schema;
         }
         return schema;

@@ -26,12 +26,12 @@ import java.io.InterruptedIOException;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.ArrayDeque;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Consumer;
 
 /**
  * Stands between the client's streams and the SDK's stdio transport, so that the server decides when the transport
@@ -41,22 +41,41 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * through to the client while the responses among its lines are counted. The server ends the transport's input
  * ({@link #endInput}) once every request has been answered ({@link #awaitAnswered}, bounded) or the wait gave up.
  *
+ * <p>Bounds (phase5-contracts.md 9.3): a line of more than {@value #MAX_LINE_BYTES} bytes (its newline not counted) is
+ * a protocol error: the reader stops at once, never hands that line on, and reports the end of the client's stream with
+ * the error, so that the server ends cleanly after answering what it read before. At most {@value #MAX_QUEUED_BYTES}
+ * bytes of lines wait for the transport (a longer single line waits alone): beyond that the reader waits, and the
+ * client's further writes wait in its pipe (back-pressure). Nothing read is dropped, but the line the reader holds when
+ * the server ends the transport's input (no answer to it could be written any more).
+ *
  * <p>The reading thread ends with the client's stream; after the server ended for another reason (a lost agent) it
  * may stay blocked on a stream that never ends until the process exits, which is why it is a daemon. Thread-safe.
  */
 final class StdioPipe {
 
+    /** The longest line the client may send, its newline not counted. */
+    static final int MAX_LINE_BYTES = 8 * 1024 * 1024;
+    /** The most bytes of the client's lines that wait for the transport. */
+    static final long MAX_QUEUED_BYTES = 16L * 1024 * 1024;
+
     private static final byte[] END = new byte[0];
 
     private final InputStream source;
     private final OutputStream sink;
-    private final Runnable onSourceEnd;
-    private final BlockingQueue<byte[]> lines = new LinkedBlockingQueue<>();
+    private final Consumer<String> onSourceEnd;
+    private final int maxLineBytes;
+    private final long maxQueuedBytes;
+    /** The lines for the transport, then {@link #END}; guarded by itself. */
+    private final ArrayDeque<byte[]> lines = new ArrayDeque<>();
     private final AtomicBoolean inputEnded = new AtomicBoolean();
     private final Object answers = new Object();
     private final Thread pump;
     private final ServerIn serverIn = new ServerIn();
     private final ServerOut serverOut = new ServerOut();
+    /** Guarded by {@link #lines}. */
+    private long queuedBytes;
+    /** Guarded by {@link #lines}: the most bytes that waited at once, for the log. */
+    private long peakQueuedBytes;
     /** Guarded by {@link #answers}. */
     private long requests;
     /** Guarded by {@link #answers}. */
@@ -67,12 +86,21 @@ final class StdioPipe {
     /**
      * @param source the client's stream (stdin)
      * @param sink the stream to the client (stdout); written through and flushed, never closed
-     * @param onSourceEnd called once on the reading thread when the client's stream ended (or failed)
+     * @param onSourceEnd called once on the reading thread when the client's stream ended (or failed), with null, or
+     *     with the protocol error that stopped the reading
      */
-    StdioPipe(InputStream source, OutputStream sink, Runnable onSourceEnd) {
+    StdioPipe(InputStream source, OutputStream sink, Consumer<String> onSourceEnd) {
+        this(source, sink, onSourceEnd, MAX_LINE_BYTES, MAX_QUEUED_BYTES);
+    }
+
+    /** {@link #StdioPipe(InputStream, OutputStream, Consumer)} with other bounds (tests). */
+    StdioPipe(InputStream source, OutputStream sink, Consumer<String> onSourceEnd, int maxLineBytes,
+              long maxQueuedBytes) {
         this.source = source;
         this.sink = sink;
         this.onSourceEnd = onSourceEnd;
+        this.maxLineBytes = maxLineBytes;
+        this.maxQueuedBytes = maxQueuedBytes;
         this.pump = new Thread(this::pump, "skillroy-mcp-stdin");
         this.pump.setDaemon(true);
     }
@@ -92,10 +120,15 @@ final class StdioPipe {
         return serverOut;
     }
 
-    /** Ends the transport's input (it then closes its session); idempotent. */
+    /**
+     * Ends the transport's input (it then closes its session) and releases a reader that waits for room; idempotent.
+     */
     void endInput() {
         if (inputEnded.compareAndSet(false, true)) {
-            lines.add(END);
+            synchronized (lines) {
+                lines.addLast(END);
+                lines.notifyAll();
+            }
         }
     }
 
@@ -120,10 +153,37 @@ final class StdioPipe {
         }
     }
 
+    /**
+     * Waits until at least {@code bytes} bytes of lines wait for the transport, or {@code max} passed (for tests).
+     *
+     * @return true when they did
+     * @throws InterruptedException if the thread is interrupted
+     */
+    boolean awaitQueued(long bytes, Duration max) throws InterruptedException {
+        long deadline = System.nanoTime() + max.toNanos();
+        synchronized (lines) {
+            while (queuedBytes < bytes) {
+                long left = deadline - System.nanoTime();
+                if (left <= 0) {
+                    return false;
+                }
+                TimeUnit.NANOSECONDS.timedWait(lines, left);
+            }
+            return true;
+        }
+    }
+
     /** The requests read and the responses written, for the log. */
     String counts() {
         synchronized (answers) {
             return requests + " requests, " + responses + " responses";
+        }
+    }
+
+    /** The most bytes of lines that waited for the transport at once, for the log. */
+    long peakQueuedBytes() {
+        synchronized (lines) {
+            return peakQueuedBytes;
         }
     }
 
@@ -132,39 +192,101 @@ final class StdioPipe {
     private void pump() {
         ByteArrayOutputStream line = new ByteArrayOutputStream();
         byte[] buffer = new byte[8192];
+        String error = null;
         try {
             int n;
+            reading:
             while (!inputEnded.get() && (n = source.read(buffer)) >= 0) {
                 int from = 0;
                 for (int i = 0; i < n; i++) {
                     if (buffer[i] == '\n') {
+                        if (line.size() + i - from > maxLineBytes) {
+                            error = tooLong();
+                            break reading;
+                        }
                         line.write(buffer, from, i + 1 - from);
-                        forward(line.toByteArray());
+                        if (!forward(line.toByteArray())) {
+                            break reading;
+                        }
                         line.reset();
                         from = i + 1;
                     }
+                }
+                if (line.size() + n - from > maxLineBytes) {
+                    error = tooLong();
+                    break;
                 }
                 line.write(buffer, from, n - from);
             }
         } catch (IOException | RuntimeException e) {
             // The client's stream failed: as its end.
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
         } finally {
-            if (line.size() > 0 && !inputEnded.get()) {
+            if (error == null && line.size() > 0 && !inputEnded.get()) {
                 line.write('\n');
-                forward(line.toByteArray());
+                try {
+                    forward(line.toByteArray());
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
             }
-            onSourceEnd.run();
+            onSourceEnd.accept(error);
         }
     }
 
-    private void forward(byte[] bytes) {
+    private String tooLong() {
+        return "a line of more than " + maxLineBytes + " bytes";
+    }
+
+    /**
+     * Hands one line to the transport, waiting while the lines that wait already hold {@link #maxQueuedBytes} bytes.
+     *
+     * @return false when the server ended the transport's input first (the line is dropped)
+     * @throws InterruptedException if the reading thread is interrupted
+     */
+    private boolean forward(byte[] bytes) throws InterruptedException {
         int count = requestCount(bytes);
         if (count > 0) {
             synchronized (answers) {
                 requests += count;
             }
         }
-        lines.add(bytes);
+        synchronized (lines) {
+            while (!lines.isEmpty() && queuedBytes + bytes.length > maxQueuedBytes && !inputEnded.get()) {
+                lines.wait();
+            }
+            if (!inputEnded.get()) {
+                lines.addLast(bytes);
+                queuedBytes += bytes.length;
+                peakQueuedBytes = Math.max(peakQueuedBytes, queuedBytes);
+                lines.notifyAll();
+                return true;
+            }
+        }
+        if (count > 0) {
+            synchronized (answers) {
+                requests -= count;
+                answers.notifyAll();
+            }
+        }
+        return false;
+    }
+
+    /** The next line for the transport, or {@link #END}, which stays in place for any later read. */
+    private byte[] take() throws InterruptedException {
+        synchronized (lines) {
+            while (lines.isEmpty()) {
+                lines.wait();
+            }
+            byte[] next = lines.peekFirst();
+            if (next != END) {
+                lines.removeFirst();
+                queuedBytes -= next.length;
+                lines.notifyAll();
+            }
+            return next;
+        }
     }
 
     /** The JSON-RPC requests in one line (a request has a method and an id); 0 for anything else. */
@@ -224,14 +346,13 @@ final class StdioPipe {
             while (!ended && position >= chunk.length) {
                 byte[] next;
                 try {
-                    next = lines.take();
+                    next = take();
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                     throw new InterruptedIOException("interrupted while reading the client's stream");
                 }
                 if (next == END) {
                     ended = true;
-                    lines.add(END);
                 } else {
                     chunk = next;
                     position = 0;

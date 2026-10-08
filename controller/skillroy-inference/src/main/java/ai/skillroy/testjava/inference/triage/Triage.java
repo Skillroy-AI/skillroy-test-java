@@ -22,7 +22,6 @@ import ai.skillroy.testjava.inference.budget.PriceTable;
 import ai.skillroy.testjava.inference.prompt.PromptMask;
 import ai.skillroy.testjava.inference.spi.CacheHint;
 import ai.skillroy.testjava.inference.spi.Content;
-import ai.skillroy.testjava.inference.spi.Effort;
 import ai.skillroy.testjava.inference.spi.InferenceException;
 import ai.skillroy.testjava.inference.spi.InferenceGateway;
 import ai.skillroy.testjava.inference.spi.Message;
@@ -35,7 +34,6 @@ import ai.skillroy.testjava.protocol.JsonException;
 import ai.skillroy.testjava.scenario.Schemas;
 import ai.skillroy.testjava.scenario.resolve.CodecException;
 import ai.skillroy.testjava.scenario.resolve.CostLedger;
-import ai.skillroy.testjava.scenario.resolve.InferenceSettings;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -69,8 +67,12 @@ import java.util.stream.Stream;
  *
  * <p>The run's outputs were masked by the run; the prompt mask applies its rules once more, and every text from the
  * run enters the request in a labelled block ({@code <target-state>}, {@code <target-ui>}, {@code <target-event>})
- * that the instructions declare to be data. The step's verb and line are not in a run's outputs, so the request names
- * the failed step by its id and its calls.
+ * that the instructions declare to be data. No row of the run's data reaches the request: a statement's
+ * {@code rowSample} and any other rows-shaped value of the run's records are left out (a row sample carries no column
+ * names, so the by-column rule of 6.2 cannot be applied to it), while the statement's text, its parameters, its
+ * {@code rowCount} and the verifiers' outcomes stay. The step's verb and line are not in a run's outputs, so the
+ * request names the failed step by its id and its calls. The calls take the options' effort ({@code effort.triage})
+ * and, with the options' {@code logPrompts}, write their masked prompts into the triage's {@code inference.jsonl}.
  *
  * <p>Stateless; runs on the calling thread.
  */
@@ -164,23 +166,24 @@ public final class Triage {
         Files.deleteIfExists(ledgerDir.resolve("cost-ledger.jsonl"));
         CostLedger ledger = new CostLedger();
         InferenceLog.FileLog log = InferenceLog.toFile(ledgerDir.resolve("inference.jsonl"));
-        LedgerWriter writer = new LedgerWriter(ledger, null, log, m, false, o.clock());
+        LedgerWriter writer = new LedgerWriter(ledger, null, log, m, o.logPrompts(), o.clock());
         String evidence = ev.render(m);
 
         List<String> models = new ArrayList<>();
         List<String> requestIds = new ArrayList<>();
-        ModelRequest labelRequest = ModelRequest.builder(PURPOSE, ModelClass.HAIKU_CLASS).effort(Effort.LOW)
+        ModelRequest labelRequest = ModelRequest.builder(PURPOSE, ModelClass.HAIKU_CLASS).effort(o.effort())
                 .maxTokens(LABEL_MAX_TOKENS).cache(CacheHint.NONE).system(Content.Text.of(LABEL_INSTRUCTIONS))
                 .message(Message.user("Label the failure of this run.\n" + evidence))
                 .outputSchema(Schemas.ofRecord(TriageLabel.class))
                 .metadata(ModelRequest.META_SCENARIO, scenarioId).build();
-        BigDecimal estimated = table.estimate(InferenceSettings.DEFAULT_MODELS.get(InferenceSettings.MODEL_HAIKU),
-                length(labelRequest) / 4, LABEL_MAX_TOKENS, false);
+        BigDecimal estimated = table.estimate(o.model(ModelClass.HAIKU_CLASS), length(labelRequest) / 4,
+                LABEL_MAX_TOKENS, false);
         ModelResponse labelResponse;
         try {
             labelResponse = gateway.complete(labelRequest);
         } catch (InferenceException e) {
-            writer.recordFailure(labelRequest, e, scenarioId, null, null);
+            writer.recordFailure(labelRequest, e, gateway.provider(), o.model(ModelClass.HAIKU_CLASS), scenarioId,
+                    null, null);
             writeLedger(ledgerDir, ledger, m);
             return new TriageResult(runDir, TriageResult.Outcome.FAILED, scenarioId, status, failureKind, null, null,
                     models, requestIds, cost(ledger), "the model provider could not be reached for the label: "
@@ -193,22 +196,23 @@ public final class Triage {
         TriageSummary summary = null;
         String failure = null;
         if (!o.labelsOnly()) {
-            ModelRequest summaryRequest = ModelRequest.builder(PURPOSE, ModelClass.SONNET_CLASS).effort(Effort.LOW)
+            ModelRequest summaryRequest = ModelRequest.builder(PURPOSE, ModelClass.SONNET_CLASS).effort(o.effort())
                     .maxTokens(SUMMARY_MAX_TOKENS).cache(CacheHint.NONE)
                     .system(Content.Text.of(SUMMARY_INSTRUCTIONS))
                     .message(Message.user("Summarise the failure of this run. A first look labelled it "
                             + label.label() + ": " + label.oneLine() + "\n" + evidence))
                     .outputSchema(Schemas.ofRecord(TriageSummary.class))
                     .metadata(ModelRequest.META_SCENARIO, scenarioId).build();
-            estimated = estimated.add(table.estimate(InferenceSettings.DEFAULT_MODELS.get(
-                    InferenceSettings.MODEL_SONNET), length(summaryRequest) / 4, SUMMARY_MAX_TOKENS, false));
+            estimated = estimated.add(table.estimate(o.model(ModelClass.SONNET_CLASS), length(summaryRequest) / 4,
+                    SUMMARY_MAX_TOKENS, false));
             try {
                 ModelResponse summaryResponse = gateway.complete(summaryRequest);
                 writer.record(summaryRequest, summaryResponse, scenarioId, null, null);
                 note(summaryResponse, models, requestIds);
                 summary = summary(summaryResponse, m);
             } catch (InferenceException e) {
-                writer.recordFailure(summaryRequest, e, scenarioId, null, null);
+                writer.recordFailure(summaryRequest, e, gateway.provider(), o.model(ModelClass.SONNET_CLASS),
+                        scenarioId, null, null);
                 failure = "the model provider could not be reached for the summary: " + e.kind() + " ("
                         + m.text(String.valueOf(e.getMessage())) + ")";
             }
@@ -461,7 +465,11 @@ public final class Triage {
             return ev;
         }
 
-        private void take(Map<String, Object> record) {
+        private void take(Map<String, Object> read) {
+            // No row of the run's data reaches the request (phase5-contracts.md 6.2, 11.2): a row sample carries no
+            // column names, so the by-column rule cannot be applied to it, and triage knows no allow-list.
+            @SuppressWarnings("unchecked")
+            Map<String, Object> record = (Map<String, Object>) withoutRows(read, 0);
             String type = String.valueOf(record.get("type"));
             switch (type) {
                 case "run-start" -> start = record;
@@ -484,6 +492,42 @@ public final class Triage {
                     // Other records are not part of the request.
                 }
             }
+        }
+
+        /** What a record keeps of a value that holds rows: their number, never a cell. */
+        static final String ROWS_NOT_SENT = "<rows not sent>";
+
+        /**
+         * {@code value} without its rows, recursively: a {@code rowSample} entry is dropped (a statement keeps its
+         * text, parameters and {@code rowCount}), and any other rows-shaped value (a list whose items are all lists,
+         * as a {@code rows} entry or a row sample is) becomes {@value #ROWS_NOT_SENT}. A value nested deeper than 64
+         * levels is dropped too.
+         */
+        static Object withoutRows(Object value, int depth) {
+            if (depth > 64) {
+                return ROWS_NOT_SENT;
+            }
+            if (value instanceof Map<?, ?> map) {
+                Map<String, Object> out = new LinkedHashMap<>();
+                for (Map.Entry<?, ?> e : map.entrySet()) {
+                    String key = String.valueOf(e.getKey());
+                    if (!key.equals("rowSample")) {
+                        out.put(key, withoutRows(e.getValue(), depth + 1));
+                    }
+                }
+                return out;
+            }
+            if (value instanceof List<?> list) {
+                if (!list.isEmpty() && list.stream().allMatch(item -> item instanceof List<?>)) {
+                    return ROWS_NOT_SENT;
+                }
+                List<Object> out = new ArrayList<>(list.size());
+                for (Object item : list) {
+                    out.add(withoutRows(item, depth + 1));
+                }
+                return out;
+            }
+            return value;
         }
 
         private static void keep(Deque<Map<String, Object>> records, Map<String, Object> record) {

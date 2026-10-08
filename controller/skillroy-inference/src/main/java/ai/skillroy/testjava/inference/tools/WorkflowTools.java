@@ -78,10 +78,13 @@ public final class WorkflowTools {
     /** Adds a note to the session's journal. */
     public static final ToolSpec SESSION_NOTE = read("skillroy_session_note", "Adds a note to the session's journal.",
             "text", text("the note"));
-    /** Exports the session as a scenario. */
+    /**
+     * Exports the session as a scenario: no approver (decision D97), so a model-found binding is written
+     * {@code REQUIRED} and a person approves it with {@code skillroy resolve}.
+     */
     public static final ToolSpec SESSION_EXPORT = acting("skillroy_session_export", "Exports the session's journal"
-            + " as a scenario and its bindings, after a compile check.", "scenarioId", text("the new scenario's id"),
-            "approvedBy", nullableText("the approval label of its model-found bindings, or null"));
+            + " as a scenario and its bindings, after a compile check. Model-found bindings are written REQUIRED: a"
+            + " person approves them with skillroy resolve.", "scenarioId", text("the new scenario's id"));
     /** Checks an expectation (the session service's own tool). */
     public static final ToolSpec CHECK = read("skillroy_check", "Checks an expectation against the target now.", "path",
             text("the expectation's path, such as db.loan or app.state.mode"), "matcher", freeObject("the matcher,"

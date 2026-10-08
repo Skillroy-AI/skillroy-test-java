@@ -333,7 +333,7 @@ public final class SqlGuard implements AutoCloseable {
                 throw new GuardViolation(Reason.REWRITE, "the rewrite changed the parameters, tables or columns");
             }
             return new GuardedStatement(sql, check.parameters, List.copyOf(check.tablesRead),
-                    List.copyOf(check.columnsRead), injected);
+                    List.copyOf(check.columnsRead), injected, List.copyOf(check.literals));
         } catch (GuardViolation v) {
             throw v.reason() == Reason.REWRITE ? v : new GuardViolation(Reason.REWRITE, "the rewritten text fails "
                     + v.reason() + ": " + v.fragment());

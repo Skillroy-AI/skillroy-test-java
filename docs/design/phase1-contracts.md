@@ -1563,6 +1563,11 @@ public record CallOptions(String correlationId, Long timeoutMs, boolean confirm,
     // is empty; a _meta.secretParams already present in params is merged with it as the other _meta keys are (the
     // options win: a non-empty list replaces it). The executor sets it for every step call and cleanup call whose
     // argument template references a joined credential field (§8.5).
+    // As built (2026-10-08, the Phase 5 fix wave; P5 §12.2): AgentClient builds params._meta from the options alone
+    // and drops a _meta the params carry, so the merge above is gone: a {_meta: {confirm: true}} among a call's
+    // params confirmed a destructive call without CallOptions.confirm. No caller relied on it (the CLI's call has
+    // --confirm and --timeout); a traceparent, which only a params _meta could carry, has no source on the
+    // controller now.
 public final class AgentClient implements AgentConnection {      // java.net.http.HttpClient; no proxy; 127.0.0.1 only
     public static AgentClient connect(Endpoint endpoint) throws AgentLostException;   // pings: the reply MAC first (H2), then
                                                                                       // session, nonce, protocol major
@@ -1885,7 +1890,10 @@ ignored, and there is no SPI for pack-defined kinds yet. `timeouts` has one key,
 a number of milliseconds; default 10 s).
 
 (Phase 5, built 2026-10-08 on provisional B23; P5 §13.1) The base verb `call` (§8.3) is reserved: a pack may not declare
-a verb named `call`, and a pack that does is refused. The row for `call` in the §8.3 table says how the verb is amended.
+a verb named `call`, and a pack that does is refused. The row for `call` in the §8.3 table says what Phase 5 confirmed
+of the verb, whose shape it does not change. As built (2026-10-08, the Phase 5 fix wave; P5 §13.1): a `_meta` key at
+any depth of a step's arguments (every verb but `expect`) is a compile error ("a step's arguments may not carry
+_meta").
 No top-level key is added: `inference` is a plan field the compiler writes (P5 §13.2), not a YAML key.
 
 ### 8.2 Plan
@@ -2046,7 +2054,7 @@ errors):
 | Verb | Compiles to |
 |---|---|
 | `call: {primitive, args?, sync?, await?}` | any primitive; `sync` defaults to `NONE`. `sync: EVENT` requires `await: {topic\|topics, match?, within?}` (`within` defaults to the step timeout, at most 600 s); any other sync forbids `await` |
-| `call`, as amended (Phase 5, built 2026-10-08 on provisional B23; P5 §13.1) | `call: {primitive, args?, sync?, timeoutMs?, await?, capture?}`: `sync` defaults to the primitive's descriptor (`SETTLE` for a mutating primitive, `NONE` for a read) where the row above defaults it to `NONE`; the verb gains the keys `timeoutMs` and `capture`; a destructive primitive needs `confirm: true` in `args`, which the compiler passes through. It compiles to one `PlannedCall` verbatim, and a pack may not declare a verb `call`; a journal export relies on it (P5 §12.3) |
+| `call`, confirmed (Phase 5, built 2026-10-08 on provisional B23; P5 §13.1) | Phase 5 confirmed the verb as it stands and amends nothing of its shape: `call: {primitive, args?, sync?, await?}` as in the row above, `sync` defaulting to `NONE`, the capture inside `await`, unknown keys errors (no `timeoutMs`, no `capture` key). It confirms that `call` is a reserved name a pack may not declare, that a destructive primitive's `confirm: true` in `args` reaches the call (the compiler passes it through and the executor sends it as `_meta.confirm`, P5 §12.2, D89), and that a journal export relies on the verb for a step no verb covers (P5 §12.3). (Corrected in the Phase 5 fix wave of 2026-10-08: this row first described an amendment that was never built, `sync` defaulting to the primitive's descriptor and the keys `timeoutMs` and `capture`.) As built (2026-10-08, fix wave; P5 §12.2, §13.1): a `_meta` key at any depth of a step's arguments, `call`'s `args` included, is a compile error, and the executor drops a parameter named `_meta` from every call |
 | `click: {by\|target, rung?, focusTimeoutMs?, activateWindow?, force?, fallback?, strict?, await?}` | `swing.click`, SETTLE; with `await`, EVENT then a settle call. **(1.x, built 2026-10-02)** `fallback` and `strict` (A29) and `await` (A32), see below |
 | `type: {by\|target, text, enter?, mode?, clear?, force?, await?}` | `swing.type`, SETTLE; with `await`, EVENT then a settle call. **(1.x, built 2026-10-02)** `await` (A32) |
 | `press: {key, target?\|by?, modifiers?, force?, await?}` | `swing.key`, SETTLE; with `await`, EVENT then a settle call. **(1.x, built 2026-10-02)** `await` (A32) |

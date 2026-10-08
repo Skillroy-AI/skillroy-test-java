@@ -23,8 +23,9 @@ import java.util.Objects;
 /**
  * Who asked for an action of an interactive session (phase5-contracts.md 12.2), as the journal records it: a person
  * (with a label of their choosing), a model (its id and the request id of the call that chose the action) or the
- * system. Only a {@link Kind#PERSON} may confirm a destructive call: the session strips {@code confirm} from the
- * arguments of a {@link Kind#MODEL} origin's call (design 3.4).
+ * system. Only a {@link Kind#PERSON} may confirm a destructive call: the session strips {@code confirm} and
+ * {@code _meta} from the arguments of every other origin's call, a {@link Kind#MODEL}'s or the {@link Kind#SYSTEM}'s
+ * (design 3.4; phase5-contracts.md 12.2).
  *
  * <p>Immutable; safe to share between threads.
  *

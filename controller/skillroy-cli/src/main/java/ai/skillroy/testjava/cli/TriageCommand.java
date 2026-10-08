@@ -43,8 +43,10 @@ import java.util.Map;
  * {@code run.jsonl} ends {@code FAIL} or {@code ERROR}, a model's label of the failure and, unless
  * {@code --labels-only}, a summary for the person who reviews it ({@link Triage#run}): {@code failure/triage.json} and
  * {@code failure/triage.md}, and the command's {@code cost-ledger.jsonl} and {@code inference.jsonl} under
- * {@code <run dir>/triage/}. A {@code PASS} or {@code DEGRADED} run prints "nothing to triage". The run's own files,
- * its status and its exit code are never touched: triage is never a verdict.
+ * {@code <run dir>/triage/} (the masked prompts in it only with {@code --log-prompts}; the options are the settings'
+ * through {@link TriageOptions#of}: the prompt logging, {@code effort.triage} and the model ids). A
+ * {@code PASS} or {@code DEGRADED} run prints "nothing to triage". The run's own files, its status and its exit code
+ * are never touched: triage is never a verdict.
  *
  * <p>Exit codes: 0; 1 when the model provider failed for a directory (or its files could not be written); 64 for a
  * usage error (a directory that is not a run's output, no gateway, a settings error).
@@ -105,6 +107,12 @@ final class TriageCommand implements Command {
             throw new UsageException(e.getMessage());
         }
         PromptMask mask = PromptMask.keysOnly();
+        TriageOptions options;
+        try {
+            options = TriageOptions.of(inference, labelsOnly, null);
+        } catch (IllegalArgumentException e) {
+            throw new UsageException(e.getMessage());
+        }
         List<Object> results = new ArrayList<>();
         BigDecimal cost = BigDecimal.ZERO;
         int calls = 0;
@@ -119,7 +127,7 @@ final class TriageCommand implements Command {
             for (Path dir : dirs) {
                 TriageResult result;
                 try {
-                    result = Triage.run(dir, gateway, mask, prices, new TriageOptions(labelsOnly, null));
+                    result = Triage.run(dir, gateway, mask, prices, options);
                 } catch (IOException e) {
                     failed++;
                     String message = dir + ": the triage files cannot be written: " + e.getClass().getSimpleName();

@@ -280,26 +280,55 @@ class BudgetAndLedgerTest {
         assertEquals("PROVIDER", ledger.entries().get(1).details().get("error"));
         writer.recordFailure(request(), new InferenceException(InferenceException.Kind.TIMEOUT, "late"), "s", "x",
                 Strategy.LLM_SQL);
-        assertEquals(2, ledger.size(), "an unbilled failure has no entry");
-        assertEquals(3, log.records().size(), "but a record");
+        assertEquals(3, ledger.size(), "an unbilled failure is an entry too (D102)");
+        assertEquals(3, log.records().size(), "and a record");
+        assertEquals(log.records().get(2), ledger.entries().get(2).details(), "the same record");
         assertNull(new CostLedger.Entry("s", null, Strategy.LLM_SQL, "p", "m", "r", 1, 2, "0").details(),
                 "the earlier constructors keep it null");
     }
 
+    /**
+     * D102: a failed call is a ledger entry whether or not the provider billed it, so that the run's writer, which
+     * sees only the ledger (D91), writes its {@code inference.jsonl} line: a {@code NO_RECORDING} or a timeout with
+     * zero usage, cost 0, the provider and the model asked, and {@code details.error}; a billed failure at its cost.
+     */
     @Test
-    void aFailureIsRecordedOnlyWhenItWasBilled() {
+    void aFailureIsAnEntryWithZeroUsageUnlessTheProviderBilledIt() throws Exception {
         CostLedger ledger = new CostLedger();
         BudgetMeter meter = new BudgetMeter(BudgetMeter.Scope.SCENARIO, "s", new BigDecimal("1"), ledger);
         InferenceLog.Memory log = InferenceLog.inMemory();
         LedgerWriter writer = new LedgerWriter(ledger, meter, log, PromptMask.keysOnly(), false, Clock.systemUTC());
+        meter.reserve(new BigDecimal("0.10"));
+        writer.recordFailure(request(), new InferenceException(InferenceException.Kind.NO_RECORDING, "no recording"
+                + " for the resolve request of slot x (fingerprint ab12); password=hunter-2-x"), "recorded",
+                "claude-sonnet-5-5", "s", "x", Strategy.LLM_SQL);
+        assertEquals(1, ledger.size(), "a failure the provider did not bill is an entry with zero usage");
+        CostLedger.Entry entry = ledger.entries().get(0);
+        assertEquals("0", entry.costUsd());
+        assertEquals(0, entry.inputTokens());
+        assertEquals(0, entry.outputTokens());
+        assertEquals("recorded", entry.provider());
+        assertEquals("claude-sonnet-5-5", entry.model(), "the model that was asked");
+        assertEquals("x", entry.slot());
+        assertEquals("resolve", entry.purpose());
+        assertEquals("failed: NO_RECORDING", entry.note());
+        assertEquals("NO_RECORDING", entry.details().get("error"));
+        assertEquals("claude-sonnet-5-5", entry.details().get("requestedModel"));
+        assertNull(entry.details().get("stop"));
+        assertTrue(String.valueOf(entry.details().get("note")).contains("password=<redacted>"), "masked: "
+                + entry.details());
+        assertEquals(log.records().get(0), entry.details(), "the same record as inference.jsonl's");
+        assertEquals(BigDecimal.ZERO, meter.spent());
+        assertEquals(new BigDecimal("1"), meter.remaining(), "the reservation released");
         writer.recordFailure(request(), new InferenceException(InferenceException.Kind.TIMEOUT, "the completion timed"
                 + " out"), "s", "x", Strategy.LLM_SQL);
-        assertTrue(ledger.isEmpty(), "a timeout is not knowable as billed");
-        assertEquals("TIMEOUT", log.records().get(0).get("error"));
+        assertEquals(2, ledger.size(), "a timeout is not knowable as billed: an entry of zero usage");
+        assertNull(ledger.entries().get(1).provider(), "not named by this caller");
         Usage billed = new Usage("claude", "m", "m", "r", 10, 0, 0, 0, 0, false, "0.001", null, null);
         writer.recordFailure(request(), new InferenceException(InferenceException.Kind.PROVIDER, "not JSON", "r",
                 billed, null), "s", "x", Strategy.LLM_SQL);
-        assertEquals(1, ledger.size());
+        assertEquals(3, ledger.size());
+        assertEquals("0.001", ledger.entries().get(2).costUsd(), "a billed failure at its cost");
         assertEquals(new BigDecimal("0.001"), meter.spent());
     }
 

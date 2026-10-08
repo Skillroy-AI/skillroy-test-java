@@ -123,7 +123,9 @@ class RecordedGatewayTest {
             assertEquals(InferenceException.Kind.NO_RECORDING, e.kind());
             assertTrue(e.getMessage().contains(r.fingerprint()));
             assertTrue(e.getMessage().contains("resolve request of slot item"));
-            assertTrue(e.getMessage().contains("-Pinference-record"));
+            assertTrue(e.getMessage().endsWith("; record with a recording gateway (record: true, see the recordings"
+                    + " README of the sample)"), e.getMessage());
+            assertFalse(e.getMessage().contains("-Pinference-record"), "a profile that is not built");
             assertEquals(-1, replay.countTokens(r));
         }
     }
@@ -148,6 +150,39 @@ class RecordedGatewayTest {
         }
         assertTrue(text.contains("password=<redacted>"));
         assertTrue(text.contains("\"staff\": \"S01\""));
+    }
+
+    /**
+     * A provider's opaque blocks (a thinking block with its signature, a fallback block) go to disk as they came (the
+     * mask passes them untouched: the model's own output, built from masked input) and come back from the recording
+     * unchanged, so that a loop that echoes them can replay.
+     */
+    @Test
+    void anOpaquePartIsRecordedAsReceivedAndReplayedUnchanged() throws Exception {
+        Content.Opaque thinking = new Content.Opaque("claude", "thinking", Map.of("type", "thinking", "thinking",
+                "the deposit rule first", "signature", "sig-opaque-42"));
+        Content.Opaque fallback = new Content.Opaque("claude", "fallback", Map.of("type", "fallback", "model",
+                "claude-sonnet-5", "reason", List.of("refusal", Map.of("category", "cyber"))));
+        ModelResponse answer = new ModelResponse(List.of(thinking, Content.Text.of("{\"answer\":\"DRL-01\"}"),
+                fallback), ModelResponse.StopReason.END_TURN, usage(), Map.of("answer", "DRL-01"));
+        assertTrue(PromptMask.keysOnly().part(thinking) == thinking, "the mask passes an opaque part untouched");
+        ModelRequest r = request("which item, thinking first?");
+        try (RecordingGateway rec = recording(ScriptedGateway.answering(x -> answer), false)) {
+            rec.complete(r);
+        }
+        String text = Files.readString(Recording.file(dir, r.fingerprint()), StandardCharsets.UTF_8);
+        assertTrue(text.contains("\"blockType\": \"thinking\"") && text.contains("sig-opaque-42"), text);
+        assertTrue(text.contains("\"blockType\": \"fallback\""), text);
+        try (RecordedGateway replay = new RecordedGateway(dir)) {
+            ModelResponse again = replay.complete(r);
+            assertEquals(answer.parts(), again.parts(), "every part, the opaque ones included, in order");
+            Content.Opaque back = (Content.Opaque) again.parts().get(0);
+            assertEquals("claude", back.provider());
+            assertEquals("thinking", back.type());
+            assertEquals(thinking.raw(), back.raw(), "the raw block, signature included");
+            assertEquals(fallback, again.parts().get(2));
+            assertEquals(answer.structured(), again.structured());
+        }
     }
 
     @Test

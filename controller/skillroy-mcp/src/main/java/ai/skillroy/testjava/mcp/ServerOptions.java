@@ -48,9 +48,13 @@ import java.util.Objects;
  * @param inference the settings of the session's binds (tier (b) through {@code skillroy_resolve} and
  *     {@code skillroy_scenario_run}), also given to the actor factory; null keeps those of {@code session}
  * @param clock the server's clock (run and session ids, the session's durations); null keeps the session's
+ * @param allowEvaluate {@code web_wait_flag} is offered, and with {@code mutating} {@code web_evaluate} too: each runs
+ *     a caller's script in the target's pages, a person's opt-in ({@code --allow-evaluate}); never the planner's
+ *     server (decision D98)
  */
 public record ServerOptions(AgentConnection agent, DomainPack pack, SessionOptions session, boolean mutating,
-                            Path outDir, SessionActorFactory actor, InferenceSettings inference, Clock clock) {
+                            Path outDir, SessionActorFactory actor, InferenceSettings inference, Clock clock,
+                            boolean allowEvaluate) {
 
     /**
      * Fills the session's default.
@@ -61,6 +65,16 @@ public record ServerOptions(AgentConnection agent, DomainPack pack, SessionOptio
         Objects.requireNonNull(agent, "agent");
         Objects.requireNonNull(pack, "pack");
         session = session == null ? SessionOptions.defaults(null) : session;
+    }
+
+    /**
+     * The options without {@code web_evaluate} (the shape before decision D98).
+     *
+     * @throws NullPointerException if the agent or the pack is null
+     */
+    public ServerOptions(AgentConnection agent, DomainPack pack, SessionOptions session, boolean mutating,
+                         Path outDir, SessionActorFactory actor, InferenceSettings inference, Clock clock) {
+        this(agent, pack, session, mutating, outDir, actor, inference, clock, false);
     }
 
     /** A builder for the CLI: read-only, no output directory (a temporary one), no actor, the session's settings. */
@@ -79,6 +93,7 @@ public record ServerOptions(AgentConnection agent, DomainPack pack, SessionOptio
         private SessionActorFactory actor;
         private InferenceSettings inference;
         private Clock clock;
+        private boolean allowEvaluate;
 
         private Builder(AgentConnection agent, DomainPack pack) {
             this.agent = agent;
@@ -122,12 +137,21 @@ public record ServerOptions(AgentConnection agent, DomainPack pack, SessionOptio
         }
 
         /**
+         * Whether {@code web_wait_flag} and, with {@code mutating}, {@code web_evaluate} are offered
+         * ({@code --allow-evaluate}, D98).
+         */
+        public Builder allowEvaluate(boolean on) {
+            this.allowEvaluate = on;
+            return this;
+        }
+
+        /**
          * The options.
          *
          * @throws NullPointerException if the agent or the pack is null
          */
         public ServerOptions build() {
-            return new ServerOptions(agent, pack, session, mutating, outDir, actor, inference, clock);
+            return new ServerOptions(agent, pack, session, mutating, outDir, actor, inference, clock, allowEvaluate);
         }
     }
 }

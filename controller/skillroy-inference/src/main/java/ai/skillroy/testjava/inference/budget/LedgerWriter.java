@@ -47,8 +47,10 @@ import java.util.Objects;
  * <p>The record travels with the ledger (decision D91): the entry's {@link CostLedger.Entry#details()} is the same
  * masked record the log receives (with the fingerprint, the stop reason, the elapsed time, the requested model, the
  * cache-write split by time to live and the masked structured answer), so that a run's writer, which never sees the
- * call, can write {@code inference.jsonl} from its ledger. A failure the provider did not bill has no entry, so its
- * record is in the log only.
+ * call, can write {@code inference.jsonl} from its ledger. A failed call is an entry too (decision D102): with the
+ * usage the provider billed when the failure carries it, else with zero usage and cost {@code "0"}, the provider and
+ * the model that were asked, and its record's {@code error} (the kind) and {@code note} (the masked message), so that
+ * every gateway call of a run has its {@code inference.jsonl} line.
  *
  * <p>Thread-safe if the ledger, meter and log are (they are).
  */
@@ -114,14 +116,33 @@ public final class LedgerWriter {
     }
 
     /**
-     * Records a failed call: a ledger entry and the meter settled only when the failure carries the usage the provider
-     * billed; the meter's reservation released otherwise; an {@code inference.jsonl} record either way, with the
-     * failure's kind.
+     * Records a failed call without naming the provider or the model asked: {@link #recordFailure(ModelRequest,
+     * InferenceException, String, String, String, String, Strategy)} with both null.
      */
     public void recordFailure(ModelRequest request, InferenceException failure, String scenarioId, String slot,
                               Strategy strategy) {
+        recordFailure(request, failure, null, null, scenarioId, slot, strategy);
+    }
+
+    /**
+     * Records a failed call (decision D102): a ledger entry either way, so that the run's writer, which sees only the
+     * ledger (D91), writes its {@code inference.jsonl} line; with the usage the provider billed and the meter settled
+     * when the failure carries it, else with zero usage, cost {@code "0"}, {@code provider} and {@code model} (the
+     * model that was asked, so that a slot whose first attempt failed still names a model) and the meter's
+     * reservation released. The record carries the failure's kind as {@code error} and its masked message as
+     * {@code note}; the entry's note is {@code "failed: KIND"} when the provider billed nothing.
+     *
+     * @param provider the gateway's provider, or null when not known
+     * @param model the model id the request asked for, or null when not known
+     */
+    public void recordFailure(ModelRequest request, InferenceException failure, String provider, String model,
+                              String scenarioId, String slot, Strategy strategy) {
         Usage usage = failure.usage();
         Map<String, Object> record = base(request, usage, scenarioId, slot);
+        if (usage == null) {
+            record.put("provider", provider);
+            record.put("requestedModel", model);
+        }
         record.put("stop", null);
         record.put("error", failure.kind().name());
         record.put("requestId", failure.requestId());
@@ -129,19 +150,21 @@ public final class LedgerWriter {
         if (logPrompts) {
             prompts(record, request);
         }
+        CostLedger.Entry entry;
         if (usage != null) {
-            CostLedger.Entry entry = entry(request, usage, scenarioId, slot, strategy, record);
-            ledger.record(entry);
+            entry = entry(request, usage, scenarioId, slot, strategy, record);
             if (meter != null) {
                 meter.settle(usage);
             }
-            log.append(entry.details());
-            return;
+        } else {
+            entry = new CostLedger.Entry(scenarioId, slot, strategy, provider, model, failure.requestId(), 0L, 0L,
+                    "0", request.purpose(), 0L, 0L, false, "failed: " + failure.kind().name(), record);
+            if (meter != null) {
+                meter.release();
+            }
         }
-        if (meter != null) {
-            meter.release();
-        }
-        log.append(record);
+        ledger.record(entry);
+        log.append(entry.details());
     }
 
     /**

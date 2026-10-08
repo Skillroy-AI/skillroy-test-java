@@ -17,6 +17,7 @@
 package ai.skillroy.testjava.cli;
 
 import ai.skillroy.testjava.data.SecretMask;
+import ai.skillroy.testjava.inference.budget.InferenceLog;
 import ai.skillroy.testjava.protocol.Json;
 import ai.skillroy.testjava.scenario.resolve.BindMode;
 import ai.skillroy.testjava.scenario.resolve.CostLedger;
@@ -28,6 +29,7 @@ import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -213,6 +215,30 @@ final class InferenceArgs {
         }
         Files.createDirectories(dir);
         Files.writeString(dir.resolve("cost-ledger.jsonl"), text.toString(), StandardCharsets.UTF_8);
+    }
+
+    /**
+     * Appends to {@code inference.jsonl} in {@code dir} the records of the model calls made through binds that recorded
+     * into {@code ledger} ({@code InferenceLog.forLedger}: the tier (b) calls of a session's resolves and of the
+     * scenario runs it started; phase5-contracts.md 7.4, 13.4), each line through the credentials' mask once more; a
+     * session's own calls are in the file already (its service appends them). Nothing is written without a record.
+     *
+     * @return how many records were appended
+     * @throws IOException if the file cannot be written
+     */
+    static int appendInferenceRecords(Path dir, CostLedger ledger, SecretMask mask) throws IOException {
+        List<Map<String, Object>> records = InferenceLog.forLedger(ledger).records();
+        if (records.isEmpty()) {
+            return 0;
+        }
+        StringBuilder text = new StringBuilder();
+        for (Map<String, Object> record : records) {
+            text.append(Json.write(mask.apply((Object) record))).append('\n');
+        }
+        Files.createDirectories(dir);
+        Files.writeString(dir.resolve(SessionServices.INFERENCE_FILE), text.toString(), StandardCharsets.UTF_8,
+                StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+        return records.size();
     }
 
     private static void add(Set<String> set, String value) {

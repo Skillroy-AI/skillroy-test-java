@@ -36,6 +36,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
@@ -114,7 +115,12 @@ public final class Planner {
     private static final Pattern ID = Pattern.compile("[a-z0-9-]+");
     private static final long VERSION_TIMEOUT_MS = 10_000;
     private static final long KILL_WAIT_MS = 5_000;
-    private static final int STDOUT_MAX = 32 << 20;
+    /** The most of a planner's stdout that is read, and kept on disk. */
+    static final int STDOUT_MAX = 32 << 20;
+    /** The most of a planner's stderr that is read, and kept on disk. */
+    static final int STDERR_MAX = 1 << 20;
+    /** How long one wait for the process's end lasts before its output's size is looked at again. */
+    private static final long OUTPUT_POLL_MS = 100;
     private static final int STDERR_LINES = 40;
     private static final int STDERR_LINE_MAX = 300;
     private static final int PROBLEMS_MAX = 30;
@@ -203,13 +209,23 @@ public final class Planner {
 
     // ------------------------------------------------------------------------------------------------ the prompt
 
-    /** The prompt of 10.2 item 4: the instructions, the brief, the catalogue summary, the verbs with their schemas. */
+    /**
+     * The prompt of 10.2 item 4: the instructions, the brief, the catalogue summary, the verbs with their schemas
+     * (decision D103). The brief is the operator's own text, typed on the command line: it goes into its block as
+     * written (only a tag that could close or open the block is neutralised), never through the prompt mask. The
+     * catalogue summary is the pack's vocabulary and goes through the mask ({@link #vocabulary}): every text by the
+     * key rule and the bounds, and in an argument schema every value a property's description, default, example, enum
+     * or constant holds, with the whole value replaced where the property's name looks secret; a property's name stays
+     * (the planner needs it). The planner reads no data, so its prompt holds no row and no sample.
+     */
     static String prompt(PlannerRequest request) throws AuthoringException {
         DomainPack pack = request.pack();
+        PromptMask mask = PromptMask.of(null, safe(pack::sqlAllowLists), safe(pack::rowMasks));
         StringBuilder p = new StringBuilder(INSTRUCTIONS);
         p.append("\nThe scenario's id: ").append(request.scenarioId()).append("; its pack: ").append(pack.id())
                 .append(".\n\n<brief>\n").append(brief(request.brief())).append("\n</brief>\n\n");
-        p.append("The pack's catalogue (").append(pack.id()).append(' ').append(pack.version()).append("):\n");
+        p.append("The pack's catalogue (").append(mask.text(pack.id())).append(' ').append(mask.text(pack.version()))
+                .append("):\n");
         ResolutionCatalogue catalogue = pack.resolution() == null ? ResolutionCatalogue.EMPTY : pack.resolution();
         p.append("Query kinds, with their argument records and the strategies that serve them:\n");
         for (String kind : new TreeSet<>(catalogue.kinds())) {
@@ -224,10 +240,11 @@ public final class Planner {
             } catch (IllegalArgumentException e) {
                 args = Map.of("type", "object");
             }
-            p.append("- ").append(kind).append(" (strategies: ").append(strategies.isEmpty() ? "none"
-                    : String.join(", ", strategies)).append("): ").append(Json.writeCanonical(args)).append('\n');
+            p.append("- ").append(mask.text(kind)).append(" (strategies: ").append(strategies.isEmpty() ? "none"
+                    : String.join(", ", strategies)).append("): ").append(Json.writeCanonical(vocabulary(mask, args,
+                    false, 0))).append('\n');
         }
-        p.append("Oracle functions: ").append(join(catalogue.oracleFns())).append('\n');
+        p.append("Oracle functions: ").append(mask.text(join(catalogue.oracleFns()))).append('\n');
         Set<String> roots = new TreeSet<>();
         try {
             for (FactProvider fact : pack.facts() == null ? List.<FactProvider>of() : pack.facts()) {
@@ -236,7 +253,7 @@ public final class Planner {
         } catch (RuntimeException e) {
             roots.add("(the pack's facts cannot be read)");
         }
-        p.append("Fact roots: ").append(join(roots)).append('\n');
+        p.append("Fact roots: ").append(mask.text(join(roots))).append('\n');
         Set<String> tables = new TreeSet<>();
         try {
             for (StoredTable table : pack.storedTables() == null ? List.<StoredTable>of() : pack.storedTables()) {
@@ -245,12 +262,12 @@ public final class Planner {
         } catch (RuntimeException e) {
             tables.add("(the pack's stored tables cannot be read)");
         }
-        p.append("Stored tables for db checks: ").append(join(tables)).append("\n\n");
+        p.append("Stored tables for db checks: ").append(mask.text(join(tables))).append("\n\n");
         p.append("The pack's verbs, with the JSON Schema of their arguments:\n");
         for (String verb : new TreeSet<>(pack.steps().verbs())) {
             Map<String, Object> schema = pack.steps().argsSchema(verb);
-            p.append("- ").append(verb).append(": ").append(schema == null ? "free-form arguments"
-                    : Json.writeCanonical(schema)).append('\n');
+            p.append("- ").append(mask.text(verb)).append(": ").append(schema == null ? "free-form arguments"
+                    : Json.writeCanonical(vocabulary(mask, schema, false, 0))).append('\n');
         }
         String text = p.toString();
         if (text.length() > MAX_ARGUMENT) {
@@ -260,7 +277,63 @@ public final class Planner {
         return text;
     }
 
-    /** The brief with anything that could close or open its block neutralised. */
+    /** The schema keywords whose values are a schema's data rather than its structure. */
+    private static final Set<String> SCHEMA_VALUES = Set.of("default", "examples", "example", "enum", "const");
+
+    /**
+     * An argument schema through the mask (D103): a property's name is kept (it is the vocabulary), its schema walked
+     * with the name's secrecy; a value under {@code default}, {@code examples}, {@code enum} or {@code const} of a
+     * property whose name looks secret becomes {@value PromptMask#REDACTED} whole; every text through the key rule and
+     * the bounds; deeper than 64 levels, nothing.
+     */
+    static Object vocabulary(PromptMask mask, Object schema, boolean secretProperty, int depth) {
+        if (depth > 64) {
+            return "<too deep>";
+        }
+        if (schema instanceof String s) {
+            return mask.text(s);
+        }
+        if (schema instanceof Map<?, ?> map) {
+            Map<String, Object> out = new LinkedHashMap<>();
+            for (Map.Entry<?, ?> e : map.entrySet()) {
+                String key = String.valueOf(e.getKey());
+                Object value = e.getValue();
+                if (key.equals("properties") && value instanceof Map<?, ?> properties) {
+                    Map<String, Object> named = new LinkedHashMap<>();
+                    for (Map.Entry<?, ?> property : properties.entrySet()) {
+                        String name = String.valueOf(property.getKey());
+                        named.put(name, vocabulary(mask, property.getValue(), mask.secretKey(name), depth + 1));
+                    }
+                    out.put(key, named);
+                } else if (secretProperty && SCHEMA_VALUES.contains(key) && value != null) {
+                    out.put(key, PromptMask.REDACTED);
+                } else {
+                    out.put(key, vocabulary(mask, value, secretProperty, depth + 1));
+                }
+            }
+            return out;
+        }
+        if (schema instanceof List<?> list) {
+            List<Object> out = new ArrayList<>(list.size());
+            for (Object item : list) {
+                out.add(vocabulary(mask, item, secretProperty, depth + 1));
+            }
+            return out;
+        }
+        return schema;
+    }
+
+    /** A pack's list (its allow-lists, its row masks), empty when the pack has none or fails to say. */
+    private static <T> List<T> safe(java.util.function.Supplier<List<T>> list) {
+        try {
+            List<T> value = list.get();
+            return value == null ? List.of() : value;
+        } catch (RuntimeException e) {
+            return List.of();
+        }
+    }
+
+    /** The brief with anything that could close or open its block neutralised; never masked (D103). */
     private static String brief(String text) {
         return text.strip().replaceAll("(?i)<(/?)brief\\b", "&lt;$1brief");
     }
@@ -455,13 +528,15 @@ public final class Planner {
             if (envelope == null) {
                 String first = oneLine(mask.text(o.stdout().strip().lines().findFirst().orElse("")));
                 throw failed(what + (resume ? "'s --resume" : "") + " printed no JSON envelope (exit " + o.exit()
-                        + ")" + (first.isEmpty() ? "" : ": " + bounded(first, 300)));
+                        + ")" + (first.isEmpty() ? "" : ": " + bounded(first, 300)) + (o.note() == null ? ""
+                        : " (" + o.note() + ")"));
             }
             record(envelope);
             Object isError = envelope.get("is_error");
             if (o.exit() != 0 || !Boolean.FALSE.equals(isError)) {
                 throw failed(what + " failed (exit " + o.exit() + ", is_error " + isError + "): "
-                        + bounded(oneLine(mask.text(String.valueOf(envelope.get("result")))), 300));
+                        + bounded(oneLine(mask.text(String.valueOf(envelope.get("result")))), 300)
+                        + (o.note() == null ? "" : " (" + o.note() + ")"));
             }
             Object mcpErrors = envelope.get("mcp_server_errors");
             if (mcpErrors instanceof List<?> errors && !errors.isEmpty()
@@ -548,7 +623,13 @@ public final class Planner {
             }
         }
 
-        /** The process's output, or null when it did not end within {@code timeoutMs} (it is then destroyed). */
+        /**
+         * The process's output, or null when it did not end within {@code timeoutMs} (it is then destroyed with its
+         * descendants). Its stdout and stderr go to files in the private directory, each bounded on disk by what is
+         * read of it (32 MiB and 1 MiB): while the process runs, the files' sizes
+         * are looked at between bounded waits for its end, and a process whose output passes a bound is stopped
+         * there; a file longer than its bound is cut to it, and the log says so (never what was cut).
+         */
         private Output execute(List<String> command, long timeoutMs) throws IOException, InterruptedException {
             int n = ++outputs;
             Path stdout = work.resolve("stdout-" + n + ".txt");
@@ -556,10 +637,23 @@ public final class Planner {
             ProcessBuilder builder = new ProcessBuilder(command).directory(work.toFile())
                     .redirectOutput(stdout.toFile()).redirectError(stderr.toFile());
             Process process = builder.start();
+            boolean overflowed = false;
             try {
                 process.getOutputStream().close();
-                if (!process.waitFor(Math.max(1, timeoutMs), TimeUnit.MILLISECONDS)) {
-                    return null;
+                long end = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(Math.max(1, timeoutMs));
+                while (true) {
+                    long left = TimeUnit.NANOSECONDS.toMillis(end - System.nanoTime());
+                    if (left <= 0) {
+                        return null;
+                    }
+                    if (process.waitFor(Math.min(left, OUTPUT_POLL_MS), TimeUnit.MILLISECONDS)) {
+                        break;
+                    }
+                    if (size(stdout) > STDOUT_MAX || size(stderr) > STDERR_MAX) {
+                        overflowed = true;
+                        stop(process);
+                        break;
+                    }
                 }
             } catch (InterruptedException e) {
                 stop(process);
@@ -569,12 +663,43 @@ public final class Planner {
                     stop(process);
                 }
             }
-            String err = read(stderr, 1 << 20);
+            List<String> cuts = new ArrayList<>();
+            if (cut(stdout, STDOUT_MAX)) {
+                cuts.add("its stdout passed " + STDOUT_MAX + " bytes and was cut there");
+            }
+            if (cut(stderr, STDERR_MAX)) {
+                cuts.add("its stderr passed " + STDERR_MAX + " bytes and was cut there");
+            }
+            String note = cuts.isEmpty() ? null : String.join(", ", cuts) + (overflowed ? "; the process was"
+                    + " stopped" : "");
+            if (note != null) {
+                log.add("the planner: " + note);
+            }
+            String err = read(stderr, STDERR_MAX);
             List<String> lines = err.lines().filter(l -> !l.isBlank()).toList();
             for (String line : lines.subList(Math.max(0, lines.size() - STDERR_LINES), lines.size())) {
                 log.add(bounded(oneLine(mask.text(line)), STDERR_LINE_MAX));
             }
-            return new Output(process.exitValue(), read(stdout, STDOUT_MAX));
+            return new Output(process.isAlive() ? -1 : process.exitValue(), read(stdout, STDOUT_MAX), note);
+        }
+
+        private static long size(Path file) {
+            try {
+                return Files.isRegularFile(file) ? Files.size(file) : 0L;
+            } catch (IOException e) {
+                return 0L;
+            }
+        }
+
+        /** Cuts a file to {@code max} bytes; true when it was longer. */
+        private static boolean cut(Path file, long max) throws IOException {
+            if (size(file) <= max) {
+                return false;
+            }
+            try (FileChannel channel = FileChannel.open(file, StandardOpenOption.WRITE)) {
+                channel.truncate(max);
+            }
+            return true;
         }
 
         private int outputs;
@@ -652,8 +777,8 @@ public final class Planner {
         }
     }
 
-    /** The output of one process. */
-    private record Output(int exit, String stdout) {
+    /** The output of one process; {@code note} says what of it was cut, or is null. */
+    private record Output(int exit, String stdout, String note) {
     }
 
     /**

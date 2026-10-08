@@ -113,6 +113,20 @@ public final class ScenarioSchema {
      * @throws IllegalArgumentException when the pack's catalogue or step library cannot be read
      */
     public static Map<String, Object> generate(DomainPack pack, List<PrimitiveDescriptor> primitives) {
+        return generate(pack, primitives, null);
+    }
+
+    /**
+     * {@link #generate(DomainPack, List)} for a host that offers only some primitives (phase5-contracts.md 9.3, 10.2,
+     * decision D96: the MCP server and the planner's server run a scenario only when its calls are ones they offer):
+     * the base verb {@code call}'s {@code primitive} is one of {@code callable}.
+     *
+     * @param callable the primitive names the host lets the base verb {@code call} name; null means every primitive
+     *     of the catalogue (any name when the catalogue is not known)
+     * @throws IllegalArgumentException when the pack's catalogue or step library cannot be read
+     */
+    public static Map<String, Object> generate(DomainPack pack, List<PrimitiveDescriptor> primitives,
+                                               Set<String> callable) {
         Objects.requireNonNull(pack, "pack");
         List<PrimitiveDescriptor> descriptors = primitives == null ? List.of() : primitives;
         ResolutionCatalogue catalogue;
@@ -149,7 +163,7 @@ public final class ScenarioSchema {
                 verbs.put(verb, packArgs(library, verb));
             }
         }
-        Map<String, Map<String, Object>> base = baseVerbs(descriptors);
+        Map<String, Map<String, Object>> base = baseVerbs(descriptors, callable);
         for (String verb : BaseSteps.VERBS) {
             verbs.putIfAbsent(verb, base.get(verb));
         }
@@ -317,11 +331,21 @@ public final class ScenarioSchema {
         return free;
     }
 
-    /** The base verbs' arguments, as {@link BaseSteps} accepts them. */
-    private static Map<String, Map<String, Object>> baseVerbs(List<PrimitiveDescriptor> descriptors) {
+    /**
+     * The base verbs' arguments, as {@link BaseSteps} accepts them; {@code call}'s primitive one of {@code callable}
+     * when it is given, else one of the catalogue's, else any name (the catalogue is not known).
+     */
+    private static Map<String, Map<String, Object>> baseVerbs(List<PrimitiveDescriptor> descriptors,
+                                                              Set<String> callable) {
         Map<String, Map<String, Object>> verbs = new LinkedHashMap<>();
         Map<String, Object> primitive = Schemas.type("string");
-        if (!descriptors.isEmpty()) {
+        if (callable != null) {
+            if (callable.isEmpty()) {
+                primitive.put("description", "no primitive is offered here: use the pack's verbs");
+            } else {
+                primitive = enumOf(new ArrayList<>(new TreeSet<>(callable)));
+            }
+        } else if (!descriptors.isEmpty()) {
             Set<String> names = new TreeSet<>();
             for (PrimitiveDescriptor descriptor : descriptors) {
                 if (descriptor != null) {

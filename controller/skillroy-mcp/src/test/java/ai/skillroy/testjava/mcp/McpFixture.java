@@ -60,10 +60,15 @@ final class McpFixture implements AutoCloseable {
 
     /** The desk's options: credentials, environment seed-a, session sess-1, the output directory, read-only. */
     ServerOptions.Builder options() {
+        return options(desk.pack);
+    }
+
+    /** {@link #options()} with another pack over the desk's agent. */
+    ServerOptions.Builder options(ai.skillroy.testjava.scenario.pack.DomainPack pack) {
         SessionOptions session = SessionOptions.defaults(null)
                 .withBind(BindOptions.defaults().withCredentials(Desk.credentials()).withEnvId("seed-a"))
                 .withId("sess-1");
-        return ServerOptions.builder(desk.agent, desk.pack).session(session).outDir(out).clock(Clock.systemUTC());
+        return ServerOptions.builder(desk.agent, pack).session(session).outDir(out).clock(Clock.systemUTC());
     }
 
     /** Starts the server with these options and initialises a client. */

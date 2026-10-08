@@ -52,8 +52,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * names, readable or other, exists in its table, and together they are exactly the table's columns, the readable ones
  * in the schema's order; every readable column has the schema's type; every key column is NOT NULL; no readable column
  * is secret, and the secret one, {@code staff.password} (the column the pack's row mask hides), is among the other
- * columns. The tables a model may not read at all are named here too. The guard's accept corpus over these tables
- * belongs to the inference module's tests.
+ * columns. The tables a model may not read at all are named here too. The guard's accept corpus over these tables runs
+ * on the same database in {@link LendingAcceptCorpusTest}.
  */
 class AllowListOnRealSchemaTest {
 

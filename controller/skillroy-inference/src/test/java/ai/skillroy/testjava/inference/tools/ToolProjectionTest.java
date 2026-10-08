@@ -68,6 +68,8 @@ class ToolProjectionTest {
                     Map.of("type", "string"), "_meta", Map.of("type", "object")), List.of("locator", "_meta"))),
             d("swing.snapshot", false, false, null),
             d("web.evaluate", true, false, object(Map.of("script", Map.of("type", "string")), List.of("script"))),
+            d("web.waitFlag", false, false, object(Map.of("expression", Map.of("type", "string")),
+                    List.of("expression"))),
             d("lending.deposit", false, false, object(Map.of("item", Map.of("type", "string", "minLength", 1)),
                     List.of("item"))),
             d("lending.loan", true, false, null),
@@ -215,7 +217,19 @@ class ToolProjectionTest {
         List<ToolSpec> tools = ToolProjection.project(PRIMITIVES, pack(true, signOnSchema()),
                 ToolProjection.Policy.mutating());
         assertEquals(List.of("app_get_state", "data_query", "lending_deposit", "lending_loan", "swing_click",
-                "swing_snapshot", "web_evaluate", "lending_scan_item", "lending_sign_on"), names(tools));
+                "swing_snapshot", "lending_scan_item", "lending_sign_on"), names(tools), "never web_evaluate by"
+                + " default (D98)");
+        assertEquals(names(tools), names(ToolProjection.project(PRIMITIVES, pack(true, signOnSchema()),
+                ToolProjection.Policy.mutating(false))));
+        assertTrue(names(ToolProjection.project(PRIMITIVES, pack(true, signOnSchema()),
+                ToolProjection.Policy.mutating(true))).containsAll(List.of("web_evaluate", "web_wait_flag")),
+                "a person's opt-in offers both");
+        List<String> readOnlyOptedIn = names(ToolProjection.project(PRIMITIVES, pack(true, signOnSchema()),
+                ToolProjection.Policy.readOnly(true)));
+        assertTrue(readOnlyOptedIn.contains("web_wait_flag") && !readOnlyOptedIn.contains("web_evaluate"),
+                "read-only, opted in: the read that runs a script, never the mutating one: " + readOnlyOptedIn);
+        assertEquals(ToolProjection.SCRIPT_PRIMITIVES, ToolProjection.Policy.session(true, true).excluded(),
+                "a session never offers either");
         ToolSpec click = named(tools, "swing_click");
         assertFalse(click.readOnly());
         Map<?, ?> props = (Map<?, ?>) click.inputSchema().get("properties");

@@ -17,6 +17,7 @@
 package ai.skillroy.testjava.inference;
 
 import ai.skillroy.testjava.inference.claude.ClaudeGateway;
+import ai.skillroy.testjava.inference.prompt.PromptMask;
 import ai.skillroy.testjava.inference.recorded.RecordedGateway;
 import ai.skillroy.testjava.inference.recorded.RecordingGateway;
 import ai.skillroy.testjava.inference.spi.BatchHandle;
@@ -31,6 +32,7 @@ import ai.skillroy.testjava.inference.spi.ModelResponse;
 import ai.skillroy.testjava.scenario.resolve.InferenceSettings;
 
 import java.nio.file.Path;
+import java.time.Clock;
 import java.time.Duration;
 import java.util.HashMap;
 import java.util.List;
@@ -43,7 +45,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * Builds the gateway the settings name (phase5-contracts.md 4.4): {@code claude} (the key from the environment),
  * {@code recorded} (the settings' recordings directory), {@code none} (a gateway whose every call is
  * {@code UNSUPPORTED} "no gateway"); a live gateway is wrapped in the {@link RecordingGateway} when {@code record} is
- * set. One gateway per distinct gateway-relevant settings, shared and reference-counted: each {@link #open} returns a
+ * set, writing its recordings through the prompt mask of whoever opened it first ({@link #open(InferenceSettings,
+ * PromptMask)}; the key rule and the bounds alone without one). One gateway per distinct gateway-relevant settings, shared and reference-counted: each {@link #open} returns a
  * lease whose {@code close()} releases it once, and the gateway is closed with its last lease (the re-resolve job parks
  * many binds at once, each with its own contributor, and they should share one HTTP client and one batch). A caller may
  * {@link #serve} settings with a gateway of its own (a scripted one, in tests and in a sample's recording generator).
@@ -95,12 +98,26 @@ public final class Gateways {
      *     unknown gateway or {@code recorded} without a directory
      */
     public static InferenceGateway open(InferenceSettings settings) throws InferenceException {
+        return open(settings, null);
+    }
+
+    /**
+     * A lease on the gateway of these settings, opened on first use with the opener's prompt mask: the mask the
+     * {@link RecordingGateway} of {@code record: true} writes its recordings through (phase5-contracts.md 4.2, the
+     * second pass; the request builders apply the full mask of 6.2 before a request reaches a gateway). The shared
+     * gateway keeps the mask of the opener that built it; a later opener's mask is not applied.
+     *
+     * @param mask the opener's mask (the run's credentials, the pack's allow-lists and row masks); null is the key rule
+     *     and the bounds alone
+     * @throws InferenceException as {@link #open(InferenceSettings)}
+     */
+    public static InferenceGateway open(InferenceSettings settings, PromptMask mask) throws InferenceException {
         Objects.requireNonNull(settings, "settings");
         Key key = Key.of(settings);
         synchronized (OPEN) {
             Shared shared = OPEN.get(key);
             if (shared == null) {
-                shared = new Shared(build(settings), false);
+                shared = new Shared(build(settings, mask), false);
                 OPEN.put(key, shared);
             }
             shared.leases++;
@@ -153,13 +170,9 @@ public final class Gateways {
         }
     }
 
-    private static InferenceGateway build(InferenceSettings settings) throws InferenceException {
+    private static InferenceGateway build(InferenceSettings settings, PromptMask mask) throws InferenceException {
         return switch (settings.gateway()) {
-            case InferenceSettings.GATEWAY_CLAUDE -> {
-                InferenceGateway live = ClaudeGateway.open(settings);
-                yield settings.record() && settings.recordings() != null
-                        ? new RecordingGateway(live, settings.recordings()) : live;
-            }
+            case InferenceSettings.GATEWAY_CLAUDE -> recording(ClaudeGateway.open(settings), settings, mask);
             case InferenceSettings.GATEWAY_RECORDED -> {
                 if (settings.recordings() == null) {
                     throw new InferenceException(Kind.UNSUPPORTED, "the recorded gateway needs a recordings"
@@ -170,6 +183,19 @@ public final class Gateways {
             case InferenceSettings.GATEWAY_NONE -> NONE;
             default -> throw new InferenceException(Kind.UNSUPPORTED, "unknown gateway " + settings.gateway());
         };
+    }
+
+    /**
+     * The live gateway as the settings want it: wrapped in a {@link RecordingGateway} over the settings' recordings
+     * directory, writing through {@code mask} (null: the key rule and the bounds alone), when {@code record} is set;
+     * else as it is.
+     */
+    static InferenceGateway recording(InferenceGateway live, InferenceSettings settings, PromptMask mask) {
+        if (!settings.record() || settings.recordings() == null) {
+            return live;
+        }
+        return new RecordingGateway(live, settings.recordings(), mask == null ? PromptMask.keysOnly() : mask,
+                Boolean.getBoolean(RecordingGateway.OVERWRITE_PROPERTY), Clock.systemUTC());
     }
 
     /** The gateway of {@code gateway: none}: every call is {@code UNSUPPORTED} "no gateway". */

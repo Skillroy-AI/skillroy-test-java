@@ -227,6 +227,40 @@ class Phase5CompileTest {
                 + " fields: { x: y } } }\n").reason().contains("unknown argument 'capture'"), "capture sits in await");
     }
 
+    /**
+     * A step's arguments may not carry {@code _meta} (phase5-contracts.md 13.1, the fix wave): a call's {@code _meta}
+     * is the executor's, built from its options. Refused at any depth of any verb's arguments ({@code expect} aside:
+     * its matchers are never sent) and in the calls a pack's verb compiles to, cleanup calls included, naming the
+     * key's path; a key that merely resembles it, and {@code confirm}, stay allowed.
+     */
+    @Test
+    void aStepsArgumentsMayNotCarryMeta() throws Exception {
+        ScenarioException call = fails("scenario: t\npack: toy\nsteps:\n"
+                + "  - call: { primitive: toy.wipe, args: { _meta: { confirm: true } } }\n");
+        assertEquals("verb 'call': a step's arguments may not carry _meta (at args._meta); a call's _meta is built by"
+                + " the executor from its options", call.reason());
+        assertEquals(4, call.line());
+        ScenarioException deep = fails("scenario: t\npack: toy\nsteps:\n  - enter: { value: B2 }\n"
+                + "  - enter: { value: B2, extra: [ { note: x }, { _meta: {} } ] }\n");
+        assertTrue(deep.reason().contains("a step's arguments may not carry _meta (at extra[1]._meta)"),
+                deep.reason());
+        assertEquals(5, deep.line());
+        pack.custom = List.of(PlannedCall.of("toy.wipe", Map.of("_meta", Map.of("confirm", true)), Sync.NONE));
+        ScenarioException packCall = fails("scenario: t\npack: toy\nsteps:\n  - custom: {}\n");
+        assertTrue(packCall.reason().contains("call toy.wipe: a step's arguments may not carry _meta (at _meta)"),
+                packCall.reason());
+        pack.custom = List.of();
+        pack.onCustom = ctx -> ctx.addCleanup(PlannedCall.of("toy.wipe", Map.of("lines", List.of(Map.of("_meta",
+                true))), Sync.NONE));
+        ScenarioException cleanup = fails("scenario: t\npack: toy\nsteps:\n  - custom: {}\n");
+        assertTrue(cleanup.reason().contains("cleanup: call toy.wipe: a step's arguments may not carry _meta (at"
+                + " lines[0]._meta)"), cleanup.reason());
+        pack.onCustom = ctx -> { };
+        Plan fine = compile("scenario: t\npack: toy\nsteps:\n  - expect: { state.name: IDLE }\n"
+                + "  - call: { primitive: toy.wipe, args: { confirm: true, meta: x, _metadata: y } }\n");
+        assertEquals(Map.of("confirm", true, "meta", "x", "_metadata", "y"), fine.steps().get(1).calls().get(0).args());
+    }
+
     // ------------------------------------------------------------------------------------------------ SPI defaults
 
     @Test

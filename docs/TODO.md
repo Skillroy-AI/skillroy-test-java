@@ -62,8 +62,8 @@ earlier runs of that copy found defects that only a real JCEF shows, fixed befor
 review" below), and display-test flakes of the Swing module ("Open flake"). The orchestrator's Linux matrix of the
 final tree is the table that follows.
 
-**On the night of 2026-10-07 to 2026-10-08 the Phase 5 contract was written** (`design/phase5-contracts.md`, specified,
-not built): the `InferenceGateway` SPI with typed content parts and its Claude, recorded and scripted implementations,
+**On the night of 2026-10-07 to 2026-10-08 the Phase 5 contract was written** (`design/phase5-contracts.md`, first
+specified, then built the same night, below): the `InferenceGateway` SPI with typed content parts and its Claude, recorded and scripted implementations,
 tier (b) SQL behind `SqlGuard` with masking before any prompt, approval and budgets, batch re-resolution, `skillroy-mcp`,
 the planner through the `claude` CLI, triage, and the interactive profile (`ExecutorSession`, `StepJournal`, the export,
 the session service); CI and replay never need a model key. Its eighteen provisional answers are decision **B23**, on
@@ -71,6 +71,34 @@ the owner interview page. Two spikes started the same night as the contract's ga
 JSqlParser) and BS13 (the Claude API facts the contract relies on, checked live with the owner's key). The small Phase 4
 follow-ups (gaps 38, 40, 45 and, if cheap, 42) went to implementers as Phase 4.x amendments A35-A38, and the display-test
 focus flake to an investigator. **The flake is explained and mitigated** (A39, below: 14 failed runs of 50 before, 0 of 60 after), and the amendments A35-A38 are built.
+
+**Phase 5 was then built the same night on the provisional B23 answers** (the method of Phases 2 to 4: eight
+implementers in isolated worktrees, integrated by file list in waves, the native reactor green after every wave; the
+decisions the build took are D88-D95, B24), **run through the Linux matrix** (first round: three failures in checks that
+had never run before, fixed; tables below), **reviewed through the three lenses, each verified by a sceptic** (33 distinct
+items, among them five rated high: a model client could run any primitive confirmed through the MCP scenario-run tool, a
+key with a stray character could leak through a provider exception, a session check was an oracle on masked values, the
+allow-list was never checked against the schema, triage sent row samples unmasked by column; section "Phase 5 code
+review" below), **and fixed by four fixers** (decisions D96-D103 and D110; the review's as-built and "fix wave" notes are
+in the contract). The final tree's matrix is the first table below. Owed to a live model, until the owner supplies the
+key's workspace id ("Walls"): the planner-authored sample scenario C, live recordings in place of the scripted
+stand-ins, the live profiles and the live acceptance of the contract's §15.3.
+
+Verification of the Phase 5 tree, first round (2026-10-08): the committed build (`7e18e0c`) on the arm64 image natively,
+then the tree with that round's three fixes (`a6ed6e9`) on the amd64 image under emulation. The arm64 counts of this
+round are not recorded: the summariser also counted the test reports of the review agents' worktrees inside the tree
+(corrected before the final round); its failures are exact. The final round, on the tree after the review's fix wave,
+is the table that follows this one.
+
+| Configuration | Command (from the repo root) | Result |
+|---|---|---|
+| Native, JDK 26, headless, the committed build `7e18e0c` | `mvn -o -q verify` | 3627 tests, 0 failures, 0 errors, 122 skipped |
+| arm64 image (JDK 25), targets on Java 25, `7e18e0c` | `ci/run-in-linux.sh mvn -o -q clean verify -Pjcef -Dskillroy.jcef.platform=linux-arm64 -Dskillroy.headless=false` | 1 failure, 2 errors, 467 s: `InferenceEndToEndIT` (approve with the reuse rule, the session export's replay), fixed in `a6ed6e9` |
+| arm64 image, targets on Java 8 (aarch64 JDK 8u504), `7e18e0c` | the same plus `-Dskillroy.it.targetJava=/opt/jdk8/bin/java` | the same three, 467 s |
+| arm64 image, agent side, test JVMs and targets on Java 8, `7e18e0c` | the Java 8 command plus `-Djvm=/opt/jdk8/bin/java`, `-pl` the twelve agent-side modules | 1361 tests, 0 failures, 1 error, 8 skipped, 178 s: kit item 12 against real JCEF (the kit's own marker script), fixed in `a6ed6e9`; after the fix the off-screen kit passes 13 of 13 on a Java 8 and on a Java 25 test JVM (run from a worktree) |
+| amd64 image (JDK 25, emulated), targets on Java 25, `a6ed6e9` | `ci/run-in-linux.sh mvn -o -q clean verify -Pjcef -Dskillroy.jcef.platform=linux-amd64 -Dskillroy.headless=false` | 4006 / 0 / 0 / 68, 1212 s |
+| amd64 image, targets on Java 8 (1.8.0_492), `a6ed6e9` | the same plus `-Dskillroy.it.targetJava=/opt/jdk8/bin/java` | 4006 / 0 / 1 / 68, 688 s: `InferenceEndToEndIT`'s session check could not spawn the CLI ("Bad code from spawn helper", the JDK's `jspawnhelper` under QEMU; the same check passed in the leg above and on arm64): an emulation flake, not a defect; the matrix now runs the amd64 test JVMs with `-Djdk.lang.Process.launchMechanism=FORK` ("Environment notes") |
+| amd64 image, agent side, test JVMs and targets on Java 8, `a6ed6e9` | the Java 8 command plus `-Djvm=/opt/jdk8/bin/java`, `-pl` the twelve agent-side modules | 1380 / 0 / 0 / 21, 250 s |
 
 Verification of the Phase 4 tree (2026-10-07). The final tree is the one after the review's fix wave; each Linux leg
 runs twice in a row (the exit criterion's "twice in a row without a flake"), on the amd64 image, which an arm64
@@ -1000,6 +1028,109 @@ the two repaired checks green on both seeds). What was run is in the table below
   interactive session on the sample is exported from its journal as a scenario that replays with zero model calls
   (**met headlessly** 2026-10-08, `SessionExportTest`; in the image by `InferenceEndToEndIT`).
 
+### Phase 5 code review (2026-10-08)
+
+The method of Phases 2 to 4: three lenses, each run by one reviewer on the committed tree (`7e18e0c`, the whole build)
+with a shared brief, and each verified by a sceptic who tried to refute every finding with probes in a worktree of the
+tree and added what the lens had missed. **Contract fit** (L1): 8 findings (0 high, 5 medium, 3 low); the sceptic
+raised F2 to high, split F3 (one medium, two documentation items), lowered F4 to a contract decision and added S1 (high),
+S2 and S3 (low). **Secrets, safety and bounds** (L2): 14 findings (3 high, 6 medium, 5 low); the sceptic confirmed 13,
+refuted half of F13 (resources are served uncut by §9.4), restated F3, F6, F8 and F14, and added S1 (high) and S2
+(medium). **Tests and determinism** (L3): 11 findings (2 high, 5 medium, 4 low); the sceptic confirmed all eleven,
+lowered F1 and F2 to medium and added S1 and S2 (low). Six items were seen through two lenses (a model's `_meta.confirm`,
+the MCP export's `approvedBy`, the session budget, triage's row samples, the recording gateway's mask, the scenario-run
+tool), which leaves about 33 distinct items. The most important:
+
+- **The MCP scenario-run tool ran whatever a client's YAML named** (L2 F2 = L1 sceptic S1, high, live on the sample):
+  through `skillroy_scenario_run`, and through `author --run`, a model could `call agent.disable {confirm: true}` (sent
+  confirmed, D89 made the route live) or `call data.query` unguarded, with the rows readable through the run resource,
+  while the planner's server is always `--mutating` and its model runs under `dontAsk`. Now one plan-policy check,
+  shared by the tool and `author --run`, refuses before anything runs a plan whose steps or cleanup name a primitive the
+  server's projection would not offer, or carry `confirm` or `_meta` (D96).
+- **A key with a character a header cannot carry leaked through OkHttp's exception** (L2 F1, high): the gateway
+  validated the key for blank only, OkHttp's `IllegalArgumentException` names the header's value, and the raw message
+  reached `run.jsonl`, `junit.xml`, the console, an MCP tool error (that is, a model) and the CLI's stack trace. Now the
+  key and the workspace id are refused outside printable ASCII with a message that names the variable, and any other
+  runtime exception of an attempt is scrubbed.
+- **A model's request could still confirm** (L1 F1 = L2 F5, medium, latent: the only destructive primitive today is
+  `agent.disable`): a params-level `_meta` map survived into the call and the controller's client merged it into the
+  request's `_meta`; only a MODEL origin's top-level `confirm` was stripped, and the scenario tests' fake agent could not
+  show it. Now `CallRunner` drops a params-level `_meta` for every caller, every origin but PERSON is stripped of
+  `confirm` and `_meta`, the compiler refuses `_meta`, the client ignores `confirm` inside `params._meta`, and the fake
+  honours it the way the client did.
+- **A session `check` was an oracle on masked values** (L2 sceptic S1, high): the matcher ran against the unmasked
+  value and only the reported `actual` was masked, so a read-only MCP client could rebuild a credential character by
+  character with `matches` and `contains`. Now the matcher runs against the masked value.
+- **The allow-list was never checked against the schema** (L1 F2, raised to high): §5.2's checks were not implemented,
+  and the guard's rule 4 trusted `otherColumns` to be complete, so a column added by a later release let a predicate on
+  it run. Now the contributor (and the MCP server at start) reads each allow-listed table's columns through the source
+  with a zero-row select and refuses a list that does not name them all, and a column a `RowMask` alters.
+- **Triage sent row samples unmasked by column** (L1 F3 = L2 F3, high but latent: the sample's SQL selects no personal
+  column) and **the `data_query` tool answered personal-column filters** (L2 F7, medium: a name rebuilt by prefix
+  enumeration). Now triage sends no row sample at all, and the MCP server guards `data_query` with an allow-list copy
+  in which personal and masked columns are unreferenceable (D99); the personal taint also escaped through `EXISTS`
+  and `IN` subqueries in a select list (L2 sceptic S2, medium), closed in the analyser.
+- **Decisions the review forced**: the MCP export writes tier (b) slots `REQUIRED` and its `approvedBy` argument is
+  gone (L1 F4 = L2 F8, D97); `web_evaluate` is not offered by the mutating projection unless a person opts in, and
+  never to the planner (L2 F6, D98); tier (b) resolves in a session count against the session budget (L1 F5 = L2 F9); the
+  `inference-live` and `inference-record` profiles and the §15.3 live tests are marked not built until a key works
+  (L3 F1: nobody can run them, and the "no code changes after a live re-record" claim was false; D110).
+- **From the tests lens**: removing the session service's masks survived every suite (L3 F2; real-builder masking
+  tests now cover the session, the summary, the overlay and the planner's catalogue); the export wrote a slot's
+  arguments in journaled order, so a live re-record would have rewritten the committed export and failed the same
+  build (L3 F3; sorted keys now); the §15.2 secret scan ran before the MCP and CLI-session checks and missed a secret
+  inside JSON text (L3 F4); no accept-corpus statement executed on the sample's own schema (L3 F5); the MCP verb check
+  passed by construction (L3 F6); the planner's process-tree kill was unproven (L3 F7).
+- Smaller: `retry-after` overflow and negative values (L2 F4); `inference.jsonl` missing failures and sessions' tier (b)
+  calls (L1 F6); settings accepted and ignored (L1 F7); contract text contradicting the build (L1 F8); the recording
+  gateway's second pass being keys-only (L1 F3(2) = L2 F11 = L3 S2, now documented and given the mask where one exists);
+  `StdioPipe` unbounded (L2 F13); the planner's files unbounded on disk (L2 F14); a timing bound that included client
+  construction (L3 F8); CLI subprocesses leaked on a timeout (L3 F9); `ReResolverTest` hanging on a regression (L3
+  sceptic S1); the parameter rule 6 not enforced on inline literals (L1 sceptic S2); the job budget's inline retries (L1
+  sceptic S3). Judged and left as a documented limitation: the table-unaware personal rule, which over-masks
+  `desk_setting.name` in two recordings and never under-masks (L2 F10).
+
+**The fix wave**, four fixers in isolated worktrees from the committed tree, each change with a test that fails before
+it (the fixers' own mutation runs are in their reports), integrated by patch in the order FA, FD, FB, FC with one
+documentation conflict resolved by hand, then reconciled (FC had coded against FA's and FB's interfaces by reflection
+while they were being written; the reconciler replaced those with direct calls, wired the allow-list check into the MCP
+server's start and made FC's fixtures match their fake schemas):
+
+- *The scenario side and the controller's client* (FA): a params-level `_meta` dropped for every caller, every origin
+  but PERSON stripped of `confirm` and `_meta`, the compiler refusing `_meta`, the client ignoring `confirm` inside a
+  params `_meta` (no `traceparent` travels that way any more; P1 §7 and P2 §11.4 amended), the scenario tests' fake
+  agent honouring `_meta.confirm` so the acceptance test can see a bypass, the session check and (behind
+  `RunOptions.withExpectationsOnMaskedValues`, which the MCP scenario-run tool and `author --run` set) a run's
+  expectations evaluated on masked values, the export's arguments written with sorted keys (the committed export
+  regenerated: three lines), `REQUIRED` written with `by: null`, and the contract text of L1 F8.
+- *The inference module* (FB): the key and the workspace id refused outside printable ASCII and every other runtime
+  exception of an attempt scrubbed; `retry-after` clamped; triage sends no row sample; `Gateways.open(settings, mask)`
+  for the recording's second pass; `AllowListCheck` (a zero-row select per table, the row-mask probe) at bind, at the
+  contributor's load and, through FC, at the MCP server's start (D100; scenario D's bindings files regenerated, the
+  check's statements now in the provenance); the personal taint through `EXISTS`, `IN`, `ANY` and scalar subqueries in
+  a select list; the metered `SessionService.resolve` with `BudgetCaps` (D101); failed calls as ledger entries (D102);
+  `effort.*`, the model ids, `logPrompts` and `timeouts.plannerMs` threaded through; real-builder masking tests for the
+  session, the summary, the overlay and the planner's vocabulary (the brief exempt, D103); the planner's process-tree
+  kill proven with a forked child and a stepping clock; the planner's files bounded on disk; `ReResolverTest` bounded;
+  the parameter rule's literal check; the job's inline retries reserved; the `NO_RECORDING` message corrected.
+- *The MCP server and the CLI* (FC): the plan-policy check before `skillroy_scenario_run` and `author --run` (D96),
+  verb tools that reach a never-offered primitive withheld and listed in `skillroy_catalogue`, `_meta` stripped at
+  the tool boundary, the planner's scenario schema naming only what the host offers; MCP exports always `REQUIRED`
+  (D97); `web.evaluate` and `web.waitFlag` behind `--allow-evaluate` and never for the planner (D98); `data_query`
+  guarded by an allow-list copy with personal and row-masked columns unreferenceable (D99); the session's and the
+  server's resolves routed through the metered entry; `inference.jsonl` written on close for sessions and the server;
+  `triage --log-prompts` and `plannerMs` honoured; `StdioPipe` bounded (an 8 MiB line, a 16 MiB queue).
+- *The sample's acceptance and the profile documentation* (FD): the live profiles and §15.3 marked not built with the
+  documents telling the truth about a live re-record (D110); the §15.2 secret scan last, with a JSON-aware matcher
+  (`SecretScan`); a lending-schema accept corpus of ten statements over all twelve allow-listed tables executed on the
+  sample's database; the MCP verb check asserting a real effect (sign-on through the session entry, then sign-off);
+  the end-to-end CLI subprocesses killed on a timeout.
+
+The reactor after the wave and the reconciliation, and the final Linux matrix, are the tables under "Status at a
+glance".
+
+The review's reports, verdicts, briefs and fixer reports are with the session's working files (2026-10-08).
+
 ### Phase 6: hooks, Byteman, Windows, OTel, hardening
 
 - [ ] `skillroy-agent-spy` and `skillroy-agent-hooks`: hook engine, probes, health, hook-catalogue format, post-detach byte verification (BS3 passed)
@@ -1137,6 +1268,10 @@ Kept generic on purpose: nothing here names a machine, a user or a local path.
   windows on the desktop.
 - A Java 8 target needs a Linux x86-64 JDK 8, mounted into the image at `/opt/jdk8` through the environment
   variable `SKILLROY_JDK8_HOME`. Its host path must never be written into a file of this repo.
+- Under QEMU emulation (the amd64 image on an arm64 host) the JDK's `jspawnhelper` fails now and then ("Bad code from
+  spawn helper (Failed to exec spawn helper), error: 0"; seen once on 2026-10-08 when an end-to-end check spawned the
+  CLI). Run the emulated test JVMs with `-Dskillroy.test.extraArgLine=-Djdk.lang.Process.launchMechanism=FORK`; the
+  arm64 image, run natively, does not need it.
 - On an arm64 development machine the image runs under emulation: a whole-reactor run takes about 7 to 8 minutes
   (407 s and 467 s on 2026-10-02).
 - The build is run offline (`-o`) once the local Maven repository is filled. **Never `mvn install` this project.**
@@ -1180,7 +1315,7 @@ Work that cannot proceed without the project owner, or without something only th
 | Wall | Decision | What waits |
 |---|---|---|
 | The push | B1 | The initial commit exists (2026-10-06); the push to the private remote `Skillroy-AI/skillroy-test-java` waits for the owner's word. History is permanent once pushed |
-| Model provider API key | B7 | Was: anything live in Phase 5. **Provided by the owner on 2026-10-07 for live checks**, in the operator's own environment only (never a file of this repository, never a property, never a command line; the contract's §2.3). **Found 2026-10-08 (BS13):** the key is an organisation-level key, and the API refuses every request from such a key with HTTP 400 unless it carries the header `anthropic-workspace-id`; no workspace id is set in the environment. **Waits for the owner:** the workspace id (exported as `ANTHROPIC_WORKSPACE_ID`, from the provider's console) or a workspace-scoped key under the same variable. Until then every live item of BS13 (§15.3 of the contract), the sample's recordings and the planner's authoring run are not run; everything else of Phase 5 proceeds against the recorded and scripted gateways. The Phase 5 build's live profile (`inference-live`) and the recording profile need the key and the workspace id on the machine that runs them; CI never does |
+| Model provider API key | B7 | Was: anything live in Phase 5. **Provided by the owner on 2026-10-07 for live checks**, in the operator's own environment only (never a file of this repository, never a property, never a command line; the contract's §2.3). **Found 2026-10-08 (BS13):** the key is an organisation-level key, and the API refuses every request from such a key with HTTP 400 unless it carries the header `anthropic-workspace-id`; no workspace id is set in the environment. **Waits for the owner:** the workspace id (exported as `ANTHROPIC_WORKSPACE_ID`, from the provider's console) or a workspace-scoped key under the same variable. Until then every live item of BS13 (§15.3 of the contract), the sample's recordings and the planner's authoring run are not run; everything else of Phase 5 proceeds against the recorded and scripted gateways. The live profile (`inference-live`) and the recording profile (`inference-record`) of the contract are specified, not built (D110, the review's fix wave of 2026-10-08): they are built in the same change as their first live run, once the workspace id exists; the route that exists is `record: true` in `inference.yaml`; CI never records or runs live |
 | A JxBrowser licence | B9 | Real verification of the `jxbrowser` adapter. The adapter exists (built 2026-10-07) and passes the contract kit against the neutral fake, plainly and with the init-script chaining option; the kit (`skillroy-agent-web`'s `test-jar`) runs against the real product only in a repository that holds a licence, outside this repo, through a `WebAdapterFixture` over a real engine. That run also settles three member names of the descriptor and whether some vendor calls can block (gaps 41 and 47). Phase 4 reached its public exit without it. The owner (2026-10-06): a licence is available, so that verification can follow in the private overlay's repository |
 | A Windows host | B13, Phase 6 | Verification of the fixes S7 and S15 (not verified on Windows); the Windows path of Phase 6. The owner (2026-10-06): later, a Windows 11 machine, which also runs the tenant layers' testing under Windows and under WSL2 |
 

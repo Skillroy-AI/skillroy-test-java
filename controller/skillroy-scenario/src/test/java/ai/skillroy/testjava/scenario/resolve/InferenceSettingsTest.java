@@ -95,7 +95,8 @@ class InferenceSettingsTest {
         assertNull(none.prices());
         assertTrue(none.fallbacks());
         assertFalse(none.images());
-        assertEquals(Map.of("callMs", 120_000L, "batchWaitMs", 7_200_000L, "batchPollMs", 30_000L), none.timeouts());
+        assertEquals(Map.of("callMs", 120_000L, "batchWaitMs", 7_200_000L, "batchPollMs", 30_000L, "plannerMs",
+                900_000L), none.timeouts(), "plannerMs: the planner's 15 minutes (phase5-contracts.md 10.2)");
         assertFalse(none.logPrompts());
         assertNull(none.file());
         assertSame(none, InferenceSettings.none());
@@ -155,7 +156,8 @@ class InferenceSettingsTest {
         assertEquals(dir.resolve("prices.yaml").toAbsolutePath().normalize(), s.prices());
         assertFalse(s.fallbacks());
         assertTrue(s.images());
-        assertEquals(Map.of("callMs", 5000L, "batchWaitMs", 7_200_000L, "batchPollMs", 1000L), s.timeouts());
+        assertEquals(Map.of("callMs", 5000L, "batchWaitMs", 7_200_000L, "batchPollMs", 1000L, "plannerMs",
+                900_000L), s.timeouts());
         assertTrue(s.logPrompts());
         assertEquals(file, s.file());
         assertEquals(List.of(InferenceSettings.KEY_VARIABLE), asked, "the environment is asked for the key only");
@@ -254,6 +256,19 @@ class InferenceSettingsTest {
         assertTrue(asked.stream().allMatch(InferenceSettings.KEY_VARIABLE::equals), asked.toString());
     }
 
+    /**
+     * phase5-contracts.md 10.2: the planner's deadline is a setting, {@code timeouts.plannerMs} (15 minutes when not
+     * set), which the strict reader accepts like the other timeouts (L1 F7: it refused the key).
+     */
+    @Test
+    void thePlannersDeadlineIsASetting() throws Exception {
+        assertEquals(900_000L, InferenceSettings.none().timeouts().get(InferenceSettings.TIMEOUT_PLANNER_MS));
+        file("version: 1\ntimeouts: {plannerMs: 600000}\n");
+        InferenceSettings s = load(BindMode.LIVE);
+        assertEquals(600_000L, s.timeouts().get(InferenceSettings.TIMEOUT_PLANNER_MS));
+        assertEquals(120_000L, s.timeouts().get(InferenceSettings.TIMEOUT_CALL_MS), "the others keep their defaults");
+    }
+
     @Test
     void combinationsThatCannotWorkAreRefused() throws Exception {
         properties.put(InferenceSettings.PROP_GATEWAY, "recorded");
@@ -280,6 +295,7 @@ class InferenceSettingsTest {
         cases.put("version: 1\nbudget: {scenarioUsd: \"" + secretish + "\"}\n", 2);
         cases.put("version: 1\nbudget: {jobUsd: \"-1\"}\n", 2);
         cases.put("version: 1\ntimeouts: {callMs: 0}\n", 2);
+        cases.put("version: 1\ntimeouts: {plannerMs: 0}\n", 2);
         cases.put("version: 1\ntimeouts: {callMs: \"" + secretish + "\"}\n", 2);
         cases.put("version: 1\nmodels: " + secretish + "\n", 2);
         cases.put("version: 1\nmodels: {opus: \"" + secretish + " with spaces\"}\n", 2);

@@ -93,11 +93,13 @@ import java.util.regex.Pattern;
  *   <li>{@code quit}.</li>
  * </ul>
  *
- * <p>The person acts as {@code Origin.person("cli")}; the model as itself. Everything is journaled in
- * {@code <out>/journal.jsonl}; the model's calls go to {@code <out>/inference.jsonl} and, when the session ends,
- * every call of the session to {@code <out>/cost-ledger.jsonl}. Everything printed passes the credentials' mask and the
- * secrets the session joined, and the CLI's control-character rule. A blank line or one that starts with {@code #} is
- * skipped; a command that fails says why and the session goes on.
+ * <p>The person acts as {@code Origin.person("cli")}; the model as itself. With a session service, {@code resolve} goes
+ * through its metered entry ({@code SessionService.resolve}), so that a model-written resolution counts on the
+ * session's budget. Everything is journaled in {@code <out>/journal.jsonl}; the model's calls go to
+ * {@code <out>/inference.jsonl} (the session model's as they are made, the resolutions' when the session ends) and,
+ * when the session ends, every call of the session to {@code <out>/cost-ledger.jsonl}. Everything printed passes the
+ * credentials' mask and the secrets the session joined, and the CLI's control-character rule. A blank line or one that
+ * starts with {@code #} is skipped; a command that fails says why and the session goes on.
  *
  * <p>Exit codes: 0; 1 when the agent was lost, when the session cannot open, or when the last {@code export} failed;
  * 3 when the agent cannot be reached; 64 for a usage error (no terminal and no {@code --script}, a settings error).
@@ -254,6 +256,12 @@ final class SessionCommand implements Command {
                         InferenceArgs.writeLedger(dir, ledger.entries(), credentials.mask());
                     } catch (IOException e) {
                         cli.err().println("skillroy session: " + dir.resolve("cost-ledger.jsonl")
+                                + " cannot be written: " + e.getClass().getSimpleName());
+                    }
+                    try {
+                        InferenceArgs.appendInferenceRecords(dir, ledger, credentials.mask());
+                    } catch (IOException e) {
+                        cli.err().println("skillroy session: " + dir.resolve(SessionServices.INFERENCE_FILE)
                                 + " cannot be written: " + e.getClass().getSimpleName());
                     }
                 }
@@ -450,8 +458,10 @@ final class SessionCommand implements Command {
                     + kind[0]);
             Resolution r;
             try {
-                r = session.resolve(slot[0], kind[0], queryArgs, strategy == null ? List.of() : strategy, List.of(),
-                        credential, PERSON);
+                r = service == null
+                        ? session.resolve(slot[0], kind[0], queryArgs, strategy, List.of(), credential, PERSON)
+                        : service.service().resolve(slot[0], kind[0], queryArgs, strategy, List.of(), credential,
+                                PERSON);
             } catch (BindException e) {
                 return error("resolve", e.kind() + (e.reason() == null ? "" : " " + e.reason()) + ": "
                         + e.getMessage());

@@ -28,8 +28,10 @@
 #   SKILLROY_PLATFORM   the image platform (default linux/amd64, the project's CI architecture; linux/arm64 runs an
 #                       arm64 build of the image natively on an arm64 development machine)
 #   ANTHROPIC_API_KEY, ANTHROPIC_WORKSPACE_ID
-#                       passed into the container by name when set (never printed): the model key of the
-#                       inference-live and inference-record profiles, and the workspace id an organisation key needs
+#                       passed into the container by name when set (never printed): the model key of a live run, and
+#                       the workspace id an organisation key needs. The inference-live and inference-record profiles
+#                       of phase5-contracts.md 2.3 are specified, not built yet (D110): Maven warns that they do not
+#                       exist, and nothing live runs
 set -euo pipefail
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 image="${SKILLROY_CI_IMAGE:-skillroy-test-java-ci:local}"
@@ -46,7 +48,8 @@ fi
 if [ -n "${SKILLROY_JDK8_HOME:-}" ]; then mounts+=(-v "$SKILLROY_JDK8_HOME:/opt/jdk8:ro"); fi
 # Phase 5 (phase5-contracts.md 2.3, 14.5): the model key and its workspace id reach the container by name only:
 # "-e NAME" without a value makes docker copy the variable from this environment, so neither value is ever on a
-# command line or printed. Unset, the container has neither (the inference-live and inference-record profiles skip).
+# command line or printed. Unset, the container has neither, and nothing live can run (the live profiles, specified in
+# 2.3, are not built yet: D110).
 for name in ANTHROPIC_API_KEY ANTHROPIC_WORKSPACE_ID; do
   if [ -n "${!name:-}" ]; then env+=(-e "$name"); fi
 done

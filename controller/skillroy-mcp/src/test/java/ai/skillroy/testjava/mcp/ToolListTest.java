@@ -37,7 +37,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * phase5-contracts.md 9.3 and 9.6: {@code initialize}, {@code tools/list} (names, hints, schemas) in the read-only
  * default and with {@code mutating}, a mutating tool refused in read-only mode (not listed, and a call refused), never
- * a destructive primitive, nothing of the agent's own namespace, {@code skillroy_session_ask} only with an actor.
+ * a destructive primitive, nothing of the agent's own namespace, no verb that reaches either, {@code web_evaluate} and
+ * {@code web_wait_flag} only with a person's opt-in, {@code skillroy_session_ask} only with an actor.
  */
 class ToolListTest {
 
@@ -131,6 +132,66 @@ class ToolListTest {
                     click.description());
             assertEquals(Boolean.TRUE, fx.tool("desk_state").annotations().readOnlyHint());
             assertFalse(fx.server.session().options().readOnly());
+        }
+    }
+
+    /**
+     * Decision D98: {@code web_evaluate} and {@code web_wait_flag} (each runs a caller's script in the target's pages;
+     * the second is a read) are offered only when a person opted in ({@code allowEvaluate},
+     * {@code skillroy mcp --allow-evaluate}); never otherwise, and {@code web_evaluate} only on a mutating server.
+     */
+    @Test
+    void theScriptPrimitivesAreOfferedOnlyWithAPersonsOptIn() throws Exception {
+        try (McpFixture fx = new McpFixture(dir.resolve("default")).startMutating()) {
+            assertFalse(fx.toolNames().contains("web_evaluate") || fx.toolNames().contains("web_wait_flag"),
+                    fx.toolNames().toString());
+            assertTrue(fx.toolNames().contains("swing_click"), "the other mutating base primitives are offered");
+            assertThrows(McpError.class, () -> fx.call("web_evaluate", Map.of("script", "1")));
+            assertThrows(McpError.class, () -> fx.call("web_wait_flag", Map.of("expression", "1")));
+            assertTrue(fx.desk.agent.callsTo("web.evaluate").isEmpty() && fx.desk.agent.callsTo("web.waitFlag")
+                    .isEmpty());
+        }
+        try (McpFixture fx = new McpFixture(dir.resolve("read-only-default")).startReadOnly()) {
+            assertFalse(fx.toolNames().contains("web_wait_flag"), "a read that runs a script: " + fx.toolNames());
+        }
+        try (McpFixture fx = new McpFixture(dir.resolve("opted-in"))) {
+            fx.start(fx.options().mutating(true).allowEvaluate(true).build());
+            assertTrue(fx.toolNames().containsAll(List.of("web_evaluate", "web_wait_flag")), fx.toolNames()
+                    .toString());
+            assertFalse(fx.call("web_evaluate", Map.of("script", "1")).isError());
+            assertEquals(1, fx.desk.agent.callsTo("web.evaluate").size());
+        }
+        try (McpFixture fx = new McpFixture(dir.resolve("read-only"))) {
+            fx.start(fx.options().allowEvaluate(true).build());
+            assertTrue(fx.toolNames().contains("web_wait_flag"), "read-only, opted in: " + fx.toolNames());
+            assertFalse(fx.toolNames().contains("web_evaluate"), "read-only: nothing mutating, opted in or not");
+        }
+    }
+
+    /**
+     * Decision D96: a verb whose compiled calls (or cleanup calls) reach what the server never offers is not offered
+     * as a tool at all, since its tool would run them for the client; the other verbs are; the withheld ones are
+     * logged and listed by {@code skillroy_catalogue}.
+     */
+    @Test
+    void aVerbThatReachesWhatTheServerNeverOffersIsNotOffered() throws Exception {
+        try (McpFixture fx = new McpFixture(dir)) {
+            fx.start(fx.options(ScenarioRunPolicyTest.extended(fx.desk)).mutating(true).build());
+            List<String> names = fx.toolNames();
+            assertFalse(names.contains("desk_clear"), "clear calls the destructive desk.wipe: " + names);
+            assertFalse(names.contains("desk_tidy"), "tidy's cleanup calls desk.wipe: " + names);
+            assertTrue(names.containsAll(List.of("desk_deposit", "desk_enter", "desk_lend", "desk_poke", "desk_peek")),
+                    "the other verbs, a verb over another module's primitive among them: " + names);
+            assertThrows(McpError.class, () -> fx.call("desk_clear", Map.of()));
+            assertTrue(fx.desk.agent.callsTo("desk.wipe").isEmpty());
+            assertTrue(fx.logText().contains("not offered because their calls reach what this server never offers:"
+                    + " desk_clear (clear calls the destructive primitive desk.wipe"), fx.logText());
+            List<?> withheld = (List<?>) McpFixture.json(fx.call("skillroy_catalogue", Map.of())).get("withheldVerbs");
+            assertEquals(List.of("clear", "tidy"), withheld.stream().map(w -> ((Map<?, ?>) w).get("verb")).toList());
+            Map<?, ?> tidy = (Map<?, ?>) withheld.get(1);
+            assertEquals("desk_tidy", tidy.get("tool"));
+            assertTrue(String.valueOf(tidy.get("reason")).startsWith("its cleanup calls the destructive primitive"
+                    + " desk.wipe"), tidy.toString());
         }
     }
 

@@ -44,11 +44,12 @@ import java.util.function.Supplier;
 
 /**
  * The session service as the CLI hosts it (phase5-contracts.md 12.4: hosts 1 and 2): built over an open
- * {@link ExecutorSession} with the gateway the settings name ({@link Gateways#open}), the session's budget meter
- * ({@code budget.sessionUsd}), a {@link LedgerWriter} that records every call in the session's ledger and appends its
- * masked record to {@code inference.jsonl} in the session's output directory, the prompt mask of the session's
- * credentials and the pack's allow-lists and row masks, and the price table of the settings; and a turn as JSON and
- * as text for {@code skillroy session} and {@code skillroy_session_ask}.
+ * {@link ExecutorSession} with the gateway the settings name, opened with the session's prompt mask
+ * ({@link Gateways#open(InferenceSettings, PromptMask)}: the recording gateway of {@code record: true} writes through
+ * it, 4.2), the session's budget meter ({@code budget.sessionUsd}), a {@link LedgerWriter} that records every call in
+ * the session's ledger and appends its masked record to {@code inference.jsonl} in the session's output directory, the
+ * prompt mask of the session's credentials and the pack's allow-lists and row masks, and the price table of the
+ * settings; and a turn as JSON and as text for {@code skillroy session} and {@code skillroy_session_ask}.
  *
  * <p>Stateless; the service it opens is used on one thread at a time.
  */
@@ -86,15 +87,15 @@ final class SessionServices {
      */
     static Opened open(ExecutorSession session, InferenceSettings settings, SessionPolicy policy, CostLedger ledger,
                        Path outDir) throws InferenceException, SettingsException {
-        InferenceGateway gateway = Gateways.open(settings);
+        DomainPack pack = session.pack();
+        PromptMask mask = PromptMask.of(session.options().bind().credentials().mask(), safe(pack::sqlAllowLists),
+                safe(pack::rowMasks));
+        InferenceGateway gateway = Gateways.open(settings, mask);
         boolean ok = false;
         try {
             BudgetMeter meter = BudgetMeter.of(BudgetMeter.Scope.SESSION, session.id(),
                     settings.budgets().get(InferenceSettings.BUDGET_SESSION), ledger);
             InferenceLog log = outDir == null ? InferenceLog.NONE : InferenceLog.toFile(outDir.resolve(INFERENCE_FILE));
-            DomainPack pack = session.pack();
-            PromptMask mask = PromptMask.of(session.options().bind().credentials().mask(), safe(pack::sqlAllowLists),
-                    safe(pack::rowMasks));
             LedgerWriter writer = new LedgerWriter(ledger, meter, log, mask, settings.logPrompts(),
                     session.options().clock());
             SessionService service = new SessionService(session, gateway, policy, meter, writer,

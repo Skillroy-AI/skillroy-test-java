@@ -61,11 +61,21 @@ final class CliHarness {
 
     /** As {@link #runWithInput}, with a scripted terminal (approve's question). */
     static Outcome runWithTerminal(Path defaultDiscoveryDir, String stdin, Terminal terminal, String... args) {
+        return runWith(CliHarness.class.getClassLoader(), defaultDiscoveryDir, stdin, terminal, args);
+    }
+
+    /** As {@link #run}, with the packs found on {@code loader} instead of the test class path. */
+    static Outcome runWithLoader(ClassLoader loader, Path defaultDiscoveryDir, String... args) {
+        return runWith(loader, defaultDiscoveryDir, "", Terminal.NONE, args);
+    }
+
+    private static Outcome runWith(ClassLoader loader, Path defaultDiscoveryDir, String stdin, Terminal terminal,
+                                   String... args) {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         ByteArrayOutputStream err = new ByteArrayOutputStream();
         Cli cli = new Cli(new ByteArrayInputStream(stdin.getBytes(StandardCharsets.UTF_8)),
                 new PrintStream(out, true, StandardCharsets.UTF_8), new PrintStream(err, true, StandardCharsets.UTF_8),
-                CliHarness.class.getClassLoader(), defaultDiscoveryDir, terminal);
+                loader, defaultDiscoveryDir, terminal);
         int exit = Main.run(List.of(args), cli);
         return new Outcome(exit, out.toString(StandardCharsets.UTF_8), err.toString(StandardCharsets.UTF_8));
     }

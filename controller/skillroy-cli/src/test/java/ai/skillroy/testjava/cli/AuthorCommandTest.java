@@ -17,6 +17,8 @@
 package ai.skillroy.testjava.cli;
 
 import ai.skillroy.testjava.protocol.Json;
+import ai.skillroy.testjava.protocol.PrimitiveDescriptor;
+import ai.skillroy.testjava.scenario.resolve.InferenceSettings;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -28,6 +30,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -43,10 +46,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * agent with a substitute {@code claude} (a shell script, as the inference module's planner tests write it, that also
  * keeps a copy of the MCP configuration and its permissions while it runs, and prints the envelope the test put
  * beside it): the MCP configuration (owner-only, naming this CLI's server with {@code mcp --mutating}, the
- * connection, the environment and no second model; deleted when the command ends), the written files, the checks
- * ({@code resolve --dry-run} semantics and {@code --run}) recorded in the authoring record, the planner's cost in the
- * invocation's ledger and the cost lines, a planner failure (exit 1), a missing {@code claude} (exit 64), and the usage
- * errors.
+ * connection, the environment and no second model, never {@code --allow-evaluate}; deleted when the command ends),
+ * the written files, the checks ({@code resolve --dry-run} semantics and {@code --run}, refused when a call is one the
+ * planner's server would not make, D96) recorded in the authoring record, the planner's schema limited to what its
+ * server offers, its deadline from {@code timeouts.plannerMs}, the planner's cost in the invocation's ledger and the
+ * cost lines, a planner failure (exit 1), a missing {@code claude} (exit 64), and the usage errors.
  */
 @DisabledOnOs(OS.WINDOWS)
 class AuthorCommandTest {
@@ -65,6 +69,7 @@ class AuthorCommandTest {
               prev="$a"
             done
             cat > /dev/null
+            if [ -f "$dir/hang-$n" ]; then exec sleep 30; fi
             if [ -f "$dir/envelope-$n.json" ]; then cat "$dir/envelope-$n.json"; fi
             if [ -f "$dir/exit-$n" ]; then exit "$(cat "$dir/exit-$n")"; fi
             exit 0
@@ -180,6 +185,7 @@ class AuthorCommandTest {
         assertTrue(mcp >= 0, serverArgs.toString());
         assertEquals(List.of("mcp", "--mutating", "--inference", "none"), serverArgs.subList(mcp, mcp + 4),
                 "the planner may act; no second model");
+        assertFalse(serverArgs.contains(McpCommand.ALLOW_EVALUATE), "never web_evaluate for the planner (D98)");
         assertEquals("ai.skillroy.testjava.cli.Main", serverArgs.get(mcp - 1));
         assertEquals(Integer.toString(agent.port()), after(serverArgs, "--port"));
         assertEquals(tokenFile.toAbsolutePath().toString(), after(serverArgs, "--token-file"));
@@ -197,6 +203,90 @@ class AuthorCommandTest {
     private static String after(List<?> list, String flag) {
         int i = list.indexOf(flag);
         return i < 0 || i + 1 >= list.size() ? null : String.valueOf(list.get(i + 1));
+    }
+
+    /** The {@code primitive} enum of the base verb {@code call} in the schema the planner was given. */
+    private List<?> plannersCallEnum(int n) throws Exception {
+        Map<String, Object> schema = Json.parseObject(after(args(n), "--json-schema"));
+        Map<?, ?> defs = (Map<?, ?>) schema.get("$defs");
+        for (Object alternative : (List<?>) ((Map<?, ?>) defs.get("step")).get("oneOf")) {
+            Map<?, ?> properties = (Map<?, ?>) ((Map<?, ?>) alternative).get("properties");
+            if (properties.get("call") instanceof Map<?, ?> call) {
+                return (List<?>) ((Map<?, ?>) ((Map<?, ?>) call.get("properties")).get("primitive")).get("enum");
+            }
+        }
+        throw new AssertionError("no call verb in the planner's schema");
+    }
+
+    /**
+     * Decision D96: the planner's scenario schema lets the base verb {@code call} name only what the planner's server
+     * offers a scenario (never a destructive primitive, the agent's own, {@code web.evaluate} or {@code data.query}).
+     */
+    @Test
+    void thePlannersSchemaLetsCallNameOnlyWhatItsServerOffers() throws Exception {
+        agent.schema.add(new PrimitiveDescriptor("clitest.lamp", "Lights the lamp.", null, null, "WORKER", 5_000, null,
+                true, false));
+        agent.schema.add(new PrimitiveDescriptor("swing.click", "Clicks.", null, null, "EDT", 5_000, null, true,
+                false));
+        agent.schema.add(new PrimitiveDescriptor("web.evaluate", "Evaluates a script.", null, null, "WORKER", 5_000,
+                null, true, false));
+        agent.schema.add(new PrimitiveDescriptor("web.waitFlag", "Waits for an expression.", null, null, "WORKER",
+                5_000, null, false, false));
+        agent.schema.add(new PrimitiveDescriptor("data.query", "Reads rows.", null, null, "WORKER", 5_000, null, false,
+                false));
+        agent.schema.add(new PrimitiveDescriptor("jvm.info", "The JVM.", null, null, "CALLER", 5_000, null, false,
+                false));
+        answer(1, envelope(document("schema-check"), false, "0.10"));
+        author("--brief", BRIEF, "--id", "schema-check", "--out", out.toString(), "--claude-command",
+                claude.toString()).expectExit(Exit.OK);
+        assertEquals(List.of("clitest.lamp", "jvm.info", "swing.click", "trace.mark"), plannersCallEnum(1),
+                "the domain's and the base's primitives the mutating server offers, and mark's trace.mark; never"
+                        + " agent.disable (destructive), test.* (another module), web.evaluate, web.waitFlag or"
+                        + " data.query");
+    }
+
+    /**
+     * Decision D96: {@code author --run} runs the planner's scenario only when every call of it is one the planner's
+     * server offers; otherwise the check fails, nothing runs, and the scenario is still written for the reviewer.
+     */
+    @Test
+    void aScenarioWithACallThePlannersServerWouldNotMakeIsNotRun() throws Exception {
+        Map<String, Object> doc = new LinkedHashMap<>();
+        doc.put("scenario", "confirming");
+        doc.put("pack", "clitest");
+        doc.put("steps", List.of(Map.of("call", Map.of("primitive", "trace.mark", "args", Map.of("label", "x",
+                "confirm", true)))));
+        answer(1, envelope(doc, false, "0.20"));
+        CliHarness.Outcome outcome = author("--brief", BRIEF, "--id", "confirming", "--out", out.toString(),
+                "--claude-command", claude.toString(), "--run").expectExit(Exit.OK);
+        assertTrue(outcome.out().contains("check: run once live: refused, nothing ran"), outcome.out());
+        assertTrue(outcome.out().contains("step s1 (call") && outcome.out().contains("'confirm'"), outcome.out());
+        assertTrue(agent.rpcRequests("trace.mark").isEmpty(), "nothing ran");
+        Map<String, Object> authoring = Json.parseObject(Files.readString(out.resolve("confirming.authoring.json")));
+        assertEquals(false, ((Map<?, ?>) authoring.get("checks")).get("ran"), "the --run check failed");
+        assertTrue(Files.isRegularFile(out.resolve("confirming.yaml")), "written for the reviewer all the same");
+    }
+
+    /** phase5-contracts.md 10.2: the planner's deadline is {@code timeouts.plannerMs} of the inference settings. */
+    @Test
+    void thePlannersDeadlineIsTheSettingsPlannerMs() {
+        InferenceSettings set = new InferenceSettings(InferenceSettings.GATEWAY_NONE, null, false, null, null, null,
+                null, null, null, true, false, Map.of(AuthorCommand.TIMEOUT_PLANNER_MS, 1_500L), false, null);
+        assertEquals(Duration.ofMillis(1_500), AuthorCommand.plannerDeadline(set));
+        assertEquals(Duration.ofMinutes(15), AuthorCommand.plannerDeadline(InferenceSettings.none()),
+                "the settings' default");
+    }
+
+    /** phase5-contracts.md 10.2: a planner that outruns {@code timeouts.plannerMs} is stopped there (exit 1). */
+    @Test
+    void aPlannerThatOutrunsTimeoutsPlannerMsIsStopped() throws Exception {
+        Files.writeString(bin.resolve("hang-1"), "");
+        Path settings = Files.writeString(tmp.resolve("inference.yaml"), "version: 1\ntimeouts: {plannerMs: 1500}\n");
+        CliHarness.Outcome outcome = author("--brief", BRIEF, "--id", "slow", "--out", out.toString(),
+                "--claude-command", claude.toString(), "--inference-file", settings.toString())
+                .expectExit(Exit.FAILED);
+        assertTrue(outcome.err().contains("deadline of PT1.5S"), outcome.err());
+        assertFalse(Files.exists(out.resolve("slow.yaml")));
     }
 
     @Test

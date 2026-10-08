@@ -25,11 +25,11 @@ a model looks at the screen and the framework turns what it decides into recorde
 bolt-on that the design keeps room for and does not build yet.
 
 **Status (2026-10-08):** Phase 1, Phase 1.x, Phase 2 and Phase 3 are built and verified, Phase 4 is built, reviewed
-and fixed, and the Phase 5 contract (the AI layer) is specified, not built; nothing is released and nothing is published. Phase 1 is the thin vertical slice: the agent (core, Swing and
+and fixed, and **Phase 5** (the AI layer) is built on the provisional answers of its contract, reviewed and fixed the same day (2026-10-08); what needs a live model (the planner-authored sample scenario, live recordings, the live profile) is owed until a model key with a workspace id exists; nothing is released and nothing is published. Phase 1 is the thin vertical slice: the agent (core, Swing and
 data modules), the controller, the scenario compiler and executor, JUnit glue, a CLI, and a bundled sample application,
 the lending desk of a tool library, with its agent module, domain pack and scenarios. Its gates are a Java 8 target and
 a Java 25 target, in every load mode; the numbers (tests, configurations, runtimes) are kept in
-[docs/TODO.md](docs/TODO.md). B1 to B22 are answered and B23, the Phase 5 contract's provisional answers, is open for the owner ([docs/DECISIONS.md](docs/DECISIONS.md)); the
+[docs/TODO.md](docs/TODO.md). B1 to B22 are answered; B23 (the Phase 5 contract's provisional answers) and B24 (the decisions its build and review took) are open for the owner ([docs/DECISIONS.md](docs/DECISIONS.md)); the
 initial commit was made on 2026-10-06, and the repository is not yet pushed or published. **Phase 1.x**
 added a set of contract amendments and the hardening that followed from a security review of the control channel: an
 agent-owned HTTP listener, keyed request and reply authentication instead of a bearer token on the wire, and the

@@ -44,6 +44,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -126,6 +127,38 @@ class OverlayBridgeTest {
             assertTrue(answers.get(0).options().timeoutMs() != null, "a bounded call");
         }
         assertTrue(unsubscribed.get(), "the subscription closes with the bridge");
+    }
+
+    /**
+     * L3 F2, the overlay's case: the text an overlay sends reaches the model through the session service's request
+     * builder, masked: a credential of the environment inside it and a key=value secret appear in no part of the
+     * request.
+     */
+    @Test
+    void anOverlaysTextIsMaskedBeforeItReachesTheModel() throws Exception {
+        Map<String, Object> doc = new java.util.LinkedHashMap<>();
+        doc.put("version", 1L);
+        doc.put("credentials", Map.of("staff", Map.of("S01", Map.of("password", SessionServiceTest.CREDENTIAL))));
+        try (ExecutorSession masked = ExecutorSession.open(pack, agent, SessionOptions.defaults(tmp.resolve("ovl"))
+                .withBind(BindOptions.defaults().withEnvId("test-env").withCredentials(
+                        ai.skillroy.testjava.data.Credentials.of(doc, "test"))).withId("overlay-masked"))) {
+            CostLedger ledger = new CostLedger();
+            BudgetMeter meter = new BudgetMeter(BudgetMeter.Scope.SESSION, null, new java.math.BigDecimal("1.00"),
+                    ledger);
+            ScriptedGateway gateway = ScriptedGateway.sequence(List.of(done("On the shelf by the door.")));
+            SessionService service = new SessionService(masked, gateway, SessionPolicy.acting(), meter,
+                    new LedgerWriter(ledger, meter, null, PromptMask.keysOnly(), false, Clock.systemUTC()),
+                    PriceTable.builtIn(), null);
+            try (OverlayBridge bridge = OverlayBridge.open(service, agent, pack, events(), 0L)) {
+                consumer.accept(event(7, Map.of("requestId", "rq-9", "text", "where is the aerator? my code is "
+                        + SessionServiceTest.CREDENTIAL + " and token=Probe-Ovl-3301")));
+                assertTrue(bridge.serveNext(Duration.ofMillis(10)).answered());
+            }
+            String all = SessionServiceTest.everything(gateway.requests().get(0));
+            assertTrue(all.contains("where is the aerator?"), all);
+            assertFalse(all.contains(SessionServiceTest.CREDENTIAL), all);
+            assertFalse(all.contains("Probe-Ovl-3301"), all);
+        }
     }
 
     @Test

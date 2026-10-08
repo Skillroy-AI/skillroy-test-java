@@ -17,14 +17,22 @@
 package ai.skillroy.testjava.mcp;
 
 import ai.skillroy.testjava.controller.AgentLostException;
+import ai.skillroy.testjava.scenario.BindException;
+import ai.skillroy.testjava.scenario.ExecutorSession;
+import ai.skillroy.testjava.scenario.Origin;
+import ai.skillroy.testjava.scenario.resolve.Resolution;
+
+import java.util.List;
+import java.util.Map;
 
 /**
  * A second model acting through the server's session: what {@code skillroy_session_ask} calls
  * (phase5-contracts.md 9.3; 12.4, host 2: the MCP client is the person's side, and the actor's model acts, both
  * journaled by origin). The CLI wires the inference module's session service into it; the server never names that
- * service, and tests use a fake.
+ * service, and tests use a fake. The server's {@code skillroy_resolve} goes through {@link #resolve} too when it has
+ * an actor, so that a model-written resolution counts on the session's budget (13.4).
  *
- * <p>Called on the server's tool thread while it holds the session: one {@link #ask} at a time.
+ * <p>Called on the server's tool thread while it holds the session: one {@link #ask} or {@link #resolve} at a time.
  */
 public interface SessionActor extends AutoCloseable {
 
@@ -37,6 +45,22 @@ public interface SessionActor extends AutoCloseable {
      * @throws InterruptedException if the thread is interrupted
      */
     Object ask(String request) throws AgentLostException, InterruptedException;
+
+    /**
+     * Resolves one slot of the server's session for {@code skillroy_resolve} through the actor's metered entry (a
+     * model token reserved and settled on the session's budget). By default, the session's own resolve.
+     *
+     * @param session the server's session
+     * @param strategy strategy tokens; null or empty means not restricted
+     * @throws BindException as the session's resolve, or when the session's budget has no room for a model token
+     * @throws AgentLostException if the agent is gone
+     * @throws InterruptedException if the thread is interrupted
+     */
+    default Resolution resolve(ExecutorSession session, String slot, String kind, Map<String, Object> args,
+                               List<String> strategy, Origin origin)
+            throws BindException, AgentLostException, InterruptedException {
+        return session.resolve(slot, kind, args, strategy, List.of(), null, origin);
+    }
 
     /** Releases what the actor holds (its gateway); never the session, which the server owns. Never throws. */
     @Override

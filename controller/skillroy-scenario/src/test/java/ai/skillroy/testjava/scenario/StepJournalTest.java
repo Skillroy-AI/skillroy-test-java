@@ -21,6 +21,7 @@ import ai.skillroy.testjava.scenario.pack.PlannedCall;
 import ai.skillroy.testjava.scenario.pack.Sync;
 import ai.skillroy.testjava.scenario.resolve.Approval;
 import ai.skillroy.testjava.scenario.resolve.BindMode;
+import ai.skillroy.testjava.scenario.resolve.CredentialSpec;
 import ai.skillroy.testjava.scenario.resolve.Resolution;
 import ai.skillroy.testjava.scenario.resolve.Strategy;
 import org.junit.jupiter.api.BeforeEach;
@@ -31,6 +32,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -254,13 +256,72 @@ class StepJournalTest {
         boolean required = Arrays.stream(Approval.State.values()).anyMatch(s -> s.name().equals("REQUIRED"));
         if (required) {
             ExportResult pending = journal.export(ExportOptions.of("tier-b"));
-            assertEquals("REQUIRED", pending.bindings().resolutions().get("item").approval().state().name());
-            assertEquals("live", pending.bindings().resolutions().get("item").approval().by(), "as live writes it");
+            assertEquals(new Approval(Approval.State.REQUIRED, null), pending.bindings().resolutions().get("item")
+                    .approval(), "by nobody, as the binder writes a value live found (phase5-contracts.md 12.3)");
+            assertEquals("live", pending.bindings().resolutions().get("assistant").approval().by(),
+                    "a tier (a) slot beside it keeps the mode's label");
         } else {
             // E2: Approval.State.REQUIRED arrives with the approval states of 7.1; until then the export says so.
             ExportException e = assertThrows(ExportException.class, () -> journal.export(ExportOptions.of("tier-b")));
             assertTrue(e.getMessage().contains("REQUIRED"), e.getMessage());
         }
+    }
+
+    /**
+     * The export writes arguments with sorted keys at every depth (phase5-contracts.md 12.3, the fix wave), whatever
+     * order the journal holds them in: a slot's, an oracle's and a verb step's arguments and a check's matcher, given
+     * here against their sorted order as a live model may give them, so that an export is a function of the journal's
+     * content; the journal read back from its file exports the same text.
+     */
+    @Test
+    void argumentsAreExportedWithSortedKeysWhateverOrderTheJournalHolds() throws Exception {
+        ExecutorSession session = fx.open();
+        session.resolve("item", "Item", ordered("deposit", ordered("lte", "50.00", "gte", "2.00")), List.of(),
+                List.of(), null, MODEL);
+        session.resolve("assistant", "Staff", ordered("limitBelow", "$item.deposit", "distinctFrom",
+                List.of("300")), List.of(), List.of(), new CredentialSpec("staff", "code"), MODEL);
+        session.evaluate("needs", "Needs", ordered("limit", "$assistant.limit", "amount", "$item.deposit"), PERSON);
+        assertEquals(Status.PASS, session.execute("enter", ordered("value", "B2"), MODEL).status());
+        assertTrue(session.check("loan.lines[0]", ordered("equals", ordered("qty", 2L, "code", "B2")), MODEL)
+                .held());
+        assertEquals(Status.PASS, session.execute("enter", ordered("value", "POST"), MODEL).status());
+        StepOutcome wait = session.execute("waitFor", ordered("within", "2s", "topic", "loan.posted", "match",
+                ordered("total", "7.00", "loanId", 41L)), MODEL);
+        assertEquals(Status.PASS, wait.status(), wait.message());
+        session.close();
+        ExportResult live = session.journal().export(ExportOptions.of("sorted"));
+        Path file = session.journal().file();
+        Map<String, Object> yaml = yamlOf(live);
+        Map<?, ?> resolve = (Map<?, ?>) yaml.get("resolve");
+        Object itemArgs = ((Map<?, ?>) resolve.get("item")).get("args");
+        Object staffArgs = ((Map<?, ?>) resolve.get("assistant")).get("args");
+        Object oracleArgs = ((Map<?, ?>) ((Map<?, ?>) yaml.get("oracle")).get("needs")).get("args");
+        assertEquals(List.of("gte", "lte"), keys(((Map<?, ?>) itemArgs).get("deposit")), "a slot's, at depth");
+        assertEquals(List.of("distinctFrom", "limitBelow"), keys(staffArgs), "a slot's");
+        assertEquals(List.of("amount", "limit"), keys(oracleArgs), "an oracle's");
+        List<Map<String, Object>> steps = steps(yaml);
+        Map<?, ?> expect = (Map<?, ?>) steps.get(1).get("expect");
+        assertEquals(List.of("code", "qty"), keys(((Map<?, ?>) expect.get("loan.lines[0]")).get("equals")),
+                "a check's matcher");
+        Map<?, ?> waitFor = (Map<?, ?>) steps.get(3).get("waitFor");
+        assertEquals(List.of("match", "topic", "within"), keys(waitFor), "a verb step's");
+        assertEquals(List.of("loanId", "total"), keys(waitFor.get("match")), "a verb step's, at depth");
+        assertEquals(live.yaml(), StepJournal.read(file, fx.pack).export(ExportOptions.of("sorted")).yaml(),
+                "read back from its file, the same text");
+    }
+
+    /** A map of the given keys and values in the order given. */
+    private static Map<String, Object> ordered(Object... keysAndValues) {
+        Map<String, Object> map = new LinkedHashMap<>();
+        for (int i = 0; i + 1 < keysAndValues.length; i += 2) {
+            map.put((String) keysAndValues[i], keysAndValues[i + 1]);
+        }
+        return map;
+    }
+
+    /** A mapping's keys in the order the exported YAML wrote them. */
+    private static List<String> keys(Object mapping) {
+        return ((Map<?, ?>) mapping).keySet().stream().map(String::valueOf).toList();
     }
 
     // ------------------------------------------------------------------------------------------------ 4. head

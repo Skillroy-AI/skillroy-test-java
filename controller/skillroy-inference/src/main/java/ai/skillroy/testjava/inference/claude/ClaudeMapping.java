@@ -422,21 +422,35 @@ final class ClaudeMapping {
         }
     }
 
-    /** The provider's {@code retry-after-ms} or {@code retry-after} (seconds), or null. */
+    /**
+     * The provider's {@code retry-after-ms} or {@code retry-after} (seconds), or null: also null for a value that is
+     * not a finite number of at least 0 ({@code NaN}, {@code Infinity}, {@code -5}), so that the gateway's own
+     * back-off applies; a finite value too large for a {@code long} of milliseconds is {@code Long.MAX_VALUE}
+     * milliseconds, which never fits a deadline.
+     */
     static Duration retryAfter(AnthropicServiceException e) {
         String ms = first(e, "retry-after-ms");
         try {
             if (ms != null) {
-                return Duration.ofMillis((long) Double.parseDouble(ms.strip()));
+                return wait(Double.parseDouble(ms.strip()));
             }
             String seconds = first(e, "retry-after");
             if (seconds != null) {
-                return Duration.ofMillis((long) (Double.parseDouble(seconds.strip()) * 1000));
+                return wait(Double.parseDouble(seconds.strip()) * 1000);
             }
         } catch (NumberFormatException ignored) {
             // An HTTP date or garbage: the gateway's own back-off applies.
         }
         return null;
+    }
+
+    /** A wait of {@code millis}, or null when it is not a finite number of at least 0. */
+    static Duration wait(double millis) {
+        if (Double.isNaN(millis) || Double.isInfinite(millis) || millis < 0) {
+            return null;
+        }
+        // The narrowing conversion saturates: 1e19 is Long.MAX_VALUE.
+        return Duration.ofMillis((long) millis);
     }
 
     private static String first(AnthropicServiceException e, String header) {

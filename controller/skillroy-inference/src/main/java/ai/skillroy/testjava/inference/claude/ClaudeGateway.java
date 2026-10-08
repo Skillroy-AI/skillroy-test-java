@@ -60,6 +60,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.UnaryOperator;
+import java.util.regex.Pattern;
 
 /**
  * The Claude gateway (phase5-contracts.md 4.1, as spike BS13 corrected it) on the Anthropic Java SDK.
@@ -92,6 +93,10 @@ public final class ClaudeGateway implements InferenceGateway {
     public static final String WORKSPACE_VARIABLE = "ANTHROPIC_WORKSPACE_ID";
     /** The header that carries the workspace id. */
     public static final String WORKSPACE_HEADER = "anthropic-workspace-id";
+
+    /** The workspace id's form: the settings' own pattern ({@code InferenceSettings}' reader), ASCII only. */
+    private static final Pattern WORKSPACE_ID =
+            Pattern.compile("[A-Za-z0-9][A-Za-z0-9_.:-]{0,199}");
 
     /** How many times a retryable failure is tried again within the deadline. */
     static final int MAX_RETRIES = 2;
@@ -159,23 +164,39 @@ public final class ClaudeGateway implements InferenceGateway {
     /**
      * The gateway of these settings, its key and base URL read from the process environment.
      *
-     * @throws InferenceException {@code AUTH} "the model key is not set (ANTHROPIC_API_KEY)" without the key;
-     *     {@code INVALID_REQUEST} when the settings' price table cannot be read
+     * @throws InferenceException {@code AUTH} "the model key is not set (ANTHROPIC_API_KEY)" without the key, and
+     *     {@code AUTH} naming the variable (never its value) for a key or a workspace id a request header cannot
+     *     carry; {@code INVALID_REQUEST} when the settings' price table cannot be read
      */
     public static ClaudeGateway open(InferenceSettings settings) throws InferenceException {
         return open(settings, System::getenv);
     }
 
-    /** {@link #open(InferenceSettings)} with the environment given (each variable is read once, here). */
+    /**
+     * {@link #open(InferenceSettings)} with the environment given (each variable is read once, here). A key or a
+     * workspace id that a request header cannot carry is refused here, before any client exists, with {@code AUTH}
+     * and a message that names where the value came from and never the value: the HTTP client's own refusal quotes
+     * the header's value (a key with a no-break space, a zero-width space or a control character would otherwise
+     * reach a run's outputs through that message).
+     */
     static ClaudeGateway open(InferenceSettings settings, UnaryOperator<String> environment)
             throws InferenceException {
         String key = environment.apply(KEY_VARIABLE);
         if (key == null || key.isBlank()) {
             throw new InferenceException(Kind.AUTH, "the model key is not set (" + KEY_VARIABLE + ")");
         }
+        if (!headerSafe(key.strip())) {
+            throw new InferenceException(Kind.AUTH, "the model key (" + KEY_VARIABLE + ") holds a character a request"
+                    + " header cannot carry (only printable ASCII, no space); set the variable again without it");
+        }
         String baseUrl = environment.apply(BASE_URL_VARIABLE);
-        String workspace = settings.workspaceId() != null ? settings.workspaceId()
-                : environment.apply(WORKSPACE_VARIABLE);
+        boolean fromSettings = settings.workspaceId() != null;
+        String workspace = fromSettings ? settings.workspaceId() : environment.apply(WORKSPACE_VARIABLE);
+        if (workspace != null && !workspace.isBlank() && !WORKSPACE_ID.matcher(workspace.strip()).matches()) {
+            throw new InferenceException(Kind.AUTH, "the workspace id (" + (fromSettings ? "workspaceId of the"
+                    + " inference settings" : WORKSPACE_VARIABLE) + ") is not a workspace id (letters, digits, '_',"
+                    + " '-', '.' and ':', at most 200)");
+        }
         PriceTable prices;
         try {
             prices = PriceTable.of(settings);
@@ -183,8 +204,28 @@ public final class ClaudeGateway implements InferenceGateway {
             throw new InferenceException(Kind.INVALID_REQUEST, "the price table cannot be read: " + e.getMessage());
         }
         Config config = Config.of(settings, prices);
-        return new ClaudeGateway(client(key, baseUrl, workspace, config.callMs()), config,
-                List.of(key.strip(), workspace == null ? "" : workspace.strip()), Clock.systemUTC(), Thread::sleep);
+        AnthropicClient client;
+        try {
+            client = client(key, baseUrl, workspace, config.callMs());
+        } catch (RuntimeException e) {
+            // Never the exception's message: it may quote a value of the environment.
+            throw new InferenceException(Kind.INVALID_REQUEST, "the provider's client cannot be built from "
+                    + KEY_VARIABLE + ", " + BASE_URL_VARIABLE + " and the workspace id (" + e.getClass().getSimpleName()
+                    + ")");
+        }
+        return new ClaudeGateway(client, config, List.of(key.strip(), workspace == null ? "" : workspace.strip()),
+                Clock.systemUTC(), Thread::sleep);
+    }
+
+    /** True when every character is printable ASCII without the space (0x21 to 0x7E): what a header value carries. */
+    static boolean headerSafe(String value) {
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+            if (c < 0x21 || c > 0x7E) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /**
@@ -463,13 +504,25 @@ public final class ClaudeGateway implements InferenceGateway {
             } catch (AnthropicException e) {
                 failure = new InferenceException(Kind.PROVIDER, what + ": the provider's answer could not be read ("
                         + e.getClass().getSimpleName() + ")");
+            } catch (RuntimeException e) {
+                // Anything else the SDK or its HTTP client throws (an IllegalArgumentException quoting a header's
+                // value, say) leaves as PROVIDER with the known secrets scrubbed and no cause: the SPI throws
+                // InferenceException only, and nothing of the exception may carry the key on.
+                if (Thread.interrupted()) {
+                    throw new InterruptedException(what + " was interrupted");
+                }
+                String message = e.getMessage();
+                throw new InferenceException(Kind.PROVIDER, what + " failed (" + e.getClass().getSimpleName() + ")"
+                        + (message == null ? "" : ": " + ClaudeMapping.bounded(ClaudeMapping.scrub(message, secrets),
+                        300)));
             }
             if (!failure.retryable() || tries >= MAX_RETRIES) {
                 throw failure;
             }
             long wait = retryAfter != null ? retryAfter.toMillis()
                     : Math.min(MAX_BACKOFF_MS, FIRST_BACKOFF_MS << tries);
-            if (clock.millis() + wait >= deadline) {
+            // Compared as a difference: a wait near Long.MAX_VALUE must not overflow past the deadline.
+            if (wait >= deadline - clock.millis()) {
                 throw failure;
             }
             sleeper.sleep(wait);

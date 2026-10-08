@@ -146,7 +146,9 @@ import java.util.stream.Stream;
  * credentials, every joined credential field and every fixture value whose key looks secret; it is applied to
  * {@code run.jsonl}, {@code bindings.json}, {@code cost-ledger.jsonl}, {@code inference.jsonl} (written beside the
  * ledger from the entries that carry details, phase5-contracts.md 7.4, decision D91), {@code failure/*.json} and the
- * {@link RunResult}.
+ * {@link RunResult}. With {@link RunOptions#expectationsOnMaskedValues()} (a plan a model or a client wrote) it also
+ * judges the expectations and stored-row checks, as in a session's check (phase5-contracts.md 12.2): a value the mask
+ * changes satisfies no matcher (the row count, a column, an aggregate), its masked form is the actual reported.
  *
  * <p>A lost agent is final: once a call reports {@link AgentLostException}, no further call is made, not even a
  * cleanup call or the pack's {@code recover} (hardening H2, client latch).
@@ -1590,7 +1592,9 @@ public final class PlanExecutor {
                 return new Attempt(false, true, found, "more than " + DataChannel.MAX_ROWS + " rows match; narrow"
                         + " the where", null);
             }
-            Matchers.Outcome count = Matchers.evaluate(row.rows(), true, (long) result.rowCount(), null);
+            Matchers.Outcome count = secret((long) result.rowCount()) != null
+                    ? new Matchers.Outcome(false, Matchers.HOLDS_A_SECRET)
+                    : Matchers.evaluate(row.rows(), true, (long) result.rowCount(), null);
             if (!count.holds()) {
                 return new Attempt(false, true, found, "row count: " + count.reason(), null);
             }
@@ -1603,12 +1607,15 @@ public final class PlanExecutor {
                         }
                     }
                     Object value = index < 0 ? null : result.get(r, index);
-                    Matchers.Outcome outcome = Matchers.evaluate(e.getValue(), index >= 0, value, "no column "
-                            + e.getKey());
+                    Matchers.Outcome outcome = index >= 0 && secret(value) != null
+                            ? new Matchers.Outcome(false, Matchers.HOLDS_A_SECRET)
+                            : Matchers.evaluate(e.getValue(), index >= 0, value, "no column " + e.getKey());
                     if (!outcome.holds()) {
                         Map<String, Object> first = new LinkedHashMap<>();
                         for (int c = 0; c < columns.size(); c++) {
-                            first.put(columns.get(c).name(), result.get(r, c));
+                            Object cell = result.get(r, c);
+                            Object masked = secret(cell);
+                            first.put(columns.get(c).name(), masked != null ? masked : cell);
                         }
                         found.put("row", first);
                         found.put("column", e.getKey());
@@ -1636,6 +1643,11 @@ public final class PlanExecutor {
                             result, index, aggregate.column());
                     value = computedValue.value();
                     problem = computedValue.problem();
+                    Object masked = problem == null ? secret(value) : null;
+                    if (masked != null) {
+                        value = masked;
+                        problem = Matchers.HOLDS_A_SECRET;
+                    }
                 }
                 computed.put(e.getKey(), value);
                 Matchers.Outcome outcome = problem != null ? new Matchers.Outcome(false, problem)
@@ -1668,9 +1680,22 @@ public final class PlanExecutor {
                         (String) fact[1]);
             }
             ExpectationPath.Resolution resolution = bound.path().resolve(fact[0]);
+            Object secret = resolution.resolved() ? secret(resolution.value()) : null;
+            if (secret != null) {
+                return new Attempt(false, true, secret, Matchers.HOLDS_A_SECRET, null);
+            }
             Matchers.Outcome outcome = Matchers.evaluate(bound.matcher(), resolution.resolved(), resolution.value(),
                     resolution.problem());
             return new Attempt(outcome.holds(), resolution.resolved(), resolution.value(), outcome.reason(), null);
+        }
+
+        /**
+         * With {@link RunOptions#expectationsOnMaskedValues()}, a value the run's mask changes holds a secret and
+         * satisfies no matcher, as in a session's check (phase5-contracts.md 12.2): its masked form, else null. Null
+         * always without the option (a scenario a person committed is evaluated on the values as read).
+         */
+        private Object secret(Object value) {
+            return options.expectationsOnMaskedValues() ? Matchers.maskedSecret(mask, value) : null;
         }
 
         private Object[] fetch(String root) throws AgentLostException, InterruptedException {

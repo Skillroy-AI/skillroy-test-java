@@ -31,14 +31,23 @@ import java.util.List;
  * @param tables the allow-listed tables read, sorted
  * @param columns the allow-listed columns read as {@code table.column}, sorted
  * @param injected what the guard injected or changed ({@code "row limit injected: LIMIT 200"}), in order
+ * @param literals the text of every string literal of the statement, in order (rule 6: the tier (b) resolver refuses
+ *     one that holds the value of a query argument, which must be bound as {@code ?})
  */
 public record GuardedStatement(String sql, int parameterCount, List<String> tables, List<String> columns,
-                               List<String> injected) {
+                               List<String> injected, List<String> literals) {
 
-    /** Copies the lists. */
+    /** Copies the lists; null literals are none. */
     public GuardedStatement {
         tables = List.copyOf(tables);
         columns = List.copyOf(columns);
         injected = List.copyOf(injected);
+        literals = literals == null ? List.of() : List.copyOf(literals);
+    }
+
+    /** A statement without string literals (a {@code CALL} with {@code ?} arguments only). */
+    public GuardedStatement(String sql, int parameterCount, List<String> tables, List<String> columns,
+                            List<String> injected) {
+        this(sql, parameterCount, tables, columns, injected, List.of());
     }
 }

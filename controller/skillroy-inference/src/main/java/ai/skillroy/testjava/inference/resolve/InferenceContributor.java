@@ -18,6 +18,7 @@ package ai.skillroy.testjava.inference.resolve;
 
 import ai.skillroy.testjava.data.SecretMask;
 import ai.skillroy.testjava.inference.Gateways;
+import ai.skillroy.testjava.inference.budget.BudgetCaps;
 import ai.skillroy.testjava.inference.budget.BudgetMeter;
 import ai.skillroy.testjava.inference.budget.InferenceLog;
 import ai.skillroy.testjava.inference.budget.LedgerWriter;
@@ -27,6 +28,7 @@ import ai.skillroy.testjava.inference.spi.Effort;
 import ai.skillroy.testjava.inference.spi.InferenceException;
 import ai.skillroy.testjava.inference.spi.InferenceGateway;
 import ai.skillroy.testjava.inference.spi.ModelClass;
+import ai.skillroy.testjava.inference.sql.AllowListCheck;
 import ai.skillroy.testjava.inference.sql.SqlGuard;
 import ai.skillroy.testjava.protocol.CapabilityState;
 import ai.skillroy.testjava.scenario.pack.DomainPack;
@@ -93,6 +95,9 @@ public final class InferenceContributor implements ResolverContributor {
                 throw new ContributionException("SQL dialect " + list.dialect() + " of source " + list.source()
                         + " is not served: no BS6 corpus");
             }
+            // D100: a column a row mask alters may not be allow-listed (P2 4); the schema half runs with the bind's
+            // data channel, before the catalogue (BindState).
+            AllowListCheck.rowMasks(list, pack.rowMasks());
         }
         PriceTable prices;
         try {
@@ -109,8 +114,11 @@ public final class InferenceContributor implements ResolverContributor {
         }
         BudgetMeter meter;
         try {
-            meter = BudgetMeter.of(BudgetMeter.Scope.SCENARIO, null,
+            BudgetMeter configured = BudgetMeter.of(BudgetMeter.Scope.SCENARIO, null,
                     settings.budgets().get(InferenceSettings.BUDGET_SCENARIO), ledger);
+            // D101: a session's resolve runs with its scenario budget capped at what is left of the session's.
+            meter = new BudgetMeter(BudgetMeter.Scope.SCENARIO, null, BudgetCaps.capped(configured.limit(), ledger),
+                    ledger);
         } catch (IllegalArgumentException e) {
             throw new ContributionException("budget.scenarioUsd must be an amount of US dollars");
         }
@@ -120,7 +128,7 @@ public final class InferenceContributor implements ResolverContributor {
         Long callMs = settings.timeouts().get(InferenceSettings.TIMEOUT_CALL_MS);
         InferenceGateway gateway;
         try {
-            gateway = Gateways.open(settings);
+            gateway = Gateways.open(settings, mask);
         } catch (InferenceException e) {
             throw new ContributionException("the " + settings.gateway() + " gateway cannot be opened: "
                     + e.getMessage());
@@ -129,7 +137,8 @@ public final class InferenceContributor implements ResolverContributor {
             state.close();
         }
         state = new BindState(gateway, prices, meter, writer, mask, lists, threshold, effort,
-                callMs == null ? 120_000L : callMs, settings.models().get(ModelClass.SONNET_CLASS.settingsKey()));
+                callMs == null ? 120_000L : callMs, settings.models().get(ModelClass.SONNET_CLASS.settingsKey()),
+                pack.rowMasks());
         ResolutionCatalogue catalogue = pack.resolution();
         List<Resolver<?, ?>> out = new ArrayList<>();
         for (String kind : catalogue.kinds()) {

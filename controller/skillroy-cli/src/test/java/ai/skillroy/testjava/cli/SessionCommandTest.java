@@ -41,6 +41,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.math.BigDecimal;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
@@ -59,8 +60,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * (every command of 13.4, a mistyped one that the session survives, the journal, the ledger), its {@code export}, and a
  * {@code replay} of the export through {@code skillroy run} with zero model calls; {@code resolve --credential}, whose
  * secret is joined and never printed, declared in the export and joined again by its replay; {@code ask} through the
- * recorded gateway with an answer the test records first; {@code --json}'s lines; the exit codes (a lost agent, a
- * failed last export) and the usage errors.
+ * recorded gateway with an answer the test records first; a model-written resolution through a served gateway, its
+ * records and its count on the session's budget; {@code --json}'s lines; the exit codes (a lost agent, a failed last
+ * export) and the usage errors.
  */
 class SessionCommandTest {
 
@@ -296,6 +298,59 @@ class SessionCommandTest {
         assertTrue(noEntry.out().contains("resolve: RESOLUTION_FAILED"), noEntry.out());
         assertTrue(noEntry.out().contains("helper = {\"code\":\"S7\""), "a slot without a credential needs no"
                 + " entry: " + noEntry.out());
+    }
+
+    /** A {@code session --script} run with the tier (b) pack, the served gateway and this script. */
+    private CliHarness.Outcome tierBSession(CliTierB tierB, Path out, String commands) throws Exception {
+        List<String> args = new ArrayList<>(List.of("session", "--script", script(commands).toString(), "--out",
+                out.toString(), "--id", "sess-b"));
+        args.addAll(tierB.options());
+        args.addAll(connection(agent, tokenFile));
+        return CliHarness.runWithLoader(tierB.loader, tmp.resolve("unused-discovery"), args.toArray(String[]::new))
+                .never(agent.token);
+    }
+
+    /**
+     * phase5-contracts.md 7.4, 13.4: a model-written resolution's call is in the session's {@code cost-ledger.jsonl}
+     * and, when the session ends, in its {@code inference.jsonl}, beside the session model's own records.
+     */
+    @Test
+    void aModelWrittenResolutionsCallIsInTheSessionsInferenceRecords() throws Exception {
+        try (CliTierB tierB = new CliTierB(tmp, agent)) {
+            Path out = tmp.resolve("tier-b");
+            CliHarness.Outcome outcome = tierBSession(tierB, out, CliTierB.RESOLVE + "\n").expectExit(Exit.OK);
+            assertTrue(outcome.out().contains("tool = {\"code\":\"T-1\"}  (inference.sql.Tool, LLM_SQL)"),
+                    outcome.out());
+            assertTrue(outcome.out().contains("model calls: 1\nmodel cost: $0.0123 (budget $1.00)"), outcome.out());
+            assertEquals(1, tierB.calls());
+            List<String> ledger = Files.readAllLines(out.resolve("cost-ledger.jsonl"));
+            assertEquals(1, ledger.size(), ledger.toString());
+            assertEquals("resolve", Json.parseObject(ledger.get(0)).get("purpose"));
+            List<String> inference = Files.readAllLines(out.resolve("inference.jsonl"));
+            assertEquals(1, inference.size(), "the resolution's record, written when the session ended: " + inference);
+            Map<String, Object> record = Json.parseObject(inference.get(0));
+            assertEquals("inference", record.get("type"));
+            assertEquals("resolve", record.get("purpose"));
+            assertEquals("tool", record.get("slot"));
+        }
+    }
+
+    /**
+     * phase5-contracts.md 12.4, 13.4: with a session service, the REPL's {@code resolve} goes through the service's
+     * metered entry, so that a model-written resolution counts on the session's budget record.
+     */
+    @Test
+    void aModelWrittenResolutionCountsOnTheSessionsBudget() throws Exception {
+        try (CliTierB tierB = new CliTierB(tmp, agent)) {
+            Path out = tmp.resolve("tier-b-budget");
+            tierBSession(tierB, out, CliTierB.RESOLVE + "\n").expectExit(Exit.OK);
+            List<Map<String, Object>> budgets = CliTierB.budgets(out.resolve("journal.jsonl"));
+            assertFalse(budgets.isEmpty(), "a budget record after the resolution");
+            Map<String, Object> last = budgets.get(budgets.size() - 1);
+            assertEquals("SESSION", last.get("scope"));
+            assertEquals(0, new BigDecimal(CliTierB.COST).compareTo(new BigDecimal(String.valueOf(
+                    last.get("spentUsd")))), last.toString());
+        }
     }
 
     @Test

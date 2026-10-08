@@ -16,15 +16,19 @@
 
 package ai.skillroy.testjava.cli;
 
+import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -40,7 +44,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * only. A child JVM runs {@link Main} as {@code bin/skillroy} would, against the fake agent of this JVM: without the
  * key, {@code --inference claude} is exit code 64 with "the model key is not set (ANTHROPIC_API_KEY)" before anything
  * runs; with a dummy key, a live {@code run} with prompt logging and a {@code session} that opens the live gateway
- * (and makes no model call) succeed, and the dummy value is in no output and in no file the commands wrote.
+ * (and makes no model call) succeed, and the dummy value is in no output and in no file the commands wrote. A session
+ * whose settings record ({@code record: true}) writes its recordings through the session's mask (4.2).
  */
 class ModelKeyTest {
 
@@ -74,6 +79,12 @@ class ModelKeyTest {
     }
 
     private Child child(String key, String... args) throws Exception {
+        // Nothing listens there: a call that should not happen could not reach anything.
+        return childAt(key, "http://127.0.0.1:9", args);
+    }
+
+    /** A child CLI whose provider is at {@code baseUrl}. */
+    private Child childAt(String key, String baseUrl, String... args) throws Exception {
         List<String> command = new ArrayList<>(List.of(Path.of(System.getProperty("java.home"), "bin", "java")
                 .toString(), "-cp", System.getProperty("java.class.path"), Main.class.getName()));
         command.addAll(List.of(args));
@@ -83,8 +94,7 @@ class ModelKeyTest {
         env.keySet().removeIf(k -> k.startsWith("ANTHROPIC_") || k.startsWith("SKILLROY_"));
         if (key != null) {
             env.put("ANTHROPIC_API_KEY", key);
-            // Nothing listens there: a call that should not happen could not reach anything.
-            env.put("ANTHROPIC_BASE_URL", "http://127.0.0.1:9");
+            env.put("ANTHROPIC_BASE_URL", baseUrl);
         }
         Path out = tmp.resolve("child-" + System.nanoTime() + ".out");
         Path err = tmp.resolve("child-" + System.nanoTime() + ".err");
@@ -132,6 +142,56 @@ class ModelKeyTest {
         for (Path f : files) {
             assertFalse(read(f).contains(DUMMY_KEY), "the key is in " + f);
         }
+    }
+
+    /**
+     * phase5-contracts.md 4.2, 12.4: the session service opens its gateway with the session's prompt mask, so that the
+     * recording gateway of {@code record: true} writes through it. The provider's answer (a loopback fake) echoes a
+     * credential of the session's credentials file, which no request builder could have masked: no recording holds it.
+     */
+    @Test
+    void aSessionsRecordingsAreWrittenThroughTheSessionsMask() throws Exception {
+        String password = "Rec-Session-Cred-7731";
+        Path credentials = Files.writeString(tmp.resolve("credentials.yaml"), "version: 1\ncredentials:\n"
+                + "  staff:\n    S7: { password: '" + password + "' }\n");
+        Files.setPosixFilePermissions(credentials, PosixFilePermissions.fromString("rw-------"));
+        Path recordings = tmp.resolve("recordings");
+        Path settings = Files.writeString(tmp.resolve("inference.yaml"), "version: 1\ngateway: claude\nrecord: true\n"
+                + "recordings: " + recordings + "\n");
+        byte[] answer = ("{\"id\":\"msg_fake_1\",\"type\":\"message\",\"role\":\"assistant\","
+                + "\"model\":\"claude-sonnet-5-5\",\"content\":[{\"type\":\"text\",\"text\":\"The note on the desk"
+                + " reads " + password + ".\"}],\"stop_reason\":\"end_turn\",\"stop_sequence\":null,"
+                + "\"usage\":{\"input_tokens\":100,\"output_tokens\":20}}").getBytes(StandardCharsets.UTF_8);
+        HttpServer provider = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
+        provider.createContext("/", exchange -> {
+            exchange.getRequestBody().readAllBytes();
+            exchange.getResponseHeaders().add("content-type", "application/json");
+            exchange.sendResponseHeaders(200, answer.length);
+            exchange.getResponseBody().write(answer);
+            exchange.close();
+        });
+        provider.start();
+        Child session;
+        try {
+            Path script = Files.writeString(tmp.resolve("ask.session"), "ask what does the note say\nquit\n");
+            session = childAt(DUMMY_KEY, "http://127.0.0.1:" + provider.getAddress().getPort(), "session", "--script",
+                    script.toString(), "--inference-file", settings.toString(), "--credentials",
+                    credentials.toString(), "--out", tmp.resolve("recording-session").toString());
+        } finally {
+            provider.stop(0);
+        }
+        assertEquals(Exit.OK, session.exit(), session.both());
+        assertTrue(session.out().contains("The note on the desk reads"), "the model answered: " + session.out());
+        List<Path> written;
+        try (Stream<Path> walk = Files.walk(recordings)) {
+            written = walk.filter(Files::isRegularFile).toList();
+        }
+        assertFalse(written.isEmpty(), "the session's call was recorded");
+        for (Path f : written) {
+            assertFalse(read(f).contains(password), "the session's credential is in the recording " + f.getFileName()
+                    + ": the recording gateway did not write through the session's mask");
+        }
+        assertFalse(session.both().contains(password), "nor in any output");
     }
 
     private static String read(Path f) throws IOException {

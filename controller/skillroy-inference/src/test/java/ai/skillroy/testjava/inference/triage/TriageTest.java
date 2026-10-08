@@ -71,8 +71,13 @@ class TriageTest {
 
     /** A copy of a fixture run directory, with an image and 60 events in its evidence when it has a failure/. */
     private Path copy(String name) throws Exception {
+        return copy(name, name);
+    }
+
+    /** {@link #copy(String)} into a directory of another name. */
+    private Path copy(String name, String as) throws Exception {
         Path from = Path.of(TriageTest.class.getResource("/triage/" + name).toURI());
-        Path to = tmp.resolve(name);
+        Path to = tmp.resolve(as);
         try (Stream<Path> files = Files.walk(from)) {
             for (Path f : files.toList()) {
                 Path target = to.resolve(from.relativize(f).toString());
@@ -257,6 +262,85 @@ class TriageTest {
         assertTrue(content.contains("ALL_REJECTED"), "the failed bind record");
         assertFalse(content.contains("LOAN_OPEN"), "not the other slot's records");
         assertTrue(Files.exists(run.resolve("failure/triage.json")), "failure/ is made when the run had none");
+    }
+
+    /**
+     * phase5-contracts.md 6.2, 11.2: no row of the run's data reaches a triage request. The slot that resolved last
+     * before the bind failed carries a row sample with a person's name (a row sample has no column names, so the
+     * by-column rule cannot be applied): its statement, parameters, row count and verifier outcome are sent, no cell.
+     */
+    @Test
+    void aRowSampleOfTheLastResolvedSlotIsNeverSent() throws Exception {
+        Path run = tmp.resolve("rows-run");
+        Files.createDirectories(run);
+        List<String> lines = List.of(
+                "{\"type\":\"run-start\",\"t\":0,\"scenarioId\":\"supervisor-return\",\"pack\":\"lending\","
+                        + "\"packVersion\":\"0.4.0\"}",
+                "{\"type\":\"resolver\",\"t\":10,\"slot\":\"supervisor\",\"resolver\":\"lending.sql.Staff\","
+                        + "\"candidates\":1}",
+                "{\"type\":\"resolve\",\"t\":12,\"slot\":\"supervisor\",\"query\":\"Staff\",\"args\":{\"code\":\"S03\"},"
+                        + "\"strategy\":\"CANONICAL_SQL\",\"resolver\":\"lending.sql.Staff\",\"statements\":[{"
+                        + "\"channel\":\"jdbc\",\"source\":\"lending\",\"sql\":\"SELECT s.code, s.name FROM staff s"
+                        + " WHERE s.code = ?\",\"params\":[\"S03\"],\"rowCount\":1,\"truncated\":false,"
+                        + "\"rowSample\":[[\"S03\",\"Alice Example\"]]}],\"calls\":[{\"primitive\":\"data.query\","
+                        + "\"params\":{\"sql\":\"SELECT 1\"},\"value\":{\"columns\":[\"code\",\"name\"],\"rows\":"
+                        + "[[\"S03\",\"Bertha Sample\"]]}}],\"verified\":[{\"id\":\"lending.access.check\","
+                        + "\"passed\":true,\"reason\":\"staff S03 may refund deposits\"}]}",
+                "{\"type\":\"bind\",\"t\":30,\"ok\":false,\"mode\":\"live\",\"failureKind\":\"ENVIRONMENT\","
+                        + "\"reason\":null,\"error\":\"the lending source could not be reached for slot keys\"}",
+                "{\"type\":\"run-end\",\"t\":32,\"status\":\"ERROR\",\"failureKind\":\"ENVIRONMENT\","
+                        + "\"failedStepId\":null,\"message\":\"the lending source could not be reached\"}");
+        Files.write(run.resolve("run.jsonl"), lines, StandardCharsets.UTF_8);
+        ScriptedGateway gateway = ScriptedGateway.sequence(List.of(label("ENVIRONMENT", 0.7, "the source"),
+                summary()));
+        Triage.run(run, gateway, mask(), PriceTable.builtIn(), new TriageOptions(false, clock));
+        for (ModelRequest request : gateway.requests()) {
+            String content = user(request);
+            assertTrue(content.contains("\"failedSlot\""), content);
+            assertTrue(content.contains("SELECT s.code, s.name FROM staff s WHERE s.code = ?"), "the statement");
+            assertTrue(content.contains("\"rowCount\": 1"), "its row count");
+            assertTrue(content.contains("staff S03 may refund deposits"), "the verifier's outcome");
+            assertFalse(content.contains("Alice Example"), "no cell of the row sample: " + content);
+            assertFalse(content.contains("Bertha Sample"), "no cell of a rows-shaped value: " + content);
+            assertFalse(content.contains("rowSample"), content);
+        }
+    }
+
+    /**
+     * The settings reach the triage (L1 F7): {@code effort.triage} the requests, the model ids the estimate, and
+     * {@code logPrompts} the triage's {@code inference.jsonl}.
+     */
+    @Test
+    void theSettingsEffortModelsAndPromptLoggingReachTheTriage() throws Exception {
+        Path plain = copy("failed-run");
+        Triage.run(plain, ScriptedGateway.sequence(List.of(label("TIMING", 0.4, "late"), summary())), mask(),
+                PriceTable.builtIn(), new TriageOptions(false, clock));
+        String plainEstimate = (String) Json.parseObject(Files.readString(plain.resolve("failure/triage.json")))
+                .get("estimatedUsd");
+        assertFalse(Files.readString(plain.resolve("triage/inference.jsonl")).contains("\"messages\""),
+                "no prompt without logPrompts");
+
+        Path run = copy("failed-run", "configured");
+        ai.skillroy.testjava.scenario.resolve.InferenceSettings settings =
+                new ai.skillroy.testjava.scenario.resolve.InferenceSettings("recorded", tmp, false, null,
+                        Map.of("opus", "claude-opus-5-5", "sonnet", "claude-opus-5-5", "haiku", "claude-opus-5-5"),
+                        Map.of("resolve", "low", "triage", "high", "session", "medium", "summary", "low"), null,
+                        null, null, true, false, null, true, null);
+        TriageOptions options = TriageOptions.of(settings, false, clock);
+        assertTrue(options.logPrompts());
+        ScriptedGateway gateway = ScriptedGateway.sequence(List.of(label("TIMING", 0.4, "late"), summary()));
+        Triage.run(run, gateway, mask(), PriceTable.builtIn(), options);
+        for (ModelRequest request : gateway.requests()) {
+            assertEquals(ai.skillroy.testjava.inference.spi.Effort.HIGH, request.effort(), "effort.triage");
+        }
+        String estimate = (String) Json.parseObject(Files.readString(run.resolve("failure/triage.json")))
+                .get("estimatedUsd");
+        assertTrue(new BigDecimal(estimate).compareTo(new BigDecimal(plainEstimate)) > 0, "the estimate is taken at"
+                + " the configured (dearer) model ids: " + estimate + " against " + plainEstimate);
+        List<String> records = Files.readAllLines(run.resolve("triage/inference.jsonl"));
+        assertTrue(records.stream().allMatch(r -> r.contains("\"messages\"") && r.contains("\"system\"")),
+                "logPrompts writes the masked prompts");
+        assertTrue(records.stream().noneMatch(r -> r.contains(CREDENTIAL)), "masked");
     }
 
     @Test

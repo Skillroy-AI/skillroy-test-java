@@ -23,6 +23,8 @@ import ai.skillroy.testjava.inference.planner.AuthoringException;
 import ai.skillroy.testjava.inference.planner.AuthoringResult;
 import ai.skillroy.testjava.inference.planner.Planner;
 import ai.skillroy.testjava.inference.planner.PlannerRequest;
+import ai.skillroy.testjava.inference.tools.ToolProjection;
+import ai.skillroy.testjava.mcp.PlanPolicy;
 import ai.skillroy.testjava.protocol.Json;
 import ai.skillroy.testjava.protocol.PrimitiveDescriptor;
 import ai.skillroy.testjava.scenario.BindOptions;
@@ -45,6 +47,7 @@ import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -58,8 +61,11 @@ import java.util.function.UnaryOperator;
  * offer no second model) into a private, owner-only temporary file, and calls {@link Planner#author}: the Claude Code
  * CLI headless with that server as its only tool source and the scenario JSON schema as its output constraint. The
  * planner writes {@code <out>/<id>.yaml}, {@code <out>/plan/<id>.plan.json} and {@code <out>/<id>.authoring.json}. The
- * command then binds the plan with {@code resolve --dry-run} semantics ({@code live}, nothing written), runs it once
- * in {@code live} with {@code --run}, records both checks in the authoring record
+ * planner is given the catalogue of the primitives its server offers a scenario ({@link PlanPolicy}), so that the
+ * scenario schema's {@code call} names only those, and its deadline is {@code timeouts.plannerMs}. The command then
+ * binds the plan with {@code resolve --dry-run} semantics ({@code live}, nothing written), with {@code --run} runs it
+ * once in {@code live} when every call of it is one the planner's server offers (D96; otherwise the check fails and
+ * nothing runs), its expectations on masked values, records both checks in the authoring record
  * ({@link AuthoringResult#recordChecks}), records the planner's calls in the invocation's ledger beside the checks'
  * own, prints the instruction for the reviewer and deletes the configuration file.
  *
@@ -88,6 +94,13 @@ final class AuthorCommand implements Command {
     static final String PROP_CLAUDE_COMMAND = "skillroy.claude.command";
     /** The system property {@code bin/skillroy} sets to itself: the launcher the MCP configuration names. */
     static final String PROP_LAUNCHER = "skillroy.launcher";
+    /** The key of {@code timeouts} in the inference settings that bounds the planner (phase5-contracts.md 10.2). */
+    static final String TIMEOUT_PLANNER_MS = InferenceSettings.TIMEOUT_PLANNER_MS;
+    /**
+     * The policy of the planner's server: {@code mcp --mutating} without {@code --allow-evaluate} (D98), as
+     * {@link #mcpConfig} writes it; what its scenario may call (D96).
+     */
+    static final ToolProjection.Policy PLANNER_POLICY = ToolProjection.Policy.mutating(false);
 
     private static final CommandSpec SPEC = new CommandSpec("author", "author a scenario from a brief with Claude Code",
             "", """
@@ -174,14 +187,22 @@ final class AuthorCommand implements Command {
                     throw new CliException(Exit.FAILED, scrub.apply(preflight) + "; the planner was not started");
                 }
                 List<PrimitiveDescriptor> primitives = target.client().schema();
+                PlanPolicy policy;
+                try {
+                    policy = PlanPolicy.of(primitives, pack, PLANNER_POLICY);
+                } catch (IllegalArgumentException e) {
+                    throw new CliException(Exit.FAILED, "the planner's tools cannot be projected: " + e.getMessage()
+                            + "; the planner was not started");
+                }
                 CostLedger ledger = new CostLedger();
                 Path config = mcpConfig(args, cli, settings);
                 AuthoringResult result;
                 try {
-                    PlannerRequest request = new PlannerRequest(brief, id, out, pack, primitives, config, model,
-                            maxTurns == null ? PlannerRequest.DEFAULT_MAX_TURNS : maxTurns.intValue(),
+                    // The catalogue of what the planner's server offers (D96): the scenario schema's call names those.
+                    PlannerRequest request = new PlannerRequest(brief, id, out, pack, policy.callableCatalogue(),
+                            config, model, maxTurns == null ? PlannerRequest.DEFAULT_MAX_TURNS : maxTurns.intValue(),
                             maxRepairs == null ? PlannerRequest.DEFAULT_MAX_REPAIRS : maxRepairs.intValue(), budget,
-                            args.flag(RUN), claude, null, null);
+                            args.flag(RUN), claude, plannerDeadline(inference), null);
                     result = Planner.author(request);
                 } catch (AuthoringException e) {
                     e.ledger().forEach(ledger::record);
@@ -215,10 +236,17 @@ final class AuthorCommand implements Command {
                 Boolean ran = null;
                 String runText = null;
                 if (args.flag(RUN)) {
-                    RunResult run = new PlanExecutor(pack, target.client(), RunOptions.defaults().withBind(live),
-                            packs.loader()).run(plan);
-                    ran = passed(run);
-                    runText = "check: run once live: " + RunCommand.describe(run, null);
+                    List<String> refusals = policy.refusals(plan);
+                    if (!refusals.isEmpty()) {
+                        ran = false;
+                        runText = "check: run once live: refused, nothing ran (the planner's server runs only what"
+                                + " it offers as tools): " + String.join("; ", refusals);
+                    } else {
+                        RunResult run = new PlanExecutor(pack, target.client(), RunOptions.defaults().withBind(live)
+                                .withExpectationsOnMaskedValues(true), packs.loader()).run(plan);
+                        ran = passed(run);
+                        runText = "check: run once live: " + RunCommand.describe(run, null);
+                    }
                 }
                 result.recordChecks(resolved, ran);
                 print(cli, json, scrub, result, resolved, ran, resolveLine, runText, ledger.entries(), budget,
@@ -321,6 +349,15 @@ final class AuthorCommand implements Command {
         } catch (NumberFormatException e) {
             throw new UsageException(BUDGET_USD + " needs an amount of US dollars such as 2.00, found '" + text + "'");
         }
+    }
+
+    /**
+     * The planner's deadline over all its rounds: {@code timeouts.plannerMs} of the inference settings (15 minutes by
+     * default, phase5-contracts.md 10.2); null (the planner's own 15-minute default) when the settings carry none.
+     */
+    static Duration plannerDeadline(InferenceSettings inference) {
+        Long ms = inference.timeouts().get(TIMEOUT_PLANNER_MS);
+        return ms == null || ms <= 0 ? null : Duration.ofMillis(ms);
     }
 
     /** The model id of {@code --model}'s class, as the settings name it; the settings' Opus id by default. */

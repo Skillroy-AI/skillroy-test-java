@@ -49,7 +49,8 @@ import java.util.function.Supplier;
  * plan run ({@link PlanExecutor}) and an interactive session ({@link ExecutorSession}) share. For a call it
  * substitutes the references against the current {@link #bindings}, announces the secret parameters
  * ({@code _meta.secretParams}, amendment A34), sends a top-level {@code confirm} argument as the call's confirmation
- * ({@code _meta.confirm}, phase5-contracts.md 13.1), routes a {@code web.*} call to the chosen web path, applies the
+ * ({@code _meta.confirm}, phase5-contracts.md 13.1), drops a parameter named {@code _meta} (the request's metadata
+ * comes from the call's options alone, 12.2), routes a {@code web.*} call to the chosen web path, applies the
  * call's sync, binds a captured slot, checks the base verbs' fidelity, looks for unexpected prompts and classifies
  * every failure as an {@link Abort}; it writes the {@code call}, {@code sync}, {@code capture}, {@code fidelity} and
  * {@code prompt} records of {@code run.jsonl}.
@@ -66,6 +67,12 @@ final class CallRunner {
 
     /** The argument that confirms a destructive call: sent as {@code _meta.confirm}, never as a parameter. */
     static final String CONFIRM = "confirm";
+
+    /**
+     * The request's metadata, which the connection builds from the call's {@link CallOptions} alone: never a parameter
+     * (phase5-contracts.md 12.2, the fix wave), so a parameter of this name is dropped before a call is sent.
+     */
+    static final String META = "_meta";
 
     final AgentConnection agent;
     final RunLog log;
@@ -170,6 +177,9 @@ final class CallRunner {
                     RunLog.fields("reason", e.reason(), "reference", e.reference(), "primitive",
                             call.primitive()));
         }
+        // For every caller (plan steps, cleanup calls, sessions and so the MCP server): a plan read from its file or a
+        // pack's call may hold a _meta parameter, which a connection that merged it could take as a confirmation.
+        params.remove(META);
         boolean isAwait = "sync.await".equals(call.primitive());
         if (isAwait && !params.containsKey("since")) {
             params.put("since", lastActionSeq);
@@ -330,6 +340,9 @@ final class CallRunner {
     List<String> secretParams(Plan.Call call) {
         List<String> names = new ArrayList<>();
         for (Map.Entry<String, Object> e : call.args().entrySet()) {
+            if (META.equals(e.getKey())) {
+                continue;   // never sent (see execute)
+            }
             for (References.Ref ref : References.collect(e.getValue())) {
                 if (bindings.isSecretField(ref.slot(), ref.fields()) || fixtureSecret(ref)) {
                     names.add(e.getKey());

@@ -17,6 +17,7 @@
 package ai.skillroy.testjava.scenario;
 
 import ai.skillroy.testjava.controller.AgentRpcException;
+import ai.skillroy.testjava.data.SecretMask;
 import ai.skillroy.testjava.protocol.CapabilityState;
 import ai.skillroy.testjava.protocol.ErrorCodes;
 import ai.skillroy.testjava.protocol.Json;
@@ -425,6 +426,31 @@ class PlanExecutorTest {
         assertTrue(snapshot.contains("- button \"DUE\" [ref=h12] (disabled)"), snapshot);
         assertTrue(snapshot.contains("toy: {\"name\":\"LOAN\"}"), snapshot);
         assertEquals(1, pack.recovered.get());
+    }
+
+    /**
+     * {@code expectationsOnMaskedValues} (phase5-contracts.md 12.2, the fix wave; for a plan a model or a client
+     * wrote): an expectation on a value the run's mask changes never holds, its actual is the masked value and the
+     * reason says it holds a secret, so a run's PASS or FAIL answers no question about a secret; without the option (a
+     * scenario a person committed) the value is matched as read, and with it a value without a secret is unchanged.
+     */
+    @Test
+    void anExpectationOnAMaskedValueHoldsOnlyWithoutTheMaskedOption() throws Exception {
+        state.put("pin", TestCredentials.PW_100);
+        options = options.withStepTimeout(Duration.ofMillis(300));
+        String body = "steps:\n  - expect: { \"state.pin\": { matches: \"^" + TestCredentials.PW_100.substring(0, 4)
+                + "\" } }\n";
+        assertOutcome(run(body), Status.PASS, null);
+        assertFalse(RunOptions.defaults().expectationsOnMaskedValues(), "off by default");
+
+        options = options.withExpectationsOnMaskedValues(true);
+        RunResult masked = run(body);
+        assertOutcome(masked, Status.FAIL, FailureKind.ASSERTION);
+        assertTrue(masked.message().endsWith(": " + Matchers.HOLDS_A_SECRET), masked.message());
+        assertEquals(SecretMask.REDACTED, masked.detail().get("actual"));
+        assertEquals(true, masked.detail().get("resolved"));
+        assertOutcome(run("steps:\n  - expect: { \"state.name\": { matches: \"^ID\" } }\n"), Status.PASS, null);
+        assertTrue(options.withStepTimeout(null).expectationsOnMaskedValues(), "kept by the other withers");
     }
 
     @Test

@@ -35,13 +35,29 @@ What is not here, and why:
 
 - From the scripted stand-ins: `mvn -o verify -pl samples/skillroy-sample-lending-scenarios -am
   -Dskillroy.inference.fixtures.update=true` (`ScenarioDRecordedTest` and `SessionExportTest` remove the old
-  recordings of their purpose, write the new ones, then scenario D's bindings files and the session's export from
-  them).
-- Live, once the key works: the Maven profile `inference-record` in the Linux image (`ci/run-in-linux.sh` passes
-  `ANTHROPIC_API_KEY` into the container when it is set, without printing it), with
-  `-Dskillroy.inference.record.overwrite=true`. The files then name the provider and the model that answered; no code
-  changes. Scenario D's bindings files and the session's export are then written again from the live recordings (the
-  statement, its rationale and the model usage in them change), reviewed, and committed with them.
+  recordings of their purpose, write the new ones from `ScriptedAnswers`, then scenario D's bindings files and the
+  session's export from them). This path always records the stand-ins: run after a live re-record, it would replace
+  the live recordings.
+- Live: not built yet. The Maven profiles `inference-record` and `inference-live` of the contract (§2.3, §14.5, §15.3)
+  are specified, not built (decision D110): nothing live can run until the key's workspace id exists (`docs/TODO.md`,
+  "Walls"), and the profiles, the live tests and the record route are built in the same change as their first live
+  run. The recording route that exists is `record: true` in an `inference.yaml` with `gateway: claude` and
+  `recordings:` naming this directory: the live gateway is then wrapped in a `RecordingGateway` (`Gateways.build`), and
+  `-Dskillroy.inference.record.overwrite=true` (for the CLI, in `SKILLROY_JAVA_OPTS`) lets it replace an existing file.
+  Scenario D bound with `approve` on each seed through such settings records its supervisor request live.
+- A live re-record of scenario D's tier (b) requests changes the provider, the model, the statement, the rationale and
+  the usage in the recordings, and in the bindings files written from them by `approve` through the recorded gateway
+  (as the second half of the update path above does; its first half must not run then), whose `approval.by` label
+  changes too. The assertions that pin the stand-ins must be loosened in that change: `ScenarioDRecordedTest.java:253` (the recording's provider `scripted`), `:260`
+  (confidence 0.9), `:264` (the stand-in's rationale), `:267` (the stand-in's statement), `:443-444` (every committed
+  recording a stand-in made at `RECORDED_AT`); `BindingsUpToDateTest.java:164-169` (the label, the rationale, the
+  model `scripted-model`, confidence 0.9); and the label itself, `ScriptedAnswers.APPROVED_BY`, which
+  `ScenarioDRecordedTest` and items 2 and 7 of `InferenceChecks` reproduce.
+- The session's recordings are not refreshed by a live session: a live session is a new session, with its own answers
+  and actions, so the session's stand-ins stay scripted. `SessionExportTest.java:110-111` (the answer and the tools),
+  `:116-117` (five calls), `:134` and `:156` (the model `scripted-model` in the journal and the export) and `:184` (the
+  recordings are stand-ins) pin them, and the image's session check (`InferenceChecks.java:333`, §15.2 item 4) drives
+  the same script by position and compares its export with the committed copies.
 
 ## How a recording works
 

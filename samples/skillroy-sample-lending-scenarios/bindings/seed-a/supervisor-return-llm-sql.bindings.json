@@ -221,6 +221,102 @@
           {
             "channel": "agent",
             "source": "lending",
+            "sql": "SELECT * FROM staff WHERE 1 = 0",
+            "params": [],
+            "rowCount": 0,
+            "truncated": false
+          },
+          {
+            "channel": "agent",
+            "source": "lending",
+            "sql": "SELECT * FROM staff_role WHERE 1 = 0",
+            "params": [],
+            "rowCount": 0,
+            "truncated": false
+          },
+          {
+            "channel": "agent",
+            "source": "lending",
+            "sql": "SELECT * FROM role_permission WHERE 1 = 0",
+            "params": [],
+            "rowCount": 0,
+            "truncated": false
+          },
+          {
+            "channel": "agent",
+            "source": "lending",
+            "sql": "SELECT * FROM role_cap WHERE 1 = 0",
+            "params": [],
+            "rowCount": 0,
+            "truncated": false
+          },
+          {
+            "channel": "agent",
+            "source": "lending",
+            "sql": "SELECT * FROM desk_setting WHERE 1 = 0",
+            "params": [],
+            "rowCount": 0,
+            "truncated": false
+          },
+          {
+            "channel": "agent",
+            "source": "lending",
+            "sql": "SELECT * FROM item WHERE 1 = 0",
+            "params": [],
+            "rowCount": 0,
+            "truncated": false
+          },
+          {
+            "channel": "agent",
+            "source": "lending",
+            "sql": "SELECT * FROM waiver_rule WHERE 1 = 0",
+            "params": [],
+            "rowCount": 0,
+            "truncated": false
+          },
+          {
+            "channel": "agent",
+            "source": "lending",
+            "sql": "SELECT * FROM waiver_rule_item WHERE 1 = 0",
+            "params": [],
+            "rowCount": 0,
+            "truncated": false
+          },
+          {
+            "channel": "agent",
+            "source": "lending",
+            "sql": "SELECT * FROM loan WHERE 1 = 0",
+            "params": [],
+            "rowCount": 0,
+            "truncated": false
+          },
+          {
+            "channel": "agent",
+            "source": "lending",
+            "sql": "SELECT * FROM loan_line WHERE 1 = 0",
+            "params": [],
+            "rowCount": 0,
+            "truncated": false
+          },
+          {
+            "channel": "agent",
+            "source": "lending",
+            "sql": "SELECT * FROM loan_waiver WHERE 1 = 0",
+            "params": [],
+            "rowCount": 0,
+            "truncated": false
+          },
+          {
+            "channel": "agent",
+            "source": "lending",
+            "sql": "SELECT * FROM loan_authorisation WHERE 1 = 0",
+            "params": [],
+            "rowCount": 0,
+            "truncated": false
+          },
+          {
+            "channel": "agent",
+            "source": "lending",
             "sql": "SELECT DISTINCT s0.permission FROM role_permission s0 ORDER BY s0.permission LIMIT 21",
             "params": [],
             "rowCount": 3,

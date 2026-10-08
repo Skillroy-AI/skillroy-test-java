@@ -103,7 +103,9 @@ import java.util.TreeSet;
  * inference module, not by the pack's catalogue), and is a compile error naming the pack otherwise; the plan's
  * {@code inference} is {@code bind} when a slot names it ({@link Plan#inferenceOf}). The base verb {@code call} (P1
  * 8.3, unchanged) is reserved: a pack may not declare a verb of that name, since an exported session step relies on
- * it. Plans are written as version 5.
+ * it. Plans are written as version 5. A {@code _meta} key at any depth of a step's arguments (every verb but
+ * {@code expect}) or of a call a verb compiles to, cleanup calls and a session's raw call included, is a compile
+ * error naming its path: a call's {@code _meta} is the executor's, built from the call's options (13.1, the fix wave).
  *
  * <p>Stateless; safe from any thread, provided the pack's step library is.
  */
@@ -244,6 +246,44 @@ public final class PlanCompiler {
             return false;
         }
         return expected.equals(Files.readString(planFile));
+    }
+
+    /**
+     * The path of the first key {@code _meta} at any depth of a step's or a call's arguments ({@code args._meta},
+     * {@code lines[0]._meta}), or null when there is none: the request's {@code _meta} is the executor's, built from a
+     * call's options, and never a parameter (phase5-contracts.md 12.2, 13.1).
+     *
+     * @param value arguments in the JSON normal form, a tree (normalising refuses cycles and deep nesting first)
+     * @param at the path of {@code value}, empty at the top
+     */
+    private static String metaPath(Object value, String at) {
+        if (value instanceof Map<?, ?> map) {
+            for (Map.Entry<?, ?> e : map.entrySet()) {
+                String key = String.valueOf(e.getKey());
+                String path = at.isEmpty() ? key : at + "." + key;
+                if (CallRunner.META.equals(key)) {
+                    return path;
+                }
+                String found = metaPath(e.getValue(), path);
+                if (found != null) {
+                    return found;
+                }
+            }
+        } else if (value instanceof List<?> list) {
+            for (int i = 0; i < list.size(); i++) {
+                String found = metaPath(list.get(i), at + "[" + i + "]");
+                if (found != null) {
+                    return found;
+                }
+            }
+        }
+        return null;
+    }
+
+    /** The refusal of a {@code _meta} key found at {@code path}. */
+    private static String noMeta(String path) {
+        return "a step's arguments may not carry _meta (at " + path + "); a call's _meta is built by the executor from"
+                + " its options";
     }
 
     /** A captured slot as declared so far: the capturing step and the field names. */
@@ -791,10 +831,15 @@ public final class PlanCompiler {
                 throw new ScenarioException(scenario.id(), line, "unknown verb '" + verb + "'; available verbs: "
                         + String.join(", ", BaseSteps.available(packVerbs)));
             }
+            Object args = normalise(step.args(), false, line);
+            String meta = metaPath(args, "");
+            if (meta != null) {
+                throw error(line, "verb '" + verb + "': " + noMeta(meta));
+            }
             Context ctx = new Context(line);
             List<PlannedCall> planned;
             try {
-                planned = chosen.compile(verb, normalise(step.args(), false, line), ctx);
+                planned = chosen.compile(verb, args, ctx);
             } catch (ScenarioException e) {
                 throw e.locate(scenario.id(), line);
             } catch (RuntimeException e) {
@@ -840,6 +885,11 @@ public final class PlanCompiler {
         private Plan.Call toCall(PlannedCall call, boolean marked, int line, String where) throws ScenarioException {
             @SuppressWarnings("unchecked")
             Map<String, Object> args = (Map<String, Object>) normalise(call.args(), true, line);
+            String meta = metaPath(args, "");
+            if (meta != null) {
+                throw new ScenarioException(scenario.id(), line, where + ": call " + call.primitive() + ": "
+                        + noMeta(meta));
+            }
             Sync sync = call.sync();
             if (sync == Sync.ACK && policy.ackTopic() == null) {
                 throw new ScenarioException(scenario.id(), line, where + ": call " + call.primitive()

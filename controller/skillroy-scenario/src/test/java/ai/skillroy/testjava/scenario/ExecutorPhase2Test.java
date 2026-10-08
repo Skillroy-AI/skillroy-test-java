@@ -16,6 +16,7 @@
 
 package ai.skillroy.testjava.scenario;
 
+import ai.skillroy.testjava.data.SecretMask;
 import ai.skillroy.testjava.protocol.Json;
 import ai.skillroy.testjava.protocol.sql.Rows;
 import ai.skillroy.testjava.scenario.pack.PreflightCheck;
@@ -271,6 +272,29 @@ class ExecutorPhase2Test {
                 .replace("code: B2 }", "code: B2, none: null }"));
         assertEquals(FailureKind.RESOLUTION_FAILED, nullParam.failureKind());
         assertEquals("REFERENCE", nullParam.detail().get("reason"));
+    }
+
+    /**
+     * {@code expectationsOnMaskedValues} on a stored-row check (phase5-contracts.md 12.2, the fix wave): a column value
+     * the run's mask changes satisfies no matcher and the row reported carries it masked; without the option (a
+     * scenario a person committed) the value is matched as read.
+     */
+    @Test
+    void aDbCheckOnAMaskedColumnHoldsOnlyWithoutTheMaskedOption() throws Exception {
+        FakeAgentConnection.Handler query = agent.handler("data.query");
+        agent.on("data.query", params -> LINE_SQL.equals(params.get("sql")) ? line(List.of(java.util.Arrays.asList(
+                41L, "B2", "-5.00", true, TestCredentials.PW_100)), false).toJson() : query.handle(params));
+        String yaml = DB.replace("note: { exists: false }", "note: { matches: \"^"
+                + TestCredentials.PW_100.substring(0, 4) + "\" }");
+        RunResult plain = run(yaml);
+        assertEquals(Status.PASS, plain.status(), plain.message());
+
+        options = options.withStepTimeout(Duration.ofMillis(300)).withExpectationsOnMaskedValues(true);
+        RunResult masked = run(yaml);
+        assertEquals(Status.FAIL, masked.status(), masked.message());
+        assertEquals(FailureKind.ASSERTION, masked.failureKind());
+        assertTrue(masked.message().endsWith("row 1 column note: " + Matchers.HOLDS_A_SECRET), masked.message());
+        assertEquals(SecretMask.REDACTED, ((Map<?, ?>) masked.detail().get("row")).get("note"));
     }
 
     /** The last db record failed and, like every attempt, names the table, the source and the channel (11.3). */

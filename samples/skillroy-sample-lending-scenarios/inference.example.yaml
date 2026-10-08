@@ -6,14 +6,14 @@
 # asks a model, whatever this file says; options and system properties override what it sets.
 #
 # The model key never stands here: the live gateway (gateway: claude) reads ANTHROPIC_API_KEY from the environment
-# only, and a run refuses to start without it. Recordings are made once, live, by a maintainer with the key (the Maven
-# profile inference-record, in the Linux image) and committed after review (the ones committed now are scripted
-# stand-ins, provider "scripted": see the README beside them); a request without a recording fails loudly ("no
-# recording"), so that a changed prompt is seen, never guessed.
+# only, and a run refuses to start without it. Recordings are made once, live, by a maintainer with the key (gateway:
+# claude with record: true; the Maven profile inference-record is specified, not built) and committed after review
+# (the ones committed now are scripted stand-ins, provider "scripted": see the README beside them); a request without
+# a recording fails loudly ("no recording"), so that a changed prompt is seen, never guessed.
 version: 1
 gateway: recorded                       # claude | recorded | none
 recordings: src/test/resources/inference/   # relative to this file; also where record: true writes
-record: false                           # true: wrap the live gateway and write what it answers (inference-record)
+record: false                           # true: wrap the live gateway and write what it answers into recordings
 workspaceId: null                       # what an organisation-level key needs (else ANTHROPIC_WORKSPACE_ID); no secret
 models:
   opus: claude-opus-5-5

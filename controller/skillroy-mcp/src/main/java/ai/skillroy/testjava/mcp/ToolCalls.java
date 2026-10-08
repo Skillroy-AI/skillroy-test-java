@@ -109,6 +109,8 @@ final class ToolCalls {
     static final int EVENTS_MAX = 200;
     /** How long a read of the event bus's last sequence number may take. */
     private static final long READ_TIMEOUT_MS = 10_000L;
+    private static final String CONFIRM = "confirm";
+    private static final String META = "_meta";
 
     private final SkillroyMcpServer server;
 
@@ -138,7 +140,7 @@ final class ToolCalls {
         } catch (RuntimeException e) {
             // A pack that cannot describe a verb's arguments: none are dropped.
         }
-        Object given = withoutConfirm(Arguments.dropNullOptionals(args, schema));
+        Object given = withoutConfirmOrMeta(Arguments.dropNullOptionals(args, schema));
         StepOutcome outcome = session().execute(verb, given, SkillroyMcpServer.ORIGIN);
         return step(outcome, "verb " + verb);
     }
@@ -146,8 +148,7 @@ final class ToolCalls {
     /** A primitive as one raw call of the session ({@code data.query} through {@link #dataQuery}). */
     Reply primitive(PrimitiveDescriptor d, Map<String, Object> args) throws AgentLostException, InterruptedException,
             ToolError {
-        Map<String, Object> params = withoutConfirm(Arguments.dropNullOptionals(args, d.paramsSchema()));
-        params.remove("_meta");
+        Map<String, Object> params = withoutConfirmOrMeta(Arguments.dropNullOptionals(args, d.paramsSchema()));
         if (SkillroyMcpServer.DATA_QUERY.equals(d.name())) {
             return dataQuery(params);
         }
@@ -342,6 +343,10 @@ final class ToolCalls {
         server.renamedPrimitives().forEach((tool, primitive) -> renamed.add(Map.of("tool", tool, "primitive",
                 primitive)));
         json.put("renamedPrimitives", renamed);
+        List<Object> withheld = new ArrayList<>();
+        server.withheldVerbs().forEach((tool, why) -> withheld.add(Map.of("verb", why[0], "tool", tool, "reason",
+                why[1])));
+        json.put("withheldVerbs", withheld);
         ResolutionCatalogue catalogue;
         try {
             catalogue = pack.resolution();
@@ -381,7 +386,7 @@ final class ToolCalls {
         }
         json.put("capabilities", caps);
         List<Object> sources = new ArrayList<>();
-        for (SqlAllowList list : server.allowLists().values()) {
+        for (SqlAllowList list : server.dataQueryLists().values()) {
             Map<String, Object> s = new LinkedHashMap<>();
             s.put("source", list.source());
             s.put("dialect", list.dialect().name());
@@ -477,14 +482,23 @@ final class ToolCalls {
         }
     }
 
-    /** {@code skillroy_resolve}: a query resolved live; the answer joins the session's bindings. */
+    /**
+     * {@code skillroy_resolve}: a query resolved live; the answer joins the session's bindings. With an actor (a
+     * session service), through the actor's metered entry, so that a model token counts on the session's budget
+     * (13.4); else on the session itself.
+     */
     Reply resolve(Map<String, Object> args) throws AgentLostException, InterruptedException, ToolError {
         String slot = Arguments.text(args, "slot", true);
         String kind = Arguments.text(args, "kind", true);
         Map<String, Object> queryArgs = Arguments.map(args, "args");
         List<String> strategy = Arguments.texts(args, "strategy");
         try {
-            session().resolve(slot, kind, queryArgs, strategy, null, null, SkillroyMcpServer.ORIGIN);
+            SessionActor actor = server.resolvingActor();
+            if (actor != null) {
+                actor.resolve(session(), slot, kind, queryArgs, strategy, SkillroyMcpServer.ORIGIN);
+            } else {
+                session().resolve(slot, kind, queryArgs, strategy, null, null, SkillroyMcpServer.ORIGIN);
+            }
         } catch (BindException e) {
             Map<String, Object> json = new LinkedHashMap<>();
             json.put("slot", slot);
@@ -583,9 +597,12 @@ final class ToolCalls {
     }
 
     /**
-     * {@code skillroy_scenario_run} (mutating only): the scenario compiled and run once with {@link PlanExecutor} in
-     * {@code live} (nothing written) or {@code approve} (the session's approver and bindings root decide), with
-     * recover, its evidence in {@code <out>/runs/<run id>/}; the run's summary.
+     * {@code skillroy_scenario_run} (mutating only): the scenario compiled, checked against what this server offers
+     * ({@link PlanPolicy}, D96: refused as a tool error naming each call that may not run, before anything runs), and
+     * run once with {@link PlanExecutor} in {@code live} (nothing written) or {@code approve} (the session's approver
+     * and bindings root decide), with recover and every expectation on masked values
+     * ({@code RunOptions.withExpectationsOnMaskedValues}, so that PASS or FAIL never answers whether a credential
+     * starts with a prefix), its evidence in {@code <out>/runs/<run id>/}; the run's summary.
      */
     Reply run(Map<String, Object> args) throws AgentLostException, ToolError {
         String yaml = Arguments.text(args, "yaml", true);
@@ -602,10 +619,16 @@ final class ToolCalls {
         } catch (ScenarioException e) {
             throw new ToolError("skillroy_scenario_run: the scenario does not compile: " + e.getMessage());
         }
+        List<String> refusals = server.planPolicy().refusals(plan);
+        if (!refusals.isEmpty()) {
+            throw new ToolError("skillroy_scenario_run: the scenario is refused, nothing ran (this server runs only"
+                    + " what it offers as tools): " + String.join("; ", refusals));
+        }
         String runId = server.nextRunId();
         Path dir = server.outDir().resolve("runs").resolve(runId);
         BindOptions bind = session().options().bind().withMode(bindMode).withWriteBindings(false);
-        RunOptions options = RunOptions.defaults().withOutputDir(dir).withBind(bind).withClock(server.clock());
+        RunOptions options = RunOptions.defaults().withOutputDir(dir).withBind(bind).withClock(server.clock())
+                .withExpectationsOnMaskedValues(true);
         PlanExecutor executor = new PlanExecutor(pack(), server.agent(), options,
                 session().options().webPathLoader());
         PlanExecutor.Resolved ran = executor.runWithOutcome(plan);
@@ -718,14 +741,16 @@ final class ToolCalls {
     /**
      * {@code skillroy_session_export}: the journal exported as a scenario (compile-checked by the export), written as
      * {@code <out>/<id>.yaml}, {@code <out>/plan/<id>.plan.json} and {@code <out>/bindings/<env>/<id>.bindings.json};
-     * the reviewer's report.
+     * the reviewer's report. No approver (decision D97): a client is often a model, so a model-found binding is always
+     * written {@code REQUIRED}, and an {@code approvedBy} sent anyway is ignored and said so in the report; a person
+     * approves with {@code skillroy resolve}, which reuses the recorded value without a model call (D82).
      */
     Reply export(Map<String, Object> args) throws ToolError {
         String scenarioId = Arguments.text(args, "scenarioId", true);
-        String approvedBy = Arguments.text(args, "approvedBy", false);
+        boolean approverIgnored = args.get("approvedBy") != null;
         ExportOptions options;
         try {
-            options = ExportOptions.of(scenarioId).withApprovedBy(approvedBy);
+            options = ExportOptions.of(scenarioId);
         } catch (IllegalArgumentException e) {
             throw new ToolError("skillroy_session_export: " + e.getMessage());
         }
@@ -759,6 +784,10 @@ final class ToolCalls {
         if (bindingsFile != null) {
             text.append("  ").append(bindingsFile).append('\n');
         }
+        if (approverIgnored) {
+            text.append("approvedBy is not taken over MCP: a model-found binding is written REQUIRED; a person"
+                    + " approves it with skillroy resolve.\n");
+        }
         server.log().info("exported session " + session().id() + " as " + scenarioId + " into " + out);
         return new Reply(Masking.cut(masking().text(text.toString())), List.of(), false);
     }
@@ -771,17 +800,21 @@ final class ToolCalls {
     }
 
     /**
-     * The arguments without {@code confirm}: at the top and in a nested {@code args} (the base verb {@code call}'s
-     * form), as the session strips a model's (design 3.4: a model's request is never the confirmation, and the MCP
-     * client speaks for a model as often as for a person).
+     * The arguments without {@code confirm} and {@code _meta}: at the top and in a nested {@code args} (the base verb
+     * {@code call}'s form, and a verb that forwards its arguments), as the session strips a model's (design 3.4: a
+     * model's request is never the confirmation, and the MCP client speaks for a model as often as for a person; a
+     * call's {@code _meta} is the executor's to build, and its {@code confirm} would ride in it).
      */
-    static Map<String, Object> withoutConfirm(Map<String, Object> args) {
+    static Map<String, Object> withoutConfirmOrMeta(Map<String, Object> args) {
         Map<String, Object> copy = new LinkedHashMap<>(args);
-        copy.remove("confirm");
-        if (copy.get("args") instanceof Map<?, ?> nested && nested.containsKey("confirm")) {
+        copy.remove(CONFIRM);
+        copy.remove(META);
+        if (copy.get("args") instanceof Map<?, ?> nested && (nested.containsKey(CONFIRM)
+                || nested.containsKey(META))) {
             Map<String, Object> inner = new LinkedHashMap<>();
             nested.forEach((k, v) -> inner.put(String.valueOf(k), v));
-            inner.remove("confirm");
+            inner.remove(CONFIRM);
+            inner.remove(META);
             copy.put("args", inner);
         }
         return copy;

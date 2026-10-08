@@ -42,10 +42,16 @@ import java.util.function.Supplier;
  * @param captureOnFailure whether to collect failure evidence (snapshot, capture, events, app state, dialogs)
  * @param bind how the run binds its slots (phase2-contracts.md 11.1); never null. The executor never reads system
  *     properties: only the JUnit glue's overloads without {@code RunOptions} do
+ * @param expectationsOnMaskedValues whether expectations ({@code expect} steps and {@code verify}) and stored-row
+ *     checks are evaluated on values as the run's secret mask leaves them, as an interactive session evaluates a
+ *     check (phase5-contracts.md 12.2): a value the mask changes holds a secret and satisfies no matcher, its masked
+ *     form is the reported actual, and the reason says so. For a plan a model or a client wrote (the MCP server's
+ *     {@code skillroy_scenario_run}, {@code author --run}), whose PASS or FAIL would otherwise answer questions about a
+ *     secret; false (the default) evaluates on the values as read, as for a scenario a person committed
  */
 public record RunOptions(Path outputDir, Duration stepTimeout, DegradedAs degradedAs, Clock clock,
                          Duration pollInterval, Sleeper sleeper, Supplier<Boolean> targetRestarted,
-                         boolean captureOnFailure, BindOptions bind) {
+                         boolean captureOnFailure, BindOptions bind, boolean expectationsOnMaskedValues) {
 
     /** How a DEGRADED run is reported (decision B14). */
     public enum DegradedAs {
@@ -86,72 +92,88 @@ public record RunOptions(Path outputDir, Duration stepTimeout, DegradedAs degrad
         sleeper = sleeper == null ? duration -> Thread.sleep(Math.max(1L, duration.toMillis())) : sleeper;
     }
 
+    /** Options that evaluate expectations on the values as read (the Phase 2 shape). */
+    public RunOptions(Path outputDir, Duration stepTimeout, DegradedAs degradedAs, Clock clock, Duration pollInterval,
+                      Sleeper sleeper, Supplier<Boolean> targetRestarted, boolean captureOnFailure, BindOptions bind) {
+        this(outputDir, stepTimeout, degradedAs, clock, pollInterval, sleeper, targetRestarted, captureOnFailure, bind,
+                false);
+    }
+
     /** Options with {@link BindOptions#defaults()} (the Phase 1 shape). */
     public RunOptions(Path outputDir, Duration stepTimeout, DegradedAs degradedAs, Clock clock, Duration pollInterval,
                       Sleeper sleeper, Supplier<Boolean> targetRestarted, boolean captureOnFailure) {
         this(outputDir, stepTimeout, degradedAs, clock, pollInterval, sleeper, targetRestarted, captureOnFailure,
-                BindOptions.defaults());
+                BindOptions.defaults(), false);
     }
 
     /**
      * No output directory, the plan's step timeout, DEGRADED as skipped, system clock, 100 ms polls, evidence on,
-     * {@link BindOptions#defaults()}.
+     * {@link BindOptions#defaults()}, expectations on the values as read.
      */
     public static RunOptions defaults() {
-        return new RunOptions(null, null, null, null, null, null, null, true, BindOptions.defaults());
+        return new RunOptions(null, null, null, null, null, null, null, true, BindOptions.defaults(), false);
     }
 
     /** A copy with the given bind options (never null). */
     public RunOptions withBind(BindOptions newBind) {
         return new RunOptions(outputDir, stepTimeout, degradedAs, clock, pollInterval, sleeper, targetRestarted,
-                captureOnFailure, newBind);
+                captureOnFailure, newBind, expectationsOnMaskedValues);
     }
 
     /** A copy with the given output directory (null writes nothing). */
     public RunOptions withOutputDir(Path dir) {
         return new RunOptions(dir, stepTimeout, degradedAs, clock, pollInterval, sleeper, targetRestarted,
-                captureOnFailure, bind);
+                captureOnFailure, bind, expectationsOnMaskedValues);
     }
 
     /** A copy with the given step timeout override (null keeps the plan's). */
     public RunOptions withStepTimeout(Duration timeout) {
         return new RunOptions(outputDir, timeout, degradedAs, clock, pollInterval, sleeper, targetRestarted,
-                captureOnFailure, bind);
+                captureOnFailure, bind, expectationsOnMaskedValues);
     }
 
     /** A copy with the given DEGRADED mapping. */
     public RunOptions withDegradedAs(DegradedAs mapping) {
         return new RunOptions(outputDir, stepTimeout, mapping, clock, pollInterval, sleeper, targetRestarted,
-                captureOnFailure, bind);
+                captureOnFailure, bind, expectationsOnMaskedValues);
     }
 
     /** A copy with the given clock. */
     public RunOptions withClock(Clock newClock) {
         return new RunOptions(outputDir, stepTimeout, degradedAs, newClock, pollInterval, sleeper, targetRestarted,
-                captureOnFailure, bind);
+                captureOnFailure, bind, expectationsOnMaskedValues);
     }
 
     /** A copy with the given poll interval. */
     public RunOptions withPollInterval(Duration interval) {
         return new RunOptions(outputDir, stepTimeout, degradedAs, clock, interval, sleeper, targetRestarted,
-                captureOnFailure, bind);
+                captureOnFailure, bind, expectationsOnMaskedValues);
     }
 
     /** A copy with the given sleeper. */
     public RunOptions withSleeper(Sleeper newSleeper) {
         return new RunOptions(outputDir, stepTimeout, degradedAs, clock, pollInterval, newSleeper, targetRestarted,
-                captureOnFailure, bind);
+                captureOnFailure, bind, expectationsOnMaskedValues);
     }
 
     /** A copy with the given restart probe. */
     public RunOptions withTargetRestarted(Supplier<Boolean> probe) {
         return new RunOptions(outputDir, stepTimeout, degradedAs, clock, pollInterval, sleeper, probe,
-                captureOnFailure, bind);
+                captureOnFailure, bind, expectationsOnMaskedValues);
     }
 
     /** A copy with evidence collection switched on or off. */
     public RunOptions withCaptureOnFailure(boolean on) {
         return new RunOptions(outputDir, stepTimeout, degradedAs, clock, pollInterval, sleeper, targetRestarted, on,
-                bind);
+                bind, expectationsOnMaskedValues);
+    }
+
+    /**
+     * A copy that evaluates expectations and stored-row checks on masked values (true) or on the values as read
+     * (false, the default); see {@link #expectationsOnMaskedValues()}.
+     */
+    public RunOptions withExpectationsOnMaskedValues(boolean on) {
+        return new RunOptions(outputDir, stepTimeout, degradedAs, clock, pollInterval, sleeper, targetRestarted,
+                captureOnFailure, bind, on);
     }
 }

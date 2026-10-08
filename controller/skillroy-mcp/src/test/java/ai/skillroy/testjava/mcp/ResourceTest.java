@@ -101,6 +101,42 @@ class ResourceTest {
         }
     }
 
+    /** The {@code primitive} enum of the base verb {@code call} in a scenario schema. */
+    private static List<?> callable(Map<String, Object> schema) {
+        Map<?, ?> defs = (Map<?, ?>) schema.get("$defs");
+        for (Object alternative : (List<?>) ((Map<?, ?>) defs.get("step")).get("oneOf")) {
+            Map<?, ?> properties = (Map<?, ?>) ((Map<?, ?>) alternative).get("properties");
+            if (properties.get("call") instanceof Map<?, ?> call) {
+                Map<?, ?> primitive = (Map<?, ?>) ((Map<?, ?>) call.get("properties")).get("primitive");
+                return (List<?>) primitive.get("enum");
+            }
+        }
+        throw new AssertionError("no call verb in the schema");
+    }
+
+    /**
+     * Decision D96: the scenario schema the server serves lets the base verb {@code call} name only what this server
+     * offers a scenario run: never a destructive primitive, the agent's own, {@code data.query} or
+     * {@code web.evaluate}.
+     */
+    @Test
+    void theScenarioSchemasCallNamesOnlyWhatThisServerOffers() throws Exception {
+        try (McpFixture fx = new McpFixture(dir.resolve("mutating")).startMutating()) {
+            List<?> callable = callable(Json.parseObject(read(fx, "skillroy://schema/scenario")));
+            assertTrue(callable.containsAll(List.of("desk.input", "desk.lend", "desk.state", "swing.click",
+                    "trace.mark")), callable.toString());
+            for (String never : List.of("desk.wipe", "agent.disable", "agent.info", "data.query", "web.evaluate",
+                    "web.waitFlag", "evt.query", "data.sources")) {
+                assertFalse(callable.contains(never), never + " in " + callable);
+            }
+        }
+        try (McpFixture fx = new McpFixture(dir.resolve("read-only")).startReadOnly()) {
+            List<?> callable = callable(Json.parseObject(read(fx, "skillroy://schema/scenario")));
+            assertTrue(callable.contains("desk.state"), callable.toString());
+            assertFalse(callable.contains("desk.input") || callable.contains("swing.click"), "read-only: the reads");
+        }
+    }
+
     @Test
     void aResourceReadThatFindsTheAgentLostEndsTheServer() throws Exception {
         try (McpFixture fx = new McpFixture(dir).startReadOnly()) {

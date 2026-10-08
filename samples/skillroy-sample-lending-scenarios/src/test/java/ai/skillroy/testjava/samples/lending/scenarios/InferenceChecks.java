@@ -17,6 +17,7 @@
 package ai.skillroy.testjava.samples.lending.scenarios;
 
 import ai.skillroy.testjava.controller.AgentClient;
+import ai.skillroy.testjava.data.Credentials;
 import ai.skillroy.testjava.inference.Gateways;
 import ai.skillroy.testjava.inference.budget.PriceTable;
 import ai.skillroy.testjava.inference.job.JobOptions;
@@ -45,6 +46,7 @@ import ai.skillroy.testjava.scenario.FailureKind;
 import ai.skillroy.testjava.scenario.Plan;
 import ai.skillroy.testjava.scenario.RunOptions;
 import ai.skillroy.testjava.scenario.Status;
+import ai.skillroy.testjava.scenario.StepJournal;
 import ai.skillroy.testjava.scenario.resolve.BindMode;
 import ai.skillroy.testjava.scenario.resolve.CostLedger;
 import ai.skillroy.testjava.scenario.resolve.InferenceSettings;
@@ -101,10 +103,10 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
  *   <li>{@link #theSessionScriptExportsTheCommittedScenarioWhichReplaysWithZeroModelCalls()} (seed A): item 4;</li>
  *   <li>{@link #triageLabelsTheFailedRunsThroughRecordingsAndLeavesTheirFilesAlone()} (seed A): item 6;</li>
  *   <li>{@link #aDryRunOfTheNightlyJobReportsEveryScenarioUnchanged()}: item 7;</li>
- *   <li>{@link #noSecretInAnythingTheseChecksWrote()}: item 8, over the outputs of the checks above;</li>
  *   <li>{@link #theMcpServerAsASubprocessListsTheLendingToolsAndServesTheDesk()} and
- *       {@link #theSessionCommandRunsAScriptExportsAndTheExportReplays()}: item 5 and the command form of item 4,
- *       disabled until the CLI's new commands are merged (the CLI wave).</li>
+ *       {@link #theSessionCommandRunsAScriptExportsAndTheExportReplays()} (seed A): item 5 and the command form of
+ *       item 4, through the assembled launcher;</li>
+ *   <li>{@link #noSecretInAnythingTheseChecksWrote()}: item 8, last, over the outputs of every check above.</li>
  * </ol>
  *
  * <p>Items 2 to 8 run once per seed, with the agent on the command line ({@link #full()}); the other load modes run
@@ -119,6 +121,15 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 abstract class InferenceChecks {
+
+    /**
+     * Seed A's desk assistant whom the desk signs on by code alone ({@code auto_sign_on}): item 5's verb with an effect
+     * enters this code, because a sign-on with a password needs a slot that declares a credential, which a slot
+     * resolved over MCP cannot (D94, the tools' half open).
+     */
+    static final String AUTO_SIGN_ON_ASSISTANT = "103";
+    /** How long a subprocess of the assembled launcher may take. */
+    static final Duration SUBPROCESS_WAIT = Duration.ofSeconds(120);
 
     LendingTarget target;
     /** The files and directories the checks before {@link #noSecretInAnythingTheseChecksWrote()} wrote. */
@@ -445,57 +456,14 @@ abstract class InferenceChecks {
         assertSignedOffAndQuiet(seq);
     }
 
-    // ------------------------------------------------------------------------------------------------ item 8
-
-    /**
-     * Item 8: no file the checks above wrote holds a staff password of this seed as a value or a token, nor the desk's
-     * PIN: the journals, {@code inference.jsonl} files, the exports, {@code triage.json}, {@code triage.md}, the
-     * triage's ledgers and recordings, the nightly job's reports, the runs' outputs.
-     */
-    @Test
-    @Order(7)
-    void noSecretInAnythingTheseChecksWrote() throws Exception {
-        assumeTrue(full(), "once per seed");
-        Set<String> secrets = new java.util.HashSet<>(SampleCredentials.staff(env()).values());
-        secrets.add(LendingTarget.PIN);
-        List<String> leaks = new ArrayList<>();
-        Set<String> kinds = new java.util.TreeSet<>();
-        for (Path output : outputs) {
-            if (!Files.exists(output)) {
-                continue;
-            }
-            try (Stream<Path> walk = Files.walk(output)) {
-                for (Path file : walk.filter(Files::isRegularFile).toList()) {
-                    String name = file.getFileName().toString();
-                    if (name.endsWith(".png") || name.endsWith(".zip")) {
-                        continue;
-                    }
-                    kinds.add(name.endsWith(".bindings.json") ? "bindings file" : name.endsWith(".plan.json") ? "plan"
-                            : name.endsWith(".yaml") ? "yaml" : name.matches("[0-9a-f]{64}\\.json") ? "recording"
-                            : name);
-                    for (String hit : ResolutionChecks.leaks(file, secrets)) {
-                        leaks.add(file + ": " + hit);
-                    }
-                }
-            }
-        }
-        assertEquals(List.of(), leaks, "a secret was written");
-        List<String> expected = new ArrayList<>(List.of("bindings file", "cost-ledger.jsonl", "run.jsonl",
-                "re-resolve-report.md"));
-        if (env() == Env.SEED_A) {
-            expected.addAll(List.of("journal.jsonl", "inference.jsonl", "yaml", "plan", "triage.json", "triage.md",
-                    "recording"));
-        }
-        assertTrue(kinds.containsAll(expected), "every kind of output was looked at: " + kinds);
-    }
-
-    // ------------------------------------------------------------------------------------------------ the CLI wave
+    // ------------------------------------------------------------------------------------------------ items 5 and 4
 
     /**
      * Item 5: {@code skillroy mcp} as a subprocess of the assembled launcher against this desk: read-only, it lists the
      * workflow reads and the lending reads and no verb; with {@code --mutating} the verbs; a snapshot and a fact are
-     * read; a verb runs through the session entry; a resource is read. Enabled once the CLI's {@code mcp} command was
-     * merged.
+     * read; a resource is read; and verbs with an effect run through the session entry: entering the code of
+     * {@link #AUTO_SIGN_ON_ASSISTANT} signs the assistant on (the desk IDLE), {@code signOff} signs them off (the desk
+     * SIGNED_OFF), each result PASS, both steps in the server's journal under its {@code --out}.
      */
     @Test
     @Order(8)
@@ -504,10 +472,9 @@ abstract class InferenceChecks {
         Path credentials = SampleCredentials.write(runDir("mcp-secrets"), env(), null);
         List<String> connection = List.of("--pid", String.valueOf(target.pid()), "--discovery-dir",
                 target.discoveryDir.toString(), "--pack", Path.of(System.getProperty("skillroy.it.packJar"))
-                        .toString(), "--credentials", credentials.toString(), "--env", env().id, "--out",
-                runDir("mcp").toString());
+                        .toString(), "--credentials", credentials.toString(), "--env", env().id);
         Path cli = Path.of(System.getProperty("skillroy.it.cliDist", "missing")).resolve("bin").resolve("skillroy");
-        try (McpSyncClient readOnly = mcp(cli, connection, false)) {
+        try (McpSyncClient readOnly = mcp(cli, connection, runDir("mcp"), false)) {
             List<String> names = readOnly.listTools().tools().stream().map(McpSchema.Tool::name).toList();
             assertTrue(names.containsAll(List.of("skillroy_snapshot", "skillroy_facts", "lending_access_check")),
                     String.valueOf(names));
@@ -522,21 +489,69 @@ abstract class InferenceChecks {
                     "skillroy://env/profile"));
             assertTrue(((McpSchema.TextResourceContents) profile.contents().get(0)).text().contains("lending"));
         }
-        try (McpSyncClient mutating = mcp(cli, connection, true)) {
+        assertSignedOffAndQuiet(-1);
+        Path out = runDir("mcp-mutating");
+        try (McpSyncClient mutating = mcp(cli, connection, out, true)) {
             List<String> names = mutating.listTools().tools().stream().map(McpSchema.Tool::name).toList();
-            assertTrue(names.containsAll(List.of("lending_sign_on", "lending_scan", "lending_deposit")),
-                    String.valueOf(names));
-            McpSchema.CallToolResult key = mutating.callTool(new McpSchema.CallToolRequest("lending_sign_off",
+            assertTrue(names.containsAll(List.of("lending_sign_on", "lending_scan", "lending_deposit", "lending_enter",
+                    "lending_sign_off")), String.valueOf(names));
+            McpSchema.CallToolResult on = mutating.callTool(new McpSchema.CallToolRequest("lending_enter",
+                    Map.of("value", AUTO_SIGN_ON_ASSISTANT)));
+            assertStep(on, "enter");
+            Map<String, Object> state = LoadModeChecks.value(client().call("lending.state", Map.of(),
+                    ResolutionChecks.CALL));
+            assertEquals("IDLE", state.get("name"), "signed on: " + state);
+            assertEquals(AUTO_SIGN_ON_ASSISTANT, ((Map<?, ?>) state.get("staff")).get("code"), String.valueOf(state));
+            McpSchema.CallToolResult off = mutating.callTool(new McpSchema.CallToolRequest("lending_sign_off",
                     Map.of()));
-            assertNotNull(key, "a verb through the session entry");
+            assertStep(off, "signOff");
+            assertSignedOffAndQuiet(-1);
+            // Read while the server runs: each record is flushed when its step ends, and a server that is being
+            // stopped may still be writing its session's last record.
+            assertJournalSignedOnAndOff(sessionJournal(out));
         }
         Runs.PACK.recover(client());
         assertSignedOffAndQuiet(-1);
     }
 
-    private static McpSyncClient mcp(Path cli, List<String> connection, boolean mutating) {
+    /** A verb's tool result: not an error, and the step it reports passed. */
+    private static void assertStep(McpSchema.CallToolResult result, String verb) {
+        assertFalse(Boolean.TRUE.equals(result.isError()), verb + ": " + text(result));
+        Map<String, Object> step = Json.parseObject(text(result));
+        assertEquals(verb, step.get("verb"), text(result));
+        assertEquals("PASS", step.get("status"), text(result));
+    }
+
+    /** The journal of the one session a server wrote below its {@code --out}: {@code runs/<session id>/}. */
+    static Path sessionJournal(Path out) throws IOException {
+        try (Stream<Path> sessions = Files.list(out.resolve("runs"))) {
+            List<Path> dirs = sessions.filter(Files::isDirectory).toList();
+            assertEquals(1, dirs.size(), "one session: " + dirs);
+            return dirs.get(0).resolve("journal.jsonl");
+        }
+    }
+
+    /**
+     * Item 5's verbs as a journal records them: two steps through the session entry, {@code enter} with the
+     * assistant's code and {@code signOff}, each PASS and each sending one {@code lending.input}.
+     */
+    static void assertJournalSignedOnAndOff(Path journal) throws IOException {
+        List<StepJournal.StepEntry> steps = StepJournal.read(journal, Runs.PACK).entries().stream()
+                .filter(e -> e instanceof StepJournal.StepEntry).map(e -> (StepJournal.StepEntry) e).toList();
+        assertEquals(List.of("enter", "signOff"), steps.stream().map(StepJournal.StepEntry::verb).toList(),
+                journal.toString());
+        assertEquals(Map.of("value", AUTO_SIGN_ON_ASSISTANT), steps.get(0).args());
+        for (StepJournal.StepEntry step : steps) {
+            assertEquals(Status.PASS, step.status(), step.verb() + ": " + step.outcome());
+            assertEquals(List.of("lending.input"), step.calls().stream().map(c -> c.get("primitive")).toList(),
+                    step.verb() + ": " + step.calls());
+        }
+    }
+
+    private static McpSyncClient mcp(Path cli, List<String> connection, Path out, boolean mutating) {
         List<String> args = new ArrayList<>(List.of("mcp"));
         args.addAll(connection);
+        args.addAll(List.of("--out", out.toString()));
         if (mutating) {
             args.add("--mutating");
         }
@@ -556,7 +571,8 @@ abstract class InferenceChecks {
      * The command form of item 4: {@code skillroy session --script} against this desk, the person's commands only
      * ({@code --inference none}: the recorded session answers on the headless desk only, see the class comment): it
      * resolves, signs on, lends and settles through {@code do}, checks through facts and exports; the exported scenario
-     * compiles and replays with {@code model calls: 0}. Enabled once the CLI's {@code session} command was merged.
+     * compiles and replays with {@code model calls: 0}. A launcher subprocess that does not end within
+     * {@link #SUBPROCESS_WAIT} is destroyed before the check fails ({@link Processes#await}).
      */
     @Test
     @Order(9)
@@ -583,7 +599,7 @@ abstract class InferenceChecks {
                 System.getProperty("skillroy.it.packJar"), "--credentials", credentials.toString(), "--env", env().id,
                 "--inference", "none", "--script", script.toString(), "--out", dir.resolve("out").toString())
                 .redirectErrorStream(true).redirectOutput(dir.resolve("session.out").toFile()).start();
-        assertTrue(session.waitFor(120, java.util.concurrent.TimeUnit.SECONDS), "the session ended");
+        assertTrue(Processes.await(session, SUBPROCESS_WAIT), "the session ended");
         assertEquals(0, session.exitValue(), Files.readString(dir.resolve("session.out")));
         Path yaml = dir.resolve("exported").resolve(SessionScript.SCENARIO_ID + ".yaml");
         assertTrue(Files.isRegularFile(yaml));
@@ -592,9 +608,60 @@ abstract class InferenceChecks {
                 "--discovery-dir", target.discoveryDir.toString(), "--pack", System.getProperty("skillroy.it.packJar"),
                 "--credentials", credentials.toString(), "--env", env().id).redirectErrorStream(true)
                 .redirectOutput(dir.resolve("replay.out").toFile()).start();
-        assertTrue(replay.waitFor(120, java.util.concurrent.TimeUnit.SECONDS));
+        assertTrue(Processes.await(replay, SUBPROCESS_WAIT), "the replay ended");
         assertEquals(0, replay.exitValue(), Files.readString(dir.resolve("replay.out")));
         assertTrue(Files.readString(dir.resolve("replay.out")).contains("model calls: 0"));
         assertSignedOffAndQuiet(-1);
+    }
+
+    // ------------------------------------------------------------------------------------------------ item 8
+
+    /**
+     * Item 8, last, over the outputs of every check above: no file they wrote holds a staff password of this seed or
+     * the desk's PIN as a value ({@link SecretScan}: strings of JSON, the JSON in labelled blocks and in escaped JSON
+     * text, the tokens of the rest): the journals of the sessions and of the MCP server, {@code inference.jsonl} files,
+     * the exports, {@code triage.json}, {@code triage.md}, the triage's ledgers and recordings, the nightly job's
+     * reports, the runs' outputs, the launcher's output. The credentials files the checks wrote themselves (for the
+     * launcher, {@value Credentials#FILE_NAME}) are left out by name: they hold the passwords by design.
+     */
+    @Test
+    @Order(10)
+    void noSecretInAnythingTheseChecksWrote() throws Exception {
+        assumeTrue(full(), "once per seed");
+        Set<String> secrets = new java.util.HashSet<>(SampleCredentials.staff(env()).values());
+        secrets.add(LendingTarget.PIN);
+        List<String> leaks = new ArrayList<>();
+        Set<String> kinds = new java.util.TreeSet<>();
+        Set<String> scanned = new java.util.TreeSet<>();
+        for (Path output : outputs) {
+            if (!Files.exists(output)) {
+                continue;
+            }
+            try (Stream<Path> walk = Files.walk(output)) {
+                for (Path file : walk.filter(Files::isRegularFile).toList()) {
+                    String name = file.getFileName().toString();
+                    if (name.endsWith(".png") || name.endsWith(".zip") || name.equals(Credentials.FILE_NAME)) {
+                        continue;
+                    }
+                    kinds.add(name.endsWith(".bindings.json") ? "bindings file" : name.endsWith(".plan.json") ? "plan"
+                            : name.endsWith(".yaml") ? "yaml" : name.matches("[0-9a-f]{64}\\.json") ? "recording"
+                            : name);
+                    scanned.add(output.getFileName().toString());
+                    for (String hit : SecretScan.leaks(file, secrets)) {
+                        leaks.add(file + ": " + hit);
+                    }
+                }
+            }
+        }
+        assertEquals(List.of(), leaks, "a secret was written");
+        List<String> expected = new ArrayList<>(List.of("bindings file", "cost-ledger.jsonl", "run.jsonl",
+                "re-resolve-report.md"));
+        if (env() == Env.SEED_A) {
+            expected.addAll(List.of("journal.jsonl", "inference.jsonl", "yaml", "plan", "triage.json", "triage.md",
+                    "recording", "session.out", "replay.out"));
+            assertTrue(scanned.containsAll(List.of("mcp-mutating", "cli-session")), "the outputs of items 5 and 4's"
+                    + " command form were looked at: " + scanned);
+        }
+        assertTrue(kinds.containsAll(expected), "every kind of output was looked at: " + kinds);
     }
 }

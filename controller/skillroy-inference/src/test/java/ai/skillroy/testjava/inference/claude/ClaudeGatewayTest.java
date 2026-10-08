@@ -372,17 +372,38 @@ class ClaudeGatewayTest {
         assertEquals(3, fake.seen().size());
     }
 
+    /**
+     * A {@code retry-after} that is not a finite number of at least 0 is no wait at all (the gateway's back-off
+     * applies), and one too long for the deadline (1e19 overflowed it before) is not waited for.
+     */
+    @ParameterizedTest(name = "{0}: {1} -> {2} calls")
+    @CsvSource({"retry-after, Infinity, 3", "retry-after, NaN, 3", "retry-after, -5, 3", "retry-after-ms, -5, 3",
+            "retry-after-ms, Infinity, 3", "retry-after-ms, 1e19, 1", "retry-after, 1e19, 1",
+            "retry-after-ms, 10001, 1"})
+    void aRetryAfterThatIsNotAFiniteFittingWaitIsNeverSlept(String header, String value, int calls) {
+        fake.otherwise(Answer.error(429, "rate_limit_error", "slow down", Map.of(header, value)));
+        try (ClaudeGateway g = gateway(true, false, 10_000, null)) {
+            assertEquals(Kind.RATE_LIMIT, assertThrows(InferenceException.class,
+                    () -> g.complete(request().build())).kind());
+        }
+        assertEquals(calls, fake.seen().size());
+        assertEquals(calls == 3 ? List.of(500L, 1000L) : List.of(), waits,
+                "the back-off for a value that is no wait, nothing for one that does not fit the deadline");
+        assertTrue(waits.stream().allMatch(w -> w >= 0 && w < 10_000), "never a negative or an endless sleep");
+    }
+
     @Test
     void theDeadlineBoundsTheCallWhateverTheProviderDoes() {
         fake.otherwise(new Answer(200, Map.of(), FakeAnthropic.message("end_turn", "[]", "{}"), 3000));
-        long started = System.nanoTime();
         try (ClaudeGateway g = gateway()) {
+            // Only the call is timed: building and closing the client is not the deadline's business.
+            long started = System.nanoTime();
             InferenceException e = assertThrows(InferenceException.class,
                     () -> g.complete(request().build(), Duration.ofMillis(400)));
+            long ms = (System.nanoTime() - started) / 1_000_000;
             assertEquals(Kind.TIMEOUT, e.kind());
+            assertTrue(ms < 2500, "returned after " + ms + " ms");
         }
-        long ms = (System.nanoTime() - started) / 1_000_000;
-        assertTrue(ms < 2500, "returned after " + ms + " ms");
         try (ClaudeGateway g = gateway(true, false, 400, null)) {
             assertEquals(Kind.TIMEOUT, assertThrows(InferenceException.class,
                     () -> g.complete(request().build())).kind(), "the settings' callMs alone");
@@ -554,5 +575,61 @@ class ClaudeGatewayTest {
         }
         assertFalse(captured.toString(StandardCharsets.UTF_8).contains(KEY), "nothing logged with the key");
         assertEquals("", captured.toString(StandardCharsets.UTF_8), "the SDK's logging is off");
+    }
+
+    /**
+     * A key or a workspace id a header cannot carry (a no-break space, a zero-width space, a control character: none
+     * of them is stripped) is refused when the gateway opens, with {@code AUTH} naming the variable, never the value;
+     * nothing is sent (the HTTP client's own refusal would have quoted the key).
+     */
+    @ParameterizedTest(name = "suffix U+{0}")
+    @CsvSource({"00a0", "200b", "0007"})
+    void aKeyOrWorkspaceIdAHeaderCannotCarryIsRefusedNamingTheVariable(String hex) {
+        String bad = String.valueOf((char) Integer.parseInt(hex, 16));
+        Map<String, String> badKey = Map.of(ClaudeGateway.KEY_VARIABLE, KEY + bad, ClaudeGateway.BASE_URL_VARIABLE,
+                fake.url());
+        InferenceException key = assertThrows(InferenceException.class,
+                () -> ClaudeGateway.open(settings(null), badKey::get));
+        assertEquals(Kind.AUTH, key.kind());
+        assertTrue(key.getMessage().contains(ClaudeGateway.KEY_VARIABLE), key.getMessage());
+        assertFalse(key.getMessage().contains(KEY), key.getMessage());
+        Map<String, String> badWorkspace = Map.of(ClaudeGateway.KEY_VARIABLE, KEY, ClaudeGateway.BASE_URL_VARIABLE,
+                fake.url(), ClaudeGateway.WORKSPACE_VARIABLE, WORKSPACE + bad);
+        InferenceException env = assertThrows(InferenceException.class,
+                () -> ClaudeGateway.open(settings(null), badWorkspace::get));
+        assertEquals(Kind.AUTH, env.kind());
+        assertTrue(env.getMessage().contains(ClaudeGateway.WORKSPACE_VARIABLE), env.getMessage());
+        assertFalse(env.getMessage().contains(WORKSPACE), env.getMessage());
+        Map<String, String> goodEnv = Map.of(ClaudeGateway.KEY_VARIABLE, KEY, ClaudeGateway.BASE_URL_VARIABLE,
+                fake.url());
+        InferenceException settings = assertThrows(InferenceException.class,
+                () -> ClaudeGateway.open(settings(WORKSPACE + bad), goodEnv::get));
+        assertEquals(Kind.AUTH, settings.kind());
+        assertTrue(settings.getMessage().contains("workspaceId"), settings.getMessage());
+        assertFalse(settings.getMessage().contains(WORKSPACE), settings.getMessage());
+        assertTrue(fake.seen().isEmpty(), "nothing was sent");
+    }
+
+    /**
+     * Any other exception of the SDK or its HTTP client (here the client's own refusal of a header value, which
+     * quotes the key) leaves the gateway as {@code PROVIDER} with the known secrets scrubbed and no cause.
+     */
+    @Test
+    void anyOtherRuntimeExceptionOfTheClientIsProviderScrubbedAndWithoutACause() {
+        String bad = KEY + " ";
+        Map<ModelClass, String> models = new EnumMap<>(ModelClass.class);
+        models.put(ModelClass.SONNET_CLASS, "claude-sonnet-5-5");
+        try (ClaudeGateway g = new ClaudeGateway(ClaudeGateway.client(bad, fake.url(), null, 5000),
+                new ClaudeGateway.Config(models, false, false, 5000, PriceTable.builtIn()), List.of(bad),
+                Clock.systemUTC(), ms -> waits.add(ms))) {
+            InferenceException e = assertThrows(InferenceException.class, () -> g.complete(request().build()));
+            assertEquals(Kind.PROVIDER, e.kind());
+            assertNull(e.getCause(), "no cause: nothing of the client's exception travels on");
+            assertFalse(e.getMessage().contains(KEY), e.getMessage());
+            assertTrue(e.getMessage().contains("<redacted>"), "the client's message, scrubbed: " + e.getMessage());
+            assertFalse(e.retryable());
+        }
+        assertTrue(fake.seen().isEmpty(), "the request never left");
+        assertTrue(waits.isEmpty(), "not retried");
     }
 }

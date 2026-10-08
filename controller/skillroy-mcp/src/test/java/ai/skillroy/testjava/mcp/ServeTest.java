@@ -51,10 +51,11 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * phase5-contracts.md 9.2, 9.6 and 13.4: {@code serve} runs until the client closes the stream (exit 0) or the agent
- * is lost (exit 3, after the call in flight was answered with the loss as a tool error); a call in flight when the
- * client closes is still answered; start-up errors are exceptions, never a half-started server. Spoken in raw JSON-RPC
- * lines, as a client on stdio writes them.
+ * phase5-contracts.md 9.2, 9.3, 9.6 and 13.4: {@code serve} runs until the client closes the stream (exit 0), the
+ * agent is lost (exit 3, after the call in flight was answered with the loss as a tool error) or the client sends a
+ * line longer than the stdin bridge takes (exit 1); a call in flight when the client closes is still answered;
+ * start-up errors are exceptions, never a half-started server. Spoken in raw JSON-RPC lines, as a client on stdio
+ * writes them.
  */
 class ServeTest {
 
@@ -178,6 +179,30 @@ class ServeTest {
         Map<String, Object> answer = client.answer(2);
         assertTrue(toolText(answer).contains("\"PASS\""), toolText(answer));
         assertEquals(SkillroyMcpServer.EXIT_CLIENT_CLOSED, served.get(20, TimeUnit.SECONDS));
+        client.fromServer.closeWriter();
+    }
+
+    /**
+     * phase5-contracts.md 9.3: a line longer than the stdin bridge takes is a protocol error: the calls read before it
+     * are answered, and the server ends with exit code 1 without the client closing its stream.
+     */
+    @Test
+    void aLineLongerThanTheBridgeTakesEndsTheServerWithExitCode1() throws Exception {
+        McpFixture fx = new McpFixture(dir);
+        LineClient client = new LineClient();
+        Future<Integer> served = pool.submit(() -> SkillroyMcpServer.serve(fx.options().build(),
+                client.toServer.in(), client.fromServer.out(), fx.log));
+        client.initialize();
+        client.callTool(2, "desk_state", "{}");
+        assertTrue(toolText(client.answer(2)).contains("\"IDLE\""));
+        byte[] chunk = "x".repeat(1 << 20).getBytes(StandardCharsets.UTF_8);
+        for (int i = 0; i <= StdioPipe.MAX_LINE_BYTES / chunk.length; i++) {
+            client.toServer.out().write(chunk);
+        }
+        assertEquals(SkillroyMcpServer.EXIT_PROTOCOL_ERROR, served.get(20, TimeUnit.SECONDS));
+        assertTrue(fx.logText().contains("the client broke the protocol: a line of more than "
+                + StdioPipe.MAX_LINE_BYTES + " bytes"), fx.logText());
+        client.toServer.closeWriter();
         client.fromServer.closeWriter();
     }
 

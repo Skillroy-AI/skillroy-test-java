@@ -277,7 +277,7 @@ final class FakeAgentConnection implements AgentConnection {
         if (handler == null) {
             throw new AgentRpcException(method, new RpcError(ErrorCodes.METHOD_NOT_FOUND, "no " + method, null));
         }
-        if (destructive.contains(method) && (options == null || !options.confirm())) {
+        if (destructive.contains(method) && !confirmed(copy, options)) {
             throw new AgentRpcException(method, new RpcError(ErrorCodes.CONFIRM_REQUIRED, method
                     + " is destructive and needs _meta.confirm=true", null));
         }
@@ -290,6 +290,18 @@ final class FakeAgentConnection implements AgentConnection {
             }
         }
         return new RpcResult(value, events, before, seq, 1, "fake-worker");
+    }
+
+    /**
+     * Whether a call reaches the agent confirmed: by its options, or by a {@code confirm: true} in a {@code _meta} map
+     * among its params, as a connection that merges the params' {@code _meta} into the request's would deliver it
+     * (the HTTP client did until the Phase 5 fix wave). So a test sees any {@code _meta} that reaches a connection.
+     */
+    private static boolean confirmed(Map<String, Object> params, CallOptions options) {
+        if (options != null && options.confirm()) {
+            return true;
+        }
+        return params.get("_meta") instanceof Map<?, ?> meta && Boolean.TRUE.equals(meta.get("confirm"));
     }
 
     @Override
@@ -372,7 +384,8 @@ final class FakeAgentConnection implements AgentConnection {
 
     /**
      * Makes {@code method} destructive: described as such, and refused with CONFIRM_REQUIRED unless the call is
-     * confirmed ({@code _meta.confirm}), as the agent's dispatcher refuses it.
+     * confirmed ({@code _meta.confirm}, from the options or from a {@code _meta} among the params), as the agent's
+     * dispatcher refuses it.
      */
     synchronized FakeAgentConnection destructive(String method) {
         destructive.add(method);

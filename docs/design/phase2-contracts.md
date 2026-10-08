@@ -737,6 +737,7 @@ public record NumberRange(BigDecimal gt, BigDecimal gte, BigDecimal lt, BigDecim
 | an `enum` | its `name()` |
 | `LocalDate`, `Instant` | ISO-8601 text (`2026-10-02`, `2026-10-02T09:30:00Z`) |
 | `List<E>`, `Map<String,V>` | list (order kept); map, written with sorted keys (values may be null) |
+| `Double`/`double`, `Float`/`float` (Phase 5, built 2026-10-08 on provisional B23: `Double` and `Float` as JSON numbers; P5 §5.4) | a JSON number, decoded from any finite number (a whole one included; text is not a number), a `float` only when the number fits one; encoded as a `Double`. What a model's structured answer states as a number, such as `SqlProposal.confidence` |
 | `Optional`, arrays, any other class | not supported: an error when the pack's catalogue is validated (compile time) |
 
 A slot value is the encoded form of `T`: any JSON-like value, including a scalar (`$systemMax`) or a map
@@ -1567,8 +1568,10 @@ Rules:
   `provenance.notes`.
 - (Phase 5, built 2026-10-08 on provisional B23; P5 §5.4, §7.3) For a tier (b) slot `llm` is filled, from the ledger
   entries of the slot's model call (model, request id, tokens, cost), where tier (a) slots keep `null`; and its
-  `provenance.notes` are written, because they carry the model's rationale and the clauses the guard injected. The rest
-  of the list above stays out.
+  `provenance.rationale` is written, the model's rationale, as the provenance's last key and only when there is one, so
+  that a tier (a) file does not change (D93 of P5 §16; the refused proposals are `provenance.rejected` entries).
+  `provenance.notes` stay out of the file like the rest of the list above. (Corrected in the Phase 5 fix wave of
+  2026-10-08: this mark first said the notes were written.)
 - `approval.by` is a free-text label, never a person's name by default (Q6): `--approved-by <text>`, else the
   `Approver`'s `Decision.by`, else the mode name. As built (2026-10-02): `live --write-bindings` writes
   `--approved-by`, else `live`; the CLI's approvers (`--yes` and the terminal) and `Approver.APPROVE_ALL` give no
@@ -1779,8 +1782,11 @@ Mechanism:
 
 (Phase 5, built 2026-10-08 on provisional B23; P5 §7.4, §6.2) What is never written also includes a prompt that was not
 masked, a model key, and a response to a request that named a secret. `PromptMask` applies the run's `SecretMask`, the
-key rule and the column rule to every part before a request is built, and `RecordingGateway` applies it once more on the
-way to disk; the model key is read from the environment only, never from a file, a property or an option;
+key rule and the column rule to every part before a request is built, and `RecordingGateway` applies the mask of the
+gateway's opener once more on the way to disk (amended by the Phase 5 review fix wave, 2026-10-08, P5 §4.2: the second
+pass applies the key rule and the bounds, and the opener's credential values where its opener passed them; the by-value
+and column rules are the request builder's); the model key is read from the environment only, never from a file, a
+property or an option;
 `inference.jsonl` holds metadata and masked structured answers, and masked prompt text only under `--log-prompts`.
 
 On the agent side a secret travels as a parameter of the primitive call that needs it (a sign-on input), under a
@@ -1849,7 +1855,9 @@ integration).**
   `IllegalArgumentException`); `AgentClient` writes the key only when the list is not empty, and then its list
   replaces one given in the params. The executor names a top-level argument when its template references a joined
   credential field (§8.4), or the whole value of a slot that has joined fields; an A25 fixture secret of a version 1
-  plan is not announced to the agent (the controller still masks it in everything it writes).
+  plan is not announced to the agent (the controller still masks it in everything it writes). As built (2026-10-08,
+  the Phase 5 fix wave; P5 §12.2): `AgentClient` drops a `_meta` the params carry, so nothing given in the params is
+  merged into the request's `_meta` any more (such a `_meta` could confirm a destructive call).
 - *What it proves.* With A34 the sample's end-to-end secret check (§14.2 item 10) extends to the agent's own log:
   no line of `agent.log` holds a password as a value. Without A34 that check could only be made by never making
   the core log a param, which no contract line guaranteed. (As built, that end-to-end proof is made by the Phase 1

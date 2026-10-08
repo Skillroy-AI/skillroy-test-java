@@ -3,7 +3,7 @@
   "scenarioId": "session-basic-loan",
   "pack": "lending",
   "packVersion": "0.4.0",
-  "sourceHash": "sha256:594ab3abb63d66b4e3b04974550afb76953a297a226da5ae5ae40d31f41f12b7",
+  "sourceHash": "sha256:7d6238b0870a8ccc91a8a4d20b7255c5972bf2b22e3fa3ee6ba3be547871489e",
   "inference": "none",
   "requires": [
     "lending.input",

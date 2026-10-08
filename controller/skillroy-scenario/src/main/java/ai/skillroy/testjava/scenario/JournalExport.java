@@ -55,7 +55,8 @@ import java.util.regex.Pattern;
  *       back as the reference; an argument the journal masked is refused, naming the step. A raw call of a primitive
  *       that changes nothing (the {@code reads} of the journal's {@code session-start}) is an observation, not a step:
  *       it is left out and listed in the report unless {@link ExportOptions#includeReads()} (or it captures a
- *       slot).</li>
+ *       slot). Arguments (a step's, a slot's, an oracle's) and a check's matcher are written with their keys sorted
+ *       at every depth, so that the text does not depend on the order a person or a model gave them in.</li>
  *   <li><b>Expectations.</b> The checks that held after a step become an {@code expect} step after it (those that did
  *       not hold are listed in the report); an observed value becomes an expectation of that value with the comment
  *       {@code # observed in session <id> at step <n>, not derived} on its line and a line in the report's
@@ -63,7 +64,8 @@ import java.util.regex.Pattern;
  *   <li><b>Resolution.</b> Every {@code resolve} becomes a {@code resolve:} slot (kind, arguments as given, strategy
  *       tokens, verifier ids, credential) in the order resolved, every {@code oracle} an {@code oracle:} entry; the
  *       bindings file holds their journaled values as {@code approve} would write them: a tier (a) slot
- *       {@code NOT_REQUIRED}, a tier (b) slot {@code REQUIRED}, or {@code APPROVED} by {@code approvedBy} when given.
+ *       {@code NOT_REQUIRED}, a tier (b) slot {@code REQUIRED} by nobody, or {@code APPROVED} by {@code approvedBy}
+ *       when given.
  *       A tier (b) slot whose tokens do not name {@code llm-sql} gets the pack's tokens for the kind and
  *       {@code llm-sql}, so that the plan's {@code inference} is {@code bind}.</li>
  *   <li><b>Head.</b> {@code scenario}, {@code pack}, {@code requires} (the capability ids the exported calls'
@@ -202,7 +204,7 @@ final class JournalExport {
                                 + " (after step " + stepNumber + ")");
                         continue;
                     }
-                    expect(new Expect(c.path(), c.matcher(), null, "s" + stepNumber));
+                    expect(new Expect(c.path(), Values.sortKeys(c.matcher()), null, "s" + stepNumber));
                 }
                 case StepJournal.ObserveEntry o -> {
                     if (cut) {
@@ -272,7 +274,7 @@ final class JournalExport {
                 throw new ExportException(s.stepId(), "an argument of " + s.verb() + " was masked in the journal (it"
                         + " held a secret); give it as a reference to the slot's credential field instead");
             }
-            return new YamlStep(s.verb(), s.args(), s.stepId(), null, List.of());
+            return new YamlStep(s.verb(), Values.sortKeys(s.args()), s.stepId(), null, List.of());
         }
         if (s.calls().size() != 1) {
             throw new ExportException(s.stepId(), "a raw call step has " + s.calls().size() + " calls");
@@ -299,7 +301,7 @@ final class JournalExport {
         Map<String, Object> yaml = new LinkedHashMap<>();
         yaml.put("primitive", primitive);
         if (!args.isEmpty()) {
-            yaml.put("args", args);
+            yaml.put("args", Values.sortKeys(args));
         }
         yaml.put("sync", String.valueOf(call.get("sync")));
         Object capture = call.get("capture");
@@ -523,7 +525,7 @@ final class JournalExport {
                 Map<String, Object> entry = new LinkedHashMap<>();
                 entry.put("fn", o.fn());
                 if (o.args() != null) {
-                    entry.put("args", o.args());
+                    entry.put("args", Values.sortKeys(o.args()));
                 }
                 yaml.entry(2, o.name(), entry, null);
             }
@@ -576,7 +578,7 @@ final class JournalExport {
         Map<String, Object> slot = new LinkedHashMap<>();
         slot.put("query", r.kind());
         if (!r.args().isEmpty()) {
-            slot.put("args", r.args());
+            slot.put("args", Values.sortKeys(r.args()));
         }
         List<String> tokens = new ArrayList<>(r.strategy());
         if (tier(r) == Tier.B && !tokens.contains(Strategy.LLM_SQL.token())) {
@@ -705,9 +707,10 @@ final class JournalExport {
     }
 
     /**
-     * {@code approve}'s approval of an exported slot: tier (a) {@code NOT_REQUIRED}; tier (b) {@code APPROVED} by the
-     * exporter when one is named, else {@code REQUIRED} (a later {@code replay} refuses it until a person approves).
-     * Without an exporter the label is the mode's, {@code live}, as the binder labels what {@code live} writes.
+     * {@code approve}'s approval of an exported slot: tier (a) {@code NOT_REQUIRED}, by the exporter's label or else
+     * the mode's ({@code live}), as the binder labels what {@code live} writes; tier (b) {@code APPROVED} by the
+     * exporter when one is named, else {@code REQUIRED} by nobody ({@code by: null}, as the binder writes a value a
+     * model found in {@code live}; a later {@code replay} refuses it until a person approves).
      */
     private Approval approval(Resolution resolution) throws ExportException {
         if (resolution.strategy().tier() != Tier.B) {
@@ -717,7 +720,7 @@ final class JournalExport {
         if (options.approvedBy() != null) {
             return new Approval(Approval.State.APPROVED, options.approvedBy());
         }
-        return new Approval(required(), BindMode.LIVE.label());
+        return new Approval(required(), null);
     }
 
     /** {@code Approval.State.REQUIRED} (phase5-contracts.md 7.1): what a tier (b) slot gets until a person approves. */

@@ -50,6 +50,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -59,8 +60,9 @@ import java.util.concurrent.atomic.AtomicInteger;
  * {@code Item} resolved through
  * {@code data.query} and verified through {@code desk.item}; the oracle {@code Twice}; an SQL allow-list over the
  * source {@code desk}), and the fake application behind the fake agent: its catalogue (reads, mutating primitives, a
- * destructive one, the agent's own), its state, its events, a capture, an oversized answer, and a credential value
- * that the application leaks into its answers so that the tests can show that it never leaves the server.
+ * destructive one, the agent's own), its state, its events, a capture, an oversized answer, its database's table
+ * {@code item} (whose columns the allow-list check reads, {@link #itemColumns}), and a credential value that the
+ * application leaks into its answers so that the tests can show that it never leaves the server.
  */
 final class Desk {
 
@@ -69,11 +71,23 @@ final class Desk {
 
     /** The SQL of the Item resolver. */
     static final String ITEM_SQL = "SELECT code, title FROM item WHERE category = ? ORDER BY code";
+    /**
+     * The allow-list check's statement on table {@code item} ({@code AllowListCheck}, decision D100: the server runs
+     * it at its start, a tier (b) bind before its catalogue).
+     */
+    static final String ITEM_SCHEMA_CHECK = "SELECT * FROM item WHERE 1 = 0";
 
     final FakeAgent agent = new FakeAgent();
     final Pack pack = new Pack();
     final Map<String, Object> state = new LinkedHashMap<>(Map.of("mode", "IDLE", "operator", "100"));
     final AtomicInteger recovered = new AtomicInteger();
+    /**
+     * The columns the desk's database reports for table {@code item}: those the allow-list names, unless a test
+     * changes them.
+     */
+    final List<Rows.Column> itemColumns = new CopyOnWriteArrayList<>(List.of(new Rows.Column("CODE", "VARCHAR"),
+            new Rows.Column("TITLE", "VARCHAR"), new Rows.Column("CATEGORY", "VARCHAR"),
+            new Rows.Column("BORROWER_EMAIL", "VARCHAR")));
 
     Desk() {
         agent.capability("desk.input", CapabilityState.OK).capability("data.query", CapabilityState.OK)
@@ -97,6 +111,10 @@ final class Desk {
                         List.of()))
                 .describe("swing.click", true, false, object(Map.of("target", Map.of("type", "string"), "button",
                         Map.of("type", "string")), List.of("target")))
+                .describe("web.evaluate", true, false, object(Map.of("script", Map.of("type", "string")),
+                        List.of("script")))
+                .describe("web.waitFlag", false, false, object(Map.of("expression", Map.of("type", "string")),
+                        List.of("expression")))
                 .describe("jvm.info", false, false, null)
                 .describe("data.query", false, false, object(Map.of("source", Map.of("type", "string"), "sql",
                         Map.of("type", "string"), "params", Map.of("type", "array"), "maxRows",
@@ -128,6 +146,8 @@ final class Desk {
                         "role", "button", "name", "Lend", "enabled", true))))));
         agent.value("swing.capture", Map.of("format", "png", "width", 1L, "height", 1L, "base64", FakeAgent.PNG_1X1));
         agent.value("swing.click", Map.of("clicked", true, "fired", true));
+        agent.value("web.evaluate", Map.of("value", "evaluated"));
+        agent.value("web.waitFlag", Map.of("ready", true));
         agent.value("jvm.info", Map.of("javaVersion", "25", "vendor", "test", "pid", 4242L));
         agent.value("data.sources", Map.of("sources", List.of(Map.of("id", "desk"))));
         agent.on("data.query", params -> query(String.valueOf(params.get("sql")), (List<?>) params.get("params"))
@@ -135,8 +155,14 @@ final class Desk {
         agent.publish("desk.opened", Map.of("by", "100", "pin", SECRET));
     }
 
-    /** What the fake database answers: the resolver's statement, and any guarded statement over {@code item}. */
-    private static Rows query(String sql, List<?> params) {
+    /**
+     * What the fake database answers: the allow-list check's statement, the resolver's statement, and any guarded
+     * statement over {@code item}.
+     */
+    private Rows query(String sql, List<?> params) {
+        if (sql.equals(ITEM_SCHEMA_CHECK)) {
+            return itemSchema();
+        }
         List<Rows.Column> columns = List.of(new Rows.Column("CODE", "VARCHAR"), new Rows.Column("TITLE", "VARCHAR"));
         if (sql.equals(ITEM_SQL)) {
             String category = params == null || params.isEmpty() ? null : String.valueOf(params.get(0));
@@ -151,6 +177,17 @@ final class Desk {
             return Rows.of(wide, List.of(List.of("HAM-1", "Claw hammer", "B-7")), false);
         }
         throw new IllegalStateException("desk database: no rows for " + sql);
+    }
+
+    /** The answer to {@link #ITEM_SCHEMA_CHECK}: the columns of table {@code item} ({@link #itemColumns}), no row. */
+    Rows itemSchema() {
+        return Rows.of(List.copyOf(itemColumns), List.of(), false);
+    }
+
+    /** The {@code data.query} calls but the allow-list check's ({@link #ITEM_SCHEMA_CHECK}), in order. */
+    List<FakeAgent.Call> queries() {
+        return agent.callsTo("data.query").stream()
+                .filter(c -> !ITEM_SCHEMA_CHECK.equals(String.valueOf(c.params().get("sql")))).toList();
     }
 
     /** The credentials of the desk's environment: realm {@code staff}, entry {@code 100} with its password. */
@@ -169,6 +206,57 @@ final class Desk {
         schema.put("properties", new LinkedHashMap<>(properties));
         schema.put("required", required);
         return schema;
+    }
+
+    /** The desk's pack with these row masks (the pack itself declares none). */
+    DomainPack packWithRowMasks(List<ai.skillroy.testjava.data.RowMask> masks) {
+        DomainPack base = pack;
+        return new DomainPack() {
+            @Override
+            public String id() {
+                return base.id();
+            }
+
+            @Override
+            public String version() {
+                return base.version();
+            }
+
+            @Override
+            public StepLibrary steps() {
+                return base.steps();
+            }
+
+            @Override
+            public SyncPolicy syncPolicy() {
+                return base.syncPolicy();
+            }
+
+            @Override
+            public List<FactProvider> facts() {
+                return base.facts();
+            }
+
+            @Override
+            public void recover(AgentConnection connection) throws Exception {
+                base.recover(connection);
+            }
+
+            @Override
+            public ResolutionCatalogue resolution() {
+                return base.resolution();
+            }
+
+            @Override
+            public List<SqlAllowList> sqlAllowLists() {
+                return base.sqlAllowLists();
+            }
+
+            @Override
+            public List<ai.skillroy.testjava.data.RowMask> rowMasks() {
+                return masks;
+            }
+        };
     }
 
     /** An item of a category. */

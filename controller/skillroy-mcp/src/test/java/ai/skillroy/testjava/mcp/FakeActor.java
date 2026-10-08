@@ -31,7 +31,7 @@ import java.util.Map;
  * through it as a model would ({@code enter}, its {@code confirm} stripped by the session), so that the journal shows
  * the model's origin.
  */
-final class FakeActor implements SessionActor {
+class FakeActor implements SessionActor {
 
     /** What the session service's turn looks like, roughly: a record with an enum, a list, a duration. */
     record Turn(int index, String request, List<String> actions, String answer, Outcome outcome, Duration duration) {

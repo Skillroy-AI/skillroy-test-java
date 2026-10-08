@@ -55,6 +55,13 @@ public final class RecordedGateway implements InferenceGateway {
 
     /** The provider id of a recorded answer's usage. */
     public static final String PROVIDER = "recorded";
+    /**
+     * How a missing recording is made, as the {@code NO_RECORDING} messages say it: the {@code inference-record}
+     * profile is specified but not built (phase5-contracts.md 2.3), so the route that exists is the settings'
+     * {@code record: true}, which wraps the live gateway in the {@link RecordingGateway}.
+     */
+    public static final String RECORD_HINT = "record with a recording gateway (record: true, see the recordings"
+            + " README of the sample)";
 
     private final Path dir;
     private final Clock clock;
@@ -98,7 +105,7 @@ public final class RecordedGateway implements InferenceGateway {
             String slot = request.metadata().get(ModelRequest.META_SLOT);
             throw new InferenceException(Kind.NO_RECORDING, "no recording for the " + request.purpose() + " request"
                     + (slot == null ? "" : " of slot " + slot) + " (fingerprint " + request.fingerprint()
-                    + "); record with -Pinference-record");
+                    + "); " + RECORD_HINT);
         }
         ModelResponse r = recording.response();
         Usage usage = r.usage().replayed(PROVIDER, "0", batch, Duration.ZERO);

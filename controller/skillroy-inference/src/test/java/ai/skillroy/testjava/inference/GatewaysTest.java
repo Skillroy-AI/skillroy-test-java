@@ -56,6 +56,38 @@ class GatewaysTest {
         return ModelRequest.builder("resolve", ModelClass.SONNET_CLASS).message(Message.user("q")).build();
     }
 
+    /**
+     * 4.2's second pass: the recording wrapper of {@code record: true} writes through the opener's mask (here one that
+     * knows a credential), and through the key rule and the bounds alone when the opener gave none.
+     */
+    @Test
+    void theRecordingWrapperWritesThroughTheOpenersMask() throws Exception {
+        String credential = "Wrapper-Cred-5531";
+        InferenceSettings recording = new InferenceSettings("claude", dir.resolve("masked"), true, null, null, null,
+                null, null, null, true, false, null, false, null);
+        ModelRequest request = ModelRequest.builder("resolve", ModelClass.SONNET_CLASS)
+                .message(Message.user("the note says " + credential + " and token=Wrapper-Tok-77")).build();
+        ScriptedGateway live = ScriptedGateway.answering(r -> ScriptedGateway.text("ok"));
+        try (InferenceGateway g = Gateways.recording(live, recording, ai.skillroy.testjava.inference.prompt.PromptMask
+                .of(ai.skillroy.testjava.data.SecretMask.of(List.of(credential)), List.of(), List.of()))) {
+            g.complete(request);
+        }
+        String masked = java.nio.file.Files.readString(dir.resolve("masked").resolve(request.fingerprint() + ".json"));
+        assertFalse(masked.contains(credential), masked);
+        assertFalse(masked.contains("Wrapper-Tok-77"), "the key rule too: " + masked);
+        InferenceSettings plain = new InferenceSettings("claude", dir.resolve("plain"), true, null, null, null, null,
+                null, null, true, false, null, false, null);
+        try (InferenceGateway g = Gateways.recording(ScriptedGateway.answering(r -> ScriptedGateway.text("ok")), plain,
+                null)) {
+            g.complete(request);
+        }
+        String keysOnly = java.nio.file.Files.readString(dir.resolve("plain").resolve(request.fingerprint()
+                + ".json"));
+        assertFalse(keysOnly.contains("Wrapper-Tok-77"), "the key rule and the bounds without an opener's mask");
+        assertTrue(keysOnly.contains(credential), "a value only the opener's mask knows");
+        assertTrue(Gateways.recording(live, settings("claude", dir, null), null) == live, "record: false wraps nothing");
+    }
+
     @Test
     void noneAnswersNoGateway() throws Exception {
         try (InferenceGateway g = Gateways.open(InferenceSettings.none())) {

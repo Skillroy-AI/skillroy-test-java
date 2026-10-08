@@ -61,7 +61,7 @@ import java.util.regex.Pattern;
  * prices: null                    # a price table file, relative to the file; null: the built-in table
  * fallbacks: true
  * images: false
- * timeouts: {callMs: 120000, batchWaitMs: 7200000, batchPollMs: 30000}
+ * timeouts: {callMs: 120000, batchWaitMs: 7200000, batchPollMs: 30000, plannerMs: 900000}
  * logPrompts: false
  * </pre>
  *
@@ -78,7 +78,7 @@ import java.util.regex.Pattern;
  * @param gateway {@value #GATEWAY_CLAUDE}, {@value #GATEWAY_RECORDED} or {@value #GATEWAY_NONE}; null or blank is
  *     {@code none}
  * @param recordings the recorded gateway's directory (and where {@code record} writes), or null
- * @param record true: the live gateway is wrapped in the recording gateway (profile {@code inference-record})
+ * @param record true: the live gateway is wrapped in the recording gateway (the maintainer's re-record route)
  * @param workspaceId the workspace id an organisation-level model key needs (the provider refuses such a key without
  *     it; the live gateway sends it as {@code anthropic-workspace-id}): an account identifier, not a secret; null when
  *     none is set
@@ -97,7 +97,7 @@ import java.util.regex.Pattern;
  * @param fallbacks the provider's refusal fallback on (phase5-contracts.md 4.1)
  * @param images whether an image part may be sent (false until Phase 7)
  * @param timeouts milliseconds: {@value #TIMEOUT_CALL_MS}, {@value #TIMEOUT_BATCH_WAIT_MS},
- *     {@value #TIMEOUT_BATCH_POLL_MS}; null is the defaults
+ *     {@value #TIMEOUT_BATCH_POLL_MS}, {@value #TIMEOUT_PLANNER_MS}; null is the defaults
  * @param logPrompts true: masked prompt text goes into {@code inference.jsonl}
  * @param file the settings file that was read, or null
  */
@@ -164,6 +164,8 @@ public record InferenceSettings(String gateway, Path recordings, boolean record,
     public static final String TIMEOUT_BATCH_WAIT_MS = "batchWaitMs";
     /** {@link #timeouts()} key of the interval between batch status reads. */
     public static final String TIMEOUT_BATCH_POLL_MS = "batchPollMs";
+    /** {@link #timeouts()} key of the most the planner ({@code skillroy author}) may take over all its rounds. */
+    public static final String TIMEOUT_PLANNER_MS = "plannerMs";
 
     /** The default model ids (phase5-contracts.md 2.2, decision D84). */
     public static final Map<String, String> DEFAULT_MODELS = ordered(MODEL_OPUS, "claude-opus-5-5", MODEL_SONNET,
@@ -184,6 +186,7 @@ public record InferenceSettings(String gateway, Path recordings, boolean record,
         timeouts.put(TIMEOUT_CALL_MS, 120_000L);
         timeouts.put(TIMEOUT_BATCH_WAIT_MS, 7_200_000L);
         timeouts.put(TIMEOUT_BATCH_POLL_MS, 30_000L);
+        timeouts.put(TIMEOUT_PLANNER_MS, 900_000L);
         DEFAULT_TIMEOUTS = Collections.unmodifiableMap(timeouts);
     }
 

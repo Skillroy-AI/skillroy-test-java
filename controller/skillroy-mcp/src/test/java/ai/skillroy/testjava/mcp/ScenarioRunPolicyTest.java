@@ -1,0 +1,216 @@
+/*
+ * Copyright 2026 Mike Mills.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package ai.skillroy.testjava.mcp;
+
+import ai.skillroy.testjava.controller.AgentConnection;
+import ai.skillroy.testjava.scenario.ScenarioException;
+import ai.skillroy.testjava.scenario.pack.CompileContext;
+import ai.skillroy.testjava.scenario.pack.DomainPack;
+import ai.skillroy.testjava.scenario.pack.FactProvider;
+import ai.skillroy.testjava.scenario.pack.PlannedCall;
+import ai.skillroy.testjava.scenario.pack.StepLibrary;
+import ai.skillroy.testjava.scenario.pack.Sync;
+import ai.skillroy.testjava.scenario.pack.SyncPolicy;
+import ai.skillroy.testjava.scenario.resolve.ResolutionCatalogue;
+import ai.skillroy.testjava.scenario.resolve.SqlAllowList;
+import io.modelcontextprotocol.spec.McpSchema;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+import java.nio.file.Path;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.TreeSet;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+/**
+ * phase5-contracts.md 9.3, decision D96: {@code skillroy_scenario_run} runs a scenario only when every call of it is
+ * one the server would make for the client tool by tool. Refused before anything runs, as a tool error naming the step
+ * and the primitive: a raw {@code call} of a destructive primitive with {@code confirm}, of {@code agent.disable}, of
+ * {@code data.query} (the statement the {@code data_query} tool refuses), of {@code web.evaluate} or
+ * {@code web.waitFlag} (and the base verb {@code webWaitFlag}), a {@code _meta} in a call's arguments, a pack verb that
+ * wraps a destructive primitive, a verb whose cleanup does. Run: the pack's verbs,
+ * a raw call of an offered primitive, {@code mark}, and a pack verb over another module's primitive (the verb tools run
+ * those already). Every expectation of such a run is evaluated on masked values
+ * ({@code RunOptions.withExpectationsOnMaskedValues}).
+ */
+class ScenarioRunPolicyTest {
+
+    @TempDir
+    Path dir;
+
+    /**
+     * The desk's pack with three more verbs: {@code clear} (the destructive {@code desk.wipe}), {@code tidy}
+     * ({@code desk.poke}, registering {@code desk.wipe} as its cleanup) and {@code peek} ({@code probe.check}, a
+     * primitive of a module that is neither the domain's nor the base's).
+     */
+    static DomainPack extended(Desk desk) {
+        DomainPack base = desk.pack;
+        StepLibrary baseSteps = base.steps();
+        return new DomainPack() {
+            @Override
+            public String id() {
+                return base.id();
+            }
+
+            @Override
+            public String version() {
+                return base.version();
+            }
+
+            @Override
+            public StepLibrary steps() {
+                return new StepLibrary() {
+                    @Override
+                    public Set<String> verbs() {
+                        Set<String> verbs = new TreeSet<>(baseSteps.verbs());
+                        verbs.addAll(List.of("clear", "tidy", "peek"));
+                        return verbs;
+                    }
+
+                    @Override
+                    public List<PlannedCall> compile(String verb, Object args, CompileContext ctx)
+                            throws ScenarioException {
+                        return switch (verb) {
+                            case "clear" -> List.of(new PlannedCall("desk.wipe", Map.of(), Sync.NONE, 0));
+                            case "tidy" -> {
+                                ctx.addCleanup(new PlannedCall("desk.wipe", Map.of(), Sync.NONE, 0));
+                                yield List.of(new PlannedCall("desk.poke", Map.of(), Sync.NONE, 0));
+                            }
+                            case "peek" -> List.of(new PlannedCall("probe.check", Map.of(), Sync.NONE, 0));
+                            default -> baseSteps.compile(verb, args, ctx);
+                        };
+                    }
+
+                    @Override
+                    public Map<String, Object> argsSchema(String verb) {
+                        return baseSteps.argsSchema(verb);
+                    }
+                };
+            }
+
+            @Override
+            public SyncPolicy syncPolicy() {
+                return base.syncPolicy();
+            }
+
+            @Override
+            public List<FactProvider> facts() {
+                return base.facts();
+            }
+
+            @Override
+            public void recover(AgentConnection connection) throws Exception {
+                base.recover(connection);
+            }
+
+            @Override
+            public ResolutionCatalogue resolution() {
+                return base.resolution();
+            }
+
+            @Override
+            public List<SqlAllowList> sqlAllowLists() {
+                return base.sqlAllowLists();
+            }
+        };
+    }
+
+    private static String scenario(String id, String steps) {
+        return "scenario: " + id + "\npack: desk\nsteps:\n" + steps;
+    }
+
+    private static McpSchema.CallToolResult run(McpFixture fx, String yaml) {
+        return fx.call("skillroy_scenario_run", Map.of("yaml", yaml, "mode", "live"));
+    }
+
+    private static void refused(McpFixture fx, String yaml, String... fragments) {
+        McpSchema.CallToolResult result = run(fx, yaml);
+        String text = McpFixture.text(result);
+        assertTrue(result.isError(), text);
+        for (String fragment : fragments) {
+            assertTrue(text.contains(fragment), "'" + fragment + "' in: " + text);
+        }
+    }
+
+    @Test
+    void aScenarioCallingWhatTheServerDoesNotOfferIsRefusedBeforeAnythingRuns() throws Exception {
+        try (McpFixture fx = new McpFixture(dir)) {
+            fx.start(fx.options(extended(fx.desk)).mutating(true).build());
+            refused(fx, scenario("wipe-confirmed", "  - enter: {value: HAM-1}\n"
+                    + "  - call: {primitive: desk.wipe, args: {confirm: true}}\n"), "the scenario is refused",
+                    "step s2 (call, line 5)", "the destructive primitive desk.wipe");
+            refused(fx, scenario("agent-off", "  - call: {primitive: agent.disable, args: {confirm: true}}\n"),
+                    "step s1 (call", "agent.disable");
+            refused(fx, scenario("raw-query", "  - call: {primitive: data.query, args: {source: desk, sql: \"SELECT"
+                    + " * FROM item WHERE 1=1\"}}\n"), "step s1 (call", "data.query", "data_query");
+            refused(fx, scenario("evaluate", "  - call: {primitive: web.evaluate, args: {script: \"1\"}}\n"),
+                    "web.evaluate", "--allow-evaluate");
+            refused(fx, scenario("wait-flag", "  - call: {primitive: web.waitFlag, args: {expression: \"1\"}}\n"),
+                    "web.waitFlag", "--allow-evaluate");
+            refused(fx, scenario("wait-flag-verb", "  - webWaitFlag: {expression: \"1\"}\n"),
+                    "step s1 (webWaitFlag", "web.waitFlag");
+            refused(fx, scenario("meta", "  - call: {primitive: desk.lend, args: {item: HAM-1, _meta: {confirm:"
+                    + " true}}}\n"), "_meta");
+            refused(fx, scenario("confirming-verb", "  - lend: {item: HAM-1, confirm: true}\n"),
+                    "step s1 (lend", "'confirm'");
+            refused(fx, scenario("clear", "  - clear: {}\n"), "step s1 (clear", "desk.wipe");
+            refused(fx, scenario("tidy", "  - tidy: {}\n"), "cleanup call 1", "desk.wipe");
+            refused(fx, scenario("unoffered", "  - call: {primitive: evt.query, args: {}}\n"), "evt.query",
+                    "does not offer");
+            for (String method : List.of("desk.wipe", "agent.disable", "web.evaluate", "web.waitFlag", "desk.lend",
+                    "desk.input", "desk.poke")) {
+                assertTrue(fx.desk.agent.callsTo(method).isEmpty(), method + " was never called");
+            }
+            assertTrue(fx.desk.queries().isEmpty(), "data.query was never called but by the allow-list check at the"
+                    + " start: " + fx.desk.agent.callsTo("data.query"));
+            assertFalse(fx.desk.agent.callsTo("desk.wipe").stream().anyMatch(c -> c.options().confirm()));
+        }
+    }
+
+    @Test
+    void aScenarioOfWhatTheServerOffersRuns() throws Exception {
+        try (McpFixture fx = new McpFixture(dir)) {
+            fx.desk.agent.value("probe.check", Map.of("ok", true));
+            fx.start(fx.options(extended(fx.desk)).mutating(true).build());
+            McpSchema.CallToolResult result = run(fx, scenario("offered", "  - enter: {value: SAW-2}\n"
+                    + "  - call: {primitive: swing.click, args: {target: h12}}\n  - mark: offered\n"
+                    + "  - peek: {}\n  - lend: {item: SAW-2}\n  - expect: {desk.mode: LOAN}\n"));
+            assertFalse(result.isError(), McpFixture.text(result));
+            assertEquals("PASS", McpFixture.json(result).get("status"), McpFixture.text(result));
+            assertEquals(1, fx.desk.agent.callsTo("swing.click").size());
+            assertEquals(1, fx.desk.agent.callsTo("probe.check").size(), "a pack verb over another module's"
+                    + " primitive runs, as its verb tool would");
+            assertEquals(Map.of("item", "SAW-2"), fx.desk.agent.callsTo("desk.lend").get(0).params());
+        }
+    }
+
+    @Test
+    void aRunOnAClientsBehalfEvaluatesExpectationsOnMaskedValues() throws Exception {
+        try (McpFixture fx = new McpFixture(dir).startMutating()) {
+            McpSchema.CallToolResult result = run(fx, scenario("pin-prefix", "  - expect: {app.operatorPin:"
+                    + " {matches: \"^pw-staff\"}}\ntimeouts: {step: 200ms}\n"));
+            assertTrue(result.isError(), McpFixture.text(result));
+            assertEquals("FAIL", McpFixture.json(result).get("status"), "a credential's prefix is not an oracle: "
+                    + McpFixture.text(result));
+        }
+    }
+}

@@ -171,7 +171,8 @@ public final class DeskPack implements DomainPack {
                 .verifier(new DepositVerifier())
                 .verifier(new CountVerifier())
                 .build();
-        this.allowLists = withAllowList ? List.of(LendingFixture.allowList(SqlDialect.HSQLDB)) : List.of();
+        // The complete list (pin_hash named as another column): the contributor checks it against the schema (D100).
+        this.allowLists = withAllowList ? List.of(LendingFixture.withOtherColumns(SqlDialect.HSQLDB)) : List.of();
     }
 
     public DeskPack() {

@@ -19,6 +19,7 @@ package ai.skillroy.testjava.scenario;
 import ai.skillroy.testjava.controller.AgentLostException;
 import ai.skillroy.testjava.protocol.Event;
 import ai.skillroy.testjava.protocol.Json;
+import ai.skillroy.testjava.protocol.SecretKeys;
 import ai.skillroy.testjava.scenario.pack.PlannedCall;
 import ai.skillroy.testjava.scenario.pack.PreflightCheck;
 import ai.skillroy.testjava.scenario.pack.Sync;
@@ -49,10 +50,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * Phase 5 acceptance 15.1 item 13, the session part (phase5-contracts.md 12.2): {@link ExecutorSession} against the
  * executor tests' fake agent and the toy pack. A verb step and a raw call through the shared step protocol, a
- * read-only session refusing a mutating call before it is sent, a model's {@code confirm} stripped, the prompt policy
- * ending a step and not the session, {@code resolve} joining the bindings, {@code check} and {@code observe}, the
- * journal's records masked, correlation ids, the agent lost, {@code recoverOnClose}; and the plan run's confirmation
- * through the same runner.
+ * read-only session refusing a mutating call before it is sent, a model's and the system's {@code confirm} and
+ * {@code _meta} stripped and a person's {@code _meta} refused, the prompt policy ending a step and not the session,
+ * {@code resolve} joining the bindings, {@code check} and {@code observe} (a check on a value the mask changes never
+ * holding), the journal's records masked, correlation ids, the agent lost, {@code recoverOnClose}; and the plan run's
+ * confirmation through the same runner, which drops a {@code _meta} parameter.
  */
 class ExecutorSessionTest {
 
@@ -186,6 +188,95 @@ class ExecutorSessionTest {
         }
     }
 
+    /**
+     * A model's {@code _meta} is no confirmation either (phase5-contracts.md 12.2, the fix wave): raw, or in the
+     * {@code args} of the base verb {@code call}, it is stripped before anything compiles, the call is sent
+     * unconfirmed and refused, and the journal holds the arguments as stripped. The fake agent honours a
+     * {@code _meta.confirm} among the params as a merging connection would, so one that got through would confirm.
+     */
+    @Test
+    void aModelsMetaNeverConfirmsRawOrThroughTheCallVerb() throws Exception {
+        try (ExecutorSession session = fx.open()) {
+            StepOutcome raw = session.execute(PlannedCall.of("toy.wipe", Map.of("_meta", Map.of("confirm", true),
+                    "scope", "all"), Sync.NONE), MODEL);
+            assertEquals(Status.ERROR, raw.status(), raw.message());
+            assertTrue(raw.message().contains("CONFIRM_REQUIRED"), raw.message());
+            FakeAgentConnection.Call sent = fx.agent.callsTo("toy.wipe").get(0);
+            assertEquals(Map.of("scope", "all"), sent.params(), "no _meta reaches the connection");
+            assertFalse(sent.options().confirm());
+            StepOutcome verb = session.execute("call", Map.of("primitive", "toy.wipe", "args", Map.of("_meta",
+                    Map.of("confirm", true), "confirm", true)), MODEL);
+            assertEquals(Status.ERROR, verb.status(), verb.message());
+            assertTrue(verb.message().contains("CONFIRM_REQUIRED"), "through the call verb: " + verb.message());
+            assertEquals(Map.of(), fx.agent.callsTo("toy.wipe").get(1).params());
+            List<String> lines = Files.readAllLines(dir.resolve(StepJournal.FILE));
+            assertEquals(Map.of("scope", "all"), Json.parseObject(lines.get(1)).get("args"), "journaled as stripped");
+            assertEquals(Map.of("primitive", "toy.wipe", "args", Map.of()), Json.parseObject(lines.get(2))
+                    .get("args"));
+        }
+    }
+
+    /** The system is not a person: its {@code confirm} is stripped as a model's is, and a person's still confirms. */
+    @Test
+    void theSystemsConfirmIsStrippedAsAModelsIs() throws Exception {
+        Origin system = Origin.system("a host");
+        try (ExecutorSession session = fx.open()) {
+            StepOutcome raw = session.execute(PlannedCall.of("toy.wipe", Map.of("confirm", true), Sync.NONE), system);
+            assertEquals(Status.ERROR, raw.status(), raw.message());
+            assertTrue(raw.message().contains("CONFIRM_REQUIRED"), raw.message());
+            assertFalse(fx.agent.callsTo("toy.wipe").get(0).options().confirm());
+            StepOutcome verb = session.execute("call", Map.of("primitive", "toy.wipe", "args", Map.of("confirm",
+                    true)), system);
+            assertTrue(verb.message().contains("CONFIRM_REQUIRED"), verb.message());
+            StepOutcome person = session.execute(PlannedCall.of("toy.wipe", Map.of("confirm", true), Sync.NONE),
+                    PERSON);
+            assertEquals(Status.PASS, person.status(), person.message());
+            assertTrue(fx.agent.callsTo("toy.wipe").get(2).options().confirm(), "a person's confirm confirms");
+        }
+    }
+
+    /**
+     * A person's {@code _meta} does not compile (phase5-contracts.md 13.1): the step is refused, nothing is sent, and
+     * the session goes on.
+     */
+    @Test
+    void aPersonsMetaIsRefusedBeforeAnythingIsSent() throws Exception {
+        try (ExecutorSession session = fx.open()) {
+            StepOutcome raw = session.execute(PlannedCall.of("toy.wipe", Map.of("_meta", Map.of("confirm", true)),
+                    Sync.NONE), PERSON);
+            assertEquals(Status.ERROR, raw.status(), raw.message());
+            assertTrue(raw.message().contains("a step's arguments may not carry _meta (at _meta)"), raw.message());
+            assertEquals(0, raw.executed());
+            StepOutcome verb = session.execute("call", Map.of("primitive", "toy.wipe", "args", Map.of("_meta",
+                    Map.of("confirm", true))), PERSON);
+            assertTrue(verb.message().contains("a step's arguments may not carry _meta (at args._meta)"),
+                    verb.message());
+            assertTrue(fx.agent.callsTo("toy.wipe").isEmpty(), "nothing was sent");
+            assertEquals(Status.PASS, session.execute("poke", null, PERSON).status(), "the session goes on");
+        }
+    }
+
+    /**
+     * The runner both share drops a parameter named {@code _meta} for every caller (phase5-contracts.md 12.2, D79): a
+     * plan read from its file, which no compiler checked, cannot confirm a destructive call through one.
+     */
+    @Test
+    void aPlanRunDropsAMetaParameterSoItCannotConfirm() throws Exception {
+        String text = PlanCompiler.compile(("scenario: t\npack: toy\nsteps:\n"
+                + "  - call: { primitive: toy.wipe, args: { scope: all, zmeta: { confirm: true } } }\n")
+                .getBytes(StandardCharsets.UTF_8), "t.yaml", fx.pack).toJsonText();
+        Plan plan = Plan.parse(text.replace("\"zmeta\"", "\"_meta\""));
+        assertEquals(Map.of("scope", "all", "_meta", Map.of("confirm", true)), plan.steps().get(0).calls().get(0)
+                .args(), "the plan carries one");
+        RunResult run = new PlanExecutor(fx.pack, fx.agent, RunOptions.defaults().withClock(fx.clock)
+                .withSleeper(fx.clock.sleeper()).withBind(TestCredentials.bind())).run(plan);
+        assertEquals(Status.ERROR, run.status(), run.message());
+        assertTrue(run.message().contains("CONFIRM_REQUIRED"), run.message());
+        FakeAgentConnection.Call sent = fx.agent.callsTo("toy.wipe").get(0);
+        assertEquals(Map.of("scope", "all"), sent.params(), "the parameter was dropped");
+        assertFalse(sent.options().confirm());
+    }
+
     @Test
     void thePromptPolicyEndsTheStepNotTheSession() throws Exception {
         try (ExecutorSession session = fx.open()) {
@@ -284,6 +375,39 @@ class ExecutorSessionTest {
             assertEquals(List.of("session-start", "check", "check", "check", "check", "observe", "observe", "note"),
                     journalTypes(), "a failed observe and the reads without an origin are not journaled");
             assertEquals(0, fx.clock.sleeps, "a session never sleeps");
+        }
+    }
+
+    /**
+     * A check on a value the session's mask changes never holds (phase5-contracts.md 12.2, the fix wave): matched
+     * against the unmasked value, {@code matches} and {@code contains} answered for a secret that {@code observe}
+     * shows as {@code <redacted>}, so a credential could be rebuilt character by character. Decided here: such a value
+     * satisfies no matcher, {@code equals: "<redacted>"} included, and a text that holds a secret among other words is
+     * treated alike; a check on a value without a secret is unchanged, and an {@code expect} step obeys the same rule.
+     */
+    @Test
+    void aCheckOnAValueTheMaskChangesNeverHolds() throws Exception {
+        fx.state.put("pin", TestCredentials.PW_100);
+        fx.state.put("note", "signed on with " + TestCredentials.PW_100);
+        String prefix = TestCredentials.PW_100.substring(0, 4);
+        try (ExecutorSession session = fx.open()) {
+            assertEquals(SecretKeys.REDACTED, session.observe("state.pin", PERSON), "observe shows it masked");
+            CheckOutcome guess = session.check("state.pin", Map.of("matches", "^" + prefix), PERSON);
+            assertFalse(guess.held(), "no oracle on a secret's characters");
+            assertEquals(SecretKeys.REDACTED, guess.actual());
+            assertTrue(guess.reason().contains("holds a secret"), guess.reason());
+            assertFalse(session.check("state.pin", Map.of("contains", "100"), PERSON).held());
+            assertFalse(session.check("state.pin", Map.of("not", Map.of("matches", "^x")), PERSON).held());
+            assertFalse(session.check("state.pin", SecretKeys.REDACTED, PERSON).held(), "not even the mask's marker");
+            assertFalse(session.check("state.note", Map.of("contains", "signed on"), PERSON).held(),
+                    "a text that holds a secret");
+            assertTrue(session.check("state.name", "IDLE", PERSON).held(), "a value without a secret: unchanged");
+            assertFalse(session.check("state", Map.of("exists", true), PERSON).held(),
+                    "no matcher at all: a whole root that holds a secret is no exception");
+            StepOutcome expect = session.execute("expect", Map.of("state.pin", Map.of("matches", "^" + prefix)),
+                    PERSON);
+            assertEquals(Status.FAIL, expect.status(), "an expect step obeys the same rule: " + expect.message());
+            assertFalse(journalText().contains(TestCredentials.PW_100), "nor does the journal hold the secret");
         }
     }
 

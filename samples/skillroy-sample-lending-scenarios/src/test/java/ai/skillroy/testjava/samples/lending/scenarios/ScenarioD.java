@@ -32,9 +32,10 @@ import java.util.List;
  * <p><b>Its bindings files</b> on {@code seed-a} and {@code seed-b} are written by {@code approve} against the recorded
  * gateway (14.2, 14.5), with {@code approval.by} {@value ScriptedAnswers#APPROVED_BY}: the recordings they come from
  * are stand-ins made from correct scripted answers ({@link ScriptedAnswers}, provider {@code scripted}), because no
- * live call with the model key could be made when they were written; a maintainer re-records them live with
- * {@code -Pinference-record}, and {@code ScenarioDRecordedTest} regenerates the files from the recordings
- * ({@code -Dskillroy.inference.fixtures.update=true}). {@link #HAS_BINDINGS} says that they are committed: the JUnit
+ * live call with the model key could be made when they were written; {@code ScenarioDRecordedTest} regenerates the
+ * stand-ins and the files from them ({@code -Dskillroy.inference.fixtures.update=true}), and how they are re-recorded
+ * live, with what that changes, is in the recordings' README (the profile {@code inference-record} is specified, not
+ * built: phase5-contracts.md D110). {@link #HAS_BINDINGS} says that they are committed: the JUnit
  * glue's replay of the committed directory runs scenario D with A and B ({@link #withoutScenarioDUntilItHasBindings}
  * passes the directory through), and the bindings files' own checks ({@code BindingsUpToDateTest}) cover its files.
  *

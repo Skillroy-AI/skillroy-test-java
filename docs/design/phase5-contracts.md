@@ -1,8 +1,12 @@
 # Phase 5 contracts: the AI layer (inference gateway, model-written SQL, approval and budgets, batch re-resolution, MCP, the planner, triage, the interactive profile)
 
-**Status: specified 2026-10-08, not built.** The questions of §17 are answered provisionally by the orchestrator and
-recorded as decision **B23** (`../DECISIONS.md`, the owner interview page); nothing of this contract is code until the
-owner has seen them. Written in the manner of `phase2-contracts.md`, `phase3-contracts.md` and `phase4-contracts.md`:
+**Status: specified 2026-10-08; built 2026-10-08 on the provisional B23 answers; reviewed (three lenses, each with a
+sceptic) and fixed the same day; verified in the Linux matrix (`../TODO.md`, "Status at a glance").** The questions of
+§17 are answered provisionally by the orchestrator and recorded as decision **B23** (`../DECISIONS.md`, the owner
+interview page); the decisions the build and the review's fix wave took without the owner are D88-D104 and D110 (§16,
+**B24**, provisional). Every section the build changed carries an "As built" note; the review's fixes carry "fix wave"
+notes; what is owed to a live model (scenario C, live recordings, the live profiles and §15.3) is marked in place and
+listed under "Walls" in `../TODO.md`. Written in the manner of `phase2-contracts.md`, `phase3-contracts.md` and `phase4-contracts.md`:
 the contract is changed first, then the code, and the build marks every passage it builds or deviates from. Section
 references `P1 §n`, `P2 §n`, `P3 §n` and `P4 §n` are to the four earlier contracts; `design §n` is the design overview
 `base-framework-design.md`; `ai-inference §Fn/Rn` is the research note `../research/ai-inference.md`. Decisions taken
@@ -64,7 +68,7 @@ Phase 5 delivers:
   an interactive session on the desk exported from its journal and replayed; the recordings that make all of it run
   without a key (§14);
 - **acceptance** without a display (the normal build), end to end in the Linux image (no key), and live (profile
-  `inference-live`, skipped without a key) (§15).
+  `inference-live`, skipped without a key; specified, not built: D110) (§15).
 
 **Non-goals.** Named so that their seams are respected, not built:
 
@@ -160,6 +164,14 @@ distribution zip of the CLI gains the new jars and their attribution. Two new Ma
   environment variable `ANTHROPIC_API_KEY` is set **and** `-Pinference-live` is given; without the key the tests are
   skipped with the reason "no model key", never failed. These tests are never part of `mvn verify` in CI.
 - **`inference-record`**: refreshes the recordings of §4.2 from the live API (a maintainer's task; needs the key).
+
+**Both profiles: specified, not built (2026-10-08, review fix wave; D110)**: nothing live can run until a workspace id
+exists; the profiles, the `*LiveIT` tests and the record route are built in the same change as their first live run and
+BS13's live part (`../TODO.md`, Walls). As built (2026-10-08, review fix wave): no POM declares either profile, so
+`-Pinference-live` or `-Pinference-record` only makes Maven warn that the profile does not exist, and nothing live runs;
+the recording route that exists is `record: true` with `recordings:` in an `inference.yaml` of `gateway: claude`
+(`Gateways.build` wraps the live gateway in a `RecordingGateway`), with `-Dskillroy.inference.record.overwrite=true` to
+replace a file; what a live re-record of the sample changes is in §14.2 and the sample's recordings README.
 
 The key reaches the JVM through the environment variable only (the SDK's `fromEnv()`): never a system property on a
 command line (visible in `ps`), never a file in the repository, never `credentials.yaml` (that file holds the
@@ -384,6 +396,17 @@ the loopback fake; responses are read from their JSON form so that unknown, thin
 2.70.0 the typed form exists on the beta request type only); a tool is sent `strict: true` only when its schema can
 be strict (a free-form schema cannot); the SDK's tree no longer brings Apache HttpClient 5.
 
+As built (2026-10-08, fix wave): `open` refuses, with `AUTH` and a message that names the variable and never the value,
+a key with any character outside printable ASCII without the space (0x21-0x7E: a no-break space, a zero-width space or
+a control character survives `strip()`) and a workspace id, from the settings or from `ANTHROPIC_WORKSPACE_ID`, that is
+not of the settings' form (`[A-Za-z0-9][A-Za-z0-9_.:-]{0,199}`): the HTTP client's own refusal of such a header quotes
+its value, which would otherwise have reached a run's outputs, an MCP tool error and the CLI's stack trace; a client
+that cannot be built is `INVALID_REQUEST` without the exception's message; and any other `RuntimeException` of the SDK
+or its HTTP client during a call leaves the gateway as `PROVIDER` with the known secrets scrubbed and no cause (the
+batch methods included). A `retry-after` (or `retry-after-ms`) that is not a finite number of at least 0 is ignored (the
+gateway's own back-off applies), and a wait is taken only when it is shorter than what is left of the deadline,
+compared as a difference, so that a value near `Long.MAX_VALUE` cannot overflow past it.
+
 What the gateway never does: it never logs a prompt or a response body (the run writes `inference.jsonl`, §7.4,
 with metadata and masked structured answers only, and the prompt text itself only under `--log-prompts`); it never
 reads a key from anywhere but the environment; it never selects a model the settings do not name; it never sends an
@@ -412,6 +435,12 @@ This is what lets CI, the Linux image and every unit test run the AI layer with 
   secret). A recording that already exists is overwritten only under the profile `inference-record`'s
   `-Dskillroy.inference.record.overwrite=true`; otherwise the live answer is used and the file kept, so that a
   maintainer refreshes deliberately.
+- **The profile `inference-record`** of the two bullets above (the `-Pinference-record` of the missing recording's
+  message, the profile of the overwrite property): specified, not built (2026-10-08, review fix wave; D110): nothing
+  live can run until a workspace id exists; the profiles, the `*LiveIT` tests and the record route are built in the same
+  change as their first live run and BS13's live part (`../TODO.md`, Walls). As built (2026-10-08, review fix wave): the
+  overwrite property works without the profile, on the route that exists (`record: true`, §2.3), and the message of a
+  missing recording names that route and the sample's recordings README instead of the profile.
 - **Where the base keeps recordings**: `samples/skillroy-sample-lending-scenarios/src/test/resources/inference/`
   (the sample's tier (b) queries on both seeds, the triage of the sample's two negative runs, the session of §14.4, the
   planner's post-processing fixtures) and `controller/skillroy-inference/src/test/resources/inference/` (unit fixtures,
@@ -422,6 +451,15 @@ This is what lets CI, the Linux image and every unit test run the AI layer with 
   reference-counted lease per distinct settings (`Gateways.NONE` for `none`), so that the parked binds of a
   `re-resolve` job share one gateway; the inference module's own tests pin one committed recording of the test pack's
   prompt (`-Dskillroy.inference.fixtures.update=true` regenerates it).
+- As built (2026-10-08, fix wave): the recording's second pass through the prompt mask applies the mask of whoever
+  opened the gateway: `Gateways.open(settings, mask)` hands the opener's `PromptMask` to the `RecordingGateway` it
+  builds for `record: true` (the shared lease keeps the first opener's mask); the contributor (its mask: the
+  allow-lists, the row masks, the key rule) and the `re-resolve` job (its mask also knows the environment's
+  credentials) open their gateways so, as the session's opener does with the session's mask; `Gateways.open(settings)`
+  keeps the key rule and the bounds alone. The by-value and by-column rules are the request builders' (every builder
+  masks its parts with the full mask of 6.2 before the gateway sees the request), so the second pass is a safety net,
+  not the mask. A request with no recording is `NO_RECORDING` with "record with a recording gateway (record: true, see
+  the recordings README of the sample)", the route that exists, in place of the profile this section names.
 - **Determinism**: a recorded answer is replayed verbatim, so a test that depends on a recording is deterministic; the
   code path that *produced* the request (the prompt assembly, the catalogue, the mask) is what the fingerprint pins. The
   tests of §15.1 assert the fingerprint of each committed recording against the request the code builds today, so that
@@ -449,7 +487,7 @@ lookup rule as P2 §4, the same strict reader; the file is optional and holds no
 version: 1
 gateway: claude                 # claude | recorded | none; `replay` forces none (§5.5)
 recordings: inference/          # for recorded: a directory, relative to the file; also where `record` writes
-record: false                   # true: wrap the live gateway in RecordingGateway (profile inference-record)
+record: false                   # true: wrap the live gateway in RecordingGateway (the maintainer's re-record route; D110)
 workspaceId: null              # the workspace id for an organisation-level key (§4.1); else ANTHROPIC_WORKSPACE_ID
 models:
   opus: claude-opus-5-5
@@ -532,6 +570,23 @@ allow-listed for `WHERE` (a model may filter on it) but is never selected into a
 a secret column (P2 §4's rule: a column the pack's `RowMask` or a `SecretKeys` pattern marks) may not be allow-listed at
 all (a compile error).
 
+As built (2026-10-08, fix wave; D100): the names are checked against the schema where a data channel exists, not at
+compile time (no connection exists then): `…inference.sql.AllowListCheck.check(list, data, rowMasks, timeout)` runs
+`SELECT * FROM <table> WHERE 1 = 0` for every allow-listed table through the source and requires the result's column
+names to be exactly the table's readable columns plus its `otherColumns`, compared without regard to case (the sources
+fold unquoted names and report labels in their own case; two columns whose names differ only in case are refused), so
+that the guard's rule 4, which trusts `otherColumns` to be complete, stays sound when a later release adds a column; an
+unknown table (an SQL failure of the statement), a column the list does not name and a name the table does not have
+are a `ContributionException` naming the table and the columns, never a value. Every readable column goes through the
+pack's row masks with a sentinel of each value type a mask sees, under its declared name in three cases and the name
+the source reports, and one a mask alters or fails on is refused. The tier (b) resolvers run the whole check once per
+bind before the prompt catalogue is built (its statements are the bind's and are recorded, with the catalogue's
+samples, in the provenance of the first tier (b) slot, so scenario D's bindings files show them); a failure ends that
+slot `ENVIRONMENT` as a pack defect with the check's message, before any model call. The contributor runs the row-mask
+half (`AllowListCheck.rowMasks`) when it is loaded (a `ContributionException`, `ENVIRONMENT`); the MCP server runs the
+whole check at its start. That a key column is non-nullable needs the source's metadata, which a data channel does not
+expose: it is not checked (the sample's `AllowListOnRealSchemaTest` checks it on the sample's schema).
+
 **The prompt catalogue** (`…inference.prompt.SchemaCatalogue`) is the frozen text the model sees about the schema,
 built once per bind (and cached per source and fingerprint across the scenarios of one run): per table, its name,
 description, columns with types and descriptions, the key, and for each `sample` column up to 20 distinct values read
@@ -584,6 +639,18 @@ served for 12c and newer (11g stays unavailable: no `FETCH FIRST`, and `ROWNUM` 
 corpus is refused by the allow-list builder with "no BS6 corpus" rather than served loosely (design §3.9, ai-inference
 Risk2). Before a dialect other than HSQLDB serves a production target, its accept corpus should also run on a real
 server of that dialect (an open item of the spike; the base runs HSQLDB only).
+
+As built (2026-10-08, fix wave): rule 4's flag also follows a subquery's truth. A predicate subquery (`EXISTS`, `IN`,
+`ANY`/`ALL`) or a scalar subquery inside a select-list expression or a derived column is tainted with every personal
+column it references, in its select list, its `WHERE`, its joins, its own subqueries or correlated to the enclosing
+query, so that `CASE WHEN EXISTS (SELECT 1 FROM staff s2 WHERE s2.code = s.code AND s2.name LIKE 'A%') THEN 1 ELSE 0
+END`, its `IN` form and `(SELECT COUNT(*) FROM staff s2 WHERE … s2.name LIKE 'A%')` cannot carry one bit of a name per
+row into a candidate (`PERSONAL`); the same subqueries as filters (`WHERE`, `JOIN … ON`, `GROUP BY`, `HAVING`,
+`ORDER BY`, or a derived column that is only filtered on) are accepted as before, and every BS6 corpus statement keeps
+its outcome. Rule 6's parameter clause is enforced: `GuardedStatement` gains `literals()` (the text of each string
+literal, unescaped, in order), and the tier (b) resolver rejects `PARAM` a statement with a string literal equal to the
+text of one of the query's scalar string arguments (strings only, so that `TRUE` or `1` never collides; a blank
+argument is never matched), naming the argument and never the value.
 
 ### 5.4 The resolver `inference.sql` (`…inference.resolve.LlmSqlResolver`)
 
@@ -647,8 +714,17 @@ which the engine reports as `ENVIRONMENT` with its own prefix; the catalogue is 
 statements are recorded in the provenance of the first tier (b) slot; a loader's identity columns are named in the
 user message, not in the cached catalogue; the estimate before a call is the catalogue's tokens plus 2000 in and 2048
 out at the Sonnet price, without a cache discount; the contributor's mask knows the allow-lists, the pack's row masks
-and the key rule but no credential value (a resolver never sees one); `Structured.decode` handles `double`/`float`
-itself because `RecordCodec` does not (`SqlProposal.confidence` is a `double`).
+and the key rule but no credential value (a resolver never sees one); `SqlProposal.confidence` is a `double`, which
+`RecordCodec` did not read at first, so `Structured.decode` handled `double`/`float` itself until wave 2c taught the
+codec `Double`/`double` and `Float`/`float` as JSON numbers (P2 §6.2); `Structured` now adds nothing of its own
+(corrected in the fix wave of 2026-10-08).
+
+As built (2026-10-08, fix wave): step 3's parameter rule also refuses a value written inline: after the parameters
+match, a string literal of the guarded statement that equals the text of one of the query's scalar string arguments
+rejects the proposal `PARAM: the statement writes the value of the argument <path> as a literal …` (5.3 rule 6), and
+nothing runs; the verifiers remain the gate on what does. A provider failure the resolver records is a ledger entry
+(D102) that names the gateway's provider and the settings' Sonnet id, so that a slot whose first attempt failed still
+names a model in its `Resolution.usage`; the `NO_RECORDING` message names the recording gateway (4.2).
 
 A refusal or a `MAX_TOKENS` stop is "no candidates" with a note. An `InferenceException` of a retryable kind is tried
 once more within the slot's budget, then the slot fails `ENVIRONMENT` ("the model provider could not be reached:
@@ -735,6 +811,14 @@ or state except through the labelled, bounded channels of the session service (�
 agent's own redaction (A34, `MaskPolicy`) and the controller's `RowMask` and `SecretMask` keep their roles (P2 §7.3) and
 run first, so `PromptMask` adds a layer rather than replacing one.
 
+As built (2026-10-08, fix wave; D103): the planner (`plan`, 10.2) is the one purpose whose prompt is not built as a
+`ModelRequest`: its prompt is the operator's brief, which is exempt from the mask (the operator's own words, typed at
+the command line, neither read from the target nor holding the environment's secrets; only a tag that could close or
+open its block is neutralised), and the pack's vocabulary (kinds and their argument schemas, oracle functions, fact
+roots, stored tables, verbs and their schemas), which goes through the mask: every text by the key rule and the
+bounds, and in a schema every description, default, example, enum and constant, a property whose name looks secret
+losing its values whole while keeping its name. The planner reads no data, so its prompt carries no row and no sample.
+
 ### 6.2 `PromptMask` (`…inference.prompt`)
 
 ```java
@@ -771,6 +855,21 @@ The mask is tested with the project's existing adversarial fixtures (short and l
 inside JSON strings, the key patterns) and with the sample's `password` column; a test proves that a prompt built for
 every purpose of this contract contains none of the environment's credential values and none of the sample's
 `personal` values.
+
+As built (2026-10-08, fix wave): the session's and the summary's requests are proven masked through the service's own
+builder (`SessionServiceTest`: values only the key rule catches, under a secret-looking key and in `key=value` runs,
+fed through the facts, the snapshot and the events the model reads, the person's text and a folded summary, and a
+credential inside a text, reach no part of any request, the summary call's included; `OverlayBridgeTest` does the same
+for an overlay's text), the planner's vocabulary in `PlannerTest` (D103), triage's request in `TriageTest`. Three
+limits are recorded. The module key patterns of A21 cannot reach the controller (no wire type carries them, and the
+agent applies them to its own outputs before anything leaves the target): `PromptMask.withKeys` is the seam a later
+amendment fills, and no caller uses it now. The tier (b) contributor's mask knows the allow-lists, the row masks and
+the key rule but no credential value: nothing in a contributor's context offers the credentials' `SecretMask`
+(`ResolveContext.credentials()` answers only whether an entry exists, and adding it would be a new seam across D70),
+and a resolver never sees a credential (the binder refuses a credential reference in a query's arguments), so the
+by-value rule has nothing to replace there. An `Opaque` part (a thinking block with its signature, a fallback block)
+passes the mask untouched and is recorded as received: it is the model's own output, built from masked input, and must
+be echoed back unchanged (3.2); `RecordedGatewayTest` round-trips one.
 
 ---
 
@@ -875,6 +974,16 @@ parts) and the response `parts`. A refusal's category is in `note`. The file is 
 and answered, bounded to what the mask allows; P2 §11.4's "never written" list gains "a prompt that was not masked, a
 model key, a response to a request that named a secret".
 
+As built (2026-10-08, fix wave; D102): a failed call has its record too. `LedgerWriter.recordFailure` records every
+failure as a `CostLedger.Entry` whose details are its record (`error` the kind, `note` the masked message, `stop`
+null): with the usage the provider billed when the failure carries it, else with zero usage, cost `"0"`, the
+gateway's provider and the model that was asked (`recordFailure(request, failure, provider, model, …)`; the resolver,
+the session service and triage pass them) and the entry's note `failed: <kind>`, so that the run's writer, which sees
+only the ledger (D91), writes a line for a `NO_RECORDING`, a `TIMEOUT`, an `AUTH` or a 5xx too. A run's `model calls`
+count and its ledger therefore count failed calls; their cost is 0 unless billed, and `replay` still makes none.
+`InferenceLog.forLedger(ledger)` is public (a static method of a public interface), so that the CLI session and the MCP
+server write the records of their binds' tier (b) calls beside their own.
+
 ---
 
 ## 8. Batch re-resolution (`re-resolve`)
@@ -968,6 +1077,14 @@ for). The nightly cost thus never exceeds the job budget by more than one batch'
 catalogue part carries `CacheHint.LONG` in this mode (one hour; the batch's requests share the prefix), which is where
 the exit criterion's "cache hits above 80 %" comes from and what the report measures.
 
+As built (2026-10-08, fix wave): the bound holds with the inline retries too. A failed submission, status read or
+collection answers every request of the round with the failure, and a resolver retries a retryable one inline at the
+regular rate; before a bind resumes with such an answer, the job meter now reserves that call's estimate (the
+gateway's token count, else text length / 4, plus `maxTokens`, at the regular rate), releases it when the bind
+returns and settles the ledger entries the retry added, so that no retry runs on the resolver's scenario meter alone
+after the round's reservation was released; when the job meter has no room, the scenario fails `RESOLUTION_FAILED` /
+`BUDGET` without the call and no later batch is submitted (`budgetCut`).
+
 ---
 
 ## 9. `skillroy-mcp`: the primitives and the pack as tools
@@ -1004,8 +1121,8 @@ capture, a bitmap) is written to `<out>/mcp/<id>.png` and returned as a resource
 |---|---|---|
 | Pack verbs | `<domain>_<verb>` for every verb of the pack's `StepLibrary` with its `argsSchema` (§9.5); the call compiles the verb and executes its calls through `ExecutorSession.execute(verb, args)` (§12.2), so the step protocol, the prompt policy and the journal apply | mutating verbs only with `--mutating` |
 | Domain primitives | `<domain>_…` for the domain module's primitives (`lending_access_check`, `lending_deposit`, …) | by `mutating`/`destructive` as below |
-| Base primitives | `jvm_*`, `app_*`, `swing_*`, `web_*`, `sync_*`, `data_query` | the reads always; mutating with `--mutating`; `data_query` only with the source's allow-list and through `SqlGuard` (the model's SQL is guarded even here) |
-| Workflow | `skillroy_catalogue` (verbs with schemas, query kinds with their argument records, oracle functions, capability states); `skillroy_snapshot` (the `UiSnapshot` text, `maxChars`); `skillroy_facts {root, path?}`; `skillroy_events {sinceSeq?, topics?, max?}`; `skillroy_resolve {slot, kind, args, strategy?}`; `skillroy_scenario_compile {yaml}` (problems or the plan summary); `skillroy_scenario_run {yaml, mode: live\|approve}` (`--mutating`; runs with recover; the `RunResult` summary); `skillroy_session_ask {request}`, `skillroy_session_check {path, matcher}`, `skillroy_session_observe {path}`, `skillroy_session_note {text}`, `skillroy_session_export {scenarioId, approvedBy?}` (§12) | `skillroy_scenario_run` and `skillroy_session_ask` need `--mutating` unless the session policy is read-only |
+| Base primitives | `jvm_*`, `app_*`, `swing_*`, `web_*`, `sync_*`, `data_query` | the reads always; mutating with `--mutating`, but `web.evaluate` and `web.waitFlag` (each runs a caller's script in the target's pages) only when a person adds `--allow-evaluate` (D98; `web_evaluate` with `--mutating` as well); `data_query` only with the source's allow-list and through `SqlGuard` (the model's SQL is guarded even here), its guard reading the allow-list less its personal and row-masked columns (D99) |
+| Workflow | `skillroy_catalogue` (verbs with schemas, query kinds with their argument records, oracle functions, capability states); `skillroy_snapshot` (the `UiSnapshot` text, `maxChars`); `skillroy_facts {root, path?}`; `skillroy_events {sinceSeq?, topics?, max?}`; `skillroy_resolve {slot, kind, args, strategy?}`; `skillroy_scenario_compile {yaml}` (problems or the plan summary); `skillroy_scenario_run {yaml, mode: live\|approve}` (`--mutating`; refused unless every call of the scenario is one the server offers, D96; runs with recover; the `RunResult` summary); `skillroy_session_ask {request}`, `skillroy_session_check {path, matcher}`, `skillroy_session_observe {path}`, `skillroy_session_note {text}`, `skillroy_session_export {scenarioId}` (§12; no approver over MCP, D97) | `skillroy_scenario_run` and `skillroy_session_ask` need `--mutating` unless the session policy is read-only |
 
 A collision between a verb and a domain primitive (the sample's verb `deposit` and its read primitive
 `lending.deposit`) is resolved deterministically (D92, 2026-10-08): the primitive's tool name takes the suffix
@@ -1014,8 +1131,10 @@ start and `skillroy_catalogue` reports it under `renamedPrimitives`; every other
 
 Never offered: a destructive primitive (a person runs it with `skillroy call --confirm`); `agent.disable`,
 `agent.capabilities {reprobe}`, module upload, hook installation; `data.query` on a source without an allow-list;
-anything with `confirm: true` set by the server on a model's behalf (design §3.4: the model's request is never the
-confirmation). In read-only mode (the default) a mutating tool is not listed at all, so a client cannot even ask.
+`web.evaluate` and `web.waitFlag` unless a person started the server with `--allow-evaluate` (D98); a pack verb whose
+calls reach any of these (D96); anything with `confirm: true` set by the server on a model's behalf (design §3.4: the
+model's request is never the confirmation). In read-only mode (the default) a mutating tool is not listed at all, so a
+client cannot even ask.
 
 As built (2026-10-08, I1, `…inference.tools.ToolProjection` and `WorkflowTools`): every verb counts as mutating (a
 verb has no mutating flag); a session never offers `web.evaluate`; a verb's optional keys become nullable in the strict
@@ -1043,6 +1162,56 @@ unless the distribution adds `slf4j-nop`. Deferred loading of the low-level tool
 Code's tool search), not a field of the protocol. Open: a read primitive called directly is journaled as a step and
 exported as a `call` step (the export could leave read-only raw calls out); the prompts a `skillroy_scenario_run`
 handled are unknown to the session's prompt cursor (a seam on `ExecutorSession`).
+
+As built (2026-10-08, fix wave; `…mcp.PlanPolicy`, `DataQueryLists`, `StdioPipe`): a scenario
+is never stronger than the tools the same server offers one by one (D96). `skillroy_scenario_run` compiles the YAML
+and checks the plan before anything runs: a call of a base verb (`call`, the UI, web and wait verbs, `mark`) must name
+a primitive the server's own projection offers, other than `data.query` (the `data_query` tool is the guarded way to
+read), or `trace.mark` (the base verb `mark`'s marker on the agent's own bus); a call a pack verb compiled, and a
+cleanup call, must name none the server never offers (a destructive one, `agent.*`, `data.query`, and what the policy
+excludes, `web.evaluate` and `web.waitFlag` unless opted in), since a pack's verbs are reviewed code over any module's
+primitives; no call's arguments may hold `confirm` or `_meta`. A refusal is a tool error that names each step (id,
+verb, line) or cleanup call and its primitive, never a value. The same rule applies to the verb tools: at start the
+server compiles each verb the policy would offer, alone, with probe arguments (an empty mapping, then placeholders for
+its schema's required keys, then for all of them), and does not offer a verb a probe of which compiles to a call or a
+cleanup call that reaches what the server never offers or carries `confirm` or `_meta` (its tool's origin is
+`person("mcp")`, so a verb's own `confirm` would be honoured); the withheld verbs are logged once and listed by
+`skillroy_catalogue` under `withheldVerbs` (verb, tool, reason). A verb that compiles with no probe is offered; one
+whose arguments choose other primitives is judged by the probes only. A scenario run for a client evaluates every
+expectation on masked values (the executor's `RunOptions.withExpectationsOnMaskedValues(true)`, as a session check
+does), so that PASS or FAIL is no oracle on a credential. `skillroy://schema/scenario` lets the base verb `call` name
+only what the server offers (`ScenarioSchema.generate(pack, primitives, callable)`; the two-argument form keeps the
+whole catalogue). A pack verb's tool now strips `_meta` as well as `confirm` from the client's arguments (top level and
+a nested `args`), as the note above says. `skillroy_session_export` takes no approver (D97): a model-found binding is
+always written `REQUIRED`, an `approvedBy` sent anyway is ignored and the report says so, and a person approves with
+`skillroy resolve`, which reuses the recorded value without a model call (D82). `web.evaluate` and `web.waitFlag`
+(`ToolProjection.SCRIPT_PRIMITIVES`) are excluded by `Policy.readOnly()`, `Policy.mutating()` and
+`Policy.session(…)`; `readOnly(true)` offers `web_wait_flag` and `mutating(true)` both, through
+`ServerOptions.allowEvaluate` (`skillroy mcp --allow-evaluate`, D98); the plan check refuses either, the base verb
+`webWaitFlag` included. `data_query`'s guard reads a copy of
+each allow-list in which every personal column, and every column one of the pack's row masks alters (probed with a
+text, a whole-number, a decimal and a boolean sentinel under the declared, upper- and lower-case names; a mask that
+throws counts), is one of the table's `otherColumns`, so that a statement may not name it anywhere (`COLUMN`); a table
+whose key holds such a column, or with no readable column left, is not readable here (D99); the catalogue's
+`dataQuerySources` lists the copies. A row mask whose effect depends on the value is not found by the probe; the agent
+still masks its values in the rows. `skillroy_resolve` goes through the actor's `resolve` when the server has an actor
+factory (the actor is made on first use; the CLI's actor is the session service, whose metered entry counts a model
+token on the session's budget, §13.4), and resolves on the session otherwise. The stdin bridge takes a line of at most
+8 MiB (its newline not counted): a longer one is a protocol error, the reader stops without handing it on, the calls
+read before it are answered and the server ends with exit code 1 (`EXIT_PROTOCOL_ERROR`); at most 16 MiB of lines wait
+for the transport (one longer line alone), beyond which the reader waits and the client's writes wait in its pipe
+(back-pressure; nothing read is dropped but the line held when the server ends the transport's input).
+
+As built (2026-10-08, fix wave, the reconciliation; `SkillroyMcpServer`, `…inference.sql.AllowListCheck`): when the
+target offers `data.query`, the server runs `AllowListCheck.check` on each allow-list of the pack at its start, before
+it builds the `data_query` copies and projects the tools (§5.2, D100), through the data channel the session's binds use
+and within a session bind's budget in all (`Plan.DEFAULT_BIND_TIMEOUT_MS`, the one a tier (b) bind's check and
+catalogue share). A list naming a table the source cannot read, whose columns are not exactly the table's, or that lets
+a model read a column a row mask alters refuses the start (`SessionOpenException` `ENVIRONMENT`, naming the table and
+the columns, never a value), so a pack whose list allow-lists a row-masked column serves no `data_query` at all (P2
+§4's rule); the copy of D99 still hides such columns, a second wall for a mask the check's sentinels do not move. A
+source the check cannot reach (not served, timed out) is not read by `data_query`, whose refusal and the server's log
+say why, and the server starts (D104); the check's statements are not journaled (the session is not open yet).
 
 ### 9.4 Resources
 
@@ -1145,10 +1314,31 @@ and stderr go to files in the private temporary directory (no reader thread) and
 deadline; the planner's ledger entries are returned, not recorded (the request carries no ledger); the MCP configuration
 file belongs to the caller.
 
+As built (2026-10-08, fix wave). The prompt's brief is exempt from the prompt mask and its vocabulary goes through it
+(D103, 6.1). The stdout and stderr files are bounded on disk by what is read of them (32 MiB and 1 MiB): between bounded
+waits for the process's end (100 ms each, within the deadline) their sizes are looked at, a process whose output passes
+a bound is stopped there with its whole tree, a file longer than its bound is cut to it, and the log and the failure's
+message say so (never what was cut). The strict settings reader accepts `timeouts.plannerMs` (default 900000, 15
+minutes), which the CLI passes as the request's deadline. `PlannerTest` proves the deadline kill on a substitute that
+forks a child and waits for it (both processes are gone afterwards; without the descendants' kill the child survives)
+and the one deadline over every round with a clock that passes it once the first invocation has run (the repair round
+is refused "the planner's deadline … has passed" before it starts).
+
 `--claude-command <path>` (also `skillroy.claude.command`) names the executable; tests pass a script that prints a
 canned envelope, so that steps 5-7 are tested without the CLI (§15.1). With the real CLI absent the command exits 64
 ("claude not found on PATH"). The planner's budget is passed as the CLI's `--max-budget-usd` (present in the 2.1
 line, BS13 F-10) and `total_cost_usd` is still checked against it afterwards and reported.
+
+As built (2026-10-08, fix wave; steps 2, 3, 4 and 6): the planner's server is `mcp --mutating` without
+`--allow-evaluate`, always (D98), so its projection is `Policy.mutating(false)`; `author` gives the planner the
+catalogue of the primitives that server offers a scenario (`PlanPolicy.callableCatalogue()`: what its base verb `call`
+may name, `trace.mark` described when the target lists none), so the scenario schema's `call` enum names only those and
+the `requires` hint names their capability ids (step 2). The deadline is `timeouts.plannerMs` of the inference settings
+(`InferenceSettings.timeouts()`, read by name; the planner's own 15 minutes when the settings carry none) (step 4).
+With `--run` (step 6), the plan is checked against the planner's server's projection first, as `skillroy_scenario_run`
+checks it (§9.3, D96): a refused plan does not run, the `--run` check fails (`ran: false`, the refusal named in the
+output) and the exit code stays 0; a plan that may run runs with every expectation on masked values
+(`RunOptions.withExpectationsOnMaskedValues(true)`), so that its PASS or FAIL is no oracle on a credential.
 
 ### 10.3 What the planner is not
 
@@ -1185,6 +1375,19 @@ a directory; 64 for usage (no directory, gateway `none`). As built (2026-10-08, 
 `exitCode()`); a run's outputs carry no step record with a verb, so the request names the failed step by its id with
 its `call` and `expect` records; the events come from `failure/events.json`; effort is `LOW`; the evidence travels in
 `<target-state>`, `<target-ui>` and `<target-event>` blocks.
+
+As built (2026-10-08, fix wave): no row of the run's data reaches a triage request: every `rowSample` of the run's
+records (the statements of the `resolve` records of the slot that resolved last) and any other rows-shaped value (a
+list of lists, such as a `data.query` call's `rows`) is left out of the evidence, while a statement's text, its
+parameters, its `rowCount` and the verifiers' outcomes stay; a row sample carries no column names, so the by-column rule
+of 6.2 cannot be applied to it, and triage knows no allow-list. So the command needs no `--credentials` or `--pack`:
+the evidence is already masked, and row samples are not sent at all. `TriageOptions` gains `logPrompts`, the effort of
+both calls and the model ids the estimates are taken at, and `TriageOptions.of(settings, labelsOnly, clock)` takes
+them from the settings (`logPrompts`, `effort.triage`, `models`).
+
+As built (2026-10-08, fix wave): `triage --log-prompts` (one of the gateway options every model-calling command takes)
+reaches the triage: the command builds `TriageOptions` with `logPrompts` from the settings, so that the masked prompts
+go into `triage/inference.jsonl` with the option and never without it (D83), as for every other command.
 
 ---
 
@@ -1259,10 +1462,26 @@ read-only: `ERROR` / `ENVIRONMENT` with `READ_ONLY` in the detail, journaled wit
 `db.<table>` check is refused with a reason; each `resolve` gets the default 60 s budget and a failed one throws and
 is not journaled; a verb's cleanup calls are not run (`recoverOnClose` takes their place); the web path opens with
 tracing off (a session keeps no failure evidence and any step may type a secret); `budget(scope, spent, limit,
-exhausted)` writes the `budget` record and `primitives()` answers the catalogue. `readOnly` refuses any mutating or destructive call before it is sent (`READ_ONLY` in the outcome,
-nothing journaled as executed). A destructive call needs `confirm: true` in its arguments, which only an `Origin` of kind
-`PERSON` may carry: the session strips `confirm` from a `MODEL` origin's call and the call then fails with
-`CONFIRM_REQUIRED` as the agent answers it (design §3.4). Every outcome's `detail` and `lastResult` pass the session's
+exhausted)` writes the `budget` record and `primitives()` answers the catalogue. As built (2026-10-08, fix wave): every
+origin but `PERSON`, a `SYSTEM` one as well as a `MODEL` one, is stripped of `confirm` and `_meta` (at the top of a raw
+call's or a verb's arguments, in a nested `args`, the base verb `call`'s form, and in the calls a verb compiles to), and
+the journal holds the arguments as stripped; `CallRunner` drops a parameter named `_meta` from every call it sends, for
+every caller (plan steps, cleanup calls, sessions and so the MCP server; D79), since a request's `_meta` is built from
+the call's `CallOptions` alone, and `AgentClient` no longer merges a `_meta` of the params into the request's (P1 §7),
+which let `{_meta: {confirm: true}}` confirm a call; the compiler refuses a `_meta` key at any depth of a step's
+arguments (§13.1), so a person's raw call that carries one is refused as not compiling; and a `check` (and an `expect`
+step) is evaluated on the value as the session's mask leaves it: a value the mask changes holds a secret and satisfies
+no matcher, `equals: "<redacted>"` included, the outcome saying why, while a check on any other value is unchanged (a
+session's outputs pass its mask, §6.1; matched against the unmasked value, `matches` and `contains` rebuilt a
+credential character by character). A plan run judges its expectations (`expect` steps, `verify`) and stored-row
+checks (row count, columns, aggregates) by the same rule when its `RunOptions` say
+`withExpectationsOnMaskedValues(true)`, so that a run's PASS or FAIL answers no question about a secret either; the
+default is false (a scenario a person committed is evaluated on the values as read), and the hosts that run a plan a
+model or a client wrote (the MCP server's `skillroy_scenario_run`, `author --run`) set it. `readOnly` refuses any
+mutating or destructive call before it is sent (`READ_ONLY` in the outcome, nothing journaled as executed). A
+destructive call needs `confirm: true` in its arguments, which only an `Origin` of kind `PERSON` may carry: the
+session strips `confirm` from a `MODEL` origin's call and the call then fails with `CONFIRM_REQUIRED` as the agent
+answers it (design §3.4). Every outcome's `detail` and `lastResult` pass the session's
 `SecretMask` (credentials, fixture secrets joined into the bindings). A session's calls carry a `correlationId`
 `<sessionId>/<stepId>`.
 
@@ -1323,10 +1542,15 @@ session, pack, environment, "Acted: …" and "Model cost: …" lines; `DEGRADED`
 every failed step is left out and the passing steps after it are kept, with it the first failed step is included and
 nothing after it; a raw call's own `timeoutMs` is dropped with a report note and `await.timeoutMs` is written as
 `within: "<n>ms"`, while a capture without an `await` is an `ExportException`; an `observe` whose value was masked is
-skipped with a report note (a masked step argument still fails the export); a `REQUIRED` approval carries `by: "live"`
-(the binder's label for what `live` writes) and a tier (a) slot `NOT_REQUIRED` with `by` the exporter's label or
-`live`; the export reads a journal back from its file to the same result. `ScenarioSchema` validates every committed
-sample scenario (`ScenarioSchemaCommittedTest` in both samples) and reports problems with paths such as
+skipped with a report note (a masked step argument still fails the export); a `REQUIRED` approval carries `by: null`,
+as the binder writes a value `live` found (corrected in the fix wave of 2026-10-08: the export wrote `by: "live"` and
+called it the binder's label, which the binder never writes for `REQUIRED`), and a tier (a) slot `NOT_REQUIRED` with
+`by` the exporter's label or `live`; the export reads a journal back from its file to the same result. As built
+(2026-10-08, fix wave): arguments are written with sorted keys, at every depth (a slot's, an oracle's, a verb step's
+and a raw call's arguments, and a check's matcher), the order the recordings' tool inputs have, so that an export is a
+function of the journal's content and not of the key order of a live model's answers, which made a regeneration
+rewrite the committed export, its plan's `sourceHash` and its bindings' `planHash`. `ScenarioSchema` validates every
+committed sample scenario (`ScenarioSchemaCommittedTest` in both samples) and reports problems with paths such as
 `$.resolve.supervisor.strategy`; `requires` items are strings with the capability ids in a description (the grammar
 allows alternatives); `Schemas` lives in `ai.skillroy.testjava.scenario` (not the inference SPI package of §3.3: the
 scenario module needed it first; the inference module reuses it) with `ofRecord` (strict) and `ofArguments` (lenient,
@@ -1390,6 +1614,21 @@ subscription, sinceSeq)` owns no thread: the subscription's consumer queues requ
 counted) and the host serves them with `serveNext(Duration)`; the answer is a plain call of the pack's answer primitive,
 not a journaled step.
 
+As built (2026-10-08, fix wave; D101): the session's tier (b) resolves are metered on the session's budget.
+`SessionService.resolve(slot, kind, args, strategy, verify, credential, origin)` is the session's metered resolve
+(the signature of `ExecutorSession.resolve`), which the model's `skillroy_resolve` uses and every host uses for a
+resolve of a session that has a service (the CLI session's `resolve`, the MCP server's `skillroy_resolve`): a strategy
+list without a model token runs as it stands; one that names `llm-sql` reserves one tier (b) call's estimate on the
+session meter (2000 tokens in and 2048 out at the price of the settings' Sonnet id; the catalogue is not counted) and is
+refused `RESOLUTION_FAILED` / `BUDGET` (the meter's figures in the detail, no model call, the service exhausted) when it
+has no room or the service is exhausted; otherwise it runs with its scenario budget capped at what was left of the
+session's (`BudgetCaps`, keyed by the session's ledger, which both hosts pass to the session's binds and to the
+service; the contributor's scenario meter takes the smaller limit), and the ledger entries it added are settled on the
+session meter afterwards, whatever its outcome, with the journal's `budget` record written. The service also reads the
+session's settings from its bind options (where both hosts put the invocation's settings): the turns' calls take
+`effort.session`, the summary `effort.summary`, and the estimates the model ids the settings give the Sonnet and Haiku
+classes.
+
 **Timing.** The model's thinking happens between actions; each action is one bounded step with the pack's
 `PromptPolicy` and sync waits, so the target is never held mid-step by a model call (design §3.4). The service does
 not sleep: it waits on the gateway's call and on the session's step.
@@ -1417,12 +1656,17 @@ agent with scripted events (§15.1). An overlay's agent module never sees a mode
   cannot be served"). `llm-reason` and `llm-vision` stay rejected with "not in this version". A slot that lists
   `llm-sql` alone is allowed (the model is the only resolver asked).
 - **The base verb `call`** exists since Phase 1 (P1 §8.3, `BaseSteps`: `call: {primitive, args?, sync? (default NONE),
-  timeoutMs?, await? (with its capture inside)}` compiles to one `PlannedCall` verbatim; corrected 2026-10-08: the
-  first draft of this contract wrongly introduced it as new). Phase 5 amends nothing of its shape; it confirms that a
-  destructive primitive's `confirm: true` in `args` reaches the call (the executor honours `CallOptions.confirm`) and
-  that a pack may not name a verb `call` (reserved with the other base verb names). The journal export uses it as it
+  await? (with its capture inside)}`, unknown keys being errors, compiles to one `PlannedCall` verbatim; corrected
+  2026-10-08: the first draft of this contract wrongly introduced it as new, and the fix wave took out a `timeoutMs?`
+  the verb never had). Phase 5 amends nothing of its shape; it confirms that a destructive primitive's `confirm: true`
+  in `args` reaches the call (the executor honours `CallOptions.confirm`) and that a pack may not name a verb `call`
+  (reserved with the other base verb names). The journal export uses it as it
   is for a step that no verb covers (§12.3), so that an export can always be written; it is not the preferred way to
-  write a scenario, and `skillroy author` is told not to use it.
+  write a scenario, and `skillroy author` is told not to use it. As built (2026-10-08, fix wave): the compiler refuses
+  a `_meta` key at any depth of a step's arguments, whatever the verb (`expect` aside: its matchers are evaluated by
+  the executor, never sent), and of the calls a verb compiles to, cleanup calls and a session's raw call included,
+  with "a step's arguments may not carry _meta" and the key's path: a call's `_meta` is the executor's, built from the
+  call's options (§12.2), so a scenario, written, generated or exported, cannot carry one.
 - **`inference`** is not a YAML key: the compiler writes the plan field (§13.2).
 - Nothing else changes: the grammar of P1 §8.1 with the additions of P2-P4 stands.
 
@@ -1502,6 +1746,22 @@ zip is 48,687,408 bytes with 43 jars (7 project, 36 third-party; `anthropic-java
 of jars before Phase 5, and `THIRD-PARTY.txt` lists 36 artifacts with the MIT and MIT-0 texts and the MPL-2.0 note.
 `ci/run-in-linux.sh` passes `ANTHROPIC_API_KEY` and `ANTHROPIC_WORKSPACE_ID` into the container by name when set.
 
+As built (2026-10-08, fix wave). A resolve of a session that has a session service (`--inference` other than `none`)
+goes through the service's metered entry (`SessionService.resolve(slot, kind, args, strategy, verify, credential,
+origin)`; the REPL passes no verifier list), so that a model token is reserved and settled on the session's budget and
+shows in its `budget` record (§12.4, D74): the `session` REPL's `resolve`, and `mcp`'s `skillroy_resolve` through the
+server's actor (made on first use; without a gateway there is no actor and the session resolves, no model token being
+servable then). Both hosts write, when the session or the server ends, the records of the resolutions' model calls
+(`InferenceLog.forLedger(ledger)`, kept with the ledger by the contributor) into `inference.jsonl` beside
+`cost-ledger.jsonl`, through the credentials' mask, after the session model's own records (no record, no file); `mcp`
+writes the session's `cost-ledger.jsonl` when the server ends whether or not its actor was ever made. `mcp` gains
+`--allow-evaluate`, which offers `web_wait_flag`, and with `--mutating` `web_evaluate` too (D98), and ends with exit
+code 1 when the client breaks the protocol (a line longer than 8 MiB, §9.3). `author` reads the planner's deadline
+from `timeouts.plannerMs` and checks a `--run` against the planner's server's projection (§10.2, D96), and runs it with
+every expectation on masked values; `triage` builds its options from the settings (`TriageOptions.of`: `logPrompts`,
+`effort.triage` and the model ids, §11.2). The CLI's session service opens its gateway with the session's prompt mask
+(`Gateways.open(settings, mask)`), so that the recording gateway of `record: true` writes through it (§4.2).
+
 ### 13.5 JUnit
 
 `ScenarioTests` is unchanged in its contract: `replay` streams need no gateway; `approve` and `live` streams with
@@ -1573,6 +1833,16 @@ the committed file byte for byte (apart from the channel: `jdbc` headless, `agen
 none and the same file, `replay` no call, a changed catalogue `ENVIRONMENT` "no recording", a reject-corpus `DELETE`
 `RESOLUTION_FAILED` with the guard's reason, the nightly dry run `UNCHANGED` for A, B and D.
 
+The `-Pinference-record` re-record of the S2 note above: specified, not built (2026-10-08, review fix wave; D110):
+nothing live can run until a workspace id exists; the profiles, the `*LiveIT` tests and the record route are built in
+the same change as their first live run and BS13's live part (`../TODO.md`, Walls). As built (2026-10-08, review fix
+wave): the route that exists is `record: true` (§2.3), and a live re-record changes more than "the provider and the
+model answers": the provider, the model, the statement, the rationale and the usage of the recordings and of the
+bindings files written from them (through the recorded gateway, since `-Dskillroy.inference.fixtures.update=true`
+always records the stand-ins), and their `approval.by` label; so the assertions that pin the stand-ins
+(`ScenarioDRecordedTest`, `BindingsUpToDateTest`, the label `ScriptedAnswers.APPROVED_BY`, listed by line in the
+sample's recordings README) are loosened in that change.
+
 ### 14.3 Scenario C: `return-refunds-deposit` (authored by the planner)
 
 The brief, in full: *"A borrower returns the only item of a loan on the same day it was lent. The desk takes the item
@@ -1612,7 +1882,16 @@ export must still equal the committed copies.
 and business date, so the image's check records its own two failed runs' triage and replays it in the same run; and
 no planner envelope yet, scenario C being owed to the live run); `-Pinference-record` regenerates
 them in the Linux image with the key passed through the environment (`ci/run-in-linux.sh` passes `ANTHROPIC_API_KEY`
-into the container when it is set, without printing it); `-Pinference-live` runs §15.3.
+into the container when it is set, without printing it); `-Pinference-live` runs §15.3 (both profiles: specified, not
+built, D110; the route that exists is `record: true`).
+
+Both profiles of this section: specified, not built (2026-10-08, review fix wave; D110): nothing live can run until a
+workspace id exists; the profiles, the `*LiveIT` tests and the record route are built in the same change as their
+first live run and BS13's live part (`../TODO.md`, Walls). As built (2026-10-08, review fix wave): the stand-ins are
+regenerated with `-Dskillroy.inference.fixtures.update=true` (§14.2), a live recording goes through `record: true`
+(§2.3), and the session's recordings of §14.4 stay scripted stand-ins whatever is recorded live: a live session is a
+new session with its own answers, not a refresh of the recorded one, so the image's session check (§15.2 item 4) keeps
+driving the scripted session by position and comparing its export with the committed copies.
 
 ---
 
@@ -1623,6 +1902,12 @@ into the container when it is set, without printing it); `-Pinference-live` runs
 1. **The SPI**: `Schemas.ofRecord` on the records of this contract and the sample's queries (compliant schemas; the
    refused shapes refused); `ModelRequest.fingerprint()` stable across part order of maps, independent of `maxTokens`,
    `cache` and `metadata`, sensitive to a one-character change of any text; `Structured.decode` through the codec.
+   As built (2026-10-08, review fix wave): `Schemas.ofRecord` serves the records of this contract that a model answers
+   with (`SqlProposal`, `TriageLabel`, `TriageSummary`; `SchemasTest`, `StructuredTest`); no main code path applies it
+   to a pack's query record: the planner, the session service, the MCP server and the scenario schema describe a
+   query's arguments with `Schemas.ofArguments` (references allowed; `Planner`, `SessionService`, `ToolCalls`,
+   `ScenarioSchema`), so the sample's queries are proven through that schema (`ScenarioSchemaCommittedTest` validates
+   every committed and negative sample scenario against the pack's scenario schema), not through `ofRecord`.
 2. **`ClaudeGateway`** against a loopback fake of the provider's HTTP API (the JDK `HttpServer` in the test, canned
    JSON): the request body for each mapping row of §4.1 (system parts with the cache marker and its TTL, strict tools,
    `tool_choice: auto`, `output_config` for effort and format, no `thinking` field, the fallback field when enabled,
@@ -1638,12 +1923,23 @@ into the container when it is set, without printing it); `-Pinference-live` runs
    constructs), every reason code of §5.3 with a minimal statement each, the injected `ORDER BY` and `LIMIT`, alias
    and CTE resolution, the `personal` rule; the sample's allow-list against the real schema (`AllowListOnRealSchemaTest`:
    every allow-listed column exists; every accept-corpus statement over the sample's tables also executes on the
-   embedded database).
+   embedded database). As built (2026-10-08, review fix wave): BS6's corpora run on BS6's own schema in the inference
+   module (`HsqldbExecutionTest`, `lending-schema.sql`), which is not the sample's; `AllowListOnRealSchemaTest` proves
+   the list's tables, columns, types and keys against the sample's `LendingDb`; the sample's own accept corpus,
+   `corpus/lending-accept.sql` in the scenarios module (BS6's format, with `<<` lines for the rows read back), ten
+   statements that together read all twelve allow-listed tables, is guarded with the pack's allow-list, each rewrite
+   compared with the corpus's byte for byte on two runs, and run by `LendingAcceptCorpusTest` on `LendingDb` (seed A,
+   business date 2026-10-08, as the read-only account, with two posted loans the test inserts for the stored tables)
+   with the corpus's parameters, the rows read back equal to the corpus's.
 6. **`LlmSqlResolver`** with a scripted gateway against the sample's pack on the embedded database (the `JdbcDataChannel`
    of the scenario tests): a good proposal yields candidates in statement order that the engine verifies; `cannotAnswer`,
    low confidence, a guard violation, a param that matches no argument, a row count outside the bounds, a shape
    mismatch, a refusal, `NO_RECORDING`, a retryable error retried once; the ledger entry, `Resolution.usage` and
-   `confidence` filled, the provenance's statement and notes; the budget exhausted before and after a call.
+   `confidence` filled, the provenance's statement and notes; the budget exhausted before and after a call. As built
+   (2026-10-08, review fix wave): `LlmSqlResolverTest` runs these on a mirror pack over BS6's schema (`DeskPack`, the
+   embedded database of `lending-schema.sql`), since the inference module cannot depend on the sample's pack; the
+   sample's pack itself, on its own database, covers the good path, the guard's refusal and the missing recording
+   (`ScenarioDRecordedTest`, both seeds).
 7. **The engine and binder**: the contributor found and ordered after the pack's resolvers; `replay` loading no
    contributor whatever the settings; `REBIND_NEEDED` / `NOT_APPROVED` for an unapproved tier (b) slot; `live
    --write-bindings` writing `REQUIRED`; `approve` writing `APPROVED` and the reuse rule (reused when identical and
@@ -1723,6 +2019,12 @@ a Java 25 target, in every load mode, with the `recorded` gateway and the commit
 6. One `session` turn live on the desk (`ask "lend one plain item to the walk-in borrower"`) ends `DONE` within the
    action limit and exports a scenario that compiles.
 
+Items 1 to 6 and the profile `inference-live`: specified, not built (2026-10-08, review fix wave; D110): nothing live
+can run until a workspace id exists; the profiles, the `*LiveIT` tests and the record route are built in the same
+change as their first live run and BS13's live part (`../TODO.md`, Walls). As built (2026-10-08, review fix wave): no
+test of this section exists, and `-Pinference-live` only makes Maven warn that the profile does not exist and runs
+nothing, which is not a pass of this section.
+
 As built (2026-10-08, S2, `InferenceEndToEndIT`, eight nested classes, four load modes and two seeds): item 1 in every
 mode on both seeds (scenario D alone through the JUnit glue with its trailing zero-calls test); on each seed with the
 agent on the command line items 2, 7 and 8 (the secret scans cover `inference.jsonl`, `journal.jsonl`, the exports,
@@ -1731,6 +2033,18 @@ the committed copies and replayed) and 6 (triage over two failed runs the class 
 runs, because A and B are committed with the `approve` label and D with the stand-in label and one job writes one
 label; item 5 and the command form of item 4 were written against the CLI's commands and marked disabled until the
 CLI wave landed. Item 3 (scenario C) waits for the live planner run.
+
+As built (2026-10-08, review fix wave), §15.2 items 5 and 8 of the note above (item 5 and the command form of item 4
+run since the CLI wave landed): item 5's verb through the session entry has an effect and its outcome is asserted: the mutating server enters the code of seed A's auto-sign-on desk assistant
+(`lending_enter`; a `signOn` needs a slot with a credential, which `skillroy_resolve` over MCP cannot declare, D94) and
+signs off (`lending_sign_off`), each result `PASS`, the desk `IDLE` and then `SIGNED_OFF`, both steps in the server's
+journal under its `--out` (`lending_sign_off` alone on a desk signed off already is refused by the desk, which
+`SessionEntryVerbTest` shows on the headless desk); item 8's scan runs last, after item 5 and the command form of item
+4, over every check's outputs except the credentials files the checks write themselves (left out by name), with the
+matcher `SecretScan` (the strings of JSON files, the JSON in labelled blocks and in escaped JSON text read the same
+way, the rest split on whitespace, quotes, commas, colons and backslashes; `SecretScanTest`), which `SessionExportTest`
+uses too; the launcher subprocesses of the command form of item 4 are destroyed, with their descendants, when they do
+not end in time (`Processes`, `ProcessesTest`).
 
 Exit criteria of the roadmap (design §8): (1) is §14.3 with §15.2 item 3; (2) is §15.3 item 4; (3) is §14.4 with §15.2
 item 4; all three are also exercised without a key through the recordings.
@@ -1743,6 +2057,7 @@ item 4; all three are also exercised without a key through the recordings.
 |---|---|---|---|
 | D70 | `skillroy-inference` reaches a bind through the `ServiceLoader` SPI `ResolverContributor` of `skillroy-scenario`, with string-only `InferenceSettings`; the engine never loads a contributor in `replay` | packs depending on `skillroy-inference` and registering the resolver themselves; `skillroy-scenario` depending on `skillroy-inference` | a pack must stay buildable and testable without a model SDK; P2 D1 forbids the reverse dependency; the `WebPath` precedent (D49) works |
 | D71 | The recorded gateway is keyed by a fingerprint of the request's content and the recordings are committed, masked, byte-stable files; a missing recording fails loudly | mocks per test; a cassette keyed by call order; a tolerant match | a prompt change must be visible as a build failure and reviewable as a file diff; order-keyed cassettes break on any refactor; a tolerant match would hide a changed prompt |
+| D110 | The live profiles `inference-live` and `inference-record` (§2.3, §4.2, §4.4, §14.2, §14.5) and the live tests of §15.3 are marked specified, not built, and the sample's documents say what a live re-record changes; the profiles, the `*LiveIT` tests and the record route are built in the same change as their first live run and BS13's live part (2026-10-08, review fix wave) | building the profiles and the `*LiveIT` tests now, unrun; leaving the sections as they read | nothing live can run until the key's workspace id exists (`../TODO.md`, Walls): tests built now would be committed unrun (this phase's first image run of a never-run class failed two checks), §15.3 rests on facts BS13's live part has not confirmed, and which recordings a live run replaces needs real answers in hand; meanwhile a profile that does not exist must not read as a pass, nor a document promise a re-record with "no code changes" |
 | D72 | `replay` forces the gateway to `none`, loads no contributor, and refuses a tier (b) binding that is not `APPROVED` (`REBIND_NEEDED` / `NOT_APPROVED`); `Approval.State.REQUIRED` marks what `live` wrote | trusting the settings; a tier (b) binding accepted on the verifier alone | B6's zero-call CI is a mechanism, not a convention; R13's "approval on first use" needs a state the file can carry |
 | D73 | `SqlGuard`'s rule set (§5.3): one `SELECT`, allow-listed tables and columns with aliases resolved, no set operations, a function allow-list, literals bounded, values bound as parameters that must match the query's arguments, `ORDER BY` completed with the key, `LIMIT` ≤ 200 injected, size bounds, a dialect served only with a passing BS6 corpus | the agent's `StatementGuard` alone (keywords); a looser guard that trusts the read-only role; set operations and arbitrary functions allowed | ai-inference F7 and F24: unordered results and unguarded SQL are the two known sources of flaky and unsafe generated tests; the read-only role is a second wall, not the first; a parameter that must equal an argument stops a literal smuggled through the model |
 | D74 | Budget meters reserve an estimate before a call and settle after; exhaustion is `RESOLUTION_FAILED` / `BUDGET` for a slot, ends a session's model calls, and stops a job's further batches; a job budget has no default | a soft budget (warn and continue); `ENVIRONMENT` for exhaustion; a default job budget | B6 says the budget aborts; a slot whose model call the budget refused has no answer, which is what `RESOLUTION_FAILED` means; B6 left the nightly figure to the deployment |
@@ -1760,6 +2075,10 @@ item 4; all three are also exercised without a key through the recordings.
 | D86 | The calibrated-oracle case of gap 26 is answered by the export: an observed value is an ordinary expectation marked in the YAML and listed in the report for the reviewer; no run-time status | a `DEGRADED` outcome for a scenario with observed expectations; refusing to export them | the reviewer who commits the scenario decides; a run cannot tell an observed value from a specified one after the comment is removed |
 | D94 | The MCP server's `skillroy_resolve`, the session service's model-side resolve and the CLI's `session resolve` can declare a credential for a slot (`--credential <realm>.<key>` in the REPL; the tools' `credential` argument is open), since a sign-on slot cannot be declared otherwise (2026-10-08, C; the tools' half is open) | no credential from a session | the person-signs-on session of §14.4 is impossible otherwise |
 | D95 | The CLI's `session` closes with `recoverOnClose` on: after a mutating call the pack's `recover` runs when the session ends, as after a run (2026-10-08, the matrix fix wave; the MCP server keeps its options' value) | leaving the target as the person left it; an option | the session's purpose is an export that replays, and a replay starts from a recovered target; the §14.4 flow (session, export, replay) is otherwise a trap |
+| D96 | A plan run on a client's behalf (`skillroy_scenario_run`, `author --run`) is checked against the server's own projection before anything runs: a base verb's call names a primitive the server offers as a tool (not `data.query`; `trace.mark` for `mark`), a pack verb's or a cleanup call names none it never offers (destructive, `agent.*`, `data.query`, `web.evaluate` and `web.waitFlag` unless opted in), no call's arguments hold `confirm` or `_meta`; a refusal names each step and primitive; every expectation of such a run is evaluated on masked values; the scenario schema's `call` names only what the host offers; the same rule withholds a pack verb's tool whose compiled calls (with probe arguments, at start) reach what the server never offers, logged and listed in `skillroy_catalogue` (2026-10-08, review fix wave) | no check (a scenario stronger than the tools); the positive rule for every call (it refuses a pack's verbs over another module's primitives, which the verb tools run already); stripping `confirm` instead of refusing (the client's scenario would silently not be the one it wrote) | design §3.4 and D76: the server never confirms or runs a never-offered primitive for a client, whose request is often a model's; the planner's server runs under `dontAsk` with no person in the loop; PASS or FAIL on an unmasked credential would rebuild it character by character |
+| D97 | Over MCP a model-found (tier (b)) binding is always exported `REQUIRED`: `skillroy_session_export` takes no `approvedBy` and ignores one sent; a person approves with `skillroy resolve`, which reuses the recorded value without a model call (D82). Provisional (2026-10-08, review fix wave): the owner may veto it; it narrows Q12 for MCP, where the exporter is a client | the client's label as the approver (Q12 as written); a label given on the `mcp` command line | a client is often a model, and a model's request is never a person's approval (D72, the server's own `REJECT_ALL` for `scenario_run approve`); the CLI's `session export --approved-by` stays, a person typing it |
+| D98 | `web.evaluate` and `web.waitFlag` (each runs a caller's script in the target's pages; `web.waitFlag` is a read that evaluates an expression until it is true) are offered by no policy, read-only, mutating or the session's, unless a person starts the server with `skillroy mcp --allow-evaluate` (read-only: `web.waitFlag`; with `--mutating` both); the planner's server never has the flag, and the plan check refuses both (2026-10-08, review fix wave) | offering `web.evaluate` with `--mutating` and `web.waitFlag` as an ordinary read (§9.3's first table); never offering them over MCP | no model output reaches a page's script (design §9 risks; the session already excluded `web.evaluate`), and the planner's model runs under `dontAsk`; a person debugging a page by hand keeps the tools |
+| D99 | `data_query`'s guard reads a copy of the allow-list in which every personal column and every column one of the pack's row masks alters is one of the table's `otherColumns`, so that a statement may not name it anywhere; a table keyed by such a column, or with no readable column left, is not readable by `data_query` (2026-10-08, review fix wave) | a guard mode that refuses personal columns everywhere; refusing filters only; trusting rule 4 ("filter, never select") | rule 4 assumes nobody sees the rows, but `data_query` returns them to the client, so a filter, an order or a function of a personal value rebuilds it row by row; the copy needs no new guard code, and the guard's own `COLUMN` rule does the rest |
 | D93 | The rationale and the rejections of a tier (b) proposal reach the provenance through `ResolveContext.rationale(text)` and `reject(label, reason)` (defaults keep them as notes; the engine's context fills `Provenance.rationale` and `rejected`), and the bindings file writes `provenance.rationale` last and omits it when null, so that tier (a) files do not change (2026-10-08, I2) | the resolver building `Provenance` itself; notes only | the engine owns `Provenance`; a reviewer of a bindings file needs the rationale beside the statement (Q1 of §17); the file's byte-stability for tier (a) slots is preserved |
 | D92 | A verb and a domain primitive that would share a tool name are both offered: the primitive's name takes the suffix `_primitive`, the verb keeps the plain name; every other collision refuses the start (2026-10-08, M) | hiding the primitive behind the verb; refusing the start on any collision | the sample's `deposit` verb and `lending.deposit` read collide, so the planner's mutating server could not start under the first rule, and one name meaning a lookup in read-only mode and an action in mutating mode would mislead a model |
 | D91 | The record of a model call travels in `CostLedger.Entry.details`, and the run writer writes `inference.jsonl` from the ledger entries, beside `cost-ledger.jsonl` (2026-10-08, I1) | a sink passed through `BindOptions`; the contributor writing into a directory it is told | the contributor is created per engine and never sees the run's output directory; the ledger already crosses that boundary and is masked by the writer |
@@ -1767,6 +2086,11 @@ item 4; all three are also exercised without a key through the recordings.
 | D89 | A `confirm` argument of any call (a plan step, a cleanup call, a session step) is taken out of the parameters and sent as the request's `_meta.confirm` (2026-10-08, E1) | leaving `confirm` as an ordinary parameter | the agent reads the confirmation only from `_meta`, so a scenario's `confirm: true` never reached it before; no primitive in the base or the samples has a parameter of that name; a `MODEL` origin's `confirm` is stripped before this mapping (§12.2) |
 | D88 | The Anthropic Java SDK is pinned to its current line at build time (2.69.x on 2026-10-08) rather than the research note's 2.34.0; the client is built explicitly from `ANTHROPIC_API_KEY` with the SDK's retries and logging off, and the gateway retries within its own deadline; MCP comes as `mcp-core` + `mcp-json-jackson2`; the root POM imports `jackson-bom` | staying on 2.34.0 with work-arounds (an untyped fallback parameter, no typed workspace id, unknown 5.5 content blocks); `fromEnv()`; the SDK's own retries; the `mcp` convenience artifact | spike BS13 (F-2, F-7, F-9, F-11): 2.34.0 predates the 5.5 models and the fallback betas; `fromEnv()` reads profiles, auth tokens and custom headers from the operator's shell; the SDK's retries are per attempt without a cap on `retry-after`; `mcp` brings a second Jackson |
 | D87 | The session service offers the pack's verbs (and base primitives only by policy), one action at a time, with the model's `confirm` stripped; the overlay bridge rides the existing event stream and answers through a pack-named primitive | a free tool set; parallel actions; a dedicated transport for overlays | design §5 and B15: the verbs are what exports well, a model's request is never a confirmation, no new transport |
+| D100 | An SQL allow-list is checked against its source where a data channel exists, not at compile time: `SELECT * FROM <table> WHERE 1 = 0` per table, the readable and other columns compared with the result's names without regard to case, a column a row mask alters refused; by the tier (b) resolvers once per bind before the catalogue (the statements recorded with the catalogue's samples), by the contributor's load for the row masks, by the MCP server at its start; key nullability unchecked (2026-10-08, the review fix wave) | the compile-time check §5.2 described; JDBC metadata; trusting the pack's list | no connection exists at compile time, and the agent's channel exposes no metadata; the guard's rule 4 is sound only while `otherColumns` names every column, and a later release of the application adds columns (L1 F2, L2 F12) |
+| D101 | A session's tier (b) resolves are metered on the session's budget through `SessionService.resolve`: one tier (b) estimate reserved on the session meter first (refused `BUDGET` without room), the resolve's scenario budget capped at the session's room by a cap keyed by the session's ledger, the entries it added settled afterwards; every host routes a resolve of a session with a service through it (2026-10-08, the review fix wave) | a meter or budget seam in `BindOptions` or `ResolveContext`; tier (b) resolves outside the session budget | B15 gives a session one money budget and D74 ends its model calls at exhaustion; D70 keeps the scenario module's settings strings only, and both hosts already pass one ledger to the session's binds and to the service |
+| D102 | A failed gateway call is a ledger entry: with the usage the provider billed, else with zero usage, cost 0, the provider and the model asked, its details the `inference.jsonl` record with `error` and the masked message; `model calls` counts it (2026-10-08, the review fix wave) | failures in the in-memory log only; a second sink for the run's writer | the run's writer sees only the ledger (D91), and 7.4 promises one record per gateway call; an entry of zero cost changes no budget, and `replay` makes no call to fail |
+| D103 | The planner's brief is exempt from the prompt mask; the rest of its prompt, the pack's vocabulary, goes through it, schema values included and property names kept (2026-10-08, the review fix wave) | masking the brief; leaving the planner's prompt unmasked | the brief is the operator's own words, typed at the command line and holding nothing of the target or the environment's secrets, and masking it could change what was asked; the pack's text may carry a secret-looking default or example |
+| D104 | The MCP server runs the allow-list check of D100 at its start only when the target offers `data.query`; a list the check refuses refuses the start (`ENVIRONMENT`), and a source the check cannot reach (not served, timed out, refused before it ran) is not read by `data_query`, which says so, while the server starts (2026-10-08, the review fix wave's reconciliation) | refusing the start for an unreachable source; offering `data_query` on an unchecked list; checking only the schema half at the start and leaving row-masked columns to D99's copy | `data_query` is one tool among many, so failing closed for that tool keeps a server usable for the UI while the guard's rule 4 is never trusted on an unchecked list; a list that allow-lists a row-masked column is a pack defect (P2 §4's rule), which the tier (b) binds refuse too |
 
 ### 16.1 Changes to the Phase 1-4 contracts that Phase 5 needs
 

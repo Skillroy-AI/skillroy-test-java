@@ -431,27 +431,40 @@ class AgentClientTest {
         }
     }
 
+    /**
+     * The request's {@code _meta} is built from the call options alone (phase5-contracts.md 12.2, the Phase 5 fix
+     * wave): a {@code _meta} among the params, which this client merged before, is dropped whole, so it can neither
+     * confirm a destructive call nor set a timeout, a correlation id or a traceparent; the other params are sent as
+     * given.
+     */
     @Test
-    void callOptionsGoIntoMetaAndWinOverAGivenMeta() throws Exception {
+    void callOptionsAloneMakeTheMetaAndAMetaAmongTheParamsIsDropped() throws Exception {
         agent.handlers.put("lending.reset", params -> Map.of("reset", true));
         try (AgentClient client = AgentClient.connect(agent.endpoint())) {
             Map<String, Object> params = new LinkedHashMap<>();
-            params.put("_meta", Map.of("traceparent", "00-abc-def-01", "correlationId", "given"));
+            params.put("scope", "all");
+            params.put("_meta", Map.of("traceparent", "00-abc-def-01", "correlationId", "given", "confirm", true,
+                    "timeoutMs", 1L));
             client.call("lending.reset", params, new CallOptions("step-7", 2500L, true));
-            Map<String, Object> meta = meta(Json.parseObject(agent.requests("/rpc").get(0).body()));
-            assertEquals("step-7", meta.get("correlationId"));
-            assertEquals(2500L, meta.get("timeoutMs"));
-            assertEquals(true, meta.get("confirm"));
-            assertEquals("00-abc-def-01", meta.get("traceparent"));
+            Map<String, Object> first = Json.parseObject(agent.requests("/rpc").get(0).body());
+            assertEquals(Map.of("correlationId", "step-7", "timeoutMs", 2500L, "confirm", true), meta(first));
+            assertEquals("all", ((Map<?, ?>) first.get("params")).get("scope"), "the other params as given");
 
             client.call("lending.reset", params, null);
-            assertEquals("given", meta(Json.parseObject(agent.requests("/rpc").get(1).body())).get("correlationId"));
+            Map<String, Object> second = meta(Json.parseObject(agent.requests("/rpc").get(1).body()));
+            assertEquals(Set.of("correlationId"), second.keySet(), "nothing of the params' _meta: " + second);
+            assertFalse("given".equals(second.get("correlationId")), "a generated correlation id");
+
+            client.call("lending.reset", Map.of("_meta", Map.of("confirm", true)), CallOptions.defaults());
+            Map<String, Object> third = meta(Json.parseObject(agent.requests("/rpc").get(2).body()));
+            assertFalse(third.containsKey("confirm"), "a params' _meta never confirms a call: " + third);
         }
     }
 
     /**
      * Amendment A34: the call options' secret param names travel as {@code _meta.secretParams}, only when there are
-     * any, and win over a {@code secretParams} the params already carried; the params themselves are sent unchanged.
+     * any; a {@code secretParams} the params carried in a {@code _meta} of their own is dropped with it; the params
+     * themselves are sent unchanged.
      */
     @Test
     void secretParamsGoIntoMetaOnlyWhenGiven() throws Exception {

@@ -21,8 +21,17 @@ import ai.skillroy.testjava.inference.resolve.DeskPack;
 import ai.skillroy.testjava.protocol.Json;
 import ai.skillroy.testjava.scenario.Plan;
 import ai.skillroy.testjava.scenario.PlanCompiler;
+import ai.skillroy.testjava.scenario.ScenarioException;
 import ai.skillroy.testjava.scenario.ScenarioSchema;
+import ai.skillroy.testjava.scenario.pack.CompileContext;
+import ai.skillroy.testjava.scenario.pack.DomainPack;
+import ai.skillroy.testjava.scenario.pack.FactProvider;
+import ai.skillroy.testjava.scenario.pack.PlannedCall;
+import ai.skillroy.testjava.scenario.pack.StepLibrary;
+import ai.skillroy.testjava.scenario.pack.SyncPolicy;
 import ai.skillroy.testjava.scenario.resolve.CostLedger;
+import ai.skillroy.testjava.scenario.resolve.ResolutionCatalogue;
+import ai.skillroy.testjava.scenario.resolve.SqlAllowList;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.DisabledOnOs;
@@ -40,6 +49,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -53,8 +63,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * test writes, which records the arguments of each invocation, its working directory and its stdin, and prints the
  * envelope the test put beside it): the arguments, the YAML with its comment head, the plan, the authoring record, a
  * repair round through {@code --resume}, the repair limit, {@code is_error}, {@code mcp_server_errors}, a failed
- * {@code --resume} that prints plain text, a missing executable, the deadline, and the ledger entry with the envelope's
- * cost.
+ * {@code --resume} that prints plain text, a missing executable, the deadline (the whole process tree killed, one
+ * deadline over every round), the output bounds on disk, the vocabulary's mask and the brief's exemption (D103), and
+ * the ledger entry with the envelope's cost.
  */
 @DisabledOnOs(OS.WINDOWS)
 class PlannerTest {
@@ -70,7 +81,14 @@ class PlannerTest {
             pwd > "$dir/cwd-$n"
             cat > "$dir/stdin-$n"
             echo "a warning on stderr: token=Zq7-Lantern-42x" >&2
-            if [ -f "$dir/hang-$n" ]; then exec tail -f /dev/null; fi
+            if [ -f "$dir/hang-$n" ]; then
+              sleep 600 &
+              echo $! > "$dir/child-$n"
+              echo $$ > "$dir/parent-$n"
+            fi
+            if [ -f "$dir/flood-err-$n" ]; then head -c 3000000 /dev/zero | tr '\\000' 'x' >&2; fi
+            if [ -f "$dir/flood-out-$n" ]; then head -c 34000000 /dev/zero | tr '\\000' 'x'; fi
+            if [ -f "$dir/hang-$n" ]; then wait; fi
             if [ -f "$dir/envelope-$n.json" ]; then cat "$dir/envelope-$n.json"; fi
             if [ -f "$dir/text-$n.txt" ]; then cat "$dir/text-$n.txt"; fi
             if [ -f "$dir/exit-$n" ]; then exit "$(cat "$dir/exit-$n")"; fi
@@ -374,12 +392,197 @@ class PlannerTest {
         assertNull(none.claudeCommand());
     }
 
+    /** The pid a script wrote, once it is there (the script writes it before it waits). */
+    private long pid(String file) throws Exception {
+        return Long.parseLong(Files.readString(bin.resolve(file)).strip());
+    }
+
+    /** Waits, bounded, for a process to be gone: true when it is (or never was). */
+    private static boolean gone(long pid) throws Exception {
+        java.util.Optional<ProcessHandle> handle = ProcessHandle.of(pid);
+        if (handle.isEmpty()) {
+            return true;
+        }
+        try {
+            handle.get().onExit().get(5, java.util.concurrent.TimeUnit.SECONDS);
+            return true;
+        } catch (java.util.concurrent.TimeoutException e) {
+            return false;
+        }
+    }
+
+    /** Kills what a failed test would otherwise leave running. */
+    private static void reap(long pid) {
+        ProcessHandle.of(pid).ifPresent(ProcessHandle::destroyForcibly);
+    }
+
+    /**
+     * 10.2 as built: at the deadline the planner's whole process tree is killed. The substitute forks a child (as the
+     * real CLI forks its MCP server) and waits for it; both are gone afterwards.
+     */
     @Test
-    void thePlannerIsStoppedAtItsDeadline() throws Exception {
+    void thePlannerIsStoppedAtItsDeadlineWithItsWholeProcessTree() throws Exception {
         Files.writeString(bin.resolve("hang-1"), "");
         AuthoringException e = assertThrows(AuthoringException.class, () -> Planner.author(
                 request("desk-slow", 2, Duration.ofMillis(1500))));
+        long child = pid("child-1");
+        long parent = pid("parent-1");
+        try {
+            assertEquals(1, e.exitCode());
+            assertTrue(e.getMessage().contains("did not finish within its deadline"), e.getMessage());
+            assertTrue(gone(child), "the planner's child process was killed with it");
+            assertTrue(gone(parent), "the planner's process was killed");
+        } finally {
+            reap(child);
+            reap(parent);
+        }
+    }
+
+    /**
+     * One deadline over every round (10.2): a clock that passes the deadline once the first invocation has run (the
+     * substitute cannot move the JVM's clock) makes the repair round refused before it starts.
+     */
+    @Test
+    void theDeadlineCoversTheRepairRounds() throws Exception {
+        answer(1, envelope(document("desk-late", CYCLE), false, "0.30"));
+        Instant start = Instant.parse("2026-10-08T10:00:00Z");
+        java.time.Clock stepping = new java.time.Clock() {
+            @Override
+            public java.time.ZoneId getZone() {
+                return java.time.ZoneOffset.UTC;
+            }
+
+            @Override
+            public java.time.Clock withZone(java.time.ZoneId zone) {
+                return this;
+            }
+
+            @Override
+            public Instant instant() {
+                // Past the deadline as soon as the first invocation has written its arguments.
+                return Files.exists(bin.resolve("args-1")) ? start.plus(Duration.ofHours(1)) : start;
+            }
+        };
+        PlannerRequest r = new PlannerRequest(BRIEF, "desk-late", out, pack, List.of(), mcp, "claude-opus-5-5", 40, 2,
+                new BigDecimal("2.00"), false, claude, Duration.ofMinutes(15), stepping);
+        AuthoringException e = assertThrows(AuthoringException.class, () -> Planner.author(r));
         assertEquals(1, e.exitCode());
-        assertTrue(e.getMessage().contains("did not finish within its deadline"), e.getMessage());
+        assertTrue(e.getMessage().contains("deadline of PT15M has passed"), e.getMessage());
+        assertFalse(Files.exists(bin.resolve("args-2")), "no repair round was started");
+    }
+
+    /**
+     * L2 F14: the planner's stdout and stderr files are bounded on disk by what is read of them: an invocation whose
+     * output passes the bound is stopped there, its file cut, and the failure says so; it does not run to the deadline.
+     */
+    @Test
+    void anOutputPastItsBoundIsCutAndThePlannerStopped() throws Exception {
+        Files.writeString(bin.resolve("flood-err-1"), "");
+        Files.writeString(bin.resolve("hang-1"), "");
+        long started = System.nanoTime();
+        AuthoringException err = assertThrows(AuthoringException.class, () -> Planner.author(
+                request("desk-noisy", 2, Duration.ofSeconds(30))));
+        long child = pid("child-1");
+        try {
+            assertTrue(err.getMessage().contains("stderr passed " + Planner.STDERR_MAX + " bytes and was cut there;"
+                    + " the process was stopped"), err.getMessage());
+            assertTrue((System.nanoTime() - started) / 1_000_000 < 20_000, "stopped at the bound, not the deadline");
+            assertTrue(gone(child), "with its whole process tree");
+        } finally {
+            reap(child);
+        }
+        Files.writeString(bin.resolve("flood-out-2"), "");
+        Files.writeString(bin.resolve("hang-2"), "");
+        AuthoringException out = assertThrows(AuthoringException.class, () -> Planner.author(
+                request("desk-loud", 2, Duration.ofSeconds(30))));
+        long child2 = pid("child-2");
+        try {
+            assertTrue(out.getMessage().contains("stdout passed " + Planner.STDOUT_MAX + " bytes and was cut there"),
+                    out.getMessage());
+            assertTrue(gone(child2));
+        } finally {
+            reap(child2);
+        }
+    }
+
+    /**
+     * D103: the planner's prompt holds the brief as the operator wrote it (exempt from the mask) and the pack's
+     * vocabulary through the mask: a secret-looking property keeps its name and loses its default, example and enum,
+     * a key=value secret in a description is masked; the planner reads no data, so there is no row and no sample.
+     */
+    @Test
+    void theVocabularyIsMaskedAndTheBriefIsTheOperatorsOwn() throws Exception {
+        DomainPack secretive = withSchema(pack, "signOn", Map.of("type", "object", "properties", Map.of(
+                "staff", Map.of("type", "string", "description", "the code; set it as token=Vocab-Tok-311"),
+                "password", Map.of("type", "string", "default", "Vocab-Default-4021", "examples",
+                        List.of("Vocab-Example-5507"), "enum", List.of("Vocab-Enum-6613")))));
+        String brief = BRIEF + " The desk's demo note reads token=Brief-Own-7788.";
+        answer(1, envelope(document("desk-mask"), false, "0.01"));
+        Planner.author(new PlannerRequest(brief, "desk-mask", out, secretive, List.of(), mcp, "claude-opus-5-5", 40, 2,
+                new BigDecimal("2.00"), false, claude, Duration.ofSeconds(30), clock));
+        List<String> args = args(1);
+        String prompt = args.get(args.size() - 1);
+        assertTrue(prompt.contains("\"password\":{"), "the property's name stays: " + prompt);
+        for (String hidden : List.of("Vocab-Tok-311", "Vocab-Default-4021", "Vocab-Example-5507",
+                "Vocab-Enum-6613")) {
+            assertFalse(prompt.contains(hidden), hidden + " in the planner's prompt: " + prompt);
+        }
+        assertTrue(prompt.contains("token=Brief-Own-7788"), "the brief is the operator's own text, unmasked");
+    }
+
+    /** A pack that answers one verb's argument schema with {@code schema}; otherwise {@code base}. */
+    private static DomainPack withSchema(DomainPack base, String verb, Map<String, Object> schema) {
+        StepLibrary steps = new StepLibrary() {
+            @Override
+            public Set<String> verbs() {
+                return base.steps().verbs();
+            }
+
+            @Override
+            public List<PlannedCall> compile(String v, Object args, CompileContext ctx) throws ScenarioException {
+                return base.steps().compile(v, args, ctx);
+            }
+
+            @Override
+            public Map<String, Object> argsSchema(String v) {
+                return v.equals(verb) ? schema : base.steps().argsSchema(v);
+            }
+        };
+        return new DomainPack() {
+            @Override
+            public String id() {
+                return base.id();
+            }
+
+            @Override
+            public String version() {
+                return base.version();
+            }
+
+            @Override
+            public StepLibrary steps() {
+                return steps;
+            }
+
+            @Override
+            public SyncPolicy syncPolicy() {
+                return base.syncPolicy();
+            }
+
+            @Override
+            public List<FactProvider> facts() {
+                return base.facts();
+            }
+
+            @Override
+            public ResolutionCatalogue resolution() {
+                return base.resolution();
+            }
+
+            @Override
+            public List<SqlAllowList> sqlAllowLists() {
+                return base.sqlAllowLists();
+            }
+        };
     }
 }

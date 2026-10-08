@@ -54,6 +54,7 @@ import ai.skillroy.testjava.scenario.resolve.CostLedger;
 import ai.skillroy.testjava.scenario.resolve.Query;
 import ai.skillroy.testjava.scenario.resolve.QueryType;
 import ai.skillroy.testjava.scenario.resolve.ResolverCandidate;
+import ai.skillroy.testjava.scenario.resolve.SqlAllowList;
 import ai.skillroy.testjava.scenario.resolve.SqlDialect;
 import ai.skillroy.testjava.scenario.resolve.Strategy;
 import ai.skillroy.testjava.scenario.resolve.ValueLoader;
@@ -115,15 +116,37 @@ class LlmSqlResolverTest {
     }
 
     private BindState state(InferenceGateway gateway, String budget) {
+        return state(gateway, budget, LendingFixture.withOtherColumns(SqlDialect.HSQLDB));
+    }
+
+    private BindState state(InferenceGateway gateway, String budget, SqlAllowList list) {
         BudgetMeter meter = BudgetMeter.of(BudgetMeter.Scope.SCENARIO, null, budget, ledger);
-        PromptMask mask = PromptMask.of(SecretMask.of(List.of(LendingDatabase.READER_PASSWORD)),
-                List.of(LendingFixture.allowList(SqlDialect.HSQLDB)), List.of());
+        PromptMask mask = PromptMask.of(SecretMask.of(List.of(LendingDatabase.READER_PASSWORD)), List.of(list),
+                List.of());
         LedgerWriter writer = new LedgerWriter(ledger, meter, log, mask, false, Clock.systemUTC());
-        BindState s = new BindState(gateway, PriceTable.builtIn(), meter, writer, mask,
-                List.of(LendingFixture.allowList(SqlDialect.HSQLDB)), new BigDecimal("0.8"), Effort.LOW, 120_000L,
-                "claude-sonnet-5-5");
+        BindState s = new BindState(gateway, PriceTable.builtIn(), meter, writer, mask, List.of(list),
+                new BigDecimal("0.8"), Effort.LOW, 120_000L, "claude-sonnet-5-5");
         states.add(s);
         return s;
+    }
+
+    /**
+     * D100: the bind checks its allow-list against the source before the catalogue is built: a list that leaves a
+     * column of a table unnamed (here the BS6 list without {@code staff.pin_hash} as another column, which the guard's
+     * rule 4 needs to resolve a correlated name) ends the slot before any model call, naming the column, never a value.
+     */
+    @Test
+    void anAllowListThatDoesNotMatchTheSchemaEndsTheSlotBeforeAnyModelCall() {
+        ScriptedGateway gateway = answering(goodProposal());
+        LlmSqlResolver<ItemByCategory, ItemRef> partial = resolver("ItemByCategory", ItemByCategory.class, null,
+                state(gateway, "0.50", LendingFixture.allowList(SqlDialect.HSQLDB)));
+        IllegalStateException e = assertThrows(IllegalStateException.class, () -> partial.candidates(POWER, ctx));
+        assertTrue(e.getMessage().contains("does not match table staff") && e.getMessage().contains("[PIN_HASH]"),
+                e.getMessage());
+        assertTrue(gateway.requests().isEmpty(), "no model call");
+        assertTrue(ledger.isEmpty());
+        assertTrue(ctx.statements.stream().anyMatch(s -> s.startsWith("SELECT * FROM staff WHERE 1 = 0")),
+                "the check's statements are the bind's: " + ctx.statements);
     }
 
     private static <Q extends Query<T>, T> LlmSqlResolver<Q, T> resolver(String kind, Class<Q> query,
@@ -281,6 +304,29 @@ class LlmSqlResolverTest {
                 "a number equal in value is the argument's value");
     }
 
+    /**
+     * Rule 6 of 5.3 (the L1 sceptic's S2): a value of the query's arguments is bound as {@code ?}; a statement that
+     * writes one inline as a string literal, its parameter list short by that one, is rejected {@code PARAM} naming the
+     * argument, and nothing runs.
+     */
+    @Test
+    void anArgumentsValueWrittenAsALiteralIsRejected() throws Exception {
+        String inline = "SELECT i.code, i.title, i.deposit FROM item i WHERE i.category = 'POWER' AND i.deposit <= ?"
+                + " ORDER BY i.deposit";
+        int before = ctx.statements.size();
+        assertTrue(items(answering(proposal(inline, List.of(param("maxDeposit", "60.00", "NUMBER")), 0.9, 1, 5)))
+                .candidates(POWER, ctx).isEmpty());
+        assertTrue(ctx.allRejected().contains("proposal: PARAM: the statement writes the value of the argument"
+                + " category as a literal"), ctx.allRejected());
+        assertTrue(ctx.statements.subList(before, ctx.statements.size()).stream()
+                .noneMatch(s -> s.contains("i.category = 'POWER'")), "the statement did not run");
+        String other = "SELECT i.code, i.title, i.deposit FROM item i WHERE i.category = ? AND i.deposit <= ? AND"
+                + " i.title <> 'Tile saw' ORDER BY i.deposit";
+        assertEquals(2, items(answering(proposal(other, List.of(param("category", "POWER", "STRING"),
+                param("maxDeposit", "60.00", "NUMBER")), 0.9, 1, 5))).candidates(POWER, ctx).size(),
+                "a literal that is no argument's value is the model's own condition");
+    }
+
     @Test
     void theRowCountMustLieWithinTheStatedBounds() throws Exception {
         Map<String, Object> p = goodProposal();
@@ -377,8 +423,16 @@ class LlmSqlResolverTest {
                 .candidates(POWER, ctx));
         assertEquals(DataException.Kind.UNAVAILABLE, e.kind());
         assertEquals(LlmSqlResolver.SOURCE, e.source());
-        assertTrue(e.getMessage().startsWith("no recording for the request of slot item; record with"
-                + " -Pinference-record"), e.getMessage());
+        assertTrue(e.getMessage().startsWith("no recording for the request of slot item; record with a recording"
+                + " gateway (record: true, see the recordings README of the sample)"), e.getMessage());
+        assertFalse(e.getMessage().contains("-Pinference-record"), "a profile that is not built: " + e.getMessage());
+        assertEquals(1, ledger.size(), "the failed call is in the ledger, so the run's inference.jsonl has its line");
+        CostLedger.Entry failed = ledger.entries().get(0);
+        assertEquals("NO_RECORDING", failed.details().get("error"));
+        assertEquals("recorded", failed.provider());
+        assertEquals("claude-sonnet-5-5", failed.model(), "the model asked");
+        assertEquals("0", failed.costUsd());
+        assertEquals("item", failed.slot());
     }
 
     @Test
@@ -392,7 +446,11 @@ class LlmSqlResolverTest {
         });
         assertEquals(2, items(flaky).candidates(POWER, ctx).size());
         assertEquals(2, flaky.requests().size());
-        assertEquals(1, ledger.size(), "the failure was not billed");
+        assertEquals(2, ledger.size(), "the failed call is an entry too (D102), of zero usage");
+        assertEquals("0", ledger.entries().get(0).costUsd(), "the failure was not billed");
+        assertEquals("RATE_LIMIT", ledger.entries().get(0).details().get("error"));
+        assertEquals("claude-sonnet-5-5", ledger.entries().get(0).model(), "the slot's first entry names the model");
+        assertEquals("0.001", ledger.entries().get(1).costUsd());
         assertEquals("RATE_LIMIT", log.records().get(0).get("error"));
         ScriptedGateway down = ScriptedGateway.failing(new InferenceException(Kind.OVERLOADED, "HTTP 529"));
         DataException e = assertThrows(DataException.class, () -> items(down).candidates(POWER, ctx));

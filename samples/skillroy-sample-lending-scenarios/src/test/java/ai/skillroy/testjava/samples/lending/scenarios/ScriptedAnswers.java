@@ -50,8 +50,15 @@ import java.util.concurrent.atomic.AtomicInteger;
  * them ({@code RecordingGateway} around a {@code ScriptedGateway}, {@code -D}{@value #UPDATE}{@code =true}) have the
  * real format and the whole tier (b) and session paths run for real with no key. A recording made this way names
  * {@code provider: "scripted"} and the model {@value ScriptedGateway#MODEL}: that is what marks it as a stand-in.
- * Once a model key can be used, a maintainer records the same requests live with {@code -Pinference-record}; the files
- * then name the provider and the model that answered, and no code changes.
+ *
+ * <p>Once a model key can be used, scenario D's tier (b) requests can be recorded live through the route that exists,
+ * {@code record: true} in an {@code inference.yaml} with the live gateway (a {@code RecordingGateway} around it,
+ * {@code Gateways.build}; {@code -Dskillroy.inference.record.overwrite=true} to replace a file); the profile
+ * {@code inference-record} is specified, not built (phase5-contracts.md D110). That is not "no code changes": the
+ * recordings and the bindings files written from them then carry another provider, model, statement, rationale, usage
+ * and label, and the assertions that pin the stand-ins (listed in the recordings' README) are loosened in the same
+ * change, {@link #APPROVED_BY} included. The session's recordings stay stand-ins: a live session is a new session, and
+ * the image's session check drives {@link #sessionScript()} by position.
  *
  * <ul>
  *   <li>{@link #supervisor}: scenario D's supervisor query on each seed, one {@code SELECT} over the allow-listed

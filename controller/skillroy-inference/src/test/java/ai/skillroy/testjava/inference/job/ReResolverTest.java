@@ -52,6 +52,7 @@ import ai.skillroy.testjava.scenario.resolve.Strategy;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.math.BigDecimal;
@@ -67,6 +68,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 
@@ -85,6 +87,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * budget cutting a round, a batch that does not end in time (cancelled, {@code BATCH_TIMEOUT}), a gateway without a
  * batch interface, and the refusals before anything runs.
  */
+@Timeout(value = 120, unit = TimeUnit.SECONDS)
 class ReResolverTest {
 
     static final String ITEM = """
@@ -210,10 +213,16 @@ class ReResolverTest {
         final AtomicInteger statusReads = new AtomicInteger();
         final AtomicInteger collected = new AtomicInteger();
         int inProgressReads;
-        MutableClock clock;
-        Duration perRead = Duration.ZERO;
+        /**
+         * The job's clock (the tests run the job on it): moved forward on every status read, by default a minute,
+         * so that a wait loop that never sees its batch end meets the job's two-hour bound instead of spinning.
+         */
+        MutableClock clock = new MutableClock(Instant.parse("2026-10-08T01:00:00Z"));
+        Duration perRead = Duration.ofMinutes(1);
         boolean batch = true;
         InferenceException submitFailure;
+        /** Counted down on the first status read. */
+        final java.util.concurrent.CountDownLatch firstRead = new java.util.concurrent.CountDownLatch(1);
 
         TestGateway(Function<ModelRequest, ModelResponse> answers) {
             this.scripted = ScriptedGateway.answering(answers);
@@ -253,6 +262,7 @@ class ReResolverTest {
         @Override
         public BatchStatus batchStatus(BatchHandle handle) throws InferenceException {
             statusReads.incrementAndGet();
+            firstRead.countDown();
             if (clock != null) {
                 clock.advance(perRead);
             }
@@ -296,8 +306,10 @@ class ReResolverTest {
                 + r.metadata().get(ModelRequest.META_SLOT)).toList();
     }
 
+    /** Runs the job through {@code gateway}; a test gateway's clock is the job's (it moves on every status read). */
     private ReResolveReport run(Path root, JobOptions job, InferenceGateway gateway) throws Exception {
-        return ReResolver.run(plans, pack, agent, options(root), job, gateway);
+        JobOptions timed = gateway instanceof TestGateway t && t.clock != null ? job.withClock(t.clock) : job;
+        return ReResolver.run(plans, pack, agent, options(root), timed, gateway);
     }
 
     private static JobOptions job(Path out, String id, String budget) {
@@ -488,6 +500,82 @@ class ReResolverTest {
         ReResolveReport report = run(tmp.resolve("slow"), job(null, "slow-1", "1.00"), gateway);
         assertEquals(5, gateway.statusReads.get(), "three in progress, then ended, then the second round's");
         assertEquals(ReResolveReport.Status.NEW, report.scenario("desk-two").status());
+    }
+
+    /** A positive poll interval: the job waits between two status reads (the bounded wait), then collects. */
+    @Test
+    void aPositivePollWaitsBetweenStatusReads() throws Exception {
+        TestGateway gateway = gateway();
+        gateway.inProgressReads = 2;
+        long started = System.nanoTime();
+        ReResolveReport report = run(tmp.resolve("polled"), job(null, "polled-1", "1.00").withBatchTimes(
+                Duration.ofHours(2), Duration.ofMillis(40)), gateway);
+        assertTrue((System.nanoTime() - started) / 1_000_000 >= 80, "two waits of the poll interval");
+        assertEquals(4, gateway.statusReads.get(), "two in progress, then ended, then the second round's");
+        assertEquals(ReResolveReport.Status.NEW, report.scenario("desk-two").status());
+    }
+
+    /** An interrupt while the job waits for a batch cancels the batch and ends the job with the interrupt. */
+    @Test
+    void anInterruptWhileWaitingForABatchCancelsIt() throws Exception {
+        TestGateway gateway = gateway();
+        gateway.inProgressReads = Integer.MAX_VALUE;
+        java.util.concurrent.atomic.AtomicReference<Throwable> thrown = new java.util.concurrent.atomic
+                .AtomicReference<>();
+        Thread job = new Thread(() -> {
+            try {
+                run(tmp.resolve("interrupted"), job(null, "interrupted-1", "1.00").withBatchTimes(
+                        Duration.ofHours(2), Duration.ofMinutes(10)), gateway);
+            } catch (Throwable e) {
+                thrown.set(e);
+            }
+        }, "re-resolve-job");
+        job.start();
+        assertTrue(gateway.firstRead.await(30, TimeUnit.SECONDS), "the job reached its wait for the batch");
+        job.interrupt();
+        job.join(30_000);
+        assertFalse(job.isAlive(), "the interrupt ended the wait");
+        assertTrue(thrown.get() instanceof InterruptedException, String.valueOf(thrown.get()));
+        assertEquals(1, gateway.cancelled.size(), "the batch in flight was cancelled");
+        assertEquals(0, gateway.collected.get());
+    }
+
+    /**
+     * 8.3 (the L1 sceptic's S3): after a failed batch, a resolver retries inline at the regular rate; the job meter
+     * reserves that call's estimate before the bind resumes, so that the job budget bounds it: without room the
+     * scenario fails BUDGET and no call is made; with room the call is made and counted.
+     */
+    @Test
+    void anInlineRetryAfterAFailedBatchIsReservedOnTheJobBudget() throws Exception {
+        plans = List.of(plan(ITEM, "desk-item"));
+        TestGateway probe = gateway();
+        run(tmp.resolve("probe-retry"), job(null, "probe-retry", "1.00"), probe);
+        BigDecimal batchRound = estimate(probe, probe.batches.get(0).get(0));
+
+        TestGateway gateway = gateway();
+        gateway.submitFailure = new InferenceException(InferenceException.Kind.OVERLOADED, "HTTP 529 overloaded");
+        try (ai.skillroy.testjava.inference.Gateways.Served served = ai.skillroy.testjava.inference.Gateways.serve(
+                settings(), gateway)) {
+            // The round's batch fits exactly; its retry, at twice the batch rate, does not.
+            ReResolveReport report = run(tmp.resolve("no-room"), job(null, "no-room-1", batchRound.toPlainString()),
+                    gateway);
+            ReResolveReport.ScenarioReport item = report.scenario("desk-item");
+            assertEquals(ReResolveReport.Status.FAILED, item.status());
+            assertEquals(FailureKind.RESOLUTION_FAILED, item.failureKind());
+            assertEquals("BUDGET", item.reason());
+            assertTrue(item.message().contains("no room for the inline retry"), item.message());
+            assertTrue(gateway.scripted.requests().isEmpty(), "no retry was made");
+            assertTrue(report.costUsd().compareTo(batchRound) <= 0, "within the job budget");
+        }
+        TestGateway roomy = gateway();
+        roomy.submitFailure = new InferenceException(InferenceException.Kind.OVERLOADED, "HTTP 529 overloaded");
+        try (ai.skillroy.testjava.inference.Gateways.Served served = ai.skillroy.testjava.inference.Gateways.serve(
+                settings(), roomy)) {
+            ReResolveReport report = run(tmp.resolve("room"), job(null, "room-1", "1.00"), roomy);
+            assertEquals(ReResolveReport.Status.NEW, report.scenario("desk-item").status());
+            assertEquals(1, roomy.scripted.requests().size(), "the inline retry, made");
+            assertEquals(0, new BigDecimal("0.0010").compareTo(report.costUsd()), "and counted by the job");
+        }
     }
 
     @Test

@@ -144,7 +144,12 @@ final class Values {
         return sortKeys(normalise(value));
     }
 
-    private static Object sortKeys(Object value) {
+    /**
+     * A copy with the keys of every map sorted ({@link String#compareTo}, the order of canonical JSON), at every depth;
+     * lists keep their order and scalars are returned as they are. For text that must not depend on the order in which
+     * a value's keys were given (the session export, phase5-contracts.md 12.3).
+     */
+    static Object sortKeys(Object value) {
         if (value instanceof Map<?, ?> map) {
             TreeMap<String, Object> sorted = new TreeMap<>();
             for (Map.Entry<?, ?> e : map.entrySet()) {

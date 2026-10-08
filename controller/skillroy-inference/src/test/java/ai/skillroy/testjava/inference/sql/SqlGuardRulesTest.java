@@ -29,7 +29,9 @@ import org.junit.jupiter.params.provider.CsvSource;
 import java.sql.Connection;
 import java.sql.ResultSet;
 import java.util.EnumSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -145,6 +147,67 @@ class SqlGuardRulesTest {
         assertEquals(Reason.PERSONAL, refused(hsqldb,
                 "SELECT (SELECT MAX(l.borrower) FROM loan l WHERE l.id = x.loan_id) AS who FROM loan_line x"),
                 "and a scalar subquery");
+    }
+
+    /**
+     * The L2 sceptic's S2: a predicate subquery ({@code EXISTS}, {@code IN}, {@code ANY}) inside a select-list
+     * expression carries one bit of each personal column it references into the candidate, so it is tainted with
+     * them and refused; the same subqueries as filters are accepted (a personal column may filter).
+     */
+    /** The predicate subqueries over a personal column (the probe's {@code s2.name LIKE 'A%'}). */
+    private static final String EXISTS_A = "EXISTS (SELECT 1 FROM staff s2 WHERE s2.code = s.code AND s2.name"
+            + " LIKE 'A%')";
+    private static final String IN_A = "s.code IN (SELECT s2.code FROM staff s2 WHERE s2.name LIKE 'A%')";
+    private static final String ANY_A = "s.code = ANY (SELECT s2.code FROM staff s2 WHERE s2.name LIKE 'A%')";
+
+    private static String flag(String predicate) {
+        return "CASE WHEN " + predicate + " THEN 1 ELSE 0 END";
+    }
+
+    @Test
+    void aPredicateSubqueryOverAPersonalColumnIsNeverSelected() {
+        Map<String, String> refusedForms = new LinkedHashMap<>();
+        refusedForms.put("EXISTS", "SELECT s.code, " + flag(EXISTS_A) + " AS f FROM staff s");
+        refusedForms.put("NOT EXISTS", "SELECT s.code, " + flag("NOT EXISTS (SELECT 1 FROM staff s2 WHERE s2.code ="
+                + " s.code AND s2.email LIKE 'b%')") + " AS f FROM staff s");
+        refusedForms.put("IN", "SELECT s.code, " + flag(IN_A) + " AS f FROM staff s");
+        refusedForms.put("ANY", "SELECT s.code, " + flag(ANY_A) + " AS f FROM staff s");
+        refusedForms.put("correlated outward", "SELECT l.id, " + flag("EXISTS (SELECT 1 FROM staff s WHERE s.name ="
+                + " l.borrower)") + " AS f FROM loan l");
+        refusedForms.put("through a derived column", "SELECT d.code, d.f FROM (SELECT s.code AS code, "
+                + flag(EXISTS_A) + " AS f FROM staff s) d");
+        refusedForms.put("bare", "SELECT s.code, s.code IN (SELECT s2.code FROM staff s2 WHERE s2.name LIKE 'A%')"
+                + " AS f FROM staff s");
+        refusedForms.put("a scalar count, the same bit", "SELECT s.code, (SELECT COUNT(*) FROM staff s2 WHERE"
+                + " s2.code = s.code AND s2.name LIKE 'A%') AS f FROM staff s");
+        refusedForms.forEach((form, sql) -> assertEquals(Reason.PERSONAL, refused(hsqldb, sql), form));
+    }
+
+    @Test
+    void theSamePredicateSubqueriesFilter() throws Exception {
+        List<String> accepted = List.of(
+                "SELECT s.code FROM staff s WHERE " + EXISTS_A,
+                "SELECT s.code FROM staff s WHERE " + IN_A,
+                "SELECT s.code FROM staff s WHERE " + ANY_A,
+                "SELECT s.code FROM staff s WHERE " + flag(EXISTS_A) + " = 1",
+                "SELECT d.code FROM (SELECT s.code AS code, " + flag(EXISTS_A) + " AS f FROM staff s) d WHERE d.f = 1",
+                "SELECT s.code, " + flag("EXISTS (SELECT 1 FROM staff_role r WHERE r.staff_code = s.code AND r.role ="
+                        + " 'DESK')") + " AS f FROM staff s",
+                "SELECT s.code FROM staff s WHERE (SELECT COUNT(*) FROM staff s2 WHERE s2.code = s.code AND s2.name"
+                        + " LIKE 'A%') = 1",
+                "SELECT s.code, (SELECT COUNT(*) FROM staff_role r WHERE r.staff_code = s.code) AS roles FROM staff s");
+        for (String sql : accepted) {
+            hsqldb.guard(sql);
+        }
+    }
+
+    /** Rule 6: the guarded statement names its string literals (unescaped, in order) for the resolver's check. */
+    @Test
+    void theGuardedStatementNamesItsStringLiterals() throws Exception {
+        GuardedStatement g = hsqldb.guard("SELECT i.code FROM item i WHERE i.category = 'GARDEN' AND i.title <>"
+                + " 'O''Neil''s saw' AND i.deposit > 10 AND i.active = TRUE AND i.code = ?");
+        assertEquals(List.of("GARDEN", "O'Neil's saw"), g.literals(), "strings only: not 10, not TRUE");
+        assertEquals(List.of(), hsqldb.guard("SELECT i.code FROM item i WHERE i.code = ?").literals());
     }
 
     @Test

@@ -66,6 +66,11 @@ public final class ToolProjection {
     public static final String DATA_QUERY = "data.query";
     /** What a primitive's tool name ends with when a verb of the pack takes its plain name (D92). */
     public static final String PRIMITIVE_SUFFIX = "_primitive";
+    /**
+     * The primitives that run a caller's script in the target's pages ({@code web.evaluate}, and {@code web.waitFlag},
+     * which evaluates an expression until it is true): offered by no policy unless a person opted in (D98).
+     */
+    public static final Set<String> SCRIPT_PRIMITIVES = Set.of("web.evaluate", "web.waitFlag");
     /** Keywords the provider's strict schemas do not take. */
     private static final Set<String> UNSUPPORTED_KEYWORDS = Set.of("minimum", "maximum", "exclusiveMinimum",
             "exclusiveMaximum", "multipleOf", "minLength", "maxLength", "maxItems", "uniqueItems", "minProperties",
@@ -93,24 +98,49 @@ public final class ToolProjection {
             excluded = excluded == null ? Set.of() : Set.copyOf(excluded);
         }
 
-        /** The MCP server's default: reads only, {@code data_query} over allow-listed sources. */
+        /**
+         * The MCP server's default: reads only, {@code data_query} over allow-listed sources; never the
+         * {@link ToolProjection#SCRIPT_PRIMITIVES} ({@code web.waitFlag} is a read that runs a caller's script, D98).
+         */
         public static Policy readOnly() {
-            return new Policy(true, false, false, Set.of(), true, Set.of());
+            return readOnly(false);
         }
 
-        /** The MCP server with {@code --mutating}: the reads, the verbs, the domain and base mutating primitives. */
+        /**
+         * {@link #readOnly()}, with {@code web.waitFlag} offered only when {@code allowEvaluate} is true (a person's
+         * opt-in, {@code skillroy mcp --allow-evaluate}, D98; {@code web.evaluate} changes the page and is mutating).
+         */
+        public static Policy readOnly(boolean allowEvaluate) {
+            return new Policy(true, false, false, Set.of(), true, allowEvaluate ? Set.of() : SCRIPT_PRIMITIVES);
+        }
+
+        /**
+         * The MCP server with {@code --mutating}: the reads, the verbs, the domain and base mutating primitives; never
+         * the {@link ToolProjection#SCRIPT_PRIMITIVES}, which run any script in the target's pages (decision D98):
+         * {@link #mutating(boolean)} offers them when a person opted in.
+         */
         public static Policy mutating() {
-            return new Policy(true, true, true, BASE_NAMESPACES, true, Set.of());
+            return mutating(false);
+        }
+
+        /**
+         * {@link #mutating()}, with the {@link ToolProjection#SCRIPT_PRIMITIVES} offered only when
+         * {@code allowEvaluate} is true (a person's opt-in, {@code skillroy mcp --mutating --allow-evaluate}; the
+         * planner's server never has it, D98).
+         */
+        public static Policy mutating(boolean allowEvaluate) {
+            return new Policy(true, true, true, BASE_NAMESPACES, true, allowEvaluate ? Set.of() : SCRIPT_PRIMITIVES);
         }
 
         /**
          * The session service's primitives and verbs (12.4): no primitive reads (the workflow reads stand for them),
          * the verbs with {@code allowMutatingVerbs}, the base {@code swing_*} and {@code web_*} mutating primitives
-         * with {@code allowBasePrimitives}; never {@code data_query}, never {@code evaluate}.
+         * with {@code allowBasePrimitives}; never {@code data_query}, never the
+         * {@link ToolProjection#SCRIPT_PRIMITIVES}.
          */
         public static Policy session(boolean allowMutatingVerbs, boolean allowBasePrimitives) {
             return new Policy(false, allowMutatingVerbs, false, allowBasePrimitives ? Set.of("swing", "web") : Set.of(),
-                    false, Set.of("web.evaluate"));
+                    false, SCRIPT_PRIMITIVES);
         }
     }
 

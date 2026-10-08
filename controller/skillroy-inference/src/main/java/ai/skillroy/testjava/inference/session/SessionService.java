@@ -17,11 +17,13 @@
 package ai.skillroy.testjava.inference.session;
 
 import ai.skillroy.testjava.controller.AgentLostException;
+import ai.skillroy.testjava.inference.budget.BudgetCaps;
 import ai.skillroy.testjava.inference.budget.BudgetException;
 import ai.skillroy.testjava.inference.budget.BudgetMeter;
 import ai.skillroy.testjava.inference.budget.LedgerWriter;
 import ai.skillroy.testjava.inference.budget.PriceTable;
 import ai.skillroy.testjava.inference.prompt.PromptMask;
+import ai.skillroy.testjava.inference.resolve.LlmSqlResolver;
 import ai.skillroy.testjava.inference.spi.CacheHint;
 import ai.skillroy.testjava.inference.spi.Content;
 import ai.skillroy.testjava.inference.spi.Effort;
@@ -42,16 +44,20 @@ import ai.skillroy.testjava.protocol.PrimitiveDescriptor;
 import ai.skillroy.testjava.scenario.BindException;
 import ai.skillroy.testjava.scenario.CheckOutcome;
 import ai.skillroy.testjava.scenario.ExecutorSession;
+import ai.skillroy.testjava.scenario.FailureKind;
 import ai.skillroy.testjava.scenario.Origin;
 import ai.skillroy.testjava.scenario.Schemas;
 import ai.skillroy.testjava.scenario.StepOutcome;
 import ai.skillroy.testjava.scenario.pack.DomainPack;
 import ai.skillroy.testjava.scenario.pack.PlannedCall;
 import ai.skillroy.testjava.scenario.pack.Sync;
+import ai.skillroy.testjava.scenario.resolve.CostLedger;
+import ai.skillroy.testjava.scenario.resolve.CredentialSpec;
 import ai.skillroy.testjava.scenario.resolve.InferenceSettings;
 import ai.skillroy.testjava.scenario.resolve.QueryType;
 import ai.skillroy.testjava.scenario.resolve.Resolution;
 import ai.skillroy.testjava.scenario.resolve.ResolutionCatalogue;
+import ai.skillroy.testjava.scenario.resolve.Strategy;
 
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
@@ -89,7 +95,16 @@ import java.util.TreeSet;
  * named by the session id, and its {@code inference.jsonl} record) and the session meter; the turn's budget state goes
  * into the journal ({@code ExecutorSession.budget}). The history carries at most {@code maxHistoryTurns} earlier turns
  * in full; older ones are folded into a summary by one {@code summary} call at {@code HAIKU_CLASS}, recorded like any
- * call. A provider's opaque parts (thinking blocks with their signatures) are echoed back unchanged.
+ * call. A provider's opaque parts (thinking blocks with their signatures) are echoed back unchanged. The turns' calls
+ * take the settings' {@code effort.session}, the summary {@code effort.summary}, and each estimate is taken at the
+ * model id the settings give the call's class; the settings are the session's bind options' (the hosts open the
+ * session with the invocation's settings there, which also serve its tier (b) resolves).
+ *
+ * <p>{@link #resolve} is the session's metered resolve (decision D101): a strategy list that names a model token
+ * reserves a tier (b) estimate on the session meter first (and is refused {@code RESOLUTION_FAILED} / {@code BUDGET}
+ * when it has no room), the resolve runs with its scenario budget capped at what is left of the session's, and the
+ * ledger entries it added are settled on the session meter afterwards; the model's {@code skillroy_resolve} goes
+ * through it, and so should every host's resolve of a session that has a service.
  *
  * <p>The service never sleeps: it waits on the gateway's call and on the session's step, each bounded. It closes
  * nothing of the session (the caller owns the session, the gateway, the meter and the ledger).
@@ -150,6 +165,10 @@ public final class SessionService implements AutoCloseable {
     private final Clock clock;
     private final DomainPack pack;
     private final PromptMask mask;
+    /** The session's inference settings (its bind options'): the efforts and the model ids of its calls. */
+    private final InferenceSettings settings;
+    private final Effort sessionEffort;
+    private final Effort summaryEffort;
     private final List<ToolSpec> tools;
     private final Map<String, String> verbTools = new TreeMap<>();
     private final Map<String, PrimitiveDescriptor> primitiveTools = new TreeMap<>();
@@ -170,7 +189,8 @@ public final class SessionService implements AutoCloseable {
      * @param ledger the writer every call is recorded through (the session's ledger, {@code inference.jsonl})
      * @param prices the price table the estimate before a call is taken at
      * @param clock what a turn's duration is measured on; null means the session's clock
-     * @throws IllegalArgumentException when the pack's verbs or the target's primitives cannot be projected as tools
+     * @throws IllegalArgumentException when the pack's verbs or the target's primitives cannot be projected as tools,
+     *     or the session's settings name an effort that is not low, medium or high
      */
     public SessionService(ExecutorSession session, InferenceGateway gateway, SessionPolicy policy, BudgetMeter meter,
                           LedgerWriter ledger, PriceTable prices, Clock clock) {
@@ -182,6 +202,12 @@ public final class SessionService implements AutoCloseable {
         this.prices = prices == null ? PriceTable.builtIn() : prices;
         this.clock = clock != null ? clock : session.options().clock();
         this.pack = session.pack();
+        // The hosts open the session with the invocation's settings in its bind options (they also serve the
+        // session's tier (b) resolves): effort.session, effort.summary and the model ids come from there.
+        InferenceSettings bound = session.options().bind() == null ? null : session.options().bind().inference();
+        this.settings = bound == null ? InferenceSettings.none() : bound;
+        this.sessionEffort = effort(settings, "session", Effort.MEDIUM);
+        this.summaryEffort = effort(settings, "summary", Effort.LOW);
         this.mask = PromptMask.of(session.options().bind().credentials().mask(), safe(pack::sqlAllowLists),
                 safe(pack::rowMasks));
         meter.identify(session.id());
@@ -281,6 +307,111 @@ public final class SessionService implements AutoCloseable {
         }
         recordBudget(usages);
         return finish(new Turn(index, text, actions, answer, outcome, total(usages), elapsed(t0)), turn);
+    }
+
+    /**
+     * A resolve of the session, metered on the session's budget (decision D101): what the model's
+     * {@code skillroy_resolve} runs, and what a host runs for a resolve of a session that has a service (the CLI
+     * session's {@code resolve}, the MCP server's {@code skillroy_resolve}). A strategy list without a model token is
+     * {@link ExecutorSession#resolve} as it stands, whatever the budget. One that names a model token ({@code llm-sql})
+     * first reserves one tier (b) call's estimate on the session meter ({@value LlmSqlResolver#ESTIMATE_EXTRA_TOKENS}
+     * input and {@value LlmSqlResolver#MAX_TOKENS} output tokens at the price of the model id the settings give the
+     * Sonnet class; the catalogue is not counted), and is refused {@code RESOLUTION_FAILED} reason {@code BUDGET}
+     * without a model call when the service's budget is exhausted or the meter has no room (the service then makes no
+     * further model call); otherwise the resolve runs with its scenario budget capped at what was left of the
+     * session's ({@link BudgetCaps}: the contributor its engine loads reads the cap of the session's ledger), and the
+     * ledger entries it added are settled on the session meter afterwards, whatever its outcome; the journal's
+     * {@code budget} record then says where the session stands.
+     *
+     * @throws BindException as {@link ExecutorSession#resolve}, and the refusal above (its detail: {@code scope},
+     *     {@code id}, {@code limitUsd}, {@code spentUsd}, {@code estimateUsd})
+     * @throws IllegalArgumentException as {@link ExecutorSession#resolve}
+     * @throws AgentLostException if the agent is gone
+     * @throws InterruptedException if the thread is interrupted
+     * @throws IllegalStateException after {@link #close()}
+     */
+    public synchronized Resolution resolve(String slot, String kind, Map<String, Object> args, List<String> strategy,
+                                           List<String> verify, CredentialSpec credential, Origin origin)
+            throws BindException, AgentLostException, InterruptedException {
+        if (closed) {
+            throw new IllegalStateException("the session service is closed");
+        }
+        if (!namesModel(strategy)) {
+            return session.resolve(slot, kind, args, strategy, verify, credential, origin);
+        }
+        BigDecimal estimate = prices.estimate(model(ModelClass.SONNET_CLASS), LlmSqlResolver.ESTIMATE_EXTRA_TOKENS,
+                LlmSqlResolver.MAX_TOKENS, false);
+        BigDecimal room = meter.remaining();
+        if (exhausted) {
+            throw refused(slot, new BudgetException(meter.scope(), meter.id(), meter.limit(), meter.spent(),
+                    estimate));
+        }
+        try {
+            meter.reserve(estimate);
+        } catch (BudgetException e) {
+            exhausted = true;
+            recordBudgetNow();
+            throw refused(slot, e);
+        }
+        CostLedger bindLedger = session.options().bind().ledger();
+        int before = bindLedger.size();
+        try (BudgetCaps.Cap cap = BudgetCaps.cap(bindLedger, room)) {
+            return session.resolve(slot, kind, args, strategy, verify, credential, origin);
+        } finally {
+            BigDecimal spent = BigDecimal.ZERO;
+            List<CostLedger.Entry> all = bindLedger.entries();
+            for (int i = before; i < all.size(); i++) {
+                spent = spent.add(cost(all.get(i)));
+            }
+            if (all.size() > before) {
+                meter.settle(Usage.none(gateway.provider(), null).withCost(spent.toPlainString(), null));
+            } else {
+                meter.release();
+            }
+            recordBudgetNow();
+        }
+    }
+
+    /** True when a strategy list names a token whose strategy needs a model. */
+    private static boolean namesModel(List<String> strategy) {
+        if (strategy == null) {
+            return false;
+        }
+        for (String token : strategy) {
+            Strategy s = Strategy.ofToken(token);
+            if (s != null && s.needsModel()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static BigDecimal cost(CostLedger.Entry entry) {
+        try {
+            return entry.costUsd() == null ? BigDecimal.ZERO : new BigDecimal(entry.costUsd().strip());
+        } catch (NumberFormatException e) {
+            return BigDecimal.ZERO;
+        }
+    }
+
+    /** The refusal of a resolve that names a model token when the session meter has no room. */
+    private BindException refused(String slot, BudgetException e) {
+        Map<String, Object> detail = new LinkedHashMap<>(e.toResolutionException().detail());
+        return new BindException(FailureKind.RESOLUTION_FAILED, BUDGET_REASON, slot, "slot '" + slot + "': "
+                + e.getMessage() + "; the session makes no further model call (a resolve without llm-sql still runs)",
+                detail);
+    }
+
+    /** The reason of a refused resolve, as a slot's budget failure is reported (D74). */
+    static final String BUDGET_REASON = "BUDGET";
+
+    /** Writes the journal's {@code budget} record now; a session its owner closed takes none. */
+    private void recordBudgetNow() {
+        try {
+            session.budget(BUDGET_SCOPE, meter.spent(), meter.limit(), exhausted);
+        } catch (IllegalStateException e) {
+            // The session was closed by its owner; the ledger still has the calls.
+        }
     }
 
     /** Ends the service; closes nothing of the session. Idempotent. */
@@ -409,20 +540,44 @@ public final class SessionService implements AutoCloseable {
     /** One model call of the turn: the estimate reserved, the call, its record. */
     private ModelResponse call(List<Message> messages, List<Usage> usages)
             throws BudgetException, InferenceException, InterruptedException {
-        ModelRequest request = ModelRequest.builder(PURPOSE, ModelClass.SONNET_CLASS).effort(Effort.MEDIUM)
+        ModelRequest request = ModelRequest.builder(PURPOSE, ModelClass.SONNET_CLASS).effort(sessionEffort)
                 .maxTokens(MAX_TOKENS).cache(CacheHint.SHORT).system(system.get(0)).system(system.get(1))
                 .messages(messages).tools(tools).metadata(META_SESSION, session.id()).build();
-        return complete(request, usages, InferenceSettings.DEFAULT_MODELS.get(InferenceSettings.MODEL_SONNET));
+        return complete(request, usages, model(ModelClass.SONNET_CLASS));
+    }
+
+    /** The model id the settings give a class (the gateway's mapping), for the estimate before a call. */
+    private String model(ModelClass modelClass) {
+        String id = settings.models().get(modelClass.settingsKey());
+        return id != null ? id : InferenceSettings.DEFAULT_MODELS.get(modelClass.settingsKey());
+    }
+
+    /** The effort the settings give a purpose, else the default. */
+    private static Effort effort(InferenceSettings settings, String purpose, Effort fallback) {
+        String text = settings.effort().get(purpose);
+        if (text == null) {
+            return fallback;
+        }
+        try {
+            return Effort.parse(text);
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException("effort." + purpose + " must be low, medium or high");
+        }
     }
 
     private ModelResponse complete(ModelRequest request, List<Usage> usages, String estimateModel)
             throws BudgetException, InferenceException, InterruptedException {
-        meter.reserve(estimate(request, estimateModel));
+        BigDecimal estimate = estimate(request, estimateModel);
+        if (exhausted) {
+            // A refused resolve exhausted the service during this turn: no further model call (D74).
+            throw new BudgetException(meter.scope(), meter.id(), meter.limit(), meter.spent(), estimate);
+        }
+        meter.reserve(estimate);
         ModelResponse response;
         try {
             response = gateway.complete(request);
         } catch (InferenceException e) {
-            ledger.recordFailure(request, e, session.id(), null, null);
+            ledger.recordFailure(request, e, gateway.provider(), estimateModel, session.id(), null, null);
             if (ledger.meter() != meter) {
                 if (e.usage() != null) {
                     meter.settle(e.usage());
@@ -520,7 +675,7 @@ public final class SessionService implements AutoCloseable {
                 return Result.ok(bounded(Json.writePretty(catalogue()), policy.snapshotMaxChars()));
             }
             if (name.equals(WorkflowTools.RESOLVE.name())) {
-                return resolve(in, origin);
+                return resolveTool(in, origin);
             }
             if (name.equals(WorkflowTools.CHECK.name())) {
                 CheckOutcome check = session.check(required(in, "path"), in.get("matcher"), origin);
@@ -560,7 +715,7 @@ public final class SessionService implements AutoCloseable {
         }
     }
 
-    private Result resolve(Map<String, Object> in, Origin origin) throws AgentLostException, InterruptedException {
+    private Result resolveTool(Map<String, Object> in, Origin origin) throws AgentLostException, InterruptedException {
         String slot = required(in, "slot");
         String kind = required(in, "kind");
         @SuppressWarnings("unchecked")
@@ -572,7 +727,7 @@ public final class SessionService implements AutoCloseable {
             }
         }
         try {
-            Resolution r = session.resolve(slot, kind, args, strategy, List.of(), null, origin);
+            Resolution r = resolve(slot, kind, args, strategy, List.of(), null, origin);
             Map<String, Object> j = new LinkedHashMap<>();
             j.put("slot", r.slot());
             j.put("kind", r.query());
@@ -679,13 +834,12 @@ public final class SessionService implements AutoCloseable {
             }
             text.append("Ended ").append(t.outcome()).append(": ").append(mask.text(t.answer())).append("\n\n");
         }
-        ModelRequest request = ModelRequest.builder(PURPOSE_SUMMARY, ModelClass.HAIKU_CLASS).effort(Effort.LOW)
+        ModelRequest request = ModelRequest.builder(PURPOSE_SUMMARY, ModelClass.HAIKU_CLASS).effort(summaryEffort)
                 .maxTokens(SUMMARY_MAX_TOKENS).cache(CacheHint.NONE).system(Content.Text.of(SUMMARY_INSTRUCTIONS))
                 .message(Message.user(text.toString())).metadata(META_SESSION, session.id()).build();
         String folding;
         try {
-            ModelResponse response = complete(request, usages,
-                    InferenceSettings.DEFAULT_MODELS.get(InferenceSettings.MODEL_HAIKU));
+            ModelResponse response = complete(request, usages, model(ModelClass.HAIKU_CLASS));
             folding = response.text().isBlank() ? mechanical(folded) : mask.text(response.text().strip());
         } catch (InferenceException e) {
             folding = (summary == null ? "" : summary + "\n") + mechanical(folded);

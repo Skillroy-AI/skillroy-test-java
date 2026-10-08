@@ -86,7 +86,8 @@ import java.util.function.Consumer;
  *
  * <p>Calls: request ids are {@code "c-<n>"} per client. {@link CallOptions} go into {@code params._meta}
  * ({@code correlationId}, always present and generated when not given; {@code timeoutMs}; {@code confirm} when true;
- * {@code secretParams} when not empty, amendment A34).
+ * {@code secretParams} when not empty, amendment A34), and nothing else does: a {@code _meta} among the params is
+ * dropped (phase5-contracts.md 12.2).
  * The deadline of a call is {@code timeoutMs + 5 s}, or 130 s when no timeout is given, so the agent's own TIMEOUT
  * error normally arrives first. Every deadline covers the whole reply, headers and body (finding S23), and a reply
  * body is limited to 64 MiB (64 KiB for {@code /ping}); a late or oversized reply is an {@link AgentLostException}.
@@ -226,7 +227,8 @@ public final class AgentClient implements AgentConnection {
     /**
      * {@inheritDoc}
      *
-     * <p>A {@code _meta} object already present in {@code params} is merged with the options, which win. A
+     * <p>The request's {@code _meta} is built from the options alone: a {@code _meta} in {@code params} is dropped,
+     * never merged (phase5-contracts.md 12.2), so no map a caller passes on can confirm a destructive call. A
      * successful {@code agent.disable} marks this client lost (the agent is going away).
      *
      * @param options null means {@link CallOptions#defaults()}
@@ -639,25 +641,23 @@ public final class AgentClient implements AgentConnection {
         }
     }
 
+    /**
+     * The params as sent: every param but {@code _meta}, then {@code _meta} built from the options alone. A
+     * {@code _meta} among the params is dropped, never merged (phase5-contracts.md 12.2, the Phase 5 fix wave): a
+     * caller's map could otherwise confirm a destructive call without {@link CallOptions#confirm()}.
+     */
     private Map<String, Object> withMeta(Map<String, Object> params, CallOptions options) {
         Map<String, Object> copy = new LinkedHashMap<>();
-        Map<String, Object> meta = new LinkedHashMap<>();
         if (params != null) {
             for (Map.Entry<String, Object> e : params.entrySet()) {
-                if (META.equals(e.getKey())) {
-                    if (e.getValue() instanceof Map<?, ?> given) {
-                        given.forEach((k, v) -> meta.put(String.valueOf(k), v));
-                    }
-                } else {
+                if (!META.equals(e.getKey())) {
                     copy.put(e.getKey(), e.getValue());
                 }
             }
         }
-        String correlationId = options.correlationId();
-        if (correlationId == null) {
-            correlationId = meta.get("correlationId") instanceof String given && !given.isEmpty()
-                    ? given : correlationPrefix + correlationIds.incrementAndGet();
-        }
+        Map<String, Object> meta = new LinkedHashMap<>();
+        String correlationId = options.correlationId() != null ? options.correlationId()
+                : correlationPrefix + correlationIds.incrementAndGet();
         meta.put("correlationId", correlationId);
         if (options.timeoutMs() != null) {
             meta.put("timeoutMs", options.timeoutMs());

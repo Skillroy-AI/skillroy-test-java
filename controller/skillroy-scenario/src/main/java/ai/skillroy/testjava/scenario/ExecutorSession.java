@@ -78,12 +78,14 @@ import java.util.regex.Pattern;
  * detail), not the session. {@link SessionOptions#readOnly()} refuses a call whose primitive is mutating, destructive
  * or not in the target's catalogue before anything is sent ({@code READ_ONLY} in the outcome; journaled with
  * {@code executed: 0}). A destructive call needs {@code confirm: true} in its arguments, which only a
- * {@link Origin.Kind#PERSON} may carry: the session strips {@code confirm} from a {@link Origin.Kind#MODEL} origin's
- * calls and arguments, and the agent then answers {@code CONFIRM_REQUIRED} (design 3.4). Every outcome's detail and
- * result, every journal record and every value returned pass the session's secret mask (the credentials, and the
- * secret fields a resolution joined). A session's calls carry the correlation id {@code <sessionId>/<stepId>/<n>}.
- * Expectations ({@link #check}, the {@code expect} verb) are evaluated once, now: a session does not wait for them to
- * hold.
+ * {@link Origin.Kind#PERSON} may carry: the session strips {@code confirm}, and the request's {@code _meta} it could
+ * hide in, from the calls and arguments of every other origin (a {@link Origin.Kind#MODEL} or a
+ * {@link Origin.Kind#SYSTEM} one), journals the arguments as stripped, and the agent then answers
+ * {@code CONFIRM_REQUIRED} (design 3.4; a person's {@code _meta} does not compile). Every outcome's detail and result,
+ * every journal record and every value returned pass the session's secret mask (the credentials, and the secret
+ * fields a resolution joined). A session's calls carry the correlation id {@code <sessionId>/<stepId>/<n>}.
+ * Expectations ({@link #check}, the {@code expect} verb) are evaluated once, now, on the value as the mask leaves it:
+ * a session does not wait for them to hold, and a value the mask changes satisfies none.
  *
  * <p>Not thread-safe: one session is driven by one thread at a time; it starts no threads (a web path may run its
  * own). {@link #close()} is idempotent.
@@ -382,7 +384,7 @@ public final class ExecutorSession implements AutoCloseable {
         Objects.requireNonNull(origin, "origin");
         requireOpen();
         String stepId = nextStepId();
-        PlannedCall given = origin.kind() == Origin.Kind.MODEL ? withoutConfirm(call) : call;
+        PlannedCall given = confirms(origin) ? call : withoutConfirmation(call);
         Plan.Step step;
         try {
             Plan.Call compiled = PlanCompiler.sessionCall(given, pack, options.stepTimeout().toMillis(), id);
@@ -408,7 +410,7 @@ public final class ExecutorSession implements AutoCloseable {
         Objects.requireNonNull(origin, "origin");
         requireOpen();
         String stepId = nextStepId();
-        Object given = origin.kind() == Origin.Kind.MODEL ? withoutConfirm(args) : args;
+        Object given = confirms(origin) ? args : withoutConfirmation(args);
         Plan.Step step;
         try {
             Plan compiled = PlanCompiler.compile(scenarioOf(verb, given), pack);
@@ -419,10 +421,10 @@ public final class ExecutorSession implements AutoCloseable {
         } catch (RuntimeException e) {
             return refused(stepId, verb, given, List.of(), origin, "the step does not compile: " + e);
         }
-        if (origin.kind() == Origin.Kind.MODEL) {
+        if (!confirms(origin)) {
             List<Plan.Call> calls = new ArrayList<>();
             for (Plan.Call call : step.calls()) {
-                calls.add(withoutConfirm(call));
+                calls.add(withoutConfirmation(call));
             }
             step = new Plan.Step(stepId, verb, 0, calls, step.expect());
         }
@@ -756,7 +758,9 @@ public final class ExecutorSession implements AutoCloseable {
 
     /**
      * An expectation evaluated now (P1 8.4 matchers over the fact roots, the UI snapshot among them): one read of the
-     * path's root, no waiting. Journaled with its outcome; a matcher or path that is not valid does not hold.
+     * path's root, no waiting. Journaled with its outcome; a matcher or path that is not valid does not hold, and
+     * neither does any matcher on a value the session's mask changes (it holds a secret, which {@link #observe} shows
+     * as {@code <redacted>}): a check is no oracle on a secret (phase5-contracts.md 12.2).
      *
      * @param matcher a scalar or a matcher object, {@code $references} in place
      * @throws AgentLostException if the agent is gone
@@ -803,6 +807,13 @@ public final class ExecutorSession implements AutoCloseable {
                     e.getMessage());
         }
         ExpectationPath.Resolution resolution = parsed.resolve(fact);
+        if (resolution.resolved()) {
+            // On the value as the session's mask leaves it (phase5-contracts.md 12.2).
+            Object masked = Matchers.maskedSecret(mask, resolution.value());
+            if (masked != null) {
+                return new Evaluation(false, masked, Matchers.HOLDS_A_SECRET, null);
+            }
+        }
         Matchers.Outcome outcome = Matchers.evaluate(normal, resolution.resolved(), resolution.value(),
                 resolution.problem());
         return new Evaluation(outcome.holds(), resolution.value(), outcome.reason(), null);
@@ -1162,42 +1173,58 @@ public final class ExecutorSession implements AutoCloseable {
         }
     }
 
-    /** A model's call without {@code confirm}: only a person confirms a destructive call (design 3.4). */
-    private static PlannedCall withoutConfirm(PlannedCall call) {
-        if (!call.args().containsKey(CallRunner.CONFIRM)) {
-            return call;
-        }
-        Map<String, Object> args = new LinkedHashMap<>(call.args());
-        args.remove(CallRunner.CONFIRM);
-        return new PlannedCall(call.primitive(), args, call.sync(), call.timeoutMs(), call.await(), call.capture());
+    /**
+     * Whether the origin may confirm a destructive call: only a person (design 3.4; phase5-contracts.md 12.2). A
+     * model's request, and the system's, is never a confirmation.
+     */
+    private static boolean confirms(Origin origin) {
+        return origin.kind() == Origin.Kind.PERSON;
     }
 
-    private static Plan.Call withoutConfirm(Plan.Call call) {
-        if (!call.args().containsKey(CallRunner.CONFIRM)) {
+    /** True when the arguments hold a key that could confirm a call: {@code confirm}, or a request's {@code _meta}. */
+    private static boolean holdsConfirmation(Map<?, ?> args) {
+        return args.containsKey(CallRunner.CONFIRM) || args.containsKey(CallRunner.META);
+    }
+
+    /** A copy of the arguments without {@code confirm} and {@code _meta}, in their order. */
+    private static Map<String, Object> stripped(Map<?, ?> args) {
+        Map<String, Object> copy = new LinkedHashMap<>();
+        args.forEach((k, v) -> copy.put(String.valueOf(k), v));
+        copy.remove(CallRunner.CONFIRM);
+        copy.remove(CallRunner.META);
+        return copy;
+    }
+
+    /** A raw call of an origin that is not a person's, without {@code confirm} and {@code _meta}. */
+    private static PlannedCall withoutConfirmation(PlannedCall call) {
+        if (!holdsConfirmation(call.args())) {
             return call;
         }
-        Map<String, Object> args = new LinkedHashMap<>(call.args());
-        args.remove(CallRunner.CONFIRM);
-        return new Plan.Call(call.primitive(), args, call.sync(), call.timeoutMs(), call.await(), call.handlesPrompt(),
+        return new PlannedCall(call.primitive(), stripped(call.args()), call.sync(), call.timeoutMs(), call.await(),
                 call.capture());
     }
 
+    /** A call a verb compiled to, for an origin that is not a person's: without {@code confirm} and {@code _meta}. */
+    private static Plan.Call withoutConfirmation(Plan.Call call) {
+        if (!holdsConfirmation(call.args())) {
+            return call;
+        }
+        return new Plan.Call(call.primitive(), stripped(call.args()), call.sync(), call.timeoutMs(), call.await(),
+                call.handlesPrompt(), call.capture());
+    }
+
     /**
-     * A model's verb arguments without {@code confirm}: at the top, and in a nested {@code args} (the base verb
-     * {@code call}'s form), so that neither the step nor its export confirms anything.
+     * Verb arguments of an origin that is not a person's, without {@code confirm} and {@code _meta}: at the top, and in
+     * a nested {@code args} (the base verb {@code call}'s form), so that neither the step nor its export confirms
+     * anything. A {@code _meta} deeper down is left for the compiler, which refuses the step.
      */
-    private static Object withoutConfirm(Object args) {
+    private static Object withoutConfirmation(Object args) {
         if (!(args instanceof Map<?, ?> map)) {
             return args;
         }
-        Map<String, Object> copy = new LinkedHashMap<>();
-        map.forEach((k, v) -> copy.put(String.valueOf(k), v));
-        copy.remove(CallRunner.CONFIRM);
-        if (copy.get("args") instanceof Map<?, ?> nested && nested.containsKey(CallRunner.CONFIRM)) {
-            Map<String, Object> inner = new LinkedHashMap<>();
-            nested.forEach((k, v) -> inner.put(String.valueOf(k), v));
-            inner.remove(CallRunner.CONFIRM);
-            copy.put("args", inner);
+        Map<String, Object> copy = stripped(map);
+        if (copy.get("args") instanceof Map<?, ?> nested && holdsConfirmation(nested)) {
+            copy.put("args", stripped(nested));
         }
         return copy;
     }

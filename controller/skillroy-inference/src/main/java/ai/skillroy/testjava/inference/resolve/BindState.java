@@ -18,6 +18,7 @@ package ai.skillroy.testjava.inference.resolve;
 
 import ai.skillroy.testjava.controller.AgentLostException;
 import ai.skillroy.testjava.data.DataException;
+import ai.skillroy.testjava.data.RowMask;
 import ai.skillroy.testjava.inference.budget.BudgetMeter;
 import ai.skillroy.testjava.inference.budget.LedgerWriter;
 import ai.skillroy.testjava.inference.budget.PriceTable;
@@ -25,7 +26,9 @@ import ai.skillroy.testjava.inference.prompt.PromptMask;
 import ai.skillroy.testjava.inference.prompt.SchemaCatalogue;
 import ai.skillroy.testjava.inference.spi.Effort;
 import ai.skillroy.testjava.inference.spi.InferenceGateway;
+import ai.skillroy.testjava.inference.sql.AllowListCheck;
 import ai.skillroy.testjava.inference.sql.SqlGuard;
+import ai.skillroy.testjava.scenario.resolve.ContributionException;
 import ai.skillroy.testjava.scenario.resolve.ResolveContext;
 import ai.skillroy.testjava.scenario.resolve.SqlAllowList;
 
@@ -39,8 +42,10 @@ import java.util.Objects;
 /**
  * What the tier (b) resolvers of one bind share (phase5-contracts.md 5.4): the gateway lease, the price table, the
  * scenario's budget meter, the ledger writer, the prompt mask, one guard per allow-list and the prompt catalogue,
- * built on first use with the bind's data channel and kept for the bind. Created by {@link InferenceContributor} and
- * closed with it (the guards' parser threads and the gateway lease).
+ * built on first use with the bind's data channel and kept for the bind, after every allow-list has been checked
+ * against its source's schema and the pack's row masks ({@link AllowListCheck}, decision D100: the statements of the
+ * check are the bind's, recorded in the provenance of the first tier (b) slot with the catalogue's samples). Created
+ * by {@link InferenceContributor} and closed with it (the guards' parser threads and the gateway lease).
  *
  * <p>Thread-safe.
  */
@@ -56,6 +61,7 @@ final class BindState implements AutoCloseable {
     final Effort effort;
     final long callMs;
     final String estimateModel;
+    final List<RowMask> rowMasks;
 
     private final Map<SqlAllowList, SqlGuard> guards = new IdentityHashMap<>();
     private SchemaCatalogue catalogue;
@@ -63,6 +69,13 @@ final class BindState implements AutoCloseable {
 
     BindState(InferenceGateway gateway, PriceTable prices, BudgetMeter meter, LedgerWriter ledger, PromptMask mask,
               List<SqlAllowList> lists, BigDecimal threshold, Effort effort, long callMs, String estimateModel) {
+        this(gateway, prices, meter, ledger, mask, lists, threshold, effort, callMs, estimateModel, List.of());
+    }
+
+    BindState(InferenceGateway gateway, PriceTable prices, BudgetMeter meter, LedgerWriter ledger, PromptMask mask,
+              List<SqlAllowList> lists, BigDecimal threshold, Effort effort, long callMs, String estimateModel,
+              List<RowMask> rowMasks) {
+        this.rowMasks = rowMasks == null ? List.of() : List.copyOf(rowMasks);
         this.gateway = Objects.requireNonNull(gateway, "gateway");
         this.prices = Objects.requireNonNull(prices, "prices");
         this.meter = meter;
@@ -85,11 +98,23 @@ final class BindState implements AutoCloseable {
 
     /**
      * The prompt catalogue, built on first use with the samples read through this slot's data channel (the sample
-     * statements are recorded in that slot's provenance) and kept for the bind.
+     * statements are recorded in that slot's provenance) and kept for the bind; before it, every allow-list is
+     * checked against its source ({@link AllowListCheck}).
+     *
+     * @throws IllegalStateException when an allow-list does not match its source's schema or lets a model read a
+     *     column a row mask alters (the engine reports it as a pack defect, ENVIRONMENT, with the check's message)
      */
     synchronized SchemaCatalogue catalogue(ResolveContext ctx)
             throws DataException, AgentLostException, InterruptedException {
         if (catalogue == null) {
+            for (SqlAllowList list : lists) {
+                try {
+                    AllowListCheck.check(list, ctx.data(), rowMasks, Duration.ofMillis(Math.max(1,
+                            ctx.remainingMs())));
+                } catch (ContributionException e) {
+                    throw new IllegalStateException(e.getMessage());
+                }
+            }
             catalogue = SchemaCatalogue.build(lists, ctx.data(), mask, Duration.ofMillis(Math.max(1,
                     ctx.remainingMs())));
         }

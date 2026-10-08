@@ -17,6 +17,9 @@
 package ai.skillroy.testjava.mcp;
 
 import ai.skillroy.testjava.protocol.Json;
+import ai.skillroy.testjava.protocol.sql.Rows;
+import ai.skillroy.testjava.scenario.FailureKind;
+import ai.skillroy.testjava.scenario.SessionOpenException;
 import ai.skillroy.testjava.scenario.StepJournal;
 import io.modelcontextprotocol.spec.McpSchema;
 import org.junit.jupiter.api.Test;
@@ -37,14 +40,15 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * phase5-contracts.md 9.3 and 9.6: a read tool, a verb tool through the session entry, the arguments as a scenario
- * would give them (nullable optional keys dropped, no {@code confirm}, no {@code _meta}), a failed step as a tool error,
- * the 25000-character cut, an image as a resource link, {@code data_query} through {@code SqlGuard} on an allow-listed
- * source only, and the workflow tools: the catalogue, the snapshot, facts, events, {@code skillroy_resolve}, the compile
- * with a problem and with a plan.
+ * would give them (nullable optional keys dropped, no {@code confirm}, no {@code _meta}), a failed step as a tool
+ * error, the 25000-character cut, an image as a resource link, {@code data_query} through {@code SqlGuard} on an
+ * allow-listed source only (its list checked against the source's schema at the start), and the workflow tools: the
+ * catalogue, the snapshot, facts, events, {@code skillroy_resolve}, the compile with a problem and with a plan.
  */
 class ToolCallTest {
 
@@ -103,6 +107,13 @@ class ToolCallTest {
             FakeAgent.Call lend = fx.desk.agent.callsTo("desk.lend").get(0);
             assertEquals(Map.of("item", "HAM-1"), lend.params(), "borrower: null is an absent key, confirm is gone");
             assertFalse(lend.options().confirm(), "the server never confirms on the client's behalf");
+            McpSchema.CallToolResult meta = fx.call("desk_lend", args("item", "SAW-2", "_meta", Map.of("confirm",
+                    true)));
+            assertFalse(meta.isError(), McpFixture.text(meta));
+            FakeAgent.Call forwarded = fx.desk.agent.callsTo("desk.lend").get(1);
+            assertEquals(Map.of("item", "SAW-2"), forwarded.params(), "a verb that forwards its arguments forwards no"
+                    + " _meta: a confirmation cannot ride in it");
+            assertFalse(forwarded.options().confirm());
             assertFalse(fx.call("swing_click", args("target", "h12", "button", null, "confirm", true, "_meta",
                     Map.of("confirm", true))).isError());
             FakeAgent.Call click = fx.desk.agent.callsTo("swing.click").get(0);
@@ -166,7 +177,7 @@ class ToolCallTest {
                     "SELECT code, title FROM item WHERE category = ?", "params", List.of("tools"), "maxRows", null));
             assertFalse(result.isError(), McpFixture.text(result));
             Map<String, Object> json = McpFixture.json(result);
-            String sent = String.valueOf(fx.desk.agent.callsTo("data.query").get(0).params().get("sql"));
+            String sent = String.valueOf(fx.desk.queries().get(0).params().get("sql"));
             assertEquals(json.get("statement"), sent, "the guarded text runs, never the client's");
             assertTrue(sent.contains("ORDER BY") && sent.contains("LIMIT 200"), sent);
             Map<?, ?> rows = (Map<?, ?>) json.get("value");
@@ -176,7 +187,8 @@ class ToolCallTest {
             McpSchema.CallToolResult personal = fx.call("data_query", args("source", "desk", "sql",
                     "SELECT borrower_email FROM item"));
             assertTrue(personal.isError());
-            assertTrue(McpFixture.text(personal).contains("PERSONAL"), McpFixture.text(personal));
+            assertTrue(McpFixture.text(personal).contains("COLUMN: borrower_email"), "a personal column is not even"
+                    + " named here (D99): " + McpFixture.text(personal));
             McpSchema.CallToolResult dml = fx.call("data_query", args("source", "desk", "sql", "DELETE FROM item"));
             assertTrue(dml.isError());
             assertTrue(McpFixture.text(dml).contains("SqlGuard refused"), McpFixture.text(dml));
@@ -184,8 +196,103 @@ class ToolCallTest {
                     "SELECT code FROM item"));
             assertTrue(other.isError());
             assertTrue(McpFixture.text(other).contains("has no SQL allow-list"), McpFixture.text(other));
-            assertEquals(1, fx.desk.agent.callsTo("data.query").size(), "nothing refused reached the agent");
+            assertEquals(1, fx.desk.queries().size(), "nothing refused reached the agent");
             assertEquals(1, fx.server.guardCount(), "one guard per source, closed with the server");
+        }
+    }
+
+    /**
+     * Decision D99: {@code data_query} returns its rows to the client, so a personal column may not be named anywhere
+     * (a filter, an order or a function of it would rebuild its values row by row); the other columns still read.
+     */
+    @Test
+    void dataQueryNamesNoPersonalColumnAnywhere() throws Exception {
+        try (McpFixture fx = new McpFixture(dir).startReadOnly()) {
+            for (String sql : List.of("SELECT code FROM item WHERE borrower_email LIKE 'a%'",
+                    "SELECT code FROM item WHERE SUBSTRING(borrower_email, 1, 1) = 'a'",
+                    "SELECT code FROM item WHERE LENGTH(borrower_email) > 3",
+                    "SELECT code FROM item ORDER BY borrower_email",
+                    "SELECT code FROM item WHERE borrower_email < 'm'")) {
+                McpSchema.CallToolResult refused = fx.call("data_query", args("source", "desk", "sql", sql));
+                assertTrue(refused.isError(), sql);
+                assertTrue(McpFixture.text(refused).contains("COLUMN: borrower_email"), sql + ": "
+                        + McpFixture.text(refused));
+            }
+            assertTrue(fx.desk.queries().isEmpty(), "nothing refused reached the agent");
+            McpSchema.CallToolResult codes = fx.call("data_query", args("source", "desk", "sql",
+                    "SELECT code FROM item"));
+            assertFalse(codes.isError(), McpFixture.text(codes));
+            assertEquals(1, fx.desk.queries().size());
+        }
+    }
+
+    /**
+     * Decisions D99 and D100: a column one of the pack's row masks alters is secret and may not be allow-listed (P2
+     * 4's rule), so {@code data_query} never reads it: the server's allow-list check refuses the start, naming the
+     * column and the mask. (The copy of the list {@code data_query}'s guard reads hides such a column as well, a second
+     * wall for a mask the check's sentinels do not move: {@code PartsTest}.)
+     */
+    @Test
+    void aColumnARowMaskAltersRefusesTheStart() throws Exception {
+        try (McpFixture fx = new McpFixture(dir)) {
+            SessionOpenException refused = assertThrows(SessionOpenException.class, () -> fx.start(fx.options(
+                    fx.desk.packWithRowMasks(List.of((source, column, value) -> "title".equalsIgnoreCase(column)
+                            ? "<masked>" : value))).build()));
+            assertEquals(FailureKind.ENVIRONMENT, refused.kind());
+            assertTrue(refused.getMessage().contains("column item.title, which row mask 1 of the pack alters"),
+                    refused.getMessage());
+            assertTrue(fx.desk.queries().isEmpty(), "nothing but the check reached the database");
+            assertTrue(fx.desk.agent.callsTo("trace.mark").isEmpty(), "the session never opened");
+        }
+    }
+
+    /**
+     * Decision D100: at its start the server checks the allow-list against its source's schema once, before
+     * {@code data_query} is offered (the guard's rule 4 trusts {@code otherColumns} to name every column of a table);
+     * a list that names a column the table does not have, or leaves out one it has, refuses the start, naming the table
+     * and the columns, never a value.
+     */
+    @Test
+    void anAllowListThatDoesNotMatchItsSourcesSchemaRefusesTheStart() throws Exception {
+        try (McpFixture fx = new McpFixture(dir.resolve("matching")).startReadOnly()) {
+            assertEquals(List.of(Desk.ITEM_SCHEMA_CHECK), fx.desk.agent.callsTo("data.query").stream()
+                    .map(c -> c.params().get("sql")).toList(), "the check ran once, at the start");
+            assertTrue(fx.toolNames().contains("data_query"), fx.toolNames().toString());
+        }
+        try (McpFixture fx = new McpFixture(dir.resolve("drifted"))) {
+            fx.desk.itemColumns.removeIf(c -> c.name().equals("CATEGORY"));
+            fx.desk.itemColumns.add(new Rows.Column("SHELF", "VARCHAR"));
+            SessionOpenException refused = assertThrows(SessionOpenException.class,
+                    () -> fx.start(fx.options().build()));
+            assertEquals(FailureKind.ENVIRONMENT, refused.kind());
+            String message = refused.getMessage();
+            assertTrue(message.contains("does not match table item"), message);
+            assertTrue(message.contains("columns it names neither as readable nor as other columns: [SHELF]"),
+                    message);
+            assertTrue(message.contains("names the table does not have: [category]"), message);
+            assertFalse(message.contains("Claw hammer") || message.contains("HAM-1") || message.contains(Desk.SECRET),
+                    "never a value: " + message);
+            assertTrue(fx.desk.queries().isEmpty(), "nothing but the check reached the database");
+            assertTrue(fx.desk.agent.callsTo("trace.mark").isEmpty(), "the session never opened");
+        }
+    }
+
+    /**
+     * Decision D100: a source the check cannot reach at the start (here the agent does not list it) is not read by
+     * {@code data_query}, which says why; the server still starts.
+     */
+    @Test
+    void aSourceTheCheckCannotReachIsNotReadByDataQuery() throws Exception {
+        try (McpFixture fx = new McpFixture(dir)) {
+            fx.desk.agent.value("data.sources", Map.of("sources", List.of()));
+            fx.start(fx.options().build());
+            McpSchema.CallToolResult result = fx.call("data_query", args("source", "desk", "sql",
+                    "SELECT code FROM item"));
+            assertTrue(result.isError(), McpFixture.text(result));
+            assertTrue(McpFixture.text(result).contains("could not be checked against the source's schema"),
+                    McpFixture.text(result));
+            assertTrue(fx.desk.agent.callsTo("data.query").isEmpty(), "nothing reached the database");
+            assertTrue(fx.logText().contains("data_query does not read source desk"), fx.logText());
         }
     }
 

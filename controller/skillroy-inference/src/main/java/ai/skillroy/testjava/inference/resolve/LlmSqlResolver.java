@@ -22,6 +22,7 @@ import ai.skillroy.testjava.data.DataChannel;
 import ai.skillroy.testjava.data.DataException;
 import ai.skillroy.testjava.inference.budget.BudgetException;
 import ai.skillroy.testjava.inference.prompt.SchemaCatalogue;
+import ai.skillroy.testjava.inference.recorded.RecordedGateway;
 import ai.skillroy.testjava.inference.spi.BatchResult;
 import ai.skillroy.testjava.inference.spi.CacheHint;
 import ai.skillroy.testjava.inference.spi.Content;
@@ -239,7 +240,8 @@ public final class LlmSqlResolver<Q extends Query<T>, T> implements BatchableRes
                     + " an InferenceException, not " + (answer == null ? "null" : answer.getClass().getName()));
         }
         if (failure != null) {
-            state.ledger.recordFailure(request, failure, ctx.scenarioId(), ctx.slot(), Strategy.LLM_SQL);
+            state.ledger.recordFailure(request, failure, state.gateway.provider(), state.estimateModel,
+                    ctx.scenarioId(), ctx.slot(), Strategy.LLM_SQL);
             if (!failure.retryable() || ctx.remainingMs() <= 0) {
                 throw environment(failure, ctx);
             }
@@ -361,7 +363,8 @@ public final class LlmSqlResolver<Q extends Query<T>, T> implements BatchableRes
                 state.ledger.record(request, response, ctx.scenarioId(), ctx.slot(), Strategy.LLM_SQL);
                 return response;
             } catch (InferenceException e) {
-                state.ledger.recordFailure(request, e, ctx.scenarioId(), ctx.slot(), Strategy.LLM_SQL);
+                state.ledger.recordFailure(request, e, state.gateway.provider(), state.estimateModel,
+                        ctx.scenarioId(), ctx.slot(), Strategy.LLM_SQL);
                 if (e.retryable() && attempt < attempts && ctx.remainingMs() > 0) {
                     reserve(request, ctx, false);
                     continue;
@@ -377,7 +380,8 @@ public final class LlmSqlResolver<Q extends Query<T>, T> implements BatchableRes
             case TIMEOUT -> new DataException(DataException.Kind.TIMEOUT, SOURCE, "the model call timed out ("
                     + e.getMessage() + ")");
             case NO_RECORDING -> new DataException(DataException.Kind.UNAVAILABLE, SOURCE, "no recording for the"
-                    + " request of slot " + ctx.slot() + "; record with -Pinference-record (" + e.getMessage() + ")");
+                    + " request of slot " + ctx.slot() + "; " + RecordedGateway.RECORD_HINT + " (" + e.getMessage()
+                    + ")");
             default -> new DataException(DataException.Kind.UNAVAILABLE, SOURCE, "the model provider could not be"
                     + " reached: " + e.kind() + " (" + e.getMessage() + ")");
         };
@@ -440,6 +444,9 @@ public final class LlmSqlResolver<Q extends Query<T>, T> implements BatchableRes
         Object args = type.codec().encode(query);
         List<Object> params = new ArrayList<>();
         String problem = params(proposal, args, guarded, params);
+        if (problem == null) {
+            problem = literalArgument(guarded.literals(), args);
+        }
         if (problem != null) {
             return rejected(ctx, "PARAM: " + problem);
         }
@@ -539,6 +546,50 @@ public final class LlmSqlResolver<Q extends Query<T>, T> implements BatchableRes
             out.add(value);
         }
         return null;
+    }
+
+    /**
+     * Rule 6 of 5.3: a value the model was told to bind as a parameter appears as {@code ?}. A string literal of the
+     * statement that equals the text of one of the query's scalar string arguments is that value written inline; the
+     * problem names the argument (by its dotted path), never the value; null when there is none. Strings only (a
+     * literal {@code TRUE} or {@code 1} is not a string literal), and a blank argument is never matched.
+     */
+    static String literalArgument(List<String> literals, Object args) {
+        if (literals.isEmpty()) {
+            return null;
+        }
+        Map<String, String> strings = new LinkedHashMap<>();
+        strings(args, "", strings, 0);
+        for (String literal : literals) {
+            for (Map.Entry<String, String> e : strings.entrySet()) {
+                if (e.getValue().equals(literal)) {
+                    return "the statement writes the value of the argument " + e.getKey() + " as a literal; a value"
+                            + " of the query's arguments is bound as ?";
+                }
+            }
+        }
+        return null;
+    }
+
+    /** The scalar string values of a JSON-like value, by dotted path. */
+    private static void strings(Object value, String path, Map<String, String> out, int depth) {
+        if (depth > 32) {
+            return;
+        }
+        if (value instanceof String s) {
+            if (!s.isBlank()) {
+                out.putIfAbsent(path.isEmpty() ? "(the argument)" : path, s);
+            }
+        } else if (value instanceof Map<?, ?> map) {
+            for (Map.Entry<?, ?> e : map.entrySet()) {
+                strings(e.getValue(), path.isEmpty() ? String.valueOf(e.getKey()) : path + "." + e.getKey(), out,
+                        depth + 1);
+            }
+        } else if (value instanceof List<?> list) {
+            for (int i = 0; i < list.size(); i++) {
+                strings(list.get(i), path.isEmpty() ? Integer.toString(i) : path + "." + i, out, depth + 1);
+            }
+        }
     }
 
     private static final Object MISSING = new Object();

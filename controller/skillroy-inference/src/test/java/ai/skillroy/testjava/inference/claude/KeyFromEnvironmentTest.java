@@ -85,7 +85,7 @@ class KeyFromEnvironmentTest {
             assertTrue(printed.contains("done"), printed);
             assertTrue(printed.contains("refused AUTH"), printed);
             List<Seen> seen = fake.seen();
-            assertEquals(2, seen.size());
+            assertEquals(3, seen.size(), "the answered call, the refused one and the masked opener's");
             for (Seen s : seen) {
                 assertEquals(DUMMY_KEY, s.header("x-api-key"), "the key came from the environment");
                 assertNull(s.header("authorization"), "the auth token is not read");
@@ -102,10 +102,14 @@ class KeyFromEnvironmentTest {
         assertTrue(files.stream().anyMatch(f -> f.getFileName().toString().equals("inference.jsonl")), files.toString());
         assertTrue(files.stream().anyMatch(f -> f.getParent().getFileName().toString().equals("recordings")),
                 "a recording was written: " + files);
+        assertTrue(files.stream().anyMatch(f -> f.getParent().getFileName().toString().equals("recordings-masked")),
+                "a recording was written through the opener's mask (4.2): " + files);
         for (Path f : files) {
             String text = read(f);
             assertFalse(text.contains(DUMMY_KEY), "the key is in " + f.getFileName());
             assertFalse(text.contains(DUMMY_TOKEN), "the token is in " + f.getFileName());
+            assertFalse(text.contains(KeyProbe.CREDENTIAL), "the opener's credential is in " + f + ": the recording"
+                    + " gateway did not write through the opener's mask");
         }
     }
 

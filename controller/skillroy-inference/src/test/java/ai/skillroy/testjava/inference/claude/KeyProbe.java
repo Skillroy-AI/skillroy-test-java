@@ -72,7 +72,22 @@ public final class KeyProbe {
                 e.printStackTrace(System.out);
             }
         }
+        // 4.2's second pass with the opener's mask: a gateway opened for record: true with a mask that knows a
+        // credential writes its recording through that mask (a request builder that missed one is still caught).
+        InferenceSettings masked = new InferenceSettings("claude", out.resolve("recordings-masked"), true, null, null,
+                null, null, null, null, false, false, Map.of("callMs", 20_000L), false, null);
+        PromptMask mask = PromptMask.of(ai.skillroy.testjava.data.SecretMask.of(List.of(CREDENTIAL)), List.of(),
+                List.of());
+        try (InferenceGateway gateway = Gateways.open(masked, mask)) {
+            ModelResponse response = gateway.complete(ModelRequest.builder("resolve", ModelClass.SONNET_CLASS)
+                    .system(Content.Text.cached("the catalogue"))
+                    .message(Message.user("which item? the reader's note says " + CREDENTIAL + " and more")).build());
+            System.out.println("masked recording " + response.stop());
+        }
         System.out.println("ledger " + ledger.entries());
         System.out.println("done");
     }
+
+    /** A credential the masked opener knows: it must reach no recording. */
+    static final String CREDENTIAL = "Probe-Rec-Cred-8812";
 }

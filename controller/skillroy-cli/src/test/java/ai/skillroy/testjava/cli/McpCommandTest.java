@@ -16,6 +16,8 @@
 
 package ai.skillroy.testjava.cli;
 
+import ai.skillroy.testjava.protocol.Json;
+import ai.skillroy.testjava.protocol.PrimitiveDescriptor;
 import io.modelcontextprotocol.client.McpClient;
 import io.modelcontextprotocol.client.McpSyncClient;
 import io.modelcontextprotocol.json.McpJsonMapper;
@@ -28,6 +30,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
+import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -48,9 +51,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * phase5-contracts.md 9.2, 13.4, 15.1 item 15: {@code skillroy mcp} driven through {@link Main#run} in process, on
  * piped standard streams, with the MCP SDK's own client on their other ends against the CLI tests' fake agent: it
  * starts, answers {@code tools/list} (read-only by default; the pack's verbs and the mutating primitives with
- * {@code --mutating}; never a destructive one; {@code skillroy_session_ask} only with a gateway), runs a verb, and ends
- * with exit code 0 when the client closes the stream, and 3 when the agent's event stream drops while the client is
- * idle (the command's watch). Its usage errors are exit code 64 before anything is served.
+ * {@code --mutating}; never a destructive one; {@code web_evaluate} and {@code web_wait_flag} only with
+ * {@code --allow-evaluate};
+ * {@code skillroy_session_ask} only with a gateway), runs a verb, writes the session's ledger and model-call records
+ * when it ends (an actor or not), and ends with exit code 0 when the client closes the stream, and 3 when the agent's
+ * event stream drops while the client is idle (the command's watch). Its usage errors are exit code 64 before anything
+ * is served.
  */
 class McpCommandTest {
 
@@ -88,12 +94,17 @@ class McpCommandTest {
         final McpSyncClient client;
 
         Served(String... args) {
+            this(CliHarness.class.getClassLoader(), args);
+        }
+
+        /** The command with the packs of {@code loader}. */
+        Served(ClassLoader loader, String... args) {
             List<String> all = new ArrayList<>(List.of("mcp"));
             all.addAll(List.of(args));
             all.addAll(connection);
             Cli cli = new Cli(toServer.in(), new PrintStream(fromServer.out(), true, StandardCharsets.UTF_8),
-                    new PrintStream(err, true, StandardCharsets.UTF_8), CliHarness.class.getClassLoader(),
-                    tmp.resolve("unused-discovery"), Terminal.NONE);
+                    new PrintStream(err, true, StandardCharsets.UTF_8), loader, tmp.resolve("unused-discovery"),
+                    Terminal.NONE);
             exit = pool.submit(() -> Main.run(all, cli));
             client = McpClient.sync(new PipedClientTransport(MAPPER, toServer, fromServer)).requestTimeout(WAIT)
                     .initializationTimeout(WAIT).clientInfo(new McpSchema.Implementation("skillroy-cli-test", "1.0"))
@@ -174,6 +185,86 @@ class McpCommandTest {
             assertTrue(served.tools().contains("skillroy_session_ask"), served.tools().toString());
             assertEquals(0, served.clientCloses(), served.log());
         }
+    }
+
+    /**
+     * Decision D98: {@code web_evaluate} and {@code web_wait_flag} (each runs a script in the target's pages) only with
+     * {@code --allow-evaluate}, a person's opt-in; {@code web_evaluate} with {@code --mutating} as well.
+     */
+    @Test
+    void theScriptPrimitivesAreOfferedOnlyWhenAPersonAllowsThem() throws Exception {
+        agent.schema.add(new PrimitiveDescriptor("web.evaluate", "Evaluates a script.", null, null, "WORKER", 5_000,
+                null, true, false));
+        agent.schema.add(new PrimitiveDescriptor("web.waitFlag", "Waits for an expression.", null, null, "WORKER",
+                5_000, null, false, false));
+        agent.schema.add(new PrimitiveDescriptor("swing.click", "Clicks.", null, null, "EDT", 5_000, null, true,
+                false));
+        try (Served served = new Served("--mutating", "--out", tmp.resolve("default").toString())) {
+            assertFalse(served.tools().contains("web_evaluate") || served.tools().contains("web_wait_flag"),
+                    served.tools().toString());
+            assertTrue(served.tools().contains("swing_click"), served.tools().toString());
+            assertEquals(0, served.clientCloses(), served.log());
+        }
+        try (Served served = new Served("--mutating", "--allow-evaluate", "--out", tmp.resolve("opted").toString())) {
+            assertTrue(served.tools().containsAll(List.of("web_evaluate", "web_wait_flag")), served.tools()
+                    .toString());
+            assertEquals(0, served.clientCloses(), served.log());
+        }
+        try (Served served = new Served("--allow-evaluate", "--out", tmp.resolve("read-only").toString())) {
+            assertTrue(served.tools().contains("web_wait_flag"), served.tools().toString());
+            assertFalse(served.tools().contains("web_evaluate"), "read-only: " + served.tools());
+            assertEquals(0, served.clientCloses(), served.log());
+        }
+    }
+
+    /**
+     * phase5-contracts.md 13.4: the server writes the session's {@code cost-ledger.jsonl} when it ends, whether or
+     * not its client ever made the session's actor (here, no gateway: no actor at all).
+     */
+    @Test
+    void theSessionsLedgerIsWrittenWhenTheServerEndsWithoutAnActor() throws Exception {
+        Path out = tmp.resolve("no-actor");
+        try (Served served = new Served("--out", out.toString())) {
+            assertFalse(served.tools().contains("skillroy_session_ask"));
+            assertEquals(0, served.clientCloses(), served.log());
+        }
+        Path session = out.resolve("runs").resolve(sessionDir(out));
+        assertEquals(List.of(), Files.readAllLines(session.resolve("cost-ledger.jsonl")), "written, and empty");
+        assertFalse(Files.exists(session.resolve("inference.jsonl")), "no model call, no record");
+    }
+
+    /**
+     * phase5-contracts.md 7.4, 13.4: a model-written resolution through {@code skillroy_resolve} goes through the
+     * session's actor; its call is in the session's {@code cost-ledger.jsonl} and {@code inference.jsonl} when the
+     * server ends, and (through the service's metered resolve) counts on the session's budget record.
+     */
+    @Test
+    void aModelWrittenResolutionIsRecordedWhenTheServerEnds() throws Exception {
+        Path out = tmp.resolve("tier-b");
+        try (CliTierB tierB = new CliTierB(tmp, agent)) {
+            List<String> args = new ArrayList<>(tierB.options());
+            args.addAll(List.of("--out", out.toString()));
+            try (Served served = new Served(tierB.loader, args.toArray(String[]::new))) {
+                McpSchema.CallToolResult resolved = served.client.callTool(new McpSchema.CallToolRequest(
+                        "skillroy_resolve", Map.of("slot", "tool", "kind", "Tool", "args", Map.of("kind", "hammer"),
+                                "strategy", List.of("llm-sql"))));
+                String text = ((McpSchema.TextContent) resolved.content().get(0)).text();
+                assertFalse(resolved.isError(), text);
+                assertTrue(text.contains("\"LLM_SQL\""), text);
+                assertEquals(0, served.clientCloses(), served.log());
+            }
+            assertEquals(1, tierB.calls());
+        }
+        Path session = out.resolve("runs").resolve(sessionDir(out));
+        List<String> ledger = Files.readAllLines(session.resolve("cost-ledger.jsonl"));
+        assertEquals(1, ledger.size(), ledger.toString());
+        List<String> inference = Files.readAllLines(session.resolve("inference.jsonl"));
+        assertEquals(1, inference.size(), inference.toString());
+        assertEquals("resolve", Json.parseObject(inference.get(0)).get("purpose"));
+        List<Map<String, Object>> budgets = CliTierB.budgets(session.resolve("journal.jsonl"));
+        assertFalse(budgets.isEmpty(), "through the session service's metered resolve: a budget record");
+        assertEquals(0, new BigDecimal(CliTierB.COST).compareTo(new BigDecimal(String.valueOf(
+                budgets.get(budgets.size() - 1).get("spentUsd")))), budgets.toString());
     }
 
     @Test

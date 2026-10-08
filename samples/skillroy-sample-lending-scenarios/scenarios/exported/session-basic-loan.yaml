@@ -8,7 +8,7 @@ requires: [lending.input]
 resolve:
   assistant:
     query: StaffWithPermission
-    args: { perform: [SIGN_ON], interactiveSignOn: true }
+    args: { interactiveSignOn: true, perform: [SIGN_ON] }
     credential: { realm: staff, key: code }
   item: { query: LendableItem, args: { deposit: { between: ["1.00", "2.00"] }, perDay: false } }
 steps:

@@ -50,8 +50,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * phase5-contracts.md 11.2, 13.4, 15.1 item 15: {@code skillroy triage} through {@link Main#run} over run directories
  * that {@code skillroy run --out} wrote on the fake agent, with the recorded gateway and answers the test records
  * first: a failed run labelled and summarised beside its evidence (the run's own files untouched),
- * {@code --labels-only}, a passed run "nothing to triage", a missing recording (the provider failed for that directory:
- * exit 1), {@code --json}, and the usage errors (exit 64).
+ * {@code --labels-only}, {@code --log-prompts}, a passed run "nothing to triage", a missing recording (the provider
+ * failed for that directory: exit 1), {@code --json}, and the usage errors (exit 64).
  */
 class TriageCommandTest {
 
@@ -156,6 +156,30 @@ class TriageCommandTest {
         assertEquals("0", document.get("modelCost"));
         assertEquals("recorded", ((Map<?, ?>) document.get("inference")).get("gateway"));
         assertTrue(labels.err().contains("model cost: $0 (no budget)"), labels.err());
+    }
+
+    /**
+     * phase5-contracts.md 7.4, 11.2, decision D83: {@code --log-prompts} puts the masked prompts into
+     * {@code triage/inference.jsonl}; without it they stay out (the options carry it, {@code TriageOptions.of}).
+     */
+    @Test
+    void logPromptsPutsTheMaskedPromptsIntoTheTriagesRecords() throws Exception {
+        record();
+        Path failed = runs.resolve("wrong-count");
+        Path records = failed.resolve("triage/inference.jsonl");
+        triage(failed.toString(), "--labels-only", "--inference", "recorded", "--recordings", recordings.toString())
+                .expectExit(Exit.OK);
+        List<String> without = Files.readAllLines(records);
+        assertFalse(without.stream().anyMatch(line -> Json.parseObject(line).containsKey("messages")), without
+                .toString());
+        triage(failed.toString(), "--labels-only", "--log-prompts", "--inference", "recorded", "--recordings",
+                recordings.toString()).expectExit(Exit.OK);
+        List<String> with = Files.readAllLines(records);
+        assertEquals(without.size(), with.size(), "each triage writes its records anew: " + with);
+        for (String line : with) {
+            Map<String, Object> entry = Json.parseObject(line);
+            assertTrue(entry.containsKey("messages") && entry.containsKey("system"), entry.keySet().toString());
+        }
     }
 
     @Test

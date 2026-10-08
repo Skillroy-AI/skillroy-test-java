@@ -16,10 +16,13 @@
 
 package ai.skillroy.testjava.scenario;
 
+import ai.skillroy.testjava.data.SecretMask;
+
 import java.math.BigDecimal;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
 
@@ -49,6 +52,29 @@ final class Matchers {
 
     /** The result of one evaluation; {@code reason} explains a failure. */
     record Outcome(boolean holds, String reason) {
+    }
+
+    /** Why no matcher holds on a value that holds a secret ({@link #maskedSecret}). */
+    static final String HOLDS_A_SECRET = "the value holds a secret (the mask changes it), and a check on a secret never"
+            + " holds";
+
+    /**
+     * The rule of a check on a secret (phase5-contracts.md 12.2): when {@code mask} changes a value, the value holds a
+     * secret and satisfies no matcher, since {@code matches}, {@code contains} and the comparisons would otherwise
+     * rebuild it one character at a time. Used by a session's checks always and by a run's expectations and
+     * stored-row checks with {@link RunOptions#expectationsOnMaskedValues()}.
+     *
+     * @return the value as the mask leaves it when the mask changes it (what a check reports as its actual), else null
+     */
+    static Object maskedSecret(SecretMask mask, Object value) {
+        Object form;
+        try {
+            form = value == null ? null : RunLog.jsonForm(value, 0);
+        } catch (RuntimeException e) {
+            form = String.valueOf(value);
+        }
+        Object masked = mask.apply(form);
+        return Objects.equals(masked, form) ? null : masked;
     }
 
     /**

@@ -26,6 +26,7 @@ import ai.skillroy.testjava.inference.budget.BudgetMeter;
 import ai.skillroy.testjava.inference.budget.InferenceLog;
 import ai.skillroy.testjava.inference.budget.LedgerWriter;
 import ai.skillroy.testjava.inference.budget.PriceTable;
+import ai.skillroy.testjava.inference.prompt.PromptMask;
 import ai.skillroy.testjava.inference.spi.BatchHandle;
 import ai.skillroy.testjava.inference.spi.BatchResult;
 import ai.skillroy.testjava.inference.spi.BatchStatus;
@@ -91,7 +92,10 @@ import java.util.concurrent.TimeUnit;
  * is reserved; when it does not fit, the requests that fit (in parking order) are submitted and the others' scenarios
  * are reported {@code RESOLUTION_FAILED} / {@code BUDGET}, and no later round submits a batch (D74: exhaustion stops a
  * job's further batches). A batch in flight is always awaited and collected: it is paid for. The meter is settled from
- * the job's ledger entries, so that a resolver's inline retry is counted too.
+ * the job's ledger entries, so that a resolver's inline retry is counted too, and before a bind resumes with a
+ * retryable failure (which its resolver retries inline, at the regular rate) the job meter reserves that call's
+ * estimate; when it has no room, the scenario fails {@code RESOLUTION_FAILED} / {@code BUDGET} without the call, and no
+ * later batch is submitted.
  *
  * <p>A gateway without {@link GatewayCapability#BATCH} answers a round's requests one by one through
  * {@code complete} (noted in the report); the recorded gateway serves batches request by request itself. Gateway
@@ -132,7 +136,10 @@ public final class ReResolver {
         check(plans, options, job);
         InferenceGateway gateway;
         try {
-            gateway = Gateways.open(options.inference());
+            // The job's mask knows the environment's credentials: a recording written for record: true goes through
+            // it (phase5-contracts.md 4.2).
+            gateway = Gateways.open(options.inference(), PromptMask.of(options.credentials().mask(),
+                    listOf(pack::sqlAllowLists), listOf(pack::rowMasks)).withImages(options.inference().images()));
         } catch (InferenceException e) {
             throw new ReResolveException("the " + options.inference().gateway() + " gateway cannot be opened: "
                     + options.credentials().mask().apply(String.valueOf(e.getMessage())), null);
@@ -173,6 +180,16 @@ public final class ReResolver {
             }
         }
         return report;
+    }
+
+    /** A pack's list (its allow-lists, its row masks), empty when the pack has none or fails to say. */
+    private static <T> List<T> listOf(java.util.function.Supplier<List<T>> list) {
+        try {
+            List<T> value = list.get();
+            return value == null ? List.of() : value;
+        } catch (RuntimeException e) {
+            return List.of();
+        }
     }
 
     private static void check(List<Plan> plans, BindOptions options, JobOptions job) throws ReResolveException {
@@ -387,7 +404,36 @@ public final class ReResolver {
             List<Item> next = new ArrayList<>();
             for (int i = 0; i < submitted.size(); i++) {
                 Item item = submitted.get(i);
-                step(item, answers.answers().get(i));
+                Object answer = answers.answers().get(i);
+                // A retryable failure is retried inline by the resolver, at the regular rate (8.3): the job meter
+                // reserves that call's estimate first, or the scenario fails BUDGET without the call.
+                boolean retry = retryable(answer);
+                if (retry) {
+                    BigDecimal estimate = estimate(requestsOfRound.get(i), false);
+                    try {
+                        meter.reserve(estimate);
+                    } catch (ai.skillroy.testjava.inference.budget.BudgetException e) {
+                        budgetCut = true;
+                        String slot = item.parked.slot();
+                        item.abandon();
+                        fail(item, FailureKind.RESOLUTION_FAILED, ReResolveReport.REASON_BUDGET, "slot '" + slot
+                                + "': the job budget of $" + plain(meter.limit()) + " has $" + plain(meter.spent())
+                                + " spent and no room for the inline retry of its failed batch answer, estimated at $"
+                                + plain(estimate) + " (the regular rate)");
+                        notes.add("The job budget of $" + plain(meter.limit()) + " had no room for an inline retry in"
+                                + " round " + rounds + ", and no later batch is submitted.");
+                        continue;
+                    }
+                }
+                try {
+                    step(item, answer);
+                } finally {
+                    if (retry) {
+                        // The retry, made or not, is over: its reservation gives way to its cost.
+                        meter.release();
+                        settle();
+                    }
+                }
                 if (item.parked != null) {
                     next.add(item);
                 }
@@ -446,11 +492,24 @@ public final class ReResolver {
             return fit;
         }
 
-        /**
-         * The estimate of one request at the batch rate (7.2): its input tokens as the gateway counts them, else its
-         * text length / 4, plus its {@code maxTokens}, at the price of the model its class names.
-         */
+        /** The estimate of one request at the batch rate: {@link #estimate(ModelRequest, boolean)}. */
         private BigDecimal estimate(ModelRequest request) {
+            return estimate(request, true);
+        }
+
+        /** True for a round's answer that the resolver retries inline: a retryable failure. */
+        private static boolean retryable(Object answer) {
+            if (answer instanceof InferenceException e) {
+                return e.retryable();
+            }
+            return answer instanceof BatchResult b && b.error() != null && b.error().retryable();
+        }
+
+        /**
+         * The estimate of one request (7.2): its input tokens as the gateway counts them, else its text length / 4,
+         * plus its {@code maxTokens}, at the price of the model its class names, at the batch rate or the regular one.
+         */
+        private BigDecimal estimate(ModelRequest request, boolean batch) {
             long input = -1;
             if (gateway.capabilities().contains(GatewayCapability.TOKEN_COUNT)) {
                 try {
@@ -463,7 +522,7 @@ public final class ReResolver {
                 input = textLength(request) / 4;
             }
             String model = settings.models().get(request.modelClass().settingsKey());
-            return prices.estimate(model, input, request.maxTokens(), true);
+            return prices.estimate(model, input, request.maxTokens(), batch);
         }
 
         private static long textLength(ModelRequest request) {

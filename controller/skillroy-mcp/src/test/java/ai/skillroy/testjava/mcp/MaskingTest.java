@@ -74,8 +74,7 @@ class MaskingTest {
             results.add(fx.call("skillroy_scenario_run", Map.of("yaml", "scenario: desk-masked\npack: desk\nsteps:\n"
                     + "  - enter: {value: SAW-2}\n  - expect: {desk.mode: CLOSED}\ntimeouts: {step: 200ms}\n",
                     "mode", "live")));
-            results.add(fx.call("skillroy_session_export", args("scenarioId", "desk-masked-export", "approvedBy",
-                    null)));
+            results.add(fx.call("skillroy_session_export", args("scenarioId", "desk-masked-export")));
             for (McpSchema.CallToolResult result : results) {
                 texts.add(McpFixture.text(result));
             }

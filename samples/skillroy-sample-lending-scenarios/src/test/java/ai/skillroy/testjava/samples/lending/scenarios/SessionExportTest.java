@@ -42,6 +42,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -166,15 +167,15 @@ class SessionExportTest {
             assertEquals(0L, Files.size(replay.dir().resolve("cost-ledger.jsonl")));
         }
 
-        // No secret in what the session wrote: no password as a value, no JDBC password anywhere.
+        // No secret in what the session wrote: no password as a value (the matcher of the end-to-end scan, which also
+        // reads escaped JSON and labelled blocks), no JDBC password anywhere.
         List<Path> outputs = new ArrayList<>(List.of(result.journal(), result.inferenceLog(), written.yaml(),
                 written.plan(), written.bindings()));
+        Set<String> passwords = Set.copyOf(SampleCredentials.SEED_A.values());
         for (Path file : outputs) {
             String text = Files.readString(file);
             assertFalse(text.contains(HeadlessDesk.readerPassword()), file + " holds the JDBC password");
-            for (String password : SampleCredentials.SEED_A.values()) {
-                assertFalse(text.contains("\"" + password + "\""), file + " holds a staff password as a value");
-            }
+            assertEquals(List.of(), SecretScan.leaks(file, passwords), file + " holds a staff password as a value");
         }
     }
 
