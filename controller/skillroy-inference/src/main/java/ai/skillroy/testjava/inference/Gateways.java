@@ -1,0 +1,260 @@
+/*
+ * Copyright 2026 Mike Mills.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package ai.skillroy.testjava.inference;
+
+import ai.skillroy.testjava.inference.claude.ClaudeGateway;
+import ai.skillroy.testjava.inference.recorded.RecordedGateway;
+import ai.skillroy.testjava.inference.recorded.RecordingGateway;
+import ai.skillroy.testjava.inference.spi.BatchHandle;
+import ai.skillroy.testjava.inference.spi.BatchResult;
+import ai.skillroy.testjava.inference.spi.BatchStatus;
+import ai.skillroy.testjava.inference.spi.GatewayCapability;
+import ai.skillroy.testjava.inference.spi.InferenceException;
+import ai.skillroy.testjava.inference.spi.InferenceException.Kind;
+import ai.skillroy.testjava.inference.spi.InferenceGateway;
+import ai.skillroy.testjava.inference.spi.ModelRequest;
+import ai.skillroy.testjava.inference.spi.ModelResponse;
+import ai.skillroy.testjava.scenario.resolve.InferenceSettings;
+
+import java.nio.file.Path;
+import java.time.Duration;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
+
+/**
+ * Builds the gateway the settings name (phase5-contracts.md 4.4): {@code claude} (the key from the environment),
+ * {@code recorded} (the settings' recordings directory), {@code none} (a gateway whose every call is
+ * {@code UNSUPPORTED} "no gateway"); a live gateway is wrapped in the {@link RecordingGateway} when {@code record} is
+ * set. One gateway per distinct gateway-relevant settings, shared and reference-counted: each {@link #open} returns a
+ * lease whose {@code close()} releases it once, and the gateway is closed with its last lease (the re-resolve job parks
+ * many binds at once, each with its own contributor, and they should share one HTTP client and one batch).
+ *
+ * <p>Thread-safe.
+ */
+public final class Gateways {
+
+    /** What decides which gateway serves a settings object (the budgets and thresholds do not). */
+    private record Key(String gateway, Path recordings, boolean record, String workspaceId, Map<String, String> models,
+                       Path prices, boolean fallbacks, boolean images, Map<String, Long> timeouts) {
+
+        static Key of(InferenceSettings s) {
+            return new Key(s.gateway(), s.recordings(), s.record(), s.workspaceId(), s.models(), s.prices(),
+                    s.fallbacks(), s.images(), s.timeouts());
+        }
+    }
+
+    private static final class Shared {
+        final InferenceGateway gateway;
+        int leases;
+
+        Shared(InferenceGateway gateway) {
+            this.gateway = gateway;
+        }
+    }
+
+    private static final Map<Key, Shared> OPEN = new HashMap<>();
+
+    private Gateways() {
+    }
+
+    /**
+     * A lease on the gateway of these settings, opened on first use.
+     *
+     * @throws InferenceException {@code AUTH} without the model key for {@code claude}; {@code UNSUPPORTED} for an
+     *     unknown gateway or {@code recorded} without a directory
+     */
+    public static InferenceGateway open(InferenceSettings settings) throws InferenceException {
+        Objects.requireNonNull(settings, "settings");
+        Key key = Key.of(settings);
+        synchronized (OPEN) {
+            Shared shared = OPEN.get(key);
+            if (shared == null) {
+                shared = new Shared(build(settings));
+                OPEN.put(key, shared);
+            }
+            shared.leases++;
+            return new Lease(key, shared);
+        }
+    }
+
+    /** How many distinct gateways are open (for tests). */
+    static int openGateways() {
+        synchronized (OPEN) {
+            return OPEN.size();
+        }
+    }
+
+    private static InferenceGateway build(InferenceSettings settings) throws InferenceException {
+        return switch (settings.gateway()) {
+            case InferenceSettings.GATEWAY_CLAUDE -> {
+                InferenceGateway live = ClaudeGateway.open(settings);
+                yield settings.record() && settings.recordings() != null
+                        ? new RecordingGateway(live, settings.recordings()) : live;
+            }
+            case InferenceSettings.GATEWAY_RECORDED -> {
+                if (settings.recordings() == null) {
+                    throw new InferenceException(Kind.UNSUPPORTED, "the recorded gateway needs a recordings"
+                            + " directory");
+                }
+                yield new RecordedGateway(settings.recordings());
+            }
+            case InferenceSettings.GATEWAY_NONE -> NONE;
+            default -> throw new InferenceException(Kind.UNSUPPORTED, "unknown gateway " + settings.gateway());
+        };
+    }
+
+    /** The gateway of {@code gateway: none}: every call is {@code UNSUPPORTED} "no gateway". */
+    public static final InferenceGateway NONE = new InferenceGateway() {
+        @Override
+        public String provider() {
+            return InferenceSettings.GATEWAY_NONE;
+        }
+
+        @Override
+        public Set<GatewayCapability> capabilities() {
+            return Set.of();
+        }
+
+        @Override
+        public ModelResponse complete(ModelRequest request) throws InferenceException {
+            throw new InferenceException(Kind.UNSUPPORTED, "no gateway");
+        }
+
+        @Override
+        public BatchHandle submitBatch(List<ModelRequest> requests) throws InferenceException {
+            throw new InferenceException(Kind.UNSUPPORTED, "no gateway");
+        }
+
+        @Override
+        public BatchStatus batchStatus(BatchHandle handle) throws InferenceException {
+            throw new InferenceException(Kind.UNSUPPORTED, "no gateway");
+        }
+
+        @Override
+        public List<BatchResult> collectBatch(BatchHandle handle) throws InferenceException {
+            throw new InferenceException(Kind.UNSUPPORTED, "no gateway");
+        }
+
+        @Override
+        public void cancelBatch(BatchHandle handle) throws InferenceException {
+            throw new InferenceException(Kind.UNSUPPORTED, "no gateway");
+        }
+
+        @Override
+        public long countTokens(ModelRequest request) throws InferenceException {
+            throw new InferenceException(Kind.UNSUPPORTED, "no gateway");
+        }
+
+        @Override
+        public void close() {
+        }
+
+        @Override
+        public String toString() {
+            return "NoGateway";
+        }
+    };
+
+    /** One user's hold on a shared gateway; closing it releases the hold once. */
+    private static final class Lease implements InferenceGateway {
+
+        private final Key key;
+        private final Shared shared;
+        private final AtomicBoolean released = new AtomicBoolean();
+
+        Lease(Key key, Shared shared) {
+            this.key = key;
+            this.shared = shared;
+        }
+
+        private InferenceGateway gateway() throws InferenceException {
+            if (released.get()) {
+                throw new InferenceException(Kind.UNSUPPORTED, "the gateway lease is closed");
+            }
+            return shared.gateway;
+        }
+
+        @Override
+        public String provider() {
+            return shared.gateway.provider();
+        }
+
+        @Override
+        public Set<GatewayCapability> capabilities() {
+            return shared.gateway.capabilities();
+        }
+
+        @Override
+        public ModelResponse complete(ModelRequest request) throws InferenceException, InterruptedException {
+            return gateway().complete(request);
+        }
+
+        @Override
+        public ModelResponse complete(ModelRequest request, Duration timeout)
+                throws InferenceException, InterruptedException {
+            return gateway().complete(request, timeout);
+        }
+
+        @Override
+        public BatchHandle submitBatch(List<ModelRequest> requests) throws InferenceException {
+            return gateway().submitBatch(requests);
+        }
+
+        @Override
+        public BatchStatus batchStatus(BatchHandle handle) throws InferenceException {
+            return gateway().batchStatus(handle);
+        }
+
+        @Override
+        public List<BatchResult> collectBatch(BatchHandle handle) throws InferenceException {
+            return gateway().collectBatch(handle);
+        }
+
+        @Override
+        public void cancelBatch(BatchHandle handle) throws InferenceException {
+            gateway().cancelBatch(handle);
+        }
+
+        @Override
+        public long countTokens(ModelRequest request) throws InferenceException {
+            return gateway().countTokens(request);
+        }
+
+        @Override
+        public void close() {
+            if (!released.compareAndSet(false, true)) {
+                return;
+            }
+            synchronized (OPEN) {
+                shared.leases--;
+                if (shared.leases <= 0 && OPEN.get(key) == shared) {
+                    OPEN.remove(key);
+                    shared.gateway.close();
+                }
+            }
+        }
+
+        @Override
+        public String toString() {
+            return "Lease[" + shared.gateway + "]";
+        }
+    }
+}

@@ -64,6 +64,7 @@
     <module>controller/skillroy-controller</module>
     <module>controller/skillroy-data</module>
     <module>controller/skillroy-scenario</module>
+    <module>controller/skillroy-inference</module>
     <module>controller/skillroy-junit</module>
     <module>controller/skillroy-cli</module>
     <module>controller/skillroy-cdp</module>
@@ -95,6 +96,15 @@
     <jackson.version>2.22.3</jackson.version>
     <hsqldb.version>2.7.4</hsqldb.version>
     <junit.version>5.14.4</junit.version>
+    <!-- Phase 5 (phase5-contracts.md 2.2, decision D88): the Anthropic Java SDK on its current 2.x line, MIT; the
+         newest on Maven Central on 2026-10-08. It brings OkHttp, Okio, Kotlin's standard library, the Jackson jdk8,
+         jsr310 and Kotlin modules and the victools schema generator; audited in docs/licence-audit.md section 5. -->
+    <anthropic-java.version>2.70.0</anthropic-java.version>
+    <!-- JSqlParser: the 5.4 line has no patch release; dual LGPL-2.1 / Apache-2.0, taken under Apache-2.0. -->
+    <jsqlparser.version>5.4</jsqlparser.version>
+    <!-- Kotlin's standard library and reflection at one version: the SDK asks for 1.9 and the Jackson Kotlin module of
+         jackson.version for 2.1.21 (kotlin-reflect 2.1.21 needs the 2.1 standard library). -->
+    <kotlin.version>2.1.21</kotlin.version>
 
     <!-- Plugin versions. -->
     <maven-assembly-plugin.version>3.8.0</maven-assembly-plugin.version>
@@ -183,6 +193,11 @@
       </dependency>
       <dependency>
         <groupId>ai.skillroy</groupId>
+        <artifactId>skillroy-inference</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>ai.skillroy</groupId>
         <artifactId>skillroy-junit</artifactId>
         <version>${project.version}</version>
       </dependency>
@@ -222,6 +237,37 @@
         <groupId>com.fasterxml.jackson.dataformat</groupId>
         <artifactId>jackson-dataformat-yaml</artifactId>
         <version>${jackson.version}</version>
+      </dependency>
+      <!-- Every Jackson module at one version (phase5-contracts.md 2.6): the Anthropic SDK brings the jdk8, jsr310 and
+           Kotlin modules at its own, older version otherwise. The two entries above win over the import. -->
+      <dependency>
+        <groupId>com.fasterxml.jackson</groupId>
+        <artifactId>jackson-bom</artifactId>
+        <version>${jackson.version}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+
+      <!-- Controller side, Phase 5 (skillroy-inference): the model provider's SDK and the SQL parser of SqlGuard. -->
+      <dependency>
+        <groupId>com.anthropic</groupId>
+        <artifactId>anthropic-java</artifactId>
+        <version>${anthropic-java.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.github.jsqlparser</groupId>
+        <artifactId>jsqlparser</artifactId>
+        <version>${jsqlparser.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.jetbrains.kotlin</groupId>
+        <artifactId>kotlin-stdlib</artifactId>
+        <version>${kotlin.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.jetbrains.kotlin</groupId>
+        <artifactId>kotlin-reflect</artifactId>
+        <version>${kotlin.version}</version>
       </dependency>
 
       <!-- Sample application database and test database of the data channels; the jdk8 classifier runs on a Java 8

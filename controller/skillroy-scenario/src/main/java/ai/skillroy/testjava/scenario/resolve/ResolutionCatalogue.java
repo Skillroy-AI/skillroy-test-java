@@ -45,8 +45,9 @@ import java.util.Set;
  * controller contributes from Phase 5 on); a query, value or oracle type its codec does not support; and, for
  * cross-checks (phase3-contracts.md 5.2), two with one id, one whose {@code oracleFn()} names no registered oracle,
  * one whose input or output type does not equal its oracle's (compared as {@code java.lang.reflect.Type}s after
- * {@code GenericTypes} resolution) or is not supported by the codec. Each is an {@link IllegalStateException},
- * reported as a compile error naming the pack.
+ * {@code GenericTypes} resolution) or is not supported by the codec; and, for value loaders (phase5-contracts.md 5.4,
+ * decision D90), one for an undeclared kind, two for one kind, or one without identity columns. Each is an
+ * {@link IllegalStateException}, reported as a compile error naming the pack.
  *
  * <p>Immutable once built; safe to share between threads (the registered objects must be too).
  */
@@ -54,25 +55,31 @@ public final class ResolutionCatalogue {
 
     /** A catalogue with nothing in it: the default of {@code DomainPack.resolution()}. */
     public static final ResolutionCatalogue EMPTY = new ResolutionCatalogue(List.of(), List.of(), List.of(),
-            List.of(), List.of());
+            List.of(), List.of(), List.of());
 
     private final List<QueryType<?, ?>> queries;
     private final List<Resolver<?, ?>> resolvers;
     private final List<Verifier<?, ?>> verifiers;
     private final List<Oracle<?, ?>> oracles;
     private final List<CrossCheck<?, ?>> crossChecks;
+    private final List<ValueLoader<?, ?>> loaders;
     private final Map<String, QueryType<?, ?>> byKind = new LinkedHashMap<>();
     private final Map<String, Oracle<?, ?>> byFn = new LinkedHashMap<>();
     private final Map<String, CrossCheck<?, ?>> byCheckId = new LinkedHashMap<>();
+    private final Map<String, ValueLoader<?, ?>> byLoaderKind = new LinkedHashMap<>();
 
     private ResolutionCatalogue(List<QueryType<?, ?>> queries, List<Resolver<?, ?>> resolvers,
                                 List<Verifier<?, ?>> verifiers, List<Oracle<?, ?>> oracles,
-                                List<CrossCheck<?, ?>> crossChecks) {
+                                List<CrossCheck<?, ?>> crossChecks, List<ValueLoader<?, ?>> loaders) {
         this.queries = List.copyOf(queries);
         this.resolvers = List.copyOf(resolvers);
         this.verifiers = List.copyOf(verifiers);
         this.oracles = List.copyOf(oracles);
         this.crossChecks = List.copyOf(crossChecks);
+        this.loaders = List.copyOf(loaders);
+        for (ValueLoader<?, ?> loader : this.loaders) {
+            byLoaderKind.put(loader.kind(), loader);
+        }
         for (QueryType<?, ?> type : this.queries) {
             byKind.put(type.kind(), type);
         }
@@ -169,10 +176,19 @@ public final class ResolutionCatalogue {
         return List.copyOf(out);
     }
 
+    /**
+     * The value loader of a kind (phase5-contracts.md 5.4 step 4, decision D90), or null when the kind has none: a
+     * model-written statement for a kind with a loader selects the loader's identity columns, and the loader fills each
+     * value.
+     */
+    public ValueLoader<?, ?> valueLoader(String kind) {
+        return byLoaderKind.get(kind);
+    }
+
     /** True when nothing is registered. */
     public boolean isEmpty() {
         return queries.isEmpty() && resolvers.isEmpty() && verifiers.isEmpty() && oracles.isEmpty()
-                && crossChecks.isEmpty();
+                && crossChecks.isEmpty() && loaders.isEmpty();
     }
 
     /** The counts only. */
@@ -191,6 +207,7 @@ public final class ResolutionCatalogue {
         private final List<Verifier<?, ?>> verifiers;
         private final List<Oracle<?, ?>> oracles;
         private final List<CrossCheck<?, ?>> crossChecks;
+        private final List<ValueLoader<?, ?>> loaders;
 
         private Builder(ResolutionCatalogue base) {
             queries = new ArrayList<>(base.queries);
@@ -198,6 +215,7 @@ public final class ResolutionCatalogue {
             verifiers = new ArrayList<>(base.verifiers);
             oracles = new ArrayList<>(base.oracles);
             crossChecks = new ArrayList<>(base.crossChecks);
+            loaders = new ArrayList<>(base.loaders);
         }
 
         /** Declares a query kind. */
@@ -227,6 +245,15 @@ public final class ResolutionCatalogue {
         /** Adds a cross-check; registration order is irrelevant (one per id, found by id and by oracle function). */
         public Builder crossCheck(CrossCheck<?, ?> check) {
             crossChecks.add(Objects.requireNonNull(check, "check"));
+            return this;
+        }
+
+        /**
+         * Adds the value loader of a kind (phase5-contracts.md 5.4 step 4, decision D90): at most one per kind, for a
+         * declared kind.
+         */
+        public Builder valueLoader(ValueLoader<?, ?> loader) {
+            loaders.add(Objects.requireNonNull(loader, "loader"));
             return this;
         }
 
@@ -398,7 +425,37 @@ public final class ResolutionCatalogue {
                             + " types must equal its oracle's");
                 }
             }
-            return new ResolutionCatalogue(queries, resolvers, verifiers, oracles, crossChecks);
+            Set<String> loaderKinds = new LinkedHashSet<>();
+            for (ValueLoader<?, ?> loader : loaders) {
+                String kind;
+                List<String> identity;
+                try {
+                    kind = loader.kind();
+                    identity = loader.identityColumns();
+                } catch (RuntimeException e) {
+                    throw new IllegalStateException("value loader " + loader.getClass().getName() + ": "
+                            + e.getMessage(), e);
+                }
+                if (kind == null || !kinds.containsKey(kind)) {
+                    throw new IllegalStateException("value loader " + loader.getClass().getSimpleName() + " names the"
+                            + " kind " + kind + ", which no query type declares");
+                }
+                if (!loaderKinds.add(kind)) {
+                    throw new IllegalStateException("two value loaders for kind " + kind);
+                }
+                if (identity == null || identity.isEmpty()) {
+                    throw new IllegalStateException("the value loader of kind " + kind + " names no identity column");
+                }
+                Set<String> seen = new LinkedHashSet<>();
+                for (String column : identity) {
+                    if (column == null || column.isBlank()
+                            || !seen.add(column.toLowerCase(java.util.Locale.ROOT))) {
+                        throw new IllegalStateException("the value loader of kind " + kind + " names a blank or"
+                                + " repeated identity column");
+                    }
+                }
+            }
+            return new ResolutionCatalogue(queries, resolvers, verifiers, oracles, crossChecks, loaders);
         }
 
         private static String id(String id, String what) {

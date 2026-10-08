@@ -1,0 +1,188 @@
+/*
+ * Copyright 2026 Mike Mills.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package ai.skillroy.testjava.inference.spi;
+
+import ai.skillroy.testjava.protocol.Json;
+
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.ArrayList;
+import java.util.HexFormat;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * Canonical JSON for fingerprints and recordings (phase5-contracts.md 3.3, 4.2): the JSON-like form of every part,
+ * message and tool, rendered with {@link Json#writeCanonical} (keys sorted recursively), so that the same request
+ * gives the same text on any machine and in any map order. Stateless; safe from any thread.
+ */
+public final class Prompts {
+
+    private Prompts() {
+    }
+
+    /** The canonical JSON text of a JSON-like value (keys sorted at every depth, no insignificant whitespace). */
+    public static String canonical(Object jsonLike) {
+        return Json.writeCanonical(jsonLike);
+    }
+
+    /** {@code sha256:<hex>} of the bytes. */
+    public static String sha256(byte[] bytes) {
+        return "sha256:" + HexFormat.of().formatHex(digest(bytes));
+    }
+
+    /** The SHA-256 of a text's UTF-8 bytes as 64 lower-case hex digits. */
+    public static String hex(String text) {
+        return HexFormat.of().formatHex(digest(text.getBytes(StandardCharsets.UTF_8)));
+    }
+
+    private static byte[] digest(byte[] bytes) {
+        try {
+            return MessageDigest.getInstance("SHA-256").digest(bytes);
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 is missing from this JVM", e);
+        }
+    }
+
+    /**
+     * The JSON-like form of a part as a fingerprint and a recording hold it: {@code {type: text, text}},
+     * {@code {type: image, mediaType, sha256, caption}} (never the bytes), {@code {type: tool_use, id, name, input}},
+     * {@code {type: tool_result, toolUseId, content, error}}, {@code {type: opaque, provider, blockType, raw}}. A text's
+     * cache breakpoint is not part of it (a cache concern, like {@link CacheHint}).
+     */
+    public static Map<String, Object> part(Content part) {
+        Map<String, Object> json = new LinkedHashMap<>();
+        switch (part) {
+            case Content.Text t -> {
+                json.put("type", "text");
+                json.put("text", t.text());
+            }
+            case Content.Image i -> {
+                json.put("type", "image");
+                json.put("mediaType", i.mediaType());
+                json.put("sha256", i.sha256());
+                json.put("caption", i.caption());
+            }
+            case Content.ToolUse u -> {
+                json.put("type", "tool_use");
+                json.put("id", u.id());
+                json.put("name", u.name());
+                json.put("input", u.input());
+            }
+            case Content.ToolResult r -> {
+                json.put("type", "tool_result");
+                json.put("toolUseId", r.toolUseId());
+                json.put("content", r.content());
+                json.put("error", r.error());
+            }
+            case Content.Opaque o -> {
+                json.put("type", "opaque");
+                json.put("provider", o.provider());
+                json.put("blockType", o.type());
+                json.put("raw", o.raw());
+            }
+        }
+        return json;
+    }
+
+    /** The parts' JSON-like forms; opaque parts left out when {@code withOpaque} is false. */
+    public static List<Object> parts(List<Content> parts, boolean withOpaque) {
+        List<Object> out = new ArrayList<>(parts.size());
+        for (Content part : parts) {
+            if (withOpaque || !(part instanceof Content.Opaque)) {
+                out.add(part(part));
+            }
+        }
+        return out;
+    }
+
+    /** A part read back from {@link #part}; an image cannot be (its bytes are not kept). */
+    public static Content partFromJson(Map<?, ?> json) {
+        Object type = json.get("type");
+        return switch (String.valueOf(type)) {
+            case "text" -> Content.Text.of(string(json, "text"));
+            case "tool_use" -> new Content.ToolUse(string(json, "id"), string(json, "name"), map(json.get("input")));
+            case "tool_result" -> new Content.ToolResult(string(json, "toolUseId"), json.get("content"),
+                    Boolean.TRUE.equals(json.get("error")));
+            case "opaque" -> new Content.Opaque(string(json, "provider"), string(json, "blockType"), json.get("raw"));
+            default -> throw new IllegalArgumentException("a part of type " + type + " cannot be read back");
+        };
+    }
+
+    /** {@code {role, parts}} with every part, opaque ones included when {@code withOpaque}. */
+    public static Map<String, Object> message(Message message, boolean withOpaque) {
+        Map<String, Object> json = new LinkedHashMap<>();
+        json.put("role", message.role().name());
+        json.put("parts", parts(message.parts(), withOpaque));
+        return json;
+    }
+
+    /** {@code {name, description, inputSchema, readOnly, destructive}}. */
+    public static Map<String, Object> tool(ToolSpec tool) {
+        Map<String, Object> json = new LinkedHashMap<>();
+        json.put("name", tool.name());
+        json.put("description", tool.description());
+        json.put("inputSchema", tool.inputSchema());
+        json.put("readOnly", tool.readOnly());
+        json.put("destructive", tool.destructive());
+        return json;
+    }
+
+    /**
+     * What a fingerprint is taken over: {@code {modelClass, effort, system, messages, tools, outputSchema}}, opaque
+     * parts left out.
+     */
+    public static Map<String, Object> fingerprintJson(ModelRequest request) {
+        Map<String, Object> json = new LinkedHashMap<>();
+        json.put("modelClass", request.modelClass().name());
+        json.put("effort", request.effort().name());
+        json.put("system", parts(request.system(), false));
+        List<Object> messages = new ArrayList<>();
+        for (Message m : request.messages()) {
+            messages.add(message(m, false));
+        }
+        json.put("messages", messages);
+        List<Object> tools = new ArrayList<>();
+        for (ToolSpec t : request.tools()) {
+            tools.add(tool(t));
+        }
+        json.put("tools", tools);
+        json.put("outputSchema", request.outputSchema());
+        return json;
+    }
+
+    private static String string(Map<?, ?> json, String key) {
+        Object value = json.get(key);
+        if (!(value instanceof String s)) {
+            throw new IllegalArgumentException("a part needs the text '" + key + "'");
+        }
+        return s;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> map(Object value) {
+        if (value == null) {
+            return Map.of();
+        }
+        if (!(value instanceof Map<?, ?>)) {
+            throw new IllegalArgumentException("a tool call's input is a mapping");
+        }
+        return (Map<String, Object>) value;
+    }
+}

@@ -137,7 +137,7 @@ time.
 
 | Piece | Version | Where | Licence (audited in `../licence-audit.md` §5 when built) |
 |---|---|---|---|
-| Anthropic Java SDK (`com.anthropic:anthropic-java`) | the current line at build time, 2.69.x on 2026-10-08 (D88; the research note's 2.34.0 predates the 5.5 models, the fallback parameter and the per-request workspace id, spike BS13 F-11); the exact version is pinned in the root POM and audited | `skillroy-inference`, main scope; the CLI distribution | **MIT** (BS13: the POMs of all three artifacts; the jars carry no licence file, so `THIRD-PARTY.txt` carries the MIT text and the copyright line) |
+| Anthropic Java SDK (`com.anthropic:anthropic-java`) | the current line at build time: **2.70.0** as built 2026-10-08 (released that day; D88; the research note's 2.34.0 predates the 5.5 models, the fallback parameter and the per-request workspace id, spike BS13 F-11); the exact version is pinned in the root POM and audited | `skillroy-inference`, main scope; the CLI distribution | **MIT** (BS13: the POMs of all three artifacts; the jars carry no licence file, so `THIRD-PARTY.txt` carries the MIT text and the copyright line) |
 | JSqlParser (`com.github.jsqlparser:jsqlparser`) | 5.4 (the 5.4 line has no patch release; ai-inference F24; the design's BS6) | `skillroy-inference`, main scope; the CLI distribution; no dependencies of its own | dual, LGPL-2.1 and Apache-2.0 (two `<license>` entries in its POM, BS13 F-11); the project takes Apache-2.0 |
 | MCP Java SDK: `io.modelcontextprotocol.sdk:mcp-core` and `io.modelcontextprotocol.sdk:mcp-json-jackson2` (BS13 F-11: the convenience artifact `mcp` is `mcp-core` plus the Jackson 3 module, which would bring a second Jackson) | 2.0.1, specification line 2025-11-25 confirmed in its `ProtocolVersions` (design §5; control-channel F18) | `skillroy-mcp`, main scope; the CLI distribution | MIT (both; BS13 F-11), with `reactor-core` (Apache-2.0), `reactive-streams` (MIT-0), `slf4j-api` (MIT) and `json-schema-validator` (Apache-2.0) in their trees |
 | Claude Code CLI (`claude`) | whatever is on the `PATH`; 2.1 or newer is what the planner was written against | a run-time precondition of `skillroy author` only; never a dependency, never bundled (B3) | not distributed |
@@ -325,6 +325,12 @@ Rules.
 - *Bounded.* The deadline of §2.4 applies to `complete`, `countTokens` and each batch method; a batch's own lifetime
   is the provider's (24 h) and the nightly job bounds its wait (§8).
 
+As built (2026-10-08, I1): `InferenceGateway` also has a default `complete(request, Duration)` (the way a model call
+stays inside what is left of a bind budget); `InferenceException` carries `usage()` so that a billed failure reaches
+the ledger; `fingerprint()` is 64 hex digits without a prefix (it is a file name) and leaves `purpose` and the
+breakpoint flag out as well; `Content.Image` has `sha256()`; `Usage` has `toJson`/`fromJson`; `Effort` has
+`parse`/`label`, `ModelClass` a `settingsKey()`; `JsonLike` makes deep frozen copies.
+
 ### 3.3 Helpers in the SPI package
 
 - `Schemas.ofRecord(Class<? extends Record>)`: a JSON Schema (`type: object`, `properties`, `required` = every
@@ -371,6 +377,12 @@ used), and `stop_details.category` is read as a string (the SDK's enum lags the 
 | errors | classified by `statusCode()` and `errorType()`, not by the exception class alone (BS13 F-9: 529 arrives as `InternalServerException` with `overloaded_error`, 402 and 413 as `UnexpectedStatusCodeException`): 401/403 `AUTH`; 402 `BILLING`; 429 `RATE_LIMIT`; 529 or `overloaded_error` `OVERLOADED`; 400/404/413/422 `INVALID_REQUEST`, except the 400 whose message names the workspace, which is `AUTH` with that message; `AnthropicIoException` `TRANSPORT`, or `TIMEOUT` when its cause is a timeout or the deadline passed; the rest `PROVIDER`; retries as §2.4 |
 | fallbacks | `inference.yaml` `fallbacks: true` (the provisional default, §17 Q6) sends the server-side refusal fallback in its `default` form (the beta header `server-side-fallback-2026-07-01`, `fallbacks: "default"`; typed in the SDK line of §2.2, an extra body property on 2.34.0): a refused request is answered by a model the provider picks by refusal category, `Usage.model` names it and a `fallback` block comes back as an `Opaque` part; `false` sends none; **never in a batch request** (the provider rejects it; BS13 F-7). Either way the ledger records both model names |
 
+As built (2026-10-08, I1): `ClaudeGateway.open(InferenceSettings)`; a package-private constructor takes a client for
+the loopback fake; responses are read from their JSON form so that unknown, thinking and fallback blocks become
+`Opaque`; the fallback parameter goes to the regular endpoint as an extra body property plus the beta header (in
+2.70.0 the typed form exists on the beta request type only); a tool is sent `strict: true` only when its schema can
+be strict (a free-form schema cannot); the SDK's tree no longer brings Apache HttpClient 5.
+
 What the gateway never does: it never logs a prompt or a response body (the run writes `inference.jsonl`, §7.4,
 with metadata and masked structured answers only, and the prompt text itself only under `--log-prompts`); it never
 reads a key from anywhere but the environment; it never selects a model the settings do not name; it never sends an
@@ -404,6 +416,11 @@ This is what lets CI, the Linux image and every unit test run the AI layer with 
   planner's post-processing fixtures) and `controller/skillroy-inference/src/test/resources/inference/` (unit fixtures,
   hand-written where no live call is needed). They are committed, reviewed like fixtures, and byte-stable
   (`Json.writeCanonical`, sorted keys). A recording's request text is masked text: a reviewer can read it.
+- As built (2026-10-08, I1): a recording is pretty-printed JSON with keys sorted at every depth (byte-stable and
+  reviewable); `RecordingGateway(live, dir[, mask, overwrite, clock])`; `Gateways.open(settings)` returns a shared,
+  reference-counted lease per distinct settings (`Gateways.NONE` for `none`), so that the parked binds of a
+  `re-resolve` job share one gateway; the inference module's own tests pin one committed recording of the test pack's
+  prompt (`-Dskillroy.inference.fixtures.update=true` regenerates it).
 - **Determinism**: a recorded answer is replayed verbatim, so a test that depends on a recording is deterministic; the
   code path that *produced* the request (the prompt assembly, the catalogue, the mask) is what the fingerprint pins. The
   tests of §15.1 assert the fingerprint of each committed recording against the request the code builds today, so that
@@ -541,7 +558,12 @@ order:
 | 10 | **The output check**: the deparsed text, which is what runs (never the model's own text), contains no comment marker, parses back to itself, and passes rules 2-9 again with the same parameters, tables and columns | `REWRITE` |
 
 The guard is deterministic and pure: the same text and allow-list give the same `GuardedStatement` or the same
-violation on every run (BS6: each accept statement carries its expected rewrite, byte for byte). Its rewrite is textual
+violation on every run (BS6: each accept statement carries its expected rewrite, byte for byte). As built
+(2026-10-08, I1, lifted from BS6): `SqlGuard.guard`, `guardDistinct` (the catalogue's sample reads), `served(dialect)`;
+the per-dialect default functions are the date functions plus `CURRENT_TIMESTAMP` and `EXTRACT`; an allow-list table
+declared as `schema.table` is matched by its table part; `otherColumns` let an unqualified name resolve outward only
+when every inner relation's columns are fully known; the BS6 corpora run as the module's tests with and without
+`otherColumns`. Its rewrite is textual
 through JSqlParser's deparser, which keeps the dialect's own syntax (backticks, `::` casts); the guard runs in about
 0.1 ms per statement once warm. **BS6 is the gate, and it passed on 2026-10-08**: its accept and reject corpora for
 HSQLDB, MySQL, MariaDB, PostgreSQL, DB2, Oracle, SQL Server and `GENERIC` become the guard's unit tests in
@@ -609,6 +631,18 @@ pack declares at least one `SqlAllowList`; strategy `LLM_SQL`; id `inference.sql
    shows a reviewer why the statement was written; `Provenance.notes` carries the rest, for the run record only; the
    `Resolution` gets `confidence` from the proposal and `usage` from the ledger entries of the call (P2 §6.3's "where
    the Phase 5 fields get their values"); `Approval` is `REQUIRED` until a person approves (§7.1).
+
+As built (2026-10-08, I1): the resolver ids are `inference.sql.<Kind>` (one per kind; the engine refuses two contributed
+resolvers with one id); the engine owns `Provenance`, so the resolver cannot yet set `rationale` or `rejected` and
+writes them as notes ("rationale: …", "rejected proposal: …" with the refused statement masked) until the engine gains
+`ResolveContext.rationale(text)` and `reject(label, reason)` (the next wave); a provider failure is thrown as a
+`DataException` of kind `UNAVAILABLE` or `TIMEOUT` on the source `inference` (a resolver cannot throw `BindException`),
+which the engine reports as `ENVIRONMENT` with its own prefix; the catalogue is cached per bind and its sample
+statements are recorded in the provenance of the first tier (b) slot; a loader's identity columns are named in the
+user message, not in the cached catalogue; the estimate before a call is the catalogue's tokens plus 2000 in and 2048
+out at the Sonnet price, without a cache discount; the contributor's mask knows the allow-lists, the pack's row masks
+and the key rule but no credential value (a resolver never sees one); `Structured.decode` handles `double`/`float`
+itself because `RecordCodec` does not (`SqlProposal.confidence` is a `double`).
 
 A refusal or a `MAX_TOKENS` stop is "no candidates" with a note. An `InferenceException` of a retryable kind is tried
 once more within the slot's budget, then the slot fails `ENVIRONMENT` ("the model provider could not be reached:
@@ -813,7 +847,12 @@ submitted (§8.3). The `--json` of every command and the run summary print `mode
 
 `CostLedger.Entry` gains `String purpose`, `long cacheReadTokens`, `long cacheWriteTokens`, `boolean batch` and `String
 note`; the Phase 2 nine-argument constructor stays (purpose `"resolve"`, zeros, `false`, `null`). `cost-ledger.jsonl`
-writes the new fields after the old ones. `…inference.budget.LedgerWriter` is what every caller of a gateway uses:
+writes the new fields after the old ones. As built and amended (2026-10-08, I1; D91): the contributor is never told a run's output directory, so the record of
+§7.4 travels with the ledger: `CostLedger.Entry` gains a `Map<String,Object> details` component (the fingerprint, the
+stop reason, the elapsed time, the requested model, the cache-write split and the masked structured answer; null when
+there is none; the earlier constructors keep it null), and the run writer that writes `cost-ledger.jsonl` writes
+`inference.jsonl` from the same entries (one record per entry that has details). `…inference.budget.LedgerWriter` is
+what every caller of a gateway uses:
 `Usage record(ModelRequest, ModelResponse, String scenarioId, String slot, Strategy strategy)` builds the entry from
 the response's usage, records it, settles the meter and appends the record of §7.4. A `RecordedGateway` call is
 recorded with provider `recorded` and cost `0`, so that a `live`/`approve` run against recordings still shows its
@@ -951,6 +990,11 @@ Never offered: a destructive primitive (a person runs it with `skillroy call --c
 `agent.capabilities {reprobe}`, module upload, hook installation; `data.query` on a source without an allow-list;
 anything with `confirm: true` set by the server on a model's behalf (design §3.4: the model's request is never the
 confirmation). In read-only mode (the default) a mutating tool is not listed at all, so a client cannot even ask.
+
+As built (2026-10-08, I1, `…inference.tools.ToolProjection` and `WorkflowTools`): every verb counts as mutating (a
+verb has no mutating flag); a session never offers `web.evaluate`; a verb's optional keys become nullable in the strict
+tool schema, numeric bounds and lengths are dropped and `required` lists the schema's own required keys first, then
+the rest by name, so that fingerprints stay stable; the scenario schema keeps the verb's original `argsSchema`.
 
 ### 9.4 Resources
 
@@ -1575,6 +1619,7 @@ item 4; all three are also exercised without a key through the recordings.
 | D84 | Model classes with the defaults Sonnet (resolve, session, summary), Opus (the planner), Haiku (labels); refusal fallbacks on and recorded; images off; Fable never configured by default | one model everywhere; fallbacks off; images on | ai-inference R7 and F10 (cost and retention); a fallback that answers a refusal keeps a nightly job alive and the ledger says who answered (Q6) |
 | D85 | The agent's `StatementGuard` stays as it is and `SqlGuard` lives on the controller only | JSqlParser inside the agent for `data.query` | B4: nothing but the JDK in a target JVM; the model's SQL runs through the controller's channel or through `data.query` after the controller's guard |
 | D86 | The calibrated-oracle case of gap 26 is answered by the export: an observed value is an ordinary expectation marked in the YAML and listed in the report for the reviewer; no run-time status | a `DEGRADED` outcome for a scenario with observed expectations; refusing to export them | the reviewer who commits the scenario decides; a run cannot tell an observed value from a specified one after the comment is removed |
+| D91 | The record of a model call travels in `CostLedger.Entry.details`, and the run writer writes `inference.jsonl` from the ledger entries, beside `cost-ledger.jsonl` (2026-10-08, I1) | a sink passed through `BindOptions`; the contributor writing into a directory it is told | the contributor is created per engine and never sees the run's output directory; the ledger already crosses that boundary and is masked by the writer |
 | D90 | A tier (b) row becomes a typed candidate through the pack's `ValueLoader` for the kind (the model selects the identity columns, the pack's committed reads build the value), with the flat column-by-name decoding only for kinds without a loader (2026-10-08, S1's finding) | the model aggregating lists and maps in SQL (`GROUP_CONCAT`, `ARRAY_AGG`); the resolver gathering several rows into one value; changing the sample's value types | aggregation functions are outside the guard's set and dialect-specific; gathering rows needs a grouping rule per type; the pack already has the code that loads a value from its key, and reusing it keeps the model to finding *which* row |
 | D89 | A `confirm` argument of any call (a plan step, a cleanup call, a session step) is taken out of the parameters and sent as the request's `_meta.confirm` (2026-10-08, E1) | leaving `confirm` as an ordinary parameter | the agent reads the confirmation only from `_meta`, so a scenario's `confirm: true` never reached it before; no primitive in the base or the samples has a parameter of that name; a `MODEL` origin's `confirm` is stripped before this mapping (§12.2) |
 | D88 | The Anthropic Java SDK is pinned to its current line at build time (2.69.x on 2026-10-08) rather than the research note's 2.34.0; the client is built explicitly from `ANTHROPIC_API_KEY` with the SDK's retries and logging off, and the gateway retries within its own deadline; MCP comes as `mcp-core` + `mcp-json-jackson2`; the root POM imports `jackson-bom` | staying on 2.34.0 with work-arounds (an untyped fallback parameter, no typed workspace id, unknown 5.5 content blocks); `fromEnv()`; the SDK's own retries; the `mcp` convenience artifact | spike BS13 (F-2, F-7, F-9, F-11): 2.34.0 predates the 5.5 models and the fallback betas; `fromEnv()` reads profiles, auth tokens and custom headers from the operator's shell; the SDK's retries are per attempt without a cap on `retry-after`; `mcp` brings a second Jackson |

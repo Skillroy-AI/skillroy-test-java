@@ -36,16 +36,29 @@ import java.util.Objects;
  * @param candidatesTruncated true when more candidates existed than were handed to the verifiers, or a candidate
  *     statement was cut at 200 rows
  * @param rejected the candidates that were not accepted (at most 20), with resolver, label and reason
+ * @param rationale why a model wrote the accepted statement (tier (b), phase5-contracts.md 5.4 step 5): the model's
+ *     text, masked by the resolver, at most {@value #MAX_RATIONALE} characters (longer text is cut); null for tier (a)
  */
 public record Provenance(String resolverId, List<Statement> statements, List<Call> calls, List<String> notes,
-                         int candidates, boolean candidatesTruncated, List<Rejected> rejected) {
+                         int candidates, boolean candidatesTruncated, List<Rejected> rejected, String rationale) {
 
-    /** Copies the lists; null is empty. */
+    /** The longest rationale kept. */
+    public static final int MAX_RATIONALE = 2000;
+
+    /** Copies the lists (null is empty) and cuts the rationale at {@value #MAX_RATIONALE} characters. */
     public Provenance {
         statements = statements == null ? List.of() : List.copyOf(statements);
         calls = calls == null ? List.of() : List.copyOf(calls);
         notes = notes == null ? List.of() : List.copyOf(notes);
         rejected = rejected == null ? List.of() : List.copyOf(rejected);
+        rationale = rationale == null || rationale.length() <= MAX_RATIONALE ? rationale
+                : rationale.substring(0, MAX_RATIONALE);
+    }
+
+    /** The Phase 2 shape: no rationale (tier (a)). */
+    public Provenance(String resolverId, List<Statement> statements, List<Call> calls, List<String> notes,
+                      int candidates, boolean candidatesTruncated, List<Rejected> rejected) {
+        this(resolverId, statements, calls, notes, candidates, candidatesTruncated, rejected, null);
     }
 
     /**
