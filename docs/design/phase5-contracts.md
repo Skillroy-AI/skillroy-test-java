@@ -43,8 +43,9 @@ Phase 5 delivers:
   write the bindings files and a review report; the pull request is the pipeline's job and a sample workflow shows it
   (§8);
 - **`skillroy-mcp`**, a new controller-side module: a Model Context Protocol server over stdio that projects the
-  target's primitive catalogue and the pack's verbs as tools, with read-only and destructive hints, deferred loading
-  of the low-level tools, the resources of design §5, and the hosting of an interactive session (§9);
+  target's primitive catalogue and the pack's verbs as tools, with read-only and destructive hints, the resources of
+  design §5, and the hosting of an interactive session (§9); the deferral of the low-level tools is the client's
+  (Claude Code's tool search), not the server's;
 - **the planner**: `skillroy author`, which runs the Claude Code CLI headless (`claude -p`) against the MCP server in
   read-only mode with the scenario JSON schema as the output constraint, validates what comes back, writes the YAML,
   compiles the plan and leaves the review to a person; the sample's scenario C is authored that way (§10);
@@ -986,6 +987,11 @@ capture, a bitmap) is written to `<out>/mcp/<id>.png` and returned as a resource
 | Base primitives | `jvm_*`, `app_*`, `swing_*`, `web_*`, `sync_*`, `data_query` | the reads always; mutating with `--mutating`; `data_query` only with the source's allow-list and through `SqlGuard` (the model's SQL is guarded even here) |
 | Workflow | `skillroy_catalogue` (verbs with schemas, query kinds with their argument records, oracle functions, capability states); `skillroy_snapshot` (the `UiSnapshot` text, `maxChars`); `skillroy_facts {root, path?}`; `skillroy_events {sinceSeq?, topics?, max?}`; `skillroy_resolve {slot, kind, args, strategy?}`; `skillroy_scenario_compile {yaml}` (problems or the plan summary); `skillroy_scenario_run {yaml, mode: live\|approve}` (`--mutating`; runs with recover; the `RunResult` summary); `skillroy_session_ask {request}`, `skillroy_session_check {path, matcher}`, `skillroy_session_observe {path}`, `skillroy_session_note {text}`, `skillroy_session_export {scenarioId, approvedBy?}` (§12) | `skillroy_scenario_run` and `skillroy_session_ask` need `--mutating` unless the session policy is read-only |
 
+A collision between a verb and a domain primitive (the sample's verb `deposit` and its read primitive
+`lending.deposit`) is resolved deterministically (D92, 2026-10-08): the primitive's tool name takes the suffix
+`_primitive` (`lending_deposit_primitive`), the verb keeps the plain name, both are listed, the renaming is logged at
+start and `skillroy_catalogue` reports it under `renamedPrimitives`; every other collision refuses the start.
+
 Never offered: a destructive primitive (a person runs it with `skillroy call --confirm`); `agent.disable`,
 `agent.capabilities {reprobe}`, module upload, hook installation; `data.query` on a source without an allow-list;
 anything with `confirm: true` set by the server on a model's behalf (design §3.4: the model's request is never the
@@ -995,6 +1001,28 @@ As built (2026-10-08, I1, `…inference.tools.ToolProjection` and `WorkflowTools
 verb has no mutating flag); a session never offers `web.evaluate`; a verb's optional keys become nullable in the strict
 tool schema, numeric bounds and lengths are dropped and `required` lists the schema's own required keys first, then
 the rest by name, so that fingerprints stay stable; the scenario schema keeps the verb's original `argsSchema`.
+
+As built (2026-10-08, M; the MCP Java SDK's `McpServer.sync` on a `StdioServerTransportProvider`, `SyncToolSpecification`
+with `ToolAnnotations`, `SyncResourceSpecification`, the Jackson 2 JSON mapper and schema validator built explicitly):
+`SkillroyMcpServer.serve(ServerOptions, in, out[, log]) → int` (0 when the client closed the stream, 3 when the agent
+was lost), `start`/`awaitExit`/`agentLost`/`close`, `ServerOptions` with its builder (a null `outDir` gives a kept
+temporary directory), the `SessionActor`/`SessionActorFactory` seam through which the CLI wires `SessionService`
+(`ask` declares the agent-loss and interruption exceptions); one `ExecutorSession` for the server's life, read-only
+unless mutating; the server strips `confirm` and `_meta` from every argument a client sends (a client is often a
+model), uses `SETTLE` for a mutating `swing.*` primitive called directly and `NONE` otherwise, drops null optional
+keys (the strict schemas made them nullable) and leaves the SDK's own input validation off; `data_query` runs only
+on a source with an allow-list, through `SqlGuard` and `PromptMask.rows`; images are resources `skillroy://mcp/<n>.png`;
+runs live under `<out>/runs/run-<n>/`, exports directly under `<out>`, and of a run's `failure/` files only `.json`,
+`.jsonl`, `.txt` and `.png` are served (the mask cannot read a trace zip); a `readOnly` flag on a resource travels in
+its `_meta` (MCP resource annotations have none); `skillroy_scenario_run` in `approve` uses the session's approver
+(`REJECT_ALL` by default, so the server never approves on a client's behalf); calls are serialised on the session;
+the stdin bridge lets the SDK see the end of its input only once every request has been answered (the SDK's stdio
+transport stops writing the moment its input ends); a lost agent while idle is noticed at the next call unless the
+host calls `agentLost` (the CLI watches the event stream); `slf4j-api` finds no provider and prints its notice once
+unless the distribution adds `slf4j-nop`. Deferred loading of the low-level tools is the client's business (Claude
+Code's tool search), not a field of the protocol. Open: a read primitive called directly is journaled as a step and
+exported as a `call` step (the export could leave read-only raw calls out); the prompts a `skillroy_scenario_run`
+handled are unknown to the session's prompt cursor (a seam on `ExecutorSession`).
 
 ### 9.4 Resources
 
@@ -1619,6 +1647,7 @@ item 4; all three are also exercised without a key through the recordings.
 | D84 | Model classes with the defaults Sonnet (resolve, session, summary), Opus (the planner), Haiku (labels); refusal fallbacks on and recorded; images off; Fable never configured by default | one model everywhere; fallbacks off; images on | ai-inference R7 and F10 (cost and retention); a fallback that answers a refusal keeps a nightly job alive and the ledger says who answered (Q6) |
 | D85 | The agent's `StatementGuard` stays as it is and `SqlGuard` lives on the controller only | JSqlParser inside the agent for `data.query` | B4: nothing but the JDK in a target JVM; the model's SQL runs through the controller's channel or through `data.query` after the controller's guard |
 | D86 | The calibrated-oracle case of gap 26 is answered by the export: an observed value is an ordinary expectation marked in the YAML and listed in the report for the reviewer; no run-time status | a `DEGRADED` outcome for a scenario with observed expectations; refusing to export them | the reviewer who commits the scenario decides; a run cannot tell an observed value from a specified one after the comment is removed |
+| D92 | A verb and a domain primitive that would share a tool name are both offered: the primitive's name takes the suffix `_primitive`, the verb keeps the plain name; every other collision refuses the start (2026-10-08, M) | hiding the primitive behind the verb; refusing the start on any collision | the sample's `deposit` verb and `lending.deposit` read collide, so the planner's mutating server could not start under the first rule, and one name meaning a lookup in read-only mode and an action in mutating mode would mislead a model |
 | D91 | The record of a model call travels in `CostLedger.Entry.details`, and the run writer writes `inference.jsonl` from the ledger entries, beside `cost-ledger.jsonl` (2026-10-08, I1) | a sink passed through `BindOptions`; the contributor writing into a directory it is told | the contributor is created per engine and never sees the run's output directory; the ledger already crosses that boundary and is masked by the writer |
 | D90 | A tier (b) row becomes a typed candidate through the pack's `ValueLoader` for the kind (the model selects the identity columns, the pack's committed reads build the value), with the flat column-by-name decoding only for kinds without a loader (2026-10-08, S1's finding) | the model aggregating lists and maps in SQL (`GROUP_CONCAT`, `ARRAY_AGG`); the resolver gathering several rows into one value; changing the sample's value types | aggregation functions are outside the guard's set and dialect-specific; gathering rows needs a grouping rule per type; the pack already has the code that loads a value from its key, and reusing it keeps the model to finding *which* row |
 | D89 | A `confirm` argument of any call (a plan step, a cleanup call, a session step) is taken out of the parameters and sent as the request's `_meta.confirm` (2026-10-08, E1) | leaving `confirm` as an ordinary parameter | the agent reads the confirmation only from `_meta`, so a scenario's `confirm: true` never reached it before; no primitive in the base or the samples has a parameter of that name; a `MODEL` origin's `confirm` is stripped before this mapping (§12.2) |

@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Copyright 2026 Mike Mills.
+
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+
+      http://www.apache.org/licenses/LICENSE-2.0
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>ai.skillroy</groupId>
+    <artifactId>skillroy-test-java-parent</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+    <relativePath>../../pom.xml</relativePath>
+  </parent>
+
+  <artifactId>skillroy-mcp</artifactId>
+  <name>skillroy-mcp</name>
+  <description>
+    The MCP server (phase5-contracts.md 9): a Model Context Protocol server over stdio that projects a connected
+    target's primitives and the pack's verbs as tools, serves the controller's workflow tools and the run's state as
+    resources, and hosts one interactive session (ExecutorSession) for its life. Read-only by default, mutating tools
+    by a flag, never a destructive primitive. Controller side only: nothing of it reaches a target JVM.
+  </description>
+
+  <properties>
+    <!-- Controller side: Java 25. -->
+    <maven.compiler.release>25</maven.compiler.release>
+  </properties>
+
+  <dependencies>
+    <!-- The tool projection (ToolProjection, WorkflowTools), the prompt mask and SqlGuard. -->
+    <dependency>
+      <groupId>ai.skillroy</groupId>
+      <artifactId>skillroy-inference</artifactId>
+    </dependency>
+    <!-- The executor's session entry, the journal and its export, the compiler, the executor, the scenario schema. -->
+    <dependency>
+      <groupId>ai.skillroy</groupId>
+      <artifactId>skillroy-scenario</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>ai.skillroy</groupId>
+      <artifactId>skillroy-controller</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>ai.skillroy</groupId>
+      <artifactId>skillroy-protocol</artifactId>
+    </dependency>
+    <!-- The MCP Java SDK (phase5-contracts.md 2.2): the server, the stdio transport and the schema types, and the
+         Jackson 2 JSON mapper; the convenience artifact 'mcp' is not used (it brings the Jackson 3 module). -->
+    <dependency>
+      <groupId>io.modelcontextprotocol.sdk</groupId>
+      <artifactId>mcp-core</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>io.modelcontextprotocol.sdk</groupId>
+      <artifactId>mcp-json-jackson2</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+</project>

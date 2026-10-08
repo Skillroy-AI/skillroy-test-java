@@ -39,8 +39,12 @@ import java.util.TreeSet;
  *
  * <p>Names use {@code [a-z0-9_]} only, at most 64 characters: a primitive {@code a.b.c} becomes {@code a_b_c} (a
  * camel-case part in snake case: {@code app.getState} is {@code app_get_state}); a verb {@code signOn} of pack
- * {@code lending} becomes {@code lending_sign_on}; a workflow tool is {@code skillroy_*}; two tools projecting to one
- * name are refused. A description is the descriptor's, prefixed with the thread and the timeout. An input schema is
+ * {@code lending} becomes {@code lending_sign_on}; a workflow tool is {@code skillroy_*}. A primitive whose name a
+ * verb of the pack would take (the verb {@code deposit} and the primitive {@code lending.deposit} of pack
+ * {@code lending}, both {@code lending_deposit}) is named with {@value #PRIMITIVE_SUFFIX}
+ * ({@code lending_deposit_primitive}), whatever the policy, so that one name never means two things by mode; the verb
+ * keeps the plain name (decision D92). Any other two tools projecting to one name are refused. A description is the
+ * descriptor's, prefixed with the thread and the timeout. An input schema is
  * the descriptor's {@code paramsSchema} without {@code _meta}, or the verb's {@code argsSchema} (a free-form object
  * when there is none), made strict: every object that declares properties requires all of them, an optional one
  * becoming nullable ({@code type: [<t>, "null"]}), with {@code additionalProperties: false}; the numeric bounds and
@@ -60,6 +64,8 @@ public final class ToolProjection {
     public static final Set<String> BASE_NAMESPACES = Set.of("jvm", "app", "swing", "web", "sync");
     /** The one data primitive a policy may offer, and only with an allow-list. */
     public static final String DATA_QUERY = "data.query";
+    /** What a primitive's tool name ends with when a verb of the pack takes its plain name (D92). */
+    public static final String PRIMITIVE_SUFFIX = "_primitive";
     /** Keywords the provider's strict schemas do not take. */
     private static final Set<String> UNSUPPORTED_KEYWORDS = Set.of("minimum", "maximum", "exclusiveMinimum",
             "exclusiveMaximum", "multipleOf", "minLength", "maxLength", "maxItems", "uniqueItems", "minProperties",
@@ -109,7 +115,9 @@ public final class ToolProjection {
     }
 
     /**
-     * The primitives and verbs a policy offers: the primitives by name, then the verbs by name.
+     * The primitives and verbs a policy offers: the primitives by name, then the verbs by name. A primitive whose tool
+     * name a verb of the pack would take is named with {@value #PRIMITIVE_SUFFIX}, whether or not the policy offers
+     * the verbs (D92).
      *
      * @param primitives the target's catalogue ({@code GET /schema})
      * @param pack the running pack (its id is the domain, its verbs and allow-lists)
@@ -124,9 +132,10 @@ public final class ToolProjection {
             sources.add(list.source());
         }
         String domain = pack.id();
+        Set<String> verbNames = verbToolNames(pack);
         for (PrimitiveDescriptor d : sorted) {
             if (offered(d, domain, policy, !sources.isEmpty())) {
-                out.add(primitive(d, DATA_QUERY.equals(d.name()) ? sources : null));
+                out.add(primitive(d, DATA_QUERY.equals(d.name()) ? sources : null, verbNames));
             }
         }
         if (policy.mutatingVerbs()) {
@@ -159,12 +168,49 @@ public final class ToolProjection {
     }
 
     /**
+     * The tool names of every verb of the pack, whatever a policy offers: the names a primitive's tool may not take
+     * (D92). A verb whose name cannot be a tool name is left out (it is refused when it is projected).
+     */
+    public static Set<String> verbToolNames(DomainPack pack) {
+        Set<String> names = new TreeSet<>();
+        Set<String> verbs = pack.steps() == null ? null : pack.steps().verbs();
+        for (String verb : verbs == null ? Set.<String>of() : verbs) {
+            try {
+                names.add(verbToolName(pack.id(), verb));
+            } catch (IllegalArgumentException e) {
+                // Refused when the verb itself is projected.
+            }
+        }
+        return names;
+    }
+
+    /**
+     * A primitive's tool name in a pack's projection: {@link #toolName}, with {@value #PRIMITIVE_SUFFIX} when a verb of
+     * the pack takes that name (D92).
+     *
+     * @param verbToolNames the pack's {@link #verbToolNames}
+     * @throws IllegalArgumentException if the name is not {@code [a-z0-9_]{1,64}}
+     */
+    public static String primitiveToolName(String primitive, Set<String> verbToolNames) {
+        String name = toolName(primitive);
+        return verbToolNames.contains(name) ? check(name + PRIMITIVE_SUFFIX, primitive) : name;
+    }
+
+    /**
      * The tool of a primitive: its name projected, its description prefixed with the thread and timeout, its params
      * schema without {@code _meta}, made strict.
      *
      * @param sources for {@code data.query}: the allow-listed sources its {@code source} is limited to; else null
      */
     public static ToolSpec primitive(PrimitiveDescriptor d, Collection<String> sources) {
+        return primitive(d, sources, Set.of());
+    }
+
+    /**
+     * {@link #primitive(PrimitiveDescriptor, Collection)} named as {@link #primitiveToolName} names it in a pack whose
+     * verbs take {@code verbToolNames}.
+     */
+    public static ToolSpec primitive(PrimitiveDescriptor d, Collection<String> sources, Set<String> verbToolNames) {
         Map<String, Object> schema = d.paramsSchema() == null ? freeForm() : withoutMeta(d.paramsSchema());
         Map<String, Object> strict = strict(schema);
         String description = "[thread: " + (d.thread() == null ? "any" : d.thread()) + ", timeout: " + d.timeoutMs()
@@ -179,7 +225,8 @@ public final class ToolProjection {
             p.put("source", limited);
             description += " Only the allow-listed sources; the statement passes SqlGuard before it runs.";
         }
-        return new ToolSpec(toolName(d.name()), description, strict, !d.mutating(), d.destructive());
+        return new ToolSpec(primitiveToolName(d.name(), verbToolNames), description, strict, !d.mutating(),
+                d.destructive());
     }
 
     /** The tool of a pack verb: {@code <domain>_<verb_in_snake_case>}, its args schema made strict, or free-form. */

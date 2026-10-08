@@ -100,6 +100,7 @@ included), the sample pack and the scenarios of both samples build with `--relea
 | `skillroy-data` (Phase 2) | Jackson set (it declares `jackson-databind` and `jackson-dataformat-yaml`) | none | JUnit set, HSQLDB |
 | `skillroy-scenario` | Jackson set, through `skillroy-data` (since Phase 2 its own POM declares no Jackson artifact) | none | JUnit set, HSQLDB |
 | `skillroy-inference` (Phase 5, 2026-10-08) | the Anthropic Java SDK 2.70.0 set (OkHttp, Okio, Kotlin, Jackson's jdk8/jsr310/Kotlin modules, victools, swagger-annotations, errorprone annotations, standardwebhooks, slf4j-api), JSqlParser 5.4; the Jackson set through `skillroy-data` | none | JUnit set, HSQLDB |
+| `skillroy-mcp` (Phase 5, 2026-10-08) | the MCP Java SDK 2.0.1 (`mcp-core`, `mcp-json-jackson2`) with `reactor-core`, `reactive-streams`, `slf4j-api`, `json-schema-validator` and `itu`; the inference set through `skillroy-inference` | none | JUnit set |
 | `skillroy-junit` | Jackson set; `junit-jupiter-api` and its transitive artifacts | none | JUnit set, `junit-platform-launcher` |
 | `skillroy-cli` | Jackson set, through `skillroy-data`, which it also declares itself since Phase 2 | none | JUnit set |
 | `skillroy-cdp` (Phase 4) | Playwright set; Jackson set, through `skillroy-scenario` and `skillroy-data` | none | JUnit set |
@@ -249,6 +250,11 @@ None of these is in the agent home or the CLI distribution. The Playwright set (
 | `com.squareup.okhttp3:okhttp` | 4.12.0 | runtime, through the Anthropic SDK | Apache-2.0; its `publicsuffixes.gz` is compiled from the Public Suffix List under MPL-2.0 | POM; JAR `okhttp3/internal/publicsuffix/NOTICE` |
 | `com.squareup.okio:okio`, `okio-jvm` | 3.6.0 | runtime, through OkHttp | Apache-2.0 | POM |
 | `com.github.jsqlparser:jsqlparser` (Phase 5, 2026-10-08) | 5.4 | compile, `skillroy-inference`; the CLI distribution (wave 2b); no dependencies; 2,008,413 bytes | dual LGPL-2.1 / Apache-2.0 (two `<license>` entries in its POM; every source header says "Dual licensed under GNU LGPL 2.1 or Apache License 2.0"); the project takes Apache-2.0 | POM; manifest `Bundle-License` names both; no licence file in the jar |
+| `io.modelcontextprotocol.sdk:mcp-core`, `mcp-json-jackson2` (Phase 5, 2026-10-08) | 2.0.1 | compile, `skillroy-mcp`; the CLI distribution (wave 2b) | MIT (both; no licence file in the jars, so `THIRD-PARTY.txt` must carry the MIT text) | POM; manifest `Bundle-License` |
+| `io.projectreactor:reactor-core` | 3.7.0 | compile, through `mcp-core` | Apache-2.0 | POM; no licence file in the jar |
+| `org.reactivestreams:reactive-streams` | 1.0.4 | compile, through `reactor-core` | MIT-0 | POM; no licence file in the jar |
+| `com.networknt:json-schema-validator` | 2.0.4 | compile, through `mcp-json-jackson2` | Apache-2.0 | POM; manifest `Bundle-License` |
+| `com.ethlo.time:itu` | 1.14.0 | compile, through `json-schema-validator` | Apache-2.0 | POM; manifest `Bundle-License` |
 | `com.google.code.gson:gson` | 2.14.0 (Playwright set); 2.11.0 (JCEF set) | compile: 2.14.0 through `playwright` in `skillroy-cdp`; 2.11.0 through `jcefmaven` in the web host modules | Apache-2.0 | POM |
 | `com.google.errorprone:error_prone_annotations` | 2.48.0 (through gson 2.14.0); 2.27.0 (through gson 2.11.0) | compile, in the same modules as the `gson` version it comes with | Apache-2.0 (the POMs say "Apache 2.0") | POM |
 | `org.jspecify:jspecify` | 1.0.1 | compile, through `playwright` (`skillroy-cdp`) | Apache-2.0 | POM |
@@ -416,7 +422,7 @@ licence is claimed here beyond what `docs/DECISIONS.md` already records (cited i
 | JNA | Optional emulated-attach path | Dual Apache-2.0 / LGPL-2.1-or-later (B1, B8); take Apache-2.0 | optional controller dependency; not audited |
 | jattach | Attach as root or across users | Apache-2.0 (B1) | not redistributed; found on `PATH` or at a configured path (B8) |
 | JSqlParser 5.4 | `SqlGuard` of Phase 5 | declared 2026-10-08 (wave 2a), dual LGPL-2.1 / Apache-2.0, the project takes Apache-2.0: moved to §5 | done |
-| MCP Java SDK 2.0.1 (`mcp-core`, `mcp-json-jackson2`) | `skillroy-mcp` of Phase 5 | MIT (both artifacts, POM and manifest); its tree: `reactor-core` Apache-2.0, `reactive-streams` MIT-0, `slf4j-api` MIT, `json-schema-validator` Apache-2.0 with its YAML and time libraries (Apache-2.0) | audited by spike BS13 on 2026-10-08 (`spikes/BS13/RESULT.md` F-11); the convenience artifact `mcp` is not used (it brings a second Jackson); declared and moved to §5 when Phase 5 is built |
+| MCP Java SDK | `skillroy-mcp` of Phase 5 | declared 2026-10-08 (wave 2b) as `mcp-core` and `mcp-json-jackson2` 2.0.1, MIT: moved to §5 with their tree | done |
 | Anthropic Java SDK | the Claude gateway of Phase 5 | declared 2026-10-08 (wave 2a) at 2.70.0, MIT: moved to §5 with its tree | done |
 | JxBrowser | Reflective adapter inside `skillroy-agent-web` (B9; Phase 4) | Commercial licence needed at run time (B9); the base ships no vendor code | the adapter ships without vendor code; JxBrowser itself is in no build and not audited; never bundled |
 | snakeyaml-engine, victools jsonschema-generator | Controller schema and YAML (design table) | not audited | not audited |

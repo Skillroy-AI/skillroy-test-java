@@ -80,6 +80,11 @@ class ToolProjectionTest {
 
     /** A pack with two verbs, one with a schema with optional keys, and maybe an allow-list. */
     static DomainPack pack(boolean allowList, Map<String, Object> signOnSchema) {
+        return pack(allowList, signOnSchema, Set.of("signOn", "scanItem"));
+    }
+
+    /** {@link #pack(boolean, Map)} with these verbs. */
+    static DomainPack pack(boolean allowList, Map<String, Object> signOnSchema, Set<String> packVerbs) {
         return new DomainPack() {
             @Override
             public String id() {
@@ -96,7 +101,7 @@ class ToolProjectionTest {
                 return new StepLibrary() {
                     @Override
                     public Set<String> verbs() {
-                        return Set.of("signOn", "scanItem");
+                        return packVerbs;
                     }
 
                     @Override
@@ -247,6 +252,31 @@ class ToolProjectionTest {
         Map<String, Object> wrapped = ToolProjection.nullable(noType);
         assertEquals(2, ((List<?>) wrapped.get("anyOf")).size());
         assertEquals(Map.of("type", "null"), ((List<?>) wrapped.get("anyOf")).get(1));
+    }
+
+    @Test
+    void aPrimitiveWhoseNameAVerbTakesIsNamedWithTheSuffixInEveryPolicy() {
+        DomainPack pack = pack(true, signOnSchema(), Set.of("signOn", "deposit"));
+        List<ToolSpec> readOnly = ToolProjection.project(PRIMITIVES, pack, ToolProjection.Policy.readOnly());
+        assertEquals(List.of("app_get_state", "data_query", "lending_deposit_primitive", "swing_snapshot"),
+                names(readOnly), "the read primitive lending.deposit, not the name of the verb deposit");
+        assertTrue(named(readOnly, "lending_deposit_primitive").readOnly());
+        List<ToolSpec> mutating = ToolProjection.project(PRIMITIVES, pack, ToolProjection.Policy.mutating());
+        assertTrue(names(mutating).containsAll(List.of("lending_deposit", "lending_deposit_primitive")),
+                names(mutating).toString());
+        assertTrue(named(mutating, "lending_deposit").description().startsWith("Pack verb 'deposit'"),
+                "the verb keeps the plain name");
+        assertTrue(named(mutating, "lending_deposit_primitive").description().contains("does lending.deposit"));
+        assertEquals(Set.of("lending_sign_on", "lending_deposit"), ToolProjection.verbToolNames(pack));
+        assertEquals("lending_deposit_primitive", ToolProjection.primitiveToolName("lending.deposit",
+                ToolProjection.verbToolNames(pack)));
+        assertEquals("lending_loan", ToolProjection.primitiveToolName("lending.loan",
+                ToolProjection.verbToolNames(pack)));
+        DomainPack twice = pack(false, null, Set.of("deposit", "depositPrimitive"));
+        IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+                () -> ToolProjection.project(PRIMITIVES, twice, ToolProjection.Policy.mutating()));
+        assertEquals("tool name collision: two tools project to lending_deposit_primitive", e.getMessage(),
+                "any other collision is still refused");
     }
 
     @Test

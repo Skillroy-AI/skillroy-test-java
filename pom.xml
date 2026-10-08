@@ -65,6 +65,7 @@
     <module>controller/skillroy-data</module>
     <module>controller/skillroy-scenario</module>
     <module>controller/skillroy-inference</module>
+    <module>controller/skillroy-mcp</module>
     <module>controller/skillroy-junit</module>
     <module>controller/skillroy-cli</module>
     <module>controller/skillroy-cdp</module>
@@ -105,6 +106,10 @@
     <!-- Kotlin's standard library and reflection at one version: the SDK asks for 1.9 and the Jackson Kotlin module of
          jackson.version for 2.1.21 (kotlin-reflect 2.1.21 needs the 2.1 standard library). -->
     <kotlin.version>2.1.21</kotlin.version>
+    <!-- The MCP Java SDK (phase5-contracts.md 2.2, D88): mcp-core and the Jackson 2 JSON module, MIT, specification
+         2025-11-25; not the convenience artifact 'mcp', which adds the Jackson 3 module and so a second Jackson. It
+         brings reactor-core, reactive-streams, slf4j-api and json-schema-validator (skillroy-mcp only). -->
+    <mcp-sdk.version>2.0.1</mcp-sdk.version>
 
     <!-- Plugin versions. -->
     <maven-assembly-plugin.version>3.8.0</maven-assembly-plugin.version>
@@ -198,6 +203,11 @@
       </dependency>
       <dependency>
         <groupId>ai.skillroy</groupId>
+        <artifactId>skillroy-mcp</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>ai.skillroy</groupId>
         <artifactId>skillroy-junit</artifactId>
         <version>${project.version}</version>
       </dependency>
@@ -258,6 +268,17 @@
         <groupId>com.github.jsqlparser</groupId>
         <artifactId>jsqlparser</artifactId>
         <version>${jsqlparser.version}</version>
+      </dependency>
+      <!-- Controller side, Phase 5 (skillroy-mcp): the MCP server's SDK. -->
+      <dependency>
+        <groupId>io.modelcontextprotocol.sdk</groupId>
+        <artifactId>mcp-core</artifactId>
+        <version>${mcp-sdk.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>io.modelcontextprotocol.sdk</groupId>
+        <artifactId>mcp-json-jackson2</artifactId>
+        <version>${mcp-sdk.version}</version>
       </dependency>
       <dependency>
         <groupId>org.jetbrains.kotlin</groupId>
