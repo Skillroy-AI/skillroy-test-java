@@ -54,7 +54,7 @@
       "confidence": 1.0,
       "approval": {
         "state": "APPROVED",
-        "by": "recorded 2026-10-08 (scripted stand-in)"
+        "by": "recorded 2026-10-08"
       },
       "llm": null
     },
@@ -108,7 +108,7 @@
       "confidence": 1.0,
       "approval": {
         "state": "APPROVED",
-        "by": "recorded 2026-10-08 (scripted stand-in)"
+        "by": "recorded 2026-10-08"
       },
       "llm": null
     },
@@ -180,7 +180,7 @@
       "confidence": 1.0,
       "approval": {
         "state": "APPROVED",
-        "by": "recorded 2026-10-08 (scripted stand-in)"
+        "by": "recorded 2026-10-08"
       },
       "llm": null
     },
@@ -349,15 +349,14 @@
           {
             "channel": "agent",
             "source": "lending",
-            "sql": "SELECT s.code AS code FROM staff s WHERE s.active = true AND s.code <> ? AND EXISTS (SELECT sr.staff_code FROM staff_role sr JOIN role_permission rp ON rp.role_id = sr.role_id WHERE sr.staff_code = s.code AND rp.permission = ?) AND ((SELECT MAX(rc.amount) FROM staff_role sr2 JOIN role_cap rc ON rc.role_id = sr2.role_id WHERE sr2.staff_code = s.code AND rc.kind = ?) >= CAST(? AS DECIMAL (10, 2)) OR NOT EXISTS (SELECT sr3.staff_code FROM staff_role sr3 JOIN role_cap rc3 ON rc3.role_id = sr3.role_id WHERE sr3.staff_code = s.code AND rc3.kind = ?)) ORDER BY s.code LIMIT 200",
+            "sql": "SELECT s.code AS code FROM staff s WHERE s.code <> ? AND EXISTS (SELECT 1 FROM staff_role sr JOIN role_permission rp ON rp.role_id = sr.role_id WHERE sr.staff_code = s.code AND rp.permission = ?) AND (SELECT MAX(rc.amount) FROM staff_role sr2 JOIN role_cap rc ON rc.role_id = sr2.role_id WHERE sr2.staff_code = s.code AND rc.kind = ?) >= ? ORDER BY s.code LIMIT 200",
             "params": [
               "4711",
               "RETURN_OVERRIDE",
               "RETURN",
-              "27.50",
-              "RETURN"
+              "27.50"
             ],
-            "rowCount": 2,
+            "rowCount": 1,
             "truncated": false
           },
           {
@@ -379,33 +378,13 @@
             ],
             "rowCount": 3,
             "truncated": false
-          },
-          {
-            "channel": "agent",
-            "source": "lending",
-            "sql": "SELECT s.code AS code, s.auto_sign_on AS auto_sign_on, (SELECT MAX(rl.amount) FROM staff_role sr JOIN role_cap rl ON rl.role_id = sr.role_id WHERE sr.staff_code = s.code AND rl.kind = ?) AS limit_amount FROM staff s WHERE s.active = TRUE ORDER BY s.code",
-            "params": [
-              "RETURN"
-            ],
-            "rowCount": 7,
-            "truncated": false
-          },
-          {
-            "channel": "agent",
-            "source": "lending",
-            "sql": "SELECT DISTINCT rp.permission AS permission FROM staff_role sr JOIN role_permission rp ON rp.role_id = sr.role_id WHERE sr.staff_code = ? ORDER BY permission",
-            "params": [
-              "4790"
-            ],
-            "rowCount": 3,
-            "truncated": false
           }
         ],
         "calls": [],
         "candidates": 1,
         "candidatesTruncated": false,
         "rejected": [],
-        "rationale": "A supervisor for this return is an active staff member other than the one in distinctFrom who holds RETURN_OVERRIDE through any of their roles and whose RETURN limit covers the amount: the highest RETURN amount over their roles is at least limit.gte, or none of their roles has a RETURN limit, which the desk treats as unlimited. One row per staff member, by code."
+        "rationale": "Selects staff other than the excluded code who hold a role permitting RETURN_OVERRIDE and whose highest RETURN cap across roles is at least 27.50. Staff with no RETURN cap row yield NULL and are excluded. interactiveSignOn is null so no filter is applied."
       },
       "verifier": [
         {
@@ -414,16 +393,16 @@
           "reason": "RETURN_OVERRIDE permitted; RETURN_OVERRIDE of 27.50 allowed; limit 200.00"
         }
       ],
-      "confidence": 0.9,
+      "confidence": 0.8,
       "approval": {
         "state": "APPROVED",
-        "by": "recorded 2026-10-08 (scripted stand-in)"
+        "by": "recorded 2026-10-08"
       },
       "llm": {
-        "model": "scripted-model",
-        "requestId": "scripted-3320-356",
-        "inputTokens": 3320,
-        "outputTokens": 356,
+        "model": "claude-sonnet-5-5",
+        "requestId": "msg_011CfqKkUKAEgbeiN9LWR1Sd",
+        "inputTokens": 476,
+        "outputTokens": 515,
         "costUsd": "0"
       }
     },
@@ -459,7 +438,7 @@
       "confidence": 1.0,
       "approval": {
         "state": "APPROVED",
-        "by": "recorded 2026-10-08 (scripted stand-in)"
+        "by": "recorded 2026-10-08"
       },
       "llm": null
     }

@@ -139,6 +139,10 @@ public final class ResolutionEngine implements AutoCloseable {
     static final int MAX_CANDIDATES = 20;
     /** How many rejected candidates are recorded. */
     static final int MAX_REJECTED = 20;
+    /** How many refusals a slot's {@code NO_CANDIDATE} message names ({@link #refusals}). */
+    static final int MESSAGE_REFUSALS = 3;
+    /** How many characters each refusal a {@code NO_CANDIDATE} message names may have. */
+    static final int MESSAGE_REFUSAL_CHARS = 120;
     private static final int SAMPLE_ROWS = 3;
     private static final long MAX_CALL_MS = 120_000L;
     /** The default of a statement without a timeout when nothing better is known (the agent's data.query default). */
@@ -1144,7 +1148,8 @@ public final class ResolutionEngine implements AutoCloseable {
         detail.put("rejected", rejectedJson(run.rejected));
         if (!run.anyCandidate) {
             throw new BindException(FailureKind.RESOLUTION_FAILED, "NO_CANDIDATE", run.slot, "slot '" + run.slot
-                    + "': no candidate in this environment answers query " + run.type.kind(), detail);
+                    + "': no candidate in this environment answers query " + run.type.kind()
+                    + refusals(run.rejected), detail);
         }
         throw new BindException(FailureKind.RESOLUTION_FAILED, "ALL_REJECTED", run.slot, "slot '" + run.slot
                 + "': every candidate for query " + run.type.kind() + " was rejected (" + run.rejected.size()
@@ -1350,6 +1355,28 @@ public final class ResolutionEngine implements AutoCloseable {
             out.add(fields("resolver", r.resolverId(), "label", r.label(), "reason", r.reason()));
         }
         return out;
+    }
+
+    /**
+     * What a slot no candidate answers says of the resolvers' refusals (a proposal a resolver refused, a row it could
+     * not offer): {@code " (rejected: <label>: <reason>; …)"}, the first {@value #MESSAGE_REFUSALS} in order, each on
+     * one line and at most {@value #MESSAGE_REFUSAL_CHARS} characters, with how many more there are; empty when there
+     * is none. The labels and reasons were masked when they were recorded. Found live: a correct statement refused at
+     * confidence 0.7 was reported as "no candidate" alone.
+     */
+    static String refusals(List<Provenance.Rejected> rejected) {
+        if (rejected.isEmpty()) {
+            return "";
+        }
+        List<String> named = new ArrayList<>();
+        for (Provenance.Rejected r : rejected.subList(0, Math.min(MESSAGE_REFUSALS, rejected.size()))) {
+            String text = (r.label() == null ? "" : r.label() + ": ") + (r.reason() == null ? "" : r.reason());
+            text = text.replace('\n', ' ').replace('\r', ' ').strip();
+            named.add(text.length() > MESSAGE_REFUSAL_CHARS ? text.substring(0, MESSAGE_REFUSAL_CHARS - 3) + "..."
+                    : text);
+        }
+        int more = rejected.size() - named.size();
+        return " (rejected: " + String.join("; ", named) + (more > 0 ? "; and " + more + " more" : "") + ")";
     }
 
     // ------------------------------------------------------------------------------------------- internals

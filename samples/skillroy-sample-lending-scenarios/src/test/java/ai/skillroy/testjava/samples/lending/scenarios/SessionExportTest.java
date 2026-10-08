@@ -179,7 +179,11 @@ class SessionExportTest {
         }
     }
 
-    /** The session's committed recordings: five calls, each a scripted stand-in until recorded live. */
+    /**
+     * The session's committed recordings (purpose {@code session}): five calls, each a scripted stand-in, which a live
+     * session does not refresh (phase5-contracts.md 14.5). The directory's other recordings are not the session's:
+     * scenario D's are live ({@code ScenarioDRecordedTest} checks them).
+     */
     @Test
     void theSessionsRecordingsAreScriptedStandIns() throws Exception {
         List<Map<String, Object>> session = new ArrayList<>();

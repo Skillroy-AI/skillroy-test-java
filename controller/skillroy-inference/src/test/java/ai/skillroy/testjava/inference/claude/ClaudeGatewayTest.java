@@ -50,12 +50,14 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.EnumMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -194,6 +196,107 @@ class ClaudeGatewayTest {
         assertNull(fake.last().header("anthropic-workspace-id"), "no workspace id, no header");
     }
 
+    /**
+     * 4.1's {@code Effort} row as verified live (BS13): the Haiku class's model refuses the effort parameter, so its
+     * request sends {@code output_config} with the format and without the effort, and none at all without a schema;
+     * the token count goes through the same body; the Sonnet class still sends both; the effort stays part of the
+     * request's fingerprint.
+     */
+    @Test
+    void theHaikuClassSendsTheFormatWithoutTheEffort() throws Exception {
+        ModelRequest haiku = ModelRequest.builder("triage", ModelClass.HAIKU_CLASS).effort(Effort.LOW)
+                .message(Message.user("label the run")).outputSchema(strictSchema()).build();
+        String answer = "[{\"type\":\"text\",\"text\":\"{\\\"answer\\\":\\\"x\\\"}\"}]";
+        try (ClaudeGateway g = gateway()) {
+            fake.answer(Answer.json(FakeAnthropic.message("end_turn", answer, "{}")));
+            assertEquals(Map.of("answer", "x"), g.complete(haiku).structured());
+            Map<String, Object> body = fake.last().json();
+            assertEquals("claude-haiku-4-5", body.get("model"));
+            Map<String, Object> output = at(body, "output_config");
+            assertFalse(output.containsKey("effort"), "no effort for the Haiku class: " + output);
+            assertEquals("json_schema", at(output, "format", "type"));
+            assertEquals(strictSchema(), at(output, "format", "schema"), "the format stays");
+
+            fake.answer(Answer.json("{\"input_tokens\":42}"));
+            assertEquals(42, g.countTokens(haiku));
+            assertEquals("/v1/messages/count_tokens", fake.last().path());
+            Map<String, Object> counted = at(fake.last().json(), "output_config");
+            assertFalse(counted.containsKey("effort"), "the token count's body follows: " + counted);
+            assertEquals("json_schema", at(counted, "format", "type"));
+
+            g.complete(ModelRequest.builder("triage", ModelClass.HAIKU_CLASS).message(Message.user("q")).build());
+            assertFalse(fake.last().json().containsKey("output_config"), "no schema and no effort: no output_config");
+
+            fake.answer(Answer.json(FakeAnthropic.message("end_turn", answer, "{}")));
+            g.complete(request().outputSchema(strictSchema()).build());
+            assertEquals("low", at(fake.last().json(), "output_config", "effort"), "the Sonnet class keeps its effort");
+            assertEquals("json_schema", at(fake.last().json(), "output_config", "format", "type"));
+        }
+        assertNotEquals(haiku.fingerprint(), ModelRequest.builder("triage", ModelClass.HAIKU_CLASS).effort(Effort.HIGH)
+                .message(Message.user("label the run")).outputSchema(strictSchema()).build().fingerprint(),
+                "the effort is part of the fingerprint although it is not sent");
+    }
+
+    /** A strict object schema of these properties: every one required, nothing else allowed. */
+    private static Map<String, Object> objectOf(Map<String, Object> properties) {
+        Map<String, Object> schema = new LinkedHashMap<>();
+        schema.put("type", "object");
+        schema.put("properties", properties);
+        schema.put("required", List.copyOf(properties.keySet()));
+        schema.put("additionalProperties", false);
+        return schema;
+    }
+
+    /** {@code n} properties that each take a union, by turns a nullable type (a type array) and an {@code anyOf}. */
+    private static Map<String, Object> unionProperties(String prefix, int n) {
+        Map<String, Object> properties = new LinkedHashMap<>();
+        for (int i = 0; i < n; i++) {
+            properties.put(prefix + i, i % 2 == 0 ? Map.of("type", List.of("string", "null"))
+                    : Map.of("anyOf", List.of(Map.of("type", "string"), Map.of("type", "string", "pattern", "^\\$"))));
+        }
+        return properties;
+    }
+
+    /**
+     * Strict tools against the provider's limit of union-typed parameters (2026-10-08, live: HTTP 400 "too many
+     * parameters with union types ... limit: 16 parameters with unions"): tools holding 17 such parameters between
+     * them, eight of them nested in an object, go out without a {@code strict} field on any tool and with their schemas
+     * as given; with 16 the tools whose schema can be strict are strict, and a free-form one is not.
+     */
+    @Test
+    void moreThanSixteenUnionTypedParametersTurnStrictOffForEveryTool() throws Exception {
+        for (int unions : new int[] {17, 16}) {
+            Map<String, Object> nested = new LinkedHashMap<>();
+            nested.put("item", objectOf(unionProperties("b", unions - 9)));
+            nested.put("note", Map.of("type", "string"));
+            ModelRequest r = ModelRequest.builder("session", ModelClass.SONNET_CLASS).message(Message.user("lend it"))
+                    .tool(new ToolSpec("lending_lend", "lends an item", objectOf(unionProperties("a", 9)), false,
+                            false))
+                    .tool(new ToolSpec("lending_return", "takes an item back", objectOf(nested), false, false))
+                    .tool(new ToolSpec("lending_note", "free-form", Map.of("type", "object"), false, false)).build();
+            assertEquals(unions, ClaudeMapping.unionParameters(r.tools()), "counted at any depth");
+            try (ClaudeGateway g = gateway()) {
+                g.complete(r);
+            }
+            Map<String, Object> body = fake.last().json();
+            List<Map<String, Object>> tools = at(body, "tools");
+            assertEquals(3, tools.size());
+            assertEquals(List.of("string", "null"), at(body, "tools", 0, "input_schema", "properties", "a0", "type"),
+                    "the schema as given");
+            assertEquals(Map.of("type", "auto"), body.get("tool_choice"));
+            if (unions > ClaudeMapping.MAX_STRICT_UNION_PARAMETERS) {
+                for (Map<String, Object> tool : tools) {
+                    assertFalse(tool.containsKey("strict"), unions + " union-typed parameters: no strict field on "
+                            + tool.get("name"));
+                }
+            } else {
+                assertEquals(true, tools.get(0).get("strict"), unions + " union-typed parameters: strict as before");
+                assertEquals(true, tools.get(1).get("strict"));
+                assertEquals(false, tools.get(2).get("strict"), "a free-form schema cannot be strict");
+            }
+        }
+    }
+
     @Test
     void anImageIsRefusedWhileImagesAreOffAndSentAsBase64WhenOn() throws Exception {
         ModelRequest r = ModelRequest.builder("session", ModelClass.SONNET_CLASS)
@@ -253,6 +356,33 @@ class ClaudeGatewayTest {
         assertEquals("0.000645", u.costUsd());
         assertEquals("fallback: answered by claude-sonnet-5", u.note());
         assertFalse(u.batch());
+    }
+
+    /**
+     * A dated snapshot id answering for the id asked for is the same model (BS13 live: a request for
+     * {@code claude-haiku-4-5} is answered by {@code claude-haiku-4-5-20251001}): the usage names the dated id, with no
+     * fallback note and no unknown-model note, at Haiku's price; another id is still a fallback.
+     */
+    @Test
+    void aDatedSnapshotIdIsTheModelAskedFor() throws Exception {
+        fake.answer(Answer.json(FakeAnthropic.message("claude-haiku-4-5-20251001", "end_turn",
+                "[{\"type\":\"text\",\"text\":\"a label\"}]", "{}", null)));
+        Usage u;
+        try (ClaudeGateway g = gateway()) {
+            u = g.complete(ModelRequest.builder("triage", ModelClass.HAIKU_CLASS).message(Message.user("label it"))
+                    .build()).usage();
+        }
+        assertEquals("claude-haiku-4-5", u.requestedModel());
+        assertEquals("claude-haiku-4-5-20251001", u.model(), "the id the response names");
+        assertNull(u.note(), "neither a fallback nor an unknown model");
+        // claude-haiku-4-5: 100 x 1.00 + 20 x 5.00 = 200 per million.
+        assertEquals("0.000200", u.costUsd());
+        assertTrue(ClaudeMapping.sameModel("claude-haiku-4-5", "claude-haiku-4-5-20251001"));
+        assertTrue(ClaudeMapping.sameModel("claude-sonnet-5-5", "claude-sonnet-5-5"));
+        assertFalse(ClaudeMapping.sameModel("claude-haiku-4-5", "claude-haiku-4-5-2025100"), "seven digits");
+        assertFalse(ClaudeMapping.sameModel("claude-haiku-4-5", "claude-haiku-4-5-202510011"), "nine digits");
+        assertFalse(ClaudeMapping.sameModel("claude-sonnet-5-5", "claude-sonnet-5"), "Sonnet 5.5's fallback target");
+        assertFalse(ClaudeMapping.sameModel("claude-opus-5", "claude-opus-5-5"));
     }
 
     @ParameterizedTest(name = "{0} -> {1}")

@@ -71,7 +71,7 @@ class BudgetAndLedgerTest {
     void theBuiltInTableHasTheContractsRates() {
         PriceTable t = PriceTable.builtIn();
         assertEquals(List.of("claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-4-5", "claude-sonnet-5",
-                "claude-opus-4-8"), t.models());
+                "claude-opus-4-8", "claude-opus-5"), t.models());
         PriceTable.Price sonnet = t.price("claude-sonnet-5-5");
         assertEquals(new BigDecimal("2.00"), sonnet.inputPerMTok());
         assertEquals(new BigDecimal("10.00"), sonnet.outputPerMTok());
@@ -82,6 +82,14 @@ class BudgetAndLedgerTest {
         assertEquals(new BigDecimal("4.00"), t.price("claude-opus-5-5").inputPerMTok());
         assertEquals(new BigDecimal("1.00"), t.price("claude-haiku-4-5").inputPerMTok());
         assertEquals(new BigDecimal("5.00"), t.price("claude-opus-4-8").inputPerMTok());
+        PriceTable.Price opus5 = t.price("claude-opus-5");
+        assertEquals(new BigDecimal("5.00"), opus5.inputPerMTok(), "the other Opus-line fallback target (BS13 live)");
+        assertEquals(new BigDecimal("25.00"), opus5.outputPerMTok());
+        assertEquals(new BigDecimal("0.50"), opus5.cacheReadPerMTok());
+        assertEquals(new BigDecimal("1.25"), opus5.cacheWrite5mFactor());
+        assertEquals(new BigDecimal("2"), opus5.cacheWrite1hFactor());
+        assertEquals(new BigDecimal("0.5"), opus5.batchFactor());
+        assertNull(t.note("claude-opus-5"), "priced as itself, not as an unknown model");
     }
 
     @Test
@@ -103,6 +111,32 @@ class BudgetAndLedgerTest {
         assertNull(t.note("claude-sonnet-5-5"));
         assertEquals(new BigDecimal("0.026480"), t.estimate("claude-sonnet-5-5", 3000, 2048, false));
         assertEquals(new BigDecimal("0.013240"), t.estimate("claude-sonnet-5-5", 3000, 2048, true));
+    }
+
+    /**
+     * A dated snapshot id (the id the provider names in its answer to a request for {@code claude-haiku-4-5}, BS13
+     * live) is priced as its undated id, without a note; an id that is not a known one with {@code -YYYYMMDD} is still
+     * unknown: priced at the Opus rate, with the note.
+     */
+    @Test
+    void aDatedSnapshotIdIsPricedAsItsUndatedId() {
+        PriceTable t = PriceTable.builtIn();
+        String dated = "claude-haiku-4-5-20251001";
+        assertEquals(t.cost(usage("claude-haiku-4-5", 1000, 500, 2000, 400, 100, false, "0")),
+                t.cost(usage(dated, 1000, 500, 2000, 400, 100, false, "0")), "Haiku's price");
+        assertEquals(new BigDecimal("0.004400"), t.cost(usage(dated, 1000, 500, 2000, 400, 100, false, "0")),
+                "1000 x 1 + 500 x 5 + 2000 x 0.10 + 400 x 1 x 1.25 + 100 x 1 x 2 = 4400 per million");
+        assertNull(t.note(dated), "no unknown-model note");
+        assertTrue(t.knows(dated));
+        assertEquals(new BigDecimal("1.00"), t.price(dated).inputPerMTok());
+        assertEquals(t.estimate("claude-haiku-4-5", 3000, 2048, true), t.estimate(dated, 3000, 2048, true));
+        for (String unknown : List.of("claude-fable-x-20251001", "claude-haiku-4-5-2025100", "claude-haiku-4-5-latest",
+                "claude-haiku-4-520251001")) {
+            assertEquals(t.cost(usage("claude-opus-5-5", 100, 10, 0, 0, 0, false, "0")),
+                    t.cost(usage(unknown, 100, 10, 0, 0, 0, false, "0")), unknown + " at Opus's price");
+            assertEquals("priced as claude-opus-5-5 (unknown model " + unknown + ")", t.note(unknown));
+            assertFalse(t.knows(unknown), unknown);
+        }
     }
 
     @Test

@@ -573,5 +573,73 @@
         </pluginManagement>
       </build>
     </profile>
+    <!-- The live tests of phase5-contracts.md 15.3, which call the live Claude API and spend money (2.3, D111): only
+         with -Pinference-live, never activated by the environment (a profile on the key alone would make every verify
+         on a machine with a key call a model), never in CI. It sets skillroy.inference.live=true for the test JVMs.
+         The live tests are failsafe classes named *LiveIT, compiled and run by every verify, each beginning with two
+         assumptions: this property ("the profile inference-live is not active") and ANTHROPIC_API_KEY in the
+         environment, which the forked test JVM inherits ("no model key"); without the profile, or with it and without
+         the key, they are reported skipped, never failed. -->
+    <profile>
+      <id>inference-live</id>
+      <build>
+        <pluginManagement>
+          <plugins>
+            <plugin>
+              <groupId>org.apache.maven.plugins</groupId>
+              <artifactId>maven-surefire-plugin</artifactId>
+              <configuration>
+                <systemPropertyVariables>
+                  <skillroy.inference.live>true</skillroy.inference.live>
+                </systemPropertyVariables>
+              </configuration>
+            </plugin>
+            <plugin>
+              <groupId>org.apache.maven.plugins</groupId>
+              <artifactId>maven-failsafe-plugin</artifactId>
+              <configuration>
+                <systemPropertyVariables>
+                  <skillroy.inference.live>true</skillroy.inference.live>
+                </systemPropertyVariables>
+              </configuration>
+            </plugin>
+          </plugins>
+        </pluginManagement>
+      </build>
+    </profile>
+    <!-- Refreshes the committed recordings of phase5-contracts.md 4.2 from the live API, a maintainer's task that needs
+         the key (2.3, D111): only with -Pinference-record, never activated by the environment. It sets
+         skillroy.inference.record=true, the property the record route's live test assumes ("the profile
+         inference-record is not active", then "no model key"), and skillroy.inference.record.overwrite=true, which
+         lets a recording gateway replace a recording that exists (RecordingGateway.OVERWRITE_PROPERTY). -->
+    <profile>
+      <id>inference-record</id>
+      <build>
+        <pluginManagement>
+          <plugins>
+            <plugin>
+              <groupId>org.apache.maven.plugins</groupId>
+              <artifactId>maven-surefire-plugin</artifactId>
+              <configuration>
+                <systemPropertyVariables>
+                  <skillroy.inference.record>true</skillroy.inference.record>
+                  <skillroy.inference.record.overwrite>true</skillroy.inference.record.overwrite>
+                </systemPropertyVariables>
+              </configuration>
+            </plugin>
+            <plugin>
+              <groupId>org.apache.maven.plugins</groupId>
+              <artifactId>maven-failsafe-plugin</artifactId>
+              <configuration>
+                <systemPropertyVariables>
+                  <skillroy.inference.record>true</skillroy.inference.record>
+                  <skillroy.inference.record.overwrite>true</skillroy.inference.record.overwrite>
+                </systemPropertyVariables>
+              </configuration>
+            </plugin>
+          </plugins>
+        </pluginManagement>
+      </build>
+    </profile>
   </profiles>
 </project>

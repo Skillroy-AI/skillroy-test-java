@@ -1,9 +1,9 @@
 {
   "fingerprint": "c8c78cbc35e9368de19b08e815ec1ca3ae35245baa0dd2f7b1fecd4e5a60cf22",
-  "model": "scripted-model",
+  "model": "claude-sonnet-5-5",
   "modelClass": "SONNET_CLASS",
   "purpose": "resolve",
-  "recordedAt": "2026-10-08T12:00:00Z",
+  "recordedAt": "2026-10-08T19:29:48.706606Z",
   "request": {
     "effort": "LOW",
     "messages": [
@@ -123,11 +123,21 @@
     ],
     "tools": []
   },
-  "requestedModel": "scripted-model",
+  "requestedModel": "claude-sonnet-5-5",
   "response": {
     "parts": [
       {
-        "text": "{\"cannotAnswer\":false,\"cannotAnswerReason\":\"\",\"confidence\":0.9,\"expectedRows\":{\"max\":5,\"min\":1},\"orderBy\":\"s.code\",\"params\":[{\"name\":\"distinctFrom.0\",\"type\":\"STRING\",\"value\":\"100\"},{\"name\":\"perform.0\",\"type\":\"STRING\",\"value\":\"RETURN_OVERRIDE\"},{\"name\":\"limit.type\",\"type\":\"STRING\",\"value\":\"RETURN\"},{\"name\":\"limit.gte\",\"type\":\"NUMBER\",\"value\":\"34.99\"},{\"name\":\"limit.type\",\"type\":\"STRING\",\"value\":\"RETURN\"}],\"rationale\":\"A supervisor for this return is an active staff member other than the one in distinctFrom who holds RETURN_OVERRIDE through any of their roles and whose RETURN limit covers the amount: the highest RETURN amount over their roles is at least limit.gte, or none of their roles has a RETURN limit, which the desk treats as unlimited. One row per staff member, by code.\",\"sql\":\"SELECT s.code AS code FROM staff s WHERE s.active = TRUE AND s.code <> ? AND EXISTS (SELECT sr.staff_code FROM staff_role sr JOIN role_permission rp ON rp.role_id = sr.role_id WHERE sr.staff_code = s.code AND rp.permission = ?) AND ((SELECT MAX(rc.amount) FROM staff_role sr2 JOIN role_cap rc ON rc.role_id = sr2.role_id WHERE sr2.staff_code = s.code AND rc.kind = ?) >= CAST(? AS DECIMAL(10,2)) OR NOT EXISTS (SELECT sr3.staff_code FROM staff_role sr3 JOIN role_cap rc3 ON rc3.role_id = sr3.role_id WHERE sr3.staff_code = s.code AND rc3.kind = ?)) ORDER BY s.code\",\"tablesUsed\":[\"staff\",\"staff_role\",\"role_permission\",\"role_cap\"]}",
+        "blockType": "thinking",
+        "provider": "claude",
+        "raw": {
+          "signature": "CAQS+woKEAgSGAI4AUIIdGhpbmtpbmcSDK1FTeI2Mz2JayNichoM/6apAprbQvI0dOOLIjBHU/MSwyxvM8lab7fe7BYav7a7tNConKmKnKc7Fpk9LHH95zHZgZozFlsl6YUelvIqmAr9cz567wdK+V5m2qif+3iILMFjdoRsF4TlxvN/WAP3AhsVSlZz+SUjnsxkxWtjNIgjmd6Q8ci+Y3vcUbq4nbYhyS9r82Le+p+fqCO3MgPzPKia7os6MmzBCzWnitZ9TKagl/wDgl49F1jSuNArVpNEhPUonUy7dzo4O6gGCyle3gvGx9WiO0M8XlG6CIcEcOBy7By1orR9K/a/j9hTxJfI+5tMblIMu8xxFl9mFgtX08HLE+rAAX8GTzj35bcPPlHpkpikfJ5nxHIG0wgCBjdv/ma+IDOjOCJzgaYj9l1gi0UnsXNxZbn8TeGkExy7KHHBKq+cHfuATShnyzBN/iavZ23MPUa//SOvuiv0PSpuPqnoFEQWC0bSYcbLPH/FoioqbevpF+f2cceEvuowSMx7TRr6URjQcVsRRmZ+Bpu0w1ZU8NyEgRBDUt1J4QCwhfxtNQS117rZ3wgHWBEKiRQLrFZZURBNcgqx7VN5wWuAI+uD0eWwYeDvrdLLe67+Bb0urdH2B/QdjdBDRqFWmIyJQIGaZh2RjnEO3hlNrd/2HLpbLL/cDesWgnIwru7CTQ91A/NKeGeL6sX6G0StCXVC5Wu8zpnl/uS1E0BCk1sqC/se3eSs5mE4qXn91UDdJ4gsBZG4k0o3jKwJEQ1tpFADsVNpvxjXpSPXGj6pK7ht62Ohc+82KZgSEMsncx0ShwagUsCYyKvxzdlwIIDhEoxlwbI7UzHl48yrTZrYkfaJK5haTVvYjNnWiRCY8rYqDs0HRsiIF8TVMrrRmCD30hcjxy17eM4zEvGpFT/QCRA/VBCrAC7WzEzWSU+Ibjlitgrl87Sbkr+rDS2SDT4mnCgaFQTmCamj8MLg91+oHKj3g+2bX2EOJgZgusQdiG863WYOle6NX5k1OBtZt9dPDbzfRQ7YFs4CvEWfw/kHWovd5Wque3WAlAjjhzhdr2KBvHADN4ZEpi0EwDlCa6lGtVNOo2805rxZU1+jXP9ewtc7zVR/xMe/J3U3ynTtvhYP2pu6mJlErTJ66Vk1Cp+K14WG7o4usgz8q1ZCusLLwAamIbGVlz513XSDbM6CdQQtVoL64wR+RYRI5tSb69ob8pQYMT+L9Osde0tkDT3kzt1fsM058LRUuq7juPWpHPdjAB6lrcHs7wyoIKZUhbSNpw8UTWtcrA50iqfDC7VjqwpYoEFrk3Q2LVqJsYcjn74TH54/FlSLO7q/PPRxhw8fUiZaOSEnEUsUPLYy7zPVSPf1z5m3hjdhFeV7Rz09ZgDTYhLxDwTBg6tnVcT3lazh4i2KyphL/IukczhkGTDifXBlwjLWtQMNF1ntDm+Nrs3LnvSsF/cQ8zGcjg+W5EGTmIYBkSTM3DkgA3Ukv1s7BtrL+lTkHc6L5HOUGm/1q4SQfBoLWY7N34gC1xqKtk2HVVMW8wStqYrYbiCkjB1Cq37hYLFtOeSwR2yoyxBSAZ7IYUUzm0jqjckFBw9ReL+0uh7sB1nMhNNsc/HczsU7iWm/H2tqERDGnymDDUdNYwzWdc17dKSksP2//cw3Zhtw1BSf9KZJRHjzIblgkpiPjlW2VM+R1jsBDwSeVdSLR8c528mpTgg+Te3YxRvRKuB18Q1XFN1TqlYCt+B0JgBmmp/08e1Jp2pPx/foXKVltDhF8iPTB2NPoOop0BnjKmuEQrQrmvn0KiMoRb3/6r8Gmuw+vfvNuGqiCLCUAByT/Cr1IYb6/bVRF3M/yxgB",
+          "thinking": "",
+          "type": "thinking"
+        },
+        "type": "opaque"
+      },
+      {
+        "text": "{\"sql\":\"SELECT s.code AS code FROM staff s WHERE s.code <> ? AND EXISTS (SELECT 1 FROM staff_role sr JOIN role_permission rp ON rp.role_id = sr.role_id WHERE sr.staff_code = s.code AND rp.permission = ?) AND EXISTS (SELECT 1 FROM staff_role sr2 JOIN role_cap rc ON rc.role_id = sr2.role_id WHERE sr2.staff_code = s.code AND rc.kind = ? AND rc.amount >= ?) ORDER BY s.code\",\"params\":[{\"name\":\"distinctFrom.0\",\"value\":\"100\",\"type\":\"STRING\"},{\"name\":\"perform.0\",\"value\":\"RETURN_OVERRIDE\",\"type\":\"STRING\"},{\"name\":\"limit.type\",\"value\":\"RETURN\",\"type\":\"STRING\"},{\"name\":\"limit.gte\",\"value\":\"34.99\",\"type\":\"NUMBER\"}],\"rationale\":\"Selects staff codes other than the excluded one who hold a role permitting RETURN_OVERRIDE and whose highest RETURN cap over their roles is at least 34.99 (some role has a RETURN cap of at least that amount). No sign-on filter is applied because that argument is null.\",\"tablesUsed\":[\"staff\",\"staff_role\",\"role_permission\",\"role_cap\"],\"orderBy\":\"s.code\",\"confidence\":0.8,\"expectedRows\":{\"min\":1,\"max\":50},\"cannotAnswer\":false,\"cannotAnswerReason\":\"\"}",
         "type": "text"
       }
     ],
@@ -135,9 +145,9 @@
     "structured": {
       "cannotAnswer": false,
       "cannotAnswerReason": "",
-      "confidence": 0.9,
+      "confidence": 0.8,
       "expectedRows": {
-        "max": 5,
+        "max": 50,
         "min": 1
       },
       "orderBy": "s.code",
@@ -161,15 +171,10 @@
           "name": "limit.gte",
           "type": "NUMBER",
           "value": "34.99"
-        },
-        {
-          "name": "limit.type",
-          "type": "STRING",
-          "value": "RETURN"
         }
       ],
-      "rationale": "A supervisor for this return is an active staff member other than the one in distinctFrom who holds RETURN_OVERRIDE through any of their roles and whose RETURN limit covers the amount: the highest RETURN amount over their roles is at least limit.gte, or none of their roles has a RETURN limit, which the desk treats as unlimited. One row per staff member, by code.",
-      "sql": "SELECT s.code AS code FROM staff s WHERE s.active = TRUE AND s.code <> ? AND EXISTS (SELECT sr.staff_code FROM staff_role sr JOIN role_permission rp ON rp.role_id = sr.role_id WHERE sr.staff_code = s.code AND rp.permission = ?) AND ((SELECT MAX(rc.amount) FROM staff_role sr2 JOIN role_cap rc ON rc.role_id = sr2.role_id WHERE sr2.staff_code = s.code AND rc.kind = ?) >= CAST(? AS DECIMAL(10,2)) OR NOT EXISTS (SELECT sr3.staff_code FROM staff_role sr3 JOIN role_cap rc3 ON rc3.role_id = sr3.role_id WHERE sr3.staff_code = s.code AND rc3.kind = ?)) ORDER BY s.code",
+      "rationale": "Selects staff codes other than the excluded one who hold a role permitting RETURN_OVERRIDE and whose highest RETURN cap over their roles is at least 34.99 (some role has a RETURN cap of at least that amount). No sign-on filter is applied because that argument is null.",
+      "sql": "SELECT s.code AS code FROM staff s WHERE s.code <> ? AND EXISTS (SELECT 1 FROM staff_role sr JOIN role_permission rp ON rp.role_id = sr.role_id WHERE sr.staff_code = s.code AND rp.permission = ?) AND EXISTS (SELECT 1 FROM staff_role sr2 JOIN role_cap rc ON rc.role_id = sr2.role_id WHERE sr2.staff_code = s.code AND rc.kind = ? AND rc.amount >= ?) ORDER BY s.code",
       "tablesUsed": [
         "staff",
         "staff_role",
@@ -181,16 +186,16 @@
       "batch": false,
       "cacheReadTokens": 0,
       "cacheWrite1hTokens": 0,
-      "cacheWrite5mTokens": 0,
-      "costUsd": "0",
-      "elapsedMs": 0,
-      "inputTokens": 3320,
-      "model": "scripted-model",
+      "cacheWrite5mTokens": 5024,
+      "costUsd": "0.022280",
+      "elapsedMs": 9474,
+      "inputTokens": 475,
+      "model": "claude-sonnet-5-5",
       "note": null,
-      "outputTokens": 356,
-      "provider": "scripted",
-      "requestId": "scripted-3320-356",
-      "requestedModel": "scripted-model"
+      "outputTokens": 877,
+      "provider": "claude",
+      "requestId": "msg_011CfqKjnsrG4ybkCUHXMAG9",
+      "requestedModel": "claude-sonnet-5-5"
     }
   },
   "version": 1

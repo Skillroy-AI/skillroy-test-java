@@ -110,7 +110,8 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
  * </ol>
  *
  * <p>Items 2 to 8 run once per seed, with the agent on the command line ({@link #full()}); the other load modes run
- * item 1 only, which is what "in every load mode" asks of them. Item 3 (scenario C) waits for the planner's live run.
+ * item 1 only, which is what "in every load mode" asks of them. Item 3 (scenario C) is
+ * {@link ResolutionChecks#scenarioCReplaysGreenAndTheReturnIsStored()}, in every load mode on both seeds.
  * Why item 4 uses the scripted model here and not the recordings: a session's later requests carry what the desk
  * answered (the snapshot's hash, which holds the desk's business date, and the events of each call, whose order the
  * engine's thread decides), so recordings made on the headless desk ({@code SessionExportTest}) answer only there;
@@ -174,10 +175,13 @@ abstract class InferenceChecks {
         return dir;
     }
 
-    /** {@code approve} with the label of the committed files, against the recordings, with a ledger. */
+    /**
+     * {@code approve} with the label scenario D's committed file of this seed holds ({@link ScenarioD#approvedBy}),
+     * against the recordings, with a ledger.
+     */
     BindOptions approve(Path root, InferenceSettings inference, CostLedger ledger) {
         return Runs.bind(env()).withMode(BindMode.APPROVE).withBindingsRoot(root).withLedger(ledger)
-                .withInference(inference).withApprovedBy(ScriptedAnswers.APPROVED_BY)
+                .withInference(inference).withApprovedBy(ScenarioD.approvedBy(env()))
                 .withApprover(request -> new Approver.Decision(true, null, "scripted"));
     }
 
@@ -429,9 +433,9 @@ abstract class InferenceChecks {
 
     /**
      * Item 7: the nightly job's dry run on this seed against the recordings: scenarios A and B (approved as
-     * {@code approve}) and scenario D (approved with the recordings' label) are {@code UNCHANGED} against the
-     * committed files; D's request goes through the recorded gateway's batch interface; the report has its cache line.
-     * Two jobs, because a job approves every file it writes under one label.
+     * {@code approve}) and scenario D (approved with the label its committed file holds) are {@code UNCHANGED} against
+     * the committed files; D's request goes through the recorded gateway's batch interface; the report has its cache
+     * line. Two jobs, because a job approves every file it writes under one label.
      */
     @Test
     @Order(6)
@@ -448,7 +452,7 @@ abstract class InferenceChecks {
                 .stream().map(ReResolveReport.ScenarioReport::status).toList(), tierA.toMarkdown());
         Path reportD = runDir("nightly-d");
         ReResolveReport tierB = ReResolver.run(List.of(Plan.read(ScenarioD.plan())), Runs.PACK, client(), options,
-                job.withOutDir(reportD).withApprovedBy(ScriptedAnswers.APPROVED_BY));
+                job.withOutDir(reportD).withApprovedBy(ScenarioD.approvedBy(env())));
         assertEquals(ReResolveReport.Status.UNCHANGED, tierB.scenarios().get(0).status(), tierB.toMarkdown());
         assertEquals(1, tierB.requests(), tierB.toMarkdown());
         String markdown = Files.readString(reportD.resolve(ReResolveReport.MARKDOWN_FILE));

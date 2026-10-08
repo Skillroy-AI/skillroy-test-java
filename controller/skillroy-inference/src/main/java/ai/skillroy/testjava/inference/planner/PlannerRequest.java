@@ -16,6 +16,7 @@
 
 package ai.skillroy.testjava.inference.planner;
 
+import ai.skillroy.testjava.data.SecretMask;
 import ai.skillroy.testjava.protocol.PrimitiveDescriptor;
 import ai.skillroy.testjava.scenario.pack.DomainPack;
 import ai.skillroy.testjava.scenario.resolve.InferenceSettings;
@@ -42,7 +43,8 @@ import java.util.List;
  * @param model the model id ({@code claude-opus-5-5}); null means the settings' default Opus id
  * @param maxTurns {@code --max-turns}, at least 1 (40)
  * @param maxRepairs the most repair rounds through {@code --resume}, at least 0 (2)
- * @param budgetUsd the planner's budget, passed as {@code --max-budget-usd} (2.00) and checked afterwards
+ * @param budgetUsd the planner's budget (2.00): the first invocation's {@code --max-budget-usd}, what is left of it a
+ *     repair's, and the bound the reported cost is checked against afterwards
  * @param run whether the CLI will run the scenario once after it is written ({@code --run}); recorded in the
  *     authoring record's checks
  * @param claudeCommand the {@code claude} executable (the CLI resolves {@code --claude-command} or the
@@ -50,11 +52,13 @@ import java.util.List;
  * @param deadline the most the planner may take over all its rounds ({@code timeouts.plannerMs}, 15 min); null means
  *     15 minutes
  * @param clock the authoring date's clock; null means the system UTC clock
+ * @param secrets the secret values the planner's log and envelope file are masked by (the CLI passes its credentials'
+ *     mask: a model's text that repeats a credential reaches neither); null knows none, leaving the key rule alone
  */
 public record PlannerRequest(String brief, String scenarioId, Path outDir, DomainPack pack,
                              List<PrimitiveDescriptor> primitives, Path mcpConfig, String model, int maxTurns,
                              int maxRepairs, BigDecimal budgetUsd, boolean run, Path claudeCommand, Duration deadline,
-                             Clock clock) {
+                             Clock clock, SecretMask secrets) {
 
     /** The default turn limit. */
     public static final int DEFAULT_MAX_TURNS = 40;
@@ -65,7 +69,7 @@ public record PlannerRequest(String brief, String scenarioId, Path outDir, Domai
     /** The default deadline. */
     public static final Duration DEFAULT_DEADLINE = Duration.ofMinutes(15);
 
-    /** Copies the catalogue; fills the model, the budget, the deadline and the clock. */
+    /** Copies the catalogue; fills the model, the budget, the deadline, the clock and the secrets. */
     public PlannerRequest {
         primitives = primitives == null ? List.of() : List.copyOf(primitives);
         model = model == null || model.isBlank() ? InferenceSettings.DEFAULT_MODELS.get(InferenceSettings.MODEL_OPUS)
@@ -73,12 +77,22 @@ public record PlannerRequest(String brief, String scenarioId, Path outDir, Domai
         budgetUsd = budgetUsd == null ? DEFAULT_BUDGET_USD : budgetUsd;
         deadline = deadline == null ? DEFAULT_DEADLINE : deadline;
         clock = clock == null ? Clock.systemUTC() : clock;
+        secrets = secrets == null ? SecretMask.NONE : secrets;
+    }
+
+    /** A request whose log and envelope file know no secret value (the key rule alone). */
+    public PlannerRequest(String brief, String scenarioId, Path outDir, DomainPack pack,
+                          List<PrimitiveDescriptor> primitives, Path mcpConfig, String model, int maxTurns,
+                          int maxRepairs, BigDecimal budgetUsd, boolean run, Path claudeCommand, Duration deadline,
+                          Clock clock) {
+        this(brief, scenarioId, outDir, pack, primitives, mcpConfig, model, maxTurns, maxRepairs, budgetUsd, run,
+                claudeCommand, deadline, clock, null);
     }
 
     /** A request with the contract's defaults for the turns, repairs, budget and deadline. */
     public static PlannerRequest of(String brief, String scenarioId, Path outDir, DomainPack pack,
                                     List<PrimitiveDescriptor> primitives, Path mcpConfig, Path claudeCommand) {
         return new PlannerRequest(brief, scenarioId, outDir, pack, primitives, mcpConfig, null, DEFAULT_MAX_TURNS,
-                DEFAULT_MAX_REPAIRS, null, false, claudeCommand, null, null);
+                DEFAULT_MAX_REPAIRS, null, false, claudeCommand, null, null, null);
     }
 }

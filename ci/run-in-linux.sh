@@ -29,9 +29,14 @@
 #                       arm64 build of the image natively on an arm64 development machine)
 #   ANTHROPIC_API_KEY, ANTHROPIC_WORKSPACE_ID
 #                       passed into the container by name when set (never printed): the model key of a live run, and
-#                       the workspace id an organisation key needs. The inference-live and inference-record profiles
-#                       of phase5-contracts.md 2.3 are specified, not built yet (D110): Maven warns that they do not
-#                       exist, and nothing live runs
+#                       the workspace id an organisation key needs. With the key passed through, -Pinference-live runs
+#                       the live tests of phase5-contracts.md 15.3 in the image and -Pinference-record re-records (the
+#                       profiles of 2.3, D111), e.g. ci/run-in-linux.sh mvn -o verify -pl samples/skillroy-sample-lending-scenarios -am -Pinference-live -Dskillroy.headless=false -Dit.test=InferenceLiveIT -Dfailsafe.failIfNoSpecifiedTests=false; without the key,
+#                       or without the profile, those tests report themselves skipped and nothing live runs
+#   SKILLROY_CLAUDE_BIN  optional directory holding a Linux build of the claude CLI (the planner, phase5-contracts.md 10,
+#                       14.3): mounted read-only at /opt/claude-bin and put first on the container's PATH, so that
+#                       `skillroy author` and the live item 5 of 15.3 find `claude`; the image and the repository
+#                       never carry the CLI (B3)
 set -euo pipefail
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 image="${SKILLROY_CI_IMAGE:-skillroy-test-java-ci:local}"
@@ -48,11 +53,20 @@ fi
 if [ -n "${SKILLROY_JDK8_HOME:-}" ]; then mounts+=(-v "$SKILLROY_JDK8_HOME:/opt/jdk8:ro"); fi
 # Phase 5 (phase5-contracts.md 2.3, 14.5): the model key and its workspace id reach the container by name only:
 # "-e NAME" without a value makes docker copy the variable from this environment, so neither value is ever on a
-# command line or printed. Unset, the container has neither, and nothing live can run (the live profiles, specified in
-# 2.3, are not built yet: D110).
+# command line or printed. Set, -Pinference-live runs the live tests of 15.3 in the image (the forked test JVMs inherit
+# the variables); unset, the container has neither, and those tests report themselves skipped ("no model key").
 for name in ANTHROPIC_API_KEY ANTHROPIC_WORKSPACE_ID; do
   if [ -n "${!name:-}" ]; then env+=(-e "$name"); fi
 done
+# The planner's CLI, when a directory with a Linux `claude` is named: mounted, never copied into the image.
+if [ -n "${SKILLROY_CLAUDE_BIN:-}" ] && [ -x "$SKILLROY_CLAUDE_BIN/claude" ]; then
+  mounts+=(-v "$SKILLROY_CLAUDE_BIN:/opt/claude-bin:ro")
+  if [ -n "$mvn_home" ] && [ -d "$mvn_home" ]; then
+    env+=(-e "PATH=/opt/claude-bin:/opt/maven/bin:/opt/java/openjdk/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
+  else
+    env+=(-e "PATH=/opt/claude-bin:/opt/java/openjdk/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
+  fi
+fi
 if [ "${SKILLROY_NO_XVFB:-0}" = "1" ]; then
   exec docker run --rm --init --platform "$platform" "${mounts[@]}" "${env[@]}" "$image" "$@"
 fi

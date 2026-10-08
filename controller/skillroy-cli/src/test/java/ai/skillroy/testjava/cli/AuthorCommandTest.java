@@ -50,7 +50,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * the written files, the checks ({@code resolve --dry-run} semantics and {@code --run}, refused when a call is one the
  * planner's server would not make, D96) recorded in the authoring record, the planner's schema limited to what its
  * server offers, its deadline from {@code timeouts.plannerMs}, the planner's cost in the invocation's ledger and the
- * cost lines, a planner failure (exit 1), a missing {@code claude} (exit 64), and the usage errors.
+ * cost lines, the envelope file (D112: the envelopes the substitute printed, in order and masked, named in the
+ * {@code written:} lines, in {@code --json} and, after a failure that received one, on stderr), a planner failure
+ * (exit 1), a missing {@code claude} (exit 64), and the usage errors.
  */
 @DisabledOnOs(OS.WINDOWS)
 class AuthorCommandTest {
@@ -145,7 +147,8 @@ class AuthorCommandTest {
 
     @Test
     void aBriefBecomesAScenarioThatIsCheckedAndRunOnce() throws Exception {
-        answer(1, envelope(document("poke-once"), false, "0.42"));
+        Map<String, Object> printed = envelope(document("poke-once"), false, "0.42");
+        answer(1, printed);
         CliHarness.Outcome outcome = author("--brief", BRIEF, "--id", "poke-once", "--out", out.toString(),
                 "--claude-command", claude.toString(), "--run", "--env", "lab").expectExit(Exit.OK);
         String text = outcome.out();
@@ -166,6 +169,14 @@ class AuthorCommandTest {
         assertEquals(true, checks.get("compiled"));
         assertNull(checks.get("resolved"), "no bindings needed: no bind was made");
         assertEquals(true, checks.get("ran"));
+
+        // D112: the envelope file, named in the written lines and the instruction, holds the one envelope printed.
+        Path envelopeFile = out.resolve("poke-once.envelope.json");
+        assertTrue(text.contains("\n           " + out.resolve("poke-once.authoring.json") + "\n           "
+                + envelopeFile + "\n"), text);
+        assertTrue(text.contains(" poke-once.envelope.json holds the planner's envelopes: delete it before committing"
+                + " or keep it as the fixture of the planner's replay."), text);
+        assertEquals(List.of(Json.parse(Json.write(printed))), Json.parse(Files.readString(envelopeFile)));
 
         // The MCP configuration the planner was given: owner-only, this CLI's server, deleted afterwards.
         List<String> args = args(1);
@@ -287,17 +298,76 @@ class AuthorCommandTest {
                 .expectExit(Exit.FAILED);
         assertTrue(outcome.err().contains("deadline of PT1.5S"), outcome.err());
         assertFalse(Files.exists(out.resolve("slow.yaml")));
+        assertFalse(Files.exists(out.resolve("slow.envelope.json")), "no envelope arrived, none is written");
+        assertFalse(outcome.err().contains("the planner's envelopes"), outcome.err());
     }
 
     @Test
     void aPlannerThatFailsIsExitCode1AndItsCostIsStillCounted() throws Exception {
-        answer(1, envelope(null, true, "0.05"));
+        Map<String, Object> printed = envelope(null, true, "0.05");
+        answer(1, printed);
         CliHarness.Outcome outcome = author("--brief", BRIEF, "--id", "poke-fail", "--out", out.toString(),
                 "--claude-command", claude.toString(), "--json").expectExit(Exit.FAILED);
         assertTrue(outcome.err().contains("skillroy author: "), outcome.err());
         assertTrue(outcome.err().contains("model calls: 1\nmodel cost: $0.05 (budget $2.00)"), outcome.err());
         assertFalse(Files.exists(out.resolve("poke-fail.yaml")));
         assertEquals("", outcome.out(), "nothing was written, so nothing is reported on stdout");
+        // D112: the is_error envelope is kept so that a person can read why, and stderr names its file.
+        Path envelopeFile = out.resolve("poke-fail.envelope.json");
+        assertTrue(outcome.err().contains("the planner's envelopes: " + envelopeFile + "\n"), outcome.err());
+        assertEquals(List.of(Json.parse(Json.write(printed))), Json.parse(Files.readString(envelopeFile)));
+    }
+
+    /**
+     * D112: with a repair round the envelope file holds both envelopes, the first invocation's and the repair's, in
+     * order, through the mask of the planner's log: a secret the mask knows (a {@code key=value} run in a text) is not
+     * in it.
+     */
+    @Test
+    void theEnvelopeFileHoldsEveryRoundMasked() throws Exception {
+        Map<String, Object> wrong = document("poke-twice");
+        wrong.put("colour", "blue");
+        Map<String, Object> first = envelope(wrong, false, "0.20");
+        first.put("result", "a draft; the desk's note reads password=Cli-Envelope-Pw-6620");
+        Map<String, Object> second = envelope(document("poke-twice"), false, "0.25");
+        answer(1, first);
+        answer(2, second);
+        CliHarness.Outcome outcome = author("--brief", BRIEF, "--id", "poke-twice", "--out", out.toString(),
+                "--claude-command", claude.toString()).expectExit(Exit.OK);
+        assertTrue(outcome.out().startsWith("authored poke-twice with claude-opus-5-5 in 10 turns, 1 repair (session"
+                + " sess-9"), outcome.out());
+        assertTrue(outcome.out().endsWith("model calls: 2\nmodel cost: $0.25 (budget $2.00)\n"), "the session's last"
+                + " running total, not the sum of the totals: " + outcome.out());
+        assertEquals("1.80", after(args(2), "--max-budget-usd"), "the repair is given what is left of the budget");
+        Path envelopeFile = out.resolve("poke-twice.envelope.json");
+        assertTrue(outcome.out().contains("\n           " + envelopeFile + "\n"), outcome.out());
+        String text = Files.readString(envelopeFile);
+        assertFalse(text.contains("Cli-Envelope-Pw-6620"), text);
+        Map<String, Object> masked = new LinkedHashMap<>(first);
+        masked.put("result", "a draft; the desk's note reads password=<redacted>");
+        assertEquals(List.of(Json.parse(Json.write(masked)), Json.parse(Json.write(second))), Json.parse(text),
+                "both rounds, in order, the first masked");
+    }
+
+    /**
+     * D112 with the environment's credentials: the command gives the planner the credentials' mask, so a password of
+     * the credentials file that the model repeats in its envelope reaches neither the envelope file nor the output.
+     */
+    @Test
+    void theEnvelopeFileIsMaskedByTheCredentials() throws Exception {
+        String password = "Cli-Desk-Pw-5531-Kx";
+        Path credentials = Files.writeString(tmp.resolve("credentials.yaml"), "version: 1\ncredentials:\n"
+                + "  staff:\n    S7: { password: '" + password + "' }\n");
+        Files.setPosixFilePermissions(credentials, PosixFilePermissions.fromString("rw-------"));
+        Map<String, Object> printed = envelope(document("poke-cred"), false, "0.10");
+        printed.put("result", "done; the helper signed on with " + password + " at the desk");
+        answer(1, printed);
+        CliHarness.Outcome outcome = author("--brief", BRIEF, "--id", "poke-cred", "--out", out.toString(),
+                "--claude-command", claude.toString(), "--credentials", credentials.toString()).expectExit(Exit.OK);
+        String text = Files.readString(out.resolve("poke-cred.envelope.json"));
+        assertFalse(text.contains(password), text);
+        assertTrue(text.contains("done; the helper signed on with <redacted> at the desk"), text);
+        assertFalse((outcome.out() + outcome.err()).contains(password));
     }
 
     @Test
@@ -316,6 +386,11 @@ class AuthorCommandTest {
         assertEquals(1L, json.get("modelCalls"));
         assertEquals("claude-sonnet-5-5", after(args(1), "--model"));
         assertEquals("1.50", after(args(1), "--max-budget-usd"));
+        assertEquals(out.resolve("poke-json.envelope.json").toString(), json.get("envelope"),
+                "the envelope file (D112)");
+        assertTrue(Files.isRegularFile(out.resolve("poke-json.envelope.json")));
+        assertTrue(String.valueOf(json.get("instruction")).contains("poke-json.envelope.json holds the planner's"
+                + " envelopes"), String.valueOf(json.get("instruction")));
     }
 
     @Test

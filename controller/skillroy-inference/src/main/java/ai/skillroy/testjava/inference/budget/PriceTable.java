@@ -33,14 +33,16 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
  * What a model call costs (phase5-contracts.md 7.2): US dollars per million tokens by model id, with the cache-write
  * factors by time to live and the batch factor. The provider reports tokens, not money; a gateway computes
  * {@code Usage.costUsd} with {@link #cost(Usage)}, from the usage's own cache-write split (BS13 F-4), at the batch
- * rate for a batch call (stacking with cache reads). An unknown model costs at the price of the Opus class's default
- * model ({@value #UNKNOWN_MODEL_PRICE}) and {@link #note} says so.
+ * rate for a batch call (stacking with cache reads). A dated snapshot id the table does not hold (a known id followed
+ * by {@code -YYYYMMDD}) costs as the known id; an unknown model costs at the price of the Opus class's default model
+ * ({@value #UNKNOWN_MODEL_PRICE}) and {@link #note} says so.
  *
  * <p>The built-in table ({@link #builtIn()}) holds this version's published rates, to be replaced by a file when they
  * move ({@code inference.yaml} {@code prices}, read by {@link #load}):
@@ -67,6 +69,8 @@ public final class PriceTable {
     private static final int SCALE = 6;
     private static final int MAX_FILE_BYTES = 1 << 20;
     private static final Pattern MODEL_ID = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._:@/-]{0,199}");
+    /** A dated snapshot id: an id, {@code -} and the eight digits of a date. */
+    private static final Pattern DATED_ID = Pattern.compile("(.+)-[0-9]{8}");
     private static final List<String> TOP_KEYS = List.of("version", "models");
     private static final List<String> PRICE_KEYS = List.of("inputPerMTok", "outputPerMTok", "cacheReadPerMTok",
             "cacheWrite5mFactor", "cacheWrite1hFactor", "batchFactor");
@@ -111,9 +115,11 @@ public final class PriceTable {
         table.put("claude-opus-5-5", Price.of("claude-opus-5-5", "4.00", "20.00", "0.20"));
         table.put("claude-sonnet-5-5", Price.of("claude-sonnet-5-5", "2.00", "10.00", "0.20"));
         table.put("claude-haiku-4-5", Price.of("claude-haiku-4-5", "1.00", "5.00", "0.10"));
-        // The two fallback targets: Sonnet 5.5's documented one (BS13 F-7) and an Opus-line one.
+        // The fallback targets: Sonnet 5.5's documented one (BS13 F-7) and the two the models endpoint names for
+        // Opus 5.5 (BS13 live, 2026-10-08).
         table.put("claude-sonnet-5", Price.of("claude-sonnet-5", "2.00", "10.00", "0.20"));
         table.put("claude-opus-4-8", Price.of("claude-opus-4-8", "5.00", "25.00", "0.50"));
+        table.put("claude-opus-5", Price.of("claude-opus-5", "5.00", "25.00", "0.50"));
         BUILT_IN = new PriceTable(table);
     }
 
@@ -123,7 +129,12 @@ public final class PriceTable {
         this.prices = Collections.unmodifiableMap(new LinkedHashMap<>(prices));
     }
 
-    /** This version's table (phase5-contracts.md 7.2). */
+    /**
+     * This version's table (phase5-contracts.md 7.2): {@code claude-opus-5-5}, {@code claude-sonnet-5-5} and
+     * {@code claude-haiku-4-5}, and the fallback targets {@code claude-sonnet-5} (Sonnet 5.5's),
+     * {@code claude-opus-4-8} and {@code claude-opus-5} (Opus 5.5's), each with the factors 1.25 and 2 of the cache
+     * writes and 0.5 of a batch.
+     */
     public static PriceTable builtIn() {
         return BUILT_IN;
     }
@@ -242,9 +253,21 @@ public final class PriceTable {
         return file + (line > 0 ? ":" + line : "") + ": ";
     }
 
-    /** The price of a model, or null when the table does not know it. */
+    /**
+     * The price of a model, or null when the table does not know it. A dated id the table does not hold, a known id
+     * followed by {@code -} and the eight digits of a snapshot date ({@code claude-haiku-4-5-20251001}, the id the
+     * provider names in its answer to a request for {@code claude-haiku-4-5}, BS13 live), has the known id's price.
+     */
     public Price price(String model) {
-        return model == null ? null : prices.get(model);
+        if (model == null) {
+            return null;
+        }
+        Price own = prices.get(model);
+        if (own != null) {
+            return own;
+        }
+        Matcher dated = DATED_ID.matcher(model);
+        return dated.matches() ? prices.get(dated.group(1)) : null;
     }
 
     /** True when the table knows the model. */

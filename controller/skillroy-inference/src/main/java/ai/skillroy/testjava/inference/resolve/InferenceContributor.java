@@ -105,7 +105,8 @@ public final class InferenceContributor implements ResolverContributor {
         } catch (SettingsException e) {
             throw new ContributionException(e.getMessage());
         }
-        BigDecimal threshold = decimal(settings.thresholds().get("confidence"), "0.8", "thresholds.confidence");
+        BigDecimal threshold = decimal(settings.thresholds().get("confidence"),
+                InferenceSettings.DEFAULT_THRESHOLDS.get("confidence"), "thresholds.confidence");
         Effort effort;
         try {
             effort = Effort.parse(settings.effort().getOrDefault("resolve", "low"));

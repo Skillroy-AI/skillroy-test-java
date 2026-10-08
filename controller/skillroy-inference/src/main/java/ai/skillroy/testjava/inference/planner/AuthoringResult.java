@@ -27,10 +27,11 @@ import java.util.Objects;
 
 /**
  * What the planner wrote (phase5-contracts.md 10.2 items 5-7): the scenario's YAML (with its comment head), its plan
- * (compiled as {@code compile} writes it) and its authoring record, the plan itself for the CLI's checks (a
- * {@code resolve --dry-run} bind and, with {@code --run}, one {@code live} run), the session, the turns and repairs,
- * the cost (the ledger entries of provider {@code claude-code}, purpose {@code plan}), the {@code claude} version, the
- * masked tail of the planner's error output, and the instruction for the reviewer.
+ * (compiled as {@code compile} writes it), its authoring record and its envelope file (the planner's envelopes,
+ * masked; D112), the plan itself for the CLI's checks (a {@code resolve --dry-run} bind and, with {@code --run}, one
+ * {@code live} run), the session, the turns and repairs, the cost (the ledger entries of provider {@code claude-code},
+ * purpose {@code plan}), the {@code claude} version, the masked tail of the planner's error output, and the
+ * instruction for the reviewer.
  *
  * <p>Immutable (lists copied); safe to share between threads.
  *
@@ -38,6 +39,9 @@ import java.util.Objects;
  * @param yaml {@code <out>/<id>.yaml}
  * @param planFile {@code <out>/plan/<id>.plan.json}
  * @param authoring {@code <out>/<id>.authoring.json}
+ * @param envelope {@code <out>/<id>.envelope.json}: the envelopes of the first invocation and of each repair, in
+ *     order, through the mask of the planner's log; the reviewer deletes it before committing the scenario or keeps it
+ *     as the fixture of the planner's replay
  * @param plan the compiled plan
  * @param yamlText the YAML as written
  * @param model the model id the planner ran with
@@ -50,10 +54,10 @@ import java.util.Objects;
  * @param ledger the planner's ledger entries, one per invocation
  * @param log the masked tail of the planner's error output, one line each
  */
-public record AuthoringResult(String scenarioId, Path yaml, Path planFile, Path authoring, Plan plan, String yamlText,
-                              String model, String sessionId, int turns, int repairs, BigDecimal costUsd,
-                              boolean overBudget, String claudeVersion, List<CostLedger.Entry> ledger,
-                              List<String> log) {
+public record AuthoringResult(String scenarioId, Path yaml, Path planFile, Path authoring, Path envelope, Plan plan,
+                              String yamlText, String model, String sessionId, int turns, int repairs,
+                              BigDecimal costUsd, boolean overBudget, String claudeVersion,
+                              List<CostLedger.Entry> ledger, List<String> log) {
 
     /** Copies the lists. */
     public AuthoringResult {
@@ -63,10 +67,12 @@ public record AuthoringResult(String scenarioId, Path yaml, Path planFile, Path 
         costUsd = costUsd == null ? BigDecimal.ZERO : costUsd;
     }
 
-    /** What the reviewer is told (10.2 item 7). */
+    /** What the reviewer is told (10.2 item 7, D112). */
     public String instruction() {
         return "Review the YAML and the plan, then run skillroy resolve --env <env> " + yaml.getFileName()
-                + " to approve its bindings.";
+                + " to approve its bindings." + (envelope == null ? "" : " " + envelope.getFileName() + " holds the"
+                + " planner's envelopes: delete it before committing or keep it as the fixture of the planner's"
+                + " replay.");
     }
 
     /**

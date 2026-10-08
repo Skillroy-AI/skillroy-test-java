@@ -46,6 +46,7 @@ import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -66,21 +67,33 @@ import java.util.stream.Stream;
  *
  * <p>The command: {@code claude -p --bare --output-format json --json-schema <schema> --mcp-config <file>
  * --strict-mcp-config --tools "" --allowedTools "mcp__skillroy__*" --permission-mode dontAsk --model <id>
- * --max-turns <n> --max-budget-usd <usd> "<prompt>"}, the schema given as its JSON text (the form spike BS13 ran),
- * stdin closed, the working directory a private temporary directory (deleted afterwards), stdout and stderr captured
- * into files there and read once the process ended, all within the request's deadline (then the process is
- * destroyed). The environment is inherited ({@code ANTHROPIC_API_KEY} when set).
+ * --max-turns <n> --max-budget-usd <usd> "<prompt>"}, the schema given as its JSON text (the form spike BS13 ran)
+ * without its {@code $schema} key, which the CLI refuses ({@link #cliSchema}), stdin closed, the working directory a
+ * private temporary directory (deleted afterwards), stdout and stderr captured into files there and read once the
+ * process ended, all within the request's deadline (then the process is destroyed). The environment is inherited
+ * ({@code ANTHROPIC_API_KEY} when set).
  *
  * <p>The envelope (BS13 F-10): success is exit code 0 with {@code is_error} false, never the {@code subtype}; a
  * non-zero exit, {@code is_error}, a non-empty {@code mcp_server_errors} or a missing {@code structured_output} fails
- * the command; output that is not a JSON envelope (a failed {@code --resume} prints plain text) is reported as such.
- * Every envelope's {@code total_cost_usd} becomes a ledger entry (provider {@code claude-code}, purpose {@code plan}).
- * The document is checked against the schema ({@link ScenarioSchema#validate}), rendered as YAML with a comment head
- * (the brief, the date, the model, the session and the cost) and compiled with {@link PlanCompiler}; a problem starts
- * a repair round, {@code claude -p --resume <session_id>} with the problems as the prompt, at most {@code maxRepairs}
- * times, within what is left of the budget. Written: {@code <out>/<id>.yaml}, {@code <out>/plan/<id>.plan.json} (as
- * {@code compile} writes it) and {@code <out>/<id>.authoring.json}. The {@code resolve --dry-run} check and
- * {@code --run} are the CLI's, with the returned plan; it records their outcome with
+ * the command; output that is not a JSON envelope (a failed {@code --resume} prints plain text, a refused argument
+ * prints nothing) is reported as such, with the last line of the CLI's stderr.
+ * Every envelope becomes a ledger entry (provider {@code claude-code}, purpose {@code plan}) at what its invocation
+ * cost: an envelope's {@code total_cost_usd} is its session's running total (BS13 live: the {@code --resume}
+ * envelope's total is the first call's plus its own), so the entry takes the difference from the previous envelope of
+ * the same session, and the entries add up to the last total. The document is checked against the schema
+ * ({@link ScenarioSchema#validate}), rendered as YAML with a comment head (the brief, the date, the model, the session
+ * and the cost) and compiled with {@link PlanCompiler}; a problem starts a repair round, {@code claude -p --resume
+ * <session_id>} with the problems as the prompt, at most {@code maxRepairs} times, and only while the running total is
+ * under the budget. The first invocation is given the budget as {@code --max-budget-usd} and a repair what is left of
+ * it (at least 0.01): the CLI bounds an invocation's own spend by it, not the session's (live, 2026-10-08). A stop at
+ * that budget comes back as an envelope with {@code is_error: true}, {@code subtype: "error_max_budget_usd"},
+ * {@code terminal_reason: "budget_exhausted"}, {@code result: null} and the running {@code total_cost_usd}: its cost
+ * is recorded like any envelope's, and it fails the command as {@code is_error} does, naming the subtype and the
+ * terminal reason in place of the missing result. Written: {@code <out>/<id>.yaml}, {@code <out>/plan/<id>.plan.json}
+ * (as {@code compile} writes it), {@code <out>/<id>.authoring.json} and {@code <out>/<id>.envelope.json} (decision
+ * D112: the envelopes of the first invocation and of each repair, in order, through the mask of the planner's log; a
+ * failure after an envelope arrived writes what it has, so that a person can read why). The {@code resolve --dry-run}
+ * check and {@code --run} are the CLI's, with the returned plan; it records their outcome with
  * {@link AuthoringResult#recordChecks}.
  *
  * <p>Runs on the calling thread and starts no thread of its own (the subprocess's output goes to files); never
@@ -124,6 +137,10 @@ public final class Planner {
     private static final int STDERR_LINES = 40;
     private static final int STDERR_LINE_MAX = 300;
     private static final int PROBLEMS_MAX = 30;
+    /** The name of the envelope file after the scenario's id (10.2 item 7, D112). */
+    static final String ENVELOPE_SUFFIX = ".envelope.json";
+    /** The deepest an envelope's value is written: the file's array is one level more, and JSON is written to 200. */
+    private static final int ENVELOPE_DEPTH = 199;
 
     private Planner() {
     }
@@ -145,7 +162,7 @@ public final class Planner {
         } catch (IllegalArgumentException e) {
             throw AuthoringException.usage("the scenario schema cannot be generated: " + e.getMessage());
         }
-        String schemaJson = Json.write(schema);
+        String schemaJson = Json.write(cliSchema(schema));
         if (schemaJson.length() > MAX_ARGUMENT) {
             throw AuthoringException.usage("the scenario schema of pack " + request.pack().id() + " is "
                     + schemaJson.length() + " characters, more than one command-line argument may hold");
@@ -165,6 +182,19 @@ public final class Planner {
         } finally {
             deleteQuietly(work);
         }
+    }
+
+    /**
+     * The scenario schema as {@code --json-schema} gets it: without its top-level {@code $schema} key, which the
+     * {@code claude} CLI refuses (2.1.294, live, 2026-10-08: "--json-schema is not a valid JSON Schema: no schema with
+     * key or ref "https://json-schema.org/draft/2020-12/schema"", exit 1, nothing on stdout); the same schema without
+     * the key is accepted, {@code $defs} and its {@code $ref}s included. The generated schema keeps the key (the MCP
+     * resource, the validator); only the CLI's copy drops it.
+     */
+    static Map<String, Object> cliSchema(Map<String, Object> schema) {
+        Map<String, Object> copy = new LinkedHashMap<>(schema);
+        copy.remove("$schema");
+        return copy;
     }
 
     private static void check(PlannerRequest r) throws AuthoringException {
@@ -323,6 +353,43 @@ public final class Planner {
         return schema;
     }
 
+    /**
+     * An envelope through the mask of the planner's log, for {@code <id>.envelope.json} (10.2 item 7, D112): every
+     * text, at any depth, through {@link PromptMask#text}, as a line of the log is (the secret values the request
+     * names, a {@code key: value} or {@code key=value} run whose key names a secret, the bound); a text under a key
+     * that names a secret becomes {@value PromptMask#REDACTED} whole; an object or an array is walked whatever its key,
+     * and a number, a boolean and null are kept (a number through the secret values), so that the envelope keeps its
+     * shape: a scenario's {@code credential: {realm, key}} slots and the usage's {@code output_tokens_details} and
+     * token counts stay what they are, and the file can serve as the replay fixture of 15.1 item 11. Nested deeper than
+     * the file can hold (its array is one level more), {@code "<too deep>"}.
+     */
+    static Object maskedEnvelope(PromptMask mask, Object value, int depth) {
+        if (depth > ENVELOPE_DEPTH) {
+            return "<too deep>";
+        }
+        if (value instanceof String s) {
+            return mask.text(s);
+        }
+        if (value instanceof Map<?, ?> map) {
+            Map<String, Object> out = new LinkedHashMap<>();
+            for (Map.Entry<?, ?> e : map.entrySet()) {
+                String key = String.valueOf(e.getKey());
+                Object item = e.getValue();
+                out.put(key, item instanceof String && mask.secretKey(key) ? PromptMask.REDACTED
+                        : maskedEnvelope(mask, item, depth + 1));
+            }
+            return out;
+        }
+        if (value instanceof List<?> list) {
+            List<Object> out = new ArrayList<>(list.size());
+            for (Object item : list) {
+                out.add(maskedEnvelope(mask, item, depth + 1));
+            }
+            return out;
+        }
+        return value instanceof Number ? mask.secrets().apply(value) : value;
+    }
+
     /** A pack's list (its allow-lists, its row masks), empty when the pack has none or fails to say. */
     private static <T> List<T> safe(java.util.function.Supplier<List<T>> list) {
         try {
@@ -342,16 +409,21 @@ public final class Planner {
         return items.isEmpty() ? "none" : String.join(", ", items);
     }
 
-    /** One planner run: its invocations, its ledger and its working directory. */
+    /** One planner run: its invocations, its envelopes, its ledger and its working directory. */
     private static final class Run {
 
         private final PlannerRequest request;
         private final Path work;
         private final String schemaJson;
         private final long deadlineAt;
-        private final PromptMask mask = PromptMask.keysOnly();
+        /** The mask of the log, the failures and the envelope file: the request's secrets and the key rule. */
+        private final PromptMask mask;
         private final List<CostLedger.Entry> ledger = new ArrayList<>();
         private final List<String> log = new ArrayList<>();
+        /** The envelopes the invocations printed, in order, as they came (masked when written). */
+        private final List<Map<String, Object>> envelopes = new ArrayList<>();
+        /** The highest running total ({@code total_cost_usd}) each session has reported so far. */
+        private final Map<String, BigDecimal> sessionTotals = new HashMap<>();
         private int invocations;
         private int turns;
         private String sessionId;
@@ -364,6 +436,7 @@ public final class Planner {
             this.schemaJson = schemaJson;
             this.deadlineAt = deadlineAt;
             this.model = request.model();
+            this.mask = PromptMask.of(request.secrets(), List.of(), List.of());
         }
 
         AuthoringResult author(String prompt, Map<String, Object> schema)
@@ -418,7 +491,7 @@ public final class Planner {
         private List<String> head() {
             List<String> head = new ArrayList<>();
             head.add("Authored by the planner (skillroy author) on " + request.clock().instant() + " with " + model
-                    + "; session " + sessionId + "; model cost $" + cost(ledger).toPlainString() + ".");
+                    + "; session " + sessionId + "; model cost $" + dollars(cost(ledger)) + ".");
             head.add("Review this scenario and its plan before you commit them; its bindings are approved by a"
                     + " person (skillroy resolve).");
             head.add("Brief:");
@@ -451,7 +524,13 @@ public final class Planner {
             return request.budgetUsd().subtract(cost(ledger));
         }
 
-        /** The arguments of one invocation (10.2 item 4); a repair adds {@code --resume <session>}. */
+        /**
+         * The arguments of one invocation (10.2 item 4); a repair adds {@code --resume <session>}. The first invocation
+         * is given the budget as {@code --max-budget-usd} and a repair what is left of it, at least 0.01: the CLI
+         * bounds an invocation's own spend by it, not the session's running total (two live probes, 2026-10-08: a
+         * resume given 0.001 made its call of 0.0014 and then stopped; one given 0.0045 with 0.0041 spent before
+         * succeeded).
+         */
         private List<String> command(String prompt, String resume) {
             List<String> c = new ArrayList<>();
             c.add(request.claudeCommand().toString());
@@ -479,7 +558,7 @@ public final class Planner {
             c.add("--max-turns");
             c.add(Integer.toString(request.maxTurns()));
             c.add("--max-budget-usd");
-            BigDecimal budget = resume == null ? request.budgetUsd() : remainingBudget().max(new BigDecimal("0.01"));
+            BigDecimal budget = resume == null ? request.budgetUsd() : remainingBudget();
             c.add(budget.setScale(2, RoundingMode.DOWN).max(new BigDecimal("0.01")).toPlainString());
             c.add(prompt);
             return c;
@@ -526,16 +605,26 @@ public final class Planner {
             Map<String, Object> envelope = envelope(o.stdout());
             String what = resume ? "the repair round" : "the planner";
             if (envelope == null) {
+                // What the CLI said: the first line of its stdout and the last line of its stderr (a refused argument
+                // prints its error there and nothing on stdout), each through the mask and bounded.
+                List<String> said = new ArrayList<>();
                 String first = oneLine(mask.text(o.stdout().strip().lines().findFirst().orElse("")));
+                if (!first.isEmpty()) {
+                    said.add(bounded(first, 300));
+                }
+                if (!o.stderrTail().isEmpty()) {
+                    said.add(o.stderrTail());
+                }
                 throw failed(what + (resume ? "'s --resume" : "") + " printed no JSON envelope (exit " + o.exit()
-                        + ")" + (first.isEmpty() ? "" : ": " + bounded(first, 300)) + (o.note() == null ? ""
+                        + ")" + (said.isEmpty() ? "" : ": " + String.join("; ", said)) + (o.note() == null ? ""
                         : " (" + o.note() + ")"));
             }
+            envelopes.add(envelope);
             record(envelope);
             Object isError = envelope.get("is_error");
             if (o.exit() != 0 || !Boolean.FALSE.equals(isError)) {
                 throw failed(what + " failed (exit " + o.exit() + ", is_error " + isError + "): "
-                        + bounded(oneLine(mask.text(String.valueOf(envelope.get("result")))), 300)
+                        + bounded(oneLine(mask.text(outcome(envelope))), 300)
                         + (o.note() == null ? "" : " (" + o.note() + ")"));
             }
             Object mcpErrors = envelope.get("mcp_server_errors");
@@ -550,7 +639,15 @@ public final class Planner {
             return envelope;
         }
 
-        /** The envelope's ledger entry (10.2 item 5): provider claude-code, purpose plan, the reported cost. */
+        /**
+         * The envelope's ledger entry (10.2 item 5): provider claude-code, purpose plan, at what this invocation cost.
+         * An envelope's {@code total_cost_usd} is its session's running total, not the invocation's (BS13 live: the
+         * {@code --resume} envelope reported 0.0026886, the first call's 0.0018205 and its own 0.0008681), so the
+         * entry's cost is the difference from the previous envelope of the same session, the session's first envelope
+         * costing its whole total, and the entries add up to the last total. A total below the session's highest so
+         * far costs 0, and the entry's details note it; the details hold the running total as
+         * {@code sessionTotalUsd}. An envelope without a total costs 0 and leaves the session's total as it was.
+         */
         private void record(Map<String, Object> envelope) {
             if (envelope.get("session_id") instanceof String s && !s.isBlank()) {
                 sessionId = s;
@@ -574,8 +671,18 @@ public final class Planner {
                 cacheWrite = count(u.get("cache_creation_input_tokens"));
             }
             BigDecimal cost = BigDecimal.ZERO;
+            BigDecimal total = null;
+            String note = null;
             if (envelope.get("total_cost_usd") instanceof Number n) {
-                cost = new BigDecimal(n.toString());
+                total = new BigDecimal(n.toString());
+                BigDecimal before = sessionTotals.get(sessionId);
+                cost = before == null ? total : total.subtract(before);
+                if (cost.signum() < 0) {
+                    note = "the session's running total fell from " + before.toPlainString() + " to "
+                            + total.toPlainString() + " USD; this invocation is counted at 0";
+                    cost = BigDecimal.ZERO;
+                }
+                sessionTotals.put(sessionId, before == null ? total : before.max(total));
             }
             invocations++;
             Map<String, Object> details = new LinkedHashMap<>();
@@ -591,12 +698,35 @@ public final class Planner {
             details.put("numTurns", envelope.get("num_turns"));
             details.put("isError", envelope.get("is_error"));
             details.put("costUsd", cost.toPlainString());
+            if (total != null) {
+                details.put("sessionTotalUsd", total.toPlainString());
+            }
+            if (note != null) {
+                details.put("note", note);
+            }
             ledger.add(new CostLedger.Entry(request.scenarioId(), null, null, PROVIDER, answered, sessionId, input,
                     output, cost.toPlainString(), PURPOSE, cacheRead, cacheWrite, false, null, details));
         }
 
         private static long count(Object value) {
             return value instanceof Long n ? n : value instanceof Number n ? n.longValue() : 0L;
+        }
+
+        /**
+         * What an envelope that failed says of its end: its {@code result}, or, when it has none (the CLI's stop at
+         * {@code --max-budget-usd} reports {@code result: null}), its {@code subtype} and {@code terminal_reason}.
+         */
+        private static String outcome(Map<String, Object> envelope) {
+            if (envelope.get("result") instanceof String result) {
+                return result;
+            }
+            List<String> said = new ArrayList<>();
+            for (String key : List.of("subtype", "terminal_reason")) {
+                if (envelope.get(key) instanceof String value && !value.isBlank()) {
+                    said.add(key + " " + value);
+                }
+            }
+            return said.isEmpty() ? "no result" : String.join(", ", said);
         }
 
         /** The JSON envelope in the output, or null when there is none (plain text, BS13 F-10). */
@@ -677,10 +807,12 @@ public final class Planner {
             }
             String err = read(stderr, STDERR_MAX);
             List<String> lines = err.lines().filter(l -> !l.isBlank()).toList();
+            String tail = "";
             for (String line : lines.subList(Math.max(0, lines.size() - STDERR_LINES), lines.size())) {
-                log.add(bounded(oneLine(mask.text(line)), STDERR_LINE_MAX));
+                tail = bounded(oneLine(mask.text(line)), STDERR_LINE_MAX);
+                log.add(tail);
             }
-            return new Output(process.isAlive() ? -1 : process.exitValue(), read(stdout, STDOUT_MAX), note);
+            return new Output(process.isAlive() ? -1 : process.exitValue(), read(stdout, STDOUT_MAX), note, tail);
         }
 
         private static long size(Path file) {
@@ -720,7 +852,7 @@ public final class Planner {
             }
         }
 
-        /** Writes the three files of 10.2 item 7. */
+        /** Writes the four files of 10.2 item 7. */
         private AuthoringResult write(String yaml, Plan compiled, int repairs, String version)
                 throws AuthoringException {
             Path out = request.outDir();
@@ -729,6 +861,7 @@ public final class Planner {
             Path planFile = out.resolve("plan").resolve(id + ".plan.json");
             Path authoring = out.resolve(id + ".authoring.json");
             Plan plan;
+            Path envelope;
             try {
                 Files.createDirectories(out);
                 Files.writeString(yamlFile, yaml, StandardCharsets.UTF_8, StandardOpenOption.CREATE_NEW,
@@ -736,20 +869,41 @@ public final class Planner {
                 plan = PlanCompiler.compileTo(yamlFile, request.pack(), planFile);
                 Files.writeString(authoring, Json.writePretty(authoringRecord(repairs, version)),
                         StandardCharsets.UTF_8);
+                envelope = writeEnvelopes();
             } catch (FileAlreadyExistsException e) {
                 throw new AuthoringException(AuthoringException.EXIT_USAGE, "scenario " + id + " appeared in " + out
                         + " while the planner ran; nothing was written", yaml, ledger);
             } catch (IOException e) {
-                throw new AuthoringException(AuthoringException.EXIT_FAILED, "the scenario's files could not be"
-                        + " written to " + out + ": " + e.getClass().getSimpleName(), yaml, ledger);
+                throw failed("the scenario's files could not be written to " + out + ": "
+                        + e.getClass().getSimpleName());
             } catch (ScenarioException e) {
-                throw new AuthoringException(AuthoringException.EXIT_FAILED, "the written scenario does not compile: "
-                        + e.getMessage(), yaml, ledger);
+                throw failed("the written scenario does not compile: " + e.getMessage());
             }
             BigDecimal cost = cost(ledger);
-            return new AuthoringResult(id, yamlFile, planFile, authoring, plan != null ? plan : compiled, yaml,
-                    model, sessionId, turns, repairs, cost, cost.compareTo(request.budgetUsd()) > 0, version, ledger,
-                    log);
+            return new AuthoringResult(id, yamlFile, planFile, authoring, envelope, plan != null ? plan : compiled,
+                    yaml, model, sessionId, turns, repairs, cost, cost.compareTo(request.budgetUsd()) > 0, version,
+                    ledger, log);
+        }
+
+        /**
+         * Writes {@code <out>/<id>.envelope.json} (10.2 item 7, D112): a JSON array of the envelopes the invocations
+         * printed, the first invocation's and each repair's in order, each through the mask of the planner's log
+         * ({@link #maskedEnvelope}), pretty-printed as the other files are; it replaces a file a failed run left.
+         *
+         * @return the file, or null when no invocation printed an envelope (nothing is written then)
+         */
+        private Path writeEnvelopes() throws IOException {
+            if (envelopes.isEmpty()) {
+                return null;
+            }
+            List<Object> masked = new ArrayList<>(envelopes.size());
+            for (Map<String, Object> envelope : envelopes) {
+                masked.add(maskedEnvelope(mask, envelope, 1));
+            }
+            Path file = request.outDir().resolve(request.scenarioId() + ENVELOPE_SUFFIX);
+            Files.createDirectories(request.outDir());
+            Files.writeString(file, Json.writePretty(masked), StandardCharsets.UTF_8);
+            return file;
         }
 
         private Map<String, Object> authoringRecord(int repairs, String version) {
@@ -772,13 +926,26 @@ public final class Planner {
             return json;
         }
 
+        /**
+         * The failure of the run, after the envelopes that arrived were written ({@link #writeEnvelopes}), so that a
+         * person can read why; a file that cannot be written leaves the failure as it is, without the file.
+         */
         private AuthoringException failed(String message) {
-            return new AuthoringException(AuthoringException.EXIT_FAILED, message, lastYaml, ledger);
+            Path envelope;
+            try {
+                envelope = writeEnvelopes();
+            } catch (IOException | RuntimeException e) {
+                envelope = null;
+            }
+            return new AuthoringException(AuthoringException.EXIT_FAILED, message, lastYaml, ledger, envelope);
         }
     }
 
-    /** The output of one process; {@code note} says what of it was cut, or is null. */
-    private record Output(int exit, String stdout, String note) {
+    /**
+     * The output of one process; {@code note} says what of it was cut, or is null; {@code stderrTail} is the last
+     * non-blank line of its stderr as the log holds it (masked, at most 300 characters), or empty.
+     */
+    private record Output(int exit, String stdout, String note, String stderrTail) {
     }
 
     /**
@@ -817,6 +984,11 @@ public final class Planner {
             }
         }
         return total;
+    }
+
+    /** An amount of dollars as the YAML head prints it: two decimals at least ($0.40), all it has ($0.0026886). */
+    static String dollars(BigDecimal amount) {
+        return (amount.scale() < 2 ? amount.setScale(2) : amount).toPlainString();
     }
 
     private static Path privateDirectory() throws IOException {

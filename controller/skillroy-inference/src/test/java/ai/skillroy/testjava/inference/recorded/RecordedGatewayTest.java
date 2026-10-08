@@ -123,9 +123,9 @@ class RecordedGatewayTest {
             assertEquals(InferenceException.Kind.NO_RECORDING, e.kind());
             assertTrue(e.getMessage().contains(r.fingerprint()));
             assertTrue(e.getMessage().contains("resolve request of slot item"));
-            assertTrue(e.getMessage().endsWith("; record with a recording gateway (record: true, see the recordings"
-                    + " README of the sample)"), e.getMessage());
-            assertFalse(e.getMessage().contains("-Pinference-record"), "a profile that is not built");
+            assertTrue(e.getMessage().endsWith("; record with -Pinference-record (the sample's ScenarioDRecordIT) or"
+                    + " with a recording gateway (record: true; see the recordings README of the sample)"),
+                    e.getMessage());
             assertEquals(-1, replay.countTokens(r));
         }
     }

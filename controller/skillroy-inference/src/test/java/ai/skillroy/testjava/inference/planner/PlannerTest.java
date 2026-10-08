@@ -16,6 +16,7 @@
 
 package ai.skillroy.testjava.inference.planner;
 
+import ai.skillroy.testjava.data.SecretMask;
 import ai.skillroy.testjava.inference.fakes.MutableClock;
 import ai.skillroy.testjava.inference.resolve.DeskPack;
 import ai.skillroy.testjava.protocol.Json;
@@ -63,9 +64,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * test writes, which records the arguments of each invocation, its working directory and its stdin, and prints the
  * envelope the test put beside it): the arguments, the YAML with its comment head, the plan, the authoring record, a
  * repair round through {@code --resume}, the repair limit, {@code is_error}, {@code mcp_server_errors}, a failed
- * {@code --resume} that prints plain text, a missing executable, the deadline (the whole process tree killed, one
- * deadline over every round), the output bounds on disk, the vocabulary's mask and the brief's exemption (D103), and
- * the ledger entry with the envelope's cost.
+ * {@code --resume} that prints plain text, an argument the CLI refuses (reported with the last line of its stderr; the
+ * schema goes without its {@code $schema} key), a missing executable, the deadline (the whole process tree killed, one
+ * deadline over every round), the output bounds on disk, the vocabulary's mask and the brief's exemption (D103), the
+ * ledger entries (each invocation at the rise of its session's running total, which is what an envelope reports), and
+ * the envelope file (D112: the envelopes the substitute printed, in order, through the log's mask; written by a
+ * failure that received one, never by one that did not).
  */
 @DisabledOnOs(OS.WINDOWS)
 class PlannerTest {
@@ -81,6 +85,7 @@ class PlannerTest {
             pwd > "$dir/cwd-$n"
             cat > "$dir/stdin-$n"
             echo "a warning on stderr: token=Zq7-Lantern-42x" >&2
+            if [ -f "$dir/err-$n.txt" ]; then cat "$dir/err-$n.txt" >&2; fi
             if [ -f "$dir/hang-$n" ]; then
               sleep 600 &
               echo $! > "$dir/child-$n"
@@ -198,9 +203,20 @@ class PlannerTest {
         return i < 0 || i + 1 >= args.size() ? null : args.get(i + 1);
     }
 
+    /** An envelope as the planner reads it from the substitute's output: with JSON's own types. */
+    private static Object printed(Map<String, Object> envelope) throws Exception {
+        return Json.parse(Json.write(envelope));
+    }
+
+    /** What {@code <out>/<id>.envelope.json} holds: the array of the envelopes. */
+    private List<?> envelopes(String id) throws Exception {
+        return (List<?>) Json.parse(Files.readString(out.resolve(id + ".envelope.json")));
+    }
+
     @Test
     void theScenarioIsWrittenWithItsHeadPlanAndAuthoringRecord() throws Exception {
-        answer(1, envelope(document("desk-lend"), false, "0.42"));
+        Map<String, Object> fixture = envelope(document("desk-lend"), false, "0.42");
+        answer(1, fixture);
         AuthoringResult result = Planner.author(request("desk-lend", 2, Duration.ofSeconds(30)));
 
         List<String> args = args(1);
@@ -216,8 +232,14 @@ class PlannerTest {
         assertEquals("40", after(args, "--max-turns"));
         assertEquals("2.00", after(args, "--max-budget-usd"));
         assertFalse(args.contains("--resume"));
-        assertEquals(Json.write(ScenarioSchema.generate(pack, List.of())), after(args, "--json-schema"),
-                "the scenario schema, as its JSON text");
+        // The scenario schema as its JSON text, without the $schema key the CLI refuses (2.1.294, live, 2026-10-08).
+        Map<String, Object> generated = new LinkedHashMap<>(ScenarioSchema.generate(pack, List.of()));
+        assertTrue(generated.containsKey("$schema"), "the generated schema keeps it (the MCP resource, the validator)");
+        Map<String, Object> given = Json.parseObject(after(args, "--json-schema"));
+        assertFalse(given.containsKey("$schema"), "no $schema key in what the CLI is given");
+        assertTrue(given.containsKey("$defs"), "the definitions stay, and the $refs into them");
+        generated.remove("$schema");
+        assertEquals(Json.write(generated), after(args, "--json-schema"), "nothing else changes");
         String prompt = args.get(args.size() - 1);
         assertTrue(prompt.contains("<brief>\n" + BRIEF + "\n</brief>"), prompt);
         assertTrue(prompt.contains("- ItemByCategory"), "the catalogue summary");
@@ -269,6 +291,13 @@ class PlannerTest {
                 + result.log());
         assertTrue(result.instruction().contains("skillroy resolve --env <env> desk-lend.yaml"));
 
+        // D112: the envelope the substitute printed, as it printed it (nothing in it the mask knows), beside the YAML.
+        assertEquals(out.resolve("desk-lend.envelope.json"), result.envelope());
+        assertEquals(List.of(printed(fixture)), envelopes("desk-lend"), "the one envelope of a clean run");
+        assertTrue(Files.readString(result.envelope()).startsWith("[\n  {\n"), "pretty-printed as the other files");
+        assertTrue(result.instruction().endsWith(" desk-lend.envelope.json holds the planner's envelopes: delete it"
+                + " before committing or keep it as the fixture of the planner's replay."), result.instruction());
+
         result.recordChecks(true, null);
         Map<?, ?> after = (Map<?, ?>) Json.parseObject(Files.readString(out.resolve("desk-lend.authoring.json")))
                 .get("checks");
@@ -280,27 +309,46 @@ class PlannerTest {
         assertEquals(64, exists.exitCode(), "an id that exists is a usage error");
     }
 
+    /**
+     * A repair round through {@code --resume}. An envelope's {@code total_cost_usd} is the session's running total
+     * (BS13 live), so the envelopes report 0.30 and then 0.40: the entries are 0.30 and 0.10 and the head says $0.40;
+     * the repair is given what is left of the budget, since the CLI bounds an invocation's own spend by it (live).
+     */
     @Test
     void aCompileProblemStartsARepairRoundThroughResume() throws Exception {
-        answer(1, envelope(document("desk-fix", CYCLE), false, "0.30"));
-        answer(2, envelope(document("desk-fix"), false, "0.10"));
+        Map<String, Object> first = envelope(document("desk-fix", CYCLE), false, "0.30");
+        Map<String, Object> second = envelope(document("desk-fix"), false, "0.40");
+        answer(1, first);
+        answer(2, second);
         AuthoringResult result = Planner.author(request("desk-fix", 2, Duration.ofSeconds(30)));
+        assertEquals(List.of(printed(first), printed(second)), envelopes("desk-fix"),
+                "the first invocation's envelope and the repair's, in order (D112)");
         assertEquals(1, result.repairs());
         List<String> repair = args(2);
         assertEquals("sess-41", after(repair, "--resume"), "the planner's session resumed");
         assertTrue(repair.get(repair.size() - 1).contains("reference each other"), "the problems are the prompt: "
                 + repair.get(repair.size() - 1));
-        assertEquals("1.70", after(repair, "--max-budget-usd"), "what is left of the budget");
+        assertEquals("1.70", after(repair, "--max-budget-usd"), "what is left of the budget after the first 0.30");
         assertEquals(2, result.ledger().size());
+        assertEquals(0, new BigDecimal("0.30").compareTo(new BigDecimal(result.ledger().get(0).costUsd())),
+                "the first invocation: its whole total");
+        assertEquals(0, new BigDecimal("0.10").compareTo(new BigDecimal(result.ledger().get(1).costUsd())),
+                "the repair: the difference of the running totals, " + result.ledger().get(1).costUsd());
+        assertEquals("0.4", result.ledger().get(1).details().get("sessionTotalUsd"));
+        assertNull(result.ledger().get(1).details().get("note"));
         assertEquals(0, new BigDecimal("0.40").compareTo(result.costUsd()), result.costUsd().toPlainString());
+        assertTrue(Files.readString(out.resolve("desk-fix.yaml")).contains("; model cost $0.40.\n"),
+                "the head says the last total");
         assertEquals(12, result.turns());
         assertEquals(1L, Json.parseObject(Files.readString(out.resolve("desk-fix.authoring.json"))).get("repairs"));
     }
 
     @Test
     void theRepairsRunOut() throws Exception {
-        answer(1, envelope(document("desk-bad", CYCLE), false, "0.30"));
-        answer(2, envelope(document("desk-bad", CYCLE), false, "0.10"));
+        Map<String, Object> first = envelope(document("desk-bad", CYCLE), false, "0.30");
+        Map<String, Object> second = envelope(document("desk-bad", CYCLE), false, "0.40");
+        answer(1, first);
+        answer(2, second);
         AuthoringException e = assertThrows(AuthoringException.class, () -> Planner.author(request("desk-bad", 1,
                 Duration.ofSeconds(30))));
         assertEquals(1, e.exitCode());
@@ -309,6 +357,85 @@ class PlannerTest {
         assertEquals(0, new BigDecimal("0.40").compareTo(e.costUsd()), "what the attempts cost");
         assertFalse(Files.exists(out.resolve("desk-bad.yaml")), "nothing written");
         assertTrue(Files.exists(bin.resolve("args-2")) && !Files.exists(bin.resolve("args-3")), "one repair");
+        assertEquals(out.resolve("desk-bad.envelope.json"), e.envelope(), "the failure wrote what it had (D112)");
+        assertEquals(List.of(printed(first), printed(second)), envelopes("desk-bad"), "both rounds, so that a person"
+                + " can read why");
+    }
+
+    /**
+     * The CLI's stop at {@code --max-budget-usd} (live, 2026-10-08): an envelope with {@code is_error: true},
+     * {@code subtype: "error_max_budget_usd"}, {@code terminal_reason: "budget_exhausted"}, {@code result: null} and
+     * the running total. Its cost is recorded, as the difference from the first envelope, before it fails the command;
+     * the message names the subtype and the terminal reason; the envelope file holds both rounds.
+     */
+    @Test
+    void aRepairStoppedAtItsBudgetIsRecordedAndFails() throws Exception {
+        Map<String, Object> first = envelope(document("desk-dear", CYCLE), false, "0.30");
+        Map<String, Object> stopped = new LinkedHashMap<>();
+        stopped.put("type", "result");
+        stopped.put("subtype", "error_max_budget_usd");
+        stopped.put("is_error", true);
+        stopped.put("terminal_reason", "budget_exhausted");
+        stopped.put("result", null);
+        stopped.put("session_id", "sess-41");
+        stopped.put("num_turns", 2L);
+        stopped.put("total_cost_usd", 0.45);
+        answer(1, first);
+        answer(2, stopped);
+        Files.writeString(bin.resolve("exit-2"), "1");
+        AuthoringException e = assertThrows(AuthoringException.class, () -> Planner.author(request("desk-dear", 2,
+                Duration.ofSeconds(30))));
+        assertEquals("1.70", after(args(2), "--max-budget-usd"), "the repair was given what was left");
+        assertEquals(1, e.exitCode());
+        assertEquals("the repair round failed (exit 1, is_error true): subtype error_max_budget_usd, terminal_reason"
+                + " budget_exhausted", e.getMessage());
+        assertEquals(2, e.ledger().size(), "the stopped round's cost is recorded too");
+        assertEquals(0, new BigDecimal("0.15").compareTo(new BigDecimal(e.ledger().get(1).costUsd())),
+                e.ledger().get(1).costUsd());
+        assertEquals(0, new BigDecimal("0.45").compareTo(e.costUsd()), "the running total");
+        assertEquals(List.of(printed(first), printed(stopped)), envelopes("desk-dear"));
+    }
+
+    /**
+     * The envelope file and the log through the request's secrets (the CLI passes its credentials' mask) and the key
+     * rule on texts alone: a password the model repeated, in its result and in a nested text, and one on stderr, are
+     * masked; a scenario's {@code credential: {realm, key}} slot and the usage's {@code output_tokens_details} keep
+     * their shape, so that the file can serve as the replay fixture.
+     */
+    @Test
+    void theEnvelopeFileKnowsTheCredentialsAndKeepsItsShape() throws Exception {
+        String password = "Desk-Pw-7781-Q4xZ";
+        Map<String, Object> doc = document("desk-cred");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> resolve = (Map<String, Object>) doc.get("resolve");
+        resolve.put("assistant", Map.of("fixture", Map.of("code", "100"), "credential", Map.of("realm", "staff",
+                "key", "code")));
+        Map<String, Object> fixture = envelope(doc, false, "0.05");
+        fixture.put("result", "done; the assistant signs on with " + password);
+        fixture.put("usage", Map.of("input_tokens", 1200L, "output_tokens", 800L, "output_tokens_details",
+                Map.of("reasoning_tokens", 120L)));
+        fixture.put("permission_denials", List.of(Map.of("tool_name", "mcp__skillroy__lending_sign_on", "tool_input",
+                Map.of("note", "pin " + password))));
+        answer(1, fixture);
+        Files.writeString(bin.resolve("err-1.txt"), "the desk said: " + password + "\n");
+        AuthoringResult result = Planner.author(new PlannerRequest(BRIEF, "desk-cred", out, pack, List.of(), mcp,
+                "claude-opus-5-5", 40, 2, new BigDecimal("2.00"), false, claude, Duration.ofSeconds(30), clock,
+                SecretMask.of(List.of(password))));
+        String text = Files.readString(result.envelope());
+        assertFalse(text.contains(password), text);
+        Map<?, ?> kept = (Map<?, ?>) envelopes("desk-cred").get(0);
+        assertEquals("done; the assistant signs on with <redacted>", kept.get("result"));
+        assertEquals(List.of(Map.of("tool_name", "mcp__skillroy__lending_sign_on", "tool_input", Map.of("note",
+                "pin <redacted>"))), kept.get("permission_denials"), "a nested text, masked by value");
+        Map<?, ?> slot = (Map<?, ?>) ((Map<?, ?>) ((Map<?, ?>) kept.get("structured_output")).get("resolve"))
+                .get("assistant");
+        assertEquals(Map.of("realm", "staff", "key", "code"), slot.get("credential"), "a credential slot stays");
+        assertEquals(printed(doc), kept.get("structured_output"), "the document as printed");
+        assertEquals(Map.of("reasoning_tokens", 120L), ((Map<?, ?>) kept.get("usage")).get("output_tokens_details"),
+                "an object under a key that names a token stays");
+        assertTrue(result.log().contains("the desk said: <redacted>"), "the log through the same mask: "
+                + result.log());
+        assertTrue(result.log().stream().noneMatch(l -> l.contains(password)), result.log().toString());
     }
 
     @Test
@@ -320,17 +447,26 @@ class PlannerTest {
         AuthoringResult result = Planner.author(request("desk-schema", 2, Duration.ofSeconds(30)));
         assertEquals(1, result.repairs());
         assertTrue(args(2).get(args(2).size() - 1).contains("colour"), "the validator's problem with its path");
+        // A running total that fell (0.20, then 0.05) is no negative cost: the repair counts 0, and its entry says so.
+        CostLedger.Entry repair = result.ledger().get(1);
+        assertEquals("0", repair.costUsd());
+        assertEquals("the session's running total fell from 0.2 to 0.05 USD; this invocation is counted at 0",
+                repair.details().get("note"));
+        assertEquals(0, new BigDecimal("0.20").compareTo(result.costUsd()), result.costUsd().toPlainString());
     }
 
     @Test
     void anErrorEnvelopeOrAnMcpServerErrorFailsTheCommand() throws Exception {
-        answer(1, envelope(null, true, "0"));
+        Map<String, Object> notLoggedIn = envelope(null, true, "0");
+        answer(1, notLoggedIn);
         Files.writeString(bin.resolve("exit-1"), "1");
         AuthoringException isError = assertThrows(AuthoringException.class, () -> Planner.author(
                 request("desk-err", 2, Duration.ofSeconds(30))));
         assertEquals(1, isError.exitCode());
         assertTrue(isError.getMessage().contains("Not logged in"), isError.getMessage());
         assertEquals(1, isError.ledger().size(), "its cost is recorded all the same");
+        assertEquals(out.resolve("desk-err.envelope.json"), isError.envelope(), "an is_error envelope is written");
+        assertEquals(List.of(printed(notLoggedIn)), envelopes("desk-err"));
 
         Map<String, Object> mcpError = envelope(document("desk-mcp"), false, "0.01");
         mcpError.put("mcp_server_errors", List.of(Map.of("server", "skillroy", "error", "spawn failed")));
@@ -361,13 +497,59 @@ class PlannerTest {
 
     @Test
     void aFailedResumePrintsPlainTextAndIsReportedAsSuch() throws Exception {
-        answer(1, envelope(document("desk-resume", CYCLE), false, "0.30"));
+        Map<String, Object> first = envelope(document("desk-resume", CYCLE), false, "0.30");
+        answer(1, first);
         Files.writeString(bin.resolve("text-2.txt"), "No conversation found with session ID: sess-41\n");
         Files.writeString(bin.resolve("exit-2"), "1");
         AuthoringException e = assertThrows(AuthoringException.class, () -> Planner.author(
                 request("desk-resume", 2, Duration.ofSeconds(30))));
         assertTrue(e.getMessage().startsWith("the repair round's --resume printed no JSON envelope (exit 1): No"
                 + " conversation found"), e.getMessage());
+        assertTrue(e.getMessage().endsWith("sess-41; a warning on stderr: token=<redacted>"), "and the last line of"
+                + " its stderr, through the mask: " + e.getMessage());
+        assertFalse(e.getMessage().contains("Zq7-Lantern-42x"), e.getMessage());
+        assertEquals(List.of(printed(first)), envelopes("desk-resume"), "the envelope that arrived, and no other");
+    }
+
+    /**
+     * An argument the CLI refuses (live, 2026-10-08: a {@code $schema} it does not know) makes it print its error on
+     * stderr and nothing on stdout and exit 1: the failure ends with the CLI's own words, the last line of its stderr.
+     */
+    @Test
+    void aRefusedArgumentIsReportedInTheCLIsOwnWords() throws Exception {
+        String refusal = "Error: --json-schema is not a valid JSON Schema: no schema with key or ref"
+                + " \"https://json-schema.org/draft/2020-12/schema\"";
+        Files.writeString(bin.resolve("err-1.txt"), refusal + "\n");
+        Files.writeString(bin.resolve("exit-1"), "1");
+        AuthoringException e = assertThrows(AuthoringException.class, () -> Planner.author(
+                request("desk-refused", 2, Duration.ofSeconds(30))));
+        assertEquals(1, e.exitCode());
+        assertEquals("the planner printed no JSON envelope (exit 1): " + refusal, e.getMessage());
+        assertNull(e.envelope(), "no envelope arrived");
+        assertTrue(e.ledger().isEmpty(), "nothing was recorded");
+    }
+
+    /**
+     * D112: the envelope file holds what the planner printed through the mask of its log, a secret planted as the
+     * stderr line of the substitute plants one: a {@code key=value} secret in a text and a text under a key that names
+     * a secret are gone; the token counts under keys that name a token, and the document, stay as printed.
+     */
+    @Test
+    void theEnvelopeFileIsMaskedAsTheLogIs() throws Exception {
+        Map<String, Object> fixture = envelope(document("desk-veil"), false, "0.05");
+        fixture.put("result", "done; the desk's note reads token=Envelope-Tok-5512");
+        fixture.put("api_key", "Envelope-Key-7781");
+        answer(1, fixture);
+        AuthoringResult result = Planner.author(request("desk-veil", 2, Duration.ofSeconds(30)));
+        String text = Files.readString(result.envelope());
+        assertFalse(text.contains("Envelope-Tok-5512"), text);
+        assertFalse(text.contains("Envelope-Key-7781"), text);
+        Map<?, ?> kept = (Map<?, ?>) envelopes("desk-veil").get(0);
+        assertEquals("done; the desk's note reads token=<redacted>", kept.get("result"));
+        assertEquals("<redacted>", kept.get("api_key"));
+        assertEquals(1200L, ((Map<?, ?>) kept.get("usage")).get("input_tokens"), "a count is no secret");
+        assertEquals(500L, ((Map<?, ?>) kept.get("usage")).get("cache_creation_input_tokens"));
+        assertEquals(Json.parse(Json.write(document("desk-veil"))), kept.get("structured_output"));
     }
 
     @Test
@@ -432,6 +614,8 @@ class PlannerTest {
             assertTrue(e.getMessage().contains("did not finish within its deadline"), e.getMessage());
             assertTrue(gone(child), "the planner's child process was killed with it");
             assertTrue(gone(parent), "the planner's process was killed");
+            assertNull(e.envelope(), "no envelope arrived, so none is written");
+            assertFalse(Files.exists(out.resolve("desk-slow.envelope.json")));
         } finally {
             reap(child);
             reap(parent);

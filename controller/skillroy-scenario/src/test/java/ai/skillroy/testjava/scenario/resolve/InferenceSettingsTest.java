@@ -91,7 +91,7 @@ class InferenceSettingsTest {
         assertEquals(Map.of("resolve", "low", "triage", "low", "session", "medium", "summary", "low"),
                 none.effort());
         assertEquals(Map.of("scenario", "0.50", "session", "1.00"), none.budgets(), "the job budget has no default");
-        assertEquals(Map.of("confidence", "0.8"), none.thresholds(), "phase5-contracts.md 5.4: 0.8");
+        assertEquals(Map.of("confidence", "0.6"), none.thresholds(), "phase5-contracts.md 5.4 (D113): 0.6");
         assertNull(none.prices());
         assertTrue(none.fallbacks());
         assertFalse(none.images());
@@ -373,7 +373,7 @@ class InferenceSettingsTest {
             InferenceSettings s = InferenceSettings.fromSystemProperties(dir);
             assertEquals("recorded", s.gateway());
             assertEquals(dir.resolve("rec").toAbsolutePath().normalize(), s.recordings());
-            assertEquals(Map.of("confidence", "0.8", "rows", "7"), s.thresholds(), "a system property may name a"
+            assertEquals(Map.of("confidence", "0.6", "rows", "7"), s.thresholds(), "a system property may name a"
                     + " new threshold");
             System.setProperty(bad, "zz-value-31");
             SettingsException badName = assertThrows(SettingsException.class, () -> InferenceSettings
@@ -381,7 +381,7 @@ class InferenceSettingsTest {
             assertTrue(badName.getMessage().startsWith("a property under skillroy.inference.thresholds. does not name"
                     + " a threshold"), badName.getMessage());
             assertFalse(badName.getMessage().contains("zz"), "neither its name's tail nor its value");
-            assertEquals(Map.of("confidence", "0.8"), InferenceSettings.load(BindMode.LIVE, null, null, name -> null,
+            assertEquals(Map.of("confidence", "0.6"), InferenceSettings.load(BindMode.LIVE, null, null, name -> null,
                     name -> null).thresholds(), "with another lookup a system property's name is only a key to ask"
                     + " for, never a value");
             System.clearProperty(bad);

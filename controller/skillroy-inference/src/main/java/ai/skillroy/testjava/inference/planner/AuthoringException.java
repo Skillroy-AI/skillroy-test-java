@@ -19,13 +19,15 @@ package ai.skillroy.testjava.inference.planner;
 import ai.skillroy.testjava.scenario.resolve.CostLedger;
 
 import java.math.BigDecimal;
+import java.nio.file.Path;
 import java.util.List;
 
 /**
  * The planner wrote no scenario (phase5-contracts.md 10.2): a usage problem before it ran ({@link #EXIT_USAGE}: no
  * {@code claude} executable, the id exists, no MCP configuration, a bad request), or the planner failed, or its repairs
- * ran out ({@link #EXIT_FAILED}). It carries what the planner's calls cost (their ledger entries) and the last
- * document it rendered, for the person to look at. The message is one line and never holds a secret.
+ * ran out ({@link #EXIT_FAILED}). It carries what the planner's calls cost (their ledger entries), the last document it
+ * rendered and the envelope file a failure after an envelope arrived wrote (D112), for the person to look at. The
+ * message is one line and never holds a secret.
  *
  * <p>Immutable; safe to share between threads.
  */
@@ -41,18 +43,35 @@ public final class AuthoringException extends Exception {
     private final int exitCode;
     private final String lastYaml;
     private final transient List<CostLedger.Entry> ledger;
+    private final transient Path envelope;
 
     /**
+     * A failure without an envelope file.
+     *
      * @param exitCode {@link #EXIT_USAGE} or {@link #EXIT_FAILED}
      * @param message one line, no secret
      * @param lastYaml the last scenario the planner returned, rendered, or null
      * @param ledger the planner's calls so far; null is none
      */
     public AuthoringException(int exitCode, String message, String lastYaml, List<CostLedger.Entry> ledger) {
+        this(exitCode, message, lastYaml, ledger, null);
+    }
+
+    /**
+     * @param exitCode {@link #EXIT_USAGE} or {@link #EXIT_FAILED}
+     * @param message one line, no secret
+     * @param lastYaml the last scenario the planner returned, rendered, or null
+     * @param ledger the planner's calls so far; null is none
+     * @param envelope {@code <out>/<id>.envelope.json} as the failure wrote it (the envelopes that arrived, masked), or
+     *     null when none arrived or the file could not be written
+     */
+    public AuthoringException(int exitCode, String message, String lastYaml, List<CostLedger.Entry> ledger,
+                              Path envelope) {
         super(message);
         this.exitCode = exitCode;
         this.lastYaml = lastYaml;
         this.ledger = ledger == null ? List.of() : List.copyOf(ledger);
+        this.envelope = envelope;
     }
 
     /** A usage problem before the planner ran. */
@@ -73,6 +92,11 @@ public final class AuthoringException extends Exception {
     /** The planner's calls (provider {@code claude-code}, purpose {@code plan}). */
     public List<CostLedger.Entry> ledger() {
         return ledger;
+    }
+
+    /** The envelope file the failure wrote (D112), or null. */
+    public Path envelope() {
+        return envelope;
     }
 
     /** What the planner's calls cost. */

@@ -84,4 +84,16 @@
       <scope>test</scope>
     </dependency>
   </dependencies>
+
+  <build>
+    <plugins>
+      <!-- ClaudeGatewayLiveIT, the live tests of phase5-contracts.md 15.3 items 1 and 2: run by every verify and
+           skipped without the profile inference-live or without the key (2.3). Executions (integration-test, verify)
+           and argLine come from the parent's pluginManagement. -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-failsafe-plugin</artifactId>
+      </plugin>
+    </plugins>
+  </build>
 </project>

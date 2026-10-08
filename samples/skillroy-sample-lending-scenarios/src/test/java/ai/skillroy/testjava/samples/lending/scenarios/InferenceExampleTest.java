@@ -82,17 +82,18 @@ class InferenceExampleTest {
         assertTrue(text.contains("ANTHROPIC_API_KEY"), "it says where the key comes from");
         assertFalse(text.contains("sk-"), "and holds none");
         assertTrue(text.contains("workspaceId: null"));
-        assertTrue(text.contains("record: true; the Maven profile inference-record is specified, not built"),
-                "how recordings are made live, by the route that exists (D110)");
+        assertTrue(text.contains("-Pinference-record runs ScenarioDRecordIT") && text.contains("record: true"),
+                "how recordings are made live: the profile's record route, or the same route by hand (D111)");
     }
 
     /**
-     * The recordings directory exists with its README, which says what is in it (scenario D's tier (b) requests and
-     * the exported session's calls) and that the committed recordings are scripted stand-ins until recorded live; how
-     * they are recorded live says what is true (phase5-contracts.md D110): the route that exists ({@code record: true}
-     * and the overwrite property), the profile {@code inference-record} specified and not built, no promise of "no code
-     * changes" but the classes whose assertions pin the stand-ins; scenario D's bindings, written from its recordings,
-     * are committed with them.
+     * The recordings directory exists with its README, which says what is in it and what each recording is
+     * (phase5-contracts.md 4.2, 14.2, 14.5; D111): scenario D's tier (b) requests recorded live
+     * ({@code provider: "claude"}) by the record route ({@code -Pinference-record}, {@code ScenarioDRecordIT}) and the
+     * exported session's calls, scripted stand-ins ({@code provider: "scripted"}); how to record live, by the profile
+     * or by hand ({@code record: true} and the overwrite property); that the fixture update path records no tier (b)
+     * request; and which classes pin what a live answer must hold, the label read from the files. Scenario D's
+     * bindings, written from its recordings, are committed with them, and the example says what the recordings are.
      */
     @Test
     void theRecordingsDirectorySaysWhatGoesIntoIt() throws Exception {
@@ -100,22 +101,29 @@ class InferenceExampleTest {
         String readme = Files.readString(recordings().resolve("README.md"));
         assertTrue(readme.contains(ScenarioD.ID), readme);
         assertTrue(readme.contains(SessionScript.SCENARIO_ID), readme);
-        assertTrue(readme.contains("scripted stand-ins") && readme.contains("provider: \"scripted\""), readme);
+        assertTrue(readme.contains("recorded live") && readme.contains("provider: \"claude\""),
+                "scenario D's recordings are live: " + readme);
+        assertTrue(readme.contains("scripted stand-ins") && readme.contains("provider: \"scripted\""),
+                "the session's are stand-ins: " + readme);
+        assertTrue(readme.contains("-Pinference-record") && readme.contains(ScenarioDRecordIT.class.getSimpleName()),
+                "the record route: " + readme);
         assertTrue(readme.contains("`record: true`") && readme.contains(RecordingGateway.OVERWRITE_PROPERTY),
-                "how to record them live, by the route that exists: " + readme);
+                "the same route by hand: " + readme);
         String flat = readme.replaceAll("\\s+", " ");
-        assertTrue(flat.contains("`inference-record` and `inference-live` of the contract (§2.3, §14.5, §15.3) are"
-                + " specified, not built (decision D110)"), "the profiles are not built: " + readme);
-        assertFalse(flat.contains("no code changes"), "a live re-record changes code: " + readme);
-        for (String pin : List.of("ScenarioDRecordedTest.java:", "BindingsUpToDateTest.java:",
-                "SessionExportTest.java:", "InferenceChecks.java:", "ScriptedAnswers.APPROVED_BY")) {
-            assertTrue(readme.contains(pin), "the stand-ins' pins name " + pin + ": " + readme);
+        assertTrue(flat.contains("records no tier (b) request"), "the update path never replaces a live recording: "
+                + readme);
+        assertFalse(flat.contains("specified, not built"), "the profiles are built (D111): " + readme);
+        for (String pin : List.of("ScenarioDRecordedTest", "BindingsUpToDateTest", "SessionExportTest",
+                "ScenarioD.approvedBy")) {
+            assertTrue(readme.contains(pin), "the README names " + pin + ": " + readme);
         }
         List<Path> files;
         try (Stream<Path> list = Files.list(recordings())) {
             files = list.filter(p -> p.getFileName().toString().endsWith(".json")).toList();
         }
         assertTrue(!ScenarioD.HAS_BINDINGS || !files.isEmpty(), "scenario D's bindings come from its recordings");
-        assertTrue(Files.readString(example()).contains("scripted"), "the example says what the committed ones are");
+        String example = Files.readString(example());
+        assertTrue(example.contains("provider \"claude\"") && example.contains("provider \"scripted\""),
+                "the example says what the committed ones are");
     }
 }

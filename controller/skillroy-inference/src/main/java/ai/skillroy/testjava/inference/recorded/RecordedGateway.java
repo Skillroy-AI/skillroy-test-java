@@ -45,7 +45,8 @@ import java.util.concurrent.atomic.AtomicLong;
  * The gateway that answers from recordings (phase5-contracts.md 4.2, decision D71): what lets CI, the Linux image and
  * every unit test run the AI layer with no key. {@link #complete} answers from the file named by the request's
  * fingerprint, the recorded usage marked provider {@value #PROVIDER} and cost {@code "0"}; a request with no file is
- * {@code NO_RECORDING} with the fingerprint and the purpose, so that a changed prompt is seen, never guessed. Batches
+ * {@code NO_RECORDING} with the fingerprint, the purpose and the routes that record one ({@link #RECORD_HINT}: the
+ * profile {@code inference-record} or {@code record: true}), so that a changed prompt is seen, never guessed. Batches
  * are served the same way, request by request, with {@code batch: true} in the usage. {@link #countTokens} answers the
  * recorded input tokens, or -1. Capabilities: all but images.
  *
@@ -56,12 +57,12 @@ public final class RecordedGateway implements InferenceGateway {
     /** The provider id of a recorded answer's usage. */
     public static final String PROVIDER = "recorded";
     /**
-     * How a missing recording is made, as the {@code NO_RECORDING} messages say it: the {@code inference-record}
-     * profile is specified but not built (phase5-contracts.md 2.3), so the route that exists is the settings'
-     * {@code record: true}, which wraps the live gateway in the {@link RecordingGateway}.
+     * How a missing recording is made, as the {@code NO_RECORDING} messages say it (phase5-contracts.md 2.3, 4.2;
+     * D111): the profile {@code inference-record}, whose record route is the sample's {@code ScenarioDRecordIT}, or the
+     * settings' {@code record: true}, which wraps the live gateway in the {@link RecordingGateway}; both need the key.
      */
-    public static final String RECORD_HINT = "record with a recording gateway (record: true, see the recordings"
-            + " README of the sample)";
+    public static final String RECORD_HINT = "record with -Pinference-record (the sample's ScenarioDRecordIT) or with"
+            + " a recording gateway (record: true; see the recordings README of the sample)";
 
     private final Path dir;
     private final Clock clock;

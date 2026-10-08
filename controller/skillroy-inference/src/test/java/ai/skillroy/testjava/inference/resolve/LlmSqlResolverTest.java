@@ -423,9 +423,9 @@ class LlmSqlResolverTest {
                 .candidates(POWER, ctx));
         assertEquals(DataException.Kind.UNAVAILABLE, e.kind());
         assertEquals(LlmSqlResolver.SOURCE, e.source());
-        assertTrue(e.getMessage().startsWith("no recording for the request of slot item; record with a recording"
-                + " gateway (record: true, see the recordings README of the sample)"), e.getMessage());
-        assertFalse(e.getMessage().contains("-Pinference-record"), "a profile that is not built: " + e.getMessage());
+        assertTrue(e.getMessage().startsWith("no recording for the request of slot item; record with"
+                + " -Pinference-record (the sample's ScenarioDRecordIT) or with a recording gateway (record: true; see"
+                + " the recordings README of the sample)"), e.getMessage());
         assertEquals(1, ledger.size(), "the failed call is in the ledger, so the run's inference.jsonl has its line");
         CostLedger.Entry failed = ledger.entries().get(0);
         assertEquals("NO_RECORDING", failed.details().get("error"));

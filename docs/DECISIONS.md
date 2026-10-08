@@ -1054,12 +1054,29 @@ either way.
 
 **What it changed.** Each is built and tested (`TODO.md`, "Phase 5"). **Blocks.** Nothing; provisional.
 
+## B25 The live session's decisions (2026-10-08, afternoon; provisional)
+
+**From:** the decisions taken while closing the live items of Phase 5 on 2026-10-08 without the owner (the owner's
+brief: BS13's live part, the live profiles and §15.3 with their first live run, scenario D re-recorded, scenario C
+authored, the nightly figures, the matrix), recorded as D111, D112 and D113 in `design/phase5-contracts.md` §16 with the
+alternatives rejected and the reason. **Question.** Three points the session could have decided either way.
+
+| D | Question | Answer | Veto form offered |
+|---|---|---|---|
+| D111 | How do the live profiles work, and what does a live re-record of the sample pin? | `-Pinference-live` and `-Pinference-record` are explicit profiles that set one system property each for the test JVMs; the live tests are failsafe `*LiveIT` classes that skip (never fail) without the property or without the key; `ScenarioDRecordIT` is the record route (records live, then rewrites the committed bindings through the recorded gateway with the label `recorded <date>`); the tier (b) stand-in generator is gone; the tests read the label from the committed file; the gateway sends no `effort` to the Haiku class (Haiku 4.5 refuses it); the cache-hit criterion is read on a warm prefix (the one-request job run twice) | `B25 D111 veto`: name the part (`… profile on the key`, `… keep the generator`, `… label constant`, `… cold ratio`) |
+| D112 | Does the planner keep the envelopes the `claude` CLI printed? | Yes, as `<out>/<id>.envelope.json`, masked, beside the YAML, the plan and the authoring record; a person deletes it before committing or keeps it as the fixture of the planner's replay test | `B25 D112 veto`: the envelopes discarded with the planner's temporary directory |
+| D113 | What is the default confidence threshold of the tier (b) gate? | 0.6 (was 0.8): the live model reported 0.8, 0.8, 0.8 and 0.7 on four correct answers to the sample's supervisor query, so 0.8 refused a correct statement in about one case of four; the verifier remains the gate that decides, and the threshold stays a setting | `B25 D113 veto`: keep 0.8 (`… 0.8`), or the verifier alone (`… no gate`) |
+
+**What it changed.** Built and run live on 2026-10-08 (`TODO.md`, "Phase 5", the live table). **Blocks.** Nothing;
+provisional until the owner answers.
+
 ---
 
 ## Questions for the owner
 
+**Open: B25** (the three decisions of the live session of 2026-10-08, D111 to D113; `B25 ok` or `B25 D113 veto 0.8`).
 **B23** (the Phase 5 contract's eighteen provisional answers, one withdrawn) and **B24** (the seven decisions the Phase 5
-build and the review's fix wave took, D88-D104 and D110) were confirmed by the owner on 2026-10-08, every row; no question is open.
+build and the review's fix wave took, D88-D104 and D110) were confirmed by the owner on 2026-10-08, every row.
 Before it, none was open as of the evening of 2026-10-07: the owner confirmed **B21** (the fifteen answers of the Phase 4 contract)
 and **B22** (the eleven decisions of the Phase 4 build, D59-D69) on 2026-10-07 through the interview page, both
 without a veto. The owner answered every earlier

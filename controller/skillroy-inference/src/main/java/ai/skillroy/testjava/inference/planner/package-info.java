@@ -17,8 +17,8 @@
 /**
  * The planner of phase5-contracts.md 10 (decision D77): {@link ai.skillroy.testjava.inference.planner.Planner} runs
  * the Claude Code CLI headless against the MCP server with the scenario JSON schema as its output constraint, checks
- * and compiles what comes back (repairing it through {@code --resume}), and writes the scenario's YAML, plan and
- * authoring record for a person to review. The command that calls it, and the checks after it, are the CLI's
- * {@code author}.
+ * and compiles what comes back (repairing it through {@code --resume}), and writes the scenario's YAML, plan,
+ * authoring record and the planner's masked envelopes (D112) for a person to review. The command that calls it, and
+ * the checks after it, are the CLI's {@code author}.
  */
 package ai.skillroy.testjava.inference.planner;

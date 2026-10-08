@@ -57,7 +57,7 @@ import java.util.regex.Pattern;
  * models: {opus: claude-opus-5-5, sonnet: claude-sonnet-5-5, haiku: claude-haiku-4-5}
  * effort: {resolve: low, triage: low, session: medium, summary: low}
  * budget: {scenarioUsd: "0.50", jobUsd: null, sessionUsd: "1.00"}
- * thresholds: {confidence: "0.8"} # by name, scalar values kept as text (phase5-contracts.md 5.4)
+ * thresholds: {confidence: "0.6"} # by name, scalar values kept as text (phase5-contracts.md 5.4, D113)
  * prices: null                    # a price table file, relative to the file; null: the built-in table
  * fallbacks: true
  * images: false
@@ -88,8 +88,8 @@ import java.util.regex.Pattern;
  *     {@code session}, {@code summary}; null is the defaults
  * @param budgets limits in US dollars as plain decimal strings by scope: {@value #BUDGET_SCENARIO},
  *     {@value #BUDGET_JOB} (only when set), {@value #BUDGET_SESSION}; null is the defaults
- * @param thresholds the gates of a model's answer by name ({@code confidence}, default {@code "0.8"},
- *     phase5-contracts.md 5.4), each value a scalar kept as text for the inference module to read; null is the
+ * @param thresholds the gates of a model's answer by name ({@code confidence}, default {@code "0.6"},
+ *     phase5-contracts.md 5.4, D113), each value a scalar kept as text for the inference module to read; null is the
  *     defaults. A threshold is set by the file's {@code thresholds:} map, by the property or option
  *     {@value #PROP_THRESHOLDS}{@code <key>} (for a key the defaults, the file or the options name, or that the JVM's
  *     system properties name under that prefix), and keeps its default otherwise
@@ -176,8 +176,12 @@ public record InferenceSettings(String gateway, Path recordings, boolean record,
     /** The default budgets: per scenario 0.50 (B6), per session 1.00 (B15); per job none (B6). */
     public static final Map<String, String> DEFAULT_BUDGETS = ordered(BUDGET_SCENARIO, "0.50", BUDGET_SESSION,
             "1.00");
-    /** The default thresholds: a model's stated confidence of at least 0.8 (phase5-contracts.md 5.4, B23 Q3). */
-    public static final Map<String, String> DEFAULT_THRESHOLDS = ordered("confidence", "0.8");
+    /**
+     * The default thresholds: a model's stated confidence of at least 0.6 (phase5-contracts.md 5.4, B23 Q3; decision
+     * D113: the live model stated 0.8, 0.8, 0.8 and 0.7 for four correct answers to the sample's supervisor query, so
+     * 0.8 refused about one correct answer in four).
+     */
+    public static final Map<String, String> DEFAULT_THRESHOLDS = ordered("confidence", "0.6");
     /** The default timeouts. */
     public static final Map<String, Long> DEFAULT_TIMEOUTS;
 

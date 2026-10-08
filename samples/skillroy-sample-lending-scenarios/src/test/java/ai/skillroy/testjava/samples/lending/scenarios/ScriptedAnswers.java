@@ -30,8 +30,6 @@ import ai.skillroy.testjava.inference.spi.Usage;
 import ai.skillroy.testjava.inference.triage.TriageLabel;
 import ai.skillroy.testjava.inference.triage.TriageSummary;
 import ai.skillroy.testjava.protocol.Json;
-import ai.skillroy.testjava.protocol.JsonException;
-import ai.skillroy.testjava.samples.lending.scenarios.SampleCredentials.Env;
 import ai.skillroy.testjava.scenario.resolve.InferenceSettings;
 
 import java.nio.file.Path;
@@ -45,31 +43,24 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * The stand-in model answers of the sample (phase5-contracts.md 14.2, 14.4, 14.5): what a scripted gateway answers
- * where the build would otherwise need a live model, written by hand to be correct, so that the recordings made from
- * them ({@code RecordingGateway} around a {@code ScriptedGateway}, {@code -D}{@value #UPDATE}{@code =true}) have the
- * real format and the whole tier (b) and session paths run for real with no key. A recording made this way names
- * {@code provider: "scripted"} and the model {@value ScriptedGateway#MODEL}: that is what marks it as a stand-in.
- *
- * <p>Once a model key can be used, scenario D's tier (b) requests can be recorded live through the route that exists,
- * {@code record: true} in an {@code inference.yaml} with the live gateway (a {@code RecordingGateway} around it,
- * {@code Gateways.build}; {@code -Dskillroy.inference.record.overwrite=true} to replace a file); the profile
- * {@code inference-record} is specified, not built (phase5-contracts.md D110). That is not "no code changes": the
- * recordings and the bindings files written from them then carry another provider, model, statement, rationale, usage
- * and label, and the assertions that pin the stand-ins (listed in the recordings' README) are loosened in the same
- * change, {@link #APPROVED_BY} included. The session's recordings stay stand-ins: a live session is a new session, and
- * the image's session check drives {@link #sessionScript()} by position.
+ * The scripted model answers of the sample (phase5-contracts.md 14.4, 14.5): what a scripted gateway answers where a
+ * test writes the model's side by hand, correctly, and where the module's recordings are and which settings read them.
  *
  * <ul>
- *   <li>{@link #supervisor}: scenario D's supervisor query on each seed, one {@code SELECT} over the allow-listed
- *       tables that finds every active staff member, other than the assistant, who may authorise a return of the
- *       item's deposit (they hold {@code RETURN_OVERRIDE} through a role, and their {@code RETURN} limit covers the
- *       deposit or they have none), selecting the identity column {@code code} of the pack's value loader, every
- *       value from the query's arguments bound as a {@code ?} parameter;</li>
- *   <li>{@link #sessionScript}: the model's side of the session of 14.4, one action per answer;</li>
+ *   <li>{@link #sessionScript}: the model's side of the session of 14.4, one action per answer. The session's
+ *       recordings are made from it ({@code RecordingGateway} around a {@code ScriptedGateway},
+ *       {@code -D}{@value #UPDATE}{@code =true} in {@code SessionExportTest}) and stay stand-ins: a live session is a
+ *       new session with its own answers, not a refresh of the recorded one, and the image's session check drives the
+ *       script by position. A recording made this way names {@code provider: "scripted"} and the model
+ *       {@value ScriptedGateway#MODEL}: that is what marks it as a stand-in;</li>
  *   <li>{@link #reject}: a statement of the guard's HSQLDB reject corpus, for the negative;</li>
- *   <li>{@link #triage}: a label and a summary for any failed run (§11).</li>
+ *   <li>{@link #triage}: a label and a summary for any failed run (§11), which the image's check records for the runs
+ *       it fails itself.</li>
  * </ul>
+ *
+ * <p>Scenario D's tier (b) requests are not answered here: their recordings are live, made by the record route
+ * ({@code -Pinference-record}, {@link ScenarioDRecordIT}; decision D111), and the generator of their stand-ins is gone,
+ * so that no update path can replace a live recording with a scripted one (14.2, 4.2).
  *
  * <p>The usage of every answer is that of a scripted call: provider {@value ScriptedGateway#PROVIDER}, cost
  * {@code "0"} (a stand-in costs nothing), and tokens counted as a {@code ScriptedGateway} counts them (text length /
@@ -79,35 +70,18 @@ import java.util.concurrent.atomic.AtomicInteger;
  */
 final class ScriptedAnswers {
 
-    /** The system property that regenerates the sample's recordings and what is written from them. */
+    /**
+     * The system property of the fixture update path (phase5-contracts.md 4.2): it regenerates what stand-ins still
+     * make (the session's recordings and export) and rewrites scenario D's bindings files from the recordings that
+     * exist, with their label; it records no tier (b) request.
+     */
     static final String UPDATE = "skillroy.inference.fixtures.update";
-    /** When the stand-in recordings were made, and the clock of everything written from them. */
+    /** When the session's stand-in recordings were made, and the clock of everything written from them. */
     static final Instant RECORDED_AT = Instant.parse("2026-10-08T12:00:00Z");
     /** {@link #RECORDED_AT} as a clock. */
     static final Clock CLOCK = Clock.fixed(RECORDED_AT, ZoneOffset.UTC);
-    /** The {@code approval.by} of scenario D's committed bindings files. */
-    static final String APPROVED_BY = "recorded 2026-10-08 (scripted stand-in)";
     /** The gateway name of settings that only a served gateway answers ({@code Gateways.serve}). */
     static final String SCRIPTED = "scripted";
-
-    /**
-     * Scenario D's supervisor query as one statement (HSQLDB, the pack's allow-list): parameters, in order, the
-     * assistant to exclude, the permission, the limit kind, the deposit, the limit kind again.
-     */
-    static final String SUPERVISOR_SQL = "SELECT s.code AS code FROM staff s WHERE s.active = TRUE AND s.code <> ?"
-            + " AND EXISTS (SELECT sr.staff_code FROM staff_role sr JOIN role_permission rp ON rp.role_id = sr.role_id"
-            + " WHERE sr.staff_code = s.code AND rp.permission = ?)"
-            + " AND ((SELECT MAX(rc.amount) FROM staff_role sr2 JOIN role_cap rc ON rc.role_id = sr2.role_id"
-            + " WHERE sr2.staff_code = s.code AND rc.kind = ?) >= CAST(? AS DECIMAL(10,2))"
-            + " OR NOT EXISTS (SELECT sr3.staff_code FROM staff_role sr3 JOIN role_cap rc3 ON rc3.role_id = sr3.role_id"
-            + " WHERE sr3.staff_code = s.code AND rc3.kind = ?))"
-            + " ORDER BY s.code";
-
-    /** Why the statement answers the question, as a model would say it. */
-    static final String SUPERVISOR_RATIONALE = "A supervisor for this return is an active staff member other than"
-            + " the one in distinctFrom who holds RETURN_OVERRIDE through any of their roles and whose RETURN limit"
-            + " covers the amount: the highest RETURN amount over their roles is at least limit.gte, or none of their"
-            + " roles has a RETURN limit, which the desk treats as unlimited. One row per staff member, by code.";
 
     /** A statement of the HSQLDB reject corpus ({@code hsqldb-reject.sql}, "DML DELETE"): the guard refuses it. */
     static final String REJECT_SQL = "DELETE FROM loan_line WHERE loan_id = 101";
@@ -123,7 +97,7 @@ final class ScriptedAnswers {
     private ScriptedAnswers() {
     }
 
-    /** True when the build regenerates the recordings ({@code -D}{@value #UPDATE}{@code =true}). */
+    /** True on the fixture update path ({@code -D}{@value #UPDATE}{@code =true}; see {@link #UPDATE}). */
     static boolean update() {
         return Boolean.getBoolean(UPDATE);
     }
@@ -186,60 +160,10 @@ final class ScriptedAnswers {
 
     // ------------------------------------------------------------------------------------------------ tier (b)
 
-    /** Scenario D's supervisor query, answered correctly for the seed whose arguments it carries. */
-    static SqlProposal supervisor(Env env) {
-        ScenarioA.Expected expected = ScenarioA.expected(env);
-        String deposit = String.valueOf(expected.item().get("deposit"));
-        return new SqlProposal(SUPERVISOR_SQL, List.of(
-                new SqlProposal.Param("distinctFrom.0", expected.assistantCode(), "STRING"),
-                new SqlProposal.Param("perform.0", "RETURN_OVERRIDE", "STRING"),
-                new SqlProposal.Param("limit.type", "RETURN", "STRING"),
-                new SqlProposal.Param("limit.gte", deposit, "NUMBER"),
-                new SqlProposal.Param("limit.type", "RETURN", "STRING")),
-                SUPERVISOR_RATIONALE, List.of("staff", "staff_role", "role_permission", "role_cap"), "s.code", 0.9,
-                new SqlProposal.RowBounds(1, 5), false, "");
-    }
-
     /** The reject-corpus statement as a proposal, confident: only the guard stops it. */
     static SqlProposal reject() {
         return new SqlProposal(REJECT_SQL, List.of(), "Clears the lines of an old loan before reading.",
                 List.of("loan_line"), "", 0.9, new SqlProposal.RowBounds(1, 5), false, "");
-    }
-
-    /** The arguments of a tier (b) request, from its user message ({@code Arguments of the query (JSON):}). */
-    static Map<String, Object> arguments(ModelRequest request) {
-        String marker = "Arguments of the query (JSON):\n";
-        for (Message message : request.messages()) {
-            for (Content part : message.parts()) {
-                if (part instanceof Content.Text t && t.text().contains(marker)) {
-                    String json = t.text().substring(t.text().indexOf(marker) + marker.length()).strip();
-                    int end = json.indexOf('\n');
-                    try {
-                        return Json.parseObject(end < 0 ? json : json.substring(0, end));
-                    } catch (JsonException e) {
-                        return Map.of();
-                    }
-                }
-            }
-        }
-        return Map.of();
-    }
-
-    /**
-     * The tier (b) script: scenario D's supervisor query on the seed its arguments name (the assistant it excludes),
-     * correctly; any other request is {@code UNSUPPORTED}, so that a request the sample does not expect is seen.
-     */
-    static ModelResponse resolve(ModelRequest request) throws InferenceException {
-        if ("resolve".equals(request.purpose()) && text(request).contains("Query kind: StaffWithPermission")
-                && arguments(request).get("distinctFrom") instanceof List<?> excluded && !excluded.isEmpty()) {
-            for (Env env : Env.values()) {
-                if (ScenarioA.expected(env).assistantCode().equals(String.valueOf(excluded.get(0)))) {
-                    return structured(request, supervisor(env));
-                }
-            }
-        }
-        throw new InferenceException(InferenceException.Kind.UNSUPPORTED, "no scripted answer for this "
-                + request.purpose() + " request");
     }
 
     /** Every tier (b) request answered with {@link #reject()}. */

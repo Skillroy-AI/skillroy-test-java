@@ -60,14 +60,15 @@ import java.util.function.UnaryOperator;
  * the pack jars, the environment, the credentials file and {@code --inference none}, so that the planner's tools
  * offer no second model) into a private, owner-only temporary file, and calls {@link Planner#author}: the Claude Code
  * CLI headless with that server as its only tool source and the scenario JSON schema as its output constraint. The
- * planner writes {@code <out>/<id>.yaml}, {@code <out>/plan/<id>.plan.json} and {@code <out>/<id>.authoring.json}. The
- * planner is given the catalogue of the primitives its server offers a scenario ({@link PlanPolicy}), so that the
- * scenario schema's {@code call} names only those, and its deadline is {@code timeouts.plannerMs}. The command then
- * binds the plan with {@code resolve --dry-run} semantics ({@code live}, nothing written), with {@code --run} runs it
- * once in {@code live} when every call of it is one the planner's server offers (D96; otherwise the check fails and
- * nothing runs), its expectations on masked values, records both checks in the authoring record
- * ({@link AuthoringResult#recordChecks}), records the planner's calls in the invocation's ledger beside the checks'
- * own, prints the instruction for the reviewer and deletes the configuration file.
+ * planner writes {@code <out>/<id>.yaml}, {@code <out>/plan/<id>.plan.json}, {@code <out>/<id>.authoring.json} and
+ * {@code <out>/<id>.envelope.json} (its envelopes, masked, D112; a failure writes the ones that arrived, and the
+ * command names the file on stderr). The planner is given the catalogue of the primitives its server offers a scenario
+ * ({@link PlanPolicy}), so that the scenario schema's {@code call} names only those, and its deadline is
+ * {@code timeouts.plannerMs}. The command then binds the plan with {@code resolve --dry-run} semantics ({@code live},
+ * nothing written), with {@code --run} runs it once in {@code live} when every call of it is one the planner's server
+ * offers (D96; otherwise the check fails and nothing runs), its expectations on masked values, records both checks in
+ * the authoring record ({@link AuthoringResult#recordChecks}), records the planner's calls in the invocation's ledger
+ * beside the checks' own, prints the instruction for the reviewer and deletes the configuration file.
  *
  * <p>This CLI's own launcher is the system property {@code skillroy.launcher} ({@code bin/skillroy} sets it to
  * itself); without it (in-process, an IDE) the configuration names this JVM's {@code java} with its class path.
@@ -108,10 +109,12 @@ final class AuthorCommand implements Command {
             only tools are this target's skillroy MCP server (mcp --mutating: the planner may try steps on the
             disposable test instance) and whose answer must fit the scenario JSON schema of the pack. Writes
             <out>/<id>.yaml (with the brief, the date, the model, the session and the cost as a comment head),
-            <out>/plan/<id>.plan.json and <out>/<id>.authoring.json; a compile problem starts a repair round
+            <out>/plan/<id>.plan.json, <out>/<id>.authoring.json and <out>/<id>.envelope.json (the planner's
+            envelopes, masked; a failure writes the ones it received); a compile problem starts a repair round
             (claude -p --resume), at most --max-repairs times. Then binds the scenario live, writing nothing, and
             with --run runs it once live; both checks are recorded in the authoring record. Nothing is approved:
-            review the YAML and the plan, then skillroy resolve approves its bindings. Needs the claude command
+            review the YAML and the plan, then skillroy resolve approves its bindings; delete the envelope file
+            before committing, or keep it as the fixture of the planner's replay. Needs the claude command
             (--claude-command, or claude on the PATH) and its login or ANTHROPIC_API_KEY. Exit code 0 when the
             scenario was written and compiled, 1 when the planner failed or its repairs ran out, 64 for a usage
             error.""",
@@ -199,10 +202,12 @@ final class AuthorCommand implements Command {
                 AuthoringResult result;
                 try {
                     // The catalogue of what the planner's server offers (D96): the scenario schema's call names those.
+                    // The credentials' mask: a model's text that repeats a credential reaches neither the planner's
+                    // log nor its envelope file.
                     PlannerRequest request = new PlannerRequest(brief, id, out, pack, policy.callableCatalogue(),
                             config, model, maxTurns == null ? PlannerRequest.DEFAULT_MAX_TURNS : maxTurns.intValue(),
                             maxRepairs == null ? PlannerRequest.DEFAULT_MAX_REPAIRS : maxRepairs.intValue(), budget,
-                            args.flag(RUN), claude, plannerDeadline(inference), null);
+                            args.flag(RUN), claude, plannerDeadline(inference), null, mask);
                     result = Planner.author(request);
                 } catch (AuthoringException e) {
                     e.ledger().forEach(ledger::record);
@@ -210,6 +215,9 @@ final class AuthorCommand implements Command {
                     if (e.lastYaml() != null) {
                         cli.err().println("the last scenario the planner returned:");
                         cli.err().print(scrub.apply(e.lastYaml()));
+                    }
+                    if (e.envelope() != null) {
+                        cli.err().println(scrub.apply("the planner's envelopes: " + e.envelope()));
                     }
                     failureSummary(cli, ledger.entries(), budget);
                     return e.exitCode();
@@ -271,6 +279,7 @@ final class AuthorCommand implements Command {
             document.put("yaml", r.yaml().toString());
             document.put("plan", r.planFile().toString());
             document.put("authoring", r.authoring().toString());
+            document.put("envelope", r.envelope() == null ? null : r.envelope().toString());
             document.put("model", r.model());
             document.put("sessionId", r.sessionId());
             document.put("turns", (long) r.turns());
@@ -300,7 +309,11 @@ final class AuthorCommand implements Command {
                 .append(r.repairs() == 1 ? " repair" : " repairs").append(" (session ").append(r.sessionId())
                 .append(r.claudeVersion() == null ? "" : ", claude " + r.claudeVersion()).append(")\n");
         text.append("  written: ").append(r.yaml()).append("\n           ").append(r.planFile())
-                .append("\n           ").append(r.authoring()).append('\n');
+                .append("\n           ").append(r.authoring());
+        if (r.envelope() != null) {
+            text.append("\n           ").append(r.envelope());
+        }
+        text.append('\n');
         text.append("  check: it compiles\n  ").append(resolveLine).append('\n');
         if (runText != null) {
             text.append("  ").append(runText.replace("\n", "\n  ")).append('\n');

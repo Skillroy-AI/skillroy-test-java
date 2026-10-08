@@ -440,7 +440,7 @@ class ContributedResolutionTest {
         FakeContributor.offering(llm);
         llm.codes = List.of("C3");
         llm.rationale = "the dearest active item within the return limit; never " + TestCredentials.PW_100;
-        llm.rejections = List.of(List.of("proposal", "confidence 0.6 below 0.8"),
+        llm.rejections = List.of(List.of("proposal", "confidence 0.5 below 0.6"),
                 List.of("row B2", "the value loader refused it: " + TestCredentials.PW_200));
         Plan plan = plan(WITH_MAX, Map.of("item", List.of("llm-sql")));
         BindOutcome live = bind(plan, options(BindMode.LIVE).withWriteBindings(true));
@@ -451,7 +451,7 @@ class ContributedResolutionTest {
         assertFalse(rationale.contains(TestCredentials.PW_100), "masked by the engine: " + rationale);
         assertTrue(item.provenance().notes().stream().noneMatch(n -> n.contains("dearest")), "not a note");
         List<Provenance.Rejected> rejected = item.provenance().rejected();
-        assertEquals(new Provenance.Rejected("inference.fake-sql", "proposal", "confidence 0.6 below 0.8"),
+        assertEquals(new Provenance.Rejected("inference.fake-sql", "proposal", "confidence 0.5 below 0.6"),
                 rejected.get(0), "a refused proposal under the resolver's id");
         assertEquals("row B2", rejected.get(1).label());
         assertFalse(rejected.get(1).reason().contains(TestCredentials.PW_200), "masked: " + rejected.get(1));
@@ -479,6 +479,37 @@ class ContributedResolutionTest {
         assertEquals("NO_CANDIDATE", none.reason());
         assertEquals(List.of(Map.of("resolver", "inference.fake-sql", "label", "proposal", "reason",
                 "guard STAR: *")), none.detail().get("rejected"), "the failure's detail names the refusal");
+    }
+
+    /**
+     * A slot no candidate answers names the resolvers' refusals in its message: at most three, in order, each on one
+     * line and bounded to 120 characters, with how many more there are (found live: a correct statement refused at
+     * confidence 0.7 was reported as "no candidate" alone). Without a refusal the message is as it was.
+     */
+    @Test
+    void aSlotNoCandidateAnswersNamesTheRefusalsInItsMessage() throws Exception {
+        FakeContributor.offering(llm);
+        llm.codes = List.of();
+        Plan plan = plan(ONE, Map.of("item", List.of("llm-sql")));
+        llm.rejections = List.of(List.of("proposal", "confidence 0.5 below 0.6"));
+        BindException one = fails(plan, options(BindMode.LIVE));
+        assertEquals("NO_CANDIDATE", one.reason());
+        assertEquals("slot 'item': no candidate in this environment answers query Item (rejected: proposal:"
+                + " confidence 0.5 below 0.6)", one.getMessage());
+
+        String longReason = "guard STAR: " + "x".repeat(200);
+        llm.rejections = List.of(List.of("proposal", "confidence 0.5 below 0.6"), List.of("row A1", longReason),
+                List.of("row A2", "the value loader\nrefused it"), List.of("row A3", "a fourth refusal"));
+        String many = fails(plan, options(BindMode.LIVE)).getMessage();
+        String bounded = ("row A1: " + longReason).substring(0, 117) + "...";
+        assertEquals("slot 'item': no candidate in this environment answers query Item (rejected: proposal:"
+                + " confidence 0.5 below 0.6; " + bounded + "; row A2: the value loader refused it; and 1 more)",
+                many);
+        assertFalse(many.contains("a fourth refusal"), "three at most");
+
+        llm.rejections = List.of();
+        assertEquals("slot 'item': no candidate in this environment answers query Item",
+                fails(plan, options(BindMode.LIVE)).getMessage(), "no refusal, nothing added");
     }
 
     @Test

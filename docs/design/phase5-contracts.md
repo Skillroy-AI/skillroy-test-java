@@ -4,11 +4,13 @@
 with a sceptic) and fixed the same day; verified in the Linux matrix (`../TODO.md`, "Status at a glance"); B23 and B24
 confirmed by the owner on 2026-10-08, every row.** The questions of §17 are answered by the orchestrator and recorded as
 decision **B23** (`../DECISIONS.md`, the owner interview page), confirmed by the owner; the decisions the build and the
-review's fix wave took are D88-D104 and D110 (§16, **B24**), confirmed by the owner. The owner's workspace-scoped model
-key (2026-10-08, `ANTHROPIC_API_KEY`, no workspace id needed: the models endpoint answers it) makes the live items of
-§14 and §15.3 the next session's work. Every section the build changed carries an "As built" note; the review's fixes carry "fix wave"
-notes; what is owed to a live model (scenario C, live recordings, the live profiles and §15.3) is marked in place and
-listed under "Walls" in `../TODO.md`. Written in the manner of `phase2-contracts.md`, `phase3-contracts.md` and `phase4-contracts.md`:
+review's fix wave took are D88-D104 and D110 (§16, **B24**), confirmed by the owner. **The live items were closed in
+the afternoon of 2026-10-08** with the owner's workspace-scoped model key (`ANTHROPIC_API_KEY`, no workspace id
+needed): BS13's live part, scenario D's live recordings, the profiles `inference-live` and `inference-record` with
+§15.3 run live (every item green in the second run), scenario C authored by the planner and the nightly job's figures
+(`../TODO.md`, "Phase 5, the live items"); the decisions of that session are D111-D113 (§16, **B25**, provisional).
+Every section the build changed carries an "As built" note; the review's fixes carry "fix wave" notes; the live
+session's passages are marked "the live session". Written in the manner of `phase2-contracts.md`, `phase3-contracts.md` and `phase4-contracts.md`:
 the contract is changed first, then the code, and the build marks every passage it builds or deviates from. Section
 references `P1 §n`, `P2 §n`, `P3 §n` and `P4 §n` are to the four earlier contracts; `design §n` is the design overview
 `base-framework-design.md`; `ai-inference §Fn/Rn` is the research note `../research/ai-inference.md`. Decisions taken
@@ -162,18 +164,30 @@ finds goes into §5 of that file and the CLI's `THIRD-PARTY.txt`.
 As P2 §2.3 and P4 §2.3: `--release 25` for both new modules; the Apache header on every file; no `mvn install`; the
 distribution zip of the CLI gains the new jars and their attribution. Two new Maven profiles, both off by default:
 
-- **`inference-live`**: the tests of §15.3, which call the live Claude API. The profile activates only when the
-  environment variable `ANTHROPIC_API_KEY` is set **and** `-Pinference-live` is given; without the key the tests are
-  skipped with the reason "no model key", never failed. These tests are never part of `mvn verify` in CI.
+- **`inference-live`**: the tests of §15.3, which call the live Claude API. The profile is given explicitly
+  (`-Pinference-live`) and its tests run only when the environment variable `ANTHROPIC_API_KEY` is set as well; without
+  the key they are skipped with the reason "no model key", never failed. These tests are never part of `mvn verify` in
+  CI.
 - **`inference-record`**: refreshes the recordings of §4.2 from the live API (a maintainer's task; needs the key).
 
-**Both profiles: specified, not built (2026-10-08, review fix wave; D110)**: nothing live can run until a workspace id
-exists; the profiles, the `*LiveIT` tests and the record route are built in the same change as their first live run and
-BS13's live part (`../TODO.md`, Walls). As built (2026-10-08, review fix wave): no POM declares either profile, so
-`-Pinference-live` or `-Pinference-record` only makes Maven warn that the profile does not exist, and nothing live runs;
-the recording route that exists is `record: true` with `recordings:` in an `inference.yaml` of `gateway: claude`
-(`Gateways.build` wraps the live gateway in a `RecordingGateway`), with `-Dskillroy.inference.record.overwrite=true` to
-replace a file; what a live re-record of the sample changes is in §14.2 and the sample's recordings README.
+**Both profiles (2026-10-08, the live session; D111)**, built in the same change as their first live run and BS13's live
+part, as D110 asked (until then no POM declared either, so `-Pinference-live` only made Maven warn, and the recording
+route that existed was `record: true` with `recordings:` in an `inference.yaml` of `gateway: claude`, which stands:
+`Gateways.build` wraps the live gateway in a `RecordingGateway`, and `-Dskillroy.inference.record.overwrite=true` lets
+it replace a file). A profile is explicit (`-P`) and never activated by the environment: Maven cannot make a profile
+depend on a variable *and* a flag at once, and a profile that activated on the key alone would make `mvn verify` call a
+model on any machine that has one. Each profile sets one system property for the test JVMs through the surefire and
+failsafe plugin management of the root POM, as the `pass-it-target-java` profile does: `skillroy.inference.live=true`,
+and `skillroy.inference.record=true` together with `skillroy.inference.record.overwrite=true` (§4.2). The live tests
+are failsafe classes (`ClaudeGatewayLiveIT` in `skillroy-inference`; `InferenceLiveIT` and the record route
+`ScenarioDRecordIT` in the sample's scenarios module), compiled with every build and run by every `verify`, and each
+begins with two assumptions: the property of its profile ("the profile inference-live is not active", or
+`inference-record`) and the key in the environment ("no model key"), so that a build without the profile, or with the
+profile and no key, reports them skipped, never failed, and a profile that does not exist can no longer read as a
+pass. The key reaches a test JVM as it reaches the CLI: through the environment, inherited by the forked JVM, and in
+the Linux image through `ci/run-in-linux.sh`'s pass-through by name. The live tests spend money, and each states its
+bound (§15.3); `ClaudeGatewayLiveIT` and `ScenarioDRecordIT` run natively (no display), `InferenceLiveIT` launches the
+desk and runs in the image.
 
 The key reaches the JVM through the environment variable only (the SDK's `fromEnv()`): never a system property on a
 command line (visible in `ps`), never a file in the repository, never `credentials.yaml` (that file holds the
@@ -327,8 +341,10 @@ Rules.
   is untrusted input and goes into `USER` messages, labelled).
 - *Structured output first.* Where a caller needs data back, it passes `outputSchema` and reads `structured`; it never
   parses free text for JSON. Schemas obey the provider's limits (ai-inference F11: no recursion, no numeric bounds, no
-  string lengths, `minItems` 0 or 1, no external references); `Schemas.ofRecord(Class)` (§3.3) builds compliant schemas
-  from records and refuses what it cannot express.
+  string lengths, `minItems` 0 or 1, no external references; BS13 live, 2026-10-08: a numeric `minimum` and a
+  `minItems` other than 0 or 1 are refused with HTTP 400, a string `maxLength` was accepted, which the conservative
+  rule keeps refusing all the same); `Schemas.ofRecord(Class)` (§3.3) builds compliant schemas from records and
+  refuses what it cannot express.
 - *Tools are optional and auto.* A request with tools gets tool choice `auto` and an instruction in its system text;
   a `TOOL_USE` stop returns the `ToolUse` parts and it is the caller's loop (the session service, §12) that answers
   them. The gateway itself never runs a tool.
@@ -369,7 +385,8 @@ logging off: not `fromEnv()`, which also reads `ANTHROPIC_AUTH_TOKEN`, `ANTHROPI
 variables, profiles on disk, `ANTHROPIC_CUSTOM_HEADERS` and `ANTHROPIC_LOG`, and would make the gateway's credential
 source and its logging depend on an operator's shell (BS13 F-9). Structured output goes through the manual
 `OutputConfig.builder().effort(…).format(JsonOutputFormat…)` form, because the typed `.outputConfig(Class)` overload
-drops `effort` (BS13 F-1); the schema is the project's (`Schemas.ofRecord`). Response content is read tolerantly
+dropped `effort` in 2.34.0 (BS13 F-1; 2.70.0 keeps it, and the manual form stays because it is explicit and
+builds the schema the project chose); the schema is the project's (`Schemas.ofRecord`). Response content is read tolerantly
 (unknown block types become `Opaque` parts; the SDK's `validate()` and visitors without an `unknown` branch are not
 used), and `stop_details.category` is read as a string (the SDK's enum lags the provider's categories; BS13 F-8).
 
@@ -378,19 +395,19 @@ used), and `stop_details.category` is read as a string (the SDK's enum lags the 
 | the key and the workspace | `ANTHROPIC_API_KEY` from the environment (`fromEnv()`); an organisation-level key (one not scoped to a workspace) is refused by the API with HTTP 400 unless every request carries the header `anthropic-workspace-id`, and SDK 2.34.0 adds that header on its own only for profile, OAuth and workload-identity credentials, so the gateway adds it itself for a static key from `inference.yaml` `workspaceId`, else the environment variable `ANTHROPIC_WORKSPACE_ID` (found by BS13 on 2026-10-08: the owner's key is such a key); a 400 whose message names the workspace is reported as `AUTH` with that message, never with the key |
 | `ModelClass` | the ids of `inference.yaml` `models:` (defaults in §2.2); `requestedModel` in `Usage` |
 | `Content.Opaque` | a `thinking` block (with its signature) or a `fallback` block of a response, kept as it came; a request's history that carries one sends it back unchanged (the 5.5 models return thinking blocks before tool calls, BS13 F-2) |
-| `Effort` | `output_config.effort` `low`/`medium`/`high`; thinking is left at the model's default (adaptive; it cannot be disabled on Opus 5.5 and is not disabled anywhere, ai-inference F12) |
+| `Effort` | `output_config.effort` `low`/`medium`/`high` for `OPUS_CLASS` and `SONNET_CLASS`; **no `effort` field for `HAIKU_CLASS`** (BS13 live, 2026-10-08: the models endpoint reports `effort.supported: false` for `claude-haiku-4-5` and a request that carries it is refused with HTTP 400 "This model does not support the effort parameter"; the request's `effort` stays part of its fingerprint, so a recording's identity does not change); thinking is left at the model's default (adaptive; it cannot be disabled on the 5.5 models and is not disabled anywhere, ai-inference F12; the models endpoint reports `thinking.types.disabled.supported: false` for Sonnet 5.5 and Opus 5.5 alike). Live (BS13): Sonnet 5.5 at `low` answered with no thinking block; Opus 5.5 at `low` answered with a `thinking` block of empty text and a signature (82 thinking tokens), which is the `Opaque` part a loop echoes |
 | `maxTokens` | `max_tokens` |
 | `CacheHint` | `cache_control {type: ephemeral}` on the last system part marked `cacheBreakpoint` (`SHORT`: the default 5-minute TTL; `LONG`: `ttl: 1h`); none when `NONE`. The provider's minimum cacheable prefix is 512 tokens on the 5.5 models and 4096 on Haiku 4.5 (ai-inference F13): a shorter prefix silently does not cache, which the ledger shows as `cacheReadTokens = 0` |
 | `Content.Text` / `Image` | text and image blocks (`base64`) |
 | `ToolUse` / `ToolResult` | `tool_use` and `tool_result` blocks; a `ToolResult` with JSON-like content is rendered as JSON text |
-| `ToolSpec` | a tool with `strict: true`, `additionalProperties: false` and every property required; tool choice `auto` always (forced choice is HTTP 400 on the 5.5 models) |
+| `ToolSpec` | a tool with `strict: true`, `additionalProperties: false` and every property required; tool choice `auto` always (forced choice is HTTP 400 on the 5.5 models). **The union limit** (the live session, 2026-10-08): the provider refuses a request whose strict tools hold more than 16 union-typed parameters (a property with `anyOf`, `oneOf` or a `type` array, at any depth, counted over all the request's tools) with HTTP 400 "Schemas contains too many parameters with union types … (limit: 16 parameters with unions)" (the sample's verbs as session tools hold 20: the "value or a `$reference`" unions and the nullable optional keys strict mode forces), so the gateway counts them before rendering and sends every tool of such a request without `strict` (the schemas unchanged; the pack's verbs validate their arguments at the step), and with `strict: true` otherwise |
 | `outputSchema` | `output_config.format` of type `json_schema`; the answer's text is parsed with `Json` into `structured` |
 | `StopReason` | `end_turn`, `tool_use`, `max_tokens`, `refusal` (`stop_details.category` goes into the ledger's `note`) |
-| `Usage` | `usage.input_tokens`, `output_tokens`, `cache_read_input_tokens`, `cache_creation.ephemeral_5m_input_tokens` and `ephemeral_1h_input_tokens` (the split by TTL; `cache_creation_input_tokens` is their sum), the response id, the model the response names, `usage.iterations` when a fallback ran; `costUsd` from the price table (§7.2), priced from the split, not from the `CacheHint` |
-| `submitBatch` … `collectBatch` | the Message Batches API (`client.messages().batches()`, whose request params are their own type): one batch per call, `custom_id` = the request's index, results read as JSON Lines (`resultsStreaming`) and matched by `custom_id`, never by position; `costUsd` at the batch rate (50 % off, stacking with cache reads); no `fallbacks` in a batch |
-| `countTokens` | `messages.countTokens` |
+| `Usage` | `usage.input_tokens`, `output_tokens`, `cache_read_input_tokens`, `cache_creation.ephemeral_5m_input_tokens` and `ephemeral_1h_input_tokens` (the split by TTL; `cache_creation_input_tokens` is their sum), the response id, the model the response names (a dated id such as `claude-haiku-4-5-20251001` for the alias `claude-haiku-4-5`, BS13 live: the requested id followed by `-` and a date is the same model, not a fallback, and is priced as its alias), `usage.iterations` whenever `fallbacks` was sent (one entry per iteration; a second entry, or a `Usage.model` other than the requested one, is what says a fallback ran); `costUsd` from the price table (§7.2), priced from the split, not from the `CacheHint` |
+| `submitBatch` … `collectBatch` | the Message Batches API (`client.messages().batches()`, whose request params are their own type): one batch per call, `custom_id` = the request's index, results read as JSON Lines (`resultsStreaming`) and matched by `custom_id`, never by position; `costUsd` at the batch rate (50 % off, stacking with cache reads); no `fallbacks` in a batch. Live (BS13, 2026-10-08): a batch of two requests ended after 458 s, its results streamed in reverse order (the match by `custom_id` is what saved them), `service_tier: batch` in each usage; the first request wrote the one-hour prefix (`ephemeral_1h_input_tokens`) although a standard request had written the identical entry five seconds before the submission, and the second read 1135 tokens (the first's entry, or that one; one observation: a batch request did not read the standard tier's entry, which §8.3's reading of the cache criterion allows for) |
+| `countTokens` | `messages.countTokens` (live, BS13: exact, 0 % off the reported `input_tokens + cache_creation_input_tokens + cache_read_input_tokens` in both measurements; the structured-output format adds about 200 tokens to a request's prefix, counted on both sides) |
 | errors | classified by `statusCode()` and `errorType()`, not by the exception class alone (BS13 F-9: 529 arrives as `InternalServerException` with `overloaded_error`, 402 and 413 as `UnexpectedStatusCodeException`): 401/403 `AUTH`; 402 `BILLING`; 429 `RATE_LIMIT`; 529 or `overloaded_error` `OVERLOADED`; 400/404/413/422 `INVALID_REQUEST`, except the 400 whose message names the workspace, which is `AUTH` with that message; `AnthropicIoException` `TRANSPORT`, or `TIMEOUT` when its cause is a timeout or the deadline passed; the rest `PROVIDER`; retries as §2.4 |
-| fallbacks | `inference.yaml` `fallbacks: true` (the provisional default, §17 Q6) sends the server-side refusal fallback in its `default` form (the beta header `server-side-fallback-2026-07-01`, `fallbacks: "default"`; typed in the SDK line of §2.2, an extra body property on 2.34.0): a refused request is answered by a model the provider picks by refusal category, `Usage.model` names it and a `fallback` block comes back as an `Opaque` part; `false` sends none; **never in a batch request** (the provider rejects it; BS13 F-7). Either way the ledger records both model names |
+| fallbacks | `inference.yaml` `fallbacks: true` (the provisional default, §17 Q6) sends the server-side refusal fallback in its `default` form (the beta header `server-side-fallback-2026-07-01`, `fallbacks: "default"`; typed in the SDK line of §2.2, an extra body property on 2.34.0): a refused request is answered by a model the provider picks by refusal category, `Usage.model` names it and a `fallback` block comes back as an `Opaque` part; `false` sends none; **never in a batch request** (the provider rejects it; BS13 F-7; live: HTTP 400 "The `fallbacks` parameter is not supported for batch requests"). Either way the ledger records both model names. Live (BS13, 2026-10-08): the body property is accepted on the regular endpoint only together with the beta header (without it HTTP 400 "fallbacks: Extra inputs are not permitted"); a response to a request that carried `fallbacks` has `usage.iterations` whether or not a fallback ran (one entry per iteration with its own token counts, `model: null` for the primary), so its presence means nothing and a fallback is read from a second iteration or from `Usage.model`; the models endpoint names the allowed targets: `claude-sonnet-5` for Sonnet 5.5, `claude-opus-4-8` and `claude-opus-5` for Opus 5.5, none for Haiku 4.5, which accepts the parameter all the same (one raw request, 2026-10-08) (all in the price table of §7.2) |
 
 As built (2026-10-08, I1): `ClaudeGateway.open(InferenceSettings)`; a package-private constructor takes a client for
 the loopback fake; responses are read from their JSON form so that unknown, thinking and fallback blocks become
@@ -408,6 +425,18 @@ or its HTTP client during a call leaves the gateway as `PROVIDER` with the known
 batch methods included). A `retry-after` (or `retry-after-ms`) that is not a finite number of at least 0 is ignored (the
 gateway's own back-off applies), and a wait is taken only when it is shorter than what is left of the deadline,
 compared as a difference, so that a value near `Long.MAX_VALUE` cannot overflow past it.
+
+As verified live (2026-10-08, BS13's live part through SDK 2.70.0, the owner's workspace-scoped key, USD 0.032 in all, the two CLI calls included;
+`../../spikes/BS13/RESULT.md`): the mapping rows above hold as the build made them, with the corrections marked "live"
+in the rows (no `effort` for the Haiku class; the fallback header mandatory and `usage.iterations` present whenever
+`fallbacks` is sent; `claude-opus-5` priced; the batch tier's own cache). The strict tool with `tool_choice: auto`
+was called with schema-valid input and a forced choice was refused as the row says; the structured answer of both
+the typed and the manual `OutputConfig` forms parsed (2.70.0's typed form keeps `effort`, which 2.34.0 dropped; the
+gateway keeps the manual form); 404 and 400 arrive as `NotFoundException` and `BadRequestException` with request ids;
+a 1135-token system part was written to the cache (five-minute TTL) and read by the identical call two seconds
+later, and written again as a one-hour entry with `ttl: 1h` and no beta header; `count_tokens` was exact. No refusal was provoked, so `stop_details` stayed `null`
+on every response. The Haiku rule was found by the orchestrator with one raw request and is built in the same
+change as the live profiles (D111).
 
 What the gateway never does: it never logs a prompt or a response body (the run writes `inference.jsonl`, §7.4,
 with metadata and masked structured answers only, and the prompt text itself only under `--log-prompts`); it never
@@ -438,11 +467,23 @@ This is what lets CI, the Linux image and every unit test run the AI layer with 
   `-Dskillroy.inference.record.overwrite=true`; otherwise the live answer is used and the file kept, so that a
   maintainer refreshes deliberately.
 - **The profile `inference-record`** of the two bullets above (the `-Pinference-record` of the missing recording's
-  message, the profile of the overwrite property): specified, not built (2026-10-08, review fix wave; D110): nothing
-  live could run until a workspace id existed (a workspace-scoped key arrived at the end of 2026-10-08); the profiles, the `*LiveIT` tests and the record route are built in the same
-  change as their first live run and BS13's live part (`../TODO.md`, Walls). As built (2026-10-08, review fix wave): the
-  overwrite property works without the profile, on the route that exists (`record: true`, §2.3), and the message of a
-  missing recording names that route and the sample's recordings README instead of the profile.
+  message, the profile of the overwrite property), built 2026-10-08 in the live session (D111; until then specified
+  only, D110, the route that existed being `record: true`, §2.3, which stands and which the overwrite property serves
+  without the profile too): `ScenarioDRecordIT` in the sample's scenarios module (§14.2), run by `verify` under
+  `-Pinference-record` with the key, removes the module's committed `resolve`-purpose recordings, binds scenario D in
+  `approve` without reuse on each seed through the live gateway wrapped in a `RecordingGateway` (settings `gateway:
+  claude`, `record: true`, `recordings:` the module's directory; the profile's overwrite property), and then writes the
+  committed bindings files of both seeds from the new recordings through the recorded gateway, as `approve` writes
+  them, with the label `recorded <date>` (the UTC date of the run). The message of a missing recording names the
+  profile and the sample's recordings README. As built (2026-10-08, the live session, after the review lens): the route
+  records and writes into a temporary directory first, checks there what the unit tests pin (the provider, a Sonnet
+  model id, the confidence at or above the threshold, a non-empty rationale, the guarded statement, the value loader's
+  statement, the label, the bindings files' canonical form) and runs the secret scan over the four files with both
+  seeds' passwords, the desk PIN and the reader password, and only then replaces the committed recordings and bindings
+  files, so that a failure on either seed leaves the module as it was. The fixture update property (`-Dskillroy.inference.fixtures.update=true`)
+  regenerates only what stand-ins still make, the session's recordings and export (§14.4), and rewrites scenario D's
+  bindings files from whatever recordings exist with their existing label; it records no tier (b) stand-in any more
+  (the generator is gone), so that it can never replace a live recording with a scripted one.
 - **Where the base keeps recordings**: `samples/skillroy-sample-lending-scenarios/src/test/resources/inference/`
   (the sample's tier (b) queries on both seeds, the triage of the sample's two negative runs, the session of §14.4, the
   planner's post-processing fixtures) and `controller/skillroy-inference/src/test/resources/inference/` (unit fixtures,
@@ -500,7 +541,7 @@ budget:
   scenarioUsd: "0.50"           # B6; per bind of one scenario
   jobUsd: null                  # re-resolve: must be set, no built-in value (B6)
   sessionUsd: "1.00"            # B15; per interactive session
-thresholds: {confidence: "0.8"}  # the tier (b) gates of §5.4 that are settings
+thresholds: {confidence: "0.6"}  # the tier (b) gates of §5.4 that are settings (0.8 until D113, 2026-10-08)
 prices: null                    # a YAML file with the price table of §7.2; null = the built-in table of this version
 fallbacks: true                 # §4.1
 images: false                   # Phase 7 turns it on
@@ -679,9 +720,12 @@ pack declares at least one `SqlAllowList`; strategy `LLM_SQL`; id `inference.sql
        public record RowBounds(int min, int max) { }
    }
    ```
-3. **The gate**: `cannotAnswer` → no candidates, with the reason in `Provenance.notes`; `confidence < 0.8` (the
-   threshold of ai-inference R13, a setting `thresholds.confidence` of `inference.yaml`) → no candidates, recorded as
-   rejected `{resolver: inference.sql, label: "proposal", reason: "confidence 0.6 below 0.8"}`; the statement through
+3. **The gate**: `cannotAnswer` → no candidates, with the reason in `Provenance.notes`; `confidence` below the
+   threshold (a setting `thresholds.confidence` of `inference.yaml`; 0.8 as ai-inference R13 recommended, **0.6 since
+   D113**, 2026-10-08: Sonnet 5.5 at effort `low` reported 0.8, 0.8, 0.8 and 0.7 on four correct answers to the sample's
+   supervisor query, so 0.8 refused one correct statement in four, and the verifier is the gate that decides) → no
+   candidates, recorded as rejected `{resolver: inference.sql, label: "proposal", reason: "confidence 0.5 below 0.6"}`,
+   which the binder's "no candidate" message names (the live session, 2026-10-08); the statement through
    `SqlGuard` → a violation gives no candidates with the reason code and the violating fragment (never the whole
    statement in a *message* a person did not ask for; the full statement goes into provenance, masked). Every `Param`
    must name an argument of the query (or a field of one) whose text equals the value the model wrote, so that a model
@@ -925,7 +969,7 @@ public final class PriceTable {
                         BigDecimal cacheWrite5mFactor, BigDecimal cacheWrite1hFactor, BigDecimal batchFactor) { }
     public static PriceTable builtIn();                   // this version's table, below
     public static PriceTable load(Path yaml) throws SettingsException;   // overrides and additions, strict YAML
-    public BigDecimal cost(Usage usage);                 // 6 decimals, HALF_UP, from the usage's own cache-write split; an unknown model costs at the OPUS_CLASS price and is noted
+    public BigDecimal cost(Usage usage);                 // 6 decimals, HALF_UP, from the usage's own cache-write split; a dated id (a known id followed by -YYYYMMDD, as the provider names Haiku 4.5's snapshot; BS13 live) is priced as the known id; an unknown model costs at the OPUS_CLASS price and is noted
 }
 ```
 
@@ -939,6 +983,7 @@ and replaced by the file when they move):
 | `claude-haiku-4-5` | 1.00 | 5.00 | 0.10 | ×1.25 / ×2 | ×0.5 |
 | `claude-sonnet-5` (Sonnet 5.5's documented fallback target, BS13 F-7) | 2.00 | 10.00 | 0.20 | ×1.25 / ×2 | ×0.5 |
 | `claude-opus-4-8` (an Opus-line fallback target) | 5.00 | 25.00 | 0.50 | ×1.25 / ×2 | ×0.5 |
+| `claude-opus-5` (the other Opus-line fallback target the models endpoint names for Opus 5.5; BS13 live, 2026-10-08) | 5.00 | 25.00 | 0.50 | ×1.25 / ×2 | ×0.5 |
 
 Scopes and limits: **per scenario** (`budget.scenarioUsd`, default 0.50, B6), one meter per bind, created by the
 contributor; **per job** (`budget.jobUsd`, no default: `re-resolve` refuses to start without it, B6); **per session**
@@ -1086,6 +1131,13 @@ gateway's token count, else text length / 4, plus `maxTokens`, at the regular ra
 returns and settles the ledger entries the retry added, so that no retry runs on the resolver's scenario meter alone
 after the round's reservation was released; when the job meter has no room, the scenario fails `RESOLUTION_FAILED` /
 `BUDGET` without the call and no later batch is submitted (`budgetCut`).
+
+The exit criterion's reading (2026-10-08, the live session; D111): the ratio is measured over a job's ledger, so a job
+with one tier (b) request and a cold cache reads nothing (its one request writes the prefix) and reports 0 %, however
+well the prefix caches; the criterion speaks of a job whose requests share the prefix, where every request after the
+first reads it. The live acceptance (§15.3 item 4) therefore runs the sample's one-request job twice within the hour
+and reads the ratio of the second, which is what the second and later requests of a larger job see; the figures of
+both runs are in `../TODO.md`.
 
 ---
 
@@ -1278,7 +1330,9 @@ it in CI. What it produces is a YAML file and a plan for a person to review; the
 
 1. Connects, pre-flights, selects the pack, as `resolve` does. Refuses an `--id` that exists in `--out`.
 2. **The scenario schema** (`…scenario.ScenarioSchema.generate(DomainPack, List<PrimitiveDescriptor>)`): a JSON
-   Schema (draft 2020-12 as `claude -p --json-schema` reads it) of the scenario document: the top-level keys of P1 §8.1
+   Schema (draft 2020-12 in content; passed to `claude -p --json-schema` **without its `$schema` key**, since the CLI's
+   validator refuses one that names the 2020-12 meta-schema, "no schema with key or ref …", and accepts the same text
+   without it, `$defs` and `$ref`s included: the live session, 2026-10-08) of the scenario document: the top-level keys of P1 §8.1
    with their shapes; `resolve` slots whose `query` is one of the pack's kinds with the kind's argument record
    (`Schemas.ofRecord(queryClass)`, references allowed as strings matching `^\$`), `strategy` tokens limited to those the
    pack can serve (`sql`, `java`, and `llm-sql` when an allow-list exists); `oracle` entries over the pack's functions;
@@ -1305,17 +1359,28 @@ it in CI. What it produces is a YAML file and a plan for a person to review; the
    `session_id`, `num_turns`, `is_error`, `mcp_server_errors` (optional). Success is exit code 0 with `is_error: false`,
    never the envelope's `subtype` (it reads `success` on failures too, BS13 F-10); a non-zero exit, `is_error`, a
    missing `structured_output` or a non-empty `mcp_server_errors` ends the command (exit 1) with the message (a failed
-   `--resume` prints plain text, not JSON, which is reported as such); the cost is recorded in the ledger as provider `claude-code`, model as reported, purpose
-   `plan`. The document is rendered to YAML (sorted top-level keys in the order of P1 §8.1; the brief, the date, the
+   `--resume` prints plain text, not JSON, which is reported as such, and an invocation that printed no envelope is
+   reported with the last line of its stderr, masked and bounded, which is where the CLI explains itself: the live
+   session, 2026-10-08); the cost is recorded in the ledger as provider `claude-code`, model as reported, purpose
+   `plan`: one entry per invocation holding the **difference** between this envelope's `total_cost_usd` and the previous
+   envelope's of the same session, because the envelope reports the session's running total (BS13 live, 2026-10-08:
+   the `--resume` envelope's total was the first call's plus the second's), and the repair invocation is given what is left of the planner's budget, floored at 0.01 (the CLI's
+   `--max-budget-usd` bounds an invocation's own spend, not the session's total: two live probes on 2026-10-08, a resume
+   under a budget below the running total succeeded, one under a budget below its own cost ended `is_error: true`,
+   `subtype: "error_max_budget_usd"`, `terminal_reason: "budget_exhausted"`, `result: null`, after its one turn). The document is rendered to YAML (sorted top-level keys in the order of P1 §8.1; the brief, the date, the
    model, the session id and the cost as a leading comment) and compiled with `PlanCompiler`; compile problems start a
    **repair round**: `claude -p --resume <session_id>` with the problems as the prompt, at most `--max-repairs` times.
 6. **Checks**: the plan is bound with `resolve --dry-run` semantics (live mode, nothing written) so that the planner's
    queries are seen to resolve on this environment; with `--run` the scenario is run once in `live` mode (with recover)
    and the `RunResult` summary is printed. Neither writes bindings: the first `approve` run does, by a person.
 7. **Written**: `<out>/<id>.yaml`, `<out>/plan/<id>.plan.json` (as `compile` writes it), `<out>/<id>.authoring.json`
-   (`{brief, model, sessionId, turns, repairs, costUsd, checks: {compiled, resolved, ran?}, claudeVersion, date}`), and
-   the instruction "review the YAML and the plan, then `skillroy resolve --env … <id>.yaml` to approve its bindings".
-   Exit 0 when the file was written and compiled; 1 when the planner failed or the repairs ran out; 64 for usage.
+   (`{brief, model, sessionId, turns, repairs, costUsd, checks: {compiled, resolved, ran?}, claudeVersion, date}`),
+   `<out>/<id>.envelope.json` (2026-10-08, the live session; D112: the envelopes the CLI printed, the first
+   invocation's and each repair's, in order, passed through the prompt mask, so that a planner's run can be reviewed as
+   a whole and replayed in the build by the fixture test of §15.1 item 11; a person deletes it before committing the
+   scenario or keeps it as that fixture), and the instruction "review the YAML and the plan, then `skillroy resolve
+   --env … <id>.yaml` to approve its bindings". Exit 0 when the file was written and compiled; 1 when the planner
+   failed or the repairs ran out; 64 for usage.
 
 As built (2026-10-08, I2, `…inference.planner`): `Planner.author(PlannerRequest) → AuthoringResult` and
 `Planner.recordChecks(authoring, resolved, ran)`; `PlannerRequest` with the fourteen components (nulls take the
@@ -1353,6 +1418,20 @@ With `--run` (step 6), the plan is checked against the planner's server's projec
 checks it (§9.3, D96): a refused plan does not run, the `--run` check fails (`ran: false`, the refusal named in the
 output) and the exit code stays 0; a plan that may run runs with every expectation on masked values
 (`RunOptions.withExpectationsOnMaskedValues(true)`), so that its PASS or FAIL is no oracle on a credential.
+
+As built (2026-10-08, the live session; D112, step 7): `<out>/<id>.envelope.json` is a JSON array of the envelopes as
+the CLI printed them, pretty-printed as the other files are, through the mask of the planner's log
+(`PromptMask.keysOnly()`: the planner knows no secret value, so the key rule and the bounds): every text through the
+text rule as a log line is, a text, an object or an array under a key that names a secret replaced whole, and a number
+or a boolean kept under any key, because an envelope's `usage` counts its tokens under keys that name a token
+(`input_tokens`, `cache_read_input_tokens`), which `jsonLike`'s key rule would blank and the text rule over the JSON
+text would leave unparseable. A failure after an envelope arrived (an `is_error` envelope, a non-zero exit, an MCP
+server error, no document, the repairs or the budget run out, the deadline before a repair round, a plain-text
+`--resume`) writes the file with what arrived, `AuthoringException.envelope()` names it and `author` prints it on stderr
+("the planner's envelopes: <path>"); a failure before any envelope writes none, and a later run of the same id replaces
+the file. `AuthoringResult.envelope()` is the path, the instruction adds "`<id>.envelope.json` holds the planner's
+envelopes: delete it before committing or keep it as the fixture of the planner's replay", and `author` prints the
+path in its `written:` lines and as `envelope` in `--json`.
 
 ### 10.3 What the planner is not
 
@@ -1641,7 +1720,9 @@ service; the contributor's scenario meter takes the smaller limit), and the ledg
 session meter afterwards, whatever its outcome, with the journal's `budget` record written. The service also reads the
 session's settings from its bind options (where both hosts put the invocation's settings): the turns' calls take
 `effort.session`, the summary `effort.summary`, and the estimates the model ids the settings give the Sonnet and Haiku
-classes.
+classes. As found live (2026-10-08): the sample's verbs projected as strict tools hold 20 union-typed parameters,
+above the provider's limit of 16 (§4.1, `ToolSpec`), so a session's request on the sample goes out with its tools
+unstrict; the first live request of the session had been refused with HTTP 400 before the gateway learned the rule.
 
 **Timing.** The model's thinking happens between actions; each action is one bounded step with the pack's
 `PromptPolicy` and sync waits, so the target is never held mid-step by a model call (design §3.4). The service does
@@ -1847,15 +1928,32 @@ the committed file byte for byte (apart from the channel: `jdbc` headless, `agen
 none and the same file, `replay` no call, a changed catalogue `ENVIRONMENT` "no recording", a reject-corpus `DELETE`
 `RESOLUTION_FAILED` with the guard's reason, the nightly dry run `UNCHANGED` for A, B and D.
 
-The `-Pinference-record` re-record of the S2 note above: specified, not built (2026-10-08, review fix wave; D110):
-nothing live can run until a workspace id exists; the profiles, the `*LiveIT` tests and the record route are built in
-the same change as their first live run and BS13's live part (`../TODO.md`, Walls). As built (2026-10-08, review fix
-wave): the route that exists is `record: true` (§2.3), and a live re-record changes more than "the provider and the
-model answers": the provider, the model, the statement, the rationale and the usage of the recordings and of the
-bindings files written from them (through the recorded gateway, since `-Dskillroy.inference.fixtures.update=true`
-always records the stand-ins), and their `approval.by` label; so the assertions that pin the stand-ins
-(`ScenarioDRecordedTest`, `BindingsUpToDateTest`, the label `ScriptedAnswers.APPROVED_BY`, listed by line in the
-sample's recordings README) are loosened in that change.
+The `-Pinference-record` re-record of the S2 note above, built 2026-10-08 in the live session (D111; until then
+specified only, D110, the route that existed being `record: true`, §2.3). A live re-record changes more than "the
+provider and the model answers": the provider, the model, the statement, the rationale and the usage of the recordings
+and of the bindings files written from them, and their `approval.by` label. `ScenarioDRecordIT` (§4.2) makes the
+recordings live, one request per seed on the Sonnet class at `effort.resolve`, and writes both bindings files through
+the recorded gateway with the label `recorded <date>`; the assertions that pinned the stand-ins
+(`ScenarioDRecordedTest`, `BindingsUpToDateTest`, the image's items 2 and 7, the label `ScriptedAnswers.APPROVED_BY`)
+now pin what a live answer must hold and nothing a model may word differently: the recording's provider `claude` and a
+model id of the Sonnet line, a confidence at or above the settings' threshold, a non-empty rationale, one guarded
+`SELECT` over the allow-listed tables ending with the injected `LIMIT 200`, the value loader's statement in the
+provenance, and above all the value: the supervisor the committed SQL finds on the same seed (the verifier
+`lending.access.check` is the gate, as in scenario A). The label is read from the committed file itself
+(`ScenarioD.approvedBy(env)`, which must match `recorded <date>`), so that a later re-record changes the files and not
+the tests; the stand-in generator of the tier (b) answers is gone (§4.2), and the session's recordings stay scripted
+(§14.5). **The first live re-record (2026-10-08, `ScenarioDRecordIT`, natively, USD 0.029):** both seeds' requests
+were answered by `claude-sonnet-5-5` at effort `low` on the first attempt, each statement passed the guard and the
+desk's access check, and each found the supervisor the committed SQL finds (scenario A's value on the same seed); the
+recordings carry `provider: "claude"` (seed A's with an `opaque` thinking part, empty text and a signature, before the
+structured answer; seed B's with the answer alone), confidence 0.8 (the threshold exactly; the stand-ins said 0.9), a rationale in the model's words and one
+guarded `SELECT … ORDER BY s.code LIMIT 200` over `staff`, `staff_role`, `role_permission` and `role_cap` with four
+parameters (the stand-in's statement had five and treated a missing limit as unlimited; the model's requires a cap
+at or above the deposit, which on both seeds names the same first supervisor); the bindings files carry the label
+`recorded 2026-10-08`, the model, the request id and `costUsd: "0"` (written through the recorded gateway). Seed A's
+call: 475 tokens in, 877 out, 5024 written to the cache, USD 0.0223, 9.5 s; seed B's four seconds later: 476 in, 515
+out, 5024 read from the cache, USD 0.0071, 4.0 s. The fingerprints did not change (the requests did not), so the
+file names stayed.
 
 ### 14.3 Scenario C: `return-refunds-deposit` (authored by the planner)
 
@@ -1870,6 +1968,22 @@ says, committed with their `.authoring.json`, bound with `approve` on both seeds
 prefer committed strategies and the brief needs none other) and replayed in the acceptance. If the desk's behaviour
 makes a part of the brief unachievable (a return slip that does not show the deposit, say), the reviewer narrows the
 scenario and the `.authoring.json` records what was changed and why; the brief stays as the test of the planner.
+
+As built (2026-10-08, the live session): authored in the Linux image (the arm64 build, natively) against the desk
+launched with the agent on seed A, with a Linux build of the `claude` CLI (2.1.294) mounted on the container's `PATH`
+(`ci/run-in-linux.sh`, `SKILLROY_CLAUDE_BIN`; the image and the repository carry no CLI, B3) and the key passed through
+by name: `skillroy author --brief-file … --id return-refunds-deposit --run --out <the sample's scenarios directory>
+--pack … --env seed-a --credentials …`, Opus 5.5, 43 turns, no repair round, USD 0.80, 161 s with the checks; the
+plan compiled, both slots resolved, the scenario ran green on seed A. The orchestrator reviewed it on the owner's
+instruction and kept it as written; the `review` section of `return-refunds-deposit.authoring.json` records the two
+readings the brief needed ("an item that needs no induction" cannot be stated through `LendableItem`, which has no
+`inductionRequired` argument, and holds by the resolver's order on both seeds; "the loan's total is back to zero" is
+the net of the lent posting and the return posting the desk makes, each checked). The bindings of both seeds were
+approved with `skillroy resolve` (label `approve`, tier (a) only). The planner's envelope is the fixture
+`src/test/resources/author/return-refunds-deposit.envelope.json`, beside `return-refunds-deposit.authored.yaml`, the
+YAML as the planner's post-processing rendered it (equal to the committed one today), which the replay test of §15.1
+item 11 compares with. The live acceptance's own authoring (§15.3 item 5, 35 turns, USD 0.91) produced a scenario of
+the same shape, which is not committed. The owner's own review of the committed scenario stays open.
 
 ### 14.4 An interactive session on the desk, exported and replayed
 
@@ -1891,21 +2005,23 @@ export must still equal the committed copies.
 
 ### 14.5 Recordings and the two profiles in the sample
 
-`src/test/resources/inference/` holds the recordings of §14.2 and §14.4 (as built 2026-10-08: scripted stand-ins,
-§14.2; no triage recording is committed, since a triage request carries the failed run's own durations, timestamps
-and business date, so the image's check records its own two failed runs' triage and replays it in the same run; and
-no planner envelope yet, scenario C being owed to the live run); `-Pinference-record` regenerates
-them in the Linux image with the key passed through the environment (`ci/run-in-linux.sh` passes `ANTHROPIC_API_KEY`
-into the container when it is set, without printing it); `-Pinference-live` runs §15.3 (both profiles: specified, not
-built, D110; the route that exists is `record: true`).
+`src/test/resources/inference/` holds the recordings of §14.2 (live since the afternoon of 2026-10-08, §14.2) and §14.4
+(the session's scripted stand-ins; as first built, 2026-10-08, scenario D's were stand-ins too); no triage recording is
+committed, since a triage request carries the failed run's own durations, timestamps and business date, so the image's
+check records its own two failed runs' triage and replays it in the same run; the planner's envelope of scenario C is
+the fixture of §14.3 once it is authored. `-Pinference-record` re-records scenario D's requests natively
+(`ScenarioDRecordIT`, below); `-Pinference-live` runs §15.3, in the image with the key passed through the environment
+(`ci/run-in-linux.sh` passes `ANTHROPIC_API_KEY` into the container by name when it is set, without printing it, and
+mounts a Linux `claude` for item 5 when `SKILLROY_CLAUDE_BIN` names one).
 
-Both profiles of this section: specified, not built (2026-10-08, review fix wave; D110): nothing live can run until a
-workspace id exists; the profiles, the `*LiveIT` tests and the record route are built in the same change as their
-first live run and BS13's live part (`../TODO.md`, Walls). As built (2026-10-08, review fix wave): the stand-ins are
-regenerated with `-Dskillroy.inference.fixtures.update=true` (§14.2), a live recording goes through `record: true`
-(§2.3), and the session's recordings of §14.4 stay scripted stand-ins whatever is recorded live: a live session is a
-new session with its own answers, not a refresh of the recorded one, so the image's session check (§15.2 item 4) keeps
-driving the scripted session by position and comparing its export with the committed copies.
+Both profiles of this section, built 2026-10-08 in the live session (D111; the mechanics in §2.3): `-Pinference-record`
+runs `ScenarioDRecordIT` (§4.2, §14.2) natively, since it binds through the controller-side JDBC channel against the
+sample's database in the test JVM; `-Pinference-live` runs `ClaudeGatewayLiveIT` natively and `InferenceLiveIT` in the
+Linux image with the key passed through the environment (§15.3). The stand-ins that remain are the session's
+(regenerated with `-Dskillroy.inference.fixtures.update=true`, §14.4) and the triage answers the image's check records
+for its own failed runs: a live session is a new session with its own answers, not a refresh of the recorded one, so
+the image's session check (§15.2 item 4) keeps driving the scripted session by position and comparing its export with
+the committed copies, and a triage request carries the run's own times.
 
 ---
 
@@ -2009,6 +2125,23 @@ a Java 25 target, in every load mode, with the `recorded` gateway and the commit
    scripted gateway's reject-corpus statement ends `RESOLUTION_FAILED` with the guard's reason.
 3. Scenario C replays green on both seeds; its plan and the committed one are identical; its `.authoring.json` is
    present.
+   As built (2026-10-08, the live session): `ScenarioC` (the test helper, as `ScenarioB`), the replay check of
+   `ResolutionChecks` (`@Order(14)`, after scenario B's, on both seeds in every load mode: the committed plan runs in
+   `replay` with the committed bindings and passes at the first attempt of every check, no resolver, every verifier
+   once, zero model calls, the lent and the return postings read back through their rows, `lending.loan` and the slip;
+   the `.authoring.json` present), the plan and bindings shape tests (`PlansUpToDateTest`, `BindingsUpToDateTest`,
+   `DiffCommittedBindingsTest`: the seeds differ in the item, the assistant, the refund and the fingerprint only), the
+   scenario count of `ScenarioSchemaCommittedTest` (17, the authoring record not a scenario), a headless replay on
+   both seeds (`ScenarioCReplayTest`, the same assertions through `ScenarioC.assertReplayed`; `HeadlessDesk` answers
+   `sync.await`), and `AuthorEnvelopeTest` for §15.1 item 11 on the real envelope (the YAML the post-processing
+   renders equals the pre-review fixture byte for byte, head included, under a clock at the authoring's date; the
+   `--json-schema` argument equals the generated schema without `$schema`; the authoring record and the ledger hold
+   the envelope's session, turns and cost; the envelope file written equals the fixture). The plan lives in `plan/`
+   beside the other scenarios' (the CLI looks for a plan's bindings beside its directory, D31). The planner wrote no
+   `requires` list, so the plan requires the verifiers' capabilities only; and its slip check follows a wait for
+   `loan.posted` alone (the desk prints the slip after it posts), which held at the first attempt in every run so far
+   (600 headless replays by the implementer; the image's runs): if it ever retries, a `waitFor slip.printed` after the
+   return's posting is the change, with both seeds' bindings re-approved.
 4. The session script of §14.4 runs against the desk, exports, and the export replays with zero model calls.
 5. `skillroy mcp` as a subprocess against the desk: `tools/list` shows the lending verbs, the reads and no mutating
    tool; with `--mutating` the verbs; a snapshot and a fact read; a verb through the session entry; a resource read.
@@ -2033,11 +2166,38 @@ a Java 25 target, in every load mode, with the `recorded` gateway and the commit
 6. One `session` turn live on the desk (`ask "lend one plain item to the walk-in borrower"`) ends `DONE` within the
    action limit and exports a scenario that compiles.
 
-Items 1 to 6 and the profile `inference-live`: specified, not built (2026-10-08, review fix wave; D110): nothing live
-can run until a workspace id exists; the profiles, the `*LiveIT` tests and the record route are built in the same
-change as their first live run and BS13's live part (`../TODO.md`, Walls). As built (2026-10-08, review fix wave): no
-test of this section exists, and `-Pinference-live` only makes Maven warn that the profile does not exist and runs
-nothing, which is not a pass of this section.
+As specified (2026-10-08, the live session; D111), built in the same change as the first live run (until then no test
+of this section existed and `-Pinference-live` only made Maven warn, D110). `ClaudeGatewayLiveIT` (`skillroy-inference`,
+natively) runs items 1 and 2 through `ClaudeGateway.open` on the default settings: item 1's system part is a
+lending-vocabulary text of about 600 tokens marked `cacheBreakpoint` (above the 512-token minimum of the Sonnet line)
+with a small structured answer; the first call must write the cache (`cacheWrite5mTokens > 0`), the second, within a
+minute, read it (`cacheReadTokens > 0`), `costUsd` is positive and the pair costs under USD 0.05, and `countTokens` of
+the same request is within 10 % of `inputTokens + cacheReadTokens + cacheWriteTokens` of a call; item 2 submits two
+requests (`maxTokens` 64, distinct questions), polls `batchStatus` every 15 s for at most 20 minutes (a batch that has
+not ended by then is cancelled and the test fails with the last status), collects, and asserts each result succeeded
+with the answer of its own request (matched by index, not by order of arrival). `InferenceLiveIT` (the scenarios
+module, in the image; the desk launched on seed A with the agent as `InferenceChecks` launches it) runs items 3 to 6 in
+order, each with its own bound: item 3 binds scenario D in `approve` without reuse through the live gateway without
+recording, under the settings' scenario budget (USD 0.50), and asserts the guard and the verifier passed, the value
+equals the committed binding's and the one ledger entry names provider `claude` and a positive cost; item 4 runs the
+nightly job over copies of the committed files in a temporary bindings root (seed A, job budget USD 1.00, batch wait
+20 minutes; written, not a dry run, so that the written file can be read): once over scenarios A and B with the label
+`approve` (no model: both `UNCHANGED`, no request), then over scenario D with the committed file's label twice in a row,
+asserting for each D job that the scenario is `CHANGED` (a live answer carries a new request id and cost, so the file is
+never byte-identical) with the written supervisor equal to the committed one, one batch of one request, the cost under
+the budget, and for the second job a cache-hit ratio above 0.80 (the exit criterion, read as §8.3 says: the first job's
+request writes the one-hour prefix the second reads, as a job's second tier (b) request would; a one-request job on a
+cold cache reads nothing by construction), and prints both jobs' figures (cost, tokens, ratio, duration), which
+`../TODO.md` records; item 5 is
+skipped with "no claude on the PATH" when the CLI is absent and otherwise runs the assembled launcher's `author` as a
+subprocess with the brief of §14.3 (id `live-return-refunds-deposit`, `--budget-usd 2.00`, the default turns and
+repairs, no `--run`, `--json`) under the planner's deadline plus a minute, and asserts exit 0 with `checks.compiled` and
+`checks.resolved` true (the authored scenario is not compared with the committed one); item 6 signs on as §14.4's
+script does, asks the live session service one turn (`SessionPolicy.acting()`, the settings' session budget USD 1.00)
+"lend one plain item to the walk-in borrower", asserts the turn ended `DONE` within `maxActionsPerTurn` with a
+non-empty answer, exports `live-session-basic-loan` and compiles the export. Every file the class wrote passes the
+secret scan of §15.2 item 8 last. The figures of the first live run are in `../TODO.md` ("Status at a glance", the live
+table).
 
 As built (2026-10-08, S2, `InferenceEndToEndIT`, eight nested classes, four load modes and two seeds): item 1 in every
 mode on both seeds (scenario D alone through the JUnit glue with its trailing zero-calls test); on each seed with the
@@ -2060,6 +2220,17 @@ way, the rest split on whitespace, quotes, commas, colons and backslashes; `Secr
 uses too; the launcher subprocesses of the command form of item 4 are destroyed, with their descendants, when they do
 not end in time (`Processes`, `ProcessesTest`).
 
+As built (2026-10-08, the live session; D111), `ClaudeGatewayLiveIT`: each test begins with `Live.assumeLive()` (the
+property `skillroy.inference.live`, then the key's presence, its value never kept or printed), so a build without the
+profile reports both skipped with "the profile inference-live is not active". Item 1's system part is the desk's 22
+rules, 2886 characters (about 720 tokens counted as characters / 4), in a `SONNET_CLASS` request at `Effort.LOW`,
+`maxTokens` 64, `CacheHint.SHORT`, with the strict `{answer: string}` schema; the first call must have written the
+prefix or read it (a prefix an earlier run left warm within its five minutes is read, not written; the test prints
+which), and the second, made as soon as the first returns (the gap is printed, not asserted), must read it. Item 2's
+questions are answered by rules 6 and 20, so each result is checked by the number its own question names and not the
+other's; a batch that has not ended at 20 minutes is cancelled, and so is one whose status read failed. Each call
+prints one line: the request id, the model, the stop reason, the tokens, the cost and the elapsed time.
+
 Exit criteria of the roadmap (design §8): (1) is §14.3 with §15.2 item 3; (2) is §15.3 item 4; (3) is §14.4 with §15.2
 item 4; all three are also exercised without a key through the recordings.
 
@@ -2071,7 +2242,10 @@ item 4; all three are also exercised without a key through the recordings.
 |---|---|---|---|
 | D70 | `skillroy-inference` reaches a bind through the `ServiceLoader` SPI `ResolverContributor` of `skillroy-scenario`, with string-only `InferenceSettings`; the engine never loads a contributor in `replay` | packs depending on `skillroy-inference` and registering the resolver themselves; `skillroy-scenario` depending on `skillroy-inference` | a pack must stay buildable and testable without a model SDK; P2 D1 forbids the reverse dependency; the `WebPath` precedent (D49) works |
 | D71 | The recorded gateway is keyed by a fingerprint of the request's content and the recordings are committed, masked, byte-stable files; a missing recording fails loudly | mocks per test; a cassette keyed by call order; a tolerant match | a prompt change must be visible as a build failure and reviewable as a file diff; order-keyed cassettes break on any refactor; a tolerant match would hide a changed prompt |
-| D110 | The live profiles `inference-live` and `inference-record` (§2.3, §4.2, §4.4, §14.2, §14.5) and the live tests of §15.3 are marked specified, not built, and the sample's documents say what a live re-record changes; the profiles, the `*LiveIT` tests and the record route are built in the same change as their first live run and BS13's live part (2026-10-08, review fix wave) | building the profiles and the `*LiveIT` tests now, unrun; leaving the sections as they read | nothing live can run until the key's workspace id exists (`../TODO.md`, Walls): tests built now would be committed unrun (this phase's first image run of a never-run class failed two checks), §15.3 rests on facts BS13's live part has not confirmed, and which recordings a live run replaces needs real answers in hand; meanwhile a profile that does not exist must not read as a pass, nor a document promise a re-record with "no code changes" |
+| D110 | The live profiles `inference-live` and `inference-record` (§2.3, §4.2, §4.4, §14.2, §14.5) and the live tests of §15.3 are marked specified, not built, and the sample's documents say what a live re-record changes; the profiles, the `*LiveIT` tests and the record route are built in the same change as their first live run and BS13's live part (2026-10-08, review fix wave); done the same day in the live session (D111) | building the profiles and the `*LiveIT` tests now, unrun; leaving the sections as they read | nothing live can run until the key's workspace id exists (`../TODO.md`, Walls): tests built now would be committed unrun (this phase's first image run of a never-run class failed two checks), §15.3 rests on facts BS13's live part has not confirmed, and which recordings a live run replaces needs real answers in hand; meanwhile a profile that does not exist must not read as a pass, nor a document promise a re-record with "no code changes" |
+| D111 | How the live profiles work (§2.3, §4.2, §8.3, §14.2, §14.5, §15.3; 2026-10-08, the live session): explicit `-P` profiles that set one system property each for the test JVMs; `*LiveIT` failsafe classes that skip without the property or without the key; `ScenarioDRecordIT` as the record route, which records live and rewrites the committed bindings through the recorded gateway with the label `recorded <date>`; the tier (b) stand-in generator removed; the label read from the committed file; the cache-hit criterion read on a warm prefix (the one-request job run twice); the gateway sends no `effort` to the Haiku class and treats a dated model id as its alias (BS13 live) | a profile activated by the key alone; a profile that selects the tests by include pattern; keeping the stand-in generator beside the live recordings; a label constant; reading the ratio of a cold one-request job | a profile on the key alone would make every `verify` with a key call a model; an include pattern makes a missing profile read as a pass, a skipped assumption reads as what it is; a generator kept beside live recordings is a route that overwrites them; a constant would make every re-record a test change; a cold one-request job reads nothing by construction and measures nothing |
+| D112 | The planner keeps the envelopes of its invocations as `<out>/<id>.envelope.json`, masked (§10.2 item 7; 2026-10-08, the live session) | the envelopes discarded with the private temporary directory; the envelopes inside `.authoring.json` | the fixture of §15.1 item 11 is the real envelope of the real run (§14.3), and a reviewer sees what the planner answered in each round; `.authoring.json` is the summary a person edits and commits, which the envelopes would swell |
+| D113 | The default confidence threshold of the tier (b) gate is 0.6 (§4.4, §5.4; 2026-10-08, the live session) | keeping 0.8 (ai-inference R13); dropping the gate (the verifier alone, the Q3 veto); raising `effort.resolve` | measured live: Sonnet 5.5 at effort `low` said 0.8, 0.8, 0.8 and 0.7 on four correct statements, so 0.8 refuses a correct answer in about one case of four while the verifier catches a wrong one either way; 0.6 keeps the gate for a model that says it is unsure and leaves routine answers alone; the owner may veto to 0.8 or to the verifier alone (B25) |
 | D72 | `replay` forces the gateway to `none`, loads no contributor, and refuses a tier (b) binding that is not `APPROVED` (`REBIND_NEEDED` / `NOT_APPROVED`); `Approval.State.REQUIRED` marks what `live` wrote | trusting the settings; a tier (b) binding accepted on the verifier alone | B6's zero-call CI is a mechanism, not a convention; R13's "approval on first use" needs a state the file can carry |
 | D73 | `SqlGuard`'s rule set (§5.3): one `SELECT`, allow-listed tables and columns with aliases resolved, no set operations, a function allow-list, literals bounded, values bound as parameters that must match the query's arguments, `ORDER BY` completed with the key, `LIMIT` ≤ 200 injected, size bounds, a dialect served only with a passing BS6 corpus | the agent's `StatementGuard` alone (keywords); a looser guard that trusts the read-only role; set operations and arbitrary functions allowed | ai-inference F7 and F24: unordered results and unguarded SQL are the two known sources of flaky and unsafe generated tests; the read-only role is a second wall, not the first; a parameter that must equal an argument stops a literal smuggled through the model |
 | D74 | Budget meters reserve an estimate before a call and settle after; exhaustion is `RESOLUTION_FAILED` / `BUDGET` for a slot, ends a session's model calls, and stops a job's further batches; a job budget has no default | a soft budget (warn and continue); `ENVIRONMENT` for exhaustion; a default job budget | B6 says the budget aborts; a slot whose model call the budget refused has no answer, which is what `RESOLUTION_FAILED` means; B6 left the nightly figure to the deployment |

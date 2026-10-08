@@ -24,6 +24,7 @@ import ai.skillroy.testjava.inference.spi.InferenceException;
 import ai.skillroy.testjava.inference.spi.InferenceException.Kind;
 import ai.skillroy.testjava.inference.spi.JsonLike;
 import ai.skillroy.testjava.inference.spi.Message;
+import ai.skillroy.testjava.inference.spi.ModelClass;
 import ai.skillroy.testjava.inference.spi.ModelRequest;
 import ai.skillroy.testjava.inference.spi.ModelResponse;
 import ai.skillroy.testjava.inference.spi.ModelResponse.StopReason;
@@ -56,14 +57,17 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 /**
  * The Claude mapping of phase5-contracts.md 4.1, as BS13 corrected it: a {@link ModelRequest} to the SDK's typed
- * {@link MessageCreateParams} (the manual {@code OutputConfig} form for effort and format, strict tools with tool
- * choice {@code auto}, the cache marker on the last system part marked as a breakpoint, the refusal fallback as an
- * extra body property and the beta header), and a response read tolerantly from its JSON form (every block the SDK
- * knows or not: text and tool use as parts, everything else as an {@link Content.Opaque} part; the stop category as a
- * string; the cache writes split by time to live), never through {@code validate()} or a visitor.
+ * {@link MessageCreateParams} (the manual {@code OutputConfig} form for effort and format, the effort for the Opus and
+ * Sonnet classes only, strict tools with tool choice {@code auto} unless the request's tools hold more union-typed
+ * parameters than the provider compiles ({@link #MAX_STRICT_UNION_PARAMETERS}), the cache marker on the last system
+ * part marked as a breakpoint, the refusal fallback as an extra body property and the beta header), and a response read
+ * tolerantly from its JSON form (every block the SDK knows or not: text and tool use as parts, everything else as an
+ * {@link Content.Opaque} part; the stop category as a string; the cache writes split by time to live), never through
+ * {@code validate()} or a visitor.
  *
  * <p>Stateless; safe from any thread.
  */
@@ -76,13 +80,31 @@ final class ClaudeMapping {
 
     static final JsonMapper MAPPER = ObjectMappers.jsonMapper();
 
+    /** What a dated snapshot id adds to the id asked for: {@code -} and the eight digits of a date. */
+    private static final Pattern SNAPSHOT_SUFFIX = Pattern.compile("-[0-9]{8}");
+
+    /**
+     * The most parameters with a union type the tools of one request may hold and still go out strict. The provider
+     * refused more (2026-10-08, a live session request with the lending pack's verbs as strict tools: HTTP 400
+     * invalid_request_error "Schemas contains too many parameters with union types (20 parameters with type arrays or
+     * anyOf). This causes exponential compilation cost. Reduce the number of nullable or union-typed parameters
+     * (limit: 16 parameters with unions)."); above it every tool of the request goes out without {@code strict}.
+     */
+    static final int MAX_STRICT_UNION_PARAMETERS = 16;
+
+    /** How deep the union count walks a tool's schema. */
+    private static final int SCHEMA_DEPTH = 64;
+
     private ClaudeMapping() {
     }
 
     // ------------------------------------------------------------------------------------------------ requests
 
     /**
-     * The SDK params of a request.
+     * The SDK params of a request. {@code output_config.effort} goes out for the Opus and Sonnet classes only: the
+     * Haiku class's model refuses the field (HTTP 400 "This model does not support the effort parameter", 4.1's
+     * {@code Effort} row as verified live), so its request carries the format alone, and no {@code output_config} at
+     * all without an output schema; the request's effort stays part of its fingerprint either way.
      *
      * @param model the model id the settings name for the request's class
      * @param fallbacks true: the refusal fallback in its {@code default} form (never in a batch)
@@ -104,16 +126,23 @@ final class ClaudeMapping {
             b.addMessage(MessageParam.builder().role(m.role() == Message.Role.USER ? MessageParam.Role.USER
                     : MessageParam.Role.ASSISTANT).contentOfBlockParams(blocks).build());
         }
-        OutputConfig.Builder output = OutputConfig.builder().effort(effort(request.effort()));
-        if (request.outputSchema() != null) {
-            JsonOutputFormat.Schema.Builder schema = JsonOutputFormat.Schema.builder();
-            request.outputSchema().forEach((k, v) -> schema.putAdditionalProperty(k, JsonValue.from(v)));
-            output.format(JsonOutputFormat.builder().schema(schema.build()).build());
+        boolean withEffort = request.modelClass() != ModelClass.HAIKU_CLASS;
+        if (withEffort || request.outputSchema() != null) {
+            OutputConfig.Builder output = OutputConfig.builder();
+            if (withEffort) {
+                output.effort(effort(request.effort()));
+            }
+            if (request.outputSchema() != null) {
+                JsonOutputFormat.Schema.Builder schema = JsonOutputFormat.Schema.builder();
+                request.outputSchema().forEach((k, v) -> schema.putAdditionalProperty(k, JsonValue.from(v)));
+                output.format(JsonOutputFormat.builder().schema(schema.build()).build());
+            }
+            b.outputConfig(output.build());
         }
-        b.outputConfig(output.build());
         if (!request.tools().isEmpty()) {
+            boolean strictAllowed = unionParameters(request.tools()) <= MAX_STRICT_UNION_PARAMETERS;
             for (ToolSpec tool : request.tools()) {
-                b.addTool(tool(tool));
+                b.addTool(tool(tool, strictAllowed));
             }
             b.toolChoice(ToolChoiceAuto.builder().build());
         }
@@ -198,11 +227,73 @@ final class ClaudeMapping {
         };
     }
 
-    /** A strict tool when the schema can be strict, else a plain one (a free-form object cannot be strict). */
-    static Tool tool(ToolSpec spec) {
-        return Tool.builder().name(spec.name()).description(spec.description())
-                .inputSchema(MAPPER.convertValue(spec.inputSchema(), Tool.InputSchema.class))
-                .strict(strict(spec.inputSchema())).build();
+    /**
+     * A tool as the provider gets it: strict when {@code strictAllowed} and its schema can be strict, not strict when
+     * it cannot (a free-form object), and without the {@code strict} field at all when strict tools are not allowed for
+     * the request ({@link #unionParameters}); the schema is sent as it is either way.
+     */
+    static Tool tool(ToolSpec spec, boolean strictAllowed) {
+        Tool.Builder tool = Tool.builder().name(spec.name()).description(spec.description())
+                .inputSchema(MAPPER.convertValue(spec.inputSchema(), Tool.InputSchema.class));
+        if (strictAllowed) {
+            tool.strict(strict(spec.inputSchema()));
+        }
+        return tool.build();
+    }
+
+    /**
+     * How many parameters of these tools take a union, the provider's count against {@link
+     * #MAX_STRICT_UNION_PARAMETERS}: a property, at any depth of a tool's input schema (under {@code properties},
+     * {@code items}, {@code anyOf}, {@code oneOf}, {@code allOf}, {@code additionalProperties}, {@code $defs} or
+     * {@code definitions}), whose schema has {@code anyOf} or {@code oneOf} or a {@code type} that is an array.
+     */
+    static int unionParameters(List<ToolSpec> tools) {
+        int count = 0;
+        for (ToolSpec tool : tools) {
+            count += unionParameters(tool.inputSchema(), 0);
+        }
+        return count;
+    }
+
+    private static int unionParameters(Object schema, int depth) {
+        if (!(schema instanceof Map<?, ?> map) || depth > SCHEMA_DEPTH) {
+            return 0;
+        }
+        int count = 0;
+        if (map.get("properties") instanceof Map<?, ?> properties) {
+            for (Object property : properties.values()) {
+                if (property instanceof Map<?, ?> p && (p.containsKey("anyOf") || p.containsKey("oneOf")
+                        || p.get("type") instanceof List<?>)) {
+                    count++;
+                }
+                count += unionParameters(property, depth + 1);
+            }
+        }
+        for (String key : List.of("items", "additionalProperties")) {
+            Object sub = map.get(key);
+            if (sub instanceof List<?> list) {
+                for (Object item : list) {
+                    count += unionParameters(item, depth + 1);
+                }
+            } else {
+                count += unionParameters(sub, depth + 1);
+            }
+        }
+        for (String key : List.of("anyOf", "oneOf", "allOf")) {
+            if (map.get(key) instanceof List<?> branches) {
+                for (Object branch : branches) {
+                    count += unionParameters(branch, depth + 1);
+                }
+            }
+        }
+        for (String key : List.of("$defs", "definitions")) {
+            if (map.get(key) instanceof Map<?, ?> definitions) {
+                for (Object definition : definitions.values()) {
+                    count += unionParameters(definition, depth + 1);
+                }
+            }
+        }
+        return count;
     }
 
     /**
@@ -276,7 +367,7 @@ final class ClaudeMapping {
                 .contains(stopText)) {
             notes.add("stop_reason " + stopText);
         }
-        if (requestedModel != null && model != null && !requestedModel.equals(model)) {
+        if (requestedModel != null && model != null && !sameModel(requestedModel, model)) {
             notes.add("fallback: answered by " + model);
         }
         String priceNote = prices.note(model);
@@ -312,6 +403,17 @@ final class ClaudeMapping {
             }
         }
         return new ModelResponse(parts, stop, usage, structured);
+    }
+
+    /**
+     * True when the model that answered is the one asked for: the same id, or that id followed by {@code -} and
+     * exactly eight digits, the dated snapshot id the provider names in its answer (BS13 live: a request for
+     * {@code claude-haiku-4-5} is answered by {@code claude-haiku-4-5-20251001}; the 5.5 models answer with their plain
+     * ids). Anything else answered as a fallback.
+     */
+    static boolean sameModel(String requested, String answered) {
+        return answered.equals(requested) || answered.startsWith(requested)
+                && SNAPSHOT_SUFFIX.matcher(answered.substring(requested.length())).matches();
     }
 
     private static Content part(Map<?, ?> block) {
