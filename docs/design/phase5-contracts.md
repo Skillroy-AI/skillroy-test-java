@@ -137,15 +137,17 @@ time.
 
 | Piece | Version | Where | Licence (audited in `../licence-audit.md` §5 when built) |
 |---|---|---|---|
-| Anthropic Java SDK (`com.anthropic:anthropic-java`) | 2.34.0 (ai-inference F12, R7) | `skillroy-inference`, main scope | Apache-2.0 (to be confirmed in the audit) |
-| JSqlParser (`com.github.jsqlparser:jsqlparser`) | 5.4 line, the latest 5.4.x available offline at build time (ai-inference F24; the design's BS6) | `skillroy-inference`, main scope | Apache-2.0 or LGPL-2.1 at the user's choice; the project takes Apache-2.0 (to be confirmed) |
-| MCP Java SDK (group `io.modelcontextprotocol.sdk`; the core artifact and its Jackson JSON module, exact ids as spike BS13 records them) | 2.0.1, specification line 2025-11-25 (design §5; control-channel F18) | `skillroy-mcp`, main scope | MIT (to be confirmed) |
+| Anthropic Java SDK (`com.anthropic:anthropic-java`) | the current line at build time, 2.69.x on 2026-10-08 (D88; the research note's 2.34.0 predates the 5.5 models, the fallback parameter and the per-request workspace id, spike BS13 F-11); the exact version is pinned in the root POM and audited | `skillroy-inference`, main scope; the CLI distribution | **MIT** (BS13: the POMs of all three artifacts; the jars carry no licence file, so `THIRD-PARTY.txt` carries the MIT text and the copyright line) |
+| JSqlParser (`com.github.jsqlparser:jsqlparser`) | 5.4 (the 5.4 line has no patch release; ai-inference F24; the design's BS6) | `skillroy-inference`, main scope; the CLI distribution; no dependencies of its own | dual, LGPL-2.1 and Apache-2.0 (two `<license>` entries in its POM, BS13 F-11); the project takes Apache-2.0 |
+| MCP Java SDK: `io.modelcontextprotocol.sdk:mcp-core` and `io.modelcontextprotocol.sdk:mcp-json-jackson2` (BS13 F-11: the convenience artifact `mcp` is `mcp-core` plus the Jackson 3 module, which would bring a second Jackson) | 2.0.1, specification line 2025-11-25 confirmed in its `ProtocolVersions` (design §5; control-channel F18) | `skillroy-mcp`, main scope; the CLI distribution | MIT (both; BS13 F-11), with `reactor-core` (Apache-2.0), `reactive-streams` (MIT-0), `slf4j-api` (MIT) and `json-schema-validator` (Apache-2.0) in their trees |
 | Claude Code CLI (`claude`) | whatever is on the `PATH`; 2.1 or newer is what the planner was written against | a run-time precondition of `skillroy author` only; never a dependency, never bundled (B3) | not distributed |
 | Models | `claude-sonnet-5-5` (resolvers, sessions, summaries), `claude-opus-5-5` (the planner through `claude -p`), `claude-haiku-4-5` (triage labels) (ai-inference R7; B7) | `inference.yaml` (§4.4), all three replaceable | – |
 
 The three SDK sets reach the local Maven cache before the build (the build runs offline, `-o`); the download is
 authorised by the owner's "install what is needed" (B3) and recorded in `../TODO.md` under "Environment notes". Their
-transitive sets are audited in `../licence-audit.md` before they are declared (B1 checklist item 2); what the audit
+transitive sets are audited in `../licence-audit.md` before they are declared (B1 checklist item 2); spike BS13
+(`../../spikes/BS13/RESULT.md` F-11) lists every artifact of the three trees with its licence and evidence in the
+audit's own format, for the 2.34.0 line; the build re-lists the pinned SDK version's tree the same way. What the audit
 finds goes into §5 of that file and the CLI's `THIRD-PARTY.txt`.
 
 ### 2.3 Build conventions
@@ -165,8 +167,12 @@ command line (visible in `ps`), never a file in the repository, never `credentia
 ### 2.4 Threads and bounds
 
 Every gateway call runs on the thread that asked (the binder's thread during a bind; the session's thread in a session;
-the batch job's thread), under a per-call deadline (`inference.yaml` `timeouts.callMs`, default 120000) and the SDK's
-own bounded retries (two, on 429 and 5xx; a retry counts against the same deadline). No gateway starts a thread of its
+the batch job's thread), under a per-call deadline (`inference.yaml` `timeouts.callMs`, default 120000). The SDK's own
+retries are **off** (`maxRetries(0)`; BS13 F-9: its timeout is per attempt, it obeys `retry-after` without a cap, an
+asynchronous cancel does not stop the attempt, and its asynchronous path does not retry I/O errors): the gateway retries
+`RATE_LIMIT`, `OVERLOADED` and `TRANSPORT` itself, at most twice, with the provider's `retry-after` honoured only while
+it fits, and gives each attempt what is left of the deadline (`RequestOptions.timeout`), so that a call never outlives
+`callMs`. No gateway starts a thread of its
 own except the SDK's HTTP client pool, which is closed with the gateway. The binder's budget rule of P2 §6.4 holds: a
 model call's deadline is clamped to what is left of `bindTimeoutMs`, and a bind that runs out of time during a model
 call fails as `ENVIRONMENT` ("binding timed out in slot …"), not as a resolver failure. Time inside `Approver.review`
@@ -180,10 +186,14 @@ The agent's `DistributionContentIT` keeps its seven jars (P4 §14.1).
 
 ### 2.6 What the CLI distribution carries
 
-The CLI zip gains the three SDK sets with their transitive dependencies (the Anthropic SDK brings OkHttp, Jackson and
-Kotlin's standard library; JSqlParser is self-contained; the MCP SDK brings Jackson and the reactive-streams set), each
-attributed in `THIRD-PARTY.txt`. The distribution grows by what the audit measures (recorded in `../licence-audit.md`
-§5 when built). Playwright stays out of it (D49).
+The CLI zip gains the three SDK sets with their transitive dependencies (the Anthropic SDK brings OkHttp, Okio,
+Kotlin's standard library, Jackson's jdk8, jsr310 and Kotlin modules, the victools schema generator, Apache HttpClient 5
+and `standardwebhooks`; JSqlParser is self-contained; the MCP SDK brings `reactor-core`, `slf4j-api` and
+`json-schema-validator` with its YAML and time libraries), each attributed in `THIRD-PARTY.txt`: about 38 third-party
+jars and 33 MB in place of today's five (BS13 F-11, for the 2.34.0 line). The root POM imports `jackson-bom` so that
+every Jackson module is at one version, manages `kotlin-stdlib` and `kotlin-reflect` to one version (the newer Jackson
+Kotlin module brings a newer `kotlin-reflect`), and keeps `slf4j-api` at the MCP set's 2.x; a test drives the SDK's
+serialisation and parsing on the final class path without a key (§15.1 item 2). Playwright stays out of it (D49).
 
 ---
 
@@ -237,13 +247,14 @@ public record ModelRequest(String purpose /* "resolve", "triage", "session", "pl
                            Map<String,Object> outputSchema /* nullable */, Map<String,String> metadata) {
     public static Builder builder(String purpose, ModelClass modelClass);   // defaults: MEDIUM, 4096, SHORT, no tools, no schema
     /** A stable fingerprint of what the model sees: sha256 over the canonical JSON of modelClass, effort, system,
-     *  messages, tools and outputSchema; not maxTokens, cache, metadata (§4.2). Image parts enter by their sha256. */
+     *  messages, tools and outputSchema; not maxTokens, cache, metadata (§4.2). Image parts enter by their sha256;
+ *  Opaque parts (a thinking block's signature) do not enter at all. */
     public String fingerprint();
 }
 public record Message(Role role, List<Content> parts) { public enum Role { USER, ASSISTANT } }
 
 /** Typed content parts (B7, B16): a capture can travel without a signature change. Sealed: a provider maps each. */
-public sealed interface Content permits Content.Text, Content.Image, Content.ToolUse, Content.ToolResult {
+public sealed interface Content permits Content.Text, Content.Image, Content.ToolUse, Content.ToolResult, Content.Opaque {
     record Text(String text, boolean cacheBreakpoint) implements Content { public static Text of(String text); }
     /** mediaType image/png or image/jpeg; bytes as given. Reserved for Phase 7; the Claude gateway sends it, the
      *  recorded gateway hashes it, the mask treats it as personal data until §6.2 says otherwise. */
@@ -252,6 +263,11 @@ public sealed interface Content permits Content.Text, Content.Image, Content.Too
     record ToolUse(String id, String name, Map<String,Object> input) implements Content { }
     /** The caller's answer to a ToolUse; content is text or JSON-like data; error marks a failed tool. */
     record ToolResult(String toolUseId, Object content, boolean error) implements Content { }
+    /** A provider's own block that a caller must echo back unchanged (a thinking block with its signature, a fallback
+     *  block): provider, the block's type and its raw JSON-like form. Never built by a caller, never rendered as text,
+     *  kept by ModelResponse.parts and sent back by a loop that continues the conversation (§12.4); outside the
+     *  fingerprint of §4.2 (signatures differ per call). BS13 F-2, F-7. */
+    record Opaque(String provider, String type, Object raw) implements Content { }
 }
 
 /** A tool the model may call. inputSchema: JSON Schema with additionalProperties false and every property required
@@ -269,8 +285,11 @@ public record ModelResponse(List<Content> parts, StopReason stop, Usage usage,
 /** What one call cost. costUsd is computed by the gateway from its price table (the API reports tokens, not money),
  *  as a plain decimal string; requestedModel differs from model when a fallback answered (§4.1). */
 public record Usage(String provider, String requestedModel, String model, String requestId,
-                    long inputTokens, long outputTokens, long cacheReadTokens, long cacheWriteTokens,
-                    boolean batch, String costUsd, Duration elapsed) { }
+                    long inputTokens, long outputTokens, long cacheReadTokens,
+                    long cacheWrite5mTokens, long cacheWrite1hTokens /* the provider splits writes by TTL, BS13 F-4 */,
+                    boolean batch, String costUsd, Duration elapsed, String note /* a refusal's category, a fallback */) {
+    public long cacheWriteTokens();                      // the sum; what the ledger entry carries
+}
 
 public record BatchHandle(String provider, String id, Instant submitted, int requests) { }
 public record BatchStatus(State state, int succeeded, int errored, int expired, int canceled, int processing) {
@@ -280,8 +299,8 @@ public record BatchStatus(State state, int succeeded, int errored, int expired, 
 public record BatchResult(int index, ModelResponse response /* null when not succeeded */, InferenceException error /* null when succeeded */) { }
 
 public final class InferenceException extends Exception {
-    public enum Kind { AUTH, RATE_LIMIT, OVERLOADED, INVALID_REQUEST, REFUSAL, TRANSPORT, TIMEOUT, NO_RECORDING,
-                       BUDGET, UNSUPPORTED, PROVIDER }
+    public enum Kind { AUTH, BILLING, RATE_LIMIT, OVERLOADED, INVALID_REQUEST, REFUSAL, TRANSPORT, TIMEOUT, NO_RECORDING,
+                       BUDGET, UNSUPPORTED, PROVIDER }     // BILLING: HTTP 402, not retryable (BS13 F-9)
     public Kind kind();  public String requestId();  public boolean retryable();   // RATE_LIMIT, OVERLOADED, TRANSPORT
 }
 ```
@@ -323,13 +342,21 @@ Rules.
 
 ### 4.1 `ClaudeGateway` (`…inference.claude`)
 
-Built on `com.anthropic:anthropic-java` 2.34.0, the `AnthropicOkHttpClient` from the environment (`ANTHROPIC_API_KEY`,
-optionally `ANTHROPIC_BASE_URL` for a proxy; `fromEnv()`), one client per gateway, closed with it.
+Built on `com.anthropic:anthropic-java` (the version of §2.2), one `AnthropicOkHttpClient` per gateway, closed with it,
+**built explicitly** from `ANTHROPIC_API_KEY` (and `ANTHROPIC_BASE_URL` when set), with `maxRetries(0)` and the SDK's
+logging off: not `fromEnv()`, which also reads `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_PROFILE`, the workload-identity
+variables, profiles on disk, `ANTHROPIC_CUSTOM_HEADERS` and `ANTHROPIC_LOG`, and would make the gateway's credential
+source and its logging depend on an operator's shell (BS13 F-9). Structured output goes through the manual
+`OutputConfig.builder().effort(…).format(JsonOutputFormat…)` form, because the typed `.outputConfig(Class)` overload
+drops `effort` (BS13 F-1); the schema is the project's (`Schemas.ofRecord`). Response content is read tolerantly
+(unknown block types become `Opaque` parts; the SDK's `validate()` and visitors without an `unknown` branch are not
+used), and `stop_details.category` is read as a string (the SDK's enum lags the provider's categories; BS13 F-8).
 
 | SPI element | Claude mapping |
 |---|---|
 | the key and the workspace | `ANTHROPIC_API_KEY` from the environment (`fromEnv()`); an organisation-level key (one not scoped to a workspace) is refused by the API with HTTP 400 unless every request carries the header `anthropic-workspace-id`, and SDK 2.34.0 adds that header on its own only for profile, OAuth and workload-identity credentials, so the gateway adds it itself for a static key from `inference.yaml` `workspaceId`, else the environment variable `ANTHROPIC_WORKSPACE_ID` (found by BS13 on 2026-10-08: the owner's key is such a key); a 400 whose message names the workspace is reported as `AUTH` with that message, never with the key |
 | `ModelClass` | the ids of `inference.yaml` `models:` (defaults in §2.2); `requestedModel` in `Usage` |
+| `Content.Opaque` | a `thinking` block (with its signature) or a `fallback` block of a response, kept as it came; a request's history that carries one sends it back unchanged (the 5.5 models return thinking blocks before tool calls, BS13 F-2) |
 | `Effort` | `output_config.effort` `low`/`medium`/`high`; thinking is left at the model's default (adaptive; it cannot be disabled on Opus 5.5 and is not disabled anywhere, ai-inference F12) |
 | `maxTokens` | `max_tokens` |
 | `CacheHint` | `cache_control {type: ephemeral}` on the last system part marked `cacheBreakpoint` (`SHORT`: the default 5-minute TTL; `LONG`: `ttl: 1h`); none when `NONE`. The provider's minimum cacheable prefix is 512 tokens on the 5.5 models and 4096 on Haiku 4.5 (ai-inference F13): a shorter prefix silently does not cache, which the ledger shows as `cacheReadTokens = 0` |
@@ -338,11 +365,11 @@ optionally `ANTHROPIC_BASE_URL` for a proxy; `fromEnv()`), one client per gatewa
 | `ToolSpec` | a tool with `strict: true`, `additionalProperties: false` and every property required; tool choice `auto` always (forced choice is HTTP 400 on the 5.5 models) |
 | `outputSchema` | `output_config.format` of type `json_schema`; the answer's text is parsed with `Json` into `structured` |
 | `StopReason` | `end_turn`, `tool_use`, `max_tokens`, `refusal` (`stop_details.category` goes into the ledger's `note`) |
-| `Usage` | `usage.input_tokens`, `output_tokens`, `cache_read_input_tokens`, `cache_creation_input_tokens`, the response id, the model the response names; `costUsd` from the price table (§7.2) |
-| `submitBatch` … `collectBatch` | the Message Batches API (`client.messages().batches()`): one batch per call, `custom_id` = the request's index, results matched by `custom_id`, never by position; `costUsd` at the batch rate (50 % off, stacking with cache reads) |
+| `Usage` | `usage.input_tokens`, `output_tokens`, `cache_read_input_tokens`, `cache_creation.ephemeral_5m_input_tokens` and `ephemeral_1h_input_tokens` (the split by TTL; `cache_creation_input_tokens` is their sum), the response id, the model the response names, `usage.iterations` when a fallback ran; `costUsd` from the price table (§7.2), priced from the split, not from the `CacheHint` |
+| `submitBatch` … `collectBatch` | the Message Batches API (`client.messages().batches()`, whose request params are their own type): one batch per call, `custom_id` = the request's index, results read as JSON Lines (`resultsStreaming`) and matched by `custom_id`, never by position; `costUsd` at the batch rate (50 % off, stacking with cache reads); no `fallbacks` in a batch |
 | `countTokens` | `messages.countTokens` |
-| errors | 401/403 `AUTH`; 429 `RATE_LIMIT`; 529 `OVERLOADED`; 400/404/413/422 `INVALID_REQUEST`; I/O `TRANSPORT`; the deadline `TIMEOUT`; the rest `PROVIDER`; the SDK's two retries on 429 and 5xx stay on, under the call's deadline |
-| fallbacks | `inference.yaml` `fallbacks: true` (the provisional default, §17 Q6) sends the server-side refusal fallback in its `default` form (the beta header `server-side-fallback-2026-07-01`, `fallbacks: "default"`): a refused request is answered by a model the provider picks by refusal category, and `Usage.model` names it; `false` sends none. Either way the ledger records both model names |
+| errors | classified by `statusCode()` and `errorType()`, not by the exception class alone (BS13 F-9: 529 arrives as `InternalServerException` with `overloaded_error`, 402 and 413 as `UnexpectedStatusCodeException`): 401/403 `AUTH`; 402 `BILLING`; 429 `RATE_LIMIT`; 529 or `overloaded_error` `OVERLOADED`; 400/404/413/422 `INVALID_REQUEST`, except the 400 whose message names the workspace, which is `AUTH` with that message; `AnthropicIoException` `TRANSPORT`, or `TIMEOUT` when its cause is a timeout or the deadline passed; the rest `PROVIDER`; retries as §2.4 |
+| fallbacks | `inference.yaml` `fallbacks: true` (the provisional default, §17 Q6) sends the server-side refusal fallback in its `default` form (the beta header `server-side-fallback-2026-07-01`, `fallbacks: "default"`; typed in the SDK line of §2.2, an extra body property on 2.34.0): a refused request is answered by a model the provider picks by refusal category, `Usage.model` names it and a `fallback` block comes back as an `Opaque` part; `false` sends none; **never in a batch request** (the provider rejects it; BS13 F-7). Either way the ledger records both model names |
 
 What the gateway never does: it never logs a prompt or a response body (the run writes `inference.jsonl`, §7.4,
 with metadata and masked structured answers only, and the prompt text itself only under `--log-prompts`); it never
@@ -705,7 +732,7 @@ public final class PriceTable {
                         BigDecimal cacheWrite5mFactor, BigDecimal cacheWrite1hFactor, BigDecimal batchFactor) { }
     public static PriceTable builtIn();                   // this version's table, below
     public static PriceTable load(Path yaml) throws SettingsException;   // overrides and additions, strict YAML
-    public BigDecimal cost(Usage usage, CacheHint cache); // 6 decimals, HALF_UP; an unknown model costs at the OPUS_CLASS price and is noted
+    public BigDecimal cost(Usage usage);                 // 6 decimals, HALF_UP, from the usage's own cache-write split; an unknown model costs at the OPUS_CLASS price and is noted
 }
 ```
 
@@ -717,6 +744,8 @@ and replaced by the file when they move):
 | `claude-opus-5-5` | 4.00 | 20.00 | 0.20 | ×1.25 / ×2 | ×0.5 |
 | `claude-sonnet-5-5` | 2.00 | 10.00 | 0.20 | ×1.25 / ×2 | ×0.5 |
 | `claude-haiku-4-5` | 1.00 | 5.00 | 0.10 | ×1.25 / ×2 | ×0.5 |
+| `claude-sonnet-5` (Sonnet 5.5's documented fallback target, BS13 F-7) | 2.00 | 10.00 | 0.20 | ×1.25 / ×2 | ×0.5 |
+| `claude-opus-4-8` (an Opus-line fallback target) | 5.00 | 25.00 | 0.50 | ×1.25 / ×2 | ×0.5 |
 
 Scopes and limits: **per scenario** (`budget.scenarioUsd`, default 0.50, B6), one meter per bind, created by the
 contributor; **per job** (`budget.jobUsd`, no default: `re-resolve` refuses to start without it, B6); **per session**
@@ -930,13 +959,18 @@ it in CI. What it produces is a YAML file and a plan for a person to review; the
    checks, never through what the UI shows unless the brief asks for the UI; prefer committed strategies; return
    exactly one scenario document) with the brief inside a `<brief>` block, the catalogue summary and the verbs with
    their schemas. The command runs
-   `claude -p --bare --output-format json --json-schema <schema> --mcp-config <file> --allowedTools "mcp__skillroy__*"
-   --permission-mode dontAsk --model <id> --max-turns <n> "<prompt>"` with `ANTHROPIC_API_KEY` inherited when set (the
-   CLI also accepts its own login), the working directory a private temporary directory, stdin closed, stdout read in
-   full under a deadline of `timeouts.plannerMs` (default 15 min), stderr to the command's log, masked.
-5. **The result**: the JSON envelope's `structured_output` (the scenario), `total_cost_usd`, `session_id`, `num_turns`,
-   `is_error`, `mcp_server_errors`. A non-zero exit, `is_error` or a non-empty `mcp_server_errors` ends the command
-   (exit 1) with the message; the cost is recorded in the ledger as provider `claude-code`, model as reported, purpose
+   `claude -p --bare --output-format json --json-schema <schema> --mcp-config <file> --strict-mcp-config --tools ""
+   --allowedTools "mcp__skillroy__*" --permission-mode dontAsk --model <id> --max-turns <n> --max-budget-usd <usd>
+   "<prompt>"` (`--tools ""` leaves the CLI's built-in shell and file tools out; `--strict-mcp-config` admits no other
+   server; `--max-budget-usd` is the CLI's own budget, BS13 F-10) with `ANTHROPIC_API_KEY` inherited when set (the CLI
+   also accepts its own login; a key that needs a workspace id needs it here too, through `ANTHROPIC_CUSTOM_HEADERS`,
+   to be verified when the live run is possible), the working directory a private temporary directory, stdin closed,
+   stdout read in full under a deadline of `timeouts.plannerMs` (default 15 min), stderr to the command's log, masked.
+5. **The result**: the JSON envelope's `structured_output` (the scenario; optional in the envelope), `total_cost_usd`,
+   `session_id`, `num_turns`, `is_error`, `mcp_server_errors` (optional). Success is exit code 0 with `is_error: false`,
+   never the envelope's `subtype` (it reads `success` on failures too, BS13 F-10); a non-zero exit, `is_error`, a
+   missing `structured_output` or a non-empty `mcp_server_errors` ends the command (exit 1) with the message (a failed
+   `--resume` prints plain text, not JSON, which is reported as such); the cost is recorded in the ledger as provider `claude-code`, model as reported, purpose
    `plan`. The document is rendered to YAML (sorted top-level keys in the order of P1 §8.1; the brief, the date, the
    model, the session id and the cost as a leading comment) and compiled with `PlanCompiler`; compile problems start a
    **repair round**: `claude -p --resume <session_id>` with the problems as the prompt, at most `--max-repairs` times.
@@ -950,8 +984,8 @@ it in CI. What it produces is a YAML file and a plan for a person to review; the
 
 `--claude-command <path>` (also `skillroy.claude.command`) names the executable; tests pass a script that prints a
 canned envelope, so that steps 5-7 are tested without the CLI (§15.1). With the real CLI absent the command exits 64
-("claude not found on PATH"). The planner's budget is the CLI's own `--max-budget-usd` if that option exists in the
-installed version, else the command's `--budget-usd` is checked against `total_cost_usd` afterwards and reported.
+("claude not found on PATH"). The planner's budget is passed as the CLI's `--max-budget-usd` (present in the 2.1
+line, BS13 F-10) and `total_cost_usd` is still checked against it afterwards and reported.
 
 ### 10.3 What the planner is not
 
@@ -1430,6 +1464,7 @@ item 4; all three are also exercised without a key through the recordings.
 | D84 | Model classes with the defaults Sonnet (resolve, session, summary), Opus (the planner), Haiku (labels); refusal fallbacks on and recorded; images off; Fable never configured by default | one model everywhere; fallbacks off; images on | ai-inference R7 and F10 (cost and retention); a fallback that answers a refusal keeps a nightly job alive and the ledger says who answered (Q6) |
 | D85 | The agent's `StatementGuard` stays as it is and `SqlGuard` lives on the controller only | JSqlParser inside the agent for `data.query` | B4: nothing but the JDK in a target JVM; the model's SQL runs through the controller's channel or through `data.query` after the controller's guard |
 | D86 | The calibrated-oracle case of gap 26 is answered by the export: an observed value is an ordinary expectation marked in the YAML and listed in the report for the reviewer; no run-time status | a `DEGRADED` outcome for a scenario with observed expectations; refusing to export them | the reviewer who commits the scenario decides; a run cannot tell an observed value from a specified one after the comment is removed |
+| D88 | The Anthropic Java SDK is pinned to its current line at build time (2.69.x on 2026-10-08) rather than the research note's 2.34.0; the client is built explicitly from `ANTHROPIC_API_KEY` with the SDK's retries and logging off, and the gateway retries within its own deadline; MCP comes as `mcp-core` + `mcp-json-jackson2`; the root POM imports `jackson-bom` | staying on 2.34.0 with work-arounds (an untyped fallback parameter, no typed workspace id, unknown 5.5 content blocks); `fromEnv()`; the SDK's own retries; the `mcp` convenience artifact | spike BS13 (F-2, F-7, F-9, F-11): 2.34.0 predates the 5.5 models and the fallback betas; `fromEnv()` reads profiles, auth tokens and custom headers from the operator's shell; the SDK's retries are per attempt without a cap on `retry-after`; `mcp` brings a second Jackson |
 | D87 | The session service offers the pack's verbs (and base primitives only by policy), one action at a time, with the model's `confirm` stripped; the overlay bridge rides the existing event stream and answers through a pack-named primitive | a free tool set; parallel actions; a dedicated transport for overlays | design §5 and B15: the verbs are what exports well, a model's request is never a confirmation, no new transport |
 
 ### 16.1 Changes to the Phase 1-4 contracts that Phase 5 needs

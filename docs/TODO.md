@@ -288,7 +288,7 @@ re-run. BS8 comes from `research/embedded-browser-spi.md` R4 (B9); BS9-BS12 from
 | BS10 | Routed in-JVM dispatch behaves like Robot | New, not started |
 | BS11 | `PAINT` capture is deterministic | New, not started |
 | BS12 | Grounding accuracy and cost of a vision loop on the sample | New, not started; needs live model calls (B7) |
-| BS13 | The Claude API facts the Phase 5 contract relies on (structured output, strict tools, effort, caching minimums and TTLs, token counting, the Batch API, the fallback parameter, error mapping, the `claude` CLI's headless envelope), checked live once; the three Phase 5 dependency sets resolved and listed for the licence audit | **Started 2026-10-08** (`spikes/BS13/`); needs the model key, which the owner provided in the operator's environment for the live checks (never in a file of this repository) |
+| BS13 | The Claude API facts the Phase 5 contract relies on (structured output, strict tools, effort, caching minimums and TTLs, token counting, the Batch API, the fallback parameter, error mapping, the `claude` CLI's headless envelope), checked live once; the three Phase 5 dependency sets resolved and listed for the licence audit | **Run 2026-10-08, offline part done, live part not run** (`spikes/BS13/RESULT.md`): the owner's key is organisation-level and every request is refused without `anthropic-workspace-id` ("Walls"); settled offline from the SDK's source and a dry run: the SDK is MIT, the MCP artifacts are `mcp-core` + `mcp-json-jackson2`, the typed structured-output overload drops `effort`, the SDK's retries are per attempt and uncapped on `retry-after`, `fromEnv()` reads profiles and custom headers, 402/413/529 arrive as unexpected or server exceptions, the CLI has `--max-budget-usd` and reports `subtype: success` on failures; fifteen contract changes written in (P5 §2.2, §2.4, §2.6, §3.2, §4.1, §7.2, §10.2, D88). One command runs the live items once `ANTHROPIC_WORKSPACE_ID` is exported (`spikes/BS13/README.md`); spend so far $0 |
 
 ### BS1 Attach matrix on stock JVMs
 
@@ -1070,6 +1070,10 @@ Kept generic on purpose: nothing here names a machine, a user or a local path.
   `/ping`. The CLI POM declares the zip now, as the lending and the web host scenarios POMs do, and the stale
   snapshots were deleted.
 - Downloads, authorised by the owner in general terms ("install what is needed"), all done:
+  - Phase 5 (2026-10-08, spike BS13): the Anthropic Java SDK 2.34.0 with its tree (and the 2.69.0 core jar alone, for
+    comparison; the build pins the current line and resolves it, P5 §2.2), JSqlParser 5.4, the MCP Java SDK 2.0.1 in
+    both JSON variants, in the local Maven cache; their licences are listed in `spikes/BS13/RESULT.md` F-11 in the
+    audit's format and go into `licence-audit.md` §5 when the modules declare them.
   - BS8 and Phase 4: the JCEF natives for Linux x86-64 and arm64 (152 and 168 MB) are in the local Maven cache (the
     web host modules declare them behind the profile `jcef`, `-Dskillroy.jcef.platform` choosing one), and
     Chromium's fifteen run-time libraries are in the image (`ci/Dockerfile`; the list is in `spikes/BS8/RESULT.md` §3

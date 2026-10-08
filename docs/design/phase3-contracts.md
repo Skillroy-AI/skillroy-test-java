@@ -436,7 +436,7 @@ and exit code 0). The `bind` record of `run.jsonl` lists `skipped`. An unguarded
 
 What is deliberately **not** degraded: an oracle without a cross-check. Oracles are committed, unit-tested Java
 (P2 §6.5); the cross-check is extra evidence a pack adds where the application can compute the same thing. Gap
-26's other case, an oracle calibrated from a first real run, belongs to Phase 5, where a model may draft one; a
+26's other case, an oracle calibrated from a first real run, belongs to Phase 5, where a model may draft one (Phase 5, specified 2026-10-08, not yet built; P5 §12.3, D86: a model drafts no oracle in Phase 5; an observed value exported from a session is an ordinary expectation marked in the YAML and listed in the export report for the reviewer, with no run-time status); a
 model-drafted oracle will carry an approval state, not a cross-check.
 
 ### 6.3 Ordering and purity summary (P2 §8.5, one row added)
@@ -969,7 +969,7 @@ Numbers are those of `../TODO.md`, "Open SPI and DSL gaps".
 
 | # | Gap | In Phase 3 |
 |---|---|---|
-| 26 | Oracle cross-check outcomes | **Closed**: a guarded cross-check that cannot run makes the outcome `DEGRADED` (§6.2); the other case (a calibrated oracle) is Phase 5's |
+| 26 | Oracle cross-check outcomes | **Closed**: a guarded cross-check that cannot run makes the outcome `DEGRADED` (§6.2); the other case (a calibrated oracle) is Phase 5's (Phase 5, specified 2026-10-08, not yet built; P5 §12.3, D86: answered by the journal export, which marks observed expectations for the reviewer) |
 | 20 | Expectations relative to an earlier step | unchanged (partly closed in Phase 2); a captured print event is the pattern of §3.5 |
 | 12 | Positional sources | unchanged; aggregates also read columns by position |
 | 21 | Event expectations | unchanged; the two consecutive `waitFor`s of scenario B work without it |
