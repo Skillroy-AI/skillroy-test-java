@@ -201,7 +201,7 @@ class ComponentFallbackDisplayTest extends DisplayTestBase {
             other[0].setVisible(true);
             return null;
         });
-        await("the second frame is the focused window", WAIT_MS, () -> other[0].isFocused());
+        awaitFocusedWindow("the second frame is the focused window", other[0]);
         return other[0];
     }
 }

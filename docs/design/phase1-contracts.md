@@ -1360,9 +1360,11 @@ Click rungs: **ACTION** = the first `ActionFirer` that `canFire`, else `Abstract
 `requestFocusInWindow()`, wait up to `focusTimeoutMs` for `hasFocus()`, then `doClick()` (a non-button gets a
 dispatched mouse click instead); if focus never arrives the result is `{rung:"FOCUS_FAILED", fired:false, reason}`
 and nothing is clicked. With `activateWindow: true` the rung first calls `toFront()` + `requestFocus()` on the
-component's window and waits for it to be the focused window; `focusTimeoutMs` bounds window activation and
-component focus together, nothing is activated when the window already has the focus, and the flag is ignored by the
-other rungs. **DISPATCH** = `MOUSE_PRESSED`, `MOUSE_RELEASED`, `MOUSE_CLICKED` delivered with
+component's window and waits for it to be the focused window, re-issuing `toFront()` + `requestFocus()` once a
+second while it waits (4.x, A39, built 2026-10-08); `focusTimeoutMs` bounds window activation and component focus
+together (the re-issue stays within it and stops once it is spent), nothing is activated when the window already
+has the focus, and the flag is ignored by the other rungs. **DISPATCH** = `MOUSE_PRESSED`, `MOUSE_RELEASED`,
+`MOUSE_CLICKED` delivered with
 `Component.dispatchEvent` at the component centre (never posted to the system queue). **ROBOT** = `UNAVAILABLE` in
 Phase 1 (`reason: "opt-in rung, not implemented"`; the call fails with `CAPABILITY_UNAVAILABLE`). **AUTO** = ACTION.
 Clicking a disabled or non-showing component is `INVALID_PARAMS` with the reason. In every rung `fired:true` means
@@ -1392,6 +1394,26 @@ that fired on the rung that was asked for reports `{rung, requestedRung, fidelit
 before the rung's capability check; with a fall-back the `swing.click.action` capability is required as well. A
 fall-back reserves 400 ms of the call's budget (on top of the existing 100 ms margin) for the ACTION click, so the
 focus wait ends that much earlier.
+
+**A39 window activation re-issued (4.x, built 2026-10-08).** The window activation of the COMPONENT rung was one
+`toFront()` + `requestFocus()` on the EDT, then a wait. Under an X server without a window manager that is a single
+`XSetInputFocus` (`toFront()` only raises there, since no window manager ever sets `WM_STATE`), and it can lose
+against the activation of a window shown a few milliseconds earlier: that window's own activation ends on the EDT
+with the focus moving to its most recent focus owner, for which the X toolkit issues one more `XSetInputFocus` on
+that window; the last request wins, the X server and the toolkit end consistent with the earlier window focused,
+and nothing re-issues the lost request, so the activated window stays unfocused for the whole wait. Evidence: the
+Swing module's display tests under the WM-less Xvfb (the open flake of `docs/TODO.md`, 2026-10-02 to 2026-10-07),
+reproduced on 2026-10-08 with the toolkit's focus log (`sun.awt.X11.focus` and `java.awt.focus` at FINEST), where
+a second frame shown right after the test frame, and the test frame activated right after a focused frame was
+disposed, each stayed unfocused for 30 s while the next request took the focus at once. The rung therefore
+re-issues `toFront()` + `requestFocus()` (posted to the EDT, never waited for) after every second of waiting in
+which the window has not become the focused window, within the unchanged `focusTimeoutMs` bound and never once it
+is spent; a window that is already focused, undisplayable, or blocked by a modal dialog is not touched (`toFront()`
+and `requestFocus()` do nothing for a blocked window). With the default `focusTimeoutMs` of 500 ms nothing is
+re-issued; the sample's UI scenario (`focusTimeoutMs: 5000`) re-issues up to four times. The `FOCUS_FAILED` reason
+of a window that never became focused says how many times the activation was re-issued. Nothing else changes: the
+result shapes, the fall-back and the listener clean-up are as A28. The display tests wait for a window to become
+the focused window through one helper that re-issues the same activation once a second (`DisplayTestBase`).
 
 **Modal blocking.** `swing.click`, `swing.type` and `swing.key` with an explicit target whose window is blocked by
 a showing modal dialog fail with `MODAL_OPEN` (`data.dialog` = the dialog's ref, `data.title`, `data.ref` = the

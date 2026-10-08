@@ -38,6 +38,7 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import javax.swing.AbstractButton;
 
@@ -45,7 +46,8 @@ import javax.swing.AbstractButton;
  * The click rungs of {@code swing.click}. ACTION fires the widget's semantic action ({@link ActionFirer}, else
  * {@code doClick()}, else a dispatched mouse click); COMPONENT focuses the component first and clicks only once it owns
  * the focus, optionally activating its window first ({@code toFront()} + {@code requestFocus()}, then waiting for the
- * window to be the focused window: {@code requestFocusInWindow()} fails in any window but the focused one); DISPATCH
+ * window to be the focused window, re-issuing the activation once a second while it waits (amendment A39):
+ * {@code requestFocusInWindow()} fails in any window but the focused one); DISPATCH
  * delivers a mouse press/release/click with {@code Component.dispatchEvent}. Every click is posted to the EDT and the
  * call returns once it is queued, because the click may open a modal dialog. Unless {@code force}, a component whose
  * window a modal dialog blocks, or that lies outside a blocking dialog drawn inside its window, is not clicked
@@ -84,6 +86,22 @@ final class Clicks {
     private static final long FALLBACK_RESERVE_MS = 400;
     /** Budget for posting cleanup work after the call budget is spent. */
     private static final long CLEANUP_POST_MS = 1000;
+    /**
+     * Amendment A39: how often the COMPONENT rung re-issues {@code toFront()} + {@code requestFocus()} while it waits
+     * for the component's window to become the focused window. Under an X server without a window manager the
+     * activation is a single {@code XSetInputFocus}, and it loses against the activation of a window shown a few
+     * milliseconds earlier (whose own activation ends with one more native request for that window); the last
+     * request wins, the window system and the toolkit end consistent with the earlier window focused, and nothing
+     * re-issues the lost request. A fresh request a second later takes the focus at once.
+     */
+    static final long REACTIVATE_MS = 1000;
+    /** The clock of {@link #awaitActivation} in production. */
+    static final Clock SYSTEM_CLOCK = new Clock() {
+        @Override
+        public long millis() {
+            return TimeUnit.NANOSECONDS.toMillis(System.nanoTime());
+        }
+    };
 
     private final AgentContext ctx;
     private final Windows windows;
@@ -184,11 +202,39 @@ final class Clicks {
             long focusStart = System.nanoTime();
             if (accepted == null) {
                 // the window was asked to become the focused window: wait for it, then ask for the component's focus;
-                // focusTimeoutMs bounds both waits together
+                // focusTimeoutMs bounds both waits together. A39: the activation is re-issued once a second while
+                // waiting (posted, never waited for), because a single request can lose against the activation of a
+                // window shown just before, after which nothing re-issues it
                 long budget = budget(focusTimeoutMs, 0, reserve, inv);
-                if (!windowWait.hasArrived() && !windowWait.await(budget)) {
+                final Window w = activated.get();
+                final AtomicInteger reissued = new AtomicInteger();
+                Edt.Action reactivate = new Edt.Action() {
+                    @Override
+                    public void run() throws Exception {
+                        reissued.incrementAndGet();
+                        Edt.post(ctx, inv.remainingMs(), "swing.click COMPONENT re-activate", new Edt.Action() {
+                            @Override
+                            public void run() {
+                                if (wait.cancelled.get() || windowWait.hasArrived() || !w.isDisplayable()) {
+                                    return;
+                                }
+                                if (!w.isFocused()) {
+                                    w.toFront();
+                                    w.requestFocus();
+                                }
+                                if (w.isFocused()) {
+                                    windowWait.arrived();
+                                }
+                            }
+                        });
+                    }
+                };
+                if (!windowWait.hasArrived()
+                        && !awaitActivation(windowWait, budget, REACTIVATE_MS, SYSTEM_CLOCK, reactivate)) {
                     return focusFailed(inv, listenedTo.get(), requested, "the window did not become the focused window"
-                            + " within " + budget + " ms of toFront() and requestFocus()", force, fallback);
+                            + " within " + budget + " ms of toFront() and requestFocus()" + (reissued.get() == 0 ? ""
+                            : " (re-issued " + reissued.get() + (reissued.get() == 1 ? " time)" : " times)")),
+                            force, fallback);
                 }
                 try {
                     accepted = Edt.read(ctx, inv.remainingMs(), new Callable<Boolean>() {
@@ -285,6 +331,43 @@ final class Clicks {
 
     private static long elapsedMs(long startNanos) {
         return TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startNanos);
+    }
+
+    /**
+     * The window-activation wait of the COMPONENT rung (amendment A39): waits on {@code wait} in slices of at most
+     * {@code retryMs}, and after every slice that ends without the window being the focused window re-issues the
+     * activation through {@code reissue}, until the focus arrives or {@code budgetMs} is spent; nothing is re-issued
+     * once the budget is spent. The wait and the clock are parameters so that a unit test proves the re-issue
+     * without a display.
+     *
+     * @return whether the window became the focused window within the budget
+     */
+    static boolean awaitActivation(Waiter wait, long budgetMs, long retryMs, Clock clock, Edt.Action reissue)
+            throws Exception {
+        long slice = Math.max(1, retryMs);
+        long start = clock.millis();
+        long left = budgetMs;
+        while (true) {
+            if (wait.await(Math.max(0, Math.min(left, slice)))) {
+                return true;
+            }
+            left = budgetMs - (clock.millis() - start);
+            if (left <= 0) {
+                return false;
+            }
+            reissue.run();
+        }
+    }
+
+    /** A bounded wait for a window to become the focused window; {@link WindowWait} in production, a fake in a test. */
+    interface Waiter {
+        /** @return whether the window became the focused window within {@code ms} */
+        boolean await(long ms) throws InterruptedException;
+    }
+
+    /** A clock in milliseconds; {@link #SYSTEM_CLOCK} in production, a fake in a test. */
+    interface Clock {
+        long millis();
     }
 
     /** Posts the listener removal; it runs after the tasks that added the listeners, whenever those run. */
@@ -444,7 +527,7 @@ final class Clicks {
      * Counts down when the window becomes the focused window; added for one COMPONENT click with
      * {@code activateWindow} and removed afterwards.
      */
-    private static final class WindowWait extends WindowAdapter {
+    static final class WindowWait extends WindowAdapter implements Waiter {
         private final CountDownLatch latch = new CountDownLatch(1);
 
         @Override
@@ -460,7 +543,8 @@ final class Clicks {
             return latch.getCount() == 0;
         }
 
-        boolean await(long ms) throws InterruptedException {
+        @Override
+        public boolean await(long ms) throws InterruptedException {
             return latch.await(ms, TimeUnit.MILLISECONDS);
         }
     }

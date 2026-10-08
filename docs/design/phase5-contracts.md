@@ -437,6 +437,7 @@ budget:
   scenarioUsd: "0.50"           # B6; per bind of one scenario
   jobUsd: null                  # re-resolve: must be set, no built-in value (B6)
   sessionUsd: "1.00"            # B15; per interactive session
+thresholds: {confidence: "0.8"}  # the tier (b) gates of §5.4 that are settings
 prices: null                    # a YAML file with the price table of §7.2; null = the built-in table of this version
 fallbacks: true                 # §4.1
 images: false                   # Phase 7 turns it on
@@ -626,18 +627,31 @@ public interface ResolverContributor extends AutoCloseable {
 }
 /** Strings only, so that skillroy-scenario names no inference type (§4.4 says how it is filled). */
 public record InferenceSettings(String gateway, Path recordings, boolean record, String workspaceId, Map<String,String> models,
-                                Map<String,String> effort, Map<String,String> budgets, Path prices, boolean fallbacks,
-                                boolean images, Map<String,Long> timeouts, boolean logPrompts, Path file) {
+                                Map<String,String> effort, Map<String,String> budgets, Map<String,String> thresholds,
+                                Path prices, boolean fallbacks, boolean images, Map<String,Long> timeouts,
+                                boolean logPrompts, Path file) {
     public static InferenceSettings none();            // gateway "none": what replay uses
     public static InferenceSettings fromSystemProperties(Path credentialsDir) throws SettingsException;
+    // as built 2026-10-08 (E2): also load(mode, dir, options[, properties, environment]) for the CLI and tests,
+    // enabled(), and the budget keys scenario, job, session; a null map means the defaults; an unknown key, a wrong
+    // type or another version is a SettingsException naming the line, never a value; `claude` without the key and
+    // `recorded` without a directory are refused there
 }
 ```
 
-`BindOptions` gains `InferenceSettings inference` (default `none()`), `withInference(…)`, and
-`fromSystemProperties(...)` reads §4.4. The engine, when it builds a slot's ladder: the pack's resolvers first (P2 §8.3
-step 4b), then the contributed ones in `ServiceLoader` order, both restricted by the slot's `strategy` list; a slot
-whose list names `llm-sql` while no contributor offers it is `ENVIRONMENT` ("no resolver for strategy llm-sql: the
-gateway is none / skillroy-inference is not on the class path / the pack declares no allow-list"). **In `replay` the
+`BindOptions` gains `InferenceSettings inference` (default `none()`), `withInference(…)`, `reuseBindings` (default
+true, §7.1) and `fromSystemProperties(...)` reads §4.4 (as built 2026-10-08: the nine-argument Phase 2 constructor
+stays; `inference.yaml` is looked for beside the credentials file, else in `<root>/<env>/`; a `SettingsException` is
+rethrown as `IllegalArgumentException` so that the JUnit glue's `environment` test catches it unchanged). The engine,
+when it builds a slot's ladder: the pack's resolvers first (P2 §8.3 step 4b), then the contributed ones in
+`ServiceLoader` order, both restricted by the slot's `strategy` list; a slot whose list names `llm-sql` while no
+contributor offers it is `ENVIRONMENT` ("no resolver for strategy llm-sql: the gateway is none / skillroy-inference is
+not on the class path / the pack declares no allow-list"). As built (2026-10-08, E2): **a contributed resolver joins a
+ladder only when the slot names its token** (a slot without a strategy list keeps the pack's resolvers alone, so that a
+plan whose `inference` is `none` makes no model call); contributors are loaded once per engine, on the first slot that
+names a model token, validated when loaded (an `inference.` id and a model strategy, else `ENVIRONMENT` "contributor …
+offered …") and closed with the engine; `ResolveContext` gains `slot()` and `scenarioId()` so that a ledger entry can
+name both; `replay` writes an `inference` record saying that `none` was substituted. **In `replay` the
 engine neither loads a contributor nor constructs a gateway**, whatever the settings say (`InferenceSettings.none()`
 is substituted and logged); that, with the ledger check, is the "zero model calls" assertion's mechanism. A contributed
 resolver is never part of the pack's catalogue (`ResolutionCatalogue.build()` keeps refusing an `LLM_*` strategy and an
@@ -723,8 +737,12 @@ binder looks at the existing bindings file: when the file is readable, its `reso
 offered on the screen as the candidate ("recorded 2026-10-08, approved by …; verified now; no model call") and, if
 approved, written again with the new approval; a model is called only for a slot that fails that check. Tier (a) slots
 are not reused (recomputing them is free). `--no-reuse-bindings` resolves every slot afresh. The reuse is recorded in
-the `resolve` run record (`reused: true`, with the `approval.by` of the file it came from) and nowhere in the bindings
-file, which must come out byte-identical when nothing changed (§15.2; P2 §9 keeps notes and dates out of the file).
+the `resolve` run record (`reused: true`, `reusedFrom: <approval.by>`) and nowhere in the bindings file, which must
+come out byte-identical when nothing changed (§15.2; P2 §9 keeps notes and dates out of the file). As built
+(2026-10-08, E2): the reuse needs the same file, scenario and environment, an equal `resolveHash`, the same kind, an
+equal `argsHash`, the credential still present and every verifier passing now; then the contributor is not even loaded;
+`live --write-bindings` writes `REQUIRED` with `by: null`; the `replay` refusal's detail carries `bindingsFile`,
+`slot`, `strategy` and `approval`, and the `resolve` record of a model value carries `confidence`, `approval` and `llm`.
 
 ### 7.2 Budgets: `BudgetMeter`, `PriceTable` (`…inference.budget`)
 
@@ -853,7 +871,15 @@ public interface BatchableResolver<Q extends Query<T>, T> extends Resolver<Q, T>
 }
 ```
 
-The job's meter is the `JOB` scope: `reserve` is called for the whole round's batch before it is submitted (the sum of
+As built (2026-10-08, E2), the engine's API for the job is `Binder.bindStepwise(plan, pack, agent, options, listener)`,
+which returns a `BindStep`: `Done(BindOutcome)` or `Parked` (`scenarioId()`, `slot()`, `kind()`, `resolverId()`, the
+opaque `request()`, `resume(answer)` returning the next step, `close()` to abandon; time parked is not counted against
+the bind budget; the engine closes its data channels while parked and reopens them on resumption; outside
+`RE_RESOLVE` nothing parks and a `BatchableResolver` is asked through `candidates()`; the one-shot `Binder.bind`
+refuses `RE_RESOLVE` as `ENVIRONMENT`, since it cannot return a parked slot). The file is written `APPROVED` by
+`approvedBy` (default `re-resolve`) only with `writeBindings`; `resolver` records carry `parked` and `resumed`. The
+job should share one gateway across the scenarios it parks (each engine holds its own contributor; the inference
+module's contributor hands out one gateway per settings, reference-counted). The job's meter is the `JOB` scope: `reserve` is called for the whole round's batch before it is submitted (the sum of
 the estimates, at the batch rate); when the round does not fit, the scenarios whose requests were not submitted are
 reported `BUDGET` and the round goes on with the rest; a batch in flight is always awaited and collected (it is paid
 for). The nightly cost thus never exceeds the job budget by more than one batch's estimate error. Caching: the

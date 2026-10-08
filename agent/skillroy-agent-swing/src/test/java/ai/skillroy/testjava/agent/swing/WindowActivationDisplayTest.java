@@ -85,12 +85,7 @@ class WindowActivationDisplayTest extends DisplayTestBase {
 
     @Test
     void activateWindowOnTheFocusedWindowJustClicks() throws Exception {
-        onEdt(() -> {
-            ui.frame.toFront();
-            ui.frame.requestFocus();
-            return null;
-        });
-        await("the test frame is the focused window", WAIT_MS, () -> ui.frame.isFocused());
+        activate("the test frame is the focused window", ui.frame);
         final int clicks = ui.cancelClicks.get();
         assertEquals(fired("COMPONENT", "COMPONENT"), call("swing.click", "by", map("text", "Cancel"),
                 "rung", "COMPONENT", "focusTimeoutMs", FOCUS_MS, "activateWindow", true));
@@ -137,7 +132,7 @@ class WindowActivationDisplayTest extends DisplayTestBase {
             other[0].setVisible(true);
             return null;
         });
-        await("the second frame is the focused window", WAIT_MS, () -> other[0].isFocused());
+        awaitFocusedWindow("the second frame is the focused window", other[0]);
         return other[0];
     }
 }

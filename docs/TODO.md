@@ -70,7 +70,7 @@ the session service); CI and replay never need a model key. Its eighteen provisi
 the owner interview page. Two spikes started the same night as the contract's gates: BS6 (`SqlGuard` across dialects on
 JSqlParser) and BS13 (the Claude API facts the contract relies on, checked live with the owner's key). The small Phase 4
 follow-ups (gaps 38, 40, 45 and, if cheap, 42) went to implementers as Phase 4.x amendments A35-A38, and the display-test
-focus flake to an investigator; their results are recorded below as they land.
+focus flake to an investigator. **The flake is explained and mitigated** (A39, below: 14 failed runs of 50 before, 0 of 60 after), and the amendments A35-A38 are built.
 
 Verification of the Phase 4 tree (2026-10-07). The final tree is the one after the review's fix wave; each Linux leg
 runs twice in a row (the exit criterion's "twice in a row without a flake"), on the amd64 image, which an arm64
@@ -174,6 +174,25 @@ the times are slow. Java 21 targets are no longer run (B3).
   the same way in the second round of the Phase 4 matrix (the agent-side leg on the Java 8 test JVM stopped at the
   Swing module after 153 s with 875 tests run); the rerun is recorded in the Phase 4 table. The Java 25 test JVMs of
   the amd64 image have still never shown it.
+  **Investigated and mitigated 2026-10-08 (A39).** Reproduced in both images with the X toolkit's own focus log
+  (`sun.awt.X11.focus` and `java.awt.focus` at FINEST): 14 failed runs of 50 of the nine display classes (arm64 Java
+  25 4/20, arm64 Java 8 8/20, amd64 Java 8 2/10), **0 of 60 after the change**. Not a stale timestamp and no dropped
+  event. Under the WM-less Xvfb an activation is a single `XSetInputFocus` (`toFront()` only raises without `WM_STATE`,
+  since no window manager ever sets it), and it was lost in three ways: (1) a frame shown a few milliseconds after
+  another loses the focus to that frame's own activation tail (when the focus moves to the frame's first component
+  the toolkit issues one more `XSetInputFocus`; the last request wins, the state ends consistent, nothing re-issues);
+  (2) on the Java 8 test JVM, an activation issued on the EDT after the focus holder was disposed is not delivered
+  until the next X round trip from the EDT (a re-issue one second later finds the focus already there and its
+  `FocusIn` arrives with it; why the idle toolkit thread does not flush within its poll cadence is not established,
+  the native sources not being at hand); (3) `ModalBlockingDisplayTest`'s "forced key delivered" is (1) seen from the
+  key side: the frame's first field never gained the focus, so the field's ENTER action was disabled. Every failure
+  but (2) was the first test of its class. Mitigation: `DisplayTestBase.activate` and `awaitFocusedWindow` re-issue
+  `toFront()` + `requestFocus()` once a second within the unchanged 30 s wait, every display test uses them, and the
+  class set-up waits for the frame to be focused and settles; the `COMPONENT` rung's window activation re-issues the
+  same way within `focusTimeoutMs` (`design/phase1-contracts.md` §6, amendment A39; `WindowActivationRetryTest`).
+  The two key focus logs and the run summaries are kept with the session notes. Open: the native reason for (2); the
+  garbage-collection-dependent skip of `SwingDisplayTest.refBecomesStaleOnceTheComponentIsCollected`, seen in 3 of 60
+  runs.
 - **First run on a Java 25 target.** The end-to-end acceptance passed in every load-mode variant on a Java 25
   target and on a Java 8 target. With it the B4 gate and the Phase 1 exit item "target on Java 25" are met, and
   BS1's "Java 25 target" is answered for Linux: `JAVAAGENT`, `JAVAAGENT` through `JAVA_TOOL_OPTIONS`, `ATTACH` and
@@ -911,6 +930,10 @@ night of 2026-10-07 to 2026-10-08, integrated into the main tree by file list.
   green natively; kit item 12 against real JCEF waits for the next Linux matrix
 - [x] A38: the re-probe after `window.opened` at most once a second, on the worker, nothing dropped (gap 42); built
   2026-10-08 (`WindowOpenedPaceTest`)
+- [x] A39: the `COMPONENT` rung's window activation re-issues `toFront()` + `requestFocus()` once a second while it waits,
+  within `focusTimeoutMs` (the open display-test focus flake, investigated and mitigated 2026-10-08: 14 failed runs of 50
+  before, 0 of 60 after; `design/phase1-contracts.md` §6; `WindowActivationRetryTest`); the display tests wait through
+  one helper that re-issues the same way, and their class set-up waits for the frame to be focused
 
 ### Phase 5: AI layer
 
@@ -1149,8 +1172,7 @@ The review items of the end-to-end review, now decided (gap numbers refer to the
    contracts first), wave 1 the modules that need no key (the SPI and the recorded gateway, `SqlGuard`, the contributor
    and the tier (b) resolver, approval and budgets, `ExecutorSession` and the journal, plan version 5), wave 2 the
    commands (`re-resolve`, `mcp`, `author`, `triage`, `session`) and the sample's scenarios C and D with their recordings.
-4. **Investigate the display-test flakes** (`HostSafetyDisplayTest` on 2026-10-02 and `WindowActivationDisplayTest`
-   on 2026-10-06, both on the Java 8 test JVM; `ModalBlockingDisplayTest` and `ComponentFallbackDisplayTest` in 4 of 7
-   runs on 2026-10-07, on a Java 25 test JVM in the arm64 image; the hypotheses and the retry mitigation are under
-   "Open flake" in "Status at a glance"), on an otherwise idle machine; and the garbage-collection-dependent abort of
-   `SwingDisplayTest.refBecomesStaleOnceTheComponentIsCollected` seen once under emulation on 2026-10-03.
+4. **The display-test focus flake is explained and mitigated** (2026-10-08, A39; "Open flake" under "Status at a
+   glance"). Still open there: the native reason why the Java 8 toolkit thread does not flush an EDT-issued focus request
+   while idle, and the garbage-collection-dependent skip of `SwingDisplayTest.refBecomesStaleOnceTheComponentIsCollected`
+   (3 of 60 runs on 2026-10-08, once under emulation on 2026-10-03).

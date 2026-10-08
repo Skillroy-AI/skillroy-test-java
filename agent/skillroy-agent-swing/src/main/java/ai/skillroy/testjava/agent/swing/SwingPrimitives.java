@@ -125,7 +125,8 @@ final class SwingPrimitives {
                 .param("focusTimeoutMs", "integer", false, "COMPONENT: how long to wait for focus, window "
                         + "activation included (default 500)")
                 .param("activateWindow", "boolean", false, "COMPONENT: first bring the component's window to the "
-                        + "front, request the focus for it and wait for it to be the focused window (default false)")
+                        + "front, request the focus for it and wait for it to be the focused window, re-issuing the "
+                        + "activation once a second while waiting (default false)")
                 .param("force", "boolean", false, "click even if a modal dialog blocks the component's window "
                         + "(default false: MODAL_OPEN)")
                 .param("fallback", "string", false, "COMPONENT only: ACTION fires the click through the ACTION rung "

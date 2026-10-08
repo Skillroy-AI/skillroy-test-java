@@ -24,13 +24,16 @@ import ai.skillroy.testjava.protocol.Event;
 import ai.skillroy.testjava.protocol.TopicFilter;
 
 import java.awt.GraphicsEnvironment;
+import java.awt.Window;
 import java.util.List;
 import java.util.Map;
+import javax.swing.SwingUtilities;
 
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 
 import static ai.skillroy.testjava.agent.swing.JsonCheck.map;
+import static org.junit.jupiter.api.Assertions.fail;
 import static org.junit.jupiter.api.Assumptions.assumeFalse;
 
 /**
@@ -42,6 +45,8 @@ abstract class DisplayTestBase {
     /** Generous: the Linux container may run x86-64 under emulation. */
     static final long WAIT_MS = 30000;
     static final long CALL_MS = 30000;
+    /** How often {@link #awaitFocusedWindow} re-issues {@code toFront()} + {@code requestFocus()} while it waits. */
+    static final long REACTIVATE_MS = 1000;
 
     static FakeContext ctx;
     static SwingModule module;
@@ -68,6 +73,12 @@ abstract class DisplayTestBase {
         // window.opened for the windows already showing; let both happen before a test looks at the events
         JsonCheck.await("AWT tap installed", WAIT_MS, module::tapInstalled);
         LocatorTest.onEdt(() -> null);
+        // a freshly shown frame takes the focus by itself, but its activation ends a few milliseconds after the
+        // frame shows (the focused-window event, then the focus moves to its first component with one more native
+        // request); a window a test shows inside that interval loses the focus to the frame again, or leaves the
+        // frame's first component without the focus, so wait for the frame and let the focus transfer finish
+        awaitFocusedWindow("the test frame is the focused window", ui.frame);
+        settle();
     }
 
     @AfterAll
@@ -83,6 +94,57 @@ abstract class DisplayTestBase {
 
     static Map<String, Object> call(String method, Object... kv) throws Exception {
         return ctx.call(method, map(kv), CALL_MS);
+    }
+
+    /**
+     * Makes the window the focused window: {@code toFront()} + {@code requestFocus()} on the EDT, then
+     * {@link #awaitFocusedWindow}. Every display test that activates a window itself does it through this helper.
+     */
+    static void activate(String what, Window w) throws Exception {
+        requestActivation(w);
+        awaitFocusedWindow(what, w);
+    }
+
+    /**
+     * Waits (at most {@link #WAIT_MS}) until the window is the focused window, whether it was just shown and should
+     * take the focus by itself or was activated with {@link #activate}, and re-issues {@code toFront()} +
+     * {@code requestFocus()} on the EDT once every {@link #REACTIVATE_MS} while it waits. Under the WM-less Xvfb a
+     * single activation sometimes never makes the window the focused window (the open flake recorded in
+     * {@code docs/TODO.md}); the re-issue is the test-side mitigation, and the failure message counts the re-issues.
+     */
+    static void awaitFocusedWindow(String what, final Window w) {
+        long start = System.currentTimeMillis();
+        long deadline = start + WAIT_MS;
+        long nextActivation = start + REACTIVATE_MS;
+        int reissued = 0;
+        while (!w.isFocused()) {
+            long now = System.currentTimeMillis();
+            if (now > deadline) {
+                fail("timed out after " + WAIT_MS + " ms waiting for " + what + " (toFront() + requestFocus() "
+                        + "re-issued " + reissued + " times)");
+            }
+            if (now >= nextActivation) {
+                requestActivation(w);
+                reissued++;
+                nextActivation = now + REACTIVATE_MS;
+            }
+            try {
+                Thread.sleep(20);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                fail("interrupted waiting for " + what);
+            }
+        }
+    }
+
+    /** Posts {@code toFront()} + {@code requestFocus()} to the EDT; never waits for the EDT, so the wait stays bounded. */
+    private static void requestActivation(final Window w) {
+        SwingUtilities.invokeLater(() -> {
+            if (w.isDisplayable() && !w.isFocused()) {
+                w.toFront();
+                w.requestFocus();
+            }
+        });
     }
 
     /** Settles the EDT (two markers, a short quiet period) so that posted actions have run. */

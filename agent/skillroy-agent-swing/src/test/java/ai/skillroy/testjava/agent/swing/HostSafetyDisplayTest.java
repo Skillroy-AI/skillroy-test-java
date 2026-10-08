@@ -253,12 +253,7 @@ class HostSafetyDisplayTest extends DisplayTestBase {
 
     @Test
     void componentRungClicksOnlyWithFocusAndAlwaysRemovesItsListener() throws Exception {
-        onEdt(() -> {
-            ui.frame.toFront();
-            ui.frame.requestFocus();
-            return null;
-        });
-        await("the test frame is the focused window", WAIT_MS, () -> ui.frame.isFocused());
+        activate("the test frame is the focused window", ui.frame);
         final int listeners = onEdt(() -> ui.ok.getFocusListeners().length);
         final int clicks = ui.okClicks.get();
         assertEquals(fired("COMPONENT", "COMPONENT"),
@@ -277,7 +272,7 @@ class HostSafetyDisplayTest extends DisplayTestBase {
             other[0].setVisible(true);
             return null;
         });
-        await("the second frame is the focused window", WAIT_MS, () -> other[0].isFocused());
+        awaitFocusedWindow("the second frame is the focused window", other[0]);
         Map<String, Object> r = call("swing.click", "target", ref(ui.ok), "rung", "COMPONENT", "focusTimeoutMs", 300L);
         assertEquals("FOCUS_FAILED", r.get("rung"));
         assertEquals(Boolean.FALSE, r.get("fired"));
@@ -289,12 +284,7 @@ class HostSafetyDisplayTest extends DisplayTestBase {
 
     @Test
     void keyWithoutATargetGoesIntoTheModalDialogWhileTheFocusIsStillInItsOwner() throws Exception {
-        onEdt(() -> {
-            ui.frame.toFront();
-            ui.frame.requestFocus();
-            return null;
-        });
-        await("the test frame is the focused window", WAIT_MS, () -> ui.frame.isFocused());
+        activate("the test frame is the focused window", ui.frame);
         final AtomicInteger escapes = new AtomicInteger();
         final JDialog[] dialog = new JDialog[1];
         onEdt(() -> {
@@ -357,7 +347,7 @@ class HostSafetyDisplayTest extends DisplayTestBase {
             excluded[0] = f;
             return null;
         });
-        await("the excluded frame has the focus", WAIT_MS, () -> excluded[0].isFocused());
+        awaitFocusedWindow("the excluded frame has the focus", excluded[0]);
         onEdt(() -> field[0].requestFocusInWindow());
         await("its field owns the focus", WAIT_MS, () -> field[0].hasFocus());
         assertEquals(map("dispatchedTo", ref(field[0])), call("swing.key", "key", "A"));
