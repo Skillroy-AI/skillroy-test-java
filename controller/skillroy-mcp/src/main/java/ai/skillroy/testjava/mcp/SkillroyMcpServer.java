@@ -52,6 +52,7 @@ import io.modelcontextprotocol.server.McpSyncServer;
 import io.modelcontextprotocol.server.transport.StdioServerTransportProvider;
 import io.modelcontextprotocol.spec.McpError;
 import io.modelcontextprotocol.spec.McpSchema;
+import io.modelcontextprotocol.spec.McpServerTransportProvider;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -114,9 +115,10 @@ import java.util.stream.Stream;
  * <p>Threads: the SDK's stdio transport (two single-thread executors, ended with its input), its tool calls on Reactor's
  * bounded elastic scheduler, and the daemon {@code skillroy-mcp-stdin} that reads the client's stream (see
  * {@link StdioPipe}). Tool calls are serialised on the session (one at a time; a call waits at most ten minutes for
- * another). {@link #close} answers what is in flight (bounded), ends the transport, closes the actor, the session
- * (its {@code recover} when its options say so) and the SQL guards; it never closes the agent connection or the
- * caller's streams. Thread-safe.
+ * another); every message to the client is handed to the transport one at a time, whichever thread sends it
+ * ({@link SerialSends}). {@link #close} answers what is in flight (bounded), ends the transport, closes the actor, the
+ * session (its {@code recover} when its options say so) and the SQL guards; it never closes the agent connection or
+ * the caller's streams. Thread-safe.
  */
 public final class SkillroyMcpServer implements AutoCloseable {
 
@@ -362,8 +364,7 @@ public final class SkillroyMcpServer implements AutoCloseable {
         calls = new ToolCalls(this);
         pipe = new StdioPipe(in, out, this::inputEnded);
         McpJsonMapper mapper = new JacksonMcpJsonMapperSupplier().get();
-        StdioServerTransportProvider transport = new StdioServerTransportProvider(mapper, pipe.serverIn(),
-                pipe.serverOut());
+        McpServerTransportProvider transport = transport(mapper, pipe.serverIn(), pipe.serverOut());
         List<McpServerFeatures.SyncToolSpecification> toolSpecs = new ArrayList<>();
         for (ToolSpec tool : tools) {
             toolSpecs.add(toolSpecification(tool));
@@ -382,6 +383,15 @@ public final class SkillroyMcpServer implements AutoCloseable {
         pipe.start();
         log.info("serving " + tools.size() + " tools (" + (mutating ? "mutating" : "read-only") + ") for pack "
                 + pack.id() + " " + pack.version() + ", session " + session.id() + ", output " + outDir);
+    }
+
+    /**
+     * The server's transport: the SDK's stdio transport on {@code in} and {@code out} (the stdin bridge's ends), its
+     * sends one at a time ({@link SerialSends}: the SDK's own drops a message sent while another thread is sending,
+     * and stops handling the client).
+     */
+    static McpServerTransportProvider transport(McpJsonMapper mapper, InputStream in, OutputStream out) {
+        return new SerialSends(new StdioServerTransportProvider(mapper, in, out));
     }
 
     /**

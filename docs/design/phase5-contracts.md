@@ -1213,6 +1213,18 @@ the columns, never a value), so a pack whose list allow-lists a row-masked colum
 source the check cannot reach (not served, timed out) is not read by `data_query`, whose refusal and the server's log
 say why, and the server starts (D104); the check's statements are not journaled (the session is not open yet).
 
+As built (2026-10-08, the Linux matrix's MCP timeout; `…mcp.SerialSends`): every message to the client is handed to
+the SDK's transport one at a time. The SDK's stdio transport puts each outgoing message into a Reactor sink that refuses
+a thread while another is still emitting: the refused message is dropped ("Failed to enqueue message", logged nowhere
+without an SLF4J provider), and a refused answer also ends the transport's handling of the client, which has no error
+path: it stops reading and writing while the process stays up, so the call and every later one wait for the client's
+timeout. The server sends from more than one thread: a call's answer and the `notifications/resources/list_changed` of
+a run's resources from the call's thread, the answers to `initialize`, `ping`, `tools/list` and `resources/list` (which
+a client sends on that notification) from the transport's reading thread; under load even strictly alternating calls
+overlap, since the emitting thread lets go of the sink only after its message is on the way. The transport the server
+hands the SDK subscribes each send under one lock (the SDK emits on the subscribing thread once its transport has
+started, which it has before the client's first message is read) and signals the send's end outside it.
+
 ### 9.4 Resources
 
 `skillroy://env/profile` (pack id and version, environment id, the capability matrix, the target's Java and pid);
