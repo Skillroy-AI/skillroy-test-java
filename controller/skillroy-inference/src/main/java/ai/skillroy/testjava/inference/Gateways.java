@@ -45,7 +45,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * {@code UNSUPPORTED} "no gateway"); a live gateway is wrapped in the {@link RecordingGateway} when {@code record} is
  * set. One gateway per distinct gateway-relevant settings, shared and reference-counted: each {@link #open} returns a
  * lease whose {@code close()} releases it once, and the gateway is closed with its last lease (the re-resolve job parks
- * many binds at once, each with its own contributor, and they should share one HTTP client and one batch).
+ * many binds at once, each with its own contributor, and they should share one HTTP client and one batch). A caller may
+ * {@link #serve} settings with a gateway of its own (a scripted one, in tests and in a sample's recording generator).
  *
  * <p>Thread-safe.
  */
@@ -63,11 +64,23 @@ public final class Gateways {
 
     private static final class Shared {
         final InferenceGateway gateway;
+        /** True for a gateway a caller registered with {@link #serve}: the caller's, never closed here. */
+        final boolean served;
+        /** True while a {@link #serve} registration holds the entry, leases or not. */
+        boolean registered;
         int leases;
 
-        Shared(InferenceGateway gateway) {
+        Shared(InferenceGateway gateway, boolean served) {
             this.gateway = gateway;
+            this.served = served;
+            this.registered = served;
         }
+    }
+
+    /** The hold of {@link #serve} on its settings; closing it ends the registration, once. */
+    public interface Served extends AutoCloseable {
+        @Override
+        void close();
     }
 
     private static final Map<Key, Shared> OPEN = new HashMap<>();
@@ -87,11 +100,49 @@ public final class Gateways {
         synchronized (OPEN) {
             Shared shared = OPEN.get(key);
             if (shared == null) {
-                shared = new Shared(build(settings));
+                shared = new Shared(build(settings), false);
                 OPEN.put(key, shared);
             }
             shared.leases++;
             return new Lease(key, shared);
+        }
+    }
+
+    /**
+     * Serves these settings with a gateway the caller owns (phase5-contracts.md 4.3): until the returned registration
+     * is closed, {@link #open} with settings that select the same gateway (equal in what decides which gateway serves
+     * them: the gateway's name, the recordings, the models and the rest of {@code Key}; not the budgets) returns
+     * leases on {@code gateway} instead of building one. This is how a test, or a scenarios module's recording
+     * generator, runs the real binder and the real contributor through a {@code ScriptedGateway}, or a
+     * {@code RecordingGateway} around one, with no key; the settings may name any gateway, {@code scripted} included,
+     * since nothing is built for them. The caller keeps its gateway and closes it: neither a lease nor the
+     * registration does. Closing the registration ends it; leases still held go on answering until they are closed.
+     *
+     * @throws IllegalStateException when a gateway is open or served for such settings already
+     */
+    public static Served serve(InferenceSettings settings, InferenceGateway gateway) {
+        Objects.requireNonNull(settings, "settings");
+        Objects.requireNonNull(gateway, "gateway");
+        Key key = Key.of(settings);
+        synchronized (OPEN) {
+            if (OPEN.containsKey(key)) {
+                throw new IllegalStateException("a gateway is open or served for these settings already (gateway "
+                        + settings.gateway() + ")");
+            }
+            Shared shared = new Shared(gateway, true);
+            OPEN.put(key, shared);
+            AtomicBoolean ended = new AtomicBoolean();
+            return () -> {
+                if (!ended.compareAndSet(false, true)) {
+                    return;
+                }
+                synchronized (OPEN) {
+                    shared.registered = false;
+                    if (shared.leases <= 0 && OPEN.get(key) == shared) {
+                        OPEN.remove(key);
+                    }
+                }
+            };
         }
     }
 
@@ -245,9 +296,11 @@ public final class Gateways {
             }
             synchronized (OPEN) {
                 shared.leases--;
-                if (shared.leases <= 0 && OPEN.get(key) == shared) {
+                if (shared.leases <= 0 && !shared.registered && OPEN.get(key) == shared) {
                     OPEN.remove(key);
-                    shared.gateway.close();
+                    if (!shared.served) {
+                        shared.gateway.close();
+                    }
                 }
             }
         }

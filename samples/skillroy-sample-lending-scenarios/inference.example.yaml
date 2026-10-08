@@ -7,8 +7,9 @@
 #
 # The model key never stands here: the live gateway (gateway: claude) reads ANTHROPIC_API_KEY from the environment
 # only, and a run refuses to start without it. Recordings are made once, live, by a maintainer with the key (the Maven
-# profile inference-record, in the Linux image) and committed after review; a request without a recording fails
-# loudly ("no recording"), so that a changed prompt is seen, never guessed.
+# profile inference-record, in the Linux image) and committed after review (the ones committed now are scripted
+# stand-ins, provider "scripted": see the README beside them); a request without a recording fails loudly ("no
+# recording"), so that a changed prompt is seen, never guessed.
 version: 1
 gateway: recorded                       # claude | recorded | none
 recordings: src/test/resources/inference/   # relative to this file; also where record: true writes

@@ -1,0 +1,22 @@
+# Exported from an interactive session on the sample desk (phase5-contracts.md 14.4): a person signs on, a model lends one plain item to the walk-in borrower and settles the deposit, the person checks the loan.
+# Session basic-loan-session on 2026-10-08, pack lending 0.4.0, environment seed-a.
+# Acted: person: 1 step, model scripted-model: 3 steps.
+# Model cost: $0.
+scenario: session-basic-loan
+pack: lending
+requires: [lending.input]
+resolve:
+  assistant:
+    query: StaffWithPermission
+    args: { perform: [SIGN_ON], interactiveSignOn: true }
+    credential: { realm: staff, key: code }
+  item: { query: LendableItem, args: { deposit: { between: ["1.00", "2.00"] }, perDay: false } }
+steps:
+  - signOn: { staff: $assistant }
+  - scan: { item: $item }
+  - key: { action: DUE }
+  - deposit: {}
+  - expect:
+      loan.total: $item.deposit
+      state.name: IDLE
+timeouts: { step: "10s" }

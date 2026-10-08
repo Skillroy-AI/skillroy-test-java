@@ -434,6 +434,11 @@ ModelResponse>)`, `ScriptedGateway.sequence(List<ModelResponse>)`, `ScriptedGate
 every request is kept in `requests()` for assertions. In main scope (as `Approver.APPROVE_ALL` is), so that the
 scenarios modules' tests and a pack's tests can use it without a test-jar.
 
+As built (2026-10-08, S2): `Gateways.serve(InferenceSettings, InferenceGateway)` registers a caller's own gateway (a
+scripted one, or a recording wrapper around it) for the settings, so that the real contributor and binder use it; the
+gateway stays the caller's and `Gateways` never closes it. This is how the sample's stand-in recordings are made
+and how the scripted negatives of §15.1 and §15.2 reach the engine.
+
 ### 4.4 Settings: `inference.yaml`, properties and options
 
 `InferenceSettings` (a record in `skillroy-scenario`, strings only, §5.5) is built from, in order of precedence, the CLI
@@ -1494,7 +1499,13 @@ trailing `skillroy: zero model calls` test is unchanged.
 - Nothing else changes in the pack: the queries, resolvers, verifiers, oracles, cross-check and fingerprinter stand.
   The version becomes 0.4.0 (the allow-list is new pack surface).
 
-As built (2026-10-08, S1, before the loaders): `LendingAllowList` with the fingerprinter's twelve tables, every
+As built (2026-10-08, S2): `LendingLoaders` registers `StaffLoader` (identity `code`; the staff resolver's two reads and
+the building of a `StaffRef` are factored out and shared; refusal `UNKNOWN_STAFF`; the query's conditions are not
+re-applied, the access check covers them) and `ItemLoader` (identity `code`; the item read shared with its resolver;
+refusal `NOT_LENDABLE`; the query's deposit range is applied, since the `lending.deposit` verifier never checks it);
+`ValueLoadersOnRealSchemaTest` proves on both seeds that every key the tier (a) resolvers answer gets the identical
+value, that unknown keys are refused with a reason and that loaded values pass the verifiers. As built (2026-10-08, S1,
+before the loaders): `LendingAllowList` with the fingerprinter's twelve tables, every
 non-secret column readable (`staff.auto_sign_on` included: the committed staff SQL reads it), `staff.password` the one
 `otherColumns` entry, `desk_setting.name` sampled (the column is `name`, not `key`), the schema's own types (`BIGINT`
 for the loan ids); `AllowListOnRealSchemaTest` (not `PackOnRealSchemaTest`) proves the list against the embedded
@@ -1520,7 +1531,17 @@ S1): the YAML and the version-5 plan (`inference: bind`, pack 0.4.0; a test chec
 apart from the id, the source hash, `inference`, the line numbers and that one strategy) are committed; the bindings
 files and the recordings wait for the key (`ScenarioD.HAS_BINDINGS` keeps the bindings-dependent tests and the JUnit
 glue's end-to-end check away from it until then); the supervisor's `StaffRef` is completed through the pack's
-`ValueLoader` (D90).
+`ValueLoader` (D90). **As built (2026-10-08, S2): the recordings are scripted stand-ins until the key works**: no live
+model call was possible (the key's workspace id, `../TODO.md` "Walls"), so `ScenarioDRecordedTest` with
+`-Dskillroy.inference.fixtures.update=true` binds scenario D in `approve` on both seeds through a `RecordingGateway`
+around a `ScriptedGateway` whose hand-written `SqlProposal`s (one `SELECT`, five `?` parameters bound to the query's
+arguments, confidence 0.9, rows 1..5) find the same supervisor the committed SQL finds; the seven recordings carry
+`provider: "scripted"` and the bindings files the label `recorded 2026-10-08 (scripted stand-in)`; with the key,
+`-Pinference-record` re-records them live and only the provider and the model answers change. `ScenarioD.HAS_BINDINGS`
+is true. The headless acceptance (13 tests on both seeds): `approve` without reuse makes one recorded call and writes
+the committed file byte for byte (apart from the channel: `jdbc` headless, `agent` in the committed file), with reuse
+none and the same file, `replay` no call, a changed catalogue `ENVIRONMENT` "no recording", a reject-corpus `DELETE`
+`RESOLUTION_FAILED` with the guard's reason, the nightly dry run `UNCHANGED` for A, B and D.
 
 ### 14.3 Scenario C: `return-refunds-deposit` (authored by the planner)
 
@@ -1547,8 +1568,10 @@ with zero model calls on seed A in the acceptance. The same journal, read back f
 
 ### 14.5 Recordings and the two profiles in the sample
 
-`src/test/resources/inference/` holds the recordings of §14.2 and §14.4, the triage of the two negative runs of
-`ResolutionChecks` that end `FAIL` and `ERROR`, and the planner envelope of §14.3; `-Pinference-record` regenerates
+`src/test/resources/inference/` holds the recordings of §14.2 and §14.4 (as built 2026-10-08: scripted stand-ins,
+§14.2; no triage recording is committed, since a triage request carries the failed run's own durations, timestamps
+and business date, so the image's check records its own two failed runs' triage and replays it in the same run; and
+no planner envelope yet, scenario C being owed to the live run); `-Pinference-record` regenerates
 them in the Linux image with the key passed through the environment (`ci/run-in-linux.sh` passes `ANTHROPIC_API_KEY`
 into the container when it is set, without printing it); `-Pinference-live` runs §15.3.
 
@@ -1660,6 +1683,15 @@ a Java 25 target, in every load mode, with the `recorded` gateway and the commit
    that compiles and resolves (the authored content is not compared with the committed one: a person reviewed that).
 6. One `session` turn live on the desk (`ask "lend one plain item to the walk-in borrower"`) ends `DONE` within the
    action limit and exports a scenario that compiles.
+
+As built (2026-10-08, S2, `InferenceEndToEndIT`, eight nested classes, four load modes and two seeds): item 1 in every
+mode on both seeds (scenario D alone through the JUnit glue with its trailing zero-calls test); on each seed with the
+agent on the command line items 2, 7 and 8 (the secret scans cover `inference.jsonl`, `journal.jsonl`, the exports,
+`triage.*` and the report); on seed A items 4 (the session with the scripted model script, its export compared with
+the committed copies and replayed) and 6 (triage over two failed runs the class makes itself); item 7 takes two dry
+runs, because A and B are committed with the `approve` label and D with the stand-in label and one job writes one
+label; item 5 and the command form of item 4 were written against the CLI's commands and marked disabled until the
+CLI wave landed. Item 3 (scenario C) waits for the live planner run.
 
 Exit criteria of the roadmap (design §8): (1) is §14.3 with §15.2 item 3; (2) is §15.3 item 4; (3) is §14.4 with §15.2
 item 4; all three are also exercised without a key through the recordings.

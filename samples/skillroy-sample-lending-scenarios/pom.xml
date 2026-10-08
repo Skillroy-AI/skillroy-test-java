@@ -96,6 +96,20 @@
         </exclusion>
       </exclusions>
     </dependency>
+    <!-- Phase 5 (phase5-contracts.md 2.1, 14): the inference layer for scenario D's tier (b) slot (its contributor is
+         found through ServiceLoader in approve and live; replay never loads it), the recorded and scripted gateways,
+         the session service and triage; and the MCP server with its SDK client for the end-to-end checks. Test scope
+         only: nothing of it reaches the pack or a target JVM. -->
+    <dependency>
+      <groupId>ai.skillroy</groupId>
+      <artifactId>skillroy-inference</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>ai.skillroy</groupId>
+      <artifactId>skillroy-mcp</artifactId>
+      <scope>test</scope>
+    </dependency>
     <dependency>
       <groupId>org.junit.jupiter</groupId>
       <artifactId>junit-jupiter</artifactId>

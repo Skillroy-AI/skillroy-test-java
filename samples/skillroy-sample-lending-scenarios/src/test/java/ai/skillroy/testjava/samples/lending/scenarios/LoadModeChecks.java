@@ -712,12 +712,11 @@ abstract class LoadModeChecks {
     // ------------------------------------------------------------------ JUnit glue
 
     /**
-     * The JUnit glue over the committed scenario directory: the two Phase 1 scenarios and scenarios A and B
-     * (phase3-contracts.md 10.4), which run in {@code replay} on this seed A target with the {@code seed-a} bindings,
-     * then the stream's trailing {@code skillroy: zero model calls} test (phase2-contracts.md 12.2), because scenarios
-     * A and B need bindings. Scenario D ({@code supervisor-return-llm-sql}, phase5-contracts.md 14.2) is left out of
-     * the directory until it has bindings: the recording wave of the Phase 5 build (after wave 2) commits them, and
-     * {@link ScenarioD#HAS_BINDINGS} then brings it in (and this check's lists with it).
+     * The JUnit glue over the committed scenario directory: the two Phase 1 scenarios and scenarios A, B and D
+     * (phase3-contracts.md 10.4, phase5-contracts.md 14.2, 15.2 item 1), which run in {@code replay} on this seed A
+     * target with the {@code seed-a} bindings, then the stream's trailing {@code skillroy: zero model calls} test
+     * (phase2-contracts.md 12.2), because scenarios A, B and D need bindings: scenario D's supervisor, found by a model
+     * when it was approved, replays like any binding, with no model call.
      */
     @TestFactory
     @Order(14)
@@ -727,13 +726,13 @@ abstract class LoadModeChecks {
         List<DynamicTest> tests = ScenarioTests.dynamicTests(ScenarioD.withoutScenarioDUntilItHasBindings(
                 ScenarioSource.directory(ItEnv.moduleDir().resolve("scenarios"))), this::client, options).toList();
         List<String> names = tests.stream().map(DynamicTest::getDisplayName).toList();
-        assertEquals(List.of("basic-loan", "basic-loan-ui", ScenarioB.ID, ScenarioA.ID), names.subList(0, 4).stream()
-                .sorted().toList(), String.valueOf(names));
-        assertEquals("skillroy: zero model calls", names.get(4), "the stream ends with the ledger check");
-        assertEquals(5, names.size());
+        assertEquals(List.of("basic-loan", "basic-loan-ui", ScenarioB.ID, ScenarioA.ID, ScenarioD.ID),
+                names.subList(0, 5).stream().sorted().toList(), String.valueOf(names));
+        assertEquals("skillroy: zero model calls", names.get(5), "the stream ends with the ledger check");
+        assertEquals(6, names.size());
         List<DynamicTest> checked = new ArrayList<>(tests);
         checked.add(DynamicTest.dynamicTest("run.jsonl written by the glue", () -> {
-            for (String id : List.of("basic-loan", "basic-loan-ui", ScenarioB.ID, ScenarioA.ID)) {
+            for (String id : List.of("basic-loan", "basic-loan-ui", ScenarioB.ID, ScenarioA.ID, ScenarioD.ID)) {
                 List<Map<String, Object>> log = Runs.runLog(ItEnv.runDir(mode().slug, "junit-glue").resolve(id));
                 assertEquals("PASS", log.get(log.size() - 1).get("status"), id);
                 assertFalse(log.stream().anyMatch(r -> "fidelity".equals(r.get("type"))), id + ": full fidelity");

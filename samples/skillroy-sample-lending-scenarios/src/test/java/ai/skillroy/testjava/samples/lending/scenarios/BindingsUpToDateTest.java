@@ -45,9 +45,9 @@ import static org.junit.jupiter.api.Assertions.fail;
  * that fails here would fail every {@code replay} as {@code PLAN_CHANGED} or be rewritten on the next approval as
  * noise in the diff.
  *
- * <p>Scenario D ({@code supervisor-return-llm-sql}, phase5-contracts.md 14.2) has no bindings file yet: the recording
- * wave of the Phase 5 build (after wave 2) writes its files through the recorded gateway and flips
- * {@link ScenarioD#HAS_BINDINGS}, which these checks follow; until then its absence on both seeds is checked too.
+ * <p>Scenario D ({@code supervisor-return-llm-sql}, phase5-contracts.md 14.2) has its files since the recording wave
+ * of the Phase 5 build wrote them through the recorded gateway ({@link ScenarioD#HAS_BINDINGS}, which these checks
+ * follow): the same checks apply to them, and its supervisor's approval names the recordings it came from.
  */
 class BindingsUpToDateTest {
 
@@ -79,7 +79,8 @@ class BindingsUpToDateTest {
             assertEquals("lending", read.pack());
             assertEquals("0.4.0", read.packVersion());
             assertTrue(text.endsWith("}\n"), "ends with a newline");
-            assertFalse(ScenarioB.ISO_DATE.matcher(text).find(), file + " holds no date: it is the same on every day");
+            assertFalse(ScenarioB.ISO_DATE.matcher(text.replaceAll("\"by\": \"[^\"]*\"", "")).find(), file
+                    + " holds no date outside an approval's label: it is the same on every day");
             assertFalse(text.contains("\"jdbc\""), "recorded as the end-to-end agent channel sees it");
         }
         BindingsFile a = BindingsFile.read(ScenarioA.committedBindings(Env.SEED_A));
@@ -95,8 +96,7 @@ class BindingsUpToDateTest {
 
     /**
      * Every committed scenario whose plan needs bindings has its file on both seeds, and one that needs none has none;
-     * scenario D excepted until the recording wave of the Phase 5 build writes its files (14.2), by
-     * {@link ScenarioD#HAS_BINDINGS}, which must say what is on disk: the wave that commits the files flips it.
+     * scenario D's follow {@link ScenarioD#HAS_BINDINGS}, which must say what is on disk.
      */
     @Test
     void everyPlanThatNeedsBindingsHasThemOnBothSeedsScenarioDOnceRecorded() throws Exception {
@@ -146,6 +146,36 @@ class BindingsUpToDateTest {
                 fail(ScenarioB.committedBindings(env) + " holds a date: " + date.group());
             }
             assertFalse(text.contains("\"" + expected.assistantPassword() + "\""), "no password as a value");
+        }
+    }
+
+    /**
+     * Scenario D's files (phase5-contracts.md 14.2): the supervisor is a tier (b) binding, {@code LLM_SQL}, approved
+     * with the label of the recordings it came from, with the model's rationale and usage; and every slot and oracle
+     * holds scenario A's committed value on the same seed: the model found the supervisor the committed SQL finds.
+     */
+    @Test
+    void scenarioDsFilesHoldTheModelsSupervisorWithScenarioAsValues() throws Exception {
+        for (Env env : Env.values()) {
+            BindingsFile d = BindingsFile.read(ScenarioD.committedBindings(env));
+            BindingsFile a = BindingsFile.read(ScenarioA.committedBindings(env));
+            var supervisor = d.resolutions().get(ScenarioD.MODEL_SLOT);
+            assertEquals(ai.skillroy.testjava.scenario.resolve.Strategy.LLM_SQL, supervisor.strategy());
+            assertEquals(new ai.skillroy.testjava.scenario.resolve.Approval(
+                    ai.skillroy.testjava.scenario.resolve.Approval.State.APPROVED, ScriptedAnswers.APPROVED_BY),
+                    supervisor.approval());
+            assertEquals(ScriptedAnswers.SUPERVISOR_RATIONALE, supervisor.provenance().rationale());
+            assertEquals("scripted-model", supervisor.usage().model(), "a stand-in until recorded live");
+            assertEquals(0.9, supervisor.confidence());
+            assertEquals(a.resolutions().keySet(), d.resolutions().keySet());
+            for (String slot : a.resolutions().keySet()) {
+                assertEquals(a.resolutions().get(slot).value(), d.resolutions().get(slot).value(), env.id + " " + slot);
+                assertEquals(a.resolutions().get(slot).argsHash(), d.resolutions().get(slot).argsHash(), slot);
+            }
+            for (String oracle : a.oracles().keySet()) {
+                assertEquals(a.oracles().get(oracle).value(), d.oracles().get(oracle).value(), oracle);
+            }
+            assertEquals(a.env(), d.env(), "one environment, one fingerprint");
         }
     }
 

@@ -207,7 +207,11 @@ final class LendingResolvers {
         }
     }
 
-    /** {@code lending.sql.LendableItem}: active scannable items in the range, cheapest first. */
+    /**
+     * {@code lending.sql.LendableItem}: active scannable items in the range, cheapest first. The read and the building
+     * of an {@code ItemRef} ({@link #lendable}, {@link #itemRef}) are shared with the tier (b) value loader
+     * {@link LendingLoaders.ItemLoader} (decision D90).
+     */
     static final class LendableItemResolver implements Resolver<LendableItem, ItemRef> {
 
         @Override
@@ -228,6 +232,24 @@ final class LendingResolvers {
         @Override
         public List<ResolverCandidate<ItemRef>> candidates(LendableItem query, ResolveContext ctx)
                 throws DataException, AgentLostException, InterruptedException {
+            Rows rows = lendable(query, ctx);
+            List<ResolverCandidate<ItemRef>> out = new ArrayList<>();
+            for (int r = 0; r < rows.rowCount(); r++) {
+                ItemRef item = itemRef(query, rows, r);
+                if (item != null) {
+                    out.add(ResolverCandidate.of(item, "item " + item.code()));
+                }
+            }
+            return out;
+        }
+
+        /**
+         * The query's read ({@link #LENDABLE_ITEM_SQL}): the active scannable items lent the way the query asks
+         * whose deposit lies within the range's outer bounds, cheapest first. Shared with the tier (b) value loader
+         * ({@link LendingLoaders.ItemLoader}).
+         */
+        static Rows lendable(LendableItem query, ResolveContext ctx)
+                throws DataException, AgentLostException, InterruptedException {
             NumberRange range = query.deposit();
             BigDecimal lower = range == null ? null : range.lowerBound();
             BigDecimal upper = range == null ? null : range.upperBound();
@@ -235,18 +257,22 @@ final class LendingResolvers {
             params.add(Boolean.TRUE.equals(query.perDay()));
             params.add(lower == null ? NO_LOWER : lower.toPlainString());
             params.add(upper == null ? NO_UPPER : upper.toPlainString());
-            Rows rows = ctx.data().query(SOURCE, LENDABLE_ITEM_SQL, params, DataChannel.MAX_ROWS, null);
-            List<ResolverCandidate<ItemRef>> out = new ArrayList<>();
-            for (int r = 0; r < rows.rowCount(); r++) {
-                BigDecimal deposit = decimal(rows.get(r, 3));
-                if (deposit == null || range != null && !range.test(deposit)) {
-                    continue;
-                }
-                String code = String.valueOf(rows.get(r, 0));
-                out.add(ResolverCandidate.of(new ItemRef(code, String.valueOf(rows.get(r, 1)),
-                        String.valueOf(rows.get(r, 2)), money(deposit)), "item " + code));
+            return ctx.data().query(SOURCE, LENDABLE_ITEM_SQL, params, DataChannel.MAX_ROWS, null);
+        }
+
+        /**
+         * The item of row {@code r} of {@link #lendable}, or null when its deposit is not a decimal or does not
+         * satisfy the range exactly (the statement narrows by the outer bounds; strict bounds and every other
+         * condition of the range are applied here).
+         */
+        static ItemRef itemRef(LendableItem query, Rows rows, int r) {
+            NumberRange range = query.deposit();
+            BigDecimal deposit = decimal(rows.get(r, 3));
+            if (deposit == null || range != null && !range.test(deposit)) {
+                return null;
             }
-            return out;
+            return new ItemRef(String.valueOf(rows.get(r, 0)), String.valueOf(rows.get(r, 1)),
+                    String.valueOf(rows.get(r, 2)), money(deposit));
         }
     }
 
@@ -261,6 +287,10 @@ final class LendingResolvers {
      * drops them and reports why ({@code ALL_REJECTED}, "no credential staff/&lt;id&gt;", phase2-contracts.md 4) rather
      * than claiming that nobody in the desk qualifies ({@code NO_CANDIDATE}). A bind that succeeds reads exactly what
      * it read without this rule.
+     *
+     * <p>The two reads and the building of a {@code StaffRef} ({@link #activeStaff}, {@link #staffRef}) are shared
+     * with the tier (b) value loader {@link LendingLoaders.StaffLoader} (decision D90), so that a staff member a model
+     * found is loaded exactly as this resolver loads one.
      */
     static final class StaffResolver implements Resolver<StaffWithPermission, StaffRef> {
 
@@ -288,7 +318,7 @@ final class LendingResolvers {
             List<String> distinct = query.distinctFrom() == null ? List.of() : query.distinctFrom();
             CredentialSpec credential = ctx.credential();
             boolean skipEarly = credential != null && "code".equals(credential.key());
-            Rows staff = ctx.data().query(SOURCE, STAFF_SQL, List.of(kind), DataChannel.MAX_ROWS, null);
+            Rows staff = activeStaff(kind, ctx);
             List<ResolverCandidate<StaffRef>> out = new ArrayList<>();
             List<Integer> withoutCredential = new ArrayList<>();
             for (int r = 0; r < staff.rowCount() && out.size() < ctx.maxCandidates(); r++) {
@@ -317,9 +347,33 @@ final class LendingResolvers {
             return out;
         }
 
-        /** Reads one staff member's permissions and adds the candidate if they cover {@code perform}. */
+        /** Reads one staff member's value and adds the candidate if their permissions cover {@code perform}. */
         private static void addIfPermitted(Rows staff, int r, String kind, List<String> perform, ResolveContext ctx,
                                            List<ResolverCandidate<StaffRef>> out)
+                throws ResolutionException, DataException, AgentLostException, InterruptedException {
+            StaffRef value = staffRef(staff, r, kind, ctx);
+            if (value.permissions().containsAll(perform)) {
+                out.add(ResolverCandidate.of(value, "staff " + value.code()));
+            }
+        }
+
+        /**
+         * Every active staff member with the auto-sign-on flag and their limit of {@code kind} ({@link #STAFF_SQL},
+         * by code): the first read of the resolver, and of the tier (b) value loader
+         * ({@link LendingLoaders.StaffLoader}), so that both see a staff member the same way.
+         */
+        static Rows activeStaff(String kind, ResolveContext ctx)
+                throws DataException, AgentLostException, InterruptedException {
+            return ctx.data().query(SOURCE, STAFF_SQL, List.of(kind), DataChannel.MAX_ROWS, null);
+        }
+
+        /**
+         * The value of the staff member in row {@code r} of {@link #activeStaff}: the code, the permissions their roles
+         * grant ({@link #PERMISSIONS_SQL}, read whole, sorted) and their limit of {@code kind} at scale 2 (null =
+         * unlimited). The one place a {@code StaffRef} is built from the database, for the resolver and the tier (b)
+         * value loader alike (decision D90).
+         */
+        static StaffRef staffRef(Rows staff, int r, String kind, ResolveContext ctx)
                 throws ResolutionException, DataException, AgentLostException, InterruptedException {
             String code = String.valueOf(staff.get(r, 0));
             BigDecimal amount = money(decimal(staff.get(r, 2)));
@@ -329,10 +383,8 @@ final class LendingResolvers {
             for (int p = 0; p < permissionRows.rowCount(); p++) {
                 permissions.add(String.valueOf(permissionRows.get(p, 0)));
             }
-            if (permissions.containsAll(perform)) {
-                Map<String, BigDecimal> limits = Collections.singletonMap(kind, amount);
-                out.add(ResolverCandidate.of(new StaffRef(code, List.copyOf(permissions), limits), "staff " + code));
-            }
+            Map<String, BigDecimal> limits = Collections.singletonMap(kind, amount);
+            return new StaffRef(code, List.copyOf(permissions), limits);
         }
     }
 

@@ -1,0 +1,450 @@
+/*
+ * Copyright 2026 Mike Mills.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package ai.skillroy.testjava.samples.lending.scenarios;
+
+import ai.skillroy.testjava.data.Credentials;
+import ai.skillroy.testjava.inference.Gateways;
+import ai.skillroy.testjava.inference.job.JobOptions;
+import ai.skillroy.testjava.inference.job.ReResolveReport;
+import ai.skillroy.testjava.inference.job.ReResolver;
+import ai.skillroy.testjava.inference.prompt.PromptMask;
+import ai.skillroy.testjava.inference.recorded.Recording;
+import ai.skillroy.testjava.inference.recorded.RecordingGateway;
+import ai.skillroy.testjava.inference.scripted.ScriptedGateway;
+import ai.skillroy.testjava.protocol.Json;
+import ai.skillroy.testjava.samples.lending.LendingDb;
+import ai.skillroy.testjava.samples.lending.Seed;
+import ai.skillroy.testjava.samples.lending.scenarios.SampleCredentials.Env;
+import ai.skillroy.testjava.samples.lending.scenarios.SampleCredentials.JdbcSource;
+import ai.skillroy.testjava.scenario.Approver;
+import ai.skillroy.testjava.scenario.BindException;
+import ai.skillroy.testjava.scenario.BindListener;
+import ai.skillroy.testjava.scenario.BindOptions;
+import ai.skillroy.testjava.scenario.BindOutcome;
+import ai.skillroy.testjava.scenario.Binder;
+import ai.skillroy.testjava.scenario.BindingsFile;
+import ai.skillroy.testjava.scenario.FailureKind;
+import ai.skillroy.testjava.scenario.Plan;
+import ai.skillroy.testjava.scenario.pack.DomainPack;
+import ai.skillroy.testjava.scenario.resolve.Approval;
+import ai.skillroy.testjava.scenario.resolve.BindMode;
+import ai.skillroy.testjava.scenario.resolve.CostLedger;
+import ai.skillroy.testjava.scenario.resolve.InferenceSettings;
+import ai.skillroy.testjava.scenario.resolve.Provenance;
+import ai.skillroy.testjava.scenario.resolve.Resolution;
+import ai.skillroy.testjava.scenario.resolve.Strategy;
+import ai.skillroy.testjava.scenario.resolve.VerifierResult;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
+
+import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.time.Duration;
+import java.time.LocalDate;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Stream;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+/**
+ * Scenario D ({@code supervisor-return-llm-sql}, phase5-contracts.md 14.2) bound through tier (b) without a display
+ * and without a key, the module's normal build: the sample's database in this JVM over the controller-side JDBC
+ * channel, the desk's real access rules behind {@link DeskConnection} (as {@link PackOnRealSchemaTest} binds), the
+ * real binder finding the inference module's contributor, and the committed recordings answering through the recorded
+ * gateway.
+ *
+ * <ul>
+ *   <li>{@code approve} without reuse ({@code --no-reuse-bindings}) makes one recorded call per seed and writes the
+ *       committed bindings file byte for byte (apart from the channel, {@code jdbc} here and {@code agent} in the
+ *       committed file, which the end-to-end check writes); the model's supervisor is the committed SQL's, found
+ *       through the pack's value loader and passed by the desk's access check;</li>
+ *   <li>with reuse on (the default) it makes no call and writes the same file;</li>
+ *   <li>{@code replay} loads the committed file and makes no call, whatever the inference settings say;</li>
+ *   <li>a changed prompt catalogue (one word more in a table's description) ends ENVIRONMENT, "no recording";</li>
+ *   <li>a scripted gateway answering a statement of the guard's reject corpus ends RESOLUTION_FAILED with the guard's
+ *       reason in the detail;</li>
+ *   <li>the nightly job's dry run (8.2) leaves scenarios A, B and D unchanged, D's request answered through the
+ *       recorded gateway's batch interface (15.2 item 7, here without a display).</li>
+ * </ul>
+ *
+ * <p>{@code -Dskillroy.inference.fixtures.update=true} regenerates the recordings first ({@link ScriptedAnswers}: a
+ * {@code RecordingGateway} around a {@code ScriptedGateway} whose answers are correct, served to the real contributor
+ * through {@code Gateways.serve}), then the committed bindings files of both seeds from those recordings through the
+ * recorded gateway, with {@code approval.by} {@value ScriptedAnswers#APPROVED_BY}.
+ */
+class ScenarioDRecordedTest {
+
+    private static final AtomicInteger DATABASES = new AtomicInteger();
+    /** The read-only account's password here: test-local, at least 8 characters (masked in longer texts). */
+    private static final String READER_PASSWORD = "Scenario-D-Reader-4419";
+
+    @TempDir
+    Path tmp;
+
+    private LendingDb db;
+
+    @AfterEach
+    void closeDatabase() {
+        if (db != null) {
+            db.close();
+        }
+    }
+
+    /** The seeded database, the credentials naming it, and the desk connection. */
+    private record Setup(LendingDb db, Credentials credentials, DeskConnection desk) {
+    }
+
+    private static Setup setUp(Env env, Path dir) throws Exception {
+        LocalDate today = LocalDate.now();
+        LendingDb db = LendingDb.create("p5scenariod" + env.seed + DATABASES.incrementAndGet(), Seed.parse(env.seed),
+                today);
+        db.createReadOnlyUser(READER_PASSWORD);
+        Credentials credentials = SampleCredentials.load(dir.resolve("credentials-" + env.id), env,
+                new JdbcSource(db.url(), LendingDb.READER_USER, READER_PASSWORD));
+        return new Setup(db, credentials, new DeskConnection(db, today));
+    }
+
+    private Setup open(Env env) throws Exception {
+        Setup setup = setUp(env, tmp);
+        db = setup.db();
+        return setup;
+    }
+
+    /** {@code approve} with the label of the committed files, the scripted approver, a ledger. */
+    private static BindOptions approve(Setup setup, Env env, Path root, InferenceSettings inference,
+                                       CostLedger ledger) {
+        return BindOptions.defaults().withMode(BindMode.APPROVE).withEnvId(env.id).withBindingsRoot(root)
+                .withCredentials(setup.credentials()).withLedger(ledger).withInference(inference)
+                .withApprovedBy(ScriptedAnswers.APPROVED_BY)
+                .withApprover(request -> new Approver.Decision(true, null, "checked by the test"));
+    }
+
+    /** The text as the end-to-end agent channel writes it. */
+    static String asTheAgentWritesIt(String text) {
+        return text.replace("\"channel\": \"jdbc\"", "\"channel\": \"agent\"");
+    }
+
+    /** run.jsonl-like records of a bind. */
+    private static final class Events implements BindListener {
+        final List<String> types = new ArrayList<>();
+        final List<Map<String, Object>> records = new ArrayList<>();
+
+        @Override
+        public void event(String type, Map<String, Object> fields) {
+            types.add(type);
+            records.add(fields);
+        }
+
+        long count(String type) {
+            return types.stream().filter(type::equals).count();
+        }
+
+        Map<String, Object> first(String type, String slot) {
+            for (int i = 0; i < types.size(); i++) {
+                if (type.equals(types.get(i)) && slot.equals(records.get(i).get("slot"))) {
+                    return records.get(i);
+                }
+            }
+            return null;
+        }
+    }
+
+    // ------------------------------------------------------------------------------------------------ update
+
+    /**
+     * {@code -Dskillroy.inference.fixtures.update=true}: the tier (b) recordings of both seeds from the scripted
+     * stand-in answers (the old ones of purpose {@code resolve} removed first), then each seed's bindings file from
+     * them through the recorded gateway, written as the agent channel would write it.
+     */
+    @BeforeAll
+    static void regenerateWhenAsked(@TempDir Path dir) throws Exception {
+        if (!ScriptedAnswers.update()) {
+            return;
+        }
+        Path recordings = ScriptedAnswers.recordings();
+        Files.createDirectories(recordings);
+        try (Stream<Path> files = Files.list(recordings)) {
+            for (Path file : files.filter(f -> f.getFileName().toString().endsWith(".json")).toList()) {
+                if ("resolve".equals(Recording.read(file).purpose())) {
+                    Files.delete(file);
+                }
+            }
+        }
+        for (Env env : Env.values()) {
+            Setup setup = setUp(env, dir);
+            try {
+                try (RecordingGateway recording = new RecordingGateway(ScriptedGateway.of(ScriptedAnswers::resolve),
+                        recordings, PromptMask.keysOnly(), true, ScriptedAnswers.CLOCK);
+                     Gateways.Served served = Gateways.serve(ScriptedAnswers.scripted(), recording)) {
+                    Binder.bind(Plan.read(ScenarioD.plan()), Runs.PACK, setup.desk(), approve(setup, env,
+                            dir.resolve("scripted-" + env.id), ScriptedAnswers.scripted(), new CostLedger())
+                            .withReuseBindings(false), BindListener.NONE);
+                }
+                BindOutcome outcome = Binder.bind(Plan.read(ScenarioD.plan()), Runs.PACK, setup.desk(),
+                        approve(setup, env, dir.resolve("recorded-" + env.id), ScriptedAnswers.recorded(recordings),
+                                new CostLedger()).withReuseBindings(false), BindListener.NONE);
+                Path committed = ScenarioD.committedBindings(env);
+                Files.createDirectories(committed.getParent());
+                Files.writeString(committed, asTheAgentWritesIt(Files.readString(outcome.written(),
+                        StandardCharsets.UTF_8)), StandardCharsets.UTF_8);
+            } finally {
+                setup.db().close();
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------------------------------------ checks
+
+    /**
+     * {@code approve --no-reuse-bindings} against the recordings: one recorded call, at no cost; the supervisor found
+     * through tier (b) is the committed SQL's supervisor of this seed (the model's statement selected the code, the
+     * pack's value loader built the value, the desk's access check passed it); the written file is the committed one
+     * byte for byte, apart from the channel.
+     */
+    @ParameterizedTest
+    @EnumSource(Env.class)
+    void approveWithoutReuseMakesOneRecordedCallAndWritesTheCommittedFile(Env env) throws Exception {
+        Setup setup = open(env);
+        CostLedger ledger = new CostLedger();
+        Events events = new Events();
+        Path root = tmp.resolve("approve-" + env.id);
+        BindOutcome outcome = Binder.bind(Plan.read(ScenarioD.plan()), Runs.PACK, setup.desk(), approve(setup, env,
+                root, ScriptedAnswers.recorded(ScriptedAnswers.recordings()), ledger).withReuseBindings(false),
+                events);
+        assertEquals(1, ledger.size(), "one model call: " + ledger.entries());
+        CostLedger.Entry call = ledger.entries().get(0);
+        assertEquals("recorded", call.provider());
+        assertEquals("0", call.costUsd());
+        assertEquals(ScenarioD.MODEL_SLOT, call.slot());
+        assertEquals(Strategy.LLM_SQL, call.strategy());
+        assertNotNull(call.details(), "the record of inference.jsonl travels with the entry");
+        Path recording = Recording.file(ScriptedAnswers.recordings(), String.valueOf(call.details().get(
+                "fingerprint")));
+        assertTrue(Files.isRegularFile(recording), "the committed recording of this request: " + recording);
+        Map<String, Object> recorded = Json.parseObject(Files.readString(recording));
+        assertEquals("scripted", ((Map<?, ?>) ((Map<?, ?>) recorded.get("response")).get("usage")).get("provider"),
+                "a stand-in until it is recorded live");
+
+        Resolution supervisor = outcome.bindings().resolutions().get(ScenarioD.MODEL_SLOT);
+        assertEquals(Strategy.LLM_SQL, supervisor.strategy());
+        assertEquals(ScenarioA.expected(env).supervisor(), supervisor.value(), "the committed SQL's answer");
+        assertEquals(new Approval(Approval.State.APPROVED, ScriptedAnswers.APPROVED_BY), supervisor.approval());
+        assertEquals(0.9, supervisor.confidence());
+        assertTrue(supervisor.verified().stream().allMatch(VerifierResult::passed), String.valueOf(
+                supervisor.verified()));
+        assertEquals("lending.access.check", supervisor.verified().get(0).verifierId());
+        assertEquals(ScriptedAnswers.SUPERVISOR_RATIONALE, supervisor.provenance().rationale());
+        assertEquals("inference.sql.StaffWithPermission", supervisor.provenance().resolverId());
+        List<String> sql = supervisor.provenance().statements().stream().map(Provenance.Statement::sql).toList();
+        assertTrue(sql.stream().anyMatch(s -> s.startsWith("SELECT s.code AS code FROM staff s")
+                && s.endsWith("LIMIT 200")), "the guarded statement, its limit injected: " + sql);
+        String staffSql = BindingsFile.read(ScenarioA.committedBindings(env)).resolutions().get("assistant")
+                .provenance().statements().get(0).sql();
+        assertTrue(sql.contains(staffSql), "the value loader reads with the staff resolver's own statement: " + sql);
+        assertNotNull(supervisor.usage());
+        assertEquals("0", supervisor.usage().costUsd());
+        Map<String, String> strategies = new java.util.LinkedHashMap<>();
+        for (String slot : ScenarioA.QUERY_SLOTS) {
+            strategies.put(slot, outcome.bindings().strategy(slot));
+        }
+        assertEquals(Map.of("systemMax", "CANONICAL_SQL", "item", "CANONICAL_SQL", "assistant", "CANONICAL_SQL",
+                "supervisor", "LLM_SQL", "keys", "CANONICAL_JAVA"), strategies, "two tiers in one scenario");
+        assertEquals("SUPERVISOR_PROMPT", outcome.bindings().oracle("auth"), "the scenario still needs a supervisor");
+
+        String text = Files.readString(outcome.written(), StandardCharsets.UTF_8);
+        assertEquals(Files.readString(ScenarioD.committedBindings(env), StandardCharsets.UTF_8),
+                asTheAgentWritesIt(text), "byte-identical to the committed file except for the channel (regenerate"
+                        + " with -D" + ScriptedAnswers.UPDATE + "=true)");
+        assertFalse(text.contains(READER_PASSWORD), "no JDBC password in the file");
+        for (String password : SampleCredentials.staff(env).values()) {
+            assertFalse(text.contains("\"" + password + "\""), "no password as a value in the file");
+        }
+        assertEquals(1L, events.count("inference"), "one inference record: " + events.types);
+    }
+
+    /** {@code approve} with reuse on (the default, D82): the recorded value holds, no model call, the same file. */
+    @ParameterizedTest
+    @EnumSource(Env.class)
+    void approveWithReuseMakesNoCallAndWritesTheSameFile(Env env) throws Exception {
+        Setup setup = open(env);
+        Path root = tmp.resolve("reuse-" + env.id);
+        Path existing = BindingsFile.locate(root, env.id, ScenarioD.ID);
+        Files.createDirectories(existing.getParent());
+        Files.copy(ScenarioD.committedBindings(env), existing);
+        CostLedger ledger = new CostLedger();
+        Events events = new Events();
+        BindOutcome outcome = Binder.bind(Plan.read(ScenarioD.plan()), Runs.PACK, setup.desk(), approve(setup, env,
+                root, ScriptedAnswers.recorded(tmp.resolve("no-recordings")), ledger), events);
+        assertTrue(ledger.isEmpty(), "no model call: " + ledger.entries());
+        Map<String, Object> resolve = events.first("resolve", ScenarioD.MODEL_SLOT);
+        assertNotNull(resolve, String.valueOf(events.types));
+        assertEquals(Boolean.TRUE, resolve.get("reused"), String.valueOf(resolve));
+        assertEquals(ScriptedAnswers.APPROVED_BY, resolve.get("reusedFrom"));
+        assertEquals(Files.readString(ScenarioD.committedBindings(env), StandardCharsets.UTF_8),
+                asTheAgentWritesIt(Files.readString(outcome.written(), StandardCharsets.UTF_8)),
+                "the file comes out byte-identical");
+    }
+
+    /** {@code replay} loads the committed file, re-runs every verifier, asks no resolver and makes no model call. */
+    @ParameterizedTest
+    @EnumSource(Env.class)
+    void replayLoadsTheCommittedFileAndMakesNoCall(Env env) throws Exception {
+        Setup setup = open(env);
+        CostLedger ledger = new CostLedger();
+        Events events = new Events();
+        BindOutcome outcome = Binder.bind(Plan.read(ScenarioD.plan()), Runs.PACK, setup.desk(), BindOptions.defaults()
+                .withMode(BindMode.REPLAY).withEnvId(env.id).withBindingsRoot(ScenarioA.bindingsRoot())
+                .withCredentials(setup.credentials()).withLedger(ledger)
+                .withInference(ScriptedAnswers.recorded(ScriptedAnswers.recordings())), events);
+        assertTrue(ledger.isEmpty(), "zero model calls");
+        assertEquals(0, events.count("resolver"), "a replay never calls a resolver");
+        assertEquals(5, events.count("verifier"), "every slot's verifier ran once");
+        assertNull(outcome.written());
+        assertEquals("REPLAY", outcome.bindings().strategy(ScenarioD.MODEL_SLOT));
+        assertEquals(ScenarioA.expected(env).supervisor(), outcome.bindings().resolutions().get(ScenarioD.MODEL_SLOT)
+                .value(), "the recorded value (the joined password is in the bindings' values only)");
+        Map<String, Object> inference = events.records.get(events.types.indexOf("inference"));
+        assertEquals(InferenceSettings.GATEWAY_NONE, inference.get("gateway"), "replay substitutes none: " + inference);
+    }
+
+    /**
+     * A changed prompt (the catalogue a model is shown, one word more in the description of the table {@code staff})
+     * has no recording: ENVIRONMENT, "no recording", nothing written.
+     */
+    @ParameterizedTest
+    @EnumSource(Env.class)
+    void aChangedCatalogueEndsEnvironmentWithNoRecording(Env env) throws Exception {
+        Setup setup = open(env);
+        Path root = tmp.resolve("changed-" + env.id);
+        DomainPack changed = OverlayPack.changedCatalogue();
+        BindException e = assertThrows(BindException.class, () -> Binder.bind(Plan.read(ScenarioD.plan()), changed,
+                setup.desk(), approve(setup, env, root, ScriptedAnswers.recorded(ScriptedAnswers.recordings()),
+                        new CostLedger()).withReuseBindings(false), BindListener.NONE));
+        assertEquals(FailureKind.ENVIRONMENT, e.kind(), e.getMessage());
+        assertTrue(e.getMessage().contains("no recording"), e.getMessage());
+        assertEquals(ScenarioD.MODEL_SLOT, e.slot());
+        assertFalse(Files.exists(root), "nothing written");
+    }
+
+    /**
+     * A model that answers with a statement of the guard's HSQLDB reject corpus ({@code DELETE}): the guard refuses
+     * it before anything runs, no candidate is offered, and the slot fails RESOLUTION_FAILED with the guard's reason
+     * code in the detail; nothing is written and nothing reached the database.
+     */
+    @ParameterizedTest
+    @EnumSource(Env.class)
+    void aRejectCorpusStatementEndsResolutionFailedWithTheGuardsReason(Env env) throws Exception {
+        Setup setup = open(env);
+        Path root = tmp.resolve("reject-" + env.id);
+        ScriptedGateway rejecting = ScriptedGateway.of(ScriptedAnswers::rejecting);
+        CostLedger ledger = new CostLedger();
+        BindException e;
+        try (Gateways.Served served = Gateways.serve(ScriptedAnswers.scripted(), rejecting)) {
+            e = assertThrows(BindException.class, () -> Binder.bind(Plan.read(ScenarioD.plan()), Runs.PACK,
+                    setup.desk(), approve(setup, env, root, ScriptedAnswers.scripted(), ledger)
+                            .withReuseBindings(false), BindListener.NONE));
+        }
+        assertEquals(FailureKind.RESOLUTION_FAILED, e.kind(), e.getMessage());
+        assertEquals(ScenarioD.MODEL_SLOT, e.slot());
+        String detail = Json.write(e.detail());
+        assertTrue(detail.contains("guard " + ScriptedAnswers.REJECT_REASON), "the guard's reason: " + detail);
+        assertFalse(detail.contains(ScriptedAnswers.REJECT_SQL), "the refused statement is not in the detail");
+        assertEquals(1, rejecting.requests().size(), "one call, no retry of a refused statement");
+        assertEquals(1, ledger.size());
+        assertFalse(Files.exists(root), "nothing written");
+    }
+
+    /**
+     * The nightly job's dry run (phase5-contracts.md 8.2, 15.2 item 7) on this seed against the recordings: scenarios A
+     * and B (approved as {@code approve}) and scenario D (approved with the recordings' label) all come out
+     * {@code UNCHANGED}, byte for byte, against copies of the committed files in the channel this test reads through;
+     * D's tier (b) request goes through the recorded gateway's batch interface, and the report has its cache line.
+     * Two jobs, because a job approves every file it writes under one label (D's differs from A's and B's).
+     */
+    @ParameterizedTest
+    @EnumSource(Env.class)
+    void aDryRunOfTheNightlyJobLeavesEveryFileUnchanged(Env env) throws Exception {
+        Setup setup = open(env);
+        Path root = tmp.resolve("nightly-" + env.id);
+        Map<Path, String> copies = new java.util.LinkedHashMap<>();
+        for (Path committed : List.of(ScenarioA.committedBindings(env), ScenarioB.committedBindings(env),
+                ScenarioD.committedBindings(env))) {
+            Path copy = root.resolve(env.id).resolve(committed.getFileName());
+            Files.createDirectories(copy.getParent());
+            String text = Files.readString(committed, StandardCharsets.UTF_8).replace("\"channel\": \"agent\"",
+                    "\"channel\": \"jdbc\"");
+            Files.writeString(copy, text, StandardCharsets.UTF_8);
+            copies.put(copy, text);
+        }
+        BindOptions options = BindOptions.defaults().withEnvId(env.id).withBindingsRoot(root)
+                .withCredentials(setup.credentials()).withLedger(new CostLedger())
+                .withInference(ScriptedAnswers.recorded(ScriptedAnswers.recordings()));
+        JobOptions job = JobOptions.of(tmp.resolve("nightly-out-" + env.id), "nightly", new BigDecimal("1.00"))
+                .withDryRun(true).withBatchTimes(Duration.ofMinutes(5), Duration.ZERO);
+        ReResolveReport tierA = ReResolver.run(List.of(Plan.read(ScenarioA.plan()), Plan.read(ScenarioB.plan())),
+                Runs.PACK, setup.desk(), options, job.withApprovedBy("approve"));
+        assertEquals(List.of(ReResolveReport.Status.UNCHANGED, ReResolveReport.Status.UNCHANGED), tierA.scenarios()
+                .stream().map(ReResolveReport.ScenarioReport::status).toList(), tierA.toMarkdown());
+        assertEquals(0, tierA.requests(), "tier (a) needs no model");
+        ReResolveReport tierB = ReResolver.run(List.of(Plan.read(ScenarioD.plan())), Runs.PACK, setup.desk(),
+                options, job.withApprovedBy(ScriptedAnswers.APPROVED_BY));
+        assertEquals(ReResolveReport.Status.UNCHANGED, tierB.scenarios().get(0).status(), tierB.toMarkdown());
+        assertEquals(1, tierB.batches(), "one batch of one request: " + tierB.toMarkdown());
+        assertEquals(1, tierB.requests());
+        assertTrue(tierB.toMarkdown().contains("; cache hits "), tierB.toMarkdown());
+        assertEquals(0, tierB.exitCode());
+        for (Map.Entry<Path, String> copy : copies.entrySet()) {
+            assertEquals(copy.getValue(), Files.readString(copy.getKey(), StandardCharsets.UTF_8),
+                    "a dry run writes nothing: " + copy.getKey().getFileName());
+        }
+    }
+
+    /** Every committed recording is a stand-in named by its request's fingerprint. */
+    @Test
+    void everyCommittedRecordingIsAScriptedStandInNamedByItsFingerprint() throws Exception {
+        List<Path> files;
+        try (Stream<Path> list = Files.list(ScriptedAnswers.recordings())) {
+            files = list.filter(f -> f.getFileName().toString().endsWith(".json")).sorted().toList();
+        }
+        assertFalse(files.isEmpty(), "the recordings are committed");
+        int resolve = 0;
+        for (Path file : files) {
+            Map<String, Object> json = Json.parseObject(Files.readString(file));
+            assertEquals(file.getFileName().toString(), json.get("fingerprint") + ".json");
+            Map<?, ?> usage = (Map<?, ?>) ((Map<?, ?>) json.get("response")).get("usage");
+            assertEquals(ScriptedGateway.PROVIDER, usage.get("provider"), file.getFileName().toString());
+            assertEquals(ScriptedAnswers.RECORDED_AT.toString(), json.get("recordedAt"));
+            assertEquals(Recording.read(file).fingerprint(), json.get("fingerprint"));
+            resolve += "resolve".equals(json.get("purpose")) ? 1 : 0;
+        }
+        assertEquals(2, resolve, "scenario D's supervisor query on seed A and on seed B");
+    }
+}

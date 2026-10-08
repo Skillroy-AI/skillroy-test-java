@@ -29,10 +29,12 @@ import ai.skillroy.testjava.scenario.resolve.CrossCheck;
 import ai.skillroy.testjava.scenario.resolve.CrossCheckResult;
 import ai.skillroy.testjava.scenario.resolve.EnvFingerprinter;
 import ai.skillroy.testjava.scenario.resolve.ResolutionCatalogue;
+import ai.skillroy.testjava.scenario.resolve.SqlAllowList;
 import ai.skillroy.testjava.scenario.resolve.StoredTable;
 import ai.skillroy.testjava.scenario.resolve.VerifyContext;
 
 import java.math.BigDecimal;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.function.UnaryOperator;
@@ -44,16 +46,44 @@ import java.util.function.UnaryOperator;
  * so this wraps it. The catalogue is built once.
  *
  * <p>Used for the wrong-oracle demonstration of phase3-contracts.md 10.4 (decision D46): nothing wrong is ever
- * committed under {@code scenarios/}; the wrong oracle exists only in the test that overlays it.
+ * committed under {@code scenarios/}; the wrong oracle exists only in the test that overlays it. Phase 5: the SQL
+ * allow-lists are forwarded too, or replaced ({@link #changedCatalogue()}: the prompt catalogue a model sees changes,
+ * phase5-contracts.md 15.2 item 2).
  */
 final class OverlayPack implements DomainPack {
 
     private final DomainPack pack;
     private final ResolutionCatalogue catalogue;
+    private final List<SqlAllowList> allowLists;
 
     OverlayPack(DomainPack pack, UnaryOperator<ResolutionCatalogue.Builder> overlay) {
+        this(pack, overlay, pack.sqlAllowLists());
+    }
+
+    private OverlayPack(DomainPack pack, UnaryOperator<ResolutionCatalogue.Builder> overlay,
+                        List<SqlAllowList> allowLists) {
         this.pack = pack;
         this.catalogue = overlay.apply(ResolutionCatalogue.builder(pack.resolution())).build();
+        this.allowLists = List.copyOf(allowLists);
+    }
+
+    /**
+     * The lending pack with one word more in the description of the allow-listed table {@code staff}: the prompt
+     * catalogue a model is shown changes, so the request a tier (b) slot sends has another fingerprint and no
+     * recording answers it ("no recording", phase5-contracts.md 4.2, 15.2 item 2). Everything else is the pack's.
+     */
+    static OverlayPack changedCatalogue() {
+        List<SqlAllowList> changed = new ArrayList<>();
+        for (SqlAllowList list : Runs.PACK.sqlAllowLists()) {
+            List<SqlAllowList.AllowedTable> tables = new ArrayList<>();
+            for (SqlAllowList.AllowedTable table : list.tables()) {
+                tables.add(!table.name().equals("staff") ? table : new SqlAllowList.AllowedTable(table.name(),
+                        table.columns(), table.key(), table.description() + " Changed.", table.otherColumns()));
+            }
+            changed.add(new SqlAllowList(list.source(), list.dialect(), tables, list.procedures(),
+                    list.functions()));
+        }
+        return new OverlayPack(Runs.PACK, builder -> builder, changed);
     }
 
     /** The lending pack with {@code ExpectedWaiver} replaced by {@link WrongExpectedWaiver}; its cross-check stays. */
@@ -153,5 +183,10 @@ final class OverlayPack implements DomainPack {
     @Override
     public List<RowMask> rowMasks() {
         return pack.rowMasks();
+    }
+
+    @Override
+    public List<SqlAllowList> sqlAllowLists() {
+        return allowLists;
     }
 }

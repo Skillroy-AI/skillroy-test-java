@@ -84,21 +84,23 @@ class InferenceExampleTest {
     }
 
     /**
-     * The recordings directory exists with its README; no recording is committed yet, and scenario D's bindings, which
-     * are written from its recordings, cannot be committed before them.
+     * The recordings directory exists with its README, which says what is in it (scenario D's tier (b) requests and
+     * the exported session's calls) and that the committed recordings are scripted stand-ins until recorded live;
+     * scenario D's bindings, written from its recordings, are committed with them.
      */
     @Test
     void theRecordingsDirectorySaysWhatGoesIntoIt() throws Exception {
         assertTrue(Files.isDirectory(recordings()));
         String readme = Files.readString(recordings().resolve("README.md"));
         assertTrue(readme.contains(ScenarioD.ID), readme);
+        assertTrue(readme.contains(SessionScript.SCENARIO_ID), readme);
+        assertTrue(readme.contains("scripted stand-ins") && readme.contains("provider: \"scripted\""), readme);
+        assertTrue(readme.contains("inference-record"), "how to record them live: " + readme);
         List<Path> files;
         try (Stream<Path> list = Files.list(recordings())) {
             files = list.filter(p -> p.getFileName().toString().endsWith(".json")).toList();
         }
-        if (files.isEmpty()) {
-            assertTrue(readme.contains("Nothing is recorded yet"), "the README says so: " + readme);
-        }
         assertTrue(!ScenarioD.HAS_BINDINGS || !files.isEmpty(), "scenario D's bindings come from its recordings");
+        assertTrue(Files.readString(example()).contains("scripted"), "the example says what the committed ones are");
     }
 }

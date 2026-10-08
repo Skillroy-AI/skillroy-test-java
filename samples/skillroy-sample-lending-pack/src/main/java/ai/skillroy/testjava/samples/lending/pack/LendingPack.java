@@ -56,9 +56,11 @@ import java.util.List;
  *       {@link LoanFromTrigger}, {@link ExpectedWaiver} and {@link ExpectedTotals}, the cross-check
  *       {@code lending.waiver.evaluate} of {@code ExpectedWaiver} ({@link LendingCrossChecks}), the fingerprinter
  *       ({@link LendingFingerprinter}), the stored tables and the password row mask ({@link LendingTables}).</li>
- *   <li>Tier (b) (phase5-contracts.md 5.2, 14.1): the SQL allow-list of source {@code lending}
+ *   <li>Tier (b) (phase5-contracts.md 5.2, 5.4a, 14.1): the SQL allow-list of source {@code lending}
  *       ({@link LendingAllowList}), which lets a scenario name the strategy {@code llm-sql} and tells the inference
- *       module what a model may read.</li>
+ *       module what a model may read; and the value loaders of {@code StaffWithPermission} and {@code LendableItem}
+ *       ({@link LendingLoaders}, decision D90), through which a model's statement selects only the code and the pack
+ *       builds the value with the tier (a) resolvers' own reads.</li>
  *   <li>Pre-flight: {@value #PREFLIGHT_DATABASE}, the lending database answers a read on source {@code lending},
  *       through whichever channel serves it (the agent's {@code data.query}, or JDBC when the environment's
  *       credentials name the source).</li>
@@ -164,8 +166,9 @@ public final class LendingPack implements DomainPack {
     }
 
     /**
-     * The pack's query kinds, resolvers (in the order they are tried), verifiers, oracles and oracle cross-checks.
-     * Built once; a variant pack starts from it with {@code ResolutionCatalogue.builder(base)} and replaces by id.
+     * The pack's query kinds, resolvers (in the order they are tried), verifiers, oracles, oracle cross-checks and
+     * tier (b) value loaders. Built once; a variant pack starts from it with {@code ResolutionCatalogue.builder(base)}
+     * and replaces by id.
      */
     static ResolutionCatalogue catalogue() {
         return ResolutionCatalogue.builder()
@@ -193,6 +196,8 @@ public final class LendingPack implements DomainPack {
                 .oracle(new ExpectedWaiver())
                 .oracle(new ExpectedTotals())
                 .crossCheck(new LendingCrossChecks.WaiverEvaluate())
+                .valueLoader(new LendingLoaders.StaffLoader())
+                .valueLoader(new LendingLoaders.ItemLoader())
                 .build();
     }
 

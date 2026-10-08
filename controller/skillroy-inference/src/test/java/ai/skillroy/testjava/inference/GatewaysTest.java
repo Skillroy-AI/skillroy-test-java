@@ -16,6 +16,7 @@
 
 package ai.skillroy.testjava.inference;
 
+import ai.skillroy.testjava.inference.scripted.ScriptedGateway;
 import ai.skillroy.testjava.inference.spi.InferenceException;
 import ai.skillroy.testjava.inference.spi.InferenceGateway;
 import ai.skillroy.testjava.inference.spi.Message;
@@ -30,12 +31,14 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * phase5-contracts.md 4.4: the gateway the settings name, built once per distinct gateway settings and shared,
- * reference-counted, closed with its last lease; {@code none} answers every call {@code UNSUPPORTED} "no gateway".
+ * reference-counted, closed with its last lease; {@code none} answers every call {@code UNSUPPORTED} "no gateway"; a
+ * gateway the caller owns serves settings through {@code serve}.
  * (The {@code claude} path, the key from the environment and the recording wrapper are exercised by the child JVM of
  * {@code KeyFromEnvironmentTest}.)
  */
@@ -85,6 +88,46 @@ class GatewaysTest {
         b.close();
         c.close();
         assertEquals(before, Gateways.openGateways());
+    }
+
+    /**
+     * A gateway the caller owns serves settings until its registration ends: every lease answers through it, no lease
+     * and no registration closes it, a second registration or a registration over an open gateway is refused, and
+     * after the registration the settings build their own gateway again.
+     */
+    @Test
+    void aServedGatewayAnswersItsSettingsUntilTheRegistrationEnds() throws Exception {
+        int before = Gateways.openGateways();
+        InferenceSettings scripted = settings("scripted", null, null);
+        ScriptedGateway mine = ScriptedGateway.answering(r -> ScriptedGateway.text("served"));
+        try (Gateways.Served served = Gateways.serve(scripted, mine)) {
+            assertEquals(before + 1, Gateways.openGateways());
+            assertThrows(IllegalStateException.class, () -> Gateways.serve(scripted, mine), "one at a time");
+            InferenceGateway a = Gateways.open(scripted);
+            InferenceGateway b = Gateways.open(settings("scripted", null, Map.of("scenario", "0.10")));
+            assertEquals("served", a.complete(request()).text());
+            assertEquals("served", b.complete(request()).text(), "budgets do not select another gateway");
+            a.close();
+            b.close();
+            assertFalse(mine.closed(), "a lease never closes the caller's gateway");
+            assertEquals(before + 1, Gateways.openGateways(), "the registration holds the entry without leases");
+            InferenceGateway held = Gateways.open(scripted);
+            served.close();
+            served.close();
+            assertEquals("served", held.complete(request()).text(), "a lease outlives the registration");
+            assertEquals(before + 1, Gateways.openGateways());
+            held.close();
+            assertEquals(before, Gateways.openGateways());
+            assertFalse(mine.closed(), "nor does the registration");
+        }
+        assertEquals(InferenceException.Kind.UNSUPPORTED, assertThrows(InferenceException.class,
+                () -> Gateways.open(scripted)).kind(), "after it, scripted is an unknown gateway again");
+        InferenceGateway open = Gateways.open(settings("recorded", dir, null));
+        assertThrows(IllegalStateException.class, () -> Gateways.serve(settings("recorded", dir, null), mine),
+                "not over an open gateway");
+        open.close();
+        assertEquals(before, Gateways.openGateways());
+        assertEquals(3, mine.requests().size(), "every lease's request went to the caller's gateway");
     }
 
     @Test
