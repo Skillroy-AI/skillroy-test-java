@@ -483,7 +483,9 @@ public record SqlAllowList(String source /* the DataChannel source id */, SqlDia
                            List<AllowedTable> tables, List<String> procedures /* empty: no CALL */,
                            List<String> functions /* allowed function names beyond the built-in set; empty: none */) {
     public record AllowedTable(String name, List<AllowedColumn> columns, List<String> key /* the tie-breaker columns */,
-                               String description /* for the catalogue; nullable */) { }
+                               String description /* for the catalogue; nullable */,
+                               List<String> otherColumns /* every other column of the table, by name: never readable, so
+                                   that the guard resolves every reference (BS6, §5.3 rule 4); may be empty */) { }
     public record AllowedColumn(String name, String type /* as the catalogue names it */, boolean personal /* masked
                                 in samples and never selected into a candidate, §6.2 */, boolean sample /* small
                                 enum-like: its distinct values go into the catalogue, masked */, String description) { }
@@ -519,30 +521,40 @@ text contains no credential, no personal value, no row of a non-sample column an
 
 JSqlParser 5.4 parses the statement into an AST; the guard walks it and either returns a `GuardedStatement` (the
 statement rewritten with the injected clauses, its parameters, the tables and columns it reads) or throws
-`GuardViolation` with a reason code. Rules, in order:
+`GuardViolation` with a reason code. The rules below are those spike BS6 proved on 2026-10-08
+(`../../spikes/BS6/RESULT.md`: a prototype of the guard on every dialect of `SqlDialect`, 264 accept and 382 reject
+statements, every HSQLDB rewrite executed; the first draft's rules are corrected where the corpora broke them). In
+order:
 
 | # | Rule | Reason code |
 |---|---|---|
-| 1 | The text parses in the allow-list's dialect, as exactly one statement; a parse failure is a violation, never a pass-through (the statement is not run unparsed) | `PARSE` |
-| 2 | It is a `SELECT` (a plain select or a select with `WITH`); not `INSERT`/`UPDATE`/`DELETE`/`MERGE`, no DDL, no `CALL`/`EXEC` unless the procedure is allow-listed (then exactly `CALL p(?, …)` with parameters only), no `INTO`, no `FOR UPDATE`, no locking hints, no set operations (`UNION` and the like) in Phase 5 | `NOT_SELECT`, `DML`, `DDL`, `PROCEDURE`, `SET_OPERATION`, `LOCKING` |
-| 3 | Every table (in `FROM`, joins, subqueries, CTEs) is on the allow-list of the one source; aliases resolve; a CTE's name shadows nothing on the allow-list | `TABLE` |
-| 4 | Every column reference resolves (through aliases, CTE columns and subquery columns) to an allow-listed column of its table; `SELECT *` and `t.*` are refused; a `personal` column may appear in `WHERE`, `JOIN … ON`, `GROUP BY`, `ORDER BY` but not in the select list | `COLUMN`, `STAR`, `PERSONAL` |
-| 5 | Functions: aggregates (`COUNT`, `SUM`, `MIN`, `MAX`, `AVG`), `COALESCE`, `NULLIF`, `CASE`, `CAST`, `LOWER`, `UPPER`, `TRIM`, `LENGTH`, `SUBSTRING`, `ABS`, `ROUND`, `CURRENT_DATE` and the allow-list's `functions`; anything else is refused (no `SLEEP`, no `LOAD_FILE`, no dialect side effects) | `FUNCTION` |
-| 6 | Literals: numbers, strings and `NULL` only; no string longer than 200 characters; no hexadecimal or binary literals; a value the model was told to bind as a parameter must appear as `?` (§5.4) | `LITERAL` |
-| 7 | `ORDER BY` is present and ends with every `key` column of the driving table, ascending or as the model wrote them; when the model's `ORDER BY` lacks them the guard **appends** them (recorded in `GuardedStatement.injected`); with no `ORDER BY` at all the guard appends the key alone; an `ORDER BY` on an expression the guard cannot resolve to allow-listed columns is refused | `ORDER` |
-| 8 | A `LIMIT` (or the dialect's `FETCH FIRST n ROWS ONLY` / `TOP n`) of at most 200 is present, else injected; `OFFSET` is refused | `LIMIT` |
-| 9 | Depth: at most 3 nested subqueries, at most 8 tables, at most 20 columns in the select list, the whole text at most 4000 characters | `SIZE` |
-| 10 | Comments are stripped before parsing and refused if they survive (no `/*+ hints */`) | `COMMENT` |
+| 1 | **The guard's own lexical pass runs first**, before the parser (the parser drops comments silently, among them MySQL's executable `/*! … */` comments, which the server runs): plain comments are stripped; a hint (`/*+`), an executable, a nested or an unterminated comment is refused; parentheses nested more than 32 deep are refused (the parser's time and stack grow with depth: 640 levels overflow a 1 MB stack within the size limit of rule 9). Then the text parses in the dialect's parser preset as exactly one statement; a parse failure, and an `UnsupportedStatement` the parser returns for what it does not know, is a violation, never a pass-through (the statement is not run unparsed) | `COMMENT`, `SIZE`, `PARSE` |
+| 2 | It is a `SELECT` (a plain select or a select with `WITH`); not `INSERT`/`UPDATE`/`DELETE`/`MERGE`, also inside a `WITH` (PostgreSQL allows `WITH d AS (DELETE … RETURNING)`), no DDL, no `INTO` of any kind (`DML`); no `CALL`/`EXEC` unless the procedure is allow-listed, then exactly `CALL p(?, …)` with parameters only, on every dialect, which the channel runs through the JDBC escape `{call …}` (T-SQL has no `CALL` of its own); no set operations (`UNION` and the like) in Phase 5; no locking of any form: table hints, isolation clauses (`WITH UR` and kin), every `FOR` clause, `LOCK IN SHARE MODE`; constructs outside the guard's grammar are refused as `UNSUPPORTED`: `CONNECT BY`, `PIVOT`, `LATERAL`, `APPLY`, `DISTINCT ON`, recursive CTEs, `GROUPING SETS`, query hints | `NOT_SELECT`, `DML`, `DDL`, `PROCEDURE`, `SET_OPERATION`, `LOCKING`, `UNSUPPORTED` |
+| 3 | Every table (in `FROM`, joins, subqueries, CTEs) is on the allow-list of the one source, **by its unqualified name**: a qualified name (`schema.table`) and a database link (`table@link`; the parser's table name drops the link, so the guard checks the raw name) are refused; a quoted name must spell the declared name as the dialect folds case; aliases resolve; a CTE's name shadows nothing on the allow-list; `DUAL` is a keyless one-row table on Oracle, MySQL and MariaDB | `TABLE` |
+| 4 | Every column reference resolves (through aliases, CTE columns and derived-table columns) to an allow-listed column of its table; **the allow-list carries every column name of each allow-listed table** (`AllowedTable.otherColumns`, the names the model may not read), so that an unqualified reference in a subquery cannot bind, in the guard's view, to an allowed outer column while the database binds it to a hidden inner one: a reference that could bind to more than one table is refused unless qualified; `SELECT *` and `t.*` are refused; a `personal` column may appear in `WHERE`, `JOIN … ON`, `GROUP BY`, `HAVING` and `ORDER BY` but not in the select list, and the flag follows a value through CTEs, derived tables and scalar subqueries | `COLUMN`, `STAR`, `PERSONAL` |
+| 5 | Functions: the built-in set (`COUNT`, `SUM`, `MIN`, `MAX`, `AVG`, `COALESCE`, `NULLIF`, `CASE`, `CAST` to a scalar type only (no catalogue types such as PostgreSQL's `::regclass`), `LOWER`, `UPPER`, `TRIM`, `LENGTH`, `SUBSTRING`, `ABS`, `ROUND`, `CURRENT_DATE`, `CURRENT_TIMESTAMP`, `EXTRACT`), the dialect's default date functions (a fixed list per dialect in the guard, for example `DATEADD`/`DATEDIFF` on SQL Server and HSQLDB, `DATE_ADD`/`DATE_SUB` on MySQL and MariaDB, `ADD_DAYS`/`DAYS` on DB2, `ADD_MONTHS`/`TRUNC` on Oracle) and the allow-list's `functions`; a bare word is read as a function only from a fixed list (`SYSDATE`, `CURRENT_DATE`, …), so that a hidden column cannot be read under a function's name; window and ordered-set forms (`OVER`, `WITHIN GROUP`, `FILTER`, `KEEP`) are refused even for allowed names; anything else is refused (no `SLEEP`, no `LOAD_FILE`, no dialect side effects) | `FUNCTION` |
+| 6 | Literals: numbers, plain strings, `DATE`/`TIMESTAMP`/`INTERVAL` literals, `TRUE`/`FALSE`/`NULL`; refused: a string longer than 200 characters, backslash escapes and MySQL double-quoted strings (their meaning depends on the server's settings), dollar-quoted, `E''`, `q''` and `U&''` strings, charset introducers, hexadecimal and binary literals; a value the model was told to bind as a parameter must appear as `?` (§5.4) | `LITERAL` |
+| 7 | **`ORDER BY` is completed with a tie-breaker the guard derives**, not "the key of the driving table" (invalid after `GROUP BY` or `DISTINCT` and after a single-row aggregate, and not unique under a one-to-many join): the `GROUP BY` expressions for a grouped select, the select list for a `DISTINCT` select, nothing for a single-row aggregate, else the key columns of every table in `FROM` (a CTE or derived table contributes its derived key, or the statement is refused); the `ORDER BY` must **contain** them, in any position, and is completed by appending what is missing (an absent `ORDER BY` is added); an `ORDER BY` inside a subquery is refused; a column joined with `USING` is written unqualified (Oracle requires it); an `ORDER BY` expression the guard cannot resolve to allow-listed columns is refused | `ORDER` |
+| 8 | A row limit of at most 200 in **the dialect's one form**, injected when absent and capped when larger: `LIMIT n` on HSQLDB, MySQL, MariaDB and PostgreSQL; `FETCH FIRST n ROWS ONLY` on DB2, Oracle 12c and newer, and `GENERIC`; `TOP n` on SQL Server (its `FETCH` needs `OFFSET`); refused: a parameter or `0` as the limit, `PERCENT`, `WITH TIES`, `LIMIT a, b`, `OFFSET`, `ROWNUM` | `LIMIT` |
+| 9 | Depth and size: at most 3 nested subqueries, 8 tables, 20 columns in the select list, 32 nesting parentheses, 4000 characters | `SIZE` |
+| 10 | **The output check**: the deparsed text, which is what runs (never the model's own text), contains no comment marker, parses back to itself, and passes rules 2-9 again with the same parameters, tables and columns | `REWRITE` |
 
 The guard is deterministic and pure: the same text and allow-list give the same `GuardedStatement` or the same
-violation on every run. Its rewrite is textual through JSqlParser's deparser, so the recorded statement is what ran.
-**BS6 is the gate**: before the resolver is built, the spike's accept and reject corpora for HSQLDB, MariaDB/MySQL,
-PostgreSQL, DB2, Oracle and SQL Server (`../TODO.md`, "BS6") run as the guard's unit tests; every reject-corpus
-statement is refused, every accept-corpus statement is accepted and rewritten identically on every run, and the
-constructs the parser cannot handle per dialect are listed in the spike's result. Where a dialect's corpus shows that
-the parser cannot handle what that dialect's targets need, tier (b) stays unavailable for that dialect
-(`SqlDialect` without a passing corpus is refused by the allow-list builder with "no BS6 corpus") rather than served
-loosely (design §3.9, ai-inference Risk2).
+violation on every run (BS6: each accept statement carries its expected rewrite, byte for byte). Its rewrite is textual
+through JSqlParser's deparser, which keeps the dialect's own syntax (backticks, `::` casts); the guard runs in about
+0.1 ms per statement once warm. **BS6 is the gate, and it passed on 2026-10-08**: its accept and reject corpora for
+HSQLDB, MySQL, MariaDB, PostgreSQL, DB2, Oracle, SQL Server and `GENERIC` become the guard's unit tests in
+`skillroy-inference` (the prototype's rules are lifted, not rewritten), every reject-corpus statement refused with the
+reason the corpus names, every accept-corpus statement accepted and rewritten identically on every run, the HSQLDB
+accept corpus also executed on the embedded database. What the parser cannot handle per dialect is recorded in the
+spike's `parser-limits.sql` with the guard's outcome for each. Per dialect, in the words of this section: HSQLDB,
+MySQL, MariaDB and PostgreSQL are served; DB2 is served, with the prompt catalogue telling the model to write
+`ADD_DAYS`/`DAYS()` or singular durations (plural durations such as `- 7 DAYS` are refused as `PARSE`); Oracle is
+served for 12c and newer (11g stays unavailable: no `FETCH FIRST`, and `ROWNUM` is refused); SQL Server is served with
+`CALL` through the JDBC escape; `GENERIC` only for a database that accepts `FETCH FIRST`. A dialect without a passing
+corpus is refused by the allow-list builder with "no BS6 corpus" rather than served loosely (design §3.9, ai-inference
+Risk2). Before a dialect other than HSQLDB serves a production target, its accept corpus should also run on a real
+server of that dialect (an open item of the spike; the base runs HSQLDB only).
 
 ### 5.4 The resolver `inference.sql` (`…inference.resolve.LlmSqlResolver`)
 
