@@ -10,6 +10,8 @@ limits were checked against the source; what was run, on which JDKs and with wha
 single source of truth for Phase 2 in the way `phase1-contracts.md` is for Phase 1: where it and the design overview
 disagree on a Phase 2 detail, this file wins; where it and the code disagree, one of the two has a defect. Change the
 contract first, then the code.
+Passages that Phase 5 changes (`phase5-contracts.md` §16.1) are written in before its code and marked
+"(Phase 5, specified 2026-10-08, not yet built; P5 §n)".
 
 **What it builds on.** The Phase 1 contract as built, plus the Phase 1.x items of the same day (amendments A17-A33
 and hardening H1-H3), which are written into `phase1-contracts.md` and marked there "(1.x, built 2026-10-02)"; they
@@ -247,6 +249,10 @@ Rules:
    compiling pack has no resolver of that query kind is a compile error that lists the strategies the pack offers.
    `strategy` is a *restriction*: without it, the resolvers are whatever the pack running at bind time has for the
    kind, in its order (§8.3). The plan does not name resolver ids (decision D24).
+   (Phase 5, specified 2026-10-08, not yet built; P5 §13.1) `llm-sql` is accepted when the compiling pack declares a
+   `SqlAllowList` for at least one source (`DomainPack.sqlAllowLists()`, §6.1): the compile error above is replaced by a
+   check against the pack ("pack lending declares no SQL allow-list: llm-sql cannot be served"), and a slot may list
+   `llm-sql` alone. `llm-reason` and `llm-vision` stay rejected, with "not in this version".
 3. **Every query slot has at least one verifier.** If neither the scenario nor the pack names one for the kind,
    compilation fails: the verifier is the gate regardless of tier, and a slot without one would be unverified data.
    Fixture slots are literals written by the author and are not verified.
@@ -299,6 +305,9 @@ not be `aiAct`, `aiExpect`, `pointer` or `expectImage`. A pack id, a capability 
 a resolver, verifier or oracle id of a pack may not be `inference` or start with `inference.`: that prefix belongs
 to what the controller contributes from Phase 5 on (`ResolutionCatalogue.build()` and the pack loader enforce it;
 as built 2026-10-02, the pack loader's test is the public `DomainPacks.reservedId(String)`).
+
+(Phase 5, specified 2026-10-08, not yet built; P5 §13.1) `call` joins the reserved verb names: it is a base verb
+(P1 §8.3), and a pack that declares a verb `call` is refused.
 
 ### 3.4 A slot captured from an event
 
@@ -508,6 +517,8 @@ in `Plan` and `PlanCompiler` after the 1.x merge), so Phase 2 is the next number
 | Key | Rule |
 |---|---|
 | `inference` | `none`, `bind` or `run`. Always `none` in Phase 2. From Phase 5: `bind` when a slot lists an `llm-*` strategy, `run` when a step needs a model while steps run. A plan with `run` is never executed in `replay`; it is reported as skipped (decision B16). An executor that reads a value it does not know refuses the plan |
+| `inference` (Phase 5, specified 2026-10-08, not yet built; P5 §13.2) | version 5 writes `bind` when any slot's strategy list holds a token whose strategy `needsModel()` (`llm-sql`), and `none` otherwise; the reader accepts `none` and `bind` and refuses `run` with "not in this version" (B16). `resolveHash` covers what it covered, so a slot that gains `llm-sql` changes it |
+| a `call` step (Phase 5, specified 2026-10-08, not yet built; P5 §13.1, §13.2) | compiles like any other step; the plan shows the primitive (P1 §8.3 for the verb) |
 | `slots` | fixture and query slots in the order of the `resolve` section, then capture slots in step order |
 | `slots[].kind` | `fixture` (as Phase 1, plus optional `credential`), `query`, `capture` |
 | `slots[]` of kind `query` | `query`, `args` (keys sorted), `strategy` (**only when the scenario wrote it**), `verify` (verifier ids after defaulting), optional `credential`. Resolver ids are not written: resolvers are selected from the running pack at bind time, and the bindings file records which one answered (§9) |
@@ -537,10 +548,15 @@ schema differs compiles its own plans from the same YAML.
   (Phase 4, built 2026-10-07; P4 §7.3, D58: version 4, with the scenario key `web` and the web verbs' calls; the
   reader accepts 1 to 4, reads a version 3 plan as version 4 without `web` and refuses `web` below version 4). The
   sample's committed plans are regenerated.
+  (Phase 5, specified 2026-10-08, not yet built; P5 §13.2) Version 5 (D81) supersedes 4 as the written version, with
+  `inference: bind` when a slot lists `llm-sql` and the base verb `call`; the reader accepts 1 to 5. The sample's plans
+  are regenerated once, which changes the `planHash` of every bindings file and no value.
 - The reader accepts versions 1 and 2. A version 1 plan is read as version 2 with `inference: none`, no oracles, an
   empty graph and `bindTimeoutMs` 60000. Any other version is refused (`ScenarioException`, CLI exit 2). As built
   (2026-10-02), the reader also refuses a version 2 plan whose `inference` is anything but `none` ("needs the
   inference module, which is not part of this version") and a `bindTimeoutMs` above 600000 (10 minutes).
+  (Phase 5, specified 2026-10-08, not yet built; P5 §13.2) The reader accepts `inference` of `none` and `bind`; `run`
+  stays refused, with "not in this version" (B16).
 - The version is raised whenever a plan written by the new compiler could be executed wrongly, or not at all, by an
   executor that knows only the previous version: a new key, a new value of an enumerated key, or a changed meaning.
   A plan is never silently down-converted.
@@ -573,6 +589,7 @@ public record Plan(/* … Phase 1 components …; verify becomes List<Check> */
                    String inference, List<Oracle> oracles, List<String> resolutionGraph, long bindTimeoutMs) {
     public static final int VERSION = 2;
     // (Phase 4, built 2026-10-07; P4 §7.3: VERSION is 4, after 3 in Phase 3, P3 §4.1)
+    // (Phase 5, specified 2026-10-08, not yet built; P5 §13.2: VERSION is 5, after 4 in Phase 4, P4 §7.3)
     public record Slot(String name, String kind, Object value /*fixture*/, QuerySpec query /*query*/,
                        CredentialSpec credential /*nullable*/, CaptureDecl capture /*capture*/) {
         public Slot(String name, String kind, Object value);          // the Phase 1 constructor: a fixture
@@ -631,6 +648,10 @@ public interface DomainPack {
     default List<StoredTable> storedTables() { return List.of(); }
     /** Applied on the controller to every row read over either channel before it is kept or shown (§7.3). */
     default List<RowMask> rowMasks() { return List.of(); }
+    // (Phase 5, specified 2026-10-08, not yet built; P5 §5.2, §12.4) two more default members: sqlAllowLists(),
+    // a List<SqlAllowList> with one entry per data source (default List.of(): tier (b) is unavailable for the
+    // pack), and assistAnswerPrimitive(), by which a pack names the primitive that answers an in-application
+    // overlay (default null: no overlay)
 }
 
 public record PlannedCall(String primitive, Map<String,Object> args, Sync sync, long timeoutMs, AwaitSpec await,
@@ -656,6 +677,13 @@ public interface PreflightCheck {
     /** Phase 2 entry; the executor calls this one. data() routes by source like every other read (§7.2). */
     default String check(PreflightContext ctx) throws Exception { return check(ctx.agent()); }
     interface PreflightContext { AgentConnection agent(); DataChannel data(); String envId(); }
+}
+// (Phase 5, specified 2026-10-08, not yet built; P5 §9.5)
+public interface StepLibrary {
+    // … Phase 1 members unchanged (P1 §8.3) …
+    /** The JSON Schema of a verb's arguments, for MCP tools and the scenario schema; null = a free-form object.
+     *  The verb's compile stays the authority: the compiler does not check arguments against the schema. */
+    default Map<String,Object> argsSchema(String verb) { return null; }
 }
 ```
 
@@ -752,6 +780,8 @@ public record VerifierResult(String verifierId, boolean passed, String reason, M
 public record CredentialSpec(String realm, String key) { }      // what a slot declares
 public record CredentialRef(String realm, String id) { }
 public record Approval(State state, String by) { public enum State { NOT_REQUIRED, APPROVED } }
+// (Phase 5, specified 2026-10-08, not yet built; P5 §7.1) State gains REQUIRED, between NOT_REQUIRED and
+// APPROVED; the record keeps its shape
 public record LlmUsage(String model, String requestId, long inputTokens, long outputTokens, String costUsd) { }
 public record EnvFingerprint(int version, String hash, Map<String,String> components) { }
 ```
@@ -777,6 +807,12 @@ on 2026-10-02:
 `ResolverCandidate.confidence` (1.0 from every tier (a) resolver). `Resolution.usage` is filled by the engine from
 the ledger entries recorded during that slot's `candidates` calls; a resolver never builds it. In Phase 2 both are
 constant (1.0, null).
+
+(Phase 5, specified 2026-10-08, not yet built; P5 §5.4, §7.3) Phase 5 builds the rule above: as built in Phase 2 the
+engine passes `null` for `usage`. It then fills `usage` from the ledger entries of the slot's model call
+(`LedgerWriter`, P5 §7.3), and `confidence` is the proposal's own, carried by the candidate
+(`ResolverCandidate.confidence`), where tier (a) gives 1.0. The `Approval` of a tier (b) resolution is `REQUIRED` until
+a person approves.
 
 ### 6.4 Resolvers and verifiers
 
@@ -903,6 +939,14 @@ value type or oracle type is not supported by its codec.
   or `RESOLVER` for the two-argument constructor, with the text in `detail.message`). A `DataException`, an
   unhandled JSON-RPC error, a `RuntimeException`, a null list or a null candidate from a resolver or verifier is
   `ENVIRONMENT` (§10).
+- (Phase 5, specified 2026-10-08, not yet built; P5 §8.3) *Batchable.* A resolver may implement `BatchableResolver`
+  (`skillroy-scenario`): `prepare(query, ctx)` returns an opaque request where `candidates` would call a model, and
+  `complete(query, ctx, answer)` returns the candidates once the batch has answered. Only `re-resolve` (§8.3) uses them;
+  every other mode calls `candidates`.
+- (Phase 5, specified 2026-10-08, not yet built; P5 §5.5) *Contributed resolvers.* Besides the pack's, the engine asks
+  the resolvers that a `ResolverContributor` offers (§6.6), after the pack's and in `ServiceLoader` order, both
+  restricted by the slot's `strategy` list. Their ids start with `inference.`; the one Phase 5 offers is `inference.sql`
+  (P5 §5.4), with the strategy `LLM_SQL`.
 
 ### 6.5 Oracles
 
@@ -941,6 +985,8 @@ public interface FingerprintContext { AgentConnection agent(); DataChannel data(
 
 public enum BindMode { REPLAY, APPROVE, LIVE }   // as built 2026-10-02: label() ("replay", …) and parse(String),
                                                 // which refuses re-resolve ("not part of this version")
+// (Phase 5, specified 2026-10-08, not yet built; P5 §8.1) BindMode gains RE_RESOLVE, label "re-resolve"; parse
+// accepts it, and run and the JUnit glue refuse it: re-resolve is a command, skillroy re-resolve (P5 §8.2)
 
 public record BindOptions(BindMode mode, String envId, Path bindingsRoot, Credentials credentials,
                           Approver approver, boolean writeBindings, String approvedBy, CostLedger ledger,
@@ -954,6 +1000,8 @@ public record BindOptions(BindMode mode, String envId, Path bindingsRoot, Creden
     public static BindOptions fromSystemProperties(Path defaultBindingsRoot) throws CredentialsException;
     /* with…() copies; as built also DEFAULT_ENV and the property names PROP_MODE, PROP_ENV, PROP_BINDINGS,
        PROP_APPROVE */
+    // (Phase 5, specified 2026-10-08, not yet built; P5 §5.5) a last component InferenceSettings inference (default
+    // InferenceSettings.none()), with withInference(…); fromSystemProperties(…) reads the properties of P5 §4.4
 }
 
 /** Asked once per bind in APPROVE mode, with every resolution and oracle of the scenario. */
@@ -1003,6 +1051,10 @@ public final class ResolutionEngine implements AutoCloseable {     // as built 2
 public final class CostLedger {
     public record Entry(String scenarioId, String slot, Strategy strategy, String provider, String model,
                         String requestId, long inputTokens, long outputTokens, String costUsd) { }
+    // (Phase 5, specified 2026-10-08, not yet built; P5 §7.3) Entry gains String purpose, long cacheReadTokens, long
+    // cacheWriteTokens, boolean batch and String note; the nine-argument constructor stays, with purpose "resolve",
+    // zeros, false and null. cost-ledger.jsonl writes the new fields after the old ones, and the ledger gains a
+    // writer, LedgerWriter of …inference.budget
     public void record(Entry entry);
     public List<Entry> entries();  public boolean isEmpty();
     public int size();                       // as built 2026-10-02
@@ -1016,6 +1068,15 @@ every joined field), and `toJson(Plan)` in the shape of §11.3. `Bindings.substi
 returns. As built (2026-10-02) it also has the accessors `strategy(slot)`, `credential(slot)`, `oracle(name)`,
 `oracles()`, `resolutions()`, `captured()` and `envId()`, which the `$oracle` and `$env` lookups and the executor
 use.
+
+(Phase 5, specified 2026-10-08, not yet built; P5 §5.5) `ResolverContributor`, a `ServiceLoader` SPI of
+`…scenario.resolve` found on the thread context class loader (as `WebPath` is, P4 §6.1), lets a controller-side module
+offer resolvers to a bind without being a pack: `resolvers(pack, settings, ledger, clock)` returns them (ids start with
+`inference.`), `capabilities(settings)` contributes capability ids (`inference.gateway`, `inference.sql`) to the matrix,
+and `close()` ends the bind's use of it. It is consulted once per bind in `live`, `approve` and `re-resolve` and never
+in `replay`, where `InferenceSettings.none()` is substituted. `InferenceSettings` holds strings, booleans and paths only
+(gateway, recordings, models, effort, budgets, prices, fallbacks, images, timeouts, `logPrompts` and its file), so that
+`skillroy-scenario` names no inference type; P5 §4.4 says how it is filled.
 
 ---
 
@@ -1297,6 +1358,10 @@ Two definitions used below:
       binder first checks that the recorded `credential` has the slot's realm and, as its id, the text of the
       recorded value's key field; a mismatch, a missing `credential` on a slot that declares one, and a recorded
       `credential` on a slot that declares none are `REBIND_NEEDED` reason `UNREADABLE`.
+   (Phase 5, specified 2026-10-08, not yet built; P5 §7.1, §5.5) In step 6 a recorded slot whose `strategy` is `LLM_SQL`
+   and whose `approval.state` is not `APPROVED` is `REBIND_NEEDED` reason `NOT_APPROVED`, with the file and the slot in
+   the detail; any other recorded slot is checked as items a to d say, with no model involved. `replay` loads no
+   `ResolverContributor` and constructs no gateway, whatever the settings say.
 7. For an **oracle** node: substitute references in `args`; compute `inputsHash` and compare it with the file's
    (a difference is `REBIND_NEEDED` reason `ARGS_CHANGED`, with `oracle` set); decode, `compute`, encode. Compare
    the output with the file's recorded value (JSON equality after encoding): a difference is `REBIND_NEEDED`
@@ -1332,6 +1397,10 @@ Two definitions used below:
       `RESOLUTION_FAILED` reason `ALL_REJECTED`, with up to 20 `{resolver, label, reason}`. A resolver's own
       `ResolutionException` ends the slot at once with its reason (`TRUNCATED`, a reason the resolver chose, or
       `RESOLVER`).
+   (Phase 5, specified 2026-10-08, not yet built; P5 §5.5) In 4b the ladder is the pack's resolvers first and then the
+   contributed ones (§6.4, §6.6), in `ServiceLoader` order, both restricted by the slot's `strategy` list. A slot whose
+   list names `llm-sql` while no contributor offers it is `ENVIRONMENT` ("no resolver for strategy llm-sql: the gateway
+   is none / skillroy-inference is not on the class path / the pack declares no allow-list").
 5. Oracle nodes: compute (step 7 without the comparisons), then step 8 (reserved), then the guard. A failed guard
    in `live` or `approve` is `RESOLUTION_FAILED` reason `GUARD`: with the slots fixed at their first verified
    candidates this environment does not give a binding under which the scenario tests what it claims, so it is
@@ -1340,6 +1409,9 @@ Two definitions used below:
 7. Nothing is written, unless `writeBindings` is set: then the file is written as in `approve` step 8 with
    `approval.state = NOT_REQUIRED`. (Tier (a) resolutions are accepted on the verifier alone; approval becomes
    mandatory for tiers (b) and (c) in Phase 5.)
+   (Phase 5, specified 2026-10-08, not yet built; P5 §7.1) A tier (b) resolution in `live` is used by the run with
+   `approval` `REQUIRED`, and with `writeBindings` the file is written with `approval.state = REQUIRED`, so that a later
+   `replay` refuses it until a person approves.
 
 **`approve`**
 
@@ -1348,6 +1420,12 @@ Two definitions used below:
    samples, verifier evidence), every oracle value with its guard, the fingerprint, and the difference against an
    existing bindings file if there is one. Call the `Approver` once; the time it takes is outside the bind
    budget. Not approved: `RESOLUTION_FAILED` reason `NOT_APPROVED`; nothing is written.
+   (Phase 5, specified 2026-10-08, not yet built; P5 §7.1) Before a tier (b) slot calls a model in `approve`, the binder
+   reads the existing bindings file (`--reuse-bindings`, on by default, D82). When its `resolveHash` equals the plan's,
+   the slot's `argsHash` equals the one just computed and the recorded value passes every verifier now, the recorded
+   value is offered as the candidate, with no model call, and is written again with the new approval if approved; a
+   model is called only for a slot that fails that check. Tier (a) slots are not reused, `--no-reuse-bindings` resolves
+   every slot afresh, and the reuse is noted in the slot's provenance notes.
 8. Write `<bindingsRoot>/<envId>/<scenarioId>.bindings.json` (§9): the `<envId>` directory is created if needed;
    the text goes to a temporary file in the same directory, then an atomic move. If the content is byte-identical
    to the existing file, the file is left untouched. **The file must hold no credential value**: if
@@ -1358,6 +1436,14 @@ Two definitions used below:
    ("approve needs a bindings root …; nothing was resolved"), by `Binder.bind` and by `PlanExecutor` before the
    pre-flight (built 2026-10-03; the CLI refuses it as a usage error earlier still).
 9. The run continues with these bindings (the `resolve` command stops here instead, §12.1).
+
+**`re-resolve` (Phase 5, specified 2026-10-08, not yet built; P5 §8.1, §8.2).** `BindMode.RE_RESOLVE` binds as `live`
+(steps 3-6) with one difference: a tier (b) call is not made inline. A resolver that is a `BatchableResolver` (§6.4)
+parks the scenario at that slot, the job submits the parked requests of a round as one batch, and each scenario resumes
+with its answer; the verifiers, oracles, cross-checks and guards then run as in `live`, against the live target, in the
+round in which the scenario resumed. The file is written as in `approve` step 8, with
+`approval: {state: APPROVED, by: "re-resolve:<jobId>"}` for every slot the job resolved, and an identical file is left
+untouched. The mode belongs to the command `skillroy re-resolve` (§12.1); `run` and the JUnit glue refuse it.
 
 **No backtracking across slots.** The engine fixes each slot in graph order and never revisits an earlier one
 because a later slot or a guard failed. A scenario that needs a joint choice expresses it in its queries (the
@@ -1478,6 +1564,10 @@ Rules:
   and change without the binding changing; they are shown at approval and written to the run's own outputs,
   masked); the time of approval (the commit has it; a timestamp would make every re-resolution a diff);
   `provenance.notes`.
+- (Phase 5, specified 2026-10-08, not yet built; P5 §5.4, §7.3) For a tier (b) slot `llm` is filled, from the ledger
+  entries of the slot's model call (model, request id, tokens, cost), where tier (a) slots keep `null`; and its
+  `provenance.notes` are written, because they carry the model's rationale and the clauses the guard injected. The rest
+  of the list above stays out.
 - `approval.by` is a free-text label, never a person's name by default (Q6): `--approved-by <text>`, else the
   `Approver`'s `Decision.by`, else the mode name. As built (2026-10-02): `live --write-bindings` writes
   `--approved-by`, else `live`; the CLI's approvers (`--yes` and the terminal) and `Approver.APPROVE_ALL` give no
@@ -1486,6 +1576,10 @@ Rules:
   `NOT_REQUIRED` (written by `live` with `--write-bindings`, tier (a) only). **`replay` accepts both states** (Q2):
   a tier (a) binding is accepted on the verifier alone, so a file written by `live --write-bindings` replays like
   an approved one. Phase 2 has no switch that insists on `APPROVED`; one can be added for CI if wanted.
+- (Phase 5, specified 2026-10-08, not yet built; P5 §7.1) `approval.state` may also be `REQUIRED`: a tier (b) resolution
+  that `live --write-bindings` wrote and no person has approved. `replay` refuses an `LLM_SQL` slot whose state is not
+  `APPROVED` (`REBIND_NEEDED` reason `NOT_APPROVED`, §8.3), so the acceptance of both states above holds for tier (a)
+  slots. A file written by `re-resolve` says `APPROVED` with `by: "re-resolve:<jobId>"`.
 - `pack`, `packVersion` and `planHash` are informational (they tell a reviewer which pack and plan the file was
   made with); `resolveHash` is what `replay` compares.
 - `value` holds semantic ids and facts of the environment, never a secret field. The base does not inspect what a
@@ -1538,6 +1632,12 @@ No value is added to `FailureKind`. Phase 2 starts raising `REBIND_NEEDED` and e
 | `PRECONDITION_FAILED` | `ERROR` | executor | as Phase 1, plus: a `db` element's source is served by no channel |
 | `ENVIRONMENT` | `ERROR` | binder and executor | credentials lacking an entry that a fixture slot or a recorded binding needs; a secret field colliding with a value field; the fingerprint could not be computed (including a truncated statement); the bind budget was spent; a pack defect (a mutating call from a resolver or verifier; a null list, null candidate or null value; a `RuntimeException` from a resolver, verifier or oracle; a parameter of a form §7.1 does not allow; a catalogue that does not match the plan); a `DataException` or an unhandled JSON-RPC error from a resolver, verifier or fingerprinter; a bindings file that could not be written, or that would hold a credential value; a `DataException` or a wrong column count in a `db` check; **a non-empty cost ledger after a `replay` run** |
 | `ASSERTION` | `FAIL` | executor | as Phase 1, plus: a `db` check that does not hold; an awaited event without a captured payload value |
+
+(Phase 5, specified 2026-10-08, not yet built; P5 §7.1, §7.2, §8.2) `REBIND_NEEDED` gains the reason `NOT_APPROVED`
+(`replay` found a tier (b) slot whose approval is not `APPROVED`; the file and the slot are in the detail), and
+`RESOLUTION_FAILED` gains `BUDGET` (a budget meter refused a model call; `{scope, id, limitUsd, spentUsd, estimateUsd}`
+is in the detail). The nightly job's report lists a scenario whose batch did not end within `timeouts.batchWaitMs` as
+`BATCH_TIMEOUT`.
 
 A credentials file that is missing where one was named, unreadable, malformed or too open is not a per-scenario
 failure: it is found before anything runs (§12).
@@ -1676,6 +1776,12 @@ Mechanism:
 - the JDBC password goes from `Credentials` to `Driver.connect` inside `JdbcDataChannel` and is not held anywhere
   else.
 
+(Phase 5, specified 2026-10-08, not yet built; P5 §7.4, §6.2) What is never written also includes a prompt that was not
+masked, a model key, and a response to a request that named a secret. `PromptMask` applies the run's `SecretMask`, the
+key rule and the column rule to every part before a request is built, and `RecordingGateway` applies it once more on the
+way to disk; the model key is read from the environment only, never from a file, a property or an option;
+`inference.jsonl` holds metadata and masked structured answers, and masked prompt text only under `--log-prompts`.
+
 On the agent side a secret travels as a parameter of the primitive call that needs it (a sign-on input), under a
 neutral key: the password is the `value` of a `lending.input` call, and the Phase 1 redaction of the agent (P1 §5
 "Secret redaction") works by key name, so it would not recognise it. Amendment A34 closes that (Q3).
@@ -1757,6 +1863,13 @@ interactive session has bindings but no plan, so no factory signature is fixed h
 structured so that "execute one call with the step protocol" is one private method, which is what the session
 entry will expose (as built 2026-10-02: `executeCall` of the executor's run; neither type exists).
 
+(Phase 5, specified 2026-10-08, not yet built; P5 §12.1, §12.2, §12.3) Phase 5 builds both types in `skillroy-scenario`
+(D79), by extracting `executeCall` into a package-private call runner that the plan run and the session share.
+`ExecutorSession.open(pack, agent, options)` opens a session without a plan (the checks and pre-flight of a run, the web
+path and the fingerprint); `execute` runs one call or one verb with the step protocol and returns a `StepOutcome`, never
+throwing for a failed call. `StepJournal` is the session's masked, append-only `journal.jsonl` and exports ordinary
+scenario steps and bindings that replay with zero model calls.
+
 ---
 
 ## 12. CLI and JUnit
@@ -1774,6 +1887,8 @@ New options of `run` (the Phase 1 options stay):
 | `--yes` | `approve` only: approve everything without asking (`Approver.APPROVE_ALL`) |
 | `--approved-by <label>` | written as `approval.by` |
 | `--write-bindings` | `live` only: write the bindings file with `approval.state = NOT_REQUIRED` |
+| `--mode re-resolve` (Phase 5, specified 2026-10-08, not yet built; P5 §8.1) | refused by `run` with "re-resolve is a command: skillroy re-resolve" (exit 64), in place of "not part of this version"; the mode belongs to the command of that name |
+| `--inference claude\|recorded\|none`, `--recordings <dir>`, `--inference-file <path>`, `--budget-scenario <usd>`, `--log-prompts` (Phase 5, specified 2026-10-08, not yet built; P5 §13.4, §4.4) | the gateway, the recordings directory, the settings file, the per-scenario budget and the logging of masked prompts; also options of `resolve`. The summary prints `model cost: $x (budget $y)` after `model calls: N`, and `--json` carries `modelCost`, `budget` and a summary of the `inference` records |
 
 `approve` without `--yes` asks on the terminal: per scenario it prints the fingerprint, each resolution (slot,
 value, resolver, each statement with its parameters, the masked row sample, each verifier's reason), each oracle
@@ -1785,6 +1900,12 @@ counts as `n`. When the terminal is not interactive and `--yes` is absent, the c
 before anything runs: `approve` never blocks an unattended job. The same holds for `resolve`. The human-readable
 summary of every `run` ends with a line `model calls: 0`.
 
+(Phase 5, specified 2026-10-08, not yet built; P5 §7.1) For a tier (b) resolution the screen also shows, after the value
+and the verifier reasons: the strategy (`llm-sql`), the model, the request id and the cost; the model's rationale; the
+guarded statement, with the clauses the guard injected marked `[injected]`; the parameters and the argument each binds;
+the masked row sample; and the confidence and the row bounds the model stated, with the count found. On the JUnit path
+nothing changes: `approve` in a test is scripted or fails.
+
 **Before the agent is contacted**, `run` and `resolve` determine the bindings root and load the credentials, once.
 A credentials file that was named and is missing, or is unreadable, malformed or too open: no scenario runs, the
 JUnit XML's `environment` testcase fails with the reason (never a value), and the exit code is 1.
@@ -1795,6 +1916,7 @@ New commands:
 |---|---|
 | `resolve <yaml\|plan.json\|dir>… [--env <id>] [--bindings <dir>] [--credentials <file>] [--yes] [--approved-by <label>] [--dry-run] [--pack <jar>]… [--json]` | connects, checks `requires` and launch properties, runs pre-flight, then binds each scenario in `approve` mode, checks that every `db` source is served (since 2026-10-03) and stops: no step runs, no cleanup call is sent and `recover` is not called. `--dry-run` binds in `live` mode: it prints what would be written and writes nothing. Scenarios that need no bindings are listed as such and skipped |
 | `diff-bindings <a.bindings.json> <b.bindings.json> [--json]` and `diff-bindings --bindings <dir> --env <a> --env <b> <scenario-id> [--json]` | offline (no agent): prints the `BindingsDiff` of two files, one line per change, grouped by slot. For reviewing a re-resolution, and for comparing two environments |
+| `re-resolve`, `mcp`, `author`, `triage`, `session` (Phase 5, specified 2026-10-08, not yet built; P5 §13.4) | the commands of the AI layer, as P5 §8.2 (`re-resolve`, which refuses to start without a job budget), §9.2 (`mcp`, the MCP server over stdio), §10.2 (`author`, the planner), §11.2 (`triage`, over the output directory of a finished run) and §12.4 (`session`, an interactive session with a REPL or a script) state them. Each takes `--help`, `--json` and the exit codes below unless P5 states otherwise |
 
 `resolve` and `diff-bindings` take `--help`; `resolve` takes the connection options of P1 §8.6. Reviewed and
 corrected 2026-10-03: `--dry-run` printed the would-be bindings file with a text scrub only, so a recorded value that
@@ -1838,6 +1960,7 @@ new `ScenarioSource.scenarioDirectory()`, a default method that answers null for
 | `skillroy.bindings` | bindings root | §9: `bindings` in the parent of the scenario directory of a `ScenarioSource` that has one; for `ScenarioSource.classpath` there is no default, and the property is required when a scenario needs bindings |
 | `skillroy.credentials` | credentials file | §4 |
 | `skillroy.approve` | `all`: `Approver.APPROVE_ALL`. Any other value, or absent: `Approver.REJECT_ALL` | absent |
+| `skillroy.inference`, `skillroy.inference.recordings`, `skillroy.inference.budget.scenario`, `skillroy.inference.file`, `skillroy.inference.logPrompts` (Phase 5, specified 2026-10-08, not yet built; P5 §13.5, §4.4) | the gateway `claude`, `recorded` or `none` and its settings, read when `skillroy-inference` is on the class path | `claude` when `ANTHROPIC_API_KEY` is set and the mode is `live`, `approve` or `re-resolve`, else `none`; `replay` is always `none` |
 
 If `fromSystemProperties()` throws `CredentialsException`, the stream consists of one failing dynamic test named
 `environment` with the reason, and no scenario runs. The same single test reports an `approve` stream whose scenario
@@ -1851,6 +1974,11 @@ In `replay`, **when at least one plan of the stream needs bindings**, the stream
 `skillroy: zero model calls`, which fails when the shared `CostLedger` is not empty after the scenarios of the
 stream ran. A stream of Phase 1 scenarios only keeps its test count. Status mapping as Phase 1: `REBIND_NEEDED` and
 `RESOLUTION_FAILED` are `ERROR` and throw `ScenarioRunException` carrying the `RunResult`.
+
+(Phase 5, specified 2026-10-08, not yet built; P5 §13.5) `ScenarioTests` is unchanged in its contract. A `replay` stream
+needs no gateway; an `approve` or `live` stream with `llm-sql` slots works when `skillroy-inference` is on the class
+path and `skillroy.inference` names a gateway. `skillroy.mode=re-resolve` is the single failing `environment` test, with
+the message of P5 §8.1. The trailing `skillroy: zero model calls` test is unchanged.
 
 ---
 

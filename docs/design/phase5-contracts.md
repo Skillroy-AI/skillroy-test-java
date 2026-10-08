@@ -55,7 +55,8 @@ Phase 5 delivers:
   lets a person, an MCP client or an in-application overlay drive a live target with a model choosing actions, within
   a per-session budget and the safety rules of design §3.4 (§12);
 - **scenario YAML and `plan.json` version 5**: the strategy token `llm-sql` accepted, the plan field `inference` written
-  as `bind` when a plan needs a model at bind time, the base verb `call` for exported steps that no verb covers (§13);
+  as `bind` when a plan needs a model at bind time, the existing base verb `call` confirmed as the form of an exported
+  step that no verb covers (§13);
 - **the sample**: the lending pack's `SqlAllowList`, its prompt catalogue, scenario C `return-refunds-deposit`
   authored by the planner from a one-paragraph brief and replaying green on both seeds, scenario D
   `supervisor-return-llm-sql` (scenario A's supervisor query re-bound through tier (b) against the recorded gateway),
@@ -104,8 +105,8 @@ target JVM (B4, B15).
   and so does the planner.
 - **`skillroy-scenario`** gains: `ExecutorSession` and `StepJournal` (the names P2 §11.5 reserved) with their export;
   the `ResolverContributor` SPI and `InferenceSettings`; the `call` base verb and plan version 5; the `inference`
-  field written as `bind`; approval states and the `replay` rule for tier (b); the budget hooks of `BindOptions`
-  (§7); the scenario JSON schema generator the planner needs (§10.2). It gains **no dependency**.
+  field written as `bind`; approval states and the `replay` rule for tier (b); `BindOptions.inference` (§5.5); the
+  scenario JSON schema generator the planner needs (§10.2). It gains **no dependency**.
 - **`skillroy-cli`** gains the commands `re-resolve`, `mcp`, `author`, `triage` and `session`, and the inference options
   of `run` and `resolve` (§13.4). It depends on `skillroy-inference` and `skillroy-mcp`; the distribution zip therefore
   carries the three new third-party sets (§2.6).
@@ -327,6 +328,7 @@ optionally `ANTHROPIC_BASE_URL` for a proxy; `fromEnv()`), one client per gatewa
 
 | SPI element | Claude mapping |
 |---|---|
+| the key and the workspace | `ANTHROPIC_API_KEY` from the environment (`fromEnv()`); an organisation-level key (one not scoped to a workspace) is refused by the API with HTTP 400 unless every request carries the header `anthropic-workspace-id`, and SDK 2.34.0 adds that header on its own only for profile, OAuth and workload-identity credentials, so the gateway adds it itself for a static key from `inference.yaml` `workspaceId`, else the environment variable `ANTHROPIC_WORKSPACE_ID` (found by BS13 on 2026-10-08: the owner's key is such a key); a 400 whose message names the workspace is reported as `AUTH` with that message, never with the key |
 | `ModelClass` | the ids of `inference.yaml` `models:` (defaults in §2.2); `requestedModel` in `Usage` |
 | `Effort` | `output_config.effort` `low`/`medium`/`high`; thinking is left at the model's default (adaptive; it cannot be disabled on Opus 5.5 and is not disabled anywhere, ai-inference F12) |
 | `maxTokens` | `max_tokens` |
@@ -398,6 +400,7 @@ version: 1
 gateway: claude                 # claude | recorded | none; `replay` forces none (§5.5)
 recordings: inference/          # for recorded: a directory, relative to the file; also where `record` writes
 record: false                   # true: wrap the live gateway in RecordingGateway (profile inference-record)
+workspaceId: null              # the workspace id for an organisation-level key (§4.1); else ANTHROPIC_WORKSPACE_ID
 models:
   opus: claude-opus-5-5
   sonnet: claude-sonnet-5-5
@@ -418,6 +421,7 @@ logPrompts: false               # true writes masked prompt text into inference.
 |---|---|
 | `skillroy.inference` / `--inference claude\|recorded\|none` | the gateway; default: `claude` when `ANTHROPIC_API_KEY` is set and the mode is `live`, `approve` or `re-resolve`, else `none`; `replay` always `none` |
 | `skillroy.inference.recordings` / `--recordings <dir>` | the directory of the recorded gateway |
+| `skillroy.inference.workspaceId` / `--workspace-id <id>` | the workspace id of an organisation-level key (§4.1); an account identifier, never a secret, but kept out of run outputs all the same |
 | `skillroy.inference.budget.scenario`, `.job`, `.session` / `--budget-scenario <usd>` etc. | the budgets, decimal strings |
 | `skillroy.inference.file` / `--inference-file <path>` | the settings file; default: beside the credentials file |
 | `skillroy.inference.logPrompts` / `--log-prompts` | §7.4 |
@@ -552,7 +556,10 @@ pack declares at least one `SqlAllowList`; strategy `LLM_SQL`; id `inference.sql
    through the value type's codec by column name (a missing or extra column is rejected `SHAPE`), at most
    `ctx.maxCandidates()` of them, in the statement's order.
 5. **Provenance**: the `Statement` record carries the guarded statement, the parameters (masked), the row count and
-   the masked sample as for tier (a); `Provenance.notes` carries the rationale and the injected clauses; the
+   the masked sample as for tier (a); `Provenance` gains a `rationale` component (the model's text, masked, at most
+   2000 characters; null for tier (a)) and the injected clauses stand in the statement's text itself (the guard's
+   rewrite is what ran), so that the bindings file, which keeps `notes` out as P2 §9 says (no dates, D47), still
+   shows a reviewer why the statement was written; `Provenance.notes` carries the rest, for the run record only; the
    `Resolution` gets `confidence` from the proposal and `usage` from the ledger entries of the call (P2 §6.3's "where
    the Phase 5 fields get their values"); `Approval` is `REQUIRED` until a person approves (§7.1).
 
@@ -579,7 +586,7 @@ public interface ResolverContributor extends AutoCloseable {
     @Override default void close() { }
 }
 /** Strings only, so that skillroy-scenario names no inference type (§4.4 says how it is filled). */
-public record InferenceSettings(String gateway, Path recordings, boolean record, Map<String,String> models,
+public record InferenceSettings(String gateway, Path recordings, boolean record, String workspaceId, Map<String,String> models,
                                 Map<String,String> effort, Map<String,String> budgets, Path prices, boolean fallbacks,
                                 boolean images, Map<String,Long> timeouts, boolean logPrompts, Path file) {
     public static InferenceSettings none();            // gateway "none": what replay uses
@@ -593,7 +600,11 @@ step 4b), then the contributed ones in `ServiceLoader` order, both restricted by
 whose list names `llm-sql` while no contributor offers it is `ENVIRONMENT` ("no resolver for strategy llm-sql: the
 gateway is none / skillroy-inference is not on the class path / the pack declares no allow-list"). **In `replay` the
 engine neither loads a contributor nor constructs a gateway**, whatever the settings say (`InferenceSettings.none()`
-is substituted and logged); that, with the ledger check, is the "zero model calls" assertion's mechanism.
+is substituted and logged); that, with the ledger check, is the "zero model calls" assertion's mechanism. A contributed
+resolver is never part of the pack's catalogue (`ResolutionCatalogue.build()` keeps refusing an `LLM_*` strategy and an
+`inference.` id for a pack's own resolvers): the engine appends it to the ladder after the catalogue's resolvers and
+checks the inverse rule, an id starting with `inference.` and an `LLM_*` strategy, refusing a contributor that offers
+anything else (`ENVIRONMENT`, "contributor … offered …").
 
 ---
 
@@ -673,7 +684,8 @@ binder looks at the existing bindings file: when the file is readable, its `reso
 offered on the screen as the candidate ("recorded 2026-10-08, approved by …; verified now; no model call") and, if
 approved, written again with the new approval; a model is called only for a slot that fails that check. Tier (a) slots
 are not reused (recomputing them is free). `--no-reuse-bindings` resolves every slot afresh. The reuse is recorded in
-the slot's provenance notes ("reused from the bindings file of 2026-10-08") and in the `resolve` record.
+the `resolve` run record (`reused: true`, with the `approval.by` of the file it came from) and nowhere in the bindings
+file, which must come out byte-identical when nothing changed (§15.2; P2 §9 keeps notes and dates out of the file).
 
 ### 7.2 Budgets: `BudgetMeter`, `PriceTable` (`…inference.budget`)
 
@@ -775,8 +787,9 @@ JUnit `environment` test).
    is left untouched. `--dry-run` writes nothing and reports what would change.
 5. **The report**, `<out>/re-resolve-report.md` and `.json` (default `<out>` = `run-output/re-resolve-<jobId>/`): per
    scenario `UNCHANGED`, `CHANGED` (with the `BindingsDiff` against the previous file, one line per change), `NEW`,
-   `FAILED` (the failure kind and reason: `RESOLUTION_FAILED`, `ORACLE_SUSPECT`, `BUDGET`, `BATCH_TIMEOUT`,
-   `ENVIRONMENT`); the job's cost, the budget, the number of batches and requests, the cache-hit ratio
+   `FAILED` (the scenario's failure kind and reason as the binder reports them: `RESOLUTION_FAILED` with its reason,
+   `BUDGET` included, `ORACLE_SUSPECT`, `REBIND_NEEDED`, `ENVIRONMENT`; a scenario whose batch did not end in time is
+   `ENVIRONMENT` with the report's own reason `BATCH_TIMEOUT`, a reason of the job, not a `FailureKind`); the job's cost, the budget, the number of batches and requests, the cache-hit ratio
    (`cacheReadTokens / (inputTokens + cacheReadTokens)` over the job's ledger), the model ids; and the instruction for
    the reviewer ("approve by merging; a slot's statement and rationale are in the file's provenance"). The job's
    `cost-ledger.jsonl` and `inference.jsonl` are written beside it.
@@ -1163,13 +1176,13 @@ agent with scripted events (§15.1). An overlay's agent module never sees a mode
   module") is replaced by a compile-time check against the pack ("pack lending declares no SQL allow-list: llm-sql
   cannot be served"). `llm-reason` and `llm-vision` stay rejected with "not in this version". A slot that lists
   `llm-sql` alone is allowed (the model is the only resolver asked).
-- **The base verb `call`** (reserved from here on; a pack may not name a verb `call`):
-  `call: {primitive: <name>, args?: {…}, sync?: NONE|ACK|READY|SETTLE|EVENT (default the primitive's descriptor:
-  SETTLE for mutating, NONE for reads), timeoutMs?, await?: <A32 shape>, capture?: <P2 §3.4 shape>}` compiles to one
-  `PlannedCall` verbatim; references in `args` resolve as in any verb; a destructive primitive needs `confirm: true` in
-  `args`, which the compiler passes through (the executor already honours `CallOptions.confirm`). It exists so that a
-  journal export can always be written (§12.3) and so that a scenario can reach a primitive its pack has no verb for;
-  it is not the preferred way to write a scenario, and `skillroy author` is told not to use it.
+- **The base verb `call`** exists since Phase 1 (P1 §8.3, `BaseSteps`: `call: {primitive, args?, sync? (default NONE),
+  timeoutMs?, await? (with its capture inside)}` compiles to one `PlannedCall` verbatim; corrected 2026-10-08: the
+  first draft of this contract wrongly introduced it as new). Phase 5 amends nothing of its shape; it confirms that a
+  destructive primitive's `confirm: true` in `args` reaches the call (the executor honours `CallOptions.confirm`) and
+  that a pack may not name a verb `call` (reserved with the other base verb names). The journal export uses it as it
+  is for a step that no verb covers (§12.3), so that an export can always be written; it is not the preferred way to
+  write a scenario, and `skillroy author` is told not to use it.
 - **`inference`** is not a YAML key: the compiler writes the plan field (§13.2).
 - Nothing else changes: the grammar of P1 §8.1 with the additions of P2-P4 stands.
 
@@ -1177,10 +1190,10 @@ agent with scripted events (§15.1). An overlay's agent module never sees a mode
 
 `Plan.VERSION` becomes 5; the reader accepts 1-5 (P2 D18, P3 D41, P4 D58: one writer, older executors refuse newer
 plans). The field `inference` is written `bind` when any slot's strategy list contains a token whose strategy
-`needsModel()` and `none` otherwise; the reader accepts `none` and `bind` (and refuses `run` with "not in this
-version", B16). `resolveHash` is unchanged in what it covers (slots with their strategy tokens, oracles, graph), so a
-plan that gains `llm-sql` on a slot changes its hash, as a strategy change should. The `call` verb compiles like any
-step (the plan shows the primitive). Every committed plan of the sample is regenerated as version 5 and, because
+`needsModel()` and `none` otherwise; the reader accepts `none` and `bind` and refuses `run` with "not in this
+version": no writer of Phase 5 produces `run`, and Phase 7 replaces that refusal by B16's rule (a `run` plan is
+reported as skipped in `replay`). `resolveHash` is unchanged in what it covers (slots with their strategy tokens, oracles, graph), so a
+plan that gains `llm-sql` on a slot changes its hash, as a strategy change should. Every committed plan of the sample is regenerated as version 5 and, because
 `planHash` enters every bindings file, the sample's bindings files are regenerated once (as P3 D45 and P4 did), with
 no value changing (Q10).
 
@@ -1410,7 +1423,7 @@ item 4; all three are also exercised without a key through the recordings.
 | D77 | The planner is `claude -p --bare` as a subprocess with the generated scenario JSON schema, at most two repair rounds by `--resume`, tested with a substitute executable; its cost is recorded as provider `claude-code` | an Agent SDK sidecar in TypeScript; a planner loop written on the gateway with the tool projection | B3 chose `claude -p`; a loop of our own would re-implement the CLI's tool search, permissions and compaction (ai-inference F17, Risk5) for no gain in a test framework |
 | D78 | Triage is a separate command over a finished run, two calls (a Haiku label, a Sonnet summary), never a change of outcome or of the run's files | triage inside `run` behind a flag; a label only | the zero-call assertion of `replay` must stay absolute; a summary is what a person reads (ai-inference R14) |
 | D79 | `ExecutorSession` is built by extracting the executor's private call runner so that a plan step and a session step share one implementation; `StepOutcome` carries the classification instead of throwing | a second executor for sessions; the session calling the agent directly with its own waits | B15's "one way in"; two implementations of the step protocol would drift |
-| D80 | The journal is a masked append-only file with typed records and model provenance in `origin`; the export writes verb steps when a step was journaled by verb and `call` steps otherwise, references written back for bound values, observed expectations marked, failed steps excluded by default, a compile check before anything is written | exporting primitives only; exporting verbs by reverse-mapping calls; writing literals | a scenario should read as a person would write it, and only the verb the person or the model chose is known for certain; a literal that equals a bound value would hide the dependency and could leak a secret |
+| D80 | The journal is a masked append-only file with typed records and model provenance in `origin`; the export writes verb steps when a step was journaled by verb and the existing base verb `call` otherwise, references written back for bound values, observed expectations marked, failed steps excluded by default, a compile check before anything is written | exporting primitives only; exporting verbs by reverse-mapping calls; writing literals | a scenario should read as a person would write it, and only the verb the person or the model chose is known for certain; a literal that equals a bound value would hide the dependency and could leak a secret |
 | D81 | Plan version 5 (`inference: bind`, the `call` verb), the reader accepting 1-5; the sample's plans and bindings regenerated once | keeping 4 and tolerating the keys | P2 D18, P3 D41, P4 D58 |
 | D82 | `approve` reuses a recorded, verified, unchanged tier (b) value by default (`--reuse-bindings`) and calls a model only for the rest | always re-resolving in `approve` | a person approving a scenario should not pay and wait for an answer that has not changed (Q2) |
 | D83 | `CostLedger.Entry` gains purpose, cache tokens, batch and a note with the old constructor kept; every run, job, triage and session writes `inference.jsonl` with metadata and masked structured answers, prompt text only on request | a new ledger type; prompts always logged | the ledger is the zero-call assertion's evidence and must not change shape under its readers; prompts are personal data by default (ai-inference R15, C8) |
@@ -1426,18 +1439,18 @@ and "(Phase 5, built …)" once built:
 
 | Contract and section | Change |
 |---|---|
-| P1 §8.1 scenario YAML | the base verb `call` (§13.1); `call` reserved as a verb name |
+| P1 §8.1 scenario YAML | the existing base verb `call` confirmed (§13.1): `confirm` reaches the call; `call` reserved as a verb name |
 | P1 §8.6 CLI | the commands `re-resolve`, `mcp`, `author`, `triage`, `session`; the inference options of `run` |
 | P1 §8.5 outputs | `inference.jsonl` per run; `failure/triage.json` and `triage.md` written by `triage`, not by the run |
 | P2 §3.1 grammar | `llm-sql` accepted when the pack declares an allow-list; `llm-reason`, `llm-vision` still rejected |
-| P2 §5 `plan.json` | version 5; `inference: bind`; the `call` step |
+| P2 §5 `plan.json` | version 5; `inference: bind` |
 | P2 §6.1 `DomainPack` | `sqlAllowLists()`, `assistAnswerPrimitive()`; `StepLibrary.argsSchema` |
 | P2 §6.3 | `Approval.State.REQUIRED`; `Resolution.usage` filled from the ledger (the contradiction the inventory of 2026-10-08 found: the engine passes null today); `confidence` from the proposal |
 | P2 §6.4 rules | a resolver may be a `BatchableResolver`; contributed resolvers after the pack's |
 | P2 §6.6 | `BindMode.RE_RESOLVE`; `BindOptions.inference`; `CostLedger.Entry`'s new fields; `ResolverContributor`, `InferenceSettings` |
 | P2 §8.3 algorithm | the ladder with contributed resolvers; `replay` step 6 refusing an unapproved tier (b) slot; `approve`'s reuse; the `re-resolve` mode |
-| P2 §9 bindings file | `approval.state` may be `REQUIRED`; `llm` filled for tier (b); provenance notes carry the rationale and the injected clauses |
-| P2 §10 taxonomy | `REBIND_NEEDED` reason `NOT_APPROVED`; `RESOLUTION_FAILED` reason `BUDGET`; the job's `BATCH_TIMEOUT` |
+| P2 §9 bindings file | `approval.state` may be `REQUIRED`; `llm` filled for tier (b); `provenance.rationale` for tier (b); notes stay out of the file |
+| P2 §10 taxonomy | `REBIND_NEEDED` reason `NOT_APPROVED`; `RESOLUTION_FAILED` reason `BUDGET`; `ENVIRONMENT` with the job's reason `BATCH_TIMEOUT` |
 | P2 §11.4 never written | a prompt that was not masked; a model key; a response to a request that named a secret |
 | P2 §11.5 | built: `ExecutorSession`, `StepJournal` as §12 |
 | P2 §12 CLI and JUnit | §13.4, §13.5 |
@@ -1480,7 +1493,7 @@ sections named. A veto removes or changes what the section says; its form is sta
 | Q8 | **The planner as the `claude` CLI headless** (B3), with the person's own Claude Code login or the key, tested in the build with a substitute executable? | Yes (D77) | §10 | `B23 Q8 veto`: a planner loop on the gateway with the tool projection (more code, no CLI dependency) |
 | Q9 | **Triage as a separate command**, never inside `run`? | Yes (D78) | §11 | `B23 Q9 veto`: `run --triage` in `live` and `approve` |
 | Q10 | **Plan version 5** and the sample's bindings files regenerated once? | Yes (D81) | §13.2 | `B23 Q10 veto`: keep 4 |
-| Q11 | **The base verb `call`** for exported steps and for primitives without a verb? | Yes (D80) | §13.1 | `B23 Q11 veto`: the export refuses a session that used a raw call |
+| Q11 | ~~**The base verb `call`** for exported steps and for primitives without a verb?~~ Withdrawn 2026-10-08: the verb has existed since Phase 1 (P1 §8.3) and the export uses it as it is; nothing to decide | (withdrawn) | §13.1 | – |
 | Q12 | **The export's approval**: a tier (b) slot of an exported session is `REQUIRED` unless the exporter names `--approved-by`? | Yes | §12.3 | `B23 Q12 veto`: always `REQUIRED` |
 | Q13 | **Budget exhaustion as `RESOLUTION_FAILED` / `BUDGET`** (not `ENVIRONMENT`), a session's model calls ending, a job's further batches stopped? | Yes (D74) | §7.2 | `B23 Q13 veto`: `ENVIRONMENT` |
 | Q14 | **Prompts not logged by default**: `inference.jsonl` holds metadata and masked structured answers; prompt text only with `--log-prompts`? | Yes (D83) | §7.4 | `B23 Q14 veto`: masked prompts always logged |

@@ -999,7 +999,7 @@ the build.** Built 2026-10-07. **Blocks.** Nothing.
 2026-10-08 without the owner so that the groundwork (spikes BS6 and BS13) and, on the owner's word, the build can
 start; they produced the contract's decisions D70-D87 (§16). **Provisional** until the owner answers, through the
 interview page (`B23 ok`, or `B23 Qn veto` per row; named veto forms as the contract states them).
-**Question.** Eighteen points the contract could have decided either way.
+**Question.** Eighteen points the contract could have decided either way (Q11 withdrawn the same day: nothing to decide).
 
 | Q | Question | Provisional answer | Veto form offered |
 |---|---|---|---|
@@ -1013,7 +1013,7 @@ interview page (`B23 ok`, or `B23 Qn veto` per row; named veto forms as the cont
 | Q8 | The planner as the `claude` CLI headless (B3), tested with a substitute executable? | Yes (D77) | `B23 Q8 veto`: a planner loop on the gateway |
 | Q9 | Triage as a separate command, never inside `run`? | Yes (D78) | `B23 Q9 veto`: `run --triage` |
 | Q10 | Plan version 5, the sample's bindings regenerated once? | Yes (D81) | `B23 Q10 veto`: keep 4 |
-| Q11 | The base verb `call`? | Yes (D80) | `B23 Q11 veto`: the export refuses raw calls |
+| Q11 | ~~The base verb `call`?~~ Withdrawn 2026-10-08: the verb has existed since Phase 1 (P1 §8.3); the export uses it as it is | – | – |
 | Q12 | An exported tier (b) slot is `REQUIRED` unless `--approved-by` is given? | Yes | `B23 Q12 veto`: always `REQUIRED` |
 | Q13 | Budget exhaustion as `RESOLUTION_FAILED` / `BUDGET`? | Yes (D74) | `B23 Q13 veto`: `ENVIRONMENT` |
 | Q14 | Prompts not logged by default (`inference.jsonl` holds metadata and masked structured answers)? | Yes (D83) | `B23 Q14 veto`: masked prompts always logged |

@@ -9,6 +9,8 @@ run, on which JDKs and with what result is in `../TODO.md`. **Scope:** Phase 3 o
 ("Roadmap": waiver rules and oracles, sample scenario B). This file is the single source of truth for Phase 3 in the
 way `phase2-contracts.md` is for Phase 2: where it and the design overview disagree on a Phase 3 detail, this file
 wins; change the contract first, then the code.
+Passages that Phase 5 changes (`phase5-contracts.md` §16.1) are written in before its code and marked
+"(Phase 5, specified 2026-10-08, not yet built; P5 §n)".
 
 **What it builds on.** The Phase 1 contract as built (with Phase 1.x) and the Phase 2 contract as built, both stated
 in their own files. Phase 2 reserved the seams this phase fills: the `crossCheck` key of an oracle entry (P2 §3.1,
@@ -219,6 +221,9 @@ version 2 plan as the Phase 2 code computed it. The rule "a
 fixture field whose key looks secret is refused" (P2 §3.1 rule 5) applies to version 2 **and later**; version 1
 relies on A25. The sample's committed plans are regenerated (all of them: `planVersion` and `packVersion` change).
 
+(Phase 5, specified 2026-10-08, not yet built; P5 §13.2) Version 5 (D81) supersedes 4 as the written version, as 4
+superseded 3; the reader accepts 1 to 5.
+
 **`resolveHash`** covers `{slots (fixture and query), oracles, resolutionGraph}` as P2 §5. An oracle entry's
 `crossCheck` is part of `oracles` and therefore of the hash **when it is written**; an entry without one is written
 exactly as in Phase 2, so the `resolveHash` of every Phase 2 scenario is unchanged by this version. `aggregates` are
@@ -233,6 +238,7 @@ public record Plan(/* … Phase 2 components … */) {
     // (Phase 4, built 2026-10-07; P4 §7.3: VERSION 4, reads 1 to 4; Plan and Scenario gain a last component
     // WebSettings web, null when the YAML has no web key (effectiveWeb() then answers WebSettings.DEFAULT), and keep
     // the Phase 3 constructors)
+    // (Phase 5, specified 2026-10-08, not yet built; P5 §13.2: VERSION 5, reads 1 to 5)
     public record Oracle(String name, String fn, Object args, Object mustEqual, boolean hasMustEqual,
                          CrossCheckSpec crossCheck /*nullable*/) {
         public Oracle(String name, String fn, Object args, Object mustEqual, boolean hasMustEqual); // Phase 2: null

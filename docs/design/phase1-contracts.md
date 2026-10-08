@@ -10,6 +10,8 @@ values come from the end-to-end review and the Phase 1.x integration. **Scope:**
 `base-framework-design.md` ("Roadmap", Phase 1). This file is the single source of truth for Phase 1. Where it and
 the design overview disagree on a Phase 1 detail, this file wins; where it and the code disagree, one of the two has
 a defect. Change the contract first, then the code. Names are final (decision B2).
+Passages that Phase 5 changes (`phase5-contracts.md` §16.1) are written in before its code and marked
+"(Phase 5, specified 2026-10-08, not yet built; P5 §n)".
 
 **Phase 1.x.** Two sets of changes were decided on 2026-10-02 and are written into the sections they change:
 amendments A17-A33 (A24 is withdrawn, A26 is superseded) and the hardening items H1-H3, which carry the dispositions
@@ -1859,6 +1861,10 @@ value, and the absence of the key, selects the pack's `promptPolicy()` (the name
 ignored, and there is no SPI for pack-defined kinds yet. `timeouts` has one key, `step` (`10s`, `500ms`, `2m`, or
 a number of milliseconds; default 10 s).
 
+(Phase 5, specified 2026-10-08, not yet built; P5 §13.1) The base verb `call` (§8.3) is reserved: a pack may not declare
+a verb named `call`, and a pack that does is refused. The row for `call` in the §8.3 table says how the verb is amended.
+No top-level key is added: `inference` is a plan field the compiler writes (P5 §13.2), not a YAML key.
+
 ### 8.2 Plan
 
 `PlanCompiler.compile(Path yaml, DomainPack pack)` is deterministic: the same YAML and pack version produce a
@@ -1944,6 +1950,9 @@ public interface StepLibrary {
     Set<String> verbs();
     /** args is the YAML value of the verb (Map, List, String, Number, …) with $references left intact. */
     List<PlannedCall> compile(String verb, Object args, CompileContext ctx) throws ScenarioException;
+    // (Phase 5, specified 2026-10-08, not yet built; P5 §9.5) default Map<String,Object> argsSchema(String verb)
+    // { return null; }: the JSON Schema of a verb's arguments, for MCP tools and the scenario schema; null = a
+    // free-form object. compile stays the authority; the schema is not checked at compile time
 }
 /** ctx.addCleanup(call): a call that must run when the scenario ends, however it ends (for example re-enabling a
  *  timer a verb switched off). Cleanup calls run in reverse registration order; their failures are logged in
@@ -2014,6 +2023,7 @@ errors):
 | Verb | Compiles to |
 |---|---|
 | `call: {primitive, args?, sync?, await?}` | any primitive; `sync` defaults to `NONE`. `sync: EVENT` requires `await: {topic\|topics, match?, within?}` (`within` defaults to the step timeout, at most 600 s); any other sync forbids `await` |
+| `call`, as amended (Phase 5, specified 2026-10-08, not yet built; P5 §13.1) | `call: {primitive, args?, sync?, timeoutMs?, await?, capture?}`: `sync` defaults to the primitive's descriptor (`SETTLE` for a mutating primitive, `NONE` for a read) where the row above defaults it to `NONE`; the verb gains the keys `timeoutMs` and `capture`; a destructive primitive needs `confirm: true` in `args`, which the compiler passes through. It compiles to one `PlannedCall` verbatim, and a pack may not declare a verb `call`; a journal export relies on it (P5 §12.3) |
 | `click: {by\|target, rung?, focusTimeoutMs?, activateWindow?, force?, fallback?, strict?, await?}` | `swing.click`, SETTLE; with `await`, EVENT then a settle call. **(1.x, built 2026-10-02)** `fallback` and `strict` (A29) and `await` (A32), see below |
 | `type: {by\|target, text, enter?, mode?, clear?, force?, await?}` | `swing.type`, SETTLE; with `await`, EVENT then a settle call. **(1.x, built 2026-10-02)** `await` (A32) |
 | `press: {key, target?\|by?, modifiers?, force?, await?}` | `swing.key`, SETTLE; with `await`, EVENT then a settle call. **(1.x, built 2026-10-02)** `await` (A32) |
@@ -2250,6 +2260,8 @@ removed):
 | `bindings.json` | `{scenarioId, planHash, resolutions:{slot:{strategy, value}}}`, the Phase 1 subset of the design's shape. **(Phase 2, built 2026-10-02)** written when the bind ends and again at run end, in the shape of P2 §11.3 (with `resolveHash`, `mode`, `envId`, `env`, `oracles`, `captured`, and per slot its credential reference, never a joined field) |
 | `failure/` (failures during steps or verify; never after the agent is lost) | `snapshot.json`, `app-state.json`, `dialogs.json`, `events.json` (the last 200 events) and `capture.png` (when `swing.capture.paint` is OK). The UI as indented text is also in `RunResult.detail.snapshot`. (Phase 4, built 2026-10-07; P4 §6.4: for a target with an indexed browser also `web-browsers.json` and, for each browser visible in Swing, at most four, `web-<ref>-aria.json` and `web-<ref>.png`, or `web-<ref>-error.txt` for a failed read; `web-trace.zip` when the scenario traced the CDP path and no call may carry a secret; P4 §6.2: `RunResult.detail.snapshot` renders a `WEB` surface after the Swing windows) |
 | `artifacts/capture.png` | kept on success when the scenario lists `artifacts: [capture]` |
+| `inference.jsonl` (Phase 5, specified 2026-10-08, not yet built; P5 §7.4) | beside `cost-ledger.jsonl` (P2 §11.3): one masked record per gateway call of the run, with the provider, the requested and the answering model, the request id and fingerprint, the stop reason, the token counts, the cost and the masked structured answer; the masked prompt text only under `--log-prompts`. `re-resolve`, `triage` and `session` write one into their own output directories |
+| `failure/triage.json`, `failure/triage.md` (Phase 5, specified 2026-10-08, not yet built; P5 §11.2) | written by `skillroy triage` over a finished run that ended `FAIL` or `ERROR`, never by the run: the label and the summary a model gave (both answers, the models, request ids and cost) and a readable copy. The command's own `inference.jsonl` and `cost-ledger.jsonl` go to `<run dir>/triage/`; the run's `run.jsonl`, `junit.xml` and status are untouched |
 
 **A25 fixture secrets masked (1.x, built 2026-10-02; decision B18).** A fixture field whose key
 `SecretKeys.looksSecret` (§3), everything below such a field, and a whole slot whose name looks secret, are secrets
@@ -2323,6 +2335,8 @@ agent home is not bundled.
 | `events [--since n] [--topics globs] [--count n] [--timeout <d>]` | streams events until interrupted |
 | `compile <yaml\|dir>… [--out <dir>] [--check] [--pack <jar>]…` | writes `<scenario-id>.plan.json` next to the YAML or into `--out`; `--check` writes nothing and reports a missing or stale plan |
 | `run <yaml\|plan.json\|dir>… [--out <dir>] [--junit <file>] [--suite <name>] [--degraded-as skipped\|failure\|pass] [--step-timeout <d>] [--pack <jar>]…` | compiles and loads every file first (a broken file means nothing runs), then runs them in order; with `--out` each scenario writes into `<out>/<scenario-id>/`. **(Phase 2, built 2026-10-02; P2 §7.2)** `--pack <jar>` accepts any jar (or class directory), with or without a `DomainPack` in it, so that a JDBC driver for a controller-side source reaches the loader the CLI sets as context class loader while scenarios run (that loader is as in Phase 1); the Phase 2 `run` options (`--mode`, `--env`, `--bindings`, `--credentials`, `--yes`, `--approved-by`, `--write-bindings`) and the commands `resolve` and `diff-bindings` are P2 §12.1 |
+| `re-resolve`, `mcp`, `author`, `triage`, `session` (Phase 5, specified 2026-10-08, not yet built; P5 §13.4) | the commands of the AI layer: batch re-resolution of an environment's bindings (P5 §8.2; it needs a job budget), the MCP server over stdio (P5 §9.2), the planner (P5 §10.2), triage of a finished run (P5 §11.2) and the interactive session (P5 §12.4). Each takes `--help` and `--json`, the connection options below where it connects, and the exit codes below unless P5 states otherwise |
+| `run` and `resolve`, inference options (Phase 5, specified 2026-10-08, not yet built; P5 §13.4) | `--inference claude\|recorded\|none`, `--recordings <dir>`, `--inference-file <path>`, `--budget-scenario <usd>` and `--log-prompts`; the summary prints `model cost: $x (budget $y)` after `model calls: N`, and `--json` carries `modelCost`, `budget` and a summary of the `inference` records. `run --mode re-resolve` is refused (P2 §12.1) |
 
 Every command takes `--json` and `--help`. Connection (all commands except `jvms`, `attach`, `compile`):
 `--pid <pid>` (through its discovery file), or `--port <port>` with `--token-file <file>`, or neither (the only live
