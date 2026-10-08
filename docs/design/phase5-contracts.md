@@ -1118,7 +1118,18 @@ public record CheckOutcome(String path, Object matcher, Object actual /* masked 
 Rules. A session has no plan: `requires` is what a verb's calls need (checked per call against the matrix, as the
 dispatcher would refuse them anyway), the step timeout is the option's, and an unexpected prompt is handled by the
 pack's `PromptPolicy` as in a run, except that `FAIL` ends the *step* (`FAIL` / `ASSERTION`, the dialog in the detail)
-and not the session. `readOnly` refuses any mutating or destructive call before it is sent (`READ_ONLY` in the outcome,
+and not the session. As built (2026-10-08, E1; D79): the executor's private call runner became the package-private
+`CallRunner`, used by the plan run and the session alike, and the plan run is unchanged; correlation ids are
+`<sessionId>/<stepId>/<n>` (one verb step may make several calls, as `<scenarioId>/<stepId>/<n>` in a run); a `confirm`
+argument is taken out of every call's parameters (plan steps, cleanup and sessions) and sent as `_meta.confirm`
+(`CallRunner.confirmation`), which the executor did not do before, so that a scenario's `confirm: true` reaches the
+agent (D89); `readOnly` also refuses a primitive the target's catalogue does not list (it cannot be shown to be
+read-only: `ERROR` / `ENVIRONMENT` with `READ_ONLY` in the detail, journaled with `executed: 0`); a `MODEL` origin's
+`confirm` is stripped from a verb's top-level and nested `args` too; a check is evaluated once, without waiting, and a
+`db.<table>` check is refused with a reason; each `resolve` gets the default 60 s budget and a failed one throws and
+is not journaled; a verb's cleanup calls are not run (`recoverOnClose` takes their place); the web path opens with
+tracing off (a session keeps no failure evidence and any step may type a secret); `budget(scope, spent, limit,
+exhausted)` writes the `budget` record and `primitives()` answers the catalogue. `readOnly` refuses any mutating or destructive call before it is sent (`READ_ONLY` in the outcome,
 nothing journaled as executed). A destructive call needs `confirm: true` in its arguments, which only an `Origin` of kind
 `PERSON` may carry: the session strips `confirm` from a `MODEL` origin's call and the call then fails with
 `CONFIRM_REQUIRED` as the agent answers it (design §3.4). Every outcome's `detail` and `lastResult` pass the session's
@@ -1173,6 +1184,24 @@ not in the journal.
 
 `skillroy session export` (§13.4) and `skillroy_session_export` (§9.3) write the three files (`<id>.yaml`,
 `plan/<id>.plan.json`, `bindings/<env>/<id>.bindings.json`) and print the report.
+
+As built (2026-10-08, E1). The journal's `session-start` also carries `startedAt` and `primitives` (primitive to
+capability id, which an export from a file needs for `requires`), a `resolve` entry `verify` and `credential`, an
+`oracle` entry `args`, and a step's `outcome.detail.captured` (so that later values are written back as references); the
+`description` goes into the leading comment block, not a key (the strict loader has no `description` key), with the
+session, pack, environment, "Acted: …" and "Model cost: …" lines; `DEGRADED` counts as passed; without `includeFailed`
+every failed step is left out and the passing steps after it are kept, with it the first failed step is included and
+nothing after it; a raw call's own `timeoutMs` is dropped with a report note and `await.timeoutMs` is written as
+`within: "<n>ms"`, while a capture without an `await` is an `ExportException`; an `observe` whose value was masked is
+skipped with a report note (a masked step argument still fails the export); a `REQUIRED` approval carries `by: "live"`
+(the binder's label for what `live` writes) and a tier (a) slot `NOT_REQUIRED` with `by` the exporter's label or
+`live`; the export reads a journal back from its file to the same result. `ScenarioSchema` validates every committed
+sample scenario (`ScenarioSchemaCommittedTest` in both samples) and reports problems with paths such as
+`$.resolve.supervisor.strategy`; `requires` items are strings with the capability ids in a description (the grammar
+allows alternatives); `Schemas` lives in `ai.skillroy.testjava.scenario` (not the inference SPI package of §3.3: the
+scenario module needed it first; the inference module reuses it) with `ofRecord` (strict) and `ofArguments` (lenient,
+`$` references allowed, primitive components only); the plan reader also checks that a version 5 plan's `inference`
+equals what its slots imply.
 
 ### 12.4 The session service (`…inference.session`)
 
@@ -1267,7 +1296,11 @@ version": no writer of Phase 5 produces `run`, and Phase 7 replaces that refusal
 reported as skipped in `replay`). `resolveHash` is unchanged in what it covers (slots with their strategy tokens, oracles, graph), so a
 plan that gains `llm-sql` on a slot changes its hash, as a strategy change should. Every committed plan of the sample is regenerated as version 5 and, because
 `planHash` enters every bindings file, the sample's bindings files are regenerated once (as P3 D45 and P4 did), with
-no value changing (Q10).
+no value changing (Q10). As built (2026-10-08, E1): `Plan.inferenceOf(slots)` writes the field; `run` is refused with
+"inference 'run' (a model at run time) is not in this version", `bind` below version 5 and unknown values are refused;
+`llm-sql` below version 5 is "needs a version 5 plan"; the seven committed plans changed `planVersion` only and the four
+bindings files `planHash` only (regenerated through `PlansUpToDateTest` and `PackOnRealSchemaTest` with their update
+properties, as Phase 4 did).
 
 ### 13.3 The scenario JSON schema and its validator (`skillroy-scenario`)
 
@@ -1502,6 +1535,7 @@ item 4; all three are also exercised without a key through the recordings.
 | D84 | Model classes with the defaults Sonnet (resolve, session, summary), Opus (the planner), Haiku (labels); refusal fallbacks on and recorded; images off; Fable never configured by default | one model everywhere; fallbacks off; images on | ai-inference R7 and F10 (cost and retention); a fallback that answers a refusal keeps a nightly job alive and the ledger says who answered (Q6) |
 | D85 | The agent's `StatementGuard` stays as it is and `SqlGuard` lives on the controller only | JSqlParser inside the agent for `data.query` | B4: nothing but the JDK in a target JVM; the model's SQL runs through the controller's channel or through `data.query` after the controller's guard |
 | D86 | The calibrated-oracle case of gap 26 is answered by the export: an observed value is an ordinary expectation marked in the YAML and listed in the report for the reviewer; no run-time status | a `DEGRADED` outcome for a scenario with observed expectations; refusing to export them | the reviewer who commits the scenario decides; a run cannot tell an observed value from a specified one after the comment is removed |
+| D89 | A `confirm` argument of any call (a plan step, a cleanup call, a session step) is taken out of the parameters and sent as the request's `_meta.confirm` (2026-10-08, E1) | leaving `confirm` as an ordinary parameter | the agent reads the confirmation only from `_meta`, so a scenario's `confirm: true` never reached it before; no primitive in the base or the samples has a parameter of that name; a `MODEL` origin's `confirm` is stripped before this mapping (§12.2) |
 | D88 | The Anthropic Java SDK is pinned to its current line at build time (2.69.x on 2026-10-08) rather than the research note's 2.34.0; the client is built explicitly from `ANTHROPIC_API_KEY` with the SDK's retries and logging off, and the gateway retries within its own deadline; MCP comes as `mcp-core` + `mcp-json-jackson2`; the root POM imports `jackson-bom` | staying on 2.34.0 with work-arounds (an untyped fallback parameter, no typed workspace id, unknown 5.5 content blocks); `fromEnv()`; the SDK's own retries; the `mcp` convenience artifact | spike BS13 (F-2, F-7, F-9, F-11): 2.34.0 predates the 5.5 models and the fallback betas; `fromEnv()` reads profiles, auth tokens and custom headers from the operator's shell; the SDK's retries are per attempt without a cap on `retry-after`; `mcp` brings a second Jackson |
 | D87 | The session service offers the pack's verbs (and base primitives only by policy), one action at a time, with the model's `confirm` stripped; the overlay bridge rides the existing event stream and answers through a pack-named primitive | a free tool set; parallel actions; a dedicated transport for overlays | design §5 and B15: the verbs are what exports well, a model's request is never a confirmation, no new transport |
 

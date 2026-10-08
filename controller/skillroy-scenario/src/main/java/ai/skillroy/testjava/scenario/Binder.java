@@ -71,6 +71,13 @@ import java.util.Set;
  *   <li>{@code approve}: as {@code live}, then asks the {@link Approver} once and, if approved, writes the bindings
  *       file atomically (an identical file is left untouched; a text the run's mask would change is refused).</li>
  * </ul>
+ * Phase 5 (phase5-contracts.md 5.5, 7.1, 8): a slot naming a model token ({@code llm-sql}) gets the contributed
+ * resolvers after the pack's (never in {@code replay}); a value a model found is {@code REQUIRED} until approved, so
+ * that {@code live --write-bindings} writes it {@code REQUIRED} and {@code replay} refuses it (REBIND_NEEDED, reason
+ * {@code NOT_APPROVED}) until {@code approve} writes it {@code APPROVED}; {@code approve} reuses a recorded tier (b)
+ * value that is unchanged and still verified, without asking a resolver ({@code BindOptions.reuseBindings}, D82);
+ * {@code re-resolve} is refused by this one-shot bind and driven by {@link #bindStepwise}, which parks a slot whose
+ * ladder reaches a batchable resolver and writes the file {@code APPROVED} by the job.
  * Substitution during the graph walk uses values without joined secret fields; the credential join is applied after
  * the walk and the guards, then {@link #check} runs. No backtracking across slots (decision D5): a failure names the
  * already-bound query slots it depended on ({@code fixedUpstream}). A bind never mutates the target.
@@ -242,13 +249,16 @@ public final class Binder {
     }
 
     /**
-     * The full bind of phase2-contracts.md 8. Never mutates the target.
+     * The full bind of phase2-contracts.md 8. Never mutates the target. A one-shot bind cannot park a slot, so
+     * {@code re-resolve} is refused here (phase5-contracts.md 8.1: a command, never part of a run); the job binds with
+     * {@link #bindStepwise}.
      *
      * @param pack the running pack
      * @param agent the target's agent (resolvers and verifiers see a read-only view)
-     * @param options mode, environment, bindings root, credentials, approver, ledger and clock
+     * @param options mode, environment, bindings root, credentials, approver, ledger, clock and inference settings
      * @param listener receives the run.jsonl records of the bind; null ignores them
-     * @throws BindException REBIND_NEEDED, RESOLUTION_FAILED or ENVIRONMENT, with the reason and detail of section 10
+     * @throws BindException REBIND_NEEDED, RESOLUTION_FAILED or ENVIRONMENT, with the reason and detail of section 10;
+     *     ENVIRONMENT "re-resolve is a command: skillroy re-resolve" for mode {@code re-resolve}
      * @throws AgentLostException if the agent is gone
      * @throws InterruptedException if the thread is interrupted
      */
@@ -256,6 +266,47 @@ public final class Binder {
                                    BindListener listener)
             throws BindException, AgentLostException, InterruptedException {
         return bind(plan, pack, agent, options, listener, null, null);
+    }
+
+    /**
+     * A bind that may stop at a slot (phase5-contracts.md 8.2 step 2, 8.3): in {@code re-resolve}, a query slot whose
+     * ladder reaches a {@code BatchableResolver} is parked with the request the resolver prepared, and the returned
+     * {@link BindStep.Parked} goes on with the batch's answer ({@link BindStep.Parked#resume}) until the next park or
+     * the end. Everything else is the bind of {@link #bind}: the ladder (tier (a) resolvers are asked inline), the
+     * verifiers on every candidate, the oracles, cross-checks and guards, the credential join and the reference check;
+     * at the end, the file is the one {@code approve} writes, every resolution {@code APPROVED} by
+     * {@code options.approvedBy()} (the job's {@code re-resolve:<jobId>}; {@code re-resolve} when none), written when
+     * {@code options.writeBindings()} (false: a dry run, the outcome's file is what would be written; it must hold no
+     * credential value either way). In {@code replay}, {@code live} and {@code approve} nothing parks: the bind runs as
+     * {@link #bind} does and the step is {@link BindStep.Done}.
+     *
+     * <p>A parked bind holds its engine (the contributors and the gateways they opened; its JDBC connections are closed
+     * while it is parked and opened again on resumption) until it is resumed to the end, fails or is closed; the time
+     * it is parked is not counted against the bind budget.
+     *
+     * @throws BindException as {@link #bind} (the engine is then closed)
+     * @throws AgentLostException if the agent is gone
+     * @throws InterruptedException if the thread is interrupted
+     */
+    public static BindStep bindStepwise(Plan plan, DomainPack pack, AgentConnection agent, BindOptions options,
+                                        BindListener listener)
+            throws BindException, AgentLostException, InterruptedException {
+        Objects.requireNonNull(plan, "plan");
+        BindOptions effective = options == null ? BindOptions.defaults() : options;
+        requireBindingsRoot(plan, effective);
+        ResolutionEngine engine = new ResolutionEngine(pack, agent, effective, Duration.ofMillis(plan.bindTimeoutMs()),
+                listener, null);
+        engine.scenario(plan.scenarioId());
+        BindStep step = null;
+        try {
+            step = new Run(plan, engine, agent, null, effective, listener == null ? BindListener.NONE : listener,
+                    true).start();
+            return step;
+        } finally {
+            if (!(step instanceof BindStep.Parked)) {
+                engine.close();
+            }
+        }
     }
 
     /** As the public form, reading through the executor's data channels when {@code data} is not null. */
@@ -275,11 +326,18 @@ public final class Binder {
             throws BindException, AgentLostException, InterruptedException {
         Objects.requireNonNull(plan, "plan");
         BindOptions effective = options == null ? BindOptions.defaults() : options;
+        if (effective.mode() == BindMode.RE_RESOLVE) {
+            throw new BindException(FailureKind.ENVIRONMENT, null, null, "re-resolve is a command: skillroy"
+                    + " re-resolve (a re-resolve bind parks slots and is driven by Binder.bindStepwise, never by a"
+                    + " run)", RunLog.fields("mode", effective.mode().label(), "envId", effective.envId()));
+        }
         requireBindingsRoot(plan, effective);
         try (ResolutionEngine engine = new ResolutionEngine(pack, agent, effective,
                 Duration.ofMillis(plan.bindTimeoutMs()), listener, data)) {
-            return new Run(plan, engine, agent, caps, effective, listener == null ? BindListener.NONE : listener)
-                    .bind();
+            engine.scenario(plan.scenarioId());
+            BindStep step = new Run(plan, engine, agent, caps, effective, listener == null ? BindListener.NONE
+                    : listener, false).start();
+            return ((BindStep.Done) step).outcome();
         }
     }
 
@@ -292,10 +350,11 @@ public final class Binder {
      * @throws BindException ENVIRONMENT naming the missing root
      */
     static void requireBindingsRoot(Plan plan, BindOptions options) throws BindException {
-        boolean writes = options.mode() == BindMode.APPROVE
-                || options.mode() == BindMode.LIVE && options.writeBindings();
+        boolean writes = options.mode() == BindMode.APPROVE || (options.mode() == BindMode.LIVE
+                || options.mode() == BindMode.RE_RESOLVE) && options.writeBindings();
         if (writes && options.bindingsRoot() == null && plan.needsBindings()) {
-            String what = options.mode() == BindMode.APPROVE ? "approve" : "live with writeBindings";
+            String what = options.mode() == BindMode.APPROVE ? "approve"
+                    : options.mode().label() + " with writeBindings";
             throw new BindException(FailureKind.ENVIRONMENT, null, null, what + " needs a bindings root to write the"
                     + " bindings file of " + plan.scenarioId() + " to, and none was given (the CLI's --bindings,"
                     + " the JUnit glue's skillroy.bindings, BindOptions.withBindingsRoot); nothing was resolved",
@@ -333,36 +392,86 @@ public final class Binder {
         return out;
     }
 
-    /** One full bind. */
-    private static final class Run {
+    /**
+     * One full bind. The graph walk of {@code live}, {@code approve} and {@code re-resolve} keeps its place
+     * ({@link #position}), so that a stepwise bind parked at a query slot resumes there.
+     */
+    private static final class Run implements BindStep.Parked.Continuation {
 
         private final Plan plan;
         private final ResolutionEngine engine;
         private final AgentConnection agent;
         private final BindOptions options;
         private final BindListener listener;
+        /** True for a stepwise bind: a batchable resolver may park its slot (re-resolve only). */
+        private final boolean mayPark;
         /** The target's capability states for guarded cross-checks; read on first need when not given. */
         private CapabilityMatrix caps;
         /** The lines of the guarded cross-checks skipped so far (6.2). */
         private final List<String> skipped = new ArrayList<>();
+        /** The fingerprint of this bind, once computed. */
+        private EnvFingerprint env;
+        /** The index of the resolution graph node the walk visits next. */
+        private int position;
+        /** approve's reuse (P5 7.1): the existing bindings file, read once on first need; null when none is usable. */
+        private BindingsFile existing;
+        private boolean existingRead;
 
         Run(Plan plan, ResolutionEngine engine, AgentConnection agent, CapabilityMatrix caps, BindOptions options,
-            BindListener listener) {
+            BindListener listener, boolean mayPark) {
             this.plan = plan;
             this.engine = engine;
             this.agent = agent;
             this.caps = caps;
             this.options = options;
             this.listener = listener;
+            this.mayPark = mayPark;
         }
 
-        BindOutcome bind() throws BindException, AgentLostException, InterruptedException {
+        BindStep start() throws BindException, AgentLostException, InterruptedException {
             if (!plan.needsBindings()) {
-                return withoutBindings();
+                return new BindStep.Done(withoutBindings());
             }
             checkCatalogue();
-            EnvFingerprint env = engine.fingerprint();
-            return options.mode() == BindMode.REPLAY ? replay(env) : resolve(env);
+            env = engine.fingerprint();
+            if (options.mode() == BindMode.REPLAY) {
+                return new BindStep.Done(replay(env));
+            }
+            fingerprintEvent(env, null);
+            return walk();
+        }
+
+        /** Resumes the walk at the parked slot; the engine is closed when the bind ends or fails. */
+        @Override
+        public BindStep resume(Object answer) throws BindException, AgentLostException, InterruptedException {
+            BindStep step = null;
+            try {
+                Plan.Slot slot = plan.slot(plan.resolutionGraph().get(position));
+                engine.slot(slot.name());
+                ResolutionEngine.Parking parking;
+                try {
+                    parking = engine.resumeSlot(answer);
+                } catch (BindException e) {
+                    throw upstream(slot, e);
+                }
+                if (parking != null) {
+                    step = parked(parking);
+                    return step;
+                }
+                position++;
+                step = walk();
+                return step;
+            } finally {
+                if (!(step instanceof BindStep.Parked)) {
+                    engine.close();
+                }
+            }
+        }
+
+        /** The job will not resume this bind: its engine is released. */
+        @Override
+        public void abandon() {
+            engine.close();
         }
 
         /** A plan without query slots or oracles: Phase 1 fixtures plus the credential join (8.1). */
@@ -484,6 +593,21 @@ public final class Binder {
                     continue;
                 }
                 Resolution recorded = file.resolutions().get(slot.name());
+                if (recorded.strategy().needsModel() && (recorded.approval() == null
+                        || recorded.approval().state() != Approval.State.APPROVED)) {
+                    // P5 7.1, D72: a value a model found replays only once a person (or the re-resolve job's review)
+                    // approved it; nothing of the slot runs before.
+                    Map<String, Object> d = new LinkedHashMap<>(where);
+                    d.put("strategy", recorded.strategy().name());
+                    d.put("approval", RunLog.fields("state", recorded.approval() == null ? null
+                            : recorded.approval().state().name(), "by", recorded.approval() == null ? null
+                            : recorded.approval().by()));
+                    throw new BindException(FailureKind.REBIND_NEEDED, "NOT_APPROVED", slot.name(), "slot '"
+                            + slot.name() + "': its recorded value was found by a model (" + recorded.strategy()
+                            + ") and is not approved (" + (recorded.approval() == null ? "no approval"
+                            : recorded.approval().state()) + " in " + relative + "); a person approves it with"
+                            + " skillroy resolve", d);
+                }
                 Map<String, Object> args = args(slot);
                 String argsHash = ResolutionEngine.hash(args);
                 if (!argsHash.equals(recorded.argsHash())) {
@@ -593,59 +717,187 @@ public final class Binder {
             listener.event("fingerprint", fields);
         }
 
-        // -------------------------------------------------------------------------------------- live, approve
+        // -------------------------------------------------------------------------------------- live, approve, re-resolve
 
-        private BindOutcome resolve(EnvFingerprint env) throws BindException, AgentLostException,
-                InterruptedException {
-            fingerprintEvent(env, null);
-            for (String node : plan.resolutionGraph()) {
-                if (node.startsWith("oracle.")) {
-                    Plan.Oracle oracle = plan.oracle(node.substring("oracle.".length()));
+        /**
+         * 8.3 live steps 4 and 5 from the current node: fixtures, query slots (which may park in a stepwise
+         * {@code re-resolve} bind) and oracles in graph order; then the end of the bind.
+         */
+        private BindStep walk() throws BindException, AgentLostException, InterruptedException {
+            List<String> graph = plan.resolutionGraph();
+            while (position < graph.size()) {
+                String name = graph.get(position);
+                if (name.startsWith("oracle.")) {
+                    Plan.Oracle oracle = plan.oracle(name.substring("oracle.".length()));
                     OracleValue value = oracle(oracle, null, null);
                     crossCheck(oracle, value);
                     guard(oracle, value, options.mode());
+                    position++;
                     continue;
                 }
-                Plan.Slot slot = plan.slot(node);
+                Plan.Slot slot = plan.slot(name);
                 engine.slot(slot.name());
                 if ("fixture".equals(slot.kind())) {
                     fixture(slot);
+                    position++;
                     continue;
                 }
-                Map<String, Object> args = args(slot);
-                try {
-                    engine.resolveSlot(slot.name(), slot.query().query(), args, slot.query().strategy(),
-                            slot.query().verify(), slot.credential());
-                } catch (BindException e) {
-                    if ("NO_CANDIDATE".equals(e.reason()) || "ALL_REJECTED".equals(e.reason())) {
-                        throw withUpstream(e, references(slot.query().args()));
+                ResolutionEngine.Parking parking = query(slot, args(slot));
+                if (parking != null) {
+                    return parked(parking);
+                }
+                position++;
+            }
+            return new BindStep.Done(finish());
+        }
+
+        /**
+         * One query slot: in {@code approve} with reuse on, a recorded tier (b) value that still holds is taken without
+         * asking a resolver (P5 7.1, D82); otherwise the ladder.
+         *
+         * @return null when the slot is resolved, or where it parked
+         */
+        private ResolutionEngine.Parking query(Plan.Slot slot, Map<String, Object> args)
+                throws BindException, AgentLostException, InterruptedException {
+            String notReused = null;
+            if (options.mode() == BindMode.APPROVE && options.reuseBindings()) {
+                List<String> why = new ArrayList<>();
+                if (reuse(slot, args, why)) {
+                    return null;
+                }
+                notReused = why.isEmpty() ? null : "not reused from the bindings file: " + why.get(0);
+            }
+            try {
+                ResolutionEngine.Parking parking = engine.startSlot(slot.name(), slot.query().query(), args,
+                        slot.query().strategy(), slot.query().verify(), slot.credential(), mayPark);
+                if (parking == null && notReused != null) {
+                    engine.addNote(slot.name(), notReused);
+                }
+                return parking;
+            } catch (BindException e) {
+                throw upstream(slot, e);
+            }
+        }
+
+        /**
+         * approve's reuse (P5 7.1, D82): the existing file is readable and belongs here, its {@code resolveHash} equals
+         * the plan's, the slot's recorded value was found by a model (tier (b) or (c); tier (a) is never reused,
+         * recomputing it is free), its {@code argsHash} equals the one just computed, and every verifier passes it now
+         * (the engine checks that and the credential): then it is the slot's resolution and no resolver is asked.
+         *
+         * @param why receives the reason a recorded tier (b) value was not reused (nothing for a slot without one)
+         */
+        private boolean reuse(Plan.Slot slot, Map<String, Object> args, List<String> why)
+                throws BindException, AgentLostException, InterruptedException {
+            BindingsFile file = existing();
+            Resolution recorded = file == null ? null : file.resolutions().get(slot.name());
+            if (recorded == null || !recorded.strategy().needsModel()) {
+                return false;
+            }
+            if (!file.resolveHash().equals(plan.resolveHash())) {
+                why.add("the scenario's resolve section changed since it was written");
+                return false;
+            }
+            if (!recorded.query().equals(slot.query().query())) {
+                why.add("it records another query kind");
+                return false;
+            }
+            if (!ResolutionEngine.hash(args).equals(recorded.argsHash())) {
+                why.add("the slot's arguments changed");
+                return false;
+            }
+            return engine.reuse(slot.name(), slot.query().query(), args, recorded, slot.query().verify(),
+                    slot.credential(), why) != null;
+        }
+
+        /** The existing bindings file of this scenario and environment, read once; null when absent or unusable. */
+        private BindingsFile existing() {
+            if (!existingRead) {
+                existingRead = true;
+                Path root = options.bindingsRoot();
+                Path path = root == null ? null : BindingsFile.locate(root, options.envId(), plan.scenarioId());
+                if (path != null && Files.isRegularFile(path)) {
+                    try {
+                        BindingsFile file = BindingsFile.read(path);
+                        if (file.scenarioId().equals(plan.scenarioId()) && file.envId().equals(options.envId())) {
+                            existing = file;
+                        }
+                    } catch (IOException | BindingsFormatException e) {
+                        existing = null;
                     }
-                    throw e;
                 }
             }
+            return existing;
+        }
+
+        /** A stepwise bind's stop: the continuation is this run; the engine stays open. */
+        private BindStep.Parked parked(ResolutionEngine.Parking parking) {
+            return new BindStep.Parked(plan.scenarioId(), parking.slot(), parking.kind(), parking.resolverId(),
+                    parking.request(), this);
+        }
+
+        /** NO_CANDIDATE and ALL_REJECTED name the already-bound slots the failing one depended on (D5). */
+        private BindException upstream(Plan.Slot slot, BindException e) {
+            if ("NO_CANDIDATE".equals(e.reason()) || "ALL_REJECTED".equals(e.reason())) {
+                return withUpstream(e, references(slot.query().args()));
+            }
+            return e;
+        }
+
+        /**
+         * 8.3 live steps 6 and 7, approve steps 7 and 8, P5 8.2 step 4: the join and the reference check, then the
+         * file: {@code approve} asks the approver and writes; {@code re-resolve} approves every slot by the job's label
+         * and writes unless it is a dry run; {@code live} writes only with {@code writeBindings}.
+         */
+        private BindOutcome finish() throws BindException {
             joinAndCheck();
             BindingsFile file = file(env);
             Path written = null;
             if (options.mode() == BindMode.APPROVE) {
                 file = approve(file, env);
                 written = write(file);
+            } else if (options.mode() == BindMode.RE_RESOLVE) {
+                String by = options.approvedBy() != null ? options.approvedBy() : options.mode().label();
+                file = approved(file, new Approval(Approval.State.APPROVED, by));
+                if (options.writeBindings()) {
+                    written = write(file);
+                } else {
+                    requireNoCredential(plan, options, file.toJsonText());
+                }
             } else if (options.writeBindings()) {
                 written = write(file);
             }
             return new BindOutcome(engine.bindings(), file, env, written, skipped);
         }
 
+        /**
+         * The file of a {@code live} bind (and the starting point of the others): a tier (a) slot {@code NOT_REQUIRED}
+         * by {@code approvedBy} or the mode's name; a value a model found {@code REQUIRED}, by nobody (P5 7.1).
+         */
         private BindingsFile file(EnvFingerprint env) {
             String by = options.approvedBy() != null ? options.approvedBy() : options.mode().label();
-            Approval approval = new Approval(Approval.State.NOT_REQUIRED, by);
             Map<String, Resolution> resolutions = new LinkedHashMap<>();
             for (Resolution r : engine.resolutions().values()) {
+                Approval approval = r.strategy().needsModel() ? new Approval(Approval.State.REQUIRED, null)
+                        : new Approval(Approval.State.NOT_REQUIRED, by);
                 Resolution withApproval = r.withApproval(approval);
                 resolutions.put(r.slot(), withApproval);
                 engine.replaceResolution(withApproval);
             }
             return new BindingsFile(BindingsFile.VERSION, plan.scenarioId(), options.envId(), plan.pack(),
                     plan.packVersion(), plan.hash(), plan.resolveHash(), env, resolutions, engine.oracleValues());
+        }
+
+        /** The file with every resolution under {@code approval}, kept in the engine too. */
+        private BindingsFile approved(BindingsFile file, Approval approval) {
+            Map<String, Resolution> resolutions = new LinkedHashMap<>();
+            for (Resolution r : file.resolutions().values()) {
+                Resolution approved = r.withApproval(approval);
+                resolutions.put(r.slot(), approved);
+                engine.replaceResolution(approved);
+            }
+            return new BindingsFile(file.bindingsVersion(), file.scenarioId(), file.envId(), file.pack(),
+                    file.packVersion(), file.planHash(), file.resolveHash(), file.env(), resolutions, file.oracles());
         }
 
         /** 8.3 approve step 7: the approver is asked once; its time is outside the budget. */
@@ -682,15 +934,7 @@ public final class Binder {
             }
             String by = options.approvedBy() != null ? options.approvedBy()
                     : decision.by() != null ? decision.by() : options.mode().label();
-            Approval approval = new Approval(Approval.State.APPROVED, by);
-            Map<String, Resolution> resolutions = new LinkedHashMap<>();
-            for (Resolution r : file.resolutions().values()) {
-                Resolution approved = r.withApproval(approval);
-                resolutions.put(r.slot(), approved);
-                engine.replaceResolution(approved);
-            }
-            return new BindingsFile(file.bindingsVersion(), file.scenarioId(), file.envId(), file.pack(),
-                    file.packVersion(), file.planHash(), file.resolveHash(), file.env(), resolutions, file.oracles());
+            return approved(file, new Approval(Approval.State.APPROVED, by));
         }
 
         /** 8.3 approve step 8. */

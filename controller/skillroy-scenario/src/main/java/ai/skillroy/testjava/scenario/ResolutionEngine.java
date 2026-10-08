@@ -35,9 +35,11 @@ import ai.skillroy.testjava.protocol.SecretKeys;
 import ai.skillroy.testjava.protocol.sql.Rows;
 import ai.skillroy.testjava.scenario.pack.DomainPack;
 import ai.skillroy.testjava.scenario.resolve.Approval;
+import ai.skillroy.testjava.scenario.resolve.BatchableResolver;
 import ai.skillroy.testjava.scenario.resolve.BindMode;
 import ai.skillroy.testjava.scenario.resolve.Codec;
 import ai.skillroy.testjava.scenario.resolve.CodecException;
+import ai.skillroy.testjava.scenario.resolve.ContributionException;
 import ai.skillroy.testjava.scenario.resolve.CostLedger;
 import ai.skillroy.testjava.scenario.resolve.CredentialIndex;
 import ai.skillroy.testjava.scenario.resolve.CredentialRef;
@@ -47,6 +49,8 @@ import ai.skillroy.testjava.scenario.resolve.CrossCheckResult;
 import ai.skillroy.testjava.scenario.resolve.EnvFingerprint;
 import ai.skillroy.testjava.scenario.resolve.EnvFingerprinter;
 import ai.skillroy.testjava.scenario.resolve.FingerprintContext;
+import ai.skillroy.testjava.scenario.resolve.InferenceSettings;
+import ai.skillroy.testjava.scenario.resolve.LlmUsage;
 import ai.skillroy.testjava.scenario.resolve.Oracle;
 import ai.skillroy.testjava.scenario.resolve.Provenance;
 import ai.skillroy.testjava.scenario.resolve.Query;
@@ -57,6 +61,7 @@ import ai.skillroy.testjava.scenario.resolve.ResolutionCatalogue;
 import ai.skillroy.testjava.scenario.resolve.ResolveContext;
 import ai.skillroy.testjava.scenario.resolve.Resolver;
 import ai.skillroy.testjava.scenario.resolve.ResolverCandidate;
+import ai.skillroy.testjava.scenario.resolve.ResolverContributor;
 import ai.skillroy.testjava.scenario.resolve.Strategy;
 import ai.skillroy.testjava.scenario.resolve.Verifier;
 import ai.skillroy.testjava.scenario.resolve.VerifierResult;
@@ -73,9 +78,11 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.TreeMap;
 
 /**
@@ -103,11 +110,28 @@ import java.util.TreeMap;
  *       view and data channel as a verifier, its call is bounded the same way, and what it throws or a null result
  *       is ENVIRONMENT ("pack defect: cross-check … failed: …"); a disagreement is a result, never an
  *       exception. What its records and outcomes hold (the check's actual and evidence, its reason, the oracle's
- *       value, a skipped check's capability reason) is JSON-like and masked before anything sees it.</li>
+ *       value, a skipped check's capability reason) is JSON-like and masked before anything sees it;</li>
+ *   <li>(phase5-contracts.md 5.5) a slot whose {@code strategy} names a model token ({@code llm-sql}) gets, after the
+ *       pack's resolvers, the resolvers the {@link ResolverContributor}s offer for its kind and token, in
+ *       {@code ServiceLoader} order. The contributors are loaded once per engine, on the first such slot, in
+ *       {@code live}, {@code approve} and {@code re-resolve}, and closed with the engine; <b>in {@code replay} none is
+ *       loaded</b> and {@link InferenceSettings#none()} is substituted for the settings (logged as an
+ *       {@code inference} record when the settings named a gateway). A slot naming a token no contributor offers is
+ *       ENVIRONMENT ("no resolver for strategy llm-sql: …"); a contributed resolver whose id does not start with
+ *       {@code inference.} or whose strategy needs no model is ENVIRONMENT ("contributor … offered …");</li>
+ *   <li>a resolution by a strategy that needs a model gets approval {@code REQUIRED}, and its {@code usage} from the
+ *       ledger entries recorded during the slot's resolver calls (summed tokens and cost, the first model and request
+ *       id; null when none); a resolver's {@link ResolutionException} detail (reason {@code BUDGET}: scope, id,
+ *       limit, spent, estimate) reaches the failure's detail;</li>
+ *   <li>in {@code re-resolve}, a stepwise bind may <b>park</b> a slot whose ladder reaches a {@link BatchableResolver}
+ *       ({@link #startSlot}, {@link #resumeSlot}): the resolver prepares its request, the engine keeps the slot's
+ *       place on the ladder, and the answer is handed to {@code complete} later, the time parked not counted against
+ *       the budget; while parked, the data channels the engine opened itself are closed (a batch may take hours) and
+ *       they are opened again on resumption.</li>
  * </ul>
  *
  * <p>Not thread-safe: one engine serves one bind on one thread. {@link #close()} closes the data channels the engine
- * opened itself (not the agent).
+ * opened itself (not the agent) and the contributors it loaded.
  */
 public final class ResolutionEngine implements AutoCloseable {
 
@@ -124,8 +148,11 @@ public final class ResolutionEngine implements AutoCloseable {
     private final AgentConnection agent;
     private final BindOptions options;
     private final BindListener listener;
-    private final DataChannel data;
+    /** The channels statements go through; the engine's own are released while a slot is parked (re-resolve). */
+    private DataChannel data;
     private final boolean ownsData;
+    /** The engine's own channels were closed when a slot parked; they are opened again on resumption. */
+    private boolean dataReleased;
     private final Clock clock;
     private final SecretMask mask;
     private final List<RowMask> rowMasks;
@@ -145,6 +172,16 @@ public final class ResolutionEngine implements AutoCloseable {
     private final Map<String, Object> oracleArgs = new LinkedHashMap<>();
     private final Map<String, CrossCheckOutcome> crossChecks = new LinkedHashMap<>();
     private EnvFingerprint fingerprint;
+    /** The settings the contributors see: {@code none()} in replay (D72). */
+    private final InferenceSettings inference;
+    /** The contributors, once loaded (never in replay); closed with the engine. */
+    private Contributors contributors;
+    /** What they offered, validated; null until the first slot that names a model token. */
+    private List<Resolver<?, ?>> contributed;
+    /** The slot waiting for a batch's answer (re-resolve), or null. */
+    private SlotRun parked;
+    /** The scenario being bound, for a resolver's ledger entries; null outside a plan. */
+    private String scenarioId;
 
     /**
      * @param pack the running pack (its catalogue is read once, on first use)
@@ -183,6 +220,17 @@ public final class ResolutionEngine implements AutoCloseable {
             this.data = DataChannels.of(agent, this.options.credentials(), this.rowMasks);
             this.ownsData = true;
         }
+        if (this.options.mode() == BindMode.REPLAY) {
+            // D72: replay neither loads a contributor nor constructs a gateway, whatever the settings say.
+            this.inference = InferenceSettings.none();
+            if (this.options.inference().enabled()) {
+                this.listener.event("inference", fields("mode", BindMode.REPLAY.label(), "requested",
+                        this.options.inference().gateway(), "gateway", InferenceSettings.GATEWAY_NONE, "reason",
+                        "replay makes no model call: no contributor is loaded and no gateway is constructed"));
+            }
+        } else {
+            this.inference = this.options.inference();
+        }
     }
 
     // ------------------------------------------------------------------------------------------- public entries
@@ -192,7 +240,8 @@ public final class ResolutionEngine implements AutoCloseable {
      * {@link #bindings()}.
      *
      * @param args the query's arguments, references already resolved (JSON-like)
-     * @param strategy strategy tokens ({@code sql}, {@code java}); empty = not restricted
+     * @param strategy strategy tokens ({@code sql}, {@code java}, {@code llm-sql}); empty = the pack's resolvers, not
+     *     restricted; a model token adds the contributed resolvers of that token (phase5-contracts.md 5.5)
      * @param verify verifier ids; empty = the pack's verifiers for the kind
      * @param credential the slot's credential declaration, or null
      * @throws BindException RESOLUTION_FAILED ({@code NO_CANDIDATE}, {@code ALL_REJECTED}, {@code ARGS},
@@ -462,9 +511,18 @@ public final class ResolutionEngine implements AutoCloseable {
         return bindings;
     }
 
-    /** Closes the data channels the engine opened itself. Idempotent; never throws. */
+    /**
+     * Closes the contributors the engine loaded (and the gateways they opened) and the data channels it opened itself;
+     * a parked slot is dropped. Idempotent; never throws.
+     */
     @Override
     public void close() {
+        parked = null;
+        Contributors loaded = contributors;
+        contributors = null;
+        if (loaded != null) {
+            loaded.close();
+        }
         if (ownsData && data instanceof AutoCloseable closeable) {
             try {
                 closeable.close();
@@ -500,8 +558,18 @@ public final class ResolutionEngine implements AutoCloseable {
         currentSlot = slot;
     }
 
+    /** The scenario a resolver's context reports ({@code ResolveContext.scenarioId()}); the binder sets the plan's. */
+    void scenario(String id) {
+        scenarioId = id;
+    }
+
     BindOptions options() {
         return options;
+    }
+
+    /** The settings the contributors see: {@link InferenceSettings#none()} in {@code replay}. */
+    InferenceSettings inference() {
+        return inference;
     }
 
     DomainPack pack() {
@@ -684,11 +752,36 @@ public final class ResolutionEngine implements AutoCloseable {
 
     /**
      * Resolves a query slot (8.3 live step 4) without the credential join, which the binder applies after the graph
-     * walk and the guards.
+     * walk and the guards. Never parks: a {@link BatchableResolver} is asked through {@code candidates} here.
      */
     Resolution resolveSlot(String slot, String kind, Map<String, Object> args, List<String> strategy,
                            List<String> verify, CredentialSpec credential)
             throws BindException, AgentLostException, InterruptedException {
+        startSlot(slot, kind, args, strategy, verify, credential, false);
+        return resolutions.get(slot);
+    }
+
+    /**
+     * Where a slot stopped in {@code re-resolve}: its batchable resolver prepared {@code request}, which the job
+     * submits; {@link #resumeSlot} goes on with the answer.
+     */
+    record Parking(String slot, String kind, String resolverId, Object request) {
+    }
+
+    /**
+     * Starts resolving a query slot as {@link #resolveSlot} does. With {@code mayPark} in {@code re-resolve}, the
+     * first {@link BatchableResolver} the ladder reaches is asked to {@code prepare} its request instead of its
+     * candidates, and the slot parks (phase5-contracts.md 8.2 step 2): the parking is returned and the engine keeps the
+     * slot's place on the ladder. Otherwise the slot is resolved and kept, and null is returned.
+     *
+     * @throws IllegalStateException when another slot is parked
+     */
+    Parking startSlot(String slot, String kind, Map<String, Object> args, List<String> strategy,
+                      List<String> verify, CredentialSpec credential, boolean mayPark)
+            throws BindException, AgentLostException, InterruptedException {
+        if (parked != null) {
+            throw new IllegalStateException("slot " + parked.slot + " is parked; resume it first");
+        }
         currentSlot = slot;
         ensureView();
         QueryType<?, ?> type = queryType(slot, kind);
@@ -705,105 +798,497 @@ public final class ResolutionEngine implements AutoCloseable {
             throw new BindException(FailureKind.ENVIRONMENT, null, slot, "pack defect: the codec of kind " + kind
                     + " failed: " + e, null);
         }
-        List<Resolver<?, ?>> resolvers = new ArrayList<>();
-        for (Resolver<?, ?> resolver : catalogue().resolvers(kind)) {
-            if (strategy == null || strategy.isEmpty() || strategy.contains(tokenOf(resolver))) {
-                resolvers.add(resolver);
+        List<Resolver<?, ?>> ladder = ladder(slot, type, strategy);
+        List<Verifier<?, ?>> verifiers = verifiers(slot, type, verify);
+        return advance(new SlotRun(slot, type, frozenArgs, argsHash, query, ladder, verifiers, credential, mayPark));
+    }
+
+    /**
+     * Resumes the parked slot with the batch's answer: {@code BatchableResolver.complete}, then its candidates as any
+     * resolver's, then the rest of the ladder. The time the slot was parked is added back to the budget.
+     *
+     * @return null when the slot is resolved (and kept), or where it parked again
+     * @throws IllegalStateException when no slot is parked
+     */
+    Parking resumeSlot(Object answer) throws BindException, AgentLostException, InterruptedException {
+        SlotRun run = parked;
+        if (run == null) {
+            throw new IllegalStateException("no slot is parked");
+        }
+        parked = null;
+        currentSlot = run.slot;
+        pause(clock.millis() - run.parkedAtMs);
+        if (dataReleased) {
+            data = DataChannels.of(agent, options.credentials(), rowMasks);
+            dataReleased = false;
+        }
+        @SuppressWarnings("unchecked")
+        BatchableResolver<Query<Object>, Object> resolver = (BatchableResolver<Query<Object>, Object>)
+                run.parkedResolver;
+        Recorder recorder = run.parkedRecorder;
+        Ctx ctx = run.parkedCtx;
+        run.parkedResolver = null;
+        run.parkedRecorder = null;
+        run.parkedCtx = null;
+        @SuppressWarnings("unchecked")
+        Query<Object> query = (Query<Object>) run.query;
+        List<ResolverCandidate<Object>> list = resolverCall(run, recorder, () -> resolver.complete(query, ctx,
+                answer));
+        listener.event("resolver", fields("slot", run.slot, "resolver", resolver.id(), "candidates",
+                list == null ? null : list.size(), "resumed", true));
+        if (consider(run, resolver, recorder, list)) {
+            return null;
+        }
+        return advance(run);
+    }
+
+    /**
+     * {@code approve}'s reuse of a recorded tier (b) value (phase5-contracts.md 7.1, decision D82): the value is decoded
+     * and re-checked now by every verifier of the slot (and, for a slot with a credential, against the recorded
+     * reference and the credentials) and, when all of that holds, kept as the slot's resolution with the recorded
+     * provenance, strategy, confidence and usage and approval {@code REQUIRED}; no resolver is asked. The
+     * {@code resolve} record says {@code reused: true} with {@code reusedFrom}, the recorded {@code approval.by}; the
+     * in-memory provenance gains the note "reused from the bindings file of …" (the approver sees it; the bindings file
+     * never holds notes, so a re-approval of an unchanged value writes the same bytes).
+     *
+     * @param recorded the slot's resolution in the existing bindings file (its args hash already compared)
+     * @param why receives the reason when the value does not qualify
+     * @return the resolution, or null when the value does not qualify
+     */
+    Resolution reuse(String slot, String kind, Map<String, Object> args, Resolution recorded, List<String> verify,
+                     CredentialSpec credential, List<String> why)
+            throws BindException, AgentLostException, InterruptedException {
+        currentSlot = slot;
+        ensureView();
+        QueryType<?, ?> type = queryType(slot, kind);
+        List<Verifier<?, ?>> verifiers = verifiers(slot, type, verify);
+        Object query;
+        Object value;
+        try {
+            query = type.codec().decode(type.queryClass(), args == null ? Map.of() : args);
+            value = type.codec().decode(type.valueType(), recorded.value());
+        } catch (CodecException | RuntimeException e) {
+            why.add("the recorded value no longer decodes");
+            return null;
+        }
+        CredentialRef ref = null;
+        if (credential != null) {
+            String id;
+            try {
+                id = credentialId(slot, recorded.value(), credential);
+            } catch (BindException e) {
+                why.add("the recorded value has no credential key");
+                return null;
+            }
+            CredentialRef was = recorded.credential();
+            if (was == null || !was.realm().equals(credential.realm()) || !was.id().equals(id)) {
+                why.add("its credential does not match its value");
+                return null;
+            }
+            if (!options.credentials().has(credential.realm(), id)) {
+                why.add("the credentials have no entry " + credential.realm() + "/" + id);
+                return null;
+            }
+            ref = was;
+        } else if (recorded.credential() != null) {
+            why.add("it records a credential the slot does not declare");
+            return null;
+        }
+        List<VerifierResult> results = new ArrayList<>();
+        for (Verifier<?, ?> verifier : verifiers) {
+            VerifierResult result = verify(slot, verifier, query, value);
+            results.add(result);
+            if (!result.passed()) {
+                why.add("verifier " + result.verifierId() + " refuses it now: " + (result.reason() == null
+                        ? "refused" : result.reason()));
+                return null;
             }
         }
-        if (resolvers.isEmpty()) {
+        Approval recordedApproval = recorded.approval();
+        String reusedFrom = recordedApproval == null ? null : recordedApproval.by();
+        Provenance was = recorded.provenance();
+        List<String> notes = new ArrayList<>(was == null ? List.of() : was.notes());
+        notes.add("reused from the bindings file of " + (reusedFrom != null ? reusedFrom : recordedApproval == null
+                ? "an unknown approval" : "approval " + recordedApproval.state()) + ": verified now, no model call");
+        Provenance provenance = was == null ? new Provenance(null, List.of(), List.of(), notes, 0, false, List.of())
+                : new Provenance(was.resolverId(), was.statements(), was.calls(), notes, was.candidates(),
+                was.candidatesTruncated(), was.rejected());
+        Resolution resolution = new Resolution(slot, kind, args == null ? Map.of() : args, recorded.argsHash(),
+                recorded.value(), recorded.strategy(), provenance, results, recorded.confidence(), ref,
+                approvalFor(recorded.strategy()), recorded.usage());
+        keep(resolution);
+        Map<String, Object> record = resolveRecord(resolution, null);
+        record.put("reused", true);
+        record.put("reusedFrom", reusedFrom);
+        listener.event("resolve", record);
+        return resolution;
+    }
+
+    /** Adds a note to a kept resolution's provenance (the binder's "not reused" reason). */
+    void addNote(String slot, String note) {
+        Resolution r = resolutions.get(slot);
+        if (r == null || r.provenance() == null) {
+            return;
+        }
+        Provenance p = r.provenance();
+        List<String> notes = new ArrayList<>(p.notes());
+        notes.add(note);
+        resolutions.put(slot, new Resolution(r.slot(), r.query(), r.args(), r.argsHash(), r.value(), r.strategy(),
+                new Provenance(p.resolverId(), p.statements(), p.calls(), notes, p.candidates(),
+                        p.candidatesTruncated(), p.rejected()), r.verified(), r.confidence(), r.credential(),
+                r.approval(), r.usage()));
+    }
+
+    /**
+     * The slot's ladder (8.3 step 4b, phase5-contracts.md 5.5): the pack's resolvers for the kind, restricted to the
+     * slot's strategy when it has one; then, for every model token the strategy names, the contributed resolvers of the
+     * kind with that token, in contributor order. A model token no contributor offers is ENVIRONMENT, and so is an
+     * empty ladder.
+     */
+    private List<Resolver<?, ?>> ladder(String slot, QueryType<?, ?> type, List<String> strategy)
+            throws BindException {
+        List<Resolver<?, ?>> out = new ArrayList<>();
+        for (Resolver<?, ?> resolver : catalogue().resolvers(type.kind())) {
+            if (strategy == null || strategy.isEmpty() || strategy.contains(tokenOf(resolver))) {
+                out.add(resolver);
+            }
+        }
+        Set<String> modelTokens = new LinkedHashSet<>();
+        if (strategy != null) {
+            for (String token : strategy) {
+                Strategy s = Strategy.ofToken(token);
+                if (s != null && s.needsModel()) {
+                    modelTokens.add(s.token());
+                }
+            }
+        }
+        if (!modelTokens.isEmpty()) {
+            List<Resolver<?, ?>> offered = contributed(slot);
+            for (String token : modelTokens) {
+                boolean found = false;
+                for (Resolver<?, ?> resolver : offered) {
+                    found |= resolver.queryClass() == type.queryClass() && token.equals(tokenOf(resolver));
+                }
+                if (!found) {
+                    throw noContributedResolver(slot, type.kind(), token);
+                }
+            }
+            for (Resolver<?, ?> resolver : offered) {
+                if (resolver.queryClass() == type.queryClass() && modelTokens.contains(tokenOf(resolver))) {
+                    out.add(resolver);
+                }
+            }
+        }
+        if (out.isEmpty()) {
             throw new BindException(FailureKind.ENVIRONMENT, null, slot, "pack " + pack.id() + " has no "
                     + (strategy == null || strategy.isEmpty() ? "" : String.join("/", strategy) + " ")
-                    + "resolver for kind " + kind, null);
+                    + "resolver for kind " + type.kind(), null);
         }
-        List<Verifier<?, ?>> verifiers = verifiers(slot, type, verify);
-        List<Provenance.Rejected> rejected = new ArrayList<>();
-        boolean anyCandidate = false;
-        boolean truncated = false;
-        int handed = 0;
-        for (Resolver<?, ?> resolver : resolvers) {
+        return out;
+    }
+
+    /** ENVIRONMENT "no resolver for strategy …", with the cause this engine can tell. */
+    private BindException noContributedResolver(String slot, String kind, String token) {
+        String cause;
+        if (options.mode() == BindMode.REPLAY) {
+            cause = "replay loads no contributor and makes no model call";
+        } else if (!inference.enabled()) {
+            cause = "the gateway is none (" + InferenceSettings.PROP_GATEWAY + ", --inference or "
+                    + InferenceSettings.FILE_NAME + " names one)";
+        } else if (contributors == null || contributors.loaded().isEmpty()) {
+            cause = "skillroy-inference is not on the class path" + (contributors == null
+                    || contributors.loadError() == null ? "" : " (a contributor could not be loaded: "
+                    + contributors.loadError() + ")");
+        } else {
+            cause = "no contributor offers one for kind " + kind + " of pack " + pack.id() + " (does the pack"
+                    + " declare an SQL allow-list?)";
+        }
+        return new BindException(FailureKind.ENVIRONMENT, null, slot, "no resolver for strategy " + token + ": "
+                + cause, fields("strategy", token, "gateway", inference.gateway()));
+    }
+
+    /**
+     * The contributed resolvers, loaded once per engine on first need (phase5-contracts.md 5.5): never in
+     * {@code replay}. Each contributor is asked once with the engine's settings, ledger and clock; what it offers is
+     * checked (an id with the prefix {@code inference.}, a strategy that needs a model, a query class, no id twice).
+     * The {@code inference} record names the contributors and what they offered.
+     */
+    private List<Resolver<?, ?>> contributed(String slot) throws BindException {
+        if (contributed != null) {
+            return contributed;
+        }
+        if (options.mode() == BindMode.REPLAY) {
+            return List.of();
+        }
+        Contributors loaded = Contributors.load(null);
+        contributors = loaded;
+        List<Resolver<?, ?>> out = new ArrayList<>();
+        List<String> names = new ArrayList<>();
+        List<String> ids = new ArrayList<>();
+        try {
+            for (ResolverContributor contributor : loaded.loaded()) {
+                String name = contributor.getClass().getName();
+                names.add(name);
+                List<Resolver<?, ?>> offered;
+                try {
+                    offered = contributor.resolvers(pack, inference, options.ledger(), clock);
+                } catch (ContributionException e) {
+                    throw new BindException(FailureKind.ENVIRONMENT, null, slot, "contributor " + name
+                            + " cannot offer its resolvers: " + e.getMessage(), fields("contributor", name));
+                } catch (RuntimeException | LinkageError e) {
+                    throw new BindException(FailureKind.ENVIRONMENT, null, slot, "contributor " + name + " failed: "
+                            + e, fields("contributor", name));
+                }
+                if (offered == null) {
+                    throw new BindException(FailureKind.ENVIRONMENT, null, slot, "contributor " + name
+                            + " offered null instead of a list of resolvers", fields("contributor", name));
+                }
+                for (Resolver<?, ?> resolver : offered) {
+                    String problem = contributedProblem(resolver);
+                    if (problem == null && ids.contains(resolver.id())) {
+                        problem = "resolver " + resolver.id() + " a second time: contributed resolver ids are unique";
+                    }
+                    if (problem != null) {
+                        throw new BindException(FailureKind.ENVIRONMENT, null, slot, "contributor " + name
+                                + " offered " + problem, fields("contributor", name));
+                    }
+                    ids.add(resolver.id());
+                    out.add(resolver);
+                }
+            }
+        } catch (BindException e) {
+            contributors = null;
+            loaded.close();
+            throw e;
+        }
+        contributed = List.copyOf(out);
+        listener.event("inference", fields("mode", options.mode().label(), "gateway", inference.gateway(),
+                "contributors", names, "resolvers", ids, "loadError", loaded.loadError()));
+        return contributed;
+    }
+
+    /** Why a contributed resolver is refused, or null when it is acceptable. */
+    private static String contributedProblem(Resolver<?, ?> resolver) {
+        if (resolver == null) {
+            return "a null resolver";
+        }
+        String id;
+        Strategy strategy;
+        Class<?> queryClass;
+        try {
+            id = resolver.id();
+            strategy = resolver.strategy();
+            queryClass = resolver.queryClass();
+        } catch (RuntimeException e) {
+            return "a resolver that fails: " + e;
+        }
+        if (id == null || !id.startsWith("inference.") || id.length() == "inference.".length()) {
+            return "resolver " + id + ": a contributed resolver's id must start with inference.";
+        }
+        if (strategy == null || !strategy.needsModel()) {
+            return "resolver " + id + " with strategy " + strategy + ": a contributed resolver's strategy must be"
+                    + " one that needs a model (LLM_SQL, LLM_REASON, LLM_VISION)";
+        }
+        if (queryClass == null) {
+            return "resolver " + id + " without a query class";
+        }
+        return null;
+    }
+
+    /** Asks the ladder's resolvers from where the slot stands, until one's candidate is accepted or the slot parks. */
+    private Parking advance(SlotRun run) throws BindException, AgentLostException, InterruptedException {
+        @SuppressWarnings("unchecked")
+        Query<Object> query = (Query<Object>) run.query;
+        while (run.next < run.ladder.size()) {
+            Resolver<?, ?> resolver = run.ladder.get(run.next++);
             Recorder recorder = new Recorder("resolver " + resolver.id());
-            Ctx ctx = new Ctx(recorder, credential);
+            Ctx ctx = new Ctx(recorder, run.credential, run.slot);
+            if (run.mayPark && options.mode() == BindMode.RE_RESOLVE
+                    && resolver instanceof BatchableResolver<?, ?> batchable) {
+                @SuppressWarnings("unchecked")
+                BatchableResolver<Query<Object>, Object> typed = (BatchableResolver<Query<Object>, Object>) batchable;
+                Object request = resolverCall(run, recorder, () -> typed.prepare(query, ctx));
+                if (request == null) {
+                    throw new BindException(FailureKind.ENVIRONMENT, null, run.slot, "pack defect: resolver "
+                            + resolver.id() + " prepared no request", null);
+                }
+                listener.event("resolver", fields("slot", run.slot, "resolver", resolver.id(), "parked", true));
+                run.parkedResolver = batchable;
+                run.parkedRecorder = recorder;
+                run.parkedCtx = ctx;
+                run.parkedAtMs = clock.millis();
+                parked = run;
+                if (ownsData && data instanceof AutoCloseable closeable) {
+                    // A batch can take hours, and a job parks many binds: their JDBC connections are not held
+                    // meanwhile. The channels are opened again on resumption.
+                    try {
+                        closeable.close();
+                    } catch (Exception e) {
+                        // Best effort, as in close().
+                    }
+                    dataReleased = true;
+                }
+                return new Parking(run.slot, run.type.kind(), resolver.id(), request);
+            }
             @SuppressWarnings("unchecked")
             Resolver<Query<Object>, Object> typed = (Resolver<Query<Object>, Object>) resolver;
-            @SuppressWarnings("unchecked")
-            Query<Object> typedQuery = (Query<Object>) query;
-            List<ResolverCandidate<Object>> list = packCall(slot, recorder, () -> typed.candidates(typedQuery, ctx));
-            listener.event("resolver", fields("slot", slot, "resolver", resolver.id(), "candidates",
+            List<ResolverCandidate<Object>> list = resolverCall(run, recorder, () -> typed.candidates(query, ctx));
+            listener.event("resolver", fields("slot", run.slot, "resolver", resolver.id(), "candidates",
                     list == null ? null : list.size()));
-            if (list == null) {
-                throw new BindException(FailureKind.ENVIRONMENT, null, slot, "pack defect: resolver " + resolver.id()
-                        + " returned null", null);
-            }
-            truncated |= recorder.truncated();
-            List<ResolverCandidate<Object>> kept = new ArrayList<>();
-            List<Object> keptEncoded = new ArrayList<>();
-            for (ResolverCandidate<Object> candidate : list) {
-                if (candidate == null || candidate.value() == null) {
-                    throw new BindException(FailureKind.ENVIRONMENT, null, slot, "pack defect: resolver "
-                            + resolver.id() + " returned a null " + (candidate == null ? "candidate" : "value"), null);
-                }
-                anyCandidate = true;
-                Object encoded = encode(slot, type.codec(), candidate.value());
-                if (credential != null) {
-                    String id = credentialId(slot, encoded, credential);
-                    if (!options.credentials().has(credential.realm(), id)) {
-                        reject(rejected, new Provenance.Rejected(resolver.id(), candidate.label(), "no credential "
-                                + credential.realm() + "/" + id));
-                        continue;
-                    }
-                }
-                kept.add(candidate);
-                keptEncoded.add(encoded);
-            }
-            if (kept.size() > MAX_CANDIDATES) {
-                truncated = true;
-                kept = kept.subList(0, MAX_CANDIDATES);
-            }
-            for (int i = 0; i < kept.size(); i++) {
-                ResolverCandidate<Object> candidate = kept.get(i);
-                handed++;
-                List<VerifierResult> results = new ArrayList<>();
-                String failure = null;
-                for (Verifier<?, ?> verifier : verifiers) {
-                    VerifierResult result = verify(slot, verifier, query, candidate.value());
-                    results.add(result);
-                    if (!result.passed()) {
-                        failure = result.verifierId() + ": " + (result.reason() == null ? "refused" : result.reason());
-                        break;
-                    }
-                }
-                if (failure != null) {
-                    reject(rejected, new Provenance.Rejected(resolver.id(), candidate.label(), failure));
-                    continue;
-                }
-                Object encoded = keptEncoded.get(i);
-                CredentialRef ref = credential == null ? null : new CredentialRef(credential.realm(),
-                        credentialId(slot, encoded, credential));
-                Provenance provenance = new Provenance(resolver.id(), recorder.statements, recorder.calls,
-                        recorder.notes, handed, truncated, rejected);
-                Resolution resolution = new Resolution(slot, kind, frozenArgs, argsHash, encoded, resolver.strategy(),
-                        provenance, results, candidate.confidence(), ref,
-                        new Approval(Approval.State.NOT_REQUIRED, null), null);
-                values.put(slot, resolution.value());
-                strategies.put(slot, resolution.strategy().name());
-                resolutions.put(slot, resolution);
-                if (ref != null) {
-                    credentialRefs.put(slot, ref);
-                }
-                listener.event("resolve", resolveRecord(resolution, null));
-                return resolution;
+            if (consider(run, resolver, recorder, list)) {
+                return null;
             }
         }
         Map<String, Object> detail = new LinkedHashMap<>();
-        detail.put("rejected", rejectedJson(rejected));
-        if (!anyCandidate) {
-            throw new BindException(FailureKind.RESOLUTION_FAILED, "NO_CANDIDATE", slot, "slot '" + slot + "': no"
-                    + " candidate in this environment answers query " + kind, detail);
+        detail.put("rejected", rejectedJson(run.rejected));
+        if (!run.anyCandidate) {
+            throw new BindException(FailureKind.RESOLUTION_FAILED, "NO_CANDIDATE", run.slot, "slot '" + run.slot
+                    + "': no candidate in this environment answers query " + run.type.kind(), detail);
         }
-        throw new BindException(FailureKind.RESOLUTION_FAILED, "ALL_REJECTED", slot, "slot '" + slot + "': every"
-                + " candidate for query " + kind + " was rejected (" + rejected.size() + " recorded"
-                + (rejected.isEmpty() ? "" : "; first: " + rejected.get(0).reason()) + ")", detail);
+        throw new BindException(FailureKind.RESOLUTION_FAILED, "ALL_REJECTED", run.slot, "slot '" + run.slot
+                + "': every candidate for query " + run.type.kind() + " was rejected (" + run.rejected.size()
+                + " recorded" + (run.rejected.isEmpty() ? "" : "; first: " + run.rejected.get(0).reason()) + ")",
+                detail);
+    }
+
+    /**
+     * One resolver's candidates (8.3 step 4c): the credential drop, the cap of 20, every verifier on each in order;
+     * the first candidate every verifier passes becomes the slot's resolution (kept) and true is returned.
+     */
+    private boolean consider(SlotRun run, Resolver<?, ?> resolver, Recorder recorder,
+                             List<ResolverCandidate<Object>> list)
+            throws BindException, AgentLostException, InterruptedException {
+        String slot = run.slot;
+        if (list == null) {
+            throw new BindException(FailureKind.ENVIRONMENT, null, slot, "pack defect: resolver " + resolver.id()
+                    + " returned null", null);
+        }
+        run.truncated |= recorder.truncated();
+        CredentialSpec credential = run.credential;
+        List<ResolverCandidate<Object>> kept = new ArrayList<>();
+        List<Object> keptEncoded = new ArrayList<>();
+        for (ResolverCandidate<Object> candidate : list) {
+            if (candidate == null || candidate.value() == null) {
+                throw new BindException(FailureKind.ENVIRONMENT, null, slot, "pack defect: resolver "
+                        + resolver.id() + " returned a null " + (candidate == null ? "candidate" : "value"), null);
+            }
+            run.anyCandidate = true;
+            Object encoded = encode(slot, run.type.codec(), candidate.value());
+            if (credential != null) {
+                String id = credentialId(slot, encoded, credential);
+                if (!options.credentials().has(credential.realm(), id)) {
+                    reject(run.rejected, new Provenance.Rejected(resolver.id(), candidate.label(), "no credential "
+                            + credential.realm() + "/" + id));
+                    continue;
+                }
+            }
+            kept.add(candidate);
+            keptEncoded.add(encoded);
+        }
+        if (kept.size() > MAX_CANDIDATES) {
+            run.truncated = true;
+            kept = kept.subList(0, MAX_CANDIDATES);
+        }
+        for (int i = 0; i < kept.size(); i++) {
+            ResolverCandidate<Object> candidate = kept.get(i);
+            run.handed++;
+            List<VerifierResult> results = new ArrayList<>();
+            String failure = null;
+            for (Verifier<?, ?> verifier : run.verifiers) {
+                VerifierResult result = verify(slot, verifier, run.query, candidate.value());
+                results.add(result);
+                if (!result.passed()) {
+                    failure = result.verifierId() + ": " + (result.reason() == null ? "refused" : result.reason());
+                    break;
+                }
+            }
+            if (failure != null) {
+                reject(run.rejected, new Provenance.Rejected(resolver.id(), candidate.label(), failure));
+                continue;
+            }
+            Object encoded = keptEncoded.get(i);
+            CredentialRef ref = credential == null ? null : new CredentialRef(credential.realm(),
+                    credentialId(slot, encoded, credential));
+            Provenance provenance = new Provenance(resolver.id(), recorder.statements, recorder.calls,
+                    recorder.notes, run.handed, run.truncated, run.rejected);
+            Resolution resolution = new Resolution(slot, run.type.kind(), run.args, run.argsHash, encoded,
+                    resolver.strategy(), provenance, results, candidate.confidence(), ref,
+                    approvalFor(resolver.strategy()), usage(run.usage));
+            keep(resolution);
+            listener.event("resolve", resolveRecord(resolution, null));
+            return true;
+        }
+        return false;
+    }
+
+    /** P5 7.1: a value a model found needs a person's approval; tier (a) does not. */
+    private static Approval approvalFor(Strategy strategy) {
+        return new Approval(strategy != null && strategy.needsModel() ? Approval.State.REQUIRED
+                : Approval.State.NOT_REQUIRED, null);
+    }
+
+    /** Keeps a resolution under its slot, for later references and {@link #bindings()}. */
+    private void keep(Resolution resolution) {
+        values.put(resolution.slot(), resolution.value());
+        strategies.put(resolution.slot(), resolution.strategy().name());
+        resolutions.put(resolution.slot(), resolution);
+        if (resolution.credential() != null) {
+            credentialRefs.put(resolution.slot(), resolution.credential());
+        }
+    }
+
+    /**
+     * A resolver call ({@code candidates}, {@code prepare}, {@code complete}) as a pack call, collecting the ledger
+     * entries recorded meanwhile for this slot (an entry that names another slot or scenario belongs to a bind on
+     * another thread sharing the ledger).
+     */
+    private <R> R resolverCall(SlotRun run, Recorder recorder, PackCall<R> call)
+            throws BindException, AgentLostException, InterruptedException {
+        CostLedger ledger = options.ledger();
+        int before = ledger.size();
+        try {
+            return packCall(run.slot, recorder, call);
+        } finally {
+            if (ledger.size() > before) {
+                List<CostLedger.Entry> all = ledger.entries();
+                for (int i = before; i < all.size(); i++) {
+                    CostLedger.Entry e = all.get(i);
+                    if ((e.slot() == null || e.slot().equals(run.slot))
+                            && (e.scenarioId() == null || scenarioId == null || e.scenarioId().equals(scenarioId))) {
+                        run.usage.add(e);
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * {@code Resolution.usage} from a slot's ledger entries (phase2-contracts.md 6.3): the tokens summed, the first
+     * entry's model and request id, the costs summed over the entries that state a decimal one (null when none does);
+     * null without entries.
+     */
+    static LlmUsage usage(List<CostLedger.Entry> entries) {
+        if (entries.isEmpty()) {
+            return null;
+        }
+        long input = 0;
+        long output = 0;
+        BigDecimal cost = null;
+        for (CostLedger.Entry e : entries) {
+            input += e.inputTokens();
+            output += e.outputTokens();
+            if (e.costUsd() != null) {
+                try {
+                    BigDecimal c = new BigDecimal(e.costUsd().strip());
+                    cost = cost == null ? c : cost.add(c);
+                } catch (NumberFormatException ignored) {
+                    // A cost the entry does not state as a decimal is left out of the sum.
+                }
+            }
+        }
+        CostLedger.Entry first = entries.get(0);
+        return new LlmUsage(first.model(), first.requestId(), input, output, cost == null ? null
+                : cost.toPlainString());
     }
 
     /** The run.jsonl {@code resolve} record of a resolution (unmasked; the log masks). */
@@ -842,6 +1327,14 @@ public final class ResolutionEngine implements AutoCloseable {
         record.put("verified", verified);
         record.put("credential", r.credential() == null ? null : fields("realm", r.credential().realm(), "id",
                 r.credential().id()));
+        if (r.strategy().needsModel()) {
+            // Phase 5 (7.1, 7.3): a model-written value's confidence, approval state and model usage.
+            record.put("confidence", r.confidence());
+            record.put("approval", r.approval() == null ? null : r.approval().state().name());
+            LlmUsage u = r.usage();
+            record.put("llm", u == null ? null : fields("model", u.model(), "requestId", u.requestId(),
+                    "inputTokens", u.inputTokens(), "outputTokens", u.outputTokens(), "costUsd", u.costUsd()));
+        }
         return record;
     }
 
@@ -1039,9 +1532,12 @@ public final class ResolutionEngine implements AutoCloseable {
             throw timedOut(slot);
         } catch (ResolutionException e) {
             String reason = e.hasReason() ? e.reason() : "RESOLVER";
+            // The resolver's own detail (BUDGET: scope, id, limitUsd, spentUsd, estimateUsd) goes beside the message;
+            // it cannot replace reason, slot or message.
+            Map<String, Object> d = detail("message", e.getMessage());
+            e.detail().forEach(d::putIfAbsent);
             throw new BindException(FailureKind.RESOLUTION_FAILED, reason, slot, "slot '" + slot + "': "
-                    + recorder.who + " ended the slot (" + reason + "): " + e.getMessage(),
-                    detail("message", e.getMessage()));
+                    + recorder.who + " ended the slot (" + reason + "): " + e.getMessage(), d);
         } catch (DataException e) {
             if (e.kind() == DataException.Kind.TIMEOUT && budgetTimedOut(recorder)) {
                 throw timedOut(slot);
@@ -1296,15 +1792,69 @@ public final class ResolutionEngine implements AutoCloseable {
         }
     }
 
+    /**
+     * A query slot on its way through the ladder: what was asked and rejected so far, the ledger entries of its resolver
+     * calls, and, while parked (re-resolve), the batchable resolver with the recorder and context of its
+     * {@code prepare}, which its {@code complete} continues.
+     */
+    private final class SlotRun {
+
+        final String slot;
+        final QueryType<?, ?> type;
+        final Map<String, Object> args;
+        final String argsHash;
+        final Object query;
+        final List<Resolver<?, ?>> ladder;
+        final List<Verifier<?, ?>> verifiers;
+        final CredentialSpec credential;
+        final boolean mayPark;
+        final List<Provenance.Rejected> rejected = new ArrayList<>();
+        final List<CostLedger.Entry> usage = new ArrayList<>();
+        int next;
+        boolean anyCandidate;
+        boolean truncated;
+        int handed;
+        BatchableResolver<?, ?> parkedResolver;
+        Recorder parkedRecorder;
+        Ctx parkedCtx;
+        long parkedAtMs;
+
+        SlotRun(String slot, QueryType<?, ?> type, Map<String, Object> args, String argsHash, Object query,
+                List<Resolver<?, ?>> ladder, List<Verifier<?, ?>> verifiers, CredentialSpec credential,
+                boolean mayPark) {
+            this.slot = slot;
+            this.type = type;
+            this.args = args;
+            this.argsHash = argsHash;
+            this.query = query;
+            this.ladder = ladder;
+            this.verifiers = verifiers;
+            this.credential = credential;
+            this.mayPark = mayPark;
+        }
+    }
+
     /** The context of one resolver call. */
     private final class Ctx implements ResolveContext {
 
         private final Recorder recorder;
         private final CredentialSpec credential;
+        private final String slot;
 
-        Ctx(Recorder recorder, CredentialSpec credential) {
+        Ctx(Recorder recorder, CredentialSpec credential, String slot) {
             this.recorder = recorder;
             this.credential = credential;
+            this.slot = slot;
+        }
+
+        @Override
+        public String slot() {
+            return slot;
+        }
+
+        @Override
+        public String scenarioId() {
+            return scenarioId;
         }
 
         @Override

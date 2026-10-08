@@ -66,7 +66,7 @@ class ResolutionCompileTest {
     @Test
     void theToyResolveScenarioCompilesToAPlanOfTheCurrentVersion() throws Exception {
         Plan plan = compile(BinderTest.YAML);
-        assertEquals(4, plan.planVersion(), "Phase 4 writes version 4 (phase4-contracts.md 7.3)");
+        assertEquals(5, plan.planVersion(), "Phase 5 writes version 5 (phase5-contracts.md 13.2)");
         assertEquals("none", plan.inference());
         assertEquals(List.of("toy.item"), plan.requires(), "the verifiers' capability ids are added");
         Plan.Slot item = plan.slot("item");
@@ -89,14 +89,14 @@ class ResolutionCompileTest {
     }
 
     @Test
-    void versionsOneToFourAreReadOthersAreRefused() throws Exception {
-        String v2 = compile(BinderTest.YAML).toJsonText().replace("\"planVersion\": 4", "\"planVersion\": 2");
-        assertEquals(4, Plan.parse(v2).planVersion(), "a version 2 plan is read as version 4");
-        ScenarioException five = assertThrows(ScenarioException.class, () -> Plan.parse(v2.replace(
-                "\"planVersion\": 2", "\"planVersion\": 5")));
-        assertTrue(five.getMessage().contains("not supported"), five.getMessage());
+    void versionsOneToFiveAreReadOthersAreRefused() throws Exception {
+        String v2 = compile(BinderTest.YAML).toJsonText().replace("\"planVersion\": 5", "\"planVersion\": 2");
+        assertEquals(5, Plan.parse(v2).planVersion(), "a version 2 plan is read as version 5");
+        ScenarioException six = assertThrows(ScenarioException.class, () -> Plan.parse(v2.replace(
+                "\"planVersion\": 2", "\"planVersion\": 6")));
+        assertTrue(six.getMessage().contains("not supported"), six.getMessage());
         Plan v1 = SecretMaskTest.version1(compile("scenario: t\npack: toy\nsteps: []\n"), Map.of());
-        assertEquals(4, v1.planVersion(), "a version 1 plan is read as version 4");
+        assertEquals(5, v1.planVersion(), "a version 1 plan is read as version 5");
         Plan legacy = SecretMaskTest.version1(compile("scenario: t\npack: toy\nresolve:\n  a: { fixture: 1 }\n"
                 + "steps: []\n"), Map.of());
         assertEquals("none", legacy.inference());
@@ -104,7 +104,7 @@ class ResolutionCompileTest {
         assertEquals(60_000L, legacy.bindTimeoutMs());
         ScenarioException run = assertThrows(ScenarioException.class, () -> Plan.parse(v2.replace(
                 "\"inference\": \"none\"", "\"inference\": \"run\"")));
-        assertTrue(run.getMessage().contains("inference module"), run.getMessage());
+        assertTrue(run.getMessage().contains("not in this version"), run.getMessage());
         ScenarioException graph = assertThrows(ScenarioException.class, () -> Plan.parse(v2.replace(
                 "\"oracle.needs\"\n", "\"oracle.nope\"\n")));
         assertTrue(graph.getMessage().contains("resolutionGraph"), graph.getMessage());
@@ -152,7 +152,8 @@ class ResolutionCompileTest {
     void grammarErrorsNameTheLine() {
         failsAt(4, "exactly one of 'fixture' and 'query'", "scenario: t\npack: toy\nresolve:\n  x: {}\nsteps: []\n");
         failsAt(4, "reserved", "scenario: t\npack: toy\nresolve:\n  env: { fixture: 1 }\nsteps: []\n");
-        failsAt(4, "inference module", "scenario: t\npack: toy\nresolve:\n  x: { query: Item, strategy: [llm-sql] }"
+        failsAt(4, "pack toy declares no SQL allow-list: llm-sql cannot be served", "scenario: t\npack: toy\n"
+                + "resolve:\n  x: { query: Item, strategy: [llm-sql] }"
                 + "\nsteps: []\n");
         failsAt(4, "unknown strategy", "scenario: t\npack: toy\nresolve:\n  x: { query: Item, strategy: [magic] }"
                 + "\nsteps: []\n");

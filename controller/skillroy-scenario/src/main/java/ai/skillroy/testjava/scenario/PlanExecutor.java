@@ -34,16 +34,13 @@ import ai.skillroy.testjava.protocol.JsonException;
 import ai.skillroy.testjava.protocol.RpcError;
 import ai.skillroy.testjava.protocol.RpcResult;
 import ai.skillroy.testjava.protocol.SecretKeys;
-import ai.skillroy.testjava.protocol.TopicFilter;
 import ai.skillroy.testjava.protocol.sql.Rows;
 import ai.skillroy.testjava.scenario.pack.AwaitSpec;
 import ai.skillroy.testjava.scenario.pack.DomainPack;
 import ai.skillroy.testjava.scenario.pack.FactProvider;
 import ai.skillroy.testjava.scenario.pack.PreflightCheck;
-import ai.skillroy.testjava.scenario.pack.PromptDecision;
 import ai.skillroy.testjava.scenario.pack.PromptPolicy;
 import ai.skillroy.testjava.scenario.pack.StepLibrary;
-import ai.skillroy.testjava.scenario.pack.Sync;
 import ai.skillroy.testjava.scenario.pack.SyncPolicy;
 import ai.skillroy.testjava.scenario.resolve.BindMode;
 import ai.skillroy.testjava.scenario.resolve.ColumnKind;
@@ -111,7 +108,10 @@ import java.util.stream.Stream;
  * FAIL / ASSERTION.
  * Arguments that came from a joined credential field or from an A25 fixture secret (by provenance, never by value)
  * are announced to the agent as {@code _meta.secretParams} (amendment A34), so that its log, trace and error data
- * redact them.
+ * redact them. A top-level {@code confirm} argument of a step or cleanup call is sent as the call's confirmation
+ * ({@code _meta.confirm} when it is {@code true}, phase5-contracts.md 13.1), not as a parameter. The protocol of one
+ * call (substitution, secret parameters, web routing, sync, capture, the prompt check, the failure classification)
+ * is {@link CallRunner}'s, which {@link ExecutorSession} shares (decision D79).
  *
  * <p>Step protocol, with no sleeps: every wait starts from the call's {@code seq.before}. {@code NONE} returns at
  * once; {@code ACK} awaits the pack's ack topic; {@code READY} awaits the ack topic (when there is one) and then the
@@ -176,10 +176,8 @@ import java.util.stream.Stream;
  */
 public final class PlanExecutor {
 
-    private static final long MAX_CALL_TIMEOUT_MS = 120_000L;
-    private static final long DIAGNOSTIC_TIMEOUT_MS = 5_000L;
+    private static final long DIAGNOSTIC_TIMEOUT_MS = CallRunner.DIAGNOSTIC_TIMEOUT_MS;
     private static final long EVENT_EVIDENCE = 200L;
-    private static final long PROMPT_QUERY_LIMIT = 200L;
     private static final String LEDGER_FILE = "cost-ledger.jsonl";
 
     /** Every file a run may write below its output directory, files before the directories that hold them. */
@@ -404,25 +402,6 @@ public final class PlanExecutor {
         }
     }
 
-    /** Stops the run with a verdict. */
-    private static final class Abort extends Exception {
-
-        private static final long serialVersionUID = 1L;
-
-        final Status status;
-        final FailureKind kind;
-        final String stepId;
-        final transient Map<String, Object> detail;
-
-        Abort(Status status, FailureKind kind, String stepId, String message, Map<String, Object> detail) {
-            super(message, null, false, false);
-            this.status = status;
-            this.kind = kind;
-            this.stepId = stepId;
-            this.detail = detail == null ? new LinkedHashMap<>() : detail;
-        }
-    }
-
     /** One expectation with its references resolved. */
     private record Bound(Expectation source, ExpectationPath path, Object matcher) {
     }
@@ -449,15 +428,9 @@ public final class PlanExecutor {
         private final Bindings provided;
         private final long startMs;
         private final long stepTimeoutMs;
-        private SyncPolicy sync = new SyncPolicy(null, null, null, null, null);
-        private PromptPolicy promptPolicy = PromptPolicy.FAIL;
         private final List<StepResult> steps = new ArrayList<>();
         private final List<String> skipped = new ArrayList<>();
-        private final List<String> degradedFidelity = new ArrayList<>();
-        private List<String> stepFidelity = new ArrayList<>();
-        private Set<String> packVerbs = Set.of();
         private SecretMask mask = SecretMask.NONE;
-        private Set<String> keyRuleSlots;
         private DataChannels data;
         private boolean startMarked;
         private final CostLedger ledger;
@@ -469,15 +442,9 @@ public final class PlanExecutor {
         private final List<Map<String, Object>> crossCheckRecords = new ArrayList<>();
         private RunLog log;
         private CapabilityMatrix caps;
-        private Bindings bindings;
-        private String currentStep;
         private boolean stepsStarted;
-        private boolean agentLost;
-        private long lastActionSeq;
-        private long promptCursor;
-        private long lastSeenSeq;
-        /** The web path's sequence number before the last step call that was not a wait, a settle or a mark. */
-        private long lastActionPathSeq;
+        /** The step protocol (decision D79): the calls, their syncs and the protocol's state; set in execute(). */
+        private CallRunner runner;
         /** The run's web side: the chosen path, its calls and waits (created when the log is open). */
         private WebRun web;
         /** The run's web summary for {@link Resolved#web()}, masked; null without web calls. */
@@ -488,8 +455,6 @@ public final class PlanExecutor {
         private final Set<String> noted = new HashSet<>();
         /** What fact providers read through: web calls go to the run's web path. */
         private final AgentConnection factConnection = new FactConnection();
-        /** True once a call of the run announced a secret parameter (A34): no web trace is kept then. */
-        private boolean secretsSent;
         /**
          * True when a call of the plan may announce a secret parameter, so that the web path was opened without
          * tracing (phase4-contracts.md 6.4).
@@ -528,15 +493,15 @@ public final class PlanExecutor {
             }
             SyncPolicy policy = pack.syncPolicy();
             if (policy != null) {
-                sync = policy;
+                runner.sync = policy;
             }
             Object unexpected = plan.onPrompt().get("unexpected");
             PromptPolicy packPolicy = pack.promptPolicy();
             boolean strict = unexpected instanceof String name && name.strip().equalsIgnoreCase("fail");
-            promptPolicy = strict || packPolicy == null ? PromptPolicy.FAIL : packPolicy;
+            runner.promptPolicy = strict || packPolicy == null ? PromptPolicy.FAIL : packPolicy;
             StepLibrary library = pack.steps();
             Set<String> verbs = library == null ? null : library.verbs();
-            packVerbs = verbs == null ? Set.of() : Set.copyOf(verbs);
+            runner.packVerbs = verbs == null ? Set.of() : Set.copyOf(verbs);
         }
 
         /**
@@ -567,6 +532,7 @@ public final class PlanExecutor {
             clearOldOutputs();
             log = RunLog.open(options.outputDir(), options.clock());
             web = new WebRun(agent, log, options.clock(), webPathLoader);
+            runner = new CallRunner(agent, log, options.clock(), web, stepTimeoutMs, this::keyRuleSlots);
             try {
                 mask = secretMask();
                 log.mask(mask);
@@ -619,11 +585,11 @@ public final class PlanExecutor {
                 failure = lost(e);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
-                failure = new Abort(Status.ERROR, FailureKind.ENVIRONMENT, currentStep, "the run was interrupted",
-                        null);
+                failure = new Abort(Status.ERROR, FailureKind.ENVIRONMENT, runner.currentStep,
+                        "the run was interrupted", null);
             } catch (RuntimeException | StackOverflowError | LinkageError e) {
                 // Not OutOfMemoryError or another VirtualMachineError: the JVM may not be able to go on.
-                failure = new Abort(Status.ERROR, FailureKind.ENVIRONMENT, currentStep, "internal error: " + e,
+                failure = new Abort(Status.ERROR, FailureKind.ENVIRONMENT, runner.currentStep, "internal error: " + e,
                         RunLog.fields("exception", e.toString()));
             }
             List<CostLedger.Entry> modelCalls = modelCalls();
@@ -637,9 +603,9 @@ public final class PlanExecutor {
             writeLedger(modelCalls);
             Map<String, Object> detail = failure == null ? new LinkedHashMap<>() : failure.detail;
             Status status = failure != null ? failure.status
-                    : skipped.isEmpty() && degradedFidelity.isEmpty() ? Status.PASS : Status.DEGRADED;
+                    : skipped.isEmpty() && runner.degradedFidelity.isEmpty() ? Status.PASS : Status.DEGRADED;
             try {
-                if (failure != null && stepsStarted && !agentLost && options.captureOnFailure()) {
+                if (failure != null && stepsStarted && !runner.agentLost && options.captureOnFailure()) {
                     collectEvidence(detail);
                 }
                 if (failure != null && stepsStarted && options.captureOnFailure()) {
@@ -662,7 +628,7 @@ public final class PlanExecutor {
             web.close();
             Map<String, Object> summary = web.summary();
             webSummary = summary == null ? null : logged(summary);
-            if (bindings != null && options.outputDir() != null) {
+            if (runner.bindings != null && options.outputDir() != null) {
                 try {
                     writeBindings(options.outputDir().resolve("bindings.json"));
                 } catch (IOException | RuntimeException e) {
@@ -672,13 +638,13 @@ public final class PlanExecutor {
             Duration duration = Duration.ofMillis(Math.max(0, options.clock().millis() - startMs));
             RunResult result = masked(new RunResult(plan.scenarioId(), status, failure == null ? null : failure.kind,
                     failure == null ? null : failure.stepId, failure == null ? null : failure.getMessage(),
-                    safeDetail(detail), steps, skipped, duration, degradedFidelity, options.bind().mode(),
+                    safeDetail(detail), steps, skipped, duration, runner.degradedFidelity, options.bind().mode(),
                     options.bind().envId(), modelCalls));
             Map<String, Object> end = RunLog.fields("status", status.name(), "failureKind",
                     result.failureKind() == null ? null : result.failureKind().name(), "failedStepId",
                     result.failedStepId(), "message", result.message(), "skippedExpectations", skipped);
-            if (!degradedFidelity.isEmpty()) {
-                end.put("degradedFidelity", degradedFidelity);
+            if (!runner.degradedFidelity.isEmpty()) {
+                end.put("degradedFidelity", runner.degradedFidelity);
             }
             end.put("durationMs", duration.toMillis());
             log.write("run-end", end);
@@ -726,10 +692,7 @@ public final class PlanExecutor {
             }
             StringBuilder text = new StringBuilder();
             for (CostLedger.Entry e : entries) {
-                text.append(Json.write(mask.apply(RunLog.fields("scenarioId", e.scenarioId(), "slot", e.slot(),
-                        "strategy", e.strategy() == null ? null : e.strategy().name(), "provider", e.provider(),
-                        "model", e.model(), "requestId", e.requestId(), "inputTokens", e.inputTokens(),
-                        "outputTokens", e.outputTokens(), "costUsd", e.costUsd())))).append('\n');
+                text.append(Json.write(mask.apply(e.toJson()))).append('\n');
             }
             try {
                 Files.createDirectories(dir);
@@ -935,9 +898,9 @@ public final class PlanExecutor {
                     return agent.call(method, params, callOptions);
                 }
                 try {
-                    return web.call(currentStep == null ? "fact" : currentStep, method,
+                    return web.call(runner.currentStep == null ? "fact" : runner.currentStep, method,
                             params == null ? Map.of() : params, callOptions == null ? CallOptions.defaults()
-                                    : callOptions, true, lastSeenSeq, new String[1]).result();
+                                    : callOptions, true, runner.lastSeenSeq, new String[1]).result();
                 } catch (WebRun.PathFailure e) {
                     throw new IllegalStateException(e.getMessage(), e);
                 }
@@ -997,7 +960,7 @@ public final class PlanExecutor {
                     || options.outputDir() == null) {
                 return;
             }
-            if (secretsSent) {
+            if (runner.secretsSent) {
                 log.write("web.trace", RunLog.fields("skipped", true, "reason", "secrets"));
                 return;
             }
@@ -1065,9 +1028,9 @@ public final class PlanExecutor {
             BindOptions bind = options.bind().withClock(options.clock());
             String mode = bind.mode().label();
             if (provided != null) {
-                bindings = provided;
+                runner.bindings = provided;
                 try {
-                    Binder.check(plan, bindings);
+                    Binder.check(plan, runner.bindings);
                 } catch (ResolutionException e) {
                     log.write("bind", RunLog.fields("ok", false, "mode", mode, "envId", bind.envId(), "reason",
                             e.reason(), "error", e.getMessage()));
@@ -1104,7 +1067,7 @@ public final class PlanExecutor {
                     throw new Abort(Status.ERROR, e.kind(), null, e.getMessage(), detail);
                 }
                 this.outcome = outcome;
-                bindings = outcome.bindings();
+                runner.bindings = outcome.bindings();
                 // phase3-contracts.md 6.2: a guarded cross-check that could not run is not a PASS.
                 skipped.addAll(outcome.skipped());
                 if (outcome.file() != null && (bind.mode() != BindMode.LIVE || bind.writeBindings())) {
@@ -1114,9 +1077,9 @@ public final class PlanExecutor {
                     log.write("bind", RunLog.fields("ok", true, "written", bindingsFile));
                 }
             }
-            mask = mask.plus(bindings.secretValues());
+            mask = mask.plus(runner.bindings.secretValues());
             log.mask(mask);
-            Map<String, Object> record = RunLog.fields("ok", true, "slots", new ArrayList<>(bindings.values()
+            Map<String, Object> record = RunLog.fields("ok", true, "slots", new ArrayList<>(runner.bindings.values()
                     .keySet()), "mode", mode, "envId", bind.envId(), "bindingsFile", bindingsFile);
             if (outcome != null && !outcome.skipped().isEmpty()) {
                 record.put("skipped", outcome.skipped());
@@ -1177,7 +1140,7 @@ public final class PlanExecutor {
          * looks secret has its whole value masked), then by value.
          */
         private void writeBindings(Path file) throws IOException {
-            Map<String, Object> json = bindings.toJson(plan);
+            Map<String, Object> json = runner.bindings.toJson(plan);
             if (json.get("resolutions") instanceof Map<?, ?> resolutions) {
                 Map<String, Object> maskedResolutions = new LinkedHashMap<>();
                 for (Map.Entry<?, ?> e : resolutions.entrySet()) {
@@ -1220,8 +1183,8 @@ public final class PlanExecutor {
             }
             noteSeq(result.seqAfter());
             startMarked = true;
-            lastActionSeq = result.seqAfter();
-            promptCursor = lastActionSeq;
+            runner.lastActionSeq = result.seqAfter();
+            runner.promptCursor = runner.lastActionSeq;
             log.write("call", RunLog.fields("step", null, "primitive", "trace.mark", "params", params, "ok", true,
                     "value", result.value(), "seq", seq(result)));
         }
@@ -1232,7 +1195,8 @@ public final class PlanExecutor {
             Plan.Step step = plan.steps().get(index);
             runBlock(step.id(), step.verb(), step.line(), stepSkipped -> {
                 for (int j = 0; j < step.calls().size(); j++) {
-                    executeCall(index, j, step.calls().get(j));
+                    runner.execute(step, j, step.calls().get(j), plan.scenarioId() + "/" + step.id() + "/" + (j + 1),
+                            () -> nextStepHandlesPrompt(index));
                 }
                 evaluate(step.expect(), step.id(), stepSkipped);
             });
@@ -1247,16 +1211,16 @@ public final class PlanExecutor {
         /** Runs one step (or the verify block) and records its {@link StepResult} however it ends. */
         private void runBlock(String id, String verb, int line, Block body)
                 throws Abort, AgentLostException, InterruptedException {
-            currentStep = id;
+            runner.currentStep = id;
             stepsStarted = true;
             long t0 = options.clock().millis();
             List<String> stepSkipped = new ArrayList<>();
-            stepFidelity = new ArrayList<>();
+            runner.stepFidelity = new ArrayList<>();
             Status status = Status.ERROR;
             String message = null;
             try {
                 body.run(stepSkipped);
-                status = stepSkipped.isEmpty() && stepFidelity.isEmpty() ? Status.PASS : Status.DEGRADED;
+                status = stepSkipped.isEmpty() && runner.stepFidelity.isEmpty() ? Status.PASS : Status.DEGRADED;
             } catch (Abort abort) {
                 status = abort.status;
                 message = abort.getMessage();
@@ -1271,663 +1235,27 @@ public final class PlanExecutor {
                 message = "internal error: " + e;
                 throw e;
             } finally {
-                steps.add(new StepResult(id, verb, line, status, message, stepSkipped, since(t0), stepFidelity));
+                steps.add(new StepResult(id, verb, line, status, message, stepSkipped, since(t0), runner.stepFidelity));
             }
         }
 
-        private void executeCall(int stepIndex, int callIndex, Plan.Call call) throws Abort, AgentLostException {
-            Plan.Step step = plan.steps().get(stepIndex);
-            String stepId = step.id();
-            boolean baseUi = BaseSteps.UI_VERBS.contains(step.verb()) && !packVerbs.contains(step.verb());
-            boolean baseWeb = BaseSteps.WEB_VERBS.contains(step.verb()) && !packVerbs.contains(step.verb());
-            Map<String, Object> params;
-            AwaitSpec await;
-            try {
-                @SuppressWarnings("unchecked")
-                Map<String, Object> substituted = (Map<String, Object>) bindings.substitute(call.args());
-                params = substituted;
-                await = AwaitRules.resolve(call.await(), bindings, stepTimeoutMs);
-            } catch (ResolutionException e) {
-                throw new Abort(Status.ERROR, FailureKind.RESOLUTION_FAILED, stepId, e.getMessage(),
-                        RunLog.fields("reason", e.reason(), "reference", e.reference(), "primitive",
-                                call.primitive()));
-            }
-            boolean isAwait = "sync.await".equals(call.primitive());
-            if (isAwait && !params.containsKey("since")) {
-                params.put("since", lastActionSeq);
-            }
-            List<String> secretParams = secretParams(call);
-            secretsSent |= !secretParams.isEmpty();
-            String correlationId = plan.scenarioId() + "/" + stepId + "/" + (callIndex + 1);
-            CallOptions callOptions = options(call.timeoutMs(), correlationId).withSecretParams(secretParams);
-            boolean webCall = WebRun.isWeb(call.primitive());
-            String[] servedBy = new String[1];
-            long t0 = options.clock().millis();
-            RpcResult result;
-            long agentSince;
-            long pathSince;
-            boolean fromPath = false;
-            try {
-                if (webCall) {
-                    WebRun.Served served = web.call(stepId, call.primitive(), params, callOptions, false, lastSeenSeq,
-                            servedBy);
-                    result = served.result();
-                    agentSince = served.agentSince();
-                    pathSince = served.pathSince();
-                } else if (isAwait && web.combines(AwaitRules.topicsText(params.get("topics")))) {
-                    // phase4-contracts.md 6.3: a waitFor on a web topic reads the path's events and the agent's bus.
-                    WebRun.Waited waited = combinedAwait(params, t0);
-                    fromPath = waited.fromPath();
-                    agentSince = lastActionSeq;
-                    pathSince = lastActionPathSeq;
-                    result = new RpcResult(waited.event().toJson(), List.of(), agentSince, fromPath ? lastSeenSeq
-                            : Math.max(lastSeenSeq, waited.event().seq()), options.clock().millis() - t0,
-                            "controller");
-                } else {
-                    pathSince = web.pathSeqNow();
-                    result = agent.call(call.primitive(), params, callOptions);
-                    agentSince = result.seqBefore();
-                }
-            } catch (AgentRpcException e) {
-                Map<String, Object> record = RunLog.fields("step", stepId, "index", callIndex + 1, "primitive",
-                        call.primitive());
-                if (webCall) {
-                    record.put("path", servedBy[0]);
-                    web.noteCall(stepId, callIndex + 1, call.primitive(), servedBy[0], false);
-                }
-                record.putAll(RunLog.fields("params", params, "ok", false, "error", e.error().toJson(), "durationMs",
-                        options.clock().millis() - t0));
-                if (!secretParams.isEmpty()) {
-                    record.put("secretParams", secretParams);
-                }
-                log.write("call", record);
-                throw rpcFailure(e, stepId, call.primitive(), params);
-            } catch (WebRun.PathFailure e) {
-                Map<String, Object> record = RunLog.fields("step", stepId, "index", callIndex + 1, "primitive",
-                        call.primitive(), "path", servedBy[0], "params", params, "ok", false, "error", e.getMessage(),
-                        "durationMs", options.clock().millis() - t0);
-                if (!secretParams.isEmpty()) {
-                    record.put("secretParams", secretParams);
-                }
-                log.write("call", record);
-                web.noteCall(stepId, callIndex + 1, call.primitive(), servedBy[0], false);
-                throw new Abort(Status.ERROR, FailureKind.ENVIRONMENT, stepId, e.getMessage(), RunLog.fields(
-                        "primitive", call.primitive(), "path", servedBy[0], "params", params));
-            }
-            boolean agentServed = !webCall || AgentWebPath.ID.equals(servedBy[0]);
-            if (agentServed && !fromPath) {
-                noteSeq(result.seqAfter());
-            }
-            Map<String, Object> record = RunLog.fields("step", stepId, "index", callIndex + 1, "primitive",
-                    call.primitive());
-            if (webCall) {
-                record.put("path", servedBy[0]);
-            }
-            record.putAll(RunLog.fields("params", params, "ok", true, "value", result.value(), "events",
-                    result.events().size(), "seq", seq(result), "durationMs", options.clock().millis() - t0,
-                    "thread", result.thread()));
-            if (fromPath) {
-                record.put("eventSource", web.pathId());
-            }
-            if (!secretParams.isEmpty()) {
-                record.put("secretParams", secretParams);
-            }
-            log.write("call", record);
-            if (webCall) {
-                web.noteCall(stepId, callIndex + 1, call.primitive(), servedBy[0], true);
-            }
-            boolean isSettle = "swing.settle".equals(call.primitive());
-            if (!isAwait && !isSettle && !"trace.mark".equals(call.primitive())) {
-                lastActionSeq = agentSince;
-                lastActionPathSeq = pathSince;
-            }
-            noteFidelity(step, call, result.value());
-            if (baseUi) {
-                checkFired(step, call, result.value());
-            }
-            if ((baseUi || baseWeb) && isSettle) {
-                checkSettled(step, call, params, result.value());
-            }
-            if (baseWeb && "web.waitFlag".equals(call.primitive())) {
-                checkWaitFlag(step, call, params, result.value());
-            }
-            Event ended = applySync(call, await, agentSince, pathSince, stepId);
-            if (call.capture() != null) {
-                capture(step, call, isAwait ? awaitedEvent(result.value()) : ended);
-            }
-            checkPrompts(stepIndex, callIndex, handledUpTo(call, result, agentSince, fromPath));
-        }
-
-        /**
-         * A {@code sync.await} call on a web topic while a non-agent web path serves the run: the executor waits on
-         * the path's events and the agent's bus itself (since the last action on each). No event in time is the
-         * agent's own TIMEOUT error, so that it is reported exactly as on the agent path; a rejected wait is the
-         * agent's error.
-         */
-        private WebRun.Waited combinedAwait(Map<String, Object> params, long t0)
-                throws AgentRpcException, AgentLostException, Abort {
-            String topics = AwaitRules.topicsText(params.get("topics"));
-            long since = params.get("since") instanceof Number n ? n.longValue() : lastActionSeq;
-            long timeoutMs = params.get("timeoutMs") instanceof Number n ? Math.max(1L, n.longValue()) : 10_000L;
-            @SuppressWarnings("unchecked")
-            Map<String, Object> match = params.get("match") instanceof Map<?, ?> m ? (Map<String, Object>) m : null;
-            WebRun.Waited waited;
-            try {
-                waited = web.await(topics, since, lastActionPathSeq, match, timeoutMs);
-            } catch (RuntimeException e) {
-                throw new Abort(Status.ERROR, FailureKind.ENVIRONMENT, currentStep, "waiting for event (" + topics
-                        + ") failed: " + e, RunLog.fields("primitive", "sync.await", "error", e.toString()));
-            }
-            if (waited == null) {
-                throw new AgentRpcException("sync.await", new RpcError(ErrorCodes.TIMEOUT, "no matching event within "
-                        + timeoutMs + " ms", RunLog.fields("lastSeq", lastSeenSeq, "topics", topics, "since", since,
-                        "pathSince", lastActionPathSeq, "timeoutMs", timeoutMs, "waitedMs",
-                        options.clock().millis() - t0)));
-            }
-            return waited;
-        }
-
-        /**
-         * Amendment A34, by provenance: the top-level params whose template references (whole, embedded in a text or
-         * inside a structure) a joined credential field, or an A25 fixture secret (a reference into a slot the key
-         * rule covers whose slot name or path field looks secret, or which reaches a structure holding a field whose
-         * key looks secret; {@link FixtureSecrets#reachesSecret}). They are sent as {@code _meta.secretParams}
-         * ({@link CallOptions#withSecretParams}), so that the agent redacts their values wherever it logs, traces or
-         * reports the call; the primitive itself receives them unchanged. Never by value: a literal that happens to
-         * equal a credential is not named. Step and cleanup calls alike.
-         */
-        private List<String> secretParams(Plan.Call call) {
-            List<String> names = new ArrayList<>();
-            for (Map.Entry<String, Object> e : call.args().entrySet()) {
-                for (References.Ref ref : References.collect(e.getValue())) {
-                    if (bindings.isSecretField(ref.slot(), ref.fields()) || fixtureSecret(ref)) {
-                        names.add(e.getKey());
-                        break;
-                    }
-                }
-            }
-            return names;
-        }
-
-        /** True when the reference reaches an A25 secret of a slot the run's mask covers by the key rule. */
-        private boolean fixtureSecret(References.Ref ref) {
-            if (!keyRuleSlots().contains(ref.slot()) || !bindings.has(ref.slot())) {
-                return false;
-            }
-            try {
-                return FixtureSecrets.reachesSecret(ref.slot(), ref.fields(),
-                        References.navigate(bindings.values().get(ref.slot()), ref.fields(), ref.text()));
-            } catch (ResolutionException e) {
-                // Substitution succeeded before this is asked, so the path exists; judge by the path alone.
-                return SecretKeys.looksSecret(ref.slot()) || ref.fields().stream().anyMatch(SecretKeys::looksSecret);
-            }
-        }
 
         /**
          * The slots whose values the run's mask collected by A25's key rule ({@link #secretMask()}): the caller's
          * slots when the caller supplied the bindings, else the plan's fixture slots.
          */
         private Set<String> keyRuleSlots() {
-            if (keyRuleSlots == null) {
-                Set<String> slots = new LinkedHashSet<>();
-                if (provided != null) {
-                    slots.addAll(provided.values().keySet());
-                } else {
-                    for (Plan.Slot slot : plan.slots()) {
-                        if ("fixture".equals(slot.kind())) {
-                            slots.add(slot.name());
-                        }
-                    }
-                }
-                keyRuleSlots = slots;
-            }
-            return keyRuleSlots;
-        }
-
-        /** The event a {@code sync.await} call returned. */
-        private Event awaitedEvent(Object value) {
-            if (value instanceof Map<?, ?> map) {
-                try {
-                    @SuppressWarnings("unchecked")
-                    Map<String, Object> json = (Map<String, Object>) map;
-                    return Event.fromJson(json);
-                } catch (RuntimeException e) {
-                    return null;
-                }
-            }
-            return null;
-        }
-
-        /**
-         * Binds the call's captured slot from the event that ended its wait (phase2-contracts.md 3.4). A field whose
-         * payload path leads nowhere fails the step as FAIL / ASSERTION.
-         */
-        private void capture(Plan.Step step, Plan.Call call, Event event) throws Abort {
-            String slot = call.capture().slot();
-            String topic = event == null ? "(none)" : event.topic();
-            Map<String, Object> payload = event == null || event.payload() == null ? Map.of() : event.payload();
-            Map<String, Object> value = new LinkedHashMap<>();
-            for (Map.Entry<String, String> field : call.capture().fields().entrySet()) {
-                String path = field.getValue();
-                try {
-                    value.put(field.getKey(), References.navigate(payload, List.of(path.split("\\.")),
-                            "$" + slot + "." + field.getKey()));
-                } catch (ResolutionException e) {
-                    log.write("capture", RunLog.fields("step", step.id(), "slot", slot, "ok", false, "topic", topic,
-                            "path", path));
-                    throw new Abort(Status.FAIL, FailureKind.ASSERTION, step.id(), "event " + topic + " has no payload"
-                            + " value at " + path, RunLog.fields("slot", slot, "field", field.getKey(), "path", path,
-                            "topic", topic, "payload", payload));
-                }
-            }
-            bindings = bindings.withCaptured(slot, value);
-            log.write("capture", RunLog.fields("step", step.id(), "slot", slot, "value", value));
-        }
-
-        /**
-         * Records a result with {@code fidelity: "DEGRADED"}: the call ran, but at a lower fidelity than requested
-         * (a COMPONENT click that fell back to ACTION). The run can then be DEGRADED at best.
-         */
-        private void noteFidelity(Plan.Step step, Plan.Call call, Object value) {
-            if (!(value instanceof Map<?, ?> v) || !"DEGRADED".equals(v.get("fidelity"))) {
-                return;
-            }
-            Object requested = v.get("requestedRung");
-            Object rung = v.get("rung");
-            Object reason = v.get("reason");
-            String entry = step.id() + ": " + step.verb() + " fell back from " + (requested == null ? "?" : requested)
-                    + " to " + (rung == null ? "?" : rung) + (reason == null ? "" : " (" + reason + ")");
-            entry = Values.printableLine(entry);
-            degradedFidelity.add(entry);
-            stepFidelity.add(entry);
-            log.write("fidelity", RunLog.fields("step", step.id(), "primitive", call.primitive(), "fidelity",
-                    "DEGRADED", "requestedRung", requested, "rung", rung, "reason", reason));
-        }
-
-        /** A base UI verb's call that reports {@code fired: false} did nothing: FAIL/ASSERTION. */
-        private void checkFired(Plan.Step step, Plan.Call call, Object value) throws Abort {
-            if (!(value instanceof Map<?, ?> v) || !Boolean.FALSE.equals(v.get("fired"))) {
-                return;
-            }
-            Object rung = v.get("rung");
-            Object reason = v.get("reason");
-            Map<String, Object> detail = RunLog.fields("primitive", call.primitive(), "value", value);
-            throw new Abort(Status.FAIL, FailureKind.ASSERTION, step.id(), step.verb() + " did not fire: "
-                    + (rung == null ? "?" : rung) + ": " + (reason == null ? "no reason given" : reason), detail);
-        }
-
-        /**
-         * The {@code swing.settle} call a base UI verb emits after an {@code await}: {@code settled: false} is
-         * SYNC_TIMEOUT, as for the SETTLE sync.
-         */
-        private void checkSettled(Plan.Step step, Plan.Call call, Map<String, Object> params, Object value)
-                throws Abort {
-            if (value instanceof Map<?, ?> v && Boolean.TRUE.equals(v.get("settled"))) {
-                return;
-            }
-            Object timeoutMs = params.get("timeoutMs");
-            Map<String, Object> detail = RunLog.fields("primitive", call.primitive(), "sync", "NONE", "timeoutMs",
-                    timeoutMs, "settle", value);
-            detail.putAll(diagnostics());
-            throw new Abort(Status.FAIL, FailureKind.SYNC_TIMEOUT, step.id(), "the UI did not settle within "
-                    + timeoutMs + " ms after " + step.verb(), detail);
-        }
-
-        /**
-         * The {@code web.waitFlag} call of the base verb {@code webWaitFlag}: a flag that did not turn true
-         * ({@code ready} not true) within the primitive's wait is SYNC_TIMEOUT, as an expired settle is. The result
-         * is the detail's {@code waitFlag}; its {@code lastError} (the last poll's error, either path: A35) also ends
-         * the message.
-         */
-        private void checkWaitFlag(Plan.Step step, Plan.Call call, Map<String, Object> params, Object value)
-                throws Abort {
-            if (value instanceof Map<?, ?> v && Boolean.TRUE.equals(v.get("ready"))) {
-                return;
-            }
-            Object ms = value instanceof Map<?, ?> v && v.get("ms") != null ? v.get("ms")
-                    : params.get("timeoutMs") != null ? params.get("timeoutMs") : call.timeoutMs();
-            Map<String, Object> detail = RunLog.fields("primitive", call.primitive(), "sync", "NONE", "expression",
-                    params.get("expression"), "waitFlag", value);
-            detail.putAll(diagnostics());
-            String expression = Values.printableLine(Values.stringOf(params.get("expression")));
-            String lastError = value instanceof Map<?, ?> v && v.get("lastError") instanceof String error
-                    ? Values.printableLine(error) : null;
-            throw new Abort(Status.FAIL, FailureKind.SYNC_TIMEOUT, step.id(), step.verb() + ": the flag did not turn"
-                    + " true within " + ms + " ms: " + shortened(expression) + (lastError == null ? ""
-                    : " (last error: " + shortened(lastError) + ")"), detail);
-        }
-
-        /** At most 200 characters of a line for a failure message: longer ones end in "...". */
-        private static String shortened(String line) {
-            return line.length() <= 200 ? line : line.substring(0, 197) + "...";
-        }
-
-        /**
-         * The highest sequence number of a prompt this call itself dealt with: for a wait on a prompt topic the event
-         * it returned, for any other prompt-handling call everything published before the call ran (the prompt it
-         * answered was open by then; one it raised comes later). -1 for a call that handles no prompt, and for a wait
-         * a web path's own event ended (its number is not the agent's, and the path publishes no prompt).
-         *
-         * @param agentBefore the agent's sequence number before the call
-         */
-        private long handledUpTo(Plan.Call call, RpcResult result, long agentBefore, boolean fromPath) {
-            if (!call.handlesPrompt()) {
-                return -1;
-            }
-            if (!"sync.await".equals(call.primitive())) {
-                return agentBefore;
-            }
-            if (fromPath) {
-                return -1;
-            }
-            if (result.value() instanceof Map<?, ?> event && event.get("seq") instanceof Long seq) {
-                noteSeq(seq);
-                return seq;
-            }
-            return -1;
-        }
-
-        private Abort rpcFailure(AgentRpcException e, String stepId, String primitive, Map<String, Object> params) {
-            RpcError error = e.error();
-            Map<String, Object> detail = errorDetail(primitive, e);
-            detail.put("params", params);
-            String message = primitive + " failed: " + ErrorCodes.name(error.code()) + ": " + error.message();
-            return switch (error.code()) {
-                // phase4-contracts.md 8.1: a script the page ran threw; the page did not do what the step expected.
-                case ErrorCodes.INPUT_REJECTED, ErrorCodes.NOT_FOUND, ErrorCodes.AMBIGUOUS, ErrorCodes.SCRIPT_ERROR ->
-                        new Abort(Status.FAIL, FailureKind.ASSERTION, stepId, message, detail);
-                case ErrorCodes.STALE_HANDLE -> WebRun.isWeb(primitive)
-                        ? new Abort(Status.FAIL, FailureKind.ASSERTION, stepId, primitive + " failed: the browser"
-                                + " closed during the step (STALE_HANDLE: " + error.message() + ")", detail)
-                        : new Abort(Status.ERROR, FailureKind.ENVIRONMENT, stepId, message, detail);
-                case ErrorCodes.MODAL_OPEN -> {
-                    String dialog = modalDialog(error, detail);
-                    yield new Abort(Status.FAIL, FailureKind.ASSERTION, stepId, message + dialog, detail);
-                }
-                case ErrorCodes.TIMEOUT -> {
-                    detail.putAll(diagnostics());
-                    yield new Abort(Status.FAIL, FailureKind.SYNC_TIMEOUT, stepId, message, detail);
-                }
-                default -> new Abort(Status.ERROR, FailureKind.ENVIRONMENT, stepId, message, detail);
-            };
-        }
-
-        /**
-         * Adds {@code dialogTitle} and {@code dialogText} of the dialog a MODAL_OPEN error names to the detail: the
-         * title from the error's data, the text from {@code swing.dialogs} (best effort, one bounded call). Returns
-         * {@code " (dialog \"title\": text)"} for the message, or "" when nothing is known.
-         */
-        private String modalDialog(RpcError error, Map<String, Object> detail) {
-            Map<String, Object> data = error.data();
-            Object ref = data == null ? null : data.get("dialog");
-            Object title = data == null ? null : data.get("title");
-            Object text = null;
-            if (diagnostic("swing.dialogs") instanceof Map<?, ?> d && d.get("dialogs") instanceof List<?> dialogs) {
-                for (Object item : dialogs) {
-                    if (item instanceof Map<?, ?> dialog && (ref != null ? ref.equals(dialog.get("ref"))
-                            : title != null && title.equals(dialog.get("title")))) {
-                        text = dialog.get("text");
-                        if (title == null) {
-                            title = dialog.get("title");
-                        }
-                        break;
+            Set<String> slots = new LinkedHashSet<>();
+            if (provided != null) {
+                slots.addAll(provided.values().keySet());
+            } else {
+                for (Plan.Slot slot : plan.slots()) {
+                    if ("fixture".equals(slot.kind())) {
+                        slots.add(slot.name());
                     }
                 }
             }
-            detail.put("dialogTitle", title);
-            detail.put("dialogText", text);
-            if (title == null && text == null) {
-                return "";
-            }
-            return " (dialog" + (title == null ? "" : " \"" + Values.printableLine(Values.stringOf(title)) + "\"")
-                    + (text == null ? "" : ": " + Values.brief(Values.printableLine(Values.stringOf(text)), 200))
-                    + ")";
-        }
-
-        // ---------------------------------------------------------------- sync
-
-        /**
-         * Applies the call's sync.
-         *
-         * @param await the call's await spec with its references resolved (EVENT only, else null)
-         * @param since the agent's sequence number before the call ({@code seq.before} of an agent call)
-         * @param pathSince the web path's sequence number before the call (used when the wait reads the path's
-         *     events, phase4-contracts.md 6.3)
-         * @return the event that ended an EVENT wait, else null
-         */
-        private Event applySync(Plan.Call call, AwaitSpec await, long since, long pathSince, String stepId)
-                throws Abort, AgentLostException {
-            switch (call.sync()) {
-                case NONE -> {
-                }
-                case ACK -> {
-                    if (sync.ackTopic() != null) {
-                        awaitTopic("ack", sync.ackTopic(), null, since, pathSince, timeout(sync.ackTimeout(), call),
-                                call, stepId);
-                    } else {
-                        log.write("sync", RunLog.fields("step", stepId, "primitive", call.primitive(), "mode", "ACK",
-                                "ok", true, "note", "the pack has no ack topic"));
-                    }
-                }
-                case READY -> {
-                    if (sync.ackTopic() != null) {
-                        awaitTopic("ack", sync.ackTopic(), null, since, pathSince, timeout(sync.ackTimeout(), call),
-                                call, stepId);
-                    }
-                    if (!sync.readyTopics().isEmpty()) {
-                        awaitTopic("ready", String.join(",", sync.readyTopics()), null, since, pathSince,
-                                timeout(sync.readyTimeout(), call), call, stepId);
-                    }
-                }
-                case SETTLE -> settle(call, stepId);
-                case EVENT -> {
-                    return awaitTopic("event", await.topics(), await.match(), since, pathSince, await.timeoutMs(),
-                            call, stepId);
-                }
-                default -> throw new IllegalStateException("unknown sync " + call.sync());
-            }
-            return null;
-        }
-
-        private long timeout(Duration configured, Plan.Call call) {
-            return configured != null ? Math.max(1, configured.toMillis()) : call.timeoutMs();
-        }
-
-        /**
-         * Awaits the first event on {@code topics} (whose payload holds every {@code match} entry, when not null)
-         * since {@code since}; none within {@code timeoutMs} is SYNC_TIMEOUT with the diagnostics in the detail, and
-         * an error from the wait itself (a topic filter the agent rejects, for instance) is ENVIRONMENT. While a
-         * non-agent web path serves the run, a wait whose topics can match a {@code web.*} topic also reads the
-         * path's own events since {@code pathSince} (phase4-contracts.md 6.3); the record then carries
-         * {@code pathSince} and {@code source} (the path's id when its event ended the wait, {@code eventSeq} being
-         * the path's own sequence number then; {@code agent} otherwise).
-         */
-        private Event awaitTopic(String wait, String topics, Map<String, Object> match, long since, long pathSince,
-                                 long timeoutMs, Plan.Call call, String stepId) throws Abort, AgentLostException {
-            long t0 = options.clock().millis();
-            boolean combined = web.combines(topics);
-            Map<String, Object> waitFields = RunLog.fields("wait", wait, "topics", topics);
-            if (match != null) {
-                waitFields.put("match", match);
-            }
-            waitFields.putAll(RunLog.fields("since", since, "timeoutMs", timeoutMs));
-            if (combined) {
-                waitFields.put("pathSince", pathSince);
-            }
-            Map<String, Object> record = RunLog.fields("step", stepId, "primitive", call.primitive(), "mode",
-                    call.sync().name());
-            record.putAll(waitFields);
-            Map<String, Object> detail = RunLog.fields("primitive", call.primitive(), "sync", call.sync().name());
-            detail.putAll(waitFields);
-            Event event;
-            boolean fromPath = false;
-            try {
-                if (combined) {
-                    WebRun.Waited waited = web.await(topics, since, pathSince, match, timeoutMs);
-                    event = waited == null ? null : waited.event();
-                    fromPath = waited != null && waited.fromPath();
-                } else {
-                    event = agent.await(topics, since, match, Duration.ofMillis(timeoutMs));
-                }
-            } catch (RuntimeException | AgentRpcException e) {
-                record.putAll(RunLog.fields("ok", false, "error", e.toString()));
-                log.write("sync", record);
-                detail.put("error", e.toString());
-                throw new Abort(Status.ERROR, FailureKind.ENVIRONMENT, stepId, "waiting for " + describe(wait,
-                        topics, match) + " after " + call.primitive() + " failed: " + e.getMessage(), detail);
-            }
-            record.putAll(RunLog.fields("ok", event != null, "eventSeq", event == null ? null : event.seq(), "topic",
-                    event == null ? null : event.topic(), "ms", options.clock().millis() - t0));
-            if (combined && event != null) {
-                record.put("source", fromPath ? web.pathId() : AgentWebPath.ID);
-            }
-            log.write("sync", record);
-            if (event == null) {
-                detail.putAll(diagnostics());
-                throw new Abort(Status.FAIL, FailureKind.SYNC_TIMEOUT, stepId, "no " + describe(wait, topics, match)
-                        + " within " + timeoutMs + " ms after " + call.primitive(), detail);
-            }
-            if (!fromPath) {
-                noteSeq(event.seq());
-            }
-            return event;
-        }
-
-        /** "ready event (a,b)", or for an EVENT wait "event (a,b)" plus " matching {…}" when it has a match. */
-        private String describe(String wait, String topics, Map<String, Object> match) {
-            return ("event".equals(wait) ? "" : wait + " ") + "event (" + topics + ")"
-                    + (match == null ? "" : " matching " + Values.safeWrite(match));
-        }
-
-        private void settle(Plan.Call call, String stepId) throws Abort, AgentLostException {
-            long timeoutMs = call.timeoutMs();
-            Map<String, Object> params = RunLog.fields("timeoutMs", timeoutMs);
-            long t0 = options.clock().millis();
-            RpcResult result;
-            try {
-                result = agent.call("swing.settle", params, options(timeoutMs + 2000, null));
-            } catch (AgentRpcException e) {
-                log.write("sync", RunLog.fields("step", stepId, "primitive", call.primitive(), "mode", "SETTLE",
-                        "ok", false, "error", e.error().toJson()));
-                throw rpcFailure(e, stepId, "swing.settle", params);
-            }
-            noteSeq(result.seqAfter());
-            boolean settled = result.value() instanceof Map<?, ?> v && Boolean.TRUE.equals(v.get("settled"));
-            log.write("sync", RunLog.fields("step", stepId, "primitive", call.primitive(), "mode", "SETTLE",
-                    "timeoutMs", timeoutMs, "ok", settled, "value", result.value(), "ms",
-                    options.clock().millis() - t0));
-            if (!settled) {
-                Map<String, Object> detail = RunLog.fields("primitive", call.primitive(), "sync", "SETTLE",
-                        "timeoutMs", timeoutMs, "settle", result.value());
-                detail.putAll(diagnostics());
-                throw new Abort(Status.FAIL, FailureKind.SYNC_TIMEOUT, stepId, "the UI did not settle within "
-                        + timeoutMs + " ms after " + call.primitive(), detail);
-            }
-        }
-
-        /** {@code swing.edtState}, {@code swing.dialogs} and {@code app.state}, each best effort. */
-        private Map<String, Object> diagnostics() {
-            Map<String, Object> d = new LinkedHashMap<>();
-            d.put("edtState", diagnostic("swing.edtState"));
-            d.put("dialogs", diagnostic("swing.dialogs"));
-            d.put("appState", diagnostic("app.state"));
-            return d;
-        }
-
-        private Object diagnostic(String primitive) {
-            if (agentLost) {
-                return RunLog.fields("error", "skipped: the agent was lost");
-            }
-            try {
-                RpcResult result = agent.call(primitive, Map.of(), options(DIAGNOSTIC_TIMEOUT_MS, null));
-                noteSeq(result.seqAfter());
-                return result.value();
-            } catch (AgentRpcException e) {
-                return RunLog.fields("error", e.getMessage());
-            } catch (AgentLostException e) {
-                agentLost = true;
-                return RunLog.fields("error", e.toString());
-            } catch (RuntimeException e) {
-                return RunLog.fields("error", e.toString());
-            }
-        }
-
-        // ---------------------------------------------------------------- prompts
-
-        private void checkPrompts(int stepIndex, int callIndex, long handledUpTo)
-                throws Abort, AgentLostException {
-            List<String> topics = sync.promptTopics();
-            if (topics.isEmpty()) {
-                return;
-            }
-            String stepId = plan.steps().get(stepIndex).id();
-            TopicFilter filter = TopicFilter.of(topics);
-            for (int round = 0; round < 10; round++) {
-                Map<String, Object> params = RunLog.fields("since", promptCursor, "topics", String.join(",", topics),
-                        "limit", PROMPT_QUERY_LIMIT);
-                RpcResult result;
-                try {
-                    result = agent.call("evt.query", params, options(DIAGNOSTIC_TIMEOUT_MS, null));
-                } catch (AgentRpcException e) {
-                    log.write("prompt", RunLog.fields("step", stepId, "ok", false, "error", e.error().toJson()));
-                    return;
-                }
-                noteSeq(result.seqAfter());
-                List<Event> events = events(result.value());
-                for (Event event : events) {
-                    if (event.seq() <= promptCursor) {
-                        continue;
-                    }
-                    promptCursor = event.seq();
-                    noteSeq(event.seq());
-                    if (!filter.matches(event.topic())) {
-                        continue;
-                    }
-                    boolean expected = event.seq() <= handledUpTo
-                            || laterCallHandlesPrompt(stepIndex, callIndex) || nextStepHandlesPrompt(stepIndex);
-                    if (expected) {
-                        log.write("prompt", RunLog.fields("step", stepId, "event", event.toJson(), "expected", true));
-                        continue;
-                    }
-                    applyPolicy(event, stepId);
-                }
-                if (events.size() < PROMPT_QUERY_LIMIT) {
-                    return;
-                }
-            }
-        }
-
-        private void applyPolicy(Event event, String stepId) throws Abort {
-            PromptDecision decision;
-            try {
-                decision = promptPolicy.onUnexpectedPrompt(event, agent);
-            } catch (RuntimeException e) {
-                log.write("prompt", RunLog.fields("step", stepId, "event", event.toJson(), "expected", false,
-                        "error", e.toString()));
-                throw new Abort(Status.ERROR, FailureKind.ENVIRONMENT, stepId, "the prompt policy failed on an"
-                        + " unexpected prompt: " + e, RunLog.fields("prompt", event.toJson()));
-            }
-            if (decision == null) {
-                decision = PromptDecision.fail("the prompt policy returned no decision");
-            }
-            log.write("prompt", RunLog.fields("step", stepId, "event", event.toJson(), "expected", false,
-                    "decision", decision.action().name(), "reason", decision.reason()));
-            if (decision.action() == PromptDecision.Action.FAIL) {
-                String reason = decision.reason() != null ? decision.reason()
-                        : "unexpected prompt (" + event.topic() + "): " + event.payload();
-                throw new Abort(Status.FAIL, FailureKind.ASSERTION, stepId, reason,
-                        RunLog.fields("prompt", event.toJson(), "policyReason", decision.reason()));
-            }
-        }
-
-        private boolean laterCallHandlesPrompt(int stepIndex, int callIndex) {
-            List<Plan.Call> calls = plan.steps().get(stepIndex).calls();
-            for (int j = callIndex + 1; j < calls.size(); j++) {
-                if (calls.get(j).handlesPrompt()) {
-                    return true;
-                }
-            }
-            return false;
+            return slots;
         }
 
         private boolean nextStepHandlesPrompt(int stepIndex) {
@@ -1974,13 +1302,14 @@ public final class PlanExecutor {
                 }
                 Expectation expectation = (Expectation) check;
                 try {
-                    ExpectationPath path = ExpectationPath.parse(expectation.path()).bind(bindings::lookupPublic);
+                    ExpectationPath path = ExpectationPath.parse(expectation.path())
+                            .bind(runner.bindings::lookupPublic);
                     if (!runFacts.containsKey(path.root())) {
                         throw new Abort(Status.ERROR, FailureKind.ENVIRONMENT, stepId, "no fact provider for root '"
                                 + path.root() + "' of " + expectation.path() + "; roots: " + runFacts.keySet(),
                                 RunLog.fields("path", expectation.path()));
                     }
-                    active.add(new Bound(expectation, path, bindings.substitutePublic(expectation.matcher())));
+                    active.add(new Bound(expectation, path, runner.bindings.substitutePublic(expectation.matcher())));
                 } catch (ResolutionException e) {
                     throw new Abort(Status.ERROR, FailureKind.RESOLUTION_FAILED, stepId, e.getMessage(),
                             RunLog.fields("reason", e.reason(), "reference", e.reference(), "path",
@@ -2108,14 +1437,16 @@ public final class PlanExecutor {
             List<Object> params = new ArrayList<>();
             try {
                 for (RowCheck.Param param : row.params()) {
-                    Object value = bindings.substitutePublic(param.value());
+                    Object value = runner.bindings.substitutePublic(param.value());
                     params.add(convert(param.kind(), value, row, stepId));
                 }
                 @SuppressWarnings("unchecked")
-                Map<String, Object> expect = (Map<String, Object>) bindings.substitutePublic(row.expect());
+                Map<String, Object> expect = (Map<String, Object>) runner.bindings.substitutePublic(row.expect());
                 @SuppressWarnings("unchecked")
-                Map<String, Object> aggregates = (Map<String, Object>) bindings.substitutePublic(row.aggregates());
-                return new BoundRow(row, table, params, bindings.substitutePublic(row.rows()), expect, aggregates);
+                Map<String, Object> aggregates = (Map<String, Object>) runner.bindings.substitutePublic(
+                        row.aggregates());
+                return new BoundRow(row, table, params, runner.bindings.substitutePublic(row.rows()), expect,
+                        aggregates);
             } catch (ResolutionException e) {
                 throw new Abort(Status.ERROR, FailureKind.RESOLUTION_FAILED, stepId, "db." + row.table() + ": "
                         + e.getMessage(), RunLog.fields("reason", e.reason(), "reference", e.reference(), "db",
@@ -2311,7 +1642,7 @@ public final class PlanExecutor {
         // ---------------------------------------------------------------- end of run
 
         private Abort lost(AgentLostException e) {
-            agentLost = true;
+            runner.agentLost = true;
             boolean restarted = false;
             if (options.targetRestarted() != null) {
                 try {
@@ -2321,7 +1652,7 @@ public final class PlanExecutor {
                 }
             }
             FailureKind kind = restarted ? FailureKind.TARGET_RESTARTED : FailureKind.AGENT_LOST;
-            return new Abort(Status.ERROR, kind, currentStep, (restarted ? "the target restarted: "
+            return new Abort(Status.ERROR, kind, runner.currentStep, (restarted ? "the target restarted: "
                     : "the agent was lost: ") + e.getMessage(), RunLog.fields("exception", e.toString()));
         }
 
@@ -2354,7 +1685,7 @@ public final class PlanExecutor {
                 log.write("evidence", RunLog.fields("kind", "swing.capture", "ok", false, "reason",
                         "capability swing.capture.paint is not OK"));
             }
-            Object probe = evidence("evt.query", RunLog.fields("since", lastSeenSeq, "limit", 1L),
+            Object probe = evidence("evt.query", RunLog.fields("since", runner.lastSeenSeq, "limit", 1L),
                     DIAGNOSTIC_TIMEOUT_MS, lost);
             if (probe instanceof Map<?, ?> p && p.get("lastSeq") instanceof Long lastSeq) {
                 writeJson(dir, "events.json", evidence("evt.query", RunLog.fields("since",
@@ -2426,7 +1757,7 @@ public final class PlanExecutor {
             writeJson(dir, "web-browsers.json", browsers);
             int kept = 0;
             for (Map<?, ?> browser : browsersInRefOrder(browsers)) {
-                if (kept >= WEB_EVIDENCE_BROWSERS || lost[0] || agentLost) {
+                if (kept >= WEB_EVIDENCE_BROWSERS || lost[0] || runner.agentLost) {
                     break;
                 }
                 if (!Boolean.TRUE.equals(browser.get("visibleInSwing"))) {
@@ -2465,13 +1796,13 @@ public final class PlanExecutor {
          */
         private WebRead webEvidence(String primitive, Map<String, Object> params, long timeoutMs, boolean[] lost,
                                     List<String> errors) {
-            if (lost[0] || agentLost) {
+            if (lost[0] || runner.agentLost) {
                 return null;
             }
             String[] servedBy = new String[1];
             try {
-                WebRun.Served served = web.call(currentStep == null ? "evidence" : currentStep, primitive, params,
-                        options(timeoutMs, null), true, lastSeenSeq, servedBy);
+                WebRun.Served served = web.call(runner.currentStep == null ? "evidence" : runner.currentStep,
+                        primitive, params, options(timeoutMs, null), true, runner.lastSeenSeq, servedBy);
                 log.write("evidence", RunLog.fields("kind", primitive, "ok", true, "path", served.path()));
                 return new WebRead(served.result().value(), served.path());
             } catch (AgentRpcException e) {
@@ -2482,7 +1813,7 @@ public final class PlanExecutor {
                         error.toJson()));
             } catch (AgentLostException e) {
                 lost[0] = true;
-                agentLost = true;
+                runner.agentLost = true;
                 log.write("evidence", RunLog.fields("kind", primitive, "ok", false, "error", e.toString()));
             } catch (WebRun.PathFailure | RuntimeException e) {
                 errors.add(primitive + ": " + e.getMessage());
@@ -2508,7 +1839,7 @@ public final class PlanExecutor {
         }
 
         private Object evidence(String primitive, Map<String, Object> params, long timeoutMs, boolean[] lost) {
-            if (lost[0] || agentLost) {
+            if (lost[0] || runner.agentLost) {
                 return null;
             }
             try {
@@ -2519,7 +1850,7 @@ public final class PlanExecutor {
                 log.write("evidence", RunLog.fields("kind", primitive, "ok", false, "error", e.error().toJson()));
             } catch (AgentLostException e) {
                 lost[0] = true;
-                agentLost = true;
+                runner.agentLost = true;
                 log.write("evidence", RunLog.fields("kind", primitive, "ok", false, "error", e.toString()));
             } catch (RuntimeException e) {
                 log.write("evidence", RunLog.fields("kind", primitive, "ok", false, "error", e.toString()));
@@ -2577,8 +1908,8 @@ public final class PlanExecutor {
             List<Plan.Call> calls = new ArrayList<>(plan.cleanup());
             Collections.reverse(calls);
             // Hardening H2: after a loss no call goes out at all, not even the first cleanup call.
-            boolean lostNow = agentLost;
-            Bindings cleanupBindings = bindings == null ? Bindings.empty() : bindings;
+            boolean lostNow = runner.agentLost;
+            Bindings cleanupBindings = runner.bindings == null ? Bindings.empty() : runner.bindings;
             for (Plan.Call call : calls) {
                 if (lostNow) {
                     log.write("cleanup", RunLog.fields("primitive", call.primitive(), "ok", false, "error",
@@ -2593,16 +1924,20 @@ public final class PlanExecutor {
                     Map<String, Object> substituted = (Map<String, Object>) cleanupBindings.substitute(call.args());
                     params = substituted;
                     AwaitSpec await = AwaitRules.resolve(call.await(), cleanupBindings, stepTimeoutMs);
-                    List<String> secretParams = secretParams(call);
-                    secretsSent |= !secretParams.isEmpty();
+                    List<String> secretParams = runner.secretParams(call);
+                    runner.secretsSent |= !secretParams.isEmpty();
                     CallOptions callOptions = options(call.timeoutMs(), null).withSecretParams(secretParams);
+                    if (CallRunner.confirmation(params)) {
+                        // phase5-contracts.md 13.1: a destructive cleanup call is confirmed as a step's is.
+                        callOptions = callOptions.withConfirm(true);
+                    }
                     RpcResult result;
                     long agentSince;
                     long pathSince;
                     if (webCall) {
                         // phase4-contracts.md 6.1: cleanup's web calls (webTap's removal) take the run's path too.
                         WebRun.Served served = web.call("cleanup", call.primitive(), params, callOptions, false,
-                                lastSeenSeq, servedBy);
+                                runner.lastSeenSeq, servedBy);
                         result = served.result();
                         agentSince = served.agentSince();
                         pathSince = served.pathSince();
@@ -2616,7 +1951,7 @@ public final class PlanExecutor {
                         agentSince = result.seqBefore();
                         noteSeq(result.seqAfter());
                     }
-                    applySync(call, await, agentSince, pathSince, "cleanup");
+                    runner.applySync(call, await, agentSince, pathSince, "cleanup");
                     Map<String, Object> record = RunLog.fields("primitive", call.primitive());
                     if (webCall) {
                         record.put("path", servedBy[0]);
@@ -2625,7 +1960,7 @@ public final class PlanExecutor {
                     log.write("cleanup", record);
                 } catch (AgentLostException e) {
                     lostNow = true;
-                    agentLost = true;
+                    runner.agentLost = true;
                     log.write("cleanup", cleanupFailure(call, servedBy[0], params, e.toString()));
                 } catch (AgentRpcException e) {
                     noteCleanupFailure(call, calls, servedBy[0]);
@@ -2656,7 +1991,7 @@ public final class PlanExecutor {
         }
 
         private void runRecover() {
-            if (agentLost) {
+            if (runner.agentLost) {
                 log.write("recover", RunLog.fields("ok", false, "error", "skipped: the agent was lost"));
                 return;
             }
@@ -2674,45 +2009,23 @@ public final class PlanExecutor {
         // ---------------------------------------------------------------- helpers
 
         private CallOptions options(long timeoutMs, String correlationId) {
-            long capped = Math.min(Math.max(1L, timeoutMs), MAX_CALL_TIMEOUT_MS);
-            return CallOptions.defaults().withCorrelationId(correlationId).withTimeoutMs(capped);
+            return CallRunner.options(timeoutMs, correlationId);
         }
 
         private void noteSeq(long seq) {
-            lastSeenSeq = Math.max(lastSeenSeq, seq);
+            runner.noteSeq(seq);
+        }
+
+        private Map<String, Object> seq(RpcResult result) {
+            return CallRunner.seq(result);
+        }
+
+        private Map<String, Object> errorDetail(String primitive, AgentRpcException e) {
+            return CallRunner.errorDetail(primitive, e);
         }
 
         private Duration since(long t0) {
             return Duration.ofMillis(Math.max(0, options.clock().millis() - t0));
-        }
-
-        private Map<String, Object> seq(RpcResult result) {
-            return RunLog.fields("before", result.seqBefore(), "after", result.seqAfter());
-        }
-
-        private Map<String, Object> errorDetail(String primitive, AgentRpcException e) {
-            RpcError error = e.error();
-            return RunLog.fields("primitive", primitive, "code", error.code(), "error", ErrorCodes.name(error.code()),
-                    "message", error.message(), "data", error.data());
-        }
-
-        private List<Event> events(Object value) {
-            List<Event> out = new ArrayList<>();
-            if (value instanceof Map<?, ?> map && map.get("events") instanceof List<?> list) {
-                for (Object item : list) {
-                    if (item instanceof Map<?, ?> raw) {
-                        try {
-                            @SuppressWarnings("unchecked")
-                            Map<String, Object> json = (Map<String, Object>) raw;
-                            out.add(Event.fromJson(json));
-                        } catch (JsonException e) {
-                            log.write("prompt", RunLog.fields("ok", false, "error", "unreadable event: " + e));
-                        }
-                    }
-                }
-            }
-            out.sort((a, b) -> Long.compare(a.seq(), b.seq()));
-            return out;
         }
 
         private Map<String, Object> safeDetail(Map<String, Object> detail) {

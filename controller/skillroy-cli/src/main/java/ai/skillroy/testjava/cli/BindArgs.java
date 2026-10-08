@@ -98,6 +98,9 @@ final class BindArgs {
             } catch (IllegalArgumentException e) {
                 throw new UsageException(MODE + ": " + e.getMessage());
             }
+            if (chosen == BindMode.RE_RESOLVE) {
+                throw new UsageException(MODE + " re-resolve: re-resolve is a command, not a run mode: skillroy re-resolve");
+            }
         }
         String envId = args.value(ENV) == null ? BindOptions.DEFAULT_ENV : args.value(ENV).strip();
         if (!ENV_ID.matcher(envId).matches()) {

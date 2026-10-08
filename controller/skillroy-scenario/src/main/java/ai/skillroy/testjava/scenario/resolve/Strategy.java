@@ -22,7 +22,8 @@ import java.util.Locale;
 /**
  * How a slot's value was obtained. A scenario restricts the strategies of a query slot with the tokens
  * {@code sql}, {@code java}, {@code llm-sql}, {@code llm-reason} and {@code llm-vision} (phase2-contracts.md 3.1);
- * Phase 2 builds only the tier (a) strategies, the others are reserved for the inference module (Phase 5).
+ * a pack's resolvers are tier (a); {@link #LLM_SQL} is served by a resolver the controller's inference module
+ * contributes ({@link ResolverContributor}, phase5-contracts.md 5.5), and the tier (c) strategies stay reserved.
  */
 public enum Strategy {
     /** A literal value written in the scenario. */

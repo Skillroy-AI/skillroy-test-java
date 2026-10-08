@@ -24,5 +24,12 @@
  * value types the engine builds ({@link ai.skillroy.testjava.scenario.resolve.Resolution},
  * {@link ai.skillroy.testjava.scenario.resolve.Provenance}). The engine that uses them ({@code Binder},
  * {@code ResolutionEngine}) lives in {@code ai.skillroy.testjava.scenario}.
+ *
+ * <p>Phase 5 (phase5-contracts.md 5.5, 8.3) adds the seams through which the controller's inference module brings a
+ * model to a bind without this module depending on it: {@link ai.skillroy.testjava.scenario.resolve.ResolverContributor}
+ * (found through {@code ServiceLoader}, never consulted in {@code replay}), the string-only
+ * {@link ai.skillroy.testjava.scenario.resolve.InferenceSettings} it is configured with, and
+ * {@link ai.skillroy.testjava.scenario.resolve.BatchableResolver}, whose model call {@code re-resolve} defers into a
+ * batch.
  */
 package ai.skillroy.testjava.scenario.resolve;

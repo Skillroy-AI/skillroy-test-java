@@ -56,8 +56,27 @@ public interface ResolveContext {
     /** What is left of the bind budget, in milliseconds. */
     long remainingMs();
 
-    /** The run's cost ledger (always empty in Phase 2). */
+    /**
+     * The run's cost ledger: a resolver that calls a model records each call in it (phase5-contracts.md 7.3); the
+     * entries recorded during this call fill the slot's {@code Resolution.usage}.
+     */
     CostLedger ledger();
+
+    /**
+     * The slot being resolved (Phase 5: what a model-backed resolver writes into its ledger entry and its request's
+     * metadata); null from an implementation that does not know it.
+     */
+    default String slot() {
+        return null;
+    }
+
+    /**
+     * The scenario being bound, or null when the engine resolves outside a plan (an interactive session that set none)
+     * or the implementation does not know it.
+     */
+    default String scenarioId() {
+        return null;
+    }
 
     /** Adds a text to {@link Provenance#notes()}; never a secret. */
     void note(String text);

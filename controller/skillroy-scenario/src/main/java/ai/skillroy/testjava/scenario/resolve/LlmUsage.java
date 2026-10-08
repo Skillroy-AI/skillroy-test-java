@@ -17,16 +17,19 @@
 package ai.skillroy.testjava.scenario.resolve;
 
 /**
- * The model usage behind a resolution (Phase 5). Always null in Phase 2: no model is called. The type exists so that
- * the bindings file's {@code llm} field and the cost ledger have their final shape.
+ * The model usage behind a resolution, written as the bindings file's {@code llm} field. Filled by the engine, never by
+ * a resolver (phase2-contracts.md 6.3, phase5-contracts.md 7.3): from the cost ledger entries recorded during the
+ * slot's resolver calls ({@code candidates}, and {@code prepare} and {@code complete} of a batchable resolver), the
+ * tokens summed, the first entry's model and request id, the costs summed; null when no entry was recorded (every tier
+ * (a) resolution).
  *
  * <p>Immutable; safe to share between threads.
  *
- * @param model the model id
- * @param requestId the provider's request id
- * @param inputTokens tokens sent
- * @param outputTokens tokens received
- * @param costUsd the cost as a decimal string
+ * @param model the model id of the first call
+ * @param requestId the provider's request id of the first call
+ * @param inputTokens tokens sent, summed
+ * @param outputTokens tokens received, summed
+ * @param costUsd the cost as a decimal string, summed over the entries that state one; null when none does
  */
 public record LlmUsage(String model, String requestId, long inputTokens, long outputTokens, String costUsd) {
 }

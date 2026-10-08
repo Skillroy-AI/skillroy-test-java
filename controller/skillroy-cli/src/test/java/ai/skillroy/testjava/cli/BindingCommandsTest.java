@@ -239,7 +239,7 @@ class BindingCommandsTest {
     @Test
     void usageErrorsAndApproveWithoutATerminal() {
         assertTrue(cli("run", scenario.toString(), "--mode", "re-resolve").expectExit(Exit.USAGE).err()
-                .contains("not part of this version"));
+                .contains("re-resolve is a command"));
         cli("run", scenario.toString(), "--env", "Bad_Env").expectExit(Exit.USAGE);
         cli("run", scenario.toString(), "--write-bindings").expectExit(Exit.USAGE);
         CliHarness.Outcome noTerminal = cli("run", scenario.toString(), "--mode", "approve").expectExit(Exit.USAGE);

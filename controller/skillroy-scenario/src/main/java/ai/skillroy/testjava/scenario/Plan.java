@@ -56,7 +56,8 @@ import java.util.regex.Pattern;
  * order, no timestamps, no absolute paths, nothing from an environment), so compiling the same YAML with the same pack
  * version gives byte-identical files.
  *
- * <p>Shape, version 4 (phase2-contracts.md 5, phase3-contracts.md 4, phase4-contracts.md 7.3): {@code planVersion,
+ * <p>Shape, version 5 (phase2-contracts.md 5, phase3-contracts.md 4, phase4-contracts.md 7.3, phase5-contracts.md
+ * 13.2; version 5 has the keys of version 4): {@code planVersion,
  * scenarioId, pack, packVersion, sourceHash, inference, requires, slots, oracles, resolutionGraph, steps[{id, verb,
  * source{line}, calls[{primitive, args, sync, timeoutMs, await?, handlesPrompt?, capture?}], expect[]}], verify,
  * cleanup, launchProperties, artifacts, onPrompt, stepTimeoutMs, ui?, web?, bindTimeoutMs}}. A slot is
@@ -67,10 +68,17 @@ import java.util.regex.Pattern;
  * scenario has the key (amendment A29), and so is {@code "web"} ({@code {path, browser?, frozenTargets, trace}},
  * version 4: the web path policy, the default browser, the frozen-target policy and CDP tracing).
  *
- * <p>The reader accepts versions 1 to 4 (decisions D41, D58). A version 1 plan is read as version 4 with
+ * <p>{@code inference} (phase5-contracts.md 13.2, decision D81) is {@code bind} when a query slot's strategy list
+ * holds a token whose strategy needs a model ({@code llm-sql}), and {@code none} otherwise: {@link #inferenceOf}
+ * computes it, and the reader requires a version 5 plan to say exactly that. {@code run} is reserved (B16) and refused
+ * as "not in this version".
+ *
+ * <p>The reader accepts versions 1 to 5 (decisions D41, D58, D81). A version 1 plan is read as version 5 with
  * {@code inference: none}, no oracles, an empty graph and {@code bindTimeoutMs} 60000; a version 2 plan is read as
- * version 4 without cross-checks and aggregates (the keys {@code crossCheck} and {@code aggregates} need version 3);
- * a version 3 plan is read as version 4 without {@code web} (the key needs version 4); any other version is refused.
+ * version 5 without cross-checks and aggregates (the keys {@code crossCheck} and {@code aggregates} need version 3);
+ * a version 3 plan is read as version 5 without {@code web} (the key needs version 4); a version 4 plan is read as
+ * version 5 (its {@code inference} must be {@code none} and no slot may name {@code llm-sql}, which needs version 5);
+ * any other version is refused.
  * A plan of version 2 or later may not hold a fixture field whose key looks secret (a hand-edited plan cannot bring a
  * secret back; a version 1 plan relies on the masking of amendment A25).
  *
@@ -91,7 +99,8 @@ import java.util.regex.Pattern;
  * @param onPrompt {@code {"unexpected": "fail" | <pack policy name>}}
  * @param stepTimeoutMs the step timeout in milliseconds
  * @param ui the scenario's {@code ui} settings, or null when it has none
- * @param inference {@code none} in Phase 2 ({@code bind} and {@code run} are reserved for Phase 5)
+ * @param inference {@code none}, or {@code bind} when a slot's strategy needs a model at bind time ({@code run} is
+ *     reserved, B16)
  * @param oracles the oracles, in file order
  * @param resolutionGraph fixture and query slot names and {@code oracle.<name>} in evaluation order
  * @param bindTimeoutMs the bind budget in milliseconds ({@code timeouts.bind}, default 60000)
@@ -104,11 +113,17 @@ public record Plan(int planVersion, String scenarioId, String pack, String packV
                    Map<String, Object> onPrompt, long stepTimeoutMs, UiSettings ui, String inference,
                    List<Oracle> oracles, List<String> resolutionGraph, long bindTimeoutMs, WebSettings web) {
 
-    /** The plan format version this code writes; it reads 1 to 4 (phase4-contracts.md 7.3). */
-    public static final int VERSION = 4;
+    /** The plan format version this code writes; it reads 1 to 5 (phase5-contracts.md 13.2). */
+    public static final int VERSION = 5;
 
-    /** {@code inference} of every Phase 2 plan. */
+    /** {@code inference} of a plan whose bind needs no model (every plan before version 5). */
     public static final String INFERENCE_NONE = "none";
+
+    /** {@code inference} of a plan whose bind needs a model: a slot names {@code llm-sql} (P5 13.2). */
+    public static final String INFERENCE_BIND = "bind";
+
+    /** {@code inference} reserved for a plan whose run needs a model (B16); refused in this version. */
+    static final String INFERENCE_RUN = "run";
 
     /** The bind budget when {@code timeouts.bind} is absent: 60 s. */
     public static final long DEFAULT_BIND_TIMEOUT_MS = 60_000L;
@@ -518,6 +533,26 @@ public record Plan(int planVersion, String scenarioId, String pack, String packV
         return false;
     }
 
+    /**
+     * The {@code inference} field these slots give (phase5-contracts.md 13.2): {@link #INFERENCE_BIND} when a query
+     * slot's strategy list holds a token whose strategy {@link Strategy#needsModel() needs a model}, else
+     * {@link #INFERENCE_NONE}.
+     */
+    public static String inferenceOf(List<Slot> slots) {
+        for (Slot slot : slots) {
+            if (slot.query() == null) {
+                continue;
+            }
+            for (String token : slot.query().strategy()) {
+                Strategy strategy = Strategy.ofToken(token);
+                if (strategy != null && strategy.needsModel()) {
+                    return INFERENCE_BIND;
+                }
+            }
+        }
+        return INFERENCE_NONE;
+    }
+
     /** The slot with this name, or null. */
     public Slot slot(String name) {
         for (Slot slot : slots) {
@@ -654,14 +689,14 @@ public record Plan(int planVersion, String scenarioId, String pack, String packV
 
     /**
      * @throws IOException if the file cannot be read
-     * @throws ScenarioException if it is not a valid plan of version 1 to 4
+     * @throws ScenarioException if it is not a valid plan of version 1 to 5
      */
     public static Plan read(Path file) throws IOException, ScenarioException {
         return parse(Files.readString(file, StandardCharsets.UTF_8));
     }
 
     /**
-     * @throws ScenarioException if the text is not a valid plan of version 1 to 4
+     * @throws ScenarioException if the text is not a valid plan of version 1 to 5
      */
     public static Plan parse(String text) throws ScenarioException {
         Map<String, Object> json;
@@ -679,14 +714,17 @@ public record Plan(int planVersion, String scenarioId, String pack, String packV
      * matchers, slot and oracle shapes, the resolution graph, the generated SQL of row checks (through the statement
      * guard), and, for version 2 and later, that no fixture field key looks secret. Unknown keys are rejected,
      * because a later plan version may need them to run correctly: an oracle's {@code crossCheck} and a {@code db}
-     * element's {@code aggregates} need version 3, the top-level {@code web} needs version 4.
+     * element's {@code aggregates} need version 3, the top-level {@code web} needs version 4, {@code inference: bind}
+     * and the strategy token {@code llm-sql} need version 5. A version 5 plan's {@code inference} must be what its
+     * slots give ({@link #inferenceOf}); {@code run} and the tokens {@code llm-reason} and {@code llm-vision} are
+     * refused as not in this version.
      *
-     * @throws ScenarioException if a key is missing, unknown or of the wrong type, or the version is not 1 to 4
+     * @throws ScenarioException if a key is missing, unknown or of the wrong type, or the version is not 1 to 5
      */
     public static Plan fromJson(Map<String, Object> json) throws ScenarioException {
         PlanReader r = new PlanReader(json);
         if (!(json.get("planVersion") instanceof Long rawVersion) || rawVersion < 1 || rawVersion > VERSION) {
-            throw r.error("planVersion " + json.get("planVersion") + " is not supported (expected 1, 2, 3 or "
+            throw r.error("planVersion " + json.get("planVersion") + " is not supported (expected 1, 2, 3, 4 or "
                     + VERSION + ")");
         }
         boolean v2OrLater = rawVersion >= 2;
@@ -707,9 +745,15 @@ public record Plan(int planVersion, String scenarioId, String pack, String packV
         String inference = INFERENCE_NONE;
         if (v2OrLater) {
             inference = r.str(json, "inference");
-            if (!INFERENCE_NONE.equals(inference)) {
-                throw r.error("inference '" + inference + "' needs the inference module, which is not part of this"
-                        + " version; this executor runs plans with inference 'none' only");
+            if (INFERENCE_RUN.equals(inference)) {
+                throw r.error("inference 'run' (a model at run time) is not in this version");
+            }
+            if (rawVersion < 5 && !INFERENCE_NONE.equals(inference)) {
+                throw r.error("inference '" + inference + "' needs a version 5 plan; a version " + rawVersion
+                        + " plan has inference 'none'");
+            }
+            if (!INFERENCE_NONE.equals(inference) && !INFERENCE_BIND.equals(inference)) {
+                throw r.error("unknown inference '" + inference + "' (expected none or bind)");
             }
         }
         List<Slot> slots = new ArrayList<>();
@@ -720,6 +764,12 @@ public record Plan(int planVersion, String scenarioId, String pack, String packV
                 throw r.error("slot '" + slot.name() + "' appears twice");
             }
             slots.add(slot);
+        }
+        if (!inference.equals(inferenceOf(slots))) {
+            throw r.error(INFERENCE_BIND.equals(inference)
+                    ? "inference is 'bind' but no slot names a strategy that needs a model"
+                    : "inference is 'none' but a slot names a strategy that needs a model (llm-sql); such a plan"
+                    + " has inference 'bind'");
         }
         List<Step> steps = new ArrayList<>();
         for (Map<String, Object> s : r.objects(json, "steps")) {
@@ -863,7 +913,7 @@ public record Plan(int planVersion, String scenarioId, String pack, String packV
         private static final Set<String> EXPECTATION_KEYS = Set.of("path", "matcher", "capability");
 
         private String id;
-        /** The plan's own version (1 to 4); keys of a later version are refused. */
+        /** The plan's own version (1 to 5); keys of a later version are refused. */
         private int version = VERSION;
 
         /** Errors name the scenario id as soon as the JSON holds one. */
@@ -980,9 +1030,11 @@ public record Plan(int planVersion, String scenarioId, String pack, String packV
                             throw error(where + ": unknown strategy '" + token + "'; strategies: "
                                     + Strategy.TOKENS);
                         }
-                        if (parsed.needsModel()) {
-                            throw error(where + ": strategy " + token + " needs the inference module, which is not"
-                                    + " part of this version");
+                        if (parsed == Strategy.LLM_REASON || parsed == Strategy.LLM_VISION) {
+                            throw error(where + ": strategy " + token + " is not in this version");
+                        }
+                        if (parsed.needsModel() && version < 5) {
+                            throw error(where + ": strategy " + token + " needs a version 5 plan");
                         }
                     }
                     List<String> verify = strings(s, "verify");

@@ -24,9 +24,10 @@ import java.util.Objects;
  *
  * <p>Immutable; safe to share between threads.
  *
- * @param state {@link State#APPROVED} (written by {@code approve}) or {@link State#NOT_REQUIRED} (written by
- *     {@code live --write-bindings}, tier (a) only)
- * @param by the label, or null
+ * @param state {@link State#APPROVED} (written by {@code approve} and {@code re-resolve}), {@link State#REQUIRED} (a
+ *     model-written value, tier (b), written by {@code live --write-bindings} and kept so until a person approves it)
+ *     or {@link State#NOT_REQUIRED} (written by {@code live --write-bindings}, tier (a) only)
+ * @param by the label, or null ({@code REQUIRED} has none: nobody approved)
  */
 public record Approval(State state, String by) {
 
@@ -34,6 +35,11 @@ public record Approval(State state, String by) {
     public enum State {
         /** Tier (a): accepted on the verifier alone. */
         NOT_REQUIRED,
+        /**
+         * Tier (b) or (c) (phase5-contracts.md 7.1, decision D72): a model found the value, and a person has not
+         * approved it yet; {@code replay} refuses it (REBIND_NEEDED, reason {@code NOT_APPROVED}).
+         */
+        REQUIRED,
         /** Shown to an approver and approved. */
         APPROVED
     }

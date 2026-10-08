@@ -51,7 +51,11 @@ public interface Resolver<Q extends Query<T>, T> {
     /** The query class this resolver answers. */
     Class<Q> queryClass();
 
-    /** {@link Strategy#CANONICAL_SQL} or {@link Strategy#CANONICAL_JAVA} in Phase 2. */
+    /**
+     * {@link Strategy#CANONICAL_SQL} or {@link Strategy#CANONICAL_JAVA} for a pack's resolver; a strategy that
+     * {@link Strategy#needsModel() needs a model} for one a {@link ResolverContributor} offers (phase5-contracts.md
+     * 5.5).
+     */
     Strategy strategy();
 
     /**

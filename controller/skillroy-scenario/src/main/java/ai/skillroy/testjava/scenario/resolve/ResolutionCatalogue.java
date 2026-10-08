@@ -328,8 +328,9 @@ public final class ResolutionCatalogue {
                 Strategy strategy = resolver.strategy();
                 if (strategy != Strategy.CANONICAL_SQL && strategy != Strategy.CANONICAL_JAVA) {
                     throw new IllegalStateException("resolver " + id + " has strategy " + strategy + "; a pack's"
-                            + " resolver must be CANONICAL_SQL or CANONICAL_JAVA (model strategies need the inference"
-                            + " module, which is not part of this version)");
+                            + " resolver must be CANONICAL_SQL or CANONICAL_JAVA (a model-backed resolver is"
+                            + " contributed by the controller's inference module through ResolverContributor, never"
+                            + " registered by a pack)");
                 }
             }
             Set<String> verifierKeys = new LinkedHashSet<>();

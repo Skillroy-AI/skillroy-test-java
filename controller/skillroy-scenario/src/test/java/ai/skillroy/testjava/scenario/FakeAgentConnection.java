@@ -79,6 +79,8 @@ final class FakeAgentConnection implements AgentConnection {
     private boolean closed;
     private RuntimeException awaitFailure;
     private final List<PrimitiveDescriptor> schema = new ArrayList<>();
+    /** Methods the fake refuses with CONFIRM_REQUIRED unless the call is confirmed, as the dispatcher does. */
+    private final java.util.Set<String> destructive = new java.util.HashSet<>();
     /** How often {@link #capabilities()} was asked. */
     int capabilityReads;
 
@@ -275,6 +277,10 @@ final class FakeAgentConnection implements AgentConnection {
         if (handler == null) {
             throw new AgentRpcException(method, new RpcError(ErrorCodes.METHOD_NOT_FOUND, "no " + method, null));
         }
+        if (destructive.contains(method) && (options == null || !options.confirm())) {
+            throw new AgentRpcException(method, new RpcError(ErrorCodes.CONFIRM_REQUIRED, method
+                    + " is destructive and needs _meta.confirm=true", null));
+        }
         long before = seq;
         Object value = handler.handle(copy);
         List<Event> events = new ArrayList<>();
@@ -355,6 +361,22 @@ final class FakeAgentConnection implements AgentConnection {
     /** Adds a primitive descriptor to what {@link #schema()} answers. */
     synchronized FakeAgentConnection describe(String name, boolean mutating) {
         schema.add(new PrimitiveDescriptor(name, null, null, null, null, 5000, null, mutating, false));
+        return this;
+    }
+
+    /** Adds a primitive descriptor naming a capability. */
+    synchronized FakeAgentConnection describe(String name, boolean mutating, String capabilityId) {
+        schema.add(new PrimitiveDescriptor(name, null, null, null, null, 5000, capabilityId, mutating, false));
+        return this;
+    }
+
+    /**
+     * Makes {@code method} destructive: described as such, and refused with CONFIRM_REQUIRED unless the call is
+     * confirmed ({@code _meta.confirm}), as the agent's dispatcher refuses it.
+     */
+    synchronized FakeAgentConnection destructive(String method) {
+        destructive.add(method);
+        schema.add(new PrimitiveDescriptor(method, null, null, null, null, 5000, null, true, true));
         return this;
     }
 

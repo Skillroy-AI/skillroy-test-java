@@ -451,6 +451,22 @@ final class WebRun {
         return pathSeq;
     }
 
+    /**
+     * The chosen path's own events after {@code since} on {@code topics} (comma-separated globs), in its order; empty
+     * while the agent path serves the run (its events are on the agent's bus) or when the path cannot list them.
+     */
+    List<Event> pathEventsSince(long since, String topics) {
+        if (chosen == agentPath) {
+            return List.of();
+        }
+        try {
+            List<Event> events = chosen.eventsSince(since, topics == null || topics.isBlank() ? "*" : topics);
+            return events == null ? List.of() : List.copyOf(events);
+        } catch (RuntimeException | LinkageError e) {
+            return List.of();
+        }
+    }
+
     /** Lists a {@code web.*} call for the run's summary ({@code run --json}). */
     void noteCall(String step, long index, String primitive, String path, boolean ok) {
         Map<String, Object> record = new LinkedHashMap<>();

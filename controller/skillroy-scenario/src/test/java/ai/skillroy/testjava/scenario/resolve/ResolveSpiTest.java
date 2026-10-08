@@ -16,6 +16,7 @@
 
 package ai.skillroy.testjava.scenario.resolve;
 
+import ai.skillroy.testjava.scenario.ResolutionException;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Type;
@@ -159,7 +160,12 @@ class ResolveSpiTest {
         assertSame(RecordCodec.DEFAULT, QueryType.of("Q", Q.class).codec());
         assertEquals(Strategy.CANONICAL_SQL, Strategy.ofToken("SQL"));
         assertEquals(Tier.C, Strategy.LLM_VISION.tier());
-        assertThrows(IllegalArgumentException.class, () -> BindMode.parse("re-resolve"));
+        assertEquals(BindMode.RE_RESOLVE, BindMode.parse("re-resolve"), "Phase 5 (8.1): parse accepts it");
+        assertEquals(BindMode.RE_RESOLVE, BindMode.parse(" Re-Resolve "));
+        assertEquals("re-resolve", BindMode.RE_RESOLVE.label());
+        assertThrows(IllegalArgumentException.class, () -> BindMode.parse("re_resolve"));
+        assertTrue(assertThrows(IllegalArgumentException.class, () -> BindMode.parse("rerun")).getMessage()
+                .endsWith("modes: replay, approve, live, re-resolve"));
         assertEquals(BindMode.APPROVE, BindMode.parse("Approve"));
     }
 
@@ -295,5 +301,47 @@ class ResolveSpiTest {
         a.join();
         assertEquals(1, ledger.size());
         assertEquals("CostLedger[1 entries]", ledger.toString());
+    }
+
+    @Test
+    void theLedgerEntryKeepsThePhase2ConstructorAndWritesItsNewFieldsLast() {
+        CostLedger.Entry old = new CostLedger.Entry("s", "slot", Strategy.LLM_SQL, "p", "m", "r", 10, 20, "0.01");
+        assertEquals(new CostLedger.Entry("s", "slot", Strategy.LLM_SQL, "p", "m", "r", 10, 20, "0.01", "resolve", 0,
+                0, false, null), old, "phase5-contracts.md 7.3: purpose resolve, zeros, not a batch, no note");
+        assertEquals(List.of("scenarioId", "slot", "strategy", "provider", "model", "requestId", "inputTokens",
+                "outputTokens", "costUsd", "purpose", "cacheReadTokens", "cacheWriteTokens", "batch", "note"),
+                List.copyOf(old.toJson().keySet()), "the Phase 2 fields in their order, then the new ones");
+        CostLedger.Entry batch = new CostLedger.Entry("s", null, null, "claude", "m", "r", 1, 2, "0.5", "triage", 3, 4,
+                true, "refusal: other");
+        Map<String, Object> json = batch.toJson();
+        assertNull(json.get("strategy"));
+        assertNull(json.get("slot"));
+        assertEquals("triage", json.get("purpose"));
+        assertEquals(3L, json.get("cacheReadTokens"));
+        assertEquals(4L, json.get("cacheWriteTokens"));
+        assertEquals(true, json.get("batch"));
+        assertEquals("refusal: other", json.get("note"));
+        assertEquals("{\"scenarioId\":\"s\",\"slot\":null,\"strategy\":null,\"provider\":\"claude\",\"model\":\"m\","
+                + "\"requestId\":\"r\",\"inputTokens\":1,\"outputTokens\":2,\"costUsd\":\"0.5\",\"purpose\":\"triage\","
+                + "\"cacheReadTokens\":3,\"cacheWriteTokens\":4,\"batch\":true,\"note\":\"refusal: other\"}",
+                ai.skillroy.testjava.protocol.Json.write(json), "one cost-ledger.jsonl line");
+        json.put("purpose", "changed");
+        assertEquals("triage", batch.toJson().get("purpose"), "a new map on each call");
+    }
+
+    @Test
+    void aBudgetRefusalCarriesTheMetersFigures() {
+        ResolutionException budget = ResolutionException.budget("JOB", "job-7", "1.00", "0.99", "0.05");
+        assertEquals(ResolutionException.BUDGET, budget.reason());
+        assertEquals(Map.of("scope", "JOB", "id", "job-7", "limitUsd", "1.00", "spentUsd", "0.99", "estimateUsd",
+                "0.05"), budget.detail());
+        assertEquals(List.of("scope", "id", "limitUsd", "spentUsd", "estimateUsd"), List.copyOf(budget.detail()
+                .keySet()));
+        assertThrows(UnsupportedOperationException.class, () -> budget.detail().put("x", 1));
+        assertEquals(Map.of(), new ResolutionException("CLOSED", null, "closed").detail());
+        assertEquals(Map.of(), new ResolutionException("$x", "unknown").detail());
+        assertEquals(Approval.State.REQUIRED, Approval.State.valueOf("REQUIRED"));
+        assertEquals(List.of(Approval.State.NOT_REQUIRED, Approval.State.REQUIRED, Approval.State.APPROVED),
+                List.of(Approval.State.values()), "REQUIRED between NOT_REQUIRED and APPROVED");
     }
 }

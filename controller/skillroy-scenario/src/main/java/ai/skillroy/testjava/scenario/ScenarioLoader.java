@@ -40,7 +40,9 @@ import java.util.regex.Pattern;
 /**
  * Reads a scenario YAML file (contract section 8.1, phase2-contracts.md 3) into a {@link Scenario}, checking its
  * shape: unknown top-level keys, a step that is not a single-key map, a bad duration, a slot that is neither a
- * fixture nor a query, a reserved slot or oracle name, an {@code llm-*} strategy, an oracle's {@code crossCheck}
+ * fixture nor a query, a reserved slot or oracle name, the strategy {@code llm-reason} or {@code llm-vision} (not in
+ * this version; {@code llm-sql} is accepted here and checked against the pack by the compiler, phase5-contracts.md
+ * 13.1), an oracle's {@code crossCheck}
  * that is neither a check id nor a mapping {@code {check, tolerance?, capability?}} (phase3-contracts.md 3.1) and a
  * {@code db.<table>} verify item with other keys are errors naming the key and line, and so is a {@code web} key
  * (phase4-contracts.md 7.2) with an unknown key or a bad value, including {@code frozenTargets: close}, which Phase 4
@@ -344,9 +346,11 @@ public final class ScenarioLoader {
                     throw errorAt(line, "slot '" + name + "': unknown strategy '" + token + "'; strategies: "
                             + String.join(", ", Strategy.TOKENS));
                 }
-                if (strategy.needsModel()) {
-                    throw errorAt(line, "slot '" + name + "': strategy " + strategy.token() + " needs the inference"
-                            + " module, which is not part of this version");
+                if (strategy == Strategy.LLM_REASON || strategy == Strategy.LLM_VISION) {
+                    // phase5-contracts.md 13.1: llm-sql is accepted here and checked against the pack by the
+                    // compiler; tier (c) stays out of this version.
+                    throw errorAt(line, "slot '" + name + "': strategy " + strategy.token() + " is not in this"
+                            + " version");
                 }
                 if (out.contains(strategy.token())) {
                     throw errorAt(line, "slot '" + name + "': strategy " + strategy.token() + " is listed twice");

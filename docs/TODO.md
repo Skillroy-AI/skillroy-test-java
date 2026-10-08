@@ -942,6 +942,17 @@ decisions D70-D87). The items below are the roadmap's; the contract makes each p
 before the build: spike BS6 (the guard's corpora) and spike BS13 (the API facts), both started 2026-10-08; the owner's word on
 B23 as for B21, unless progress on the provisional answers is asked for.
 
+**Build, wave 1 (2026-10-08, on the provisional B23; two implementers in isolated worktrees, integrated by file list):**
+the executor side of `skillroy-scenario` (`CallRunner` extracted from the executor, `ExecutorSession`, `StepJournal`
+with its file and export, `ScenarioSchema` and `Schemas`, plan version 5 with the sample's plans and bindings
+regenerated, `SqlAllowList`/`SqlDialect`, the `DomainPack` and `StepLibrary` additions, `llm-sql` accepted when a pack
+declares an allow-list, `confirm` sent as `_meta.confirm`) and the resolution side (`InferenceSettings` with
+`inference.yaml`, `ResolverContributor` and `BatchableResolver`, the ladder with contributed resolvers, `REQUIRED`
+approval and `replay`'s `NOT_APPROVED`, the `approve` reuse, `BindMode.RE_RESOLVE` with `Binder.bindStepwise`,
+`CostLedger.Entry`'s new fields, `Resolution.usage` filled, `RESOLUTION_FAILED` / `BUDGET`); the CLI refuses `--mode
+re-resolve` as a usage error. Native reactor after the merge: 2572 tests, 0 failures, 0 errors, 122 skipped; the web
+host modules green under `jcef`. Wave 2 (the inference and MCP modules, the commands, the sample) follows.
+
 - [ ] `skillroy-inference` (created here, above `skillroy-scenario`); the `InferenceGateway` SPI with typed content
   parts (text, image, tool use, tool result) and the Claude implementation (B7)
 - [ ] Tier (b) resolvers: model-authored SQL behind `SqlGuard` (BS6 passed first); masking before any prompt (P5 §6)

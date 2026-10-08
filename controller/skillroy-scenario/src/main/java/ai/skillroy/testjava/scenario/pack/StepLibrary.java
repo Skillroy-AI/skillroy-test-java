@@ -19,6 +19,7 @@ package ai.skillroy.testjava.scenario.pack;
 import ai.skillroy.testjava.scenario.ScenarioException;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -46,4 +47,19 @@ public interface StepLibrary {
      * @throws ScenarioException if the arguments are wrong; the compiler adds the scenario id and line when absent
      */
     List<PlannedCall> compile(String verb, Object args, CompileContext ctx) throws ScenarioException;
+
+    /**
+     * The JSON Schema of a verb's arguments (phase5-contracts.md 9.5), a JSON-like map, for the tools a model is
+     * offered and for the scenario schema a planner writes against; null (the default) means a free-form object: the
+     * verb is projected with {@code {type: object}} and the planner is told so. An argument that takes a reference
+     * ({@code $slot}) is typed as the reference's value type with "or a $reference" in its description.
+     *
+     * <p>Information only: the compiler does not validate arguments against it ({@link #compile} stays the
+     * authority).
+     *
+     * @param verb one of {@link #verbs()}
+     */
+    default Map<String, Object> argsSchema(String verb) {
+        return null;
+    }
 }

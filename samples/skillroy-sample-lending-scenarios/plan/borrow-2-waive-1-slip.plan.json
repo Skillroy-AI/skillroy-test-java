@@ -1,5 +1,5 @@
 {
-  "planVersion": 4,
+  "planVersion": 5,
   "scenarioId": "borrow-2-waive-1-slip",
   "pack": "lending",
   "packVersion": "0.3.0",

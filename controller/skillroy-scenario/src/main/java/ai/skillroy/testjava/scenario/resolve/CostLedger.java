@@ -17,33 +17,82 @@
 package ai.skillroy.testjava.scenario.resolve;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 /**
- * Every model call of a JVM-side run (phase2-contracts.md 6.6). Phase 2 has no writer: the type and the assertion
- * exist so that a later phase cannot add a model call to {@code replay} without a red build (a non-empty ledger
- * after a {@code replay} run is ERROR / ENVIRONMENT, decision D19).
+ * Every model call of a JVM-side run (phase2-contracts.md 6.6, phase5-contracts.md 7.3). The writer is
+ * {@code skillroy-inference}'s {@code LedgerWriter}, which every caller of a gateway uses; a call answered by a
+ * recorded gateway is recorded too (provider {@code recorded}, cost {@code 0}). A non-empty ledger after a
+ * {@code replay} run is ERROR / ENVIRONMENT (decision D19): the zero-model-call assertion means "zero gateway calls of
+ * any provider".
  *
  * <p>Thread-safe: entries may be recorded from any thread.
  */
 public final class CostLedger {
 
     /**
-     * One model call.
+     * One model call. The first nine components are the Phase 2 shape (and its constructor stays); the last five are
+     * Phase 5's (decision D83).
      *
      * @param scenarioId the scenario
      * @param slot the slot the call was made for, or null
      * @param strategy the strategy that made it
-     * @param provider the provider id
-     * @param model the model id
+     * @param provider the provider id ({@code claude}, {@code recorded}, {@code scripted}, {@code claude-code})
+     * @param model the model id that answered
      * @param requestId the provider's request id
-     * @param inputTokens tokens sent
+     * @param inputTokens tokens sent (not counting cache reads)
      * @param outputTokens tokens received
      * @param costUsd the cost as a decimal string
+     * @param purpose what the call was for: {@code resolve}, {@code triage}, {@code session}, {@code plan},
+     *     {@code summary}
+     * @param cacheReadTokens input tokens read from the provider's cache
+     * @param cacheWriteTokens input tokens written to the provider's cache
+     * @param batch true when the call was part of a batch (priced at the batch rate)
+     * @param note a short note (a refusal's category, a fallback model), or null
      */
     public record Entry(String scenarioId, String slot, Strategy strategy, String provider, String model,
-                        String requestId, long inputTokens, long outputTokens, String costUsd) {
+                        String requestId, long inputTokens, long outputTokens, String costUsd, String purpose,
+                        long cacheReadTokens, long cacheWriteTokens, boolean batch, String note) {
+
+        /** The purpose of an entry built with the Phase 2 constructor. */
+        public static final String PURPOSE_RESOLVE = "resolve";
+
+        /**
+         * The Phase 2 shape: purpose {@code resolve}, no cache tokens, not a batch, no note.
+         */
+        public Entry(String scenarioId, String slot, Strategy strategy, String provider, String model,
+                     String requestId, long inputTokens, long outputTokens, String costUsd) {
+            this(scenarioId, slot, strategy, provider, model, requestId, inputTokens, outputTokens, costUsd,
+                    PURPOSE_RESOLVE, 0L, 0L, false, null);
+        }
+
+        /**
+         * The {@code cost-ledger.jsonl} line of this entry before masking: the Phase 2 fields in their order, then
+         * {@code purpose}, {@code cacheReadTokens}, {@code cacheWriteTokens}, {@code batch} and {@code note}
+         * (phase5-contracts.md 7.3); every key present, a missing value as null, the strategy by name. A new map on
+         * each call.
+         */
+        public Map<String, Object> toJson() {
+            Map<String, Object> json = new LinkedHashMap<>();
+            json.put("scenarioId", scenarioId);
+            json.put("slot", slot);
+            json.put("strategy", strategy == null ? null : strategy.name());
+            json.put("provider", provider);
+            json.put("model", model);
+            json.put("requestId", requestId);
+            json.put("inputTokens", inputTokens);
+            json.put("outputTokens", outputTokens);
+            json.put("costUsd", costUsd);
+            json.put("purpose", purpose);
+            json.put("cacheReadTokens", cacheReadTokens);
+            json.put("cacheWriteTokens", cacheWriteTokens);
+            json.put("batch", batch);
+            json.put("note", note);
+            return json;
+        }
     }
 
     private final List<Entry> entries = new ArrayList<>();

@@ -404,25 +404,27 @@ class WebCompileTest {
     // ------------------------------------------------------------------------------------------------ plan.json
 
     @Test
-    void version4IsWrittenAndAVersion3PlanIsReadAsVersion4WithoutWeb() throws Exception {
+    void version5IsWrittenAndAVersion3PlanIsReadAsVersion5WithoutWeb() throws Exception {
         Plan plan = compile(scenario("{ path: agent }", "  - webClick: { selector: \"#a\" }\n"));
-        assertEquals(4, plan.planVersion());
-        String v4 = plan.toJsonText();
-        assertTrue(v4.startsWith("{\n  \"planVersion\": 4,\n"), v4);
-        ScenarioException needsFour = assertThrows(ScenarioException.class, () -> Plan.parse(v4.replace(
-                "\"planVersion\": 4", "\"planVersion\": 3")));
+        assertEquals(5, plan.planVersion());
+        String v5 = plan.toJsonText();
+        assertTrue(v5.startsWith("{\n  \"planVersion\": 5,\n"), v5);
+        assertEquals(v5, Plan.parse(v5.replace("\"planVersion\": 5", "\"planVersion\": 4")).toJsonText(),
+                "a version 4 plan with web is read as version 5");
+        ScenarioException needsFour = assertThrows(ScenarioException.class, () -> Plan.parse(v5.replace(
+                "\"planVersion\": 5", "\"planVersion\": 3")));
         assertEquals("invalid plan: 'web' needs a version 4 plan", needsFour.reason());
 
         Plan withoutWeb = compile(scenario(null, "  - webClick: { selector: \"#a\" }\n"));
-        Plan v3 = Plan.parse(withoutWeb.toJsonText().replace("\"planVersion\": 4", "\"planVersion\": 3"));
-        assertEquals(4, v3.planVersion(), "a version 3 plan is read as version 4");
+        Plan v3 = Plan.parse(withoutWeb.toJsonText().replace("\"planVersion\": 5", "\"planVersion\": 3"));
+        assertEquals(5, v3.planVersion(), "a version 3 plan is read as version 5");
         assertNull(v3.web(), "without web");
         assertEquals(withoutWeb.toJsonText(), v3.toJsonText());
-        Plan v2 = Plan.parse(withoutWeb.toJsonText().replace("\"planVersion\": 4", "\"planVersion\": 2"));
-        assertEquals(4, v2.planVersion(), "a version 2 plan is read as version 4");
+        Plan v2 = Plan.parse(withoutWeb.toJsonText().replace("\"planVersion\": 5", "\"planVersion\": 2"));
+        assertEquals(5, v2.planVersion(), "a version 2 plan is read as version 5");
         assertEquals(withoutWeb.toJsonText(), v2.toJsonText());
         Plan v1 = SecretMaskTest.version1(withoutWeb, Map.of());
-        assertEquals(4, v1.planVersion(), "a version 1 plan is read as version 4");
+        assertEquals(5, v1.planVersion(), "a version 1 plan is read as version 5");
         assertEquals(withoutWeb.steps(), v1.steps());
     }
 

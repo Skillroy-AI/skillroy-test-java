@@ -281,7 +281,7 @@ class PlansUpToDateTest {
     @Test
     void scenarioBsPlanHasTheWaiverModel() throws Exception {
         Plan plan = Plan.read(ScenarioB.plan());
-        assertEquals(4, plan.planVersion());
+        assertEquals(5, plan.planVersion());
         assertEquals("0.3.0", plan.packVersion());
         assertEquals(List.of("assistant/query", "rule/query", "item/query", "keys/query", "loan/capture",
                 "slip/capture"), plan.slots().stream().map(sl -> sl.name() + "/" + sl.kind()).toList());

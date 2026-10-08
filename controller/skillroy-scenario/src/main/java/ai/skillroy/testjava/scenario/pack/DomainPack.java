@@ -20,6 +20,7 @@ import ai.skillroy.testjava.controller.AgentConnection;
 import ai.skillroy.testjava.data.RowMask;
 import ai.skillroy.testjava.scenario.resolve.EnvFingerprinter;
 import ai.skillroy.testjava.scenario.resolve.ResolutionCatalogue;
+import ai.skillroy.testjava.scenario.resolve.SqlAllowList;
 import ai.skillroy.testjava.scenario.resolve.StoredTable;
 
 import java.util.List;
@@ -97,5 +98,24 @@ public interface DomainPack {
      */
     default List<RowMask> rowMasks() {
         return List.of();
+    }
+
+    /**
+     * What a model may read, per data source (phase5-contracts.md 5.2): one {@link SqlAllowList} per source. Empty
+     * (the default) means tier (b) is unavailable for this pack: a scenario of it may not name the strategy
+     * {@code llm-sql} (a compile error), and the inference module contributes no model-written SQL to its binds.
+     * Read once per compile and once per bind.
+     */
+    default List<SqlAllowList> sqlAllowLists() {
+        return List.of();
+    }
+
+    /**
+     * The primitive through which an in-application overlay receives the answer to an assistance request
+     * (phase5-contracts.md 12.4): the session service's overlay bridge calls it with {@code {requestId, answer}}.
+     * Null (the default) means the application has no overlay.
+     */
+    default String assistAnswerPrimitive() {
+        return null;
     }
 }

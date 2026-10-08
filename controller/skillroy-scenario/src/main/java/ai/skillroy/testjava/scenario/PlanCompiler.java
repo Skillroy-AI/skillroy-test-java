@@ -36,6 +36,7 @@ import ai.skillroy.testjava.scenario.resolve.QueryType;
 import ai.skillroy.testjava.scenario.resolve.RecordCodec;
 import ai.skillroy.testjava.scenario.resolve.ResolutionCatalogue;
 import ai.skillroy.testjava.scenario.resolve.Resolver;
+import ai.skillroy.testjava.scenario.resolve.SqlAllowList;
 import ai.skillroy.testjava.scenario.resolve.StoredColumn;
 import ai.skillroy.testjava.scenario.resolve.StoredTable;
 import ai.skillroy.testjava.scenario.resolve.Strategy;
@@ -74,9 +75,10 @@ import java.util.TreeSet;
  *
  * <p>Phase 2 (phase2-contracts.md 3): query slots are checked against the pack's {@link ResolutionCatalogue} (kind,
  * argument shape through the kind's codec, strategy tokens the pack offers, verifier ids, at least one verifier per
- * query slot); a fixture field whose key looks secret is refused; oracles name a function of the pack; the
- * {@code llm-*} strategies are refused; slots and oracles form one graph whose evaluation order is written as
- * {@code resolutionGraph} (among the nodes that are ready, the one written first comes first; {@code resolve} before
+ * query slot); a fixture field whose key looks secret is refused; oracles name a function of the pack; the tier (c)
+ * strategies ({@code llm-reason}, {@code llm-vision}) are refused; slots and oracles form one graph whose evaluation
+ * order is written as {@code resolutionGraph} (among the nodes that are ready, the one written first comes first;
+ * {@code resolve} before
  * {@code oracle}) and a cycle is an error naming it; a captured slot is declared by the call that captures it and may
  * be referenced only in later steps and in {@code verify}, and only by its declared fields; {@code db.<table>} checks
  * are compiled to guarded SQL from the pack's {@code StoredTable}; the capability ids the slots' verifiers require are
@@ -95,14 +97,26 @@ import java.util.TreeSet;
  * {@code webWaitFlag}, {@code webResize}, {@code webTap}, by name, also when a pack overrides it) gets
  * {@code web.evaluate} and {@code web.browsers} added to {@code requires}, and one with {@code web.path: cdp} gets
  * {@code web.cdp}, with a compile-time note ({@link #compileWithNotes}) when its {@code requires:} did not list it.
- * Plans are written as version 4.
+ *
+ * <p>Phase 5 (phase5-contracts.md 13.1, 13.2): the strategy token {@code llm-sql} is accepted on a query slot when the
+ * pack declares at least one {@code SqlAllowList} (the model-written SQL is contributed at bind time by the
+ * inference module, not by the pack's catalogue), and is a compile error naming the pack otherwise; the plan's
+ * {@code inference} is {@code bind} when a slot names it ({@link Plan#inferenceOf}). The base verb {@code call} (P1
+ * 8.3, unchanged) is reserved: a pack may not declare a verb of that name, since an exported session step relies on
+ * it. Plans are written as version 5.
  *
  * <p>Stateless; safe from any thread, provided the pack's step library is.
  */
 public final class PlanCompiler {
 
-    /** Verb names a pack or base verb may not take (decision B16). */
-    public static final Set<String> RESERVED_VERBS = Set.of("aiAct", "aiExpect", "pointer", "expectImage");
+    /** Verb names reserved for a later version (decision B16): no pack or base verb takes them. */
+    private static final Set<String> LATER_VERBS = Set.of("aiAct", "aiExpect", "pointer", "expectImage");
+
+    /**
+     * Verb names a pack verb may not take: those reserved for a later version (decision B16) and the base verb
+     * {@code call} (phase5-contracts.md 13.1), which an exported session step relies on.
+     */
+    public static final Set<String> RESERVED_VERBS = Set.of("aiAct", "aiExpect", "pointer", "expectImage", "call");
 
     private PlanCompiler() {
     }
@@ -174,6 +188,21 @@ public final class PlanCompiler {
     }
 
     /**
+     * One call an interactive session runs outside any scenario (phase5-contracts.md 12.2), compiled as a step's call
+     * is: its arguments and await match in sorted normal form, a 0 timeout the step timeout, ACK and READY checked
+     * against the pack's sync policy, a prompt-answering call marked as the compiler marks it.
+     *
+     * @param sessionId the session id, which names the compilation in messages
+     * @throws ScenarioException if the call cannot run with this pack
+     */
+    static Plan.Call sessionCall(PlannedCall call, DomainPack pack, long stepTimeoutMs, String sessionId)
+            throws ScenarioException {
+        Scenario scenario = new Scenario(sessionId, pack.id(), List.of(), List.of(), Map.of(), List.of(), List.of(),
+                List.of(), Map.of(), List.of(), stepTimeoutMs, "session", "session", null);
+        return new Compilation(scenario, pack).toCall(call, false, 0, "call");
+    }
+
+    /**
      * Compiles and writes {@code plan.json}.
      *
      * @throws IOException if the plan cannot be written
@@ -237,6 +266,8 @@ public final class PlanCompiler {
         private final Map<String, Captured> captured = new LinkedHashMap<>();
         private final Set<String> oracleNames = new LinkedHashSet<>();
         private final List<String> notes = new ArrayList<>();
+        /** Whether the pack declares an SQL allow-list (null until a slot names llm-sql). */
+        private Boolean allowList;
 
         Compilation(Scenario scenario, DomainPack pack) throws ScenarioException {
             this.scenario = scenario;
@@ -346,7 +377,8 @@ public final class PlanCompiler {
             return new Plan(Plan.VERSION, scenario.id(), pack.id(), String.valueOf(pack.version()),
                     scenario.sourceHash(), new ArrayList<>(requires), slots, steps, verify, cleanup,
                     scenario.launchProperties(), scenario.artifacts(), scenario.onPrompt(), scenario.stepTimeoutMs(),
-                    scenario.ui(), Plan.INFERENCE_NONE, oracles, graph, scenario.bindTimeoutMs(), scenario.web());
+                    scenario.ui(), Plan.inferenceOf(slots), oracles, graph, scenario.bindTimeoutMs(),
+                    scenario.web());
         }
 
         /**
@@ -409,6 +441,18 @@ public final class PlanCompiler {
             List<Resolver<?, ?>> resolvers = catalogue.resolvers(type.kind());
             for (String token : slot.strategy()) {
                 Strategy strategy = Strategy.ofToken(token);
+                if (strategy == Strategy.LLM_SQL) {
+                    // phase5-contracts.md 13.1: served by the inference module's contributed resolver, which needs
+                    // the pack's allow-list; the pack's own catalogue never holds a model strategy.
+                    if (!declaresAllowList(line)) {
+                        throw error(line, where + ": pack " + pack.id() + " declares no SQL allow-list: llm-sql"
+                                + " cannot be served");
+                    }
+                    continue;
+                }
+                if (strategy != null && strategy.needsModel()) {
+                    throw error(line, where + ": strategy " + token + " is not in this version");
+                }
                 boolean offered = false;
                 for (Resolver<?, ?> resolver : resolvers) {
                     offered |= resolver.strategy() == strategy;
@@ -445,6 +489,21 @@ public final class PlanCompiler {
             }
             return new Plan.Slot(slot.name(), "query", null, new Plan.QuerySpec(type.kind(), args, slot.strategy(),
                     verify), slot.credential(), null);
+        }
+
+        /** True when the pack declares at least one SQL allow-list (read once per compilation). */
+        private boolean declaresAllowList(int line) throws ScenarioException {
+            if (allowList == null) {
+                List<SqlAllowList> lists;
+                try {
+                    lists = pack.sqlAllowLists();
+                } catch (RuntimeException e) {
+                    throw error(line, "pack '" + pack.id() + "': its SQL allow-lists are invalid: "
+                            + (e.getMessage() == null ? e.toString() : e.getMessage()));
+                }
+                allowList = lists != null && lists.stream().anyMatch(Objects::nonNull);
+            }
+            return allowList;
         }
 
         private Plan.Oracle oracle(Scenario.OracleEntry entry, Set<String> requires) throws ScenarioException {
@@ -712,7 +771,7 @@ public final class PlanCompiler {
         private Plan.Step step(String id, int index, Scenario.Step step) throws ScenarioException {
             String verb = step.verb();
             int line = step.line();
-            if (RESERVED_VERBS.contains(verb)) {
+            if (LATER_VERBS.contains(verb)) {
                 throw error(line, "the verb '" + verb + "' is reserved for a later version");
             }
             if ("expect".equals(verb)) {

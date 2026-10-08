@@ -20,6 +20,7 @@ import ai.skillroy.testjava.controller.AgentConnection;
 import ai.skillroy.testjava.data.RowMask;
 import ai.skillroy.testjava.scenario.resolve.EnvFingerprinter;
 import ai.skillroy.testjava.scenario.resolve.ResolutionCatalogue;
+import ai.skillroy.testjava.scenario.resolve.SqlAllowList;
 import ai.skillroy.testjava.scenario.resolve.StoredTable;
 import ai.skillroy.testjava.scenario.pack.AwaitSpec;
 import ai.skillroy.testjava.scenario.pack.CompileContext;
@@ -68,6 +69,8 @@ public final class ToyPack implements DomainPack {
     List<StoredTable> storedTables = List.of();
     /** Row masks applied on the controller. */
     List<RowMask> rowMasks = List.of();
+    /** The SQL allow-lists (Phase 5): empty, so that llm-sql is a compile error unless a test sets one. */
+    List<SqlAllowList> sqlAllowLists = List.of();
 
     @Override
     public String id() {
@@ -122,6 +125,11 @@ public final class ToyPack implements DomainPack {
     @Override
     public List<RowMask> rowMasks() {
         return rowMasks;
+    }
+
+    @Override
+    public List<SqlAllowList> sqlAllowLists() {
+        return sqlAllowLists;
     }
 
     @Override

@@ -24,8 +24,15 @@ import java.util.Map;
  * {@code Verifier.verify} call), {@code resolve} (one per query slot), {@code oracle}, {@code crosscheck} (one per
  * oracle with a cross-check, every mode, phase3-contracts.md 8.2: {@code oracle, fn, check, tolerance}, then either
  * {@code skipped: true, capability, state, reason} or {@code agreed, reason, expected, actual, evidence}),
- * {@code guard}, {@code bind}. The fields are not masked, except a cross-check's evidence, actual and reason, which the
- * engine masks with the credentials: the receiver masks what it writes.
+ * {@code guard}, {@code bind}; and, from Phase 5 (phase5-contracts.md 5.5), {@code inference}: once per bind in
+ * {@code live}, {@code approve} and {@code re-resolve} when the contributors are loaded ({@code mode, gateway,
+ * contributors, resolvers, loadError}), and in {@code replay} when the settings named a gateway that was replaced by
+ * {@code none} ({@code mode, requested, gateway, reason}). A {@code resolver} record of a parked slot has
+ * {@code parked: true} instead of a count, and the one of its resumption {@code resumed: true}; a {@code resolve}
+ * record of a value a model found adds {@code confidence, approval, llm}, and one reused by {@code approve} adds
+ * {@code reused: true, reusedFrom} (the recorded {@code approval.by}). The fields are not masked, except a
+ * cross-check's evidence, actual and reason, which the engine masks with the credentials: the receiver masks what it
+ * writes.
  *
  * <p>Called on the binding thread.
  */

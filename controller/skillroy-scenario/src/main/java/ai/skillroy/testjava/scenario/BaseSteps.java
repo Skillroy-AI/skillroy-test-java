@@ -43,7 +43,10 @@ import java.util.TreeSet;
  *       first event on {@code topic} (a glob, or a list of globs) whose payload holds every {@code match} entry is
  *       published after the call began; {@code within} defaults to the step timeout and is at most 600 s. Any other
  *       sync forbids {@code await}. To wait for a prompt the scenario expects, use {@code waitFor}: an EVENT wait
- *       does not count as handling a prompt.</li>
+ *       does not count as handling a prompt. A destructive primitive needs {@code confirm: true} in {@code args}
+ *       (phase5-contracts.md 13.1), which is passed through: the executor sends it as the call's confirmation
+ *       ({@code _meta.confirm}), not as a parameter. The name {@code call} is reserved: a pack may not declare a verb
+ *       of that name ({@link PlanCompiler#RESERVED_VERBS}).</li>
  *   <li>{@code click: {by|target, rung?, focusTimeoutMs?, activateWindow?, force?, fallback?, strict?, await?}} ->
  *       {@code swing.click}, SETTLE. The scenario's {@code ui} settings (amendment A29) apply to a click that names
  *       no {@code rung}: with {@code clickRung: COMPONENT} it is sent with {@code rung: COMPONENT},

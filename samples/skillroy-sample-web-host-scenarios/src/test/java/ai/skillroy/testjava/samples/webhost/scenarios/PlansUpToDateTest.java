@@ -82,12 +82,12 @@ class PlansUpToDateTest {
         }
     }
 
-    /** Version 4, the pack and its version, the path left at auto, the default browser, the web capabilities. */
+    /** Version 5, the pack and its version, the path left at auto, the default browser, the web capabilities. */
     @Test
-    void theCommittedPlansAreVersion4AndLeaveThePathAtAuto() throws Exception {
+    void theCommittedPlansAreVersion5AndLeaveThePathAtAuto() throws Exception {
         for (Path yaml : committedScenarios()) {
             Plan plan = Plan.read(planFor(yaml));
-            assertEquals(4, plan.planVersion(), plan.scenarioId());
+            assertEquals(5, plan.planVersion(), plan.scenarioId());
             assertEquals(Plan.VERSION, plan.planVersion());
             assertEquals(WebHostPack.ID, plan.pack());
             assertEquals(WebHostPack.VERSION, plan.packVersion());

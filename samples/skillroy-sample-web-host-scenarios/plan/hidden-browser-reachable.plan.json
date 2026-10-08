@@ -1,5 +1,5 @@
 {
-  "planVersion": 4,
+  "planVersion": 5,
   "scenarioId": "hidden-browser-reachable",
   "pack": "webhost",
   "packVersion": "0.1.0",
