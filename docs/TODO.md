@@ -80,9 +80,54 @@ items, among them five rated high: a model client could run any primitive confir
 key with a stray character could leak through a provider exception, a session check was an oracle on masked values, the
 allow-list was never checked against the schema, triage sent row samples unmasked by column; section "Phase 5 code
 review" below), **and fixed by four fixers** (decisions D96-D103 and D110; the review's as-built and "fix wave" notes are
-in the contract). The final tree's matrix is the first table below. Owed to a live model until the end of 2026-10-08, when the owner's working key arrived ("Walls"), and the next
-session's work: the planner-authored sample scenario C, live recordings in place of the scripted
-stand-ins, the live profiles and the live acceptance of the contract's §15.3.
+in the contract). The final tree's matrix is the first table below. **In the afternoon of 2026-10-08 the live items were closed** with the owner's workspace-scoped key (the method of
+the night: contract first, D111-D113 as B25; two implementers in worktrees and a third for scenario C; one review lens
+with probes; a fix round; the matrix before the commits; "Phase 5, the live items" below): BS13's live part on SDK
+2.70.0, scenario D's tier (b) requests re-recorded live on both seeds, the profiles `inference-live` and
+`inference-record` with the live acceptance of P5 §15.3 green in the image (five items; the cache-hit criterion met at
+91.4 % on both nightly jobs), the planner-authored scenario C reviewed, committed and replayed, and about USD 2.05 spent.
+The live table follows this paragraph; the matrix of the final tree is the table after it.
+
+The live runs of 2026-10-08 (afternoon), with the key passed through by name; every figure from the ledger entries the
+tests printed:
+
+| What | Where | Result |
+|---|---|---|
+| BS13's live part (`java -jar spikes/BS13/target/bs13-probe.jar live`, SDK 2.70.0) and the CLI item | natively | every item answered, USD 0.032 plus about 0.008 of raw probes (`spikes/BS13/RESULT.md`) |
+| `ScenarioDRecordIT` (`-Pinference-record`): scenario D's requests re-recorded | natively (the JDBC channel, the in-JVM database) | both seeds answered by `claude-sonnet-5-5` at effort `low`, the committed SQL's supervisor found; USD 0.029 (0.0223 + 0.0071, the second reading 5024 cached tokens) |
+| `ClaudeGatewayLiveIT` (`-Pinference-live`), §15.3 items 1 and 2 | natively | 2 tests, 508.6 s: a 1187-token cache write then read 2.4 s later, `countTokens` exact (1207); a batch of two ended after 504 s, its second request reading the first's prefix; USD 0.0053 |
+| `InferenceLiveIT` (`-Pinference-live`), §15.3 items 3 to 6, first run | the arm64 image | 2 failures, 2 errors (the confidence gate at 0.8 refusing a correct answer at 0.7, the strict tools above the provider's 16-union limit, the planner's `$schema` key, a missing test directory): all fixed |
+| `InferenceLiveIT`, second run | the arm64 image, the Linux `claude` 2.1.294 mounted | 5 tests, 0 failures, 485.7 s: scenario D live through the agent channel to the committed supervisor (USD 0.022); the nightly job A+B `UNCHANGED` and D twice `CHANGED` with the same value, USD 0.0054 and 0.0051, **cache hits 91.4 % on both**, batches 154 s and 184 s; `skillroy author` on the brief exit 0 in 119 s (Opus 5.5, 35 turns, USD 0.907); one session turn `DONE` in 20 s after nine actions (USD 0.166), its export compiles; 26 files scanned clean; USD 1.11 in all |
+| Scenario C authored (`skillroy author --id return-refunds-deposit --run`) | the arm64 image | Opus 5.5, 43 turns, no repair, USD 0.80, 161 s with the checks; compiled, resolved, ran green on seed A; reviewed and kept; bindings approved on both seeds with no model call |
+
+Verification of the final tree of the live session (the tree committed as `7690322` and `22ae574`; the live classes
+skip in it, no key being passed), 2026-10-08 evening: the arm64 image natively twice in a row, then the amd64 image
+under emulation once, three legs each:
+
+| Configuration | Command (from the repo root) | Result |
+|---|---|---|
+| Native, JDK 26, headless | `mvn -o -q verify` | 4087 tests, 0 failures, 0 errors, 378 skipped (the live classes among the skips) |
+| arm64 image (JDK 25), targets on Java 25 | `ci/run-in-linux.sh mvn -o -q clean verify -Pjcef -Dskillroy.jcef.platform=linux-arm64 -Dskillroy.headless=false` | run 1: stopped at the sample application module after 342 s on one failure, `LendingUiDisplayTest.typedKeysFillTheEntryFieldAndEnterSubmitsIt` (the class then passed 3 of 3 re-runs: a one-off, "Open flake" below); run 2: 4143 / 0 / 0 / 77, 830 s |
+| arm64 image, targets on Java 8 (aarch64 JDK 8u504) | the same plus `-Dskillroy.it.targetJava=/opt/jdk8/bin/java` | run 1: 4143 / 0 / 0 / 104, 737 s; run 2: 4143 / 0 / 0 / 104, 729 s |
+| arm64 image, agent side, test JVMs and targets on Java 8 | the Java 8 command plus `-Djvm=/opt/jdk8/bin/java`, `-pl` the twelve agent-side modules | run 1: stopped at the agent core module after 34 s on one error, `LifecycleTest.productionMarkerShutsTheAgentDown` (3 of 3 re-runs green: a one-off, below); run 2: 1380 / 0 / 0 / 21, 182 s |
+| amd64 image (JDK 25, emulated), targets on Java 25 | the arm64 command with `linux-amd64` and `-Dskillroy.test.extraArgLine=-Djdk.lang.Process.launchMechanism=FORK` | 4143 / 0 / 0 / 76, 1258 s |
+| amd64 image, targets on Java 8 (1.8.0_492) | the same plus `-Dskillroy.it.targetJava=/opt/jdk8/bin/java` | 4143 / 0 / 0 / 104, 1030 s |
+| amd64 image, agent side, test JVMs and targets on Java 8 | the Java 8 command plus `-Djvm=/opt/jdk8/bin/java`, `-pl` the twelve agent-side modules | 1380 / 0 / 0 / 21, 254 s |
+
+The whole-reactor legs gained scenario C's replay check (eight cases, four load modes and two seeds) and the planner
+replay test; `InferenceEndToEndIT` runs scenario D's items against the live recordings now. Two display-free legs of
+the first arm64 round stopped on one-off failures in tests this session did not touch (both re-run three times green
+and absent from the second round and the amd64 round):
+
+- `LendingUiDisplayTest.typedKeysFillTheEntryFieldAndEnterSubmitsIt` (the sample application's own UI test, Java 25
+  test JVM): the typed keys produced no engine event within 30 s, the focus family of "Open flake" (A39 mitigated the
+  agent's display tests, not the sample application's harness); first occurrence of this test.
+- `LifecycleTest.productionMarkerShutsTheAgentDown` (agent core, Java 8 test JVM): `AgentHarness` read the token file
+  after the agent, shut down by the production marker, had deleted it (`NoSuchFileException`; A23's clean-up): a race
+  of the harness on a fast JVM; first occurrence. The harness could tolerate a vanished token when the shutdown is the
+  expected outcome.
+
+
 
 Verification of the final Phase 5 tree (`e7acd61`, the tree after the review's fix wave), 2026-10-08: the arm64 image
 natively twice in a row, then the amd64 image under emulation once, three legs each; the counts are the main tree's own
@@ -300,11 +345,11 @@ table above. "Java 8 test JVM" = the module's own tests also run on Java 8 (`-Dj
 | Platform | Controller side on Java 25 (`--release 25`, B3); agent side on Java 8 (B4). The Linux test image is JDK 25 (Temurin 25.0.4.1); the previous JDK 21 image is no longer used. Native development JDK is 26 | none |
 | Git and publication | The initial commit was made on 2026-10-06 (everything in the tree, one commit, DCO sign-off); nothing pushed. The remote `Skillroy-AI/skillroy-test-java` is private for now. `LICENSE` (Apache-2.0), `NOTICE`, `CONTRIBUTING.md` (DCO sign-off, no CLA) and the header in every source file (`ci/license-headers.sh`, with the holder's name since 2026-10-06) exist; the root POM carries the publication metadata | Push when the owner says; before the first public release, the repeated security review |
 | Licence audit | `docs/licence-audit.md`: everything the project distributes, bundles or depends on is compatible with Apache-2.0. The packaging gaps (licence files inside the jars and zips, third-party attribution in the CLI distribution, a `<licenses>` element in the root pom) are closed (Phase 1.x, built 2026-10-02). Updated 2026-10-07 for Phase 4: the Playwright and JCEF sets (in no distribution), the new modules, and the agent home's seventh jar, inspected | none |
-| Decisions | B1-B14 answered by the owner 2026-10-02; B15 and B16 follow from the answers; B17-B20, taken without the owner, were confirmed by the owner on 2026-10-06, with two vetoes inside B19 (Q10, Q14) built the same day; **B21** (the Phase 4 contract's fifteen answers) taken without the owner later on 2026-10-06 and confirmed by the owner on 2026-10-07; **B22** (D59-D69, the Phase 4 build's decisions) confirmed the same evening. **B23** (the Phase 5 contract's eighteen answers, D70-D87) taken without the owner on 2026-10-08, provisional | B23 open on the interview page (`B23 ok` or `B23 Qn veto`) |
-| Design docs (`docs/design/`) | `phase1-contracts.md` as built, with the Phase 1.x, Phase 2, Phase 3 and Phase 4 passages marked "(1.x, built 2026-10-02)", "(Phase 2, built 2026-10-02)", "(Phase 3, built 2026-10-03)" and "(Phase 4, built 2026-10-07)". `phase2-contracts.md` and `phase3-contracts.md` as built (2026-10-03: every deviation of the build and every fix of the review marked in place; their Phase 4 passages marked built). **`phase4-contracts.md` as built 2026-10-07** (specified 2026-10-06; every deviation of the build and every fix of the review marked in place, the decisions of the build D59-D69). **`phase5-contracts.md` specified 2026-10-08, not built** (D70-D87; its §16.1 lists the changes to the earlier contracts, to be written in when the build starts). Overview: roadmap with Phases 1.x to 4 built and the Phase 5 contract noted, §3.8 as built | Write the §16.1 marks into the Phase 1-4 contracts and the overview when the Phase 5 build starts |
+| Decisions | B1-B14 answered by the owner 2026-10-02; B15 and B16 follow from the answers; B17-B20, taken without the owner, were confirmed by the owner on 2026-10-06, with two vetoes inside B19 (Q10, Q14) built the same day; **B21** (the Phase 4 contract's fifteen answers) taken without the owner later on 2026-10-06 and confirmed by the owner on 2026-10-07; **B22** (D59-D69, the Phase 4 build's decisions) confirmed the same evening. **B23** (the Phase 5 contract's eighteen answers, D70-D87) and **B24** (the build's and the review's decisions, D88-D104, D110) taken without the owner on 2026-10-08 and confirmed by the owner the same day; **B25** (the live session's D111-D113) taken without the owner in the afternoon of 2026-10-08, provisional | B25 open (`B25 ok` or `B25 D113 veto 0.8`); the owner's review of the committed scenario C |
+| Design docs (`docs/design/`) | `phase1-contracts.md` as built, with the Phase 1.x, Phase 2, Phase 3 and Phase 4 passages marked "(1.x, built 2026-10-02)", "(Phase 2, built 2026-10-02)", "(Phase 3, built 2026-10-03)" and "(Phase 4, built 2026-10-07)". `phase2-contracts.md` and `phase3-contracts.md` as built (2026-10-03: every deviation of the build and every fix of the review marked in place; their Phase 4 passages marked built). **`phase4-contracts.md` as built 2026-10-07** (specified 2026-10-06; every deviation of the build and every fix of the review marked in place, the decisions of the build D59-D69). **`phase5-contracts.md` as built 2026-10-08** (specified, built, reviewed and fixed the same day, its §16.1 marks written into the Phase 1-4 contracts and the overview; the live session's passages marked "the live session", D111-D113). Overview: roadmap with Phases 1.x to 5 built, §3.8 as built | None |
 | Research notes (`docs/research/`) | Round 1 carried over, finding ids unchanged; `embedded-browser-spi` and `vision-input` new (2026-10-02). Pruned of local-environment detail | None |
 | Security review | Run 2026-10-02 on the pre-port tree: 34 confirmed findings (4 medium, 30 low); the fixes H1-H3 are built (Phase 1.x). The Phase 2 code review of 2026-10-03 had a secrets-and-safety lens (below) | Repeat the review before the first release |
-| Spikes | BS7 done. **BS8 run 2026-10-06, passed with conditions** (`spikes/BS8/RESULT.md`). **BS5 met 2026-10-07** by the Phase 4 acceptance against JCEF's Chromium (D53; the stock-Chromium run is the manual procedure `spikes/BS5/README.md`). BS1 answered for Java 8 and Java 25 targets on Linux, parts open. BS2 answered in part. BS4 answered, parts open. BS3 open. **BS6 passed 2026-10-08** and **BS13 ran its offline part 2026-10-08** (the live part is the next session's: the owner's workspace-scoped key works since the end of 2026-10-08), both as the Phase 5 contract's gates. BS9-BS12 new, not started | See "Base spikes" |
+| Spikes | BS7 done. **BS8 run 2026-10-06, passed with conditions** (`spikes/BS8/RESULT.md`). **BS5 met 2026-10-07** by the Phase 4 acceptance against JCEF's Chromium (D53; the stock-Chromium run is the manual procedure `spikes/BS5/README.md`). BS1 answered for Java 8 and Java 25 targets on Linux, parts open. BS2 answered in part. BS4 answered, parts open. BS3 open. **BS6 passed 2026-10-08** and **BS13 passed 2026-10-08** (the offline part in the night, the live part in the afternoon with the owner's key), both as the Phase 5 contract's gates. BS9-BS12 new, not started | See "Base spikes" |
 | CI for this repo | Not chosen. `ci/Dockerfile` and `ci/run-in-linux.sh` are what a pipeline would run; since 2026-10-06 the image holds Chromium's run-time libraries and the runner takes `SKILLROY_PLATFORM`; the Phase 4 matrix adds `-Pjcef` to every leg | Needs a JDK 8, a JDK >= 25 and Xvfb on the build agents; for the profile `jcef` the JCEF natives (152 MB per platform) and Playwright's jars (the driver bundle about 204 MB) in the Maven cache |
 
 ### What the end-to-end review fixed (2026-10-02)
@@ -369,7 +414,7 @@ re-run. BS8 comes from `research/embedded-browser-spi.md` R4 (B9); BS9-BS12 from
 | BS10 | Routed in-JVM dispatch behaves like Robot | New, not started |
 | BS11 | `PAINT` capture is deterministic | New, not started |
 | BS12 | Grounding accuracy and cost of a vision loop on the sample | New, not started; needs live model calls (B7) |
-| BS13 | The Claude API facts the Phase 5 contract relies on (structured output, strict tools, effort, caching minimums and TTLs, token counting, the Batch API, the fallback parameter, error mapping, the `claude` CLI's headless envelope), checked live once; the three Phase 5 dependency sets resolved and listed for the licence audit | **Run 2026-10-08, offline part done, live part not run** (`spikes/BS13/RESULT.md`): the owner's key is organisation-level and every request is refused without `anthropic-workspace-id` ("Walls"); settled offline from the SDK's source and a dry run: the SDK is MIT, the MCP artifacts are `mcp-core` + `mcp-json-jackson2`, the typed structured-output overload drops `effort`, the SDK's retries are per attempt and uncapped on `retry-after`, `fromEnv()` reads profiles and custom headers, 402/413/529 arrive as unexpected or server exceptions, the CLI has `--max-budget-usd` and reports `subtype: success` on failures; fifteen contract changes written in (P5 §2.2, §2.4, §2.6, §3.2, §4.1, §7.2, §10.2, D88). One command runs the live items once `ANTHROPIC_WORKSPACE_ID` is exported (`spikes/BS13/README.md`); spend so far $0 |
+| BS13 | The Claude API facts the Phase 5 contract relies on (structured output, strict tools, effort, caching minimums and TTLs, token counting, the Batch API, the fallback parameter, error mapping, the `claude` CLI's headless envelope), checked live once; the three Phase 5 dependency sets resolved and listed for the licence audit | **Passed: offline part 2026-10-07/08, live part 2026-10-08 (afternoon)** (`spikes/BS13/RESULT.md`): the live part ran through SDK 2.70.0 (the build's line) with the owner's workspace-scoped key, USD 0.032 in all (the resumed CLI call reports the session total, counted once), the `claude` CLI item natively. Settled: structured output as specified (a numeric `minimum` and `minItems` 2 refused, a string `maxLength` accepted; 2.70.0's typed form keeps `effort`); the strict tool called with valid input, a forced tool choice refused; Opus 5.5 returns a thinking block (empty, signed) at effort low, Sonnet 5.5 none; a 1135-token prefix written then read, the one-hour TTL without a beta header; `count_tokens` exact; a batch of two ended after 458 s with its results in reverse order, the second request reading the first's one-hour prefix (not a standard request's entry); `fallbacks` needs the beta header and `usage.iterations` is present whenever it is sent; 404/400 as mapped; the CLI's envelope with `structured_output`, `is_error: false`, `--resume` keeping the session. Found beside the probe: **Haiku 4.5 refuses `output_config.effort`**, so the gateway sends none to the Haiku class (P5 §4.1). The offline findings stand (SDK MIT, `mcp-core` + `mcp-json-jackson2`, per-attempt retries, `fromEnv()`'s reach, the error classes) |
 
 ### BS1 Attach matrix on stock JVMs
 
@@ -1040,27 +1085,32 @@ command had left signed on (the desk took the staff code for an item); the CLI s
 the two repaired checks green on both seeds). What was run is in the table below and under "Status at a glance".
 
 - [x] `skillroy-inference` (created here, above `skillroy-scenario`); the `InferenceGateway` SPI with typed content
-  parts (text, image, tool use, tool result, and an opaque part) and the Claude implementation (B7); built 2026-10-08,
-  the live gateway unexercised (the owner's working key arrived at the end of 2026-10-08: the live run is next)
+  parts (text, image, tool use, tool result, and an opaque part) and the Claude implementation (B7); built 2026-10-08;
+  the live gateway exercised the same afternoon with the owner's key (`ClaudeGatewayLiveIT` under `-Pinference-live`,
+  the live subsection below)
 - [x] Tier (b) resolvers: model-authored SQL behind `SqlGuard` (BS6 passed first); masking before any prompt (P5 §6);
-  built 2026-10-08, proven end to end against stand-in recordings
+  built 2026-10-08, proven end to end against stand-in recordings, then live: scenario D's two requests answered by
+  Sonnet 5.5 and recorded (`ScenarioDRecordIT`, the live subsection below)
 - [x] Approve flow on first use; budget meter per scenario and per nightly job (and per session); built 2026-10-08
 - [x] Nightly batch re-resolve that writes the bindings and a report (the pull request is the pipeline's,
   `ci/examples/nightly-re-resolve.yml`); `skillroy re-resolve`; built 2026-10-08, the batch interface exercised against
   the recorded gateway only
 - [x] `skillroy-mcp`: tool projection of the catalogue plus the pack's verbs, stdio transport; built 2026-10-08
-- [x] Authoring planner through headless `claude -p` (built and tested with a substitute executable; **never run live**:
-  scenario C is owed to the live run); opt-in failure triage as a separate command; built 2026-10-08
+- [x] Authoring planner through headless `claude -p` (built and tested with a substitute executable; run live in the
+  afternoon of 2026-10-08, the live subsection below); opt-in failure triage as a separate command; built 2026-10-08
 - [x] Interactive profile (B15): the executor's single-call entry and the step journal (`ExecutorSession`,
   `StepJournal`), export of a journal to scenario steps and bindings, the session service, a per-session budget; built
   2026-10-08; a session on the headless desk is exported and replays with zero model calls
 - [x] A recorded gateway and committed recordings, so that the whole layer is tested in CI and the Linux image with no
-  model key (P5 §4.2, §14.5); built 2026-10-08; the committed recordings are scripted stand-ins until the key works
-- [ ] **Exit:** a new sample scenario authored from a one-paragraph brief is reviewed, committed and replays green
-  in CI (**owed**: needs the live planner; the owner's key works since the end of 2026-10-08); the nightly job stays under budget with
-  prompt-cache hits above 80% (**owed**: a live run; the job's mechanics are proven against the recorded gateway); an
-  interactive session on the sample is exported from its journal as a scenario that replays with zero model calls
-  (**met headlessly** 2026-10-08, `SessionExportTest`; in the image by `InferenceEndToEndIT`).
+  model key (P5 §4.2, §14.5); built 2026-10-08; scenario D's committed recordings are live since the afternoon of
+  2026-10-08 (the session's stay scripted stand-ins by design, P5 §14.5)
+- [x] **Exit:** a new sample scenario authored from a one-paragraph brief is reviewed, committed and replays green
+  in CI (**met 2026-10-08**, scenario C: authored live, reviewed, committed with its plan, bindings and authoring
+  record, replayed on both seeds in every load mode by the acceptance; the live subsection below); the nightly job
+  stays under budget with prompt-cache hits above 80% (**met 2026-10-08**: USD 0.005 of 1.00 and 91.4 % on both live
+  jobs of `InferenceLiveIT`, read as P5 §8.3 says); an interactive session on the sample is exported from its journal
+  as a scenario that replays with zero model calls (**met headlessly** 2026-10-08, `SessionExportTest`; in the image
+  by `InferenceEndToEndIT`; live by `InferenceLiveIT` item 6).
 
 ### Phase 5 code review (2026-10-08)
 
@@ -1164,6 +1214,63 @@ The reactor after the wave and the reconciliation, and the final Linux matrix, a
 glance".
 
 The review's reports, verdicts, briefs and fixer reports are with the session's working files (2026-10-08).
+
+### Phase 5, the live items (2026-10-08, afternoon)
+
+The owner's workspace-scoped key made the live items possible the same day the phase was confirmed. The method of the
+night: contract first (`design/phase5-contracts.md`, the passages marked "the live session"; decisions D111-D113, B25
+provisional), two implementers in isolated worktrees (the inference module with the root POM and the CLI; the sample's
+scenarios module), one review lens with probes over the integrated change, a fix round, the Linux matrix before the
+commits. The key lived in the operator's login shell and reached a JVM by name only (`zsh -lc` to export it,
+`ci/run-in-linux.sh`'s pass-through into the container); it never touched the repository, the notes or a page.
+
+- **BS13's live part** (`spikes/BS13/RESULT.md`): the probe rebuilt on SDK 2.70.0, every item answered, USD 0.032 (the
+  "Base spikes" row above). Two facts changed the gateway: Haiku 4.5 refuses `output_config.effort` (no `effort` for
+  the Haiku class now) and answers under the dated id `claude-haiku-4-5-20251001` (a dated id is its alias, priced as
+  such, no fallback note); `claude-opus-5` joined the price table; `usage.iterations` is present whenever `fallbacks`
+  is sent. The CLI's `--max-budget-usd` bounds an invocation's own spend and a resumed envelope's `total_cost_usd` is
+  the session's running total: the planner records cost differences and gives a repair round what is left.
+- **The record route** (`ScenarioDRecordIT`, `-Pinference-record`, natively, USD 0.029): both seeds' supervisor
+  requests answered by `claude-sonnet-5-5` at effort low on the first attempt, each statement through the guard and the
+  desk's access check to the committed SQL's supervisor; seed A 475 in / 877 out / 5024 written to the cache, 9.5 s,
+  USD 0.0223; seed B four seconds later 476 / 515 / 5024 read, 4.0 s, USD 0.0071. The stand-in generator is gone; the
+  tests pin what a live answer must hold and read the label (`recorded 2026-10-08`) from the committed file.
+- **`ClaudeGatewayLiveIT`** (`-Pinference-live`, natively, 508.6 s, USD 0.0053): item 1 wrote 1187 tokens to the cache
+  and read them 2.4 s later, `countTokens` 1207 = the reported 1207; item 2's batch of two ended after 504 s with both
+  results, the first request writing the 1187-token prefix (5 min TTL inside the batch) and the second reading it.
+- **The first image run of `InferenceLiveIT`** found four things, all fixed before the second run: the model answered
+  a correct statement with confidence 0.7, under the 0.8 gate, and the slot ended "no candidate" without saying why
+  (the default threshold is 0.6 since D113, measured on four live answers 0.8 / 0.8 / 0.8 / 0.7, and the binder's
+  message now names the rejections); the API refused the session's strict tools, 20 union-typed parameters against a
+  limit of 16 (the gateway drops `strict` above the limit); the claude CLI refused the planner's `--json-schema` for
+  its 2020-12 `$schema` key (the planner strips it and reports the CLI's stderr when no envelope comes back); the test
+  of item 5 had not created its directory. The review lens found the envelope file masked without the environment's
+  credential values and whole objects redacted under secret-looking keys (fixed: masked by value, the key rule on
+  strings only), and the record route not atomic (fixed: staged, checked and scanned before it replaces anything).
+- **The second image run of `InferenceLiveIT`** (arm64 natively, 485.7 s, five tests green, USD 1.11): item 3 bound
+  scenario D live through the agent channel to the committed supervisor (USD 0.0219; 475 in, 835 out, 5024 written to
+  the cache); item 4's nightly job: scenarios A and B `UNCHANGED` with no request, then scenario D twice in a row,
+  `CHANGED` with the same supervisor each time (a live answer carries a new request id), USD 0.0054 and 0.0051, **cache
+  hits 91.4 % on both jobs** (each batch request read the 5024-token prefix; the first had been written by item 3's
+  standard request minutes before, so the batch tier did read a standard entry here, against BS13's one observation),
+  the batches 154 s and 184 s; item 5 ran `skillroy author` on the brief of §14.3 against the desk: exit 0 in 119 s,
+  Opus 5.5, 35 turns, no repair, USD 0.907, the scenario compiled and resolved; item 6's session turn ended `DONE` in
+  20 s after nine actions (a snapshot, the catalogue, two resolves, a scan, a deposit the desk refused, the DUE key, the
+  deposit, a snapshot), nine calls, USD 0.166, and its export of four steps compiles; the secret scan found nothing in
+  26 files.
+- **Scenario C** (`return-refunds-deposit`, §14.3): authored for real in the image with `skillroy author
+  --id return-refunds-deposit --run` (Opus 5.5, 43 turns, no repair, USD 0.80, 161 s with the checks; the plan
+  compiled, every slot resolved, the scenario ran green on seed A), reviewed by the orchestrator on the owner's
+  instruction and kept as written (the `review` section of its `.authoring.json` says why: the brief's "needs no
+  induction" cannot be stated through `LendableItem`, a DSL gap below, and holds by the resolver's order on both
+  seeds; "back to zero" is the net of the two postings the desk makes), its bindings approved on both seeds with
+  `skillroy resolve` (tier (a) only, label `approve`), the planner's envelope kept as the fixture of §15.1 item 11
+  beside the pre-review YAML; wired into the acceptance by a third implementer (`ScenarioC`, the plan and bindings
+  tests, the replay check of §15.2 item 3 in every load mode, the planner replay test). The owner's own review of the
+  committed scenario stays open.
+- **Spend of the live session**: about USD 2.05 in all (BS13 0.032 and its probes 0.008, the record route 0.029, the
+  CLI dry run of D 0.022, the gateway live test 0.005, the first image run 0.04, the second 1.11, scenario C's
+  authoring 0.80, the approvals nothing).
 
 ### Phase 6: hooks, Byteman, Windows, OTel, hardening
 
@@ -1281,6 +1388,7 @@ reflectively callable `EmbeddedAgent.start`, and redaction of secrets in JVM arg
 | 46 | A killed JVM leaves a traced CDP path's trace directory | The private, owner-only `skillroy-cdp-trace-*` directory is deleted at close; a JVM killed meanwhile leaves it in the temporary directory (P4 §6.4) | Delete stale ones at the next open, or accept and document (done) | accepted |
 | 48 | Over CDP, `web.waitFlag` on a page whose content security policy forbids `eval` fails at Playwright's second poll | Playwright's `waitForFunction` evaluates its own predicate with `eval` from the page's timer after the first poll, which such a policy refuses before the guard runs; it surfaces as `INTERNAL_ERROR` with an unhelpful message (found by A35, 2026-10-08; the agent path's `Runtime.evaluate` is not subject to the policy) | A clearer message, or a first-poll-only fallback to the agent path for such pages | later, if a target shows it |
 | 47 | JxBrowser's observer registration and `cdpEndpoints` call the vendor without a bound | Every other vendor call of the adapter runs on its own threads with a bound; whether `on`, `set` and the endpoint read can block needs the product (P4 §4.5) | Bound them as the accessors are, once a run against the product shows the need | with gap 41 |
+| 49 | The sample's `LendableItem` query cannot say "an item that needs no induction" | The planner was briefed to choose such an item for scenario C (P5 §14.3) and could only choose a plain counted item (`perDay: false`); the brief holds by the resolver's order on both seeds, not by the scenario's words (`ItemsTriggering` has an `inductionRequired` argument, `LendableItem` has none) | An `inductionRequired` argument on `LendableItem` (pack 0.5.0; every committed plan carries the pack version) | later, with the next pack change |
 
 Small items for the module owners, none of them a contract matter: `swing.snapshot` shows Swing's own made-up
 names such as `null.layeredPane`; module version strings are inconsistent (`0.1.0` and `0.1.0-SNAPSHOT`); in
@@ -1349,7 +1457,7 @@ Work that cannot proceed without the project owner, or without something only th
 | Wall | Decision | What waits |
 |---|---|---|
 | The push | B1 | The initial commit exists (2026-10-06); the push to the private remote `Skillroy-AI/skillroy-test-java` waits for the owner's word. History is permanent once pushed |
-| Model provider API key | B7 | **Resolved 2026-10-08.** The first key (organisation-level) was refused by the API without an `anthropic-workspace-id` header (BS13, 2026-10-08), so nothing live ran that night: BS13's live part, the sample's live recordings, the planner's authoring run and the live acceptance (§15.3) stayed owed, the profiles marked not built (D110). At the end of 2026-10-08 the owner created a workspace-scoped key, exported as `ANTHROPIC_API_KEY` in the operator's own environment only (never a file of this repository, never a property, never a command line; the contract's §2.3); the models endpoint answers it with no workspace header. The live items are the next session's ("Next steps"). |
+| Model provider API key | B7 | **Resolved 2026-10-08, and the live items done the same day.** The first key (organisation-level) was refused by the API without an `anthropic-workspace-id` header (BS13, the night of 2026-10-08), so nothing live ran that night and the profiles were marked not built (D110). The owner's workspace-scoped key, exported as `ANTHROPIC_API_KEY` in the operator's own environment only (never a file of this repository, never a property, never a command line; the contract's §2.3), answered the models endpoint with no workspace header; in the afternoon of 2026-10-08 it carried BS13's live part, scenario D's live re-record, the live profiles and §15.3, scenario C's authoring and the nightly job's live figures ("Phase 5, the live items" above), about USD 2.05 in all. Nothing waits on it. |
 | A JxBrowser licence | B9 | Real verification of the `jxbrowser` adapter. The adapter exists (built 2026-10-07) and passes the contract kit against the neutral fake, plainly and with the init-script chaining option; the kit (`skillroy-agent-web`'s `test-jar`) runs against the real product only in a repository that holds a licence, outside this repo, through a `WebAdapterFixture` over a real engine. That run also settles three member names of the descriptor and whether some vendor calls can block (gaps 41 and 47). Phase 4 reached its public exit without it. The owner (2026-10-06): a licence is available, so that verification can follow in the private overlay's repository |
 | A Windows host | B13, Phase 6 | Verification of the fixes S7 and S15 (not verified on Windows); the Windows path of Phase 6. The owner (2026-10-06): later, a Windows 11 machine, which also runs the tenant layers' testing under Windows and under WSL2 |
 
@@ -1379,14 +1487,14 @@ The review items of the end-to-end review, now decided (gap numbers refer to the
    BS8, gap 44) and why a `srcdoc` iframe never loads in the image; then the open gaps of the table above (38, 40, 42
    and 45 were closed by the Phase 4.x amendments on 2026-10-08; gap 48 is new). D59-D69 are B22, confirmed by the
    owner on 2026-10-07.
-3. **Phase 5 is built, reviewed and fixed** (`design/phase5-contracts.md`, 2026-10-08; B23 and B24 confirmed by the
-   owner on 2026-10-08). Next, with the owner's workspace-scoped key (it works; "Walls"): the live part of BS13, the live
-   acceptance of P5 §15.3 with the profiles `inference-live` and `inference-record` built in the same change (D110),
-   scenario D's tier (b) requests re-recorded live (the stand-in assertions loosened as the recordings README lists
-   them), the planner-authored scenario C (`skillroy author` against the desk, reviewed and committed), and the nightly
-   job's cache-hit figure recorded here. Open from the review, not fixed: the table-unaware personal rule (L2 F10, a
-   documented over-masking), a row mask whose effect depends on the value (not found by the start probe), a verb that
-   compiles with none of the probe argument sets (offered as is), key nullability of allow-listed tables (unchecked).
+3. **Phase 5 is built, reviewed, fixed and closed live** (`design/phase5-contracts.md`, 2026-10-08; B23 and B24
+   confirmed by the owner on 2026-10-08; the live items of the afternoon under "Phase 5, the live items"). Open for the
+   owner: B25 (D111-D113: the live profiles' mechanics, the envelope file, the confidence threshold 0.6) and the review
+   of the committed scenario C. Open from the review, not fixed: the table-unaware personal rule (L2 F10, a documented
+   over-masking), a row mask whose effect depends on the value (not found by the start probe), a verb that compiles with
+   none of the probe argument sets (offered as is), key nullability of allow-listed tables (unchecked); and gap 49 (the
+   item query's missing induction argument). Worth a re-measure later: the model's self-reported confidence at other
+   efforts (D113 rests on four answers), and the session's strict tools once the provider's union limit moves.
 4. **The display-test focus flake is explained and mitigated** (2026-10-08, A39; "Open flake" under "Status at a
    glance"). Still open there: the native reason why the Java 8 toolkit thread does not flush an EDT-issued focus request
    while idle, and the garbage-collection-dependent skip of `SwingDisplayTest.refBecomesStaleOnceTheComponentIsCollected`
