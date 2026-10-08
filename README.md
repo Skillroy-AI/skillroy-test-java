@@ -16,10 +16,13 @@ bindings with **zero model calls**.
 There are two ways of running. In CI the scenarios run in replay only: the bindings are frozen, no model is called,
 and a cost ledger asserts it. In interactive use, a person or an authoring tool drives a live target and inference at
 run time is allowed, at the start of a run and between steps; every interactive step goes through the same step
-protocol and is journaled, so that interactive work can be exported as an ordinary scenario. Both are designed in;
-today nothing calls a model: the binding modes are built without one, and the interactive session service arrives in
-a later phase. Vision-driven input, where a model looks at the screen and the framework turns what it decides into
-recorded, replayable steps, is a planned bolt-on that the design keeps room for and does not build yet.
+protocol and is journaled, so that interactive work can be exported as an ordinary scenario. Both are built: the
+binding modes without a model (Phase 2) and, since Phase 5 (2026-10-08), a model behind a syntactic guard, a verifier
+and a person's approval for the SQL that finds a binding, the interactive session service with its journal and export,
+batch re-resolution, an MCP server and a planner; CI and `replay` still never call a model, and nothing in the build
+needs a model key (every test of the AI layer runs against a recorded or scripted gateway). Vision-driven input, where
+a model looks at the screen and the framework turns what it decides into recorded, replayable steps, is a planned
+bolt-on that the design keeps room for and does not build yet.
 
 **Status (2026-10-08):** Phase 1, Phase 1.x, Phase 2 and Phase 3 are built and verified, Phase 4 is built, reviewed
 and fixed, and the Phase 5 contract (the AI layer) is specified, not built; nothing is released and nothing is published. Phase 1 is the thin vertical slice: the agent (core, Swing and
@@ -57,7 +60,7 @@ the fluent Java API.
 | Phase 2 contract (resolution, bindings, credentials, stored-row checks, sample scenario A), as built | [docs/design/phase2-contracts.md](docs/design/phase2-contracts.md) |
 | Phase 3 contract (oracle cross-checks with `ORACLE_SUSPECT`, stored-row aggregates, the `devices` fact root, sample scenario B), as built | [docs/design/phase3-contracts.md](docs/design/phase3-contracts.md) |
 | Phase 4 contract (embedded web views: `skillroy-cdp`, the web SPI, `skillroy-agent-web` with the `jcef` and `jxbrowser` adapters, the adapter contract kit, the web host sample), as built | [docs/design/phase4-contracts.md](docs/design/phase4-contracts.md) |
-| Phase 5 contract (the AI layer: the `InferenceGateway` SPI with its Claude, recorded and scripted implementations, model-written SQL behind `SqlGuard`, approval and budgets, batch re-resolution, `skillroy-mcp`, the planner, triage, the interactive profile), specified 2026-10-08, not built; its questions are decision B23, provisional | [docs/design/phase5-contracts.md](docs/design/phase5-contracts.md) |
+| Phase 5 contract (the AI layer: the `InferenceGateway` SPI with its Claude, recorded and scripted implementations, model-written SQL behind `SqlGuard`, approval and budgets, batch re-resolution, `skillroy-mcp`, the planner, triage, the interactive profile), specified and built 2026-10-08 on the provisional answers B23 (the build's own decisions are B24), with an "As built" note under every section the build changed | [docs/design/phase5-contracts.md](docs/design/phase5-contracts.md) |
 | Spike BS8 (JCEF in the Linux test image), run 2026-10-06; spike BS5 (Playwright over CDP), met by the Phase 4 acceptance, with the manual procedure against a stock Chromium | [spikes/BS8/RESULT.md](spikes/BS8/RESULT.md), [spikes/BS5/README.md](spikes/BS5/README.md) |
 | Design overview, all phases | [docs/design/base-framework-design.md](docs/design/base-framework-design.md) |
 | Research notes | [docs/research/](docs/research/) |
