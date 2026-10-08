@@ -16,6 +16,7 @@
 
 package ai.skillroy.testjava.agent.web.jcef;
 
+import ai.skillroy.testjava.agent.api.spi.web.BitmapSource;
 import ai.skillroy.testjava.agent.api.spi.web.WebBrowser;
 import ai.skillroy.testjava.agent.api.spi.web.WebCapability;
 import ai.skillroy.testjava.agent.api.spi.web.WebEval;
@@ -27,7 +28,6 @@ import ai.skillroy.testjava.agent.api.spi.web.WebInitScript;
 import ai.skillroy.testjava.agent.api.spi.web.WebRendering;
 import ai.skillroy.testjava.agent.api.spi.web.WebScriptException;
 import ai.skillroy.testjava.agent.api.spi.web.WebSubscription;
-import ai.skillroy.testjava.agent.web.reflect.BrowserExtras;
 import ai.skillroy.testjava.agent.web.reflect.Listeners;
 import ai.skillroy.testjava.agent.web.reflect.ReflectiveException;
 import ai.skillroy.testjava.agent.web.reflect.ResolvedApi;
@@ -115,7 +115,7 @@ import javax.imageio.ImageIO;
  *
  * <p>Thread-safe. Equality is the identity of the {@code CefBrowser}.
  */
-final class JcefBrowser implements WebBrowser, BrowserExtras {
+final class JcefBrowser implements WebBrowser {
 
     /** How long a synchronous accessor waits for the page. */
     static final long ACCESSOR_BOUND_MS = 2000;
@@ -1867,6 +1867,13 @@ final class JcefBrowser implements WebBrowser, BrowserExtras {
                 });
     }
 
+    /**
+     * The SPI's reload (A37), through the technology: {@code CefBrowser.reload()} / {@code reloadIgnoreCache()} on the
+     * adapter's threads, which works where the page cannot run a script (frozen-target recovery, phase4-contracts.md
+     * section 5.3) and for a {@code data:} document, whose reload by script Chromium refuses; where the descriptor's
+     * {@code reload} roles do not resolve, {@code Page.reload {ignoreCache}} on the handle's DevTools channel.
+     * Completes once the reload was requested.
+     */
     @Override
     public CompletableFuture<Void> reload(final boolean ignoreCache) {
         if (isClosed()) {
@@ -1900,9 +1907,10 @@ final class JcefBrowser implements WebBrowser, BrowserExtras {
         return out;
     }
 
+    /** {@code PROTOCOL}: the bitmap is {@code Page.captureScreenshot} (A37). */
     @Override
-    public String bitmapSource() {
-        return "PROTOCOL";
+    public BitmapSource bitmapSource() {
+        return BitmapSource.PROTOCOL;
     }
 
     // ------------------------------------------------------------------------------------------------ detach

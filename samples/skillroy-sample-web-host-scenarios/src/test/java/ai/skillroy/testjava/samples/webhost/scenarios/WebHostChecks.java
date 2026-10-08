@@ -310,8 +310,10 @@ abstract class WebHostChecks {
 
     /**
      * Item 5: the negative scenarios end as section 9.3 says, with the web evidence of section 6.4 for the failed
-     * ones: the aria JSON decodes and names the Borrow button, the PNG decodes with at least 8 colours; pinning
-     * {@code cdp} without a port is PRECONDITION_FAILED naming {@code web.cdp} (in the launches without a port).
+     * ones: the aria JSON decodes and names the Borrow button, the PNG decodes with at least 8 colours; a flag that
+     * throws to the end is SYNC_TIMEOUT with the last poll's TypeError and one that does not compile SCRIPT_ERROR at
+     * once, on either path (A35); pinning {@code cdp} without a port is PRECONDITION_FAILED naming {@code web.cdp} (in
+     * the launches without a port).
      */
     @Test
     @Order(5)
@@ -335,6 +337,33 @@ abstract class WebHostChecks {
         assertTrue(script.result().message().contains("SCRIPT_ERROR"), script.describe());
         assertTrue(script.result().message().contains("webhost negative"), script.describe());
         assertWebEvidence(script.dir().resolve("failure"));
+
+        // A35 (section 16.1): both paths poll the same guard, so a flag that throws to the end and one that does not
+        // compile end alike with and without a port, on the path the launch takes.
+        String path = withPort() ? "cdp" : "agent";
+        Runs.Outcome never = Runs.run(client(), Runs.negative("flag-never-ready.yaml"), runDir("flag-never-ready"));
+        assertEquals(Status.FAIL, never.result().status(), never.describe());
+        assertEquals(FailureKind.SYNC_TIMEOUT, never.result().failureKind(), never.describe());
+        assertTrue(never.result().message().contains("(last error: TypeError: "), never.describe());
+        Map<?, ?> flag = (Map<?, ?>) never.result().detail().get("waitFlag");
+        assertEquals(Boolean.FALSE, flag.get("ready"), never.describe());
+        assertTrue(String.valueOf(flag.get("lastError")).startsWith("TypeError: "), never.describe());
+        assertTrue(((Number) flag.get("polls")).longValue() >= 2, "polled on through the throws: " + never.describe());
+        assertEquals(path, Runs.calls(never.dir(), "web.waitFlag").get(0).get("path"), never.describe());
+        assertWebEvidence(never.dir().resolve("failure"));
+
+        Runs.Outcome syntax = Runs.run(client(), Runs.negative("flag-does-not-compile.yaml"),
+                runDir("flag-does-not-compile"));
+        assertEquals(Status.FAIL, syntax.result().status(), syntax.describe());
+        assertEquals(FailureKind.ASSERTION, syntax.result().failureKind(), syntax.describe());
+        assertTrue(syntax.result().message().contains("SCRIPT_ERROR"), syntax.describe());
+        assertTrue(syntax.result().message().contains("SyntaxError"), syntax.describe());
+        Map<String, Object> call = Runs.calls(syntax.dir(), "web.waitFlag").get(0);
+        assertEquals(path, call.get("path"), syntax.describe());
+        assertTrue(((Number) call.get("durationMs")).longValue() < 10_000, "at once, not after the flag's 60 s: "
+                + call);
+        ItEnv.timing("java=" + java + " launch=" + target.label + " A35 path=" + path + " neverReadyPolls="
+                + flag.get("polls") + " compileErrorMs=" + call.get("durationMs"));
 
         if (!withPort()) {
             Runs.Outcome pinned = Runs.run(client(), Runs.negative("cdp-without-port.yaml"),

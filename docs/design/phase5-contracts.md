@@ -1360,10 +1360,11 @@ a Java 25 target, in every load mode, with the `recorded` gateway and the commit
 
 1. Scenario D replays green on seeds A and B with the committed bindings, `model calls: 0`, the ledger empty; the JUnit
    stream's trailing test passes.
-2. `approve --yes --approved-by "recorded 2026-10-08" --inference recorded` of scenario D on both seeds writes
-   bindings files byte-identical to the committed ones (`model calls: 1`, provider `recorded`); a deliberately changed
-   prompt (a test flag that appends a word to the catalogue) ends `ENVIRONMENT` with "no recording"; a scripted
-   gateway's reject-corpus statement ends `RESOLUTION_FAILED` with the guard's reason.
+2. `approve --yes --approved-by "recorded 2026-10-08" --inference recorded --no-reuse-bindings` of scenario D on both
+   seeds writes bindings files byte-identical to the committed ones (`model calls: 1`, provider `recorded`); the same
+   command with the reuse rule on (the default, §7.1) writes the identical file with `model calls: 0`; a deliberately
+   changed prompt (a test flag that appends a word to the catalogue) ends `ENVIRONMENT` with "no recording"; a
+   scripted gateway's reject-corpus statement ends `RESOLUTION_FAILED` with the guard's reason.
 3. Scenario C replays green on both seeds; its plan and the committed one are identical; its `.authoring.json` is
    present.
 4. The session script of §14.4 runs against the desk, exports, and the export replays with zero model calls.

@@ -17,6 +17,7 @@
 package ai.skillroy.testjava.agent.web;
 
 import ai.skillroy.testjava.agent.api.ProbeResult;
+import ai.skillroy.testjava.agent.api.spi.web.BitmapSource;
 import ai.skillroy.testjava.agent.api.spi.web.CdpEndpoint;
 import ai.skillroy.testjava.agent.api.spi.web.WebBrowser;
 import ai.skillroy.testjava.agent.api.spi.web.WebCapability;
@@ -75,7 +76,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * beyond the contract kit: the fake's descriptor is the built-in one with the fake's class names and nothing else; the
  * strategy names the fake; no licence key is read; a seed of another class loader is resolved in that loader; no
  * {@code set(...)} callback is taken without the opt-in, and with it the previous occupant is called first and put
- * back on detach; a line without the bitmap member has no {@code BITMAP}, so {@code web.bitmap} is unavailable;
+ * back on detach; a line without the bitmap member has no {@code BITMAP}, so {@code web.bitmap} is unavailable; a
+ * line without the reload members reloads through the page, the SPI's default (A37);
  * detach removes the adapter's observers on the technology's side (the application's stay), fails the calls in
  * progress and leaves no thread, also when a vendor callback arrives late; a hung engine keeps every caller within
  * its bound.
@@ -83,6 +85,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class JxBrowserAdapterFakeTest {
 
     private static final String FAKE_PACKAGE = "ai.skillroy.testjava.agent.web.fake.";
+    /** The fake's descriptor for a line without the reload members (A37). */
+    private static final String NO_RELOAD = "ai/skillroy/testjava/agent/web/fake/fake-jxbrowser-noreload.json";
     private static final String PAGE = "<!doctype html><html><head><title>Loan desk</title></head>"
             + "<body><p id=\"status\">ready</p></body></html>";
     private static final ClassLoader HOST = JxBrowserAdapterFakeTest.class.getClassLoader();
@@ -440,6 +444,49 @@ class JxBrowserAdapterFakeTest {
                         .get("json"));
                 assertNotNull(h.cap("web.evaluate"));
             }
+        } finally {
+            engine.shutdown();
+        }
+    }
+
+    /**
+     * A37: the handle reloads through the product's {@code Navigation.reload()} / {@code reloadIgnoringCache()}; a
+     * line without those members reloads through the page instead, the SPI's default ({@code location.reload()}
+     * through {@code evaluate}), and never calls the product's reload. Either way a load follows, the page is a new
+     * document, and the bitmap's source is {@code VENDOR}.
+     */
+    @Test
+    void aLineWithoutTheReloadMembersReloadsThroughThePage() throws Exception {
+        FakeEngine engine = FakeEngine.newInstance(null, Paths.get("noreload"), FakeRenderingMode.OFF_SCREEN);
+        try {
+            FakeBrowser b = browser(engine);
+            for (String descriptor : new String[] {FakeJxFixture.DESCRIPTOR, NO_RELOAD}) {
+                JxBrowserAdapter adapter = new JxBrowserAdapter(descriptor, null, JxBrowserAdapter.NO_OPTIONS);
+                try {
+                    assertEquals(CapabilityState.OK, adapter.probe(HOST).state(), descriptor);
+                    WebBrowser h = adapter.browsers(Collections.singletonList(b)).get(0);
+                    assertSame(BitmapSource.VENDOR, h.bitmapSource());
+                    final CountDownLatch loaded = new CountDownLatch(1);
+                    h.subscribe(new WebEventListener() {
+                        @Override
+                        public void onEvent(WebBrowser browser, WebEvent event) {
+                            if (event.kind() == WebEvent.Kind.LOAD_FINISHED && event.frameKey() == null) {
+                                loaded.countDown();
+                            }
+                        }
+                    });
+                    eval(h, KitScripts.DOCUMENT_MARK);
+                    int productReloads = b.navigation().reloads();
+                    h.reload(true).get(10, TimeUnit.SECONDS);
+                    assertTrue(loaded.await(10, TimeUnit.SECONDS), descriptor + ": a load followed the reload");
+                    assertEquals("\"undefined\"", eval(h, KitScripts.DOCUMENT_MARK_NOW), "a new document");
+                    assertEquals(descriptor.equals(NO_RELOAD) ? productReloads : productReloads + 1,
+                            b.navigation().reloads(), descriptor + ": the product's reload");
+                } finally {
+                    adapter.detach();
+                }
+            }
+            assertEquals(Collections.emptyList(), engine.violations());
         } finally {
             engine.shutdown();
         }

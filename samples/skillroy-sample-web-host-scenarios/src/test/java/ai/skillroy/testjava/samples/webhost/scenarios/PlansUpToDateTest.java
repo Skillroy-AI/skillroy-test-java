@@ -185,13 +185,21 @@ class PlansUpToDateTest {
         Path dir = moduleDir().resolve("src/test/resources/negative");
         try (Stream<Path> files = Files.list(dir)) {
             List<Path> yamls = files.filter(p -> p.getFileName().toString().endsWith(".yaml")).sorted().toList();
-            assertEquals(List.of("cdp-without-port.yaml", "fill-a-secret.yaml", "no-such-button.yaml",
-                    "script-error.yaml", "two-inputs.yaml"), yamls.stream().map(p -> p.getFileName().toString())
-                    .toList());
+            assertEquals(List.of("cdp-without-port.yaml", "fill-a-secret.yaml", "flag-does-not-compile.yaml",
+                    "flag-never-ready.yaml", "no-such-button.yaml", "script-error.yaml", "two-inputs.yaml"),
+                    yamls.stream().map(p -> p.getFileName().toString()).toList());
             for (Path yaml : yamls) {
                 Plan plan = PlanCompiler.compile(yaml, new WebHostPack());
                 assertEquals(yaml.getFileName().toString(), plan.scenarioId() + ".yaml");
             }
+        }
+        for (String flag : List.of("flag-never-ready.yaml", "flag-does-not-compile.yaml")) {
+            Plan plan = PlanCompiler.compile(dir.resolve(flag), new WebHostPack());
+            assertEquals(Map.of("by", Map.of("tag", "front"), "expression", flag.startsWith("flag-never")
+                    ? "document.getElementById('due-date').value === '2026-10-31'" : "document.title ===",
+                    "timeoutMs", flag.startsWith("flag-never") ? 1000L : 60000L), call(plan, "web.waitFlag").args(),
+                    "A35: the base verb, the front page by default, its own time");
+            assertEquals(Sync.NONE, call(plan, "web.waitFlag").sync());
         }
         Plan cdp = PlanCompiler.compile(dir.resolve("cdp-without-port.yaml"), new WebHostPack());
         assertEquals(WebSettings.Path.CDP, cdp.effectiveWeb().path());

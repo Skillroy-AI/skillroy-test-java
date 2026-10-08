@@ -22,6 +22,8 @@ import java.awt.image.BufferedImage;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.function.BiConsumer;
 
 /**
  * One live browser, as a {@link WebEngineAdapter} found it. Methods complete futures; the caller (a primitive on an
@@ -147,4 +149,71 @@ public interface WebBrowser {
      * it).
      */
     CompletableFuture<String> cdpTargetId();
+
+    /**
+     * Reloads the main frame's document and completes once the reload was requested: the new document's load arrives
+     * as a {@link WebEvent.Kind#LOAD_FINISHED} through {@link #subscribe} (with {@link WebCapability#EVENTS_LOAD}),
+     * not through this future. Names no {@link WebCapability} flag: every browser that can evaluate can reload. Fails
+     * as the class comment says (a closed browser: {@link IllegalStateException}). Amendment A37 (Phase 4 contract
+     * §3): a default method, so an adapter built before it links and runs unchanged.
+     *
+     * <p><b>The default</b> evaluates {@code location.reload()} in the main frame through {@link #evaluate}, with
+     * {@link WebEval}'s default timeout ({@code location.reload(true)} when {@code ignoreCache} is set: a non-standard
+     * argument that Chromium ignores, so {@code ignoreCache} is honoured only by an adapter that overrides this
+     * method). It completes when that evaluation answers and fails with the evaluation's own failure (without
+     * {@link WebCapability#EVALUATE}: {@link UnsupportedOperationException}); an {@code evaluate} that throws fails
+     * the future instead; cancelling the returned future cancels the evaluation. A reload by the page's own script is
+     * a navigation the page starts, which a technology may refuse (Chromium refuses it for a {@code data:} document)
+     * and which a page that runs no script (a frozen one) never makes: an adapter whose technology can reload from
+     * outside the page overrides this method, as both built-in adapters do ({@code CefBrowser.reload()} and
+     * {@code reloadIgnoreCache()}; {@code Navigation.reload()} and {@code reloadIgnoringCache()}).
+     *
+     * @param ignoreCache bypass the cache, where the adapter's reload can
+     * @return completes once the reload was requested
+     */
+    default CompletableFuture<Void> reload(boolean ignoreCache) {
+        final CompletableFuture<String> evaluation;
+        try {
+            evaluation = evaluate(WebEval.of(ignoreCache ? "location.reload(true)" : "location.reload()").build());
+        } catch (RuntimeException e) {
+            CompletableFuture<Void> failed = new CompletableFuture<Void>();
+            failed.completeExceptionally(e);
+            return failed;
+        }
+        if (evaluation == null) {
+            CompletableFuture<Void> failed = new CompletableFuture<Void>();
+            failed.completeExceptionally(new IllegalStateException("evaluate() returned no future"));
+            return failed;
+        }
+        final CompletableFuture<Void> requested = new CompletableFuture<Void>() {
+            @Override
+            public boolean cancel(boolean mayInterruptIfRunning) {
+                boolean cancelled = super.cancel(mayInterruptIfRunning);
+                evaluation.cancel(mayInterruptIfRunning);
+                return cancelled;
+            }
+        };
+        evaluation.whenComplete(new BiConsumer<String, Throwable>() {
+            @Override
+            public void accept(String value, Throwable failure) {
+                if (failure == null) {
+                    requested.complete(null);
+                } else {
+                    requested.completeExceptionally(failure instanceof CompletionException
+                            && failure.getCause() != null ? failure.getCause() : failure);
+                }
+            }
+        });
+        return requested;
+    }
+
+    /**
+     * Where {@link #bitmap()} comes from, which {@code web.bitmap} reports as its {@code source}: informational,
+     * answered from what the adapter knows (never by asking the technology), never null. The default is
+     * {@link BitmapSource#VENDOR}; an adapter whose bitmap is a DevTools-protocol screenshot answers
+     * {@link BitmapSource#PROTOCOL} (the built-in jcef adapter). Amendment A37 (Phase 4 contract §3).
+     */
+    default BitmapSource bitmapSource() {
+        return BitmapSource.VENDOR;
+    }
 }

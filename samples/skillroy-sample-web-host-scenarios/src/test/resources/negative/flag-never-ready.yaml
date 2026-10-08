@@ -1,0 +1,9 @@
+# Negative (phase4-contracts.md 9.3, 16.1, A35): a webWaitFlag whose expression throws on every poll (it reads the
+# value of a due-date field the front page does not have) is polled until its time is up and fails as SYNC_TIMEOUT,
+# with the TypeError of the last poll as lastError, over CDP and through the agent alike.
+scenario: flag-never-ready
+pack: webhost
+web: { browser: { tag: front } }
+steps:
+  - webWaitFlag: { expression: "document.getElementById('due-date').value === '2026-10-31'", timeoutMs: 1s }
+timeouts: { step: 10s }

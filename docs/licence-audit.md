@@ -125,11 +125,11 @@ when it held six jars; the seventh, added by Phase 4, was inspected on 2026-10-0
 | `LICENSE`, `NOTICE` | Copies of the root files (added 2026-10-02) | none |
 | `skillroy-agent-bootstrap.jar` | 9 classes (`ai.skillroy.testjava.agent.bootstrap`), manifest | none |
 | `lib/skillroy-protocol.jar` | 20 classes (`ai.skillroy.testjava.protocol`) | none |
-| `lib/skillroy-agent-api.jar` | 36 classes (`ai.skillroy.testjava.agent.api`) | none |
+| `lib/skillroy-agent-api.jar` | 61 class files on 2026-10-08 (`ai.skillroy.testjava.agent.api` and its sub-packages; the count of 36 recorded in Phase 1 predates the web SPI of Phase 4 and the Phase 4.x defaults `BitmapSource`, `WebBrowser$1`, `WebBrowser$2`) | none |
 | `lib/skillroy-agent-core.jar` | 75 classes, `agent.properties` | none |
 | `modules/skillroy-agent-swing.jar` | 73 classes, one properties file, one service file | none |
 | `modules/skillroy-agent-data.jar` | 8 classes, one service file | none |
-| `modules/skillroy-agent-web.jar` | 155 classes (`ai.skillroy.testjava.agent.web` and its sub-packages `jcef`, `jxbrowser` and `reflect`): the agent's `web.*` primitives, the browser index and events, and two reflective adapters; the descriptors `jcef.json` and `jxbrowser.json`, `web-module.properties`, one service file (Phase 4) | none |
+| `modules/skillroy-agent-web.jar` | 156 classes since the Phase 4.x amendments of 2026-10-08 (155 in Phase 4: `BrowserExtras` removed, `WebModule$Pace` and `WebModule$Pace$1` added) (`ai.skillroy.testjava.agent.web` and its sub-packages `jcef`, `jxbrowser` and `reflect`): the agent's `web.*` primitives, the browser index and events, and two reflective adapters; the descriptors `jcef.json` and `jxbrowser.json`, `web-module.properties`, one service file (Phase 4) | none |
 
 Checks made on the six jars inspected (221 class files in all):
 

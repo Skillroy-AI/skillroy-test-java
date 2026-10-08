@@ -16,6 +16,7 @@
 
 package ai.skillroy.testjava.agent.web.jxbrowser;
 
+import ai.skillroy.testjava.agent.api.spi.web.BitmapSource;
 import ai.skillroy.testjava.agent.api.spi.web.WebBrowser;
 import ai.skillroy.testjava.agent.api.spi.web.WebCapability;
 import ai.skillroy.testjava.agent.api.spi.web.WebEval;
@@ -27,7 +28,6 @@ import ai.skillroy.testjava.agent.api.spi.web.WebInitScript;
 import ai.skillroy.testjava.agent.api.spi.web.WebRendering;
 import ai.skillroy.testjava.agent.api.spi.web.WebScriptException;
 import ai.skillroy.testjava.agent.api.spi.web.WebSubscription;
-import ai.skillroy.testjava.agent.web.reflect.BrowserExtras;
 import ai.skillroy.testjava.agent.web.reflect.Listeners;
 import ai.skillroy.testjava.agent.web.reflect.ReflectiveException;
 import ai.skillroy.testjava.agent.web.reflect.ResolvedApi;
@@ -90,7 +90,7 @@ import java.util.function.Consumer;
  *
  * <p>Thread-safe. Equality is the identity of the vendor's {@code Browser}.
  */
-final class JxBrowserHandle implements WebBrowser, BrowserExtras {
+final class JxBrowserHandle implements WebBrowser {
 
     /** How long an accessor that asks the vendor waits. */
     static final long ACCESSOR_BOUND_MS = 2000;
@@ -1217,15 +1217,19 @@ final class JxBrowserHandle implements WebBrowser, BrowserExtras {
         return image;
     }
 
+    /**
+     * The SPI's reload (A37), through the product: {@code navigation().reload()} / {@code reloadIgnoringCache()} on
+     * the adapter's threads, which works where the page cannot run a script; where the descriptor's
+     * {@code navigation} or {@code reload} roles do not resolve, the SPI's default, {@code location.reload()} through
+     * the page ({@link #evaluate}). Completes once the reload was requested.
+     */
     @Override
     public CompletableFuture<Void> reload(final boolean ignoreCache) {
         if (isClosed()) {
             return failed(new IllegalStateException("the browser has closed"));
         }
         if (!api.complete("navigation") || !api.complete("reload")) {
-            return failed(new UnsupportedOperationException("adapter jxbrowser cannot reload: "
-                    + (api.firstMissing("reload") != null ? api.firstMissing("reload")
-                    : api.firstMissing("navigation"))));
+            return WebBrowser.super.reload(ignoreCache);
         }
         CompletableFuture<Void> out = tracked(new CompletableFuture<Void>());
         submit(new Callable<Void>() {
@@ -1239,9 +1243,10 @@ final class JxBrowserHandle implements WebBrowser, BrowserExtras {
         return out;
     }
 
+    /** {@code VENDOR}: the bitmap is the product's own {@code Browser.bitmap()} (A37). */
     @Override
-    public String bitmapSource() {
-        return "VENDOR";
+    public BitmapSource bitmapSource() {
+        return BitmapSource.VENDOR;
     }
 
     // ------------------------------------------------------------------------------------------------ detach

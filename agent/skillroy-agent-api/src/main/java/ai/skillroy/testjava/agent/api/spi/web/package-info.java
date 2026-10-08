@@ -21,7 +21,9 @@
  * into one {@link WebBrowser} handle per live browser. The generic {@code web.*} primitives are written against those
  * handles: optional operations sit behind {@link WebCapability} flags, frames are snapshot values ({@link WebFrame})
  * with adapter-minted keys, evaluation results cross as JSON text ({@link WebEval}), and events arrive as
- * {@link WebEvent}s.
+ * {@link WebEvent}s. A reload and the bitmap's {@link BitmapSource source} are default methods of the handle
+ * (amendment A37), which an adapter overrides where its technology does better than the page's own
+ * {@code location.reload()}.
  *
  * <p>A domain pack implements {@link BrowserRegistryAdapter} only: it hands the agent {@link BrowserSeed seeds} for
  * browsers the Swing-tree scan cannot see (cached, hidden or without a view) and needs to know no vendor type. A pack

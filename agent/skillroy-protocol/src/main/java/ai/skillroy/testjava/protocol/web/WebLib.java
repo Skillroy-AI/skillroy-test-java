@@ -45,7 +45,9 @@ import java.util.Set;
  * function) that installs the library when it is absent, so it can be handed as it is to {@code Runtime.evaluate},
  * to a JxBrowser frame's {@code executeJavaScript}, to Playwright's {@code page.evaluate} (whose driver evaluates a
  * string and calls the result only when it is a function, which none of these is) or to an init script. The
- * library is per document: a call meant for a frame is evaluated in that frame's context.
+ * library is per document: a call meant for a frame is evaluated in that frame's context. The one exception is the
+ * guard of {@code web.waitFlag} ({@link #flagExpression}, amendment A35), which needs no library and installs none:
+ * it compiles the caller's expression with {@code new Function}, which the library itself never does.
  *
  * <p>The library object {@code L} offers ({@link #FUNCTIONS}; a failure the caller can act on is returned as an
  * error object, see {@link #errorOf}):
@@ -116,7 +118,30 @@ public final class WebLib {
     /** The tap buffers at most this many events between two drains; older ones are dropped and counted. */
     public static final int MAX_BUFFERED_EVENTS = 1000;
 
+    /**
+     * The guard of {@code web.waitFlag} ({@link #flagExpression}) and {@link #errorLine} cut an error's first line at
+     * this many UTF-16 code units.
+     */
+    public static final int MAX_ERROR_CHARS = 2000;
+
     private static final String LIB = "window[" + SLOT + "]";
+
+    /**
+     * The guard of {@link #flagExpression} up to its argument, the expression as a JSON string. One function
+     * expression: {@code m} turns a thrown value into the first line of its text ({@code "<name>: <message>"} for an
+     * error object, {@code String(value)} otherwise; a line ends at CR, LF, U+2028 or U+2029), cut at
+     * {@link #MAX_ERROR_CHARS} without splitting a surrogate pair; the expression is compiled on its own as the body
+     * {@code return (<expression>\n)} of a {@code new Function}, then called with the window as {@code this}.
+     */
+    private static final String FLAG_GUARD = "(function(t){var f,m=function(e){var s,i,c;"
+            + "try{s=e!==null&&typeof e===\"object\"&&typeof e.message===\"string\""
+            + "?(typeof e.name===\"string\"&&e.name?e.name:\"Error\")+\": \"+e.message:String(e);}"
+            + "catch(x){s=\"a value that cannot be converted to text was thrown\";}"
+            + "for(i=0;i<s.length;i++){c=s.charCodeAt(i);if(c===10||c===13||c===8232||c===8233){s=s.slice(0,i);break;}}"
+            + "if(s.length>" + MAX_ERROR_CHARS + "){s=s.slice(0,(s.charCodeAt(" + (MAX_ERROR_CHARS - 1)
+            + ")&64512)===55296?" + (MAX_ERROR_CHARS - 1) + ":" + MAX_ERROR_CHARS + ");}return s;};"
+            + "try{f=new Function(\"return (\"+t+\"\\n)\");}catch(e){return {ready:false,compileError:m(e)};}"
+            + "try{return f.call(window)?{ready:true}:{ready:false};}catch(e){return {ready:false,error:m(e)};}})(";
 
     private static volatile String source;
     private static volatile String hash;
@@ -251,6 +276,53 @@ public final class WebLib {
             throw new IllegalArgumentException("a deferred id is required");
         }
         return callExpression("collect", id);
+    }
+
+    /**
+     * The page-side guard of {@code web.waitFlag} (phase4-contracts.md sections 4.2 and 16.1, amendment A35): one
+     * poll of the flag, the same text on both web paths, so that both read the same shapes. The guard compiles the
+     * caller's expression on its own, as the body {@code return (<expression>\n)} of a {@code new Function}, then
+     * calls the compiled function with the window as {@code this}, and evaluates to one of:
+     * <ul>
+     *   <li>{@code {ready: true}}: the value is truthy;</li>
+     *   <li>{@code {ready: false}}: the value is falsy;</li>
+     *   <li>{@code {ready: false, error: <line>}}: the call threw (a poll that counts as not ready);</li>
+     *   <li>{@code {ready: false, compileError: <line>}}: the expression did not compile (a {@code SyntaxError}, or
+     *     the {@code EvalError} of a page whose content security policy forbids compiling text where the channel
+     *     does not lift that rule), so it can never become ready.</li>
+     * </ul>
+     * {@code <line>} is the first line of the thrown value's text as {@link #errorLine} cuts it. The expression
+     * travels as a JSON string, never as code of the guard, so the guard itself always compiles and never throws;
+     * trailing semicolons and whitespace are dropped as {@link #wrap} drops them, and the newline before the closing
+     * parenthesis ends a trailing line comment. The library is neither needed nor installed.
+     *
+     * @throws IllegalArgumentException if {@code expression} is null or blank
+     */
+    public static String flagExpression(String expression) {
+        return FLAG_GUARD + Json.write(expressionBody(expression)) + ")";
+    }
+
+    /**
+     * The first line of an error's text, cut as the guard of {@link #flagExpression} cuts it: up to the first CR,
+     * LF, U+2028 or U+2029, at most {@link #MAX_ERROR_CHARS} UTF-16 code units, never inside a surrogate pair; ""
+     * for null. For an error text that did not come from the guard (an adapter's own script error).
+     */
+    public static String errorLine(String text) {
+        if (text == null) {
+            return "";
+        }
+        int end = text.length();
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (c == '\n' || c == '\r' || c == (char) 0x2028 || c == (char) 0x2029) {
+                end = i;
+                break;
+            }
+        }
+        if (end > MAX_ERROR_CHARS) {
+            end = Character.isHighSurrogate(text.charAt(MAX_ERROR_CHARS - 1)) ? MAX_ERROR_CHARS - 1 : MAX_ERROR_CHARS;
+        }
+        return text.substring(0, end);
     }
 
     /**

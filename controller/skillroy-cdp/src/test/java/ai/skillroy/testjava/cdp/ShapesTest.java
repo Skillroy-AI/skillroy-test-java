@@ -202,7 +202,14 @@ class ShapesTest {
 
     @Test
     void theSmallValueShapes() {
-        assertEquals(Map.of("ready", true, "ms", 120L, "polls", 3L), Shapes.waitFlagValue(true, 120, 50));
+        assertEquals(Map.of("ready", true, "ms", 120L, "polls", 3L), Shapes.waitFlagValue(true, 120, 50, null));
+        assertEquals(List.of("ready", "ms", "polls", "lastError"), new ArrayList<>(Shapes.waitFlagValue(false, 300, 50,
+                "TypeError: x is null").keySet()), "A35: the agent's shape, lastError last");
+        assertEquals(Map.of("ready", false, "ms", 300L, "polls", 7L, "lastError", "TypeError: x is null"),
+                Shapes.waitFlagValue(false, 300, 50, "TypeError: x is null"));
+        assertEquals(Map.of("ready", true, "ms", 120L, "polls", 3L), Shapes.waitFlagValue(true, 120, 50, "stale"),
+                "no lastError when ready");
+        assertEquals(Map.of("ready", false, "ms", 300L, "polls", 7L), Shapes.waitFlagValue(false, 300, 50, null));
         assertEquals(1L, Shapes.polls(0, 50), "one evaluation at the start");
         assertEquals(1L, Shapes.polls(49, 50));
         assertEquals(201L, Shapes.polls(10_000, 50));

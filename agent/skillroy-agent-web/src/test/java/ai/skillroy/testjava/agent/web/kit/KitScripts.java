@@ -54,6 +54,11 @@ public final class KitScripts {
     public static final String INIT_NOW = "typeof window.__kitInit";
     /** What the page's inline script saw of the marker while the document was parsed. */
     public static final String INIT_AT_PARSE = "document.documentElement.getAttribute('data-init-at-parse')";
+    /** Marks the current document (item 12): a non-enumerable property that a new document does not have. */
+    public static final String DOCUMENT_MARK =
+            "Object.defineProperty(window, '__kitMark', {value: 'set', configurable: true, enumerable: false})";
+    /** "string" while the document is the one {@link #DOCUMENT_MARK} marked, else "undefined". */
+    public static final String DOCUMENT_MARK_NOW = "typeof window.__kitMark";
 
     private KitScripts() {
     }

@@ -43,6 +43,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -187,6 +188,42 @@ class WebPathTest {
         assertEquals("cdp", records("call").get(1).get("path"), "path follows the primitive");
         assertEquals(List.of("step", "index", "primitive", "path", "params", "ok", "value", "events", "seq",
                 "durationMs", "thread"), new ArrayList<>(records("call").get(1).keySet()));
+    }
+
+    /**
+     * A36 (phase4-contracts.md 6.3, 16.2): before a call the cdp path serves, the executor reads the agent's sequence
+     * once ({@code evt.query {since, limit: 1}}), and that number, not the path's own, is both {@code seq.before} and
+     * {@code seq.after} of the call record; a read the executor makes on its own through the path (the fact root)
+     * reads none.
+     */
+    @Test
+    void aCallTheCdpPathServesReadsTheAgentsSequenceOnceAndRecordsIt() throws Exception {
+        webCdp(CapabilityState.OK, null);
+        FakeAgentConnection.Handler query = agent.handler("evt.query");
+        List<Long> read = new CopyOnWriteArrayList<>();
+        agent.on("evt.query", params -> {
+            Object value = query.handle(params);
+            if (!params.containsKey("topics")) {
+                read.add(((Number) ((Map<?, ?>) value).get("lastSeq")).longValue());
+            }
+            return value;
+        });
+        RunResult result = run(null, STEPS + """
+                  - expect: { "web.browsers[tag=front].text": { contains: "cdp text of h7" } }
+                """);
+        assertEquals(Status.PASS, result.status(), result.message());
+        List<String> primitives = cdp.calls.stream().map(FakeCdpPath.Call::primitive).toList();
+        assertEquals(List.of("web.dom.fill", "web.dom.click"), primitives.subList(0, 2));
+        assertTrue(primitives.size() > 2 && primitives.subList(2, primitives.size()).stream()
+                .allMatch("web.dom.text"::equals), "the fact root's text reads went through the path: " + primitives);
+        List<Map<String, Object>> served = records("call").stream()
+                .filter(r -> "cdp".equals(r.get("path"))).toList();
+        assertEquals(2, served.size());
+        assertEquals(2, read.size(), "one sequence read per served step call, none for the fact read: " + read);
+        for (int i = 0; i < served.size(); i++) {
+            assertEquals(Map.of("before", read.get(i), "after", read.get(i)), served.get(i).get("seq"),
+                    "the executor's read, not the path's numbers (10000 and up): " + served.get(i));
+        }
     }
 
     @Test

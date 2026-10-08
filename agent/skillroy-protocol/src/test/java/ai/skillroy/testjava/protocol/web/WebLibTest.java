@@ -290,6 +290,64 @@ class WebLibTest {
         assertThrows(IllegalArgumentException.class, () -> WebLib.collectExpression(""));
     }
 
+    /**
+     * A35: the guard of {@code web.waitFlag}, the one text both paths evaluate. Its behaviour (a run-time throw is
+     * {@code error}, a compile failure {@code compileError}, the first line, the cut) needs a JavaScript engine and is
+     * checked outside the build and by the end-to-end negatives (phase4-contracts.md 16.1); here, its text.
+     */
+    @Test
+    void flagExpressionIsTheSharedGuardOfWaitFlag() {
+        String expression = "document.getElementById('item').value === \"saw\" && a < b";
+        String guard = WebLib.flagExpression(expression);
+        assertTrue(guard.startsWith("(function(t){"), guard);
+        assertTrue(guard.endsWith("})(" + Json.write(expression) + ")"), guard);
+        assertEquals(1, count(guard, Json.write(expression)), "the expression once, as a JSON string");
+        assertFalse(guard.contains(expression), "never as code of the guard");
+        assertFalse(guard.contains(WebLib.source()), "no library");
+        assertFalse(guard.contains("Symbol.for"), "nothing installed");
+        assertEquals(1, count(guard, "try{f=new Function(\"return (\"+t+\"\\n)\");}"), "compiled on its own");
+        assertEquals(1, count(guard, "catch(e){return {ready:false,compileError:m(e)};}"), "a compile failure");
+        assertEquals(1, count(guard, "try{return f.call(window)?{ready:true}:{ready:false};}"), "truthiness");
+        assertEquals(1, count(guard, "catch(e){return {ready:false,error:m(e)};}"), "a run-time throw: not ready");
+        assertEquals(1, count(guard, "c===10||c===13||c===8232||c===8233"), "the first line");
+        assertEquals(1, count(guard, "if(s.length>2000){s=s.slice(0,(s.charCodeAt(1999)&64512)===55296?1999:2000);}"),
+                "cut at MAX_ERROR_CHARS, never inside a surrogate pair");
+        assertEquals(2000, WebLib.MAX_ERROR_CHARS);
+    }
+
+    @Test
+    void flagExpressionDropsTrailingSemicolonsAndRefusesBlank() {
+        assertEquals(WebLib.flagExpression("x"), WebLib.flagExpression("x; ;\n"));
+        assertTrue(WebLib.flagExpression("1 // a trailing comment").endsWith("})(\"1 // a trailing comment\")"),
+                "the guard's newline before the closing parenthesis ends the comment");
+        assertTrue(WebLib.flagExpression("a \"quoted\" \\ back\nslash \u2028 </script>")
+                .endsWith("})(\"a \\\"quoted\\\" \\\\ back\\nslash \\u2028 </script>\")"));
+        assertThrows(IllegalArgumentException.class, () -> WebLib.flagExpression(null));
+        assertThrows(IllegalArgumentException.class, () -> WebLib.flagExpression(" ;\n"));
+        assertThrows(IllegalArgumentException.class, () -> WebLib.flagExpression(""));
+    }
+
+    @Test
+    void errorLineIsTheFirstLineCutAsTheGuardCutsIt() {
+        assertEquals("", WebLib.errorLine(null));
+        assertEquals("short", WebLib.errorLine("short"));
+        assertEquals("Error: boom", WebLib.errorLine("Error: boom\n    at <anonymous>:1:1"));
+        assertEquals("Error: boom", WebLib.errorLine("Error: boom\r\n    at <anonymous>:1:1"));
+        assertEquals("a", WebLib.errorLine("a\u2028b"));
+        assertEquals("a", WebLib.errorLine("a\u2029b"));
+        assertEquals("", WebLib.errorLine("\nsecond"));
+        assertEquals(repeat('x', 2000), WebLib.errorLine(repeat('x', 5000)));
+        assertEquals(repeat('x', 1999), WebLib.errorLine(repeat('x', 1999) + "\ud83d\ude00tail"),
+                "a pair across the limit is left out whole");
+        assertEquals(repeat('x', 1998) + "\ud83d\ude00", WebLib.errorLine(repeat('x', 1998) + "\ud83d\ude00tail"));
+    }
+
+    private static String repeat(char c, int n) {
+        char[] chars = new char[n];
+        Arrays.fill(chars, c);
+        return new String(chars);
+    }
+
     @Test
     void tapInstallerNamesThePatternsAndTheTarget() {
         String installer = WebLib.tapInstaller(Arrays.asList("webhost.*", "lending.ready"), "document");

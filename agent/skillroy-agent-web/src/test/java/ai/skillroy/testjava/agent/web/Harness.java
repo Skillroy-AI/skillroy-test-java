@@ -28,12 +28,14 @@ import java.util.Map;
 
 /**
  * The web module installed on a {@link FakeAgentContext} with a {@link FakeWalk} and {@link ScriptedAdapter}s instead
- * of the Swing tree and the built-in adapters; {@link #ready()} runs {@code onTargetReady} and the core's probes.
+ * of the Swing tree and the built-in adapters; {@link #ready()} runs {@code onTargetReady} and the core's probes. The
+ * re-probe's pace (A38) runs on a {@link FakePace}, so that no test waits a real second between two re-probes.
  */
 final class Harness implements AutoCloseable {
 
     final FakeAgentContext ctx = new FakeAgentContext();
     final FakeWalk walk = new FakeWalk();
+    final FakePace pace = new FakePace();
     final List<WebEngineAdapter> adapters = new ArrayList<WebEngineAdapter>();
     final WebModule module;
 
@@ -50,6 +52,7 @@ final class Harness implements AutoCloseable {
                 return new ArrayList<WebEngineAdapter>(adapters);
             }
         });
+        module.reprobePace(pace);
     }
 
     /** Installs the module. */

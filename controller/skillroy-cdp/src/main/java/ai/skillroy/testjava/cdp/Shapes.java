@@ -167,14 +167,19 @@ final class Shapes {
     }
 
     /**
-     * {@code {ready, ms, polls}}. Playwright does not report how often it evaluated the predicate, so {@code polls} is
-     * computed: one evaluation at the start and one per {@code pollMs} after it ({@code 1 + ms / pollMs}).
+     * {@code {ready, ms, polls, lastError?}}, the agent's shape. Playwright does not report how often it evaluated the
+     * predicate, so {@code polls} is computed: one evaluation at the start and one per {@code pollMs} after it
+     * ({@code 1 + ms / pollMs}). {@code lastError} (A35), the last poll's error as the shared guard cut it, is there
+     * only when the flag is not ready and the last poll threw.
      */
-    static Map<String, Object> waitFlagValue(boolean ready, long ms, long pollMs) {
+    static Map<String, Object> waitFlagValue(boolean ready, long ms, long pollMs, String lastError) {
         Map<String, Object> value = new LinkedHashMap<>();
         value.put("ready", ready);
         value.put("ms", ms);
         value.put("polls", polls(ms, pollMs));
+        if (!ready && lastError != null) {
+            value.put("lastError", lastError);
+        }
         return value;
     }
 

@@ -16,13 +16,14 @@
 
 package ai.skillroy.testjava.agent.web;
 
+import ai.skillroy.testjava.agent.api.spi.web.BitmapSource;
 import ai.skillroy.testjava.agent.api.spi.web.CdpEndpoint;
 import ai.skillroy.testjava.agent.api.spi.web.WebCapability;
 import ai.skillroy.testjava.agent.api.spi.web.WebEval;
 import ai.skillroy.testjava.agent.api.spi.web.WebFrame;
 import ai.skillroy.testjava.agent.api.spi.web.WebRendering;
-import ai.skillroy.testjava.agent.web.reflect.BrowserExtras;
 import ai.skillroy.testjava.protocol.ErrorCodes;
+import ai.skillroy.testjava.protocol.RpcException;
 import org.junit.jupiter.api.Test;
 
 import javax.imageio.ImageIO;
@@ -48,15 +49,18 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * {@code web.resize}, {@code web.bitmap}, {@code web.reload}, {@code web.cdp.status} and the shape of
  * {@code web.browsers} (phase4-contracts.md section 4.2), including the CDP target id kept from an earlier read when
  * a later read cannot be answered (a frozen renderer cannot answer {@code Page.getFrameTree}; the CDP path's
- * frozen-target recovery needs the id).
+ * frozen-target recovery needs the id). {@code web.reload} and the bitmap's {@code source} go through the SPI's
+ * {@code WebBrowser.reload} and {@code bitmapSource()} (A37): an adapter's override, else the SPI's defaults.
  */
 class ViewPrimitivesTest {
 
-    /** A browser of a built-in adapter: reload through the technology, a protocol bitmap. */
-    static final class ExtrasBrowser extends ScriptedBrowser implements BrowserExtras {
+    /** A browser whose adapter overrides the SPI's reload and bitmap source, as the built-in adapters do (A37). */
+    static final class OverridingBrowser extends ScriptedBrowser {
         final List<Boolean> reloads = new ArrayList<Boolean>();
+        volatile BitmapSource source = BitmapSource.PROTOCOL;
+        volatile RuntimeException sourceFails;
 
-        ExtrasBrowser() {
+        OverridingBrowser() {
             super("scripted");
         }
 
@@ -67,8 +71,12 @@ class ViewPrimitivesTest {
         }
 
         @Override
-        public String bitmapSource() {
-            return "PROTOCOL";
+        public BitmapSource bitmapSource() {
+            RuntimeException fails = sourceFails;
+            if (fails != null) {
+                throw fails;
+            }
+            return source;
         }
     }
 
@@ -130,23 +138,67 @@ class ViewPrimitivesTest {
             assertEquals(ErrorCodes.INVALID_PARAMS, h.ctx.error("web.bitmap", Harness.args("maxWidth",
                     Long.valueOf(0))).error().code());
         }
-        try (Harness h = harness(new ExtrasBrowser())) {
-            assertEquals("PROTOCOL", h.ctx.map("web.bitmap", Harness.args()).get("source"));
+        OverridingBrowser overriding = new OverridingBrowser();
+        try (Harness h = harness(overriding)) {
+            assertEquals("PROTOCOL", h.ctx.map("web.bitmap", Harness.args()).get("source"), "the adapter's own");
+            overriding.source = null;
+            assertEquals("VENDOR", h.ctx.map("web.bitmap", Harness.args()).get("source"), "null: the default");
+            overriding.sourceFails = new IllegalStateException("an adapter's defect");
+            assertEquals("VENDOR", h.ctx.map("web.bitmap", Harness.args()).get("source"), "a throw: the default");
         }
     }
 
     @Test
-    void reloadGoesThroughTheTechnologyOrFallsBackToLocationReload() throws Exception {
-        ExtrasBrowser extras = new ExtrasBrowser();
-        try (Harness h = harness(extras)) {
+    void reloadGoesThroughTheAdaptersOverrideOrTheSpisDefaultLocationReload() throws Exception {
+        OverridingBrowser overriding = new OverridingBrowser();
+        try (Harness h = harness(overriding)) {
+            int evals = overriding.evals.size();
             assertEquals(Boolean.TRUE, h.ctx.map("web.reload", Harness.args("ignoreCache", Boolean.TRUE))
                     .get("reloaded"));
-            assertEquals(Arrays.asList(Boolean.TRUE), extras.reloads);
+            h.ctx.call("web.reload", Harness.args());
+            assertEquals(Arrays.asList(Boolean.TRUE, Boolean.FALSE), overriding.reloads);
+            assertEquals(evals, overriding.evals.size(), "the override does not go through the page");
         }
         try (Harness h = harness(new ScriptedBrowser("scripted"))) {
-            h.ctx.call("web.reload", Harness.args());
+            assertEquals(Boolean.TRUE, h.ctx.map("web.reload", Harness.args()).get("reloaded"));
             WebEval last = browser.evals.get(browser.evals.size() - 1);
-            assertEquals("location.reload()", last.expression());
+            assertEquals("location.reload()", last.expression(), "the SPI's default");
+            h.ctx.call("web.reload", Harness.args("ignoreCache", Boolean.TRUE));
+            last = browser.evals.get(browser.evals.size() - 1);
+            assertEquals("location.reload(true)", last.expression());
+            assertEquals(null, last.frameKey(), "the main frame");
+        }
+    }
+
+    @Test
+    void aDefaultReloadThatCannotEvaluateIsUnavailableAndOneThatHangsTimesOutAndIsAbandoned() throws Exception {
+        try (Harness h = harness(new ScriptedBrowser("scripted"))) {
+            browser.capabilities = EnumSet.of(WebCapability.EVENTS_LOAD, WebCapability.BITMAP);
+            browser.responder = new ScriptedBrowser.Responder() {
+                @Override
+                public CompletableFuture<String> answer(WebEval eval) {
+                    CompletableFuture<String> f = new CompletableFuture<String>();
+                    f.completeExceptionally(new UnsupportedOperationException("no EVALUATE"));
+                    return f;
+                }
+            };
+            RpcException refused = h.ctx.error("web.reload", Harness.args());
+            assertEquals(ErrorCodes.CAPABILITY_UNAVAILABLE, refused.error().code());
+            assertTrue(String.valueOf(refused.error().data()).contains("no EVALUATE"), refused.error().toString());
+            browser.capabilities = EnumSet.of(WebCapability.EVALUATE, WebCapability.EVENTS_LOAD);
+            browser.handedOut.clear();
+            browser.responder = new ScriptedBrowser.Responder() {
+                @Override
+                public CompletableFuture<String> answer(WebEval eval) {
+                    return new CompletableFuture<String>();
+                }
+            };
+            RpcException hung = h.ctx.error("web.reload", Harness.args(), Harness.args("timeoutMs",
+                    Long.valueOf(700)));
+            assertEquals(ErrorCodes.TIMEOUT, hung.error().code());
+            assertEquals("web.reload", hung.error().data().get("primitive"));
+            assertEquals(1, browser.handedOut.size());
+            assertTrue(browser.handedOut.get(0).isCancelled(), "the abandoned reload abandoned its evaluation");
         }
     }
 

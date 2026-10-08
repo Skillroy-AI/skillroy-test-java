@@ -56,8 +56,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * {@link CdpWebPath#call} for every served primitive against fake Playwright pages (no driver, no browser): the
- * shared library's scripts and argument objects, the result shapes, the agent's sequence in {@code seqBefore} and
- * {@code seqAfter}, the path's own events, the errors with the agent's codes, and the fall-backs to the agent.
+ * shared library's scripts and argument objects, the result shapes, no read of the agent's sequence (A36: {@code
+ * seqBefore} and {@code seqAfter} are 0, no {@code evt.query}), the path's own events, the errors with the agent's
+ * codes, and the fall-backs to the agent. {@code web.waitFlag}'s guard (A35) has {@link CdpWaitFlagTest}.
  */
 class CdpWebPathCallTest {
 
@@ -110,23 +111,21 @@ class CdpWebPathCallTest {
     }
 
     @Test
-    void evaluateAnswersTheWrapperValueWithTheAgentsSequence() throws Exception {
+    void evaluateAnswersTheWrapperValueAndReadsNoAgentSequence() throws Exception {
         front.engine = a -> {
             agent.publish();
             return FakeWorld.ok("{\"json\":\"2\",\"typeofResult\":\"number\",\"truncated\":false}");
         };
-        long before = agent.lastSeq();
         RpcResult r = call("web.evaluate", map("expression", "1+1"));
         assertEquals(Map.of("json", "2", "typeofResult", "number"), r.value());
-        assertEquals(before, r.seqBefore(), "the agent's lastSeq before the call");
-        assertEquals(before + 1, r.seqAfter(), "and after it");
+        assertEquals(CdpWebPath.NOT_READ, r.seqBefore(), "A36: the executor reads the agent's sequence, not the path");
+        assertEquals(CdpWebPath.NOT_READ, r.seqAfter());
+        assertEquals(0L, r.seqBefore());
         assertTrue(r.events().isEmpty(), "the path publishes nothing on the agent's bus");
         assertEquals("controller", r.thread());
         assertEquals(Scripts.evaluate("1+1", false), front.evaluated.get(0), "the default browser's page");
         assertTrue(back.evaluated.isEmpty());
-        for (FakeAgent.Call c : agent.callsTo("evt.query")) {
-            assertEquals(Map.of("since", Long.MAX_VALUE, "limit", 1L), c.params());
-        }
+        assertEquals(List.of(), agent.callsTo("evt.query"));
     }
 
     @Test
@@ -389,13 +388,13 @@ class CdpWebPathCallTest {
 
     @Test
     void waitFlagWaitsInPlaywrightAndAnswersReadyFalseOnTimeout() throws Exception {
-        front.waitForFunction = a -> FakeWorld.handle(true);
+        front.waitForFunction = a -> FakeWorld.handle(Map.of("ready", true));
         RpcResult r = call("web.waitFlag", map("expression", "window.webhostReady === true"));
         Map<?, ?> v = (Map<?, ?>) r.value();
         assertEquals(true, v.get("ready"));
         assertTrue((Long) v.get("polls") >= 1);
         Object[] args = front.waitForFunctions.get(0);
-        assertEquals(Scripts.flag("window.webhostReady === true"), args[0]);
+        assertEquals(Scripts.flagWait("window.webhostReady === true"), args[0]);
         Frame.WaitForFunctionOptions o = (Frame.WaitForFunctionOptions) args[2];
         assertEquals(50.0, o.pollingInterval);
         assertTrue(o.timeout <= 10_000 - 250, "before the call's own bound: " + o.timeout);
@@ -407,14 +406,14 @@ class CdpWebPathCallTest {
         };
         RpcResult late = call("web.waitFlag", map("expression", "false", "timeoutMs", 500, "pollMs", 5));
         assertEquals(false, ((Map<?, ?>) late.value()).get("ready"));
+        assertFalse(((Map<?, ?>) late.value()).containsKey("lastError"), "the last poll did not answer either");
         Frame.WaitForFunctionOptions o2 = (Frame.WaitForFunctionOptions) front.waitForFunctions.get(1)[2];
         assertEquals(20.0, o2.pollingInterval, "pollMs is at least 20");
         assertEquals(500.0, o2.timeout);
+        assertEquals(WebLib.flagExpression("false"), front.waitForFunctions.get(2)[0], "then the last poll (A35)");
+        assertEquals(3, front.waitForFunctions.size());
         assertEquals(1, path.eventsSince(0, "web.ready").size(), "no FLAG when not ready");
 
-        front.waitForFunction = a -> FakeWorld.handle(Map.of("__scriptError", Map.of("message",
-                "ReferenceError: x is not defined", "stack", "")));
-        assertEquals(ErrorCodes.SCRIPT_ERROR, rpcError("web.waitFlag", map("expression", "x")).error().code());
         assertEquals(ErrorCodes.INVALID_PARAMS, rpcError("web.waitFlag", map("expression", "1", "timeoutMs", -1))
                 .error().code());
     }
@@ -547,12 +546,40 @@ class CdpWebPathCallTest {
         assertEquals(Map.of("text", "free", "truncated", false), r.value());
     }
 
+    /**
+     * A36: a call the path serves reads the agent's sequence not at all (before A36 it read it before and after the
+     * primitive, and the executor a third time): no {@code evt.query} for any served primitive, an agent whose
+     * {@code evt.query} fails does not stop a call, and both sequence numbers of the result are {@code NOT_READ}.
+     */
     @Test
-    void theAgentsSequenceMustBeReadableBeforeTheCall() {
+    void aServedCallReadsNoAgentSequence() throws Exception {
         agent.error("evt.query", ErrorCodes.INTERNAL_ERROR, "ring gone");
-        assertEquals("the agent's evt.query failed: INTERNAL_ERROR: ring gone",
-                unsupported("web.dom.text", map(), null));
-        assertTrue(front.evaluated.isEmpty());
+        front.engine = a -> {
+            String script = (String) a[0];
+            if (script.equals(Scripts.evaluate("1", false))) {
+                return FakeWorld.ok("{\"json\":\"1\",\"typeofResult\":\"number\",\"truncated\":false}");
+            }
+            if (script.contains(".domText(")) {
+                return FakeWorld.ok(Map.of("text", "served", "truncated", false));
+            }
+            if (script.contains(".dispatch(")) {
+                return FakeWorld.ok(Map.of("dispatched", true));
+            }
+            return FakeWorld.ok(Map.of("nodes", List.of(), "truncated", false));
+        };
+        front.waitForFunction = a -> FakeWorld.handle(Map.of("ready", true));
+        List<RpcResult> results = List.of(call("web.evaluate", map("expression", "1")),
+                call("web.dom.text", map()),
+                call("web.ariaSnapshot", map()),
+                call("web.dispatchEvent", map("name", "lending.ping")),
+                call("web.waitFlag", map("expression", "true")),
+                call("web.resize", map("width", 800, "height", 600)));
+        assertEquals(List.of(), agent.callsTo("evt.query"), "zero evt.query calls for served calls");
+        for (RpcResult r : results) {
+            assertEquals(CdpWebPath.NOT_READ, r.seqBefore(), String.valueOf(r));
+            assertEquals(CdpWebPath.NOT_READ, r.seqAfter(), String.valueOf(r));
+        }
+        assertEquals(Map.of("text", "served", "truncated", false), results.get(1).value());
     }
 
     @Test

@@ -1,0 +1,260 @@
+{
+  "format": 1,
+  "adapter": "jxbrowser",
+  "gate": "ai.skillroy.testjava.agent.web.fake.FakeEngine",
+  "versionResource": "ai/skillroy/testjava/agent/web/fake/version.info",
+  "roles": {
+    "engine": {"class": "ai.skillroy.testjava.agent.web.fake.FakeEngine", "for": "core"},
+    "engine.browsers": {"class": "ai.skillroy.testjava.agent.web.fake.FakeEngine", "method": "browsers", "for": "core"},
+    "engine.profiles": {
+      "class": "ai.skillroy.testjava.agent.web.fake.FakeEngine",
+      "method": "profiles",
+      "for": "profiles"
+    },
+    "engine.options": {
+      "class": "ai.skillroy.testjava.agent.web.fake.FakeEngine",
+      "method": "options",
+      "for": "options"
+    },
+    "profiles.list": {"class": "ai.skillroy.testjava.agent.web.fake.FakeProfiles", "method": "list", "for": "profiles"},
+    "profile": {"class": "ai.skillroy.testjava.agent.web.fake.FakeProfile", "for": "profiles"},
+    "profile.browsers": {
+      "class": "ai.skillroy.testjava.agent.web.fake.FakeProfile",
+      "method": "browsers",
+      "for": "profiles"
+    },
+    "options.remoteDebuggingPort": {
+      "class": "ai.skillroy.testjava.agent.web.fake.FakeOptions",
+      "method": "remoteDebuggingPort",
+      "for": "endpoints"
+    },
+    "options.userDataDir": {
+      "class": "ai.skillroy.testjava.agent.web.fake.FakeOptions",
+      "method": "userDataDir",
+      "for": "endpoints"
+    },
+    "options.renderingMode": {
+      "class": "ai.skillroy.testjava.agent.web.fake.FakeOptions",
+      "method": "renderingMode",
+      "for": "rendering"
+    },
+    "browser": {"class": "ai.skillroy.testjava.agent.web.fake.FakeBrowser", "for": "core"},
+    "browser.url": {"class": "ai.skillroy.testjava.agent.web.fake.FakeBrowser", "method": "url", "for": "core"},
+    "browser.title": {"class": "ai.skillroy.testjava.agent.web.fake.FakeBrowser", "method": "title", "for": "core"},
+    "browser.isClosed": {
+      "class": "ai.skillroy.testjava.agent.web.fake.FakeBrowser",
+      "method": "isClosed",
+      "for": "core"
+    },
+    "browser.engine": {"class": "ai.skillroy.testjava.agent.web.fake.FakeBrowser", "method": "engine", "for": "core"},
+    "browser.mainFrame": {
+      "class": "ai.skillroy.testjava.agent.web.fake.FakeBrowser",
+      "method": "mainFrame",
+      "for": "core"
+    },
+    "browser.frames": {"class": "ai.skillroy.testjava.agent.web.fake.FakeBrowser", "method": "frames", "for": "FRAMES"},
+    "browser.navigation": {
+      "class": "ai.skillroy.testjava.agent.web.fake.FakeBrowser",
+      "method": "navigation",
+      "for": "navigation"
+    },
+    "browser.on": {
+      "class": "ai.skillroy.testjava.agent.web.fake.FakeBrowser",
+      "method": "on",
+      "params": ["java.lang.Class", "ai.skillroy.testjava.agent.web.fake.FakeObserver"],
+      "for": "events"
+    },
+    "browser.size": {"class": "ai.skillroy.testjava.agent.web.fake.FakeBrowser", "method": "size", "for": "RESIZE"},
+    "browser.resize": {
+      "class": "ai.skillroy.testjava.agent.web.fake.FakeBrowser",
+      "method": "resize",
+      "params": ["int", "int"],
+      "for": "RESIZE"
+    },
+    "browser.bitmap": {"class": "ai.skillroy.testjava.agent.web.fake.FakeBrowser", "method": "bitmap", "for": "BITMAP"},
+    "browser.devTools": {
+      "class": "ai.skillroy.testjava.agent.web.fake.FakeBrowser",
+      "method": "devTools",
+      "for": "CDP_TARGET_ID"
+    },
+    "browser.set": {
+      "class": "ai.skillroy.testjava.agent.web.fake.FakeBrowser",
+      "method": "set",
+      "arity": 2,
+      "for": "chain"
+    },
+    "browser.get": {
+      "class": "ai.skillroy.testjava.agent.web.fake.FakeBrowser",
+      "method": "get",
+      "params": ["java.lang.Class"],
+      "for": "chain"
+    },
+    "browser.remove": {
+      "class": "ai.skillroy.testjava.agent.web.fake.FakeBrowser",
+      "method": "remove",
+      "params": ["java.lang.Class"],
+      "for": "chain"
+    },
+    "devTools.remoteDebuggingUrl": {
+      "class": "ai.skillroy.testjava.agent.web.fake.FakeDevTools",
+      "method": "remoteDebuggingUrl",
+      "for": "CDP_TARGET_ID"
+    },
+    "frame": {"class": "ai.skillroy.testjava.agent.web.fake.FakeFrame", "for": "core"},
+    "frame.executeJavaScriptAsync": {
+      "class": "ai.skillroy.testjava.agent.web.fake.FakeFrame",
+      "method": "executeJavaScript",
+      "params": ["java.lang.String", "java.util.function.Consumer"],
+      "for": "core"
+    },
+    "frame.executeJavaScript": {
+      "class": "ai.skillroy.testjava.agent.web.fake.FakeFrame",
+      "method": "executeJavaScript",
+      "params": ["java.lang.String"],
+      "for": "chain"
+    },
+    "frame.isMain": {"class": "ai.skillroy.testjava.agent.web.fake.FakeFrame", "method": "isMain", "for": "core"},
+    "frame.name": {"class": "ai.skillroy.testjava.agent.web.fake.FakeFrame", "method": "name", "for": "FRAMES"},
+    "frame.children": {"class": "ai.skillroy.testjava.agent.web.fake.FakeFrame", "method": "children", "for": "FRAMES"},
+    "frame.parent": {"class": "ai.skillroy.testjava.agent.web.fake.FakeFrame", "method": "parent", "for": "FRAMES"},
+    "navigation": {"class": "ai.skillroy.testjava.agent.web.fake.FakeNavigation", "for": "navigation"},
+    "navigation.on": {
+      "class": "ai.skillroy.testjava.agent.web.fake.FakeNavigation",
+      "method": "on",
+      "params": ["java.lang.Class", "ai.skillroy.testjava.agent.web.fake.FakeObserver"],
+      "for": "navigation"
+    },
+    "navigation.reload": {
+      "class": "ai.skillroy.testjava.agent.web.fake.FakeNavigation",
+      "method": "reloadOfAnotherLine",
+      "for": "reload"
+    },
+    "navigation.reloadIgnoringCache": {
+      "class": "ai.skillroy.testjava.agent.web.fake.FakeNavigation",
+      "method": "reloadIgnoringCacheOfAnotherLine",
+      "for": "reload"
+    },
+    "observer": {"class": "ai.skillroy.testjava.agent.web.fake.FakeObserver", "interface": true, "for": "events"},
+    "subscription.unsubscribe": {
+      "class": "ai.skillroy.testjava.agent.web.fake.FakeSubscription",
+      "method": "unsubscribe",
+      "for": "events"
+    },
+    "event.frameLoadFinished": {
+      "class": "ai.skillroy.testjava.agent.web.fake.FakeFrameLoadFinished",
+      "for": "navigation"
+    },
+    "frameLoadFinished.frame": {
+      "class": "ai.skillroy.testjava.agent.web.fake.FakeFrameLoadFinished",
+      "method": "frame",
+      "for": "navigation"
+    },
+    "frameLoadFinished.url": {
+      "class": "ai.skillroy.testjava.agent.web.fake.FakeFrameLoadFinished",
+      "method": "url",
+      "for": "navigation"
+    },
+    "event.frameLoadFailed": {"class": "ai.skillroy.testjava.agent.web.fake.FakeFrameLoadFailed", "for": "navigation"},
+    "frameLoadFailed.frame": {
+      "class": "ai.skillroy.testjava.agent.web.fake.FakeFrameLoadFailed",
+      "method": "frame",
+      "for": "navigation"
+    },
+    "frameLoadFailed.error": {
+      "class": "ai.skillroy.testjava.agent.web.fake.FakeFrameLoadFailed",
+      "method": "error",
+      "for": "loadDetail",
+      "alternatives": [{"class": "ai.skillroy.testjava.agent.web.fake.FakeFrameLoadFailed", "method": "errorCode"}]
+    },
+    "event.navigationFinished": {
+      "class": "ai.skillroy.testjava.agent.web.fake.FakeNavigationFinished",
+      "for": "navigation"
+    },
+    "navigationFinished.url": {
+      "class": "ai.skillroy.testjava.agent.web.fake.FakeNavigationFinished",
+      "method": "url",
+      "for": "navigation"
+    },
+    "navigationFinished.frame": {
+      "class": "ai.skillroy.testjava.agent.web.fake.FakeNavigationFinished",
+      "method": "frame",
+      "for": "navigation"
+    },
+    "navigationFinished.isInMainFrame": {
+      "class": "ai.skillroy.testjava.agent.web.fake.FakeNavigationFinished",
+      "method": "isInMainFrame",
+      "for": "navigation"
+    },
+    "navigationFinished.hasCommitted": {
+      "class": "ai.skillroy.testjava.agent.web.fake.FakeNavigationFinished",
+      "method": "hasCommitted",
+      "for": "navigation"
+    },
+    "navigationFinished.error": {
+      "class": "ai.skillroy.testjava.agent.web.fake.FakeNavigationFinished",
+      "method": "error",
+      "for": "loadDetail"
+    },
+    "event.frameDocumentLoadFinished": {
+      "class": "ai.skillroy.testjava.agent.web.fake.FakeFrameDocumentLoadFinished",
+      "for": "initScript"
+    },
+    "frameDocumentLoadFinished.frame": {
+      "class": "ai.skillroy.testjava.agent.web.fake.FakeFrameDocumentLoadFinished",
+      "method": "frame",
+      "for": "initScript"
+    },
+    "event.consoleMessageReceived": {
+      "class": "ai.skillroy.testjava.agent.web.fake.FakeConsoleMessageReceived",
+      "for": "EVENTS_CONSOLE"
+    },
+    "consoleMessageReceived.consoleMessage": {
+      "class": "ai.skillroy.testjava.agent.web.fake.FakeConsoleMessageReceived",
+      "method": "consoleMessage",
+      "for": "EVENTS_CONSOLE"
+    },
+    "consoleMessage.level": {
+      "class": "ai.skillroy.testjava.agent.web.fake.FakeConsoleMessage",
+      "method": "level",
+      "for": "EVENTS_CONSOLE"
+    },
+    "consoleMessage.message": {
+      "class": "ai.skillroy.testjava.agent.web.fake.FakeConsoleMessage",
+      "method": "message",
+      "for": "EVENTS_CONSOLE"
+    },
+    "consoleMessage.source": {
+      "class": "ai.skillroy.testjava.agent.web.fake.FakeConsoleMessage",
+      "method": "source",
+      "for": "consoleDetail"
+    },
+    "consoleMessage.lineNumber": {
+      "class": "ai.skillroy.testjava.agent.web.fake.FakeConsoleMessage",
+      "method": "lineNumber",
+      "for": "consoleDetail"
+    },
+    "event.browserClosed": {"class": "ai.skillroy.testjava.agent.web.fake.FakeBrowserClosed", "for": "events"},
+    "bitmap.pixels": {"class": "ai.skillroy.testjava.agent.web.fake.FakeBitmap", "method": "pixels", "for": "BITMAP"},
+    "bitmap.size": {"class": "ai.skillroy.testjava.agent.web.fake.FakeBitmap", "method": "size", "for": "BITMAP"},
+    "size.width": {"class": "ai.skillroy.testjava.agent.web.fake.FakeSize", "method": "width", "for": "size"},
+    "size.height": {"class": "ai.skillroy.testjava.agent.web.fake.FakeSize", "method": "height", "for": "size"},
+    "view": {"class": "ai.skillroy.testjava.agent.web.fake.FakeView", "for": "view"},
+    "view.getBrowser": {"class": "ai.skillroy.testjava.agent.web.fake.FakeView", "method": "getBrowser", "for": "view"},
+    "injectJs": {
+      "class": "ai.skillroy.testjava.agent.web.fake.FakeInjectJsCallback",
+      "interface": true,
+      "for": "chain"
+    },
+    "injectJs.params.frame": {
+      "class": "ai.skillroy.testjava.agent.web.fake.FakeInjectJsCallback$Params",
+      "method": "frame",
+      "for": "chain"
+    },
+    "injectJs.response.proceed": {
+      "class": "ai.skillroy.testjava.agent.web.fake.FakeInjectJsCallback$Response",
+      "method": "proceed",
+      "static": true,
+      "for": "chain"
+    }
+  }
+}

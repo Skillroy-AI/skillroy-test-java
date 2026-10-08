@@ -407,6 +407,63 @@ class WebEvidenceTest {
         assertEquals("the UI did not settle within 10000 ms after webClick", settle.message());
     }
 
+    /**
+     * A35 (phase4-contracts.md 16.1, 8.1): a flag whose expression throws until the end and one that does not compile
+     * end alike on both paths: {@code FAIL} / {@code SYNC_TIMEOUT} with the result, {@code lastError} included, as the
+     * detail's {@code waitFlag} and the last error at the end of the message; {@code FAIL} / {@code ASSERTION} with
+     * {@code SCRIPT_ERROR}.
+     */
+    @Test
+    void aFlagThatThrowsOrDoesNotCompileEndsAlikeOnBothPaths() throws Exception {
+        String lastError = "TypeError: Cannot read properties of null (reading 'value')";
+        Map<String, Object> notReady = Map.of("ready", false, "ms", 300L, "polls", 7L, "lastError", lastError);
+        String throwing = "  - webWaitFlag: { expression: \"document.getElementById('item').value === 'saw'\","
+                + " timeoutMs: 300ms }\n";
+        String syntax = "SyntaxError: Unexpected token '}'";
+        AgentRpcException compileError = new AgentRpcException("web.waitFlag", new RpcError(ErrorCodes.SCRIPT_ERROR,
+                syntax, Map.of("message", syntax, "stack", "")));
+        List<RunResult> flags = new ArrayList<>();
+        List<RunResult> compiles = new ArrayList<>();
+        agent.on("web.waitFlag", params -> notReady);
+        flags.add(run(throwing));
+        assertEquals("agent", webWaitFlagPath());
+        agent.on("web.waitFlag", params -> {
+            throw compileError;
+        });
+        compiles.add(run("  - webWaitFlag: { expression: \"nonsense(\", timeoutMs: 5s }\n"));
+        assertEquals("agent", webWaitFlagPath());
+
+        agent.capability("web.cdp", CapabilityState.OK, null);
+        cdp.answers.put("web.waitFlag", args -> notReady);
+        flags.add(run(throwing));
+        assertEquals("cdp", webWaitFlagPath());
+        cdp.answers.put("web.waitFlag", args -> {
+            throw compileError;
+        });
+        compiles.add(run("  - webWaitFlag: { expression: \"nonsense(\", timeoutMs: 5s }\n"));
+        assertEquals("cdp", webWaitFlagPath());
+
+        for (RunResult flag : flags) {
+            assertEquals(Status.FAIL, flag.status());
+            assertEquals(FailureKind.SYNC_TIMEOUT, flag.failureKind());
+            assertEquals("webWaitFlag: the flag did not turn true within 300 ms: document.getElementById('item')"
+                    + ".value === 'saw' (last error: " + lastError + ")", flag.message());
+            assertEquals(notReady, flag.detail().get("waitFlag"), "the result, lastError included, in the detail");
+        }
+        for (RunResult compile : compiles) {
+            assertEquals(Status.FAIL, compile.status());
+            assertEquals(FailureKind.ASSERTION, compile.failureKind());
+            assertEquals("web.waitFlag failed: SCRIPT_ERROR: " + syntax, compile.message());
+            assertEquals(Map.of("message", syntax, "stack", ""), compile.detail().get("data"));
+        }
+    }
+
+    /** The path of the last run's {@code web.waitFlag} call record. */
+    private Object webWaitFlagPath() throws IOException {
+        return records("call").stream().filter(r -> "web.waitFlag".equals(r.get("primitive")))
+                .map(r -> r.get("path")).reduce((a, b) -> b).orElse(null);
+    }
+
     @Test
     void aWebFillOfACredentialAnnouncesTheTextAsASecret() throws Exception {
         options = options.withBind(TestCredentials.bind());

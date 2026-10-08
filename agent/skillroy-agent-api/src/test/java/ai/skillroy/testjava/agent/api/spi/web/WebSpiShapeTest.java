@@ -51,7 +51,7 @@ class WebSpiShapeTest {
     private static final List<Class<?>> TYPES = Arrays.<Class<?>>asList(WebEngineAdapter.class, WebBrowser.class,
             WebEval.class, WebEval.Builder.class, WebFrame.class, WebEvent.class, WebEvent.Kind.class,
             WebEventListener.class, WebSubscription.class, WebInitScript.class, WebInitScript.Timing.class,
-            WebCapability.class, WebRendering.class, CdpEndpoint.class, WebScriptException.class,
+            WebCapability.class, WebRendering.class, BitmapSource.class, CdpEndpoint.class, WebScriptException.class,
             WebFrameGoneException.class, BrowserRegistryAdapter.class, BrowserSeed.class);
 
     @Test
@@ -70,6 +70,15 @@ class WebSpiShapeTest {
         assertEquals(names, names(WebRendering.values()));
         for (String name : names) {
             assertEquals(name, WebRendering.valueOf(name).name());
+        }
+    }
+
+    @Test
+    void everyBitmapSourceIsPresentByName() {
+        List<String> names = Arrays.asList("PROTOCOL", "VENDOR");
+        assertEquals(names, names(BitmapSource.values()));
+        for (String name : names) {
+            assertEquals(name, BitmapSource.valueOf(name).name());
         }
     }
 
@@ -111,7 +120,26 @@ class WebSpiShapeTest {
                 FUTURE + "<java.lang.Void> resize(int, int)",
                 FUTURE + "<java.lang.Void> clearResize()",
                 FUTURE + "<java.awt.image.BufferedImage> bitmap()",
-                FUTURE + "<java.lang.String> cdpTargetId()");
+                FUTURE + "<java.lang.String> cdpTargetId()",
+                FUTURE + "<java.lang.Void> reload(boolean)",
+                WEB + "BitmapSource bitmapSource()");
+    }
+
+    /**
+     * A37: the methods added to {@code WebBrowser} after Phase 4 are default methods, so that an adapter built against
+     * the Phase 4 SPI links and runs unchanged; every other method stays abstract.
+     */
+    @Test
+    void theMethodsAddedAfterPhase4AreDefaultMethods() throws Exception {
+        List<String> added = Arrays.asList("reload", "bitmapSource");
+        for (Method method : WebBrowser.class.getDeclaredMethods()) {
+            if (method.isSynthetic() || !Modifier.isPublic(method.getModifiers())) {
+                continue;
+            }
+            assertEquals(added.contains(method.getName()), method.isDefault(), method.toGenericString());
+        }
+        assertTrue(WebBrowser.class.getMethod("reload", boolean.class).isDefault());
+        assertTrue(WebBrowser.class.getMethod("bitmapSource").isDefault());
     }
 
     @Test

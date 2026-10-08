@@ -66,7 +66,10 @@ import java.util.Set;
  *       the agent's own {@code AgentRpcException}; any other failure of a non-agent path is a {@link PathFailure}.
  *       Before a call the path serves, the agent's current sequence number is read ({@code evt.query}) and the
  *       highest sequence number among the path's own events, so that a wait after the call starts on both where the
- *       call started; the sequence numbers inside a non-agent path's result are never used.</li>
+ *       call started; the sequence numbers inside a non-agent path's result are never used. That read is the only one
+ *       (amendment A36: the path reads none), and its number replaces both of the result's sequence numbers, so that
+ *       a {@code call} record's {@code seq} is in the agent's numbering whichever path served the call; a read the
+ *       executor makes on its own reads nothing and takes the highest agent sequence number the run has seen.</li>
  *   <li><b>Waits</b> ({@link #await}): when the chosen path is not the agent's and the topics can match a
  *       {@code web.*} topic, the wait reads {@link WebPath#eventsSince} and the agent's bus in turn, the agent's wait
  *       cut into slices of {@link #SLICE_MS}; the first matching event from either ends it. The path's events have
@@ -121,7 +124,8 @@ final class WebRun {
     /**
      * One served call.
      *
-     * @param result the result as the serving path gave it (a non-agent path's sequence numbers are not used here)
+     * @param result the result as the serving path gave it, except that a non-agent path's sequence numbers are
+     *     replaced by {@code agentSince} (A36)
      * @param path the id of the path that served it
      * @param agentSince the agent's sequence number before the call: where a wait on the agent's bus starts (for a
      *     call the agent served, its {@code seq.before}; otherwise read with {@code evt.query} just before the call)
@@ -373,7 +377,10 @@ final class WebRun {
                 if (result == null) {
                     throw new PathFailure(primitive + " on the " + path.id() + " path answered no result", null);
                 }
-                return new Served(result, path.id(), agentSince, pathSince);
+                // A36: the executor's read is the only one; its number stands in for the path's sequence numbers.
+                RpcResult stamped = new RpcResult(result.value(), result.events(), agentSince, agentSince,
+                        result.durationMs(), result.thread());
+                return new Served(stamped, path.id(), agentSince, pathSince);
             } catch (WebPathException e) {
                 fallback(step, primitive, message(e), path.id(), read);
             } catch (AgentRpcException | AgentLostException | PathFailure e) {

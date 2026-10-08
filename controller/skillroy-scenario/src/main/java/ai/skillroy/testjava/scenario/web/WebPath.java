@@ -58,7 +58,9 @@ public interface WebPath {
     /**
      * The call's result in the shape the agent would give (value, events, seq, durationMs, thread = "controller"),
      * or throws {@link WebPathException} ({@code UNSUPPORTED}) when this call cannot be served, or the agent's own
-     * exception type with the agent's error codes for the failures of phase4-contracts.md section 8.1.
+     * exception type with the agent's error codes for the failures of phase4-contracts.md section 8.1. A non-agent
+     * path need not read the agent's sequence for {@code seq} (amendment A36: the CDP path leaves both numbers 0): the
+     * executor reads it once before the call and writes that number in place of both.
      */
     RpcResult call(String primitive, Map<String, Object> args, CallOptions options) throws Exception;
 

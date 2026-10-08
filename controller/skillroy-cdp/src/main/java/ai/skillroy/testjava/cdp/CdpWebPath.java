@@ -117,14 +117,19 @@ import java.util.stream.Stream;
  * {@code web.dom.text}) whose execution context was destroyed by a navigation is evaluated once more; a mutating call
  * never is. Argument values are never logged.
  *
+ * <p>{@code web.waitFlag} answers as the agent does (amendment A35): the page polls the shared guard of {@link
+ * WebLib#flagExpression} through {@code waitForFunction}, a poll whose expression throws counts as not ready, and a
+ * wait that times out makes one more poll of the guard, bounded, whose {@code error} is the result's {@code
+ * lastError}; an expression that does not compile is {@code SCRIPT_ERROR} at once.
+ *
  * <h2>Two event sequences</h2>
- * The {@link RpcResult} of a call carries the <em>agent's</em> event sequence: {@code seqBefore} and {@code seqAfter}
- * are the agent's {@code lastSeq} read with {@code evt.query} just before and just after the primitive ran, so the
- * executor waits on the agent's bus from them as after any agent call. Its {@code events} list is empty (the path
- * publishes nothing on the agent's bus). The path's own events ({@code web.tap}, {@code web.ready} with {@code signal}
- * {@code TAP}, {@code FLAG} or {@code LOAD}, and {@code web.load}) are numbered by a sequence of their own (1, 2, 3,
- * ...) and read with {@link #eventsSince}; {@link #lastEventSeq()} is the current end of it and {@link #awaitEvent}
- * waits for the next one.
+ * The path reads no agent sequence (amendment A36): the {@code seqBefore} and {@code seqAfter} of a call's {@link
+ * RpcResult} are {@code 0}, because the executor reads the agent's sequence itself just before the call (one {@code
+ * evt.query}), waits on the agent's bus from there, and writes that number in their place. Its {@code events} list is
+ * empty (the path publishes nothing on the agent's bus). The path's own events ({@code web.tap}, {@code web.ready} with
+ * {@code signal} {@code TAP}, {@code FLAG} or {@code LOAD}, and {@code web.load}) are numbered by a sequence of their
+ * own (1, 2, 3, ...) and read with {@link #eventsSince}; {@link #lastEventSeq()} is the current end of it and {@link
+ * #awaitEvent} waits for the next one.
  *
  * <h2>Taps</h2>
  * {@code web.tap} taps the selected browser's page only, as the agent path taps one browser: an init script of that
@@ -175,6 +180,12 @@ public final class CdpWebPath implements WebPath {
     /** The reason {@code open} gives when the agent knows no endpoint. */
     public static final String NO_ENDPOINT = "no remote-debugging endpoint configured";
 
+    /**
+     * The {@code seqBefore} and {@code seqAfter} of every result (A36): the path reads no agent sequence; the executor
+     * reads it once before the call and writes it in their place.
+     */
+    static final long NOT_READ = 0L;
+
     /** The prefix of the private temporary directory a traced path records into. */
     static final String TRACE_DIR_PREFIX = "skillroy-cdp-trace-";
 
@@ -191,9 +202,12 @@ public final class CdpWebPath implements WebPath {
     static final long RELOAD_WAIT_MS = 10_000;
     static final long CLOSE_STEP_MS = 2_000;
     static final long WAIT_FLAG_MARGIN_MS = 250;
+    /** A35: the last poll of a timed-out {@code web.waitFlag} waits at most this long for the page. */
+    static final long LAST_POLL_MAX_MS = 1_000;
+    /** A35: and leaves this much of the call's budget, so that the call still answers before its own bound. */
+    static final long LAST_POLL_RESERVE_MS = 100;
     static final long ACTIONABILITY_RESERVE_MS = 1_000;
 
-    private static final Map<String, Object> LAST_SEQ_QUERY = Map.of("since", Long.MAX_VALUE, "limit", 1L);
     private static final System.Logger LOG = System.getLogger(CdpWebPath.class.getName());
 
     /**
@@ -436,10 +450,10 @@ public final class CdpWebPath implements WebPath {
         long budgetMs = budgetMs(primitive, o);
         long deadline = start + TimeUnit.MILLISECONDS.toNanos(budgetMs);
         Callable<Object> body = prepare(s, primitive, params, budgetMs, deadline, o.correlationId());
-        long agentBefore = agentSeq(s, deadline);
         Object value = body.call();
-        long agentAfter = agentSeqAfter(s, agentBefore);
-        return new RpcResult(value, List.of(), agentBefore, agentAfter, elapsedMs(start), "controller");
+        // A36: the path reads no agent sequence (the executor reads it once before the call and writes it in place of
+        // these, phase4-contracts.md 6.3), so seqBefore and seqAfter are NOT_READ.
+        return new RpcResult(value, List.of(), NOT_READ, NOT_READ, elapsedMs(start), "controller");
     }
 
     /** The path's own events after {@code seq} (its own sequence) whose topic matches {@code topics}. */
@@ -932,35 +946,79 @@ public final class CdpWebPath implements WebPath {
         }
         long pollMs = Params.integer(primitive, p, "pollMs", 50, 20, 60_000);
         long wanted = timeout == null || timeout == 0 ? budgetMs : Math.min(timeout, 600_000);
-        String predicate = Scripts.flag(expression);
+        String predicate;
+        try {
+            predicate = Scripts.flagWait(expression);
+        } catch (IllegalArgumentException e) {
+            throw Params.invalid(primitive, "expression", "expression must not be blank");
+        }
+        String poll = WebLib.flagExpression(expression);
         return () -> {
             Selection sel = select(s, p, deadline);
             Object[] result = onPw(s, primitive, sel, budgetMs, deadline, () -> {
                 Place at = place(s, sel, frameKey);
                 long wait = Math.max(1, Math.min(wanted, remainingMs(deadline) - WAIT_FLAG_MARGIN_MS));
                 long t0 = System.nanoTime();
-                boolean ready;
+                Map<?, ?> outcome;
                 try {
-                    JSHandle handle = at.frame().waitForFunction(predicate, null,
-                            new Frame.WaitForFunctionOptions().setPollingInterval(pollMs).setTimeout(wait));
-                    Object value = Values.json(handle.jsonValue());
-                    disposeQuietly(handle);
-                    if (value instanceof Map<?, ?> m && m.containsKey("__scriptError")) {
-                        throw Shapes.scriptError(primitive, m.get("__scriptError"), refOf(s, at));
-                    }
-                    ready = true;
+                    // A35: the page polls the shared guard; a poll that throws is not ready, Playwright polls on.
+                    outcome = flagPoll(primitive, at.frame().waitForFunction(predicate, null,
+                            new Frame.WaitForFunctionOptions().setPollingInterval(pollMs).setTimeout(wait)));
                 } catch (TimeoutError e) {
-                    ready = false;
+                    outcome = lastPoll(primitive, at.frame(), poll, pollMs, deadline);
                 }
-                return new Object[] {ready, elapsedMs(t0), at.page().url(), refOf(s, at)};
+                if (outcome != null && outcome.get("compileError") != null) {
+                    throw Shapes.scriptError(primitive, Shapes.data("message",
+                            String.valueOf(outcome.get("compileError")), "stack", ""), refOf(s, at));
+                }
+                boolean ready = outcome != null && Boolean.TRUE.equals(outcome.get("ready"));
+                String lastError = !ready && outcome != null && outcome.get("error") instanceof String error ? error
+                        : null;
+                return new Object[] {ready, elapsedMs(t0), at.page().url(), refOf(s, at), lastError};
             });
             boolean ready = (Boolean) result[0];
             if (ready) {
                 events.append("web.ready", Shapes.data("browser", result[3], "url", result[2], "signal", "FLAG"),
                         correlationId);
             }
-            return Shapes.waitFlagValue(ready, (Long) result[1], pollMs);
+            return Shapes.waitFlagValue(ready, (Long) result[1], pollMs, (String) result[4]);
         };
+    }
+
+    /**
+     * A35: after a timed-out wait, one more poll of the guard, the last poll, which says why the flag is not ready
+     * ({@code error}) or that it turned ready meanwhile; bounded by {@value #LAST_POLL_MAX_MS} ms and by what is left of
+     * the call less {@value #LAST_POLL_RESERVE_MS} ms, through {@code waitForFunction} (the guard always answers an
+     * object, so its first evaluation ends it), because {@code evaluate} has no bound of its own. Null when no time is
+     * left, the page did not answer in time, or the poll failed otherwise: it only explains a wait that is over, so
+     * only a page that closed (thrown on, {@code STALE_HANDLE}) changes the answer. Call only on the Playwright thread.
+     */
+    private static Map<?, ?> lastPoll(String primitive, Frame frame, String poll, long pollMs, long deadline)
+            throws AgentRpcException {
+        long bound = Math.min(LAST_POLL_MAX_MS, remainingMs(deadline) - LAST_POLL_RESERVE_MS);
+        if (bound < 1) {
+            return null;
+        }
+        try {
+            return flagPoll(primitive, frame.waitForFunction(poll, null,
+                    new Frame.WaitForFunctionOptions().setPollingInterval(pollMs).setTimeout(bound)));
+        } catch (PlaywrightException e) {
+            if (targetClosed(e)) {
+                throw e;
+            }
+            return null;
+        }
+    }
+
+    /** The guard's {@code {ready, error?, compileError?}} behind a handle, which is disposed. */
+    private static Map<?, ?> flagPoll(String primitive, JSHandle handle) throws AgentRpcException {
+        Object value = Values.json(handle.jsonValue());
+        disposeQuietly(handle);
+        if (!(value instanceof Map<?, ?> m) || !(m.get("ready") instanceof Boolean)) {
+            throw Shapes.error(primitive, ErrorCodes.INTERNAL_ERROR, "the web.waitFlag guard returned no result",
+                    Shapes.data("path", ID));
+        }
+        return m;
     }
 
     private Callable<Object> resize(Session s, String primitive, Map<String, Object> p, long budgetMs,
@@ -1222,33 +1280,6 @@ public final class CdpWebPath implements WebPath {
         s.refByTarget.keySet().retainAll(targets.keySet());
         s.refByTarget.putAll(targets);
         return browsers;
-    }
-
-    /** The agent's {@code lastSeq}; a failure before the primitive ran is {@code UNSUPPORTED}. */
-    private static long agentSeq(Session s, long deadline) throws WebPathException, AgentLostException {
-        try {
-            RpcResult r = s.agent.call("evt.query", LAST_SEQ_QUERY,
-                    query(Math.max(1, Math.min(AGENT_QUERY_MS, remainingMs(deadline)))));
-            if (r.value() instanceof Map<?, ?> m && m.get("lastSeq") instanceof Number n) {
-                return n.longValue();
-            }
-            throw WebPathException.unsupported("the agent's evt.query answered no lastSeq");
-        } catch (AgentRpcException e) {
-            throw WebPathException.unsupported("the agent's evt.query failed: " + describe(e));
-        }
-    }
-
-    /** The agent's {@code lastSeq} after the primitive ran; {@code before} when it cannot be read. */
-    private static long agentSeqAfter(Session s, long before) throws AgentLostException {
-        try {
-            RpcResult r = s.agent.call("evt.query", LAST_SEQ_QUERY, query(AGENT_QUERY_MS));
-            if (r.value() instanceof Map<?, ?> m && m.get("lastSeq") instanceof Number n) {
-                return Math.max(before, n.longValue());
-            }
-        } catch (AgentRpcException e) {
-            LOG.log(System.Logger.Level.DEBUG, "evt.query after a CDP call failed: " + describe(e));
-        }
-        return before;
     }
 
     private static String refOf(Session s, Place at) {

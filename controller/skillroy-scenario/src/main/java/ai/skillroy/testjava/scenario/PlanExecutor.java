@@ -1575,7 +1575,9 @@ public final class PlanExecutor {
 
         /**
          * The {@code web.waitFlag} call of the base verb {@code webWaitFlag}: a flag that did not turn true
-         * ({@code ready} not true) within the primitive's wait is SYNC_TIMEOUT, as an expired settle is.
+         * ({@code ready} not true) within the primitive's wait is SYNC_TIMEOUT, as an expired settle is. The result
+         * is the detail's {@code waitFlag}; its {@code lastError} (the last poll's error, either path: A35) also ends
+         * the message.
          */
         private void checkWaitFlag(Plan.Step step, Plan.Call call, Map<String, Object> params, Object value)
                 throws Abort {
@@ -1588,9 +1590,16 @@ public final class PlanExecutor {
                     params.get("expression"), "waitFlag", value);
             detail.putAll(diagnostics());
             String expression = Values.printableLine(Values.stringOf(params.get("expression")));
+            String lastError = value instanceof Map<?, ?> v && v.get("lastError") instanceof String error
+                    ? Values.printableLine(error) : null;
             throw new Abort(Status.FAIL, FailureKind.SYNC_TIMEOUT, step.id(), step.verb() + ": the flag did not turn"
-                    + " true within " + ms + " ms: " + (expression.length() <= 200 ? expression
-                    : expression.substring(0, 197) + "..."), detail);
+                    + " true within " + ms + " ms: " + shortened(expression) + (lastError == null ? ""
+                    : " (last error: " + shortened(lastError) + ")"), detail);
+        }
+
+        /** At most 200 characters of a line for a failure message: longer ones end in "...". */
+        private static String shortened(String line) {
+            return line.length() <= 200 ? line : line.substring(0, 197) + "...";
         }
 
         /**

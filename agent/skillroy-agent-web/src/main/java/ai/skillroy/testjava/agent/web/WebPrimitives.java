@@ -22,13 +22,13 @@ import ai.skillroy.testjava.agent.api.Primitive;
 import ai.skillroy.testjava.agent.api.PrimitiveSpec;
 import ai.skillroy.testjava.agent.api.Primitives;
 import ai.skillroy.testjava.agent.api.ThreadPolicy;
+import ai.skillroy.testjava.agent.api.spi.web.BitmapSource;
 import ai.skillroy.testjava.agent.api.spi.web.CdpEndpoint;
 import ai.skillroy.testjava.agent.api.spi.web.WebBrowser;
 import ai.skillroy.testjava.agent.api.spi.web.WebCapability;
 import ai.skillroy.testjava.agent.api.spi.web.WebEngineAdapter;
 import ai.skillroy.testjava.agent.api.spi.web.WebEval;
 import ai.skillroy.testjava.agent.api.spi.web.WebFrame;
-import ai.skillroy.testjava.agent.web.reflect.BrowserExtras;
 import ai.skillroy.testjava.protocol.ErrorCodes;
 import ai.skillroy.testjava.protocol.Json;
 import ai.skillroy.testjava.protocol.JsonException;
@@ -223,8 +223,9 @@ final class WebPrimitives {
                     }
                 }));
         list.add(Primitives.of(selecting(PrimitiveSpec.builder("web.reload")
-                .description("Reloads the browser's page through the technology (for frozen-target recovery and a "
-                        + "pack's own recovery; no base verb emits it)."), false)
+                .description("Reloads the browser's page through the technology where its adapter can, else through "
+                        + "the page's location.reload() (for frozen-target recovery and a pack's own recovery; no "
+                        + "base verb emits it). Answers once the reload was requested."), false)
                 .param("ignoreCache", "boolean", false, "bypass the cache (default false)")
                 .thread(ThreadPolicy.WORKER).timeoutMs(10000).capability(WebCapabilities.BROWSERS).mutating()
                 .build(), new Primitives.Body() {
@@ -262,8 +263,10 @@ final class WebPrimitives {
                 }));
         list.add(Primitives.of(selecting(PrimitiveSpec.builder("web.waitFlag")
                 .description("Evaluates the expression on the agent worker until it is truthy or the budget ends; "
-                        + "publishes web.ready {signal: FLAG} when it turns ready. Answers {ready: false} before the "
-                        + "call times out. Not mutating."), true)
+                        + "publishes web.ready {signal: FLAG} when it turns ready. A poll whose expression throws "
+                        + "counts as not ready; answers {ready: false, lastError?} (the last poll's error) before the "
+                        + "call times out. An expression that does not compile is SCRIPT_ERROR at once. Not "
+                        + "mutating."), true)
                 .param("expression", "string", true, "a JavaScript expression; truthy means ready")
                 .param("timeoutMs", "integer", false, "0 (default) = the call's budget; at most 600000")
                 .param("pollMs", "integer", false, "poll period (default 50, at least 20)")
@@ -703,7 +706,9 @@ final class WebPrimitives {
         long budget = Await.budget(inv);
         long limit = timeoutMs > 0 ? Math.min(timeoutMs, budget) : budget;
         long deadline = started + TimeUnit.MILLISECONDS.toNanos(limit);
-        String probe = WebLib.wrap("!!(" + body + "\n)", false);
+        // A35: the shared guard (the CDP path evaluates the same text), which compiles the expression on its own and
+        // answers {ready}, {ready: false, error} for a poll that threw, or {ready: false, compileError}.
+        String probe = WebLib.flagExpression(body);
         long polls = 0;
         String lastError = null;
         // At most one probe outstanding: one the page has not answered (a busy or frozen page) is waited for, with
@@ -739,19 +744,27 @@ final class WebPrimitives {
                             bound);
                     int code = mapped.error().code();
                     if (code == ErrorCodes.SCRIPT_ERROR) {
-                        lastError = mapped.error().message();
+                        // The guard catches what the expression throws; a channel that still reports a script error
+                        // for the guard itself counts the poll as not ready, cut as the guard cuts an error.
+                        lastError = WebLib.errorLine(scriptMessage(mapped));
                     } else if (code != ErrorCodes.TIMEOUT) {
                         throw mapped;
                     }
                 }
                 if (json != null) {
-                    Map<?, ?> w = wrapperResult(e, json);
-                    if ("true".equals(w.get("json"))) {
+                    Map<?, ?> poll = flagResult(e, json);
+                    if (Boolean.TRUE.equals(poll.get("ready"))) {
                         long ms = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started);
                         bridge.ready(e, Selection.safeUrl(e.browser()), "FLAG", null);
                         return flag(true, ms, polls, null);
                     }
-                    lastError = null;
+                    Object compileError = poll.get("compileError");
+                    if (compileError != null) {
+                        // A35: an expression that does not compile can never become ready.
+                        throw Errors.script(e.ref, String.valueOf(compileError), "");
+                    }
+                    Object error = poll.get("error");
+                    lastError = error instanceof String ? (String) error : null;
                 }
                 long pause = Math.min(pollMs, remaining(deadline));
                 if (pause <= 0) {
@@ -855,25 +868,34 @@ final class WebPrimitives {
         out.put("width", Long.valueOf(fitted.getWidth()));
         out.put("height", Long.valueOf(fitted.getHeight()));
         out.put("base64", Base64.getEncoder().encodeToString(png));
-        out.put("source", e.browser() instanceof BrowserExtras ? ((BrowserExtras) e.browser()).bitmapSource()
-                : "VENDOR");
+        out.put("source", bitmapSource(e.browser()).name());
         return out;
     }
 
+    /**
+     * The browser's {@link WebBrowser#bitmapSource()} (A37): {@code VENDOR}, the SPI's default, also when an adapter's
+     * own answer is null or throws (it is informational).
+     */
+    static BitmapSource bitmapSource(WebBrowser b) {
+        try {
+            BitmapSource s = b.bitmapSource();
+            return s != null ? s : BitmapSource.VENDOR;
+        } catch (RuntimeException e) {
+            return BitmapSource.VENDOR;
+        }
+    }
+
+    /**
+     * {@code web.reload} through the SPI's {@link WebBrowser#reload(boolean)} (A37): the built-in adapters reload
+     * through their technology; an adapter that does not override it gets the SPI's default, {@code location.reload()}
+     * through {@code evaluate} (which needs {@code EVALUATE}: without it the default fails with
+     * {@code UnsupportedOperationException}, which answers {@code CAPABILITY_UNAVAILABLE}).
+     */
     private Object reload(Invocation inv) {
         secrets.remember(inv);
         boolean ignoreCache = inv.args().bool("ignoreCache", false);
         Entry e = select(inv);
-        WebBrowser b = e.browser();
-        long budget = Await.budget(inv);
-        if (b instanceof BrowserExtras) {
-            Await.get(((BrowserExtras) b).reload(ignoreCache), budget, e, "web.reload", WebCapabilities.BROWSERS);
-        } else {
-            require(e, WebCapability.EVALUATE, "web.reload", WebCapabilities.BROWSERS);
-            String expression = "location.reload(" + (ignoreCache ? "true" : "") + ")";
-            Await.get(b.evaluate(WebEval.of(expression).timeoutMs(budget).build()), budget, e, "web.reload",
-                    WebCapabilities.BROWSERS);
-        }
+        Await.get(e.browser().reload(ignoreCache), Await.budget(inv), e, "web.reload", WebCapabilities.BROWSERS);
         Map<String, Object> out = new LinkedHashMap<String, Object>();
         out.put("reloaded", Boolean.TRUE);
         return out;
@@ -918,6 +940,22 @@ final class WebPrimitives {
             throw Errors.internal(e.ref, "browser " + e.ref + " returned no script-library result");
         }
         return (Map<?, ?>) value;
+    }
+
+    /** One poll of the guard of {@link WebLib#flagExpression}: {@code {ready, error?, compileError?}}. */
+    private static Map<?, ?> flagResult(Entry e, String json) {
+        Object value = parse(e, json);
+        if (!(value instanceof Map) || !(((Map<?, ?>) value).get("ready") instanceof Boolean)) {
+            throw Errors.internal(e.ref, "browser " + e.ref + " returned no web.waitFlag guard result");
+        }
+        return (Map<?, ?>) value;
+    }
+
+    /** The page's own message of a {@code SCRIPT_ERROR} ({@code data.message}), else the error's message. */
+    private static String scriptMessage(RpcException mapped) {
+        Map<String, Object> data = mapped.error().data();
+        Object message = data == null ? null : data.get("message");
+        return message != null ? String.valueOf(message) : mapped.error().message();
     }
 
     private static Object parse(Entry e, String json) {

@@ -187,21 +187,11 @@ final class WebCapabilities {
                 return false;
             }
             List<WebEngineAdapter> all = adapters();
-            Set<String> ids = new HashSet<String>();
-            for (WebEngineAdapter a : all) {
-                ids.add(a.id());
-            }
-            if (!ids.equals(c.adapterProbes.keySet())) {
+            if (!ids(all).equals(c.adapterProbes.keySet())) {
                 return true;
             }
-            for (WebEngineAdapter a : all) {
+            for (WebEngineAdapter a : reprobeCandidates(c, all)) {
                 ProbeResult last = c.adapterProbes.get(a.id());
-                if (last == null || last.state() != CapabilityState.UNAVAILABLE) {
-                    continue;
-                }
-                if (builtIn(a) && !NOT_LOADED.equals(last.reason())) {
-                    continue; // not present, too old, a member missing: only a reprobe asks again
-                }
                 ProbeResult now = probeOne(a);
                 if (now.state() != last.state() || !equal(now.reason(), last.reason())) {
                     return true;
@@ -209,6 +199,51 @@ final class WebCapabilities {
             }
             return false;
         }
+    }
+
+    /**
+     * Whether the re-probe after a {@code window.opened} event has anything to ask (A38, phase4-contracts.md section
+     * 4.1): adapters were registered or withdrawn since the last cycle, or one is a candidate of
+     * {@link #reprobeChanged()}. Cheap: no probe, no index rebuild, no EDT read; never throws. False before the first
+     * cycle and once closed. The module paces only a re-probe that has something to ask.
+     */
+    boolean reprobeHasCandidates() {
+        synchronized (cycleLock) {
+            Cycle c = current;
+            if (c == null || closed) {
+                return false;
+            }
+            List<WebEngineAdapter> all = adapters();
+            return !ids(all).equals(c.adapterProbes.keySet()) || !reprobeCandidates(c, all).isEmpty();
+        }
+    }
+
+    /**
+     * The adapters whose technology may have arrived since the cycle: those whose last probe was UNAVAILABLE, except
+     * a built-in adapter whose reason is not {@value #NOT_LOADED} (not present, too old, a member missing: only a
+     * reprobe asks again).
+     */
+    private List<WebEngineAdapter> reprobeCandidates(Cycle c, List<WebEngineAdapter> all) {
+        List<WebEngineAdapter> out = new ArrayList<WebEngineAdapter>();
+        for (WebEngineAdapter a : all) {
+            ProbeResult last = c.adapterProbes.get(a.id());
+            if (last == null || last.state() != CapabilityState.UNAVAILABLE) {
+                continue;
+            }
+            if (builtIn(a) && !NOT_LOADED.equals(last.reason())) {
+                continue;
+            }
+            out.add(a);
+        }
+        return out;
+    }
+
+    private static Set<String> ids(List<WebEngineAdapter> adapters) {
+        Set<String> ids = new HashSet<String>();
+        for (WebEngineAdapter a : adapters) {
+            ids.add(a.id());
+        }
+        return ids;
     }
 
     private boolean builtIn(WebEngineAdapter a) {

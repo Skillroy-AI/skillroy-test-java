@@ -1,0 +1,9 @@
+# Negative (phase4-contracts.md 9.3, 16.1, A35): a webWaitFlag whose expression does not compile can never become
+# ready, so it fails at once, long before its minute is up, as ASSERTION with SCRIPT_ERROR (a SyntaxError), over CDP
+# and through the agent alike.
+scenario: flag-does-not-compile
+pack: webhost
+web: { browser: { tag: front } }
+steps:
+  - webWaitFlag: { expression: "document.title ===", timeoutMs: 60s }
+timeouts: { step: 90s }

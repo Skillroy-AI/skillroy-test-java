@@ -207,7 +207,7 @@ table above. "Java 8 test JVM" = the module's own tests also run on Java 8 (`-Dj
 | `skillroy-sample-lending-agent` | yes | yes | module, primitives, listener slot, widgets, plugin |
 | `skillroy-sample-lending-pack` | yes | n/a | verbs, facts, recovery |
 | `skillroy-sample-lending-scenarios` | yes | targets only | committed plans up to date (4 plan tests); §10 acceptance, 19 checks per load mode, 21 tests with the JUnit glue's three dynamic tests, 84 end-to-end tests (`LendingEndToEndIT`) |
-| `skillroy-agent-web` (Phase 4) | yes | yes | the module (install, capabilities, index, selection, primitives, events and taps) against scripted adapters; both adapters against the fake JCEF and the JxBrowser fake; the contract kit (`test-jar`) in four fake runs; 160 tests after the fix wave |
+| `skillroy-agent-web` (Phase 4) | yes | yes | the module (install, capabilities, index, selection, primitives, events and taps) against scripted adapters; both adapters against the fake JCEF and the JxBrowser fake; the contract kit (`test-jar`) in four fake runs; 160 tests after the fix wave, 172 after the Phase 4.x amendments A37 and A38 (2026-10-08) |
 | `skillroy-cdp` (Phase 4) | yes | n/a (Java 25) | the probe against a fake DevTools server, the attach and the path with Playwright replaced by fakes; no test starts a driver or a browser; 105 tests |
 | `skillroy-sample-web-host`, `-web-host-agent` (Phase 4, profile `jcef`) | yes | yes | options, sentinels, pages, registry, the agent module's seeds; with a display the host itself and the kit against real JCEF, one surefire execution per rendering mode |
 | `skillroy-sample-web-host-scenarios` (Phase 4, profile `jcef`) | yes | targets only | committed plans up to date, the pack; with a display the end-to-end acceptance (`WebHostEndToEndIT`, eight launches) and the frozen-target soak (`CdpAttachSoakIT`) |
@@ -882,6 +882,24 @@ agent but fails at once over CDP (gap 38).
 
 The review's reports, verdicts, briefs and implementer reports are with the session's working files (2026-10-07).
 
+### Phase 4.x: the small follow-ups as amendments (2026-10-08)
+
+Contract first, then code, native build green; each amendment is a subsection of `design/phase4-contracts.md` §16 and
+its passages are marked "(4.x, A3n, built 2026-10-08)" in place. Built by two implementers in isolated worktrees on the
+night of 2026-10-07 to 2026-10-08, integrated into the main tree by file list.
+
+- [x] A35: `web.waitFlag` answers an expression that throws the same way on both paths (gap 38): a run-time throw is
+  "not ready" and polling goes on, `lastError` on a timed-out wait, a compile error `SCRIPT_ERROR` at once; one guard in
+  `WebLib` for both paths; built 2026-10-08 (18 new tests across protocol, agent-web, cdp and scenario; the guard also
+  checked outside the build in Node 24, over raw CDP and under Playwright 1.63 against a Chromium headless shell); the
+  two new `jcef` negatives wait for the next Linux matrix
+- [x] A36: a call the CDP path serves reads the agent's sequence once, not three times (gap 45); built 2026-10-08
+- [x] A37: `WebBrowser.reload(boolean)` and `bitmapSource()` as SPI default methods, `BitmapSource`, `BrowserExtras`
+  deleted, the built-in adapters override, kit item 12 (gap 40); built 2026-10-08, agent-api 110 and agent-web 172 tests
+  green natively; kit item 12 against real JCEF waits for the next Linux matrix
+- [x] A38: the re-probe after `window.opened` at most once a second, on the worker, nothing dropped (gap 42); built
+  2026-10-08 (`WindowOpenedPaceTest`)
+
 ### Phase 5: AI layer
 
 **Contract: `docs/design/phase5-contracts.md`** (specified 2026-10-08, not built; its eighteen answers are B23, provisional;
@@ -1009,15 +1027,16 @@ reflectively callable `EmbeddedAgent.start`, and redaction of secrets in JVM arg
 | 35 | A browser with no view and no seed is invisible | JxBrowser has no process-wide list of browsers: an engine whose browser is in no window is found only through a seed (browser-spi §F23) | The pack's `BrowserRegistryAdapter` hands it in (P4 §9.2 is the example); nothing more in the base | later, if a target needs it |
 | 36 | `web.dom.click` is a DOM click, not a pointer click | `el.click()` fires no `pointerdown`, `mousedown` or `mouseup`; a page that listens for those does not react | `INPUT` (reserved) and `web.pointer` with the vision bolt-on | 7 |
 | 37 | `web.resize` cannot change a windowed browser's Swing bounds | It sets a protocol-level viewport override; a page that measures its component sees the override only | `applied: COMPONENT` is reserved for a variant that resizes the component | later |
-| 38 | `web.waitFlag` answers an expression that throws differently on the two paths | The agent polls on and answers `ready: false` with `lastError` (the base verb then ends `SYNC_TIMEOUT`); the CDP path fails at once with `SCRIPT_ERROR` (`ASSERTION`) | Choose one behaviour for both paths (P4 §4.2) | next amendment |
+| 38 | `web.waitFlag` answers an expression that throws differently on the two paths | The agent polled on and answered `ready: false` with `lastError` (the base verb then ends `SYNC_TIMEOUT`); the CDP path failed at once with `SCRIPT_ERROR` (`ASSERTION`) | A35 (4.x, built 2026-10-08; P4 §16.1): one page-side guard (`WebLib.flagExpression`) on both paths; a run-time throw is "not ready" and polling goes on, `lastError` when the wait ends not ready, a compile error `SCRIPT_ERROR` at once | closed (built); the `jcef` negatives `flag-never-ready` and `flag-does-not-compile` run in the next matrix |
 | 39 | A hidden JCEF browser has no bitmap | Chromium renders nothing for a browser that is not showing, so `web.bitmap` on such a browser is refused with `CAPABILITY_UNAVAILABLE` (the SPI as specified promised a bitmap whatever the view's state) | None in the base (a technology limit); the aria snapshot and the page text of such a browser still read | open |
-| 40 | The SPI has no reload and no bitmap source | `web.reload` and the bitmap's `source` use the module-internal `BrowserExtras` of the built-in adapters; a third-party adapter is reloaded through `location.reload()` and reports `VENDOR` (D67) | A default method on `WebBrowser`, source- and binary-compatible | later amendment |
+| 40 | The SPI has no reload and no bitmap source | `web.reload` and the bitmap's `source` used the module-internal `BrowserExtras` of the built-in adapters; a third-party adapter was reloaded through `location.reload()` and reported `VENDOR` (D67) | A37 (4.x, built 2026-10-08; P4 §16.3): `WebBrowser.reload(ignoreCache)` and `bitmapSource()` as default methods, `BitmapSource {PROTOCOL, VENDOR}`, the built-in adapters override, `BrowserExtras` deleted, kit item 12 | closed (built); kit item 12 against real JCEF pending the next matrix |
 | 41 | Three member names of the JxBrowser descriptor are unverified | `getChromeVersion` or `CHROME_VERSION_MAJOR`, `FrameLoadFailed.error` or `errorCode`, and `Browser.set` matched by its parameter count could not be checked without the product (P4 §4.5) | The contract kit against the real product, in a repository that holds a licence | wall (a JxBrowser licence) |
-| 42 | No rate limit on the re-probe after `window.opened` | The re-probe is coalesced and cheap (probes only, no Swing walk), and the review's proposed one-a-second limit was not built (P4 §4.1) | A time-based limit, if a target with many windows shows the cost | later |
+| 42 | No rate limit on the re-probe after `window.opened` | The re-probe was coalesced and cheap (probes only, no Swing walk), and the review's proposed one-a-second limit was not built (P4 §4.1) | A38 (4.x, built 2026-10-08; P4 §16.4): at most one cycle a second, the rest of the second waited out on the agent worker that runs it, no event dropped, no new thread or timer | closed (built) |
 | 43 | A JCEF older than 2024-01 is served on neither path | Without `getDevToolsClient` the adapter is `UNAVAILABLE` and reports no endpoint, so not even a configured port is used (P4 §4.5) | An amendment that reports the port of such a JCEF for the CDP path alone | later, if a target needs it |
 | 44 | Windowed JCEF on a Java 8 target is unverified | BS8: no native browser was created, no error logged; the strategy says "windowed, Java 8: unverified" | Find the cause (BS8's open question) | open |
-| 45 | A call the CDP path serves reads the agent's sequence three times | The path reads `lastSeq` before and after the primitive and the executor reads it as well (P4 §5.2) | Drop the path's two reads | later (small) |
+| 45 | A call the CDP path serves reads the agent's sequence three times | The path read `lastSeq` before and after the primitive and the executor read it as well (P4 §5.2) | A36 (4.x, built 2026-10-08; P4 §16.2): the path reads none; the executor's read fills `seq.before` and `seq.after` of the call record | closed (built) |
 | 46 | A killed JVM leaves a traced CDP path's trace directory | The private, owner-only `skillroy-cdp-trace-*` directory is deleted at close; a JVM killed meanwhile leaves it in the temporary directory (P4 §6.4) | Delete stale ones at the next open, or accept and document (done) | accepted |
+| 48 | Over CDP, `web.waitFlag` on a page whose content security policy forbids `eval` fails at Playwright's second poll | Playwright's `waitForFunction` evaluates its own predicate with `eval` from the page's timer after the first poll, which such a policy refuses before the guard runs; it surfaces as `INTERNAL_ERROR` with an unhelpful message (found by A35, 2026-10-08; the agent path's `Runtime.evaluate` is not subject to the policy) | A clearer message, or a first-poll-only fallback to the agent path for such pages | later, if a target shows it |
 | 47 | JxBrowser's observer registration and `cdpEndpoints` call the vendor without a bound | Every other vendor call of the adapter runs on its own threads with a bound; whether `on`, `set` and the endpoint read can block needs the product (P4 §4.5) | Bound them as the accessors are, once a run against the product shows the need | with gap 41 |
 
 Small items for the module owners, none of them a contract matter: `swing.snapshot` shows Swing's own made-up

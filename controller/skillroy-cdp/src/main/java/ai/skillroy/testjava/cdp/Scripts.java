@@ -36,6 +36,12 @@ import ai.skillroy.testjava.protocol.web.WebLib;
  * text with {@code Runtime.evaluate}. Playwright itself evaluates every expression with {@code eval}, so this adds no
  * new requirement on a page's content security policy.
  *
+ * <p>{@code web.waitFlag} is the exception (amendment A35): its polls are the shared guard of
+ * {@link WebLib#flagExpression}, which turns what the flag's expression throws into a value of its own ({@code
+ * {ready: false, error}}, not ready) and tells an expression that does not compile apart ({@code {ready: false,
+ * compileError}}), so that both paths read the same shapes; {@link #flagWait} only adapts it to
+ * {@code waitForFunction}'s truthiness.
+ *
  * <p>Stateless.
  */
 final class Scripts {
@@ -72,15 +78,18 @@ final class Scripts {
     }
 
     /**
-     * The predicate of {@code web.waitFlag} for {@code waitForFunction}: {@code true} when the caller's expression is
-     * truthy, {@code false} when it is not (Playwright polls again), {@code {__scriptError}} (truthy, so the wait ends)
-     * when it throws. The expression is compiled at run time like {@link #evaluate}'s, in parentheses, so that a
-     * syntax error is a script error and an object literal stays an expression.
+     * The predicate of {@code web.waitFlag} for {@code waitForFunction} (amendment A35): one poll of the shared guard
+     * ({@link WebLib#flagExpression}, the text the agent path evaluates), whose result object is returned when the
+     * flag is ready ({@code {ready: true}}) or the expression did not compile ({@code {ready: false, compileError}});
+     * both are truthy, so the wait ends. A falsy flag and a poll that threw ({@code {ready: false, error?}}) give
+     * {@code false}, so Playwright polls again; the last poll's error is read after a timed-out wait with one more
+     * poll of the guard itself.
+     *
+     * @throws IllegalArgumentException if {@code expression} is null or blank
      */
-    static String flag(String expression) {
-        String source = Json.write("(" + expression + "\n)");
-        return "(function(){var E=" + ERROR_FUNCTION + ";try{return (0,eval)(" + source
-                + ")?true:false;}catch(e){return {__scriptError:E(e)};}})()";
+    static String flagWait(String expression) {
+        return "(function(){var r=" + WebLib.flagExpression(expression)
+                + ";return r.ready===true||r.compileError!==undefined?r:false;})()";
     }
 
     /** {@code ({w: innerWidth, h: innerHeight})} of the page's window. */

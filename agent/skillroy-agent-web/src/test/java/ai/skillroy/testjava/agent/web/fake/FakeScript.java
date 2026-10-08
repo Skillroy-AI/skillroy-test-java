@@ -40,15 +40,20 @@ import java.util.regex.Pattern;
  *       {@code wrap(expression, awaitPromise)} (the inner expression is extracted and evaluated, then stringified;
  *       awaited, it gives a {@link Promise}); {@code callExpression(function, args...)} and
  *       {@code callJsonExpression(...)} (the function name and the JSON arguments are parsed);
- *       {@code deferExpression(expression)} and {@code collectExpression(id)};</li>
+ *       {@code deferExpression(expression)} and {@code collectExpression(id)}; {@code flagExpression(expression)},
+ *       the guard of {@code web.waitFlag} (A35): an expression whose brackets do not balance, or that ends in an
+ *       operator, does not "compile" ({@code {ready: false, compileError}}), any other is evaluated through this
+ *       table, a {@link Thrown} giving {@code {ready: false, error}} cut by {@link WebLib#errorLine}, a value
+ *       {@code {ready: <truthy>}};</li>
  *   <li>the {@code jxbrowser} adapter's tagged wrapper ({@link JxBrowserAdapter#wrap}), by its fixed opening and
  *       closing text;</li>
  *   <li>the kit's expressions ({@link KitScripts}), and a few of the module's: {@code document.title},
  *       {@code location.href}, {@code [window.innerWidth, window.innerHeight]} (also as the {@code jcef} adapter's
- *       promise of the restored size), {@code location.reload(...)},
- *       {@code !!(expression\n)} (the truthiness the module's {@code web.waitFlag} asks), {@code <n> * <m>},
+ *       promise of the restored size), {@code location.reload(...)}, {@code <n> * <m>},
  *       numbers, quoted strings, {@code undefined}, {@code null}, {@code true}, {@code false},
- *       {@code console.log('text')}, and {@code window.flag === true} for a global named {@code flag};</li>
+ *       {@code console.log('text')}, {@code window.flag === true} for a global named {@code flag}, and
+ *       {@code window.flag.key === true}, which throws "TypeError: Cannot read properties of undefined (reading
+ *       'key')" while the global is absent (a page that is not ready yet);</li>
  *   <li>the library functions the fakes serve: {@code stringify}, {@code tap}, {@code drain}, {@code dispatch},
  *       {@code domText} (body or {@code #id}), {@code aria} (the title as a heading and the body's text),
  *       {@code domClick} and {@code domFill} on {@code #id} selectors present in the HTML, {@code defer},
@@ -78,6 +83,8 @@ public final class FakeScript {
     private static final Pattern QUOTED = Pattern.compile("^'([^']*)'$|^\"([^\"]*)\"$");
     private static final Pattern CONSOLE_LOG = Pattern.compile("^console\\.log\\('([^']*)'\\)$");
     private static final Pattern FLAG = Pattern.compile("^window\\.([A-Za-z_$][A-Za-z0-9_$]*) === true$");
+    private static final Pattern PROPERTY_FLAG = Pattern.compile(
+            "^window\\.([A-Za-z_$][A-Za-z0-9_$]*)\\.([A-Za-z_$][A-Za-z0-9_$]*) === true$");
     private static final Pattern ID_SELECTOR = Pattern.compile("^#([A-Za-z][A-Za-z0-9_-]*)$");
     /** The {@code jcef} adapter's read of the restored viewport after {@code clearResize} (a promise of the size). */
     private static final Pattern RESTORED_SIZE = Pattern.compile("^\\(function \\(w, h\\) \\{ return new Promise\\("
@@ -147,6 +154,10 @@ public final class FakeScript {
         String src = WebLib.source();
         if (e.equals(WebLib.installExpression())) {
             return install(doc);
+        }
+        String flagPrefix = flagPrefix();
+        if (e.startsWith(flagPrefix) && e.endsWith(")")) {
+            return flag(doc, (String) Json.parse(e.substring(flagPrefix.length(), e.length() - 1)));
         }
         String jxPrefix = jxPrefix();
         if (e.startsWith(jxPrefix) && e.endsWith(JxBrowserAdapter.EXPRESSION_CLOSE)) {
@@ -220,6 +231,64 @@ public final class FakeScript {
         return probe.substring(0, probe.length() - ("X" + JxBrowserAdapter.EXPRESSION_CLOSE).length());
     }
 
+    /** The guard of {@link WebLib#flagExpression} up to its argument, the expression as a JSON string. */
+    private static String flagPrefix() {
+        String probe = WebLib.flagExpression("X");
+        return probe.substring(0, probe.length() - (Json.write("X") + ")").length());
+    }
+
+    /** One poll of the guard of {@code web.waitFlag} (A35), with the fake's notion of compiling. */
+    private static Map<String, Object> flag(FakeDocument doc, String expression) {
+        Map<String, Object> out = new LinkedHashMap<String, Object>();
+        String compileError = compileError(expression);
+        if (compileError != null) {
+            out.put("ready", Boolean.FALSE);
+            out.put("compileError", compileError);
+            return out;
+        }
+        try {
+            out.put("ready", Boolean.valueOf(truthy(eval(doc, expression.trim()))));
+        } catch (Thrown t) {
+            out.put("ready", Boolean.FALSE);
+            out.put("error", WebLib.errorLine(t.getMessage()));
+        }
+        return out;
+    }
+
+    /**
+     * The fake's compiler: brackets outside quotes must balance and the text must not end in an operator; null when
+     * it "compiles", else the {@code SyntaxError} line.
+     */
+    private static String compileError(String expression) {
+        int depth = 0;
+        char quote = 0;
+        for (int i = 0; i < expression.length(); i++) {
+            char c = expression.charAt(i);
+            if (quote != 0) {
+                if (c == '\\') {
+                    i++;
+                } else if (c == quote) {
+                    quote = 0;
+                }
+            } else if (c == '\'' || c == '"') {
+                quote = c;
+            } else if (c == '(' || c == '[' || c == '{') {
+                depth++;
+            } else if (c == ')' || c == ']' || c == '}') {
+                depth--;
+                if (depth < 0) {
+                    return "SyntaxError: Unexpected token '" + c + "'";
+                }
+            }
+        }
+        String trimmed = expression.trim();
+        char last = trimmed.isEmpty() ? ' ' : trimmed.charAt(trimmed.length() - 1);
+        if (depth != 0 || quote != 0 || "=+-*/&|<>!?:.,".indexOf(last) >= 0) {
+            return "SyntaxError: Unexpected token '}'";
+        }
+        return null;
+    }
+
     private static Object install(FakeDocument doc) {
         if (doc.libraryInstalled) {
             return "present";
@@ -232,9 +301,6 @@ public final class FakeScript {
     // ------------------------------------------------------------------------------------------------ plain
 
     private static Object plain(FakeDocument doc, String e) {
-        if (e.startsWith("!!(") && e.endsWith("\n)")) {
-            return Boolean.valueOf(truthy(eval(doc, e.substring(3, e.length() - 2).trim())));
-        }
         if (KitScripts.NUMBER.equals(e)) {
             return Long.valueOf(42);
         }
@@ -301,6 +367,13 @@ public final class FakeScript {
         if (KitScripts.INIT_AT_PARSE.equals(e)) {
             return doc.initAtParse;
         }
+        if (KitScripts.DOCUMENT_MARK.equals(e)) {
+            doc.hidden.put("__kitMark", "set");
+            return UNDEFINED;
+        }
+        if (KitScripts.DOCUMENT_MARK_NOW.equals(e)) {
+            return doc.hidden.containsKey("__kitMark") ? "string" : "undefined";
+        }
         if ("location.href".equals(e)) {
             return doc.url;
         }
@@ -333,6 +406,16 @@ public final class FakeScript {
         m = FLAG.matcher(e);
         if (m.matches()) {
             return Boolean.valueOf(Boolean.TRUE.equals(doc.globals.get(m.group(1))));
+        }
+        m = PROPERTY_FLAG.matcher(e);
+        if (m.matches()) {
+            Object global = doc.globals.get(m.group(1));
+            if (global == null) {
+                throw new Thrown("TypeError: Cannot read properties of " + (doc.globals.containsKey(m.group(1))
+                        ? "null" : "undefined") + " (reading '" + m.group(2) + "')",
+                        "TypeError: Cannot read properties of undefined\n    at <anonymous>:1:" + (m.end(1) + 1));
+            }
+            return Boolean.valueOf(global instanceof Map && Boolean.TRUE.equals(((Map<?, ?>) global).get(m.group(2))));
         }
         throw unknown(e);
     }

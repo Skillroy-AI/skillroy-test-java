@@ -35,6 +35,7 @@ import java.util.List;
 import java.util.Properties;
 import java.util.concurrent.Callable;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
@@ -56,13 +57,22 @@ import java.util.concurrent.atomic.AtomicLong;
  * ones (bounded), and declares every capability with a probe ({@link WebCapabilities}); an adapter whose probe is
  * UNAVAILABLE stays out of the index until the next probe round ({@code agent.capabilities {reprobe: true}}), or
  * until the module's own re-probe after a {@code window.opened} event finds it: an {@code EventBus} subscription
- * posts one bounded re-probe to an agent worker (events that arrive while one is queued or running are coalesced;
- * one queued longer than {@value #CYCLE_BOUND_MS} ms, a post the core dropped, no longer holds the next one back),
- * which probes again only the adapters whose technology may have arrived (present but not loaded by the application
+ * marks a re-probe pending and posts one re-probe worker to an agent worker unless one is queued or running (one
+ * queued longer than {@value #CYCLE_BOUND_MS} ms, a post the core dropped, no longer holds the next one back). The
+ * worker probes again only the adapters whose technology may have arrived (present but not loaded by the application
  * yet, a registered adapter that was UNAVAILABLE, one registered since) and runs a full cycle only when one of their
  * results changed ({@link WebCapabilities#reprobeChanged()}); a technology that is not present at all is probed again
  * only on reprobe. (A re-probe inside a {@code web.*} call cannot work: while no adapter is present the dispatcher
  * refuses every {@code web.*} call before the module sees it.)
+ *
+ * <p><b>The pace</b> (amendment A38): the re-probe runs at most once every {@value #REPROBE_PACE_MS} ms, and no event
+ * is dropped. The worker loops while a re-probe is pending: when some adapter is a candidate
+ * ({@link WebCapabilities#reprobeHasCandidates()}) and the previous re-probe cycle started less than
+ * {@value #REPROBE_PACE_MS} ms ago, it first waits out the rest of that time on its own agent worker (a bounded wait on
+ * a monitor that uninstall wakes; never on the publishing thread, never a thread, timer or scheduler of its own), then
+ * clears the mark and runs the cycle. An event that arrives during the wait is covered by that cycle; one that arrives
+ * while the cycle runs marks the re-probe pending again, and the worker runs one further cycle. Without a candidate it
+ * neither waits nor probes. The readiness cycle and {@code reprobe} are not paced.
  *
  * <p><b>Uninstall</b> first stops what could start new work against the adapters (the {@code window.opened}
  * subscription, the event bridge with every subscription it made, the capability cycle, waiting for one in
@@ -82,6 +92,8 @@ public final class WebModule implements AgentModule {
     static final long CYCLE_BOUND_MS = 30000;
     /** Bound of the taps' removal at uninstall. */
     static final long UNINSTALL_TAPS_MS = 3000;
+    /** The re-probe after {@code window.opened} starts a cycle at most once per this many ms (A38). */
+    static final long REPROBE_PACE_MS = 1000;
 
     private final SeedWalkFactory walks;
     private final AdapterFactory adapterFactory;
@@ -92,10 +104,22 @@ public final class WebModule implements AgentModule {
     private Taps taps;
     private WebCapabilities capabilities;
     private AutoCloseable windowSubscription;
-    /** When the queued re-probe was queued ({@code System.nanoTime()}, never 0), or 0 when none is queued. */
+    /**
+     * When the re-probe worker that is queued or running was queued, or began its current round ({@link Pace#nanoTime},
+     * never 0), or 0 when there is none.
+     */
     private final AtomicLong reprobeQueuedAt = new AtomicLong();
     /** How long a queued re-probe holds the next one back ({@value #CYCLE_BOUND_MS} ms; tests shorten it). */
     private volatile long reprobeHoldMs = CYCLE_BOUND_MS;
+    /** Set by every {@code window.opened}, cleared by the re-probe cycle that starts after it (A38). */
+    private final AtomicBoolean reprobePending = new AtomicBoolean();
+    /** When the last re-probe cycle started ({@link Pace#nanoTime}); meaningful once {@link #reprobedOnce}. */
+    private volatile long lastReprobeStart;
+    private volatile boolean reprobedOnce;
+    /** What a re-probe waits on for its pace; uninstall wakes it. */
+    private final Object paceMonitor = new Object();
+    /** The pace's clock and wait ({@link Pace#SYSTEM}; tests replace it). */
+    private volatile Pace pace = Pace.SYSTEM;
     private final List<String> registered = new ArrayList<String>();
     private volatile boolean uninstalled;
 
@@ -130,6 +154,8 @@ public final class WebModule implements AgentModule {
     public synchronized void install(AgentContext context) throws Exception {
         this.ctx = context;
         this.uninstalled = false;
+        this.reprobePending.set(false);
+        this.reprobedOnce = false;
         this.builtIns = adapterFactory != null ? adapterFactory.create(context) : Arrays.<WebEngineAdapter>asList(
                 new JcefAdapter(context.instrumentation()),
                 new JxBrowserAdapter(context.instrumentation(), new JxBrowserAdapter.Options() {
@@ -210,15 +236,24 @@ public final class WebModule implements AgentModule {
     }
 
     /**
-     * Called on the publishing thread (often the EDT): only posts a bounded re-probe to a worker, unless one is queued
-     * or running; a re-probe queued longer than {@link #reprobeHoldMs} ago no longer counts (the core's broker drops a
-     * post it cannot run without telling the poster, so a lost one must not hold every later one back).
+     * Called on the publishing thread (often the EDT): marks a re-probe pending and posts a re-probe worker unless one
+     * is queued or running (that one sees the mark). Never waits.
      */
     private void windowOpened() {
         if (uninstalled) {
             return;
         }
-        long now = System.nanoTime();
+        reprobePending.set(true);
+        startReprobe();
+    }
+
+    /**
+     * Posts a re-probe worker to an agent worker unless one is queued or running; one queued longer than
+     * {@link #reprobeHoldMs} ago no longer counts (the core's broker drops a post it cannot run without telling the
+     * poster, so a lost one must not hold every later one back). Never waits.
+     */
+    private void startReprobe() {
+        long now = pace.nanoTime();
         long queued = reprobeQueuedAt.get();
         if (queued != 0 && now - queued < TimeUnit.MILLISECONDS.toNanos(reprobeHoldMs)) {
             return;
@@ -231,15 +266,75 @@ public final class WebModule implements AgentModule {
             ctx.threads().post(ThreadPolicy.WORKER, new Runnable() {
                 @Override
                 public void run() {
-                    try {
-                        reprobeAfterWindowOpened();
-                    } finally {
-                        reprobeQueuedAt.compareAndSet(mine, 0);
-                    }
+                    reprobeWorker(mine);
                 }
             });
         } catch (Throwable t) {
             reprobeQueuedAt.compareAndSet(mine, 0);
+        }
+    }
+
+    /**
+     * The re-probe worker (A38, see the class comment): runs rounds while a re-probe is pending. A round with a
+     * candidate first waits out the pace on this agent worker, then clears the mark and runs the cycle; a round
+     * without one clears the mark and finds nothing to probe. Each round renews the worker's queued time, so that a
+     * long burst is not taken for a lost post. An event that arrived after the last round found this worker running
+     * and left the re-probe to it, so the worker posts a new one when the mark is set again as it ends.
+     */
+    private void reprobeWorker(long queuedAt) {
+        long held = queuedAt;
+        try {
+            while (!uninstalled && reprobePending.get()) {
+                long now = pace.nanoTime();
+                long round = now == 0 ? 1 : now;
+                if (!reprobeQueuedAt.compareAndSet(held, round)) {
+                    return; // taken for lost and replaced: the new worker sees the mark
+                }
+                held = round;
+                WebCapabilities caps = capabilities;
+                boolean candidates = caps != null && caps.reprobeHasCandidates();
+                if (candidates && !awaitPace()) {
+                    return; // uninstalled or interrupted while waiting: no cycle
+                }
+                reprobePending.set(false);
+                if (candidates) {
+                    lastReprobeStart = pace.nanoTime();
+                    reprobedOnce = true;
+                }
+                reprobeAfterWindowOpened();
+            }
+        } finally {
+            reprobeQueuedAt.compareAndSet(held, 0);
+        }
+        if (!uninstalled && reprobePending.get()) {
+            startReprobe();
+        }
+    }
+
+    /**
+     * Waits on this agent worker until {@value #REPROBE_PACE_MS} ms have passed since the last re-probe cycle started:
+     * at most that long, on {@link #paceMonitor}, which uninstall wakes. False when uninstall or an interrupt ended
+     * the wait.
+     */
+    private boolean awaitPace() {
+        if (!reprobedOnce) {
+            return true;
+        }
+        long until = lastReprobeStart + TimeUnit.MILLISECONDS.toNanos(REPROBE_PACE_MS);
+        synchronized (paceMonitor) {
+            while (!uninstalled) {
+                long left = until - pace.nanoTime();
+                if (left <= 0) {
+                    return true;
+                }
+                try {
+                    pace.await(paceMonitor, Math.max(1, (left + 999999) / 1000000));
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return false;
+                }
+            }
+            return false;
         }
     }
 
@@ -266,10 +361,24 @@ public final class WebModule implements AgentModule {
         this.reprobeHoldMs = ms;
     }
 
+    /** Replaces the pace's clock and wait (for tests: a clock that moves only when told). */
+    void reprobePace(Pace p) {
+        this.pace = p;
+    }
+
+    /** True when no re-probe is pending and no re-probe worker is queued or running (for tests). */
+    boolean reprobeIdle() {
+        return reprobeQueuedAt.get() == 0 && !reprobePending.get();
+    }
+
     /** Removes everything the module added (see the class comment). Never throws, never blocks for long. */
     @Override
     public synchronized void uninstall() {
         uninstalled = true;
+        reprobePending.set(false);
+        synchronized (paceMonitor) {
+            paceMonitor.notifyAll();
+        }
         closeQuietly(windowSubscription);
         windowSubscription = null;
         // First what could start new work against the adapters: a re-probe or a rebuild in flight would otherwise
@@ -398,6 +507,32 @@ public final class WebModule implements AgentModule {
     /** Makes the built-in adapters (tests replace them). */
     interface AdapterFactory {
         List<WebEngineAdapter> create(AgentContext context);
+    }
+
+    /** The clock and the wait of the re-probe's pace (A38); tests replace them with a clock that moves when told. */
+    interface Pace {
+
+        /** {@code System.nanoTime()} and {@code Object.wait(ms)}. */
+        Pace SYSTEM = new Pace() {
+            @Override
+            public long nanoTime() {
+                return System.nanoTime();
+            }
+
+            @Override
+            public void await(Object monitor, long ms) throws InterruptedException {
+                monitor.wait(ms);
+            }
+        };
+
+        /** A monotonic time in nanoseconds. */
+        long nanoTime();
+
+        /**
+         * Waits on {@code monitor}, whose lock the caller holds, at most {@code ms} or until it is notified; may
+         * return early (the caller reads the time again).
+         */
+        void await(Object monitor, long ms) throws InterruptedException;
     }
 
     /** The version from the filtered {@code web-module.properties}. */

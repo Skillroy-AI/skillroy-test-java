@@ -15,6 +15,8 @@ first, then the code. **Scope:** Phase 4 of `base-framework-design.md` ("Roadmap
 in-process SPI; decision B9). This file is the single source of truth for Phase 4 in the way `phase2-contracts.md` and
 `phase3-contracts.md` are for their phases: where it and the design overview (§3.8, §2.4, §2.6) or the research notes
 disagree on a Phase 4 detail, this file wins.
+The Phase 4.x amendments A35-A38 (2026-10-08; gaps 38, 45, 40 and 42) are §16, and their passages are marked in place
+"(4.x, A3n, built 2026-10-08)".
 
 **What it builds on.** The Phase 1 contract as built (with Phase 1.x), the Phase 2 and Phase 3 contracts as built,
 the design overview §3.8 (two paths, one SPI, the module and its two adapters), decision B9 (one SPI wrapping JCEF
@@ -322,6 +324,15 @@ public interface WebBrowser {
     CompletableFuture<BufferedImage> bitmap();
     /** The CDP target id of this browser, or null when unknown (CDP_TARGET_ID). */
     CompletableFuture<String> cdpTargetId();
+    /** (4.x, A37, built 2026-10-08) Reloads the main frame's document; completes once the reload was requested (the
+     *  new document's load is a LOAD_FINISHED through subscribe()). No capability flag. The default evaluates
+     *  location.reload() through evaluate() (location.reload(true) with ignoreCache, which only an adapter that
+     *  overrides honours), completes when that evaluation answers and fails as it fails; both built-in adapters
+     *  override it with their technology's own reload (§4.5). */
+    default CompletableFuture<Void> reload(boolean ignoreCache) { … }
+    /** (4.x, A37, built 2026-10-08) Where bitmap() comes from, which web.bitmap reports as its source; informational,
+     *  never null. The default is VENDOR; the built-in jcef adapter answers PROTOCOL. */
+    default BitmapSource bitmapSource() { return BitmapSource.VENDOR; }
 }
 
 public final class WebEval {                 // immutable value; builder
@@ -358,6 +369,8 @@ public interface WebInitScript extends WebSubscription {
 public enum WebCapability { EVALUATE, AWAIT_PROMISE, FRAMES, EVENTS_LOAD, EVENTS_CONSOLE, INIT_SCRIPT_DOCUMENT_START,
                             RESIZE, BITMAP, CDP_TARGET_ID, INPUT /* reserved */, RAW_PROTOCOL /* reserved */ }
 public enum WebRendering { WINDOWED, OFFSCREEN_LIGHTWEIGHT, OFFSCREEN_HEAVYWEIGHT, UNKNOWN }
+public enum BitmapSource { PROTOCOL /* a DevTools-protocol screenshot */,          // (4.x, A37, built 2026-10-08)
+                           VENDOR /* the technology's own bitmap, or anything else: the default */ }
 public final class CdpEndpoint {
     public CdpEndpoint(String host, int port, String engineLabel);   // port 1..65535: port 0 means none, not reported
     public String host();  public int port();
@@ -407,7 +420,8 @@ Differences from the research note's proposal, all additions: `nativeId()`, `enu
 cleared on detach, so the operation has to exist); `cdpTargetId()` is a future (JCEF answers it through a protocol
 call); `WebInitScript.timing()` instead of an untyped subscription (the primitive records which timing it got);
 `CdpEndpoint.engineLabel()` (JxBrowser has one port per engine); typed exceptions for script errors and dead frames;
-`enumerationNotes()` (added during the build).
+`enumerationNotes()` (added during the build); `reload(ignoreCache)` and `bitmapSource()`, with the enum `BitmapSource`
+(4.x, A37, built 2026-10-08: default methods, §16.3).
 
 **As built (2026-10-07): what the SPI's Javadoc fixes beyond the block** (the shapes are pinned by `WebSpiShapeTest`,
 which also checks that no signature names a type outside `java.*` and the agent API; the adapters, the module and the
@@ -439,10 +453,23 @@ kit follow these rules):
   answers `UNAVAILABLE("the adapter was detached")`, `browsers()` is empty, every call still in progress fails with
   that message and the adapter's threads end for good (§2.4), so that a re-probe racing an uninstall cannot bring it
   back (§4.1).
-- *Not in the SPI.* `web.reload` and the bitmap's `source` need more than `WebBrowser` offers: the built-in adapters'
-  handles also implement the module-internal `BrowserExtras` (`reload(ignoreCache)`, `bitmapSource()`); a handle of a
-  third-party adapter is reloaded with `location.reload()` through `evaluate`, and its bitmap is reported as
-  `source: "VENDOR"` (D67; an SPI default method is a later amendment).
+- *Reload and the bitmap's source* (4.x, A37, built 2026-10-08, §16.3; until then *not in the SPI*: `web.reload` and
+  the bitmap's `source` needed more than `WebBrowser` offered, the built-in adapters' handles also implemented the
+  module-internal `BrowserExtras` (`reload(ignoreCache)`, `bitmapSource()`), and the module reloaded a handle of a
+  third-party adapter with `location.reload()` through `evaluate` and reported its bitmap as `source: "VENDOR"`, D67).
+  `reload(ignoreCache)` and `bitmapSource()` are default methods of `WebBrowser`, so an adapter built against the
+  Phase 4 SPI links and runs unchanged, with the defaults. `reload` completes once the reload was requested, not when
+  the new document has loaded (that is a `LOAD_FINISHED` through `subscribe`), and names no capability flag. Its
+  default evaluates `location.reload()` in the main frame through `evaluate`, with `WebEval`'s default timeout
+  (`location.reload(true)` when `ignoreCache` is set: a non-standard argument that Chromium ignores, so only an adapter
+  that overrides the method honours `ignoreCache`), completes when that evaluation answers and fails as it fails
+  (without `EVALUATE` with `UnsupportedOperationException`, on a closed browser with `IllegalStateException`; an
+  `evaluate` that throws fails the future instead), and cancelling the returned future cancels the evaluation. A reload
+  by the page's own script is a navigation the page starts, which a technology may refuse (Chromium refuses it for a
+  `data:` document, §10.1 item 5) and which a frozen page never makes, so an adapter whose technology can reload from
+  outside the page overrides the method; both built-in adapters do (§4.5). `bitmapSource()` answers from what the
+  adapter knows, never null: `PROTOCOL` for a DevTools-protocol screenshot, `VENDOR` (the default) for the
+  technology's own bitmap or anything else.
 
 ---
 
@@ -476,7 +503,15 @@ reason), the module runs a full cycle: every probe, the index rebuilt, the capab
 technology is not present at all ("not present": its gate class cannot be found from the host's loader) is probed
 again only on reprobe. Coalesced means one re-probe queued or running at a time; a queued one older than 30 s (a post
 that the core's broker dropped when its pool was full) no longer holds the next one back. No rate limit beyond that is
-built (the review proposed one a second; §13).
+built (the review proposed one a second; §13). (4.x, A38, built 2026-10-08, §16.4: at most once a second, and no event
+dropped. Every `window.opened` marks a re-probe pending and posts a worker unless one is queued or running. The worker
+loops while a re-probe is pending: when some adapter is a candidate (the three kinds above, or the set of adapters
+changed) and the previous re-probe cycle started less than 1 s ago, it first waits out the rest of that second on its
+own agent worker (at most 1 s, on a monitor that uninstall wakes), then clears the mark and runs the cycle. An event
+that arrives during the wait is covered by that cycle; one that arrives while the cycle runs marks it pending again,
+and the worker runs one further cycle, a second after the start of the one before. Without a candidate the worker
+neither waits nor probes. The worker renews its queued time every round, so that a long burst is not taken for a lost
+post. The readiness cycle and a reprobe are not paced.)
 
 **Uninstall** (as built) never throws: the event bridge and the probe cycle are closed first, so that a re-probe still
 running can neither subscribe a browser nor bring a detached adapter back (review 2026-10-07: the bridge cancels every
@@ -534,10 +569,10 @@ browser that has closed, is `STALE_HANDLE`; a ref of something other than a brow
 | `web.dom.fill` (mutating) | as click, plus `text: string`, `clear?: bool (true)`, `enter?: bool (false)` | `{matched, filled: {tag, type, id?}, typed: int}`; the library sets the value through the native setter so that framework bindings see it, then dispatches `input` and `change`, and `Enter` as a `keydown`/`keyup` pair when asked. As built further `INVALID_PARAMS` reasons: `not fillable` (with `tag` and `type`: checkbox, radio, file, buttons, an element that takes no text), `not editable` (disabled or read-only), `value rejected` (the element turned a non-empty value into an empty one, as a number field does with letters; the previous value is restored and no event fired), `no such option` (a `select`, filled by option value, else by label); `typed` counts UTF-16 code units; the text never appears in error data | `WORKER`, 10000, `web.evaluate` |
 | `web.dispatchEvent` (mutating) | browser selection, `frame?`, `name: string`, `detail?: any`, `target?: selector (default window)` | `{dispatched: true}`: `target.dispatchEvent(new CustomEvent(name, {detail, bubbles: true}))` (as built `target` may also be `document`) | `WORKER`, 10000, `web.evaluate` |
 | `web.tap` (mutating) | browser selection, `patterns: [string]` (event names or globs `app.*`), `target?: "window"\|"document"` | `{installed: int, timing: DOCUMENT_START\|DOCUMENT_LOADED}`: an init script that listens for the named events on every new document and publishes each as `web.tap` (§4.3); re-installing replaces the patterns. As built the same installer also runs in the current document; `installed` counts distinct patterns; `patterns: []` drains what is buffered, removes the tap and cancels the init script | `WORKER`, 10000, `web.events` |
-| `web.waitFlag` | browser selection, `frame?`, `expression: string` (truthy means ready), `timeoutMs?: int (0 = the call's budget, at most 600000)`, `pollMs?: int (50, min 20)` | `{ready: bool, ms, polls}`: evaluated on the agent worker until truthy or the budget ends; a step with `sync: EVENT` on `web.ready` pairs with it (§6.3). Answers `ready:false` before the dispatcher's `TIMEOUT`. As built: `lastError` (the last poll's error) when not ready; at most one poll is outstanding (D63): a poll is sent with the rest of the budget as its bound and awaited in slices of max(2 s, 4 x `pollMs`), a poll the page has not answered is awaited again, not abandoned and replaced, and one still pending when the wait ends is cancelled; `polls` counts the polls sent; a load of the browser wakes the wait early; a flag that turns ready publishes `web.ready {signal: FLAG}`. The dispatcher caps every call at 120 s, so the base verb accepts at most 119000 (§7.1) | `WORKER`, 10000, `web.evaluate`; not mutating |
+| `web.waitFlag` | browser selection, `frame?`, `expression: string` (truthy means ready), `timeoutMs?: int (0 = the call's budget, at most 600000)`, `pollMs?: int (50, min 20)` | `{ready: bool, ms, polls}`: evaluated on the agent worker until truthy or the budget ends; a step with `sync: EVENT` on `web.ready` pairs with it (§6.3). Answers `ready:false` before the dispatcher's `TIMEOUT`. As built: `lastError` (the last poll's error) when not ready (4.x, A35, built 2026-10-08: every poll is the shared guard `WebLib.flagExpression` of §4.6, on both paths; a poll whose expression throws is not ready and the wait goes on; `lastError` is the first line of the last poll's error, at most 2000 characters, present only when that poll threw; an expression that does not compile is `SCRIPT_ERROR` at once, `data {browser, message, stack: ""}`; a blank one `INVALID_PARAMS`; §16.1); at most one poll is outstanding (D63): a poll is sent with the rest of the budget as its bound and awaited in slices of max(2 s, 4 x `pollMs`), a poll the page has not answered is awaited again, not abandoned and replaced, and one still pending when the wait ends is cancelled; `polls` counts the polls sent; a load of the browser wakes the wait early; a flag that turns ready publishes `web.ready {signal: FLAG}`. The dispatcher caps every call at 120 s, so the base verb accepts at most 119000 (§7.1) | `WORKER`, 10000, `web.evaluate`; not mutating |
 | `web.resize` (mutating) | browser selection, `width: int`, `height: int` (1..16384), or `clear: true` | `{applied: "OVERRIDE"\|"COMPONENT", viewport: {w,h}}`: the adapter's `resize` (a protocol-level override on JCEF, `Browser.resize` on JxBrowser); `COMPONENT` is reserved for a later Swing-bounds variant and is not built. As built `clear: true` removes the override; the CDP path sets the same protocol override on its own session (§5.2, D64) | `WORKER`, 10000, `web.resize` |
-| `web.bitmap` | browser selection, `maxWidth?: int (4096)` | `{format: "png", width, height, base64, source: "PROTOCOL"\|"VENDOR"}`; scaled down keeping the aspect ratio above `maxWidth`. As built the scaling is a box filter in plain Java, one row of pixels at a time and without `Graphics2D`, so it starts no toolkit, AppKit or Java2D thread (review 2026-10-07: the first build's `Graphics2D` scaling started them in a target without a user interface); `source` is `PROTOCOL` for the built-in JCEF adapter and `VENDOR` for JxBrowser and for a third-party adapter (D67) | `WORKER`, 20000, `web.bitmap`; not mutating |
-| `web.reload` (mutating) | browser selection, `ignoreCache?: bool (false)` | `{reloaded: true}`: `CefBrowser.reload()` / `Navigation.reload()` through the adapter (as built through the module-internal `BrowserExtras` of the built-in adapters; a third-party browser is reloaded with `location.reload()` through `evaluate`, D67). Exists for frozen-target recovery (§5.3) and for a pack's own recover; no base verb emits it | `WORKER`, 10000, `web.browsers` |
+| `web.bitmap` | browser selection, `maxWidth?: int (4096)` | `{format: "png", width, height, base64, source: "PROTOCOL"\|"VENDOR"}`; scaled down keeping the aspect ratio above `maxWidth`. As built the scaling is a box filter in plain Java, one row of pixels at a time and without `Graphics2D`, so it starts no toolkit, AppKit or Java2D thread (review 2026-10-07: the first build's `Graphics2D` scaling started them in a target without a user interface); `source` is `PROTOCOL` for the built-in JCEF adapter and `VENDOR` for JxBrowser and for a third-party adapter (D67; 4.x, A37, built 2026-10-08: the handle's `bitmapSource()`, §3, whose default is `VENDOR`; `VENDOR` also when an adapter's own answer is null or throws) | `WORKER`, 20000, `web.bitmap`; not mutating |
+| `web.reload` (mutating) | browser selection, `ignoreCache?: bool (false)` | `{reloaded: true}`: `CefBrowser.reload()` / `Navigation.reload()` through the adapter (as built through the module-internal `BrowserExtras` of the built-in adapters; a third-party browser is reloaded with `location.reload()` through `evaluate`, D67; 4.x, A37, built 2026-10-08: through the SPI's `WebBrowser.reload(ignoreCache)` for every browser, §3, which the built-in adapters override with their technology's reload and whose default, for an adapter that does not, is that same `location.reload()` through `evaluate`; the call answers once the reload was requested, and a failure maps as every adapter failure does, below the table). Exists for frozen-target recovery (§5.3) and for a pack's own recover; no base verb emits it | `WORKER`, 10000, `web.browsers` |
 | `web.cdp.status` | – | `{endpoints:[{host, port, engineLabel, adapter}], browsers:[{ref, cdpTargetId?}]}`: the configured endpoints the adapters report (JCEF: from the private `settings_` of `CefApp`, else from `<cache dir>/DevToolsActivePort` when the cache path is known, else none; JxBrowser: `engine().options().remoteDebuggingPort()`); nothing is probed over the network by the agent. As built the `DevToolsActivePort` file counts only when it is not older than the JVM's start, less 2 s for coarse file times (an older file is a previous run's; review 2026-10-07, D65), and `browsers` carries the kept target ids | `WORKER`, 5000, `web.browsers`; not mutating |
 
 Every `web.*` call runs on `WORKER`; the adapter's futures are awaited with the call's remaining budget less 100 ms; a
@@ -565,12 +600,16 @@ its own ancestor, so a value shared without a cycle is written twice; 1 MiB is 1
 inner JSON text, cut without splitting a surrogate pair; the wrapper is `WebLib.wrap(expression, awaitPromise)`, the
 expression embedded once and verbatim, with an `async` wrapper for `awaitPromise`, §4.6.)
 
-**`web.waitFlag` on the two paths** (as built 2026-10-07; an open gap, §13). The paths differ for an expression that
-throws. The agent counts a poll that throws as not ready, keeps polling until its time is up and answers `ready: false`
-with the last poll's error in `lastError`, so that the base `webWaitFlag` ends `FAIL` / `SYNC_TIMEOUT` (§8.1). The CDP
-path ends the wait at the first poll that throws, with `SCRIPT_ERROR` (§5.2), which a step reports as `FAIL` /
-`ASSERTION`. A flag that throws until the page is ready (a property read of an element that does not exist yet)
-therefore waits on the agent and fails at once over CDP; one behaviour for both paths is still to be chosen.
+**`web.waitFlag` on the two paths** (as built 2026-10-07 an open gap, §13; one behaviour since (4.x, A35, built
+2026-10-08), §16.1). Both paths poll the same page-side guard, `WebLib.flagExpression(expression)` (§4.6), which
+compiles the expression on its own before it runs it. A poll whose expression throws at run time counts as not ready,
+and polling goes on until the flag is truthy or the wait's time is up; a wait that ends not ready answers
+`ready: false`, with the last poll's error in `lastError` when that poll threw, so that the base `webWaitFlag` ends
+`FAIL` / `SYNC_TIMEOUT` (§8.1) on either path. An expression that does not compile can never become ready: it is
+`SCRIPT_ERROR` at once on both paths, which a step reports as `FAIL` / `ASSERTION`. A flag that throws until the page
+is ready (a property read of an element that does not exist yet) therefore waits on either path. (As built
+2026-10-07 the CDP path ended the wait at the first poll that threw, with `SCRIPT_ERROR`, and the agent polled on
+through a compile error until its time was up.)
 
 ### 4.3 Events
 
@@ -684,7 +723,9 @@ everything by reflection through the host's loader:
   `contextId` of a frame is its default context (`auxData.frameId`), forgotten on `executionContextsCleared`, on a
   new client, on `executionContextDestroyed` and on `frameDetached`; for a frame not yet known the adapter waits for
   `Runtime.enable` to replay the live contexts, then asks `Page.getFrameTree` (a gone frame is
-  `WebFrameGoneException`); `web.reload` uses `reload()` / `reloadIgnoreCache()` through `BrowserExtras` (D67); the
+  `WebFrameGoneException`); `web.reload` uses `reload()` / `reloadIgnoreCache()` through `BrowserExtras` (D67; 4.x, A37,
+  built 2026-10-08: through the handle's override of the SPI's `reload`, which sends `Page.reload {ignoreCache}` on its
+  channel where the descriptor's `reload` roles do not resolve, and `bitmapSource()` answers `PROTOCOL`); the
   target id, once read, is kept with the main frame's id, so that a frozen page still reports it. After the kit's run
   against real JCEF (§10.3): `bitmap()` of a browser whose component is missing or not showing is refused at once with
   `UnsupportedOperationException` (`CAPABILITY_UNAVAILABLE`, §13), because Chromium renders nothing for it (windowed the
@@ -768,7 +809,10 @@ everything by reflection through the host's loader:
   accessor in flight (a hung call is waited for, not repeated); enumeration is bounded at 2 s, one at a time, and on a
   timeout keeps the browsers found before and reports `DEGRADED`; `detach()`'s vendor calls run within its own bound.
   Observer and callback registration (`on`, `set`) and `cdpEndpoints` still call the vendor on the calling worker
-  without a bound of their own: whether those members can block needs the product (§13).)
+  without a bound of their own: whether those members can block needs the product (§13).) (4.x, A37, built 2026-10-08:
+  `reload` = `navigation().reload()` / `reloadIgnoringCache()` (the descriptor's `reload` roles) on the adapter's own
+  threads, and where those roles do not resolve the SPI's default, `location.reload()` through the page, where the
+  handle refused with `UnsupportedOperationException` before; `bitmapSource()` = `VENDOR`.)
 - *Rules.* `licenseKey()` is never read; no `set(...)` callback by default; `dispatch(...)` (input) is not used
   (reserved `INPUT`); no DOM API of the vendor is used (browser-spi §F22). (As built: the descriptor has no
   `licenseKey` role at all. Three member names could not be confirmed without the product: `getChromeVersion`
@@ -854,6 +898,20 @@ The Java side, `WebLib`: `source()`, `hash()`, `SLOT`, `installExpression()`, `c
 constants `FUNCTIONS`, `ERROR_KEY`, `MAX_JSON_CHARS` (1 MiB), `MAX_DETAIL_CHARS` (64 KiB) and `MAX_BUFFERED_EVENTS`
 (1000).
 
+(4.x, A35, built 2026-10-08: also `flagExpression(expression)`, the guard of `web.waitFlag` that both paths poll
+(§4.2, §5.2, §16.1), `errorLine(text)` and `MAX_ERROR_CHARS` (2000). The guard is one function expression invoked in
+place with the expression as its argument, a JSON string and never code of the guard's own, so the guard always
+compiles and never throws. It compiles the expression alone, as the body `return (<expression>\n)` of a
+`new Function` (trailing semicolons and whitespace dropped as `wrap` drops them; the newline ends a trailing line
+comment), calls the result with the window as `this`, and evaluates to `{ready: true}`, `{ready: false}`,
+`{ready: false, error: <line>}` when the call threw, or `{ready: false, compileError: <line>}` when compiling threw (a
+`SyntaxError`; or the `EvalError` of a page whose content security policy forbids compiling text, where the channel
+does not lift that rule for its own evaluations, §16.1). `<line>` is `"<name>: <message>"` for an error object (the
+name `Error` when it has none) and `String(value)` for any other thrown value, up to its first CR, LF, U+2028 or
+U+2029, cut at 2000 UTF-16 code units without splitting a surrogate pair; `errorLine` applies the same cut in Java to
+an error text that does not come from the guard. The guard needs no library and installs none: compiling text is the
+guard's, never the library's, whose text calls no `eval` and no `Function`, as the textual checks below require.)
+
 `WebLib.source()` returns the text; `WebLib.hash()` its SHA-256, which both paths record in `run.jsonl` (§8.2) so
 that a difference between the two paths can be traced to a library version. Tests (as built 2026-10-07): the JDK has
 no JavaScript engine and none may be added, so no test of the normal build runs the library's code, neither in
@@ -863,7 +921,10 @@ resource, a stable hash, the header, one strict function expression invoked in p
 textual check with a self-test of its own), the constants equal to the library's, every expression builder and
 `errorOf`. The behaviour was checked outside the build against jsdom and a Chromium 148 headless shell over CDP, with
 byte-identical aria snapshots of the same page; inside the build only the kit against real JCEF and the end-to-end
-acceptance (§10.3, §12.2), both under the profile `jcef` with a display, run the library in a browser.
+acceptance (§10.3, §12.2), both under the profile `jcef` with a display, run the library in a browser. (4.x, A35,
+built 2026-10-08: `WebLibTest` checks the text of the guard of `web.waitFlag` and `errorLine` as well; the guard
+itself ran outside the build in Node 24, in a Chromium headless shell over CDP and under Playwright 1.63, and inside
+it only in the end-to-end acceptance's polls, §16.1.)
 
 ### 4.7 Descriptors and the reflection plumbing (`…agent.web.reflect`)
 
@@ -984,7 +1045,7 @@ the agent's: enumeration and endpoints are facts of the target), with the same p
 | `web.evaluate` | the text of `WebLib.wrap(expression, awaitPromise)` on the page, or on the frame a frame key maps to (below), evaluated through an indirect `eval` inside a page-side `try`/`catch`, so that a thrown error and a syntax error in the expression are both `SCRIPT_ERROR`, caught in the page rather than parsed from Playwright's messages (as built 2026-10-07; the specification wrote `page.evaluate(WebLib.wrap(expression))`, with frames mapped through `Page.getFrameTree` ids = Playwright's frame ids) |
 | `web.ariaSnapshot`, `web.dom.text`, `web.dom.click`, `web.dom.fill`, `web.dispatchEvent` | the same library functions through `page.evaluate` / `frame.evaluate`, so that both paths return byte-identical shapes for the same page state. `web.dom.click` and `web.dom.fill` additionally wait for Playwright's actionability of the matched element (`locator.waitFor(VISIBLE)`, bounded by the call's budget) before the library acts, and record `fidelity: "DOM"` as the agent does. As built the locator is `frame.locator("css=" + selector)` or `getByRole(role, {name, exact})` (a `Pattern` for a regular-expression name), `.nth(index)`, then `waitFor(VISIBLE)`, or `ATTACHED` with `expectVisible: false`, bounded by the budget less a reserve of at most 1 s; a wait that times out, a strict-mode violation or a selector Playwright refuses is not an error: the library then answers in its own terms |
 | `web.tap` | the selected browser's page only, as the agent taps one browser (as built 2026-10-07; the specification tapped the whole context with `context.addInitScript`): `page.addInitScript(WebLib.tapInstaller(patterns, target))` plus the same tap in the page's current document (`timing: DOCUMENT_START`); `patterns: []` removes both. No `page.exposeBinding`: the path's poller drains the tapped pages every 100 ms from `open` to `close` and publishes nothing to the agent's bus; instead the executor's event wait of §6.3 reads the path's own event list. §4.3's rule of one outstanding drain holds (review 2026-10-07, D63): the drain operation itself appends the events it took (`web.tap`, then `web.ready {signal: TAP}`) to the path's events, also after its 1 s bound, and no further drain, nor any other operation, is sent to the attach meanwhile |
-| `web.waitFlag` | `frame.waitForFunction(<the expression in a page-side guard>, null, new WaitForFunctionOptions().setPollingInterval(pollMs).setTimeout(…))` on the selected frame, the timeout being `timeoutMs` or the budget, at most what is left less 250 ms (as built; the specification wrote `page.waitForFunction(expression, …)`); `polls` is `1 + ms / pollMs` (Playwright does not count them); a throwing expression is `SCRIPT_ERROR`; a flag that turns ready appends `web.ready {signal: FLAG}` to the path's events |
+| `web.waitFlag` | `frame.waitForFunction(<the expression in a page-side guard>, null, new WaitForFunctionOptions().setPollingInterval(pollMs).setTimeout(…))` on the selected frame, the timeout being `timeoutMs` or the budget, at most what is left less 250 ms (as built; the specification wrote `page.waitForFunction(expression, …)`); `polls` is `1 + ms / pollMs` (Playwright does not count them); a throwing expression was `SCRIPT_ERROR` until A35; a flag that turns ready appends `web.ready {signal: FLAG}` to the path's events. (4.x, A35, built 2026-10-08: the page-side guard is the agent's, `WebLib.flagExpression` of §4.6, in a wrapper (`Scripts.flagWait`) that returns the guard's object when the flag is ready or the expression did not compile, both of which end the wait, and `false` otherwise, so that Playwright polls on through a poll that threw; a `compileError` is `SCRIPT_ERROR` at once with `data {browser, message, stack: ""}`; after a wait that timed out, the path makes one more poll, the last, with the guard itself through `waitForFunction` (its first evaluation ends the call; `evaluate` has no bound of its own), bounded by 1000 ms and by what is left of the call less 100 ms: its `error` is the result's `lastError`, a `ready: true` makes the flag ready after all, and a last poll that does not answer in time, or fails otherwise, leaves `lastError` out (a page that closed is `STALE_HANDLE`); one operation is outstanding at a time, D63; a blank expression is `INVALID_PARAMS`; §16.1) |
 | `web.resize` | `Emulation.setDeviceMetricsOverride {width, height, deviceScaleFactor: 0, mobile: false}` on the path's own `CDPSession` of the page, the in-process adapter's protocol call; `clear: true` sends `Emulation.clearDeviceMetricsOverride` on that same session and reads the size back (`viewport` omitted when unreadable); `close()` removes every override the path left in place (as built 2026-10-07 after the review, D64: the specified `page.setViewportSize(width, height)` cannot be removed, so `clear: true` pinned the original size, Chromium ignores a removal sent on another session, and an override outlives the session and the connection that set it) |
 | `web.bitmap` | `page.screenshot()` (`source: "PROTOCOL"`); as built scaled above `maxWidth` from the PNG itself, without a `Graphics2D` |
 
@@ -1008,17 +1069,21 @@ before `open` or after `close`.
 
 **Errors, sequence numbers, events** (as built 2026-10-07). A call's failures are `AgentRpcException`s with the
 agent's codes: a library error object as its code with its data, a thrown script as `SCRIPT_ERROR {browser, message,
-stack}` (`message` the first line of the error's description, at most 2000 characters, `stack` at most 8000), the
-call's budget passing as `TIMEOUT`, a page that closed as `STALE_HANDLE` ("the browser closed during the step"), any
-other Playwright failure as `INTERNAL_ERROR`; parameters are checked before the agent is asked anything
-(`INVALID_PARAMS` with `data.param`). The budget is `CallOptions.timeoutMs()`, else the default of §4.2, at most 120 s
-(600 s for `web.waitFlag`). A read whose execution context a navigation destroyed is evaluated once more; a mutating
-call never is. Argument values are never logged. A result's `seqBefore` and `seqAfter` are the agent's `lastSeq`,
-read with `evt.query` just before and after the primitive, and its `events` list is empty; the path's own events
-(`web.tap`, `web.ready` with `TAP`, `FLAG` or `LOAD`, and `web.load`, which the path publishes from Playwright's page
-`load` and main-frame `framenavigated` events) are numbered by a sequence of their own and read with `eventsSince`
-(§6.3). The executor reads the agent's sequence itself as well (§6.3), so a call the path serves makes three
-`evt.query` calls; the path's two are a redundancy to remove later.
+stack}` (`message` the first line of the error's description, at most 2000 characters, `stack` at most 8000; (4.x, A35,
+built 2026-10-08) a poll of `web.waitFlag` that throws is no error but a poll that is not ready, and only an expression
+that does not compile is its `SCRIPT_ERROR`, above), the call's budget passing as `TIMEOUT`, a page that closed as
+`STALE_HANDLE` ("the browser closed during the step"), any other Playwright failure as `INTERNAL_ERROR`; parameters are
+checked before the agent is asked anything (`INVALID_PARAMS` with `data.param`). The budget is
+`CallOptions.timeoutMs()`, else the default of §4.2, at most 120 s (600 s for `web.waitFlag`). A read whose execution
+context a navigation destroyed is evaluated once more; a mutating call never is. Argument values are never logged. A
+result's `seqBefore` and `seqAfter` were the agent's `lastSeq`, read with `evt.query` just before and after the
+primitive, and its `events` list is empty; the path's own events (`web.tap`, `web.ready` with `TAP`, `FLAG` or `LOAD`,
+and `web.load`, which the path publishes from Playwright's page `load` and main-frame `framenavigated` events) are
+numbered by a sequence of their own and read with `eventsSince` (§6.3). The executor reads the agent's sequence itself
+as well (§6.3), so a call the path served made three `evt.query` calls, the path's two a redundancy. (4.x, A36, built
+2026-10-08: the path reads no agent sequence; `seqBefore` and `seqAfter` are 0 (`CdpWebPath.NOT_READ`), and the
+executor writes the sequence it read before the call in place of both, §6.3, §16.2; a served call makes one
+`evt.query`, the executor's, and an agent whose `evt.query` fails no longer makes the path refuse a call.)
 
 ### 5.3 Frozen targets
 
@@ -1119,7 +1184,9 @@ public interface WebRunContext {
 (As built 2026-10-07: the specification's `RunContext` is `WebRunContext`; `openInfo()`, `saveTrace(Path)`,
 `WebSettings.trace` and `WebPathOpenException` were added during the build, and `FrozenTargetPolicy` lives here, not
 in `skillroy-cdp`. `AgentWebPath`, id `agent`, is public in the same package: it forwards every `web.*` call to the
-agent, has no events of its own, and its `open` returns null.)
+agent, has no events of its own, and its `open` returns null.) (4.x, A36, built 2026-10-08: a non-agent path need not
+read the agent's sequence for the `seq` of its result; the CDP path leaves both numbers 0, and the executor writes the
+sequence it read before the call in place of both, §6.3, §16.2. `WebPath.call` keeps its signature.)
 
 Selection per run (step 1a of the run sequence, P1 §8.5, after the capability check and before pre-flight), only
 when the plan has at least one `web.*` call:
@@ -1188,7 +1255,10 @@ it is published (§4.3). For the base web verbs:
   `SYNC_TIMEOUT`; `webResize` compiles to `SETTLE` and takes `await:` too; `webTap` compiles to `NONE`.)
 - `webWaitFlag` compiles to a `web.waitFlag` call with `sync: NONE` (the primitive itself waits, on the agent or
   on the CDP path). (As built: with `timeoutMs` the call's timeout is one second longer, without it the primitive waits
-  for the step's timeout; a result that is not `ready: true` is `FAIL` / `SYNC_TIMEOUT`, §8.1.)
+  for the step's timeout; a result that is not `ready: true` is `FAIL` / `SYNC_TIMEOUT`, §8.1.) (4.x, A35, built
+  2026-10-08: alike on both paths, a flag whose expression throws on every poll included: the failure's detail carries
+  the result as `waitFlag`, `lastError` included, and the message ends with the last error; an expression that does
+  not compile is `SCRIPT_ERROR`, `FAIL` / `ASSERTION`; §16.1.)
 - on the CDP path, waits on `web.*` topics are served by `WebPath.eventsSince` (the path's own events) **and** the
   agent's bus; the first matching event from either source ends the wait, so a scenario does not know which path ran.
 
@@ -1197,7 +1267,11 @@ topics (`EVENT`, `ACK` and `READY` waits, and `waitFor`) reads the path's `event
 100 ms slices of the agent's wait (no sleeper; bounded by the clock), and matches by text as the agent does. Before a
 call the path serves, the executor reads the agent's `lastSeq` (`evt.query`) and the highest sequence number of the
 path's events, and a wait after the call starts from both; the sequence numbers in a non-agent path's result are
-never used, and only the agent's are noted as seen. The `sync` record gains `pathSince` and `source` (`cdp` or
+never used, and only the agent's are noted as seen. (4.x, A36, built 2026-10-08: that read is the only one, the path
+reading none (§5.2); its number replaces both sequence numbers of the path's result before the result is used or
+recorded, so that the `call` record's `seq` is `{before: n, after: n}` in the agent's numbering; a read the executor
+makes on its own through the path (a fact, the surface, evidence) reads no sequence and takes the highest one the run
+has seen, as before; §16.2.) The `sync` record gains `pathSince` and `source` (`cdp` or
 `agent`), and its `eventSeq` is in the path's numbering when `source` is the path; a `waitFor` that a path event
 ended is a `call` record with `eventSource` and thread `controller`. On the agent path waits are unchanged.
 
@@ -1326,7 +1400,10 @@ were rewritten (only `planVersion` changed, to 4; `packVersion` stays `0.3.0`) a
 - As built: the failures of a call the CDP path served arrive with the agent's codes and map exactly as the agent's
   do. A base `webWaitFlag` whose result is not `ready: true` is `FAIL` / `SYNC_TIMEOUT` ("webWaitFlag: the flag did
   not turn true within <ms> ms: <expression>"); a raw `call` of `web.waitFlag` is not checked. The trailing settle of
-  an awaited web verb is checked as in A32.
+  an awaited web verb is checked as in A32. (4.x, A35, built 2026-10-08: the same on both paths, a flag whose
+  expression throws on every poll included; with a `lastError` the message ends " (last error: <lastError>)", the
+  expression and the last error each cut at 200 characters in the message, and the detail carries the whole result as
+  `waitFlag`; an expression that does not compile is `SCRIPT_ERROR`, `FAIL` / `ASSERTION`, on both paths; §16.1.)
 - No new `FailureKind` and no new `Status`.
 
 ### 8.2 `run.jsonl`
@@ -1347,7 +1424,9 @@ error}`, or `{skipped: true, reason: "secrets", error?}`, §6.4); `web.close` (`
 closing the path failed); `fact` (`{root: "web", browser, field: "text", ok: false, reason}`, a `text` the root left
 out, §6.2). In a `call` record `path` follows `primitive`, cleanup calls included; a `sync` record of a wait that read
 a path's events carries `pathSince` and `source`, and a `waitFor` that a path event ended is a `call` record with
-`eventSource` (§6.3); a web `evidence` record carries `path`.
+`eventSource` (§6.3); a web `evidence` record carries `path`. (4.x, A36, built 2026-10-08: the `seq` of a `call`
+record of a call a non-agent path served is the agent's sequence the executor read before the call, as both `before`
+and `after`; the record's shape is unchanged; §6.3, §16.2.)
 
 **`run --json`** (as built 2026-10-07): each result carries `web`, `{path, reason?, cdp?, libHash, policy, calls:
 [{step, index, primitive, path, ok}], fallbacks: [...]}`, masked, or null for a plan without web calls.
@@ -1513,7 +1592,13 @@ As built (2026-10-07):
   expression of the scenario's, keeps polling one that throws on the agent path, §4.2); these three end `FAIL` /
   `ASSERTION`. `cdp-without-port` (`web: {path: cdp}`, run against a launch without a port) ends `ERROR` /
   `PRECONDITION_FAILED` naming `web.cdp`, no step run; and, for §12.2 item 7, `fill-a-secret` fills a credential's
-  password into `#item` with `webFill`, then expects what cannot hold, so that the evidence is written.
+  password into `#item` with `webFill`, then expects what cannot hold, so that the evidence is written. (4.x, A35,
+  built 2026-10-08: `webWaitFlag` keeps polling an expression that throws on both paths now, and two negatives show
+  it, each in every launch, so over CDP with a port and through the agent without one: `flag-never-ready`
+  (`webWaitFlag` of `document.getElementById('due-date').value === '2026-10-31'`, a field the front page does not
+  have, with `timeoutMs: 1s`) ends `FAIL` / `SYNC_TIMEOUT` with the `TypeError` of its last poll as `lastError`, after
+  more than one poll; `flag-does-not-compile` (`webWaitFlag` of `document.title ===` with `timeoutMs: 60s`) ends
+  `FAIL` / `ASSERTION` with `SCRIPT_ERROR` and a `SyntaxError`, its call answered within 10 s; §16.1.)
 
 ---
 
@@ -1534,7 +1619,8 @@ item 10. The kit calls its protected `afterDetach()` right after `detach()`, whe
 their fake recorded (rule violations), so that a violation is charged to the test that made it. The pages are
 `main.html`, with a `data:`-URL iframe of `inner.html`, and `second.html`, beside `KitScripts`, `EdtWatchdog`,
 `RecordingClassLoader` and `ClassInitialisations`; the items are the test methods `item01…` to `item11…`, item 10 as
-two tests.) Its tests, one per rule and operation (browser-spi "Testing in public CI" item 1):
+two tests; 4.x, A37, built 2026-10-08: to `item12…`, thirteen tests.) Its tests, one per rule and operation
+(browser-spi "Testing in public CI" item 1):
 
 1. `probe` against a host that did not load the gate class is `UNAVAILABLE` and loads nothing (checked with a
    recording class loader); against a host that loaded and initialised the gate as the application does, and nothing
@@ -1574,8 +1660,14 @@ two tests.) Its tests, one per rule and operation (browser-spi "Testing in publi
     count the listeners registered with the technology itself, `vendorListenerCount(browser)`, the count after
     `detach()` is the count before the kit subscribed plus the application's listener, so what the adapter registered
     is gone on the technology's side too; the fake JCEF counts its client's listeners and the raw observers, the
-    JxBrowser fake the browser's observers);
-11. no enumerable global is left on `window` after any operation (`Object.keys(window)` before and after are equal).
+    JxBrowser fake the browser's observers; 4.x, A37, built 2026-10-08: the closed browser's `reload(false)` fails the
+    same way);
+11. no enumerable global is left on `window` after any operation (`Object.keys(window)` before and after are equal);
+12. (4.x, A37, built 2026-10-08) `reload` and the bitmap's source: `bitmapSource()` of the visible browser is
+    `PROTOCOL` or `VENDOR`; then, with `EVENTS_LOAD` (else the rest is skipped), `reload(false)` and then
+    `reload(true)`, each on a document of the main page that the kit has marked (a non-enumerable property set by
+    evaluation), complete within the bound and are each followed, within the bound, by a `LOAD_FINISHED` of that
+    browser's main frame, after which the marker is gone and the title is the page's (a new document of the same page).
 
 ### 10.2 The neutral fake (`skillroy-agent-web` tests, package `…agent.web.fake`)
 
@@ -1609,7 +1701,9 @@ walk's degraded answers. The kit runs against it (`JcefFakeKitTest`, every item 
 After the kit's run against real JCEF (§4.5), the fake has a descriptor for each channel: `fake-jcef.json`, without the
 `raw.*` roles, through which `JcefFakeKitTest` drives the client path, and `fake-jcef-raw.json`, with them, whose
 browsers answer every second call before its message id: the kit runs over that raw channel as well
-(`JcefFakeRawKitTest`, which also checks that no call reaches the client), beside `JcefRawChannelFakeTest`.
+(`JcefFakeRawKitTest`, which also checks that no call reaches the client), beside `JcefRawChannelFakeTest`. (4.x, A37,
+built 2026-10-08: the four runs of the kit against the fakes include item 12; the fake JCEF's `reload()` and the
+JxBrowser fake's `Navigation.reload()` load the fake page again, with its load events.)
 
 ### 10.3 Running the kit against JCEF
 
@@ -1666,6 +1760,10 @@ only be shown against real JCEF, so the kit's run in the final tree's Linux matr
 `subscribe()` wait above, init scripts added once per client (the review's N4) and kit item 5's judged console event
 (the reload by script the kit first used never happened on a `data:` page, which the first matrix round showed:
 Chromium refuses a renderer-initiated navigation of such a document; the kit now navigates through the fixture).
+(4.x, A37, built 2026-10-08: item 12 makes the kit thirteen tests. Against real JCEF it runs only in the Linux image
+under the profile `jcef`, in the web host's two kit executions, and it had not been run when A37 was built: the
+orchestrator's matrix runs it. `CefBrowser.reload()` of the web host's `data:` pages is what frozen-target recovery
+already used, §5.3.)
 
 ---
 
@@ -1758,7 +1856,9 @@ in `plan/`; that both are version 4, leave `web.path` at `auto`, name the pack a
 not require `web.cdp`; W1's calls, the tap's cleanup call and the awaited, captured click; that every web call of W2
 selects `{tag: back}` and that both roots appear in its expectations; that every call waits or is waited on; and that
 the five negative scenarios compile (`cdp-without-port` with `web.cdp` added to `requires`, `fill-a-secret` with the
-secret left a `$reference`). `WebHostPackTest` (6 tests): the pack is found through `ServiceLoader` and has no verbs;
+secret left a `$reference`; (4.x, A35, built 2026-10-08) seven with `flag-never-ready` and `flag-does-not-compile`,
+whose `web.waitFlag` calls carry the front page's `by`, the expression and their own `timeoutMs`, with sync `NONE`).
+`WebHostPackTest` (6 tests): the pack is found through `ServiceLoader` and has no verbs;
 its sync policy; the `webhost` root by tag with the status lines, by URL marker without tags (a failing status read left
 out), and a failing `web.browsers` failing the read; `recover` dispatches `webhost.reset` and settles.
 
@@ -1781,6 +1881,11 @@ a WebSocket server of its own), `CdpOptionsTest`, `ShapesTest`, `SelectionTest`,
 `CdpWebPathOpenTest`, `CdpWebPathCallTest` and `CdpWebPathServesTest` (Playwright replaced by `Proxy` fakes) and the
 guard `NoPlaywrightInUnitTestsTest`; in `skillroy-cli` `WebCommandsTest` (`caps`, the `web` object of `run --json`, the
 notes of `compile`) and in `skillroy-junit` `WebGlueTest`. The Java 8 test JVM legs are recorded in `../TODO.md`.
+(4.x, A37, built 2026-10-08: `WebBrowserDefaultsTest` in `skillroy-agent-api` for the two default methods of §3, and kit
+item 12; 4.x, A38, built 2026-10-08: `WindowOpenedPaceTest` in `skillroy-agent-web` for the pace of §4.1; §16.3,
+§16.4.)
+(4.x, A35, built 2026-10-08: and `WaitFlagGuardTest` in `skillroy-agent-web` and `CdpWaitFlagTest` in `skillroy-cdp`,
+§16.1.) (4.x, A36, built 2026-10-08: A36's tests are cases of `CdpWebPathCallTest` and `WebPathTest`, §16.2.)
 
 ### 12.2 End to end (needs a display and the profile: `ci/run-in-linux.sh … -Pjcef`)
 
@@ -1819,7 +1924,11 @@ each one is the id of a page target in `/json/list`.
    `{applied: OVERRIDE, viewport: {w: 1024, h: 768}}` either way.
 5. **Negative scenarios** (§9.3) end as stated; evidence of §6.4 is written for the failed ones: the aria JSON
    decodes and names the `Borrow` button, the PNG decodes with at least 8 colours; `web.path: cdp` without a port is
-   `PRECONDITION_FAILED` naming `web.cdp`.
+   `PRECONDITION_FAILED` naming `web.cdp`. (4.x, A35, built 2026-10-08: also `flag-never-ready`, `SYNC_TIMEOUT` with
+   "(last error: TypeError: " in the message, `ready: false`, a `TypeError` as `lastError` and at least two polls in
+   the detail's `waitFlag`, and the web evidence; and `flag-does-not-compile`, `ASSERTION` with `SCRIPT_ERROR` and
+   `SyntaxError` in the message and a `web.waitFlag` call record under 10 s; each on the launch's path, `cdp` with a
+   port and `agent` without one; written natively, where the acceptance cannot run, and left to the Linux image.)
 6. **Frozen target (the BS5 criterion, D53).** With the port: the test navigates the `back` browser to its
    `#freeze` fragment through `web.evaluate` (`location.hash = '#freeze'`), waits until the probe reports it
    unresponsive, then runs `CdpAttach.connect` **50 times** with the default policy: every attempt ends within
@@ -1933,22 +2042,27 @@ invisible** (JxBrowser; browser-spi §F23); **`web.dom.click` is a DOM click, no
 7); **`web.resize` cannot change a windowed JCEF browser's Swing bounds** (`applied: COMPONENT` is reserved).
 
 Recorded during the build (2026-10-07), for the gaps table: **the SPI has no reload and no bitmap source** (the
-built-in adapters use the module-internal `BrowserExtras`, D67; an SPI default method is a later amendment); **a JCEF
+built-in adapters use the module-internal `BrowserExtras`, D67; an SPI default method is a later amendment; closed by
+A37, 4.x, built 2026-10-08: two default methods, §16.3); **a JCEF
 older than 2024-01 is served on neither path** (no `getDevToolsClient`: the adapter is `UNAVAILABLE` and reports no
 endpoint, §4.5; serving it over CDP alone would need a further amendment); **three member names of the JxBrowser
 descriptor wait for a licence holder** (§4.5; the wall "A JxBrowser licence"); **windowed JCEF on a Java 8 target is
 still unverified** (§2.5); **a call the CDP path serves reads the agent's sequence three times** (§5.2; two of the
-reads are redundant); **a JVM killed while a traced CDP path is open leaves its owner-only trace directory** in the
+reads are redundant; (4.x, A36, built 2026-10-08) closed: one read, the executor's, §16.2); **a JVM killed while a
+traced CDP path is open leaves its owner-only trace directory** in the
 temporary directory (§6.4).
 
 Recorded when the kit and the end-to-end acceptance ran against real JCEF (2026-10-07), for the gaps table:
 **`web.waitFlag` answers an expression that throws differently on the two paths** (the agent polls on and answers
-`ready: false` with `lastError`, the CDP path fails at once with `SCRIPT_ERROR`; one behaviour is to be chosen, §4.2);
+`ready: false` with `lastError`, the CDP path fails at once with `SCRIPT_ERROR`; one behaviour is to be chosen, §4.2;
+(4.x, A35, built 2026-10-08) closed: the agent's on both paths, an expression that does not compile `SCRIPT_ERROR` at
+once on both, §16.1);
 **a hidden JCEF browser has no bitmap** (Chromium renders nothing for it, so the adapter refuses at once, as the SPI's
 Javadoc now allows and kit item 8 accepts, §3, §4.5, §10.3).
 
 Left open by the review's fix wave (2026-10-07), for the gaps table: **the re-probe after `window.opened` has no rate
-limit beyond its coalescing** (§4.1); **JxBrowser's observer and callback registration and `cdpEndpoints` call the
+limit beyond its coalescing** (§4.1; closed by A38, 4.x, built 2026-10-08: at most once a second, §16.4);
+**JxBrowser's observer and callback registration and `cdpEndpoints` call the
 vendor without a bound of their own** (§4.5; whether they can block needs the product). Choices of the fix wave that a
 later review may revisit: the 60 s bound of an outstanding drain (what a frozen page retains against the events a late
 answer still delivers, §4.3), the always-false `closed` key in `NOT_FOUND` entries (§4.2), and a late init-script
@@ -1976,14 +2090,14 @@ evening (`DECISIONS.md` B22).
 | D57 | `web.ready` is one topic with a `signal` field (`LOAD`, `TAP`, `FLAG`), published by the agent module | three topics | the step protocol already names `web.ready` as a ready topic (design §2.5); a pack's readiness list stays one entry |
 | D58 | Plan version 4; the reader accepts 1-4 | keep 3 and tolerate `web` | P2 D18 and P3 D41: one writer, and an older executor would run a plan with web verbs it cannot serve |
 | D59 | The trace (2026-10-07, review): the CDP path records it into a private temporary directory of its own (owner-only), deleted when the path closes and when `open` fails, never into the run's output directory; the executor decides at step 1a, from the plan and before the path opens, whether a step or cleanup call may announce a secret parameter, and then opens the path without tracing; `failure/web-trace.zip` is the only trace file a run keeps, recorded as saved only when the path wrote it (§6.4) | the run's output directory as Playwright's artifacts directory (the first build); stopping the trace inside the path at the first call that names `secretParams`; keeping the trace and relying on the secret mask | Playwright appends the live trace (page snapshots with the values of input fields, console text) to files in the directory it is given and never deletes them: a passing run left a typed password in clear in its output directory, and a later failing run's zip carried an earlier run's secrets; a stop inside the path never sees a non-web call whose value the application mirrors into a page; the mask cannot read a trace |
-| D60 | The re-probe after `window.opened` (2026-10-07, review): only the adapters whose technology is present but not yet loaded by the application, the registered adapters whose last probe was `UNAVAILABLE` and the adapters registered since the last cycle are probed again, cheaply; a full cycle runs only when one of their results changed; an absent technology waits for reprobe; one re-probe is queued or running at a time, and one queued for more than 30 s no longer holds the next back; no time-based rate limit (§4.1, §13) | a re-probe on the first `web.*` call after a `window.opened` (the specification); a full cycle, with the Swing walk, on every `window.opened` while any adapter is `UNAVAILABLE` (the first build) | the dispatcher refuses a `web.*` call whose capability is `UNAVAILABLE` before the module sees it, so the specified rule cannot work where it matters; the first build walked the Swing tree and probed technologies that cannot appear on every window and dialog that opened, unasked, while the executor timed and settled steps; a technology whose gate class the host's loader cannot even find does not appear on its own |
+| D60 | The re-probe after `window.opened` (2026-10-07, review): only the adapters whose technology is present but not yet loaded by the application, the registered adapters whose last probe was `UNAVAILABLE` and the adapters registered since the last cycle are probed again, cheaply; a full cycle runs only when one of their results changed; an absent technology waits for reprobe; one re-probe is queued or running at a time, and one queued for more than 30 s no longer holds the next back; no time-based rate limit (§4.1, §13). **Revised by A38 (4.x, built 2026-10-08, §16.4):** the re-probe runs at most once a second: within a second of the start of the last re-probe cycle the worker waits out the rest of that second on its agent worker before it probes, and an event that arrives while a cycle runs gets one further cycle, so no event is dropped and a burst costs at most one further cycle | a re-probe on the first `web.*` call after a `window.opened` (the specification); a full cycle, with the Swing walk, on every `window.opened` while any adapter is `UNAVAILABLE` (the first build) | the dispatcher refuses a `web.*` call whose capability is `UNAVAILABLE` before the module sees it, so the specified rule cannot work where it matters; the first build walked the Swing tree and probed technologies that cannot appear on every window and dialog that opened, unasked, while the executor timed and settled steps; a technology whose gate class the host's loader cannot even find does not appear on its own |
 | D61 | The probe's loading rule (2026-10-07, review): the technology's gate class must already be loaded by the host (asked without loading it); only then may the probe load and link the technology's other classes, and it initialises none of them (the gate's state read excepted); kit item 1 checks initialisation and that the probe stays within the technology's own packages (the fixture's optional `initialisedClasses` and `technologyPackages()`), and that nothing is loaded while the gate is absent (§3, §10.1) | "no class the host has not loaded" (the specification); a check that the classes the probe defines are the descriptor's own | looking members up links a class and loads further classes (superclasses, signature types, the classes its verified methods name), and a host has typically not loaded `CefDevToolsClient` before the agent's first call, so the specified rule would answer "JCEF older than 2024-01" for most applications; what the host needs is that no static initialiser of the technology runs and that a target without the technology is not touched; the specified check could not fail with either fake |
 | D62 | The JCEF re-send rule (2026-10-07, review): on the shared client a call is sent again at most once, only when it is one of the handle's own protocol reads (`Page.getFrameTree`, `Page.captureScreenshot`), its caller still waits, and the client refused it as closed (JCEF's "Client is closed" with the client's own `isClosed()` true: it was never sent); an evaluation is never sent again by the adapter, and a call that reached the page never; the raw channel (D69) sends nothing again; a client closed as soon as it is fetched (BS8) is fetched once more before the call is sent; reads made by evaluation are retried by the module after a navigation; init scripts are added once per client and removed on detach from every client they were added to, a removal that must follow a late answer sent from CEF's thread (§4.2, §4.5) | sending every call again whose failure message contains "closed" (the first build); a re-send of every read, judged by the adapter (the review's first wording); no re-send at all | Chromium answers a call in flight across a navigation with -32000 "Inspected target navigated or closed": the first build ran clicks twice, ran abandoned calls in the page after the caller's timeout and left a second init script on the application's client; the adapter cannot tell a read from a mutating script, so only the module, which knows its reads (D51), may retry one; without any re-send, the first call to a browser created as BS8 saw (its first client closed) fails |
 | D63 | One outstanding drain (2026-10-07, review): at most one tap drain per browser (agent) or page (CDP path) is outstanding; a drain that outlives the poller's bound is awaited and its events published when it answers, never discarded; the same holds for the polls of `web.waitFlag` (§4.3, §5.2) | abandoning a drain at the bound and sending another (the first build); a two-phase drain in the library (read, then acknowledge) | `drain()` empties the page's buffer, so an abandoned drain lost the events it took: a page that stayed busy for more than the bound right after firing made an `await` end in a wrong `SYNC_TIMEOUT` (reproduced against a real Chromium on both paths), and each abandoned 57 KB evaluation stayed queued in the application's DevTools client; a two-phase drain would change the shared library and both paths for no further gain |
 | D64 | The CDP path's viewport override (2026-10-07, review): `web.resize` is `Emulation.setDeviceMetricsOverride` on the path's own CDP session of the page, removed by `clear: true` and at close with `Emulation.clearDeviceMetricsOverride` on that session (§5.2) | Playwright's `setViewportSize` (the specification); a removal sent on another session | Playwright cannot remove its override, so `clear: true` pinned the original size, and an override outlives the session and the DevTools connection that set it, so the application's page kept the scenario's size after the run; Chromium ignores a removal from a session that did not set the override; the in-process adapter's protocol call gives both paths one behaviour |
 | D65 | The endpoint's ownership (2026-10-07, review): `open()` refuses an endpoint whose `/json/list` names none of the CDP target ids the agent reports in `web.cdp.status`, before any page is probed (no id reported: no check); the JCEF adapter counts a `DevToolsActivePort` file only when it is not older than the JVM's start, less 2 s (§4.5, §6.1) | trusting the configured endpoint; the target ids from a second agent call, `web.browsers`; no age check on the file | a stale `DevToolsActivePort` file in a persistent cache, or a configured port that another process held when CEF started, would attach the run to another browser and evaluate in its pages; the check costs nothing the probe does not already fetch; coarse file times (FAT 2 s, HFS+ 1 s) need the tolerance, and the JVM's start, not the agent's, because in `ATTACH` mode CEF starts first |
 | D66 | The floor of `web.browsers` (2026-10-07): while an adapter is present it is never worse than `DEGRADED` (a present adapter's `UNAVAILABLE` enumeration counts as `DEGRADED` with its reason) (§4.1, §4.4) | the worst enumeration state of the present adapters (the specification) | the dispatcher refuses a call whose capability is `UNAVAILABLE`, and `web.browsers` is the call that rebuilds the index: a browser that appeared after readiness would stay invisible until a reprobe |
-| D67 | `BrowserExtras` (2026-10-07): `web.reload` and the bitmap's `source` use a module-internal interface the built-in adapters' handles implement; a third-party browser is reloaded with `location.reload()` through `evaluate` and reports `source: "VENDOR"` (§3, §4.2) | `WebBrowser.reload(boolean)` and a bitmap-source accessor in the SPI now | the SPI had been built and pinned as §3 specified it before the need showed; a default method added later is source- and binary-compatible for every adapter; a reload through the technology works where the page cannot run a script, which frozen-target recovery needs from the built-in adapters |
+| D67 | `BrowserExtras` (2026-10-07): `web.reload` and the bitmap's `source` use a module-internal interface the built-in adapters' handles implement; a third-party browser is reloaded with `location.reload()` through `evaluate` and reports `source: "VENDOR"` (§3, §4.2). **Revised by A37 (4.x, built 2026-10-08, §16.3):** `WebBrowser` has both as default methods, `reload(ignoreCache)` (default: that `location.reload()` through `evaluate`) and `bitmapSource()` (default `VENDOR`, enum `BitmapSource`); the built-in adapters override them, the module calls them for every browser and `BrowserExtras` is deleted | `WebBrowser.reload(boolean)` and a bitmap-source accessor in the SPI now | the SPI had been built and pinned as §3 specified it before the need showed; a default method added later is source- and binary-compatible for every adapter; a reload through the technology works where the page cannot run a script, which frozen-target recovery needs from the built-in adapters |
 | D68 | `Invocation.secretParams()` (2026-10-07): a read-only accessor of the agent API, empty by default, that the dispatcher fills from `_meta.secretParams` (an extension of A34); the web module masks `web.console` by value until 60 s after a call's budget and by key always; the CDP path hands every call that names secret parameters to the agent (§4.3, §5.2) | masking by key only; the core redacting every event payload; serving such calls on the CDP path | a page's console echo of a filled secret is published outside the call, after the dispatcher's redaction of that call has ended, and only the call's own parameters say which value to look for; the core does not redact event payloads, and doing so for every event would cost every event; the agent can mask an echo only of a call it saw, while a Playwright trace or a driver debug log would carry the value |
 | D69 | The `jcef` adapter talks to DevTools through JCEF's raw channel (`CefBrowser_N.executeDevToolsMethod` and `addDevToolsMessageObserver`, resolved by the descriptor's `raw.*` roles) and correlates answers itself; the public `CefDevToolsClient` is only the existence check and the fallback when the raw roles do not resolve (2026-10-07, found by the acceptance) | the public client only (the research note's route) | JCEF 152's client loses an answer that arrives before its message id, which the acceptance hit on every run (kit items 3, 4, 9 and 11 timed out) and which explains BS8's one lost evaluation in twenty; the raw channel is the same package-private API the client itself uses, so nothing of the application's is taken |
 
@@ -2040,3 +2154,234 @@ that removes built behaviour is stated with each one.
 | Q15 | **The image's new packages** (fifteen Chromium run-time libraries, §11) and the 152 MB natives in the Maven cache: acceptable CI weight for this repository? | Yes | §11 | the web acceptance leaves the public image and runs where someone installs the libraries |
 
 ---
+
+## 16. Phase 4.x amendments
+
+Amendments built on 2026-10-08, after the Phase 4 build and its review, for the small follow-ups of §13 (gaps 38,
+45, 40 and 42): contract first, then code, the native reactor green. Each amendment marks the passages it changes
+in place "(4.x, A3n, built 2026-10-08)"; A35 and A36 were built by one implementer, A37 and A38 by another, each in an
+isolated copy of the tree, and integrated by file list.
+
+### 16.1 A35 `web.waitFlag` answers an expression that throws the same way on both paths (4.x, A35, built 2026-10-08)
+
+- *Gap.* 38 of `../TODO.md` (§13; §4.2 as built 2026-10-07): the agent counted a poll whose expression throws as not
+  ready, polled on and answered `ready: false` with `lastError`, so that the base `webWaitFlag` ended `FAIL` /
+  `SYNC_TIMEOUT`; the CDP path ended the wait at the first poll that threw, with `SCRIPT_ERROR`, which a step reports
+  as `FAIL` / `ASSERTION`. The same scenario failed at once over CDP and waited in process.
+- *Decision.* One behaviour on both paths, the agent's. A poll whose expression throws at run time counts as **not
+  ready**, and polling goes on until the flag is truthy or the wait's time is up (`timeoutMs`, else the call's
+  budget). A wait that ends not ready answers `{ready: false, ms, polls, lastError?}`: `lastError` is the last poll's
+  error, its first line, at most 2000 UTF-16 code units, never an argument value, present only when that poll threw.
+  The base verb's outcome stays `FAIL` / `SYNC_TIMEOUT` on both paths; the failure's detail carries the result as
+  `waitFlag`, `lastError` included, and the message ends with " (last error: <lastError>)" (§8.1). One refinement, on
+  both paths: an expression that does not **compile** (a `SyntaxError` from compiling the expression itself, as
+  distinct from one thrown while it runs, such as the `SyntaxError` of `JSON.parse("{")`) is `SCRIPT_ERROR` at once,
+  after one poll, with `data {browser, message, stack: ""}`, `message` the compile error's first line; a step reports
+  it as `FAIL` / `ASSERTION`.
+- *The guard.* Both paths poll one page-side guard, `WebLib.flagExpression(expression)` (§4.6), so that they read
+  byte-identical shapes. The expression travels as a JSON string, is compiled alone as the body
+  `return (<expression>\n)` of a `new Function` (trailing semicolons and whitespace dropped, as `wrap` drops them), and
+  the compiled function is called with the window as `this`. The guard evaluates to `{ready: true}`, `{ready: false}`,
+  `{ready: false, error: <line>}` (the call threw) or `{ready: false, compileError: <line>}` (compiling threw); it never
+  throws itself, needs no library and installs none. *The agent path* (§4.2) sends the guard as every poll, under
+  D63's rule as before (one outstanding poll, a poll the page has not answered awaited and not replaced, a load waking
+  the wait): a `compileError` is `SCRIPT_ERROR` at once; an `error` becomes `lastError`, which a poll that does not
+  throw clears; a channel that still reports a script error for the guard itself counts that poll as not ready, its
+  message cut by `WebLib.errorLine`. Its polls no longer carry the library (the former probe, `wrap`, embedded the
+  57 KB library in every poll; the guard is a few hundred characters and the expression). *The CDP path* (§5.2) has
+  `frame.waitForFunction` poll the guard in a wrapper that returns the guard's object when the flag is ready or the
+  expression did not compile, both of which end the wait, and `false` otherwise, so that Playwright polls on through
+  a poll that threw. After a wait that timed out, the path makes one more poll, the last, with the guard itself,
+  through `waitForFunction` again (the guard always answers an object, so its first evaluation ends the call, and
+  `evaluate` has no bound of its own), bounded by 1000 ms and by what is left of the call less 100 ms: its `error` is
+  `lastError`, a `ready: true` makes the flag ready after all (with `web.ready {signal: FLAG}`), and a last poll that
+  does not answer in time, or fails otherwise, leaves `lastError` out (it only explains a wait that is over; a page
+  that closed meanwhile is `STALE_HANDLE`). One operation is outstanding at a time (D63): the wait, then the last
+  poll. `polls` stays `1 + ms / pollMs`. A blank expression is `INVALID_PARAMS` (`data.param: expression`) on both
+  paths.
+- *Alternatives rejected.* Failing at once on any throw (the CDP path's former behaviour): a flag that reads a
+  property of an element that does not exist yet is the common case, and every such run would fail spuriously.
+  Treating a compile error as not ready: a typo would cost the whole step timeout before it is reported. For the CDP
+  path, recording the run-time error in the page for the path to read after the wait: the last poll gives the same
+  line without keeping state in the page; polling from the path with `frame.evaluate` every `pollMs`: `evaluate` has
+  no bound, so a page that stopped answering would turn `ready: false` into `TIMEOUT`, while Playwright already polls
+  in the page.
+- *Reason.* A predicate that throws before the page is ready is "not yet", and a step's `timeoutMs` already bounds
+  the wait; an expression that does not compile can never become ready, and compiling is pure.
+- *Limit.* Compiling text is subject to a page's content security policy (no `unsafe-eval`) except while DevTools
+  evaluates. Checked outside the build on such a page with a Chromium headless shell: `Runtime.evaluate` of the guard
+  compiles, while a compile from the page's own timer is refused with an `EvalError`. The `jcef` adapter evaluates
+  through `Runtime.evaluate`, so its polls compile on any page. JxBrowser's `executeJavaScript` on such a page is
+  unverified (gap 41); where a channel refuses, the guard reports the page's `EvalError` as a `compileError`:
+  `SCRIPT_ERROR` at once, with a message that names the cause. Over CDP, Playwright's `waitForFunction` evaluates its
+  own predicate with `eval` from the page's timer after the first poll, which such a policy refuses before the guard
+  runs (checked with Playwright 1.63): a flag that is not ready at the first poll ends in `INTERNAL_ERROR` there, as it
+  did before A35, which this amendment does not change.
+- *Sections amended.* §4.2 (the `web.waitFlag` row; "`web.waitFlag` on the two paths"), §4.6 (the Java side and its
+  tests), §5.2 (the `web.waitFlag` row; "Errors, sequence numbers, events"), §6.3, §8.1, §9.3 (the negative
+  scenarios), §12.1 (item 7 and the list of tests), §12.2 item 5, §13.
+- *Tests.* `skillroy-protocol` `WebLibTest`: the guard's text (the expression once, as a JSON string; compiled alone;
+  the four results; the first line and the cut), trailing semicolons and a blank expression, and `errorLine`.
+  `skillroy-agent-web` `WaitFlagGuardTest`, against a scripted browser whose fake page evaluates the guard: a flag that
+  throws for its first polls and then turns true is `ready: true`; a flag that throws until the end is `ready: false`
+  with its `TypeError` as `lastError`, after polling until `timeoutMs`; `lastError` is the last poll's only; a
+  channel's script error for the guard itself is a poll that is not ready; an expression that does not compile is
+  `SCRIPT_ERROR` at once, after one poll (and `EventsAndTapTest`'s throwing flag is one that throws at run time).
+  `skillroy-cdp` `CdpWaitFlagTest`, through the path's fakes (no browser): the same three cases, the last poll (the
+  agent's guard byte for byte, bounded whatever the call's budget), a last poll that finds the flag ready, one that
+  fails (no `lastError`; `STALE_HANDLE` when the page closed), a blank expression; `ShapesTest` (the shape with
+  `lastError`) and `CdpWebPathCallTest` (a last poll that does not answer).
+  `skillroy-scenario` `WebEvidenceTest`: both outcomes alike on the agent path and through the fake `cdp` path. End to
+  end (§12.2 item 5, profile `jcef`): the negatives `flag-never-ready` and `flag-does-not-compile` (§9.3) in every
+  launch, so over CDP with a port and through the agent without one. Outside the build (no JavaScript engine runs in
+  it, §4.6), the guard was evaluated in Node 24 and over CDP in a Chromium headless shell, and the CDP path's wait and
+  last poll were run with Playwright 1.63 against that shell: a run-time throw, a `SyntaxError` thrown while the
+  expression runs, compile errors (`SyntaxError`, and an `EvalError` where code generation is refused), thrown values
+  that are not errors, the first line, the cut beside a surrogate pair, a trailing line comment, a flag that throws and
+  then turns true, and one that throws to the end.
+
+### 16.2 A36 A call the CDP path serves reads the agent's sequence once (4.x, A36, built 2026-10-08)
+
+- *Gap.* 45 of `../TODO.md` (§13; §5.2 as built 2026-10-07): a result of the CDP path carried the agent's `lastSeq`
+  in `seqBefore` and `seqAfter`, read with `evt.query` just before and just after the primitive, while the executor
+  read the agent's sequence itself before the call (§6.3) and never used the result's numbers: three `evt.query` calls
+  for one served call, two of them redundant.
+- *Decision.* The path reads no agent sequence; the executor's read is the only one. `CdpWebPath.call` returns
+  `seqBefore` and `seqAfter` as 0 (`CdpWebPath.NOT_READ`), and the executor (`WebRun.call`) writes the agent sequence
+  it read before the call in place of both before the result is used or recorded. So a call the path serves makes one
+  `evt.query` (none for a read the executor makes on its own, a fact, the surface or evidence, which takes the highest
+  agent sequence the run has seen, as before), and its `call` record's `seq` is `{before: n, after: n}` in the agent's
+  numbering, `n` the executor's read; the `seq` of a call the agent served is unchanged. No type changes: `RpcResult`
+  keeps its two `long` fields and `WebPath.call` its signature (its Javadoc says that a non-agent path need not read
+  the agent's sequence).
+- *Alternatives rejected.* Passing the executor's number into the path (a new `WebPath.call` parameter or a
+  `CallOptions` component): an API change for a number the path does not use; leaving the path's zeros in the record:
+  a `seq` of 0 would read as an empty bus; keeping one read in the path and dropping the executor's: the executor needs
+  the number before the call to start its waits from it, whichever path serves the call.
+- *Reason.* The executor waits from its own read and never used the path's two; they cost two round trips to the
+  agent per served call, and a failing `evt.query` made the path refuse a call (`UNSUPPORTED`) that it could serve.
+- *What changed in behaviour.* An agent whose `evt.query` fails no longer makes the CDP path refuse calls; the executor
+  then takes the highest sequence the run has seen, as it did. `seq.after` of a served call is no longer the agent's
+  sequence after the call; nothing used it (§6.3).
+- *Sections amended.* §5.2 ("Errors, sequence numbers, events"), §6.1 (the note after `WebPath`), §6.3, §8.2,
+  §12.1 (the list of tests), §13.
+- *Tests.* `skillroy-cdp` `CdpWebPathCallTest`: a served call of each kind (`web.evaluate`, `web.dom.text`,
+  `web.ariaSnapshot`, `web.dispatchEvent`, `web.waitFlag`, `web.resize`) makes zero `evt.query` calls, is served while
+  the agent's `evt.query` fails, and answers `NOT_READ` in both numbers. `skillroy-scenario` `WebPathTest`: two step
+  calls the fake `cdp` path serves make one sequence read each and none for the fact root's text reads through the
+  path, and each call record's `seq` is the executor's read as `before` and `after`, not the path's numbers.
+
+### 16.3 A37: the SPI gains `reload` and the bitmap's source as default methods (gap 40)
+
+**Gap.** Gap 40 of `../TODO.md` ("Open SPI and DSL gaps"), recorded in §13 during the build: the SPI had no reload and
+no bitmap source. `web.reload` and the `source` of `web.bitmap` went through `BrowserExtras`, an interface internal to
+`skillroy-agent-web` that the built-in adapters' handles implemented; the module reloaded a third-party adapter's
+browser with `location.reload()` through `evaluate` and reported its bitmap as `VENDOR`, and such an adapter could offer
+neither its technology's reload nor its bitmap's source (D67).
+
+**Decision** (4.x, A37, built 2026-10-08).
+
+- `WebBrowser` (`ai.skillroy.testjava.agent.api.spi.web`) gains two default methods, and the package the enum
+  `BitmapSource { PROTOCOL, VENDOR }`:
+  - `CompletableFuture<Void> reload(boolean ignoreCache)`, shaped as the interface's other asynchronous operations
+    (`bitmap()`, `resize`): a future, no timeout parameter, the caller's bounded wait, the failures of §3 (closed:
+    `IllegalStateException`). It completes once the reload was requested; the new document's load is a `LOAD_FINISHED`
+    through `subscribe`. Its default is the module's former fallback: `location.reload()` evaluated in the main frame
+    through `evaluate`, with `WebEval`'s default timeout (`location.reload(true)` when `ignoreCache` is set, a
+    non-standard argument that Chromium ignores: `ignoreCache` is honoured only by an adapter that overrides), completed
+    when that evaluation answers and failed as it fails (without `EVALUATE` with `UnsupportedOperationException`; an
+    `evaluate` that throws fails the future); cancelling the future cancels the evaluation, so that the module's
+    abandoned wait abandons it as before. A reload by the page's own script is a navigation the page starts, which a
+    technology may refuse (Chromium refuses it for a `data:` document) and which a frozen page never makes; an adapter
+    whose technology can reload from outside the page overrides the method.
+  - `BitmapSource bitmapSource()`: where `bitmap()` comes from; informational, answered from what the adapter knows,
+    never null; the default is `VENDOR`.
+- The built-in adapters override both. `jcef`: `CefBrowser.reload()` / `reloadIgnoreCache()` through the descriptor's
+  `reload` roles (`Page.reload {ignoreCache}` on the handle's channel where they do not resolve), and `PROTOCOL`.
+  `jxbrowser`: `Navigation.reload()` / `reloadIgnoringCache()` through the descriptor's `reload` roles, and `VENDOR`;
+  where those roles do not resolve it falls back to the SPI's default (before A37 it refused with
+  `UnsupportedOperationException`), so that reload is total for every browser that can evaluate.
+- `BrowserExtras` is deleted. `web.reload` calls `reload(ignoreCache)` for every browser, and `web.bitmap` reports
+  `bitmapSource()` as its `source` (`VENDOR` when an adapter's own answer is null or throws). The primitives'
+  parameters, results, capabilities and error mapping are unchanged; for a third-party browser without `EVALUATE`
+  `web.reload` is still `CAPABILITY_UNAVAILABLE`, now with the adapter's own reason.
+- No new `WebCapability` flag: reload is total through its default, and the source is informational.
+- Compatibility, as D67 foresaw: an adapter built against the Phase 4 SPI links and runs unchanged and gets the
+  defaults; the SPI's signatures still name only `java.*` and the agent API.
+
+**Alternatives rejected.** A `WebCapability.RELOAD` flag: a flag for an operation every browser can perform through its
+page is noise, which every adapter would have to report and the module to check. Keeping `BrowserExtras` beside the
+SPI methods: two ways to do one thing, one of them closed to a third-party adapter.
+
+**Sections amended.** §3 (the `WebBrowser` block, the enum `BitmapSource`, the list of differences, the bullet that
+was "*Not in the SPI*"), §4.2 (`web.bitmap`, `web.reload`), §4.5 (both adapters), §10.1 (items 10 and 12), §10.2,
+§10.3, §12.1, §13, §14 (D67).
+
+**Tests** (as built 2026-10-08).
+
+- `skillroy-agent-api` (Java 8): `WebSpiShapeTest` pins both methods as default methods of `WebBrowser`, the enum's
+  constants in order, and the new type's signatures; `WebBrowserDefaultsTest` (new) runs the defaults on a browser that
+  implements only the abstract methods: `reload(false)` sends `location.reload()` and `reload(true)`
+  `location.reload(true)` to the main frame, without `awaitPromise`; the future is pending until the evaluation answers
+  and then completes with null; it fails with the evaluation's own exception (`WebScriptException`,
+  `UnsupportedOperationException`, `IllegalStateException`), also when it reached the adapter's future through a
+  dependent stage; an `evaluate` that throws, or answers no future, fails the future instead of throwing; cancelling
+  the future cancels the evaluation; `bitmapSource()` is `VENDOR`; a browser that declares neither method gets both.
+- `skillroy-agent-web`: `ViewPrimitivesTest` (`web.reload` goes through a handle's override, and through the default's
+  `location.reload()` and `location.reload(true)` for a handle without one; a browser without `EVALUATE`, whose
+  evaluation is refused, answers `CAPABILITY_UNAVAILABLE` with the adapter's reason; a reload whose evaluation never
+  answers answers `TIMEOUT` and the evaluation is cancelled; `web.bitmap`'s `source` is `VENDOR` by default, the
+  override's `PROTOCOL`, and `VENDOR` for an override that answers null or throws); `JxBrowserAdapterFakeTest` (a line
+  with the reload roles reloads through the fake's `Navigation.reload()`, a line without them through the page, the
+  SPI's default, without calling it; a load follows and the page is a new document either way); the kit's item 12 and
+  item 10's `reload`, in the four runs against the fakes (`JcefFakeKitTest`, `JcefFakeRawKitTest`,
+  `JxBrowserFakeKitTest`, `JxBrowserFakeChainedKitTest`).
+- Against real JCEF, item 12 runs with the kit in the web host's test JVM, in the Linux image under the profile `jcef`
+  only (§10.3); it had not been run when A37 was built, on a machine without that image: the orchestrator's matrix
+  runs it.
+
+### 16.4 A38: the re-probe after `window.opened` runs at most once a second (gap 42)
+
+**Gap.** Gap 42 of `../TODO.md`, left open by the review's fix wave (§13): the re-probe after `window.opened` (§4.1,
+D60) was coalesced, one queued or running at a time, and cheap, but had no time-based limit: in a target that opens
+windows in quick succession (dialogs, pop-ups), each window could start a re-probe as soon as the previous one ended.
+The review had proposed one a second. Besides, an event that arrived while a re-probe was running was coalesced into it
+although that re-probe might already have probed, so the event was in effect dropped until the next window or a
+reprobe.
+
+**Decision** (4.x, A38, built 2026-10-08). The re-probe runs at most once a second and no event is dropped, inside the
+module's existing plumbing (the queued mark and the agent worker that runs the re-probe), with no new thread, timer or
+scheduler:
+
+- Every `window.opened` marks a re-probe pending and, unless a re-probe worker is queued or running (and not lost:
+  queued less than 30 s ago, as before), posts one to an agent worker. The publishing thread, often the EDT, only sets
+  the mark and posts.
+- The worker runs while a re-probe is pending. When some adapter is a candidate (one of the three kinds of §4.1, or the
+  set of adapters changed) and the previous re-probe cycle started less than 1 s ago, it first waits out the rest of
+  that second on its own agent worker thread: a bounded wait of at most 1 s, on a monitor that uninstall wakes, never
+  on the EDT. Then it clears the mark and runs the cycle (the cheap probes of §4.1 and, on a change, the full cycle).
+  An event that arrives during the wait is covered by that cycle; one that arrives while the cycle runs marks it
+  pending again, and the same worker runs one further cycle, a second after the start of the one before. So every
+  event is followed by a cycle that starts after it, and a burst costs at most one further cycle.
+- Without a candidate the worker neither waits nor probes, and that round is no cycle (a target without the technology
+  still pays one short task per event, coalesced). The readiness cycle and `agent.capabilities {reprobe: true}` are not
+  paced.
+- The worker renews its queued time every round, so that a long burst is not taken for a lost post; an event that
+  arrives just as the worker finishes makes it, or the event itself, post a new one.
+- Uninstall wakes a waiting worker, which then probes nothing.
+
+**Alternatives rejected.** A re-probe scheduled one second later on a timer or a scheduler: a thread the module would
+own (§2.4), which the gap's condition ("cheap") excluded. Dropping an event that arrives within the second: a window
+that brought the technology would wait for the next window or a reprobe. Waiting on the publishing thread: often the
+EDT.
+
+**Sections amended.** §4.1 ("The re-probe after `window.opened`"), §12.1, §13, §14 (D60).
+
+**Tests** (as built 2026-10-08). `skillroy-agent-web` `WindowOpenedPaceTest` (new), with an injected clock whose wait
+advances it at once and records each wait with its thread, and an adapter whose probe can be held: of 100 events, the
+first starts a cycle and the other 99 arrive while it probes, and they cause exactly two cycles, the second one second
+after the first, after one wait of the rest of the second on an agent worker; an event one second after the last cycle
+starts one at once, without a wait; an event 300 ms after it, published on the EDT as Swing publishes it, waits 700 ms
+on an agent worker, never on the EDT; events without a candidate neither wait nor probe; uninstall wakes a waiting
+worker, which probes nothing; and, with the real clock, the second of two cycles starts at least 900 ms after the
+first. The re-probe tests of `WebCapabilitiesTest` run with the injected clock, unchanged.

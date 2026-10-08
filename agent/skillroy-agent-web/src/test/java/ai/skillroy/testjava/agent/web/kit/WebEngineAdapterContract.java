@@ -17,6 +17,7 @@
 package ai.skillroy.testjava.agent.web.kit;
 
 import ai.skillroy.testjava.agent.api.ProbeResult;
+import ai.skillroy.testjava.agent.api.spi.web.BitmapSource;
 import ai.skillroy.testjava.agent.api.spi.web.WebBrowser;
 import ai.skillroy.testjava.agent.api.spi.web.WebCapability;
 import ai.skillroy.testjava.agent.api.spi.web.WebEngineAdapter;
@@ -535,6 +536,7 @@ public abstract class WebEngineAdapterContract {
         operations.add(d.clearResize());
         operations.add(d.bitmap());
         operations.add(d.cdpTargetId());
+        operations.add(d.reload(false));
         for (CompletableFuture<?> op : operations) {
             Throwable t = failure(op);
             assertTrue(t instanceof IllegalStateException, "a closed browser fails with IllegalStateException: " + t);
@@ -606,6 +608,42 @@ public abstract class WebEngineAdapterContract {
         eval(b, WebLib.callExpression("aria", null, Long.valueOf(50), Boolean.TRUE));
         eval(b, WebLib.installExpression());
         assertEquals(before, Json.parse(eval(b, KitScripts.WINDOW_KEYS)), "Object.keys(window) unchanged");
+    }
+
+    // ------------------------------------------------------------------------------------------------ item 12
+
+    /**
+     * Item 12 (amendment A37): {@code bitmapSource()} is one of the two values; with {@code EVENTS_LOAD},
+     * {@code reload(false)} and then {@code reload(true)}, each on a document of the main page that the kit marked,
+     * complete within the bound and are each followed, within the bound, by a {@code LOAD_FINISHED} of that browser's
+     * main frame, after which the page is a new document of the same page (the marker gone, the title the page's).
+     * An adapter that keeps the SPI's default reload ({@code location.reload()} through the page) passes only where
+     * its technology lets a page reload itself (Chromium refuses that for a {@code data:} document).
+     */
+    @Test
+    void item12ReloadIsFollowedByALoadOfThatBrowserAndTheBitmapSourceIsOneOfTwo() throws Exception {
+        WebBrowser b = browser(WebAdapterFixture.Which.VISIBLE);
+        BitmapSource source = b.bitmapSource();
+        assertNotNull(source, "bitmapSource() is never null");
+        assertTrue(Arrays.asList(BitmapSource.PROTOCOL, BitmapSource.VENDOR).contains(source), String.valueOf(source));
+        assumeTrue(b.capabilities().contains(WebCapability.EVENTS_LOAD), "the adapter has no EVENTS_LOAD");
+        load(b, KitPages.main());
+        Recorder live = new Recorder();
+        WebSubscription subscription = b.subscribe(live);
+        try {
+            for (boolean ignoreCache : new boolean[] {false, true}) {
+                eval(b, KitScripts.DOCUMENT_MARK);
+                assertEquals("string", Json.parse(eval(b, KitScripts.DOCUMENT_MARK_NOW)), "the document is marked");
+                int loads = live.countMain(WebEvent.Kind.LOAD_FINISHED);
+                b.reload(ignoreCache).get(BOUND_MS, TimeUnit.MILLISECONDS);
+                live.awaitMain(WebEvent.Kind.LOAD_FINISHED, loads + 1);
+                assertEquals("undefined", Json.parse(eval(b, KitScripts.DOCUMENT_MARK_NOW)),
+                        "reload(" + ignoreCache + ") made a new document");
+                assertEquals(KitPages.MAIN_TITLE, Json.parse(eval(b, KitScripts.TITLE)), "of the same page");
+            }
+        } finally {
+            subscription.cancel();
+        }
     }
 
     // ------------------------------------------------------------------------------------------------ helpers

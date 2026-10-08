@@ -302,10 +302,12 @@ class EventsAndTapTest {
             long ms = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started);
             assertEquals(Boolean.FALSE, no.get("ready"));
             assertTrue(ms >= 250 && ms < 3000, "bounded by timeoutMs: " + ms);
-            Map<String, Object> failing = h.ctx.map("web.waitFlag", Harness.args("expression", "nonsense(",
+            // A35: a poll that throws at run time is not ready (an expression that does not compile: WaitFlagGuardTest).
+            Map<String, Object> failing = h.ctx.map("web.waitFlag", Harness.args("expression", "nonsense()",
                     "timeoutMs", Long.valueOf(100)));
             assertEquals(Boolean.FALSE, failing.get("ready"));
-            assertTrue(String.valueOf(failing.get("lastError")).contains("cannot evaluate"), String.valueOf(failing));
+            assertTrue(String.valueOf(failing.get("lastError")).startsWith("ReferenceError: the fake cannot evaluate"),
+                    String.valueOf(failing));
             Map<?, ?> budget = (Map<?, ?>) h.ctx.call("web.waitFlag", Harness.args("expression",
                     "window.never === true"), Harness.args("timeoutMs", Long.valueOf(400)));
             assertEquals(Boolean.FALSE, budget.get("ready"), "answers before the dispatcher's TIMEOUT");
