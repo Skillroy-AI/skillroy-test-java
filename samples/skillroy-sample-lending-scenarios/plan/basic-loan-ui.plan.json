@@ -2,7 +2,7 @@
   "planVersion": 5,
   "scenarioId": "basic-loan-ui",
   "pack": "lending",
-  "packVersion": "0.3.0",
+  "packVersion": "0.4.0",
   "sourceHash": "sha256:5cab62f6250f86264386dc8451aa4fb3836cbaa135c132a2567a99bb7a53dba7",
   "inference": "none",
   "requires": [

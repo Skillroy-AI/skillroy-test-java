@@ -1,0 +1,31 @@
+# An example of the inference settings the sample's tier (b) scenario needs (phase5-contracts.md 4.4, 14.5). The real
+# file is named inference.yaml and is found beside the credentials file, or named with --inference-file or the system
+# property skillroy.inference.file. Unlike credentials.yaml it holds no secret and may be committed. Copied as
+# inference.yaml beside a credentials file in this directory, it serves the recorded gateway: the model's answers come
+# from the committed recordings in src/test/resources/inference/, no model is called and no key is needed. replay never
+# asks a model, whatever this file says; options and system properties override what it sets.
+#
+# The model key never stands here: the live gateway (gateway: claude) reads ANTHROPIC_API_KEY from the environment
+# only, and a run refuses to start without it. Recordings are made once, live, by a maintainer with the key (the Maven
+# profile inference-record, in the Linux image) and committed after review; a request without a recording fails
+# loudly ("no recording"), so that a changed prompt is seen, never guessed.
+version: 1
+gateway: recorded                       # claude | recorded | none
+recordings: src/test/resources/inference/   # relative to this file; also where record: true writes
+record: false                           # true: wrap the live gateway and write what it answers (inference-record)
+workspaceId: null                       # what an organisation-level key needs (else ANTHROPIC_WORKSPACE_ID); no secret
+models:
+  opus: claude-opus-5-5
+  sonnet: claude-sonnet-5-5
+  haiku: claude-haiku-4-5
+effort: {resolve: low, triage: low, session: medium, summary: low}
+budget:
+  scenarioUsd: "0.50"                   # per bind of one scenario, in US dollars
+  jobUsd: null                          # re-resolve needs one; there is no built-in value
+  sessionUsd: "1.00"                    # per interactive session
+thresholds: {confidence: "0.8"}         # a model's statement proposed with less confidence is not run
+prices: null                            # a file of the provider's token rates, relative to this file; null: built-in
+fallbacks: true
+images: false                           # no screen capture reaches a model before Phase 7
+timeouts: {callMs: 120000, batchWaitMs: 7200000}
+logPrompts: false                       # true: the masked prompt text goes into inference.jsonl

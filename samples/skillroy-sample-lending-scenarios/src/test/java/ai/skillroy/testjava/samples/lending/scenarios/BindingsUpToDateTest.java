@@ -44,6 +44,10 @@ import static org.junit.jupiter.api.Assertions.fail;
  * again, it is byte-identical) and is tied to the committed plan (its {@code resolveHash} equals the plan's). A file
  * that fails here would fail every {@code replay} as {@code PLAN_CHANGED} or be rewritten on the next approval as
  * noise in the diff.
+ *
+ * <p>Scenario D ({@code supervisor-return-llm-sql}, phase5-contracts.md 14.2) has no bindings file yet: the recording
+ * wave of the Phase 5 build (after wave 2) writes its files through the recorded gateway and flips
+ * {@link ScenarioD#HAS_BINDINGS}, which these checks follow; until then its absence on both seeds is checked too.
  */
 class BindingsUpToDateTest {
 
@@ -54,9 +58,16 @@ class BindingsUpToDateTest {
         try (Stream<Path> walk = Files.walk(root)) {
             walk.filter(Files::isRegularFile).sorted().forEach(files::add);
         }
-        assertEquals(List.of(ScenarioB.committedBindings(Env.SEED_A), ScenarioA.committedBindings(Env.SEED_A),
-                ScenarioB.committedBindings(Env.SEED_B), ScenarioA.committedBindings(Env.SEED_B)), files,
-                "one file per scenario and environment, nothing else (no credentials file is committed)");
+        List<Path> expected = new ArrayList<>();
+        for (Env env : Env.values()) {
+            expected.add(ScenarioB.committedBindings(env));
+            expected.add(ScenarioA.committedBindings(env));
+            if (ScenarioD.HAS_BINDINGS) {
+                expected.add(ScenarioD.committedBindings(env));
+            }
+        }
+        assertEquals(expected, files, "one file per scenario and environment, nothing else (no credentials file is"
+                + " committed; scenario D's come with the recordings)");
         for (Path file : files) {
             String text = Files.readString(file, StandardCharsets.UTF_8);
             BindingsFile read = BindingsFile.read(file);
@@ -66,7 +77,7 @@ class BindingsUpToDateTest {
             assertEquals(plan.hash(), read.planHash(), file + " was approved for the committed plan");
             assertEquals(file.getParent().getFileName().toString(), read.envId());
             assertEquals("lending", read.pack());
-            assertEquals("0.3.0", read.packVersion());
+            assertEquals("0.4.0", read.packVersion());
             assertTrue(text.endsWith("}\n"), "ends with a newline");
             assertFalse(ScenarioB.ISO_DATE.matcher(text).find(), file + " holds no date: it is the same on every day");
             assertFalse(text.contains("\"jdbc\""), "recorded as the end-to-end agent channel sees it");
@@ -80,6 +91,31 @@ class BindingsUpToDateTest {
             assertEquals(BindingsFile.read(ScenarioA.committedBindings(env)).env(),
                     BindingsFile.read(ScenarioB.committedBindings(env)).env(), "one environment, one fingerprint");
         }
+    }
+
+    /**
+     * Every committed scenario whose plan needs bindings has its file on both seeds, and one that needs none has none;
+     * scenario D excepted until the recording wave of the Phase 5 build writes its files (14.2), by
+     * {@link ScenarioD#HAS_BINDINGS}, which must say what is on disk: the wave that commits the files flips it.
+     */
+    @Test
+    void everyPlanThatNeedsBindingsHasThemOnBothSeedsScenarioDOnceRecorded() throws Exception {
+        List<String> needing = new ArrayList<>();
+        for (Path yaml : PlansUpToDateTest.committedScenarios()) {
+            Plan plan = Plan.read(PlansUpToDateTest.planFor(yaml));
+            boolean expected = plan.needsBindings() && (!plan.scenarioId().equals(ScenarioD.ID)
+                    || ScenarioD.HAS_BINDINGS);
+            for (Env env : Env.values()) {
+                Path file = BindingsFile.locate(ScenarioA.bindingsRoot(), env.id, plan.scenarioId());
+                assertEquals(expected, Files.isRegularFile(file), file.toString());
+            }
+            if (plan.needsBindings()) {
+                needing.add(plan.scenarioId());
+            }
+        }
+        assertEquals(List.of(ScenarioB.ID, ScenarioA.ID, ScenarioD.ID), needing, "the scenarios with query slots");
+        assertEquals(ScenarioD.HAS_BINDINGS, ScenarioD.anyBindingsCommitted(), "ScenarioD.HAS_BINDINGS says whether"
+                + " scenario D's bindings are committed");
     }
 
     /**

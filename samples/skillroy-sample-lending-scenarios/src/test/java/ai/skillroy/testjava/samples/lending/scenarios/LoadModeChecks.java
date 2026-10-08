@@ -715,15 +715,17 @@ abstract class LoadModeChecks {
      * The JUnit glue over the committed scenario directory: the two Phase 1 scenarios and scenarios A and B
      * (phase3-contracts.md 10.4), which run in {@code replay} on this seed A target with the {@code seed-a} bindings,
      * then the stream's trailing {@code skillroy: zero model calls} test (phase2-contracts.md 12.2), because scenarios
-     * A and B need bindings.
+     * A and B need bindings. Scenario D ({@code supervisor-return-llm-sql}, phase5-contracts.md 14.2) is left out of
+     * the directory until it has bindings: the recording wave of the Phase 5 build (after wave 2) commits them, and
+     * {@link ScenarioD#HAS_BINDINGS} then brings it in (and this check's lists with it).
      */
     @TestFactory
     @Order(14)
     Stream<DynamicTest> junitGlueRunsTheCommittedScenarios() {
         RunOptions options = RunOptions.defaults().withOutputDir(ItEnv.runDir(mode().slug, "junit-glue"))
                 .withBind(Runs.bind(SampleCredentials.Env.SEED_A));
-        List<DynamicTest> tests = ScenarioTests.dynamicTests(ScenarioSource.directory(ItEnv.moduleDir()
-                .resolve("scenarios")), this::client, options).toList();
+        List<DynamicTest> tests = ScenarioTests.dynamicTests(ScenarioD.withoutScenarioDUntilItHasBindings(
+                ScenarioSource.directory(ItEnv.moduleDir().resolve("scenarios"))), this::client, options).toList();
         List<String> names = tests.stream().map(DynamicTest::getDisplayName).toList();
         assertEquals(List.of("basic-loan", "basic-loan-ui", ScenarioB.ID, ScenarioA.ID), names.subList(0, 4).stream()
                 .sorted().toList(), String.valueOf(names));

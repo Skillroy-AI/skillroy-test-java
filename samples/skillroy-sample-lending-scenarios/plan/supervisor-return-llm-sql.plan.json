@@ -1,0 +1,545 @@
+{
+  "planVersion": 5,
+  "scenarioId": "supervisor-return-llm-sql",
+  "pack": "lending",
+  "packVersion": "0.4.0",
+  "sourceHash": "sha256:ff627989ad82b1c7a67a25cc2bbd4dbccdb2a76b3551a9a1f431ea87a6dfe037",
+  "inference": "bind",
+  "requires": [
+    "lending.input",
+    "lending.state",
+    "lending.loan",
+    "lending.loan.authorisations",
+    "lending.prompt",
+    "lending.prompt.answer",
+    "lending.slip",
+    "lending.access.check",
+    "lending.deposit",
+    "lending.limits",
+    "swing.tree"
+  ],
+  "slots": [
+    {
+      "name": "systemMax",
+      "kind": "query",
+      "query": "SystemLimit",
+      "args": {
+        "type": "RETURN"
+      },
+      "verify": [
+        "lending.limits"
+      ]
+    },
+    {
+      "name": "item",
+      "kind": "query",
+      "query": "LendableItem",
+      "args": {
+        "deposit": {
+          "between": [
+            "20.00",
+            "200.00"
+          ],
+          "lte": "$systemMax"
+        }
+      },
+      "strategy": [
+        "sql"
+      ],
+      "verify": [
+        "lending.deposit"
+      ]
+    },
+    {
+      "name": "assistant",
+      "kind": "query",
+      "query": "StaffWithPermission",
+      "args": {
+        "interactiveSignOn": true,
+        "limit": {
+          "lt": "$item.deposit",
+          "type": "RETURN"
+        },
+        "perform": [
+          "SIGN_ON",
+          "RETURN"
+        ]
+      },
+      "verify": [
+        "lending.access.check"
+      ],
+      "credential": {
+        "realm": "staff",
+        "key": "code"
+      }
+    },
+    {
+      "name": "supervisor",
+      "kind": "query",
+      "query": "StaffWithPermission",
+      "args": {
+        "distinctFrom": [
+          "$assistant.code"
+        ],
+        "limit": {
+          "gte": "$item.deposit",
+          "type": "RETURN"
+        },
+        "perform": [
+          "RETURN_OVERRIDE"
+        ]
+      },
+      "strategy": [
+        "llm-sql"
+      ],
+      "verify": [
+        "lending.access.check"
+      ],
+      "credential": {
+        "realm": "staff",
+        "key": "code"
+      }
+    },
+    {
+      "name": "keys",
+      "kind": "query",
+      "query": "ActionKey",
+      "args": {
+        "actions": [
+          "RETURN",
+          "DUE"
+        ]
+      },
+      "verify": [
+        "swing.find"
+      ]
+    },
+    {
+      "name": "loan",
+      "kind": "capture",
+      "step": "s12",
+      "fields": [
+        "id",
+        "total"
+      ]
+    }
+  ],
+  "oracles": [
+    {
+      "name": "auth",
+      "fn": "ExpectedAuthorisation",
+      "args": {
+        "amount": "$item.deposit",
+        "staffLimit": "$assistant.limits.RETURN",
+        "systemMax": "$systemMax"
+      },
+      "mustEqual": "SUPERVISOR_PROMPT"
+    },
+    {
+      "name": "returnLine",
+      "fn": "Money.negate",
+      "args": [
+        "$item.deposit"
+      ]
+    }
+  ],
+  "resolutionGraph": [
+    "systemMax",
+    "item",
+    "assistant",
+    "supervisor",
+    "keys",
+    "oracle.auth",
+    "oracle.returnLine"
+  ],
+  "steps": [
+    {
+      "id": "s1",
+      "verb": "signOn",
+      "source": {
+        "line": 44
+      },
+      "calls": [
+        {
+          "primitive": "lending.input",
+          "args": {
+            "source": "Entry",
+            "value": "$assistant.code"
+          },
+          "sync": "READY",
+          "timeoutMs": 30000
+        },
+        {
+          "primitive": "lending.input",
+          "args": {
+            "source": "Entry",
+            "value": "$assistant.password"
+          },
+          "sync": "READY",
+          "timeoutMs": 30000
+        }
+      ],
+      "expect": []
+    },
+    {
+      "id": "s2",
+      "verb": "expect",
+      "source": {
+        "line": 45
+      },
+      "calls": [],
+      "expect": [
+        {
+          "path": "state.name",
+          "matcher": {
+            "equals": "IDLE"
+          }
+        },
+        {
+          "path": "state.staff.code",
+          "matcher": {
+            "equals": "$assistant.code"
+          }
+        }
+      ]
+    },
+    {
+      "id": "s3",
+      "verb": "key",
+      "source": {
+        "line": 46
+      },
+      "calls": [
+        {
+          "primitive": "lending.input",
+          "args": {
+            "source": "Key.$keys.RETURN"
+          },
+          "sync": "READY",
+          "timeoutMs": 30000
+        }
+      ],
+      "expect": []
+    },
+    {
+      "id": "s4",
+      "verb": "expect",
+      "source": {
+        "line": 47
+      },
+      "calls": [],
+      "expect": [
+        {
+          "path": "state.name",
+          "matcher": {
+            "equals": "RETURN"
+          }
+        },
+        {
+          "path": "state.returnMode",
+          "matcher": {
+            "equals": true
+          }
+        }
+      ]
+    },
+    {
+      "id": "s5",
+      "verb": "scan",
+      "source": {
+        "line": 48
+      },
+      "calls": [
+        {
+          "primitive": "lending.input",
+          "args": {
+            "source": "Barcode",
+            "value": "$item.barcode"
+          },
+          "sync": "READY",
+          "timeoutMs": 30000
+        }
+      ],
+      "expect": []
+    },
+    {
+      "id": "s6",
+      "verb": "expectPrompt",
+      "source": {
+        "line": 49
+      },
+      "calls": [
+        {
+          "primitive": "sync.await",
+          "args": {
+            "match": {
+              "id": "supervisor-required"
+            },
+            "timeoutMs": 10000,
+            "topics": "prompt.waiting"
+          },
+          "sync": "NONE",
+          "timeoutMs": 11000,
+          "handlesPrompt": true
+        }
+      ],
+      "expect": []
+    },
+    {
+      "id": "s7",
+      "verb": "authorise",
+      "source": {
+        "line": 50
+      },
+      "calls": [
+        {
+          "primitive": "lending.prompt.answer",
+          "args": {
+            "choice": "OK",
+            "id": "supervisor-required"
+          },
+          "sync": "EVENT",
+          "timeoutMs": 30000,
+          "await": {
+            "topics": "input.requested,prompt.waiting",
+            "match": null,
+            "timeoutMs": 30000
+          },
+          "handlesPrompt": true
+        },
+        {
+          "primitive": "lending.input",
+          "args": {
+            "source": "Entry",
+            "value": "$supervisor.code"
+          },
+          "sync": "READY",
+          "timeoutMs": 30000
+        },
+        {
+          "primitive": "lending.input",
+          "args": {
+            "source": "Entry",
+            "value": "$supervisor.password"
+          },
+          "sync": "READY",
+          "timeoutMs": 30000
+        }
+      ],
+      "expect": []
+    },
+    {
+      "id": "s8",
+      "verb": "expect",
+      "source": {
+        "line": 51
+      },
+      "calls": [],
+      "expect": [
+        {
+          "path": "loan.lines[code=$item.code].returned",
+          "matcher": {
+            "equals": true
+          }
+        },
+        {
+          "path": "loan.lines[code=$item.code].amount",
+          "matcher": {
+            "equals": "$oracle.returnLine"
+          }
+        },
+        {
+          "path": "loan.authorisations[kind=RETURN_OVERRIDE].staffCode",
+          "matcher": {
+            "equals": "$supervisor.code"
+          }
+        }
+      ]
+    },
+    {
+      "id": "s9",
+      "verb": "key",
+      "source": {
+        "line": 55
+      },
+      "calls": [
+        {
+          "primitive": "lending.input",
+          "args": {
+            "source": "Key.$keys.DUE"
+          },
+          "sync": "READY",
+          "timeoutMs": 30000
+        }
+      ],
+      "expect": []
+    },
+    {
+      "id": "s10",
+      "verb": "expect",
+      "source": {
+        "line": 56
+      },
+      "calls": [],
+      "expect": [
+        {
+          "path": "state.name",
+          "matcher": {
+            "equals": "DEPOSIT"
+          }
+        },
+        {
+          "path": "loan.total",
+          "matcher": {
+            "equals": "$oracle.returnLine"
+          }
+        }
+      ]
+    },
+    {
+      "id": "s11",
+      "verb": "deposit",
+      "source": {
+        "line": 57
+      },
+      "calls": [
+        {
+          "primitive": "lending.input",
+          "args": {
+            "source": "Key.DEPOSIT"
+          },
+          "sync": "READY",
+          "timeoutMs": 30000
+        }
+      ],
+      "expect": []
+    },
+    {
+      "id": "s12",
+      "verb": "waitFor",
+      "source": {
+        "line": 58
+      },
+      "calls": [
+        {
+          "primitive": "sync.await",
+          "args": {
+            "timeoutMs": 10000,
+            "topics": "loan.posted"
+          },
+          "sync": "NONE",
+          "timeoutMs": 11000,
+          "capture": {
+            "slot": "loan",
+            "fields": {
+              "id": "loanId",
+              "total": "total"
+            }
+          }
+        }
+      ],
+      "expect": []
+    }
+  ],
+  "verify": [
+    {
+      "path": "state.name",
+      "matcher": {
+        "equals": "IDLE"
+      }
+    },
+    {
+      "db": "loan",
+      "source": "lending",
+      "sql": "SELECT id, staff_code, posted_at, total FROM loan WHERE id = ? ORDER BY id",
+      "params": [
+        {
+          "kind": "INTEGER",
+          "value": "$loan.id"
+        }
+      ],
+      "rows": {
+        "equals": 1
+      },
+      "expect": {
+        "staff_code": {
+          "equals": "$assistant.code"
+        },
+        "total": {
+          "equals": "$oracle.returnLine"
+        }
+      }
+    },
+    {
+      "db": "loan_line",
+      "source": "lending",
+      "sql": "SELECT loan_id, line_no, item_code, qty, unit_deposit, amount, returned FROM loan_line WHERE loan_id = ? AND item_code = ? ORDER BY loan_id, line_no",
+      "params": [
+        {
+          "kind": "INTEGER",
+          "value": "$loan.id"
+        },
+        {
+          "kind": "TEXT",
+          "value": "$item.code"
+        }
+      ],
+      "rows": {
+        "equals": 1
+      },
+      "expect": {
+        "amount": {
+          "equals": "$oracle.returnLine"
+        },
+        "returned": {
+          "equals": true
+        }
+      }
+    },
+    {
+      "db": "loan_authorisation",
+      "source": "lending",
+      "sql": "SELECT loan_id, kind, staff_code FROM loan_authorisation WHERE loan_id = ? ORDER BY loan_id, kind, staff_code",
+      "params": [
+        {
+          "kind": "INTEGER",
+          "value": "$loan.id"
+        }
+      ],
+      "rows": {
+        "equals": 1
+      },
+      "expect": {
+        "kind": {
+          "equals": "RETURN_OVERRIDE"
+        },
+        "staff_code": {
+          "equals": "$supervisor.code"
+        }
+      }
+    },
+    {
+      "path": "slip.last.text",
+      "matcher": {
+        "contains": "$item.title"
+      }
+    }
+  ],
+  "cleanup": [
+    {
+      "primitive": "lending.input",
+      "args": {
+        "source": "Key.SIGN_OFF"
+      },
+      "sync": "READY",
+      "timeoutMs": 30000
+    }
+  ],
+  "launchProperties": {},
+  "artifacts": [],
+  "onPrompt": {
+    "unexpected": "fail"
+  },
+  "stepTimeoutMs": 30000,
+  "bindTimeoutMs": 60000
+}

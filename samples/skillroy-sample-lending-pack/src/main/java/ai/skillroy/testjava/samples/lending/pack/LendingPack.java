@@ -30,6 +30,7 @@ import ai.skillroy.testjava.scenario.pack.SyncPolicy;
 import ai.skillroy.testjava.scenario.resolve.EnvFingerprinter;
 import ai.skillroy.testjava.scenario.resolve.QueryType;
 import ai.skillroy.testjava.scenario.resolve.ResolutionCatalogue;
+import ai.skillroy.testjava.scenario.resolve.SqlAllowList;
 import ai.skillroy.testjava.scenario.resolve.StoredTable;
 
 import java.time.Duration;
@@ -45,8 +46,8 @@ import java.util.List;
  *       {@code prompt.waiting}. All three are published by the lending agent module from the desk's own engine
  *       callbacks.</li>
  *   <li>Verbs: {@code signOn}, {@code signOff}, {@code scan}, {@code key}, {@code enter}, {@code quantity},
- *       {@code deposit}, {@code expectPrompt}, {@code answerPrompt}, {@code authorise} (see {@link LendingSteps}).
- *   </li>
+ *       {@code deposit}, {@code expectPrompt}, {@code answerPrompt}, {@code authorise} (see {@link LendingSteps}),
+ *       each with the JSON Schema of its arguments (phase5-contracts.md 9.5, {@link LendingStepSchemas}).</li>
  *   <li>Facts: {@code loan}, {@code state}, {@code slip}, {@code prompt} (see {@link LendingFacts}).</li>
  *   <li>Resolution (phase2-contracts.md 13.3, phase3-contracts.md 10.3): the query kinds {@code SystemLimit},
  *       {@code LendableItem}, {@code StaffWithPermission}, {@code ActionKey}, {@code ActiveWaiverRuleWithTriggers}
@@ -55,6 +56,9 @@ import java.util.List;
  *       {@link LoanFromTrigger}, {@link ExpectedWaiver} and {@link ExpectedTotals}, the cross-check
  *       {@code lending.waiver.evaluate} of {@code ExpectedWaiver} ({@link LendingCrossChecks}), the fingerprinter
  *       ({@link LendingFingerprinter}), the stored tables and the password row mask ({@link LendingTables}).</li>
+ *   <li>Tier (b) (phase5-contracts.md 5.2, 14.1): the SQL allow-list of source {@code lending}
+ *       ({@link LendingAllowList}), which lets a scenario name the strategy {@code llm-sql} and tells the inference
+ *       module what a model may read.</li>
  *   <li>Pre-flight: {@value #PREFLIGHT_DATABASE}, the lending database answers a read on source {@code lending},
  *       through whichever channel serves it (the agent's {@code data.query}, or JDBC when the environment's
  *       credentials name the source).</li>
@@ -69,10 +73,11 @@ public final class LendingPack implements DomainPack {
     /** Pack id, the {@code pack:} of lending scenarios. */
     public static final String ID = "lending";
     /**
-     * Written into every plan; change it whenever a verb compiles differently. {@code 0.3.0}: the waiver queries,
-     * oracles and cross-check of phase3-contracts.md 10.3.
+     * Written into every plan; change it whenever a verb compiles differently or the pack's surface grows.
+     * {@code 0.3.0}: the waiver queries, oracles and cross-check of phase3-contracts.md 10.3. {@code 0.4.0}: the SQL
+     * allow-list and the verbs' argument schemas of phase5-contracts.md 14.1.
      */
-    public static final String VERSION = "0.3.0";
+    public static final String VERSION = "0.4.0";
     /** Published once per input the desk accepted from {@code lending.input}. */
     public static final String ACK_TOPIC = "input.acked";
     /** Published when the desk waits for input again, or asks a question. */
@@ -90,6 +95,7 @@ public final class LendingPack implements DomainPack {
     private static final ResolutionCatalogue CATALOGUE = catalogue();
     private static final EnvFingerprinter FINGERPRINTER = new LendingFingerprinter();
     private static final List<RowMask> ROW_MASKS = List.of(LendingTables.PASSWORD_MASK);
+    private static final List<SqlAllowList> ALLOW_LISTS = List.of(LendingAllowList.LIST);
 
     /** Public no-argument constructor for {@code ServiceLoader}. */
     public LendingPack() {
@@ -149,6 +155,12 @@ public final class LendingPack implements DomainPack {
     @Override
     public List<RowMask> rowMasks() {
         return ROW_MASKS;
+    }
+
+    /** One list, for source {@code lending}: {@link LendingAllowList}. The same list on every call. */
+    @Override
+    public List<SqlAllowList> sqlAllowLists() {
+        return ALLOW_LISTS;
     }
 
     /**

@@ -592,9 +592,16 @@ pack declares at least one `SqlAllowList`; strategy `LLM_SQL`; id `inference.sql
 4. **Execution** through `ctx.data()` on the allow-list's source with the guarded statement and its parameters in the
    forms of P2 §7.1 (a `DATE`/`TIMESTAMP` param in the forms the channel accepts), under the slot's remaining budget;
    the rows pass the channel's masks as any read (P2 §7.3). The row count must lie in `expectedRows` (bounds the model
-   stated, clamped to 1..200; a count outside is rejected "row count 0 outside 1..5"); the rows are decoded to `T`
-   through the value type's codec by column name (a missing or extra column is rejected `SHAPE`), at most
-   `ctx.maxCandidates()` of them, in the statement's order.
+   stated, clamped to 1..200; a count outside is rejected "row count 0 outside 1..5"); the rows become candidates, at most
+   `ctx.maxCandidates()` of them, in the statement's order. **How a row becomes a `T`** (D90, 2026-10-08, from the
+   sample: a flat row cannot fill `StaffRef(code, permissions: List, limits: Map)`): when the pack registers a
+   `ValueLoader` for the kind (§5.4a), the catalogue tells the model to select exactly the loader's identity columns, by
+   name, and each row's identity values go to `load`, which builds the typed value with the pack's own committed reads
+   (the same code a tier (a) resolver uses; a `ResolutionException` from it rejects that row with its reason, a
+   `RuntimeException` is `ENVIRONMENT` as for any pack defect); the candidate's label is the identity values joined.
+   Without a loader every component of a flat record is taken from a column by name and scalars go through the codec
+   (a missing or extra column is rejected `SHAPE`); a list or map component without a loader is refused `SHAPE` with a
+   message naming `ValueLoader`.
 5. **Provenance**: the `Statement` record carries the guarded statement, the parameters (masked), the row count and
    the masked sample as for tier (a); `Provenance` gains a `rationale` component (the model's text, masked, at most
    2000 characters; null for tier (a)) and the injected clauses stand in the statement's text itself (the guard's
@@ -607,6 +614,21 @@ A refusal or a `MAX_TOKENS` stop is "no candidates" with a note. An `InferenceEx
 once more within the slot's budget, then the slot fails `ENVIRONMENT` ("the model provider could not be reached:
 <kind>"); `AUTH` and `INVALID_REQUEST` fail at once the same way; `NO_RECORDING` as §4.2 says. The resolver never
 calls a mutating primitive and never sees a credential (it is a resolver of P2 §6.4 like any other).
+
+### 5.4a `ValueLoader` (`skillroy-scenario`, package `…scenario.resolve`)
+
+```java
+/** Completes a tier (b) candidate: the model's SQL selects the identity columns the pack names; the pack loads the
+ *  typed value from them with its own committed reads, so that a value type with a list or a map can be found by a
+ *  model without the model aggregating it (D90). Registered through ResolutionCatalogue.Builder.valueLoader and found
+ *  by ResolutionCatalogue.valueLoader(kind); build() refuses a loader for an undeclared kind or two for one kind. */
+public interface ValueLoader<Q extends Query<T>, T> {
+    String kind();
+    List<String> identityColumns();          // the columns a statement must select, by name; order free
+    T load(Q query, Map<String,Object> identity, ResolveContext ctx)
+            throws ResolutionException, DataException, AgentRpcException, AgentLostException, InterruptedException;
+}
+```
 
 ### 5.5 `ResolverContributor` and `InferenceSettings` (`skillroy-scenario`)
 
@@ -1355,8 +1377,21 @@ trailing `skillroy: zero model calls` test is unchanged.
 - **`argsSchema`** for every verb of the pack's `StepLibrary` (§9.5), with references typed as described there; a test
   compiles every committed scenario's steps and checks each step's arguments against its verb's schema with the
   validator of §13.3.
+- `ValueLoader`s (§5.4a, D90) for `StaffWithPermission` (identity `code`; loads `StaffRef` with the staff resolver's own
+  reads) and `LendableItem` (identity `code`; loads `ItemRef`), so that scenario D's supervisor can be found by a model.
 - Nothing else changes in the pack: the queries, resolvers, verifiers, oracles, cross-check and fingerprinter stand.
   The version becomes 0.4.0 (the allow-list is new pack surface).
+
+As built (2026-10-08, S1, before the loaders): `LendingAllowList` with the fingerprinter's twelve tables, every
+non-secret column readable (`staff.auto_sign_on` included: the committed staff SQL reads it), `staff.password` the one
+`otherColumns` entry, `desk_setting.name` sampled (the column is `name`, not `key`), the schema's own types (`BIGINT`
+for the loan ids); `AllowListOnRealSchemaTest` (not `PackOnRealSchemaTest`) proves the list against the embedded
+database's schema (a primary-key column counts as NOT NULL, since HSQLDB's schema view reports it nullable); the
+`argsSchema`s (`LendingStepSchemas`) are top-level objects with `additionalProperties: false`, references typed as the
+referenced value plus "or a $reference", the verbs' numeric bounds and "exactly one of" rules in descriptions only (the
+provider's schema limits); a step written without a value (`- signOff:`) is therefore valid to the compiler and
+invalid to the schema, and `quantity` as text likewise; `ScenarioSchemaCommittedTest` validates every pack step of the
+sixteen committed and negative scenarios against its verb's schema.
 
 ### 14.2 Scenario D: `supervisor-return-llm-sql` (tier (b) end to end, no key)
 
@@ -1368,7 +1403,12 @@ files for `seed-a` and `seed-b` are written by `approve` against the recorded ga
 "recorded 2026-10-08"` and committed. In the acceptance (§15.2) `replay` runs it on both seeds in every load mode with
 zero model calls, and `approve --yes` against the recordings reproduces the committed bindings files byte for byte.
 The verifier `lending.access.check` is the gate on the model's answer as on the committed one; `ExpectedAuthorisation`
-and the rest of scenario A are unchanged, so the scenario still tests what scenario A tests.
+and the rest of scenario A are unchanged, so the scenario still tests what scenario A tests. As built (2026-10-08,
+S1): the YAML and the version-5 plan (`inference: bind`, pack 0.4.0; a test checks that the plan equals scenario A's
+apart from the id, the source hash, `inference`, the line numbers and that one strategy) are committed; the bindings
+files and the recordings wait for the key (`ScenarioD.HAS_BINDINGS` keeps the bindings-dependent tests and the JUnit
+glue's end-to-end check away from it until then); the supervisor's `StaffRef` is completed through the pack's
+`ValueLoader` (D90).
 
 ### 14.3 Scenario C: `return-refunds-deposit` (authored by the planner)
 
@@ -1422,7 +1462,7 @@ into the container when it is set, without printing it); `-Pinference-live` runs
    prompt built for every purpose contains no credential value and no personal value.
 5. **`SqlGuard`**: the BS6 corpora (accept and reject per dialect, byte-identical rewrites, the listed unsupported
    constructs), every reason code of §5.3 with a minimal statement each, the injected `ORDER BY` and `LIMIT`, alias
-   and CTE resolution, the `personal` rule; the sample's allow-list against the real schema (`PackOnRealSchemaTest`:
+   and CTE resolution, the `personal` rule; the sample's allow-list against the real schema (`AllowListOnRealSchemaTest`:
    every allow-listed column exists; every accept-corpus statement over the sample's tables also executes on the
    embedded database).
 6. **`LlmSqlResolver`** with a scripted gateway against the sample's pack on the embedded database (the `JdbcDataChannel`
@@ -1535,6 +1575,7 @@ item 4; all three are also exercised without a key through the recordings.
 | D84 | Model classes with the defaults Sonnet (resolve, session, summary), Opus (the planner), Haiku (labels); refusal fallbacks on and recorded; images off; Fable never configured by default | one model everywhere; fallbacks off; images on | ai-inference R7 and F10 (cost and retention); a fallback that answers a refusal keeps a nightly job alive and the ledger says who answered (Q6) |
 | D85 | The agent's `StatementGuard` stays as it is and `SqlGuard` lives on the controller only | JSqlParser inside the agent for `data.query` | B4: nothing but the JDK in a target JVM; the model's SQL runs through the controller's channel or through `data.query` after the controller's guard |
 | D86 | The calibrated-oracle case of gap 26 is answered by the export: an observed value is an ordinary expectation marked in the YAML and listed in the report for the reviewer; no run-time status | a `DEGRADED` outcome for a scenario with observed expectations; refusing to export them | the reviewer who commits the scenario decides; a run cannot tell an observed value from a specified one after the comment is removed |
+| D90 | A tier (b) row becomes a typed candidate through the pack's `ValueLoader` for the kind (the model selects the identity columns, the pack's committed reads build the value), with the flat column-by-name decoding only for kinds without a loader (2026-10-08, S1's finding) | the model aggregating lists and maps in SQL (`GROUP_CONCAT`, `ARRAY_AGG`); the resolver gathering several rows into one value; changing the sample's value types | aggregation functions are outside the guard's set and dialect-specific; gathering rows needs a grouping rule per type; the pack already has the code that loads a value from its key, and reusing it keeps the model to finding *which* row |
 | D89 | A `confirm` argument of any call (a plan step, a cleanup call, a session step) is taken out of the parameters and sent as the request's `_meta.confirm` (2026-10-08, E1) | leaving `confirm` as an ordinary parameter | the agent reads the confirmation only from `_meta`, so a scenario's `confirm: true` never reached it before; no primitive in the base or the samples has a parameter of that name; a `MODEL` origin's `confirm` is stripped before this mapping (§12.2) |
 | D88 | The Anthropic Java SDK is pinned to its current line at build time (2.69.x on 2026-10-08) rather than the research note's 2.34.0; the client is built explicitly from `ANTHROPIC_API_KEY` with the SDK's retries and logging off, and the gateway retries within its own deadline; MCP comes as `mcp-core` + `mcp-json-jackson2`; the root POM imports `jackson-bom` | staying on 2.34.0 with work-arounds (an untyped fallback parameter, no typed workspace id, unknown 5.5 content blocks); `fromEnv()`; the SDK's own retries; the `mcp` convenience artifact | spike BS13 (F-2, F-7, F-9, F-11): 2.34.0 predates the 5.5 models and the fallback betas; `fromEnv()` reads profiles, auth tokens and custom headers from the operator's shell; the SDK's retries are per attempt without a cap on `retry-after`; `mcp` brings a second Jackson |
 | D87 | The session service offers the pack's verbs (and base primitives only by policy), one action at a time, with the model's `confirm` stripped; the overlay bridge rides the existing event stream and answers through a pack-named primitive | a free tool set; parallel actions; a dedicated transport for overlays | design §5 and B15: the verbs are what exports well, a model's request is never a confirmation, no new transport |
@@ -1552,6 +1593,7 @@ and "(Phase 5, built …)" once built:
 | P2 §3.1 grammar | `llm-sql` accepted when the pack declares an allow-list; `llm-reason`, `llm-vision` still rejected |
 | P2 §5 `plan.json` | version 5; `inference: bind` |
 | P2 §6.1 `DomainPack` | `sqlAllowLists()`, `assistAnswerPrimitive()`; `StepLibrary.argsSchema` |
+| P2 §6.4 `ResolutionCatalogue` | `ValueLoader` and `Builder.valueLoader` (§5.4a, D90) |
 | P2 §6.3 | `Approval.State.REQUIRED`; `Resolution.usage` filled from the ledger (the contradiction the inventory of 2026-10-08 found: the engine passes null today); `confidence` from the proposal |
 | P2 §6.4 rules | a resolver may be a `BatchableResolver`; contributed resolvers after the pack's |
 | P2 §6.6 | `BindMode.RE_RESOLVE`; `BindOptions.inference`; `CostLedger.Entry`'s new fields; `ResolverContributor`, `InferenceSettings` |

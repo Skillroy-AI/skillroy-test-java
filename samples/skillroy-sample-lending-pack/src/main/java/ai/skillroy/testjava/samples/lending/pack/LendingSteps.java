@@ -68,7 +68,9 @@ import java.util.Set;
  *
  * <p>Every READY call waits for {@code input.acked} and then for the desk to wait again
  * ({@code input.requested}) or to ask a question ({@code prompt.waiting}). Values are sent as strings; quote codes,
- * barcodes and money in YAML. Unknown argument keys are errors. Stateless; a pure function of its arguments.
+ * barcodes and money in YAML. Unknown argument keys are errors. Each verb declares the JSON Schema of its arguments
+ * ({@link #argsSchema}, built by {@link LendingStepSchemas}; phase5-contracts.md 9.5), for tools and for authoring:
+ * information only, {@link #compile} stays the authority. Stateless; a pure function of its arguments.
  */
 final class LendingSteps implements StepLibrary {
 
@@ -96,6 +98,17 @@ final class LendingSteps implements StepLibrary {
     @Override
     public Set<String> verbs() {
         return VERBS;
+    }
+
+    /**
+     * The JSON Schema of a verb's arguments (phase5-contracts.md 9.5, 14.1), as {@link LendingStepSchemas} describes
+     * them; a new map on every call.
+     *
+     * @return the schema, or null for a verb this library does not have
+     */
+    @Override
+    public Map<String, Object> argsSchema(String verb) {
+        return LendingStepSchemas.of(verb);
     }
 
     @Override

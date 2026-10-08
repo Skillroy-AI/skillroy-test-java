@@ -16,6 +16,7 @@
 
 package ai.skillroy.testjava.samples.lending.scenarios;
 
+import ai.skillroy.testjava.protocol.Json;
 import ai.skillroy.testjava.samples.lending.pack.LendingPack;
 import ai.skillroy.testjava.scenario.Plan;
 import ai.skillroy.testjava.scenario.PlanCompiler;
@@ -37,6 +38,7 @@ import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -67,8 +69,8 @@ class PlansUpToDateTest {
     void everyCommittedPlanMatchesItsScenario() throws Exception {
         List<Path> scenarios = committedScenarios();
         assertEquals(List.of("basic-loan-ui.yaml", "basic-loan.yaml", "borrow-2-waive-1-slip.yaml",
-                "return-over-limit-needs-supervisor.yaml"), scenarios.stream().map(p -> p.getFileName().toString())
-                .toList());
+                "return-over-limit-needs-supervisor.yaml", "supervisor-return-llm-sql.yaml"), scenarios.stream()
+                .map(p -> p.getFileName().toString()).toList());
         boolean update = Boolean.getBoolean("skillroy.plans.update");
         List<String> stale = new ArrayList<>();
         for (Path yaml : scenarios) {
@@ -96,7 +98,8 @@ class PlansUpToDateTest {
             Plan plan = Plan.read(planFor(yaml));
             assertEquals("lending", plan.pack());
             assertEquals(Plan.VERSION, plan.planVersion());
-            assertEquals("none", plan.inference());
+            assertEquals(plan.scenarioId().equals(ScenarioD.ID) ? Plan.INFERENCE_BIND : "none", plan.inference(),
+                    "only scenario D's bind may need a model");
             if (plan.scenarioId().startsWith("basic-loan")) {
                 assertEquals("A", plan.launchProperties().get("lending.seed"), "Phase 1 scenarios name their seed");
             } else {
@@ -225,7 +228,7 @@ class PlansUpToDateTest {
     @Test
     void scenarioAsPlanHasTheResolutionModel() throws Exception {
         Plan plan = Plan.read(ScenarioA.plan());
-        assertEquals("0.3.0", plan.packVersion());
+        assertEquals("0.4.0", plan.packVersion());
         assertEquals(List.of("systemMax/query", "item/query", "assistant/query", "supervisor/query", "keys/query",
                 "loan/capture"), plan.slots().stream().map(sl -> sl.name() + "/" + sl.kind()).toList());
         assertEquals(List.of("SystemLimit", "LendableItem", "StaffWithPermission", "StaffWithPermission",
@@ -270,8 +273,8 @@ class PlansUpToDateTest {
     }
 
     /**
-     * Scenario B's committed plan as phase3-contracts.md 4 and 10.4 describe it, written as version 4 since Phase 4
-     * (phase4-contracts.md 7.3; the only difference to its version 3 form) and pack 0.3.0, four query
+     * Scenario B's committed plan as phase3-contracts.md 4 and 10.4 describe it, written as version 5 since Phase 5
+     * (phase5-contracts.md 13.2) with pack 0.4.0 (phase5-contracts.md 14.1), four query
      * slots in file order and two captures (the posted loan and the printed slip, in that order), the waiver rule
      * resolved by SQL and verified by the desk's dry run, three oracles of which {@code waiver} alone carries the
      * cross-check (tolerance {@code "0.00"}, unguarded, so its capability is in {@code requires}), the stored-row
@@ -282,7 +285,7 @@ class PlansUpToDateTest {
     void scenarioBsPlanHasTheWaiverModel() throws Exception {
         Plan plan = Plan.read(ScenarioB.plan());
         assertEquals(5, plan.planVersion());
-        assertEquals("0.3.0", plan.packVersion());
+        assertEquals("0.4.0", plan.packVersion());
         assertEquals(List.of("assistant/query", "rule/query", "item/query", "keys/query", "loan/capture",
                 "slip/capture"), plan.slots().stream().map(sl -> sl.name() + "/" + sl.kind()).toList());
         assertEquals(List.of("StaffWithPermission", "ActiveWaiverRuleWithTriggers", "ItemsTriggering", "ActionKey"),
@@ -328,6 +331,47 @@ class PlansUpToDateTest {
         assertTrue(plan.toJsonText().contains("\"devices[id=printer].state.last.text\""), "the base root devices");
         assertTrue(plan.needsBindings());
         assertEquals(plan.resolveHash(), PlanCompiler.compile(ScenarioB.yaml(), new LendingPack()).resolveHash());
+    }
+
+    /**
+     * Scenario D's committed plan (phase5-contracts.md 14.2, 13.2): scenario A's plan with one change, the supervisor
+     * slot's strategy {@code [llm-sql]}, which makes its bind need a model ({@code inference: bind}) and gives it a
+     * resolve hash of its own; the rest, from the item's and the assistant's committed strategies to the steps, the
+     * checks, the oracles and the graph, is scenario A's, so that scenario D still tests what scenario A tests.
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    void scenarioDsPlanIsScenarioAsWithTheSupervisorFoundByAModel() throws Exception {
+        Plan plan = Plan.read(ScenarioD.plan());
+        Plan a = Plan.read(ScenarioA.plan());
+        assertEquals(ScenarioD.ID, plan.scenarioId());
+        assertEquals(5, plan.planVersion());
+        assertEquals("0.4.0", plan.packVersion());
+        assertEquals(Plan.INFERENCE_BIND, plan.inference());
+        assertEquals(List.of("llm-sql"), plan.slot(ScenarioD.MODEL_SLOT).query().strategy(), "the model only");
+        assertEquals(List.of("sql"), plan.slot("item").query().strategy(), "the item keeps its committed strategy");
+        assertEquals(List.of(), plan.slot("assistant").query().strategy(), "and so does the assistant");
+        assertEquals(List.of("lending.access.check"), plan.slot(ScenarioD.MODEL_SLOT).query().verify(),
+                "the desk's access check is the gate on the model's answer as on the committed one");
+        assertEquals(new CredentialSpec("staff", "code"), plan.slot(ScenarioD.MODEL_SLOT).credential());
+        assertEquals(ScenarioA.GRAPH, plan.resolutionGraph());
+        assertTrue(plan.needsBindings());
+        assertNotEquals(a.resolveHash(), plan.resolveHash(), "a strategy enters what the bindings are tied to");
+
+        Map<String, Object> d = Json.parseObject(Files.readString(ScenarioD.plan()));
+        Map<String, Object> expected = Json.parseObject(Files.readString(ScenarioA.plan()));
+        for (Map<String, Object> json : List.of(d, expected)) {
+            for (String differs : List.of("scenarioId", "sourceHash", "inference")) {
+                assertNotNull(json.remove(differs), differs);
+            }
+            for (Object step : (List<Object>) json.get("steps")) {
+                assertNotNull(((Map<String, Object>) step).remove("source"), "a step's line in its own file");
+            }
+        }
+        Map<String, Object> supervisor = ((List<Object>) d.get("slots")).stream().map(s -> (Map<String, Object>) s)
+                .filter(s -> ScenarioD.MODEL_SLOT.equals(s.get("name"))).findFirst().orElseThrow();
+        assertEquals(List.of("llm-sql"), supervisor.remove("strategy"));
+        assertEquals(expected, d, "scenario A's plan but for the supervisor's strategy");
     }
 
     /** The first {@code swing.click} call of a plan. */
