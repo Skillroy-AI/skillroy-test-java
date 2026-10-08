@@ -30,9 +30,10 @@ import java.util.Map;
 
 /**
  * The {@code skillroy} command line: {@code jvms}, {@code attach}, {@code info}, {@code caps}, {@code schema},
- * {@code call}, {@code snapshot}, {@code events}, {@code compile}, {@code run} (contract section 8.5), and from
- * Phase 2 {@code resolve} and {@code diff-bindings} (phase2-contracts.md 12.1). It lets a
- * person, a CI job or an AI agent drive a target application through its in-JVM agent without writing Java.
+ * {@code call}, {@code snapshot}, {@code events}, {@code compile}, {@code run} (contract section 8.5), from
+ * Phase 2 {@code resolve} and {@code diff-bindings} (phase2-contracts.md 12.1), and from Phase 5
+ * {@code re-resolve}, {@code mcp}, {@code author}, {@code triage} and {@code session} (phase5-contracts.md 13.4). It
+ * lets a person, a CI job or an AI agent drive a target application through its in-JVM agent without writing Java.
  *
  * <p>Human-readable output goes to standard output, diagnostics to standard error; {@code --json} gives
  * machine-readable output where it makes sense. Both streams pass through {@link SafePrintStream}, which makes
@@ -164,7 +165,8 @@ public final class Main {
         }
         text.append("""
 
-                Connecting (info, caps, schema, call, snapshot, events, run, resolve):
+                Connecting (info, caps, schema, call, snapshot, events, run, resolve, re-resolve, mcp, author,
+                session):
                   --pid <pid>                     the agent of this JVM, found through its discovery file
                   --port <port> --token-file <f>  the agent at 127.0.0.1:<port> with its token in <f>
                   neither                         the only live agent in the discovery directory
@@ -172,10 +174,15 @@ public final class Main {
                                                   (default: <java.io.tmpdir>/skillroy-<user>, or
                                                   <user.home>/.skillroy/run when another user owns that)
 
+                Model calls (run, resolve, re-resolve, mcp, author, triage, session): --inference claude needs the
+                model key in the environment variable ANTHROPIC_API_KEY (never an option or a file); recorded
+                answers from --recordings; replay never calls a model.
+
                 Exit codes: 0 ok; 1 failed (scenario FAIL or ERROR, REBIND_NEEDED and RESOLUTION_FAILED included,
                 JSON-RPC error, stale plan, credentials that cannot be loaded, bindings that differ); 2 scenario load
                 or compile error, or a file that is not a bindings file; 3 agent unreachable; 64 usage error
-                (including approve without a terminal and without --yes); 70 internal error.
+                (including approve without a terminal and without --yes, and an inference setting that cannot be
+                used); 70 internal error.
 
                 Run 'skillroy <command> --help' for the options of a command; 'skillroy --version' for the version.
                 """);
@@ -196,7 +203,9 @@ public final class Main {
         Map<String, Command> commands = new LinkedHashMap<>();
         for (Command command : List.of(new JvmsCommand(), new AttachCommand(), new InfoCommand(), new CapsCommand(),
                 new SchemaCommand(), new CallCommand(), new SnapshotCommand(), new EventsCommand(),
-                new CompileCommand(), new RunCommand(), new ResolveCommand(), new DiffBindingsCommand())) {
+                new CompileCommand(), new RunCommand(), new ResolveCommand(), new DiffBindingsCommand(),
+                new ReResolveCommand(), new McpCommand(), new AuthorCommand(), new TriageCommand(),
+                new SessionCommand())) {
             commands.put(command.spec().name(), command);
         }
         return Collections.unmodifiableMap(commands);

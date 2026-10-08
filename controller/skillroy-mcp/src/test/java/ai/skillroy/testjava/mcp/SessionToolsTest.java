@@ -148,6 +148,32 @@ class SessionToolsTest {
         }
     }
 
+    /**
+     * After {@code skillroy_scenario_run} the session is told the agent's sequence number
+     * ({@code ExecutorSession.promptsHandledUpTo}): a prompt from before the end of the run is not the next session
+     * step's unexpected prompt; without a run in between, the same prompt fails that step.
+     */
+    @Test
+    void aScenarioRunMovesTheSessionsPromptCursorPastWhatTheRunSaw() throws Exception {
+        try (McpFixture fx = new McpFixture(dir.resolve("unaware")).startMutating()) {
+            fx.desk.agent.publish("prompt.waiting", Map.of("id", "p1", "text", "Lend anyway?"));
+            McpSchema.CallToolResult step = fx.call("desk_enter", Map.of("value", "HAM-1"));
+            assertTrue(step.isError(), "without a run in between the prompt is the step's: " + McpFixture.text(step));
+            assertTrue(McpFixture.text(step).contains("FAIL"), McpFixture.text(step));
+        }
+        try (McpFixture fx = new McpFixture(dir.resolve("after-run")).startMutating()) {
+            fx.desk.agent.publish("prompt.waiting", Map.of("id", "p1", "text", "Lend anyway?"));
+            McpSchema.CallToolResult run = fx.call("skillroy_scenario_run", Map.of("yaml", "scenario: desk-run\n"
+                    + "pack: desk\nsteps:\n  - enter: {value: SAW-2}\n", "mode", "live"));
+            assertFalse(run.isError(), McpFixture.text(run));
+            assertTrue(fx.desk.agent.callsTo("evt.query").stream().anyMatch(c -> Long.valueOf(Long.MAX_VALUE)
+                    .equals(c.params().get("since"))), "the sequence number after the run was read");
+            McpSchema.CallToolResult step = fx.call("desk_enter", Map.of("value", "HAM-1"));
+            assertFalse(step.isError(), "the prompt before the run's end is not the step's: "
+                    + McpFixture.text(step));
+        }
+    }
+
     @Test
     void sessionAskCallsTheActorOnceMadeAndClosesItWithTheServer() throws Exception {
         AtomicInteger made = new AtomicInteger();

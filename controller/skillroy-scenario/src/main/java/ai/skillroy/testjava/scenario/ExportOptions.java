@@ -28,8 +28,13 @@ package ai.skillroy.testjava.scenario;
  *     null writes it {@code REQUIRED}
  * @param description the scenario's description for its comment head; null means "exported from session &lt;id&gt; on
  *     &lt;date&gt;"
+ * @param includeReads true exports a raw call of a primitive that changes nothing (one the journal's
+ *     {@code session-start} lists under {@code reads}) as a {@code call} step too; false (the default) leaves such a
+ *     call out and lists it in the report: a read is an observation, not a step (a read that captures a slot is always
+ *     exported, since later steps may refer to the capture)
  */
-public record ExportOptions(String scenarioId, boolean includeFailed, String approvedBy, String description) {
+public record ExportOptions(String scenarioId, boolean includeFailed, String approvedBy, String description,
+                            boolean includeReads) {
 
     /**
      * @throws IllegalArgumentException if the id is not {@code [a-z0-9-]+} or the approver label is blank
@@ -44,23 +49,37 @@ public record ExportOptions(String scenarioId, boolean includeFailed, String app
         }
     }
 
-    /** Options exporting the passed steps as {@code scenarioId}, tier (b) slots {@code REQUIRED}. */
+    /**
+     * The options before {@code includeReads}: reads left out.
+     *
+     * @throws IllegalArgumentException as the canonical constructor
+     */
+    public ExportOptions(String scenarioId, boolean includeFailed, String approvedBy, String description) {
+        this(scenarioId, includeFailed, approvedBy, description, false);
+    }
+
+    /** Options exporting the passed steps as {@code scenarioId}, tier (b) slots {@code REQUIRED}, reads left out. */
     public static ExportOptions of(String scenarioId) {
-        return new ExportOptions(scenarioId, false, null, null);
+        return new ExportOptions(scenarioId, false, null, null, false);
     }
 
     /** A copy that does or does not include the steps up to the first failure. */
     public ExportOptions withIncludeFailed(boolean on) {
-        return new ExportOptions(scenarioId, on, approvedBy, description);
+        return new ExportOptions(scenarioId, on, approvedBy, description, includeReads);
     }
 
     /** A copy with this approver label (null: tier (b) slots {@code REQUIRED}). */
     public ExportOptions withApprovedBy(String label) {
-        return new ExportOptions(scenarioId, includeFailed, label, description);
+        return new ExportOptions(scenarioId, includeFailed, label, description, includeReads);
     }
 
     /** A copy with this description. */
     public ExportOptions withDescription(String text) {
-        return new ExportOptions(scenarioId, includeFailed, approvedBy, text);
+        return new ExportOptions(scenarioId, includeFailed, approvedBy, text, includeReads);
+    }
+
+    /** A copy that does or does not export the raw calls of primitives that change nothing. */
+    public ExportOptions withIncludeReads(boolean on) {
+        return new ExportOptions(scenarioId, includeFailed, approvedBy, description, on);
     }
 }

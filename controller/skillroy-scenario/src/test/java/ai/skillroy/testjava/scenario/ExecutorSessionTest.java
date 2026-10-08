@@ -200,6 +200,38 @@ class ExecutorSessionTest {
         }
     }
 
+    /**
+     * The host's seam (the MCP server after {@code skillroy_scenario_run}): prompts that something outside the session
+     * handled, up to a sequence number, are not the next step's unexpected prompts; a later prompt still is, and the
+     * cursor never moves back.
+     */
+    @Test
+    void promptsHandledOutsideTheSessionAreNotTheNextStepsUnexpectedPrompts() throws Exception {
+        try (ExecutorSession session = fx.open()) {
+            long handled = fx.agent.publish("prompt.waiting", Map.of("id", "elsewhere", "text", "Answered by a run",
+                    "buttons", List.of("OK")));
+            session.promptsHandledUpTo(handled);
+            session.promptsHandledUpTo(handled - 1);
+            StepOutcome next = session.execute("enter", Map.of("value", "B2"), PERSON);
+            assertEquals(Status.PASS, next.status(), "the prompt a run handled is not this step's: " + next.message());
+            assertTrue(next.seqBefore() >= handled, "the session saw up to the handled sequence number");
+
+            fx.agent.publish("prompt.waiting", Map.of("id", "later", "text", "Not handled", "buttons",
+                    List.of("OK")));
+            StepOutcome unexpected = session.execute("enter", Map.of("value", "B2"), PERSON);
+            assertEquals(Status.FAIL, unexpected.status(), "a prompt after the handled number is unexpected");
+            assertEquals(FailureKind.ASSERTION, unexpected.failureKind());
+        }
+        try (ExecutorSession unaware = fx.open()) {
+            fx.agent.publish("prompt.waiting", Map.of("id", "elsewhere", "text", "Not told", "buttons",
+                    List.of("OK")));
+            assertEquals(Status.FAIL, unaware.execute("enter", Map.of("value", "B2"), PERSON).status(),
+                    "without the seam the same prompt fails the step");
+            unaware.close();
+            assertThrows(IllegalStateException.class, () -> unaware.promptsHandledUpTo(1L), "closed");
+        }
+    }
+
     // ------------------------------------------------------------------------------------------------ resolution
 
     @Test

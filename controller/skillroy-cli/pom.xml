@@ -58,6 +58,24 @@
       <groupId>ai.skillroy</groupId>
       <artifactId>skillroy-data</artifactId>
     </dependency>
+    <!-- Phase 5 (phase5-contracts.md 2.1, 2.6): the AI layer's commands (re-resolve, author, triage, session) and the
+         tier (b) resolver a live or approve bind finds through ServiceLoader; the MCP server of 'skillroy mcp'. They
+         bring the Anthropic Java SDK, JSqlParser and the MCP Java SDK with their trees into lib/ (THIRD-PARTY.txt). -->
+    <dependency>
+      <groupId>ai.skillroy</groupId>
+      <artifactId>skillroy-inference</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>ai.skillroy</groupId>
+      <artifactId>skillroy-mcp</artifactId>
+    </dependency>
+    <!-- slf4j-api (in the SDKs' trees) finds no provider and prints a notice on stderr once; the no-operation provider
+         keeps the CLI's stderr to its own messages (phase5-contracts.md 9.3, as built). Runtime only. -->
+    <dependency>
+      <groupId>org.slf4j</groupId>
+      <artifactId>slf4j-nop</artifactId>
+      <scope>runtime</scope>
+    </dependency>
     <dependency>
       <groupId>org.junit.jupiter</groupId>
       <artifactId>junit-jupiter</artifactId>
@@ -171,9 +189,11 @@
             <!-- DistributionNoticesIT compares the licence files in the distribution with the root ones. -->
             <skillroy.root.dir>${skillroy.root.dir}</skillroy.root.dir>
           </systemPropertyVariables>
-          <!-- As for the unit tests: the launched CLI must not find a developer's own credentials. -->
+          <!-- As for the unit tests: the launched CLI must not find a developer's own credentials, nor a model key. -->
           <excludedEnvironmentVariables>
             <param>SKILLROY_CREDENTIALS</param>
+            <param>ANTHROPIC_API_KEY</param>
+            <param>ANTHROPIC_WORKSPACE_ID</param>
           </excludedEnvironmentVariables>
         </configuration>
       </plugin>
@@ -182,9 +202,13 @@
         <artifactId>maven-surefire-plugin</artifactId>
         <configuration>
           <!-- run and resolve locate credentials.yaml through this variable too: a developer's own must not reach
-               the tests, which name their files with the credentials option. -->
+               the tests, which name their files with the credentials option. The model key and its workspace id
+               neither: the tests that need a key give a child JVM a dummy one, and the others assert the
+               behaviour without one (phase5-contracts.md 4.4, 15.1 item 16). -->
           <excludedEnvironmentVariables>
             <param>SKILLROY_CREDENTIALS</param>
+            <param>ANTHROPIC_API_KEY</param>
+            <param>ANTHROPIC_WORKSPACE_ID</param>
           </excludedEnvironmentVariables>
         </configuration>
       </plugin>

@@ -52,7 +52,10 @@ import java.util.regex.Pattern;
  *       the base verb {@code call} as built ({@code {primitive, args?, sync, await?}}, the capture inside
  *       {@code await}), its arguments as sent except that an argument given with a reference keeps it and a value
  *       equal to a bound slot's field (a resolved slot, an oracle, a slot an earlier exported step captured) is written
- *       back as the reference; an argument the journal masked is refused, naming the step.</li>
+ *       back as the reference; an argument the journal masked is refused, naming the step. A raw call of a primitive
+ *       that changes nothing (the {@code reads} of the journal's {@code session-start}) is an observation, not a step:
+ *       it is left out and listed in the report unless {@link ExportOptions#includeReads()} (or it captures a
+ *       slot).</li>
  *   <li><b>Expectations.</b> The checks that held after a step become an {@code expect} step after it (those that did
  *       not hold are listed in the report); an observed value becomes an expectation of that value with the comment
  *       {@code # observed in session <id> at step <n>, not derived} on its line and a line in the report's
@@ -169,6 +172,11 @@ final class JournalExport {
                         excluded.add(line);
                         continue;
                     }
+                    if (passed && !options.includeReads() && isRead(s)) {
+                        excluded.add(line + "; a read of " + s.calls().get(0).get("primitive") + " is an"
+                                + " observation, not a step (exported with includeReads)");
+                        continue;
+                    }
                     flushGroup();
                     steps.add(step(s));
                     for (Map<String, Object> call : s.calls()) {
@@ -217,6 +225,18 @@ final class JournalExport {
             }
         }
         flushGroup();
+    }
+
+    /**
+     * True for a raw call (no verb) of one primitive that changes nothing, by the {@code reads} of the journal's
+     * {@code session-start}, and that captures no slot (a later step may refer to a capture).
+     */
+    private boolean isRead(StepJournal.StepEntry s) {
+        if (s.verb() != null || s.calls().size() != 1) {
+            return false;
+        }
+        Map<String, Object> call = s.calls().get(0);
+        return call.get("capture") == null && start.reads().contains(String.valueOf(call.get("primitive")));
     }
 
     private static String originLabel(Origin origin) {

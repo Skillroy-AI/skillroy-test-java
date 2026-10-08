@@ -213,18 +213,30 @@ public final class StepJournal {
      * @param startedAt when it opened, ISO-8601, from the session's clock
      * @param primitives the target's primitives that name a capability: primitive to capability id (what an export's
      *     {@code requires} is made of)
+     * @param reads the target's primitives that change nothing (neither mutating nor destructive in its catalogue),
+     *     sorted: a raw call of one of them is an observation, which an export leaves out unless
+     *     {@link ExportOptions#includeReads()}; empty in a journal written before the field existed (every raw call is
+     *     then exported)
      */
     public record SessionStart(String id, String pack, String packVersion, String envId, Map<String, Object> env,
                                boolean readOnly, Map<String, Object> options, String startedAt,
-                               Map<String, String> primitives) implements Entry {
+                               Map<String, String> primitives, List<String> reads) implements Entry {
 
-        /** Copies and freezes. */
+        /** Copies and freezes; the reads are sorted. */
         @SuppressWarnings("unchecked")
         public SessionStart {
             Objects.requireNonNull(id, "id");
             env = env == null ? Map.of() : (Map<String, Object>) Plan.freeze(env);
             options = options == null ? Map.of() : (Map<String, Object>) Plan.freeze(options);
             primitives = primitives == null ? Map.of() : Collections.unmodifiableMap(new LinkedHashMap<>(primitives));
+            reads = reads == null ? List.of() : List.copyOf(new java.util.TreeSet<>(reads));
+        }
+
+        /** A start record without the reads (the shape before {@code reads}): every raw call is exported. */
+        public SessionStart(String id, String pack, String packVersion, String envId, Map<String, Object> env,
+                            boolean readOnly, Map<String, Object> options, String startedAt,
+                            Map<String, String> primitives) {
+            this(id, pack, packVersion, envId, env, readOnly, options, startedAt, primitives, null);
         }
 
         @Override
@@ -238,6 +250,7 @@ public final class StepJournal {
                     packVersion, "envId", envId, "env", env, "readOnly", readOnly, "options", options);
             json.put("startedAt", startedAt);
             json.put("primitives", primitives);
+            json.put("reads", reads);
             return json;
         }
 
@@ -248,7 +261,7 @@ public final class StepJournal {
             }
             return new SessionStart(text(json, "id"), text(json, "pack"), text(json, "packVersion"),
                     text(json, "envId"), map(json, "env"), Boolean.TRUE.equals(json.get("readOnly")),
-                    map(json, "options"), text(json, "startedAt"), primitives);
+                    map(json, "options"), text(json, "startedAt"), primitives, strings(json, "reads"));
         }
     }
 

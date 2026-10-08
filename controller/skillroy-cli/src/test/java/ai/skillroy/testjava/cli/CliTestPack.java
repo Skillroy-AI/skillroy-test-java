@@ -25,6 +25,15 @@ import ai.skillroy.testjava.scenario.pack.FactProvider;
 import ai.skillroy.testjava.scenario.pack.PlannedCall;
 import ai.skillroy.testjava.scenario.pack.StepLibrary;
 import ai.skillroy.testjava.scenario.pack.SyncPolicy;
+import ai.skillroy.testjava.scenario.resolve.Query;
+import ai.skillroy.testjava.scenario.resolve.QueryType;
+import ai.skillroy.testjava.scenario.resolve.ResolveContext;
+import ai.skillroy.testjava.scenario.resolve.Resolver;
+import ai.skillroy.testjava.scenario.resolve.ResolverCandidate;
+import ai.skillroy.testjava.scenario.resolve.Strategy;
+import ai.skillroy.testjava.scenario.resolve.Verifier;
+import ai.skillroy.testjava.scenario.resolve.VerifierResult;
+import ai.skillroy.testjava.scenario.resolve.VerifyContext;
 
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -38,7 +47,9 @@ import java.util.Set;
  * the fact {@code crash} throws an {@link InternalError}. Its one oracle, {@code Echo}, lets a scenario need
  * bindings; its cross-check {@code test.echo.check} (phase3-contracts.md 5.1) asks the fake agent's
  * {@code test.echo} to echo the same input and agrees when the answers match; {@code test.echo.shapes} does the same
- * with the answer in a set, an array and a record.
+ * with the answer in a set, an array and a record. Its one query kind, {@code Staff}, always resolves to the staff
+ * member {@code S7} (a {@code java} resolver and a verifier that passes), so that a session can resolve a slot with a
+ * credential.
  */
 public final class CliTestPack implements DomainPack {
 
@@ -108,7 +119,9 @@ public final class CliTestPack implements DomainPack {
     @Override
     public ai.skillroy.testjava.scenario.resolve.ResolutionCatalogue resolution() {
         return ai.skillroy.testjava.scenario.resolve.ResolutionCatalogue.builder().oracle(new Echo())
-                .crossCheck(new EchoCheck()).crossCheck(new EchoShapesCheck()).build();
+                .crossCheck(new EchoCheck()).crossCheck(new EchoShapesCheck())
+                .query(QueryType.of("Staff", Staff.class)).resolver(new StaffResolver()).verifier(new StaffKnown())
+                .build();
     }
 
     /**
@@ -172,6 +185,55 @@ public final class CliTestPack implements DomainPack {
             return output.equals(answer) ? ai.skillroy.testjava.scenario.resolve.CrossCheckResult.agree(reason,
                     answer, evidence) : ai.skillroy.testjava.scenario.resolve.CrossCheckResult.disagree(reason,
                     answer, evidence);
+        }
+    }
+
+    /** A staff member of the fake desk, by role (ignored: there is one). */
+    record Staff(String role) implements Query<StaffRef> {
+    }
+
+    /** A staff member: the code is the id of its entry in the credentials file's realm {@code staff}. */
+    record StaffRef(String code, String name) {
+    }
+
+    /** The one staff member, {@code S7}. */
+    static final class StaffResolver implements Resolver<Staff, StaffRef> {
+        @Override
+        public String id() {
+            return "clitest.java.Staff";
+        }
+
+        @Override
+        public Class<Staff> queryClass() {
+            return Staff.class;
+        }
+
+        @Override
+        public Strategy strategy() {
+            return Strategy.CANONICAL_JAVA;
+        }
+
+        @Override
+        public List<ResolverCandidate<StaffRef>> candidates(Staff query, ResolveContext ctx) {
+            return List.of(ResolverCandidate.of(new StaffRef("S7", "Desk Seven"), "staff S7"));
+        }
+    }
+
+    /** Every staff member the resolver offers is known. */
+    static final class StaffKnown implements Verifier<Staff, StaffRef> {
+        @Override
+        public String id() {
+            return "clitest.staff.known";
+        }
+
+        @Override
+        public Class<Staff> queryClass() {
+            return Staff.class;
+        }
+
+        @Override
+        public VerifierResult verify(Staff query, StaffRef candidate, VerifyContext ctx) {
+            return VerifierResult.pass("known", Map.of());
         }
     }
 

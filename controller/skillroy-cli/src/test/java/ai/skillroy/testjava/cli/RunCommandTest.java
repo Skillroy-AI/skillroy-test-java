@@ -102,8 +102,10 @@ class RunCommandTest {
         assertTrue(stdout.contains("\n  evidence: " + out.resolve("wrong-count")), stdout);
         assertTrue(stdout.contains("\nERROR     needs-fancy  ("), stdout);
         assertTrue(stdout.contains("\n  PRECONDITION_FAILED: "), stdout);
-        assertTrue(stdout.endsWith("4 scenarios: 1 passed, 1 degraded, 1 failed, 1 errors\nmodel calls: 0\n"),
-                "Phase 2 (12.1): the summary ends with the model calls: " + stdout);
+        assertTrue(stdout.endsWith("4 scenarios: 1 passed, 1 degraded, 1 failed, 1 errors\nmodel calls: 0\n"
+                        + "model cost: $0 (budget $0.50)\n"),
+                "Phase 2 (12.1): the summary ends with the model calls, and Phase 5 (13.4) with their cost: "
+                        + stdout);
         assertFalse(stdout.contains("evidence: " + out.resolve("poke-twice")), "no evidence line for a pass");
 
         for (String id : List.of("poke-twice", "guarded", "wrong-count", "needs-fancy")) {
@@ -147,7 +149,7 @@ class RunCommandTest {
     void aDirectoryRunsItsScenariosInNameOrder() {
         String stdout = run(scenarios.toString()).expectExit(Exit.FAILED).out();
         List<String> verdicts = stdout.lines().filter(l -> !l.startsWith(" ") && !l.contains("scenarios:")
-                        && !l.startsWith("model calls:"))
+                        && !l.startsWith("model calls:") && !l.startsWith("model cost:"))
                 .map(l -> l.split("\\s+")[1]).toList();
         assertEquals(List.of("guarded", "needs-fancy", "poke-twice", "wrong-count"), verdicts);
     }

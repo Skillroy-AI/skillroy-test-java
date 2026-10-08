@@ -86,19 +86,56 @@ class CredentialsTest {
         return file;
     }
 
+    /** A load that failed: the exception, and its message with the file's temporary directory written {@code <dir>}. */
+    private record Failure(CredentialsException exception, String message) {
+    }
+
     private static CredentialsException fails(String yaml) {
-        return assertThrows(CredentialsException.class, () -> {
-            Path dir = Files.createTempDirectory("skillroy-cred-test");
+        return failure(yaml).exception();
+    }
+
+    /** Loads {@code yaml} from a file in a new temporary directory; the load must fail. */
+    private static Failure failure(String yaml) {
+        Path dir;
+        try {
+            dir = Files.createTempDirectory("skillroy-cred-test");
+        } catch (IOException e) {
+            throw new java.io.UncheckedIOException(e);
+        }
+        try {
+            CredentialsException e = assertThrows(CredentialsException.class,
+                    () -> Credentials.load(write(dir, "credentials.yaml", yaml)), yaml);
+            return new Failure(e, withoutDir(e.getMessage(), dir));
+        } finally {
             try {
-                Credentials.load(write(dir, "credentials.yaml", yaml));
-            } finally {
                 for (Path p : List.of(dir.resolve("credentials.yaml"), dir)) {
                     Files.deleteIfExists(p);
                 }
+            } catch (IOException e) {
+                // A leftover temporary directory is harmless.
             }
-        }, yaml);
+        }
     }
 
+    /**
+     * {@code text} with the path of {@code dir} (as given and as the file system resolves it) written {@code <dir>}:
+     * a temporary directory's random name may hold any digits, a short numeric secret such as {@code 1234} among them
+     * (seen once), and a path is where the file is, not a value read from it.
+     */
+    private static String withoutDir(String text, Path dir) {
+        if (text == null) {
+            return null;
+        }
+        String out = text;
+        try {
+            out = out.replace(dir.toRealPath().toString(), "<dir>");
+        } catch (IOException e) {
+            // Gone already: the path as given below is the one the message names.
+        }
+        return out.replace(dir.toAbsolutePath().toString(), "<dir>").replace(dir.toString(), "<dir>");
+    }
+
+    /** Fails when {@code text}, read with every path removed by the caller, holds a secret value. */
     private static void assertNoSecret(String text) {
         for (String secret : SECRETS) {
             assertFalse(text.contains(secret), "a secret in: " + text);
@@ -148,7 +185,7 @@ class CredentialsTest {
     void textNeverHoldsAValue(@TempDir Path dir) throws Exception {
         Credentials c = Credentials.load(write(dir, "credentials.yaml", FULL));
         String text = c.toString();
-        assertNoSecret(text);
+        assertNoSecret(withoutDir(text, dir));
         assertTrue(text.contains("ops-team=1") && text.contains("staff=3"), text);
         assertTrue(text.contains("[local, reporting]"), text);
         assertNoSecret(c.jdbc("reporting").toString());
@@ -202,13 +239,15 @@ class CredentialsTest {
             "version: 1\ncredentials:\n  staff:\n    \"100\": { password: \"\", note: \"%s\" }\n",
         };
         for (String template : bad) {
-            CredentialsException e = fails(template.formatted(STAFF_PW));
-            assertNoSecret(e.getMessage());
-            assertNull(e.getCause());
+            Failure f = failure(template.formatted(STAFF_PW));
+            assertNoSecret(f.message());
+            assertTrue(f.message().startsWith("<dir>"), "the scan reads the message, not the random directory: "
+                    + f.message());
+            assertNull(f.exception().getCause());
         }
-        CredentialsException octal = fails("version: 1\ncredentials:\n  staff:\n    \"100\": { password: 0777 }\n");
-        assertFalse(octal.getMessage().contains("0777"), octal.getMessage());
-        assertTrue(octal.getMessage().contains(":4: not valid YAML"), octal.getMessage());
+        Failure octal = failure("version: 1\ncredentials:\n  staff:\n    \"100\": { password: 0777 }\n");
+        assertFalse(octal.message().contains("0777"), octal.message());
+        assertTrue(octal.message().contains(":4: not valid YAML"), octal.message());
         CredentialsException bool = fails("version: 1\ncredentials:\n  staff:\n    \"100\": { password: true }\n");
         assertTrue(bool.getMessage().contains(":4: credentials.staff.100: the value of a field must be a text or a"
                 + " whole number"), bool.getMessage());

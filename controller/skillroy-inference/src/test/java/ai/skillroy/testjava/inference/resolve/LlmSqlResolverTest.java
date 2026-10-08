@@ -183,6 +183,13 @@ class LlmSqlResolverTest {
         assertEquals(List.of("the items of the category within the deposit, cheapest first"), ctx.rationales,
                 "the rationale through the provenance seam");
         assertFalse(ctx.allNotes().contains("rationale"), "not as a note: " + ctx.allNotes());
+        assertTrue(ctx.allNotes().contains(LlmSqlResolver.GUARD_NOTE + "ORDER BY + i.code"), "what the guard"
+                + " injected, for the approval screen's [injected] lines: " + ctx.allNotes());
+        assertTrue(ctx.allNotes().contains(LlmSqlResolver.GUARD_NOTE + "row limit injected"), ctx.allNotes());
+        assertTrue(ctx.allNotes().contains(LlmSqlResolver.ROWS_NOTE + "1..5, found 2"), "the bounds the model stated"
+                + " and the rows found: " + ctx.allNotes());
+        assertTrue(ctx.allNotes().contains(LlmSqlResolver.PARAMS_NOTE + "category, maxDeposit"), "the arguments the"
+                + " parameters bind, in order: " + ctx.allNotes());
         assertTrue(ctx.rejected.isEmpty(), ctx.allRejected());
         ModelRequest r = gateway.requests().get(0);
         assertEquals("resolve", r.purpose());

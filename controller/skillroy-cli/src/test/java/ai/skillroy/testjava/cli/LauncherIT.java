@@ -156,10 +156,13 @@ class LauncherIT {
         List<String> args = seen.lines().toList();
         assertEquals("-Xmx64m", args.get(0), seen);
         assertEquals("-Dskillroy.test=1", args.get(1), seen);
-        assertEquals("-cp", args.get(2), seen);
-        assertEquals(Launcher.dist().toRealPath().resolve("lib") + "/*", args.get(3), seen);
-        assertEquals("ai.skillroy.testjava.cli.Main", args.get(4), seen);
-        assertEquals(List.of("run", "a b.yaml"), args.subList(5, args.size()), "arguments keep their spaces");
+        // Phase 5 (10.2 step 3): the launcher names itself, for the MCP configuration skillroy author writes.
+        assertEquals("-Dskillroy.launcher=" + Launcher.dist().toRealPath().resolve("bin").resolve("skillroy"),
+                args.get(2), seen);
+        assertEquals("-cp", args.get(3), seen);
+        assertEquals(Launcher.dist().toRealPath().resolve("lib") + "/*", args.get(4), seen);
+        assertEquals("ai.skillroy.testjava.cli.Main", args.get(5), seen);
+        assertEquals(List.of("run", "a b.yaml"), args.subList(6, args.size()), "arguments keep their spaces");
     }
 
     @Test

@@ -1898,7 +1898,7 @@ and so that the terminal test does not depend on one JDK's behaviour of `System.
 implementation reports `interactive` only when a console exists and reports itself as a terminal. End of input
 counts as `n`. When the terminal is not interactive and `--yes` is absent, the command fails with exit code 64
 before anything runs: `approve` never blocks an unattended job. The same holds for `resolve`. The human-readable
-summary of every `run` ends with a line `model calls: 0`.
+summary of every `run` ends with a line `model calls: 0`. (Phase 5, built 2026-10-08; P5 §13.4: a `model cost: $x (budget $y)` line follows it, and `resolve` prints both lines too.)
 
 (Phase 5, specified 2026-10-08, not yet built; P5 §7.1) For a tier (b) resolution the screen also shows, after the value
 and the verifier reasons: the strategy (`llm-sql`), the model, the request id and the cost; the model's rationale; the

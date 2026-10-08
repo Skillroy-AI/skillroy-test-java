@@ -698,6 +698,71 @@ class ContributedResolutionTest {
                 reResolve.message());
     }
 
+    /**
+     * phase5-contracts.md 7.4 and decision D91: the run writes {@code inference.jsonl} beside {@code cost-ledger.jsonl}
+     * from the run's ledger entries that carry details, one line each: {@code type: inference}, the details in their
+     * order, then the entry's fields the details lack; masked by the run's secrets; no file when no entry of the run
+     * has details (an old one is removed, as every output of an earlier run).
+     */
+    @Test
+    void theRunWritesInferenceJsonlFromTheLedgerEntriesThatCarryDetails() throws Exception {
+        agent.capabilities("toy.item");
+        FakeContributor.offering(llm);
+        llm.codes = List.of("C3");
+        Map<String, Object> details = new LinkedHashMap<>();
+        details.put("type", "inference");
+        details.put("t", "2026-10-08T10:00:00Z");
+        details.put("purpose", "resolve");
+        details.put("scenarioId", "toy-llm");
+        details.put("slot", "item");
+        details.put("provider", "recorded");
+        details.put("requestedModel", "model-a");
+        details.put("model", "model-a");
+        details.put("requestId", "req-1");
+        details.put("fingerprint", "sha256:f1");
+        details.put("stop", "END_TURN");
+        details.put("costUsd", "0");
+        details.put("structured", Map.of("rationale", "the staff code " + TestCredentials.PW_100 + " is not used"));
+        CostLedger.Entry withDetails = new CostLedger.Entry("toy-llm", "item", Strategy.LLM_SQL, "recorded",
+                "model-a", "req-1", 120, 8, "0", "resolve", 0, 0, false, null, details);
+        CostLedger.Entry plain = new CostLedger.Entry("toy-llm", "item", Strategy.LLM_SQL, "recorded", "model-a",
+                "req-2", 10, 2, "0");
+        llm.entries = List.of(withDetails, plain);
+        Plan plan = plan(ONE, Map.of("item", List.of("llm-sql")));
+        Path out = root.resolve("out");
+        RunOptions run = RunOptions.defaults().withClock(clock).withSleeper(clock.sleeper()).withOutputDir(out)
+                .withBind(options(BindMode.LIVE));
+        RunResult passed = new PlanExecutor(pack, agent, run).run(plan);
+        assertEquals(Status.PASS, passed.status(), passed.message());
+        assertEquals(2, passed.modelCalls().size());
+        assertEquals(2, Files.readAllLines(out.resolve("cost-ledger.jsonl")).size(), "every entry in the ledger");
+        List<String> lines = Files.readAllLines(out.resolve(PlanExecutor.INFERENCE_FILE));
+        assertEquals(1, lines.size(), "one record per entry with details: " + lines);
+        Map<String, Object> record = Json.parseObject(lines.get(0));
+        List<String> keys = new ArrayList<>(details.keySet());
+        keys.addAll(List.of("strategy", "inputTokens", "outputTokens", "cacheReadTokens", "cacheWriteTokens",
+                "batch"));
+        assertEquals(keys, List.copyOf(record.keySet()), "the details in their order, then the entry's other"
+                + " non-null fields");
+        assertEquals("LLM_SQL", record.get("strategy"));
+        assertEquals(120L, record.get("inputTokens"));
+        assertEquals("sha256:f1", record.get("fingerprint"));
+        assertFalse(lines.get(0).contains(TestCredentials.PW_100), "masked by the run's secrets: " + lines.get(0));
+        assertTrue(lines.get(0).contains("<redacted>"), lines.get(0));
+        Map<String, Object> direct = PlanExecutor.inferenceRecord(new CostLedger.Entry("s", null, null, "p", "m",
+                "r", 1, 1, "0.01", "triage", 0, 0, false, "a note", Map.of("purpose", "triage")));
+        assertEquals(List.of("type", "purpose", "scenarioId", "provider", "model", "requestId", "inputTokens",
+                "outputTokens", "costUsd", "cacheReadTokens", "cacheWriteTokens", "batch", "note"),
+                List.copyOf(direct.keySet()), "type first even when the details lack it; null fields left out");
+
+        llm.entries = List.of(plain);
+        RunResult again = new PlanExecutor(pack, agent, run).run(plan);
+        assertEquals(Status.PASS, again.status(), again.message());
+        assertEquals(1, Files.readAllLines(out.resolve("cost-ledger.jsonl")).size());
+        assertFalse(Files.exists(out.resolve(PlanExecutor.INFERENCE_FILE)), "no entry with details: no file, and the"
+                + " earlier run's is gone");
+    }
+
     // ------------------------------------------------------------------------------------------------ re-resolve
 
     @Test

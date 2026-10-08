@@ -610,6 +610,7 @@ final class ToolCalls {
                 session().options().webPathLoader());
         PlanExecutor.Resolved ran = executor.runWithOutcome(plan);
         RunResult result = ran.result();
+        promptsHandledByTheRun();
         List<String> resources = server.registerRun(runId, dir);
         Map<String, Object> json = new LinkedHashMap<>();
         json.put("runId", runId);
@@ -644,6 +645,25 @@ final class ToolCalls {
         }
         boolean passed = result.status() == Status.PASS || result.status() == Status.DEGRADED;
         return reply(json, !passed, List.of());
+    }
+
+    /**
+     * After {@code skillroy_scenario_run}: the run answered (or failed on) the prompts it saw with its own prompt
+     * policy, so the session is told the agent's sequence number now ({@code ExecutorSession.promptsHandledUpTo}), read
+     * from a query that returns no event; the session's next step does not take those prompts for its own unexpected
+     * ones. A query the agent refuses leaves the session as it was; a lost agent is the caller's to report.
+     */
+    private void promptsHandledByTheRun() throws AgentLostException {
+        if (server.agent().isLost()) {
+            return;
+        }
+        try {
+            RpcResult now = server.agent().call("evt.query", Map.of("since", Long.MAX_VALUE, "limit", 1L),
+                    CallOptions.defaults().withTimeoutMs(READ_TIMEOUT_MS));
+            session().promptsHandledUpTo(now.seqAfter());
+        } catch (AgentRpcException | RuntimeException e) {
+            server.log().info("the agent's sequence number after the run could not be read: " + e.getMessage());
+        }
     }
 
     /** {@code skillroy_session_ask}: the actor's turn. */

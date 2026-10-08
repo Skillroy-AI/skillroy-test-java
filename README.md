@@ -160,7 +160,7 @@ ci/run-in-linux.sh bash -c '
 '
 ```
 
-Every scenario should print `PASS`, and each `run` ends with `model calls: 0`. `-Dlending.seed=A` matters: the Phase
+Every scenario should print `PASS`, and each `run` prints `model calls: 0` (and, since Phase 5, a `model cost` line after it). `-Dlending.seed=A` matters: the Phase
 1 scenarios require the target to have been launched with it, and scenario A's `seed-a` bindings fit only that seed
 (on another seed `replay` stops with `REBIND_NEEDED` before any step). `diff-bindings` needs no agent and exits 1
 when the files differ, as these two do. `skillroy --help` lists the commands and exit codes;

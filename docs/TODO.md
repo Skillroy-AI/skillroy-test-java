@@ -951,22 +951,45 @@ declares an allow-list, `confirm` sent as `_meta.confirm`) and the resolution si
 approval and `replay`'s `NOT_APPROVED`, the `approve` reuse, `BindMode.RE_RESOLVE` with `Binder.bindStepwise`,
 `CostLedger.Entry`'s new fields, `Resolution.usage` filled, `RESOLUTION_FAILED` / `BUDGET`); the CLI refuses `--mode
 re-resolve` as a usage error. Native reactor after the merge: 2572 tests, 0 failures, 0 errors, 122 skipped; the web
-host modules green under `jcef`. Wave 2 (the inference and MCP modules, the commands, the sample) follows.
+host modules green under `jcef`.
 
-- [ ] `skillroy-inference` (created here, above `skillroy-scenario`); the `InferenceGateway` SPI with typed content
-  parts (text, image, tool use, tool result) and the Claude implementation (B7)
-- [ ] Tier (b) resolvers: model-authored SQL behind `SqlGuard` (BS6 passed first); masking before any prompt (P5 §6)
-- [ ] Approve flow on first use; budget meter per scenario and per nightly job
-- [ ] Nightly batch re-resolve that opens a PR with the bindings diff; `skillroy-cli re-resolve`
-- [ ] `skillroy-mcp`: tool projection of the catalogue plus domain tool packs, stdio transport
-- [ ] Authoring planner through headless `claude -p`; opt-in failure triage
-- [ ] Interactive profile (B15): the executor's single-call entry and the step journal (names `ExecutorSession`,
-  `StepJournal` reserved by the Phase 2 contract), export of a journal to scenario steps and bindings, the session
-  service, a per-session budget
-- [ ] A recorded gateway and committed recordings, so that the whole layer is tested in CI and the Linux image with no model key (P5 §4.2, §14.5)
+**Build, waves 2a-2c (2026-10-08, six more implementers, each in an isolated worktree, integrated by file list, one
+commit per wave; every wave green natively):** `skillroy-inference` (the gateway SPI, `ClaudeGateway` on the Anthropic
+Java SDK 2.70.0 built explicitly from the environment with the SDK's retries and logging off, `RecordedGateway` and
+`RecordingGateway`, `ScriptedGateway`, `Gateways` with reference-counted leases, `PromptMask`, `SchemaCatalogue`,
+`SqlGuard` lifted from BS6 with its corpora as tests, `LlmSqlResolver` and `InferenceContributor`, budgets, prices, the
+ledger writer, `ToolProjection`; then `ReResolver`, `Triage`, `Planner`, `SessionService`, `OverlayBridge`); the sample
+pack's allow-list, verb schemas and `ValueLoader`s, scenario D with its plan and its bindings on both seeds through
+**scripted stand-in recordings** (no live call was possible, see "Walls"), the session export acceptance on a headless
+desk, `InferenceEndToEndIT` for the image; `skillroy-mcp` (the server over stdio on the MCP Java SDK 2.0.1); the CLI's
+`re-resolve`, `mcp`, `author`, `triage` and `session` commands, the inference options of `run` and `resolve`, the
+approval screen's tier (b) lines, `inference.jsonl`, the distribution (48.7 MB, 43 jars, `THIRD-PARTY.txt` with the MIT
+texts) and the runner's key pass-through. The build took decisions D88-D94 (`DECISIONS.md` B24, provisional). The
+contract carries an "As built" note under every section the build changed. What was run is in the table below and
+under "Status at a glance".
+
+- [x] `skillroy-inference` (created here, above `skillroy-scenario`); the `InferenceGateway` SPI with typed content
+  parts (text, image, tool use, tool result, and an opaque part) and the Claude implementation (B7); built 2026-10-08,
+  the live gateway unexercised (the key's workspace id)
+- [x] Tier (b) resolvers: model-authored SQL behind `SqlGuard` (BS6 passed first); masking before any prompt (P5 §6);
+  built 2026-10-08, proven end to end against stand-in recordings
+- [x] Approve flow on first use; budget meter per scenario and per nightly job (and per session); built 2026-10-08
+- [x] Nightly batch re-resolve that writes the bindings and a report (the pull request is the pipeline's,
+  `ci/examples/nightly-re-resolve.yml`); `skillroy re-resolve`; built 2026-10-08, the batch interface exercised against
+  the recorded gateway only
+- [x] `skillroy-mcp`: tool projection of the catalogue plus the pack's verbs, stdio transport; built 2026-10-08
+- [x] Authoring planner through headless `claude -p` (built and tested with a substitute executable; **never run live**:
+  scenario C is owed to the live run); opt-in failure triage as a separate command; built 2026-10-08
+- [x] Interactive profile (B15): the executor's single-call entry and the step journal (`ExecutorSession`,
+  `StepJournal`), export of a journal to scenario steps and bindings, the session service, a per-session budget; built
+  2026-10-08; a session on the headless desk is exported and replays with zero model calls
+- [x] A recorded gateway and committed recordings, so that the whole layer is tested in CI and the Linux image with no
+  model key (P5 §4.2, §14.5); built 2026-10-08; the committed recordings are scripted stand-ins until the key works
 - [ ] **Exit:** a new sample scenario authored from a one-paragraph brief is reviewed, committed and replays green
-  in CI; the nightly job stays under budget with prompt-cache hits above 80%; an interactive session on the sample
-  is exported from its journal as a scenario that replays with zero model calls.
+  in CI (**owed**: needs the live planner, so the key's workspace id); the nightly job stays under budget with
+  prompt-cache hits above 80% (**owed**: a live run; the job's mechanics are proven against the recorded gateway); an
+  interactive session on the sample is exported from its journal as a scenario that replays with zero model calls
+  (**met headlessly** 2026-10-08, `SessionExportTest`; in the image by `InferenceEndToEndIT`).
 
 ### Phase 6: hooks, Byteman, Windows, OTel, hardening
 

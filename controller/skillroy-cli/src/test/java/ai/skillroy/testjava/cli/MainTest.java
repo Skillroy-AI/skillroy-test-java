@@ -46,17 +46,19 @@ class MainTest {
     void overviewListsEveryCommandAndTheExitCodes() {
         String out = CliHarness.run(tmp, "--help").expectExit(Exit.OK).out();
         for (String command : new String[] {"jvms", "attach", "info", "caps", "schema", "call", "snapshot", "events",
-                "compile", "run"}) {
+                "compile", "run", "resolve", "diff-bindings", "re-resolve", "mcp", "author", "triage", "session"}) {
             assertTrue(out.contains("\n  " + command + " "), command + " in\n" + out);
         }
         assertTrue(out.contains("3 agent unreachable; 64 usage error"), out);
+        assertTrue(out.contains("ANTHROPIC_API_KEY (never an option or a file)"), "Phase 5 (2.3): where the key"
+                + " comes from: " + out);
         assertEquals(out, CliHarness.run(tmp, "-h").expectExit(Exit.OK).out());
         assertEquals(out, CliHarness.run(tmp, "help").expectExit(Exit.OK).out());
     }
 
     @ParameterizedTest
     @ValueSource(strings = {"jvms", "attach", "info", "caps", "schema", "call", "snapshot", "events", "compile",
-            "run"})
+            "run", "resolve", "diff-bindings", "re-resolve", "mcp", "author", "triage", "session"})
     void everyCommandHasHelp(String command) {
         String help = CliHarness.run(tmp, command, "--help").expectExit(Exit.OK).out();
         assertTrue(help.startsWith("Usage: skillroy " + command), help);

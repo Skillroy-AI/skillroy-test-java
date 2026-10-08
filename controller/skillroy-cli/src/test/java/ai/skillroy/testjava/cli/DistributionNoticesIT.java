@@ -28,8 +28,10 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.jar.JarFile;
 import java.util.regex.Matcher;
@@ -48,14 +50,42 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * The legal content of the assembled distribution: exactly which files it holds, the licence files at its top
  * level and in the project's own jars, and {@code THIRD-PARTY.txt}, which is checked against the jars that are
  * really in {@code lib/} so that it cannot go stale.
+ *
+ * <p>Phase 5 (phase5-contracts.md 2.6): the distribution carries {@code skillroy-inference} and {@code skillroy-mcp}
+ * with the Anthropic Java SDK, JSqlParser and the MCP Java SDK and their trees, and {@code slf4j-nop}. Several of those
+ * jars (built with Gradle) carry no {@code META-INF/maven/.../pom.properties}: such a jar is identified by its file
+ * name ({@code <artifact>-<version>.jar}) against the line of {@code THIRD-PARTY.txt} that names it. Their licences are
+ * Apache-2.0, MIT or MIT-0; a licence is evidenced inside the jar (a licence file, the manifest's
+ * {@code Bundle-License}, the embedded POM's licence), or, for a jar that carries none of these, by
+ * {@code THIRD-PARTY.txt}: its attributions name the artifact, and the text of the licence is the top-level
+ * {@code LICENSE} (Apache-2.0) or in the file's "Licence texts" (MIT, MIT-0).
  */
 class DistributionNoticesIT {
 
     /** The licences a redistributed third-party jar may carry. A new one is a decision, not a test edit. */
-    private static final Set<String> ALLOWED_LICENCES = Set.of("Apache-2.0");
+    private static final Set<String> ALLOWED_LICENCES = Set.of("Apache-2.0", "MIT", "MIT-0");
 
     /** Licences the components embedded in a third-party jar may carry (all permissive). */
     private static final Set<String> ALLOWED_EMBEDDED = Set.of("MIT", "BSL-1.0", "BSD-2-Clause");
+
+    /** The project's own jars in lib/: Phase 2 added skillroy-data, Phase 5 skillroy-inference and skillroy-mcp. */
+    private static final List<String> PROJECT_MODULES = List.of("cli", "controller", "data", "inference", "mcp",
+            "protocol", "scenario");
+
+    /**
+     * The third-party artifacts the distribution carries, by artifact id (their versions are THIRD-PARTY.txt's): the
+     * Jackson set and SnakeYAML; since Phase 5 the Anthropic Java SDK's tree, JSqlParser, the MCP Java SDK's tree and
+     * the SLF4J no-operation provider. A jar that comes or goes is a decision, recorded here and in the audit.
+     */
+    private static final Set<String> THIRD_PARTY = Set.of(
+            "jackson-annotations", "jackson-core", "jackson-databind", "jackson-dataformat-yaml", "snakeyaml",
+            "anthropic-java", "anthropic-java-client-okhttp", "anthropic-java-core", "jackson-datatype-jdk8",
+            "jackson-datatype-jsr310", "jackson-module-kotlin", "kotlin-stdlib", "kotlin-stdlib-common",
+            "kotlin-stdlib-jdk7", "kotlin-stdlib-jdk8", "kotlin-reflect", "annotations", "okhttp", "okio", "okio-jvm",
+            "jsonschema-generator", "jsonschema-module-jackson", "jsonschema-module-swagger-2", "classmate",
+            "swagger-annotations", "error_prone_annotations", "standardwebhooks", "jsqlparser", "mcp-core",
+            "mcp-json-jackson2", "reactor-core", "reactive-streams", "json-schema-validator", "itu", "slf4j-api",
+            "slf4j-nop");
 
     /** {@code group:artifact:version  SPDX-licence  lib/file.jar} */
     private static final Pattern ARTIFACT_LINE =
@@ -64,6 +94,9 @@ class DistributionNoticesIT {
     /** {@code  component name  SPDX-licence  META-INF/file} (two or more spaces between the columns). */
     private static final Pattern COMPONENT_LINE =
             Pattern.compile("^\\s+(\\S.*?)\\s{2,}(\\S+)\\s+(META-INF/\\S+)$");
+
+    /** {@code  group:artifact:version  path/inside/the/jar}: another licence or notice file inside a jar. */
+    private static final Pattern OTHER_FILE_LINE = Pattern.compile("^\\s+(\\S+:\\S+:\\S+)\\s{2,}(\\S+)$");
 
     private static final String PROJECT_GROUP = "ai.skillroy";
 
@@ -77,8 +110,11 @@ class DistributionNoticesIT {
         }
     }
 
-    /** One jar in lib/, identified by the Maven coordinates the jar itself states. */
-    private record LibJar(Path path, String group, String artifact, String version) {
+    /**
+     * One jar in lib/, identified by the Maven coordinates the jar itself states, or, for a jar without
+     * {@code pom.properties}, by the listed line that names its file ({@code byFileName}).
+     */
+    private record LibJar(Path path, String group, String artifact, String version, boolean byFileName) {
         String file() {
             return "lib/" + path.getFileName();
         }
@@ -114,12 +150,20 @@ class DistributionNoticesIT {
         }
         // The project's own jars, once each; the rest is third-party and is listed in THIRD-PARTY.txt.
         List<String> projectJars = libFiles.stream().filter(f -> f.startsWith("lib/skillroy-")).toList();
-        // Phase 2 (phase2-contracts.md 2.1): skillroy-data is the fifth project jar.
-        for (String module : List.of("cli", "controller", "data", "protocol", "scenario")) {
+        for (String module : PROJECT_MODULES) {
             assertEquals(1, projectJars.stream().filter(f -> f.matches("lib/skillroy-" + module + "-\\d.*\\.jar"))
                     .count(), "lib/skillroy-" + module + "-<version>.jar in " + projectJars);
         }
-        assertEquals(5, projectJars.size(), "no other project jar: " + projectJars);
+        assertEquals(PROJECT_MODULES.size(), projectJars.size(), "no other project jar: " + projectJars);
+        Set<String> thirdParty = new TreeSet<>();
+        for (LibJar jar : libJars()) {
+            if (jar.isThirdParty()) {
+                thirdParty.add(jar.artifact());
+            }
+        }
+        assertEquals(new TreeSet<>(THIRD_PARTY), thirdParty, "the third-party jars in lib/");
+        assertFalse(libFiles.stream().anyMatch(f -> f.contains("playwright") || f.contains("junit")
+                || f.contains("hsqldb")), "no optional, test or sample dependency: " + libFiles);
     }
 
     @Test
@@ -151,8 +195,9 @@ class DistributionNoticesIT {
     @Test
     void everyProjectJarInLibCarriesTheLicenceAndNoticeInMetaInf() throws IOException {
         List<LibJar> projectJars = libJars().stream().filter(j -> !j.isThirdParty()).toList();
-        assertEquals(5, projectJars.size(), projectJars.toString());
+        assertEquals(PROJECT_MODULES.size(), projectJars.size(), projectJars.toString());
         for (LibJar jar : projectJars) {
+            assertFalse(jar.byFileName(), jar.file() + " states its coordinates");
             try (ZipFile zip = new ZipFile(jar.path().toFile())) {
                 for (String name : List.of("LICENSE", "NOTICE")) {
                     ZipEntry entry = zip.getEntry("META-INF/" + name);
@@ -183,6 +228,8 @@ class DistributionNoticesIT {
         for (Listed entry : listed) {
             assertTrue(inFile.add(entry.coordinates()), "listed twice: " + entry.coordinates());
             filesInFile.add(entry.file());
+            assertEquals("lib/" + entry.artifact() + "-" + entry.version() + ".jar", entry.file(),
+                    "the file of " + entry.coordinates() + " is <artifact>-<version>.jar");
         }
         assertEquals(inLib, inFile, "THIRD-PARTY.txt and lib/ list different artifacts or versions");
         assertEquals(filesInLib, filesInFile, "THIRD-PARTY.txt names other files than lib/ holds");
@@ -193,20 +240,42 @@ class DistributionNoticesIT {
     }
 
     @Test
-    void everyListedLicenceIsAllowedAndEvidencedInsideItsJar() throws IOException {
+    void everyListedLicenceIsAllowedAndEvidencedInsideItsJarOrInThisFile() throws IOException {
+        String text = Files.readString(dist.resolve("THIRD-PARTY.txt"), StandardCharsets.UTF_8);
+        String attributions = section(text, "Attributions", "Components embedded in jackson-core");
+        String licenceTexts = text.substring(text.indexOf("\nLicence texts\n"));
+        String topLevel = Files.readString(dist.resolve("LICENSE"), StandardCharsets.UTF_8);
         for (Listed entry : listedArtifacts()) {
             assertTrue(ALLOWED_LICENCES.contains(entry.licence()),
                     entry.coordinates() + " is " + entry.licence() + "; allowed: " + ALLOWED_LICENCES);
+            boolean inJar;
             try (JarFile jar = new JarFile(dist.resolve(entry.file()).toFile())) {
-                assertTrue(evidencesApache2(jar), entry.file() + " states " + entry.licence() + " nowhere inside");
+                inJar = evidences(jar, entry.licence());
+            }
+            if (inJar) {
+                continue;
+            }
+            // No evidence inside the jar: THIRD-PARTY.txt names the artifact and the licence text is distributed.
+            assertTrue(Pattern.compile("[\\s(,]" + Pattern.quote(entry.artifact()) + "[\\s),]").matcher(attributions)
+                    .find(), entry.coordinates() + " states " + entry.licence() + " nowhere inside its jar, and the"
+                    + " attributions of THIRD-PARTY.txt do not name " + entry.artifact());
+            switch (entry.licence()) {
+                case "Apache-2.0" -> assertTrue(topLevel.contains("Apache License") && topLevel.contains("Version"
+                        + " 2.0"), "the Apache-2.0 text at the top level");
+                case "MIT" -> assertTrue(licenceText(licenceTexts, "MIT License: ", entry.artifact()),
+                        "the MIT text with the copyright line of " + entry.artifact() + " in THIRD-PARTY.txt");
+                case "MIT-0" -> assertTrue(licenceText(licenceTexts, "MIT No Attribution: ", entry.artifact()),
+                        "the MIT-0 text of " + entry.artifact() + " in THIRD-PARTY.txt");
+                default -> throw new AssertionError("no rule for " + entry.licence());
             }
         }
+        assertTrue(licenceTexts.contains("Permission is hereby granted, free of charge"), "the MIT text");
     }
 
     @Test
-    void everyLicenceOrNoticeFileInsideAThirdPartyJarIsMentionedInThirdPartyTxt() throws IOException {
+    void everyLicenceOrNoticeFileInsideAThirdPartyJarIsNamedInThirdPartyTxt() throws IOException {
         String text = Files.readString(dist.resolve("THIRD-PARTY.txt"), StandardCharsets.UTF_8);
-        Set<String> extraFilesInJars = new TreeSet<>();
+        Map<String, Set<String>> filesInJars = new TreeMap<>();
         for (LibJar lib : libJars()) {
             if (!lib.isThirdParty()) {
                 continue;
@@ -214,62 +283,133 @@ class DistributionNoticesIT {
             try (ZipFile zip = new ZipFile(lib.path().toFile())) {
                 zip.stream().map(ZipEntry::getName).filter(DistributionNoticesIT::isLicenceLike)
                         .filter(n -> !n.equals("META-INF/LICENSE") && !n.equals("META-INF/NOTICE"))
-                        .forEach(n -> extraFilesInJars.add(lib.coordinates() + " " + n));
+                        .forEach(n -> filesInJars.computeIfAbsent(lib.coordinates(), k -> new TreeSet<>()).add(n));
             }
         }
         // The embedded components of jackson-core: the file names in the table must be the ones in the jar.
-        Set<String> named = new TreeSet<>();
+        Set<String> components = new TreeSet<>();
+        Map<String, Set<String>> others = new TreeMap<>();
         for (String line : text.lines().toList()) {
             Matcher m = COMPONENT_LINE.matcher(line);
             if (m.matches()) {
                 assertTrue(ALLOWED_EMBEDDED.contains(m.group(2)), "licence not expected for an embedded component: "
                         + line.strip());
-                named.add(m.group(3));
+                components.add(m.group(3));
+                continue;
+            }
+            Matcher o = OTHER_FILE_LINE.matcher(line);
+            if (o.matches()) {
+                others.computeIfAbsent(o.group(1), k -> new TreeSet<>()).add(o.group(2));
             }
         }
-        assertFalse(named.isEmpty(), "THIRD-PARTY.txt lists the components embedded in jackson-core");
-        Set<String> notMentioned = new TreeSet<>();
-        for (String entry : extraFilesInJars) {
-            String file = entry.substring(entry.indexOf(' ') + 1);
-            if (!named.contains(file)) {
-                notMentioned.add(entry);
-            }
-        }
-        assertEquals(Collections.emptySet(), notMentioned, "licence or notice files inside the jars that "
-                + "THIRD-PARTY.txt does not name");
+        assertFalse(components.isEmpty(), "THIRD-PARTY.txt lists the components embedded in jackson-core");
         LibJar core = libJars().stream().filter(j -> j.artifact().equals("jackson-core")).findFirst().orElseThrow();
         try (ZipFile zip = new ZipFile(core.path().toFile())) {
-            for (String file : named) {
+            for (String file : components) {
                 assertNotNull(zip.getEntry(file), "THIRD-PARTY.txt names " + file + ", not in " + core.file());
             }
         }
+        Map<String, Set<String>> notNamed = new TreeMap<>();
+        filesInJars.forEach((coordinates, files) -> {
+            for (String file : files) {
+                boolean named = coordinates.equals(core.coordinates()) ? components.contains(file)
+                        : others.getOrDefault(coordinates, Set.of()).contains(file);
+                if (!named) {
+                    notNamed.computeIfAbsent(coordinates, k -> new TreeSet<>()).add(file);
+                }
+            }
+        });
+        assertEquals(Collections.emptyMap(), notNamed, "licence or notice files inside the jars that THIRD-PARTY.txt"
+                + " does not name");
+        for (Map.Entry<String, Set<String>> named : others.entrySet()) {
+            assertEquals(named.getValue(), filesInJars.getOrDefault(named.getKey(), Set.of()), "THIRD-PARTY.txt"
+                    + " names files of " + named.getKey() + " that its jar does not hold");
+        }
     }
 
+    /** A licence or notice file: a {@code META-INF} entry naming one, or such a file anywhere else (not a class). */
     private static boolean isLicenceLike(String entryName) {
-        if (!entryName.startsWith("META-INF/") || entryName.startsWith("META-INF/maven/")
-                || entryName.startsWith("META-INF/services/")) {
+        if (entryName.startsWith("META-INF/maven/") || entryName.startsWith("META-INF/services/")
+                || entryName.endsWith("/") || entryName.endsWith(".class")) {
             return false;
         }
         String upper = entryName.toUpperCase(Locale.ROOT);
-        return upper.contains("LICENSE") || upper.contains("LICENCE") || upper.contains("NOTICE");
+        if (entryName.startsWith("META-INF/")) {
+            return upper.contains("LICENSE") || upper.contains("LICENCE") || upper.contains("NOTICE");
+        }
+        String name = upper.substring(upper.lastIndexOf('/') + 1);
+        return name.startsWith("LICENSE") || name.startsWith("LICENCE") || name.startsWith("NOTICE");
     }
 
-    /** Apache-2.0 is evidenced by a META-INF/LICENSE holding its text, or by an OSGi Bundle-License naming it. */
-    private static boolean evidencesApache2(JarFile jar) throws IOException {
-        ZipEntry licence = jar.getEntry("META-INF/LICENSE");
-        if (licence != null) {
-            try (InputStream in = jar.getInputStream(licence)) {
-                String text = new String(in.readAllBytes(), StandardCharsets.UTF_8);
-                if (text.contains("Apache License") && text.contains("Version 2.0")) {
-                    return true;
+    /**
+     * True when the jar itself states the licence: a licence file under {@code META-INF} with its text, the manifest's
+     * {@code Bundle-License}, or a licence name in its embedded POM.
+     */
+    private static boolean evidences(JarFile jar, String licence) throws IOException {
+        List<String> texts = new ArrayList<>();
+        for (String name : List.of("META-INF/LICENSE", "META-INF/LICENSE.txt", "META-INF/LICENSE.md")) {
+            ZipEntry entry = jar.getEntry(name);
+            if (entry != null) {
+                try (InputStream in = jar.getInputStream(entry)) {
+                    texts.add(new String(in.readAllBytes(), StandardCharsets.UTF_8));
                 }
             }
         }
-        if (jar.getManifest() != null) {
-            String bundleLicence = jar.getManifest().getMainAttributes().getValue("Bundle-License");
-            return bundleLicence != null && bundleLicence.contains("apache.org/licenses/LICENSE-2.0");
+        String bundle = jar.getManifest() == null ? null
+                : jar.getManifest().getMainAttributes().getValue("Bundle-License");
+        if (bundle != null) {
+            texts.add(bundle);
+        }
+        jar.stream().filter(e -> e.getName().matches("META-INF/maven/[^/]+/[^/]+/pom\\.xml")).findFirst()
+                .ifPresent(e -> {
+                    try (InputStream in = jar.getInputStream(e)) {
+                        Matcher m = Pattern.compile("<license>\\s*<name>(.*?)</name>", Pattern.DOTALL)
+                                .matcher(new String(in.readAllBytes(), StandardCharsets.UTF_8));
+                        while (m.find()) {
+                            texts.add(m.group(1));
+                        }
+                    } catch (IOException ex) {
+                        throw new IllegalStateException(ex);
+                    }
+                });
+        for (String t : texts) {
+            boolean match = switch (licence) {
+                case "Apache-2.0" -> t.contains("apache.org/licenses/LICENSE-2.0")
+                        || (t.contains("Apache") && (t.contains("Version 2.0") || t.contains("2.0")));
+                case "MIT" -> t.contains("mit-license") || t.contains("Permission is hereby granted, free of charge")
+                        || t.matches("(?s).*\\bMIT\\b.*") && !t.contains("No Attribution");
+                case "MIT-0" -> t.contains("MIT-0") || t.contains("MIT No Attribution");
+                default -> false;
+            };
+            if (match) {
+                return true;
+            }
         }
         return false;
+    }
+
+    /**
+     * True when a licence text of THIRD-PARTY.txt is headed for {@code artifact}: a line {@code <header><project>
+     * (<artifact>, <artifact>…)} followed by its copyright line and the text.
+     */
+    private static boolean licenceText(String licenceTexts, String header, String artifact) {
+        for (String line : licenceTexts.lines().toList()) {
+            int open = line.indexOf('(');
+            int close = line.lastIndexOf(')');
+            if (line.startsWith(header) && open >= 0 && close > open
+                    && List.of(line.substring(open + 1, close).split(",\\s*")).contains(artifact)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** The text between two section titles of THIRD-PARTY.txt. */
+    private static String section(String text, String from, String to) {
+        int start = text.indexOf("\n" + from + "\n");
+        int end = text.indexOf("\n" + to + "\n");
+        assertTrue(start >= 0 && end > start, "THIRD-PARTY.txt has the sections " + from + " and " + to);
+        return text.substring(start, end);
     }
 
     private static List<Listed> listedArtifacts() throws IOException {
@@ -284,8 +424,15 @@ class DistributionNoticesIT {
         return listed;
     }
 
-    /** The jars in lib/, each with the coordinates its own META-INF/maven/.../pom.properties states. */
+    /**
+     * The jars in lib/, each with the coordinates its own META-INF/maven/.../pom.properties states; a jar without one
+     * by the THIRD-PARTY.txt line that names its file, whose file name must then be {@code <artifact>-<version>.jar}.
+     */
     private static List<LibJar> libJars() throws IOException {
+        Map<String, Listed> byFile = new TreeMap<>();
+        for (Listed entry : listedArtifacts()) {
+            byFile.put(entry.file(), entry);
+        }
         List<LibJar> jars = new ArrayList<>();
         try (Stream<Path> files = Files.list(dist.resolve("lib"))) {
             for (Path path : files.filter(p -> p.toString().endsWith(".jar")).sorted().toList()) {
@@ -293,13 +440,21 @@ class DistributionNoticesIT {
                     ZipEntry props = zip.stream()
                             .filter(e -> e.getName().matches("META-INF/maven/[^/]+/[^/]+/pom\\.properties"))
                             .findFirst().orElse(null);
-                    assertNotNull(props, path.getFileName() + " carries no META-INF/maven pom.properties");
+                    if (props == null) {
+                        Listed entry = byFile.get("lib/" + path.getFileName());
+                        assertNotNull(entry, path.getFileName() + " carries no META-INF/maven pom.properties and"
+                                + " THIRD-PARTY.txt names no artifact with this file");
+                        assertEquals(entry.artifact() + "-" + entry.version() + ".jar", path.getFileName().toString(),
+                                "a jar without pom.properties is known by its file name");
+                        jars.add(new LibJar(path, entry.group(), entry.artifact(), entry.version(), true));
+                        continue;
+                    }
                     Properties p = new Properties();
                     try (InputStream in = zip.getInputStream(props)) {
                         p.load(in);
                     }
                     jars.add(new LibJar(path, p.getProperty("groupId"), p.getProperty("artifactId"),
-                            p.getProperty("version")));
+                            p.getProperty("version"), false));
                 }
             }
         }

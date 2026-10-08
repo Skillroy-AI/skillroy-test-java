@@ -144,7 +144,8 @@ import java.util.stream.Stream;
  *
  * <p>Secrets (amendment A25, phase2-contracts.md 11.4): the run's {@link SecretMask} knows every value of the
  * credentials, every joined credential field and every fixture value whose key looks secret; it is applied to
- * {@code run.jsonl}, {@code bindings.json}, {@code cost-ledger.jsonl}, {@code failure/*.json} and the
+ * {@code run.jsonl}, {@code bindings.json}, {@code cost-ledger.jsonl}, {@code inference.jsonl} (written beside the
+ * ledger from the entries that carry details, phase5-contracts.md 7.4, decision D91), {@code failure/*.json} and the
  * {@link RunResult}.
  *
  * <p>A lost agent is final: once a call reports {@link AgentLostException}, no further call is made, not even a
@@ -180,9 +181,15 @@ public final class PlanExecutor {
     private static final long EVENT_EVIDENCE = 200L;
     private static final String LEDGER_FILE = "cost-ledger.jsonl";
 
+    /**
+     * The record of the run's model calls (phase5-contracts.md 7.4, decision D91), beside {@link #LEDGER_FILE}: one
+     * line per ledger entry of the run that carries {@link CostLedger.Entry#details()}; not written when none does.
+     */
+    public static final String INFERENCE_FILE = "inference.jsonl";
+
     /** Every file a run may write below its output directory, files before the directories that hold them. */
     private static final List<String> OUTPUT_FILES = List.of(RunLog.FILE, "bindings.json", LEDGER_FILE,
-            "failure/snapshot.json",
+            INFERENCE_FILE, "failure/snapshot.json",
             "failure/app-state.json", "failure/dialogs.json", "failure/capture.png", "failure/events.json", "failure",
             "artifacts/capture.png", "artifacts");
 
@@ -347,6 +354,28 @@ public final class PlanExecutor {
             this(result, outcome, outcome == null ? List.of() : outcome.bindings().crossChecks().values().stream()
                     .map(CrossCheckOutcome::toJson).toList(), null);
         }
+    }
+
+    /**
+     * The {@code inference.jsonl} line of a ledger entry that carries details (phase5-contracts.md 7.4, decision D91),
+     * before the run's mask: {@code type: "inference"}, then the details in their own order (the record the ledger
+     * writer built: time, purpose, scenario and slot, provider, requested and answering model, request id, fingerprint,
+     * tokens, cost, elapsed time, stop reason, the masked structured answer and, with prompt logging, the masked
+     * prompt), then the entry's fields the details do not hold (its strategy, for one), null ones left out. A new map.
+     *
+     * @throws NullPointerException if the entry has no details
+     */
+    static Map<String, Object> inferenceRecord(CostLedger.Entry entry) {
+        Map<String, Object> details = Objects.requireNonNull(entry.details(), "details");
+        Map<String, Object> record = new LinkedHashMap<>();
+        record.put("type", "inference");
+        record.putAll(details);
+        entry.toJson().forEach((key, value) -> {
+            if (value != null) {
+                record.putIfAbsent(key, value);
+            }
+        });
+        return record;
     }
 
     /**
@@ -684,21 +713,36 @@ public final class PlanExecutor {
             return all.size() <= ledgerStart ? List.of() : List.copyOf(all.subList(ledgerStart, all.size()));
         }
 
-        /** {@code cost-ledger.jsonl}: one line per entry of this run; always written; masked. */
+        /**
+         * {@code cost-ledger.jsonl}: one line per entry of this run; always written; masked. Beside it
+         * {@code inference.jsonl} (phase5-contracts.md 7.4, decision D91): one line per entry that carries details,
+         * {@link #inferenceRecord}, masked; not written when no entry has details.
+         */
         private void writeLedger(List<CostLedger.Entry> entries) {
             Path dir = options.outputDir();
             if (dir == null) {
                 return;
             }
             StringBuilder text = new StringBuilder();
+            StringBuilder inference = new StringBuilder();
             for (CostLedger.Entry e : entries) {
                 text.append(Json.write(mask.apply(e.toJson()))).append('\n');
+                if (e.details() != null) {
+                    inference.append(Json.write(mask.apply(inferenceRecord(e)))).append('\n');
+                }
             }
             try {
                 Files.createDirectories(dir);
                 Files.write(dir.resolve(LEDGER_FILE), text.toString().getBytes(StandardCharsets.UTF_8));
             } catch (IOException e) {
                 log.write("ledger", RunLog.fields("ok", false, "error", e.toString()));
+            }
+            if (!inference.isEmpty()) {
+                try {
+                    Files.write(dir.resolve(INFERENCE_FILE), inference.toString().getBytes(StandardCharsets.UTF_8));
+                } catch (IOException e) {
+                    log.write("ledger", RunLog.fields("ok", false, "file", INFERENCE_FILE, "error", e.toString()));
+                }
             }
         }
 

@@ -86,5 +86,7 @@ case ${1:-} in
     ;;
 esac
 
-# Word splitting of SKILLROY_JAVA_OPTS and modules is intended.
-exec "$java" ${SKILLROY_JAVA_OPTS:-} $modules -cp "$home/lib/*" ai.skillroy.testjava.cli.Main "$@"
+# Word splitting of SKILLROY_JAVA_OPTS and modules is intended. skillroy.launcher names this script to the CLI, which
+# writes it into the MCP configuration of 'skillroy author' (the planner starts 'skillroy mcp' through it).
+exec "$java" ${SKILLROY_JAVA_OPTS:-} $modules "-Dskillroy.launcher=$home/bin/skillroy" -cp "$home/lib/*" \
+  ai.skillroy.testjava.cli.Main "$@"

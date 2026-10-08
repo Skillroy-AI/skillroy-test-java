@@ -32,14 +32,26 @@ import java.io.PrintStream;
  */
 final class SafePrintStream extends PrintStream {
 
+    private final PrintStream target;
+
     /** Wraps {@code target}, writing in its charset with autoflush on line ends. */
     private SafePrintStream(PrintStream target) {
         super(target, true, target.charset());
+        this.target = target;
     }
 
     /** {@code stream} itself when it already filters, else a filtering wrapper around it. */
     static PrintStream wrap(PrintStream stream) {
         return stream instanceof SafePrintStream ? stream : new SafePrintStream(stream);
+    }
+
+    /**
+     * The stream a wrapper writes to, or {@code stream} itself when it is not a wrapper: what {@code skillroy mcp}
+     * speaks the MCP protocol on (phase5-contracts.md 9.2). A protocol's bytes are not text for a terminal, and the
+     * filter would rewrite a control character a JSON-RPC message may carry; the server masks its answers itself.
+     */
+    static PrintStream unwrap(PrintStream stream) {
+        return stream instanceof SafePrintStream safe ? safe.target : stream;
     }
 
     @Override

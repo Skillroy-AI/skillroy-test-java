@@ -337,7 +337,7 @@ abstract class PerTargetJavaChecks {
         Result with = run(cli, concat(command, List.of("--pack", hsqldb.toString(), "--out",
                 withDriver.toString())));
         assertEquals(0, with.exit, shown(with));
-        assertTrue(with.out.strip().endsWith("model calls: 0"), shown(with));
+        assertNoModelCall(with);
         List<Map<String, Object>> log = Runs.runLog(withDriver.resolve(ScenarioA.ID));
         assertEquals(Boolean.TRUE, records(log, "preflight").get(0).get("ok"), "pre-flight over JDBC");
         List<Map<String, Object>> db = records(log, "db");
@@ -396,7 +396,7 @@ abstract class PerTargetJavaChecks {
         Result replay = run(cli, concat(List.of("run", yaml.toString(), "--mode", "replay", "--out",
                 out.resolve("cli").resolve("out").toString()), connection));
         assertEquals(0, replay.exit, shown(replay));
-        assertTrue(replay.out.strip().endsWith("model calls: 0"), shown(replay));
+        assertNoModelCall(replay);
 
         Path wrongRoot = out.resolve("cli").resolve("wrong-root");
         ScenarioA.writeWrongAssistant(ENV, wrongRoot);
@@ -452,7 +452,7 @@ abstract class PerTargetJavaChecks {
         Result replay = run(cli, concat(List.of("run", yaml.toString(), "--mode", "replay", "--out",
                 out.resolve("cli-b").resolve("out").toString()), connection));
         assertEquals(0, replay.exit, shown(replay));
-        assertTrue(replay.out.strip().endsWith("model calls: 0"), shown(replay));
+        assertNoModelCall(replay);
 
         for (Result result : List.of(resolve, replay)) {
             for (String token : (result.out + "\n" + result.err).split("\\s+")) {
@@ -550,6 +550,16 @@ abstract class PerTargetJavaChecks {
     String shown(Result result) {
         String text = result.toString();
         return target.dbPassword == null ? text : text.replace(target.dbPassword, "<the database password>");
+    }
+
+    /**
+     * The run's summary ends with {@code model calls: 0} and then the model cost line, {@code model cost: $0 (...)}
+     * (phase5-contracts.md 13.4).
+     */
+    void assertNoModelCall(Result result) {
+        List<String> lines = result.out.strip().lines().toList();
+        assertTrue(lines.size() >= 2 && lines.get(lines.size() - 2).equals("model calls: 0")
+                && lines.get(lines.size() - 1).startsWith("model cost: $0 ("), shown(result));
     }
 
     Result run(Path launcher, List<String> args) throws Exception {

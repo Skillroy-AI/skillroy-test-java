@@ -36,6 +36,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -363,11 +364,59 @@ class StepJournalTest {
         assertEquals(List.of(), run.modelCalls(), "replay made no model call");
     }
 
+    /**
+     * A raw call of a primitive that changes nothing (by the target's catalogue, which the journal's
+     * {@code session-start} keeps as {@code reads}) is an observation, not a step: left out and listed in the report
+     * unless {@code includeReads}; a mutating raw call and every verb step are kept; a journal read back from its file
+     * exports the same, and a journal without {@code reads} (written before the field) keeps every raw call.
+     */
+    @Test
+    void aRawCallOfAReadIsAnObservationLeftOutUnlessReadsAreIncluded() throws Exception {
+        fx.agent.describe("toy.read", false, "toy.read").describe("toy.poke", true, "toy.poke");
+        Path file;
+        try (ExecutorSession session = fx.open()) {
+            assertEquals(Status.PASS, session.execute(PlannedCall.of("toy.read", Map.of("x", 1), Sync.NONE), PERSON)
+                    .status());
+            assertEquals(Status.PASS, session.execute(PlannedCall.of("toy.poke", Map.of("n", 1), Sync.NONE), PERSON)
+                    .status());
+            assertEquals(Status.PASS, session.execute("enter", Map.of("value", "B2"), PERSON).status());
+            file = session.journal().file();
+        }
+        StepJournal journal = StepJournal.read(file, fx.pack);
+        StepJournal.SessionStart start = (StepJournal.SessionStart) journal.entries().get(0);
+        assertEquals(List.of("toy.read"), start.reads(), "the catalogue's reads, kept in the journal");
+
+        ExportResult plain = journal.export(ExportOptions.of("no-reads"));
+        List<Map<String, Object>> steps = steps(yamlOf(plain));
+        assertEquals(List.of("call", "enter"), steps.stream().map(s -> s.keySet().iterator().next()).toList());
+        assertEquals("toy.poke", ((Map<?, ?>) steps.get(0).get("call")).get("primitive"), "the mutating call stays");
+        assertEquals(List.of("toy.poke"), yamlOf(plain).get("requires"), "a read left out requires nothing");
+        assertEquals(1, plain.report().excluded().size(), plain.report().excluded().toString());
+        assertTrue(plain.report().excluded().get(0).startsWith("s1 (call): PASS; a read of toy.read is an"
+                + " observation, not a step"), plain.report().excluded().get(0));
+
+        ExportResult reads = journal.export(ExportOptions.of("with-reads").withIncludeReads(true));
+        assertEquals(List.of("call", "call", "enter"), steps(yamlOf(reads)).stream()
+                .map(s -> s.keySet().iterator().next()).toList());
+        assertEquals("toy.read", ((Map<?, ?>) steps(yamlOf(reads)).get(0).get("call")).get("primitive"));
+        assertTrue(reads.report().excluded().isEmpty(), reads.report().excluded().toString());
+
+        String text = Files.readString(file, StandardCharsets.UTF_8);
+        Path old = dir.resolve("before-reads.jsonl");
+        Files.writeString(old, text.replace(",\"reads\":[\"toy.read\"]", ""), StandardCharsets.UTF_8);
+        assertNotEquals(text, Files.readString(old, StandardCharsets.UTF_8), "the field was taken out");
+        assertEquals(3, steps(yamlOf(StepJournal.read(old, fx.pack).export(ExportOptions.of("old")))).size(),
+                "a journal without reads keeps every raw call");
+    }
+
     @Test
     void exportOptionsAreChecked() {
         assertThrows(IllegalArgumentException.class, () -> ExportOptions.of("Not Valid"));
         assertThrows(IllegalArgumentException.class, () -> ExportOptions.of("ok").withApprovedBy(" "));
         assertFalse(ExportOptions.of("ok").includeFailed());
+        assertFalse(ExportOptions.of("ok").includeReads(), "reads are left out by default");
+        assertTrue(ExportOptions.of("ok").withIncludeReads(true).withApprovedBy("x").includeReads());
+        assertFalse(new ExportOptions("ok", true, null, null).includeReads(), "the earlier constructor");
         assertEquals("1500ms", JournalExport.duration(1500));
         assertEquals("2m", JournalExport.duration(120_000));
         assertEquals("10s", JournalExport.duration(10_000));

@@ -110,6 +110,9 @@
          2025-11-25; not the convenience artifact 'mcp', which adds the Jackson 3 module and so a second Jackson. It
          brings reactor-core, reactive-streams, slf4j-api and json-schema-validator (skillroy-mcp only). -->
     <mcp-sdk.version>2.0.1</mcp-sdk.version>
+    <!-- SLF4J at the 2.x version the MCP SDK and the Anthropic SDK's tree bring (slf4j-api 2.0.16), MIT. The CLI adds
+         the no-operation provider at the same version, so that the API's "no providers" notice does not print. -->
+    <slf4j.version>2.0.16</slf4j.version>
 
     <!-- Plugin versions. -->
     <maven-assembly-plugin.version>3.8.0</maven-assembly-plugin.version>
@@ -279,6 +282,17 @@
         <groupId>io.modelcontextprotocol.sdk</groupId>
         <artifactId>mcp-json-jackson2</artifactId>
         <version>${mcp-sdk.version}</version>
+      </dependency>
+      <!-- SLF4J: the API at the MCP set's version everywhere, and the no-operation provider the CLI ships with it. -->
+      <dependency>
+        <groupId>org.slf4j</groupId>
+        <artifactId>slf4j-api</artifactId>
+        <version>${slf4j.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.slf4j</groupId>
+        <artifactId>slf4j-nop</artifactId>
+        <version>${slf4j.version}</version>
       </dependency>
       <dependency>
         <groupId>org.jetbrains.kotlin</groupId>

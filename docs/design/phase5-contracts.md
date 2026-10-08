@@ -1472,6 +1472,36 @@ unless stated):
 `Main`'s command list gains the five; `Cli` is unchanged. Everything printed passes the mask and the S26
 control-character rule.
 
+As built (2026-10-08, C). `run` and `resolve`: the options as stated plus `--workspace-id`, loaded through
+`InferenceSettings.load(mode, credentialsDir, options)` (a settings error is exit 64 with the settings' own message,
+never a value; `run` also writes the JUnit `environment` case then); `resolve` prints the model-calls and cost lines
+too; `run --mode replay` prints a note when inference options are given; `--json` gains `modelCalls`, `modelCost`,
+`budget`, an `inference` summary (gateway, calls, cost, providers, models, purposes) and per-call records, masked; the
+approval screen reads three provenance notes of the resolver (`GUARD_NOTE`, `PARAMS_NOTE`, `ROWS_NOTE`) for the
+injected clauses, the parameter binding and the row bounds, and the reused line names no date (the file carries
+none). `re-resolve`: the job budget may also come from `inference.yaml`; the job id is the UTC start time
+(`yyyyMMdd-HHmmss`); one job takes one pack; a plan that fails its `requires` or launch-property check is reported
+`FAILED` (`REQUIRES`, `LAUNCH_PROPERTY`, `LAUNCH_PROPERTIES`) and plans that need no bindings are not checked; exit
+codes from the report, 2 for a load or compile error, 3 for an unreachable agent, 64 before the job starts, 70 for a
+report that cannot be written. `mcp`: no `--json` (stdout is the protocol); `start`/`awaitExit` so that the command
+watches the agent's event stream and calls `agentLost`; `skillroy_session_ask` only with a gateway; exit 1 when the
+server cannot start or the credentials cannot load. `author`: the MCP configuration adds `--inference none` and
+`--discovery-dir` and names this CLI's launcher through `-Dskillroy.launcher` (set by `bin/skillroy`; in-process the
+JVM's own `java` and class path); the pre-flight runs first; exit 0 even when the dry-run bind or the `--run` fail (they
+are information for the reviewer, recorded by `recordChecks`); `--run` writes no evidence directory; the planner's
+ledger is printed, not written. `triage`: no `--credentials` or `--pack` (the evidence is already masked); a directory
+without `run.jsonl` is a usage error. `session`: the REPL as stated plus `resolve … --credential <realm>.<key>` (a
+sign-on slot cannot be declared otherwise), `--bindings` and `--json` (one object per line); output under
+`run-output/<session id>/`, the person `Origin.person("cli")`, a mutating `swing.*` call settles afterwards, a bare
+word is a `check` matcher, the session writes its own `cost-ledger.jsonl`. The run writer: `inference.jsonl` records are
+the entry's details plus its non-null fields with `type: "inference"`. The journal's `session-start` gains `reads`
+(the primitives that are not mutating) so that the export can leave read-only raw calls out (`ExportOptions.includeReads`
+keeps them); `ExecutorSession.promptsHandledUpTo(seq)` also raises the highest seen sequence number. The CLI depends on
+`skillroy-inference`, `skillroy-mcp` and `slf4j-nop` 2.0.16 (the `slf4j-api` version the SDKs bring); the distribution
+zip is 48,687,408 bytes with 43 jars (7 project, 36 third-party; `anthropic-java-core` alone 37 MB) against about 3.9 MB
+of jars before Phase 5, and `THIRD-PARTY.txt` lists 36 artifacts with the MIT and MIT-0 texts and the MPL-2.0 note.
+`ci/run-in-linux.sh` passes `ANTHROPIC_API_KEY` and `ANTHROPIC_WORKSPACE_ID` into the container by name when set.
+
 ### 13.5 JUnit
 
 `ScenarioTests` is unchanged in its contract: `replay` streams need no gateway; `approve` and `live` streams with
@@ -1564,7 +1594,16 @@ asks the model to lend one plain item to the desk's walk-in borrower and settle 
 fact, and exports the journal as `session-basic-loan`; the export's YAML, plan and bindings file are compared with the
 committed copies (byte-identical: the recorded model answers make the session deterministic), compiled, and replayed
 with zero model calls on seed A in the acceptance. The same journal, read back from its file, exports the same scenario
-(the export is a function of the journal).
+(the export is a function of the journal). As built (2026-10-08, S2): headless on a `HeadlessDesk` (the application's
+real engine, access rules, catalogue, waiver rules and slip printer in the test JVM with a fixed clock and no events),
+which makes the recorded session deterministic enough to commit its export under `scenarios/exported/`
+(`session-basic-loan.yaml`, `plan/`, `bindings/seed-a/`); the person resolves a staff member and signs on through the
+verb, the model (five recorded calls) resolves an item, scans, presses DUE and takes the deposit, then `done`; the
+person checks `loan.total` and `state.name`; the export equals the committed copies byte for byte, is valid against
+the pack's schema and replays on a fresh desk with zero model calls. On the live desk in the image a recorded session
+cannot replay (each request carries the snapshot hash and the event topics, which depend on the desk's date and the
+engine's timing), so the image drives the model with the scripted session script answering by position, and its
+export must still equal the committed copies.
 
 ### 14.5 Recordings and the two profiles in the sample
 
@@ -1719,6 +1758,7 @@ item 4; all three are also exercised without a key through the recordings.
 | D84 | Model classes with the defaults Sonnet (resolve, session, summary), Opus (the planner), Haiku (labels); refusal fallbacks on and recorded; images off; Fable never configured by default | one model everywhere; fallbacks off; images on | ai-inference R7 and F10 (cost and retention); a fallback that answers a refusal keeps a nightly job alive and the ledger says who answered (Q6) |
 | D85 | The agent's `StatementGuard` stays as it is and `SqlGuard` lives on the controller only | JSqlParser inside the agent for `data.query` | B4: nothing but the JDK in a target JVM; the model's SQL runs through the controller's channel or through `data.query` after the controller's guard |
 | D86 | The calibrated-oracle case of gap 26 is answered by the export: an observed value is an ordinary expectation marked in the YAML and listed in the report for the reviewer; no run-time status | a `DEGRADED` outcome for a scenario with observed expectations; refusing to export them | the reviewer who commits the scenario decides; a run cannot tell an observed value from a specified one after the comment is removed |
+| D94 | The MCP server's `skillroy_resolve`, the session service's model-side resolve and the CLI's `session resolve` can declare a credential for a slot (`--credential <realm>.<key>` in the REPL; the tools' `credential` argument is open), since a sign-on slot cannot be declared otherwise (2026-10-08, C; the tools' half is open) | no credential from a session | the person-signs-on session of §14.4 is impossible otherwise |
 | D93 | The rationale and the rejections of a tier (b) proposal reach the provenance through `ResolveContext.rationale(text)` and `reject(label, reason)` (defaults keep them as notes; the engine's context fills `Provenance.rationale` and `rejected`), and the bindings file writes `provenance.rationale` last and omits it when null, so that tier (a) files do not change (2026-10-08, I2) | the resolver building `Provenance` itself; notes only | the engine owns `Provenance`; a reviewer of a bindings file needs the rationale beside the statement (Q1 of §17); the file's byte-stability for tier (a) slots is preserved |
 | D92 | A verb and a domain primitive that would share a tool name are both offered: the primitive's name takes the suffix `_primitive`, the verb keeps the plain name; every other collision refuses the start (2026-10-08, M) | hiding the primitive behind the verb; refusing the start on any collision | the sample's `deposit` verb and `lending.deposit` read collide, so the planner's mutating server could not start under the first rule, and one name meaning a lookup in read-only mode and an action in mutating mode would mislead a model |
 | D91 | The record of a model call travels in `CostLedger.Entry.details`, and the run writer writes `inference.jsonl` from the ledger entries, beside `cost-ledger.jsonl` (2026-10-08, I1) | a sink passed through `BindOptions`; the contributor writing into a directory it is told | the contributor is created per engine and never sees the run's output directory; the ledger already crosses that boundary and is masked by the writer |

@@ -35,6 +35,9 @@ import ai.skillroy.testjava.scenario.ScenarioLoader;
 import ai.skillroy.testjava.scenario.Status;
 import ai.skillroy.testjava.scenario.StepResult;
 import ai.skillroy.testjava.scenario.pack.DomainPack;
+import ai.skillroy.testjava.scenario.resolve.BindMode;
+import ai.skillroy.testjava.scenario.resolve.CostLedger;
+import ai.skillroy.testjava.scenario.resolve.InferenceSettings;
 
 import java.io.IOException;
 import java.io.PrintStream;
@@ -80,6 +83,16 @@ import java.util.function.UnaryOperator;
  * auto} and {@code cdp}; with {@code --json} each result carries {@code web}: the {@code web.path} record of the run
  * ({@code path}, {@code reason}, {@code cdp}, {@code libHash}, {@code policy}), its {@code calls} (step, index,
  * primitive, the {@code path} that served it, ok) and its {@code fallbacks}, or null for a plan without web calls.
+ *
+ * <p>Phase 5 (phase5-contracts.md 4.4, 7.1, 13.4): the inference options ({@code --inference},
+ * {@code --recordings}, {@code --inference-file}, {@code --budget-scenario}, {@code --log-prompts},
+ * {@code --workspace-id}) become the bind's {@code InferenceSettings}, loaded once after the credentials and before the
+ * agent is contacted; a settings error (the model key not set for {@code --inference claude}) fails the
+ * {@code environment} testcase and is exit code 64. {@code --no-reuse-bindings} turns {@code approve}'s reuse of an
+ * unchanged, verified tier (b) value off. {@code run --mode re-resolve} is refused (a command of its own). The human
+ * summary prints {@code model cost: $x (budget $y)} after {@code model calls: N}; {@code --json} carries
+ * {@code modelCost}, {@code budget} (the per-scenario budget) and the {@code inference} summary, and each result its
+ * model calls under {@code inference}.
  */
 final class RunCommand implements Command {
 
@@ -105,23 +118,35 @@ final class RunCommand implements Command {
             writes nothing unless --write-bindings. Credentials come from credentials.yaml (--credentials).
             Exit code 0 when every scenario passed (DEGRADED counts as passed unless --degraded-as failure), 1 when
             one FAILed or ERRORed (REBIND_NEEDED and RESOLUTION_FAILED included) or the credentials cannot be
-            loaded, 3 when the agent cannot be reached, 64 for approve without a terminal and without --yes.""",
-            Connector.withConnection(
-                    OptionSpec.value(OUT, "dir", "write each scenario's evidence into <dir>/<scenario-id>/"),
-                    OptionSpec.value(JUNIT, "file", "write a JUnit XML report (one testcase per scenario plus an\n"
-                            + "'environment' testcase)"),
-                    OptionSpec.value(SUITE, "name", "the test suite name in the report (default skillroy)"),
-                    OptionSpec.value(DEGRADED_AS, "skipped|failure|pass", "how a DEGRADED scenario is reported\n"
-                            + "and counted; default skipped: shown as skipped in the\n"
-                            + "report, and not a failure for the exit code"),
-                    OptionSpec.value(STEP_TIMEOUT, "duration", "override every scenario's step timeout (10s, 2m)"),
-                    BindArgs.RUN_OPTIONS.get(0), BindArgs.RUN_OPTIONS.get(1), BindArgs.RUN_OPTIONS.get(2),
-                    BindArgs.RUN_OPTIONS.get(3), BindArgs.RUN_OPTIONS.get(4), BindArgs.RUN_OPTIONS.get(5),
-                    BindArgs.RUN_OPTIONS.get(6),
-                    Packs.OPTION_SPEC,
-                    OptionSpec.flag("--json", "print {results:[...], summary, junit} as JSON when done;\n"
-                            + "progress goes to stderr")),
-            1, CommandSpec.UNLIMITED);
+            loaded, 3 when the agent cannot be reached, 64 for approve without a terminal and without --yes.
+            A slot whose strategy names llm-sql is resolved by a model in live and approve, through the gateway of
+            --inference (claude needs ANTHROPIC_API_KEY in the environment; recorded answers from --recordings),
+            within --budget-scenario; replay never calls a model. With --out each scenario also writes
+            inference.jsonl, the masked record of its model calls. The summary ends with model calls: N and
+            model cost: $x (budget $y). An inference setting that cannot be used (--inference claude without the
+            key) is exit code 64 before anything runs.""",
+            runOptions(), 1, CommandSpec.UNLIMITED);
+
+    /** The options of {@code run}, in help order. */
+    private static List<OptionSpec> runOptions() {
+        List<OptionSpec> options = new ArrayList<>(List.of(
+                OptionSpec.value(OUT, "dir", "write each scenario's evidence into <dir>/<scenario-id>/"),
+                OptionSpec.value(JUNIT, "file", "write a JUnit XML report (one testcase per scenario plus an\n"
+                        + "'environment' testcase)"),
+                OptionSpec.value(SUITE, "name", "the test suite name in the report (default skillroy)"),
+                OptionSpec.value(DEGRADED_AS, "skipped|failure|pass", "how a DEGRADED scenario is reported\n"
+                        + "and counted; default skipped: shown as skipped in the\n"
+                        + "report, and not a failure for the exit code"),
+                OptionSpec.value(STEP_TIMEOUT, "duration", "override every scenario's step timeout (10s, 2m)")));
+        options.addAll(BindArgs.RUN_OPTIONS);
+        options.add(InferenceArgs.NO_REUSE_OPTION);
+        options.addAll(InferenceArgs.gateway());
+        options.add(InferenceArgs.BUDGET_SCENARIO_OPTION);
+        options.add(Packs.OPTION_SPEC);
+        options.add(OptionSpec.flag("--json", "print {results:[...], summary, junit, modelCalls, modelCost,\n"
+                + "budget, inference} as JSON when done; progress goes to\nstderr"));
+        return Connector.withConnection(options.toArray(OptionSpec[]::new));
+    }
 
     /** One loaded input: its file, the plan to run and the pack to run it with. */
     record Loaded(Path file, Plan plan, DomainPack pack) {
@@ -188,6 +213,19 @@ final class RunCommand implements Command {
                 throw new CliException(Exit.FAILED, message, e);
             }
             SecretMask mask = credentials.mask();
+            InferenceSettings inference;
+            try {
+                inference = InferenceArgs.load(args, bindSettings.mode(), BindArgs.credentialsDir(bindSettings));
+            } catch (UsageException e) {
+                // Phase 5 4.4: a settings error is found before any scenario runs (exit 64 / the environment case).
+                writeJunit(reporter, junit, suite, List.of(), "the inference settings cannot be used: "
+                        + e.getMessage(), cli, UnaryOperator.identity());
+                throw e;
+            }
+            if (bindSettings.mode() == BindMode.REPLAY && InferenceArgs.given(args)) {
+                cli.err().println("skillroy run: note: replay makes no model call; the inference options are not"
+                        + " used");
+            }
             if (approver == null) {
                 approver = BindArgs.terminalApprover(cli, mask);
             }
@@ -204,7 +242,8 @@ final class RunCommand implements Command {
             try (target) {
                 RunOptions base = RunOptions.defaults().withDegradedAs(degradedAs)
                         .withTargetRestarted(restartProbe(target))
-                        .withBind(BindArgs.options(bindSettings, credentials, approver));
+                        .withBind(BindArgs.options(bindSettings, credentials, approver, inference,
+                                !args.flag(InferenceArgs.NO_REUSE_BINDINGS)));
                 if (stepTimeoutMs != null) {
                     base = base.withStepTimeout(Duration.ofMillis(stepTimeoutMs));
                 }
@@ -233,6 +272,9 @@ final class RunCommand implements Command {
             }
             writeJunit(reporter, junit, suite, results, null, cli, scrub);
             long modelCalls = results.stream().mapToLong(r -> r.modelCalls().size()).sum();
+            List<CostLedger.Entry> calls = results.stream().flatMap(r -> r.modelCalls().stream()).toList();
+            String budget = inference.budgets().get(InferenceSettings.BUDGET_SCENARIO);
+            String costLine = InferenceArgs.costLine(calls, budget);
             Map<Status, Integer> counts = new EnumMap<>(Status.class);
             for (Status status : Status.values()) {
                 counts.put(status, 0);
@@ -256,12 +298,17 @@ final class RunCommand implements Command {
                 document.put("junit", junit == null ? null : junit.toString());
                 document.put("exitCode", (long) exit);
                 document.put("modelCalls", modelCalls);
-                cli.out().print(scrub.apply(Json.writePretty(document)));
+                document.put("modelCost", InferenceArgs.cost(calls).toPlainString());
+                document.put("budget", budget);
+                document.put("inference", InferenceArgs.summary(inference, calls));
+                cli.out().print(scrub.apply(Json.writePretty(mask.apply(document))));
                 cli.err().println(summary);
                 cli.err().println("model calls: " + modelCalls);
+                cli.err().println(costLine);
             } else {
                 cli.out().println(summary);
                 cli.out().println("model calls: " + modelCalls);
+                cli.out().println(costLine);
             }
             return exit;
         } finally {
@@ -408,6 +455,8 @@ final class RunCommand implements Command {
         json.put("mode", result.mode() == null ? null : result.mode().label());
         json.put("envId", result.envId());
         json.put("modelCalls", (long) result.modelCalls().size());
+        // phase5-contracts.md 13.4: the scenario's model calls (its inference records, summarised).
+        json.put("inference", InferenceArgs.records(result.modelCalls()));
         json.put("durationMs", result.duration().toMillis());
         json.put("skippedExpectations", result.skippedExpectations());
         json.put("degradedFidelity", result.degradedFidelity());

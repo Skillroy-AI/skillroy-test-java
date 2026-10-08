@@ -6,7 +6,8 @@ Apache License, Version 2.0; see LICENSE and NOTICE at the top level of this dis
 
 The jars below are third-party software. They are in lib/, they are copied here unmodified, and each carries the
 licence and attribution files its authors ship inside the jar (META-INF/LICENSE, META-INF/NOTICE and the others
-named in the second table). Please keep the jars as they are: do not repack, shade or minimise them.
+named in the tables below), where it ships any. Please keep the jars as they are: do not repack, shade or minimise
+them.
 
 Redistributed artifacts
 -----------------------
@@ -14,21 +15,93 @@ Redistributed artifacts
 Each line is: Maven coordinates (group:artifact:version), SPDX licence identifier, file in this distribution.
 The line format is read by a test; see "Keeping this file correct" below.
 
+com.anthropic:anthropic-java:2.70.0                             MIT          lib/anthropic-java-2.70.0.jar
+com.anthropic:anthropic-java-client-okhttp:2.70.0               MIT          lib/anthropic-java-client-okhttp-2.70.0.jar
+com.anthropic:anthropic-java-core:2.70.0                        MIT          lib/anthropic-java-core-2.70.0.jar
+com.ethlo.time:itu:1.14.0                                       Apache-2.0   lib/itu-1.14.0.jar
+com.fasterxml:classmate:1.7.0                                   Apache-2.0   lib/classmate-1.7.0.jar
 com.fasterxml.jackson.core:jackson-annotations:2.22             Apache-2.0   lib/jackson-annotations-2.22.jar
 com.fasterxml.jackson.core:jackson-core:2.22.3                  Apache-2.0   lib/jackson-core-2.22.3.jar
 com.fasterxml.jackson.core:jackson-databind:2.22.3              Apache-2.0   lib/jackson-databind-2.22.3.jar
 com.fasterxml.jackson.dataformat:jackson-dataformat-yaml:2.22.3 Apache-2.0   lib/jackson-dataformat-yaml-2.22.3.jar
+com.fasterxml.jackson.datatype:jackson-datatype-jdk8:2.22.3     Apache-2.0   lib/jackson-datatype-jdk8-2.22.3.jar
+com.fasterxml.jackson.datatype:jackson-datatype-jsr310:2.22.3   Apache-2.0   lib/jackson-datatype-jsr310-2.22.3.jar
+com.fasterxml.jackson.module:jackson-module-kotlin:2.22.3       Apache-2.0   lib/jackson-module-kotlin-2.22.3.jar
+com.github.jsqlparser:jsqlparser:5.4                            Apache-2.0   lib/jsqlparser-5.4.jar
+com.github.victools:jsonschema-generator:4.38.0                 Apache-2.0   lib/jsonschema-generator-4.38.0.jar
+com.github.victools:jsonschema-module-jackson:4.38.0            Apache-2.0   lib/jsonschema-module-jackson-4.38.0.jar
+com.github.victools:jsonschema-module-swagger-2:4.38.0          Apache-2.0   lib/jsonschema-module-swagger-2-4.38.0.jar
+com.google.errorprone:error_prone_annotations:2.50.0            Apache-2.0   lib/error_prone_annotations-2.50.0.jar
+com.networknt:json-schema-validator:2.0.4                       Apache-2.0   lib/json-schema-validator-2.0.4.jar
+com.squareup.okhttp3:okhttp:4.12.0                              Apache-2.0   lib/okhttp-4.12.0.jar
+com.squareup.okio:okio:3.6.0                                    Apache-2.0   lib/okio-3.6.0.jar
+com.squareup.okio:okio-jvm:3.6.0                                Apache-2.0   lib/okio-jvm-3.6.0.jar
+com.standardwebhooks:standardwebhooks:1.2.0                     MIT          lib/standardwebhooks-1.2.0.jar
+io.modelcontextprotocol.sdk:mcp-core:2.0.1                      MIT          lib/mcp-core-2.0.1.jar
+io.modelcontextprotocol.sdk:mcp-json-jackson2:2.0.1             MIT          lib/mcp-json-jackson2-2.0.1.jar
+io.projectreactor:reactor-core:3.7.0                            Apache-2.0   lib/reactor-core-3.7.0.jar
+io.swagger.core.v3:swagger-annotations:2.2.50                   Apache-2.0   lib/swagger-annotations-2.2.50.jar
+org.jetbrains:annotations:13.0                                  Apache-2.0   lib/annotations-13.0.jar
+org.jetbrains.kotlin:kotlin-reflect:2.1.21                      Apache-2.0   lib/kotlin-reflect-2.1.21.jar
+org.jetbrains.kotlin:kotlin-stdlib:2.1.21                       Apache-2.0   lib/kotlin-stdlib-2.1.21.jar
+org.jetbrains.kotlin:kotlin-stdlib-common:1.9.10                Apache-2.0   lib/kotlin-stdlib-common-1.9.10.jar
+org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.9.0                   Apache-2.0   lib/kotlin-stdlib-jdk7-1.9.0.jar
+org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.9.0                   Apache-2.0   lib/kotlin-stdlib-jdk8-1.9.0.jar
+org.reactivestreams:reactive-streams:1.0.4                      MIT-0        lib/reactive-streams-1.0.4.jar
+org.slf4j:slf4j-api:2.0.16                                      MIT          lib/slf4j-api-2.0.16.jar
+org.slf4j:slf4j-nop:2.0.16                                      MIT          lib/slf4j-nop-2.0.16.jar
 org.yaml:snakeyaml:2.5                                          Apache-2.0   lib/snakeyaml-2.5.jar
+
+Licences
+--------
+
+The Apache-2.0 text is the file LICENSE at the top level of this distribution; it applies to every artifact listed
+above as Apache-2.0 whose jar carries no licence file of its own. The MIT and MIT-0 texts, each with the copyright
+line of the project it covers, are at the end of this file ("Licence texts"). The licence of each artifact is the one
+its Maven POM states (or its parent POM's, for the Jackson datatype modules, the victools modules, swagger-annotations
+and SLF4J).
 
 Attributions
 ------------
 
-Jackson (the four com.fasterxml.jackson jars): Copyright 2007-, Tatu Saloranta; developed by a community of
-developers. Licensed under the Apache License, Version 2.0. See META-INF/NOTICE and META-INF/LICENSE inside each jar.
+Jackson (the com.fasterxml.jackson jars): Copyright 2007-, Tatu Saloranta; developed by a community of developers.
+Licensed under the Apache License, Version 2.0. See META-INF/NOTICE and META-INF/LICENSE inside each jar.
 
 SnakeYAML: YAML 1.1 parser and emitter for Java, https://bitbucket.org/snakeyaml/snakeyaml. Licensed under the
 Apache License, Version 2.0. The jar contains no licence file of its own; its manifest (Bundle-License) and its
 embedded POM name that licence. The licence text is the LICENSE file at the top level of this distribution.
+
+Anthropic Java SDK (anthropic-java, anthropic-java-client-okhttp, anthropic-java-core): Copyright 2023 Anthropic,
+PBC. https://github.com/anthropics/anthropic-sdk-java. Licensed under the MIT License (the POM of each artifact). The
+jars carry no licence file; the MIT text with this copyright line is below.
+
+MCP Java SDK (mcp-core, mcp-json-jackson2): Copyright (c) 2025 the original author or authors.
+https://github.com/modelcontextprotocol/java-sdk. Licensed under the MIT License (each POM; each manifest's
+Bundle-License). The jars carry no licence file; the MIT text with this copyright line is below.
+
+Standard Webhooks Java library (standardwebhooks): Copyright (c) 2023 Svix (https://www.svix.com).
+https://github.com/standard-webhooks/standard-webhooks (libraries/java). Licensed under the MIT License (its POM; the
+libraries' LICENSE). The jar carries no licence file; the MIT text with this copyright line is below.
+
+SLF4J (slf4j-api, slf4j-nop): Copyright (c) 2004-2022 QOS.ch Sarl (Switzerland). https://www.slf4j.org. Licensed
+under the MIT License; the text is META-INF/LICENSE.txt inside each jar, and is repeated below.
+
+Reactive Streams (reactive-streams): Copyright 2014 Reactive Streams. https://www.reactive-streams.org. Licensed under
+MIT No Attribution (MIT-0; its POM). The jar carries no licence file; the text is below.
+
+JSqlParser (jsqlparser): https://github.com/JSQLParser/JSqlParser. Dual-licensed under the GNU Lesser General Public
+License 2.1 or the Apache License, Version 2.0 (two licence entries in its POM; its manifest's Bundle-License names
+both). This distribution takes it under the Apache License, Version 2.0, as the line above says. The jar carries no
+licence file; the Apache-2.0 text is the LICENSE file at the top level.
+
+Apache-2.0 artifacts whose jars carry no licence file of their own (their POMs state the licence; the text is the
+LICENSE file at the top level): Kotlin's standard library and reflection (kotlin-stdlib, kotlin-stdlib-common,
+kotlin-stdlib-jdk7, kotlin-stdlib-jdk8, kotlin-reflect) and JetBrains annotations (annotations), by JetBrains;
+OkHttp and Okio (okhttp, okio, okio-jvm), by Square; Project Reactor (reactor-core); the victools JSON schema
+generator and its modules (jsonschema-generator, jsonschema-module-jackson, jsonschema-module-swagger-2); the
+networknt JSON schema validator (json-schema-validator); ethlo ITU (itu); Error Prone annotations
+(error_prone_annotations). The others named Apache-2.0 above (classmate, the Jackson modules, swagger-annotations)
+carry META-INF/LICENSE and META-INF/NOTICE inside their jars.
 
 Components embedded in jackson-core
 -----------------------------------
@@ -44,10 +117,112 @@ Each line is: component, SPDX licence identifier, file inside lib/jackson-core-2
   fast_float (in FastDoubleParser)                             MIT           META-INF/FastDoubleParser-ThirdParty-LICENSE
   bigint (by Tim Buktu, in FastDoubleParser)                   BSD-2-Clause  META-INF/FastDoubleParser-ThirdParty-LICENSE
 
+Other licence and notice files inside the jars
+----------------------------------------------
+
+Each line is: Maven coordinates, file inside that jar. They must stay with their jars.
+
+  org.slf4j:slf4j-api:2.0.16                  META-INF/LICENSE.txt
+  org.slf4j:slf4j-nop:2.0.16                  META-INF/LICENSE.txt
+  com.squareup.okhttp3:okhttp:4.12.0          okhttp3/internal/publicsuffix/NOTICE
+
+OkHttp's notice: the okhttp jar's data file okhttp3/internal/publicsuffix/publicsuffixes.gz is compiled from the
+Public Suffix List (https://publicsuffix.org/list/public_suffix_list.dat) and is subject to the terms of the Mozilla
+Public License, version 2.0 (https://mozilla.org/MPL/2.0/). The file is distributed unmodified inside the jar; the
+list it is compiled from is available, as its source, at the address above.
+
 Keeping this file correct
 -------------------------
 
 A test over the assembled distribution (DistributionNoticesIT in the skillroy-cli module) fails the build when this
 file and lib/ disagree: a third-party jar in lib/ that is not listed above (or a listed one that is gone or has
-another version), a licence outside the allowed list, a licence or notice file inside a jar that is not mentioned
-here, or a missing LICENSE, NOTICE or THIRD-PARTY.txt. Change the dependencies, then update this file.
+another version), a licence outside the allowed list (Apache-2.0, MIT, MIT-0), a licence that neither its jar nor
+this file evidences, a licence or notice file inside a jar that is not named here, or a missing LICENSE, NOTICE or
+THIRD-PARTY.txt. A jar that carries no Maven coordinates of its own (pom.properties) is identified by its file name.
+Change the dependencies, then update this file and docs/licence-audit.md.
+
+Licence texts
+-------------
+
+MIT License: the Anthropic Java SDK (anthropic-java, anthropic-java-client-okhttp, anthropic-java-core)
+
+  Copyright 2023 Anthropic, PBC.
+
+  Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated
+  documentation files (the "Software"), to deal in the Software without restriction, including without limitation
+  the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to
+  permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+  The above copyright notice and this permission notice shall be included in all copies or substantial portions of
+  the Software.
+
+  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE
+  WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS
+  OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+  OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+MIT License: the MCP Java SDK (mcp-core, mcp-json-jackson2)
+
+  Copyright (c) 2025 the original author or authors.
+
+  Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated
+  documentation files (the "Software"), to deal in the Software without restriction, including without limitation
+  the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to
+  permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+  The above copyright notice and this permission notice shall be included in all copies or substantial portions of
+  the Software.
+
+  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE
+  WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS
+  OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+  OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+MIT License: the Standard Webhooks Java library (standardwebhooks)
+
+  Copyright (c) 2023 Svix (https://www.svix.com)
+
+  Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated
+  documentation files (the "Software"), to deal in the Software without restriction, including without limitation
+  the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to
+  permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+  The above copyright notice and this permission notice shall be included in all copies or substantial portions of
+  the Software.
+
+  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE
+  WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS
+  OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+  OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+MIT License: SLF4J (slf4j-api, slf4j-nop)
+
+  Copyright (c) 2004-2022 QOS.ch Sarl (Switzerland)
+  All rights reserved.
+
+  Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated
+  documentation files (the "Software"), to deal in the Software without restriction, including without limitation
+  the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to
+  permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+  The above copyright notice and this permission notice shall be included in all copies or substantial portions of
+  the Software.
+
+  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE
+  WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS
+  OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+  OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+MIT No Attribution: Reactive Streams (reactive-streams)
+
+  Copyright 2014 Reactive Streams
+
+  Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated
+  documentation files (the "Software"), to deal in the Software without restriction, including without limitation
+  the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to
+  permit persons to whom the Software is furnished to do so.
+
+  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE
+  WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS
+  OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+  OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.

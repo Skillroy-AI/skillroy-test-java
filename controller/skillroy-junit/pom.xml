@@ -66,9 +66,13 @@
         <artifactId>maven-surefire-plugin</artifactId>
         <configuration>
           <!-- The glue locates credentials.yaml through this variable too: a developer's own must not reach the
-               tests (they name their files through the system property, which they restore). -->
+               tests (they name their files through the system property, which they restore). Nor the model key:
+               the inference settings' default gateway and the "key not set" refusal depend on it
+               (phase5-contracts.md 4.4). -->
           <excludedEnvironmentVariables>
             <param>SKILLROY_CREDENTIALS</param>
+            <param>ANTHROPIC_API_KEY</param>
+            <param>ANTHROPIC_WORKSPACE_ID</param>
           </excludedEnvironmentVariables>
         </configuration>
       </plugin>

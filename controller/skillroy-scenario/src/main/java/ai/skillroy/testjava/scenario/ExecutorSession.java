@@ -352,15 +352,19 @@ public final class ExecutorSession implements AutoCloseable {
             sessionOptions.put("web", Plan.webJson(options.web()));
         }
         Map<String, String> capabilityOf = new TreeMap<>();
+        List<String> reads = new ArrayList<>();
         for (PrimitiveDescriptor descriptor : primitives.values()) {
             if (descriptor.capabilityId() != null && !descriptor.capabilityId().isBlank()) {
                 capabilityOf.put(descriptor.name(), descriptor.capabilityId());
+            }
+            if (!descriptor.mutating() && !descriptor.destructive()) {
+                reads.add(descriptor.name());
             }
         }
         Map<String, Object> env = RunLog.fields("fingerprint", fingerprint.hash(), "components",
                 new LinkedHashMap<>(fingerprint.components()));
         journal.append(new StepJournal.SessionStart(id, pack.id(), pack.version(), options.bind().envId(), env,
-                options.readOnly(), sessionOptions, clock.instant().toString(), capabilityOf), mask);
+                options.readOnly(), sessionOptions, clock.instant().toString(), capabilityOf, reads), mask);
     }
 
     // ------------------------------------------------------------------------------------------------ steps
@@ -1039,6 +1043,22 @@ public final class ExecutorSession implements AutoCloseable {
         requireOpen();
         journal.append(new StepJournal.BudgetEntry(scope, spentUsd == null ? "0" : spentUsd.toPlainString(),
                 limitUsd == null ? null : limitUsd.toPlainString(), exhausted), mask);
+    }
+
+    /**
+     * Tells the session that the agent's events up to {@code seq} were handled outside it: a host that ran something
+     * else on the same target between two steps (the MCP server's {@code skillroy_scenario_run}, a plan run with its
+     * own prompt policy) passes the agent's sequence number after it, so that the next step's prompt check does not
+     * read the prompts that run saw (and answered, or failed on) as unexpected prompts of this session. The prompt
+     * cursor and the highest seen sequence number only move forward (a lower number changes nothing); not journaled.
+     *
+     * @param seq the agent's sequence number up to which prompts were handled
+     * @throws IllegalStateException after {@link #close()}
+     */
+    public void promptsHandledUpTo(long seq) {
+        requireOpen();
+        runner.promptCursor = Math.max(runner.promptCursor, seq);
+        runner.noteSeq(seq);
     }
 
     /** The session's slots, oracles and captures; what a call's references resolve against. */

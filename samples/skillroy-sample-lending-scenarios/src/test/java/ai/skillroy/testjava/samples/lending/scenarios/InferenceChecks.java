@@ -56,7 +56,6 @@ import io.modelcontextprotocol.json.jackson2.JacksonMcpJsonMapperSupplier;
 import io.modelcontextprotocol.spec.McpSchema;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.DynamicTest;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
@@ -490,12 +489,11 @@ abstract class InferenceChecks {
     /**
      * Item 5: {@code skillroy mcp} as a subprocess of the assembled launcher against this desk: read-only, it lists the
      * workflow reads and the lending reads and no verb; with {@code --mutating} the verbs; a snapshot and a fact are
-     * read; a verb runs through the session entry; a resource is read. Disabled until the CLI's {@code mcp} command is
+     * read; a verb runs through the session entry; a resource is read. Enabled once the CLI's {@code mcp} command was
      * merged.
      */
     @Test
     @Order(8)
-    @Disabled("CLI wave: needs the skillroy mcp command (phase5-contracts.md 9.2), built in parallel")
     void theMcpServerAsASubprocessListsTheLendingToolsAndServesTheDesk() throws Exception {
         assumeTrue(full() && env() == Env.SEED_A, "seed A, once");
         Path credentials = SampleCredentials.write(runDir("mcp-secrets"), env(), null);
@@ -553,18 +551,18 @@ abstract class InferenceChecks {
      * The command form of item 4: {@code skillroy session --script} against this desk, the person's commands only
      * ({@code --inference none}: the recorded session answers on the headless desk only, see the class comment): it
      * resolves, signs on, lends and settles through {@code do}, checks through facts and exports; the exported scenario
-     * compiles and replays with {@code model calls: 0}. Disabled until the CLI's {@code session} command is merged.
+     * compiles and replays with {@code model calls: 0}. Enabled once the CLI's {@code session} command was merged.
      */
     @Test
     @Order(9)
-    @Disabled("CLI wave: needs the skillroy session command (phase5-contracts.md 13.4), built in parallel")
     void theSessionCommandRunsAScriptExportsAndTheExportReplays() throws Exception {
         assumeTrue(full() && env() == Env.SEED_A, "seed A, once");
         Path dir = runDir("cli-session");
         Path credentials = SampleCredentials.write(dir.resolve("secrets"), env(), null);
         Path script = dir.resolve("session.txt");
         Files.writeString(script, String.join("\n",
-                "resolve assistant StaffWithPermission {\"perform\":[\"SIGN_ON\"],\"interactiveSignOn\":true}",
+                "resolve assistant StaffWithPermission {\"perform\":[\"SIGN_ON\"],\"interactiveSignOn\":true}"
+                        + " --credential staff.code",
                 "do signOn {\"staff\":\"$assistant\"}",
                 "resolve item LendableItem {\"deposit\":{\"between\":[\"1.00\",\"2.00\"]},\"perDay\":false}",
                 "do scan {\"item\":\"$item\"}",
@@ -591,7 +589,7 @@ abstract class InferenceChecks {
                 .redirectOutput(dir.resolve("replay.out").toFile()).start();
         assertTrue(replay.waitFor(120, java.util.concurrent.TimeUnit.SECONDS));
         assertEquals(0, replay.exitValue(), Files.readString(dir.resolve("replay.out")));
-        assertTrue(Files.readString(dir.resolve("replay.out")).strip().endsWith("model calls: 0"));
+        assertTrue(Files.readString(dir.resolve("replay.out")).contains("model calls: 0"));
         assertSignedOffAndQuiet(-1);
     }
 }

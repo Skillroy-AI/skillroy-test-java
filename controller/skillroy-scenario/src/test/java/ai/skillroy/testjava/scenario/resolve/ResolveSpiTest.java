@@ -61,6 +61,58 @@ class ResolveSpiTest {
     record O(String x) implements Query<Optional<String>> {
     }
 
+    /** The floating components a model's structured answer uses (a stated confidence, a score). */
+    record Scores(double confidence, Double optional, float ratio, Float boxed, List<Double> series) {
+    }
+
+    /**
+     * phase5-contracts.md 3.3: a {@code double} or {@code float} (boxed or not) is a JSON number, decoded from any
+     * finite number (a whole one too) and never from text; a {@code float} must fit; encoded as a {@code Double}, so
+     * that a value round-trips and the JSON writer writes it as a number.
+     */
+    @Test
+    void recordCodecReadsAndWritesDoublesAndFloatsAsNumbers() throws Exception {
+        Map<String, Object> json = new LinkedHashMap<>();
+        json.put("confidence", 0.85);
+        json.put("optional", null);
+        json.put("ratio", 2L);
+        json.put("boxed", 0.25);
+        json.put("series", List.of(1L, 2.5, new BigDecimal("3.25")));
+        Scores scores = (Scores) RecordCodec.DEFAULT.decode(Scores.class, json);
+        assertEquals(new Scores(0.85, null, 2.0f, 0.25f, List.of(1.0, 2.5, 3.25)), scores);
+        assertNull(RecordCodec.DEFAULT.unsupported(Scores.class));
+        Map<?, ?> encoded = (Map<?, ?>) RecordCodec.DEFAULT.encode(scores);
+        assertEquals(List.of("boxed", "confidence", "optional", "ratio", "series"), new ArrayList<>(encoded.keySet()));
+        assertEquals(0.85, encoded.get("confidence"));
+        assertEquals(2.0, encoded.get("ratio"), "a float is encoded as a Double");
+        assertEquals("{\"boxed\":0.25,\"confidence\":0.85,\"optional\":null,\"ratio\":2.0,\"series\":[1.0,2.5,3.25]}",
+                ai.skillroy.testjava.protocol.Json.write(encoded));
+        assertEquals(scores, RecordCodec.DEFAULT.decode(Scores.class, encoded), "round trip");
+
+        Map<String, Object> text = new LinkedHashMap<>(json);
+        text.put("confidence", "0.85");
+        String message = assertThrows(CodecException.class, () -> RecordCodec.DEFAULT.decode(Scores.class, text))
+                .getMessage();
+        assertEquals("confidence: expected a number, found text", message, "text is not a number, and the value is"
+                + " never quoted");
+        Map<String, Object> missing = new LinkedHashMap<>(json);
+        missing.remove("confidence");
+        assertTrue(assertThrows(CodecException.class, () -> RecordCodec.DEFAULT.decode(Scores.class, missing))
+                .getMessage().startsWith("confidence: a value is required"), "a primitive double needs a value");
+        Map<String, Object> huge = new LinkedHashMap<>(json);
+        huge.put("ratio", 1e300);
+        assertEquals("ratio: the number does not fit a float", assertThrows(CodecException.class,
+                () -> RecordCodec.DEFAULT.decode(Scores.class, huge)).getMessage());
+        Map<String, Object> flag = new LinkedHashMap<>(json);
+        flag.put("boxed", true);
+        assertTrue(assertThrows(CodecException.class, () -> RecordCodec.DEFAULT.decode(Scores.class, flag))
+                .getMessage().startsWith("boxed: expected a number"));
+        assertEquals(List.of("confidence: expected a number, found text"), RecordCodec.DEFAULT.check(Scores.class,
+                Map.of("confidence", "high", "ratio", "$score", "boxed", 1L)), "a reference stands for a number too");
+        assertThrows(IllegalArgumentException.class, () -> RecordCodec.DEFAULT.encode(new Scores(Double.NaN, null,
+                1f, null, List.of())), "NaN has no JSON form");
+    }
+
     @Test
     void recordCodecRoundTripsEverySupportedTypeWithSortedKeys() throws Exception {
         Map<String, Object> json = new LinkedHashMap<>();

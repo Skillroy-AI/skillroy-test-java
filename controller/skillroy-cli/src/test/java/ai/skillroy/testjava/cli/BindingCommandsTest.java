@@ -114,7 +114,7 @@ class BindingCommandsTest {
                 .contains("already identical"));
 
         CliHarness.Outcome run = cli("run", scenario.toString()).expectExit(Exit.OK);
-        assertTrue(run.out().endsWith("model calls: 0\n"), run.out());
+        assertTrue(run.out().endsWith("model calls: 0\nmodel cost: $0 (budget $0.50)\n"), run.out());
         Path plan = tmp.resolve("module/plan/with-oracle.plan.json");
         CliHarness.run(tmp, "compile", scenario.toString(), "--out", plan.getParent().toString())
                 .expectExit(Exit.OK);

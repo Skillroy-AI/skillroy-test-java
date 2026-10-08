@@ -19,6 +19,7 @@ package ai.skillroy.testjava.cli;
 import ai.skillroy.testjava.data.Credentials;
 import ai.skillroy.testjava.data.CredentialsException;
 import ai.skillroy.testjava.data.SecretMask;
+import ai.skillroy.testjava.inference.resolve.LlmSqlResolver;
 import ai.skillroy.testjava.protocol.Json;
 import ai.skillroy.testjava.scenario.Approver;
 import ai.skillroy.testjava.scenario.BindOptions;
@@ -26,11 +27,14 @@ import ai.skillroy.testjava.scenario.BindingsDiff;
 import ai.skillroy.testjava.scenario.CrossCheckOutcome;
 import ai.skillroy.testjava.scenario.OracleValue;
 import ai.skillroy.testjava.scenario.resolve.BindMode;
+import ai.skillroy.testjava.scenario.resolve.InferenceSettings;
+import ai.skillroy.testjava.scenario.resolve.LlmUsage;
 import ai.skillroy.testjava.scenario.resolve.Provenance;
 import ai.skillroy.testjava.scenario.resolve.Resolution;
 import ai.skillroy.testjava.scenario.resolve.VerifierResult;
 
 import java.io.PrintStream;
+import java.math.BigDecimal;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Locale;
@@ -42,6 +46,10 @@ import java.util.regex.Pattern;
  * {@code --bindings}, {@code --credentials}, {@code --yes}, {@code --approved-by}, {@code --write-bindings}; the
  * bindings root of the invocation (decision D31), the credentials loaded once before the agent is contacted, and the
  * approver (a terminal question, {@code --yes}, or exit 64 when nobody can answer).
+ *
+ * <p>Phase 5 (phase5-contracts.md 4.4, 7.1): where {@code inference.yaml} is looked for
+ * ({@link #credentialsDir}), the bind options with the inference settings and {@code approve}'s reuse rule, and the
+ * approval screen's lines of a model-written (tier (b)) value.
  *
  * <p>Stateless; used from the command's thread.
  */
@@ -115,8 +123,25 @@ final class BindArgs {
             String property = System.getProperty(BindOptions.PROP_BINDINGS);
             root = property == null || property.isBlank() ? defaultRoot(files) : Path.of(property.strip());
         }
-        return new Settings(chosen, envId, root, args.path(CREDENTIALS), args.flag(YES), args.value(APPROVED_BY),
-                write);
+        boolean yes = args.spec().option(YES) != null && args.flag(YES);
+        String approvedBy = args.spec().option(APPROVED_BY) == null ? null : args.value(APPROVED_BY);
+        return new Settings(chosen, envId, root, args.path(CREDENTIALS), yes, approvedBy, write);
+    }
+
+    /**
+     * Where {@code inference.yaml} is looked for (phase5-contracts.md 4.4): the directory of the credentials file the
+     * invocation uses, else {@code <bindings>/<env>/}; null when neither is known. Called after the credentials loaded,
+     * so that a named file exists.
+     */
+    static Path credentialsDir(Settings settings) {
+        Path file = Credentials.locate(settings.credentialsFile(), settings.root(), settings.envId());
+        if (file != null) {
+            Path parent = file.toAbsolutePath().getParent();
+            if (parent != null) {
+                return parent;
+            }
+        }
+        return settings.root() == null ? null : settings.root().resolve(settings.envId());
     }
 
     /** {@code bindings} in the parent of the directory that holds the first file (D31); null for none. */
@@ -159,6 +184,15 @@ final class BindArgs {
         return BindOptions.defaults().withMode(settings.mode()).withEnvId(settings.envId())
                 .withBindingsRoot(settings.root()).withCredentials(credentials).withApprover(approver)
                 .withWriteBindings(settings.writeBindings()).withApprovedBy(settings.approvedBy());
+    }
+
+    /**
+     * The bind options with the inference settings of the invocation and {@code approve}'s reuse rule
+     * (phase5-contracts.md 4.4, 7.1: {@code --no-reuse-bindings} turns the reuse off).
+     */
+    static BindOptions options(Settings settings, Credentials credentials, Approver approver,
+                               InferenceSettings inference, boolean reuseBindings) {
+        return options(settings, credentials, approver).withInference(inference).withReuseBindings(reuseBindings);
     }
 
     /**
@@ -217,6 +251,9 @@ final class BindArgs {
                 text.append("    verifier ").append(v.verifierId()).append(v.passed() ? ": passed: " : ": failed: ")
                         .append(v.reason()).append('\n');
             }
+            if (r.strategy().needsModel() || r.usage() != null) {
+                modelWritten(text, r, p);
+            }
         }
         for (OracleValue o : request.oracles()) {
             text.append("  oracle ").append(o.name()).append(" (").append(o.fn()).append(") = ")
@@ -249,6 +286,63 @@ final class BindArgs {
         out.print(mask.apply(text.toString()));
         out.flush();
     }
+
+    /**
+     * The approval screen's lines of a value a model found (tier (b), phase5-contracts.md 7.1), after the verifier
+     * reasons: the strategy with the model, the request id and the cost ({@code Resolution.usage}), or, for a value
+     * {@code approve} reused from the bindings file, "recorded, verified now; no model call"; the model's rationale
+     * ({@code Provenance.rationale}); each clause the guard injected into the statement printed above, marked
+     * {@code [injected]}; the query arguments the statement's parameters bind (their values are the statement's
+     * {@code params} above); the confidence, the row bounds the model stated and the rows found. The guard's clauses,
+     * the arguments and the bounds come from the resolver's provenance notes ({@code LlmSqlResolver.GUARD_NOTE},
+     * {@code PARAMS_NOTE}, {@code ROWS_NOTE}). The caller masks the whole text.
+     */
+    private static void modelWritten(StringBuilder text, Resolution r, Provenance p) {
+        List<String> notes = p == null ? List.of() : p.notes();
+        String reused = notes.stream().filter(n -> n.startsWith(REUSED_NOTE)).findFirst().orElse(null);
+        text.append("    strategy ").append(r.strategy().token());
+        if (reused != null) {
+            text.append(": recorded, verified now; no model call (").append(reused).append(")\n");
+        } else {
+            LlmUsage usage = r.usage();
+            text.append(", model ").append(usage == null || usage.model() == null ? "?" : usage.model())
+                    .append(", request ").append(usage == null || usage.requestId() == null ? "?"
+                            : usage.requestId())
+                    .append(", cost $").append(usage == null || usage.costUsd() == null ? "?" : usage.costUsd())
+                    .append('\n');
+        }
+        if (p != null && p.rationale() != null && !p.rationale().isBlank()) {
+            text.append("    rationale: ").append(Text.oneLine(p.rationale(), Provenance.MAX_RATIONALE)).append('\n');
+        }
+        String rows = null;
+        String bound = null;
+        for (String note : notes) {
+            int guard = note.indexOf(": " + LlmSqlResolver.GUARD_NOTE);
+            if (guard >= 0) {
+                text.append("      [injected] ").append(note.substring(guard + 2 + LlmSqlResolver.GUARD_NOTE.length()))
+                        .append('\n');
+            }
+            int stated = note.indexOf(": " + LlmSqlResolver.ROWS_NOTE);
+            if (stated >= 0) {
+                rows = note.substring(stated + 2 + LlmSqlResolver.ROWS_NOTE.length());
+            }
+            int params = note.indexOf(": " + LlmSqlResolver.PARAMS_NOTE);
+            if (params >= 0) {
+                bound = note.substring(params + 2 + LlmSqlResolver.PARAMS_NOTE.length());
+            }
+        }
+        if (bound != null) {
+            text.append("    the parameters bind the arguments ").append(bound).append(", in order\n");
+        }
+        text.append("    confidence ").append(BigDecimal.valueOf(r.confidence()).stripTrailingZeros().toPlainString());
+        if (rows != null) {
+            text.append("; rows stated ").append(rows);
+        }
+        text.append('\n');
+    }
+
+    /** How the note of a value {@code approve} reused from the bindings file starts (the engine writes it). */
+    private static final String REUSED_NOTE = "reused from the bindings file";
 
     /**
      * A value as JSON text with the credentials masked in the value first (phase2-contracts.md 11.4): the JSON text

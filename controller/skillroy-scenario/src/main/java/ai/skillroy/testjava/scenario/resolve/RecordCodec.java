@@ -49,6 +49,10 @@ import java.util.regex.Pattern;
  *       written as a number is not a string</td></tr>
  *   <tr><td>{@code BigDecimal}</td><td>encoded as its plain string with its scale ({@code "34.99"}); decoded from a
  *       string or a number</td></tr>
+ *   <tr><td>{@code Double}/{@code double}, {@code Float}/{@code float}</td><td>a JSON number: decoded from any finite
+ *       number (a whole one included; text is not a number), a {@code float} only when the number fits one; encoded
+ *       as a {@code Double}. What {@code Schemas} writes as {@code number}, such as a model's stated
+ *       confidence</td></tr>
  *   <tr><td>an {@code enum}</td><td>its {@code name()}</td></tr>
  *   <tr><td>{@code LocalDate}, {@code Instant}</td><td>ISO-8601 text</td></tr>
  *   <tr><td>{@code List<E>}, {@code Map<String,V>}</td><td>list (order kept); map with sorted keys (values may be
@@ -112,7 +116,7 @@ public final class RecordCodec implements Codec {
             return value == null ? "a Map needs its value type" : unsupported(value, seen, depth + 1);
         }
         return "type " + raw.getName() + " is not supported by RecordCodec (records, String, Boolean, Long,"
-                + " Integer, BigDecimal, enums, LocalDate, Instant, List and Map<String,V>)";
+                + " Integer, Double, Float, BigDecimal, enums, LocalDate, Instant, List and Map<String,V>)";
     }
 
     @Override
@@ -295,6 +299,20 @@ public final class RecordCodec implements Codec {
             }
             return isInt ? (Object) whole.intValue() : (Object) whole.longValue();
         }
+        if (raw == Double.class || raw == double.class || raw == Float.class || raw == float.class) {
+            Double number = floating(value);
+            if (number == null) {
+                throw new CodecException(at(path) + "expected a number, found " + describe(value));
+            }
+            if (raw == Float.class || raw == float.class) {
+                float narrowed = number.floatValue();
+                if (Float.isInfinite(narrowed)) {
+                    throw new CodecException(at(path) + "the number does not fit a float");
+                }
+                return narrowed;
+            }
+            return number;
+        }
         if (raw == BigDecimal.class) {
             BigDecimal decimal = decimal(value);
             if (decimal == null) {
@@ -349,6 +367,17 @@ public final class RecordCodec implements Codec {
         return null;
     }
 
+    /** A finite JSON number as a double (a whole number too); null for anything else, text included. */
+    private static Double floating(Object value) {
+        if (value instanceof Double || value instanceof Float || value instanceof Long || value instanceof Integer
+                || value instanceof Short || value instanceof Byte || value instanceof BigDecimal
+                || value instanceof BigInteger) {
+            double d = ((Number) value).doubleValue();
+            return Double.isFinite(d) ? d : null;
+        }
+        return null;
+    }
+
     private static BigDecimal decimal(Object value) {
         if (value instanceof BigDecimal d) {
             return d;
@@ -383,6 +412,13 @@ public final class RecordCodec implements Codec {
         }
         if (value instanceof Integer || value instanceof Short || value instanceof Byte) {
             return ((Number) value).longValue();
+        }
+        if (value instanceof Double || value instanceof Float) {
+            double d = ((Number) value).doubleValue();
+            if (!Double.isFinite(d)) {
+                throw new IllegalArgumentException("a number that is not finite cannot be encoded");
+            }
+            return d;
         }
         if (value instanceof BigDecimal d) {
             return d.toPlainString();
@@ -427,7 +463,8 @@ public final class RecordCodec implements Codec {
 
     private static boolean isScalar(Class<?> raw) {
         return raw == String.class || raw == Boolean.class || raw == boolean.class || raw == Long.class
-                || raw == long.class || raw == Integer.class || raw == int.class || raw == BigDecimal.class
+                || raw == long.class || raw == Integer.class || raw == int.class || raw == Double.class
+                || raw == double.class || raw == Float.class || raw == float.class || raw == BigDecimal.class
                 || raw.isEnum() || raw == LocalDate.class || raw == Instant.class;
     }
 

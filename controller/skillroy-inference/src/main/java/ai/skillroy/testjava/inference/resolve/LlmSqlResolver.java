@@ -115,6 +115,24 @@ public final class LlmSqlResolver<Q extends Query<T>, T> implements BatchableRes
     public static final String PURPOSE = "resolve";
     /** The label a refused proposal is rejected under (phase5-contracts.md 5.4 step 3). */
     public static final String PROPOSAL_LABEL = "proposal";
+    /**
+     * What a provenance note about a clause the guard injected or changed starts with, after the resolver's id and
+     * {@code ": "} ({@code inference.sql.Item: guard injected: row limit injected: LIMIT 200}): the approval screen
+     * marks those clauses {@code [injected]} (phase5-contracts.md 7.1). Notes never reach the bindings file.
+     */
+    public static final String GUARD_NOTE = "guard injected: ";
+    /**
+     * What the provenance note of the row bounds the model stated and the rows the statement found starts with, after
+     * the resolver's id and {@code ": "} ({@code inference.sql.Item: rows stated: 1..5, found 2}), for the approval
+     * screen (phase5-contracts.md 7.1).
+     */
+    public static final String ROWS_NOTE = "rows stated: ";
+    /**
+     * What the provenance note of the query arguments the statement's parameters bind starts with, after the
+     * resolver's id and {@code ": "} ({@code inference.sql.Item: params bind: category, maxDeposit}, in parameter
+     * order), for the approval screen (phase5-contracts.md 7.1); the values are the statement's {@code params}.
+     */
+    public static final String PARAMS_NOTE = "params bind: ";
     /** The longest rationale handed to the provenance (phase5-contracts.md 5.4 step 5). */
     static final int RATIONALE_MAX = 2000;
 
@@ -414,11 +432,23 @@ public final class LlmSqlResolver<Q extends Query<T>, T> implements BatchableRes
                     proposal.sql())), 4000));
             return rejected(ctx, "guard " + v.reason() + ": " + bounded(state.mask.text(v.fragment()), 300));
         }
+        for (String change : guarded.injected()) {
+            // What the guard added or changed, for the approval screen's [injected] lines (7.1); notes never reach
+            // the bindings file.
+            ctx.note(id() + ": " + GUARD_NOTE + change);
+        }
         Object args = type.codec().encode(query);
         List<Object> params = new ArrayList<>();
         String problem = params(proposal, args, guarded, params);
         if (problem != null) {
             return rejected(ctx, "PARAM: " + problem);
+        }
+        if (!proposal.params().isEmpty()) {
+            List<String> bound = new ArrayList<>();
+            for (SqlProposal.Param p : proposal.params()) {
+                bound.add(p.name());
+            }
+            ctx.note(id() + ": " + PARAMS_NOTE + String.join(", ", bound));
         }
         Rows rows = ctx.data().query(list.source(), guarded.sql(), params, DataChannel.MAX_ROWS,
                 Duration.ofMillis(Math.max(1, ctx.remainingMs())));
@@ -428,6 +458,7 @@ public final class LlmSqlResolver<Q extends Query<T>, T> implements BatchableRes
         if (rows.rowCount() < min || rows.rowCount() > max) {
             return rejected(ctx, "row count " + rows.rowCount() + " outside " + min + ".." + max);
         }
+        ctx.note(id() + ": " + ROWS_NOTE + min + ".." + max + ", found " + rows.rowCount());
         return loader != null ? loaded(query, ctx, rows, proposal.confidence())
                 : decoded(ctx, rows, proposal.confidence());
     }
