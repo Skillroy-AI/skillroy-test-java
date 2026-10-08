@@ -54,7 +54,9 @@ import java.util.regex.Pattern;
  * {check, tolerance?, capability?}}, informational, phase3-contracts.md 8.3; {@code bindingsVersion} stays 1).
  * Record to file: {@code provenance.resolverId} is written
  * {@code provenance.resolver}, {@code verified} is {@code verifier} with {@code verifierId} as {@code id},
- * {@code Rejected.resolverId} is {@code resolver}, {@code usage} is {@code llm}, the slot is the map key. The text
+ * {@code Rejected.resolverId} is {@code resolver}, {@code usage} is {@code llm}, the slot is the map key. A value a
+ * model found also records why ({@code provenance.rationale}, the last key of the provenance, phase5-contracts.md
+ * 5.4 step 5); the key is left out when there is none, so that a tier (a) file is unchanged. The text
  * reads back to equal objects ({@link #toJsonText()} of a read file is byte-identical to what was read, when that was
  * written by this class). The file itself is never masked: it is built only from data that never held a secret, and
  * the binder refuses to write a text the run's mask would change.
@@ -252,6 +254,9 @@ public record BindingsFile(int bindingsVersion, String scenarioId, String envId,
             rejected.add(rj);
         }
         json.put("rejected", rejected);
+        if (p.rationale() != null) {
+            json.put("rationale", p.rationale());
+        }
         return json;
     }
 
@@ -273,7 +278,7 @@ public record BindingsFile(int bindingsVersion, String scenarioId, String envId,
         private static final Set<String> RESOLUTION = Set.of("query", "args", "argsHash", "value", "credential",
                 "strategy", "provenance", "verifier", "confidence", "approval", "llm");
         private static final Set<String> PROVENANCE = Set.of("resolver", "statements", "calls", "candidates",
-                "candidatesTruncated", "rejected");
+                "candidatesTruncated", "rejected", "rationale");
 
         BindingsFile file(Map<String, Object> json) throws BindingsFormatException {
             keys(json, TOP, "the file");
@@ -413,7 +418,8 @@ public record BindingsFile(int bindingsVersion, String scenarioId, String envId,
                         nullableStr(r, "reason")));
             }
             return new Provenance(nullableStr(p, "resolver"), statements, calls, List.of(),
-                    (int) num(p, "candidates", where), bool(p, "candidatesTruncated", where), rejected);
+                    (int) num(p, "candidates", where), bool(p, "candidatesTruncated", where), rejected,
+                    nullableStr(p, "rationale"));
         }
 
         private static void keys(Map<String, Object> json, Set<String> allowed, String where)

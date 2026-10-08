@@ -34,8 +34,10 @@ import java.util.Objects;
 public final class CostLedger {
 
     /**
-     * One model call. The first nine components are the Phase 2 shape (and its constructor stays); the last five are
-     * Phase 5's (decision D83).
+     * One model call. The first nine components are the Phase 2 shape (and its constructor stays); the next five are
+     * Phase 5's (decision D83), and {@code details} is the record of the call that {@code inference.jsonl} holds
+     * (decision D91), so that a run's writer, which owns the ledger but never saw the call, can write that file from
+     * the entries (one line per entry that has details). The earlier constructors keep {@code details} null.
      *
      * @param scenarioId the scenario
      * @param slot the slot the call was made for, or null
@@ -52,28 +54,45 @@ public final class CostLedger {
      * @param cacheWriteTokens input tokens written to the provider's cache
      * @param batch true when the call was part of a batch (priced at the batch rate)
      * @param note a short note (a refusal's category, a fallback model), or null
+     * @param details the masked {@code inference.jsonl} record of the call (its fingerprint, stop reason, elapsed
+     *     time, requested model, cache-write split and masked structured answer, phase5-contracts.md 7.3, 7.4), a
+     *     deep unmodifiable copy; null when there is none
      */
     public record Entry(String scenarioId, String slot, Strategy strategy, String provider, String model,
                         String requestId, long inputTokens, long outputTokens, String costUsd, String purpose,
-                        long cacheReadTokens, long cacheWriteTokens, boolean batch, String note) {
+                        long cacheReadTokens, long cacheWriteTokens, boolean batch, String note,
+                        Map<String, Object> details) {
 
         /** The purpose of an entry built with the Phase 2 constructor. */
         public static final String PURPOSE_RESOLVE = "resolve";
 
+        /** Copies the details. */
+        public Entry {
+            details = details == null ? null : Frozen.freezeMap(details);
+        }
+
         /**
-         * The Phase 2 shape: purpose {@code resolve}, no cache tokens, not a batch, no note.
+         * The Phase 2 shape: purpose {@code resolve}, no cache tokens, not a batch, no note, no details.
          */
         public Entry(String scenarioId, String slot, Strategy strategy, String provider, String model,
                      String requestId, long inputTokens, long outputTokens, String costUsd) {
             this(scenarioId, slot, strategy, provider, model, requestId, inputTokens, outputTokens, costUsd,
-                    PURPOSE_RESOLVE, 0L, 0L, false, null);
+                    PURPOSE_RESOLVE, 0L, 0L, false, null, null);
+        }
+
+        /** The shape of decision D83, without details. */
+        public Entry(String scenarioId, String slot, Strategy strategy, String provider, String model,
+                     String requestId, long inputTokens, long outputTokens, String costUsd, String purpose,
+                     long cacheReadTokens, long cacheWriteTokens, boolean batch, String note) {
+            this(scenarioId, slot, strategy, provider, model, requestId, inputTokens, outputTokens, costUsd, purpose,
+                    cacheReadTokens, cacheWriteTokens, batch, note, null);
         }
 
         /**
          * The {@code cost-ledger.jsonl} line of this entry before masking: the Phase 2 fields in their order, then
          * {@code purpose}, {@code cacheReadTokens}, {@code cacheWriteTokens}, {@code batch} and {@code note}
-         * (phase5-contracts.md 7.3); every key present, a missing value as null, the strategy by name. A new map on
-         * each call.
+         * (phase5-contracts.md 7.3); every key present, a missing value as null, the strategy by name. The details
+         * are not part of it (they are the {@code inference.jsonl} line). A new map on each call.
          */
         public Map<String, Object> toJson() {
             Map<String, Object> json = new LinkedHashMap<>();

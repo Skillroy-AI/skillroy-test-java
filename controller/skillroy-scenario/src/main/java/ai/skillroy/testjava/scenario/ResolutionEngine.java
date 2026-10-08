@@ -912,7 +912,7 @@ public final class ResolutionEngine implements AutoCloseable {
                 ? "an unknown approval" : "approval " + recordedApproval.state()) + ": verified now, no model call");
         Provenance provenance = was == null ? new Provenance(null, List.of(), List.of(), notes, 0, false, List.of())
                 : new Provenance(was.resolverId(), was.statements(), was.calls(), notes, was.candidates(),
-                was.candidatesTruncated(), was.rejected());
+                was.candidatesTruncated(), was.rejected(), was.rationale());
         Resolution resolution = new Resolution(slot, kind, args == null ? Map.of() : args, recorded.argsHash(),
                 recorded.value(), recorded.strategy(), provenance, results, recorded.confidence(), ref,
                 approvalFor(recorded.strategy()), recorded.usage());
@@ -935,7 +935,8 @@ public final class ResolutionEngine implements AutoCloseable {
         notes.add(note);
         resolutions.put(slot, new Resolution(r.slot(), r.query(), r.args(), r.argsHash(), r.value(), r.strategy(),
                 new Provenance(p.resolverId(), p.statements(), p.calls(), notes, p.candidates(),
-                        p.candidatesTruncated(), p.rejected()), r.verified(), r.confidence(), r.credential(),
+                        p.candidatesTruncated(), p.rejected(), p.rationale()), r.verified(), r.confidence(),
+                r.credential(),
                 r.approval(), r.usage()));
     }
 
@@ -1102,7 +1103,7 @@ public final class ResolutionEngine implements AutoCloseable {
         while (run.next < run.ladder.size()) {
             Resolver<?, ?> resolver = run.ladder.get(run.next++);
             Recorder recorder = new Recorder("resolver " + resolver.id());
-            Ctx ctx = new Ctx(recorder, run.credential, run.slot);
+            Ctx ctx = new Ctx(recorder, run, resolver.id());
             if (run.mayPark && options.mode() == BindMode.RE_RESOLVE
                     && resolver instanceof BatchableResolver<?, ?> batchable) {
                 @SuppressWarnings("unchecked")
@@ -1210,7 +1211,7 @@ public final class ResolutionEngine implements AutoCloseable {
             CredentialRef ref = credential == null ? null : new CredentialRef(credential.realm(),
                     credentialId(slot, encoded, credential));
             Provenance provenance = new Provenance(resolver.id(), recorder.statements, recorder.calls,
-                    recorder.notes, run.handed, run.truncated, run.rejected);
+                    recorder.notes, run.handed, run.truncated, run.rejected, recorder.rationale);
             Resolution resolution = new Resolution(slot, run.type.kind(), run.args, run.argsHash, encoded,
                     resolver.strategy(), provenance, results, candidate.confidence(), ref,
                     approvalFor(resolver.strategy()), usage(run.usage));
@@ -1334,6 +1335,11 @@ public final class ResolutionEngine implements AutoCloseable {
             LlmUsage u = r.usage();
             record.put("llm", u == null ? null : fields("model", u.model(), "requestId", u.requestId(),
                     "inputTokens", u.inputTokens(), "outputTokens", u.outputTokens(), "costUsd", u.costUsd()));
+            if (p != null && p.rationale() != null) {
+                // P5 5.4 step 5: why the model wrote the statement, as the approval screen and the bindings file
+                // show it.
+                record.put("rationale", p.rationale());
+            }
         }
         return record;
     }
@@ -1620,13 +1626,18 @@ public final class ResolutionEngine implements AutoCloseable {
         }
     }
 
-    /** What one pack call read: statements, calls, notes, and whether it called a mutating primitive. */
+    /**
+     * What one pack call read: statements, calls, notes, a model's rationale (a resolver's
+     * {@code ResolveContext.rationale}), and whether it called a mutating primitive.
+     */
     private final class Recorder {
 
         final String who;
         final List<Provenance.Statement> statements = new ArrayList<>();
         final List<Provenance.Call> calls = new ArrayList<>();
         final List<String> notes = new ArrayList<>();
+        /** The resolver's last {@code rationale}, masked; null when it gave none. */
+        String rationale;
         String violation;
         boolean spent;
         /** The last call's timeout was cut to what was left of the budget. */
@@ -1834,17 +1845,24 @@ public final class ResolutionEngine implements AutoCloseable {
         }
     }
 
-    /** The context of one resolver call. */
+    /**
+     * The context of one resolver call: what it reads is recorded into its {@link Recorder}, what it refuses
+     * ({@link #reject}) into its slot's rejected list under its resolver's id.
+     */
     private final class Ctx implements ResolveContext {
 
         private final Recorder recorder;
+        private final SlotRun run;
+        private final String resolverId;
         private final CredentialSpec credential;
         private final String slot;
 
-        Ctx(Recorder recorder, CredentialSpec credential, String slot) {
+        Ctx(Recorder recorder, SlotRun run, String resolverId) {
             this.recorder = recorder;
-            this.credential = credential;
-            this.slot = slot;
+            this.run = run;
+            this.resolverId = resolverId;
+            this.credential = run.credential;
+            this.slot = run.slot;
         }
 
         @Override
@@ -1907,6 +1925,19 @@ public final class ResolutionEngine implements AutoCloseable {
             if (text != null && recorder.notes.size() < 100) {
                 recorder.notes.add(mask.apply(text));
             }
+        }
+
+        /** P5 5.4 step 5: kept as the slot's {@code Provenance.rationale} if this call's candidate is accepted. */
+        @Override
+        public void rationale(String text) {
+            recorder.rationale = text == null || text.isBlank() ? null : mask.apply(text);
+        }
+
+        /** P5 5.4 step 3: a refused proposal or row, in the slot's rejected list (at most 20, as a verifier's). */
+        @Override
+        public void reject(String label, String reason) {
+            ResolutionEngine.reject(run.rejected, new Provenance.Rejected(resolverId, label == null ? null
+                    : mask.apply(label), reason == null ? null : mask.apply(reason)));
         }
 
         @Override

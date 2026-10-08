@@ -28,6 +28,7 @@ import ai.skillroy.testjava.protocol.RpcResult;
 import ai.skillroy.testjava.scenario.BindOptions;
 import ai.skillroy.testjava.scenario.BindOutcome;
 import ai.skillroy.testjava.scenario.Binder;
+import ai.skillroy.testjava.scenario.BindingsFile;
 import ai.skillroy.testjava.scenario.Plan;
 import ai.skillroy.testjava.scenario.PlanCompiler;
 import ai.skillroy.testjava.scenario.resolve.Approval;
@@ -216,7 +217,16 @@ class InferenceContributorTest {
             assertTrue(item.provenance().statements().stream().anyMatch(s -> s.sql().equals("SELECT i.code, i.title,"
                     + " i.deposit FROM item i WHERE i.category = ? AND i.deposit <= ? ORDER BY i.deposit, i.code LIMIT"
                     + " 200")), "the guard's rewrite ran and is in the provenance");
-            assertTrue(item.provenance().notes().stream().anyMatch(n -> n.startsWith("rationale: ")));
+            assertEquals("the items of the category within the deposit, cheapest first",
+                    item.provenance().rationale(), "the rationale through the engine's seam");
+            assertTrue(item.provenance().notes().stream().noneMatch(n -> n.startsWith("rationale: ")));
+            String file = outcome.file().toJsonText();
+            BindingsFile read = BindingsFile.parse(file);
+            assertEquals(item.provenance().rationale(), read.resolutions().get("item").provenance().rationale(),
+                    "the bindings file writes and reads the rationale");
+            assertEquals(file, read.toJsonText(), "byte-identical when read back");
+            assertTrue(records.stream().anyMatch(r -> "resolve".equals(r.get("type"))
+                    && item.provenance().rationale().equals(r.get("rationale"))), "the resolve record has it too");
             assertTrue(agent.calls.isEmpty(), "the agent was not asked");
             assertTrue(records.stream().anyMatch(r -> "inference".equals(r.get("type"))));
             assertSame(InferenceLog.forLedger(ledger), InferenceLog.forLedger(ledger));

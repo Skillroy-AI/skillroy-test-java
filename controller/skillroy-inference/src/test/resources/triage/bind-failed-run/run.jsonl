@@ -1,0 +1,10 @@
+{"type":"run-start","t":0,"scenarioId":"supervisor-return","pack":"lending","packVersion":"0.4.0","planVersion":5,"sourceHash":"sha256:2b","stepTimeoutMs":10000,"startedAt":"2026-10-08T07:00:00Z"}
+{"type":"fingerprint","t":5,"hash":"sha256:aa","components":{"lending.seed":"seed-a"}}
+{"type":"resolver","t":10,"slot":"assistant","resolver":"lending.sql.StaffWithPermission","candidates":1}
+{"type":"resolve","t":12,"slot":"assistant","query":"StaffWithPermission","args":{"permission":"LOAN_OPEN"},"mode":"live","strategy":"CANONICAL_SQL","resolver":"lending.sql.StaffWithPermission"}
+{"type":"resolver","t":20,"slot":"supervisor","resolver":"lending.sql.StaffWithPermission","candidates":2}
+{"type":"verifier","t":21,"slot":"supervisor","verifier":"lending.access.check","label":"staff S03","passed":false,"reason":"staff S03 is not active"}
+{"type":"verifier","t":22,"slot":"supervisor","verifier":"lending.access.check","label":"staff S04","passed":false,"reason":"staff S04 lacks DEPOSIT_REFUND"}
+{"type":"bind","t":30,"ok":false,"mode":"live","envId":"seed-a","failureKind":"RESOLUTION_FAILED","reason":"ALL_REJECTED","error":"slot 'supervisor': every candidate for query StaffWithPermission was rejected (2 recorded; first: lending.access.check: staff S03 is not active)","bindingsFile":null}
+{"type":"ledger","t":31,"count":0}
+{"type":"run-end","t":32,"status":"ERROR","failureKind":"RESOLUTION_FAILED","failedStepId":null,"message":"slot 'supervisor': every candidate for query StaffWithPermission was rejected (2 recorded; first: lending.access.check: staff S03 is not active)","skippedExpectations":[],"durationMs":32}

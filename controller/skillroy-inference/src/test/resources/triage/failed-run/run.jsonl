@@ -1,0 +1,12 @@
+{"type":"run-start","t":0,"scenarioId":"return-over-limit","pack":"lending","packVersion":"0.4.0","planVersion":5,"sourceHash":"sha256:0f","stepTimeoutMs":10000,"startedAt":"2026-10-08T07:00:00Z"}
+{"type":"requires","t":2,"ok":true,"capabilities":["lending.desk"]}
+{"type":"bind","t":40,"ok":true,"slots":["assistant","item"],"mode":"replay","envId":"seed-a","bindingsFile":"seed-a/return-over-limit.bindings.json"}
+{"type":"call","t":60,"step":"s1","index":1,"primitive":"lending.signOn","params":{"staff":"S02","password":"hunter-22-desk"},"ok":true,"value":{"signedOn":true},"events":1,"seq":4,"durationMs":12,"thread":"EDT"}
+{"type":"call","t":90,"step":"s2","index":1,"primitive":"lending.scanItem","params":{"code":"DRL-02"},"ok":true,"value":{"line":1},"events":2,"seq":7,"durationMs":15,"thread":"EDT"}
+{"type":"call","t":120,"step":"s3","index":1,"primitive":"lending.takeBack","params":{"loanId":104,"item":"DRL-02","password":"hunter-22-desk"},"ok":false,"error":{"code":-32010,"message":"the deposit refund needs a supervisor"},"durationMs":20}
+{"type":"expect","t":125,"step":"s3","path":"app.state.mode","matcher":"RETURNED","capability":"lending.desk","result":"failed","resolved":true,"actual":"SUPERVISOR_PROMPT","reason":"expected RETURNED, found SUPERVISOR_PROMPT","attempts":3}
+{"type":"evidence","t":200,"kind":"swing.capture","ok":true}
+{"type":"cleanup","t":220,"ok":true}
+{"type":"recover","t":240,"ok":true}
+{"type":"ledger","t":241,"count":0}
+{"type":"run-end","t":250,"status":"FAIL","failureKind":"ASSERTION","failedStepId":"s3","message":"step s3 takeBack: expected app.state.mode RETURNED, found SUPERVISOR_PROMPT","skippedExpectations":[],"durationMs":250}

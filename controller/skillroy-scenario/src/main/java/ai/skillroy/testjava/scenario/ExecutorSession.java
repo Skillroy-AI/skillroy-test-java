@@ -1061,6 +1061,14 @@ public final class ExecutorSession implements AutoCloseable {
         return id;
     }
 
+    /**
+     * The pack the session runs: what a client of the session (the session service, phase5-contracts.md 12.4) offers
+     * as the verbs a step may name.
+     */
+    public DomainPack pack() {
+        return pack;
+    }
+
     /** The target's primitive catalogue as the session read it when it opened, by name. */
     public Map<String, PrimitiveDescriptor> primitives() {
         return java.util.Collections.unmodifiableMap(primitives);

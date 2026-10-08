@@ -1,0 +1,142 @@
+#
+# Copyright 2026 Mike Mills.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+# An example of the nightly re-resolve job (docs/design/phase5-contracts.md 8.2, decision D75; B6, B11). It is not run
+# by this repository's own CI: copy it into the .github/workflows/ of the repository that holds your scenarios and
+# bindings, and adapt the variables below.
+#
+# Every night it runs `skillroy re-resolve` in the Linux image against a running test environment, with the model key
+# and the workspace id taken from the repository's secrets (passed to the container by name, never written to the log
+# or the command line). When bindings files changed, it commits them on a branch and opens a pull request whose body
+# is the job's report: the review and the merge are the approval (the files say APPROVED by the job's label).
+#
+# Repository secrets:
+#   ANTHROPIC_API_KEY        the model key
+#   ANTHROPIC_WORKSPACE_ID   the workspace id, for a key that is not scoped to a workspace (may be empty)
+#   SKILLROY_CREDENTIALS     the environment's credentials.yaml (its JDBC sources and staff passwords); written to a
+#                            private file for the job and deleted afterwards
+# Repository variables:
+#   SKILLROY_CONNECT         the connection options of the test environment's target (the CLI's --pid, --port,
+#                            --discovery-dir, --token-file, --name), for example "--discovery-dir /srv/skillroy --name desk"
+#   SKILLROY_PACKS           the --pack options of your pack jars, for example "--pack packs/lending-pack.jar"
+
+name: nightly-re-resolve
+
+on:
+  schedule:
+    - cron: "17 2 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: nightly-re-resolve
+  cancel-in-progress: false
+
+jobs:
+  re-resolve:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      # The environment whose bindings are re-resolved, where its scenarios and bindings live, and the job budget
+      # (there is no built-in job budget: re-resolve refuses to start without one).
+      SKILLROY_ENV: seed-a
+      SCENARIOS: src/test/resources/scenarios
+      BINDINGS: src/test/resources/bindings
+      JOB_BUDGET_USD: "1.00"
+      # A stable approval label: a file whose bindings did not change stays byte-identical from night to night
+      # (re-resolve:<jobId> would change every file's approval.by every night).
+      APPROVED_BY: "re-resolve:nightly"
+      OUT: run-output/re-resolve-nightly
+      IMAGE: skillroy-test-java-ci:local
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Build the Linux image
+        run: docker build -t "$IMAGE" ci
+
+      - name: Build the CLI distribution
+        run: SKILLROY_NO_XVFB=1 ci/run-in-linux.sh mvn -q -DskipTests package -pl controller/skillroy-cli -am
+
+      - name: Write the environment's credentials
+        env:
+          SKILLROY_CREDENTIALS: ${{ secrets.SKILLROY_CREDENTIALS }}
+        run: |
+          umask 077
+          printf '%s\n' "$SKILLROY_CREDENTIALS" > "$RUNNER_TEMP/credentials.yaml"
+
+      - name: Re-resolve
+        id: job
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ANTHROPIC_WORKSPACE_ID: ${{ secrets.ANTHROPIC_WORKSPACE_ID }}
+          SKILLROY_CONNECT: ${{ vars.SKILLROY_CONNECT }}
+          SKILLROY_PACKS: ${{ vars.SKILLROY_PACKS }}
+        run: |
+          set +e
+          # -e NAME (without a value) hands the variable to the container from this step's environment.
+          docker run --rm --init --network host \
+            -v "$PWD:$PWD" -w "$PWD" -v "$RUNNER_TEMP:$RUNNER_TEMP:ro" \
+            -e ANTHROPIC_API_KEY -e ANTHROPIC_WORKSPACE_ID \
+            "$IMAGE" controller/skillroy-cli/target/skillroy-cli/bin/skillroy re-resolve "$SCENARIOS" \
+              --env "$SKILLROY_ENV" --bindings "$BINDINGS" --credentials "$RUNNER_TEMP/credentials.yaml" \
+              --budget-job "$JOB_BUDGET_USD" --inference claude --approved-by "$APPROVED_BY" --out "$OUT" \
+              $SKILLROY_PACKS $SKILLROY_CONNECT
+          status=$?
+          set -e
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          # 0: every scenario resolved; 1: some failed (the report says which; the others' files are written).
+          # Anything else (2, 3, 64, 70) is a broken job: no pull request.
+          if [ "$status" -ne 0 ] && [ "$status" -ne 1 ]; then exit "$status"; fi
+
+      - name: Remove the credentials
+        if: always()
+        run: rm -f "$RUNNER_TEMP/credentials.yaml"
+
+      - name: Keep the report and the ledger
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: re-resolve-report
+          path: |
+            ${{ env.OUT }}/re-resolve-report.md
+            ${{ env.OUT }}/re-resolve-report.json
+            ${{ env.OUT }}/cost-ledger.jsonl
+            ${{ env.OUT }}/inference.jsonl
+          if-no-files-found: ignore
+
+      - name: Open a pull request when bindings changed
+        if: steps.job.outputs.status == '0' || steps.job.outputs.status == '1'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ -z "$(git status --porcelain -- "$BINDINGS")" ]; then
+            echo "No bindings file changed."
+            exit 0
+          fi
+          branch="re-resolve/$(date -u +%Y-%m-%d)-${GITHUB_RUN_ID}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$branch"
+          git add -- "$BINDINGS"
+          git commit -s -m "Nightly re-resolve of $SKILLROY_ENV ($(date -u +%Y-%m-%d))"
+          git push origin "$branch"
+          gh pr create --base "${GITHUB_REF_NAME}" --head "$branch" \
+            --title "Nightly re-resolve of $SKILLROY_ENV ($(date -u +%Y-%m-%d))" \
+            --body-file "$OUT/re-resolve-report.md"

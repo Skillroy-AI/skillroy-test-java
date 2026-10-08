@@ -917,6 +917,21 @@ JUnit `environment` test).
 6. **Exit codes**: 0 when every scenario resolved (changed or not); 1 when any scenario failed (the report says which;
    files of the others are still written); 2, 3, 64, 70 as `resolve`.
 
+As built (2026-10-08, I2, `…inference.job`): `ReResolver.run(plans, pack, agent, options, JobOptions)` (and an overload
+taking a gateway the caller owns), `JobOptions(outDir, jobId, jobBudgetUsd, dryRun, approvedBy, batchWait, batchPoll,
+clock)` with `approvalLabel()` = `re-resolve:<jobId>` unless `approvedBy` is given, `ReResolveReport` (a record with the
+per-scenario `ScenarioReport`s, the statuses `UNCHANGED` (byte-identical file), `CHANGED` (the `BindingsDiff` lines plus
+approval, rationale and confidence lines), `NEW`, `FAILED` and `SKIPPED` (needs no bindings), the cost, the budget, the
+rounds, batches and requests, the cache-hit ratio, the models; `toMarkdown`, `toJson`, `writeTo(outDir)` for the two
+report files, the job's ledger and `inference.jsonl`; `exitCode()`), `ReResolveException` (`beforeStart()` for no budget,
+gateway `none`, a gateway that cannot open or two plans with one id, which the CLI reports as exit 64; otherwise the
+report could not be written, exit 70). The pre-flight runs once; `requires` and the launch properties are the CLI's
+check. When a round's estimate does not fit the job budget, the requests that fit (from the front) are submitted,
+the rest are `BUDGET`, and no later round submits a batch; the job meter is settled from the ledger entries, so a
+resolver's inline retry counts; a failed submit or collect is handed to each resolver (`ENVIRONMENT` or one inline
+retry); a gateway without `BATCH` answers request by request and the report notes it. A nightly label changes every
+file's `approval.by` each night, so the sample workflow passes a stable `--approved-by re-resolve:nightly`.
+
 A pull request is opened by the pipeline, not by the base: `ci/examples/nightly-re-resolve.yml` is a GitHub Actions
 workflow that runs the command in the Linux image on a schedule, with the key from the repository's secrets, and
 opens the pull request with the report as its body when `git status` shows changed bindings files. It is an example,
@@ -1114,6 +1129,17 @@ it in CI. What it produces is a YAML file and a plan for a person to review; the
    the instruction "review the YAML and the plan, then `skillroy resolve --env … <id>.yaml` to approve its bindings".
    Exit 0 when the file was written and compiled; 1 when the planner failed or the repairs ran out; 64 for usage.
 
+As built (2026-10-08, I2, `…inference.planner`): `Planner.author(PlannerRequest) → AuthoringResult` and
+`Planner.recordChecks(authoring, resolved, ran)`; `PlannerRequest` with the fourteen components (nulls take the
+defaults), `AuthoringResult` (the files, the plan, the model, the session id, turns, repairs, the cost, `overBudget`,
+the CLI's version, the ledger entries, the masked log) and `AuthoringException(exitCode 64 or 1, message, lastYaml,
+ledger)`; `claude --version` is run first; `--json-schema` is given the schema's JSON text (the form spike BS13 ran),
+so the schema and the prompt are each limited to 120000 characters (a single argument is bounded on Linux); the
+document is validated against the schema before it is compiled and the requested id replaces its `scenario`; stdout
+and stderr go to files in the private temporary directory (no reader thread) and the process tree is killed at the
+deadline; the planner's ledger entries are returned, not recorded (the request carries no ledger); the MCP configuration
+file belongs to the caller.
+
 `--claude-command <path>` (also `skillroy.claude.command`) names the executable; tests pass a script that prints a
 canned envelope, so that steps 5-7 are tested without the CLI (§15.1). With the real CLI absent the command exits 64
 ("claude not found on PATH"). The planner's budget is passed as the CLI's `--max-budget-usd` (present in the 2.1
@@ -1148,7 +1174,12 @@ APPLICATION_DEFECT | SCENARIO_DEFECT | ENVIRONMENT | DATA_DRIFT | TIMING | UNKNO
 (`proposal` is prose for a person; nothing is applied). Written: `failure/triage.json` (both answers, the models,
 request ids, cost) and `failure/triage.md` (readable), plus the command's `inference.jsonl` and `cost-ledger.jsonl` in
 `<run dir>/triage/`. The run's `run.jsonl`, `junit.xml` and status are untouched. Exit 0; 1 when the gateway failed for
-a directory; 64 for usage (no directory, gateway `none`).
+a directory; 64 for usage (no directory, gateway `none`). As built (2026-10-08, I2, `…inference.triage`):
+`Triage.run(runDir, gateway, mask, prices, TriageOptions(labelsOnly, clock)) → TriageResult` (outcome `TRIAGED`,
+`NOTHING_TO_TRIAGE` or `FAILED`, the label, the summary, the models and request ids, the cost, the two texts;
+`exitCode()`); a run's outputs carry no step record with a verb, so the request names the failed step by its id with
+its `call` and `expect` records; the events come from `failure/events.json`; effort is `LOW`; the evidence travels in
+`<target-state>`, `<target-ui>` and `<target-event>` blocks.
 
 ---
 
@@ -1344,6 +1375,15 @@ The loop of one `ask` (design §5, "Session service"):
 3. Every action is in the journal with its model origin; the turn's requests are in the ledger and `inference.jsonl`;
    the history is kept at most `maxHistoryTurns` turns back (older ones summarised by one `SUMMARY`-purpose call at
    `HAIKU_CLASS`, recorded like any call), so that a long session's prompt stays bounded.
+
+As built (2026-10-08, I2, `…inference.session`): the signatures as stated, with `tools()`, `policy()`, `exhausted()`
+added and the read-only policy factory named `readOnlyPolicy()` (`readOnly()` would clash with the record's
+accessor); `ExecutorSession.pack()` added (the service needs the verbs and their schemas); a refusal, a cut answer and
+a provider failure end a turn as `QUESTION` with the reason as the answer, and a lost agent as `LOST` (the throws clause
+stays); the history beyond the limit is folded by one `summary` call. `OverlayBridge.open(service, agent, pack,
+subscription, sinceSeq)` owns no thread: the subscription's consumer queues requests (16 at most, the rest dropped and
+counted) and the host serves them with `serveNext(Duration)`; the answer is a plain call of the pack's answer primitive,
+not a journaled step.
 
 **Timing.** The model's thinking happens between actions; each action is one bounded step with the pack's
 `PromptPolicy` and sync waits, so the target is never held mid-step by a model call (design §3.4). The service does
@@ -1647,6 +1687,7 @@ item 4; all three are also exercised without a key through the recordings.
 | D84 | Model classes with the defaults Sonnet (resolve, session, summary), Opus (the planner), Haiku (labels); refusal fallbacks on and recorded; images off; Fable never configured by default | one model everywhere; fallbacks off; images on | ai-inference R7 and F10 (cost and retention); a fallback that answers a refusal keeps a nightly job alive and the ledger says who answered (Q6) |
 | D85 | The agent's `StatementGuard` stays as it is and `SqlGuard` lives on the controller only | JSqlParser inside the agent for `data.query` | B4: nothing but the JDK in a target JVM; the model's SQL runs through the controller's channel or through `data.query` after the controller's guard |
 | D86 | The calibrated-oracle case of gap 26 is answered by the export: an observed value is an ordinary expectation marked in the YAML and listed in the report for the reviewer; no run-time status | a `DEGRADED` outcome for a scenario with observed expectations; refusing to export them | the reviewer who commits the scenario decides; a run cannot tell an observed value from a specified one after the comment is removed |
+| D93 | The rationale and the rejections of a tier (b) proposal reach the provenance through `ResolveContext.rationale(text)` and `reject(label, reason)` (defaults keep them as notes; the engine's context fills `Provenance.rationale` and `rejected`), and the bindings file writes `provenance.rationale` last and omits it when null, so that tier (a) files do not change (2026-10-08, I2) | the resolver building `Provenance` itself; notes only | the engine owns `Provenance`; a reviewer of a bindings file needs the rationale beside the statement (Q1 of §17); the file's byte-stability for tier (a) slots is preserved |
 | D92 | A verb and a domain primitive that would share a tool name are both offered: the primitive's name takes the suffix `_primitive`, the verb keeps the plain name; every other collision refuses the start (2026-10-08, M) | hiding the primitive behind the verb; refusing the start on any collision | the sample's `deposit` verb and `lending.deposit` read collide, so the planner's mutating server could not start under the first rule, and one name meaning a lookup in read-only mode and an action in mutating mode would mislead a model |
 | D91 | The record of a model call travels in `CostLedger.Entry.details`, and the run writer writes `inference.jsonl` from the ledger entries, beside `cost-ledger.jsonl` (2026-10-08, I1) | a sink passed through `BindOptions`; the contributor writing into a directory it is told | the contributor is created per engine and never sees the run's output directory; the ledger already crosses that boundary and is masked by the writer |
 | D90 | A tier (b) row becomes a typed candidate through the pack's `ValueLoader` for the kind (the model selects the identity columns, the pack's committed reads build the value), with the flat column-by-name decoding only for kinds without a loader (2026-10-08, S1's finding) | the model aggregating lists and maps in SQL (`GROUP_CONCAT`, `ARRAY_AGG`); the resolver gathering several rows into one value; changing the sample's value types | aggregation functions are outside the guard's set and dialect-specific; gathering rows needs a grouping rule per type; the pack already has the code that loads a value from its key, and reusing it keeps the model to finding *which* row |

@@ -49,34 +49,34 @@ import java.util.Set;
  * no allow-list yet, and its verifiers need the desk): query kinds with a flat record value, a value with a list (and
  * its {@code ValueLoader}), a scalar, and a map; the schema's allow-list; one verb.
  */
-final class DeskPack implements DomainPack {
+public final class DeskPack implements DomainPack {
 
     /** An item to lend, the cheapest that fits first. */
-    record ItemByCategory(String category, BigDecimal maxDeposit) implements Query<ItemRef> {
+    public record ItemByCategory(String category, BigDecimal maxDeposit) implements Query<ItemRef> {
     }
 
     /** An item as a scenario uses it. */
-    record ItemRef(String code, String title, BigDecimal deposit) {
+    public record ItemRef(String code, String title, BigDecimal deposit) {
     }
 
     /** An active staff member holding a role; the value carries every role of theirs. */
-    record StaffWithRole(String role) implements Query<StaffRef> {
+    public record StaffWithRole(String role) implements Query<StaffRef> {
     }
 
     /** The same value without a loader. */
-    record StaffPlain(String role) implements Query<StaffRef> {
+    public record StaffPlain(String role) implements Query<StaffRef> {
     }
 
     /** A staff member with their roles. */
-    record StaffRef(String code, List<String> roles) {
+    public record StaffRef(String code, List<String> roles) {
     }
 
     /** How many loans have a status. */
-    record LoanCount(String status) implements Query<Long> {
+    public record LoanCount(String status) implements Query<Long> {
     }
 
     /** Loans per status (a map value). */
-    record LoansByStatus(String since) implements Query<Map<String, Long>> {
+    public record LoansByStatus(String since) implements Query<Map<String, Long>> {
     }
 
     /** Reads a staff member's roles by code; refuses the codes it is told to. */
@@ -137,10 +137,30 @@ final class DeskPack implements DomainPack {
         }
     }
 
+    /** A count is never negative (every query slot needs a verifier; the re-resolve job's tests count loans). */
+    static final class CountVerifier implements Verifier<LoanCount, Long> {
+
+        @Override
+        public String id() {
+            return "lending.verify.count";
+        }
+
+        @Override
+        public Class<LoanCount> queryClass() {
+            return LoanCount.class;
+        }
+
+        @Override
+        public VerifierResult verify(LoanCount query, Long candidate, VerifyContext ctx) {
+            return candidate >= 0 ? VerifierResult.pass("a count", Map.of())
+                    : VerifierResult.fail("a negative count", Map.of());
+        }
+    }
+
     private final ResolutionCatalogue catalogue;
     private final List<SqlAllowList> allowLists;
 
-    DeskPack(Set<String> refuse, boolean withAllowList) {
+    public DeskPack(Set<String> refuse, boolean withAllowList) {
         this.catalogue = ResolutionCatalogue.builder()
                 .query(QueryType.of("ItemByCategory", ItemByCategory.class))
                 .query(QueryType.of("StaffWithRole", StaffWithRole.class))
@@ -149,11 +169,12 @@ final class DeskPack implements DomainPack {
                 .query(QueryType.of("LoansByStatus", LoansByStatus.class))
                 .valueLoader(new RolesLoader(refuse))
                 .verifier(new DepositVerifier())
+                .verifier(new CountVerifier())
                 .build();
         this.allowLists = withAllowList ? List.of(LendingFixture.allowList(SqlDialect.HSQLDB)) : List.of();
     }
 
-    DeskPack() {
+    public DeskPack() {
         this(Set.of(), true);
     }
 

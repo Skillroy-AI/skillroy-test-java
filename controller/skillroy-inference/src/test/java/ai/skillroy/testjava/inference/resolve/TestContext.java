@@ -34,8 +34,9 @@ import java.util.List;
 
 /**
  * A resolver's context as the engine gives one, for the resolver's own tests: the bind's data channel (recording each
- * statement as the engine's provenance does), the run's ledger, the notes, the slot, the scenario, the mode and what
- * is left of the bind budget. The agent is not offered (a tier (b) resolver never calls a primitive).
+ * statement as the engine's provenance does), the run's ledger, the notes, the rationale and the rejections (the
+ * provenance seams), the slot, the scenario, the mode and what is left of the bind budget. The agent is not offered (a
+ * tier (b) resolver never calls a primitive).
  */
 final class TestContext implements ResolveContext {
 
@@ -43,6 +44,10 @@ final class TestContext implements ResolveContext {
     final CostLedger ledger;
     final List<String> notes = new ArrayList<>();
     final List<String> statements = new ArrayList<>();
+    /** Every {@code rationale} given, in order. */
+    final List<String> rationales = new ArrayList<>();
+    /** Every {@code reject} as {@code "<label>: <reason>"}, in order. */
+    final List<String> rejected = new ArrayList<>();
     BindMode mode = BindMode.LIVE;
     long remainingMs = 60_000;
     int maxCandidates = 20;
@@ -127,6 +132,21 @@ final class TestContext implements ResolveContext {
     @Override
     public void note(String text) {
         notes.add(text);
+    }
+
+    @Override
+    public void rationale(String text) {
+        rationales.add(text);
+    }
+
+    @Override
+    public void reject(String label, String reason) {
+        rejected.add(label + ": " + reason);
+    }
+
+    /** The rejections joined, for assertions. */
+    String allRejected() {
+        return String.join("\n", rejected);
     }
 
     @Override

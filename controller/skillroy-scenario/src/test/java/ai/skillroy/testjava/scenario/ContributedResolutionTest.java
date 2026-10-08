@@ -429,6 +429,58 @@ class ContributedResolutionTest {
         assertEquals("NOT_REQUIRED", ((Map<?, ?>) edited.detail().get("approval")).get("state"));
     }
 
+    /**
+     * P5 5.4 steps 3 and 5, the provenance seams: a contributed resolver's {@code ctx.rationale} becomes the slot's
+     * {@code Provenance.rationale} (masked, in the bindings file and the resolve record, never a note), and its
+     * {@code ctx.reject} joins the slot's rejected list under its id (masked), in the file and in a failure's detail;
+     * the rationale survives approve's reuse.
+     */
+    @Test
+    void aContributedResolversRationaleAndRefusalsReachTheProvenanceAndTheBindingsFile() throws Exception {
+        FakeContributor.offering(llm);
+        llm.codes = List.of("C3");
+        llm.rationale = "the dearest active item within the return limit; never " + TestCredentials.PW_100;
+        llm.rejections = List.of(List.of("proposal", "confidence 0.6 below 0.8"),
+                List.of("row B2", "the value loader refused it: " + TestCredentials.PW_200));
+        Plan plan = plan(WITH_MAX, Map.of("item", List.of("llm-sql")));
+        BindOutcome live = bind(plan, options(BindMode.LIVE).withWriteBindings(true));
+        Resolution item = live.bindings().resolutions().get("item");
+        String rationale = item.provenance().rationale();
+        assertNotNull(rationale, "the rationale reached the provenance");
+        assertTrue(rationale.startsWith("the dearest active item within the return limit; never "), rationale);
+        assertFalse(rationale.contains(TestCredentials.PW_100), "masked by the engine: " + rationale);
+        assertTrue(item.provenance().notes().stream().noneMatch(n -> n.contains("dearest")), "not a note");
+        List<Provenance.Rejected> rejected = item.provenance().rejected();
+        assertEquals(new Provenance.Rejected("inference.fake-sql", "proposal", "confidence 0.6 below 0.8"),
+                rejected.get(0), "a refused proposal under the resolver's id");
+        assertEquals("row B2", rejected.get(1).label());
+        assertFalse(rejected.get(1).reason().contains(TestCredentials.PW_200), "masked: " + rejected.get(1));
+        assertEquals(rationale, resolveRecord("item").get("rationale"), "the resolve record shows it");
+        assertNull(resolveRecord("max").get("rationale"), "tier (a) has none");
+
+        String text = Files.readString(file());
+        BindingsFile written = BindingsFile.read(file());
+        assertEquals(rationale, written.resolutions().get("item").provenance().rationale(), "written and read");
+        assertEquals(text, written.toJsonText(), "byte-identical when read back");
+        assertEquals(2, written.resolutions().get("item").provenance().rejected().size());
+        Map<String, Object> json = Json.parseObject(text);
+        assertFalse(((Map<?, ?>) slotJson(json, "max").get("provenance")).containsKey("rationale"),
+                "a tier (a) slot's file is unchanged: no rationale key");
+        assertEquals(rationale, ((Map<?, ?>) slotJson(json, "item").get("provenance")).get("rationale"));
+
+        bind(plan, options(BindMode.APPROVE).withApprover(Approver.APPROVE_ALL));
+        assertEquals(1, llm.calls.get(), "approve reused the value");
+        assertEquals(rationale, BindingsFile.read(file()).resolutions().get("item").provenance().rationale(),
+                "the reused value keeps its rationale");
+
+        llm.codes = List.of();
+        llm.rejections = List.of(List.of("proposal", "guard STAR: *"));
+        BindException none = fails(plan, options(BindMode.LIVE));
+        assertEquals("NO_CANDIDATE", none.reason());
+        assertEquals(List.of(Map.of("resolver", "inference.fake-sql", "label", "proposal", "reason",
+                "guard STAR: *")), none.detail().get("rejected"), "the failure's detail names the refusal");
+    }
+
     @Test
     void approveReusesAnUnchangedVerifiedTierBValueWithoutAskingAResolver() throws Exception {
         FakeContributor.offering(llm);

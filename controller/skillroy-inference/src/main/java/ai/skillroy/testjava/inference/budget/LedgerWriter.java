@@ -44,6 +44,12 @@ import java.util.Objects;
  * category in {@code note}. A call answered by the recorded gateway is recorded too (provider {@code recorded}, cost
  * {@code 0}), so that a run against recordings still shows its calls; {@code replay} has none.
  *
+ * <p>The record travels with the ledger (decision D91): the entry's {@link CostLedger.Entry#details()} is the same
+ * masked record the log receives (with the fingerprint, the stop reason, the elapsed time, the requested model, the
+ * cache-write split by time to live and the masked structured answer), so that a run's writer, which never sees the
+ * call, can write {@code inference.jsonl} from its ledger. A failure the provider did not bill has no entry, so its
+ * record is in the log only.
+ *
  * <p>Thread-safe if the ledger, meter and log are (they are).
  */
 public final class LedgerWriter {
@@ -86,10 +92,6 @@ public final class LedgerWriter {
     public Usage record(ModelRequest request, ModelResponse response, String scenarioId, String slot,
                         Strategy strategy) {
         Usage usage = response.usage();
-        ledger.record(entry(request, usage, scenarioId, slot, strategy));
-        if (meter != null) {
-            meter.settle(usage);
-        }
         Map<String, Object> record = base(request, usage, scenarioId, slot);
         record.put("stop", response.stop().name());
         if (response.structured() != null) {
@@ -102,7 +104,12 @@ public final class LedgerWriter {
             prompts(record, request);
             record.put("parts", Prompts.parts(mask.parts(response.parts()), false));
         }
-        log.append(record);
+        CostLedger.Entry entry = entry(request, usage, scenarioId, slot, strategy, record);
+        ledger.record(entry);
+        if (meter != null) {
+            meter.settle(usage);
+        }
+        log.append(entry.details());
         return usage;
     }
 
@@ -114,14 +121,6 @@ public final class LedgerWriter {
     public void recordFailure(ModelRequest request, InferenceException failure, String scenarioId, String slot,
                               Strategy strategy) {
         Usage usage = failure.usage();
-        if (usage != null) {
-            ledger.record(entry(request, usage, scenarioId, slot, strategy));
-            if (meter != null) {
-                meter.settle(usage);
-            }
-        } else if (meter != null) {
-            meter.release();
-        }
         Map<String, Object> record = base(request, usage, scenarioId, slot);
         record.put("stop", null);
         record.put("error", failure.kind().name());
@@ -130,18 +129,39 @@ public final class LedgerWriter {
         if (logPrompts) {
             prompts(record, request);
         }
+        if (usage != null) {
+            CostLedger.Entry entry = entry(request, usage, scenarioId, slot, strategy, record);
+            ledger.record(entry);
+            if (meter != null) {
+                meter.settle(usage);
+            }
+            log.append(entry.details());
+            return;
+        }
+        if (meter != null) {
+            meter.release();
+        }
         log.append(record);
     }
 
     /**
      * The ledger entry of a call (phase5-contracts.md 7.3): the Phase 2 fields, then the purpose, the cache tokens
-     * (writes of both times to live summed), the batch flag and the note.
+     * (writes of both times to live summed), the batch flag and the note; without details.
      */
     public static CostLedger.Entry entry(ModelRequest request, Usage usage, String scenarioId, String slot,
                                          Strategy strategy) {
+        return entry(request, usage, scenarioId, slot, strategy, null);
+    }
+
+    /**
+     * The ledger entry of a call with its {@code inference.jsonl} record as the details (decision D91); the record
+     * must be masked already.
+     */
+    public static CostLedger.Entry entry(ModelRequest request, Usage usage, String scenarioId, String slot,
+                                         Strategy strategy, Map<String, Object> details) {
         return new CostLedger.Entry(scenarioId, slot, strategy, usage.provider(), usage.model(), usage.requestId(),
                 usage.inputTokens(), usage.outputTokens(), usage.costUsd(), request.purpose(),
-                usage.cacheReadTokens(), usage.cacheWriteTokens(), usage.batch(), usage.note());
+                usage.cacheReadTokens(), usage.cacheWriteTokens(), usage.batch(), usage.note(), details);
     }
 
     /**
@@ -180,6 +200,9 @@ public final class LedgerWriter {
         record.put("outputTokens", usage == null ? 0L : usage.outputTokens());
         record.put("cacheReadTokens", usage == null ? 0L : usage.cacheReadTokens());
         record.put("cacheWriteTokens", usage == null ? 0L : usage.cacheWriteTokens());
+        // D91: the split by time to live, which the entry sums.
+        record.put("cacheWrite5mTokens", usage == null ? 0L : usage.cacheWrite5mTokens());
+        record.put("cacheWrite1hTokens", usage == null ? 0L : usage.cacheWrite1hTokens());
         record.put("batch", usage != null && usage.batch());
         record.put("costUsd", usage == null ? "0" : usage.costUsd());
         record.put("elapsedMs", usage == null ? 0L : usage.elapsed().toMillis());

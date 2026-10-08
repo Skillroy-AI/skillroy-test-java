@@ -141,6 +141,10 @@ public final class FakeContributor implements ResolverContributor {
         volatile List<CostLedger.Entry> entries = List.of();
         /** Thrown instead of answering, when not null. */
         volatile Exception failure;
+        /** Given to {@code ctx.rationale} on each call, when not null (the provenance seam). */
+        volatile String rationale;
+        /** Each {@code {label, reason}} given to {@code ctx.reject} on each call (the provenance seam). */
+        volatile List<List<String>> rejections = List.of();
         final List<Seen> seen = new CopyOnWriteArrayList<>();
         final AtomicInteger calls = new AtomicInteger();
 
@@ -183,6 +187,12 @@ public final class FakeContributor implements ResolverContributor {
                 InterruptedException {
             for (CostLedger.Entry entry : entries) {
                 ctx.ledger().record(entry);
+            }
+            if (rationale != null) {
+                ctx.rationale(rationale);
+            }
+            for (List<String> rejection : rejections) {
+                ctx.reject(rejection.get(0), rejection.get(1));
             }
             Exception f = failure;
             if (f instanceof ResolutionException e) {

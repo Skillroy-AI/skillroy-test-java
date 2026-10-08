@@ -180,8 +180,10 @@ class LlmSqlResolverTest {
         String ran = ctx.statements.get(ctx.statements.size() - 1);
         assertEquals("SELECT i.code, i.title, i.deposit FROM item i WHERE i.category = ? AND i.deposit <= ? ORDER BY"
                 + " i.deposit, i.code LIMIT 200 [POWER, 60.00]", ran, "the guard's rewrite ran, with the arguments");
-        assertTrue(ctx.allNotes().contains("rationale: the items of the category within the deposit"),
-                ctx.allNotes());
+        assertEquals(List.of("the items of the category within the deposit, cheapest first"), ctx.rationales,
+                "the rationale through the provenance seam");
+        assertFalse(ctx.allNotes().contains("rationale"), "not as a note: " + ctx.allNotes());
+        assertTrue(ctx.rejected.isEmpty(), ctx.allRejected());
         ModelRequest r = gateway.requests().get(0);
         assertEquals("resolve", r.purpose());
         assertEquals(ModelClass.SONNET_CLASS, r.modelClass());
@@ -200,7 +202,8 @@ class LlmSqlResolverTest {
         assertEquals(Map.of("kind", "ItemByCategory", "scenarioId", "desk-scenario", "slot", "item"), r.metadata());
         CostLedger.Entry e = ledger.entries().get(0);
         assertEquals(new CostLedger.Entry("desk-scenario", "item", Strategy.LLM_SQL, "scripted", "scripted-model",
-                "scripted-1200-150", 1200, 150, "0.0039", "resolve", 0, 0, false, null), e);
+                "scripted-1200-150", 1200, 150, "0.0039", "resolve", 0, 0, false, null, e.details()), e);
+        assertEquals(log.records().get(0), e.details(), "the entry carries the inference.jsonl record (D91)");
         Map<String, Object> record = log.records().get(0);
         assertEquals(r.fingerprint(), record.get("fingerprint"));
         assertEquals(POWER_SQL, ((Map<?, ?>) record.get("structured")).get("sql"));
@@ -234,8 +237,8 @@ class LlmSqlResolverTest {
         Map<String, Object> p = goodProposal();
         p.put("confidence", 0.6);
         assertTrue(items(answering(p)).candidates(POWER, ctx).isEmpty());
-        assertTrue(ctx.allNotes().contains("inference.sql.ItemByCategory: rejected proposal: confidence 0.6 below"
-                + " 0.8"), ctx.allNotes());
+        assertEquals(List.of("proposal: confidence 0.6 below 0.8"), ctx.rejected,
+                "rejected through the provenance seam (5.4 step 3)");
         assertTrue(ctx.statements.stream().noneMatch(s -> s.contains("i.category = ?")), "nothing ran");
     }
 
@@ -243,12 +246,14 @@ class LlmSqlResolverTest {
     void aGuardViolationIsRejectedWithItsReasonAndNothingRuns() throws Exception {
         assertTrue(items(answering(proposal("SELECT * FROM item", List.of(), 0.9, 1, 5))).candidates(POWER, ctx)
                 .isEmpty());
-        assertTrue(ctx.allNotes().contains("rejected proposal: guard STAR"), ctx.allNotes());
-        assertTrue(ctx.allNotes().contains("refused statement (masked): SELECT * FROM item"));
+        assertTrue(ctx.allRejected().startsWith("proposal: guard STAR"), ctx.allRejected());
+        assertTrue(ctx.allNotes().contains("refused statement (masked): SELECT * FROM item"),
+                "the whole statement only as a note: " + ctx.allNotes());
         ctx.notes.clear();
+        ctx.rejected.clear();
         assertTrue(items(answering(proposal("SELECT a.detail FROM audit_log a", List.of(), 0.9, 1, 5)))
                 .candidates(POWER, ctx).isEmpty());
-        assertTrue(ctx.allNotes().contains("guard TABLE"), ctx.allNotes());
+        assertTrue(ctx.allRejected().contains("guard TABLE"), ctx.allRejected());
         assertTrue(ctx.statements.stream().noneMatch(s -> s.contains("audit_log")));
     }
 
@@ -256,14 +261,14 @@ class LlmSqlResolverTest {
     void aParameterMustHoldAnArgumentsValue() throws Exception {
         assertTrue(items(answering(proposal(POWER_SQL, List.of(param("category", "TOOLS", "STRING"),
                 param("maxDeposit", "60.00", "NUMBER")), 0.9, 1, 5))).candidates(POWER, ctx).isEmpty());
-        assertTrue(ctx.allNotes().contains("PARAM: parameter category does not hold the argument's value"),
-                ctx.allNotes());
+        assertTrue(ctx.allRejected().contains("proposal: PARAM: parameter category does not hold the argument's"
+                + " value"), ctx.allRejected());
         assertTrue(items(answering(proposal(POWER_SQL, List.of(param("colour", "POWER", "STRING"),
                 param("maxDeposit", "60.00", "NUMBER")), 0.9, 1, 5))).candidates(POWER, ctx).isEmpty());
-        assertTrue(ctx.allNotes().contains("PARAM: parameter colour names no argument of the query"));
+        assertTrue(ctx.allRejected().contains("PARAM: parameter colour names no argument of the query"));
         assertTrue(items(answering(proposal(POWER_SQL, List.of(param("category", "POWER", "STRING")), 0.9, 1, 5)))
                 .candidates(POWER, ctx).isEmpty());
-        assertTrue(ctx.allNotes().contains("PARAM: the statement has 2 parameters and the proposal lists 1"));
+        assertTrue(ctx.allRejected().contains("PARAM: the statement has 2 parameters and the proposal lists 1"));
         assertEquals(2, items(answering(proposal(POWER_SQL, List.of(param("category", "POWER", "STRING"),
                 param("maxDeposit", "60", "NUMBER")), 0.9, 1, 5))).candidates(POWER, ctx).size(),
                 "a number equal in value is the argument's value");
@@ -274,7 +279,7 @@ class LlmSqlResolverTest {
         Map<String, Object> p = goodProposal();
         p.put("expectedRows", Map.of("min", 5L, "max", 9L));
         assertTrue(items(answering(p)).candidates(POWER, ctx).isEmpty());
-        assertTrue(ctx.allNotes().contains("rejected proposal: row count 2 outside 5..9"), ctx.allNotes());
+        assertTrue(ctx.allRejected().contains("proposal: row count 2 outside 5..9"), ctx.allRejected());
         p.put("expectedRows", Map.of("min", -4L, "max", 900L));
         assertEquals(2, items(answering(p)).candidates(POWER, ctx).size(), "bounds are clamped to 1..200");
     }
@@ -283,22 +288,23 @@ class LlmSqlResolverTest {
     void theRowsMustHaveTheValuesShape() throws Exception {
         assertTrue(items(answering(proposal("SELECT i.code, i.title FROM item i WHERE i.category = ?",
                 List.of(param("category", "POWER", "STRING")), 0.9, 1, 5))).candidates(POWER, ctx).isEmpty());
-        assertTrue(ctx.allNotes().contains("SHAPE: the rows lack the column deposit"), ctx.allNotes());
+        assertTrue(ctx.allRejected().contains("proposal: SHAPE: the rows lack the column deposit"),
+                ctx.allRejected());
         assertTrue(items(answering(proposal("SELECT i.code, i.title, i.deposit, i.barcode FROM item i WHERE"
                 + " i.category = ?", List.of(param("category", "POWER", "STRING")), 0.9, 1, 5))).candidates(POWER,
                 ctx).isEmpty());
-        assertTrue(ctx.allNotes().contains("SHAPE: the rows have columns [BARCODE] that ItemRef does not"),
-                ctx.allNotes());
+        assertTrue(ctx.allRejected().contains("SHAPE: the rows have columns [BARCODE] that ItemRef does not"),
+                ctx.allRejected());
         assertTrue(resolver("StaffPlain", StaffPlain.class, null, state(answering(proposal("SELECT s.code, s.code AS"
                 + " roles FROM staff s", List.of(), 0.9, 1, 9)), "0.50")).candidates(new StaffPlain("DESK"), ctx)
                 .isEmpty());
-        assertTrue(ctx.allNotes().contains("SHAPE: component roles of StaffRef is a list, which one row cannot hold;"
-                + " a pack registers a ValueLoader for kind StaffPlain"), ctx.allNotes());
+        assertTrue(ctx.allRejected().contains("SHAPE: component roles of StaffRef is a list, which one row cannot"
+                + " hold; a pack registers a ValueLoader for kind StaffPlain"), ctx.allRejected());
         assertTrue(resolver("LoansByStatus", LoansByStatus.class, null, state(answering(proposal("SELECT l.status,"
                 + " COUNT(*) AS n FROM loan l GROUP BY l.status", List.of(), 0.9, 1, 9)), "0.50"))
                 .candidates(new LoansByStatus("2026-01-01"), ctx).isEmpty());
-        assertTrue(ctx.allNotes().contains("SHAPE: the value type of kind LoansByStatus is a map; a pack registers a"
-                + " ValueLoader for it"), ctx.allNotes());
+        assertTrue(ctx.allRejected().contains("SHAPE: the value type of kind LoansByStatus is a map; a pack registers"
+                + " a ValueLoader for it"), ctx.allRejected());
     }
 
     @Test
@@ -324,8 +330,8 @@ class LlmSqlResolverTest {
         assertEquals(List.of(new StaffRef("S01", List.of("DESK", "SUPERVISOR"))), c.stream()
                 .map(ResolverCandidate::value).toList(), "S02 refused by the loader");
         assertEquals("S01", c.get(0).label(), "the identity values joined");
-        assertTrue(ctx.allNotes().contains("row S02 rejected by the value loader (NOT_ELIGIBLE): staff S02 is on"
-                + " leave"), ctx.allNotes());
+        assertEquals(List.of("S02: the value loader refused it (NOT_ELIGIBLE): staff S02 is on leave"),
+                ctx.rejected, "the refused row through the provenance seam");
         String question = ((Content.Text) gateway.requests().get(0).messages().get(0).parts().get(0)).text();
         assertTrue(question.contains("Select exactly these columns, each under this name:\n- code\n"), question);
         assertTrue(ctx.statements.stream().anyMatch(s -> s.startsWith("SELECT r.role FROM staff_role r")),
@@ -334,12 +340,12 @@ class LlmSqlResolverTest {
         missing.put("tablesUsed", List.of("staff"));
         assertTrue(resolver("StaffWithRole", StaffWithRole.class, new DeskPack.RolesLoader(Set.of()),
                 state(answering(missing), "0.50")).candidates(new StaffWithRole("DESK"), ctx).isEmpty());
-        assertTrue(ctx.allNotes().contains("guard PERSONAL"), "the guard first: " + ctx.allNotes());
+        assertTrue(ctx.allRejected().contains("guard PERSONAL"), "the guard first: " + ctx.allRejected());
         Map<String, Object> noIdentity = proposal("SELECT s.joined FROM staff s", List.of(), 0.9, 1, 5);
         noIdentity.put("tablesUsed", List.of("staff"));
         assertTrue(resolver("StaffWithRole", StaffWithRole.class, new DeskPack.RolesLoader(Set.of()),
                 state(answering(noIdentity), "0.50")).candidates(new StaffWithRole("DESK"), ctx).isEmpty());
-        assertTrue(ctx.allNotes().contains("SHAPE: the rows lack the identity column code"), ctx.allNotes());
+        assertTrue(ctx.allRejected().contains("SHAPE: the rows lack the identity column code"), ctx.allRejected());
     }
 
     // ------------------------------------------------------------------------------------------------ the model

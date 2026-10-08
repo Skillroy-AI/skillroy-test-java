@@ -1,0 +1,3 @@
+{"type":"run-start","t":0,"scenarioId":"lend-one-item","pack":"lending","packVersion":"0.4.0","planVersion":5,"sourceHash":"sha256:1a","stepTimeoutMs":10000,"startedAt":"2026-10-08T07:00:00Z"}
+{"type":"call","t":60,"step":"s1","index":1,"primitive":"lending.signOn","params":{"staff":"S01"},"ok":true,"value":{"signedOn":true},"events":1,"seq":4,"durationMs":12,"thread":"EDT"}
+{"type":"run-end","t":90,"status":"PASS","failureKind":null,"failedStepId":null,"message":null,"skippedExpectations":[],"durationMs":90}

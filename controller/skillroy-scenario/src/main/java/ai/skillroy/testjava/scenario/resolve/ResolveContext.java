@@ -82,6 +82,33 @@ public interface ResolveContext {
     void note(String text);
 
     /**
+     * Why a model wrote what this resolver offers (phase5-contracts.md 5.4 step 5): the engine keeps the text as the
+     * slot's {@link Provenance#rationale()} when a candidate of this resolver call is accepted, so that the bindings
+     * file shows a reviewer why the statement was written. Masked by the resolver and again by the engine, cut at
+     * {@value Provenance#MAX_RATIONALE} characters; a later call replaces an earlier one. The default keeps it as a
+     * note ({@code "rationale: …"}), for a context that has no provenance of its own.
+     */
+    default void rationale(String text) {
+        if (text != null) {
+            note("rationale: " + text);
+        }
+    }
+
+    /**
+     * Records something this resolver considered and refused before it became a candidate (a model's proposal under
+     * the confidence threshold or refused by the guard, a row a value loader refused): the engine adds it to the
+     * slot's {@link Provenance#rejected()} under this resolver's id, as it records a candidate a verifier refused, so
+     * that a failure's detail and the bindings file show it. Never a secret (the engine masks it as it masks notes).
+     * The default keeps it as a note ({@code "rejected <label>: <reason>"}).
+     *
+     * @param label what was refused ({@code "proposal"}, a row's identity values)
+     * @param reason why
+     */
+    default void reject(String label, String reason) {
+        note("rejected " + label + ": " + reason);
+    }
+
+    /**
      * For a statement whose result the resolver needs whole (a lookup it joins against in Java).
      *
      * @return {@code rows} when it is complete

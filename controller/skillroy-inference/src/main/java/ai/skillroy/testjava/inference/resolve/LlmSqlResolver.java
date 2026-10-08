@@ -83,9 +83,11 @@ import java.util.regex.Pattern;
  * parameter rule; (4) the statement through {@code ctx.data()}, the row count within the bounds the model stated, the
  * rows decoded by column name, or, for a kind with a {@link ValueLoader} (decision D90), each row's identity columns
  * handed to the loader; (5) the provenance: the guarded statement is recorded by the engine as any statement, the
- * rationale (masked) is noted as {@code "rationale: …"} (the engine has no seam yet to carry it into
- * {@code Provenance.rationale}), the confidence goes into each candidate. A refusal, a cut answer or a failed gate is
- * "no candidates" with a note. A retryable gateway failure is tried once more; then, and for every other failure, the
+ * rationale (masked) goes to {@code ResolveContext.rationale} (the slot's {@code Provenance.rationale}, which the
+ * bindings file keeps), the confidence into each candidate. A failed gate is a rejected {@code "proposal"}
+ * ({@code ResolveContext.reject}: the slot's {@code Provenance.rejected}, with the reason), a row a value loader refuses
+ * a rejected row; a refusal, a cut answer, an unreadable answer and {@code cannotAnswer} are "no candidates" with a
+ * note. A retryable gateway failure is tried once more; then, and for every other failure, the
  * slot fails ENVIRONMENT through a {@code DataException} of source {@value #SOURCE} ("the model provider could not be
  * reached: …", "no recording for the request of slot …").
  *
@@ -111,6 +113,10 @@ public final class LlmSqlResolver<Q extends Query<T>, T> implements BatchableRes
     public static final String SOURCE = "inference";
     /** The purpose of its requests. */
     public static final String PURPOSE = "resolve";
+    /** The label a refused proposal is rejected under (phase5-contracts.md 5.4 step 3). */
+    public static final String PROPOSAL_LABEL = "proposal";
+    /** The longest rationale handed to the provenance (phase5-contracts.md 5.4 step 5). */
+    static final int RATIONALE_MAX = 2000;
 
     /** The structured answer's schema. */
     static final Map<String, Object> PROPOSAL_SCHEMA = Schemas.ofRecord(SqlProposal.class);
@@ -384,7 +390,7 @@ public final class LlmSqlResolver<Q extends Query<T>, T> implements BatchableRes
             return List.of();
         }
         if (proposal.rationale() != null && !proposal.rationale().isBlank()) {
-            ctx.note("rationale: " + bounded(state.mask.text(proposal.rationale()), 2000));
+            ctx.rationale(bounded(state.mask.text(proposal.rationale()), RATIONALE_MAX));
         }
         if (proposal.cannotAnswer()) {
             ctx.note(id() + ": the model cannot answer (" + bounded(state.mask.text(String.valueOf(
@@ -426,8 +432,9 @@ public final class LlmSqlResolver<Q extends Query<T>, T> implements BatchableRes
                 : decoded(ctx, rows, proposal.confidence());
     }
 
+    /** A failed gate (5.4 step 3): the proposal is rejected with the reason, and nothing is offered. */
     private List<ResolverCandidate<T>> rejected(ResolveContext ctx, String reason) {
-        ctx.note(id() + ": rejected proposal: " + reason);
+        ctx.reject(PROPOSAL_LABEL, reason);
         return List.of();
     }
 
@@ -704,8 +711,8 @@ public final class LlmSqlResolver<Q extends Query<T>, T> implements BatchableRes
             try {
                 value = loader.load(query, java.util.Collections.unmodifiableMap(values), ctx);
             } catch (ResolutionException e) {
-                ctx.note(id() + ": row " + label + " rejected by the value loader (" + e.reason() + "): "
-                        + state.mask.text(String.valueOf(e.getMessage())));
+                ctx.reject(label, "the value loader refused it (" + e.reason() + "): "
+                        + bounded(state.mask.text(String.valueOf(e.getMessage())), 300));
                 continue;
             }
             if (value == null) {

@@ -240,6 +240,52 @@ class BudgetAndLedgerTest {
         assertTrue(text.contains("password=<redacted>"), text);
     }
 
+    /**
+     * D91: the entry carries the record of 7.4 as its details (the same masked record the log gets), so that a run's
+     * writer can write {@code inference.jsonl} from its ledger; a failure the provider billed has one too, an unbilled
+     * failure has no entry.
+     */
+    @Test
+    void theEntryCarriesTheCallsRecordAsItsDetails() {
+        CostLedger ledger = new CostLedger();
+        InferenceLog.Memory log = InferenceLog.inMemory();
+        PromptMask mask = PromptMask.of(SecretMask.of(List.of("Zq7-Lantern-42x")), List.of(), List.of());
+        Clock clock = Clock.fixed(Instant.parse("2026-10-08T11:00:00Z"), ZoneOffset.UTC);
+        LedgerWriter writer = new LedgerWriter(ledger, null, log, mask, false, clock);
+        Usage u = new Usage("claude", "claude-sonnet-5-5", "claude-sonnet-5", "msg_7", 100, 20, 500, 30, 70, true,
+                "0.0011", Duration.ofMillis(640), "fallback: claude-sonnet-5");
+        ModelResponse response = new ModelResponse(List.of(Content.Text.of("{}")), ModelResponse.StopReason.END_TURN,
+                u, Map.of("sql", "SELECT 1", "token", "Zq7-Lantern-42x"));
+        writer.record(request(), response, "s", "slot", Strategy.LLM_SQL);
+        Map<String, Object> details = ledger.entries().get(0).details();
+        assertEquals(log.records().get(0), details, "the same record as inference.jsonl's");
+        assertEquals(request().fingerprint(), details.get("fingerprint"));
+        assertEquals("END_TURN", details.get("stop"));
+        assertEquals(640L, details.get("elapsedMs"));
+        assertEquals("claude-sonnet-5-5", details.get("requestedModel"));
+        assertEquals("claude-sonnet-5", details.get("model"), "a fallback answered");
+        assertEquals(30L, details.get("cacheWrite5mTokens"));
+        assertEquals(70L, details.get("cacheWrite1hTokens"));
+        assertEquals(100L, details.get("cacheWriteTokens"), "the entry's sum");
+        assertEquals(Map.of("sql", "SELECT 1", "token", "<redacted>"), details.get("structured"), "masked");
+        assertEquals("2026-10-08T11:00:00Z", details.get("t"));
+        assertThrows(UnsupportedOperationException.class, () -> details.put("x", 1), "a frozen copy");
+        assertEquals(List.of("scenarioId", "slot", "strategy", "provider", "model", "requestId", "inputTokens",
+                "outputTokens", "costUsd", "purpose", "cacheReadTokens", "cacheWriteTokens", "batch", "note"),
+                List.copyOf(ledger.entries().get(0).toJson().keySet()), "cost-ledger.jsonl's line is unchanged");
+
+        writer.recordFailure(request(), new InferenceException(InferenceException.Kind.PROVIDER, "not JSON", "r",
+                new Usage("claude", "m", "m", "r", 10, 0, 0, 0, 0, false, "0.001", null, null), null), "s", "x",
+                Strategy.LLM_SQL);
+        assertEquals("PROVIDER", ledger.entries().get(1).details().get("error"));
+        writer.recordFailure(request(), new InferenceException(InferenceException.Kind.TIMEOUT, "late"), "s", "x",
+                Strategy.LLM_SQL);
+        assertEquals(2, ledger.size(), "an unbilled failure has no entry");
+        assertEquals(3, log.records().size(), "but a record");
+        assertNull(new CostLedger.Entry("s", null, Strategy.LLM_SQL, "p", "m", "r", 1, 2, "0").details(),
+                "the earlier constructors keep it null");
+    }
+
     @Test
     void aFailureIsRecordedOnlyWhenItWasBilled() {
         CostLedger ledger = new CostLedger();
