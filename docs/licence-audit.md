@@ -101,6 +101,8 @@ included), the sample pack and the scenarios of both samples build with `--relea
 | `skillroy-agent-api`, `-agent-bootstrap`, `-agent-core`, `-agent-swing`, `-agent-dist` | none | none | JUnit set |
 | `skillroy-agent-data` | none | none | JUnit set, HSQLDB |
 | `skillroy-agent-web` (Phase 4) | none | none | JUnit set |
+| `skillroy-agent-byteman-sys` (Phase 6, BW) | none | Byteman 4.0.27 (a work that uses the library: compiled against it, nothing of it in the jar) | JUnit set; `skillroy-agent-api` |
+| `skillroy-agent-byteman` (Phase 6, BW) | none | `skillroy-agent-api`, `skillroy-protocol`, `skillroy-agent-byteman-sys` (project) | JUnit set, Byteman 4.0.27 |
 | `skillroy-controller` | none | none | JUnit set |
 | `skillroy-data` (Phase 2) | Jackson set (it declares `jackson-databind` and `jackson-dataformat-yaml`) | none | JUnit set, HSQLDB |
 | `skillroy-scenario` | Jackson set, through `skillroy-data` (since Phase 2 its own POM declares no Jackson artifact) | none | JUnit set, HSQLDB |
@@ -112,7 +114,7 @@ included), the sample pack and the scenarios of both samples build with `--relea
 | `skillroy-sample-lending-app` | HSQLDB | none | JUnit set |
 | `skillroy-sample-lending-agent` | none | HSQLDB (through the sample app) | JUnit set |
 | `skillroy-sample-lending-pack` | Jackson set | none | JUnit set |
-| `skillroy-sample-lending-scenarios` | Jackson set; `junit-jupiter-api` set (through `skillroy-junit`) | none | JUnit set, HSQLDB (through the sample app) |
+| `skillroy-sample-lending-scenarios` | Jackson set; `junit-jupiter-api` set (through `skillroy-junit`) | none | JUnit set, HSQLDB (through the sample app); Byteman 4.0.27 (Phase 6, BW: the hooks leg's Byteman check) |
 | `skillroy-sample-web-host` (Phase 4, profile `jcef`) | JCEF set | none | JUnit set; the natives `jcef-natives-<platform>` of the platform in `skillroy.jcef.platform` (default `linux-amd64`) |
 | `skillroy-sample-web-host-agent` (Phase 4, profile `jcef`) | none | JCEF set (through the host module, which it declares `provided`; it declares no third-party artifact itself) | JUnit set |
 | `skillroy-sample-web-host-scenarios` (Phase 4, profile `jcef`) | Jackson set, through `skillroy-scenario` (and `skillroy-data`); it declares no third-party artifact at compile scope | none | JUnit set (`junit-jupiter`); the Playwright set, through `skillroy-cdp`; the JCEF set and the natives `jcef-natives-<platform>`, through the web host, which it declares with the natives; besides, test-scope project artifacts whose transitive dependencies it excludes (the agent home's zip, the host's agent module, the CLI). Read from its POM on 2026-10-07; it does not depend on `skillroy-junit` |
@@ -292,6 +294,7 @@ None of these is in the agent home or the CLI distribution. The Playwright set (
 | `org.junit:junit-bom` | 5.14.4 | import scope (dependency management only) | EPL-2.0 | POM |
 | `org.opentest4j:opentest4j` | 1.3.0 | test; compile where `junit-jupiter-api` is compile, and in `skillroy-cdp` (through `playwright`) | Apache-2.0 | POM; JAR `META-INF/LICENSE` |
 | `org.apiguardian:apiguardian-api` | 1.1.2 | test; compile where `junit-jupiter-api` is compile | Apache-2.0 | POM; JAR `META-INF/LICENSE` |
+| `org.jboss.byteman:byteman` (Phase 6, built 2026-10-09, BW; D134) | 4.0.27 | test in `skillroy-agent-byteman`, `skillroy-agent-dist` and `skillroy-sample-lending-scenarios` (the in-process tests and the ITs take the jar's path from the test class path); provided in `skillroy-agent-byteman-sys` (its manager and helper are declared with Byteman's parameter and constructor types; they keep what Byteman hands them as `Object`, so the jar's constant pool holds no Byteman class, which `SysConstantPoolTest` checks). In no distribution: at run time the jar is the user's, named by the agent option `byteman.jar` (B8); 861,185 bytes, 385 entries, class files major 50, `Premain-Class: org.jboss.byteman.agent.Main`; its POM declares no dependency outside `provided` | LGPL-2.1-or-later (B8); the sys jar is "a work that uses the library" (LGPL-2.1 section 6) and carries nothing of it | POM (parent `byteman-root` 4.0.27); the jar has no licence file |
 | `org.hsqldb:hsqldb` (classifier `jdk8`) | 2.7.4 | compile in `skillroy-sample-lending-app`; provided in `skillroy-sample-lending-agent`; test in `skillroy-protocol`, `skillroy-agent-data`, `skillroy-data`, `skillroy-scenario` (these three since Phase 2) and `skillroy-sample-lending-scenarios` | BSD-style ("HSQLDB License, a BSD open source license"); SPDX not determined locally | POM only; the jar has no licence file |
 | `com.microsoft.playwright:playwright` | 1.63.0 | compile, `skillroy-cdp`; test, through it, in `skillroy-sample-web-host-scenarios`; in no distribution (D49) | Apache-2.0 | POM (inherited from the parent `com.microsoft.playwright:parent-pom:1.63.0`); the jar has no licence file |
 | `com.microsoft.playwright:driver` | 1.63.0 | compile, through `playwright` (`skillroy-cdp`) | Apache-2.0; it carries the `playwright-core` package and its bundled npm packages, whose texts are not enumerated here | POM (parent `parent-pom`); JAR `driver/package/LICENSE`, `NOTICE`, `ThirdPartyNotices.txt` and the sidecars `driver/package/lib/utilsBundle.js.LICENSE`, `serverRegistry.js.LICENSE`, `webp_codec.LICENSE` |
@@ -477,7 +480,7 @@ licence is claimed here beyond what `docs/DECISIONS.md` already records (cited i
 | Piece | Named for | Licence recorded in the repository | Status |
 |---|---|---|---|
 | Byte Buddy | Bytecode hooks module (shaded and relocated) | Apache-2.0 (B1) | not audited; verify at adoption, including the shaded copy |
-| Byteman 4.0.27 | Optional `rule.*` module | LGPL-2.1-or-later (B8) | optional; the jar is never bundled; the user supplies it |
+| Byteman 4.0.27 | Optional `rule.*` module | LGPL-2.1-or-later (B8) | moved to section 5 (Phase 6, built 2026-10-09, BW): test and provided scope only; the jar is never bundled; the user supplies it |
 | JNA | Optional emulated-attach path | Dual Apache-2.0 / LGPL-2.1-or-later (B1, B8); take Apache-2.0 | optional controller dependency; not audited |
 | jattach | Attach as root or across users | Apache-2.0 (B1) | not redistributed; found on `PATH` or at a configured path (B8) |
 | JSqlParser 5.4 | `SqlGuard` of Phase 5 | declared 2026-10-08 (wave 2a), dual LGPL-2.1 / Apache-2.0, the project takes Apache-2.0: moved to §5 | done |

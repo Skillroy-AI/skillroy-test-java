@@ -1339,6 +1339,21 @@ modules are created. It proves, each with its evidence line in `RESULT.md`:
 **not created**, §7 stays "specified", the TODO item reads "specified only; BS14 failed on …", nothing with a
 listener ships (the §17 Q2 veto cannot change that), and the `rule.*` names stay reserved.
 
+As built (Phase 6, BW, 2026-10-09): BS14 ran on the Java 8 and Java 25 targets of the arm64 image and **passed with
+conditions** (`../../spikes/BS14/RESULT.md`): items 1-6 on both targets, and the reuse of a parked `Retransformer` by a
+second module instance. Its five conditions are folded into §7.3-§7.5 as "as built": (1) the option string has no
+`prop:` (it prints `Setting …` on the host's stdout, and Byteman reads `org.jboss.byteman.verbose` by its presence, so
+`=false` turns verbose output **on**), and `listener:false` must precede `manager:` (after it, it clears the manager);
+(2) Byteman does not match a varargs helper method; (3) a trigger-time failure is printed on the host's stderr through
+Byteman's `Helper` trace map unless the module puts its own streams there, and a transform-time failure is printed
+nowhere (only `listScripts` shows it); (4) a sys-jar method with a Byteman-typed parameter must be branch-free, or its
+`StackMapTable` puts a `CONSTANT_Class` of Byteman into the constant pool; (5) the byte check needs a recorder ahead
+of Byteman's transformer and one behind it. Byteman's `manager:` needs no `listener:true`; `Main` loads the manager
+through the system class loader and resolves `initialize(Retransformer, String, Integer)` by `getMethod` (static, public),
+falling back to `initialize(Retransformer)`; it is called once, on the thread that called `premain`, with `hostname` and
+`port` null. Byteman builds one helper adapter per firing through the helper's declared `(Rule)` constructor. No
+listening socket and no thread before the load, after it, or after the unload; no JEP 451 line.
+
 ### 7.3 Primitives (module `byteman`; `rule.check`, `rule.submit` and `rule.list` name the capability `rule.engine`)
 
 | Primitive | Params | Result | Flags | Timeout |
@@ -1408,6 +1423,44 @@ reflecting on internals, out of scope (§7.1, `threat-model.md` §7).
 
 **Events**: `rule.fired` (above) and `rules.changed {installed: [name], removed: [name]}` after a submit or unload.
 
+As built (Phase 6, BW, 2026-10-09):
+
+- **The helper.** `fired(Object)` to `fired(Object, …, Object)` (one to eight bindings, fixed arity: BS14 condition 2;
+  D-BW-2); the one constructor is the branch-free `(org.jboss.byteman.rule.Rule)`, which keeps the rule as `Object` in
+  a non-final field; the name, trigger class and method come from the rule's `getName()`, `getTriggerClass()`,
+  `getTriggerMethod()` by reflection (cached `Method`s). `count`, `countOf`, `flag`, `flagged`, `clear` are per rule
+  (keyed by the rule's name), at most 1024 keys in the JVM; the package-private `forget(rule)` drops a rule's keys at
+  its unload. `format` answers a string (cut at 256), an enum's name, a boolean, a character or a number of the JDK
+  (`getClassLoader() == null`), else `<class name>`. The handler slot keeps counters `{fired, unhandled, failures}`.
+- **`RuleManager`.** `initialize` is branch-free and delegates to a private `accept(Object)` (BS14 condition 4); it
+  stores the **first** `Retransformer` of the JVM only and ignores every later call, so that no class can replace or
+  clear what Byteman handed over through the public method (D-BW-7). The slot holds the `Retransformer` when parked, or
+  the list of the names of rules a cut-short uninstall left behind (§7.5; D-BW-8); the probe reads the private slot by
+  reflection without taking it (no third accessor). `SysConstantPoolTest` holds the jar's three class files to
+  `CONSTANT_Class` entries under `java/` and `ai/skillroy/` and major 52.
+- **The lint** as specified, and: `CLASS`/`INTERFACE` must be a fully qualified name (an unqualified one matches a class
+  of that simple name in any package, a JDK class loaded later included); outside `RULE … ENDRULE` only blank lines
+  and `#` comments (Byteman applies a `HELPER`, `IMPORT` or `COMPILE` line there as the default of the rules after it)
+  (D-BW-11); the deny-list matches whole identifiers in every component of a dotted name and prefixes starting at any
+  component, after white space around dots is closed up (`java.lang.System.exit`, `System . exit`). `RuleLintTest`
+  holds the corpus: one refused rule per entry with "line 6: '<entry>' is not allowed (<reason>)", one accepted rule
+  per entry with the word inside its name, and for the identifier-shaped entries inside its method.
+- **`rule.check`** runs `RuleCheck` only while this module instance holds the `Retransformer` and the rule's class is
+  defined by the system loader; `RuleCheck`'s errors, parse errors, type errors **and type warnings** are `errors`
+  (a type warning means Byteman would not inject the rule, such as `$!` at `ENTRY`: D-BW-9), its warnings and the
+  `WARNING` lines of its buffer are `warnings`.
+- **`rule.submit`** answers `classes` from `listScripts` read right after `installScript`: `injected` (not triggered
+  yet), `compiled`, `failed to compile: …` or `threw: …`. A `threw` (a transform-time failure: the rule was not
+  injected, and Byteman printed nothing) removes the rule and answers `RULE_REJECTED` with the statuses; an exception
+  out of `installScript` is `RULE_REJECTED` as well (D-BW-10). `messages` are `installScript`'s lines.
+- **`rule.unload`** of a name the module does not hold answers `{removed: false, restored: []}`. A class another rule
+  of the module still touches is not verified (it is not in `restored`); a class whose removal retransformation the
+  behind recorder did not see is `DEGRADED("no restore observed")`; foreign events are counted on the ahead recorder
+  since the rule's install.
+- **The encoding** follows §4.3 with `mask("rule.<name>", "binding<i>", value)`; a container is read only when its class
+  is the JDK's (iterating an application's own collection would run its code; otherwise it is a handle) (D-BW-12).
+  `rule.fired.rule` is the name without the `skillroy:` prefix, and only the module's live rules publish.
+
 ### 7.4 Loading Byteman
 
 **Only under `rule.submit`**, after the dispatcher's read-only and confirm gates have passed, on an agent worker,
@@ -1445,6 +1498,29 @@ Load modes: `JAVAAGENT` and `ATTACH` have the `Instrumentation` and work; `EMBED
 Instrumentation in EMBEDDED mode")`. Nothing is attached a second time, nothing passes through the 1024-byte attach
 argument, and a JDK 25 target sees no second JEP 451 warning: the agent itself was loaded at launch.
 
+As built (Phase 6, BW, 2026-10-09):
+
+- **Step 3's option string is `listener:false,manager:ai.skillroy.testjava.agent.byteman.sys.RuleManager`, in that order
+  and nothing else** (BS14 condition 1; D-BW-1): `prop:org.jboss.byteman.verbose=false` is dropped. The sys jar is
+  `<home>/optional/skillroy-agent-byteman-sys.jar` (the agent option `home`); there is no option for it.
+- **Step 4 has two recorders** (BS14 condition 5; D-BW-3): the ahead recorder registered before `premain`, whose first
+  bytes per class are the reference, and the behind recorder registered right after it, whose last bytes after a
+  removal are what the JVM installed; §3.5's single recorder re-registered last would, for every later submit, see
+  Byteman's output instead of the reference. They record only the classes a rule of the module names (by name, and the
+  classes the class bound matched). **In the reuse case** both recorders are registered after Byteman's transformer,
+  so before a submit the module retransforms the matched classes whose reference it has not seen yet, in the batches
+  of §3.2 (no rule of the module is on them then, so Byteman returns nothing and the recorder sees the initial bytes):
+  one extra pause per class, in the reuse case only.
+- **Byteman's console output** (BS14 condition 3; D-BW-4): right after the load the module puts one `PrintStream` of its
+  own into `org.jboss.byteman.rule.helper.Helper.traceMap` (a private static, by reflection) under `out`, `err`, `vrb`,
+  `dbg` and `nzy`; it writes each line to the agent's log at WARN (`byteman: …`, at most 2,000 lines, each cut at 1,000
+  characters), and the module removes it by identity at `uninstall`. A rule's type error at its first trigger (a rule
+  whose class is not the system loader's escapes the type check) and a failing action's stack trace therefore reach
+  the agent's log, not the host's console.
+- A load that fails (a `premain` exception, no `Retransformer` handed over) removes the ahead recorder and answers
+  `CAPABILITY_UNAVAILABLE` with the reason; Byteman's `loaded` property may then be set, and the next probe answers by
+  §7.4 step 2.
+
 ### 7.5 Safety, lifecycle and the capability
 
 - **Gates**: `rule.submit` under read-only mode is `READ_ONLY`, without `_meta.confirm` `CONFIRM_REQUIRED`, before
@@ -1465,6 +1541,16 @@ argument, and a JDK 25 target sees no second JEP 451 warning: the agent itself w
   target")` (§7.4 step 2). Byteman itself cannot
   be unloaded (attach §C4, map 7 §4.7): its transformer stays registered and returns null without a rule, which the
   capability's reason says after a disable ("Byteman stays loaded; no rule of the agent is installed").
+- As built (Phase 6, BW, 2026-10-09): `uninstall` disarms the handler, then removes every rule of the module in one
+  `removeScripts` on a daemon thread `skillroy-uninstall-byteman` joined for `hooks.detachBudgetMs`. When it completes:
+  the byte check per class is logged, the `Retransformer` parked, the helper's slot released, both recorders removed,
+  the trace streams removed. When it does not: the WARN names the rules, the module **parks the list of their names**
+  in `RuleManager`'s slot in place of the `Retransformer` (this is where the next instance's "<names from the log>"
+  come from; D-BW-8), the ahead recorder stays registered holding the disarmed handler in its `keep` field, the behind
+  recorder and the trace streams are removed (so a later failure of the leftover rule prints on the host's stderr
+  again: a limit of the abnormal state). The test seam is the JVM system property
+  `skillroy.agent.byteman.test.keepRulesAtUninstall=true`, read only by `uninstall`, which then leaves the rules as a
+  cut-short budget would (D-BW-13).
 - **Capability `rule.engine`**: declared at `install` with a probe: `UNAVAILABLE("no Instrumentation in <mode>
   mode")`, `UNAVAILABLE("no byteman.jar configured")`, `UNAVAILABLE("not a Byteman jar: …")`,
   `UNAVAILABLE("byteman.jar is writable by others: …")`, `UNAVAILABLE("Byteman was loaded by the host; …")`,
@@ -1508,6 +1594,24 @@ first instance's budget was cut short with a rule installed (a test seam), the r
 the final
 `agent.disable` no agent thread (P1 §10 check 16's rule). On the sample desk: the hooks leg of the end-to-end
 acceptance adds one Byteman check (§13.2 item 7).
+
+As built (Phase 6, BW, 2026-10-09). Unit (`skillroy-agent-byteman-sys`): `RuleManagerTest`, `RuleHelperTest`,
+`SysConstantPoolTest`. Unit (`skillroy-agent-byteman`, the test agent `ai.skillroy.testjava.agent.byteman.TestAgent`
+in `target/<module>-test-agent.jar`, the toy `ai.skillroy.testjava.fixture.byteman.DepositDesk`): `RuleLintTest`,
+`ClassBoundTest`, `BindingEncoderTest` in the default execution, and three classes in surefire executions of their
+own, each a fresh JVM (`reuseForks=false` ran no test on the Java 8 test JVM): `ProbeTest` (the reasons of §7.5, with
+Byteman's property set and the system loader replaced by an isolated one for "loaded by the host"),
+`CheckLoadsNothingTest` (`rule.check` and `rule.list` on a fresh module define no `org.jboss.byteman` class, load
+nothing of the sys jar and set no property) and `InProcessRouteTest` (the whole route in the test JVM: the first submit
+loads Byteman from the test class path's jar, `rule.fired` with a handle and the limit, the `compiled` status,
+`rule.check` type-checking once loaded, a type error, a `killJVM` rule and `$!` at `ENTRY` refused, the unload
+`verified: OK`, the uninstall parking, a second instance reusing it with its reference primed, a cut-short third
+instance refused by name while the rule's action still runs and no `rule.fired` arrives). `BytemanIT` plays the
+re-attach without the attach API: the toy `LendingToyMain` runs with a second `-javaagent`
+(`InstrumentationKeeper`, with the retransform and redefine rights of the bootstrap's manifest) and, on a stdin
+command, calls the bootstrap's `agentmain` with that `Instrumentation`, which is what an attach calls; it also covers
+the read-only refusal in a second child. Run: natively (macOS: the socket checks skip, no `/proc`), and in the arm64
+image on the Java 8 and Java 25 targets, the module tests also on the Java 8 test JVM (`-Djvm`).
 
 ---
 
@@ -2435,6 +2539,12 @@ the golden (`javaagent-hooks.json`).
    `rule.list` shows it; `rule.unload` restores with `verified: OK`; a rule naming `killJVM` is `RULE_REJECTED`; the
    child's listening sockets (the `/proc/<pid>/fd`-mapped set of §7.6) before the first `rule.submit` and after
    `rule.unload` are equal and hold exactly the agent's port.
+   As built (Phase 6, BW, 2026-10-09): neither `HookChecks` nor `LendingTarget.Mode.JAVAAGENT_HOOKS` was on a branch BW
+   could merge, so item 7 is the class `BytemanDeskIT` of the scenarios module, which launches its own desk (seed A)
+   with `optionalModules=skillroy-agent-byteman;byteman.jar=<the test class path's jar>` and drives the return line by
+   running committed scenario A (replay, seed A); **at integration its body moves into `HookChecks` after the
+   `hook.remove` demonstration and its two options onto the hooks mode**. Green in the arm64 image on the Java 8 and
+   Java 25 desks.
 8. **The variant** (`BranchEndToEndIT`, seed A, branch edition, the overlay jar on the test class path,
    `JAVAAGENT_HOOKS`): §11.4's acceptance, each half on a freshly launched desk (A, B and E `PASS` with the overlay; E
    with the base pack alone `DEGRADED` with hooks off and `FAIL` / `ASSERTION` with hooks on,
