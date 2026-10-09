@@ -28,6 +28,7 @@ import ai.skillroy.testjava.protocol.Json;
 import ai.skillroy.testjava.scenario.BindOptions;
 import ai.skillroy.testjava.scenario.Plan;
 import ai.skillroy.testjava.scenario.ScenarioException;
+import ai.skillroy.testjava.scenario.observe.RunObserver;
 import ai.skillroy.testjava.scenario.pack.DomainPack;
 import ai.skillroy.testjava.scenario.resolve.BindMode;
 import ai.skillroy.testjava.scenario.resolve.InferenceSettings;
@@ -101,8 +102,9 @@ final class ReResolveCommand implements Command {
                 OptionSpec.value(BindArgs.APPROVED_BY, "label", "written as approval.by (default re-resolve:<jobId>;\n"
                         + "a nightly job passes a stable label)"),
                 OptionSpec.flag(DRY_RUN, "write no bindings file; report what would change"),
-                Packs.OPTION_SPEC,
-                OptionSpec.flag("--json", "print the report as JSON when done")));
+                Packs.OPTION_SPEC));
+        options.addAll(TelemetryArgs.OPTIONS);
+        options.add(OptionSpec.flag("--json", "print the report as JSON when done"));
         return Connector.withConnection(options.toArray(OptionSpec[]::new));
     }
 
@@ -132,6 +134,7 @@ final class ReResolveCommand implements Command {
         }
         List<Path> files = ScenarioFiles.expand(args.positionals());
         BindArgs.Settings settings = BindArgs.parse(args, files, BindMode.RE_RESOLVE);
+        RunObserver observer = RunObserver.NONE;
         ClassLoader previous = Thread.currentThread().getContextClassLoader();
         try (Packs packs = Packs.load(args.values(Packs.OPTION), cli.classLoader())) {
             Thread.currentThread().setContextClassLoader(packs.loader());
@@ -179,7 +182,12 @@ final class ReResolveCommand implements Command {
             Path reportDir = out != null ? out : Path.of("run-output", "re-resolve-" + jobId);
             JobOptions job = new JobOptions(reportDir, jobId, new BigDecimal(budget), dryRun, settings.approvedBy(),
                     null, null, clock);
+            // phase6-contracts.md 10.3 (as built, TL: the job exports its root span; its binds and model calls are in
+            // the report and the job's ledger): before the agent is contacted.
+            observer = TelemetryArgs.open(TelemetryArgs.load(args, BindArgs.credentialsDir(settings), reportDir), cli);
             Target target = Connector.connect(args, cli);
+            TelemetryArgs.started(observer, TelemetryArgs.runStart(observer, "re-resolve", null,
+                    BindMode.RE_RESOLVE.label(), settings.envId(), target, null));
             UnaryOperator<String> scrub = text -> mask.apply(target.scrub(text));
             try (target) {
                 CapabilityMatrix caps = target.client().capabilities();
@@ -231,6 +239,7 @@ final class ReResolveCommand implements Command {
                 return report.exitCode();
             }
         } finally {
+            TelemetryArgs.finish(observer, json ? cli.err() : cli.out());
             Thread.currentThread().setContextClassLoader(previous);
         }
     }

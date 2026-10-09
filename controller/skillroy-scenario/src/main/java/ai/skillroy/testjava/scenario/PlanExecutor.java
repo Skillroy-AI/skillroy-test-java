@@ -42,6 +42,11 @@ import ai.skillroy.testjava.scenario.pack.PreflightCheck;
 import ai.skillroy.testjava.scenario.pack.PromptPolicy;
 import ai.skillroy.testjava.scenario.pack.StepLibrary;
 import ai.skillroy.testjava.scenario.pack.SyncPolicy;
+import ai.skillroy.testjava.scenario.observe.CallStart;
+import ai.skillroy.testjava.scenario.observe.RunObserver;
+import ai.skillroy.testjava.scenario.observe.RunObservers;
+import ai.skillroy.testjava.scenario.observe.ScenarioStart;
+import ai.skillroy.testjava.scenario.observe.StepStart;
 import ai.skillroy.testjava.scenario.resolve.BindMode;
 import ai.skillroy.testjava.scenario.resolve.ColumnKind;
 import ai.skillroy.testjava.scenario.resolve.CostLedger;
@@ -173,6 +178,19 @@ import java.util.stream.Stream;
  * {@code web.*} call is FAIL / ASSERTION ("the browser closed during the step"); a {@code webWaitFlag} whose flag
  * did not turn true is FAIL / SYNC_TIMEOUT; a non-agent path's failure outside the agent's error codes is ERROR /
  * ENVIRONMENT.
+ *
+ * <p>Telemetry (phase6-contracts.md 10.2, decision D140): {@link RunOptions#observer()} is told what the run does,
+ * beside the records it mirrors: the run's start and end ({@code scenarioStarted} before {@code run-start}, whose
+ * record then carries the observer's {@code traceId}, and {@code scenarioEnded} after {@code run-end}, with the masked
+ * result), each step and {@code verify} ({@code stepStarted}, {@code stepEnded}), each step and cleanup call with its
+ * waits ({@link CallRunner}; the call's {@code _meta.traceparent} is the observer's open call span), every bind record
+ * ({@code bindEvent}: the bind listener's and the executor's final {@code bind} record), the scenario records
+ * {@code requires}, {@code launchProperties}, {@code preflight}, {@code hooks}, {@code capabilities}, {@code recover}
+ * and {@code cleanup} and the step records {@code expect}, {@code db}, {@code prompt}, {@code fidelity} and
+ * {@code capture} ({@code scenarioRecord}, as {@link RunLog} writes them: masked, in JSON form, whoever writes them)
+ * and every model call of the ledger ({@code modelCall}). The observer is
+ * wrapped ({@code RunObservers.safe}): one that throws is logged once and ignored for the rest of the run, and nothing
+ * of it changes a verdict; with {@link RunObserver#NONE} no record is built for it.
  *
  * <p>Not thread-safe: one executor runs one plan at a time on the calling thread; it starts no threads (a web path
  * may run threads of its own).
@@ -491,6 +509,10 @@ public final class PlanExecutor {
          * tracing (phase4-contracts.md 6.4).
          */
         private boolean traceWithheld;
+        /** The run's observer, wrapped so that it never throws (phase6-contracts.md 10.2). */
+        private final RunObserver observer = RunObservers.safe(options.observer());
+        /** False with {@link RunObserver#NONE}: no record is built for the observer. */
+        private final boolean observing = !RunObservers.isNone(observer);
 
         Run(Plan plan, Bindings provided, boolean bindOnly) {
             this.plan = plan;
@@ -562,8 +584,11 @@ public final class PlanExecutor {
         RunResult execute() {
             clearOldOutputs();
             log = RunLog.open(options.outputDir(), options.clock());
+            // phase6-contracts.md 10.2: the scenario and step records reach the observer as written (RunLog.observe).
+            log.observe(observer);
             web = new WebRun(agent, log, options.clock(), webPathLoader);
             runner = new CallRunner(agent, log, options.clock(), web, stepTimeoutMs, this::keyRuleSlots);
+            runner.observer = observer;
             try {
                 mask = secretMask();
                 log.mask(mask);
@@ -587,10 +612,17 @@ public final class PlanExecutor {
         }
 
         private RunResult executeLogged() {
-            log.write("run-start", RunLog.fields("scenarioId", plan.scenarioId(), "pack", plan.pack(),
+            observeStart();
+            Map<String, Object> start = RunLog.fields("scenarioId", plan.scenarioId(), "pack", plan.pack(),
                     "packVersion", plan.packVersion(), "planVersion", plan.planVersion(), "sourceHash",
                     plan.sourceHash(), "stepTimeoutMs", stepTimeoutMs, "startedAt",
-                    options.clock().instant().toString()));
+                    options.clock().instant().toString());
+            String traceId = observing ? observer.traceId() : null;
+            if (traceId != null) {
+                // phase6-contracts.md 10.3: with telemetry on, run-start names the trace (a trace id is not a secret).
+                start.put("traceId", traceId);
+            }
+            log.write("run-start", start);
             Abort failure = null;
             try {
                 requireBindingsRoot();
@@ -679,7 +711,32 @@ public final class PlanExecutor {
             }
             end.put("durationMs", duration.toMillis());
             log.write("run-end", end);
+            observer.scenarioEnded(result);
             return result;
+        }
+
+        // ---------------------------------------------------------------- telemetry (phase6-contracts.md 10.2)
+
+        /** {@code scenarioStarted}: before {@code run-start}, so that its record can name the trace. */
+        private void observeStart() {
+            if (observing) {
+                observer.scenarioStarted(new ScenarioStart(plan.scenarioId(), plan.pack(), plan.packVersion(),
+                        plan.planVersion(), plan.sourceHash(), options.bind().mode().label(),
+                        options.bind().envId()));
+            }
+        }
+
+        /** A bind record for the observer as {@code run.jsonl} holds it (the listener's, and the final bind record). */
+        private void observeBind(String type, Map<String, Object> fields) {
+            if (observing) {
+                observer.bindEvent(type, logged(fields));
+            }
+        }
+
+        /** The executor's final {@code bind} record (success or failure): written, and it ends the bind span. */
+        private void bindRecord(Map<String, Object> fields) {
+            log.write("bind", fields);
+            observeBind("bind", fields);
         }
 
         /** The result with the run's secrets masked in every string it carries. */
@@ -721,6 +778,12 @@ public final class PlanExecutor {
          * {@link #inferenceRecord}, masked; not written when no entry has details.
          */
         private void writeLedger(List<CostLedger.Entry> entries) {
+            if (observing) {
+                // phase6-contracts.md 10.2: each model call of the run, after the fact (its details place its span).
+                for (CostLedger.Entry entry : entries) {
+                    observer.modelCall(entry);
+                }
+            }
             Path dir = options.outputDir();
             if (dir == null) {
                 return;
@@ -793,7 +856,7 @@ public final class PlanExecutor {
             try {
                 Binder.requireBindingsRoot(plan, options.bind());
             } catch (BindException e) {
-                log.write("bind", RunLog.fields("ok", false, "mode", options.bind().mode().label(), "envId",
+                bindRecord(RunLog.fields("ok", false, "mode", options.bind().mode().label(), "envId",
                         options.bind().envId(), "failureKind", e.kind().name(), "error", e.getMessage()));
                 throw new Abort(Status.ERROR, e.kind(), null, e.getMessage(), new LinkedHashMap<>(e.detail()));
             }
@@ -1078,7 +1141,7 @@ public final class PlanExecutor {
                 try {
                     Binder.check(plan, runner.bindings);
                 } catch (ResolutionException e) {
-                    log.write("bind", RunLog.fields("ok", false, "mode", mode, "envId", bind.envId(), "reason",
+                    bindRecord(RunLog.fields("ok", false, "mode", mode, "envId", bind.envId(), "reason",
                             e.reason(), "error", e.getMessage()));
                     throw new Abort(Status.ERROR, FailureKind.RESOLUTION_FAILED, null, e.getMessage(),
                             RunLog.fields("reason", e.reason(), "reference", e.reference(), "mode", mode, "envId",
@@ -1092,6 +1155,7 @@ public final class PlanExecutor {
                             crossCheckRecords.add(logged(fields));
                         }
                         log.write(type, fields);
+                        observeBind(type, fields);
                     }, data(), caps);
                     if (bindOnly && bind.mode() == BindMode.LIVE && !bind.writeBindings() && outcome.file() != null) {
                         // phase2-contracts.md 12.1, 11.4: skillroy resolve --dry-run prints the file it would write,
@@ -1109,7 +1173,7 @@ public final class PlanExecutor {
                         // phase3-contracts.md 8.2: the failing bind record carries the ORACLE_SUSPECT detail.
                         record.put("detail", detail);
                     }
-                    log.write("bind", record);
+                    bindRecord(record);
                     throw new Abort(Status.ERROR, e.kind(), null, e.getMessage(), detail);
                 }
                 this.outcome = outcome;
@@ -1130,7 +1194,7 @@ public final class PlanExecutor {
             if (outcome != null && !outcome.skipped().isEmpty()) {
                 record.put("skipped", outcome.skipped());
             }
-            log.write("bind", record);
+            bindRecord(record);
             if (options.outputDir() != null) {
                 try {
                     writeBindings(options.outputDir().resolve("bindings.json"));
@@ -1259,6 +1323,9 @@ public final class PlanExecutor {
                 throws Abort, AgentLostException, InterruptedException {
             runner.currentStep = id;
             stepsStarted = true;
+            if (observing) {
+                observer.stepStarted(new StepStart(id, verb, line));
+            }
             long t0 = options.clock().millis();
             List<String> stepSkipped = new ArrayList<>();
             runner.stepFidelity = new ArrayList<>();
@@ -1281,7 +1348,13 @@ public final class PlanExecutor {
                 message = "internal error: " + e;
                 throw e;
             } finally {
-                steps.add(new StepResult(id, verb, line, status, message, stepSkipped, since(t0), runner.stepFidelity));
+                StepResult result = new StepResult(id, verb, line, status, message, stepSkipped, since(t0),
+                        runner.stepFidelity);
+                steps.add(result);
+                if (observing) {
+                    observer.stepEnded(new StepResult(id, verb, line, status, mask.apply(message),
+                            texts(stepSkipped), result.duration(), texts(result.degradedFidelity())));
+                }
             }
         }
 
@@ -1988,6 +2061,7 @@ public final class PlanExecutor {
                 Map<String, Object> params = null;
                 boolean webCall = WebRun.isWeb(call.primitive());
                 String[] servedBy = new String[1];
+                CleanupCall observed = new CleanupCall(calls.indexOf(call) + 1, call.primitive());
                 try {
                     @SuppressWarnings("unchecked")
                     Map<String, Object> substituted = (Map<String, Object>) cleanupBindings.substitute(call.args());
@@ -2000,6 +2074,7 @@ public final class PlanExecutor {
                         // phase5-contracts.md 13.1: a destructive cleanup call is confirmed as a step's is.
                         callOptions = callOptions.withConfirm(true);
                     }
+                    callOptions = observed.start(callOptions, secretParams);
                     RpcResult result;
                     long agentSince;
                     long pathSince;
@@ -2020,6 +2095,7 @@ public final class PlanExecutor {
                         agentSince = result.seqBefore();
                         noteSeq(result.seqAfter());
                     }
+                    observed.result(result, webCall ? servedBy[0] : AgentWebPath.ID);
                     runner.applySync(call, await, agentSince, pathSince, "cleanup");
                     Map<String, Object> record = RunLog.fields("primitive", call.primitive());
                     if (webCall) {
@@ -2032,12 +2108,65 @@ public final class PlanExecutor {
                     runner.agentLost = true;
                     log.write("cleanup", cleanupFailure(call, servedBy[0], params, e.toString()));
                 } catch (AgentRpcException e) {
+                    observed.error(ErrorCodes.name(e.error().code()), servedBy[0]);
                     noteCleanupFailure(call, calls, servedBy[0]);
                     log.write("cleanup", cleanupFailure(call, servedBy[0], params, e.error().toJson()));
                 } catch (Abort | ResolutionException | WebRun.PathFailure | RuntimeException e) {
                     noteCleanupFailure(call, calls, servedBy[0]);
                     log.write("cleanup", cleanupFailure(call, servedBy[0], params, e.getMessage() == null
                             ? e.toString() : e.getMessage()));
+                } finally {
+                    observed.end();
+                }
+            }
+        }
+
+        /**
+         * A cleanup call's {@code call} span (phase6-contracts.md 10.4: a child of the scenario): started once its
+         * options are known, ended however the call ends; nothing with {@link RunObserver#NONE}.
+         */
+        private final class CleanupCall {
+
+            private final int index;
+            private final String primitive;
+            private boolean started;
+            private RpcResult result;
+            private String path;
+            private String errorCode;
+            private long startMs;
+            private long rttMs = -1L;
+
+            CleanupCall(int index, String primitive) {
+                this.index = index;
+                this.primitive = primitive;
+            }
+
+            /** Starts the span; the options gain its trace parent. */
+            CallOptions start(CallOptions callOptions, List<String> secretParams) {
+                if (!observing) {
+                    return callOptions;
+                }
+                started = true;
+                startMs = options.clock().millis();
+                observer.callStarted(new CallStart("cleanup", index, primitive, callOptions.correlationId(),
+                        secretParams, callOptions.confirm()));
+                return callOptions.withTraceparent(observer.currentTraceparent());
+            }
+
+            void result(RpcResult value, String servedBy) {
+                this.result = value;
+                this.path = servedBy;
+                this.rttMs = options.clock().millis() - startMs;
+            }
+
+            void error(String code, String servedBy) {
+                this.errorCode = code;
+                this.path = servedBy == null ? AgentWebPath.ID : servedBy;
+            }
+
+            void end() {
+                if (started) {
+                    observer.callEnded(CallRunner.callEnd(result, path, errorCode, rttMs));
                 }
             }
         }

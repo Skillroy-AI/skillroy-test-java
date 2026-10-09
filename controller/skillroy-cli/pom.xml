@@ -69,6 +69,13 @@
       <groupId>ai.skillroy</groupId>
       <artifactId>skillroy-mcp</artifactId>
     </dependency>
+    <!-- Phase 6 (phase6-contracts.md 2.1, 2.6, D140): OpenTelemetry export, bundled so that the zip's - -telemetry works
+         as shipped; the OpenTelemetry jars it brings are in lib/ (THIRD-PARTY.txt). Found through ServiceLoader only
+         when an exporter is named: without - -telemetry no OpenTelemetry class loads. -->
+    <dependency>
+      <groupId>ai.skillroy</groupId>
+      <artifactId>skillroy-telemetry</artifactId>
+    </dependency>
     <!-- slf4j-api (in the SDKs' trees) finds no provider and prints a notice on stderr once; the no-operation provider
          keeps the CLI's stderr to its own messages (phase5-contracts.md 9.3, as built). Runtime only. -->
     <dependency>

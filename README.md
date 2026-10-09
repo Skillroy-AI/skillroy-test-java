@@ -76,7 +76,8 @@ agent/        Java 8, runs inside the target JVM, no third-party classes; agent/
               primitives and the reflective jcef and jxbrowser adapters, and its test-jar the adapter contract kit
 controller/   Java 25: attach and client, data channels and credentials (controller/skillroy-data), scenario
               compiler, resolution and executor, JUnit glue, CLI; controller/skillroy-cdp is the optional CDP path
-              (Playwright), which no other module depends on
+              (Playwright), which no other module depends on; controller/skillroy-telemetry the OpenTelemetry export
+              (Phase 6), which the CLI bundles and nothing else depends on
 samples/      the sample lending desk: the issue desk of a tool library, a small Swing application with an engine
               thread, custom widgets, modal prompts and an embedded database; plus its agent module, domain pack
               and scenarios (skillroy-sample-lending-app, -agent, -pack, -scenarios); and, behind the Maven profile
@@ -191,6 +192,47 @@ one option per jar, together with Playwright's jars from the local Maven reposit
 and `opentest4j-1.3.0.jar`. Without them the same command runs the web verbs through the agent. Playwright extracts its
 driver (about 140 MB) on first use in each JVM, and never downloads a browser: it attaches to the one the application
 runs.
+
+## Exporting spans (OpenTelemetry)
+
+(Phase 6, built 2026-10-09, TL; [phase6-contracts.md](docs/design/phase6-contracts.md) section 10.) A run, a session and
+the MCP server can export what they do as OpenTelemetry spans, from the controller only: nothing of OpenTelemetry
+enters a target JVM. It is **off by default**: without `--telemetry` (or the property or the file naming an exporter)
+no OpenTelemetry class loads and no thread starts. `run`, `session`, `mcp`, `re-resolve`, `triage` and `author` take
+`--telemetry none|otlp|file`, `--telemetry-endpoint <url>`, `--telemetry-attributes standard|minimal` and
+`--telemetry-file <path>`; the JUnit glue reads `skillroy.telemetry`, `skillroy.telemetry.endpoint`,
+`skillroy.telemetry.attributes`, `skillroy.telemetry.out`, `skillroy.telemetry.serviceName`,
+`skillroy.telemetry.timeoutMs` and `skillroy.telemetry.file`, with `skillroy-telemetry` on the test class path, and
+flushes at JVM exit. One trace per invocation (or JUnit stream): `skillroy <command>`, then `scenario <id>`, `bind`,
+`step <id>`, `call <primitive>` with a reconstructed `agent <primitive>` and its `await`s, and `chat <model>` for each
+model call; a session's `session <id>`, `turn <n>` and steps; an MCP `tools/call <tool>` continues the client's trace.
+Attributes are ids, enumerations, counts, durations, hashes and masked one-line messages, never a call's parameters,
+values, payloads, rows, SQL or prompts; `minimal` also drops the messages and the pack, suite, slot and file names and
+hashes the ids.
+
+`--telemetry file` writes `<out>/telemetry/spans.jsonl` beside the run's outputs, one span per line in the project's
+own format `skillroy-spans/1` (a CI artifact without a collector). `--telemetry otlp` posts OTLP/HTTP (protobuf) to
+`<endpoint>/v1/traces` through the JDK's HTTP client, default `http://127.0.0.1:4318`: `http://` is accepted only for
+a literal loopback address or `localhost`, any other host needs `https://` (the JDK's default trust store; there is
+no insecure setting). Nothing is read from `OTEL_*` variables. A backend's token goes into `telemetry.yaml` (beside the
+credentials file, or `--telemetry-file`) as the name of an environment variable, never as a value, and never one of
+the model key's (`ANTHROPIC_*`):
+
+```yaml
+version: 1
+exporter: otlp
+endpoint: https://collector.example.org
+headers: {Authorization: env:OTLP_AUTHORIZATION}
+attributes: standard
+timeoutMs: 10000
+```
+
+With telemetry on, `run-start` in `run.jsonl`, `--json` (`telemetry: {exporter, traceId}`) and the JUnit report name
+the trace, and the command ends with `telemetry: otlp <host:port>, trace <id>, <n> batches dropped`. An endpoint that
+cannot be reached is reported once on stderr and never fails or slows the run beyond the timeout. To try it against a
+real OpenTelemetry Collector (an opt-in, not part of the acceptance): start one on the operator's machine with an
+OTLP/HTTP receiver on `127.0.0.1:4318` and a debug exporter, then add `--telemetry otlp` to a `run` of the commands
+above and look for the trace id the summary prints.
 
 ## Extending it to a real application
 

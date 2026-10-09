@@ -46,6 +46,13 @@ class SeamTypesTest {
         assertEquals(List.of(), defaults.secretParams(), "the three-argument form announces no secret");
         CallOptions secret = custom.withSecretParams(List.of("value"));
         assertEquals(new CallOptions("c-1", 500L, true, List.of("value")), secret);
+        // Phase 6 (phase6-contracts.md 10.2): the trace parent, a fifth component; the four-argument form has none.
+        CallOptions traced = secret.withTraceparent("00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01");
+        assertEquals("00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01", traced.traceparent());
+        assertEquals(secret, traced.withTraceparent(" "), "a blank trace parent is none");
+        assertEquals(null, new CallOptions("c-1", 500L, true, List.of("value")).traceparent());
+        assertEquals(traced.traceparent(), traced.withConfirm(false).withTimeoutMs(1L).withCorrelationId("x")
+                .withSecretParams(List.of()).traceparent(), "every copy keeps it");
         assertEquals(List.of("value"), secret.withTimeoutMs(9L).withConfirm(false).withCorrelationId("c-2")
                 .secretParams(), "the copies keep the secret params");
         assertEquals(List.of(), secret.withSecretParams(null).secretParams());

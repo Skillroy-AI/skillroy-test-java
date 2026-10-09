@@ -307,6 +307,17 @@ implementers then build offline (`mvn -o`), as the project does. The root POM ga
 (`<!-- Phase 6 (phase6-contracts.md 2.2, decision D1nn): <library>, <licence>; audited in docs/licence-audit.md
 section <n>. -->`), and the managed entries.
 
+*As built (Phase 6, TL, 2026-10-09):* OpenTelemetry is pinned at **1.66.0** (released 2026-09-11; 1.67.0 came out on
+the day of the build and was not adopted), per artifact (no BOM import: the BOM is not in the offline cache). The
+resolved runtime tree of `skillroy-telemetry` is exactly eleven jars: `opentelemetry-api`, `-context`, `-common`,
+`-sdk-common`, `-sdk-trace`, `-sdk-metrics`, `-sdk-logs`, `-exporter-otlp`, `-exporter-otlp-common`,
+`-exporter-common` and `-exporter-sender-jdk`; `-exporter-sender-okhttp` is excluded in the root POM's managed entry
+of `-exporter-otlp`, and **no `-sdk-extension-autoconfigure-spi` (nor `-autoconfigure`) artifact is in the tree**
+(the exporter declares the SPI compile-only), so the table's guess is void. Tests add `opentelemetry-sdk-testing`
+with `opentelemetry-sdk`. `THIRD-PARTY.txt`, `DistributionNoticesIT.THIRD_PARTY` and `../licence-audit.md` §4 list
+the eleven; the jars carry no `pom.properties` and no licence file, so the test identifies them by file name and the
+attribution and the top-level `LICENSE` are their evidence.
+
 ### 2.3 Build conventions
 
 As P2 §2.3, P4 §2.3 and P5 §2.3: `--release 8` for every module under `agent/` and the sample application and agent
@@ -1762,6 +1773,46 @@ by `NONE` for the rest of the run: telemetry never changes a verdict. `BindListe
 `resolve`, `oracle` and `fingerprint` (an additive change to P2 §11.3, §15.1), so that the bind span's events show
 where model latency and SQL time went.
 
+*As built (Phase 6, TL, 2026-10-09):*
+
+- **The SPI's additions (decision D-TL-2 of the build).** A span must be open before its children, and the table of
+  §10.4 parents a session step under its turn and a tool call's work under the client's trace, which after-the-fact
+  methods cannot do. `RunObserver` therefore has, as `default` no-ops beside the methods above,
+  `sessionStarted(SessionStart)` (`SessionStart(id, pack, packVersion, policy)`, the policy `read-only` or `acting`
+  from `SessionOptions.readOnly`), `sessionStepStarted(StepStart)` (`StepStart` gains `origin`, null in a run),
+  `sessionRecord(String type)` (the type of every journal record, the session span's events; never its content),
+  `sessionEnded(String reason)`, `turnStarted(int index)`, `toolCallStarted(String tool, String traceparent)` and
+  `traceId()` (the invocation's trace id, for `run-start`, `--json` and the JUnit report). `CallEnd` carries `rttMs`,
+  the call's own round trip, in which the agent span is centred.
+- **Where the observer travels.** `RunOptions.observer` is, on the TL branch, the **eleventh** component, since
+  `hooks` (CP) did not exist there; the integration places `hooks` eleventh and `observer` twelfth as §6.1 says, and
+  every caller uses `withObserver` and the older constructors only. The session's observer is
+  **`SessionOptions.observer`** (an eleventh component with `withObserver` and the ten-argument constructor kept;
+  decision D-TL-3): `ExecutorSession` wraps it, and `ExecutorSession.observer()` hands the same wrapped observer to
+  `SessionService` (`turnStarted` at the start of `ask`, `sessionTurn` when the turn is recorded) and to the MCP
+  server (`toolCallStarted` and `toolCall` around each call's dispatch, under the session lock, so that concurrent
+  calls never interleave; `skillroy_scenario_run`'s runs carry it too). `ServerOptions` is unchanged.
+- **The scenario records reach the observer through `RunLog` (decision D-TL-5).** `RunLog.observe(observer)` passes
+  every record of the types `requires`, `launchProperties`, `preflight`, `hooks`, `capabilities`, `recover`,
+  `cleanup` (the seven) and `expect`, `db`, `prompt`, `fidelity`, `capture` (the step span's events of §10.4, which
+  the SPI had no method for) to `scenarioRecord`, as written (masked, JSON form, without `type` and `t`), whoever
+  writes it: CP's `hooks` and `capabilities` records need no further call whichever package lands second. A log
+  without a file still tells its observer (a session's). The bind records go through `bindEvent` as specified: the
+  listener's records, and the executor's **final** `bind` record (success or failure, which ends the bind span); the
+  intermediate `bind {written}` and `bind {writeError}` records are not passed.
+- **Calls.** The `call` span covers the call, its sync, its capture and its prompt check (`callStarted` once the
+  call's options are known, `callEnded` when `CallRunner.execute` returns or throws), so that its `await` spans are
+  inside it; cleanup calls get the same span from `PlanExecutor` (their own `CleanupCall`). The trace parent is sent
+  on the step and cleanup calls only, not on the executor's diagnostic reads (`swing.edtState`, `evt.query`, …).
+- **`NONE` costs nothing new.** `RunObservers.safe(NONE)` is `NONE`, the executor and `CallRunner` build no record
+  for it (`RunObservers.isNone`), `RunLog` does not copy a record for it, and `run-start` carries no `traceId`.
+  `RunObservers.safe` logs a failing observer once (`System.Logger`, WARNING, the exception's class only) and
+  replaces it by `NONE` for the rest of the run; its `close()` only flushes, since a run never ends the invocation's
+  trace.
+- **Watch out at integration:** a `SessionOptions` or `RunOptions` rebuilt through an older constructor drops the
+  observer (the MCP server's `effectiveSession` was one such place and now re-adds it); CP's and FX's new
+  constructors must carry it.
+
 **The travelling `traceparent`.** `CallOptions` gains a fifth component `traceparent` (the four-argument constructor
 stays, as A34 kept the three-argument one), `AgentClient.withMeta` writes it into `_meta.traceparent` (P1 §7's "the
 controller sends … and nothing else" is amended: it sends the trace parent when one exists, §15.1), and
@@ -1790,6 +1841,25 @@ with telemetry on, `run.jsonl`'s `run-start` gains `traceId`, `--json` gains `te
 JUnit XML's `<system-out>` gains one line `traceId=<hex>` (a trace id is not a secret), and the CLI's summary one
 line `telemetry: otlp <endpoint host:port>, trace <id>, <n> batches dropped` (the endpoint's host and port only, never
 its headers; the dropped count from the module's own failure handler, §10.4).
+
+*As built (Phase 6, TL, 2026-10-09):* the reader is **`TelemetrySettings.load`** in `skillroy-scenario`'s `observe`
+package (decision D-TL-1 of the build), not in `skillroy-telemetry`: the JUnit glue, which does not depend on the
+module, reads the file and the properties the same way, and the CLI decides `none` without loading anything; the
+module's `create` checks the endpoint rule again and reads the header values. Rules beyond the table: an endpoint
+with user information, a query or a fragment is refused; **every `ANTHROPIC_*` variable** is refused as a header's
+(the four named and `ANTHROPIC_BASE_URL`, which the gateway reads, among them; `inference.yaml` names no variable
+today); a header name or a key the grammar does not fix is never echoed in a message; the options map onto the
+property names (`--telemetry` is `skillroy.telemetry`, …) and the messages name the property. The file exporter's
+directory is `<out>/telemetry/` for `run` (its `--out`), `session` (its `--out` or `run-output/<session id>`), `mcp`
+(its `--out`) and `re-resolve` (its report directory); `triage` and `author` (whose `--out` is the scenarios
+directory) need `out:` in `telemetry.yaml` or `skillroy.telemetry.out`, else the usage error names the setting.
+`re-resolve` and `triage` export their root span only (their model calls are in their own ledgers and reports);
+`author` exports its root span, its planner's ledger entries as `chat` spans and its bind and run as scenarios; the
+planner's own `skillroy mcp` child is started without telemetry. The JUnit glue's service version is
+`skillroy-junit`'s `Implementation-Version`, which its jar's manifest now carries; its observer is registered with one
+JVM shutdown hook (`skillroy-telemetry-exit`) that closes every stream's observer, each bounded by its timeout. The
+summary line goes to stdout with the human summary, to stderr with `--json` and for `mcp` (whose stdout is the
+protocol); `--json`'s `telemetry` is null with telemetry off. `Main.version()` is package-private (it was private).
 
 ### 10.4 `skillroy-telemetry`: spans, attributes, status, masking (D142)
 
@@ -1829,6 +1899,42 @@ characters; at most 64 attributes and 128 events per span (the default limits of
 the `semconv` jars move between releases and would be two more jars to audit). The agent is not touched: its events
 already carry `ts`, `seq`, `topic`, `source`, `correlationId`, `traceparent`.
 
+*As built (Phase 6, TL, 2026-10-09):*
+
+- **Threads (decision D-TL-4 of the build).** `BatchSpanProcessor` 1.66.0 offers no thread factory: its daemon worker
+  is named by the SDK (`BatchSpanProcessor_WorkerThread-1`). The JDK sender's `HttpClient` runs on an executor of
+  daemon threads named `skillroy-telemetry` (`setExecutorService`), which `close` shuts down; the JDK adds its own
+  selector thread. The exporter runs **without retry** (`setRetryPolicy(null)`) and with the settings' timeout as the
+  connect and call timeout, so that a refused endpoint costs one attempt per batch; the processor's and the
+  exporter's meter provider is the no-op one (nothing asks `GlobalOpenTelemetry`). The `file` exporter uses a
+  `SimpleSpanProcessor` (one line per span as it ends, on the reporting thread) and appends to `spans.jsonl`.
+- **Failure reporting.** The exporter is wrapped: a failed batch is counted (`ExportStatus.droppedBatches`, the
+  summary line) and the first one prints `skillroy: telemetry: the export to <host:port> failed; …` on stderr once.
+  The `io.opentelemetry` JUL logger is set to `WARNING` with a handler of the module's own that keeps the SDK's records
+  off the console (it prints nothing: the wrapper's one line is the report).
+- **Names.** The root span is `skillroy <command>` (`run`, `session`, `mcp`, `re-resolve`, `triage`, `author`, and
+  `junit` for a JUnit stream). `minimal` names `scenario`, `step`, `call`, `chat`, `tools/call` **and `agent`** without
+  their ids (the agent span's name would otherwise repeat the primitive `minimal` replaces), each with
+  `skillroy.id.hash`; `bind` and `await` have no id, and `session <id>` and `turn <n>` keep theirs (no confidential
+  text). `TelemetryAttributes.MINIMAL_DROPS` is the six names dropped (`skillroy.message`, the `environment` event's
+  included, `skillroy.step.message`, `skillroy.pack`, `skillroy.suite`, `skillroy.bindings.file`, `skillroy.slot`);
+  `MINIMAL_REPLACED` the four replaced by a class (`skillroy.primitive`, `gen_ai.tool.name`, `skillroy.step.verb`,
+  the `expect` event's path as `skillroy.expect.path`); `MINIMAL_HASHED` the two hashed (`test.case.name`,
+  `skillroy.failed_step`). A tool's class is `workflow` (`skillroy_*`), `primitive` (a base namespace's tool) or `verb`
+  (the rest, a pack primitive's tool included). The correlation id keeps the scenario id in `minimal`, as the exact
+  list does not name it (a question for the code review).
+- **Spans and attributes.** `skillroy.skipped_expectations`, `skillroy.degraded_fidelity`, `skillroy.bind.skipped`
+  and `skillroy.step.skipped_expectations` are counts, not texts. The bind span opens at the first bind record and
+  ends at the executor's final `bind` record (`ERROR` with the failure kind when `ok` is false); `fingerprint` is an
+  event of the scenario span (hash and `durationMs`); `resolver` and `verifier` records are not exported (the
+  `resolve` event names the resolver and the verifiers with their outcomes). A `chat` span's parent is the scenario's
+  bind span (kept after it ended) for a `resolve` entry with a slot, else the scenario, else the innermost open span;
+  its times are the details' `t` and `elapsedMs`. The agent span is centred in the call's own round trip and clamped
+  inside the call span. A session step's span is the turn's child when a turn is open, else the open tool call's, else
+  the session's. `tools/call` is a `SERVER` span, `call` a `CLIENT` span, `agent` a `SERVER` span. Event attributes are
+  `skillroy.*` names of `TelemetryAttributes` (the record's identifiers only: never an expectation's actual or matcher
+  value, a prompt's payload or a captured value).
+
 ### 10.5 The `file` exporter and what is not built
 
 `FileObserverProvider` (`exporter() = "file"`) writes `<out>/spans.jsonl` in the **project's own format**
@@ -1841,6 +1947,10 @@ it is the test oracle and a CI artifact without a collector, and a converter is 
 `skillroy.call.duration {primitive, path, ok}`, `gen_ai.client.token.usage {gen_ai.token.type}`,
 `gen_ai.client.operation.duration`, the counter `skillroy.model.cost_usd {purpose, model}`), logs, a gRPC sender,
 agent-side spans.
+
+*As built (Phase 6, TL, 2026-10-09):* `SpansFileExporter` writes the format as specified (`parentSpanId` null for a
+root, attribute values as JSON strings, numbers, booleans or arrays; a double as text), appending, one line per span,
+flushed per batch of one; the values are the allow-list's, masked before they became attributes.
 
 ### 10.6 Tests
 
@@ -1865,6 +1975,23 @@ or file (a scan for the variable's value). Distribution: `DistributionNoticesIT`
 telemetry jar, `DistributionContentIT` proves the agent home holds nothing of it. JUnit glue: a stream with
 `-Dskillroy.telemetry=file -Dskillroy.telemetry.out=<dir>` writes the file and flushes at JVM exit (a shutdown hook,
 bounded).
+
+*As built (Phase 6, TL, 2026-10-09):* `skillroy-scenario`: `RunObserverSeamTest` (every hook point beside its record,
+masked, the trace parent and `traceId`, `NONE`'s cost, a throwing observer, the older constructors, a session's
+reports, the JUnit report's line) and `TelemetrySettingsTest` (every rule of §10.3, 36 cases). `skillroy-telemetry`:
+`TelemetryObserverTest` (the tree of a passing, a failing, a `SYNC_TIMEOUT` and a `REBIND_NEEDED` run on the fake
+agent, statuses, the `gen_ai` span, the centred agent span, the trace parent present and absent, `minimal` against
+`standard` with the exact lists, the session and a tool call continuing a client's trace, the secret and
+binding-value scans, the file format), `OtlpTransportTest` (the loopback stub; the header's variable is given through
+the settings' environment seam in process) and `ClassLoadingProbeTest` (a child JVM with `-Xlog:class+load`: finding
+the providers and asking `none` load no `io.opentelemetry` class; creating an observer does). The executor's
+fixtures are package-private, so the module's tests reach them through `ai.skillroy.testjava.scenario.TelemetryFixture`
+in its own test sources (the same package, on the class path). `skillroy-cli`: `TelemetryCommandTest` (the file
+exporter, `--json`, `run-start` and the JUnit line; the usage errors; a child JVM with `-Xlog:class+load` and no
+`--telemetry`; a child JVM whose environment holds the header's variable, against a loopback stub, with every output
+and file scanned for its value). `skillroy-mcp`: `McpTelemetryTest`; `skillroy-inference`: `SessionTelemetryTest`.
+The scenarios module: `TelemetryStreamTest` (headless: the JUnit stream in a child JVM on the headless desk, scenario
+C in `replay`, the root span written by the exit hook) and `TelemetryEndToEndIT` (§13.2 item 9, in the image).
 
 ---
 

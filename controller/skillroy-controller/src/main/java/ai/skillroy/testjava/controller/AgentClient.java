@@ -86,8 +86,9 @@ import java.util.function.Consumer;
  *
  * <p>Calls: request ids are {@code "c-<n>"} per client. {@link CallOptions} go into {@code params._meta}
  * ({@code correlationId}, always present and generated when not given; {@code timeoutMs}; {@code confirm} when true;
- * {@code secretParams} when not empty, amendment A34), and nothing else does: a {@code _meta} among the params is
- * dropped (phase5-contracts.md 12.2).
+ * {@code secretParams} when not empty, amendment A34; {@code traceparent} when the options carry one, Phase 6:
+ * phase6-contracts.md 10.2), and nothing else does: a {@code _meta} among the params is dropped (phase5-contracts.md
+ * 12.2).
  * The deadline of a call is {@code timeoutMs + 5 s}, or 130 s when no timeout is given, so the agent's own TIMEOUT
  * error normally arrives first. Every deadline covers the whole reply, headers and body (finding S23), and a reply
  * body is limited to 64 MiB (64 KiB for {@code /ping}); a late or oversized reply is an {@link AgentLostException}.
@@ -667,6 +668,11 @@ public final class AgentClient implements AgentConnection {
         }
         if (!options.secretParams().isEmpty()) {
             meta.put(Protocol.META_SECRET_PARAMS, new ArrayList<>(options.secretParams()));
+        }
+        if (options.traceparent() != null) {
+            // Phase 6 (phase6-contracts.md 10.2): the controller's open call span, which the agent stamps on the
+            // call's events; sent only when telemetry supplies one.
+            meta.put("traceparent", options.traceparent());
         }
         copy.put(META, meta);
         return copy;

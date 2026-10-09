@@ -19,6 +19,7 @@ package ai.skillroy.testjava.scenario;
 import ai.skillroy.testjava.data.SecretMask;
 
 import ai.skillroy.testjava.protocol.Json;
+import ai.skillroy.testjava.scenario.observe.RunObserver;
 
 import java.io.BufferedWriter;
 import java.io.IOException;
@@ -30,6 +31,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Writes {@code run.jsonl}: one compact JSON object per line, flushed per line so that a crash keeps what happened.
@@ -47,6 +49,13 @@ import java.util.Map;
  * a {@code web.*} primitive carries {@code path}. Every record passes through the run's {@link SecretMask} first
  * (amendment A25, phase2-contracts.md 11.4).
  *
+ * <p>Telemetry (phase6-contracts.md 10.2; as built, Phase 6, TL): an observer set with {@link #observe} receives, as
+ * {@code scenarioRecord}, every record of the types {@link #OBSERVED} names exactly as it is written (masked, in JSON
+ * form, without {@code type} and {@code t}), whoever writes it: the seven scenario records the contract names
+ * ({@code requires}, {@code launchProperties}, {@code preflight}, {@code hooks}, {@code capabilities},
+ * {@code recover}, {@code cleanup}) and the five the step span's events come from ({@code expect}, {@code db},
+ * {@code prompt}, {@code fidelity}, {@code capture}). A log without a file still tells its observer.
+ *
  * <p>Best effort: a write error disables the log and is never thrown into the run. Used by the executor's thread;
  * {@link #write} is synchronised because a web path may append a record through its run context from a thread of
  * its own.
@@ -59,11 +68,16 @@ final class RunLog implements AutoCloseable {
     /** The nesting the JSON codec writes at most. */
     private static final int MAX_DEPTH = 200;
 
+    /** The record types an observer receives as {@code scenarioRecord} (phase6-contracts.md 10.2, 10.4). */
+    static final Set<String> OBSERVED = Set.of("requires", "launchProperties", "preflight", "hooks", "capabilities",
+            "recover", "cleanup", "expect", "db", "prompt", "fidelity", "capture");
+
     private final Clock clock;
     private final long startMs;
     private BufferedWriter out;
     private String error;
     private SecretMask mask = SecretMask.NONE;
+    private RunObserver observer = RunObserver.NONE;
 
     private RunLog(BufferedWriter out, Clock clock) {
         this.out = out;
@@ -86,6 +100,14 @@ final class RunLog implements AutoCloseable {
         }
     }
 
+    /**
+     * Sets the observer that receives the {@link #OBSERVED} records as written; it must not throw (the executor's is
+     * wrapped).
+     */
+    synchronized void observe(RunObserver newObserver) {
+        this.observer = newObserver == null ? RunObserver.NONE : newObserver;
+    }
+
     /** Sets the mask every later record passes through. */
     void mask(SecretMask secretMask) {
         this.mask = secretMask == null ? SecretMask.NONE : secretMask;
@@ -99,7 +121,8 @@ final class RunLog implements AutoCloseable {
      * values could not be masked.
      */
     synchronized void write(String type, Map<String, ?> fields) {
-        if (out == null) {
+        boolean observed = observer != RunObserver.NONE && OBSERVED.contains(type);
+        if (out == null && !observed) {
             return;
         }
         Map<String, Object> record = new LinkedHashMap<>();
@@ -116,6 +139,16 @@ final class RunLog implements AutoCloseable {
         } catch (RuntimeException e) {
             line = Json.write(fields("type", type, "t", record.get("t"), "unwritable", mask.apply(e.toString()),
                     "fields", fields == null ? List.of() : new ArrayList<>(fields.keySet())));
+            observed = false;
+        }
+        if (observed) {
+            Map<String, Object> written = new LinkedHashMap<>(record);
+            written.remove("type");
+            written.remove("t");
+            observer.scenarioRecord(type, written);
+        }
+        if (out == null) {
+            return;
         }
         try {
             out.write(line);

@@ -30,7 +30,11 @@ import java.util.Map;
  * {@code none} ({@code mode, requested, gateway, reason}). A {@code resolver} record of a parked slot has
  * {@code parked: true} instead of a count, and the one of its resumption {@code resumed: true}; a {@code resolve}
  * record of a value a model found adds {@code confidence, approval, llm}, and one reused by {@code approve} adds
- * {@code reused: true, reusedFrom} (the recorded {@code approval.by}). The fields are not masked, except a
+ * {@code reused: true, reusedFrom} (the recorded {@code approval.by}). From Phase 6 (phase6-contracts.md 10.2, an
+ * additive change to P2 11.3) the {@code resolve}, {@code oracle} and {@code fingerprint} records end with
+ * {@code durationMs}: the time since the slot started (its resolvers, verifiers and any model call; for a parked slot
+ * the wait for the approval too), the oracle's evaluation, the fingerprint's computation, so that a bind span's events
+ * show where model latency and SQL time went. The fields are not masked, except a
  * cross-check's evidence, actual and reason, which the engine masks with the credentials: the receiver masks what it
  * writes.
  *

@@ -165,6 +165,8 @@ public final class ResolutionEngine implements AutoCloseable {
     private ResolutionCatalogue catalogue;
     private View view;
     private String currentSlot;
+    /** When the current slot started (the engine's clock), -1 before the first: a {@code resolve} record's duration. */
+    private long slotStartedMs = -1L;
 
     private final Map<String, Object> values = new LinkedHashMap<>();
     private final Map<String, String> strategies = new LinkedHashMap<>();
@@ -560,6 +562,7 @@ public final class ResolutionEngine implements AutoCloseable {
 
     void slot(String slot) {
         currentSlot = slot;
+        slotStartedMs = clock.millis();
     }
 
     /** The scenario a resolver's context reports ({@code ResolveContext.scenarioId()}); the binder sets the plan's. */
@@ -1297,7 +1300,11 @@ public final class ResolutionEngine implements AutoCloseable {
                 : cost.toPlainString());
     }
 
-    /** The run.jsonl {@code resolve} record of a resolution (unmasked; the log masks). */
+    /**
+     * The run.jsonl {@code resolve} record of a resolution (unmasked; the log masks); from Phase 6 it ends with
+     * {@code durationMs}, the time since the slot started (phase6-contracts.md 10.2, P2 11.3: where model latency and
+     * SQL time went), when the slot was started through {@link #slot}.
+     */
     Map<String, Object> resolveRecord(Resolution r, Strategy recordedStrategy) {
         Map<String, Object> record = fields("slot", r.slot(), "query", r.query(), "args", r.args(), "mode",
                 options.mode().label(), "strategy", recordedStrategy == null ? r.strategy().name()
@@ -1345,6 +1352,9 @@ public final class ResolutionEngine implements AutoCloseable {
                 // show it.
                 record.put("rationale", p.rationale());
             }
+        }
+        if (slotStartedMs >= 0) {
+            record.put("durationMs", Math.max(0L, clock.millis() - slotStartedMs));
         }
         return record;
     }

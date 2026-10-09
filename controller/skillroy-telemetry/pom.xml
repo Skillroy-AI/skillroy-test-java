@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Copyright 2026 Mike Mills.
+
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+
+      http://www.apache.org/licenses/LICENSE-2.0
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>ai.skillroy</groupId>
+    <artifactId>skillroy-test-java-parent</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+    <relativePath>../../pom.xml</relativePath>
+  </parent>
+
+  <artifactId>skillroy-telemetry</artifactId>
+  <name>skillroy-telemetry</name>
+  <description>
+    OpenTelemetry export of runs, sessions and MCP tool calls (phase6-contracts.md 10): the RunObserver providers
+    "otlp" (OTLP/HTTP through the JDK's HTTP client) and "file" (the project's skillroy-spans/1 JSON lines). Controller
+    only: nothing of it enters a target JVM. Off unless an exporter is named.
+  </description>
+
+  <properties>
+    <!-- Controller side: Java 25. -->
+    <maven.compiler.release>25</maven.compiler.release>
+  </properties>
+
+  <dependencies>
+    <dependency>
+      <groupId>ai.skillroy</groupId>
+      <artifactId>skillroy-scenario</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>ai.skillroy</groupId>
+      <artifactId>skillroy-controller</artifactId>
+    </dependency>
+    <!-- The OpenTelemetry set (phase6-contracts.md 2.2, D140, D141): the API, the trace SDK, the OTLP exporter and the
+         JDK sender; the exporter's transitives (exporter-otlp-common, exporter-common, sdk-metrics, sdk-logs, common)
+         come with it. The OkHttp sender is excluded in the root POM's managed entry. -->
+    <dependency>
+      <groupId>io.opentelemetry</groupId>
+      <artifactId>opentelemetry-api</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>io.opentelemetry</groupId>
+      <artifactId>opentelemetry-context</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>io.opentelemetry</groupId>
+      <artifactId>opentelemetry-sdk-common</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>io.opentelemetry</groupId>
+      <artifactId>opentelemetry-sdk-trace</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>io.opentelemetry</groupId>
+      <artifactId>opentelemetry-exporter-otlp</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>io.opentelemetry</groupId>
+      <artifactId>opentelemetry-exporter-sender-jdk</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>io.opentelemetry</groupId>
+      <artifactId>opentelemetry-sdk-testing</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <!-- FakeAgentConnection, ToyPack and the executor tests' fixtures (phase6-contracts.md 10.6). -->
+    <dependency>
+      <groupId>ai.skillroy</groupId>
+      <artifactId>skillroy-scenario</artifactId>
+      <type>test-jar</type>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.hsqldb</groupId>
+      <artifactId>hsqldb</artifactId>
+      <classifier>jdk8</classifier>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <configuration>
+          <!-- The settings' rules depend on the environment: a developer's own model key or credentials must not reach
+               the tests, which give the header variables they need to a child JVM or through the lookup seam. -->
+          <excludedEnvironmentVariables>
+            <param>SKILLROY_CREDENTIALS</param>
+            <param>ANTHROPIC_API_KEY</param>
+            <param>ANTHROPIC_WORKSPACE_ID</param>
+          </excludedEnvironmentVariables>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+</project>

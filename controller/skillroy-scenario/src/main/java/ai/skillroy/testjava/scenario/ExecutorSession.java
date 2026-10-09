@@ -38,6 +38,10 @@ import ai.skillroy.testjava.scenario.pack.PreflightCheck;
 import ai.skillroy.testjava.scenario.pack.PromptPolicy;
 import ai.skillroy.testjava.scenario.pack.StepLibrary;
 import ai.skillroy.testjava.scenario.pack.SyncPolicy;
+import ai.skillroy.testjava.scenario.observe.RunObserver;
+import ai.skillroy.testjava.scenario.observe.RunObservers;
+import ai.skillroy.testjava.scenario.observe.SessionStart;
+import ai.skillroy.testjava.scenario.observe.StepStart;
 import ai.skillroy.testjava.scenario.resolve.BindMode;
 import ai.skillroy.testjava.scenario.resolve.CostLedger;
 import ai.skillroy.testjava.scenario.resolve.CredentialRef;
@@ -87,6 +91,13 @@ import java.util.regex.Pattern;
  * Expectations ({@link #check}, the {@code expect} verb) are evaluated once, now, on the value as the mask leaves it:
  * a session does not wait for them to hold, and a value the mask changes satisfies none.
  *
+ * <p>Telemetry (phase6-contracts.md 10.2; as built, Phase 6, TL): {@link SessionOptions#observer()}, wrapped so that
+ * it never throws, is told that the session opened ({@code sessionStarted}, before the journal's first record), each
+ * step's start and outcome ({@code sessionStepStarted}, {@code sessionStep}, the outcome masked), the type of every
+ * journal record ({@code sessionRecord}), and the close ({@code sessionEnded}); the session's calls are observed as a
+ * run's are ({@link CallRunner}), and {@link #observer()} hands the same observer to the session service and the MCP
+ * server for their turns and tool calls.
+ *
  * <p>Not thread-safe: one session is driven by one thread at a time; it starts no threads (a web path may run its
  * own). {@link #close()} is idempotent.
  */
@@ -128,6 +139,10 @@ public final class ExecutorSession implements AutoCloseable {
     private int stepCount;
     private boolean mutated;
     private boolean closed;
+    /** The session's observer, wrapped (phase6-contracts.md 10.2). */
+    private final RunObserver observer;
+    /** Whether the current step's {@code sessionStepStarted} was sent. */
+    private boolean stepObserved;
 
     private ExecutorSession(DomainPack pack, AgentConnection agent, SessionOptions options, String id, RunLog log,
                             WebRun web, CallRunner runner, StepJournal journal, EnvFingerprint fingerprint,
@@ -147,6 +162,7 @@ public final class ExecutorSession implements AutoCloseable {
         this.data = data;
         this.ledgerStart = options.bind().ledger().size();
         this.mask = options.bind().credentials().mask();
+        this.observer = runner.observer;
         List<FactProvider> packFacts;
         try {
             packFacts = pack.facts();
@@ -229,6 +245,8 @@ public final class ExecutorSession implements AutoCloseable {
                         + " computed: " + e.getMessage()), mask(mask, e.detail()));
             }
             CallRunner runner = new CallRunner(agent, log, clock, web, effective.stepTimeout().toMillis(), Set::of);
+            runner.observer = RunObservers.safe(effective.observer());
+            log.observe(runner.observer);
             runner.bindings = Bindings.empty();
             configure(runner, pack);
             mark(runner, id);
@@ -238,6 +256,9 @@ public final class ExecutorSession implements AutoCloseable {
             } catch (IOException e) {
                 throw new SessionOpenException(FailureKind.ENVIRONMENT, "the journal cannot be written: " + e, null);
             }
+            journal.observer = runner.observer;
+            runner.observer.sessionStarted(new SessionStart(id, pack.id(), pack.version(), effective.readOnly()
+                    ? "read-only" : "acting"));
             ExecutorSession session = new ExecutorSession(pack, agent, effective, id, log, web, runner, journal,
                     fingerprint, caps, primitives, data);
             session.start();
@@ -464,6 +485,7 @@ public final class ExecutorSession implements AutoCloseable {
             }
         }
         long seqBefore = runner.lastSeenSeq;
+        observeStepStart(stepId, verb, origin);
         runner.currentStep = stepId;
         runner.stepFidelity = new ArrayList<>();
         runner.stepEvents = new ArrayList<>();
@@ -573,10 +595,30 @@ public final class ExecutorSession implements AutoCloseable {
         outcomeJson.put("seqAfter", runner.lastSeenSeq);
         outcomeJson.put("durationMs", duration.toMillis());
         outcomeJson.put("degradedFidelity", maskedFidelity);
+        observeStepStart(stepId, verb, origin);
         journal.append(new StepJournal.StepEntry(stepId, origin, verb, jsonForm(givenArgs), callRecords,
                 outcomeJson, snapshotHash), mask);
         runner.stepEvents = null;
+        stepObserved = false;
+        observer.sessionStep(outcome);
         return outcome;
+    }
+
+    /** {@code sessionStepStarted} once per step: before its first call, or before a refusal's outcome. */
+    private void observeStepStart(String stepId, String verb, Origin origin) {
+        if (!stepObserved) {
+            stepObserved = true;
+            observer.sessionStepStarted(new StepStart(stepId, verb, 0, origin.kind().name()));
+        }
+    }
+
+    /**
+     * The session's observer (phase6-contracts.md 10.2), wrapped so that it never throws: what the session service
+     * tells about its turns and the MCP server about its tool calls. {@link RunObserver#NONE} without telemetry. The
+     * observer is the opener's; the session never closes it.
+     */
+    public RunObserver observer() {
+        return observer;
     }
 
     /** The journal's {@code calls}: each call with its arguments as they will be sent (substituted). */
@@ -1128,6 +1170,7 @@ public final class ExecutorSession implements AutoCloseable {
             }
             journal.append(new StepJournal.SessionEnd(runner.agentLost ? "agent lost" : "closed", stepCount, cost()),
                     mask);
+            observer.sessionEnded(runner.agentLost ? "agent lost" : "closed");
         } finally {
             web.close();
             data.close();

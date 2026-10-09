@@ -189,7 +189,8 @@ public final class Main {
         return text.toString();
     }
 
-    private static String version() {
+    /** The CLI's version (the jar's Implementation-Version), {@code (development build)} when absent. */
+    static String version() {
         String version = Main.class.getPackage() == null ? null : Main.class.getPackage().getImplementationVersion();
         return version == null ? "(development build)" : version;
     }

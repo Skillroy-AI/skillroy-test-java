@@ -48,6 +48,7 @@ import ai.skillroy.testjava.scenario.FailureKind;
 import ai.skillroy.testjava.scenario.Origin;
 import ai.skillroy.testjava.scenario.Schemas;
 import ai.skillroy.testjava.scenario.StepOutcome;
+import ai.skillroy.testjava.scenario.observe.TurnRecord;
 import ai.skillroy.testjava.scenario.pack.DomainPack;
 import ai.skillroy.testjava.scenario.pack.PlannedCall;
 import ai.skillroy.testjava.scenario.pack.Sync;
@@ -280,6 +281,8 @@ public final class SessionService implements AutoCloseable {
         String text = request == null ? "" : request;
         long t0 = clock.millis();
         int index = turns.size() + 1;
+        // phase6-contracts.md 10.2 (as built, TL): the turn's span is opened first, so that its steps are its children.
+        session.observer().turnStarted(index);
         List<Usage> usages = new ArrayList<>();
         List<Turn.Action> actions = new ArrayList<>();
         if (exhausted) {
@@ -863,7 +866,19 @@ public final class SessionService implements AutoCloseable {
         if (!messages.isEmpty()) {
             history.add(new Kept(turn, List.copyOf(messages)));
         }
+        session.observer().sessionTurn(turnRecord(turn));
         return turn;
+    }
+
+    /**
+     * The turn's facts for the session's observer (phase6-contracts.md 10.2): its number, outcome, action count, usage
+     * sums, model, last request id and duration; never its request, answer or an action's input or result.
+     */
+    static TurnRecord turnRecord(Turn turn) {
+        Usage usage = turn.totalUsage();
+        return new TurnRecord(turn.index(), turn.outcome().name(), turn.actions().size(), usage.inputTokens(),
+                usage.outputTokens(), usage.cacheReadTokens(), usage.cacheWriteTokens(),
+                usage.model(), usage.requestId(), turn.duration().toMillis());
     }
 
     private void recordBudget(List<Usage> usages) {

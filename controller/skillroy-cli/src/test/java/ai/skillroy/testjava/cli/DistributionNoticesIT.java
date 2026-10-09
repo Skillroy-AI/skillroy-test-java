@@ -68,14 +68,20 @@ class DistributionNoticesIT {
     /** Licences the components embedded in a third-party jar may carry (all permissive). */
     private static final Set<String> ALLOWED_EMBEDDED = Set.of("MIT", "BSL-1.0", "BSD-2-Clause");
 
-    /** The project's own jars in lib/: Phase 2 added skillroy-data, Phase 5 skillroy-inference and skillroy-mcp. */
+    /**
+     * The project's own jars in lib/: Phase 2 added skillroy-data, Phase 5 skillroy-inference and skillroy-mcp, Phase 6
+     * skillroy-telemetry (phase6-contracts.md 2.6).
+     */
     private static final List<String> PROJECT_MODULES = List.of("cli", "controller", "data", "inference", "mcp",
-            "protocol", "scenario");
+            "protocol", "scenario", "telemetry");
 
     /**
      * The third-party artifacts the distribution carries, by artifact id (their versions are THIRD-PARTY.txt's): the
      * Jackson set and SnakeYAML; since Phase 5 the Anthropic Java SDK's tree, JSqlParser, the MCP Java SDK's tree and
-     * the SLF4J no-operation provider. A jar that comes or goes is a decision, recorded here and in the audit.
+     * the SLF4J no-operation provider; since Phase 6 the OpenTelemetry set of skillroy-telemetry (phase6-contracts.md
+     * 2.2, 2.6: the API, context and common jars, the SDK's common, trace, metrics and logs jars, the OTLP exporter with
+     * its common jars and the JDK sender; no OkHttp sender, no autoconfiguration). A jar that comes or goes is a
+     * decision, recorded here and in the audit.
      */
     private static final Set<String> THIRD_PARTY = Set.of(
             "jackson-annotations", "jackson-core", "jackson-databind", "jackson-dataformat-yaml", "snakeyaml",
@@ -85,7 +91,10 @@ class DistributionNoticesIT {
             "jsonschema-generator", "jsonschema-module-jackson", "jsonschema-module-swagger-2", "classmate",
             "swagger-annotations", "error_prone_annotations", "standardwebhooks", "jsqlparser", "mcp-core",
             "mcp-json-jackson2", "reactor-core", "reactive-streams", "json-schema-validator", "itu", "slf4j-api",
-            "slf4j-nop");
+            "slf4j-nop", "opentelemetry-api", "opentelemetry-common", "opentelemetry-context",
+            "opentelemetry-exporter-common", "opentelemetry-exporter-otlp", "opentelemetry-exporter-otlp-common",
+            "opentelemetry-exporter-sender-jdk", "opentelemetry-sdk-common", "opentelemetry-sdk-logs",
+            "opentelemetry-sdk-metrics", "opentelemetry-sdk-trace");
 
     /** {@code group:artifact:version  SPDX-licence  lib/file.jar} */
     private static final Pattern ARTIFACT_LINE =
@@ -164,6 +173,9 @@ class DistributionNoticesIT {
         assertEquals(new TreeSet<>(THIRD_PARTY), thirdParty, "the third-party jars in lib/");
         assertFalse(libFiles.stream().anyMatch(f -> f.contains("playwright") || f.contains("junit")
                 || f.contains("hsqldb")), "no optional, test or sample dependency: " + libFiles);
+        // phase6-contracts.md 2.2 (D140, D141): exactly one OTLP sender, the JDK's, and no autoconfiguration.
+        assertFalse(libFiles.stream().anyMatch(f -> f.contains("sender-okhttp") || f.contains("autoconfigure")
+                || f.contains("opentelemetry-sdk-testing")), "no OkHttp sender, no autoconfiguration: " + libFiles);
     }
 
     @Test

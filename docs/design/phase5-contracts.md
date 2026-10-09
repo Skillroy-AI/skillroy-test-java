@@ -1578,6 +1578,13 @@ answers it (design §3.4). Every outcome's `detail` and `lastResult` pass the se
 `SecretMask` (credentials, fixture secrets joined into the bindings). A session's calls carry a `correlationId`
 `<sessionId>/<stepId>`.
 
+(Phase 6, built 2026-10-09, TL; P6 §10.2.) `SessionOptions` gains the component `observer` (default `NONE`,
+`withObserver`; the ten-argument constructor stays): the session wraps it, reports its start (`sessionStarted`,
+the policy `read-only` or `acting`), each step's start and its masked `StepOutcome` (with the origin's kind, never the
+intent text), the type of every journal record and its close, observes its calls as a run's, and hands the same
+observer to the session service (`turnStarted`, `sessionTurn` with a `TurnRecord` of the turn's facts) and the MCP
+server (`toolCallStarted` with the client's `_meta.traceparent`, `toolCall`) through `ExecutorSession.observer()`.
+
 ### 12.3 `StepJournal` and the export
 
 **The journal file**, `<outputDir>/journal.jsonl`, is written as the session runs (append-only, masked), one record per
@@ -1856,6 +1863,11 @@ from `timeouts.plannerMs` and checks a `--run` against the planner's server's pr
 every expectation on masked values; `triage` builds its options from the settings (`TriageOptions.of`: `logPrompts`,
 `effort.triage` and the model ids, §11.2). The CLI's session service opens its gateway with the session's prompt mask
 (`Gateways.open(settings, mask)`), so that the recording gateway of `record: true` writes through it (§4.2).
+
+(Phase 6, built 2026-10-09, TL; P6 §10.3.) `run`, `session`, `mcp`, `re-resolve`, `triage` and `author` take the
+telemetry options (`--telemetry`, `--telemetry-endpoint`, `--telemetry-attributes`, `--telemetry-file`); `mcp` prints
+its telemetry line on stderr; `re-resolve` and `triage` export their root span, `author` its root span, its planner's
+model calls and its bind and run (the planner's own server child exports nothing).
 
 ### 13.5 JUnit
 

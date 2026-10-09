@@ -33,6 +33,7 @@ import ai.skillroy.testjava.scenario.Origin;
 import ai.skillroy.testjava.scenario.ScenarioException;
 import ai.skillroy.testjava.scenario.SessionOpenException;
 import ai.skillroy.testjava.scenario.SessionOptions;
+import ai.skillroy.testjava.scenario.observe.RunObserver;
 import ai.skillroy.testjava.scenario.pack.DomainPack;
 import ai.skillroy.testjava.scenario.resolve.BindMode;
 import ai.skillroy.testjava.scenario.resolve.CostLedger;
@@ -113,6 +114,7 @@ final class McpCommand implements Command {
                         + "(default: a new temporary directory)")));
         options.addAll(InferenceArgs.gateway());
         options.add(InferenceArgs.SESSION_BUDGET_OPTION);
+        options.addAll(TelemetryArgs.OPTIONS);
         return Connector.withConnection(options.toArray(OptionSpec[]::new));
     }
 
@@ -130,6 +132,7 @@ final class McpCommand implements Command {
             throw new UsageException(OUT + " " + out + " is not a directory");
         }
         BindArgs.Settings settings = BindArgs.parse(args, List.of(), BindMode.LIVE);
+        RunObserver observer = RunObserver.NONE;
         ClassLoader previous = Thread.currentThread().getContextClassLoader();
         try (Packs packs = Packs.load(args.values(Packs.OPTION), cli.classLoader())) {
             Thread.currentThread().setContextClassLoader(packs.loader());
@@ -146,14 +149,18 @@ final class McpCommand implements Command {
                 throw new CliException(Exit.FAILED, "the credentials cannot be loaded: " + e.getMessage(), e);
             }
             InferenceSettings inference = InferenceArgs.load(args, BindMode.LIVE, BindArgs.credentialsDir(settings));
+            // phase6-contracts.md 10.3: before the agent is contacted; the file exporter needs --out (or out:).
+            observer = TelemetryArgs.open(TelemetryArgs.load(args, BindArgs.credentialsDir(settings), out), cli);
             Target target = Connector.connect(args, cli);
+            TelemetryArgs.started(observer, TelemetryArgs.runStart(observer, "mcp", null, BindMode.LIVE.label(),
+                    settings.envId(), target, null));
             try (target) {
                 CostLedger ledger = new CostLedger();
                 BindOptions bind = BindOptions.defaults().withMode(BindMode.LIVE).withEnvId(settings.envId())
                         .withBindingsRoot(settings.root()).withCredentials(credentials).withLedger(ledger)
                         .withInference(inference);
                 SessionOptions session = SessionOptions.defaults(null).withBind(bind)
-                        .withWebPathLoader(packs.loader());
+                        .withWebPathLoader(packs.loader()).withObserver(observer);
                 ServerOptions options = ServerOptions.builder(target.client(), pack).session(session)
                         .mutating(mutating).allowEvaluate(allowEvaluate).outDir(out).inference(inference)
                         .actor(inference.enabled() ? actors(inference, ledger) : null)
@@ -177,6 +184,8 @@ final class McpCommand implements Command {
                 }
             }
         } finally {
+            // The protocol owns stdout: the telemetry line goes to stderr with the server's log.
+            TelemetryArgs.finish(observer, cli.err());
             Thread.currentThread().setContextClassLoader(previous);
         }
     }
