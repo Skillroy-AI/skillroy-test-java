@@ -179,12 +179,48 @@ class LauncherIT {
         }
         assertEquals(inDir, inZip);
         assertTrue(inZip.contains("skillroy-cli/bin/skillroy"), inZip.toString());
+        assertTrue(inZip.contains("skillroy-cli/bin/skillroy.bat"), inZip.toString());
         for (String legal : List.of("LICENSE", "NOTICE", "THIRD-PARTY.txt")) {
             assertTrue(inZip.contains("skillroy-cli/" + legal), legal + " at the top level: " + inZip);
         }
         assertTrue(inZip.stream().anyMatch(n -> n.matches("skillroy-cli/lib/skillroy-cli-.*\\.jar")), inZip.toString());
         assertTrue(inZip.stream().anyMatch(n -> n.matches("skillroy-cli/lib/skillroy-scenario-.*\\.jar")));
         assertFalse(inZip.stream().anyMatch(n -> n.contains("junit")), "no test dependency in the distribution");
+    }
+
+    /**
+     * Phase 6 (phase6-contracts.md 9.1): the Windows launcher keeps its CRLF bytes in the directory and through the zip
+     * (the assembly's lineEnding is per file, and .gitattributes keeps the source CRLF in every checkout), and is not
+     * executable.
+     */
+    @Test
+    void theBatLauncherIsCrlfInTheDirectoryAndInTheZip() throws IOException {
+        Path bat = Launcher.dist().resolve("bin").resolve("skillroy.bat");
+        byte[] inDir = Files.readAllBytes(bat);
+        assertCrlf(inDir, "bin/skillroy.bat in the directory");
+        assertTrue(new String(inDir, StandardCharsets.US_ASCII).startsWith("@echo off\r\n"));
+        assertEquals(new String(Files.readAllBytes(Path.of("src/main/bat/skillroy.bat")), StandardCharsets.US_ASCII),
+                new String(inDir, StandardCharsets.US_ASCII), "the assembled file is the source file");
+        assertFalse(Files.isExecutable(bat), "bin/skillroy.bat is 0644");
+        Path zip = Path.of(System.getProperty("skillroy.cli.it.zip", "target/skillroy-cli.zip"));
+        try (ZipFile file = new ZipFile(zip.toFile())) {
+            ZipEntry entry = file.getEntry("skillroy-cli/bin/skillroy.bat");
+            assertTrue(entry != null, "the zip holds bin/skillroy.bat");
+            byte[] inZip = file.getInputStream(entry).readAllBytes();
+            assertCrlf(inZip, "bin/skillroy.bat in the zip");
+            assertTrue(java.util.Arrays.equals(inDir, inZip), "the zip's copy equals the directory's");
+        }
+    }
+
+    private static void assertCrlf(byte[] bytes, String what) {
+        int lines = 0;
+        for (int i = 0; i < bytes.length; i++) {
+            if (bytes[i] == '\n') {
+                assertTrue(i > 0 && bytes[i - 1] == '\r', what + ": a LF without CR at byte " + i);
+                lines++;
+            }
+        }
+        assertTrue(lines > 50, what + ": " + lines + " lines");
     }
 
     /** A fake Java home whose bin/java prints its arguments one per line, with a release file. */

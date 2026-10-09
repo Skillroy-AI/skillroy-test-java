@@ -63,6 +63,10 @@
     <module>agent/skillroy-agent-spy</module>
     <module>agent/skillroy-agent-bytebuddy</module>
     <module>agent/skillroy-agent-hooks</module>
+    <!-- Phase 6 (phase6-contracts.md 2.1, D134): the optional Byteman module and its system-class-path jar, in the
+         reactor without a profile; built because spike BS14 passed (spikes/BS14/RESULT.md). -->
+    <module>agent/skillroy-agent-byteman-sys</module>
+    <module>agent/skillroy-agent-byteman</module>
     <module>agent/skillroy-agent-dist</module>
     <module>controller/skillroy-controller</module>
     <module>controller/skillroy-data</module>
@@ -129,6 +133,11 @@
          Maven Central on 2026-10-09; used by agent/skillroy-agent-bytebuddy only, which shades and relocates it under
          ai.skillroy.testjava.agent.hooks.shaded, and never on any class path unrelocated. -->
     <byte-buddy.version>1.18.14</byte-buddy.version>
+    <!-- Phase 6 (phase6-contracts.md 2.2, decision D134): Byteman, LGPL-2.1-or-later; audited in
+         docs/licence-audit.md section 5. Test scope in skillroy-agent-byteman, skillroy-agent-dist and the scenarios
+         module, provided scope in skillroy-agent-byteman-sys (a work that uses the library); in no distribution: at
+         run time the jar is the user's (agent option byteman.jar, B8). -->
+    <byteman.version>4.0.27</byteman.version>
 
     <!-- Plugin versions. -->
     <maven-assembly-plugin.version>3.8.0</maven-assembly-plugin.version>
@@ -204,6 +213,17 @@
       <dependency>
         <groupId>ai.skillroy</groupId>
         <artifactId>skillroy-agent-hooks</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <!-- Phase 6 (phase6-contracts.md 2.1, 7): the optional Byteman module and its system-class-path jar. -->
+      <dependency>
+        <groupId>ai.skillroy</groupId>
+        <artifactId>skillroy-agent-byteman-sys</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>ai.skillroy</groupId>
+        <artifactId>skillroy-agent-byteman</artifactId>
         <version>${project.version}</version>
       </dependency>
       <!-- The adapter contract kit and the neutral fake (phase4-contracts.md 10). A managed entry matches on its type,
@@ -417,6 +437,14 @@
         <artifactId>hsqldb</artifactId>
         <version>${hsqldb.version}</version>
         <classifier>jdk8</classifier>
+      </dependency>
+
+      <!-- Phase 6 (phase6-contracts.md 2.2, D134): Byteman, LGPL-2.1-or-later; never bundled (B8). The scope is set
+           where it is used: test, or provided for the sys jar's compilation. -->
+      <dependency>
+        <groupId>org.jboss.byteman</groupId>
+        <artifactId>byteman</artifactId>
+        <version>${byteman.version}</version>
       </dependency>
 
       <!-- Tests: JUnit 5 (Java 8 baseline; JUnit 6 needs Java 17 and cannot run agent-side tests). -->

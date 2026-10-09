@@ -127,6 +127,14 @@
       <artifactId>skillroy-sample-lending-pack-branch</artifactId>
       <scope>test</scope>
     </dependency>
+    <!-- Phase 6 (phase6-contracts.md 13.2 item 7, D134; BW): Byteman (LGPL-2.1-or-later) at test scope only, so that
+         the hooks leg's Byteman check takes the jar's path from this test class path; it never reaches the pack, the
+         agent home or a distribution (docs/licence-audit.md 5). -->
+    <dependency>
+      <groupId>org.jboss.byteman</groupId>
+      <artifactId>byteman</artifactId>
+      <scope>test</scope>
+    </dependency>
     <dependency>
       <groupId>org.junit.jupiter</groupId>
       <artifactId>junit-jupiter</artifactId>

@@ -1542,6 +1542,21 @@ modules are created. It proves, each with its evidence line in `RESULT.md`:
 **not created**, §7 stays "specified", the TODO item reads "specified only; BS14 failed on …", nothing with a
 listener ships (the §17 Q2 veto cannot change that), and the `rule.*` names stay reserved.
 
+As built (Phase 6, BW, 2026-10-09): BS14 ran on the Java 8 and Java 25 targets of the arm64 image and **passed with
+conditions** (`../../spikes/BS14/RESULT.md`): items 1-6 on both targets, and the reuse of a parked `Retransformer` by a
+second module instance. Its five conditions are folded into §7.3-§7.5 as "as built": (1) the option string has no
+`prop:` (it prints `Setting …` on the host's stdout, and Byteman reads `org.jboss.byteman.verbose` by its presence, so
+`=false` turns verbose output **on**), and `listener:false` must precede `manager:` (after it, it clears the manager);
+(2) Byteman does not match a varargs helper method; (3) a trigger-time failure is printed on the host's stderr through
+Byteman's `Helper` trace map unless the module puts its own streams there, and a transform-time failure is printed
+nowhere (only `listScripts` shows it); (4) a sys-jar method with a Byteman-typed parameter must be branch-free, or its
+`StackMapTable` puts a `CONSTANT_Class` of Byteman into the constant pool; (5) the byte check needs a recorder ahead
+of Byteman's transformer and one behind it. Byteman's `manager:` needs no `listener:true`; `Main` loads the manager
+through the system class loader and resolves `initialize(Retransformer, String, Integer)` by `getMethod` (static, public),
+falling back to `initialize(Retransformer)`; it is called once, on the thread that called `premain`, with `hostname` and
+`port` null. Byteman builds one helper adapter per firing through the helper's declared `(Rule)` constructor. No
+listening socket and no thread before the load, after it, or after the unload; no JEP 451 line.
+
 ### 7.3 Primitives (module `byteman`; `rule.check`, `rule.submit` and `rule.list` name the capability `rule.engine`)
 
 | Primitive | Params | Result | Flags | Timeout |
@@ -1611,6 +1626,44 @@ reflecting on internals, out of scope (§7.1, `threat-model.md` §7).
 
 **Events**: `rule.fired` (above) and `rules.changed {installed: [name], removed: [name]}` after a submit or unload.
 
+As built (Phase 6, BW, 2026-10-09):
+
+- **The helper.** `fired(Object)` to `fired(Object, …, Object)` (one to eight bindings, fixed arity: BS14 condition 2;
+  D-BW-2); the one constructor is the branch-free `(org.jboss.byteman.rule.Rule)`, which keeps the rule as `Object` in
+  a non-final field; the name, trigger class and method come from the rule's `getName()`, `getTriggerClass()`,
+  `getTriggerMethod()` by reflection (cached `Method`s). `count`, `countOf`, `flag`, `flagged`, `clear` are per rule
+  (keyed by the rule's name), at most 1024 keys in the JVM; the package-private `forget(rule)` drops a rule's keys at
+  its unload. `format` answers a string (cut at 256), an enum's name, a boolean, a character or a number of the JDK
+  (`getClassLoader() == null`), else `<class name>`. The handler slot keeps counters `{fired, unhandled, failures}`.
+- **`RuleManager`.** `initialize` is branch-free and delegates to a private `accept(Object)` (BS14 condition 4); it
+  stores the **first** `Retransformer` of the JVM only and ignores every later call, so that no class can replace or
+  clear what Byteman handed over through the public method (D-BW-7). The slot holds the `Retransformer` when parked, or
+  the list of the names of rules a cut-short uninstall left behind (§7.5; D-BW-8); the probe reads the private slot by
+  reflection without taking it (no third accessor). `SysConstantPoolTest` holds the jar's three class files to
+  `CONSTANT_Class` entries under `java/` and `ai/skillroy/` and major 52.
+- **The lint** as specified, and: `CLASS`/`INTERFACE` must be a fully qualified name (an unqualified one matches a class
+  of that simple name in any package, a JDK class loaded later included); outside `RULE … ENDRULE` only blank lines
+  and `#` comments (Byteman applies a `HELPER`, `IMPORT` or `COMPILE` line there as the default of the rules after it)
+  (D-BW-11); the deny-list matches whole identifiers in every component of a dotted name and prefixes starting at any
+  component, after white space around dots is closed up (`java.lang.System.exit`, `System . exit`). `RuleLintTest`
+  holds the corpus: one refused rule per entry with "line 6: '<entry>' is not allowed (<reason>)", one accepted rule
+  per entry with the word inside its name, and for the identifier-shaped entries inside its method.
+- **`rule.check`** runs `RuleCheck` only while this module instance holds the `Retransformer` and the rule's class is
+  defined by the system loader; `RuleCheck`'s errors, parse errors, type errors **and type warnings** are `errors`
+  (a type warning means Byteman would not inject the rule, such as `$!` at `ENTRY`: D-BW-9), its warnings and the
+  `WARNING` lines of its buffer are `warnings`.
+- **`rule.submit`** answers `classes` from `listScripts` read right after `installScript`: `injected` (not triggered
+  yet), `compiled`, `failed to compile: …` or `threw: …`. A `threw` (a transform-time failure: the rule was not
+  injected, and Byteman printed nothing) removes the rule and answers `RULE_REJECTED` with the statuses; an exception
+  out of `installScript` is `RULE_REJECTED` as well (D-BW-10). `messages` are `installScript`'s lines.
+- **`rule.unload`** of a name the module does not hold answers `{removed: false, restored: []}`. A class another rule
+  of the module still touches is not verified (it is not in `restored`); a class whose removal retransformation the
+  behind recorder did not see is `DEGRADED("no restore observed")`; foreign events are counted on the ahead recorder
+  since the rule's install.
+- **The encoding** follows §4.3 with `mask("rule.<name>", "binding<i>", value)`; a container is read only when its class
+  is the JDK's (iterating an application's own collection would run its code; otherwise it is a handle) (D-BW-12).
+  `rule.fired.rule` is the name without the `skillroy:` prefix, and only the module's live rules publish.
+
 ### 7.4 Loading Byteman
 
 **Only under `rule.submit`**, after the dispatcher's read-only and confirm gates have passed, on an agent worker,
@@ -1648,6 +1701,34 @@ Load modes: `JAVAAGENT` and `ATTACH` have the `Instrumentation` and work; `EMBED
 Instrumentation in EMBEDDED mode")`. Nothing is attached a second time, nothing passes through the 1024-byte attach
 argument, and a JDK 25 target sees no second JEP 451 warning: the agent itself was loaded at launch.
 
+As built (Phase 6, BW, 2026-10-09):
+
+- **Step 3's option string is `listener:false,manager:ai.skillroy.testjava.agent.byteman.sys.RuleManager`, in that order
+  and nothing else** (BS14 condition 1; D-BW-1): `prop:org.jboss.byteman.verbose=false` is dropped. The sys jar is
+  `<home>/optional/skillroy-agent-byteman-sys.jar` (the agent option `home`); there is no option for it.
+- **The residue rule** of `ByteVerification` as HK changed it (D-HK-4: a residue is a reference under the prefix that
+  the restored bytes hold and the reference bytes did not) suits the module's check: its reference is the ahead
+  recorder's first bytes of a class before any rule of the module was on it, so a Byteman reference those bytes
+  already carried (a constant-pool entry the JVM merged across an earlier redefinition) is no longer a false `FAILED`,
+  while a trigger left behind still is.
+- **Step 4 has two recorders** (BS14 condition 5; D-BW-3): the ahead recorder registered before `premain`, whose first
+  bytes per class are the reference, and the behind recorder registered right after it, whose last bytes after a
+  removal are what the JVM installed; §3.5's single recorder re-registered last would, for every later submit, see
+  Byteman's output instead of the reference. They record only the classes a rule of the module names (by name, and the
+  classes the class bound matched). **In the reuse case** both recorders are registered after Byteman's transformer,
+  so before a submit the module retransforms the matched classes whose reference it has not seen yet, in the batches
+  of §3.2 (no rule of the module is on them then, so Byteman returns nothing and the recorder sees the initial bytes):
+  one extra pause per class, in the reuse case only.
+- **Byteman's console output** (BS14 condition 3; D-BW-4): right after the load the module puts one `PrintStream` of its
+  own into `org.jboss.byteman.rule.helper.Helper.traceMap` (a private static, by reflection) under `out`, `err`, `vrb`,
+  `dbg` and `nzy`; it writes each line to the agent's log at WARN (`byteman: …`, at most 2,000 lines, each cut at 1,000
+  characters), and the module removes it by identity at `uninstall`. A rule's type error at its first trigger (a rule
+  whose class is not the system loader's escapes the type check) and a failing action's stack trace therefore reach
+  the agent's log, not the host's console.
+- A load that fails (a `premain` exception, no `Retransformer` handed over) removes the ahead recorder and answers
+  `CAPABILITY_UNAVAILABLE` with the reason; Byteman's `loaded` property may then be set, and the next probe answers by
+  §7.4 step 2.
+
 ### 7.5 Safety, lifecycle and the capability
 
 - **Gates**: `rule.submit` under read-only mode is `READ_ONLY`, without `_meta.confirm` `CONFIRM_REQUIRED`, before
@@ -1668,6 +1749,16 @@ argument, and a JDK 25 target sees no second JEP 451 warning: the agent itself w
   target")` (§7.4 step 2). Byteman itself cannot
   be unloaded (attach §C4, map 7 §4.7): its transformer stays registered and returns null without a rule, which the
   capability's reason says after a disable ("Byteman stays loaded; no rule of the agent is installed").
+- As built (Phase 6, BW, 2026-10-09): `uninstall` disarms the handler, then removes every rule of the module in one
+  `removeScripts` on a daemon thread `skillroy-uninstall-byteman` joined for `hooks.detachBudgetMs`. When it completes:
+  the byte check per class is logged, the `Retransformer` parked, the helper's slot released, both recorders removed,
+  the trace streams removed. When it does not: the WARN names the rules, the module **parks the list of their names**
+  in `RuleManager`'s slot in place of the `Retransformer` (this is where the next instance's "<names from the log>"
+  come from; D-BW-8), the ahead recorder stays registered holding the disarmed handler in its `keep` field, the behind
+  recorder and the trace streams are removed (so a later failure of the leftover rule prints on the host's stderr
+  again: a limit of the abnormal state). The test seam is the JVM system property
+  `skillroy.agent.byteman.test.keepRulesAtUninstall=true`, read only by `uninstall`, which then leaves the rules as a
+  cut-short budget would (D-BW-13).
 - **Capability `rule.engine`**: declared at `install` with a probe: `UNAVAILABLE("no Instrumentation in <mode>
   mode")`, `UNAVAILABLE("no byteman.jar configured")`, `UNAVAILABLE("not a Byteman jar: …")`,
   `UNAVAILABLE("byteman.jar is writable by others: …")`, `UNAVAILABLE("Byteman was loaded by the host; …")`,
@@ -1711,6 +1802,26 @@ first instance's budget was cut short with a rule installed (a test seam), the r
 the final
 `agent.disable` no agent thread (P1 §10 check 16's rule). On the sample desk: the hooks leg of the end-to-end
 acceptance adds one Byteman check (§13.2 item 7).
+
+As built (Phase 6, BW, 2026-10-09). Unit (`skillroy-agent-byteman-sys`): `RuleManagerTest`, `RuleHelperTest`,
+`SysConstantPoolTest`. Unit (`skillroy-agent-byteman`, the test agent `ai.skillroy.testjava.agent.byteman.TestAgent`
+in `target/<module>-test-agent.jar`, the toy `ai.skillroy.testjava.fixture.byteman.DepositDesk`): `RuleLintTest`,
+`ClassBoundTest`, `BindingEncoderTest` in the default execution, and three classes in surefire executions of their
+own, each a fresh JVM (`reuseForks=false` silently ran no test on the Java 8 test JVM; a command-line `-Dtest` merges
+the executions into one JVM, and then the three skip with a message through `FreshJvm` instead of failing): `ProbeTest`
+(the reasons of §7.5, with
+Byteman's property set and the system loader replaced by an isolated one for "loaded by the host"),
+`CheckLoadsNothingTest` (`rule.check` and `rule.list` on a fresh module define no `org.jboss.byteman` class, load
+nothing of the sys jar and set no property) and `InProcessRouteTest` (the whole route in the test JVM: the first submit
+loads Byteman from the test class path's jar, `rule.fired` with a handle and the limit, the `compiled` status,
+`rule.check` type-checking once loaded, a type error, a `killJVM` rule and `$!` at `ENTRY` refused, the unload
+`verified: OK`, the uninstall parking, a second instance reusing it with its reference primed, a cut-short third
+instance refused by name while the rule's action still runs and no `rule.fired` arrives). `BytemanIT` plays the
+re-attach without the attach API: the toy `LendingToyMain` runs with a second `-javaagent`
+(`InstrumentationKeeper`, with the retransform and redefine rights of the bootstrap's manifest) and, on a stdin
+command, calls the bootstrap's `agentmain` with that `Instrumentation`, which is what an attach calls; it also covers
+the read-only refusal in a second child. Run: natively (macOS: the socket checks skip, no `/proc`), and in the arm64
+image on the Java 8 and Java 25 targets, the module tests also on the Java 8 test JVM (`-Djvm`).
 
 ---
 
@@ -1839,6 +1950,18 @@ clone while passing in a worktree that never re-checks it out; a comment there n
 - **(waits for the Windows host)**: running it (`skillroy --help`, `jvms`, `run` of scenario A against the desk);
   `LauncherIT`'s twin with fake Java homes as `.bat` files.
 
+As built (Phase 6, BW, 2026-10-09; not run on Windows): `controller/skillroy-cli/src/main/bat/skillroy.bat` follows
+the table with three refinements that keep `cmd.exe`'s parser out of the way: the script is flat (labels and `goto`,
+no parenthesised block, so that `(set JAVA_HOME)` in the third message and a `%version%` set on the way need no
+escaping or delayed expansion); a message goes to stderr as `>&2 echo …` (a trailing `1>&2` would leave a space at
+the end of the text); `JAVA_VERSION=` is found with `findstr /b /c:"JAVA_VERSION="` (quoted, so that `for /f`'s parser
+does not split at `=`), and a non-numeric major is let through by testing it with `findstr /r /x "[0-9][0-9]*"` before
+the `LSS 25` comparison, rather than by `2>nul` on a comparison `cmd.exe` would make as text. `ci/license-headers.sh`'s
+`rem` kind writes its header lines with CRLF, as the files are, and covers `ci/**/*.yml` and `.yaml`.
+`BatLauncherTest` (seven tests) also checks that `.gitattributes` keeps the two CRLF lines below the LF rule;
+`LauncherIT`'s new test reads the `.bat` back from the directory and the zip (CRLF, equal to the source, not
+executable).
+
 ### 9.2 `skillroy author` on Windows (D137) (Linux-testable)
 
 - **`PATHEXT`.** `AuthorCommand.claudeCommand` accepts, besides a file named exactly `claude`, the names `claude` plus
@@ -1858,6 +1981,16 @@ clone while passing in a worktree that never re-checks it out; a comment there n
   configuration is written that `cmd.exe` would split. Unit-tested with a fake launcher path (the plain form, and the
   refusal for a path with a space and one with a `%`).
 - The planner's work directory and the configuration file go through `SecureFiles` (§9.3).
+
+As built (Phase 6, BW, 2026-10-09; not run on Windows): `AuthorCommand.findOnPath(Map<String,String> env, String
+osName)` is the lookup; on Windows it tries the `PATHEXT` names **before** a file named exactly `claude` (npm installs
+an extensionless shell shim beside `claude.cmd` that Windows cannot start; D-BW-5), reads `PATH` and `PATHEXT`
+without regard to the variable names' case (`Path`), compares extensions as given, lower- and upper-case, and on Windows
+asks for a regular file (no executable bit); elsewhere `PATHEXT` is ignored and the file must be executable, as
+before. `AuthorCommand.serverCommand(launcher, args)` writes the plain `cmd.exe /c` form and refuses, with exit code 64
+and the remedy, a launcher path or argument holding `"`, `%`, `^`, `&`, `|`, `<`, `>`, a space, a tab or a control
+character (the contract's list plus the two redirection characters and the other white space; D-BW-6).
+`AuthorCommandWindowsTest` (five tests) proves the lookup, the form and the refusals on Linux.
 
 ### 9.3 Every owner-only file through `SecureFiles` (D138) (Linux-testable for the POSIX branch; the ACL branch
 waits for the host)
@@ -1887,6 +2020,25 @@ with the agent's wording and names the directory's role. The sites:
 | the run's output tree (`--out`) | the process umask | unchanged: pass 1's S37 is dispositioned as documentation (`umask 077` on a shared host; the owner-only directory of its option (i) is one of the five deferred parts, §12.2), so no `SecureFiles` site is added here and BW and FX do not meet on it |
 
 The agent side is unchanged (its branches exist since 1.x).
+
+As built (Phase 6, BW, 2026-10-09; the ACL branch not run on Windows): the five members are public and nothing else
+(`SecureFilesTest` asserts the set by reflection). `createOwnerOnlyTempDirectory(parent, prefix)` names the directory
+`<prefix><16 hex digits>` from the class's `SecureRandom`, creates it exclusively (a name taken is retried, at most
+eight times), reads it back with `untrustedDirectoryReason` and deletes and refuses it when that fails (the ACL branch
+can inherit entries from the parent); a prefix holding a path separator or `..` is an `IllegalArgumentException`. A
+file system with neither view is refused **before anything is created** by every member, in the agent's wording plus
+the remedy: "the <role> <path> cannot be used: its file system has neither POSIX permissions nor ACLs, so nothing
+written there can be restricted to the current user (use a directory on a file system that has one of them)"; the
+discovery wording of `ensureOwnerOnlyDirectory(Path)` is kept for discovery, and the `what` overload drops the
+`discoveryDir` remedy. The sites: the planner's MCP configuration is written by `AuthorCommand.mcpConfig` (P5 §10.2
+step 3 is the CLI's step), as `skillroy-mcp-<16 hex>.json` under the system's temporary directory through
+`writeOwnerOnly` (`AuthorCommand.writeConfig`, the tests' seam); `Planner.privateDirectory(tmp)`,
+`CdpWebPath.createTraceDir(parent)` and `SkillroyMcpServer.temporaryOutputDirectory(tmp)` are the seams of the other
+three, each tested on the POSIX host and on a zip file system (`PlannerWorkDirectoryTest`, `CdpTraceDirectoryTest`,
+`McpOutputDirectoryTest`); the CDP path, which used to run untraced when no private directory could be made, now
+fails its `open` (`ENVIRONMENT`, the agent path under `auto`). `SecureFilesRulesTest` does not exist: the zip file
+system test is the new `SecureFilesTest`. `ItEnv.newDiscoveryDir` changed in both scenario modules (the lending
+desk's and the web host's).
 
 ### 9.4 Attach on Windows (D139) (documentation now; the behaviour waits for the host)
 
@@ -1926,6 +2078,12 @@ for the "neither" branch); the `.bat` through `LauncherIT`'s twin; the planner s
 space and a `--pack` path with a space (which decides the `cmd.exe` form of §9.2); the CLI's `AttachIT`; the
 owner-only files of §9.3 read back with `icacls`. The owner's questions that decide the host's shape are §17 Q7 and
 Q8.
+
+As built (Phase 6, BW, 2026-10-09; not run): `ci/run-on-windows.cmd` (CRLF, the `rem` header) checks that `JAVA_HOME`
+and `SKILLROY_JDK8_HOME` name a `bin\java.exe`, changes to the repository root and runs the two `mvn verify` commands
+(`call mvn`, the first stopping the script when it fails); a missing variable prints the two commands, the session
+rule and the values found, and exits 2. The matrix row shape for `../TODO.md` is in the build report (the orchestrator
+writes `TODO.md`).
 
 ---
 
@@ -2771,6 +2929,20 @@ the golden (`javaagent-hooks.json`).
    `rule.list` shows it; `rule.unload` restores with `verified: OK`; a rule naming `killJVM` is `RULE_REJECTED`; the
    child's listening sockets (the `/proc/<pid>/fd`-mapped set of §7.6) before the first `rule.submit` and after
    `rule.unload` are equal and hold exactly the agent's port.
+   As built (Phase 6, BW, 2026-10-09; moved at integration the same day): item 7 is three checks of `HookChecks`
+   at the orders CP reserved, 166-168, after the `hook.remove` demonstration (165) and before check 15 (170). The hooks
+   mode loads `optionalModules=skillroy-agent-hooks,skillroy-agent-byteman` with `byteman.jar` the scenarios module's
+   test-scoped Byteman (`LendingTarget.HOOKS_LEG_MODULES`, `LendingTarget.bytemanJar()`), so the hooks leg's module
+   lists (checks 1 and 15) gain `byteman` and its golden `javaagent-hooks.json` gains `rule.engine OK(in-process)`,
+   which `CapabilityGoldenTest` requires of the hooks leg alone. The return line is driven through `lending.input`
+   (staff 100, a return of one item, so `$!` is 20.00), not by running scenario A: a run's step 0b would install the
+   pack's hooks again under `AUTO`, a retransformation of `AccessControl` the rule's byte check would count as foreign.
+   166: `rule.engine OK(in-process)`, only the agent listens, `rule.check` ok with `typeChecked: false`, `CONFIRM_REQUIRED`
+   without confirm, `killJVM` `RULE_REJECTED`, `rule.list` not loaded; 167: submit with confirm, `rule.fired` with a
+   handle and 20.00, `rule.list` shows it; 168: unload `verified: OK` with 0 foreign events, the same listening sockets
+   after, nothing of Byteman on the desk's output. Green in the arm64 image on the Java 8 and Java 25 desks
+   (`LendingEndToEndIT$JavaAgentHooks`, 37 tests each); the other hooks-mode classes (`ResolutionJavaAgentHooksSeedA/B`,
+   `InferenceEndToEndIT$JavaAgentHooksSeedA/B`, `BranchEndToEndIT`) stay green on Java 25 with the module loaded.
 8. **The variant** (`BranchEndToEndIT`, seed A, branch edition, the overlay jar on the test class path,
    `JAVAAGENT_HOOKS`): §11.4's acceptance, each half on a freshly launched desk (A, B and E `PASS` with the overlay; E
    with the base pack alone `DEGRADED` with hooks off and `FAIL` / `ASSERTION` with hooks on,

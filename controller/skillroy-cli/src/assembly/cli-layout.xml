@@ -15,6 +15,7 @@
   limitations under the License.
 -->
 <!-- CLI distribution layout, shared by the directory and zip assemblies: bin/skillroy (POSIX sh launcher, executable),
+     bin/skillroy.bat (its Windows twin, CRLF, not executable; phase6-contracts.md 9.1),
      lib/ with this module's jar and its runtime dependencies, and at the top level LICENSE and NOTICE (copies of the
      reactor root's files) and THIRD-PARTY.txt (the redistributed third-party jars; a test keeps it in step with lib/).
      The third-party jars are copied unmodified: the notices that travel inside them must stay intact. -->
@@ -44,6 +45,12 @@
       <outputDirectory>bin</outputDirectory>
       <fileMode>0755</fileMode>
       <lineEnding>unix</lineEnding>
+    </file>
+    <file>
+      <source>src/main/bat/skillroy.bat</source>
+      <outputDirectory>bin</outputDirectory>
+      <fileMode>0644</fileMode>
+      <lineEnding>crlf</lineEnding>
     </file>
   </files>
   <dependencySets>

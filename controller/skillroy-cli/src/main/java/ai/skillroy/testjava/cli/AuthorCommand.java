@@ -16,6 +16,7 @@
 
 package ai.skillroy.testjava.cli;
 
+import ai.skillroy.testjava.controller.SecureFiles;
 import ai.skillroy.testjava.data.Credentials;
 import ai.skillroy.testjava.data.CredentialsException;
 import ai.skillroy.testjava.data.SecretMask;
@@ -45,10 +46,8 @@ import java.io.File;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -76,6 +75,13 @@ import java.util.function.UnaryOperator;
  * itself); without it (in-process, an IDE) the configuration names this JVM's {@code java} with its class path.
  * {@code --claude-command}, else the system property {@code skillroy.claude.command}, else {@code claude} on the
  * {@code PATH} names the planner's executable.
+ *
+ * <p>Windows (phase6-contracts.md 9.2, D137; Phase 6, built 2026-10-09, BW, not verified on a Windows host): on the
+ * {@code PATH} the planner's executable is also {@code claude} plus any extension of {@code PATHEXT}
+ * ({@link #findOnPath}); a launcher that is a {@code .bat} or {@code .cmd} ({@code bin\skillroy.bat}) is written into
+ * the configuration as {@code cmd.exe /c <launcher> mcp ...}, since Node-based clients refuse to spawn a batch file
+ * without a shell, and a launcher path or argument that {@code cmd.exe} would split or expand is refused
+ * ({@link #serverCommand}). The configuration file is written owner-only through {@link SecureFiles} (9.3).
  *
  * <p>Exit codes: 0 when the scenario was written and compiled (whatever the checks found: they are the reviewer's
  * information); 1 when the planner failed or its repairs ran out, or the pre-flight failed; 3 when the agent cannot
@@ -410,21 +416,69 @@ final class AuthorCommand implements Command {
         if (property != null && !property.isBlank()) {
             return ParsedArgs.toPath(PROP_CLAUDE_COMMAND, property.strip()).toAbsolutePath();
         }
-        String path = System.getenv("PATH");
+        return findOnPath(System.getenv(), System.getProperty("os.name", ""));
+    }
+
+    /**
+     * {@code claude} on the {@code PATH} of {@code env}, the first directory that has it winning: a regular,
+     * executable file named exactly {@code claude}; on Windows ({@code osName} starting with "Windows") first
+     * {@code claude} plus each extension of {@code PATHEXT} in its order, compared without regard to case, then a
+     * regular file named exactly {@code claude} (npm installs an extensionless shell shim beside {@code claude.cmd}
+     * that Windows cannot start, so the extensions come first). The environment is a parameter so that the lookup is
+     * tested on any platform (phase6-contracts.md 9.2).
+     *
+     * @return the absolute path, or null when none is found
+     */
+    static Path findOnPath(Map<String, String> env, String osName) {
+        boolean windows = osName != null && osName.startsWith("Windows");
+        String path = variable(env, "PATH", windows);
         if (path == null) {
             return null;
         }
-        for (String dir : path.split(File.pathSeparator)) {
+        List<String> names = new ArrayList<>();
+        if (windows) {
+            String pathext = variable(env, "PATHEXT", true);
+            for (String ext : (pathext == null ? ".COM;.EXE;.BAT;.CMD" : pathext).split(";")) {
+                String e = ext.strip();
+                if (e.startsWith(".") && e.length() > 1 && !e.contains("/") && !e.contains("\\")) {
+                    for (String variant : List.of(e, e.toLowerCase(java.util.Locale.ROOT),
+                            e.toUpperCase(java.util.Locale.ROOT))) {
+                        if (!names.contains("claude" + variant)) {
+                            names.add("claude" + variant);
+                        }
+                    }
+                }
+            }
+        }
+        names.add("claude");
+        String separator = windows ? ";" : File.pathSeparator;
+        for (String dir : path.split(java.util.regex.Pattern.quote(separator))) {
             if (dir.isBlank()) {
                 continue;
             }
-            try {
-                Path candidate = Path.of(dir, "claude");
-                if (Files.isRegularFile(candidate) && Files.isExecutable(candidate)) {
-                    return candidate.toAbsolutePath();
+            for (String name : names) {
+                try {
+                    Path candidate = Path.of(dir.strip(), name);
+                    if (Files.isRegularFile(candidate) && (windows || Files.isExecutable(candidate))) {
+                        return candidate.toAbsolutePath();
+                    }
+                } catch (RuntimeException e) {
+                    // A PATH entry that is not a path is skipped.
                 }
-            } catch (RuntimeException e) {
-                // A PATH entry that is not a path is skipped.
+            }
+        }
+        return null;
+    }
+
+    /** An environment variable; on Windows its name is compared without regard to case ({@code Path}, {@code PATH}). */
+    private static String variable(Map<String, String> env, String name, boolean ignoreCase) {
+        String value = env.get(name);
+        if (value != null || !ignoreCase) {
+            return value;
+        }
+        for (Map.Entry<String, String> e : env.entrySet()) {
+            if (e.getKey() != null && e.getKey().equalsIgnoreCase(name)) {
+                return e.getValue();
             }
         }
         return null;
@@ -472,30 +526,74 @@ final class AuthorCommand implements Command {
         if (credentialsFile != null) {
             serverArgs.addAll(List.of(BindArgs.CREDENTIALS, credentialsFile.toAbsolutePath().toString()));
         }
-        Map<String, Object> server = new LinkedHashMap<>();
-        server.put("command", command);
-        server.put("args", serverArgs);
+        Map<String, Object> server = serverCommand(command, serverArgs);
         Map<String, Object> config = Map.of("mcpServers", Map.of("skillroy", server));
-        Path file;
-        if (FileSystems.getDefault().supportedFileAttributeViews().contains("posix")) {
-            file = Files.createTempFile("skillroy-mcp-", ".json",
-                    PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rw-------")));
+        return writeConfig(Path.of(System.getProperty("java.io.tmpdir")), Json.writePretty(config));
+    }
+
+    /** The characters {@code cmd.exe /c} splits at or expands in an unquoted argument (phase6-contracts.md 9.2). */
+    private static final String CMD_SPECIAL = "\"%^&|<> \t";
+
+    /**
+     * The server entry {@code {command, args}} of the MCP configuration. A launcher that is a {@code .bat} or
+     * {@code .cmd} (case-insensitive) is started as {@code cmd.exe /c <launcher> <args>}: Node-based clients refuse
+     * to spawn a batch file without a shell since the CVE-2024-27980 fix, and the planner must start the same
+     * distribution. {@code cmd.exe /c} applies its quote rule to the whole command line, so until a Windows host has
+     * shown which quoted form survives the planner's client (9.5) this plain form is written and a launcher path or
+     * argument holding a quote, {@code %}, {@code ^}, {@code &}, {@code |}, {@code <}, {@code >} or white space is
+     * refused (exit code 64) rather than written into a configuration {@code cmd.exe} would split.
+     */
+    static Map<String, Object> serverCommand(String launcher, List<Object> serverArgs) throws UsageException {
+        Map<String, Object> server = new LinkedHashMap<>();
+        String lower = launcher.toLowerCase(java.util.Locale.ROOT);
+        if (lower.endsWith(".bat") || lower.endsWith(".cmd")) {
+            List<Object> args = new ArrayList<>();
+            args.add("/c");
+            args.add(launcher);
+            args.addAll(serverArgs);
+            for (Object arg : args.subList(1, args.size())) {
+                String text = String.valueOf(arg);
+                for (char c : text.toCharArray()) {
+                    if (CMD_SPECIAL.indexOf(c) >= 0 || Character.isISOControl(c)) {
+                        throw new UsageException("the planner's server would be started through cmd.exe /c, which"
+                                + " would split or expand '" + text + "' (it holds " + describe(c) + "): move the"
+                                + " installation or the pack to a path without spaces or special characters");
+                    }
+                }
+            }
+            server.put("command", "cmd.exe");
+            server.put("args", args);
         } else {
-            file = Files.createTempFile("skillroy-mcp-", ".json");
-            File f = file.toFile();
-            f.setReadable(false, false);
-            f.setReadable(true, true);
-            f.setWritable(false, false);
-            f.setWritable(true, true);
+            server.put("command", launcher);
+            server.put("args", serverArgs);
         }
-        try {
-            Files.writeString(file, Json.writePretty(config), StandardCharsets.UTF_8);
-        } catch (IOException | RuntimeException e) {
-            Files.deleteIfExists(file);
-            throw e;
-        }
+        return server;
+    }
+
+    private static String describe(char c) {
+        return switch (c) {
+            case ' ' -> "a space";
+            case '\t' -> "a tab";
+            case '"' -> "a quote";
+            default -> Character.isISOControl(c) ? "a control character" : "'" + c + "'";
+        };
+    }
+
+    /**
+     * Writes the configuration into a new owner-only file under {@code tmp} through {@link SecureFiles#writeOwnerOnly}
+     * (created exclusively, POSIX {@code rw-------} or an owner-only ACL, refused where the file system has neither;
+     * phase6-contracts.md 9.3). The tests' seam.
+     */
+    static Path writeConfig(Path tmp, String json) throws IOException {
+        byte[] random = new byte[8];
+        RANDOM.nextBytes(random);
+        Path file = tmp.toAbsolutePath().resolve("skillroy-mcp-" + java.util.HexFormat.of().formatHex(random)
+                + ".json");
+        SecureFiles.writeOwnerOnly(file, json.getBytes(StandardCharsets.UTF_8));
         return file;
     }
+
+    private static final java.security.SecureRandom RANDOM = new java.security.SecureRandom();
 
     /** The model calls and their cost of a planner that wrote nothing, on stderr. */
     private static void failureSummary(Cli cli, List<CostLedger.Entry> calls, BigDecimal budget) {

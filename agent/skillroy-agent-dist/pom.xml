@@ -83,6 +83,22 @@
         </exclusion>
       </exclusions>
     </dependency>
+    <!-- Phase 6 (phase6-contracts.md 2.1; BW): the optional Byteman module and its sys jar feed the optional/ set. -->
+    <dependency>
+      <groupId>ai.skillroy</groupId>
+      <artifactId>skillroy-agent-byteman</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>ai.skillroy</groupId>
+      <artifactId>skillroy-agent-byteman-sys</artifactId>
+    </dependency>
+    <!-- Byteman (LGPL-2.1-or-later) at test scope only (D134): BytemanIT takes the jar's path from this test class
+         path; nothing of it is in the home (docs/licence-audit.md 5). -->
+    <dependency>
+      <groupId>org.jboss.byteman</groupId>
+      <artifactId>byteman</artifactId>
+      <scope>test</scope>
+    </dependency>
     <dependency>
       <groupId>org.junit.jupiter</groupId>
       <artifactId>junit-jupiter</artifactId>

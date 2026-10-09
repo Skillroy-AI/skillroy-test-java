@@ -63,6 +63,9 @@ class DistributionContentIT {
             "modules/skillroy-agent-data.jar",
             "modules/skillroy-agent-swing.jar",
             "modules/skillroy-agent-web.jar",
+            // Phase 6 (phase6-contracts.md 2.1, 2.5; BW): the optional Byteman module and its system-class-path jar.
+            "optional/skillroy-agent-byteman-sys.jar",
+            "optional/skillroy-agent-byteman.jar",
             "optional/skillroy-agent-hooks.jar",
             "skillroy-agent-bootstrap.jar",
             "skillroy-agent-spy.jar"));

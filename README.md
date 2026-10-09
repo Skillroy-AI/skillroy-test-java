@@ -200,6 +200,30 @@ and `opentest4j-1.3.0.jar`. Without them the same command runs the web verbs thr
 driver (about 140 MB) on first use in each JVM, and never downloads a browser: it attaches to the one the application
 runs.
 
+## Windows (not verified on a Windows host)
+
+The Windows path is specified in full and built where a Linux image can test it ([phase6-contracts.md](docs/design/phase6-contracts.md)
+§9); no Windows host has run any of it yet, so everything below is **not verified on Windows**.
+
+- The CLI distribution carries `bin\skillroy.bat`, the twin of `bin/skillroy` (the same Java 25 check, the same
+  messages and exit code 69, `--add-modules jdk.attach` for `jvms` and `attach` only, `SKILLROY_JAVA_OPTS`). Call the
+  file in the installation's `bin` directory: `cmd.exe` cannot follow a link to it.
+- `skillroy author` finds the planner as `claude` plus any `PATHEXT` extension (`claude.cmd` as npm installs it), and
+  writes the planner's MCP server as `cmd.exe /c <path>\bin\skillroy.bat mcp …`. Until a Windows host has shown which
+  quoted form the planner's client passes through intact, it refuses an installation or pack path that holds a space,
+  `"`, `%`, `^`, `&`, `|`, `<` or `>`: move the installation or the pack to a plain path.
+- Every owner-only file and directory (the discovery directory, token and options files, the planner's work directory
+  and configuration, the CDP trace directory, the MCP server's temporary output) is created with an ACL of one entry
+  for the current user where the file system has no POSIX permissions, read back, and refused on a file system with
+  neither (FAT, exFAT).
+- **Attach:** the controller must run as the same user, in the same logon session and at the same integrity level as
+  the target, with matching bitness; attaching across logon sessions (a service in session 0, another user's session,
+  an elevated target from a non-elevated controller) is not supported. `JAVAAGENT` is the path for services and for
+  CI; `ATTACH` is best effort.
+- `ci\run-on-windows.cmd` runs `mvn verify` with the Java 8 and the Java 25 targets (`JAVA_HOME` a JDK 25,
+  `SKILLROY_JDK8_HOME` a JDK 8). Run it from the repository root in an interactive logon session: the tests open real
+  windows.
+
 ## Exporting spans (OpenTelemetry)
 
 (Phase 6, built 2026-10-09, TL; [phase6-contracts.md](docs/design/phase6-contracts.md) section 10.) A run, a session and

@@ -16,6 +16,7 @@
 
 package ai.skillroy.testjava.inference.planner;
 
+import ai.skillroy.testjava.controller.SecureFiles;
 import ai.skillroy.testjava.inference.prompt.PromptMask;
 import ai.skillroy.testjava.protocol.Json;
 import ai.skillroy.testjava.protocol.JsonException;
@@ -42,7 +43,6 @@ import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
-import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -171,10 +171,10 @@ public final class Planner {
         long deadlineAt = request.clock().millis() + request.deadline().toMillis();
         Path work;
         try {
-            work = privateDirectory();
-        } catch (IOException e) {
+            work = privateDirectory(Path.of(System.getProperty("java.io.tmpdir")));
+        } catch (IOException | RuntimeException e) {
             throw new AuthoringException(AuthoringException.EXIT_FAILED, "a private working directory cannot be"
-                    + " made: " + e.getClass().getSimpleName(), null, List.of());
+                    + " made: " + e.getMessage(), null, List.of());
         }
         Run run = new Run(request, work, schemaJson, deadlineAt);
         try {
@@ -991,13 +991,13 @@ public final class Planner {
         return (amount.scale() < 2 ? amount.setScale(2) : amount).toPlainString();
     }
 
-    private static Path privateDirectory() throws IOException {
-        try {
-            return Files.createTempDirectory("skillroy-author-",
-                    PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rwx------")));
-        } catch (UnsupportedOperationException e) {
-            return Files.createTempDirectory("skillroy-author-");
-        }
+    /**
+     * The planner's private working directory under {@code tmp} (phase6-contracts.md 9.3, D138; Phase 6, built
+     * 2026-10-09, BW): owner-only through {@link SecureFiles}, POSIX permissions or an owner-only ACL, refused where
+     * the file system has neither (it used to fall back to a plain temporary directory).
+     */
+    static Path privateDirectory(Path tmp) throws IOException {
+        return SecureFiles.createOwnerOnlyTempDirectory(tmp, "skillroy-author-");
     }
 
     private static void deleteQuietly(Path dir) {

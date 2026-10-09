@@ -3,3 +3,8 @@
 * text=auto eol=lf
 *.png binary
 *.jar binary
+# Phase 6 (phase6-contracts.md 9.1, D137): the Windows launcher and runner are CRLF in every checkout. These two lines
+# must stay BELOW the LF rule above, because a later line overrides an earlier one (above it, the .bat would be checked
+# out LF in every fresh clone); BatLauncherTest and LauncherIT depend on the order.
+*.bat text eol=crlf
+*.cmd text eol=crlf

@@ -17,14 +17,13 @@
 package ai.skillroy.testjava.samples.lending.scenarios;
 
 import ai.skillroy.testjava.controller.AgentHome;
+import ai.skillroy.testjava.controller.SecureFiles;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
-import java.nio.file.attribute.PosixFilePermissions;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -74,17 +73,18 @@ final class ItEnv {
         return Path.of(System.getProperty("java.home"), "bin", "java");
     }
 
-    /** A fresh discovery directory for one launch, owner-only (contract amendment A3). */
+    /**
+     * A fresh discovery directory for one launch, owner-only (contract amendment A3) through the controller's
+     * {@link SecureFiles} (phase6-contracts.md 9.3, D138; Phase 6, built 2026-10-09, BW): POSIX permissions or an
+     * owner-only ACL, so that on Windows the end-to-end tests prove the ACL branch instead of depending on the
+     * checkout's inherited ACL.
+     */
     static Path newDiscoveryDir(String label) throws IOException {
         Path parent = buildDir().resolve("it-discovery");
         Files.createDirectories(parent);
         Path dir = parent.resolve(label + "-" + ProcessHandle.current().pid() + "-"
                 + DISCOVERY_DIRS.incrementAndGet());
-        Files.createDirectories(dir);
-        if (FileSystems.getDefault().supportedFileAttributeViews().contains("posix")) {
-            Files.setPosixFilePermissions(dir, PosixFilePermissions.fromString("rwx------"));
-        }
-        return dir;
+        return SecureFiles.ensureOwnerOnlyDirectory(dir, "the test discovery directory");
     }
 
     /** {@code target/it-logs/<name>}. */
