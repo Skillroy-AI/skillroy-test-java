@@ -1706,6 +1706,11 @@ As built (Phase 6, BW, 2026-10-09):
 - **Step 3's option string is `listener:false,manager:ai.skillroy.testjava.agent.byteman.sys.RuleManager`, in that order
   and nothing else** (BS14 condition 1; D-BW-1): `prop:org.jboss.byteman.verbose=false` is dropped. The sys jar is
   `<home>/optional/skillroy-agent-byteman-sys.jar` (the agent option `home`); there is no option for it.
+- **The residue rule** of `ByteVerification` as HK changed it (D-HK-4: a residue is a reference under the prefix that
+  the restored bytes hold and the reference bytes did not) suits the module's check: its reference is the ahead
+  recorder's first bytes of a class before any rule of the module was on it, so a Byteman reference those bytes
+  already carried (a constant-pool entry the JVM merged across an earlier redefinition) is no longer a false `FAILED`,
+  while a trigger left behind still is.
 - **Step 4 has two recorders** (BS14 condition 5; D-BW-3): the ahead recorder registered before `premain`, whose first
   bytes per class are the reference, and the behind recorder registered right after it, whose last bytes after a
   removal are what the JVM installed; §3.5's single recorder re-registered last would, for every later submit, see
@@ -1802,7 +1807,9 @@ As built (Phase 6, BW, 2026-10-09). Unit (`skillroy-agent-byteman-sys`): `RuleMa
 `SysConstantPoolTest`. Unit (`skillroy-agent-byteman`, the test agent `ai.skillroy.testjava.agent.byteman.TestAgent`
 in `target/<module>-test-agent.jar`, the toy `ai.skillroy.testjava.fixture.byteman.DepositDesk`): `RuleLintTest`,
 `ClassBoundTest`, `BindingEncoderTest` in the default execution, and three classes in surefire executions of their
-own, each a fresh JVM (`reuseForks=false` ran no test on the Java 8 test JVM): `ProbeTest` (the reasons of §7.5, with
+own, each a fresh JVM (`reuseForks=false` silently ran no test on the Java 8 test JVM; a command-line `-Dtest` merges
+the executions into one JVM, and then the three skip with a message through `FreshJvm` instead of failing): `ProbeTest`
+(the reasons of §7.5, with
 Byteman's property set and the system loader replaced by an isolated one for "loaded by the host"),
 `CheckLoadsNothingTest` (`rule.check` and `rule.list` on a fresh module define no `org.jboss.byteman` class, load
 nothing of the sys jar and set no property) and `InProcessRouteTest` (the whole route in the test JVM: the first submit
@@ -2922,12 +2929,20 @@ the golden (`javaagent-hooks.json`).
    `rule.list` shows it; `rule.unload` restores with `verified: OK`; a rule naming `killJVM` is `RULE_REJECTED`; the
    child's listening sockets (the `/proc/<pid>/fd`-mapped set of §7.6) before the first `rule.submit` and after
    `rule.unload` are equal and hold exactly the agent's port.
-   As built (Phase 6, BW, 2026-10-09): neither `HookChecks` nor `LendingTarget.Mode.JAVAAGENT_HOOKS` was on a branch BW
-   could merge, so item 7 is the class `BytemanDeskIT` of the scenarios module, which launches its own desk (seed A)
-   with `optionalModules=skillroy-agent-byteman;byteman.jar=<the test class path's jar>` and drives the return line by
-   running committed scenario A (replay, seed A); **at integration its body moves into `HookChecks` after the
-   `hook.remove` demonstration and its two options onto the hooks mode**. Green in the arm64 image on the Java 8 and
-   Java 25 desks.
+   As built (Phase 6, BW, 2026-10-09; moved at integration the same day): item 7 is three checks of `HookChecks`
+   at the orders CP reserved, 166-168, after the `hook.remove` demonstration (165) and before check 15 (170). The hooks
+   mode loads `optionalModules=skillroy-agent-hooks,skillroy-agent-byteman` with `byteman.jar` the scenarios module's
+   test-scoped Byteman (`LendingTarget.HOOKS_LEG_MODULES`, `LendingTarget.bytemanJar()`), so the hooks leg's module
+   lists (checks 1 and 15) gain `byteman` and its golden `javaagent-hooks.json` gains `rule.engine OK(in-process)`,
+   which `CapabilityGoldenTest` requires of the hooks leg alone. The return line is driven through `lending.input`
+   (staff 100, a return of one item, so `$!` is 20.00), not by running scenario A: a run's step 0b would install the
+   pack's hooks again under `AUTO`, a retransformation of `AccessControl` the rule's byte check would count as foreign.
+   166: `rule.engine OK(in-process)`, only the agent listens, `rule.check` ok with `typeChecked: false`, `CONFIRM_REQUIRED`
+   without confirm, `killJVM` `RULE_REJECTED`, `rule.list` not loaded; 167: submit with confirm, `rule.fired` with a
+   handle and 20.00, `rule.list` shows it; 168: unload `verified: OK` with 0 foreign events, the same listening sockets
+   after, nothing of Byteman on the desk's output. Green in the arm64 image on the Java 8 and Java 25 desks
+   (`LendingEndToEndIT$JavaAgentHooks`, 37 tests each); the other hooks-mode classes (`ResolutionJavaAgentHooksSeedA/B`,
+   `InferenceEndToEndIT$JavaAgentHooksSeedA/B`, `BranchEndToEndIT`) stay green on Java 25 with the module loaded.
 8. **The variant** (`BranchEndToEndIT`, seed A, branch edition, the overlay jar on the test class path,
    `JAVAAGENT_HOOKS`): §11.4's acceptance, each half on a freshly launched desk (A, B and E `PASS` with the overlay; E
    with the base pack alone `DEGRADED` with hooks off and `FAIL` / `ASSERTION` with hooks on,

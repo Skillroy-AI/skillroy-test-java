@@ -54,6 +54,7 @@ class CheckLoadsNothingTest {
     void aCheckAndAListOnAFreshAgentLoadNothing() throws Exception {
         Instrumentation inst = TestAgent.instrumentation();
         assertNotNull(inst, "the test agent's Instrumentation");
+        FreshJvm.assume(true);
         new DepositDesk().ceiling("STAFF-1");
         FakeAgentContext ctx = new FakeAgentContext(inst);
         ctx.options.put(Settings.BYTEMAN_JAR, System.getProperty("skillroy.test.bytemanJar"));

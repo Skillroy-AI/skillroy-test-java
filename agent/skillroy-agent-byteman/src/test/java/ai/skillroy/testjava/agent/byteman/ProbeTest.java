@@ -53,6 +53,11 @@ class ProbeTest {
     @TempDir
     Path tmp;
 
+    @org.junit.jupiter.api.BeforeEach
+    void freshJvm() {
+        FreshJvm.assume(false);
+    }
+
     @AfterEach
     void clearProperty() throws Exception {
         System.clearProperty(Engine.LOADED_PROPERTY);

@@ -75,6 +75,7 @@ class InProcessRouteTest {
 
     @Test
     void theWholeRoute() throws Exception {
+        FreshJvm.assume(false);
         DepositDesk desk = new DepositDesk();
         assertEquals(new BigDecimal("150.00"), desk.ceiling("STAFF-1"));
 

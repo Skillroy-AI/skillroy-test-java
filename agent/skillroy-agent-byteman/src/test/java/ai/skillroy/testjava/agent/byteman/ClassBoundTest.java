@@ -115,8 +115,10 @@ class ClassBoundTest {
         ClassBound bound = new ClassBound(jvm(true), Settings.defaults(), none());
         assertEquals("class is the agent's own or the JDK's", bound.problem(String.class));
         URL classes = DepositDesk.class.getProtectionDomain().getCodeSource().getLocation();
+        // A fixture of its own (its copy stays loaded): a rule another test submits in this JVM must not match it.
+        String loaded = "ai.skillroy.testjava.fixture.byteman.AgentLoaded";
         try (AgentNamedLoader agentLoader = new AgentNamedLoader(new URL[] {classes})) {
-            Class<?> copy = agentLoader.loadClass(DESK);
+            Class<?> copy = agentLoader.loadClass(loaded);
             assertTrue(copy.getClassLoader() == agentLoader);
             assertEquals("class is the agent's own or the JDK's", bound.problem(copy),
                     "a loader whose class is under ai.skillroy.testjava.agent. is the agent's");
@@ -124,7 +126,7 @@ class ClassBoundTest {
             URLClassLoader plain = new URLClassLoader(new URL[] {classes}, null);
             chain.add(plain);
             assertEquals("class is the agent's own or the JDK's",
-                    new ClassBound(jvm(true), Settings.defaults(), chain).problem(plain.loadClass(DESK)),
+                    new ClassBound(jvm(true), Settings.defaults(), chain).problem(plain.loadClass(loaded)),
                     "a loader of the module's own chain");
             plain.close();
         }
