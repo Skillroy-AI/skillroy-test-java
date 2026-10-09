@@ -26,8 +26,10 @@ import ai.skillroy.testjava.protocol.Json;
 import ai.skillroy.testjava.protocol.RpcResult;
 import ai.skillroy.testjava.protocol.SecretKeys;
 import ai.skillroy.testjava.protocol.Topics;
+import ai.skillroy.testjava.protocol.hook.HookCapture;
 import ai.skillroy.testjava.protocol.hook.HookSpec;
 import ai.skillroy.testjava.scenario.hooks.HookCatalogue;
+import ai.skillroy.testjava.scenario.hooks.HookEntry;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 
@@ -83,6 +85,22 @@ abstract class HookChecks extends LoadModeChecks {
             params.put("replace", true);
         }
         return params;
+    }
+
+    /**
+     * The pack's catalogue with {@code sign.on.checked} enabled and capturing <b>both</b> arguments (fix wave of the
+     * Phase 6 review, FC; finding L3-F3 as its sceptic restated it): the committed entry captures {@code args: [0]}
+     * only, and the engine visits only the captured indexes, so {@code secretArgs: [1]} would never be exercised and a
+     * check of index 1 would pass on its absence alone. With index 1 captured, {@code secretArgs: [1]} must turn the
+     * password into {@code <redacted>} in the event (phase6-contracts.md 13.1 item 6).
+     */
+    static HookCatalogue signOnCheckedCapturingThePasswordIndex(HookCatalogue catalogue) {
+        HookEntry signOn = catalogue.entry("sign.on.checked");
+        HookCapture capture = signOn.capture();
+        HookEntry both = new HookEntry(signOn.id(), signOn.mode(), true, signOn.target(), new HookCapture(List.of(0, 1),
+                capture.self(), capture.result()), signOn.secretArgs(), signOn.secretResult(), signOn.emits(),
+                signOn.fallbacks(), signOn.note());
+        return HookCatalogue.builder(catalogue).replace(both).build();
     }
 
     List<Map<String, Object>> events(String id, long since) throws Exception {
@@ -238,15 +256,17 @@ abstract class HookChecks extends LoadModeChecks {
 
     /**
      * phase6-contracts.md 6.3, 13.1 item 6, 13.2 item 10: {@code sign.on.checked} (catalogued and off) enabled once,
-     * the catalogue replaced under its own id: a sign-on fires it with the staff code and never the password, which
-     * {@code secretArgs: [1]} keeps out; its events are written below this mode's run outputs, which check 18 scans for
+     * the catalogue replaced under its own id, in a test variant that also captures the password's index 1
+     * ({@link #signOnCheckedCapturingThePasswordIndex}; fix wave of the Phase 6 review, FC): a sign-on fires it with the
+     * staff code at index 0 and {@code <redacted>} at index 1, which {@code secretArgs: [1]} makes of the password, and
+     * the password is nowhere in the events; they are written below this mode's run outputs, which check 18 scans for
      * the password. The pack's own catalogue is installed again afterwards.
      */
     @Test
     @Order(67)
     void signOnCheckedEnabledNeverCapturesThePassword() throws Exception {
         HookCatalogue catalogue = Runs.PACK.hooks();
-        HookCatalogue enabled = HookCatalogue.builder(catalogue).enable("sign.on.checked").build();
+        HookCatalogue enabled = signOnCheckedCapturingThePasswordIndex(catalogue);
         try {
             value(client().call("hook.install", installParams(enabled, true), CALL.withTimeoutMs(70_000L)));
             long since = client().call("trace.mark", Map.of("label", "hooks.sign-on"), CALL).seqAfter();
@@ -256,7 +276,7 @@ abstract class HookChecks extends LoadModeChecks {
             assertFalse(fired.isEmpty(), "the sign-on checked the password");
             Map<?, ?> args = (Map<?, ?>) payload(fired.get(0)).get("args");
             assertEquals("100", args.get("0"), String.valueOf(args));
-            assertTrue(!args.containsKey("1") || SecretKeys.REDACTED.equals(args.get("1")), String.valueOf(args));
+            assertEquals(SecretKeys.REDACTED, args.get("1"), "the password's index is captured redacted: " + args);
             assertEquals(Boolean.TRUE, payload(fired.get(0)).get("returned"));
             assertFalse(passwordOccurrences(Json.write(fired)).size() > 0, "the password is nowhere: " + fired);
             Path dir = ItEnv.runDir(mode().slug, "hooks");

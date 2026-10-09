@@ -315,9 +315,13 @@ class TelemetryObserverTest {
     void minimalDropsExactlyItsListAndHashesTheIds() throws Exception {
         assertEquals(Set.of("skillroy.message", "skillroy.step.message", "skillroy.pack", "skillroy.suite",
                 "skillroy.bindings.file", "skillroy.slot"), TelemetryAttributes.MINIMAL_DROPS, "the exact list");
-        assertEquals(Set.of("skillroy.primitive", "gen_ai.tool.name", "skillroy.step.verb", "skillroy.expect.path"),
-                TelemetryAttributes.MINIMAL_REPLACED);
-        assertEquals(Set.of("test.case.name", "skillroy.failed_step"), TelemetryAttributes.MINIMAL_HASHED);
+        assertEquals(Set.of("skillroy.primitive", "gen_ai.tool.name", "skillroy.step.verb", "skillroy.expect.path",
+                "skillroy.topic"), TelemetryAttributes.MINIMAL_REPLACED);
+        assertEquals(Set.of("test.case.name", "skillroy.failed_step", "skillroy.correlation_id",
+                "skillroy.pack.version", "skillroy.env.id", "skillroy.agent.thread", "skillroy.secret_params",
+                "skillroy.id", "skillroy.ids", "skillroy.armed", "skillroy.names", "skillroy.table", "skillroy.source",
+                "skillroy.resolver", "skillroy.verifiers", "skillroy.fn", "skillroy.oracle", "skillroy.contributors"),
+                TelemetryAttributes.MINIMAL_HASHED, "the exact list (fix wave, FC)");
 
         TelemetryFixture fixture = new TelemetryFixture(dir);
         fixture.aModelCallInTheBind();
@@ -370,6 +374,207 @@ class TelemetryObserverTest {
         assertEquals("nightly", attr(one(spans(), "skillroy run"), TelemetryAttributes.SUITE));
         assertEquals("enter", attr(one(spans(), "step s1"), TelemetryAttributes.STEP_VERB));
         assertEquals("toy.input", attr(one(spans(), "call toy.input"), TelemetryAttributes.PRIMITIVE));
+    }
+
+    /**
+     * Fix wave (Phase 6 review, FC, 2026-10-09): every attribute name {@code TelemetryAttributes} holds is in exactly
+     * one of {@code minimal}'s four lists, and no list names anything else, so that an attribute added later must be
+     * placed (and is hashed until it is listed as kept, {@link TelemetryAttributes#minimal}).
+     */
+    @Test
+    void everyAttributeNameHasExactlyOneMinimalRule() {
+        Set<String> names = new java.util.TreeSet<>(TelemetryAttributes.all());
+        Map<String, Set<String>> lists = Map.of("MINIMAL_DROPS", TelemetryAttributes.MINIMAL_DROPS,
+                "MINIMAL_REPLACED", TelemetryAttributes.MINIMAL_REPLACED, "MINIMAL_KEPT", TelemetryAttributes.MINIMAL_KEPT,
+                "MINIMAL_HASHED", TelemetryAttributes.MINIMAL_HASHED);
+        List<String> wrong = new ArrayList<>();
+        for (String name : names) {
+            List<String> in = lists.entrySet().stream().filter(e -> e.getValue().contains(name)).map(Map.Entry::getKey)
+                    .sorted().toList();
+            if (in.size() != 1) {
+                wrong.add(name + " in " + in);
+            }
+        }
+        assertEquals(List.of(), wrong, "each attribute name in exactly one list");
+        for (Map.Entry<String, Set<String>> list : lists.entrySet()) {
+            assertTrue(names.containsAll(list.getValue()), list.getKey() + " names only attributes of the allow-list");
+        }
+        // The rule itself: dropped, replaced, kept and hashed; a name no list holds is hashed.
+        assertNull(TelemetryAttributes.minimal(TelemetryAttributes.PACK, "lending"));
+        assertEquals("pack", TelemetryAttributes.minimal(TelemetryAttributes.PRIMITIVE, "lending.input"));
+        assertEquals("swing.click", TelemetryAttributes.minimal(TelemetryAttributes.PRIMITIVE, "swing.click"));
+        assertEquals("hook", TelemetryAttributes.minimal(TelemetryAttributes.TOPIC, "hook.limit.applied"));
+        assertEquals("pack", TelemetryAttributes.minimal(TelemetryAttributes.TOPIC, "loan.posted"));
+        assertEquals("input.requested", TelemetryAttributes.minimal(TelemetryAttributes.TOPIC, "input.requested"));
+        assertEquals("hooks.stubbed", TelemetryAttributes.minimal(TelemetryAttributes.TOPIC, "hooks.stubbed"));
+        assertEquals("REPLAY", TelemetryAttributes.minimal(TelemetryAttributes.STATUS, "REPLAY"));
+        assertEquals(TelemetryAttributes.hash("t/s1/1"), TelemetryAttributes.minimal(
+                TelemetryAttributes.CORRELATION_ID, "t/s1/1"));
+        assertEquals(TelemetryAttributes.hash("0.5.0+lending-branch@0.1.0"), TelemetryAttributes.minimal(
+                TelemetryAttributes.PACK_VERSION, "0.5.0+lending-branch@0.1.0"));
+        assertEquals(TelemetryAttributes.hash("x"), TelemetryAttributes.minimal("skillroy.not.listed", "x"));
+    }
+
+    /**
+     * Fix wave (Phase 6 review, FC, 2026-10-09; findings L1-F1, L2-F9, L1-S1): a {@code minimal} run carries none of
+     * the identifiers of its scenarios, steps, pack, overlay, hooks, resolvers, verifiers, oracles, tables, sources,
+     * topics or threads in clear, on any span or event, whatever attribute would carry it: the fixture's runs, then a
+     * scenario and a session of an overlay pack reported directly with every record type the observer exports.
+     */
+    @Test
+    void minimalCarriesNoIdentifierOfTheScenarioThePackOrItsOverlayInClear() throws Exception {
+        TelemetryFixture fixture = new TelemetryFixture(dir);
+        fixture.aModelCallInTheBind();
+        TelemetryObserver observer = observer(true);
+        fixture.run(TelemetryFixture.BIND_YAML, BindMode.APPROVE, observer);
+        fixture.run(TelemetryFixture.BIND_YAML, BindMode.REPLAY, observer);
+        fixture.run(TelemetryFixture.FAILING_YAML, BindMode.REPLAY, observer);
+        fixture.run(TelemetryFixture.SYNC_TIMEOUT_YAML, BindMode.REPLAY, observer);
+        reportAnOverlayScenarioAndSession(observer);
+        observer.close();
+
+        List<String> texts = new ArrayList<>();
+        List<String> misplaced = new ArrayList<>();
+        Set<String> seen = new java.util.TreeSet<>();
+        for (SpanData span : spans()) {
+            texts.add(span.getName());
+            strings(span.getAttributes(), texts);
+            listed(span.getName(), span.getAttributes(), seen, misplaced);
+            for (EventData event : span.getEvents()) {
+                texts.add(event.getName());
+                strings(event.getAttributes(), texts);
+                listed(span.getName() + "/" + event.getName(), event.getAttributes(), seen, misplaced);
+            }
+        }
+        assertEquals(List.of(), misplaced, "every attribute of a minimal run is kept, replaced or hashed by its list");
+        assertTrue(seen.containsAll(Set.of(TelemetryAttributes.CORRELATION_ID, TelemetryAttributes.PACK_VERSION,
+                TelemetryAttributes.IDS, TelemetryAttributes.ARMED, TelemetryAttributes.RECORD_ID,
+                TelemetryAttributes.NAMES, TelemetryAttributes.RESOLVER, TelemetryAttributes.VERIFIERS,
+                TelemetryAttributes.ORACLE, TelemetryAttributes.FN, TelemetryAttributes.CONTRIBUTORS,
+                TelemetryAttributes.TABLE, TelemetryAttributes.SOURCE, TelemetryAttributes.TOPIC,
+                TelemetryAttributes.AGENT_THREAD, TelemetryAttributes.SECRET_PARAMS, TelemetryAttributes.ENV_ID)),
+                "the scan saw every attribute the review named: " + seen);
+        List<String> leaks = new ArrayList<>();
+        for (String text : texts) {
+            for (String id : MINIMAL_NEEDLES) {
+                if (holdsId(text, id)) {
+                    leaks.add(id + " in \"" + text + "\"");
+                }
+            }
+        }
+        assertEquals(List.of(), leaks, "minimal holds an identifier in clear");
+    }
+
+    /**
+     * Records in {@code misplaced} every attribute of {@code attributes} that {@code minimal} should not write: a
+     * dropped one, one no list holds, or a hashed one whose value (or an element) is not a {@code sha256:} hash.
+     */
+    private static void listed(String where, Attributes attributes, Set<String> seen, List<String> misplaced) {
+        attributes.forEach((key, value) -> {
+            String name = key.getKey();
+            seen.add(name);
+            if (TelemetryAttributes.MINIMAL_DROPS.contains(name)) {
+                misplaced.add(where + ": " + name + " is dropped in minimal");
+            } else if (!TelemetryAttributes.MINIMAL_KEPT.contains(name)
+                    && !TelemetryAttributes.MINIMAL_REPLACED.contains(name)
+                    && !TelemetryAttributes.MINIMAL_HASHED.contains(name)) {
+                misplaced.add(where + ": " + name + " is in no list");
+            } else if (TelemetryAttributes.MINIMAL_HASHED.contains(name)) {
+                List<?> values = value instanceof List<?> list ? list : List.of(value);
+                for (Object v : values) {
+                    if (!(v instanceof String s) || !s.startsWith("sha256:")) {
+                        misplaced.add(where + ": " + name + " = " + v + " is not hashed");
+                    }
+                }
+            }
+        });
+    }
+
+    /**
+     * The identifiers {@link #minimalCarriesNoIdentifierOfTheScenarioThePackOrItsOverlayInClear} looks for: the
+     * fixture's scenario, step, pack, primitive, slot, oracle and environment ids, and those of
+     * {@link #reportAnOverlayScenarioAndSession}.
+     */
+    private static final List<String> MINIMAL_NEEDLES = List.of(
+            // the fixture's runs
+            "toy-resolve", "toy-fails", "toy-waits", "toy", "s1", "s2", "s3", "seed-a", "nightly", "Limit", "Negate",
+            "Needs", "neg", "needs", "assistant", "never.published",
+            // the overlay's scenario and session
+            "desk-return-observed", "return-line", "returnItem", "lending", "lending-branch", "seed-b",
+            "limit.applied", "access.checked", "line.amount", "desk-open", "lending.edition", "Staff",
+            "signs-on", "expected-waiver", "WaiverFor", "lending.waivers", "loan_lines", "loan.posted",
+            "LendingEngine", "loanId", "pin");
+
+    /**
+     * True when {@code text} holds {@code id}: as the whole text, as one of its tokens (split on everything but
+     * letters, digits, {@code -} and {@code _}), or, for an id of five characters or more, anywhere in it.
+     */
+    private static boolean holdsId(String text, String id) {
+        if (text.equals(id) || id.length() >= 5 && text.contains(id)) {
+            return true;
+        }
+        for (String token : text.split("[^A-Za-z0-9_-]+")) {
+            if (token.equals(id)) {
+                return true;
+            }
+        }
+        for (String token : text.split("[^A-Za-z0-9]+")) {
+            if (token.equals(id)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * A scenario of an overlay pack ({@code lending} with the overlay {@code lending-branch}) and a session of it,
+     * reported directly: every scenario record type, every bind event type, a step with a call, its wait on a hook's
+     * topic and an agent event of a pack topic, a stored-row check, an expectation on the {@code hooks} root and a
+     * capture.
+     */
+    private static void reportAnOverlayScenarioAndSession(TelemetryObserver observer) {
+        String overlayVersion = "0.5.0+lending-branch@0.1.0";
+        observer.scenarioStarted(new ai.skillroy.testjava.scenario.observe.ScenarioStart("desk-return-observed",
+                "lending", overlayVersion, 3, "sha256:00ab", "replay", "seed-b"));
+        observer.scenarioRecord("requires", Map.of("requires", List.of("lending.input", "hook.limit.applied"),
+                "unmet", List.of()));
+        observer.scenarioRecord("launchProperties", Map.of("expected", Map.of("lending.edition", "branch"),
+                "ok", true));
+        observer.scenarioRecord("preflight", Map.of("id", "lending.desk-open", "ok", true));
+        observer.scenarioRecord("hooks", Map.of("mode", "auto", "catalogue", Map.of("id", "lending-branch",
+                "hash", "sha256:00cd"), "installed", List.of("limit.applied", "access.checked"),
+                "unavailable", List.of(Map.of("id", "waiver.evaluated")), "armed", List.of("line.amount")));
+        observer.scenarioRecord("capabilities", Map.of("hash", "sha256:00ef", "ids", 40L));
+        observer.bindEvent("fingerprint", Map.of("hash", "sha256:0011", "durationMs", 3L));
+        observer.bindEvent("resolve", Map.of("slot", "assistant", "strategy", "QUERY", "resolver",
+                "lending.sql.Staff", "candidates", 3L, "verified", List.of(Map.of("id", "lending.staff.signs-on",
+                        "passed", true)), "durationMs", 4L));
+        observer.bindEvent("oracle", Map.of("name", "expected-waiver", "fn", "WaiverFor", "durationMs", 1L));
+        observer.bindEvent("guard", Map.of("oracle", "expected-waiver", "skipped", false));
+        observer.bindEvent("crosscheck", Map.of("oracle", "expected-waiver", "fn", "WaiverFor", "agreed", true));
+        observer.bindEvent("inference", Map.of("mode", "live", "gateway", "claude", "contributors",
+                List.of("lending.waivers")));
+        observer.bindEvent("bind", Map.of("mode", "replay", "envId", "seed-b", "bindingsFile",
+                "/runs/desk-return-observed.bindings.json", "ok", true));
+        observer.stepStarted(new StepStart("return-line", "returnItem", 7, null));
+        observer.callStarted(new ai.skillroy.testjava.scenario.observe.CallStart("return-line", 1, "lending.input",
+                "desk-return-observed/return-line/1", List.of("pin"), false));
+        observer.await(new ai.skillroy.testjava.scenario.observe.AwaitRecord("EVENT", true, 12L,
+                "hook.limit.applied", 40L, "agent"));
+        observer.callEnded(new ai.skillroy.testjava.scenario.observe.CallEnd(true, "agent", null, 10L, 14L, 50L,
+                20L, "LendingEngine", List.of(new ai.skillroy.testjava.scenario.observe.CallEnd.EventFact(
+                        "loan.posted", 13L, "lending", 1L))));
+        observer.scenarioRecord("db", Map.of("table", "loan_lines", "source", "lending", "channel", "jdbc",
+                "rowCount", 1L, "ok", true));
+        observer.scenarioRecord("expect", Map.of("path", "hooks[id=limit.applied].last.returned", "matcher",
+                Map.of("equals", "20.00"), "result", "held"));
+        observer.scenarioRecord("capture", Map.of("slot", "loanId", "ok", true));
+        observer.scenarioRecord("cleanup", Map.of("primitive", "lending.input", "ok", true));
+        observer.sessionStarted(new ai.skillroy.testjava.scenario.observe.SessionStart("sess-9", "lending",
+                overlayVersion, "acting"));
+        observer.sessionStepStarted(new StepStart("return-line", "returnItem", 0, "PERSON"));
+        observer.sessionStep(null);
+        observer.sessionEnded("closed");
     }
 
     // ------------------------------------------------------------------------------------------------ sessions, MCP
