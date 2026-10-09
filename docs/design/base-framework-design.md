@@ -940,7 +940,7 @@ Every phase is proven on the sample lending desk or on toy programs. Sizes are r
 | BS11 | `PAINT` determinism: 100 captures of one window on one JDK, then across JDK lines and font sets |
 | BS12 | grounding accuracy and cost on the sample: V1 (refs) versus V2 (pixels), seconds per action, tokens per session; replaces the estimates of the research note |
 
-Status on 2026-10-07: BS7 done; BS8 run and passed with conditions (2026-10-06; `spikes/BS8/RESULT.md`); BS5's criterion met by the Phase 4 acceptance against JCEF's Chromium in the image (2026-10-07, D53; the run against a stock Chromium is the manual procedure `spikes/BS5/README.md`); BS1, BS2 and BS4 answered for Java 8 and Java 25 targets on Linux, with parts still open; BS3 and BS6 open; BS9-BS12 new and not started. Details in `../TODO.md`. The research note `vision-input` numbers its spikes BS8-BS11; here they are BS9-BS12, because BS8 is the JCEF spike.
+Status on 2026-10-07: BS7 done; BS8 run and passed with conditions (2026-10-06; `spikes/BS8/RESULT.md`); BS5's criterion met by the Phase 4 acceptance against JCEF's Chromium in the image (2026-10-07, D53; the run against a stock Chromium is the manual procedure `spikes/BS5/README.md`); BS1, BS2 and BS4 answered for Java 8 and Java 25 targets on Linux, with parts still open; BS3 and BS6 open; BS9-BS12 new and not started. Since then: BS6 passed (2026-10-08), BS13 passed (2026-10-08) and BS3 passed with conditions (2026-10-09, `spikes/BS3/RESULT.md`). Details in `../TODO.md`. The research note `vision-input` numbers its spikes BS8-BS11; here they are BS9-BS12, because BS8 is the JCEF spike.
 
 | Phase | Size | Scope | Exit criteria |
 |---|---|---|---|

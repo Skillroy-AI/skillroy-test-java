@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Copyright 2026 Mike Mills.
+
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+
+      http://www.apache.org/licenses/LICENSE-2.0
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <!-- Spike BS3: Byte Buddy retransformation with inline Advice and a bootstrap Spy, restored on detach. A small
+       aggregator of its own (not a module of the root reactor) whose modules prototype the shapes of the real
+       skillroy-agent-spy, skillroy-agent-hooks and skillroy-agent-bootstrap, plus the host programs the probe runs in.
+       Build it with "mvn -f spikes/BS3/pom.xml package" (never install); every jar lands in target/bs3/. Run the
+       matrix with spikes/BS3/run.sh. The result is written up in RESULT.md next to this file. -->
+  <groupId>ai.skillroy.spikes</groupId>
+  <artifactId>skillroy-spike-bs3</artifactId>
+  <version>0.1.0-SNAPSHOT</version>
+  <packaging>pom</packaging>
+  <name>skillroy-spike-bs3</name>
+
+  <modules>
+    <module>spy</module>
+    <module>engine</module>
+    <module>agent</module>
+    <module>toy</module>
+    <module>host</module>
+    <module>hostlibs</module>
+  </modules>
+
+  <properties>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <!-- Everything here runs inside a target JVM (Java 8 or Java 25), so all of it is Java 8 language and API. -->
+    <maven.compiler.release>8</maven.compiler.release>
+    <!-- The latest Byte Buddy on Maven Central on 2026-10-09 (maven-metadata.xml lastUpdated 20260914221459: 1.18.14 and
+         1.18.14-jdk5); the regular artifact has a Java 8 baseline since 1.18.7 (attach F13). -->
+    <bytebuddy.version>1.18.14</bytebuddy.version>
+    <!-- The older copies a host may ship on its own class path (BS3 item 2): the Byte Buddy that Mockito 4.11 bundles,
+         an ASM 5 and an old JNA. -->
+    <host.bytebuddy.version>1.12.19</host.bytebuddy.version>
+    <host.asm.version>5.0.3</host.asm.version>
+    <host.jna.version>4.5.2</host.jna.version>
+    <!-- The version the root POM pins (jdk8 classifier, as everywhere in the repo). -->
+    <hsqldb.version>2.7.4</hsqldb.version>
+    <!-- Where every jar of the spike is collected (interpolated per module: every module is a direct child). -->
+    <bs3.dist>${project.basedir}/../target/bs3</bs3.dist>
+    <!-- The sample lending desk's jar, built in the main tree (mvn -o -q -pl samples/skillroy-sample-lending-app -am
+         package -DskipTests); it is never installed, so the host module compiles against the file. -->
+    <bs3.sample.jar>${project.basedir}/../../../samples/skillroy-sample-lending-app/target/skillroy-sample-lending-app-0.1.0-SNAPSHOT.jar</bs3.sample.jar>
+  </properties>
+
+  <build>
+    <pluginManagement>
+      <plugins>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-compiler-plugin</artifactId>
+          <version>3.16.0</version>
+          <configuration>
+            <release>8</release>
+            <compilerArgs>
+              <arg>-Xlint:-options</arg>
+            </compilerArgs>
+          </configuration>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-jar-plugin</artifactId>
+          <version>3.5.1</version>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-shade-plugin</artifactId>
+          <!-- 3.6.2 (ASM 9.9.1), not 3.6.0 (ASM 9.7): 3.6.0 cannot read the class files of Byte Buddy's
+               META-INF/versions/24 entries (major 68) and fails the build (RESULT.md, "Shading"). -->
+          <version>3.6.2</version>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-dependency-plugin</artifactId>
+          <version>3.11.0</version>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-resources-plugin</artifactId>
+          <version>3.5.0</version>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-surefire-plugin</artifactId>
+          <version>3.6.0</version>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-install-plugin</artifactId>
+          <version>3.2.0</version>
+          <configuration>
+            <skip>true</skip>
+          </configuration>
+        </plugin>
+      </plugins>
+    </pluginManagement>
+  </build>
+</project>

@@ -404,7 +404,7 @@ re-run. BS8 comes from `research/embedded-browser-spi.md` R4 (B9); BS9-BS12 from
 |---|---|---|
 | BS1 | The agent loads into stock JVMs in all load modes, across JDK versions | **Answered for Java 8 and Java 25 targets on Linux** (Java 21 targets before the switch). Open: cross-user attach and jattach, Windows |
 | BS2 | The control channel survives a soak; the agent is isolated from the host class path | **Answered in part**: 3-minute soak per JDK (before the switch, on the JDK server), bounds and isolation tested; the agent's own listener (H1) is built and its per-call cost measured (1.4-5 ms). Open: the one-hour soak, loader collectability, a soak on the agent's own listener. Finding: about 45 ms per call on the JDK HTTP server on Java 8 and Java 21 targets; absent on a Java 25 target; gone with H1 |
-| BS3 | Byte Buddy retransformation with inline Advice and a bootstrap `Spy`; original bytes restored on detach | Open; partly shown in round 1 on toy programs |
+| BS3 | Byte Buddy retransformation with inline Advice and a bootstrap `Spy`; original bytes restored on detach | **Passed with conditions 2026-10-09** (`spikes/BS3/RESULT.md`): on Java 8 and Java 25 targets in the arm64 image, `JAVAAGENT` and `ATTACH`, a hook on the sample's `AccessControl.check` and on a toy class in a custom loader installs in 111-197 ms (later ones 6-23 ms), fires on the host's thread in `OBSERVE`, `CAPTURE` and `STUB`, switches mode without a retransform and restores byte for byte; Byte Buddy 1.18.14 shaded under the project prefix coexists with a host's Byte Buddy 1.12.19, ASM 5.0.3 and JNA 4.5.2; 17 configurations. Conditions: Byte Buddy injects `Nexus` (and on Java 25 a `java.lang` accessor with an `Unsafe` warning) unless its relocated `nexus.disabled` property is set; each bootstrap append prints a class-data-sharing warning on Java 25 (append once per JVM); the byte check holds by construction, so the engine also counts transform events it did not cause; a loader that delegates only `java.*` cannot see `Spy` (probe and refuse, or a `java.*`-package `Spy`); every retransform is a stop-the-world pause (size limit proposed: 256 KiB and 2,000 methods); maven-shade-plugin 3.6.2 or newer |
 | BS4 | Which Swing input rungs work on an Xvfb display with no window manager | **Answered** for Java 8 and 21 (before the switch); the end-to-end check built on it passed on Java 8 and Java 25 targets. Open: the ROBOT rung (not built; see BS9), a large-sample focus statistic, the display-test flake |
 | BS5 | Playwright attaches over CDP to an already-running Chromium safely | **Met 2026-10-07 by the Phase 4 acceptance** against JCEF's Chromium in the image (D53): 50 of 50 attach attempts against a frozen page ended with `FROZEN_TARGETS` within the deadline, the slowest in about 2.02 s. A stock-Chromium run is a manual procedure, `spikes/BS5/README.md` |
 | BS6 | `SqlGuard` accepts and rejects correctly across SQL dialects | **Passed 2026-10-08** (`spikes/BS6/RESULT.md`): a prototype guard on JSqlParser 5.4 accepts all 264 accept statements and refuses all 382 reject statements with the reason named, on HSQLDB, MySQL, MariaDB, PostgreSQL, DB2, Oracle, SQL Server and generic SQL; all 41 HSQLDB rewrites execute on the embedded database; about 0.1 ms per statement; 741 tests. It found holes in the contract's first rules (database links, dropped comments, ambiguous literals, correlated names, parenthesis depth, a tie-breaker rule that gave invalid SQL after `GROUP BY`), now corrected in P5 §5.3. Open: the other dialects' accept corpora on real servers before production use; Oracle 11g unavailable. The agent-side statement guard of `data.query` is a different, simpler check and is built |
@@ -497,7 +497,12 @@ re-run. BS8 comes from `research/embedded-browser-spi.md` R4 (B9); BS9-BS12 from
 - **Already shown in round 1 (toy programs).** Byte Buddy 1.18.14 `RETRANSFORMATION` + Advice changed a live toy
   class inside a JDK 8 target (8u492) attached from JDK 21 (attach F14); Byteman 4.0.27 loaded, fired and unloaded
   a rule in the same JVM, and the Byte Buddy advice survived the unload (attach F19).
-- **Not yet shown.** Bootstrap `Spy` visibility from a custom loader, the byte comparison on detach, a JDK 25 target.
+- **Not yet shown** (before 2026-10-09). Bootstrap `Spy` visibility from a custom loader, the byte comparison on detach, a JDK 25 target.
+- **Run 2026-10-09: passed with conditions.** `spikes/BS3/` (a standalone Maven project: spy jar, probe agent, engine on
+  shaded Byte Buddy 1.18.14, host drivers); the verdict per item, the measurements, the byte check, the size limit, where
+  `Spy` lives, what reaches the shared loaders, the shading and the load modes are in `spikes/BS3/RESULT.md`, whose §9
+  lists the facts the Phase 6 contract builds on. Not run: the amd64 image, Windows, Java lines between 8 and 25, a large
+  real application.
 
 ### BS4 Swing input rungs without a window manager
 
@@ -1274,7 +1279,7 @@ commits. The key lived in the operator's login shell and reached a JVM by name o
 
 ### Phase 6: hooks, Byteman, Windows, OTel, hardening
 
-- [ ] `skillroy-agent-spy` and `skillroy-agent-hooks`: hook engine, probes, health, hook-catalogue format, post-detach byte verification (BS3 passed)
+- [ ] `skillroy-agent-spy` and `skillroy-agent-hooks`: hook engine, probes, health, hook-catalogue format, post-detach byte verification (BS3 passed with conditions 2026-10-09)
 - [ ] `skillroy-agent-byteman` (optional and unbundled, B8)
 - [ ] JDK 25 target through `JAVAAGENT`: no JEP 451 warning; capability matrix equal to the JDK 8 matrix. The
   handshake through `JAVAAGENT` on a Java 25 target was verified on 2026-10-02; no result for the warning or the
