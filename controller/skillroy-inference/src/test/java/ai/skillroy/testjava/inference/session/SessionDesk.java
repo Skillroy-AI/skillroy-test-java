@@ -189,6 +189,142 @@ final class SessionDesk implements DomainPack {
         };
     }
 
+    /**
+     * The desk whose verb {@code signOn} has a secret-looking property with data in its schema and a {@code key=value}
+     * secret in a description (phase6 security fix S49): {@code password {type: string, default, enum}} and
+     * {@code staff}'s description "set it as token=Vocab-Tok-8812".
+     */
+    DomainPack withSecretSchema() {
+        SessionDesk base = this;
+        StepLibrary baseSteps = base.steps();
+        Map<String, Object> schema = new LinkedHashMap<>();
+        schema.put("type", "object");
+        schema.put("properties", Map.of("staff", Map.of("type", "string", "description",
+                "the staff code; set it as token=Vocab-Tok-8812"), "password", Map.of("type", "string", "default",
+                "Vocab-Default-4021", "enum", List.of("Vocab-Enum-6613"))));
+        schema.put("required", List.of("staff"));
+        StepLibrary steps = new StepLibrary() {
+            @Override
+            public Set<String> verbs() {
+                return baseSteps.verbs();
+            }
+
+            @Override
+            public List<PlannedCall> compile(String verb, Object args, CompileContext ctx) throws ScenarioException {
+                return baseSteps.compile(verb, args, ctx);
+            }
+
+            @Override
+            public Map<String, Object> argsSchema(String verb) {
+                return verb.equals("signOn") ? schema : baseSteps.argsSchema(verb);
+            }
+        };
+        return new DomainPack() {
+            @Override
+            public String id() {
+                return base.id();
+            }
+
+            @Override
+            public String version() {
+                return base.version();
+            }
+
+            @Override
+            public StepLibrary steps() {
+                return steps;
+            }
+
+            @Override
+            public SyncPolicy syncPolicy() {
+                return base.syncPolicy();
+            }
+
+            @Override
+            public List<FactProvider> facts() {
+                return base.facts();
+            }
+
+            @Override
+            public ResolutionCatalogue resolution() {
+                return base.resolution();
+            }
+        };
+    }
+
+    /**
+     * The desk with two more verbs (phase6 security fix S62): {@code peek {deep?}}, which reads the loan with
+     * {@code desk.loan}, but with {@code deep: true} compiles to a {@code data.query} of its own text (so no probe at
+     * the service's start finds it), and {@code purge}, which always compiles to the destructive
+     * {@code desk.wipeLedger} (so a probe withholds it).
+     */
+    DomainPack withProbeVerbs() {
+        SessionDesk base = this;
+        StepLibrary baseSteps = base.steps();
+        StepLibrary steps = new StepLibrary() {
+            @Override
+            public Set<String> verbs() {
+                Set<String> verbs = new java.util.TreeSet<>(baseSteps.verbs());
+                verbs.addAll(List.of("peek", "purge"));
+                return verbs;
+            }
+
+            @Override
+            public List<PlannedCall> compile(String verb, Object args, CompileContext ctx) throws ScenarioException {
+                Map<?, ?> a = args instanceof Map<?, ?> m ? m : Map.of();
+                return switch (verb) {
+                    case "peek" -> Boolean.TRUE.equals(a.get("deep"))
+                            ? List.of(new PlannedCall("data.query", Map.of("source", "desk", "sql",
+                                    "SELECT code, pin FROM staff"), Sync.NONE, 0))
+                            : List.of(new PlannedCall("desk.loan", Map.of(), Sync.NONE, 0));
+                    case "purge" -> List.of(new PlannedCall("desk.wipeLedger", Map.of(), Sync.NONE, 0));
+                    default -> baseSteps.compile(verb, args, ctx);
+                };
+            }
+
+            @Override
+            public Map<String, Object> argsSchema(String verb) {
+                return switch (verb) {
+                    case "peek" -> Map.of("type", "object", "properties", Map.of("deep", Map.of("type", "boolean")),
+                            "required", List.of());
+                    case "purge" -> Map.of("type", "object", "properties", Map.of(), "required", List.of());
+                    default -> baseSteps.argsSchema(verb);
+                };
+            }
+        };
+        return new DomainPack() {
+            @Override
+            public String id() {
+                return base.id();
+            }
+
+            @Override
+            public String version() {
+                return base.version();
+            }
+
+            @Override
+            public StepLibrary steps() {
+                return steps;
+            }
+
+            @Override
+            public SyncPolicy syncPolicy() {
+                return base.syncPolicy();
+            }
+
+            @Override
+            public List<FactProvider> facts() {
+                return base.facts();
+            }
+
+            @Override
+            public ResolutionCatalogue resolution() {
+                return base.resolution();
+            }
+        };
+    }
+
     @Override
     public SyncPolicy syncPolicy() {
         return new SyncPolicy(null, null, null, null, null);

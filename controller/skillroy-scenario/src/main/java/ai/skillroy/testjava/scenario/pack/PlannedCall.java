@@ -35,9 +35,14 @@ import java.util.Map;
  * @param await the event that completes the call: required when {@code sync} is {@link Sync#EVENT}, null otherwise
  * @param capture the slot bound from the event that ended the call's wait (phase2-contracts.md 3.4), or null; only on
  *     a call with sync {@link Sync#EVENT} or on {@code sync.await}
+ * @param literalArgs true when {@code args} are literal (phase6 security fix S55; phase5-contracts.md 9.3, 12.2): an
+ *     interactive session ({@code ExecutorSession.execute(PlannedCall, Origin)}) compiles and runs the call without
+ *     reference substitution, so that every string reaches the agent exactly as given (a {@code $slot.field} in it is
+ *     text, never a slot's value); the MCP server's {@code data_query} builds its call so, the guarded statement being
+ *     what runs. False everywhere else, as before (the constructors without the component); a plan has no such call
  */
 public record PlannedCall(String primitive, Map<String, Object> args, Sync sync, long timeoutMs, AwaitSpec await,
-                          CaptureSpec capture) {
+                          CaptureSpec capture, boolean literalArgs) {
 
     /**
      * @throws IllegalArgumentException if {@code primitive} is null or blank, {@code sync} is {@link Sync#EVENT}
@@ -61,6 +66,16 @@ public record PlannedCall(String primitive, Map<String, Object> args, Sync sync,
             throw new IllegalArgumentException("call " + primitive + ": capture needs sync EVENT or the primitive"
                     + " sync.await, found sync " + sync);
         }
+    }
+
+    /**
+     * A call whose arguments may hold references (the shape before phase6 security fix S55).
+     *
+     * @throws IllegalArgumentException as the canonical constructor
+     */
+    public PlannedCall(String primitive, Map<String, Object> args, Sync sync, long timeoutMs, AwaitSpec await,
+                       CaptureSpec capture) {
+        this(primitive, args, sync, timeoutMs, await, capture, false);
     }
 
     /**
@@ -98,6 +113,13 @@ public record PlannedCall(String primitive, Map<String, Object> args, Sync sync,
      * @throws IllegalArgumentException if the call neither has sync {@link Sync#EVENT} nor is {@code sync.await}
      */
     public PlannedCall withCapture(CaptureSpec newCapture) {
-        return new PlannedCall(primitive, args, sync, timeoutMs, await, newCapture);
+        return new PlannedCall(primitive, args, sync, timeoutMs, await, newCapture, literalArgs);
+    }
+
+    /**
+     * This call with literal arguments ({@link #literalArgs()}): a session runs it without reference substitution.
+     */
+    public PlannedCall withLiteralArgs() {
+        return new PlannedCall(primitive, args, sync, timeoutMs, await, capture, true);
     }
 }

@@ -253,4 +253,25 @@ class ToolListTest {
             assertFalse(fx.toolNames().contains("desk_enter"));
         }
     }
+
+    /**
+     * Phase 6 security fix S49: the server lists its tools through the prompt mask: a verb schema's secret-looking
+     * property keeps its name and loses its {@code default} and {@code enum}, and a {@code key=value} secret in a
+     * description is masked (before the fix {@code tools/list} carried them).
+     */
+    @Test
+    void theToolsAreListedThroughThePromptMask() throws Exception {
+        Map<String, Object> schema = Desk.object(Map.of("item", Map.of("type", "string",
+                "description", "the item; token=List-Tok-7713"), "password", Map.of("type", "string",
+                "default", "List-Default-2209", "enum", List.of("List-Enum-4410"))), List.of("item"));
+        try (McpFixture fx = new McpFixture(dir)) {
+            fx.start(fx.options(fx.desk.packWithLendSchema(schema)).mutating(true).build());
+            McpSchema.Tool lend = fx.tool("desk_lend");
+            String listed = ai.skillroy.testjava.protocol.Json.write(lend.inputSchema());
+            assertTrue(listed.contains("\"password\""), listed);
+            for (String hidden : List.of("List-Tok-7713", "List-Default-2209", "List-Enum-4410")) {
+                assertFalse(listed.contains(hidden), hidden + " in tools/list: " + listed);
+            }
+        }
+    }
 }

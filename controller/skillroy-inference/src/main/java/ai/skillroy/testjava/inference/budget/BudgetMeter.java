@@ -55,6 +55,7 @@ public final class BudgetMeter {
     private volatile String id;
     private BigDecimal spent = BigDecimal.ZERO;
     private BigDecimal reserved = BigDecimal.ZERO;
+    private boolean exhausted;
 
     /**
      * @param scope what the meter measures
@@ -149,6 +150,20 @@ public final class BudgetMeter {
         }
         reservations.addLast(estimate);
         reserved = reserved.add(estimate);
+    }
+
+    /**
+     * Marks the scope exhausted (decision D74): a reservation was refused, and every host of this meter makes no
+     * further model call in the scope. The MCP server's one session meter is shared by the session service's turns
+     * and resolves and by {@code skillroy_scenario_run} (phase6 security fix S56, D157), so the state lives here.
+     */
+    public synchronized void markExhausted() {
+        exhausted = true;
+    }
+
+    /** True once {@link #markExhausted} was called. */
+    public synchronized boolean exhausted() {
+        return exhausted;
     }
 
     /** After a model call: adds its real cost ({@code usage.costUsd}) and releases the oldest open reservation. */

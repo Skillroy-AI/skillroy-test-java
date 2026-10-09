@@ -21,6 +21,7 @@ import ai.skillroy.testjava.controller.EventStream;
 import ai.skillroy.testjava.data.Credentials;
 import ai.skillroy.testjava.data.CredentialsException;
 import ai.skillroy.testjava.data.SecretMask;
+import ai.skillroy.testjava.inference.budget.BudgetMeter;
 import ai.skillroy.testjava.inference.session.SessionPolicy;
 import ai.skillroy.testjava.mcp.ServerOptions;
 import ai.skillroy.testjava.mcp.SessionActor;
@@ -82,7 +83,9 @@ final class McpCommand implements Command {
 
     static final String MUTATING = "--mutating";
     static final String ALLOW_EVALUATE = "--allow-evaluate";
-    private static final String OUT = "--out";
+    /** The label of the server's client origin (phase6 security fix S57, D158); {@code author} passes planner. */
+    static final String CLIENT = "--client";
+    static final String OUT = "--out";
     /** How often the watch looks at the event stream while the server runs. */
     private static final Duration WATCH = Duration.ofMillis(250);
 
@@ -97,10 +100,14 @@ final class McpCommand implements Command {
             scenario only when every call of it is one the server offers. A destructive primitive is never offered,
             nor a verb that reaches one; web_evaluate and web_wait_flag (each runs a script in the target's pages)
             only with --allow-evaluate. skillroy_session_ask (a second model acting through the session) is offered
-            when --inference names a gateway, within --session-budget. Captures, runs, the journal and exports go to
-            --out (default: a new temporary directory). The server's log goes to stderr. It ends when the client
-            closes the stream (exit code 0) or the agent is lost (exit code 3); 1 when it cannot start or the client
-            breaks the protocol.""",
+            when --inference names a gateway; --session-budget bounds skillroy_session_ask, skillroy_resolve and
+            skillroy_scenario_run together. The client acts as client <label> (--client, default mcp) and never
+            confirms anything; a verb is checked on the calls it compiles to before it runs. Captures, runs, the
+            journal and exports go to --out (default: a new temporary directory); a capture's image is served to
+            the client only when the inference settings say images: true (never for author's planner, whose
+            server runs --inference none), otherwise a text resource names the written file. The server's log
+            goes to stderr. It ends when the client closes the stream (exit code 0) or the agent is lost (exit
+            code 3); 1 when it cannot start or the client breaks the protocol.""",
             options(), 0, 0);
 
     /** The options of {@code mcp}, in help order. */
@@ -120,6 +127,8 @@ final class McpCommand implements Command {
         options.add(InferenceArgs.SESSION_BUDGET_OPTION);
         options.add(HooksArgs.OPTION);
         options.addAll(TelemetryArgs.OPTIONS);
+        options.add(OptionSpec.value(CLIENT, "label", "the label the journal and the export give the client's\n"
+                + "steps, client <label> (default mcp); a client's request\nnever confirms anything"));
         return Connector.withConnection(options.toArray(OptionSpec[]::new));
     }
 
@@ -132,6 +141,11 @@ final class McpCommand implements Command {
     public int run(ParsedArgs args, Cli cli) throws Exception {
         boolean mutating = args.flag(MUTATING);
         boolean allowEvaluate = args.flag(ALLOW_EVALUATE);
+        String client = args.value(CLIENT);
+        if (client != null && !ServerOptions.isClientLabel(client)) {
+            throw new UsageException(CLIENT + " takes a short name of letters, digits, '.', '_' and '-' (at most 64"
+                    + " characters)");
+        }
         Path out = args.path(OUT);
         if (out != null && Files.exists(out) && !Files.isDirectory(out)) {
             throw new UsageException(OUT + " " + out + " is not a directory");
@@ -170,9 +184,13 @@ final class McpCommand implements Command {
                 SessionOptions session = SessionOptions.defaults(null).withBind(bind)
                         .withWebPathLoader(packs.loader()).withHooks(hooks)
                         .withObserver(observer);
+                // D157: one SESSION meter for the server's life, shared by the actor (skillroy_session_ask and its
+                // metered resolve) and skillroy_scenario_run, so that --session-budget bounds the three together.
+                BudgetMeter meter = inference.enabled() ? sessionMeter(inference, ledger) : null;
                 ServerOptions options = ServerOptions.builder(target.client(), pack).session(session)
                         .mutating(mutating).allowEvaluate(allowEvaluate).outDir(out).inference(inference)
-                        .actor(inference.enabled() ? actors(inference, ledger) : null)
+                        .actor(inference.enabled() ? actors(inference, ledger, meter) : null)
+                        .clientLabel(client).sessionMeter(meter)
                         .build();
                 SkillroyMcpServer server;
                 try {
@@ -240,14 +258,29 @@ final class McpCommand implements Command {
     }
 
     /**
-     * The actor of {@code skillroy_session_ask} and {@code skillroy_resolve}: the session service over the server's
-     * session, under the read-only policy unless the server offers mutating tools.
+     * The server's session meter from {@code budget.sessionUsd} (D157).
+     *
+     * @throws UsageException if the budget is not an amount
      */
-    static SessionActorFactory actors(InferenceSettings inference, CostLedger ledger) {
+    private static BudgetMeter sessionMeter(InferenceSettings inference, CostLedger ledger) throws UsageException {
+        try {
+            return SessionServices.sessionMeter(inference, null, ledger);
+        } catch (IllegalArgumentException e) {
+            throw new UsageException(InferenceArgs.SESSION_BUDGET + ": " + e.getMessage());
+        }
+    }
+
+    /**
+     * The actor of {@code skillroy_session_ask} and {@code skillroy_resolve}: the session service over the server's
+     * session, under the read-only policy unless the server offers mutating tools, metered on the server's session
+     * meter (D157; a new one of the settings' budget when null).
+     */
+    static SessionActorFactory actors(InferenceSettings inference, CostLedger ledger, BudgetMeter meter) {
         return (session, options) -> {
             SessionPolicy policy = options.mutating() ? SessionPolicy.acting() : SessionPolicy.readOnlyPolicy();
             Path dir = session.options().outputDir();
-            return new ServiceActor(SessionServices.open(session, inference, policy, ledger, dir));
+            BudgetMeter shared = meter != null ? meter : SessionServices.sessionMeter(inference, session.id(), ledger);
+            return new ServiceActor(SessionServices.open(session, inference, policy, ledger, dir, shared));
         };
     }
 

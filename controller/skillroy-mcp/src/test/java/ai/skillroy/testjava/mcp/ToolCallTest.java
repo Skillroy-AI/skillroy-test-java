@@ -20,7 +20,10 @@ import ai.skillroy.testjava.protocol.Json;
 import ai.skillroy.testjava.protocol.sql.Rows;
 import ai.skillroy.testjava.scenario.FailureKind;
 import ai.skillroy.testjava.scenario.SessionOpenException;
+import ai.skillroy.testjava.scenario.Status;
 import ai.skillroy.testjava.scenario.StepJournal;
+import ai.skillroy.testjava.scenario.StepOutcome;
+import ai.skillroy.testjava.scenario.resolve.InferenceSettings;
 import io.modelcontextprotocol.spec.McpSchema;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -75,7 +78,7 @@ class ToolCallTest {
             assertEquals(1, fx.desk.agent.callsTo("desk.state").size());
             assertEquals("sess-1/s1/1", fx.desk.agent.callsTo("desk.state").get(0).options().correlationId());
             StepJournal.StepEntry step = (StepJournal.StepEntry) fx.server.session().journal().entries().get(1);
-            assertEquals("PERSON", step.origin().kind().name());
+            assertEquals("CLIENT", step.origin().kind().name(), "a client's origin, which confirms nothing (D158)");
             assertEquals("mcp", step.origin().by());
         }
     }
@@ -123,6 +126,50 @@ class ToolCallTest {
         }
     }
 
+    /**
+     * Phase 6 security fix S57 (D158), the sceptic's two probe verbs: each compiles to the destructive {@code desk.wipe}
+     * with its own {@code confirm} only for some arguments, so the probes at the start offer both. A call that reaches
+     * the destructive primitive is refused at call time as a tool error naming it, and nothing reaches the agent or the
+     * journal; the same verbs with harmless arguments run. The server's origin is a client's: run past the check (the
+     * session entry with the server's origin), the verb's own {@code confirm} is stripped and the agent answers
+     * {@code CONFIRM_REQUIRED} (before the fix, the PERSON origin sent {@code confirm == true}).
+     */
+    @Test
+    void aVerbIsCheckedOnTheCallsItCompilesToWithTheClientsArguments() throws Exception {
+        try (McpFixture fx = new McpFixture(dir)) {
+            fx.start(fx.options(fx.desk.packWithProbeVerbs()).mutating(true).build());
+            assertTrue(fx.toolNames().containsAll(List.of("desk_tidy", "desk_stamp")), "no probe finds them: "
+                    + fx.toolNames());
+            int entries = fx.server.session().journal().entries().size();
+            for (Map<String, Object> call : List.of(Map.<String, Object>of("tool", "desk_tidy", "args",
+                    Map.of("hard", true)), Map.<String, Object>of("tool", "desk_stamp", "args", Map.of("amount",
+                    "1.00")))) {
+                @SuppressWarnings("unchecked")
+                McpSchema.CallToolResult refused = fx.call((String) call.get("tool"),
+                        (Map<String, Object>) call.get("args"));
+                String text = McpFixture.text(refused);
+                assertTrue(refused.isError(), text);
+                assertTrue(text.contains("the destructive primitive desk.wipe"), text);
+                assertTrue(text.contains("nothing ran"), text);
+            }
+            assertTrue(fx.desk.agent.callsTo("desk.wipe").isEmpty(), "nothing reached the agent");
+            assertEquals(entries, fx.server.session().journal().entries().size(), "nothing was journaled");
+            McpSchema.CallToolResult soft = fx.call("desk_tidy", args("hard", false));
+            assertFalse(soft.isError(), McpFixture.text(soft));
+            assertEquals(1, fx.desk.agent.callsTo("desk.poke").size());
+            McpSchema.CallToolResult bad = fx.call("desk_stamp", args("amount", "lots"));
+            assertTrue(bad.isError(), "a step that does not compile is the session's refusal as before");
+            assertTrue(McpFixture.text(bad).contains("does not compile"), McpFixture.text(bad));
+
+            StepOutcome past = fx.server.session().execute("tidy", Map.of("hard", true), fx.server.origin());
+            assertEquals(Status.ERROR, past.status(), past.message());
+            assertTrue(past.message().contains("CONFIRM_REQUIRED"), past.message());
+            FakeAgent.Call wipe = fx.desk.agent.callsTo("desk.wipe").get(0);
+            assertFalse(wipe.options().confirm(), "a client's origin confirms nothing, the verb's own confirm included");
+            assertEquals(Map.of(), wipe.params());
+        }
+    }
+
     @Test
     void aStepThatFailsIsAToolErrorWithItsOutcome() throws Exception {
         try (McpFixture fx = new McpFixture(dir).startMutating()) {
@@ -147,19 +194,49 @@ class ToolCallTest {
         }
     }
 
+    /**
+     * Phase 6 security fix S58 (D159): without the inference settings' {@code images: true} a capture is written to
+     * {@code <out>/mcp/<n>.png} for the person and the link names a text resource that gives its path; no blob of it
+     * exists (before the fix the PNG was served as a blob, unmasked and uncut).
+     */
     @Test
-    void anImageIsWrittenAndLinkedAsAResource() throws Exception {
+    void aCaptureIsWrittenAndNamedButNotServedWithoutTheImagesOptIn() throws Exception {
         try (McpFixture fx = new McpFixture(dir).startReadOnly()) {
             McpSchema.CallToolResult result = fx.call("swing_capture", args("target", null));
             assertFalse(result.isError(), McpFixture.text(result));
             assertEquals(2, result.content().size(), "the text and the link");
             McpSchema.ResourceLink link = assertInstanceOf(McpSchema.ResourceLink.class, result.content().get(1));
+            assertEquals("skillroy://mcp/1.png.txt", link.uri());
+            assertEquals("text/plain", link.mimeType());
+            Path file = fx.out.resolve("mcp").resolve("1.png");
+            byte[] png = Base64.getDecoder().decode(FakeAgent.PNG_1X1);
+            assertArrayEquals(png, Files.readAllBytes(file), "written for the person");
+            Map<?, ?> value = (Map<?, ?>) McpFixture.json(result).get("value");
+            assertEquals("<image: skillroy://mcp/1.png.txt>", value.get("base64"), "no base64 in the text");
+            McpSchema.ReadResourceResult read = fx.client.readResource(new McpSchema.ReadResourceRequest(link.uri()));
+            McpSchema.TextResourceContents named = assertInstanceOf(McpSchema.TextResourceContents.class,
+                    read.contents().get(0));
+            assertTrue(named.text().contains(file.toString()), named.text());
+            assertTrue(named.text().contains("images: true"), named.text());
+            assertFalse(fx.client.listResources().resources().stream().anyMatch(r -> r.uri().endsWith(".png")),
+                    "no PNG resource is listed");
+            assertThrows(RuntimeException.class, () -> fx.client.readResource(new McpSchema.ReadResourceRequest(
+                    "skillroy://mcp/1.png")), "the bytes are not served");
+        }
+    }
+
+    /** Phase 6 security fix S58 (D159): under {@code images: true} the capture is served as a blob, as before. */
+    @Test
+    void aCaptureIsServedAsABlobUnderTheImagesOptIn() throws Exception {
+        try (McpFixture fx = new McpFixture(dir)) {
+            fx.start(fx.options().inference(imagesOn()).build());
+            McpSchema.CallToolResult result = fx.call("swing_capture", args("target", null));
+            assertFalse(result.isError(), McpFixture.text(result));
+            McpSchema.ResourceLink link = assertInstanceOf(McpSchema.ResourceLink.class, result.content().get(1));
             assertEquals("skillroy://mcp/1.png", link.uri());
             assertEquals("image/png", link.mimeType());
             assertEquals("an image returned by swing.capture (step s1)", link.description());
-            Path file = fx.out.resolve("mcp").resolve("1.png");
             byte[] png = Base64.getDecoder().decode(FakeAgent.PNG_1X1);
-            assertArrayEquals(png, Files.readAllBytes(file));
             Map<?, ?> value = (Map<?, ?>) McpFixture.json(result).get("value");
             assertEquals("<image: skillroy://mcp/1.png>", value.get("base64"), "no base64 in the text");
             McpSchema.ReadResourceResult read = fx.client.readResource(new McpSchema.ReadResourceRequest(link.uri()));
@@ -170,6 +247,65 @@ class ToolCallTest {
         }
     }
 
+    /**
+     * Phase 6 security fix S58 (D159): a run's {@code failure/*.png} is listed only under {@code images: true}; its text
+     * files always.
+     */
+    @Test
+    void aRunsFailureCaptureIsListedOnlyUnderTheImagesOptIn() throws Exception {
+        Path run = dir.resolve("a-run");
+        Files.createDirectories(run.resolve("failure"));
+        Files.write(run.resolve("failure").resolve("capture.png"), Base64.getDecoder().decode(FakeAgent.PNG_1X1));
+        Files.writeString(run.resolve("failure").resolve("events.json"), "[]");
+        try (McpFixture fx = new McpFixture(dir.resolve("off")).startReadOnly()) {
+            assertEquals(List.of("skillroy://run/run-x/failure/events.json"), fx.server.registerRun("run-x", run));
+        }
+        try (McpFixture fx = new McpFixture(dir.resolve("on"))) {
+            fx.start(fx.options().inference(imagesOn()).build());
+            assertEquals(List.of("skillroy://run/run-x/failure/capture.png",
+                    "skillroy://run/run-x/failure/events.json"), fx.server.registerRun("run-x", run));
+        }
+    }
+
+    /**
+     * Phase 6 security fix S61: {@code skillroy_session_export} refuses an id whose files exist in {@code <out>}, and the
+     * first export's files are byte-identical afterwards (before the fix the second export replaced them).
+     */
+    @Test
+    void anExportNeverReplacesAnExistingScenario() throws Exception {
+        try (McpFixture fx = new McpFixture(dir).startMutating()) {
+            assertFalse(fx.call("skillroy_resolve", args("slot", "item", "kind", "Item", "args",
+                    Map.of("category", "tools"), "strategy", null)).isError());
+            assertFalse(fx.call("desk_enter", Map.of("value", "$item.code")).isError());
+            McpSchema.CallToolResult first = fx.call("skillroy_session_export", Map.of("scenarioId", "desk-once"));
+            assertFalse(first.isError(), McpFixture.text(first));
+            Path yaml = fx.out.resolve("desk-once.yaml");
+            Path plan = fx.out.resolve("plan").resolve("desk-once.plan.json");
+            Path bindings = fx.out.resolve("bindings").resolve("seed-a").resolve("desk-once.bindings.json");
+            byte[] yamlBefore = Files.readAllBytes(yaml);
+            byte[] planBefore = Files.readAllBytes(plan);
+            byte[] bindingsBefore = Files.readAllBytes(bindings);
+            assertFalse(fx.call("desk_poke", Map.of()).isError(), "the session goes on and would export otherwise");
+            McpSchema.CallToolResult second = fx.call("skillroy_session_export", Map.of("scenarioId", "desk-once"));
+            assertTrue(second.isError(), McpFixture.text(second));
+            assertTrue(McpFixture.text(second).contains("exists; export under another id"), McpFixture.text(second));
+            assertArrayEquals(yamlBefore, Files.readAllBytes(yaml));
+            assertArrayEquals(planBefore, Files.readAllBytes(plan));
+            assertArrayEquals(bindingsBefore, Files.readAllBytes(bindings));
+            Files.delete(yaml);
+            McpSchema.CallToolResult planLeft = fx.call("skillroy_session_export", Map.of("scenarioId", "desk-once"));
+            assertTrue(planLeft.isError(), "the plan file alone refuses the id: " + McpFixture.text(planLeft));
+            assertFalse(Files.exists(yaml), "nothing was written");
+            assertFalse(fx.call("skillroy_session_export", Map.of("scenarioId", "desk-twice")).isError());
+        }
+    }
+
+    /** Inference settings without a gateway but with the images opt-in (D84). */
+    private static InferenceSettings imagesOn() {
+        return new InferenceSettings(InferenceSettings.GATEWAY_NONE, null, false, null, null, null, null, null, null,
+                false, true, null, false, null);
+    }
+
     @Test
     void dataQueryRunsTheGuardedStatementAndKeepsTheAllowListedColumns() throws Exception {
         try (McpFixture fx = new McpFixture(dir).startReadOnly()) {
@@ -178,7 +314,8 @@ class ToolCallTest {
             assertFalse(result.isError(), McpFixture.text(result));
             Map<String, Object> json = McpFixture.json(result);
             String sent = String.valueOf(fx.desk.queries().get(0).params().get("sql"));
-            assertEquals(json.get("statement"), sent, "the guarded text runs, never the client's");
+            assertEquals(json.get("statement"), sent, "the guarded text runs, never the client's: the call is literal"
+                    + " (PlannedCall.literalArgs), so nothing is substituted into it after the guard (S55)");
             assertTrue(sent.contains("ORDER BY") && sent.contains("LIMIT 200"), sent);
             Map<?, ?> rows = (Map<?, ?>) json.get("value");
             assertEquals(List.of("CODE", "TITLE"), ((List<?>) rows.get("columns")).stream()
@@ -198,6 +335,87 @@ class ToolCallTest {
             assertTrue(McpFixture.text(other).contains("has no SQL allow-list"), McpFixture.text(other));
             assertEquals(1, fx.desk.queries().size(), "nothing refused reached the agent");
             assertEquals(1, fx.server.guardCount(), "one guard per source, closed with the server");
+        }
+    }
+
+    /**
+     * Phase 6 security fix S55 (phase5-contracts.md 9.3): {@code data_query}'s SQL and parameters are literal. A
+     * {@code $slot.field} in the SQL, or in a parameter at any depth, is refused as a tool error naming the rule, before
+     * the guard, and the agent receives nothing; a reference-shaped text is refused whether or not the slot exists.
+     */
+    @Test
+    void dataQueryRefusesAReferenceInItsSqlOrItsParameters() throws Exception {
+        try (McpFixture fx = new McpFixture(dir).startReadOnly()) {
+            McpSchema.CallToolResult resolved = fx.call("skillroy_resolve", args("slot", "it", "kind", "Item", "args",
+                    Map.of("category", "tools"), "strategy", null));
+            assertFalse(resolved.isError(), McpFixture.text(resolved));
+            int before = fx.desk.queries().size();
+            for (Map<String, Object> given : List.of(
+                    args("source", "desk", "sql", "SELECT code FROM item WHERE title = '$it.title'"),
+                    args("source", "desk", "sql", "SELECT code FROM item WHERE title = ?", "params",
+                            List.of("$it.title")),
+                    args("source", "desk", "sql", "SELECT code FROM item WHERE title = ?", "params",
+                            List.of(Map.of("nested", List.of("a $it.code")))),
+                    args("source", "desk", "sql", "SELECT code FROM item WHERE title = '$notaslot'"))) {
+                McpSchema.CallToolResult refused = fx.call("data_query", given);
+                assertTrue(refused.isError(), given + ": " + McpFixture.text(refused));
+                assertTrue(McpFixture.text(refused).contains(ToolCalls.LITERAL_ONLY), McpFixture.text(refused));
+                assertFalse(McpFixture.text(refused).contains("Claw hammer"), "never a value");
+            }
+            assertEquals(before, fx.desk.queries().size(), "nothing refused reached the agent");
+        }
+    }
+
+    /**
+     * Phase 6 security fix S55: a {@code $} that is not a reference ({@code $$}, a {@code $} before a space) runs, and
+     * the statement the agent receives is byte-equal to the guarded text (before the fix the session's substitution
+     * turned {@code $$} into {@code $} after the guard).
+     */
+    @Test
+    void dataQuerySendsTheGuardedStatementByteForByte() throws Exception {
+        try (McpFixture fx = new McpFixture(dir).startReadOnly()) {
+            for (String sql : List.of("SELECT code FROM item WHERE title = 'a$$b'",
+                    "SELECT code FROM item WHERE title = 'US$ 5'")) {
+                McpSchema.CallToolResult result = fx.call("data_query", args("source", "desk", "sql", sql, "params",
+                        List.of()));
+                assertFalse(result.isError(), sql + ": " + McpFixture.text(result));
+                List<FakeAgent.Call> queries = fx.desk.queries();
+                String sent = String.valueOf(queries.get(queries.size() - 1).params().get("sql"));
+                assertEquals(McpFixture.json(result).get("statement"), sent, sql);
+                assertTrue(sent.contains(sql.substring(sql.indexOf('\''))), sent);
+            }
+            StepJournal.StepEntry step = (StepJournal.StepEntry) fx.server.session().journal().entries().get(1);
+            assertTrue(String.valueOf(((Map<?, ?>) step.args()).get("sql")).contains("'a$$b'"), "journaled as"
+                    + " given: " + step.args());
+        }
+    }
+
+    /**
+     * Phase 6 security fix S55, the sceptic's probe ported: a resolved item whose title a user of the application wrote
+     * holds a quote and a set operation over a hidden column; a {@code data_query} naming that field is refused, and the
+     * set operation never reaches the agent. Written directly, the guard refuses it.
+     */
+    @Test
+    void aPlantedValueNeverRebuildsTheGuardedStatement() throws Exception {
+        try (McpFixture fx = new McpFixture(dir).startReadOnly()) {
+            McpSchema.CallToolResult resolved = fx.call("skillroy_resolve", args("slot", "it", "kind", "Item", "args",
+                    Map.of("category", "planted"), "strategy", null));
+            assertFalse(resolved.isError(), McpFixture.text(resolved));
+            McpSchema.CallToolResult inSql = fx.call("data_query", args("source", "desk", "sql",
+                    "SELECT code FROM item WHERE title = '$it.title'", "params", null, "maxRows", null));
+            assertTrue(inSql.isError(), McpFixture.text(inSql));
+            McpSchema.CallToolResult inParams = fx.call("data_query", args("source", "desk", "sql",
+                    "SELECT code FROM item WHERE title = ?", "params", List.of("$it.title"), "maxRows", null));
+            assertTrue(inParams.isError(), McpFixture.text(inParams));
+            McpSchema.CallToolResult direct = fx.call("data_query", args("source", "desk", "sql",
+                    "SELECT code FROM item UNION SELECT password AS code FROM staff"));
+            assertTrue(direct.isError(), McpFixture.text(direct));
+            assertTrue(McpFixture.text(direct).contains("SqlGuard refused"), McpFixture.text(direct));
+            for (FakeAgent.Call query : fx.desk.queries()) {
+                String sql = String.valueOf(query.params().get("sql"));
+                assertFalse(sql.contains("UNION") || sql.contains("staff") || sql.contains("password"), sql);
+                assertFalse(String.valueOf(query.params().get("params")).contains("UNION"), query.params().toString());
+            }
         }
     }
 

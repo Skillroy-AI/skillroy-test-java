@@ -507,8 +507,9 @@ final class ClaudeMapping {
         } else {
             kind = Kind.PROVIDER;
         }
-        String message = "HTTP " + status + (type == null ? "" : " " + type)
-                + (providerMessage == null ? "" : ": " + bounded(providerMessage, 300));
+        // Phase 6 security fix S54: scrubbed before it is cut, so that a key the cut would split is still replaced.
+        String message = "HTTP " + status + (type == null ? "" : " " + scrub(type, secrets))
+                + (providerMessage == null ? "" : ": " + bounded(scrub(providerMessage, secrets), 300));
         if (kind == Kind.AUTH && status == 400) {
             message += " (set workspaceId in inference.yaml or ANTHROPIC_WORKSPACE_ID)";
         }

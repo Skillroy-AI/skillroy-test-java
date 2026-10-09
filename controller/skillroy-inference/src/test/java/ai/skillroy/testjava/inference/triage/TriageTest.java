@@ -222,6 +222,30 @@ class TriageTest {
         }
     }
 
+    /**
+     * Phase 6 security fix S50: the model's label line and look-at items are inline code and its summary and proposal
+     * sit in a fence longer than any backtick run they hold, so that their markup is inert in triage.md.
+     */
+    @Test
+    void theModelsTextsAreRenderedAsCodeInTheMarkdown() throws Exception {
+        Path run = copy("failed-run");
+        Map<String, Object> answer = new LinkedHashMap<>();
+        answer.put("summary", "See ![x](https://e.example/x)\n# Approved\n```\nnot a fence end");
+        answer.put("lookAt", List.of("[click](https://e.example/y)"));
+        answer.put("proposal", "Open ![y](https://e.example/z)");
+        ScriptedGateway gateway = ScriptedGateway.sequence(List.of(label("TIMING", 0.4,
+                "late ![x](https://e.example/x)"), ScriptedGateway.structured(answer, new Usage("scripted",
+                "claude-sonnet-5-5", "claude-sonnet-5-5", "req-summary", 3000, 200, 0, 0, 0, false, "0.0080",
+                Duration.ZERO, null))));
+        Triage.run(run, gateway, mask(), PriceTable.builtIn(), new TriageOptions(false, clock));
+        String md = Files.readString(run.resolve("failure/triage.md"));
+        assertTrue(md.contains("): `late ![x](https://e.example/x)`"), md);
+        assertTrue(md.contains("- `[click](https://e.example/y)`"), md);
+        assertTrue(md.contains("````text\nSee ![x](https://e.example/x)\n# Approved\n```\nnot a fence end\n````\n"),
+                "a fence one backtick longer than the longest run: " + md);
+        assertTrue(md.contains("```text\nOpen ![y](https://e.example/z)\n```\n"), md);
+    }
+
     @Test
     void aPassingRunIsNothingToTriage() throws Exception {
         Path run = copy("passed-run");

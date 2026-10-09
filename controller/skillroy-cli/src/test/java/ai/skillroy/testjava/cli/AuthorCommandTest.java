@@ -197,6 +197,14 @@ class AuthorCommandTest {
         assertEquals(List.of("mcp", "--mutating", "--inference", "none"), serverArgs.subList(mcp, mcp + 4),
                 "the planner may act; no second model");
         assertFalse(serverArgs.contains(McpCommand.ALLOW_EVALUATE), "never web_evaluate for the planner (D98)");
+        assertEquals("planner", after(serverArgs, McpCommand.CLIENT), "the planner's model acts as client planner,"
+                + " never a person (phase6 security fix S59, D158)");
+        Path serverOut = Path.of(after(serverArgs, "--out"));
+        Path work = serverOut.getParent();
+        assertEquals("mcp", serverOut.getFileName().toString(), serverOut.toString());
+        assertTrue(work.getFileName().toString().startsWith("skillroy-author-"), "the server writes under the"
+                + " planner's private working directory (phase6 security fix S60): " + serverOut);
+        assertFalse(Files.exists(work), "deleted with the server's journal, run evidence and captures");
         assertEquals("ai.skillroy.testjava.cli.Main", serverArgs.get(mcp - 1));
         assertEquals(Integer.toString(agent.port()), after(serverArgs, "--port"));
         assertEquals(tokenFile.toAbsolutePath().toString(), after(serverArgs, "--token-file"));
@@ -209,6 +217,30 @@ class AuthorCommandTest {
         CliHarness.Outcome again = author("--brief", BRIEF, "--id", "poke-once", "--out", out.toString(),
                 "--claude-command", claude.toString()).expectExit(Exit.USAGE);
         assertTrue(again.err().contains("scenario poke-once exists"), again.err());
+    }
+
+    /**
+     * Phase 6 security fix S60: {@code --keep-work} keeps the planner's private working directory, where its server's
+     * output went ({@code --out <work>/mcp}), and prints its path.
+     */
+    @Test
+    void keepWorkKeepsThePlannersWorkingDirectoryAndNamesIt() throws Exception {
+        answer(1, envelope(document("kept-work"), false, "0.10"));
+        CliHarness.Outcome outcome = author("--brief", BRIEF, "--id", "kept-work", "--out", out.toString(),
+                "--claude-command", claude.toString(), "--keep-work").expectExit(Exit.OK);
+        Map<?, ?> server = (Map<?, ?>) ((Map<?, ?>) Json.parseObject(Files.readString(bin.resolve("mcp-1.json")))
+                .get("mcpServers")).get("skillroy");
+        Path work = Path.of(after((List<?>) server.get("args"), "--out")).getParent();
+        try {
+            assertTrue(Files.isDirectory(work), "kept: " + work);
+            assertTrue(outcome.err().contains("the planner's working directory is kept: " + work), outcome.err());
+        } finally {
+            try (java.util.stream.Stream<Path> files = Files.walk(work)) {
+                for (Path p : files.sorted(java.util.Comparator.reverseOrder()).toList()) {
+                    Files.deleteIfExists(p);
+                }
+            }
+        }
     }
 
     private static String after(List<?> list, String flag) {

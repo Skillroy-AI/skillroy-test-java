@@ -167,6 +167,27 @@ class PromptMaskTest {
         assertEquals("short", mask.text("short"));
     }
 
+    /**
+     * Phase 6 security fix S53: the text is masked whole, then cut: a 1200-character secret at offset 99900 of a
+     * 120000-character text leaves no character of it before the cut (before the fix the mask ran over the cut's
+     * first 1000 characters past it only, and the secret's head survived).
+     */
+    @Test
+    void aLongSecretStraddlingTheCutLeavesNothing() {
+        StringBuilder secret = new StringBuilder("Lv-");
+        for (int i = 0; secret.length() < 1200; i++) {
+            secret.append(Integer.toString(i * 7919 % 1000, 36));
+        }
+        String long1200 = secret.substring(0, 1200);
+        PromptMask withLong = PromptMask.of(SecretMask.of(List.of(long1200)), List.of(), List.of());
+        String text = "a".repeat(99_900) + long1200 + "b".repeat(120_000 - 99_900 - 1200);
+        String masked = withLong.text(text);
+        assertTrue(masked.endsWith(PromptMask.TRUNCATED), "cut");
+        assertEquals(PromptMask.MAX_TEXT + PromptMask.TRUNCATED.length(), masked.length());
+        assertFalse(masked.contains(long1200.substring(0, 8)), "no character of the secret before the cut");
+        assertFalse(masked.substring(99_900).startsWith("Lv-"), masked.substring(99_900, 99_920));
+    }
+
     @Test
     void aPromptBuiltWithTheMaskHoldsNoCredentialAndNoPersonalValue() {
         String reader = "Desk-Reader-Secret-7319";

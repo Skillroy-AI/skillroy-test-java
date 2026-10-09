@@ -2718,10 +2718,11 @@ CP, TL and BW build nothing of them; CP's own `ToolProjection` and `PlanPolicy` 
   exclusions (`ToolProjection.isScript(d)`: the flag, or a name of `SCRIPT_PRIMITIVES`), so an older agent's unflagged
   `web.waitFlag` is not annotated `readOnlyHint: true` either (D-SR-2); "the policy excludes script primitives" is
   `Policy.excludesScripts()`, true when `excluded` holds every name of `SCRIPT_PRIMITIVES` (`readOnly(false)`,
-  `mutating(false)`, `session(...)`), a derived method rather than a new record component (D-SR-3); `PlanPolicy`
-  refuses a flagged primitive in its own `scriptRefusal` under the same condition; the dispatcher's refusal is a
-  second check after the mutating one, with its own message ("… evaluates a caller's expression in the target and
-  the agent is read-only").
+  `mutating(false)`, `session(...)`), a derived method rather than a new record component (D-SR-3); the shared
+  never-for-a-client rule refuses a flagged primitive under the same condition (`CallPolicy.scriptRefusal`, called by
+  `CallPolicy.never`, so that `PlanPolicy` and, after FX-2's S62, the session service's verb checks both apply
+  it); the dispatcher's refusal is a second check after the mutating one, with its own message ("… evaluates a
+  caller's expression in the target and the agent is read-only").
 - **D157 (= P6-SEC-2, S56; widens D101, B24): one session budget per MCP server bounds every model call made on a
   client's behalf.** The MCP server owns one `SESSION` `BudgetMeter` from `budget.sessionUsd`, shared with the
   `skillroy_session_ask` actor (`ServerOptions.sessionMeter`; `SessionServices.open` takes the meter); `skillroy_resolve`
@@ -2757,6 +2758,19 @@ CP, TL and BW build nothing of them; CP's own `ToolProjection` and `PlanPolicy` 
   `--inference none`, so it never serves them. **There is no `--serve-captures` flag** (the superseded D150). Built by
   **FX-mcp**. Alternatives rejected: a separate flag (a second switch for the one question D84 already answers);
   serving as today (a capture is personal data until masked, and the client is often a model).
+
+**As built (Phase 6, SR, FX-2, 2026-10-09):** D157-D159 as stated, with these details (the amendment texts are in P5
+§9.2-§9.4, §10.2, §12.2-§12.4 and §13.4, marked "Phase 6 security fix S<n>, A<m>"). D157: the meter's exhausted state
+lives on `BudgetMeter` (`markExhausted`, `exhausted`), which `SessionService` now reads instead of a field of its own,
+so that the service and `skillroy_scenario_run` share it; a run's refused reservation exhausts the session (D74), as a
+refused resolve does; the estimate and the settlement are `…inference.budget.SessionMetering`'s, shared with
+`SessionService.resolve`; a `skillroy_resolve` the server runs without an actor is metered on the same meter
+(D-SR2-4). D158: `ExecutorSession.compile(verb, args)` answers `Compiled(calls, cleanup, refusal)`, with an overload
+`compile(verb, args, origin)` that strips the arguments as `execute` does for that origin (the session service checks
+with it, D-SR2-5); the never-for-a-client rule and the start-time probe arguments are `…inference.tools.CallPolicy`'s
+(`never`, `arguments`, `refusals`, `probes`), to which `PlanPolicy` delegates; a verb the session service withholds is
+listed by its `skillroy_catalogue` under `withheldVerbs` and not logged (the service has no log). D159: the text
+resource is `skillroy://mcp/<n>.png.txt`; images are served when `ServerOptions.inference().images()` is true.
 
 ---
 

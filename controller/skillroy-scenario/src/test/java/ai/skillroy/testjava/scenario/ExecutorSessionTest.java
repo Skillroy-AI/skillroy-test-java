@@ -130,6 +130,38 @@ class ExecutorSessionTest {
         }
     }
 
+    /**
+     * Phase 6 security fix S55 (phase5-contracts.md 12.2): a call with {@code literalArgs} is compiled and run without
+     * reference substitution, so that the agent receives its strings byte for byte (a bound slot's field, a slot that
+     * does not exist, {@code $$}), and the journal records the arguments as given; the same call without the flag is
+     * substituted as before.
+     */
+    @Test
+    void aLiteralCallReachesTheAgentUnsubstitutedAndIsJournaledAsGiven() throws Exception {
+        try (ExecutorSession session = fx.open()) {
+            SessionFixture.resolveItemAndAssistant(session, PERSON);
+            String text = "'$item.code' $$ $nobody.code US$ 5";
+            Map<String, Object> args = Map.of("who", text, "list", List.of("$item.code", Map.of("k", "a$$b")));
+            StepOutcome literal = session.execute(PlannedCall.of("toy.read", args, Sync.NONE).withLiteralArgs(),
+                    MODEL);
+            assertEquals(Status.PASS, literal.status(), literal.message());
+            FakeAgentConnection.Call sent = fx.agent.callsTo("toy.read").get(0);
+            assertEquals(text, sent.params().get("who"), "byte for byte");
+            assertEquals(List.of("$item.code", Map.of("k", "a$$b")), sent.params().get("list"));
+            List<String> lines = Files.readAllLines(dir.resolve(StepJournal.FILE));
+            Map<String, Object> step = Json.parseObject(lines.get(lines.size() - 1));
+            assertEquals(args, step.get("args"), "journaled as given");
+            Map<?, ?> call = (Map<?, ?>) ((List<?>) step.get("calls")).get(0);
+            assertEquals(args, call.get("args"), "the call's record holds the arguments as sent");
+            StepOutcome substituted = session.execute(PlannedCall.of("toy.read", Map.of("who", "$item.code $$"),
+                    Sync.NONE), MODEL);
+            assertEquals(Status.PASS, substituted.status(), substituted.message());
+            String who = String.valueOf(fx.agent.callsTo("toy.read").get(1).params().get("who"));
+            assertFalse(who.contains("$item"), "without the flag the reference is substituted: " + who);
+            assertTrue(who.endsWith(" $"), who);
+        }
+    }
+
     @Test
     void aStepThatDoesNotCompileIsAnOutcomeNotAnException() throws Exception {
         try (ExecutorSession session = fx.open()) {

@@ -169,18 +169,23 @@ public final class Planner {
         }
         String prompt = prompt(request);
         long deadlineAt = request.clock().millis() + request.deadline().toMillis();
-        Path work;
-        try {
-            work = privateDirectory(Path.of(System.getProperty("java.io.tmpdir")));
-        } catch (IOException | RuntimeException e) {
-            throw new AuthoringException(AuthoringException.EXIT_FAILED, "a private working directory cannot be"
-                    + " made: " + e.getMessage(), null, List.of());
+        Path work = request.workDirectory();
+        boolean own = work == null;
+        if (own) {
+            try {
+                work = workDirectory();
+            } catch (IOException | RuntimeException e) {
+                throw new AuthoringException(AuthoringException.EXIT_FAILED, "a private working directory cannot be"
+                        + " made: " + e.getMessage(), null, List.of());
+            }
         }
         Run run = new Run(request, work, schemaJson, deadlineAt);
         try {
             return run.author(prompt, schema);
         } finally {
-            deleteQuietly(work);
+            if (own) {
+                deleteQuietly(work);
+            }
         }
     }
 
@@ -271,8 +276,8 @@ public final class Planner {
                 args = Map.of("type", "object");
             }
             p.append("- ").append(mask.text(kind)).append(" (strategies: ").append(strategies.isEmpty() ? "none"
-                    : String.join(", ", strategies)).append("): ").append(Json.writeCanonical(vocabulary(mask, args,
-                    false, 0))).append('\n');
+                    : String.join(", ", strategies)).append("): ").append(Json.writeCanonical(vocabulary(mask, args)))
+                    .append('\n');
         }
         p.append("Oracle functions: ").append(mask.text(join(catalogue.oracleFns()))).append('\n');
         Set<String> roots = new TreeSet<>();
@@ -297,7 +302,7 @@ public final class Planner {
         for (String verb : new TreeSet<>(pack.steps().verbs())) {
             Map<String, Object> schema = pack.steps().argsSchema(verb);
             p.append("- ").append(mask.text(verb)).append(": ").append(schema == null ? "free-form arguments"
-                    : Json.writeCanonical(vocabulary(mask, schema, false, 0))).append('\n');
+                    : Json.writeCanonical(vocabulary(mask, schema))).append('\n');
         }
         String text = p.toString();
         if (text.length() > MAX_ARGUMENT) {
@@ -307,50 +312,14 @@ public final class Planner {
         return text;
     }
 
-    /** The schema keywords whose values are a schema's data rather than its structure. */
-    private static final Set<String> SCHEMA_VALUES = Set.of("default", "examples", "example", "enum", "const");
-
     /**
-     * An argument schema through the mask (D103): a property's name is kept (it is the vocabulary), its schema walked
-     * with the name's secrecy; a value under {@code default}, {@code examples}, {@code enum} or {@code const} of a
-     * property whose name looks secret becomes {@value PromptMask#REDACTED} whole; every text through the key rule and
-     * the bounds; deeper than 64 levels, nothing.
+     * An argument schema through the mask (D103): {@link PromptMask#schema}, the one rule wherever a model receives the
+     * pack's vocabulary (phase6 security fix S49: a secret-looking property loses its {@code default},
+     * {@code examples}, {@code example}, {@code const} and {@code enum} whole, so that the schema stays valid, where
+     * the planner's own walk used to write {@value PromptMask#REDACTED} in their place).
      */
-    static Object vocabulary(PromptMask mask, Object schema, boolean secretProperty, int depth) {
-        if (depth > 64) {
-            return "<too deep>";
-        }
-        if (schema instanceof String s) {
-            return mask.text(s);
-        }
-        if (schema instanceof Map<?, ?> map) {
-            Map<String, Object> out = new LinkedHashMap<>();
-            for (Map.Entry<?, ?> e : map.entrySet()) {
-                String key = String.valueOf(e.getKey());
-                Object value = e.getValue();
-                if (key.equals("properties") && value instanceof Map<?, ?> properties) {
-                    Map<String, Object> named = new LinkedHashMap<>();
-                    for (Map.Entry<?, ?> property : properties.entrySet()) {
-                        String name = String.valueOf(property.getKey());
-                        named.put(name, vocabulary(mask, property.getValue(), mask.secretKey(name), depth + 1));
-                    }
-                    out.put(key, named);
-                } else if (secretProperty && SCHEMA_VALUES.contains(key) && value != null) {
-                    out.put(key, PromptMask.REDACTED);
-                } else {
-                    out.put(key, vocabulary(mask, value, secretProperty, depth + 1));
-                }
-            }
-            return out;
-        }
-        if (schema instanceof List<?> list) {
-            List<Object> out = new ArrayList<>(list.size());
-            for (Object item : list) {
-                out.add(vocabulary(mask, item, secretProperty, depth + 1));
-            }
-            return out;
-        }
-        return schema;
+    static Object vocabulary(PromptMask mask, Object schema) {
+        return mask.schema(schema);
     }
 
     /**
@@ -998,6 +967,25 @@ public final class Planner {
      */
     static Path privateDirectory(Path tmp) throws IOException {
         return SecureFiles.createOwnerOnlyTempDirectory(tmp, "skillroy-author-");
+    }
+
+    /**
+     * A new private working directory for the planner under {@code java.io.tmpdir} ({@link #privateDirectory}): what
+     * {@code skillroy author} makes before it writes the MCP configuration, so that the planner's server writes its
+     * journal, run evidence and captures under it ({@code --out <work>/mcp}) and they are deleted with it (phase6
+     * security fix S60); the caller deletes it ({@link #deleteWorkDirectory}).
+     *
+     * @throws IOException when it cannot be made owner-only
+     */
+    public static Path workDirectory() throws IOException {
+        return privateDirectory(Path.of(System.getProperty("java.io.tmpdir")));
+    }
+
+    /** Deletes a working directory and everything under it; best effort, never throws. */
+    public static void deleteWorkDirectory(Path dir) {
+        if (dir != null) {
+            deleteQuietly(dir);
+        }
     }
 
     private static void deleteQuietly(Path dir) {

@@ -78,7 +78,7 @@ final class SessionServices {
     }
 
     /**
-     * Opens the service over {@code session}.
+     * Opens the service over {@code session} with a session meter of its own ({@link #sessionMeter}).
      *
      * @param ledger the ledger the session's binds record into (the session's {@code cost-ledger.jsonl})
      * @param outDir where {@code inference.jsonl} is appended; null keeps no record
@@ -87,14 +87,37 @@ final class SessionServices {
      */
     static Opened open(ExecutorSession session, InferenceSettings settings, SessionPolicy policy, CostLedger ledger,
                        Path outDir) throws InferenceException, SettingsException {
+        return open(session, settings, policy, ledger, outDir, sessionMeter(settings, session.id(), ledger));
+    }
+
+    /**
+     * The session's one {@code SESSION} meter, from {@code budget.sessionUsd} and the session's ledger: the MCP command
+     * builds it once and hands it to the server and to the service it opens (phase6 security fix S56, D157).
+     *
+     * @param id the session id, or null when it is not known yet (the service names the meter)
+     * @throws IllegalArgumentException if the budget is not an amount
+     */
+    static BudgetMeter sessionMeter(InferenceSettings settings, String id, CostLedger ledger) {
+        return BudgetMeter.of(BudgetMeter.Scope.SESSION, id, settings.budgets().get(InferenceSettings.BUDGET_SESSION),
+                ledger);
+    }
+
+    /**
+     * Opens the service over {@code session} with the given session meter (phase6 security fix S56, D157: the MCP
+     * server's meter, which {@code skillroy_scenario_run} and {@code skillroy_resolve} share).
+     *
+     * @param meter the session's {@code SESSION} meter
+     * @throws InferenceException when the settings' gateway cannot be opened (no model key)
+     * @throws SettingsException when the price table of the settings cannot be read
+     */
+    static Opened open(ExecutorSession session, InferenceSettings settings, SessionPolicy policy, CostLedger ledger,
+                       Path outDir, BudgetMeter meter) throws InferenceException, SettingsException {
         DomainPack pack = session.pack();
         PromptMask mask = PromptMask.of(session.options().bind().credentials().mask(), safe(pack::sqlAllowLists),
                 safe(pack::rowMasks));
         InferenceGateway gateway = Gateways.open(settings, mask);
         boolean ok = false;
         try {
-            BudgetMeter meter = BudgetMeter.of(BudgetMeter.Scope.SESSION, session.id(),
-                    settings.budgets().get(InferenceSettings.BUDGET_SESSION), ledger);
             InferenceLog log = outDir == null ? InferenceLog.NONE : InferenceLog.toFile(outDir.resolve(INFERENCE_FILE));
             LedgerWriter writer = new LedgerWriter(ledger, meter, log, mask, settings.logPrompts(),
                     session.options().clock());

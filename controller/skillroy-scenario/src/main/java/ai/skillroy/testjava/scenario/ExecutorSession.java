@@ -87,8 +87,9 @@ import java.util.regex.Pattern;
  * or not in the target's catalogue before anything is sent ({@code READ_ONLY} in the outcome; journaled with
  * {@code executed: 0}). A destructive call needs {@code confirm: true} in its arguments, which only a
  * {@link Origin.Kind#PERSON} may carry: the session strips {@code confirm}, and the request's {@code _meta} it could
- * hide in, from the calls and arguments of every other origin (a {@link Origin.Kind#MODEL} or a
- * {@link Origin.Kind#SYSTEM} one), journals the arguments as stripped, and the agent then answers
+ * hide in, from the calls and arguments of every other origin (a {@link Origin.Kind#MODEL}, a
+ * {@link Origin.Kind#CLIENT} or a {@link Origin.Kind#SYSTEM} one), journals the arguments as stripped, and the agent
+ * then answers
  * {@code CONFIRM_REQUIRED} (design 3.4; a person's {@code _meta} does not compile). Every outcome's detail and result,
  * every journal record and every value returned pass the session's secret mask (the credentials, and the secret
  * fields a resolution joined). A session's calls carry the correlation id {@code <sessionId>/<stepId>/<n>}.
@@ -456,6 +457,11 @@ public final class ExecutorSession implements AutoCloseable {
      * the call's sync, its capture, the prompt policy, the failure classification. Never throws for a failed call:
      * the outcome says. Journaled as one step without a verb.
      *
+     * <p>A call with {@link PlannedCall#literalArgs()} (phase6 security fix S55; phase5-contracts.md 12.2) is compiled
+     * and run without reference substitution: every {@code $} of its string arguments is escaped ({@code $$}) before it
+     * compiles, so that the substitution the runner applies to every call gives each string back exactly as given and
+     * the agent receives it byte for byte; the journal records the arguments as given.
+     *
      * @throws AgentLostException if the agent is gone (the step is journaled first)
      * @throws InterruptedException if the thread is interrupted
      */
@@ -467,7 +473,7 @@ public final class ExecutorSession implements AutoCloseable {
         PlannedCall given = confirms(origin) ? call : withoutConfirmation(call);
         Plan.Step step;
         try {
-            Plan.Call compiled = PlanCompiler.sessionCall(given, pack, options.stepTimeout().toMillis(), id);
+            Plan.Call compiled = PlanCompiler.sessionCall(literal(given), pack, options.stepTimeout().toMillis(), id);
             step = new Plan.Step(stepId, "call", 0, List.of(compiled), List.of());
         } catch (ScenarioException e) {
             return refused(stepId, null, given.args(), List.of(), origin, "the call does not compile: " + e.reason());
@@ -509,6 +515,58 @@ public final class ExecutorSession implements AutoCloseable {
             step = new Plan.Step(stepId, verb, 0, calls, step.expect());
         }
         return run(stepId, verb, given, step, origin);
+    }
+
+    /**
+     * What a verb compiles to with these arguments, as {@link #execute(String, Object, Origin)} would compile it,
+     * without running or journaling anything (phase6 security fix S57, D158): the calls of its one step and the cleanup
+     * calls it registered, each with its arguments as the verb wrote them (a verb's own {@code confirm} included, which
+     * {@code execute} strips for every origin but a person's). A host that offers a verb to a client or a model checks
+     * these with the client's real arguments before the first call runs (the MCP server's {@code PlanPolicy}, the
+     * session service's {@code CallPolicy}). A step that does not compile is a refusal reason, never an exception.
+     *
+     * @param args the verb's arguments as a scenario writes them (JSON-like, {@code $references} in place)
+     * @throws IllegalStateException after {@link #close()}
+     */
+    public Compiled compile(String verb, Object args) {
+        Objects.requireNonNull(verb, "verb");
+        requireOpen();
+        try {
+            Plan compiled = PlanCompiler.compile(scenarioOf(verb, args), pack);
+            return new Compiled(compiled.steps().get(0).calls(), compiled.cleanup(), null);
+        } catch (ScenarioException e) {
+            return new Compiled(List.of(), List.of(), "the step does not compile: " + e.reason());
+        } catch (RuntimeException e) {
+            return new Compiled(List.of(), List.of(), "the step does not compile: " + e);
+        }
+    }
+
+    /**
+     * {@link #compile(String, Object)} with the arguments as {@link #execute(String, Object, Origin)} takes them from
+     * this origin: without {@code confirm} and {@code _meta} (at the top and in a nested {@code args}) for every origin
+     * but a person's. The calls keep what the verb itself wrote (its own {@code confirm} included).
+     *
+     * @throws IllegalStateException after {@link #close()}
+     */
+    public Compiled compile(String verb, Object args, Origin origin) {
+        Objects.requireNonNull(origin, "origin");
+        return compile(verb, confirms(origin) ? args : withoutConfirmation(args));
+    }
+
+    /**
+     * What {@link #compile} answers: the step's calls and the cleanup calls, or why the step does not compile.
+     *
+     * @param calls the calls of the verb's step, in order; empty when it does not compile
+     * @param cleanup the cleanup calls the verb registered; empty when it does not compile
+     * @param refusal why the step does not compile, or null
+     */
+    public record Compiled(List<Plan.Call> calls, List<Plan.Call> cleanup, String refusal) {
+
+        /** Copies the lists. */
+        public Compiled {
+            calls = calls == null ? List.of() : List.copyOf(calls);
+            cleanup = cleanup == null ? List.of() : List.copyOf(cleanup);
+        }
     }
 
     /** A one-step scenario of the session: its resolved slots and oracles declared, so a verb may ask after them. */
@@ -1284,7 +1342,7 @@ public final class ExecutorSession implements AutoCloseable {
 
     /**
      * Whether the origin may confirm a destructive call: only a person (design 3.4; phase5-contracts.md 12.2). A
-     * model's request, and the system's, is never a confirmation.
+     * model's request, an MCP client's (D158) and the system's is never a confirmation.
      */
     private static boolean confirms(Origin origin) {
         return origin.kind() == Origin.Kind.PERSON;
@@ -1310,7 +1368,20 @@ public final class ExecutorSession implements AutoCloseable {
             return call;
         }
         return new PlannedCall(call.primitive(), stripped(call.args()), call.sync(), call.timeoutMs(), call.await(),
-                call.capture());
+                call.capture(), call.literalArgs());
+    }
+
+    /**
+     * The call as it is compiled: a call with literal arguments has every {@code $} of its strings escaped, so that no
+     * reference is substituted in it (phase6 security fix S55); any other call as it is.
+     */
+    @SuppressWarnings("unchecked")
+    private static PlannedCall literal(PlannedCall call) {
+        if (!call.literalArgs()) {
+            return call;
+        }
+        return new PlannedCall(call.primitive(), (Map<String, Object>) References.escaped(call.args()), call.sync(),
+                call.timeoutMs(), call.await(), call.capture(), true);
     }
 
     /** A call a verb compiled to, for an origin that is not a person's: without {@code confirm} and {@code _meta}. */

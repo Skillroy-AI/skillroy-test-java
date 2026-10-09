@@ -46,6 +46,9 @@ import java.util.TreeMap;
  * {@link AgentRpcException} or {@link AgentLostException}; a catalogue of descriptors and a capability matrix; the
  * lost latch of the real client ({@link #isLost()}), set by {@link #loseOn}.
  *
+ * <p>A destructive primitive of the catalogue called without {@code confirm} in its options answers
+ * {@code CONFIRM_REQUIRED}, as the agent's dispatcher does (the call is recorded first).
+ *
  * <p>Defaults: {@code trace.mark} publishes a {@code trace.mark} event; {@code evt.query} answers from the bus with
  * {@code lastSeq}; {@code swing.settle} settles at once; {@code sync.await} answers from the bus or fails with
  * TIMEOUT; everything else is METHOD_NOT_FOUND. {@link #await} answers from the bus at once (null when nothing
@@ -178,6 +181,13 @@ final class FakeAgent implements AgentConnection {
         Handler handler = handlers.get(method);
         if (handler == null) {
             throw new AgentRpcException(method, new RpcError(ErrorCodes.METHOD_NOT_FOUND, "no " + method, null));
+        }
+        // The dispatcher's confirmation gate (phase1-contracts.md 5): a destructive primitive needs _meta.confirm.
+        for (PrimitiveDescriptor d : schema) {
+            if (d.name().equals(method) && d.destructive() && (options == null || !options.confirm())) {
+                throw new AgentRpcException(method, new RpcError(ErrorCodes.CONFIRM_REQUIRED, method
+                        + " is destructive: it needs a confirmation", null));
+            }
         }
         long before = seq;
         Object value = handler.handle(copy);

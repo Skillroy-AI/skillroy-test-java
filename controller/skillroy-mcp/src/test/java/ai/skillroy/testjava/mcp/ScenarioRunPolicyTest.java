@@ -17,7 +17,23 @@
 package ai.skillroy.testjava.mcp;
 
 import ai.skillroy.testjava.controller.AgentConnection;
+import ai.skillroy.testjava.controller.AgentLostException;
+import ai.skillroy.testjava.inference.budget.BudgetMeter;
+import ai.skillroy.testjava.inference.budget.InferenceLog;
+import ai.skillroy.testjava.inference.budget.LedgerWriter;
+import ai.skillroy.testjava.inference.budget.PriceTable;
+import ai.skillroy.testjava.inference.budget.SessionMetering;
+import ai.skillroy.testjava.inference.prompt.PromptMask;
+import ai.skillroy.testjava.inference.session.SessionPolicy;
+import ai.skillroy.testjava.inference.session.SessionService;
+import ai.skillroy.testjava.inference.session.Turn;
+import ai.skillroy.testjava.scenario.BindException;
+import ai.skillroy.testjava.scenario.BindOptions;
+import ai.skillroy.testjava.scenario.ExecutorSession;
+import ai.skillroy.testjava.scenario.Origin;
 import ai.skillroy.testjava.scenario.ScenarioException;
+import ai.skillroy.testjava.scenario.SessionOptions;
+import ai.skillroy.testjava.scenario.StepJournal;
 import ai.skillroy.testjava.scenario.pack.CompileContext;
 import ai.skillroy.testjava.scenario.pack.DomainPack;
 import ai.skillroy.testjava.scenario.pack.FactProvider;
@@ -25,12 +41,15 @@ import ai.skillroy.testjava.scenario.pack.PlannedCall;
 import ai.skillroy.testjava.scenario.pack.StepLibrary;
 import ai.skillroy.testjava.scenario.pack.Sync;
 import ai.skillroy.testjava.scenario.pack.SyncPolicy;
+import ai.skillroy.testjava.scenario.resolve.CostLedger;
+import ai.skillroy.testjava.scenario.resolve.Resolution;
 import ai.skillroy.testjava.scenario.resolve.ResolutionCatalogue;
 import ai.skillroy.testjava.scenario.resolve.SqlAllowList;
 import io.modelcontextprotocol.spec.McpSchema;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.math.BigDecimal;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
@@ -249,6 +268,85 @@ class ScenarioRunPolicyTest {
                     + " primitive runs, as its verb tool would");
             assertEquals(Map.of("item", "SAW-2"), fx.desk.agent.callsTo("desk.lend").get(0).params());
         }
+    }
+
+    /**
+     * Phase 6 security fix S56 (D157): the server's one session meter bounds {@code skillroy_scenario_run} with
+     * {@code skillroy_session_ask} and {@code skillroy_resolve}. The budget lets one tier (b) resolve's estimate through
+     * but not the run's real cost plus another estimate: the first run of a scenario with one {@code llm-sql} slot makes
+     * its model call and is settled on the session meter; then {@code skillroy_session_ask} ends {@code BUDGET} and the
+     * second run is refused {@code BUDGET} with the meter's figures, each without a gateway call (before the fix the
+     * runs were bounded by the scenario budget only and the actor's meter was untouched).
+     */
+    @Test
+    void aScenarioRunIsMeteredOnTheSessionsBudget() throws Exception {
+        try (McpFixture fx = new McpFixture(dir); TierB tierB = new TierB("scripted-mcp-session-budget", fx.desk,
+                "0.20")) {
+            BigDecimal estimate = SessionMetering.tierBEstimate(tierB.settings, PriceTable.of(tierB.settings));
+            CostLedger ledger = new CostLedger();
+            BudgetMeter meter = new BudgetMeter(BudgetMeter.Scope.SESSION, null, estimate.add(new BigDecimal("0.10")),
+                    ledger);
+            ServerOptions.Builder options = fx.options();
+            SessionOptions session = SessionOptions.defaults(null).withBind(BindOptions.defaults()
+                    .withCredentials(Desk.credentials()).withEnvId("seed-a").withLedger(ledger)).withId("sess-1");
+            fx.start(options.session(session).mutating(true).inference(tierB.settings).sessionMeter(meter)
+                    .actor((s, o) -> serviceActor(s, o, tierB, ledger)).build());
+            String yaml = "scenario: metered\npack: desk\nresolve:\n  item: { query: Item, args: { category: tools },"
+                    + " strategy: [llm-sql] }\nsteps:\n  - enter: { value: $item.code }\n";
+
+            McpSchema.CallToolResult first = run(fx, yaml);
+            assertFalse(first.isError(), McpFixture.text(first));
+            int calls = tierB.gateway.requests().size();
+            assertEquals(1, calls, "the run's one tier (b) call");
+            assertEquals(0, new BigDecimal("0.20").compareTo(meter.spent()), "settled on the session meter: "
+                    + meter.spent());
+            assertTrue(fx.server.session().journal().entries().stream()
+                    .anyMatch(e -> e instanceof StepJournal.BudgetEntry), "the session's budget record is journaled");
+
+            McpSchema.CallToolResult ask = fx.call("skillroy_session_ask", Map.of("request", "lend an item"));
+            assertFalse(ask.isError(), McpFixture.text(ask));
+            assertEquals("BUDGET", McpFixture.json(ask).get("outcome"), McpFixture.text(ask));
+            assertEquals(calls, tierB.gateway.requests().size(), "the actor shares the meter: no model call");
+
+            McpSchema.CallToolResult second = run(fx, yaml.replace("metered", "metered-again"));
+            String text = McpFixture.text(second);
+            assertTrue(second.isError(), text);
+            Map<String, Object> refused = McpFixture.json(second);
+            assertEquals("BUDGET", refused.get("refused"), text);
+            assertEquals("SESSION", refused.get("scope"), text);
+            assertEquals(meter.limit().toPlainString(), refused.get("limitUsd"), text);
+            assertTrue(text.contains("nothing ran and no model call was made"), text);
+            assertEquals(calls, tierB.gateway.requests().size(), "no gateway call for the refused run");
+            assertTrue(meter.exhausted(), "D74: the session makes no further model call");
+        }
+    }
+
+    /** The session service over the server's session, metered on the server's meter, as skillroy mcp builds it. */
+    private static SessionActor serviceActor(ExecutorSession session, ServerOptions options, TierB tierB,
+                                             CostLedger ledger) {
+        PromptMask mask = PromptMask.of(Desk.credentials().mask(), List.of(), List.of());
+        LedgerWriter writer = new LedgerWriter(ledger, options.sessionMeter(), InferenceLog.NONE, mask, false, null);
+        SessionService service = new SessionService(session, tierB.gateway, SessionPolicy.acting(),
+                options.sessionMeter(), writer, PriceTable.builtIn(), null);
+        return new SessionActor() {
+            @Override
+            public Object ask(String request) throws AgentLostException, InterruptedException {
+                Turn turn = service.ask(request);
+                return Map.of("outcome", turn.outcome().name(), "answer", String.valueOf(turn.answer()));
+            }
+
+            @Override
+            public Resolution resolve(ExecutorSession s, String slot, String kind, Map<String, Object> args,
+                                      List<String> strategy, Origin origin)
+                    throws BindException, AgentLostException, InterruptedException {
+                return service.resolve(slot, kind, args, strategy, List.of(), null, origin);
+            }
+
+            @Override
+            public void close() {
+                service.close();
+            }
+        };
     }
 
     @Test

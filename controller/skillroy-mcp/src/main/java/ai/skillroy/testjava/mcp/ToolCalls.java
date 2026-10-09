@@ -19,6 +19,11 @@ package ai.skillroy.testjava.mcp;
 import ai.skillroy.testjava.controller.AgentLostException;
 import ai.skillroy.testjava.controller.AgentRpcException;
 import ai.skillroy.testjava.controller.CallOptions;
+import ai.skillroy.testjava.inference.budget.BudgetCaps;
+import ai.skillroy.testjava.inference.budget.BudgetException;
+import ai.skillroy.testjava.inference.budget.BudgetMeter;
+import ai.skillroy.testjava.inference.budget.PriceTable;
+import ai.skillroy.testjava.inference.budget.SessionMetering;
 import ai.skillroy.testjava.inference.sql.GuardViolation;
 import ai.skillroy.testjava.inference.sql.GuardedStatement;
 import ai.skillroy.testjava.inference.sql.SqlGuard;
@@ -39,6 +44,7 @@ import ai.skillroy.testjava.scenario.FailureKind;
 import ai.skillroy.testjava.scenario.Plan;
 import ai.skillroy.testjava.scenario.PlanCompiler;
 import ai.skillroy.testjava.scenario.PlanExecutor;
+import ai.skillroy.testjava.scenario.References;
 import ai.skillroy.testjava.scenario.RunOptions;
 import ai.skillroy.testjava.scenario.RunResult;
 import ai.skillroy.testjava.scenario.Scenario;
@@ -54,14 +60,18 @@ import ai.skillroy.testjava.scenario.pack.PlannedCall;
 import ai.skillroy.testjava.scenario.pack.StepLibrary;
 import ai.skillroy.testjava.scenario.pack.Sync;
 import ai.skillroy.testjava.scenario.resolve.BindMode;
+import ai.skillroy.testjava.scenario.resolve.CostLedger;
+import ai.skillroy.testjava.scenario.resolve.InferenceSettings;
 import ai.skillroy.testjava.scenario.resolve.Oracle;
 import ai.skillroy.testjava.scenario.resolve.QueryType;
 import ai.skillroy.testjava.scenario.resolve.ResolutionCatalogue;
+import ai.skillroy.testjava.scenario.resolve.SettingsException;
 import ai.skillroy.testjava.scenario.resolve.SqlAllowList;
 import io.modelcontextprotocol.spec.McpSchema;
 
 import java.io.IOException;
 import java.lang.reflect.Type;
+import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -78,8 +88,9 @@ import java.util.TreeSet;
  * an allow-listed source, its rows reduced to the allow-listed columns), and the workflow tools. Every answer is a
  * {@link Reply}: masked JSON (or masked text) cut at 25000 characters, an image written to {@code <out>/mcp/<n>.png}
  * and linked; a failed step is an error reply with its outcome. The origin of everything is
- * {@code Origin.person("mcp")}; a {@code confirm} and a {@code _meta} in the client's arguments are dropped (design
- * 3.4: the server never confirms on a model's behalf).
+ * {@code Origin.client(<label>)} (phase6 security fix S57, D158), which the session never takes as a confirmation; a
+ * {@code confirm} and a {@code _meta} in the client's arguments are dropped as well (design 3.4: the server never
+ * confirms on a model's behalf), and a verb's call is checked on what it compiles to before it runs.
  *
  * <p>Called by {@link SkillroyMcpServer} on the thread that holds the session; not thread-safe on its own.
  */
@@ -111,6 +122,15 @@ final class ToolCalls {
     private static final long READ_TIMEOUT_MS = 10_000L;
     private static final String CONFIRM = "confirm";
     private static final String META = "_meta";
+    /** The reason of a refusal for want of budget (D74), as a slot's budget failure is reported. */
+    static final String BUDGET = "BUDGET";
+    /** The journal's {@code budget} scope of the session meter. */
+    private static final String BUDGET_SCOPE = "SESSION";
+    private static final String BUDGET_SCOPE_NOTE = " (the session's budget, --session-budget, bounds"
+            + " skillroy_session_ask, skillroy_resolve and skillroy_scenario_run together)";
+    /** {@code data_query}'s refusal of a reference (phase6 security fix S55): the rule, never a value. */
+    static final String LITERAL_ONLY = "data_query takes literal SQL and literal parameter values; a slot's field"
+            + " ($slot.field) is not substituted here";
 
     private final SkillroyMcpServer server;
 
@@ -132,8 +152,14 @@ final class ToolCalls {
 
     // ------------------------------------------------------------------------------------------------ verbs, primitives
 
-    /** A pack verb through the session entry: the step protocol, the prompt policy and the journal apply. */
-    Reply verb(String verb, Map<String, Object> args) throws AgentLostException, InterruptedException {
+    /**
+     * A pack verb through the session entry: the step protocol, the prompt policy and the journal apply. Before the first
+     * call runs, the verb is compiled with the client's arguments and its calls and cleanup calls are checked
+     * ({@link PlanPolicy#packRefusals}, phase6 security fix S57, D158): a verb whose arguments choose a call the server
+     * never runs for a client is refused as a tool error naming each primitive, never a value, and nothing runs or is
+     * journaled. A step that does not compile goes to the session, which journals the refusal as before.
+     */
+    Reply verb(String verb, Map<String, Object> args) throws AgentLostException, InterruptedException, ToolError {
         Map<String, Object> schema = null;
         try {
             schema = pack().steps().argsSchema(verb);
@@ -141,7 +167,15 @@ final class ToolCalls {
             // A pack that cannot describe a verb's arguments: none are dropped.
         }
         Object given = withoutConfirmOrMeta(Arguments.dropNullOptionals(args, schema));
-        StepOutcome outcome = session().execute(verb, given, SkillroyMcpServer.ORIGIN);
+        ExecutorSession.Compiled compiled = session().compile(verb, given);
+        if (compiled.refusal() == null) {
+            List<String> refusals = server.planPolicy().packRefusals(compiled.calls(), compiled.cleanup());
+            if (!refusals.isEmpty()) {
+                throw new ToolError("verb " + verb + " is refused with these arguments, nothing ran (this server never"
+                        + " runs these calls for a client): " + String.join("; ", refusals));
+            }
+        }
+        StepOutcome outcome = session().execute(verb, given, server.origin());
         return step(outcome, "verb " + verb);
     }
 
@@ -153,7 +187,7 @@ final class ToolCalls {
             return dataQuery(params);
         }
         PlannedCall call = new PlannedCall(d.name(), params, syncFor(d), timeoutFor(d));
-        return step(session().execute(call, SkillroyMcpServer.ORIGIN), d.name());
+        return step(session().execute(call, server.origin()), d.name());
     }
 
     /** A mutating Swing primitive settles the UI after itself, as the base verbs' calls do; everything else none. */
@@ -171,10 +205,19 @@ final class ToolCalls {
      * {@code data_query}: the source must have an allow-list, the statement passes {@link SqlGuard} (the guarded text
      * is what runs, at most {@value SqlGuard#ROW_CAP} rows), and the rows keep the allow-listed columns only, a personal
      * column's values {@code <personal>} (the model's SQL is guarded even here, 9.3).
+     *
+     * <p>The SQL and the parameters are literal (phase6 security fix S55): a {@code $reference} in {@code sql}, or in a
+     * string of {@code params} at any depth, is refused before the guard ({@link #LITERAL_ONLY}), and the call runs with
+     * the session's reference substitution off ({@link PlannedCall#literalArgs()}), so that the statement the agent
+     * receives is byte-equal to the guarded text: a slot's value is target content and never rebuilds the statement
+     * after the guard checked it.
      */
     private Reply dataQuery(Map<String, Object> params) throws AgentLostException, InterruptedException, ToolError {
         String source = Arguments.text(params, "source", true);
         String sql = Arguments.text(params, "sql", true);
+        if (References.containsReference(sql) || References.anyReference(params.get("params"))) {
+            throw new ToolError(LITERAL_ONLY);
+        }
         SqlAllowList allow = server.allowLists().get(source);
         if (allow == null) {
             throw new ToolError("data_query: source '" + source + "' has no SQL allow-list; data_query reads only "
@@ -201,8 +244,8 @@ final class ToolCalls {
         sent.put("sql", guarded.sql());
         sent.put("params", values);
         sent.put("maxRows", maxRows);
-        StepOutcome outcome = session().execute(new PlannedCall(SkillroyMcpServer.DATA_QUERY, sent, Sync.NONE, 0L),
-                SkillroyMcpServer.ORIGIN);
+        StepOutcome outcome = session().execute(new PlannedCall(SkillroyMcpServer.DATA_QUERY, sent, Sync.NONE, 0L)
+                .withLiteralArgs(), server.origin());
         Object rows = null;
         if (outcome.succeeded() && outcome.lastResult() != null
                 && outcome.lastResult().value() instanceof Map<?, ?> value) {
@@ -495,9 +538,26 @@ final class ToolCalls {
         try {
             SessionActor actor = server.resolvingActor();
             if (actor != null) {
-                actor.resolve(session(), slot, kind, queryArgs, strategy, SkillroyMcpServer.ORIGIN);
+                actor.resolve(session(), slot, kind, queryArgs, strategy, server.origin());
             } else {
-                session().resolve(slot, kind, queryArgs, strategy, null, null, SkillroyMcpServer.ORIGIN);
+                // D157: without an actor, a resolve that names a model is metered on the server's session meter here.
+                Metering metering = meter(SessionMetering.namesModel(strategy) ? 1 : 0);
+                if (metering.refusal() != null) {
+                    Map<String, Object> json = new LinkedHashMap<>();
+                    json.put("slot", slot);
+                    json.put("kind", kind);
+                    json.put("failureKind", FailureKind.RESOLUTION_FAILED.name());
+                    json.put("reason", BUDGET);
+                    json.put("message", "slot '" + slot + "': " + metering.refusal().getMessage() + "; no model call"
+                            + " was made" + BUDGET_SCOPE_NOTE);
+                    json.put("detail", budgetDetail(metering.refusal()));
+                    return reply(json, true, List.of());
+                }
+                try (BudgetCaps.Cap cap = metering.cap()) {
+                    session().resolve(slot, kind, queryArgs, strategy, null, null, server.origin());
+                } finally {
+                    settle(metering);
+                }
             }
         } catch (BindException e) {
             Map<String, Object> json = new LinkedHashMap<>();
@@ -596,13 +656,110 @@ final class ToolCalls {
         return json;
     }
 
+    // ------------------------------------------------------------------------------------------------ the session budget
+
+    /**
+     * What a run or a resolve reserved on the server's session meter (phase6 security fix S56, D157): the meter, the
+     * session's ledger and its size before, the number of tier (b) estimates reserved, the session's room before them
+     * (the cap of the binds), the gateway's name; or the refusal; {@link #NONE} when nothing is metered.
+     */
+    private record Metering(BudgetMeter meter, CostLedger ledger, int before, int reserved, BigDecimal room,
+                            String provider, BudgetException refusal) {
+
+        static final Metering NONE = new Metering(null, null, 0, 0, null, null, null);
+
+        /** The cap of the binds that record into the session's ledger: the session's room; none when not metered. */
+        BudgetCaps.Cap cap() {
+            return meter == null || ledger == null ? () -> { } : BudgetCaps.cap(ledger, room);
+        }
+    }
+
+    /**
+     * Reserves one tier (b) estimate per slot whose strategy names a model on the server's session meter, as
+     * {@code SessionService.resolve} does (D157): refused, with the meter's figures and no model call, when the meter is
+     * exhausted (D74) or has no room (which exhausts it, D74). Nothing is metered without a session meter, without a
+     * gateway, or for no such slot.
+     *
+     * @throws ToolError when the settings' price table cannot be read
+     */
+    private Metering meter(int tierBSlots) throws ToolError {
+        BudgetMeter meter = server.sessionMeter();
+        InferenceSettings settings = session().options().bind().inference();
+        if (meter == null || tierBSlots == 0 || settings == null || !settings.enabled()) {
+            return Metering.NONE;
+        }
+        meter.identify(session().id());
+        PriceTable prices;
+        try {
+            prices = PriceTable.of(settings);
+        } catch (SettingsException e) {
+            throw new ToolError("the price table of the inference settings cannot be read: " + e.getMessage());
+        }
+        BigDecimal estimate = SessionMetering.tierBEstimate(settings, prices);
+        BigDecimal room = meter.remaining();
+        if (meter.exhausted()) {
+            return refused(new BudgetException(meter.scope(), meter.id(), meter.limit(), meter.spent(), estimate));
+        }
+        int reserved = 0;
+        try {
+            for (; reserved < tierBSlots; reserved++) {
+                meter.reserve(estimate);
+            }
+        } catch (BudgetException e) {
+            for (int i = 0; i < reserved; i++) {
+                meter.release();
+            }
+            meter.markExhausted();
+            recordBudget(meter);
+            return refused(e);
+        }
+        CostLedger ledger = session().options().bind().ledger();
+        return new Metering(meter, ledger, ledger.size(), tierBSlots, room, settings.gateway(), null);
+    }
+
+    private static Metering refused(BudgetException e) {
+        return new Metering(null, null, 0, 0, null, null, e);
+    }
+
+    /** Settles what the metered run or resolve added to the session's ledger and journals the session's budget. */
+    private void settle(Metering metering) {
+        if (metering.meter() == null) {
+            return;
+        }
+        SessionMetering.settle(metering.meter(), metering.ledger(), metering.before(), metering.reserved(),
+                metering.provider());
+        recordBudget(metering.meter());
+    }
+
+    private void recordBudget(BudgetMeter meter) {
+        try {
+            session().budget(BUDGET_SCOPE, meter.spent(), meter.limit(), meter.exhausted());
+        } catch (IllegalStateException e) {
+            // The session was closed; the ledger keeps the calls.
+        }
+    }
+
+    /** A refusal's figures: scope, id, limit, spent and estimate, in US dollars as plain text. */
+    private static Map<String, Object> budgetDetail(BudgetException e) {
+        Map<String, Object> json = new LinkedHashMap<>();
+        json.put("scope", e.scope().name());
+        json.put("id", e.id());
+        json.put("limitUsd", e.limitUsd() == null ? null : e.limitUsd().toPlainString());
+        json.put("spentUsd", e.spentUsd() == null ? null : e.spentUsd().toPlainString());
+        json.put("estimateUsd", e.estimateUsd() == null ? null : e.estimateUsd().toPlainString());
+        return json;
+    }
+
     /**
      * {@code skillroy_scenario_run} (mutating only): the scenario compiled, checked against what this server offers
      * ({@link PlanPolicy}, D96: refused as a tool error naming each call that may not run, before anything runs), and
      * run once with {@link PlanExecutor} in {@code live} (nothing written) or {@code approve} (the session's approver
      * and bindings root decide), with recover and every expectation on masked values
      * ({@code RunOptions.withExpectationsOnMaskedValues}, so that PASS or FAIL never answers whether a credential
-     * starts with a prefix), its evidence in {@code <out>/runs/<run id>/}; the run's summary.
+     * starts with a prefix), its evidence in {@code <out>/runs/<run id>/}; the run's summary. Metered on the server's
+     * session meter (phase6 security fix S56, D157): one tier (b) estimate per slot whose strategy names a model is
+     * reserved first ({@link #meter}; refused {@code BUDGET} with no model call when there is no room), the run executes
+     * under a cap of the session's room, and what it spent is settled and journaled afterwards.
      */
     Reply run(Map<String, Object> args) throws AgentLostException, ToolError {
         String yaml = Arguments.text(args, "yaml", true);
@@ -624,6 +781,21 @@ final class ToolCalls {
             throw new ToolError("skillroy_scenario_run: the scenario is refused, nothing ran (this server runs only"
                     + " what it offers as tools): " + String.join("; ", refusals));
         }
+        int tierB = 0;
+        for (Plan.Slot slot : plan.slots()) {
+            if (slot.query() != null && SessionMetering.namesModel(slot.query().strategy())) {
+                tierB++;
+            }
+        }
+        Metering metering = meter(tierB);
+        if (metering.refusal() != null) {
+            Map<String, Object> json = budgetDetail(metering.refusal());
+            json.put("refused", BUDGET);
+            json.put("tierBSlots", (long) tierB);
+            json.put("message", "skillroy_scenario_run: the scenario is refused, nothing ran and no model call was"
+                    + " made: " + metering.refusal().getMessage() + BUDGET_SCOPE_NOTE);
+            return reply(json, true, List.of());
+        }
         String runId = server.nextRunId();
         Path dir = server.outDir().resolve("runs").resolve(runId);
         BindOptions bind = session().options().bind().withMode(bindMode).withWriteBindings(false);
@@ -631,7 +803,12 @@ final class ToolCalls {
                 .withExpectationsOnMaskedValues(true).withObserver(session().observer());
         PlanExecutor executor = new PlanExecutor(pack(), server.agent(), options,
                 session().options().webPathLoader());
-        PlanExecutor.Resolved ran = executor.runWithOutcome(plan);
+        PlanExecutor.Resolved ran;
+        try (BudgetCaps.Cap cap = metering.cap()) {
+            ran = executor.runWithOutcome(plan);
+        } finally {
+            settle(metering);
+        }
         RunResult result = ran.result();
         promptsHandledByTheRun();
         List<String> resources = server.registerRun(runId, dir);
@@ -701,7 +878,7 @@ final class ToolCalls {
     Reply check(Map<String, Object> args) throws AgentLostException, InterruptedException, ToolError {
         String path = Arguments.text(args, "path", true);
         Object matcher = args.get("matcher");
-        CheckOutcome outcome = session().check(path, matcher, SkillroyMcpServer.ORIGIN);
+        CheckOutcome outcome = session().check(path, matcher, server.origin());
         Map<String, Object> json = new LinkedHashMap<>();
         json.put("path", outcome.path());
         json.put("matcher", outcome.matcher());
@@ -717,7 +894,7 @@ final class ToolCalls {
         String path = Arguments.text(args, "path", true);
         Object value;
         try {
-            value = session().observe(path, SkillroyMcpServer.ORIGIN);
+            value = session().observe(path, server.origin());
         } catch (IllegalArgumentException | IllegalStateException e) {
             throw new ToolError("skillroy_session_observe: " + e.getMessage());
         }
@@ -731,7 +908,7 @@ final class ToolCalls {
     /** {@code skillroy_session_note}: a note in the journal. */
     Reply note(Map<String, Object> args) throws ToolError {
         String text = Arguments.text(args, "text", true);
-        session().note(text, SkillroyMcpServer.ORIGIN);
+        session().note(text, server.origin());
         Map<String, Object> json = new LinkedHashMap<>();
         json.put("noted", true);
         json.put("entries", (long) session().journal().entries().size());
@@ -743,7 +920,10 @@ final class ToolCalls {
      * {@code <out>/<id>.yaml}, {@code <out>/plan/<id>.plan.json} and {@code <out>/bindings/<env>/<id>.bindings.json};
      * the reviewer's report. No approver (decision D97): a client is often a model, so a model-found binding is always
      * written {@code REQUIRED}, and an {@code approvedBy} sent anyway is ignored and said so in the report; a person
-     * approves with {@code skillroy resolve}, which reuses the recorded value without a model call (D82).
+     * approves with {@code skillroy resolve}, which reuses the recorded value without a model call (D82). An id whose
+     * files exist in {@code <out>} is refused, and each file is created new ({@code CREATE_NEW}), as {@code author}
+     * does (phase6 security fix S61): a client never replaces a scenario; the CLI's {@code session export}, a
+     * person's, may overwrite.
      */
     Reply export(Map<String, Object> args) throws ToolError {
         String scenarioId = Arguments.text(args, "scenarioId", true);
@@ -766,16 +946,22 @@ final class ToolCalls {
         Path planFile = out.resolve("plan").resolve(scenarioId + ".plan.json");
         Path bindingsFile = result.bindings() == null ? null
                 : BindingsFile.locate(out.resolve("bindings"), session().options().bind().envId(), scenarioId);
+        for (Path existing : new Path[] {yamlFile, planFile, bindingsFile}) {
+            if (existing != null && Files.exists(existing, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+                throw new ToolError("skillroy_session_export: " + existing + " exists; export under another id");
+            }
+        }
         try {
             Plan plan = PlanCompiler.compile(yaml, scenarioId + ".yaml", pack());
-            Files.createDirectories(out);
-            Files.write(yamlFile, yaml);
-            plan.write(planFile);
+            createNew(yamlFile, yaml);
+            createNew(planFile, plan.toJsonText().getBytes(StandardCharsets.UTF_8));
             if (bindingsFile != null) {
-                result.bindings().write(bindingsFile);
+                createNew(bindingsFile, result.bindings().toJsonText().getBytes(StandardCharsets.UTF_8));
             }
         } catch (ScenarioException e) {
             throw new ToolError("skillroy_session_export: the exported scenario does not compile: " + e.getMessage());
+        } catch (java.nio.file.FileAlreadyExistsException e) {
+            throw new ToolError("skillroy_session_export: " + e.getFile() + " exists; export under another id");
         } catch (IOException e) {
             throw new ToolError("skillroy_session_export: the files cannot be written: " + e);
         }
@@ -793,6 +979,12 @@ final class ToolCalls {
     }
 
     // ------------------------------------------------------------------------------------------------ helpers
+
+    /** Writes a new file (its parent directories made), never replacing one ({@code CREATE_NEW}, S61). */
+    private static void createNew(Path file, byte[] bytes) throws IOException {
+        Files.createDirectories(file.toAbsolutePath().getParent());
+        Files.write(file, bytes, java.nio.file.StandardOpenOption.CREATE_NEW, java.nio.file.StandardOpenOption.WRITE);
+    }
 
     /** Masked pretty JSON, cut. */
     private Reply reply(Object value, boolean error, List<McpSchema.Content> extra) {

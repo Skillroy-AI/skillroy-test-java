@@ -32,9 +32,13 @@ import java.util.regex.Pattern;
  * number a number); a reference embedded in a longer string is replaced by the value's text. {@code $$} writes a
  * literal {@code $}; a {@code $} not followed by a slot name is kept as it is. Map keys are never substituted.
  *
+ * <p>Public for one predicate only (phase6 security fix S55): a host that hands a client's text to a call whose
+ * arguments must stay literal ({@code data_query}'s SQL) asks {@link #containsReference(String)} and
+ * {@link #anyReference(Object)} first; the substitution itself stays the package's.
+ *
  * <p>Stateless; safe from any thread.
  */
-final class References {
+public final class References {
 
     static final Pattern REFERENCE = Pattern.compile("\\$([A-Za-z_][A-Za-z0-9_]*)((?:\\.[A-Za-z0-9_]+)*)");
 
@@ -79,8 +83,11 @@ final class References {
         return out;
     }
 
-    /** True if the string holds at least one reference (after {@code $$} escapes are taken into account). */
-    static boolean containsReference(String text) {
+    /**
+     * True if the string holds at least one reference (after {@code $$} escapes are taken into account): a {@code $}
+     * followed by a slot name, whether or not a slot of that name exists.
+     */
+    public static boolean containsReference(String text) {
         for (int i = 0; i < text.length(); i++) {
             if (text.charAt(i) == '$') {
                 if (i + 1 < text.length() && text.charAt(i + 1) == '$') {
@@ -95,6 +102,66 @@ final class References {
             }
         }
         return false;
+    }
+
+    /**
+     * True if any string of a JSON-like value, at any depth of its maps and lists, holds a reference
+     * ({@link #containsReference(String)}); map keys are never substituted and are not looked at. A value nested deeper
+     * than 64 levels counts as holding one (refused rather than searched).
+     */
+    public static boolean anyReference(Object value) {
+        return anyReference(value, 0);
+    }
+
+    private static boolean anyReference(Object value, int depth) {
+        if (depth > 64) {
+            return true;
+        }
+        if (value instanceof String text) {
+            return containsReference(text);
+        }
+        if (value instanceof Map<?, ?> map) {
+            for (Object item : map.values()) {
+                if (anyReference(item, depth + 1)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        if (value instanceof List<?> list) {
+            for (Object item : list) {
+                if (anyReference(item, depth + 1)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
+     * A copy of a JSON-like value with every {@code $} of every string, at any depth, written {@code $$}, so that a
+     * later {@link #substitute} gives the value back unchanged: no reference is resolved in it (a call with
+     * {@code PlannedCall.literalArgs}, phase6 security fix S55). Map keys are kept as they are.
+     */
+    static Object escaped(Object value) {
+        if (value instanceof String text) {
+            return text.indexOf('$') < 0 ? text : text.replace("$", "$$");
+        }
+        if (value instanceof Map<?, ?> map) {
+            Map<String, Object> out = new LinkedHashMap<>();
+            for (Map.Entry<?, ?> e : map.entrySet()) {
+                out.put(String.valueOf(e.getKey()), escaped(e.getValue()));
+            }
+            return out;
+        }
+        if (value instanceof List<?> list) {
+            List<Object> out = new ArrayList<>(list.size());
+            for (Object item : list) {
+                out.add(escaped(item));
+            }
+            return out;
+        }
+        return value;
     }
 
     /** A copy of the template with every reference substituted; the template is not modified. */

@@ -246,6 +246,7 @@ final class JournalExport {
             case PERSON -> "person";
             case MODEL -> "model " + (origin.by() == null ? "(unnamed)" : origin.by());
             case SYSTEM -> "system";
+            case CLIENT -> "client " + (origin.by() == null ? "(unnamed)" : origin.by());
         };
     }
 

@@ -166,7 +166,9 @@ public final class ClaudeGateway implements InferenceGateway {
      *
      * @throws InferenceException {@code AUTH} "the model key is not set (ANTHROPIC_API_KEY)" without the key, and
      *     {@code AUTH} naming the variable (never its value) for a key or a workspace id a request header cannot
-     *     carry; {@code INVALID_REQUEST} when the settings' price table cannot be read
+     *     carry, or an {@code ANTHROPIC_BASE_URL} that is not {@code https} (or {@code http} on a loopback host) or
+     *     carries user-info (phase6 security fix S51); {@code INVALID_REQUEST} when the settings' price table cannot
+     *     be read or a configured model is not in it (S52)
      */
     public static ClaudeGateway open(InferenceSettings settings) throws InferenceException {
         return open(settings, System::getenv);
@@ -190,6 +192,11 @@ public final class ClaudeGateway implements InferenceGateway {
                     + " header cannot carry (only printable ASCII, no space); set the variable again without it");
         }
         String baseUrl = environment.apply(BASE_URL_VARIABLE);
+        String baseUrlProblem = baseUrlProblem(baseUrl);
+        if (baseUrlProblem != null) {
+            throw new InferenceException(Kind.AUTH, BASE_URL_VARIABLE + " " + baseUrlProblem + "; set it again (the"
+                    + " key travels to that address)");
+        }
         boolean fromSettings = settings.workspaceId() != null;
         String workspace = fromSettings ? settings.workspaceId() : environment.apply(WORKSPACE_VARIABLE);
         if (workspace != null && !workspace.isBlank() && !WORKSPACE_ID.matcher(workspace.strip()).matches()) {
@@ -203,6 +210,13 @@ public final class ClaudeGateway implements InferenceGateway {
         } catch (SettingsException e) {
             throw new InferenceException(Kind.INVALID_REQUEST, "the price table cannot be read: " + e.getMessage());
         }
+        // Phase 6 security fix S52: a configured model must be in the effective table, else it would be under-counted.
+        for (String model : new java.util.TreeSet<>(settings.models().values())) {
+            if (model != null && !model.isBlank() && prices.price(model.strip()) == null) {
+                throw new InferenceException(Kind.INVALID_REQUEST, "model " + model.strip() + " is not in the price"
+                        + " table; name it under prices: with its price");
+            }
+        }
         Config config = Config.of(settings, prices);
         AnthropicClient client;
         try {
@@ -215,6 +229,39 @@ public final class ClaudeGateway implements InferenceGateway {
         }
         return new ClaudeGateway(client, config, List.of(key.strip(), workspace == null ? "" : workspace.strip()),
                 Clock.systemUTC(), Thread::sleep);
+    }
+
+    /**
+     * Why {@code ANTHROPIC_BASE_URL} may not be used, never quoting it, or null when it may (or is not set): it must
+     * parse as an absolute URL with a host, use {@code https} unless the host is {@code 127.0.0.1}, {@code ::1} or
+     * {@code localhost} (a local proxy or a test's fake), and carry no user-info (phase6 security fix S51: the key
+     * travels to that address).
+     */
+    static String baseUrlProblem(String baseUrl) {
+        if (baseUrl == null || baseUrl.isBlank()) {
+            return null;
+        }
+        java.net.URI uri;
+        try {
+            uri = new java.net.URI(baseUrl.strip());
+        } catch (java.net.URISyntaxException e) {
+            return "is not a URL";
+        }
+        String scheme = uri.getScheme() == null ? "" : uri.getScheme().toLowerCase(java.util.Locale.ROOT);
+        String host = uri.getHost();
+        if (!uri.isAbsolute() || host == null || host.isBlank()) {
+            return "is not an absolute URL with a host";
+        }
+        if (uri.getRawUserInfo() != null) {
+            return "carries a user name or password";
+        }
+        String bare = host.startsWith("[") && host.endsWith("]") ? host.substring(1, host.length() - 1) : host;
+        boolean loopback = bare.equals("127.0.0.1") || bare.equals("::1") || bare.equals("0:0:0:0:0:0:0:1")
+                || bare.equalsIgnoreCase("localhost");
+        if (scheme.equals("https") || scheme.equals("http") && loopback) {
+            return null;
+        }
+        return "must use https (http only for 127.0.0.1, ::1 or localhost)";
     }
 
     /** True when every character is printable ASCII without the space (0x21 to 0x7E): what a header value carries. */
@@ -406,9 +453,10 @@ public final class ClaudeGateway implements InferenceGateway {
                 Map<?, ?> inner = outer.get("error") instanceof Map<?, ?> m ? m : outer;
                 String errorType = String.valueOf(inner.get("type"));
                 String message = inner.get("message") instanceof String s ? s : errorType;
+                // S54: scrubbed before the cut, as the gateway's RuntimeException branch does.
                 return new BatchResult(index, null, new InferenceException(kindOf(errorType), ClaudeMapping.scrub(
-                        "batch request " + index + ": " + errorType + ": " + ClaudeMapping.bounded(message, 300),
-                        secrets)));
+                        "batch request " + index + ": " + ClaudeMapping.scrub(errorType, secrets) + ": "
+                                + ClaudeMapping.bounded(ClaudeMapping.scrub(message, secrets), 300), secrets)));
             }
             case "expired" -> {
                 return new BatchResult(index, null, new InferenceException(Kind.TIMEOUT, "batch request " + index

@@ -69,6 +69,9 @@ final class Desk {
     /** The pack's credential value; the application leaks it into its answers. */
     static final String SECRET = "pw-staff-100-secret";
 
+    /** The title of the planted item (category {@code planted}): a quote and a set operation over a hidden column. */
+    static final String PLANTED_TITLE = "x' UNION SELECT password AS code FROM staff WHERE 'a'='a";
+
     /** The SQL of the Item resolver. */
     static final String ITEM_SQL = "SELECT code, title FROM item WHERE category = ? ORDER BY code";
     /**
@@ -166,8 +169,11 @@ final class Desk {
         List<Rows.Column> columns = List.of(new Rows.Column("CODE", "VARCHAR"), new Rows.Column("TITLE", "VARCHAR"));
         if (sql.equals(ITEM_SQL)) {
             String category = params == null || params.isEmpty() ? null : String.valueOf(params.get(0));
+            // "planted": a row whose title a user of the application wrote, holding a quote and a set operation
+            // (security pass 1, S55: a resolved value is target content).
             List<List<Object>> rows = "tools".equals(category) ? List.of(List.of("HAM-1", "Claw hammer"),
-                    List.of("SAW-2", "Panel saw")) : List.of();
+                    List.of("SAW-2", "Panel saw")) : "planted".equals(category) ? List.of(List.of("PL-1",
+                    PLANTED_TITLE)) : List.of();
             return Rows.of(columns, rows, false);
         }
         if (sql.contains("FROM item")) {
@@ -255,6 +261,167 @@ final class Desk {
             @Override
             public List<ai.skillroy.testjava.data.RowMask> rowMasks() {
                 return masks;
+            }
+        };
+    }
+
+    /**
+     * The desk's pack whose verb {@code lend} declares this argument schema (phase6 security fix S49: a schema with a
+     * secret-looking property and data in it).
+     */
+    DomainPack packWithLendSchema(Map<String, Object> schema) {
+        DomainPack base = pack;
+        StepLibrary baseSteps = base.steps();
+        StepLibrary steps = new StepLibrary() {
+            @Override
+            public Set<String> verbs() {
+                return baseSteps.verbs();
+            }
+
+            @Override
+            public List<PlannedCall> compile(String verb, Object args, CompileContext ctx) throws ScenarioException {
+                return baseSteps.compile(verb, args, ctx);
+            }
+
+            @Override
+            public Map<String, Object> argsSchema(String verb) {
+                return verb.equals("lend") ? schema : baseSteps.argsSchema(verb);
+            }
+        };
+        return new DomainPack() {
+            @Override
+            public String id() {
+                return base.id();
+            }
+
+            @Override
+            public String version() {
+                return base.version();
+            }
+
+            @Override
+            public StepLibrary steps() {
+                return steps;
+            }
+
+            @Override
+            public SyncPolicy syncPolicy() {
+                return base.syncPolicy();
+            }
+
+            @Override
+            public List<FactProvider> facts() {
+                return base.facts();
+            }
+
+            @Override
+            public void recover(AgentConnection connection) throws Exception {
+                base.recover(connection);
+            }
+
+            @Override
+            public ResolutionCatalogue resolution() {
+                return base.resolution();
+            }
+
+            @Override
+            public List<SqlAllowList> sqlAllowLists() {
+                return base.sqlAllowLists();
+            }
+        };
+    }
+
+    /**
+     * The desk's pack with the two verbs of the security review's probe (pass 1, S57), each of which compiles to the
+     * destructive {@code desk.wipe} with its own {@code confirm} only for some arguments, so that no probe at the
+     * server's start finds it: {@code tidy {hard?}} ({@code desk.wipe} when {@code hard} is true, else
+     * {@code desk.poke}) and {@code stamp {amount}} ({@code desk.wipe} for a decimal string such as {@code 5.00}, and no
+     * compile for anything else).
+     */
+    DomainPack packWithProbeVerbs() {
+        DomainPack base = pack;
+        StepLibrary baseSteps = base.steps();
+        StepLibrary steps = new StepLibrary() {
+            @Override
+            public Set<String> verbs() {
+                Set<String> verbs = new java.util.TreeSet<>(baseSteps.verbs());
+                verbs.addAll(List.of("tidy", "stamp"));
+                return verbs;
+            }
+
+            @Override
+            public List<PlannedCall> compile(String verb, Object args, CompileContext ctx) throws ScenarioException {
+                Map<?, ?> a = args instanceof Map<?, ?> m ? m : Map.of();
+                switch (verb) {
+                    case "tidy": {
+                        if (Boolean.TRUE.equals(a.get("hard"))) {
+                            Map<String, Object> params = new LinkedHashMap<>();
+                            params.put("confirm", true);
+                            return List.of(new PlannedCall("desk.wipe", params, Sync.NONE, 0));
+                        }
+                        return List.of(new PlannedCall("desk.poke", Map.of(), Sync.NONE, 0));
+                    }
+                    case "stamp": {
+                        if (!(a.get("amount") instanceof String amount) || !amount.matches("[0-9]+[.][0-9][0-9]")) {
+                            throw new ScenarioException("stamp: 'amount' must be a decimal string such as 5.00");
+                        }
+                        Map<String, Object> params = new LinkedHashMap<>();
+                        params.put("confirm", true);
+                        return List.of(new PlannedCall("desk.wipe", params, Sync.NONE, 0));
+                    }
+                    default:
+                        return baseSteps.compile(verb, args, ctx);
+                }
+            }
+
+            @Override
+            public Map<String, Object> argsSchema(String verb) {
+                return switch (verb) {
+                    case "tidy" -> object(Map.of("hard", Map.of("type", "boolean")), List.of());
+                    case "stamp" -> object(Map.of("amount", Map.of("type", "string")), List.of("amount"));
+                    default -> baseSteps.argsSchema(verb);
+                };
+            }
+        };
+        return new DomainPack() {
+            @Override
+            public String id() {
+                return base.id();
+            }
+
+            @Override
+            public String version() {
+                return base.version();
+            }
+
+            @Override
+            public StepLibrary steps() {
+                return steps;
+            }
+
+            @Override
+            public SyncPolicy syncPolicy() {
+                return base.syncPolicy();
+            }
+
+            @Override
+            public List<FactProvider> facts() {
+                return base.facts();
+            }
+
+            @Override
+            public void recover(AgentConnection connection) throws Exception {
+                base.recover(connection);
+            }
+
+            @Override
+            public ResolutionCatalogue resolution() {
+                return base.resolution();
+            }
+
+            @Override
+            public List<SqlAllowList> sqlAllowLists() {
+                return base.sqlAllowLists();
             }
         };
     }

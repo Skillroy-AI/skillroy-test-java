@@ -1,5 +1,5 @@
 {
-  "fingerprint": "183e0de3bb7d8e937d805fcb7da316901a0cf97fcf8c3c68c073a8ca44cb79fc",
+  "fingerprint": "4a24891ea811fb3e7aa90fe4f50dc4cc329e02027bfed48f1856ebea368697e3",
   "model": "scripted-model",
   "modelClass": "SONNET_CLASS",
   "purpose": "session",
@@ -12,45 +12,6 @@
           {
             "text": "<person>\nLend one plain item to the walk-in borrower and settle the deposit.\n</person>",
             "type": "text"
-          }
-        ],
-        "role": "USER"
-      },
-      {
-        "parts": [
-          {
-            "text": "Find a plain item the desk lends first, cheap and counted.",
-            "type": "text"
-          },
-          {
-            "id": "toolu_scripted_1",
-            "input": {
-              "args": {
-                "deposit": {
-                  "between": [
-                    "1.00",
-                    "2.00"
-                  ]
-                },
-                "perDay": false
-              },
-              "kind": "LendableItem",
-              "slot": "item",
-              "strategy": null
-            },
-            "name": "skillroy_resolve",
-            "type": "tool_use"
-          }
-        ],
-        "role": "ASSISTANT"
-      },
-      {
-        "parts": [
-          {
-            "content": "<target-state>\n{\n  \"slot\": \"item\",\n  \"kind\": \"LendableItem\",\n  \"value\": {\n    \"barcode\": \"5000000000048\",\n    \"code\": \"HND-001\",\n    \"deposit\": \"1.10\",\n    \"title\": \"Claw hammer\"\n  },\n  \"strategy\": \"CANONICAL_SQL\",\n  \"resolver\": \"lending.sql.LendableItem\",\n  \"reference\": \"$item\"\n}\n\n</target-state>",
-            "error": false,
-            "toolUseId": "toolu_scripted_1",
-            "type": "tool_result"
           }
         ],
         "role": "USER"
@@ -305,7 +266,7 @@
           "description": "A supervisor authorises what the desk asked for with the supervisor-required prompt: answers it with OK, then enters the supervisor's code and password, which comes from credentials.yaml, each time waiting until the desk is ready again. If the desk refuses, its authorisation-failed prompt fails the step.",
           "properties": {
             "staff": {
-              "description": "The supervisor who authorises: a $reference to a slot that declares a credential (credential: {realm: staff, key: code}), such as $assistant; never a staff member or a password written out.",
+              "description": "The supervisor who authorises: a $reference to a slot that declares a credential (credential: <redacted> staff, key: code}), such as $assistant; never a staff member or a password written out.",
               "pattern": "^\\$[A-Za-z_][A-Za-z0-9_]*$",
               "type": "string"
             }
@@ -643,7 +604,7 @@
           "description": "Signs a staff member on at the desk: enters their code, then their password, which comes from credentials.yaml and never from the scenario, each time waiting until the desk is ready again. A scenario that passes signs off again at its end.",
           "properties": {
             "staff": {
-              "description": "The staff member to sign on: a $reference to a slot that declares a credential (credential: {realm: staff, key: code}), such as $assistant; never a staff member or a password written out.",
+              "description": "The staff member to sign on: a $reference to a slot that declares a credential (credential: <redacted> staff, key: code}), such as $assistant; never a staff member or a password written out.",
               "pattern": "^\\$[A-Za-z_][A-Za-z0-9_]*$",
               "type": "string"
             }
@@ -700,17 +661,26 @@
   "response": {
     "parts": [
       {
-        "text": "Scan the item.",
+        "text": "Find a plain item the desk lends first, cheap and counted.",
         "type": "text"
       },
       {
-        "id": "toolu_scripted_2",
+        "id": "toolu_scripted_1",
         "input": {
-          "barcode": null,
-          "item": "$item",
-          "times": null
+          "args": {
+            "deposit": {
+              "between": [
+                "1.00",
+                "2.00"
+              ]
+            },
+            "perDay": false
+          },
+          "kind": "LendableItem",
+          "slot": "item",
+          "strategy": null
         },
-        "name": "lending_scan",
+        "name": "skillroy_resolve",
         "type": "tool_use"
       }
     ],
@@ -723,12 +693,12 @@
       "cacheWrite5mTokens": 0,
       "costUsd": "0",
       "elapsedMs": 0,
-      "inputTokens": 5078,
+      "inputTokens": 4963,
       "model": "scripted-model",
       "note": null,
-      "outputTokens": 25,
+      "outputTokens": 54,
       "provider": "scripted",
-      "requestId": "scripted-5078-25",
+      "requestId": "scripted-4963-54",
       "requestedModel": "scripted-model"
     }
   },
