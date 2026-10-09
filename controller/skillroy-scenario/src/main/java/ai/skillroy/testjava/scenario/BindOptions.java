@@ -158,8 +158,11 @@ public record BindOptions(BindMode mode, String envId, Path bindingsRoot, Creden
         String approve = properties.apply(PROP_APPROVE);
         Approver approver = approve != null && "all".equals(approve.strip().toLowerCase(Locale.ROOT))
                 ? Approver.APPROVE_ALL : Approver.REJECT_ALL;
-        Path file = Credentials.locate(null, root, envId);
-        Credentials credentials = file == null ? Credentials.empty() : Credentials.load(file);
+        // S38: a value of skillroy.credentials or SKILLROY_CREDENTIALS that is not a file name is refused, and the file
+        // it names is named by the property or the variable in messages, never by its value.
+        Credentials.Location location = Credentials.find(null, root, envId);
+        Path file = location == null ? null : location.file();
+        Credentials credentials = Credentials.loadFound(location);
         Path credentialsDir = file != null ? file.toAbsolutePath().getParent()
                 : root != null && ENV_ID.matcher(envId).matches() ? root.resolve(envId) : null;
         InferenceSettings inference;

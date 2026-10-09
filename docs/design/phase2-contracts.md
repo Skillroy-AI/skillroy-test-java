@@ -429,6 +429,16 @@ public final class Credentials {
 public final class CredentialsException extends Exception { }   // never a value; since 2026-10-03 never a key text
     public CredentialsException(String message);                             // as built: public
 }
+// (Phase 6 security fix S35 + S41, A40, built 2026-10-09, SR) never a value; never the text of a key whose value is
+// not the mapping its position requires (a realm, an entry, a source), nor of a key below <realm>.<id>, among a
+// source's keys or under properties; a duplicated key's text is withheld with its line (StrictYaml marks the
+// duplicate-key error as one that may echo the document, so Credentials reports ":N: not valid YAML" and withholds
+// the reader's message, as for every such error). A realm, entry or source that is not a mapping is named by its
+// line and its parent's path only ("credentials.staff: an entry must be a mapping"); `jdbc.<id>.url is required`
+// names the source's own line and keeps the id, whose value is then a mapping. The location of the file (§4 below)
+// is refused before it is read when $SKILLROY_CREDENTIALS or -Dskillroy.credentials holds a line break or more than
+// 4096 characters ("... is not a file name"), and a missing or unreadable file named by either is reported by the
+// variable's or the property's name, never by its value (S38; no amendment).
 /** Replaces secrets in anything about to be written or printed. Thread-safe; immutable once built. */
 public final class SecretMask {
     public static final String REDACTED = SecretKeys.REDACTED;               // "<redacted>"
@@ -1757,6 +1767,12 @@ bounded wait around a JDBC connect (§7.2) is a wait on a future, not a sleep.
 ### 11.3 What a run writes
 
 In `RunOptions.outputDir` (one directory per scenario, as Phase 1):
+
+**(Phase 6 security fix S37, A42, built 2026-10-09, SR.)** The directory and its files take the process umask (the CI
+example reads them from another user's step); on a shared host run the controller under `umask 077`. The CDP trace
+directory is owner-only regardless (D59). Owner-only run output directories by default (the finding's option (i)) are
+not built: one of the five low parts the owner accepted (P6 §12.2, §17 Q22), with the release note "run outputs take
+the process umask; on a shared host run the controller under `umask 077` (`skillroy run --out`)".
 
 | File | Content |
 |---|---|

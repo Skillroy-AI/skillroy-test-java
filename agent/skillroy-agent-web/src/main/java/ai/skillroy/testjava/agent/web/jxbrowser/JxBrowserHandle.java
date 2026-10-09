@@ -32,6 +32,8 @@ import ai.skillroy.testjava.agent.web.reflect.Listeners;
 import ai.skillroy.testjava.agent.web.reflect.ReflectiveException;
 import ai.skillroy.testjava.agent.web.reflect.ResolvedApi;
 import ai.skillroy.testjava.protocol.Json;
+import ai.skillroy.testjava.protocol.RpcError;
+import ai.skillroy.testjava.protocol.RpcException;
 import ai.skillroy.testjava.protocol.web.WebLib;
 
 import java.awt.Component;
@@ -577,13 +579,23 @@ final class JxBrowserHandle implements WebBrowser {
         }
     }
 
-    /** Decodes the wrapper's tagged text ({@code s}tring, {@code j}son, {@code e}rror). */
+    /**
+     * Decodes the wrapper's tagged text ({@code s}tring, {@code j}son, {@code e}rror). A text longer than
+     * {@link WebLib#MAX_CHANNEL_CHARS} is refused before it is parsed, {@code INTERNAL_ERROR {reason: "oversized"}}, and
+     * a script error's message and stack are cut as {@link WebLib#scriptMessage} and {@link WebLib#scriptStack} cut
+     * them (security fix S43: a page may replace the library).
+     */
     static void decode(Object result, CompletableFuture<String> out) {
         if (!(result instanceof String) || ((String) result).isEmpty()) {
             out.completeExceptionally(new IllegalStateException("the page returned no result"));
             return;
         }
         String text = (String) result;
+        if (text.length() > WebLib.MAX_CHANNEL_CHARS) {
+            RpcError e = WebLib.oversized("the page's result", WebLib.MAX_CHANNEL_CHARS);
+            out.completeExceptionally(new RpcException(e.code(), e.message(), e.data()));
+            return;
+        }
         char tag = text.charAt(0);
         String rest = text.substring(1);
         try {
@@ -607,7 +619,8 @@ final class JxBrowserHandle implements WebBrowser {
                 Object message = error.get("message");
                 Object stack = error.get("stack");
                 out.completeExceptionally(new WebScriptException(message == null ? "script error"
-                        : String.valueOf(message), stack == null ? null : String.valueOf(stack)));
+                        : WebLib.scriptMessage(String.valueOf(message)), stack == null ? null
+                        : WebLib.scriptStack(String.valueOf(stack))));
                 return;
             }
         } catch (RuntimeException e) {
@@ -657,7 +670,8 @@ final class JxBrowserHandle implements WebBrowser {
                     Object message = s.get("message");
                     Object stack = s.get("stack");
                     out.completeExceptionally(new WebScriptException(message == null ? "promise rejected"
-                            : String.valueOf(message), stack == null ? null : String.valueOf(stack)));
+                            : WebLib.scriptMessage(String.valueOf(message)), stack == null ? null
+                            : WebLib.scriptStack(String.valueOf(stack))));
                 } else {
                     out.completeExceptionally(new IllegalStateException("the awaited value was lost: the document "
                             + "was replaced"));

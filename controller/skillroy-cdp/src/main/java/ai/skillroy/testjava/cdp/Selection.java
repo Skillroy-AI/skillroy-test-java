@@ -16,11 +16,13 @@
 
 package ai.skillroy.testjava.cdp;
 
+import ai.skillroy.testjava.protocol.text.BoundedRegex;
 import ai.skillroy.testjava.scenario.web.WebPathException;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
@@ -41,6 +43,12 @@ import java.util.regex.PatternSyntaxException;
  * answers with its own {@code NOT_FOUND}, {@code AMBIGUOUS} or {@code STALE_HANDLE} and their data, so the two paths
  * never disagree on selection errors.
  *
+ * <p>The regular expression of {@code by.url} or {@code by.title} is searched under the S24 budget (security fix S46,
+ * phase4-contracts.md 4.2): {@link BoundedRegex}, at most {@value BoundedRegex#BUDGET_MS} ms for the whole pick and
+ * never past the call's deadline, the subject at most 1 Mi characters. A search that runs out throws
+ * {@link RegexStopped}, which the path answers as {@code INVALID_PARAMS} (not {@code UNSUPPORTED}: the agent would
+ * spin on the same pattern).
+ *
  * <p>Immutable.
  */
 final class Selection {
@@ -55,27 +63,67 @@ final class Selection {
         List<AgentBrowser> current() throws Exception;
     }
 
+    /**
+     * A {@code by.url} or {@code by.title} search that ran out of its budget, recursed too deeply, or met a subject
+     * over 1 Mi characters (security fix S46); the path answers it as {@code INVALID_PARAMS} with {@code data
+     * {param, reason}}. Never carries the subject.
+     */
+    static final class RegexStopped extends RuntimeException {
+
+        private static final long serialVersionUID = 1L;
+
+        private final String param;
+        private final String reason;
+
+        RegexStopped(String param, String reason, String message) {
+            super(message, null, false, false);
+            this.param = param;
+            this.reason = reason;
+        }
+
+        /** {@code by.url} or {@code by.title}. */
+        String param() {
+            return param;
+        }
+
+        /** {@link BoundedRegex#REGEX_TOO_SLOW} or {@link BoundedRegex#TEXT_TOO_LONG}. */
+        String reason() {
+            return reason;
+        }
+    }
+
     private enum Kind { TARGET, URL, TITLE }
 
     private final Kind kind;
     private final String targetId;
     private final String ref;
     private final Pattern pattern;
+    /** The call's deadline ({@link System#nanoTime()}), bounding the regex search; 0 for none. */
+    private final long deadlineNanos;
 
-    private Selection(Kind kind, String targetId, String ref, Pattern pattern) {
+    private Selection(Kind kind, String targetId, String ref, Pattern pattern, long deadlineNanos) {
         this.kind = kind;
         this.targetId = targetId;
         this.ref = ref;
         this.pattern = pattern;
+        this.deadlineNanos = deadlineNanos;
     }
 
     /** A selection of a known target. */
     static Selection target(String targetId, String ref) {
-        return new Selection(Kind.TARGET, targetId, ref, null);
+        return new Selection(Kind.TARGET, targetId, ref, null, 0L);
     }
 
     /** Resolves the call's {@code browser} or {@code by} parameter as far as it can be without the pages. */
     static Selection resolve(Map<String, Object> params, Source source) throws Exception {
+        return resolve(params, source, 0L);
+    }
+
+    /**
+     * As {@link #resolve(Map, Source)}, with the call's deadline ({@link System#nanoTime()}; 0 for none), which bounds
+     * a {@code by.url} or {@code by.title} search as well as the S24 budget.
+     */
+    static Selection resolve(Map<String, Object> params, Source source, long deadlineNanos) throws Exception {
         Object browser = params.get("browser");
         if (browser != null) {
             if (!(browser instanceof String ref) || ref.isBlank()) {
@@ -102,7 +150,7 @@ final class Selection {
                     }
                     try {
                         return new Selection(key.equals("url") ? Kind.URL : Kind.TITLE, null, null,
-                                Pattern.compile(regex));
+                                Pattern.compile(regex), deadlineNanos);
                     } catch (PatternSyntaxException x) {
                         throw WebPathException.unsupported("by." + key + " is not a regular expression: "
                                 + x.getDescription());
@@ -137,6 +185,7 @@ final class Selection {
      * The target id of the one page this selection picks among {@code pages} (target id to page).
      *
      * @throws WebPathException if no page or several pages match
+     * @throws RegexStopped if a {@code by.url} or {@code by.title} search runs out of its budget (S46)
      */
     <P> String pick(Map<String, P> pages, Function<P, String> url, Function<P, String> title)
             throws WebPathException {
@@ -147,14 +196,27 @@ final class Selection {
             }
             return targetId;
         }
+        String param = "by." + (kind == Kind.URL ? "url" : "title");
+        long start = System.nanoTime();
+        long until = start + TimeUnit.MILLISECONDS.toNanos(BoundedRegex.BUDGET_MS);
+        if (deadlineNanos != 0L && deadlineNanos - until < 0) {
+            until = deadlineNanos;
+        }
         List<String> hits = new ArrayList<>();
         for (Map.Entry<String, P> e : pages.entrySet()) {
             String text = kind == Kind.URL ? url.apply(e.getValue()) : title.apply(e.getValue());
-            if (text != null && pattern.matcher(text).find()) {
-                hits.add(e.getKey());
+            if (text == null) {
+                continue;
+            }
+            try {
+                if (BoundedRegex.find(pattern, text, until - System.nanoTime())) {
+                    hits.add(e.getKey());
+                }
+            } catch (BoundedRegex.TooSlow x) {
+                throw new RegexStopped(param, x.reason(), x.describe(param, BoundedRegex.BUDGET_MS));
             }
         }
-        String what = "by." + (kind == Kind.URL ? "url" : "title") + " " + pattern.pattern();
+        String what = param + " " + pattern.pattern();
         if (hits.isEmpty()) {
             throw WebPathException.unsupported("no CDP page matches " + what);
         }
@@ -172,6 +234,11 @@ final class Selection {
     /** The target id of a target selection, else null. */
     String targetId() {
         return targetId;
+    }
+
+    /** The call's deadline ({@link System#nanoTime()}) this selection was resolved with; 0 for none. */
+    long deadlineNanos() {
+        return deadlineNanos;
     }
 
     @Override

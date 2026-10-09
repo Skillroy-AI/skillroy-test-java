@@ -24,6 +24,7 @@ import ai.skillroy.testjava.controller.SecureFiles;
 import ai.skillroy.testjava.protocol.ErrorCodes;
 import ai.skillroy.testjava.protocol.Event;
 import ai.skillroy.testjava.protocol.RpcResult;
+import ai.skillroy.testjava.protocol.text.TextBounds;
 import ai.skillroy.testjava.protocol.web.WebLib;
 import ai.skillroy.testjava.scenario.web.FrozenTargetPolicy;
 import ai.skillroy.testjava.scenario.web.WebPath;
@@ -105,7 +106,8 @@ import java.util.stream.Stream;
  * A call that this path cannot serve throws {@link WebPathException} ({@code UNSUPPORTED}) before anything reached
  * the page, and the executor sends it to the agent and records the fall-back: the path is not open or closed, the
  * call names secret parameters ({@code CallOptions.secretParams()}: the agent's records redact them, a Playwright
- * trace or debug log would not), the target is in read-only mode and the primitive is mutating, an earlier operation
+ * trace or debug log would not), the target is in read-only mode and the primitive is mutating or evaluates a
+ * caller's expression ({@link #SCRIPT}, D156), an earlier operation
  * of this path has not returned (a frozen page), or the browser selection cannot pick exactly one page (see {@link
  * Selection}). Failures of the call itself are {@link AgentRpcException}s with the agent's codes, the type {@code
  * AgentConnection.call} throws: a library error object as its code ({@code NOT_FOUND}, {@code AMBIGUOUS}, {@code
@@ -171,6 +173,13 @@ public final class CdpWebPath implements WebPath {
     /** The mutating ones among them (D51). */
     static final Set<String> MUTATING = Set.of("web.evaluate", "web.dom.click", "web.dom.fill",
             "web.dispatchEvent", "web.tap", "web.resize");
+
+    /**
+     * The ones that evaluate a caller's expression in the page (phase6-contracts.md 12.9, D156; security fix S42):
+     * refused on a read-only target as the {@link #MUTATING} ones are, so that the agent answers them
+     * ({@code READ_ONLY}).
+     */
+    static final Set<String> SCRIPT = Set.of("web.evaluate", "web.waitFlag");
 
     /** The reason {@code open} gives for the policy {@code CLOSE}. */
     public static final String CLOSE_REFUSED = "frozenTargets: close is refused in Phase 4 (D52): closing a browser the"
@@ -439,7 +448,7 @@ public final class CdpWebPath implements WebPath {
             throw WebPathException.unsupported("a call with secret parameters is served by the agent, which redacts"
                     + " them in its records");
         }
-        if (s.readOnly && MUTATING.contains(primitive)) {
+        if (s.readOnly && (MUTATING.contains(primitive) || SCRIPT.contains(primitive))) {
             throw WebPathException.unsupported("the target is in read-only mode: the agent answers " + primitive);
         }
         if (s.attach.busy()) {
@@ -625,7 +634,7 @@ public final class CdpWebPath implements WebPath {
     private static Map<String, Object> openInfo(CdpEndpoint endpoint, TargetProbe probe, CdpAttach attach) {
         Map<String, Object> info = new LinkedHashMap<>();
         info.put("endpoint", endpoint.toString());
-        info.put("browserVersion", probe.browserVersion());
+        info.put("browserVersion", WebLib.cut(probe.browserVersion(), WebLib.MAX_URL_CHARS));
         info.put("connectMs", attach.connectMillis());
         info.put("targets", (long) probe.pages().size());
         info.put("unresponsive", (long) probe.unresponsive().size());
@@ -702,7 +711,9 @@ public final class CdpWebPath implements WebPath {
      * {@code {ref, rule}} of the agent's browser for a frozen target, or null: the browser whose {@code cdpTargetId}
      * is the target's ({@code "cdpTargetId"}); else the one open browser without a known target id whose URL is the
      * target's ({@code "url"}); else, for a single frozen target, the only open browser without a known target id
-     * ({@code "elimination"}). The fall-backs exist because the agent may not read the target id of a frozen page.
+     * ({@code "elimination"}). The fall-backs exist because the agent may not read the target id of a frozen page;
+     * they apply only when at least one listed page target is one the agent reports (security fix S45), so that the
+     * pages of another browser at the endpoint never decide which of the target's browsers is reloaded.
      */
     static String[] matchFrozen(TargetProbe.Target target, List<TargetProbe.Target> frozen,
                                 List<TargetProbe.Target> pages, List<AgentBrowser> browsers) {
@@ -710,6 +721,17 @@ public final class CdpWebPath implements WebPath {
             if (!b.closed() && target.id().equals(b.cdpTargetId())) {
                 return new String[] {b.ref(), "cdpTargetId"};
             }
+        }
+        boolean anyReported = false;
+        for (TargetProbe.Target p : pages) {
+            for (AgentBrowser b : browsers) {
+                if (p.id().equals(b.cdpTargetId())) {
+                    anyReported = true;
+                }
+            }
+        }
+        if (!anyReported) {
+            return null;
         }
         List<AgentBrowser> unknown = new ArrayList<>();
         for (AgentBrowser b : browsers) {
@@ -974,12 +996,14 @@ public final class CdpWebPath implements WebPath {
                             String.valueOf(outcome.get("compileError")), "stack", ""), refOf(s, at));
                 }
                 boolean ready = outcome != null && Boolean.TRUE.equals(outcome.get("ready"));
-                String lastError = !ready && outcome != null && outcome.get("error") instanceof String error ? error
-                        : null;
-                return new Object[] {ready, elapsedMs(t0), at.page().url(), refOf(s, at), lastError};
+                // S43: the guard cuts its line, but a page can break the string functions the guard calls.
+                String lastError = !ready && outcome != null && outcome.get("error") instanceof String error
+                        ? WebLib.errorLine(error) : null;
+                return new Object[] {ready, elapsedMs(t0), WebLib.cut(at.page().url(), WebLib.MAX_URL_CHARS),
+                        refOf(s, at), lastError};
             });
             boolean ready = (Boolean) result[0];
-            if (ready) {
+            if (ready && result[3] != null) {
                 events.append("web.ready", Shapes.data("browser", result[3], "url", result[2], "signal", "FLAG"),
                         correlationId);
             }
@@ -1016,6 +1040,9 @@ public final class CdpWebPath implements WebPath {
     private static Map<?, ?> flagPoll(String primitive, JSHandle handle) throws AgentRpcException {
         Object value = Values.json(handle.jsonValue());
         disposeQuietly(handle);
+        if (TextBounds.exceeds(value, WebLib.MAX_CHANNEL_CHARS)) {
+            throw Shapes.oversized(primitive, "the web.waitFlag guard's answer", WebLib.MAX_CHANNEL_CHARS);
+        }
         if (!(value instanceof Map<?, ?> m) || !(m.get("ready") instanceof Boolean)) {
             throw Shapes.error(primitive, ErrorCodes.INTERNAL_ERROR, "the web.waitFlag guard returned no result",
                     Shapes.data("path", ID));
@@ -1170,16 +1197,31 @@ public final class CdpWebPath implements WebPath {
             throw WebPathException.unsupported(e.getMessage());
         } catch (PlaywrightException e) {
             throw playwrightFailure(primitive, e, sel.ref());
+        } catch (Selection.RegexStopped e) {
+            // S46: INVALID_PARAMS, as the agent answers it, so that the executor does not hand the same pattern on.
+            throw Shapes.error(primitive, ErrorCodes.INVALID_PARAMS, e.getMessage(), Shapes.data("param", e.param(),
+                    "reason", e.reason(), "path", ID));
         } catch (RuntimeException e) {
             throw Shapes.error(primitive, ErrorCodes.INTERNAL_ERROR, "the CDP path failed: " + e,
                     Shapes.data("path", ID));
         }
     }
 
-    /** The page and frame of a selection; call only on the Playwright thread. */
-    private Place place(Session s, Selection sel, Object frameKey) throws WebPathException {
+    /**
+     * The page and frame of a selection; call only on the Playwright thread. A page picked by {@code by.url} or
+     * {@code by.title} must carry a target id the agent reports ({@code web.browsers}, read once more when it is not
+     * among the known refs), else the call is {@code UNSUPPORTED} and the agent serves it: the path acts only on the
+     * target's pages, never on another browser's at the same endpoint (security fix S45, phase4-contracts.md 5.2).
+     */
+    private Place place(Session s, Selection sel, Object frameKey) throws WebPathException, AgentLostException {
         Map<String, Page> pages = s.attach.pagesOnPw();
         String targetId = sel.pick(pages, Page::url, Page::title);
+        if (sel.targetId() == null && !s.refByTarget.containsKey(targetId)) {
+            refreshBrowsers(s, sel.deadlineNanos() != 0L ? sel.deadlineNanos() : deadline(AGENT_QUERY_MS));
+            if (!s.refByTarget.containsKey(targetId)) {
+                throw WebPathException.unsupported("no browser of the target has the CDP page matching " + sel);
+            }
+        }
         Page page = pages.get(targetId);
         watch(s, page);
         return new Place(page, frame(s, page, frameKey), targetId);
@@ -1256,7 +1298,7 @@ public final class CdpWebPath implements WebPath {
             public List<AgentBrowser> current() throws Exception {
                 return refreshBrowsers(s, deadline);
             }
-        });
+        }, deadline);
     }
 
     /** Reads the agent's {@code web.browsers} and refreshes the ref caches; a failure is {@code UNSUPPORTED}. */
@@ -1357,12 +1399,19 @@ public final class CdpWebPath implements WebPath {
         });
     }
 
-    /** {@code web.load} (and {@code web.ready} with {@code signal: LOAD} for a finished load) of a main frame. */
+    /**
+     * {@code web.load} (and {@code web.ready} with {@code signal: LOAD} for a finished load) of a main frame; only for a
+     * page whose target id the agent reports (security fix S45), with its URL cut at {@link WebLib#MAX_URL_CHARS}
+     * (S43).
+     */
     private void loadEvent(Session s, Page page, String kind) {
         try {
             String targetId = s.attach.cachedTargetId(page);
             String ref = targetId == null ? null : s.refByTarget.get(targetId);
-            String url = page.url();
+            if (ref == null) {
+                return;
+            }
+            String url = WebLib.cut(page.url(), WebLib.MAX_URL_CHARS);
             events.append("web.load", Shapes.data("browser", ref, "url", url, "kind", kind, "cdpTargetId",
                     targetId), null);
             if (kind.equals("LOAD_FINISHED")) {
@@ -1405,7 +1454,7 @@ public final class CdpWebPath implements WebPath {
                 List<Drained> drained = drainOnPw(s);
                 if (session == s) {
                     for (Drained d : drained) {
-                        publish(d);
+                        publish(s, d);
                     }
                 }
                 return null;
@@ -1436,7 +1485,8 @@ public final class CdpWebPath implements WebPath {
                 continue;
             }
             try {
-                Object value = Shapes.unwrap("web.tap", page.evaluate(Scripts.call("drain")), e.getValue().ref);
+                Object value = Shapes.unwrap("web.tap", page.evaluate(Scripts.call("drain", WebLib.DRAIN_CHARS)),
+                        e.getValue().ref);
                 out.add(new Drained(e.getValue(), page.url(), value));
             } catch (AgentRpcException | PlaywrightException x) {
                 LOG.log(System.Logger.Level.DEBUG, "draining a tapped page failed: " + x.getMessage());
@@ -1460,29 +1510,44 @@ public final class CdpWebPath implements WebPath {
         }
     }
 
-    private void publish(Drained d) {
+    /**
+     * Appends a drain's events: only for a page whose target id the agent reports (security fix S45), each
+     * {@code detail} whose JSON text exceeds {@link WebLib#MAX_DETAIL_CHARS} kept as that text cut, with
+     * {@code truncated: true}, and the event name and URL cut at {@link WebLib#MAX_URL_CHARS} (S43), whatever the
+     * page's library did.
+     */
+    private void publish(Session s, Drained d) {
         if (!(d.value() instanceof Map<?, ?> m)) {
             return;
         }
-        String ref = d.tap().ref;
+        String ref = d.tap().targetId == null ? null : s.refByTarget.get(d.tap().targetId);
+        if (ref == null) {
+            return;
+        }
+        String url = WebLib.cut(d.url(), WebLib.MAX_URL_CHARS);
         if (m.get("events") instanceof List<?> list) {
             for (Object item : list) {
-                if (!(item instanceof Map<?, ?> event) || !(event.get("name") instanceof String name)) {
+                if (!(item instanceof Map<?, ?> event) || !(event.get("name") instanceof String raw)) {
                     continue;
                 }
+                String name = WebLib.cut(raw, WebLib.MAX_URL_CHARS);
                 Map<String, Object> tap = new LinkedHashMap<>();
-                if (ref != null) {
-                    tap.put("browser", ref);
-                }
+                tap.put("browser", ref);
                 tap.put("name", name);
+                boolean truncated = Boolean.TRUE.equals(event.get("truncated"));
                 if (event.containsKey("detail")) {
-                    tap.put("detail", event.get("detail"));
+                    Object detail = event.get("detail");
+                    if (WebLib.detailTooLong(detail)) {
+                        detail = WebLib.cutDetail(detail);
+                        truncated = true;
+                    }
+                    tap.put("detail", detail);
                 }
-                if (Boolean.TRUE.equals(event.get("truncated"))) {
+                if (truncated) {
                     tap.put("truncated", true);
                 }
                 events.append("web.tap", tap, null);
-                events.append("web.ready", Shapes.data("browser", ref, "url", d.url(), "signal", "TAP", "name", name),
+                events.append("web.ready", Shapes.data("browser", ref, "url", url, "signal", "TAP", "name", name),
                         null);
             }
         }

@@ -32,6 +32,9 @@ import ai.skillroy.testjava.agent.web.reflect.Listeners;
 import ai.skillroy.testjava.agent.web.reflect.ReflectiveException;
 import ai.skillroy.testjava.agent.web.reflect.ResolvedApi;
 import ai.skillroy.testjava.protocol.Json;
+import ai.skillroy.testjava.protocol.RpcError;
+import ai.skillroy.testjava.protocol.RpcException;
+import ai.skillroy.testjava.protocol.web.WebLib;
 
 import java.awt.Component;
 import java.awt.Dimension;
@@ -698,8 +701,27 @@ final class JcefBrowser implements WebBrowser {
         });
     }
 
+    /**
+     * True when a DevTools text is longer than {@link WebLib#MAX_CHANNEL_CHARS} (security fix S43): it is refused (an
+     * answer) or dropped (an event) before it is parsed. {@code Page.captureScreenshot}'s answer is bounded by the
+     * viewport instead (at most 16384 x 16384, set by the caller, never by the page).
+     */
+    static boolean oversized(String method, String json) {
+        return json != null && json.length() > WebLib.MAX_CHANNEL_CHARS && !"Page.captureScreenshot".equals(method);
+    }
+
+    /** {@code INTERNAL_ERROR {reason: "oversized"}} of a DevTools answer over the bound (S43). */
+    static RpcException oversizedAnswer(String method) {
+        RpcError e = WebLib.oversized("DevTools " + method + "'s answer", WebLib.MAX_CHANNEL_CHARS);
+        return new RpcException(e.code(), e.message(), e.data());
+    }
+
     /** Completes {@code out} with an answer: its JSON object, or a failure with the protocol's error message. */
     private static void deliver(String method, Answer answer, CompletableFuture<Map<String, Object>> out) {
+        if (oversized(method, answer.json)) {
+            out.completeExceptionally(oversizedAnswer(method));
+            return;
+        }
         if (answer.success) {
             try {
                 out.complete(answer.json == null || answer.json.isEmpty() ? new LinkedHashMap<String, Object>()
@@ -719,7 +741,8 @@ final class JcefBrowser implements WebBrowser {
         } catch (RuntimeException e) {
             // keep the raw text
         }
-        out.completeExceptionally(new IllegalStateException("DevTools " + method + ": " + message));
+        out.completeExceptionally(new IllegalStateException("DevTools " + method + ": "
+                + WebLib.errorLine(message)));
     }
 
     /** Disposes of an observer registration (never throws). */
@@ -919,6 +942,10 @@ final class JcefBrowser implements WebBrowser {
                     @Override
                     public void run() {
                         if (failure == null) {
+                            if (value != null && oversized(method, String.valueOf(value))) {
+                                out.completeExceptionally(oversizedAnswer(method));
+                                return;
+                            }
                             try {
                                 out.complete(value == null ? new LinkedHashMap<String, Object>()
                                         : Json.parseObject(String.valueOf(value)));
@@ -1219,7 +1246,8 @@ final class JcefBrowser implements WebBrowser {
             message = text == null ? "script error" : String.valueOf(text);
         }
         String stack = description != null ? description : stackOf(details.get("stackTrace"));
-        return new WebScriptException(message, stack);
+        // S43: the first line at most 2000 characters, the stack at most 8000, whatever the page threw.
+        return new WebScriptException(WebLib.scriptMessage(message), stack == null ? null : WebLib.scriptStack(stack));
     }
 
     private static String stackOf(Object stackTrace) {
@@ -1371,8 +1399,8 @@ final class JcefBrowser implements WebBrowser {
 
     /** One DevTools event, on the serial executor (in order). */
     private void onDevToolsEvent(String name, String json) {
-        if (detached) {
-            return;
+        if (detached || oversized(name, json)) {
+            return; // S43: an event over the channel bound is dropped unparsed
         }
         Map<String, Object> p;
         try {

@@ -93,6 +93,29 @@ class ToolListTest {
         }
     }
 
+    /**
+     * phase6-contracts.md 12.9, D156 (security fix S42): {@code web_wait_flag} runs the caller's expression, so it is
+     * annotated {@code readOnlyHint: false} even on a read-only server, which offers it only with
+     * {@code --allow-evaluate} (D98); a third-party primitive with the flag is decided the same way.
+     */
+    @Test
+    void aScriptPrimitiveIsNeverAnnotatedReadOnly() throws Exception {
+        try (McpFixture fx = new McpFixture(dir)) {
+            fx.desk.agent.describeScript("web.waitFlag", false, null).describeScript("desk.peek", false, null);
+            fx.start(fx.options().allowEvaluate(true).build());
+            assertEquals(Boolean.FALSE, fx.tool("web_wait_flag").annotations().readOnlyHint());
+            assertEquals(Boolean.FALSE, fx.tool("desk_peek").annotations().readOnlyHint());
+            assertEquals(Boolean.TRUE, fx.tool("desk_state").annotations().readOnlyHint());
+        }
+        try (McpFixture fx = new McpFixture(dir.resolve("default"))) {
+            fx.desk.agent.describeScript("web.waitFlag", false, null).describeScript("desk.peek", false, null);
+            fx.start(fx.options().build());
+            List<String> names = fx.toolNames();
+            assertFalse(names.contains("web_wait_flag") || names.contains("desk_peek"), "no opt-in, no script: "
+                    + names);
+        }
+    }
+
     @Test
     void mutatingAddsTheVerbsTheMutatingPrimitivesAndTheRunNeverADestructiveOne() throws Exception {
         try (McpFixture fx = new McpFixture(dir).startMutating()) {

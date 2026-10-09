@@ -39,6 +39,7 @@ public final class PrimitiveDescriptor {
     private final String capabilityId;
     private final boolean mutating;
     private final boolean destructive;
+    private final boolean script;
 
     /**
      * @param name primitive name, not null
@@ -53,6 +54,21 @@ public final class PrimitiveDescriptor {
     public PrimitiveDescriptor(String name, String description, Map<String, Object> paramsSchema,
                                Map<String, Object> resultSchema, String thread, long timeoutMs, String capabilityId,
                                boolean mutating, boolean destructive) {
+        this(name, description, paramsSchema, resultSchema, thread, timeoutMs, capabilityId, mutating, destructive,
+                false);
+    }
+
+    /**
+     * As the nine-argument constructor, with the {@code script} flag (phase6-contracts.md 12.9, D156; security fix
+     * S42).
+     *
+     * @param script the call evaluates a caller-supplied expression or script in the target (rejected in read-only
+     *     mode, as a mutating call is)
+     * @throws JsonException if a schema holds NaN or Infinity or nests deeper than 184
+     */
+    public PrimitiveDescriptor(String name, String description, Map<String, Object> paramsSchema,
+                               Map<String, Object> resultSchema, String thread, long timeoutMs, String capabilityId,
+                               boolean mutating, boolean destructive, boolean script) {
         this.name = Objects.requireNonNull(name, "name");
         this.description = description;
         this.paramsSchema = Coerce.freezeMap(paramsSchema);
@@ -62,6 +78,7 @@ public final class PrimitiveDescriptor {
         this.capabilityId = capabilityId;
         this.mutating = mutating;
         this.destructive = destructive;
+        this.script = script;
     }
 
     public String name() {
@@ -103,8 +120,18 @@ public final class PrimitiveDescriptor {
     }
 
     /**
+     * True when the call evaluates a caller-supplied expression or script in the target ({@code web.evaluate},
+     * {@code web.waitFlag}): the agent's read-only mode and the CDP path's read-only check refuse it as they refuse a
+     * mutating call, and a tool projection never marks it read-only (D156).
+     */
+    public boolean script() {
+        return script;
+    }
+
+    /**
      * {@code {"name","description","paramsSchema","resultSchema","thread","timeoutMs","capabilityId","mutating",
-     * "destructive"}}, all keys always present (null values written as null). A new map on each call.
+     * "destructive"}}, all keys always present (null values written as null), then {@code "script": true} only when
+     * the flag is set, so that the entry of a primitive without it reads as before (D156). A new map on each call.
      */
     public Map<String, Object> toJson() {
         Map<String, Object> json = new LinkedHashMap<String, Object>();
@@ -117,12 +144,16 @@ public final class PrimitiveDescriptor {
         json.put("capabilityId", capabilityId);
         json.put("mutating", Boolean.valueOf(mutating));
         json.put("destructive", Boolean.valueOf(destructive));
+        if (script) {
+            json.put("script", Boolean.TRUE);
+        }
         return json;
     }
 
     /**
      * Reads the shape written by {@link #toJson()}. Only {@code name} is required; absent fields take null, 0 or
-     * false, so that a catalogue from a newer agent with fewer or extra fields still reads.
+     * false ({@code script} included: an older agent's catalogue has no such key), so that a catalogue from a newer
+     * agent with fewer or extra fields still reads.
      *
      * @throws JsonException on a missing name or a field of the wrong type
      */
@@ -137,7 +168,8 @@ public final class PrimitiveDescriptor {
                 Wire.optLong(json, "timeoutMs", 0L, TYPE),
                 Wire.optString(json, "capabilityId", TYPE),
                 Wire.optBool(json, "mutating", false, TYPE),
-                Wire.optBool(json, "destructive", false, TYPE));
+                Wire.optBool(json, "destructive", false, TYPE),
+                Wire.optBool(json, "script", false, TYPE));
     }
 
     @Override
@@ -153,13 +185,13 @@ public final class PrimitiveDescriptor {
                 && Objects.equals(paramsSchema, other.paramsSchema) && Objects.equals(resultSchema, other.resultSchema)
                 && Objects.equals(thread, other.thread) && timeoutMs == other.timeoutMs
                 && Objects.equals(capabilityId, other.capabilityId) && mutating == other.mutating
-                && destructive == other.destructive;
+                && destructive == other.destructive && script == other.script;
     }
 
     @Override
     public int hashCode() {
         return Objects.hash(name, description, paramsSchema, resultSchema, thread, Long.valueOf(timeoutMs),
-                capabilityId, Boolean.valueOf(mutating), Boolean.valueOf(destructive));
+                capabilityId, Boolean.valueOf(mutating), Boolean.valueOf(destructive), Boolean.valueOf(script));
     }
 
     @Override

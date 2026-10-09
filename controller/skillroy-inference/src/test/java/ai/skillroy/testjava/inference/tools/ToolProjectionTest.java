@@ -212,6 +212,46 @@ class ToolProjectionTest {
                 .get("item")).containsKey("minLength"), "a length the provider does not take is left out");
     }
 
+    /**
+     * phase6-contracts.md 12.9, D156 (security fix S42): a primitive that evaluates a caller's expression is never
+     * annotated read-only; the flag decides the exclusions, the named set staying the fallback of an older agent's
+     * catalogue (the fixture's {@code web.waitFlag} has no flag); D98's offer rule is unchanged.
+     */
+    @Test
+    void aScriptPrimitiveIsNeverReadOnlyAndIsDecidedByItsFlag() {
+        List<PrimitiveDescriptor> flagged = List.of(
+                new PrimitiveDescriptor("web.waitFlag", "flag", object(Map.of("expression", Map.of("type", "string")),
+                        List.of("expression")), null, "WORKER", 10000, "web.evaluate", false, false, true),
+                new PrimitiveDescriptor("web.evaluate", "eval", null, null, "WORKER", 10000, "web.evaluate", true,
+                        false, true),
+                new PrimitiveDescriptor("lending.peek", "a domain read that runs a caller's expression", null, null,
+                        "WORKER", 10000, null, false, false, true),
+                d("web.dom.text", false, false, null));
+        DomainPack pack = pack(false, signOnSchema());
+        List<ToolSpec> optedIn = ToolProjection.project(flagged, pack, ToolProjection.Policy.readOnly(true));
+        assertEquals(List.of("lending_peek", "web_dom_text", "web_wait_flag"), names(optedIn),
+                "read-only, opted in: the script reads, never the mutating one (D98)");
+        assertFalse(named(optedIn, "web_wait_flag").readOnly(), "readOnlyHint false for a script primitive");
+        assertFalse(named(optedIn, "lending_peek").readOnly());
+        assertTrue(named(optedIn, "web_dom_text").readOnly());
+        assertEquals(List.of("web_dom_text"), names(ToolProjection.project(flagged, pack,
+                ToolProjection.Policy.readOnly(false))), "without the opt-in no script primitive, named or flagged");
+        assertEquals(List.of("lending_scan_item", "lending_sign_on"), names(ToolProjection.project(flagged, pack,
+                ToolProjection.Policy.session(true, true))), "a session offers no script primitive");
+        assertTrue(names(ToolProjection.project(flagged, pack, ToolProjection.Policy.mutating(true)))
+                .containsAll(List.of("web_evaluate", "web_wait_flag", "lending_peek")));
+        assertFalse(names(ToolProjection.project(flagged, pack, ToolProjection.Policy.mutating(false)))
+                .contains("lending_peek"));
+        // The fallback: the fixture's web.waitFlag carries no flag, as an older agent's descriptor.
+        List<ToolSpec> older = ToolProjection.project(PRIMITIVES, pack, ToolProjection.Policy.readOnly(true));
+        assertFalse(named(older, "web_wait_flag").readOnly(), "the named set decides an unflagged descriptor");
+        assertTrue(ToolProjection.isScript(PRIMITIVES.get(4)));
+        assertFalse(ToolProjection.isScript(PRIMITIVES.get(0)));
+        assertTrue(ToolProjection.Policy.readOnly().excludesScripts());
+        assertFalse(ToolProjection.Policy.readOnly(true).excludesScripts());
+        assertTrue(ToolProjection.Policy.session(false, false).excludesScripts());
+    }
+
     @Test
     void mutatingAddsVerbsAndMutatingPrimitivesNeverADestructiveOne() {
         List<ToolSpec> tools = ToolProjection.project(PRIMITIVES, pack(true, signOnSchema()),

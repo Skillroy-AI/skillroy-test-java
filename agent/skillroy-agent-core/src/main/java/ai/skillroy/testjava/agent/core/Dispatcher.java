@@ -216,6 +216,12 @@ final class Dispatcher {
             return error(ErrorCodes.READ_ONLY, method + " changes the target and the agent is read-only",
                     "primitive", method);
         }
+        if (spec.script() && ctx.readOnly() && !exempt) {
+            // phase6-contracts.md 12.9, D156 (security fix S42): a caller's expression evaluated in the target may
+            // change it, whatever the primitive's own effect.
+            return error(ErrorCodes.READ_ONLY, method + " evaluates a caller's expression in the target and the agent"
+                    + " is read-only", "primitive", method);
+        }
         if (spec.destructive() && !meta.bool("confirm", false)) {
             return error(ErrorCodes.CONFIRM_REQUIRED, method + " is destructive and needs _meta.confirm=true",
                     "primitive", method);

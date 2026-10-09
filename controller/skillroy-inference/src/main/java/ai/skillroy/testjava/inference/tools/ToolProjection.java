@@ -49,8 +49,9 @@ import java.util.TreeSet;
  * when there is none), made strict: every object that declares properties requires all of them, an optional one
  * becoming nullable ({@code type: [<t>, "null"]}), with {@code additionalProperties: false}; the numeric bounds and
  * lengths the provider does not take are left out. The pack's own {@code argsSchema} is not changed (the scenario
- * schema keeps it). {@code readOnly} comes from the descriptor's {@code mutating}, {@code destructive} from its
- * {@code destructive}.
+ * schema keeps it). {@code readOnly} comes from the descriptor's {@code mutating} and {@code script} (a primitive that
+ * evaluates a caller's expression is never read-only, phase6-contracts.md 12.9, D156; {@link #isScript}), {@code
+ * destructive} from its {@code destructive}.
  *
  * <p>What a {@link Policy} offers: the reads always (when it offers primitive reads at all); mutating verbs, domain
  * and base primitives by flags; a destructive primitive never; {@code data_query} only for a source with an allow-list
@@ -72,7 +73,9 @@ public final class ToolProjection {
     public static final String PRIMITIVE_SUFFIX = "_primitive";
     /**
      * The primitives that run a caller's script in the target's pages ({@code web.evaluate}, and {@code web.waitFlag},
-     * which evaluates an expression until it is true): offered by no policy unless a person opted in (D98).
+     * which evaluates an expression until it is true): offered by no policy unless a person opted in (D98). Since
+     * D156 the descriptor's {@code script} flag decides ({@link #isScript}); this named set stays as the fallback for
+     * the catalogue of an older agent whose descriptors do not carry the flag.
      */
     public static final Set<String> SCRIPT_PRIMITIVES = Set.of("web.evaluate", "web.waitFlag");
     /**
@@ -110,6 +113,16 @@ public final class ToolProjection {
         public Policy {
             mutatingBaseNamespaces = mutatingBaseNamespaces == null ? Set.of() : Set.copyOf(mutatingBaseNamespaces);
             excluded = excluded == null ? Set.of() : Set.copyOf(excluded);
+        }
+
+        /**
+         * True when this policy offers no script primitive: it excludes every one of the named
+         * {@link ToolProjection#SCRIPT_PRIMITIVES}, and then every primitive whose descriptor carries the
+         * {@code script} flag is left out as well, named or not (phase6-contracts.md 12.9, D156; security fix S42).
+         * False for a policy a person opted into with {@code --allow-evaluate}.
+         */
+        public boolean excludesScripts() {
+            return excluded.containsAll(SCRIPT_PRIMITIVES);
         }
 
         /**
@@ -195,6 +208,9 @@ public final class ToolProjection {
         if (d.destructive() || policy.excluded().contains(name) || NEVER_OFFERED.contains(name)) {
             return false;
         }
+        if (policy.excludesScripts() && isScript(d)) {
+            return false;
+        }
         if (HOOK_READS.contains(name)) {
             return !d.mutating();
         }
@@ -212,6 +228,16 @@ public final class ToolProjection {
             return policy.primitiveReads();
         }
         return isDomain ? policy.mutatingDomainPrimitives() : policy.mutatingBaseNamespaces().contains(namespace);
+    }
+
+    /**
+     * True when the primitive evaluates a caller's expression or script in the target: its descriptor's {@code script}
+     * flag, or, for the catalogue of an older agent whose descriptors do not carry the flag, its name in
+     * {@link #SCRIPT_PRIMITIVES} (phase6-contracts.md 12.9, D156; security fix S42). Such a primitive is never
+     * {@code readOnly} and is offered only by a policy a person opted into ({@code --allow-evaluate}, D98).
+     */
+    public static boolean isScript(PrimitiveDescriptor d) {
+        return d.script() || SCRIPT_PRIMITIVES.contains(d.name());
     }
 
     /**
@@ -272,8 +298,8 @@ public final class ToolProjection {
             p.put("source", limited);
             description += " Only the allow-listed sources; the statement passes SqlGuard before it runs.";
         }
-        return new ToolSpec(primitiveToolName(d.name(), verbToolNames), description, strict, !d.mutating(),
-                d.destructive());
+        return new ToolSpec(primitiveToolName(d.name(), verbToolNames), description, strict,
+                !d.mutating() && !isScript(d), d.destructive());
     }
 
     /** The tool of a pack verb: {@code <domain>_<verb_in_snake_case>}, its args schema made strict, or free-form. */

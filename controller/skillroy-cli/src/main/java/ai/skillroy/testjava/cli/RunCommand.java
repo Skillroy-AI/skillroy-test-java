@@ -141,7 +141,8 @@ final class RunCommand implements Command {
     /** The options of {@code run}, in help order. */
     private static List<OptionSpec> runOptions() {
         List<OptionSpec> options = new ArrayList<>(List.of(
-                OptionSpec.value(OUT, "dir", "write each scenario's evidence into <dir>/<scenario-id>/"),
+                OptionSpec.value(OUT, "dir", "write each scenario's evidence into <dir>/<scenario-id>/\n"
+                        + "(files take the process umask: umask 077 on a shared host)"),
                 OptionSpec.value(JUNIT, "file", "write a JUnit XML report (one testcase per scenario plus an\n"
                         + "'environment' testcase)"),
                 OptionSpec.value(SUITE, "name", "the test suite name in the report (default skillroy)"),

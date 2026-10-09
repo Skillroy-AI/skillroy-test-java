@@ -110,9 +110,12 @@ final class McpCommand implements Command {
                 OptionSpec.flag(MUTATING, "offer the pack's verbs, the mutating primitives and\n"
                         + "skillroy_scenario_run (never a destructive primitive)"),
                 OptionSpec.flag(ALLOW_EVALUATE, "offer web_wait_flag, and with --mutating web_evaluate:\n"
-                        + "any script in the target's pages, a person's choice\n(never the planner's)"),
+                        + "any script in the target's pages, which can change\nthem; a person's choice (never the"
+                        + " planner's)"),
                 OptionSpec.value(OUT, "dir", "where captures, runs, the journal and exports go\n"
-                        + "(default: a new temporary directory)")));
+                        + "(default: a new temporary directory; a directory\n"
+                        + "you name takes the process umask: umask 077 on a\n"
+                        + "shared host)")));
         options.addAll(InferenceArgs.gateway());
         options.add(InferenceArgs.SESSION_BUDGET_OPTION);
         options.add(HooksArgs.OPTION);

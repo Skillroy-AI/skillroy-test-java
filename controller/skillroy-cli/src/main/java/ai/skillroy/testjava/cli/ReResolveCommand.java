@@ -98,7 +98,8 @@ final class ReResolveCommand implements Command {
         options.addAll(InferenceArgs.gateway());
         options.addAll(List.of(
                 OptionSpec.value(OUT, "dir", "where the report and the job's ledger go\n"
-                        + "(default run-output/re-resolve-<jobId>/)"),
+                        + "(default run-output/re-resolve-<jobId>/; files take the\n"
+                        + "process umask: umask 077 on a shared host)"),
                 OptionSpec.value(BindArgs.APPROVED_BY, "label", "written as approval.by (default re-resolve:<jobId>;\n"
                         + "a nightly job passes a stable label)"),
                 OptionSpec.flag(DRY_RUN, "write no bindings file; report what would change"),

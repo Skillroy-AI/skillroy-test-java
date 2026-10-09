@@ -180,6 +180,13 @@ when the files differ, as these two do. `skillroy --help` lists the commands and
 `skillroy <command> --help` the options. With `--out` each scenario leaves `run.jsonl`, `bindings.json`,
 `cost-ledger.jsonl` and, on failure, a `failure/` directory with a UI snapshot and a PNG capture.
 
+Run outputs take the process umask (Phase 6 security fix S37, SR): `--out` of `run`, `re-resolve` and `mcp`, and the
+JUnit glue's output directories, are created with whatever permissions the process gives new files, so another user
+of a shared host may read what a run leaves behind (values the mask did not know, captures of the screen). On a
+shared host run the controller under `umask 077` (for example `(umask 077; skillroy run … --out /tmp/run)`). The CDP
+trace directory is owner-only regardless. Owner-only output directories by default are not built (an accepted low
+finding of the repeat security review).
+
 `skillroy call` is the way to call a primitive by hand: every request and reply is HMAC-signed with the token,
 which never travels, so plain `curl` with a bearer token no longer works (the agent answers 401).
 
@@ -199,6 +206,15 @@ one option per jar, together with Playwright's jars from the local Maven reposit
 and `opentest4j-1.3.0.jar`. Without them the same command runs the web verbs through the agent. Playwright extracts its
 driver (about 140 MB) on first use in each JVM, and never downloads a browser: it attaches to the one the application
 runs.
+
+The Playwright driver inherits the controller's environment (Phase 6 security fix S48, SR). These change what it runs
+or what it logs, so set them only on purpose: `PLAYWRIGHT_NODEJS_PATH` and the system property `playwright.nodejs.path`
+(the Node.js executable it runs), `PLAYWRIGHT_DRIVER_DIR` (an extracted driver to use instead of the bundled one),
+`PLAYWRIGHT_DRIVER_TMPDIR` and the system property `playwright.driver.tmpdir` (where it extracts the driver),
+`NODE_OPTIONS` (options of that Node.js process, `--require` included), and `DEBUG=pw:*`, which logs the protocol
+traffic: the expressions the path evaluates and the texts it types that are not secret (a call naming secret
+parameters is served by the agent, never through the driver). A minimal driver environment is not built (an accepted
+low finding of the repeat security review).
 
 ## Windows (not verified on a Windows host)
 

@@ -217,6 +217,23 @@ class ScenarioRunPolicyTest {
         }
     }
 
+    /**
+     * phase6-contracts.md 12.9, D156 (security fix S42): a primitive whose descriptor carries the {@code script} flag
+     * is refused in a client's plan as the named script primitives are, when a pack verb reaches it too.
+     */
+    @Test
+    void aFlaggedScriptPrimitiveIsRefusedLikeTheNamedOnes() throws Exception {
+        try (McpFixture fx = new McpFixture(dir)) {
+            fx.desk.agent.describeScript("probe.check", false, null);
+            fx.desk.agent.value("probe.check", Map.of("ok", true));
+            fx.start(fx.options(extended(fx.desk)).mutating(true).build());
+            refused(fx, scenario("peek-script", "  - peek: {}\n"), "step s1 (peek", "probe.check",
+                    "--allow-evaluate");
+            refused(fx, scenario("raw-script", "  - call: {primitive: probe.check, args: {}}\n"), "probe.check");
+            assertTrue(fx.desk.agent.callsTo("probe.check").isEmpty(), "never called");
+        }
+    }
+
     @Test
     void aScenarioOfWhatTheServerOffersRuns() throws Exception {
         try (McpFixture fx = new McpFixture(dir)) {

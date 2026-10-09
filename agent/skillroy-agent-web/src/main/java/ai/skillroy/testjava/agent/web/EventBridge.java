@@ -22,6 +22,7 @@ import ai.skillroy.testjava.agent.api.spi.web.WebCapability;
 import ai.skillroy.testjava.agent.api.spi.web.WebEvent;
 import ai.skillroy.testjava.agent.api.spi.web.WebEventListener;
 import ai.skillroy.testjava.agent.api.spi.web.WebSubscription;
+import ai.skillroy.testjava.protocol.web.WebLib;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -53,6 +54,10 @@ import java.util.function.BiConsumer;
  * <p>{@link #close()} (the module's uninstall, before the adapters are detached) cancels every subscription the
  * bridge made and refuses new ones, also one a rebuild in flight would make, so that no subscription of a detached
  * adapter survives the uninstall.
+ *
+ * <p>Every page-supplied text is bounded here, whatever the adapter gave (security fix S43): a load's {@code url} and
+ * {@code error}, a ready's {@code url} and a console {@code source} at {@link WebLib#MAX_URL_CHARS} (the source masked
+ * over a margin first, as the text is).
  *
  * <p>The listener runs on the adapter's threads (with JCEF off-screen, possibly the EDT): it only builds a small map
  * and publishes, which never blocks; it never throws into the adapter. Thread-safe.
@@ -164,11 +169,11 @@ final class EventBridge implements BrowserIndex.Listener {
         }
     }
 
-    /** Publishes {@code web.ready {browser, url, signal, name?}}. */
+    /** Publishes {@code web.ready {browser, url, signal, name?}}; the URL cut at {@link WebLib#MAX_URL_CHARS}. */
     void ready(Entry e, String url, String signal, String name) {
         Map<String, Object> payload = new LinkedHashMap<String, Object>();
         payload.put("browser", e.ref);
-        payload.put("url", url == null ? "" : url);
+        payload.put("url", url == null ? "" : WebLib.cut(url, WebLib.MAX_URL_CHARS));
         payload.put("signal", signal);
         if (name != null) {
             payload.put("name", name);
@@ -205,13 +210,13 @@ final class EventBridge implements BrowserIndex.Listener {
             case NAVIGATED:
                 Map<String, Object> load = new LinkedHashMap<String, Object>();
                 load.put("browser", e.ref);
-                load.put("url", event.url() == null ? "" : event.url());
+                load.put("url", event.url() == null ? "" : WebLib.cut(event.url(), WebLib.MAX_URL_CHARS));
                 if (event.frameKey() != null) {
                     load.put("frameKey", event.frameKey());
                 }
                 load.put("kind", event.kind().name());
                 if (event.error() != null) {
-                    load.put("error", event.error());
+                    load.put("error", WebLib.cut(event.error(), WebLib.MAX_URL_CHARS));
                 }
                 ctx.events().publish(WebTopics.LOAD, WebTopics.SOURCE, load);
                 if (event.kind() == WebEvent.Kind.LOAD_FINISHED && event.frameKey() == null) {
@@ -239,7 +244,9 @@ final class EventBridge implements BrowserIndex.Listener {
                 }
                 console.put("text", text);
                 if (event.source() != null && !event.source().isEmpty()) {
-                    console.put("source", secrets.redact(event.source()));
+                    // S43: cut (beyond a masking margin), masked, then cut at its bound, as the text is.
+                    console.put("source", WebLib.cut(secrets.redact(WebLib.cut(event.source(),
+                            WebLib.MAX_URL_CHARS + WebPrimitives.CONSOLE_REDACTION_MARGIN)), WebLib.MAX_URL_CHARS));
                 }
                 if (event.line() > 0) {
                     console.put("line", Long.valueOf(event.line()));

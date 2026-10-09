@@ -33,7 +33,9 @@ import java.util.function.Supplier;
  *
  * @param outputDir directory for {@code run.jsonl}, {@code bindings.json}, {@code failure/} and {@code artifacts/};
  *     null writes nothing. Files of an earlier run in the same directory are replaced or removed, so use one
- *     directory per scenario
+ *     directory per scenario. The directory and its files take the process umask (phase2-contracts.md 11.3,
+ *     security fix S37): on a shared host run the controller under {@code umask 077}; the CDP trace directory is
+ *     owner-only regardless (D59)
  * @param stepTimeout overrides the plan's {@code stepTimeoutMs} (how long expectations are retried); null keeps it
  * @param degradedAs how reports and the JUnit glue show a DEGRADED run; null means {@link DegradedAs#SKIPPED}
  * @param clock measures durations and deadlines and stamps {@code run.jsonl}; null means the system UTC clock

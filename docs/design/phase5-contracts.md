@@ -1096,7 +1096,14 @@ file's `approval.by` each night, so the sample workflow passes a stable `--appro
 A pull request is opened by the pipeline, not by the base: `ci/examples/nightly-re-resolve.yml` is a GitHub Actions
 workflow that runs the command in the Linux image on a schedule, with the key from the repository's secrets, and
 opens the pull request with the report as its body when `git status` shows changed bindings files. It is an example,
-not run by this repository's own CI.
+not run by this repository's own CI. **(Phase 6 security fix S40, A43, built 2026-10-09, SR)** the example persists
+no checkout token into the work tree the container mounts (`persist-credentials: false`; the push step sets up git
+with `gh auth setup-git` under its own `GH_TOKEN`), and names the credentials secret `SKILLROY_CREDENTIALS_YAML` (the
+base's own variable `SKILLROY_CREDENTIALS` is a path, the secret is the file's content); comments say that `--pid` and
+`--discovery-dir` do not reach a host JVM from inside the container (use `--port` with a `--token-file` under a
+mounted path) and that a copy should pin the base image by digest and the actions by commit SHA. The pinning itself
+is not made in the example: one of the five low parts the owner accepted (P6 §12.2, §17 Q22), with the release note
+"pin the image and the actions in your copy of `ci/examples/nightly-re-resolve.yml`".
 
 ### 8.3 `BatchableResolver` (`skillroy-scenario`) and the budget
 
@@ -1165,7 +1172,9 @@ log goes to stderr, masked. The `claude` CLI's `--mcp-config` names it as `{"mcp
 Names use `[a-z0-9_]` only (the Anthropic API forbids dots, control-channel F22), at most 64 characters: a primitive
 `a.b.c` becomes `a_b_c`; a verb `signOn` of pack `lending` becomes `lending_sign_on`; a workflow tool is `skillroy_*`.
 A collision is a start-up error. Every tool carries MCP annotations: `readOnlyHint` from the descriptor's `mutating`
-(false → read-only), `destructiveHint` from `destructive`, `idempotentHint` false, `openWorldHint` false; its input
+(false → read-only) **and `script` (Phase 6 security fix S42, A44, built 2026-10-09, SR; P6 D156: a `script`
+primitive, or one of the named `SCRIPT_PRIMITIVES` of an older agent's catalogue without the flag, is never
+`readOnlyHint: true`; `web_wait_flag` is offered by a read-only server only with `--allow-evaluate`, D98 unchanged)**, `destructiveHint` from `destructive`, `idempotentHint` false, `openWorldHint` false; its input
 schema is the descriptor's `paramsSchema` (less `_meta`) or the verb's `argsSchema`; its description is the
 descriptor's, prefixed with the thread and timeout. Results are text content: the call's `value` as pretty JSON,
 masked, cut at 25000 characters with `[truncated: N more]` (control-channel F19); a result that holds an image (a

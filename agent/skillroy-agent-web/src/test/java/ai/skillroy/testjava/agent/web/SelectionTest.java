@@ -174,6 +174,38 @@ class SelectionTest {
         }
     }
 
+    /**
+     * Security fix S46: {@code by.title} and {@code by.url} are searched under the S24 budget: the finding's pattern
+     * against a 78-character title answers {@code INVALID_PARAMS} within 1.5 s, and a 2 Mi-character URL is refused
+     * before the search.
+     */
+    @Test
+    void aRegexThatBacktracksWithoutEndIsStoppedAsInvalidParams() throws Exception {
+        try (Harness h = harness()) {
+            char[] title = new char[78];
+            java.util.Arrays.fill(title, 'a');
+            front.load("<html><head><title>" + new String(title) + "</title></head><body></body></html>");
+            long start = System.nanoTime();
+            RpcException slow = h.ctx.error("web.dom.text", Harness.args("by", Harness.args("title",
+                    "(.*){1,32000}#")));
+            long ms = (System.nanoTime() - start) / 1000000L;
+            assertEquals(ErrorCodes.INVALID_PARAMS, slow.error().code());
+            assertTrue(ms < 1500, "stopped within the budget: " + ms + " ms");
+            assertEquals("by.title", slow.error().data().get("param"));
+            assertEquals("regex too slow", slow.error().data().get("reason"));
+            assertTrue(slow.error().message().startsWith("the regex in by.title "), slow.error().message());
+
+            char[] url = new char[2 << 20];
+            java.util.Arrays.fill(url, 'u');
+            back.url = "app://back/" + new String(url);
+            h.ctx.call("web.browsers", Harness.args());
+            RpcException tooLong = h.ctx.error("web.dom.text", Harness.args("by", Harness.args("url", "^nowhere")));
+            assertEquals(ErrorCodes.INVALID_PARAMS, tooLong.error().code());
+            assertEquals("by.url", tooLong.error().data().get("param"));
+            assertEquals("text too long", tooLong.error().data().get("reason"));
+        }
+    }
+
     @Test
     void aBadByObjectIsInvalid() throws Exception {
         try (Harness h = harness()) {

@@ -18,6 +18,7 @@ package ai.skillroy.testjava.cdp;
 
 import ai.skillroy.testjava.protocol.Json;
 import ai.skillroy.testjava.protocol.JsonException;
+import ai.skillroy.testjava.protocol.web.WebLib;
 
 import java.io.IOException;
 import java.net.URI;
@@ -26,6 +27,8 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.net.http.HttpTimeoutException;
 import java.net.http.WebSocket;
+import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -40,6 +43,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.Flow;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
@@ -60,6 +64,15 @@ import java.util.concurrent.TimeoutException;
  * another type than {@code page} are listed as reported by {@code /json/list} and not probed ({@code responsive},
  * {@code millis} 0). A page target without {@code webSocketDebuggerUrl} gets {@code ws://<host>:<port>/devtools/page/
  * <id>}.
+ *
+ * <p>The answers are bounded before they are trusted (security fix S44, phase4-contracts.md 5.1): {@code /json/version}
+ * is read through a bound of {@value #MAX_VERSION_BYTES} bytes and {@code /json/list} through one of
+ * {@value #MAX_LIST_BYTES} (a {@code Content-Length} over the bound is refused before the body is read, and the body
+ * read stops at the bound; either is {@code PROTOCOL}); a list of more than {@value #MAX_TARGETS} targets is {@code
+ * PROTOCOL}; a target's WebSocket is opened only at the endpoint's own authority: a {@code webSocketDebuggerUrl} whose
+ * scheme is not {@code ws} or whose authority is not the endpoint's is replaced by {@code ws://<host>:<port>/devtools/
+ * page/<id>}, so that a list never makes the probe dial another host. A target's URL and title and the browser version
+ * are cut at {@link WebLib#MAX_URL_CHARS} (S43).
  *
  * <p>Each {@code /json} request is bounded by the deadline as its caller waits for it; the request's own timeout is
  * {@value #REQUEST_TIMEOUT_MARGIN_MS} ms longer (it only releases the exchange), and a request that times out either
@@ -84,6 +97,15 @@ public final class TargetProbe {
 
     /** Waiting for the per-target threads may take this much longer than the deadline before they are abandoned. */
     private static final long GATHER_GRACE_MS = 500;
+
+    /** The most bytes of {@code /json/version} read (S44). */
+    static final int MAX_VERSION_BYTES = 64 * 1024;
+
+    /** The most bytes of {@code /json/list} read (S44). */
+    static final int MAX_LIST_BYTES = 4 * 1024 * 1024;
+
+    /** The most targets a {@code /json/list} may name (S44). */
+    static final int MAX_TARGETS = 1000;
 
     /**
      * One target of {@code /json/list} and what the probe found.
@@ -136,8 +158,8 @@ public final class TargetProbe {
     TargetProbe(CdpEndpoint endpoint, String browserVersion, String protocolVersion, List<Target> targets,
                 long millis) {
         this.endpoint = Objects.requireNonNull(endpoint, "endpoint");
-        this.browserVersion = browserVersion == null ? "" : browserVersion;
-        this.protocolVersion = protocolVersion == null ? "" : protocolVersion;
+        this.browserVersion = browserVersion == null ? "" : WebLib.cut(browserVersion, WebLib.MAX_URL_CHARS);
+        this.protocolVersion = protocolVersion == null ? "" : WebLib.cut(protocolVersion, WebLib.MAX_URL_CHARS);
         this.targets = List.copyOf(targets);
         this.millis = millis;
     }
@@ -178,8 +200,12 @@ public final class TargetProbe {
         try {
             Object version;
             try {
-                version = getJson(http, endpoint, "/json/version", deadlineMs);
+                version = getJson(http, endpoint, "/json/version", deadlineMs, MAX_VERSION_BYTES);
             } catch (ProbeHttpException e) {
+                if (e.oversized) {
+                    throw new CdpException(CdpException.Kind.PROTOCOL, "the DevTools endpoint at "
+                            + endpoint.httpUri() + "/json/version: " + e.getMessage(), null, e.getCause());
+                }
                 throw new CdpException(CdpException.Kind.UNREACHABLE, "no DevTools endpoint answers at "
                         + endpoint.httpUri() + "/json/version: " + e.getMessage(), null, e.getCause());
             }
@@ -189,7 +215,7 @@ public final class TargetProbe {
             }
             Object list;
             try {
-                list = getJson(http, endpoint, "/json/list", deadlineMs);
+                list = getJson(http, endpoint, "/json/list", deadlineMs, MAX_LIST_BYTES);
             } catch (ProbeHttpException e) {
                 throw new CdpException(e.unreachable ? CdpException.Kind.UNREACHABLE : CdpException.Kind.PROTOCOL,
                         "cannot list the targets at " + endpoint.httpUri() + "/json/list: " + e.getMessage(), null,
@@ -198,6 +224,10 @@ public final class TargetProbe {
             if (!(list instanceof List<?> entries)) {
                 throw new CdpException(CdpException.Kind.PROTOCOL, "cannot list the targets at " + endpoint.httpUri()
                         + "/json/list: the answer is not a JSON array", null);
+            }
+            if (entries.size() > MAX_TARGETS) {
+                throw new CdpException(CdpException.Kind.PROTOCOL, "cannot list the targets at " + endpoint.httpUri()
+                        + "/json/list: it names " + entries.size() + " targets, more than " + MAX_TARGETS, null);
             }
             List<Target> listed = parseTargets(endpoint, entries);
             if (!servesOneOf(listed, targetIds)) {
@@ -276,12 +306,31 @@ public final class TargetProbe {
                 continue;
             }
             String ws = text(m.get("webSocketDebuggerUrl"));
-            if (ws.isEmpty()) {
+            if (!atEndpoint(ws, endpoint)) {
                 ws = "ws://" + endpoint.authority() + "/devtools/page/" + id;
             }
-            out.add(new Target(id, text(m.get("type")), text(m.get("url")), text(m.get("title")), ws, true, 0, null));
+            out.add(new Target(id, WebLib.cut(text(m.get("type")), WebLib.MAX_URL_CHARS),
+                    WebLib.cut(text(m.get("url")), WebLib.MAX_URL_CHARS),
+                    WebLib.cut(text(m.get("title")), WebLib.MAX_URL_CHARS), ws, true, 0, null));
         }
         return out;
+    }
+
+    /**
+     * True when a listed {@code webSocketDebuggerUrl} is a {@code ws} URL at the endpoint's own authority (S44): the
+     * probe never dials a host the list names.
+     */
+    static boolean atEndpoint(String ws, CdpEndpoint endpoint) {
+        if (ws == null || ws.isEmpty()) {
+            return false;
+        }
+        try {
+            URI uri = new URI(ws);
+            return "ws".equalsIgnoreCase(uri.getScheme()) && uri.getRawUserInfo() == null
+                    && endpoint.authority().equalsIgnoreCase(uri.getRawAuthority());
+        } catch (java.net.URISyntaxException e) {
+            return false;
+        }
     }
 
     /** True when {@code targetIds} is empty or a listed target (of any type) has one of those ids. */
@@ -376,21 +425,27 @@ public final class TargetProbe {
      * {@code GET <path>} within {@code deadlineMs}: the caller's wait is the bound; the request's own timeout is a
      * margin longer, so that it only releases the exchange, and either timeout gives the same message.
      */
-    private static Object getJson(HttpClient http, CdpEndpoint endpoint, String path, long deadlineMs)
+    private static Object getJson(HttpClient http, CdpEndpoint endpoint, String path, long deadlineMs, int maxBytes)
             throws ProbeHttpException {
         HttpRequest request = HttpRequest.newBuilder(URI.create(endpoint.httpUri() + path))
                 .timeout(Duration.ofMillis(deadlineMs + REQUEST_TIMEOUT_MARGIN_MS))
                 .header("Accept", "application/json")
                 .GET()
                 .build();
-        HttpResponse<String> response;
+        HttpResponse<byte[]> response;
         try {
-            response = http.sendAsync(request, HttpResponse.BodyHandlers.ofString())
-                    .get(deadlineMs, TimeUnit.MILLISECONDS);
+            response = http.sendAsync(request, capped(maxBytes)).get(deadlineMs, TimeUnit.MILLISECONDS);
         } catch (TimeoutException e) {
             throw new ProbeHttpException(true, noAnswer(deadlineMs), e);
         } catch (ExecutionException e) {
-            throw new ProbeHttpException(true, requestFailure(e.getCause(), deadlineMs), e.getCause());
+            Throwable cause = e.getCause();
+            while (cause instanceof java.io.IOException && cause.getCause() instanceof AnswerTooLarge) {
+                cause = cause.getCause();
+            }
+            if (cause instanceof AnswerTooLarge) {
+                throw new ProbeHttpException(false, cause.getMessage(), cause, true);
+            }
+            throw new ProbeHttpException(true, requestFailure(cause, deadlineMs), cause);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new ProbeHttpException(true, "interrupted", e);
@@ -399,9 +454,106 @@ public final class TargetProbe {
             throw new ProbeHttpException(false, "HTTP " + response.statusCode(), null);
         }
         try {
-            return Json.parse(response.body());
+            return Json.parse(new String(response.body(), StandardCharsets.UTF_8));
         } catch (JsonException e) {
             throw new ProbeHttpException(false, "the answer is not JSON (" + e.getMessage() + ")", e);
+        }
+    }
+
+    /**
+     * A body handler that reads at most {@code maxBytes} (S44, the shape of the controller's agent client): a declared
+     * {@code Content-Length} over the bound is refused before the body is read, and the read stops (the subscription
+     * cancelled) as soon as the bytes seen pass the bound, one buffer requested at a time; the failure is
+     * {@link AnswerTooLarge}.
+     */
+    static HttpResponse.BodyHandler<byte[]> capped(int maxBytes) {
+        return info -> new CappedBody(maxBytes, info.headers().firstValueAsLong("Content-Length").orElse(-1L));
+    }
+
+    /** An answer of the endpoint over its bound. */
+    static final class AnswerTooLarge extends IOException {
+
+        private static final long serialVersionUID = 1L;
+
+        AnswerTooLarge(long maxBytes) {
+            super("the answer exceeds " + maxBytes + " bytes");
+        }
+    }
+
+    /** See {@link #capped}. */
+    static final class CappedBody implements HttpResponse.BodySubscriber<byte[]> {
+
+        private final long maxBytes;
+        private final long declared;
+        private final CompletableFuture<byte[]> result = new CompletableFuture<>();
+        private final List<ByteBuffer> parts = new ArrayList<>();
+        private Flow.Subscription subscription;
+        private long seen;
+
+        CappedBody(long maxBytes, long declared) {
+            this.maxBytes = maxBytes;
+            this.declared = declared;
+        }
+
+        /** The bytes seen so far (tests). */
+        synchronized long seen() {
+            return seen;
+        }
+
+        @Override
+        public CompletionStage<byte[]> getBody() {
+            return result;
+        }
+
+        @Override
+        public synchronized void onSubscribe(Flow.Subscription s) {
+            subscription = s;
+            if (declared > maxBytes) {
+                s.cancel();
+                result.completeExceptionally(new AnswerTooLarge(maxBytes));
+                return;
+            }
+            s.request(1);
+        }
+
+        @Override
+        public synchronized void onNext(List<ByteBuffer> items) {
+            if (result.isDone()) {
+                return;
+            }
+            for (ByteBuffer b : items) {
+                seen += b.remaining();
+                if (seen > maxBytes) {
+                    subscription.cancel();
+                    parts.clear();
+                    result.completeExceptionally(new AnswerTooLarge(maxBytes));
+                    return;
+                }
+                parts.add(b);
+            }
+            subscription.request(1);
+        }
+
+        @Override
+        public synchronized void onError(Throwable t) {
+            parts.clear();
+            result.completeExceptionally(t);
+        }
+
+        @Override
+        public synchronized void onComplete() {
+            if (result.isDone()) {
+                return;
+            }
+            byte[] all = new byte[(int) seen];
+            int at = 0;
+            for (ByteBuffer b : parts) {
+                int n = b.remaining();
+                b.get(all, at, n);
+                at += n;
+            }
+            parts.clear();
+            result.complete(all);
         }
     }
 
@@ -441,16 +593,25 @@ public final class TargetProbe {
         return TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startNanos);
     }
 
-    /** One HTTP request of the probe failed; {@code unreachable} distinguishes I/O from a wrong answer. */
+    /**
+     * One HTTP request of the probe failed; {@code unreachable} distinguishes I/O from a wrong answer, and
+     * {@code oversized} an answer over its bound (S44: {@code PROTOCOL} for either request).
+     */
     private static final class ProbeHttpException extends Exception {
 
         private static final long serialVersionUID = 1L;
 
         final boolean unreachable;
+        final boolean oversized;
 
         ProbeHttpException(boolean unreachable, String message, Throwable cause) {
+            this(unreachable, message, cause, false);
+        }
+
+        ProbeHttpException(boolean unreachable, String message, Throwable cause, boolean oversized) {
             super(message, cause);
             this.unreachable = unreachable;
+            this.oversized = oversized;
         }
     }
 

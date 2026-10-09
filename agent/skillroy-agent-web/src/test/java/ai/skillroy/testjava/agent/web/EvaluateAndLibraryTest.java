@@ -280,6 +280,10 @@ class EvaluateAndLibraryTest {
         }
     }
 
+    /**
+     * Read-only mode (D51, with D156: {@code web.waitFlag} runs the caller's expression and is refused as the
+     * mutating primitives are; the dispatcher's gate itself is {@code DispatchTest}'s).
+     */
     @Test
     void readOnlyModeRejectsTheMutatingPrimitivesAndServesTheReads() throws Exception {
         try (Harness h = harness()) {
@@ -292,16 +296,99 @@ class EvaluateAndLibraryTest {
             mutating.put("web.tap", Harness.args("patterns", Arrays.asList("x")));
             mutating.put("web.resize", Harness.args("width", Long.valueOf(5), "height", Long.valueOf(5)));
             mutating.put("web.reload", Harness.args());
+            mutating.put("web.waitFlag", Harness.args("expression", "true"));
             for (Map.Entry<String, Map<String, Object>> m : mutating.entrySet()) {
                 assertEquals(ErrorCodes.READ_ONLY, h.ctx.error(m.getKey(), m.getValue()).error().code(), m.getKey());
             }
             h.ctx.call("web.browsers", Harness.args());
             h.ctx.call("web.ariaSnapshot", Harness.args());
             h.ctx.call("web.dom.text", Harness.args());
-            h.ctx.call("web.waitFlag", Harness.args("expression", "true"));
             h.ctx.call("web.bitmap", Harness.args());
             h.ctx.call("web.cdp.status", Harness.args());
         }
+    }
+
+    /**
+     * Security fix S43: what a page that replaced the library sends is bounded here: a 2 MiB {@code json} is cut at
+     * 1 MiB, a library value over 1 MiB is refused, a 10 KiB {@code lastError} and a script error's message are cut
+     * to 2000 characters and its stack to 8000, a channel text over its bound is refused unparsed, and
+     * {@code web.browsers} cuts a 100 KiB URL and title at 4096.
+     */
+    @Test
+    void pageSuppliedValuesAreBoundedOnTheAgent() throws Exception {
+        try (Harness h = harness()) {
+            final String big = repeat('x', 2 << 20);
+            browser.responder = wrapper(big, "string", false);
+            Map<String, Object> cut = h.ctx.map("web.evaluate", Harness.args("expression", "big"));
+            assertEquals(WebLib.MAX_JSON_CHARS, ((String) cut.get("json")).length());
+            assertEquals(Boolean.TRUE, cut.get("truncated"));
+
+            browser.responder = new ScriptedBrowser.Responder() {
+                @Override
+                public CompletableFuture<String> answer(WebEval eval) {
+                    Map<String, Object> value = new LinkedHashMap<String, Object>();
+                    value.put("text", big);
+                    value.put("truncated", Boolean.FALSE);
+                    return CompletableFuture.completedFuture(Json.write(value));
+                }
+            };
+            RpcException oversized = h.ctx.error("web.dom.text", Harness.args());
+            assertEquals(ErrorCodes.INTERNAL_ERROR, oversized.error().code());
+            assertEquals("oversized", oversized.error().data().get("reason"));
+            assertTrue(oversized.error().message().length() < 300, "never the text");
+
+            browser.responder = new ScriptedBrowser.Responder() {
+                @Override
+                public CompletableFuture<String> answer(WebEval eval) {
+                    return CompletableFuture.completedFuture(Json.write(repeat('y', WebLib.MAX_CHANNEL_CHARS)));
+                }
+            };
+            assertEquals("oversized", h.ctx.error("web.evaluate", Harness.args("expression", "y")).error().data()
+                    .get("reason"), "a channel text over its bound is refused unparsed");
+
+            browser.responder = new ScriptedBrowser.Responder() {
+                @Override
+                public CompletableFuture<String> answer(WebEval eval) {
+                    Map<String, Object> poll = new LinkedHashMap<String, Object>();
+                    poll.put("ready", Boolean.FALSE);
+                    poll.put("error", repeat('E', 10 * 1024));
+                    return CompletableFuture.completedFuture(Json.write(poll));
+                }
+            };
+            Map<String, Object> flag = h.ctx.map("web.waitFlag", Harness.args("expression", "x", "timeoutMs",
+                    Long.valueOf(150)));
+            assertEquals(WebLib.MAX_ERROR_CHARS, ((String) flag.get("lastError")).length());
+
+            browser.responder = new ScriptedBrowser.Responder() {
+                @Override
+                public CompletableFuture<String> answer(WebEval eval) {
+                    CompletableFuture<String> f = new CompletableFuture<String>();
+                    f.completeExceptionally(new ai.skillroy.testjava.agent.api.spi.web.WebScriptException(
+                            "Error: " + repeat('m', 10 * 1024) + "\nnext", repeat('s', 100 * 1024)));
+                    return f;
+                }
+            };
+            RpcException thrown = h.ctx.error("web.evaluate", Harness.args("expression", "throw"));
+            assertEquals(ErrorCodes.SCRIPT_ERROR, thrown.error().code());
+            assertEquals(WebLib.MAX_ERROR_CHARS, ((String) thrown.error().data().get("message")).length());
+            assertEquals(WebLib.MAX_STACK_CHARS, ((String) thrown.error().data().get("stack")).length());
+
+            browser.responder = null;
+            browser.url = "data:text/html," + repeat('u', 100 * 1024);
+            browser.load("<html><head><title>" + repeat('t', 100 * 1024) + "</title></head><body></body></html>");
+            @SuppressWarnings("unchecked")
+            List<Object> listed = (List<Object>) h.ctx.map("web.browsers", Harness.args()).get("browsers");
+            @SuppressWarnings("unchecked")
+            Map<String, Object> first = (Map<String, Object>) listed.get(0);
+            assertEquals(WebLib.MAX_URL_CHARS, ((String) first.get("url")).length());
+            assertTrue(((String) first.get("title")).length() <= WebLib.MAX_URL_CHARS);
+        }
+    }
+
+    private static String repeat(char c, int n) {
+        char[] chars = new char[n];
+        Arrays.fill(chars, c);
+        return new String(chars);
     }
 
     private void assertSent(String expression) {

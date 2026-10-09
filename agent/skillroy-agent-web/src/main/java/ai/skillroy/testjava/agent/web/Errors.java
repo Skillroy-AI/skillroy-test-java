@@ -17,7 +17,9 @@
 package ai.skillroy.testjava.agent.web;
 
 import ai.skillroy.testjava.protocol.ErrorCodes;
+import ai.skillroy.testjava.protocol.RpcError;
 import ai.skillroy.testjava.protocol.RpcException;
+import ai.skillroy.testjava.protocol.web.WebLib;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -72,10 +74,25 @@ final class Errors {
                 Long.valueOf(timeoutMs)));
     }
 
-    /** SCRIPT_ERROR with {@code data {browser, message, stack}} (phase4-contracts.md section 8.1). */
+    /**
+     * SCRIPT_ERROR with {@code data {browser, message, stack}} (phase4-contracts.md section 8.1): the message's first
+     * line at most 2000 characters and the stack at most 8000, whatever the page or the adapter sent (security fix
+     * S43: the one builder every adapter's script error, a {@code compileError} included, goes through).
+     */
     static RpcException script(String browser, String message, String stack) {
-        return new RpcException(ErrorCodes.SCRIPT_ERROR, "script error in browser " + browser + ": " + message,
-                data("browser", browser, "message", message, "stack", stack));
+        String line = WebLib.scriptMessage(message);
+        return new RpcException(ErrorCodes.SCRIPT_ERROR, "script error in browser " + browser + ": " + line,
+                data("browser", browser, "message", line, "stack", stack == null ? null : WebLib.scriptStack(stack)));
+    }
+
+    /** {@code INTERNAL_ERROR {reason: "oversized", bound, browser}} of a page-supplied value over its bound (S43). */
+    static RpcException oversized(String browser, String what, long bound) {
+        RpcError e = WebLib.oversized(what, bound);
+        Map<String, Object> data = new LinkedHashMap<String, Object>(e.data());
+        if (browser != null) {
+            data.put("browser", browser);
+        }
+        return new RpcException(e.code(), e.message(), data);
     }
 
     /** INTERNAL_ERROR with {@code data.browser} (when known) and the failure's description. */

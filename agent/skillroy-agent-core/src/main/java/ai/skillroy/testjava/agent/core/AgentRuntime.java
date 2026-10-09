@@ -229,7 +229,8 @@ public final class AgentRuntime implements AutoCloseable {
                 hostLoader);
         String givenToken = options.get("token");
         this.tokenGenerated = givenToken == null || givenToken.isEmpty();
-        RingEventBus bus = new RingEventBus(Integer.parseInt(options.get("eventRing")), log);
+        RingEventBus bus = new RingEventBus(Integer.parseInt(options.get("eventRing")),
+                Long.parseLong(options.get("eventRingChars")), log);
         CoreSpiRegistry spi = new CoreSpiRegistry();
         this.redactor = Redactor.withExtraKeys(options.get("redact"), spi, log);
         CoreThreadBroker broker = new CoreThreadBroker(workers, spi, log);
@@ -363,6 +364,7 @@ public final class AgentRuntime implements AutoCloseable {
         out.put("discoveryDir", SecureFiles.defaultDiscoveryDir().getPath());
         out.put("readyTimeoutMs", "120000");
         out.put("eventRing", "10000");
+        out.put("eventRingChars", String.valueOf(RingEventBus.DEFAULT_MAX_CHARS));
         out.put("httpThreads", String.valueOf(DEFAULT_HTTP_THREADS));
         out.put("httpIdleTimeoutMs", String.valueOf(DEFAULT_HTTP_IDLE_TIMEOUT_MS));
         out.put("allowFailedModules", "false");
@@ -378,6 +380,8 @@ public final class AgentRuntime implements AutoCloseable {
         out.put("port", String.valueOf(port));
         longOption(out, "readyTimeoutMs", 1L, MAX_READY_TIMEOUT_MS);
         longOption(out, "eventRing", 1L, 1000000L);
+        // Security fix S43 (P1 2.4): the ring's total payload characters, 1 Mi to 1 Gi.
+        longOption(out, "eventRingChars", 1L << 20, 1L << 30);
         longOption(out, "httpThreads", MIN_HTTP_THREADS, MAX_HTTP_THREADS);
         longOption(out, "httpIdleTimeoutMs", MIN_HTTP_IDLE_TIMEOUT_MS, MAX_HTTP_IDLE_TIMEOUT_MS);
         Redactor.withExtraKeys(out.get("redact"));

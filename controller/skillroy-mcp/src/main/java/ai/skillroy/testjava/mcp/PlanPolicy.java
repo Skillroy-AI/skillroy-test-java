@@ -47,7 +47,8 @@ import java.util.TreeSet;
  *       or {@value #TRACE_MARK}, the base verb {@code mark}'s marker on the agent's own event bus.</li>
  *   <li>A call a pack verb compiled (or a cleanup call a verb registered) names no primitive the server never offers:
  *       not a destructive one, nothing of {@code agent.*}, not {@code data.query}, nothing the policy excludes
- *       ({@code web.evaluate} and {@code web.waitFlag} unless a person opted in), no {@code hook.*} or {@code rule.*}
+ *       ({@code web.evaluate} and {@code web.waitFlag} unless a person opted in, and then also any primitive whose
+ *       descriptor carries the {@code script} flag, phase6-contracts.md 12.9, D156), no {@code hook.*} or {@code rule.*}
  *       primitive but the three reads {@code hook.health}, {@code hook.events} and {@code rule.list}
  *       (phase6-contracts.md 4.2). The pack's verbs are reviewed code, over primitives of any module.</li>
  *   <li>No call's arguments hold {@code confirm} or {@code _meta}: a confirmation is never a client's to give, and a
@@ -335,7 +336,22 @@ public final class PlanPolicy {
                     + (ToolProjection.SCRIPT_PRIMITIVES.contains(primitive) ? " (it runs a script in the target's"
                     + " pages: a person opts in when starting the server, skillroy mcp --allow-evaluate)" : "");
         }
-        return null;
+        return scriptRefusal(primitive);
+    }
+
+    /**
+     * A primitive whose descriptor carries the {@code script} flag, on a server whose policy offers no script
+     * primitive (phase6-contracts.md 12.9, D156; security fix S42): refused as the named
+     * {@link ToolProjection#SCRIPT_PRIMITIVES} are, so that a third-party adapter's or a later primitive that runs a
+     * caller's script is never run for a client without a person's opt-in; null otherwise.
+     */
+    private String scriptRefusal(String primitive) {
+        PrimitiveDescriptor d = catalogue.get(primitive);
+        if (d == null || !d.script() || !excluded.containsAll(ToolProjection.SCRIPT_PRIMITIVES)) {
+            return null;
+        }
+        return "calls " + primitive + ", which this server does not offer (it runs a script in the target: a person"
+                + " opts in when starting the server, skillroy mcp --allow-evaluate)";
     }
 
     /** A call whose arguments carry {@code confirm} or {@code _meta}. */

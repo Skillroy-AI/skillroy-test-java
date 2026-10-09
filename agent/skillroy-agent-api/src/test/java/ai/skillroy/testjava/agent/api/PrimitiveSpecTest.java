@@ -108,6 +108,20 @@ class PrimitiveSpecTest {
         assertFalse(mutating.destructive());
     }
 
+    /** phase6-contracts.md 12.9, D156 (security fix S42): {@code script()} implies nothing else; off by default. */
+    @Test
+    void scriptIsAFlagOfItsOwn() {
+        PrimitiveSpec script = PrimitiveSpec.builder("web.waitFlag").script().build();
+        assertTrue(script.script());
+        assertTrue(script.describe().script());
+        assertFalse(script.mutating(), "a script read stays a read for the step protocol");
+        assertFalse(script.destructive());
+        assertFalse(PrimitiveSpec.builder("web.dom.text").build().script());
+        assertFalse(PrimitiveSpec.builder("swing.click").mutating().build().script());
+        PrimitiveSpec both = PrimitiveSpec.builder("web.evaluate").mutating().script().build();
+        assertTrue(both.mutating() && both.script());
+    }
+
     @Test
     void customParamsSchemaIsUsedAsGivenAndCopied() {
         Map<String, Object> schema = new LinkedHashMap<String, Object>();

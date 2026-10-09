@@ -44,6 +44,7 @@ import static ai.skillroy.testjava.agent.core.AgentHarness.map;
 import static ai.skillroy.testjava.agent.core.AgentHarness.withMeta;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -228,6 +229,36 @@ class DispatchTest {
         assertEquals((long) ErrorCodes.CONFIRM_REQUIRED,
                 code(agent.error("test.destroy", withMeta(null, "confirm", Boolean.FALSE))));
         assertEquals("destroyed", agent.value("test.destroy", withMeta(null, "confirm", Boolean.TRUE)));
+    }
+
+    /**
+     * phase6-contracts.md 12.9, D156 (security fix S42): a primitive that evaluates a caller's expression is refused in
+     * read-only mode as a mutating one is, although it is not mutating; served otherwise; its schema entry carries
+     * {@code script: true}.
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    void aScriptPrimitiveIsReadOnlyLikeAMutatingOne() throws Exception {
+        assertEquals(Long.valueOf(1), agent.value("test.script", null), "served when the agent is not read-only");
+        Map<String, Object> descriptor = null;
+        for (Object d : (List<Object>) agent.get("/schema").json().get("primitives")) {
+            if ("test.script".equals(((Map<String, Object>) d).get("name"))) {
+                descriptor = (Map<String, Object>) d;
+            }
+        }
+        assertNotNull(descriptor);
+        assertEquals(Boolean.TRUE, descriptor.get("script"));
+        assertEquals(Boolean.FALSE, descriptor.get("mutating"));
+        agent.close();
+        TestState.reset();
+        agent = AgentHarness.start(tmp, "readOnly", "true");
+        AgentHarness.await("target ready", 30000, () -> agent.runtime.isReady());
+        Map<String, Object> error = agent.error("test.script", null);
+        assertEquals((long) ErrorCodes.READ_ONLY, code(error));
+        assertEquals("test.script", data(error).get("primitive"));
+        assertEquals(0, TestState.MUTATIONS.get(), "the expression never ran");
+        assertEquals(map("value", "v"), ((Map<String, Object>) agent.value("test.echo", map("value", "v")))
+                .get("args"), "a plain read is still served");
     }
 
     @Test

@@ -156,6 +156,14 @@ public final class CoreTestModule implements AgentModule {
                         return Long.valueOf(TestState.MUTATIONS.incrementAndGet());
                     }
                 }));
+        // phase6-contracts.md 12.9, D156: a read that evaluates a caller's expression.
+        ctx.primitives().register(Primitives.of(PrimitiveSpec.builder("test.script").script().build(),
+                new Primitives.Body() {
+                    @Override
+                    public Object invoke(Invocation inv) {
+                        return Long.valueOf(TestState.MUTATIONS.incrementAndGet());
+                    }
+                }));
         ctx.primitives().register(Primitives.of(PrimitiveSpec.builder("test.destroy").destructive().build(),
                 new Primitives.Body() {
                     @Override

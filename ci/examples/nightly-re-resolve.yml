@@ -26,12 +26,23 @@
 # Repository secrets:
 #   ANTHROPIC_API_KEY        the model key
 #   ANTHROPIC_WORKSPACE_ID   the workspace id, for a key that is not scoped to a workspace (may be empty)
-#   SKILLROY_CREDENTIALS     the environment's credentials.yaml (its JDBC sources and staff passwords); written to a
-#                            private file for the job and deleted afterwards
+#   SKILLROY_CREDENTIALS_YAML
+#                            the environment's credentials.yaml, its content (its JDBC sources and staff passwords);
+#                            written to a private file for the job and deleted afterwards. The base's own variable
+#                            SKILLROY_CREDENTIALS is a *path*; this secret is the file's *content*, so it has a name of
+#                            its own and is never exported under the base's name.
 # Repository variables:
-#   SKILLROY_CONNECT         the connection options of the test environment's target (the CLI's --pid, --port,
-#                            --discovery-dir, --token-file, --name), for example "--discovery-dir /srv/skillroy --name desk"
+#   SKILLROY_CONNECT         the connection options of the test environment's target (the CLI's --port, --token-file,
+#                            --name), for example "--port 7411 --token-file /srv/skillroy/desk.token". --pid and
+#                            --discovery-dir do not reach a JVM on the runner's host from inside the container (another
+#                            PID namespace, and a discovery directory the container does not see): use --port with a
+#                            --token-file under a path the step mounts.
 #   SKILLROY_PACKS           the --pack options of your pack jars, for example "--pack packs/lending-pack.jar"
+#
+# Hardening of a copy (Phase 6 security fix S40): the checkout persists no token into the work tree that the
+# container mounts (persist-credentials: false; the push step authenticates with its own GH_TOKEN); pin the base image
+# of ci/Dockerfile by digest and every action below by its commit SHA in your copy (this example names floating tags,
+# which a copy should not keep).
 
 name: nightly-re-resolve
 
@@ -67,6 +78,9 @@ jobs:
     steps:
       - name: Check out
         uses: actions/checkout@v4
+        with:
+          # No token in .git/config: the work tree is mounted into the container, which runs as root.
+          persist-credentials: false
 
       - name: Build the Linux image
         run: docker build -t "$IMAGE" ci
@@ -76,10 +90,10 @@ jobs:
 
       - name: Write the environment's credentials
         env:
-          SKILLROY_CREDENTIALS: ${{ secrets.SKILLROY_CREDENTIALS }}
+          SKILLROY_CREDENTIALS_YAML: ${{ secrets.SKILLROY_CREDENTIALS_YAML }}
         run: |
           umask 077
-          printf '%s\n' "$SKILLROY_CREDENTIALS" > "$RUNNER_TEMP/credentials.yaml"
+          printf '%s\n' "$SKILLROY_CREDENTIALS_YAML" > "$RUNNER_TEMP/credentials.yaml"
 
       - name: Re-resolve
         id: job
@@ -136,6 +150,8 @@ jobs:
           git switch -c "$branch"
           git add -- "$BINDINGS"
           git commit -s -m "Nightly re-resolve of $SKILLROY_ENV ($(date -u +%Y-%m-%d))"
+          # The checkout persisted no token: git authenticates through gh, with this step's GH_TOKEN only.
+          gh auth setup-git
           git push origin "$branch"
           gh pr create --base "${GITHUB_REF_NAME}" --head "$branch" \
             --title "Nightly re-resolve of $SKILLROY_ENV ($(date -u +%Y-%m-%d))" \

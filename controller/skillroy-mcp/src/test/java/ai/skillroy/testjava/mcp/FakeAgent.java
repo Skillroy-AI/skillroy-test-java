@@ -117,6 +117,13 @@ final class FakeAgent implements AgentConnection {
         return this;
     }
 
+    /** Describes a primitive that evaluates a caller's expression (the {@code script} flag, D156). */
+    synchronized FakeAgent describeScript(String name, boolean mutating, Map<String, Object> params) {
+        schema.add(new PrimitiveDescriptor(name, "does " + name, params, null, "WORKER", 5000, null, mutating, false,
+                true));
+        return this;
+    }
+
     /** Every later call, await or catalogue read throws AgentLostException once {@code method} is called. */
     synchronized FakeAgent loseOn(String method) {
         this.loseOn = method;

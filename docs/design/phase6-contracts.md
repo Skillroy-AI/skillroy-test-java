@@ -2711,7 +2711,17 @@ CP, TL and BW build nothing of them; CP's own `ToolProjection` and `PlanPolicy` 
   `dispositions.md` S42: protocol, agent-api, `WebPrimitives`, `Dispatcher`, `CdpWebPath`, `ToolProjection`,
   `McpCommand`'s help). Alternatives rejected: `.mutating()` on `web.waitFlag` (removes it from `readOnly(true)`,
   reversing D98, and makes the step protocol settle and recover after a wait); the controller-only named set (a
-  third-party adapter or a later primitive would be missed, map 5 §8 Q11).
+  third-party adapter or a later primitive would be missed, map 5 §8 Q11). **As built (Phase 6, SR, 2026-10-09):**
+  the descriptor writes `"script": true` only when the flag is set (a primitive without it serialises as before, so
+  an older reader and the pinned wire test are unchanged; D-SR-1); `PrimitiveDescriptor` keeps its nine-argument
+  constructor and gains a tenth `script` argument; the projection's `readOnly` uses the same fallback as its
+  exclusions (`ToolProjection.isScript(d)`: the flag, or a name of `SCRIPT_PRIMITIVES`), so an older agent's unflagged
+  `web.waitFlag` is not annotated `readOnlyHint: true` either (D-SR-2); "the policy excludes script primitives" is
+  `Policy.excludesScripts()`, true when `excluded` holds every name of `SCRIPT_PRIMITIVES` (`readOnly(false)`,
+  `mutating(false)`, `session(...)`), a derived method rather than a new record component (D-SR-3); `PlanPolicy`
+  refuses a flagged primitive in its own `scriptRefusal` under the same condition; the dispatcher's refusal is a
+  second check after the mutating one, with its own message ("… evaluates a caller's expression in the target and
+  the agent is read-only").
 - **D157 (= P6-SEC-2, S56; widens D101, B24): one session budget per MCP server bounds every model call made on a
   client's behalf.** The MCP server owns one `SESSION` `BudgetMeter` from `budget.sessionUsd`, shared with the
   `skillroy_session_ask` actor (`ServerOptions.sessionMeter`; `SessionServices.open` takes the meter); `skillroy_resolve`

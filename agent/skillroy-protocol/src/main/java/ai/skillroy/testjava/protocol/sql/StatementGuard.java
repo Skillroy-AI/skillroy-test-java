@@ -56,7 +56,16 @@ import java.util.Set;
  *       number is also checked without it, since T-SQL reads {@code 1DELETE} as {@code 1 DELETE}). Quote an
  *       identifier that happens to be one of these words. The one exception: {@code TRUNCATE(} and {@code INSERT(}
  *       (the word, optional whitespace, an opening parenthesis) are the scalar functions of that name, which no
- *       database reads as the start of a statement, and are allowed.</li>
+ *       database reads as the start of a statement, and are allowed. Security fix S36 (Phase 6, P1 6) adds the T-SQL
+ *       transaction, control-of-flow and lock-hint words a batch without {@code ;} would run ({@code BEGIN},
+ *       {@code COMMIT}, {@code ROLLBACK}, {@code SAVE}, {@code DECLARE}, {@code WAITFOR}, {@code RAISERROR},
+ *       {@code THROW}, {@code PRINT}, {@code GOTO}, {@code USE}, {@code CHECKPOINT}, {@code RECEIVE}, {@code SEND},
+ *       {@code OPENROWSET}, {@code OPENQUERY}, {@code OPENDATASOURCE}, {@code HOLDLOCK}, {@code TABLOCK},
+ *       {@code TABLOCKX}, {@code XLOCK}, {@code UPDLOCK}, {@code PAGLOCK}); {@code SET} is not one of them, since
+ *       MySQL's {@code CAST(x AS CHAR CHARACTER SET utf8mb4)} must stay admitted.</li>
+ *   <li>The locking reads {@code FOR SHARE}, {@code FOR KEY SHARE} and {@code LOCK IN SHARE MODE} are rejected as
+ *       word sequences ({@link #FORBIDDEN_SEQUENCES}): consecutive words with only whitespace and comments between
+ *       them, in every reading (S36).</li>
  * </ol>
  *
  * <p>Because the guard does not know which database a source uses, rules 2, 3 and 5 are checked once with the
@@ -79,7 +88,19 @@ public final class StatementGuard {
     public static final Set<String> FORBIDDEN_WORDS = Collections.unmodifiableSet(new HashSet<String>(Arrays.asList(
             "INSERT", "UPDATE", "DELETE", "MERGE", "TRUNCATE", "DROP", "ALTER", "CREATE", "GRANT", "REVOKE", "DENY",
             "CALL", "EXEC", "EXECUTE", "INTO", "SHUTDOWN", "KILL", "BACKUP", "RESTORE", "DBCC", "UPDATETEXT",
-            "WRITETEXT", "RECONFIGURE", "SETUSER")));
+            "WRITETEXT", "RECONFIGURE", "SETUSER",
+            // Security fix S36: T-SQL transaction, control-of-flow and lock-hint words (a batch needs no ';').
+            "BEGIN", "COMMIT", "ROLLBACK", "SAVE", "DECLARE", "WAITFOR", "RAISERROR", "THROW", "PRINT", "GOTO", "USE",
+            "CHECKPOINT", "RECEIVE", "SEND", "OPENROWSET", "OPENQUERY", "OPENDATASOURCE", "HOLDLOCK", "TABLOCK",
+            "TABLOCKX", "XLOCK", "UPDLOCK", "PAGLOCK")));
+
+    /**
+     * Locking reads rejected as sequences of whole words (security fix S36): consecutive words outside literals,
+     * quoted identifiers and comments, with only whitespace and comments between them.
+     */
+    public static final java.util.List<java.util.List<String>> FORBIDDEN_SEQUENCES =
+            Collections.unmodifiableList(Arrays.asList(Arrays.asList("FOR", "SHARE"),
+                    Arrays.asList("FOR", "KEY", "SHARE"), Arrays.asList("LOCK", "IN", "SHARE", "MODE")));
 
     /** Forbidden words that are also scalar functions; allowed when directly followed by a parenthesis. */
     private static final Set<String> FUNCTION_WORDS =
@@ -143,6 +164,8 @@ public final class StatementGuard {
         }
         final boolean standard = d == STANDARD;
         final int n = sql.length();
+        // The last words read without another code token between them (S36's sequences).
+        final String[] recent = new String[4];
         boolean first = true;
         boolean inExecutableComment = false;
         int i = 0;
@@ -213,6 +236,12 @@ public final class StatementGuard {
                         && !(FUNCTION_WORDS.contains(word) && opensParenthesis(sql, end))) {
                     return reason("'" + sql.substring(i, end) + "' is not allowed in a read-only query", d);
                 }
+                System.arraycopy(recent, 1, recent, 0, recent.length - 1);
+                recent[recent.length - 1] = word;
+                String sequence = forbiddenSequence(recent);
+                if (sequence != null) {
+                    return reason("'" + sequence + "' (a locking read) is not allowed in a read-only query", d);
+                }
                 first = false;
                 i = end;
                 continue;
@@ -221,6 +250,7 @@ public final class StatementGuard {
                 return "the statement must start with SELECT or WITH, not '" + abbreviate(sql.substring(i)) + "'";
             }
             first = false;
+            Arrays.fill(recent, null);
             int end;
             String what;
             if (c == '\'') {
@@ -254,6 +284,25 @@ public final class StatementGuard {
             i = end;
         }
         return first && standard ? "empty statement" : null;
+    }
+
+    /** The forbidden sequence the last words read end with, as text, or null (S36). */
+    private static String forbiddenSequence(String[] recent) {
+        for (java.util.List<String> sequence : FORBIDDEN_SEQUENCES) {
+            int offset = recent.length - sequence.size();
+            boolean match = true;
+            for (int k = 0; k < sequence.size() && match; k++) {
+                match = sequence.get(k).equals(recent[offset + k]);
+            }
+            if (match) {
+                StringBuilder text = new StringBuilder();
+                for (String w : sequence) {
+                    text.append(text.length() == 0 ? "" : " ").append(w);
+                }
+                return text.toString();
+            }
+        }
+        return null;
     }
 
     private static String reason(String text, Dialect d) {

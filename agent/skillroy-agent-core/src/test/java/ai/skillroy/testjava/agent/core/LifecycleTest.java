@@ -113,6 +113,15 @@ class LifecycleTest {
         }
         options.put("httpIdleTimeoutMs", "100");
         assertEquals("100", AgentRuntime.resolveOptions(options).get("httpIdleTimeoutMs"));
+        for (String bad : new String[] {"1048575", "1073741825", "lots"}) {
+            options.put("eventRingChars", bad);
+            IllegalArgumentException chars = assertThrows(IllegalArgumentException.class,
+                    () -> AgentRuntime.resolveOptions(options));
+            assertTrue(chars.getMessage().contains("eventRingChars"), chars.getMessage());
+        }
+        options.put("eventRingChars", "1048576");
+        assertEquals("1048576", AgentRuntime.resolveOptions(options).get("eventRingChars"));
+        options.remove("eventRingChars");
         options.remove("httpIdleTimeoutMs");
         options.put("redact", "(unclosed");
         IllegalArgumentException badRegex = assertThrows(IllegalArgumentException.class,
@@ -123,6 +132,7 @@ class LifecycleTest {
         assertEquals("false", defaults.get("readOnly"));
         assertEquals("120000", defaults.get("readyTimeoutMs"));
         assertEquals("10000", defaults.get("eventRing"));
+        assertEquals(String.valueOf(64L << 20), defaults.get("eventRingChars"), "S43: 64 Mi characters");
         assertEquals("32", defaults.get("httpThreads"));
         assertEquals("120000", defaults.get("httpIdleTimeoutMs"), "longer than the JDK HttpClient's 30 s pool");
         assertEquals(new File(System.getProperty("java.io.tmpdir"), "skillroy-"

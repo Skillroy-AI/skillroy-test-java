@@ -164,7 +164,10 @@ public final class StrictYaml {
                         String key = parser.currentName();
                         int keyLine = line(parser);
                         if (map.containsKey(key)) {
-                            throw new YamlException(keyLine, "duplicate key '" + key + "'");
+                            // The key's text may be a value typed where a key belongs (a secret in a credentials
+                            // file): the error says it repeats the document, so a reader of secrets withholds it
+                            // (security fix S35).
+                            throw new YamlException(keyLine, "duplicate key '" + key + "'", true, null);
                         }
                         JsonToken valueToken = parser.nextToken();
                         keys.put(key, keyLine);

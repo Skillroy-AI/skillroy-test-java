@@ -19,6 +19,7 @@ package ai.skillroy.testjava.cdp;
 import ai.skillroy.testjava.controller.AgentRpcException;
 import ai.skillroy.testjava.protocol.ErrorCodes;
 import ai.skillroy.testjava.protocol.Json;
+import ai.skillroy.testjava.protocol.web.WebLib;
 import org.junit.jupiter.api.Test;
 
 import javax.imageio.ImageIO;
@@ -41,6 +42,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * The shape adapters of the CDP path (phase4-contracts.md section 12.1 item 5): the {@code web.evaluate} text, the
@@ -85,31 +87,85 @@ class ShapesTest {
         assertEquals(List.of("message", "stack"), new ArrayList<>(noRef.error().data().keySet()));
     }
 
+    /**
+     * Security fix S47: a library error object maps through {@code WebLib.errorOf}, as on the agent path: the three
+     * codes the library names keep their codes and the agent's messages, with {@code data.browser} added; any other
+     * name, {@code TIMEOUT} and {@code STALE_HANDLE} among them, is {@code INTERNAL_ERROR} with {@code data.error}.
+     */
     @Test
-    void libraryErrorObjectsKeepTheirCodeAndData() {
+    void libraryErrorObjectsMapAsOnTheAgentPath() {
+        Map<String, Object> notFoundObject = Map.of("__error", "NOT_FOUND", "data", Map.of("selector", "#nope"));
         AgentRpcException notFound = assertThrows(AgentRpcException.class, () -> Shapes.unwrap("web.dom.click",
-                FakeWorld.ok(Map.of("__error", "NOT_FOUND", "data", Map.of("selector", "#nope"))), "b"));
+                FakeWorld.ok(notFoundObject), "b"));
         assertEquals(ErrorCodes.NOT_FOUND, notFound.error().code());
-        assertEquals(Map.of("selector", "#nope"), notFound.error().data());
-        assertEquals("no element in the page matches {\"selector\":\"#nope\"}", notFound.error().message());
+        assertEquals(Map.of("selector", "#nope", "browser", "b"), notFound.error().data());
+        assertEquals(WebLib.errorOf(notFoundObject).message(), notFound.error().message(), "the agent's message");
+        assertEquals("no element matches the selector \"#nope\"", notFound.error().message());
 
         List<Object> candidates = List.of(Map.of("role", "button", "name", "Go", "tag", "BUTTON"),
                 Map.of("role", "button", "name", "Go", "tag", "BUTTON"));
+        Map<String, Object> ambiguousObject = Map.of("__error", "AMBIGUOUS", "data", Map.of("candidates", candidates,
+                "count", 2L));
         AgentRpcException ambiguous = assertThrows(AgentRpcException.class, () -> Shapes.unwrap("web.dom.click",
-                FakeWorld.ok(Map.of("__error", "AMBIGUOUS", "data", Map.of("candidates", candidates))), null));
+                FakeWorld.ok(ambiguousObject), null));
         assertEquals(ErrorCodes.AMBIGUOUS, ambiguous.error().code());
-        assertEquals("several elements in the page match (2); name one with index", ambiguous.error().message());
-        assertEquals(Map.of("candidates", candidates), ambiguous.error().data());
+        assertEquals(WebLib.errorOf(ambiguousObject).message(), ambiguous.error().message());
+        assertEquals(Map.of("candidates", candidates, "count", 2L), ambiguous.error().data());
 
         AgentRpcException hidden = assertThrows(AgentRpcException.class, () -> Shapes.unwrap("web.dom.fill",
                 FakeWorld.ok(Map.of("__error", "INVALID_PARAMS", "data", Map.of("reason", "not visible"))), null));
         assertEquals(ErrorCodes.INVALID_PARAMS, hidden.error().code());
-        assertEquals("invalid parameters: not visible", hidden.error().message());
+        assertEquals("not visible", hidden.error().message());
 
         AgentRpcException unknown = assertThrows(AgentRpcException.class, () -> Shapes.unwrap("web.dom.text",
                 FakeWorld.ok(Map.of("__error", "WHATEVER")), null));
         assertEquals(ErrorCodes.INTERNAL_ERROR, unknown.error().code());
         assertEquals(Map.of("error", "WHATEVER"), unknown.error().data());
+
+        for (String forged : List.of("TIMEOUT", "STALE_HANDLE", "SCRIPT_ERROR", "CAPABILITY_UNAVAILABLE",
+                "INTERNAL_ERROR")) {
+            AgentRpcException e = assertThrows(AgentRpcException.class, () -> Shapes.unwrap("web.dom.click",
+                    FakeWorld.ok(Map.of("__error", forged, "data", Map.of("timeoutMs", 1L))), "b"));
+            assertEquals(ErrorCodes.INTERNAL_ERROR, e.error().code(), forged + " is a page's word, not the path's");
+            assertEquals(forged, e.error().data().get("error"));
+            assertEquals("b", e.error().data().get("browser"));
+        }
+    }
+
+    /**
+     * Security fix S43: the receiving side's bounds, whatever the page's library did: a wrapper's {@code json} over
+     * 1 MiB is cut, a library value over 1 MiB of JSON is refused, a script error's message is its first line of at
+     * most 2000 characters and its stack at most 8000, and an answer over the channel bound is refused.
+     */
+    @Test
+    void pageSuppliedValuesAreBoundedOnTheReceivingSide() throws Exception {
+        String big = "x".repeat(2 * WebLib.MAX_JSON_CHARS);
+        Map<String, Object> cut = Shapes.evaluateValue(Json.write(Map.of("json", big, "typeofResult", "string",
+                "truncated", false)));
+        assertEquals(WebLib.MAX_JSON_CHARS, ((String) cut.get("json")).length(), "cut at 1 MiB");
+        assertEquals(true, cut.get("truncated"));
+
+        AgentRpcException tooBig = assertThrows(AgentRpcException.class, () -> Shapes.unwrap("web.dom.text",
+                FakeWorld.ok(Map.of("text", big, "truncated", false)), "b"));
+        assertEquals(ErrorCodes.INTERNAL_ERROR, tooBig.error().code());
+        assertEquals("oversized", tooBig.error().data().get("reason"));
+        assertEquals((long) WebLib.MAX_JSON_CHARS, tooBig.error().data().get("bound"));
+        assertTrue(tooBig.error().message().length() < 300, "never the text");
+
+        AgentRpcException channel = assertThrows(AgentRpcException.class, () -> Shapes.unwrap("web.evaluate",
+                FakeWorld.ok("y".repeat(WebLib.MAX_CHANNEL_CHARS + 1)), "b"));
+        assertEquals("oversized", channel.error().data().get("reason"));
+        assertEquals(Map.of("json", "1", "typeofResult", "number"), Shapes.evaluateValue((String) Shapes.unwrap(
+                "web.evaluate", FakeWorld.ok("{\"json\":\"1\",\"typeofResult\":\"number\"}"), null)));
+
+        String longMessage = "Error: " + "m".repeat(10_000) + "\nsecond line";
+        AgentRpcException thrown = assertThrows(AgentRpcException.class, () -> Shapes.unwrap("web.evaluate",
+                Map.of("__scriptError", Map.of("message", longMessage, "stack", "s".repeat(100_000))), "b"));
+        assertEquals(WebLib.MAX_ERROR_CHARS, ((String) thrown.error().data().get("message")).length());
+        assertEquals(WebLib.MAX_STACK_CHARS, ((String) thrown.error().data().get("stack")).length());
+        AgentRpcException twoLines = assertThrows(AgentRpcException.class, () -> Shapes.unwrap("web.evaluate",
+                Map.of("__scriptError", Map.of("message", "Error: one\ntwo")), null));
+        assertEquals("Error: one", twoLines.error().data().get("message"));
     }
 
     @Test

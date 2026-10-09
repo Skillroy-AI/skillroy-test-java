@@ -316,10 +316,11 @@ intact; from 1025 the load is refused with an `IOException` on the attaching sid
 | `hooks.detachBudgetMs` | `8000` | **(Phase 6, HK; P6 §3.5, §3.7.)** the restore budget of the hooks module's uninstall; 1000 to 9000 |
 | `hooks.capture.maxBytes` | `16384` | **(Phase 6, HK; P6 §4.3.)** the input budget of one `CAPTURE` event's encoding, also its output bound; 1024 to 1 MiB |
 | `mainClassGuard` | – | JAVAAGENT only: start only if the system property `sun.java.command` names this launch target (lets `JAVA_TOOL_OPTIONS` inject the agent into one JVM of a process tree). **S17 (1.x, built 2026-10-02):** the guard must match the whole launch target (the main class, or the jar path for `-jar`): the command, trimmed, equals the trimmed value or continues with white space directly after it. A value that is only a prefix of a longer main-class name does not match |
-| `readOnly` | `false` | reject primitives whose spec is `mutating` |
+| `readOnly` | `false` | reject primitives whose spec is `mutating` **or `script`** (Phase 6 security fix S42, A44, built 2026-10-09, SR; P6 D156: a `script` primitive evaluates a caller's expression in the target, `web.evaluate` and `web.waitFlag`) |
 | `discoveryDir` | `${java.io.tmpdir}/skillroy-<user>` | where discovery and token files are written; a per-user directory, see §2.5. **S8/S19 (1.x, built 2026-10-02):** when the option is absent and the default is occupied by another user, the fall-back `<user.home>/.skillroy/run` is used (§2.5); a directory named explicitly is never substituted |
 | `readyTimeoutMs` | `120000` | how long to wait for `ReadinessSource`s before reporting `target.ready` UNAVAILABLE (the agent keeps polling, §5); at most one day |
 | `eventRing` | `10000` | event ring-buffer size; at most 1000000 |
+| `eventRingChars` | `67108864` | **(Phase 6 security fix S43, A45, built 2026-10-09, SR.)** the ring is bounded by the total characters of its events' payloads as well as by `eventRing` (64 Mi characters by default; 1 Mi to 1 Gi): the oldest events leave first, and an event whose own payload exceeds the bound is published with `truncated: true` and each of its strings cut to 1/64 of the bound (or, when still over, with the payload `{truncated: true}` alone). A payload's size is the sum of its keys' and strings' characters and 8 for every other value |
 | `httpThreads` | `32` | the most threads the control server's pool may have (2 to 1024), see §5. **H1 (1.x, built 2026-10-02):** with one thread per connection it is also the most connections that can be open; the `WORKER` and `CALLER` pools are sized from it (S30, §5) |
 | `httpIdleTimeoutMs` | `120000` | **H1 (1.x, built 2026-10-02).** How long an authenticated kept-alive connection may wait idle for its next request head before the agent closes it (§5 "Control server"). Validated at start to 100 to 3600000 ms (one hour at most, because an idle connection holds one of the `httpThreads` threads; `AgentRuntime`, confirmed against the code 2026-10-02). The default is deliberately longer than the controller's HTTP client keep-alive (30 s), so that the client, not the agent, retires an idle connection and a request never meets a connection the agent has just closed |
 | `redact` | – | a regular expression (case-insensitive) naming further secret keys, see "Secret redaction" in §5; validated and read at start |
@@ -649,6 +650,10 @@ public final class PrimitiveDescriptor {
     public PrimitiveDescriptor(String name, String description, Map<String,Object> paramsSchema,
         Map<String,Object> resultSchema, String thread, long timeoutMs, String capabilityId,
         boolean mutating, boolean destructive);
+    // (Phase 6 security fix S42, A44, built 2026-10-09, SR; P6 D156) a second constructor with a trailing
+    // boolean script: "evaluates a caller's expression in the target" (web.evaluate, web.waitFlag); script() reads it.
+    // JSON key "script", optional, default false (Wire.optBool), written only when true, so that an older reader and
+    // the catalogue of an older agent are unchanged; the read-only gate (§5, gate 2) refuses it as it refuses mutating.
     /* getters */  public Map<String,Object> toJson();  public static PrimitiveDescriptor fromJson(Map<String,Object> json);
 }
 
@@ -756,6 +761,8 @@ public final class PrimitiveSpec {
         public Builder timeoutMs(long ms);                              // default 10000
         public Builder capability(String capabilityId);                 // call fails fast when UNAVAILABLE
         public Builder mutating();  public Builder destructive();       // destructive implies mutating, needs confirm
+        public Builder script();   // (Phase 6 security fix S42, A44, built 2026-10-09, SR; P6 D156) evaluates a
+                                   // caller's expression in the target; refused in read-only mode; implies nothing else
         public PrimitiveSpec build();
     }
     /* getters */  public PrimitiveDescriptor describe();
@@ -1260,7 +1267,8 @@ method, `params` and `_meta` checks and before any gate of step 2, and honoured 
 
 1. a request that is not an object, lacks `"jsonrpc":"2.0"` or a string `method`, or an empty batch ->
    `INVALID_REQUEST`; unknown method -> `METHOD_NOT_FOUND`; `params` not an object -> `INVALID_PARAMS`.
-2. `readOnly` and spec `mutating` -> `READ_ONLY`. Spec `destructive` and `_meta.confirm != true` -> `CONFIRM_REQUIRED`.
+2. `readOnly` and spec `mutating` **or `script`** (Phase 6 security fix S42, A44, built 2026-10-09, SR; P6 D156)
+   -> `READ_ONLY`. Spec `destructive` and `_meta.confirm != true` -> `CONFIRM_REQUIRED`.
    Spec `mutating` while the target is not yet ready (readiness sources pending, or the production-marker check not
    yet passed) -> `NOT_READY`. `agent.disable` is exempt from `READ_ONLY` and `NOT_READY`; it still needs
    `_meta.confirm`.
@@ -1575,7 +1583,14 @@ boundary is the data source the provider hands out). A small tokenizer, never a 
 4. outside literals, quoted identifiers and comments, none of the words `INSERT`, `UPDATE`, `DELETE`, `MERGE`,
    `TRUNCATE`, `DROP`, `ALTER`, `CREATE`, `GRANT`, `REVOKE`, `DENY`, `CALL`, `EXEC`, `EXECUTE`, `INTO`, `SHUTDOWN`,
    `KILL`, `BACKUP`, `RESTORE`, `DBCC`, `UPDATETEXT`, `WRITETEXT`, `RECONFIGURE`, `SETUSER`. That rejects
-   data-changing CTEs, `SELECT … INTO`, `FOR UPDATE`, data-change table references and batches that need no `;`.
+   data-changing CTEs, `SELECT … INTO`, `FOR UPDATE`, data-change table references and batches that need no `;`
+   **when they carry one of these words or a T-SQL transaction, control-of-flow or lock-hint word; `FOR SHARE`,
+   `FOR KEY SHARE` and `LOCK IN SHARE MODE` are rejected as word sequences (Phase 6 security fix S36, A41, built
+   2026-10-09, SR)**: the words `BEGIN`, `COMMIT`, `ROLLBACK`, `SAVE`, `DECLARE`, `WAITFOR`, `RAISERROR`, `THROW`,
+   `PRINT`, `GOTO`, `USE`, `CHECKPOINT`, `RECEIVE`, `SEND`, `OPENROWSET`, `OPENQUERY`, `OPENDATASOURCE`, `HOLDLOCK`,
+   `TABLOCK`, `TABLOCKX`, `XLOCK`, `UPDLOCK`, `PAGLOCK` are added to the list, and the sequences are matched on the
+   same tokens in every reading; `SET` is not a forbidden word (MySQL's `CAST(x AS CHAR CHARACTER SET utf8mb4)` stays
+   admitted).
    `TRUNCATE(` and `INSERT(` are the scalar functions and are allowed; an identifier that is one of these words
    must be quoted.
 
@@ -2229,7 +2244,12 @@ checked every 1024 character reads: one budget per matcher evaluation, and one p
 elements of a filtered list. A regex that runs longer, or that recurses too deeply (a `StackOverflowError`, reported
 as "the regex recurses too deeply…"), is stopped, and a subject over 1 Mi characters is rejected, never truncated;
 the expectation then does not hold and its message says why. It is retried like any other, so the step ends at its
-timeout as an ordinary `FAIL` / `ASSERTION`.
+timeout as an ordinary `FAIL` / `ASSERTION`. **The same bound applies to the web module's `by.url` and `by.title`
+and to the CDP path's selection (Phase 6 security fix S46, A48, built 2026-10-09, SR)**: one budget of 1000 ms per
+selection (never more than the call has left), checked every 1024 character reads, a `StackOverflowError` caught, a
+subject over 1 Mi characters refused before the search, through the shared Java 8 class
+`ai.skillroy.testjava.protocol.text.BoundedRegex`; a search that runs out is `INVALID_PARAMS` with `data {param:
+"by.url" | "by.title", reason: "regex too slow"}` (`"text too long"` for the subject) on both paths.
 
 **Guarded expectations.** A matcher object may carry `capability: <id>` next to its matcher key (in plan.json:
 `{"path":…, "matcher":…, "capability": id}`). If that capability is not `OK` on this target the expectation is not

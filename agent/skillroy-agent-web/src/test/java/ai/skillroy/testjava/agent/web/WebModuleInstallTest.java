@@ -44,7 +44,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * The module's install (phase4-contracts.md section 4.1; section 12.1 item 3): headless, every capability
  * UNAVAILABLE with the right reasons, the thirteen primitives of the table with the contract's thread, timeout,
- * capability and mutating flag (D51), no AWT and no vendor class requested at install (a recording class loader), no
+ * capability, mutating flag (D51) and script flag (D156), no AWT and no vendor class requested at install (a recording class loader), no
  * thread started, and nothing done at readiness in a target without an embedded browser.
  */
 class WebModuleInstallTest {
@@ -54,6 +54,8 @@ class WebModuleInstallTest {
             "web.reload", "web.resize", "web.tap", "web.waitFlag");
     private static final Set<String> MUTATING = new HashSet<String>(Arrays.asList("web.evaluate", "web.dom.click",
             "web.dom.fill", "web.dispatchEvent", "web.tap", "web.resize", "web.reload"));
+    /** phase6-contracts.md 12.9, D156 (security fix S42): the primitives that evaluate a caller's expression. */
+    private static final Set<String> SCRIPT = new HashSet<String>(Arrays.asList("web.evaluate", "web.waitFlag"));
 
     @Test
     void theModuleIsFoundByServiceLoaderWithItsIdAndVersion() {
@@ -104,6 +106,8 @@ class WebModuleInstallTest {
                 names.add(spec.name());
                 assertEquals(ThreadPolicy.WORKER, spec.thread(), spec.name());
                 assertEquals(MUTATING.contains(spec.name()), spec.mutating(), spec.name() + " mutating (D51)");
+                assertEquals(SCRIPT.contains(spec.name()), spec.script(), spec.name() + " script (D156)");
+                assertEquals(SCRIPT.contains(spec.name()), spec.describe().script(), spec.name() + " in /schema");
                 assertFalse(spec.destructive(), spec.name());
                 long timeout = "web.bitmap".equals(spec.name()) ? 20000 : "web.cdp.status".equals(spec.name())
                         ? 5000 : 10000;

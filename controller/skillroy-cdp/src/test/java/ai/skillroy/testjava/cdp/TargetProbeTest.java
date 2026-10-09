@@ -152,8 +152,127 @@ class TargetProbeTest {
         TargetProbe probe = TargetProbe.run(devTools.endpoint(), options(DEADLINE_MS));
         TargetProbe.Target n = probe.targets().get(0);
         assertEquals("ws://" + devTools.endpoint().authority() + "/devtools/page/N", n.webSocketDebuggerUrl());
-        assertFalse(n.responsive(), "the fake's HTTP server does not speak WebSocket: " + n);
-        assertTrue(n.error().startsWith("did not open its WebSocket"), n.error());
+        assertTrue(n.responsive(), "the endpoint serves its targets' sockets on its own port: " + n);
+        assertEquals(1, devTools.requestsTo("N"));
+    }
+
+    /**
+     * Security fix S44: a {@code webSocketDebuggerUrl} at another host or port, or of another scheme, is replaced by
+     * the endpoint's own {@code ws://<authority>/devtools/page/<id>}: the probe never dials a host the list names.
+     */
+    @Test
+    void aListedWebSocketAtAnotherHostIsProbedAtTheEndpointsOwnAuthority() throws Exception {
+        devTools.page("F", Behaviour.ANSWER);
+        devTools.targets.get(0).put("webSocketDebuggerUrl", "ws://198.51.100.7:9/devtools/page/F");
+        devTools.page("G", Behaviour.ANSWER);
+        devTools.targets.get(1).put("webSocketDebuggerUrl", "wss://" + devTools.endpoint().authority()
+                + "/devtools/page/G");
+        devTools.page("U", Behaviour.ANSWER);
+        devTools.targets.get(2).put("webSocketDebuggerUrl", "ws://user@" + devTools.endpoint().authority()
+                + "/devtools/page/U");
+        TargetProbe probe = TargetProbe.run(devTools.endpoint(), options(DEADLINE_MS));
+        for (TargetProbe.Target t : probe.targets()) {
+            assertEquals("ws://" + devTools.endpoint().authority() + "/devtools/page/" + t.id(),
+                    t.webSocketDebuggerUrl(), t.toString());
+            assertTrue(t.responsive(), "dialled at the endpoint, which answers: " + t);
+            assertEquals(1, devTools.requestsTo(t.id()), t.id());
+        }
+        assertTrue(TargetProbe.atEndpoint("ws://" + devTools.endpoint().authority() + "/devtools/page/X",
+                devTools.endpoint()));
+        assertFalse(TargetProbe.atEndpoint("ws://127.0.0.1:1/devtools/page/X", devTools.endpoint()));
+        assertFalse(TargetProbe.atEndpoint("not a url", devTools.endpoint()));
+    }
+
+    /**
+     * Security fix S44: a {@code /json/version} body over 64 KiB is {@code PROTOCOL}, refused by its
+     * {@code Content-Length} before the body is read, or, without one, read no further than the bound; the 16 MiB
+     * body is never read whole.
+     */
+    @Test
+    void anOversizedVersionAnswerIsAProtocolErrorReadOnlyToItsBound() {
+        for (boolean declared : new boolean[] {true, false}) {
+            devTools.versionBytes = 16L << 20;
+            devTools.versionDeclared = declared;
+            devTools.versionWritten.set(0);
+            long start = System.nanoTime();
+            CdpException e = assertThrows(CdpException.class, () -> TargetProbe.run(devTools.endpoint(),
+                    options(5000)));
+            long ms = (System.nanoTime() - start) / 1_000_000;
+            assertEquals(CdpException.Kind.PROTOCOL, e.kind(), e.getMessage());
+            assertTrue(e.getMessage().endsWith("/json/version: the answer exceeds 65536 bytes"), e.getMessage());
+            assertTrue(ms < 5000, "not read whole: " + ms + " ms");
+            assertTrue(devTools.versionWritten.get() < (16L << 20), "the fake could not write it all: "
+                    + devTools.versionWritten.get());
+        }
+    }
+
+    /** Security fix S44: the bounded body reader stops at its bound, one buffer at a time, and keeps nothing. */
+    @Test
+    void theBoundedBodyReaderStopsAtItsBound() throws Exception {
+        TargetProbe.CappedBody body = new TargetProbe.CappedBody(100, -1);
+        java.util.concurrent.atomic.AtomicLong requested = new java.util.concurrent.atomic.AtomicLong();
+        java.util.concurrent.atomic.AtomicInteger cancelled = new java.util.concurrent.atomic.AtomicInteger();
+        body.onSubscribe(new java.util.concurrent.Flow.Subscription() {
+            @Override
+            public void request(long n) {
+                requested.addAndGet(n);
+            }
+
+            @Override
+            public void cancel() {
+                cancelled.incrementAndGet();
+            }
+        });
+        assertEquals(1, requested.get(), "one buffer at a time");
+        body.onNext(List.of(java.nio.ByteBuffer.wrap(new byte[60])));
+        assertEquals(2, requested.get());
+        body.onNext(List.of(java.nio.ByteBuffer.wrap(new byte[60])));
+        assertEquals(1, cancelled.get(), "cancelled past the bound");
+        assertEquals(2, requested.get(), "nothing more requested");
+        assertTrue(body.getBody().toCompletableFuture().isCompletedExceptionally());
+        TargetProbe.CappedBody declared = new TargetProbe.CappedBody(100, 101);
+        declared.onSubscribe(new java.util.concurrent.Flow.Subscription() {
+            @Override
+            public void request(long n) {
+                requested.addAndGet(1000);
+            }
+
+            @Override
+            public void cancel() {
+                cancelled.incrementAndGet();
+            }
+        });
+        assertEquals(2, cancelled.get(), "a declared length over the bound is refused before any read");
+        assertEquals(2, requested.get());
+    }
+
+    /** Security fix S44: a list of more than 1000 targets is {@code PROTOCOL}; 1000 are listed. */
+    @Test
+    void aListOfMoreThanAThousandTargetsIsAProtocolError() throws Exception {
+        StringBuilder list = new StringBuilder("[");
+        for (int i = 0; i < 1001; i++) {
+            list.append(i == 0 ? "" : ",").append("{\"id\":\"W").append(i).append("\",\"type\":\"service_worker\"}");
+        }
+        devTools.listBody = list.append("]").toString();
+        CdpException e = assertThrows(CdpException.class, () -> TargetProbe.run(devTools.endpoint(),
+                options(DEADLINE_MS)));
+        assertEquals(CdpException.Kind.PROTOCOL, e.kind());
+        assertTrue(e.getMessage().endsWith("/json/list: it names 1001 targets, more than 1000"), e.getMessage());
+        devTools.listBody = devTools.listBody.replace(",{\"id\":\"W1000\",\"type\":\"service_worker\"}", "");
+        assertEquals(1000, TargetProbe.run(devTools.endpoint(), options(DEADLINE_MS)).targets().size());
+    }
+
+    /** Security fix S43: a listed URL and title, and the browser version, are cut at 4096 characters. */
+    @Test
+    void longListedTextsAreCut() throws Exception {
+        devTools.page("L", Behaviour.ANSWER);
+        devTools.targets.get(0).put("title", "t".repeat(100_000));
+        devTools.targets.get(0).put("url", "data:," + "u".repeat(100_000));
+        devTools.versionBody = "{\"Browser\":\"" + "b".repeat(50_000) + "\"}";
+        TargetProbe probe = TargetProbe.run(devTools.endpoint(), options(DEADLINE_MS));
+        assertEquals(4096, probe.targets().get(0).title().length());
+        assertEquals(4096, probe.targets().get(0).url().length());
+        assertEquals(4096, probe.browserVersion().length());
     }
 
     @Test

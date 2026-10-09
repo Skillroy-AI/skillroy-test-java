@@ -160,8 +160,9 @@ final class BindArgs {
      * @throws CredentialsException if a file was named and is missing, or is unreadable, malformed or too open
      */
     static Credentials credentials(Settings settings) throws CredentialsException {
-        Path file = Credentials.locate(settings.credentialsFile(), settings.root(), settings.envId());
-        return file == null ? Credentials.empty() : Credentials.load(file);
+        // S38: a value of $SKILLROY_CREDENTIALS or -Dskillroy.credentials that is not a file name is refused, and the
+        // file it names is named by the variable or the property in messages, never by its value.
+        return Credentials.loadFound(Credentials.find(settings.credentialsFile(), settings.root(), settings.envId()));
     }
 
     /**

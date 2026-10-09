@@ -19,6 +19,7 @@ package ai.skillroy.testjava.protocol.web;
 import ai.skillroy.testjava.protocol.ErrorCodes;
 import ai.skillroy.testjava.protocol.Json;
 import ai.skillroy.testjava.protocol.RpcError;
+import ai.skillroy.testjava.protocol.text.TextBounds;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -123,6 +124,30 @@ public final class WebLib {
      * this many UTF-16 code units.
      */
     public static final int MAX_ERROR_CHARS = 2000;
+
+    /**
+     * The receiving side's bound of a page-supplied {@code url}, {@code title}, frame URL, console {@code source},
+     * load {@code error} or browser version (phase4-contracts.md 4.6, security fix S43).
+     */
+    public static final int MAX_URL_CHARS = 4096;
+
+    /** The receiving side's bound of a script error's {@code stack} (S43; phase4-contracts.md 5.2 already cut it). */
+    public static final int MAX_STACK_CHARS = 8000;
+
+    /**
+     * The longest raw text an adapter's channel may deliver for one answer or event (S43): a value the library cuts at
+     * {@link #MAX_JSON_CHARS} crosses the channel JSON-escaped twice (as the wrapper's string, then inside the
+     * channel's own message), at most six characters per character when the channel escapes non-ASCII text, plus
+     * 64 KiB for the envelope. Anything longer was not made by the genuine library and is refused before it is
+     * parsed ({@link #oversized}).
+     */
+    public static final int MAX_CHANNEL_CHARS = 6 * MAX_JSON_CHARS + (1 << 16);
+
+    /**
+     * The {@code maxChars} both paths pass to the library's {@code drain} (S43): a drain answers at most about this
+     * much JSON and keeps the rest for the next one ({@code more: true}).
+     */
+    public static final int DRAIN_CHARS = 900000;
 
     private static final String LIB = "window[" + SLOT + "]";
 
@@ -323,6 +348,50 @@ public final class WebLib {
             end = Character.isHighSurrogate(text.charAt(MAX_ERROR_CHARS - 1)) ? MAX_ERROR_CHARS - 1 : MAX_ERROR_CHARS;
         }
         return text.substring(0, end);
+    }
+
+    /**
+     * The text cut at {@code max} UTF-16 code units, never inside a surrogate pair; null for null (security fix S43:
+     * the receiving side's cut of a page-supplied text, whatever the library did).
+     */
+    public static String cut(String text, int max) {
+        return TextBounds.cut(text, max);
+    }
+
+    /**
+     * The {@code INTERNAL_ERROR} of a page-supplied answer or value over its bound (S43), the same on both paths:
+     * {@code "<what> exceeds <bound> characters"} with {@code data {reason: "oversized", bound}}; never any of the
+     * text.
+     */
+    public static RpcError oversized(String what, long bound) {
+        Map<String, Object> data = new LinkedHashMap<String, Object>();
+        data.put("reason", "oversized");
+        data.put("bound", Long.valueOf(bound));
+        return new RpcError(ErrorCodes.INTERNAL_ERROR, what + " exceeds " + bound + " characters (a page may replace"
+                + " the script library; the bound is the receiving side's)", data);
+    }
+
+    /** A script error's {@code message} as both paths report it (S43): its first line, cut by {@link #errorLine}. */
+    public static String scriptMessage(String message) {
+        return errorLine(message);
+    }
+
+    /** A script error's {@code stack} as both paths report it (S43): cut at {@link #MAX_STACK_CHARS}; "" for null. */
+    public static String scriptStack(String stack) {
+        return stack == null ? "" : TextBounds.cut(stack, MAX_STACK_CHARS);
+    }
+
+    /**
+     * True when a tap event's {@code detail} exceeds {@link #MAX_DETAIL_CHARS} by the estimate of {@link TextBounds}
+     * (S43): the receiving side then keeps {@link #cutDetail} of it, with {@code truncated: true}, as the library would.
+     */
+    public static boolean detailTooLong(Object detail) {
+        return TextBounds.exceeds(detail, MAX_DETAIL_CHARS);
+    }
+
+    /** The JSON text of a {@code detail}, cut at {@link #MAX_DETAIL_CHARS}: what the library keeps of a long one. */
+    public static String cutDetail(Object detail) {
+        return TextBounds.cut(Json.write(detail), MAX_DETAIL_CHARS);
     }
 
     /**

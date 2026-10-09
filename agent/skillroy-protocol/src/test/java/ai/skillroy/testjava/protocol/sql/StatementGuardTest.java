@@ -235,6 +235,59 @@ class StatementGuardTest {
         assertTrue(reason.contains(expectedReason), "reason for [" + sql + "] was: " + reason);
     }
 
+    /**
+     * Security fix S36 (P1 6): T-SQL batch continuations without {@code ;}, lock hints and locking reads are rejected
+     * in every reading; {@code SET} is not a forbidden word, so MySQL's character-set cast stays admitted.
+     */
+    @ParameterizedTest
+    @ValueSource(strings = {
+        "SELECT 1 BEGIN TRAN SELECT 2",
+        "SELECT 1 COMMIT",
+        "SELECT 1 ROLLBACK TRANSACTION",
+        "SELECT 1 SAVE TRANSACTION s1",
+        "SELECT 1 DECLARE @x INT",
+        "SELECT 1 WAITFOR DELAY '00:01:00'",
+        "SELECT 1 RAISERROR('x', 16, 1)",
+        "SELECT 1 THROW 50000, 'x', 1",
+        "SELECT 1 PRINT 'x'",
+        "SELECT 1 GOTO done",
+        "SELECT 1 USE master",
+        "SELECT 1 CHECKPOINT",
+        "SELECT 1 RECEIVE * FROM q",
+        "SELECT 1 SEND ON CONVERSATION @h",
+        "SELECT * FROM OPENROWSET('SQLNCLI', 'Server=x;', 'SELECT 1')",
+        "SELECT * FROM OPENQUERY(remote, 'SELECT 1')",
+        "SELECT * FROM OPENDATASOURCE('SQLNCLI', 'Data Source=x').db.dbo.t",
+        "SELECT * FROM item WITH (HOLDLOCK)",
+        "SELECT * FROM item WITH (TABLOCK)",
+        "SELECT * FROM item WITH (TABLOCKX)",
+        "SELECT * FROM item WITH (XLOCK)",
+        "SELECT * FROM item WITH (UPDLOCK)",
+        "SELECT * FROM item WITH (PAGLOCK)",
+        "SELECT * FROM item FOR SHARE",
+        "SELECT * FROM item for key share",
+        "SELECT * FROM item FOR /* c */ SHARE",
+        "SELECT * FROM item LOCK IN SHARE MODE",
+        "SELECT * FROM item lock\nin share\tmode",
+    })
+    void rejectsTransactionControlAndLockingWords(String sql) {
+        assertNotNull(rejectionReason(sql), "accepted: " + sql);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+        "SELECT CAST(x AS CHAR CHARACTER SET utf8mb4) FROM t",
+        "SELECT 'BEGIN TRAN; COMMIT' FROM t",
+        "SELECT \"share\", \"for\" FROM t",
+        "SELECT used, saved, sender, printed, begins, mode FROM t",
+        "SELECT * FROM item WHERE label = 'FOR SHARE'",
+        "SELECT share FROM t",
+        "SELECT 'for' || share FROM t",
+    })
+    void admitsTheWordsWhereTheyAreNotStatements(String sql) {
+        assertNull(rejectionReason(sql), sql);
+    }
+
     @Test
     void rejectsNull() {
         assertEquals("empty statement", rejectionReason(null));

@@ -45,7 +45,12 @@ m2="${SKILLROY_M2:-$HOME/.m2}"
 # Maven is pure Java: reuse the host installation ("Maven home" as reported by mvn itself) instead of baking one in.
 mvn_home="${SKILLROY_MAVEN_HOME:-$(mvn -v 2>/dev/null | sed -n 's/^Maven home: //p')}"
 mounts=(-v "$repo:$repo" -v "$m2:/root/.m2" -w "$PWD")
-env=(-e "MAVEN_OPTS=${MAVEN_OPTS:-}")
+# Every variable taken from this environment reaches the container by name only: "-e NAME" without a value makes
+# docker copy it, so no value of it is ever on the docker command line, where another user's `ps` would show it
+# (Phase 6 security fix S39: MAVEN_OPTS may carry a -D password or a proxy credential). The only values the script
+# writes on the command line are the fixed PATHs it builds below.
+env=()
+if [ -n "${MAVEN_OPTS:-}" ]; then env+=(-e MAVEN_OPTS); fi
 if [ -n "$mvn_home" ] && [ -d "$mvn_home" ]; then
   mounts+=(-v "$mvn_home:/opt/maven:ro")
   env+=(-e "PATH=/opt/maven/bin:/opt/java/openjdk/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
@@ -68,8 +73,8 @@ if [ -n "${SKILLROY_CLAUDE_BIN:-}" ] && [ -x "$SKILLROY_CLAUDE_BIN/claude" ]; th
   fi
 fi
 if [ "${SKILLROY_NO_XVFB:-0}" = "1" ]; then
-  exec docker run --rm --init --platform "$platform" "${mounts[@]}" "${env[@]}" "$image" "$@"
+  exec docker run --rm --init --platform "$platform" "${mounts[@]}" ${env[@]+"${env[@]}"} "$image" "$@"
 fi
 # --init: xvfb-run waits for a signal from Xvfb that never arrives when xvfb-run itself is PID 1.
-exec docker run --rm --init --platform "$platform" "${mounts[@]}" "${env[@]}" "$image" \
+exec docker run --rm --init --platform "$platform" "${mounts[@]}" ${env[@]+"${env[@]}"} "$image" \
   xvfb-run -a -s "-screen 0 1024x768x24 -nolisten tcp" "$@"

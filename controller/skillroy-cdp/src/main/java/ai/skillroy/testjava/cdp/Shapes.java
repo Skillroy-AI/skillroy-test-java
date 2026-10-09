@@ -21,11 +21,12 @@ import ai.skillroy.testjava.protocol.ErrorCodes;
 import ai.skillroy.testjava.protocol.Json;
 import ai.skillroy.testjava.protocol.JsonException;
 import ai.skillroy.testjava.protocol.RpcError;
+import ai.skillroy.testjava.protocol.text.TextBounds;
+import ai.skillroy.testjava.protocol.web.WebLib;
 
 import java.io.IOException;
 import java.util.Base64;
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
 
 /**
@@ -34,14 +35,19 @@ import java.util.Map;
  * AgentRpcException}s with the agent's codes, which is what {@code AgentConnection.call} throws, so the executor maps
  * them unchanged.
  *
+ * <p>Every bound of phase4-contracts.md 4.6 is enforced here as well, on the receiving side (security fix S43): a page
+ * may replace the library, so its own cuts are not the guarantee. A guarded result whose JSON text exceeds {@link
+ * WebLib#MAX_CHANNEL_CHARS} is refused, and so is a library value (anything but the {@code web.evaluate} wrapper's
+ * text) over {@link WebLib#MAX_JSON_CHARS}, both as {@code INTERNAL_ERROR {reason: "oversized"}}; the wrapper's
+ * {@code json} is cut at {@link WebLib#MAX_JSON_CHARS} ({@code truncated: true}); a script error's {@code message} is
+ * its first line, at most 2000 characters, and its {@code stack} at most 8000. A library error object maps through
+ * {@link WebLib#errorOf}, the agent path's one mapping (security fix S47): only {@code NOT_FOUND}, {@code AMBIGUOUS}
+ * and {@code INVALID_PARAMS} keep their codes, any other name a page writes is {@code INTERNAL_ERROR} with
+ * {@code data.error}.
+ *
  * <p>Stateless.
  */
 final class Shapes {
-
-    /** Error codes the page library may name in an {@code __error} object. */
-    private static final Map<String, Integer> LIBRARY_CODES = codes(ErrorCodes.NOT_FOUND, ErrorCodes.AMBIGUOUS,
-            ErrorCodes.INVALID_PARAMS, ErrorCodes.SCRIPT_ERROR, ErrorCodes.STALE_HANDLE, ErrorCodes.TIMEOUT,
-            ErrorCodes.INTERNAL_ERROR, ErrorCodes.CAPABILITY_UNAVAILABLE);
 
     private Shapes() {
     }
@@ -53,6 +59,10 @@ final class Shapes {
      * @throws IllegalArgumentException if the text is not the wrapper's shape
      */
     static Map<String, Object> evaluateValue(String text) {
+        if (text.length() > WebLib.MAX_CHANNEL_CHARS) {
+            throw new IllegalArgumentException("the wrapper's text exceeds " + WebLib.MAX_CHANNEL_CHARS
+                    + " characters");
+        }
         Map<String, Object> parsed;
         try {
             parsed = Json.parseObject(text);
@@ -63,9 +73,11 @@ final class Shapes {
             throw new IllegalArgumentException("the wrapper's text lacks json or typeofResult");
         }
         Map<String, Object> value = new LinkedHashMap<>();
-        value.put("json", json);
-        value.put("typeofResult", type);
-        if (Boolean.TRUE.equals(parsed.get("truncated"))) {
+        // S43: the receiving side's cut, whatever the page's library did.
+        boolean cut = json.length() > WebLib.MAX_JSON_CHARS;
+        value.put("json", cut ? WebLib.cut(json, WebLib.MAX_JSON_CHARS) : json);
+        value.put("typeofResult", WebLib.cut(type, 64));
+        if (cut || Boolean.TRUE.equals(parsed.get("truncated"))) {
             value.put("truncated", true);
         }
         return value;
@@ -80,6 +92,9 @@ final class Shapes {
      */
     static Object unwrap(String primitive, Object raw, String browserRef) throws AgentRpcException {
         Object value = Values.json(raw);
+        if (TextBounds.exceeds(value, WebLib.MAX_CHANNEL_CHARS)) {
+            throw oversized(primitive, "the page's answer", WebLib.MAX_CHANNEL_CHARS);
+        }
         if (!(value instanceof Map<?, ?> m)) {
             throw error(primitive, ErrorCodes.INTERNAL_ERROR, "the guarded script returned no object",
                     data("path", "cdp"));
@@ -92,22 +107,38 @@ final class Shapes {
                     data("path", "cdp"));
         }
         Object ok = m.get("ok");
-        if (ok instanceof Map<?, ?> lib && lib.get("__error") instanceof String code) {
-            throw libraryError(primitive, code, lib.get("data"));
+        if (!(ok instanceof String) && TextBounds.exceeds(ok, WebLib.MAX_JSON_CHARS)) {
+            // S43: a library value is at most MAX_JSON_CHARS of JSON (the evaluate wrapper's text, a string, is cut
+            // by evaluateValue instead).
+            throw oversized(primitive, "the page library's value", WebLib.MAX_JSON_CHARS);
+        }
+        if (ok instanceof Map<?, ?> lib && lib.get("__error") instanceof String) {
+            throw libraryError(primitive, lib, browserRef);
         }
         return ok;
     }
 
-    /** {@code SCRIPT_ERROR} with {@code data {browser?, message, stack}}. */
+    /** {@code INTERNAL_ERROR {reason: "oversized", bound, path}} (S43), the agent path's shape plus the path. */
+    static AgentRpcException oversized(String primitive, String what, long bound) {
+        RpcError e = WebLib.oversized(what, bound);
+        Map<String, Object> data = new LinkedHashMap<>(e.data());
+        data.put("path", CdpWebPath.ID);
+        return error(primitive, e.code(), e.message(), data);
+    }
+
+    /**
+     * {@code SCRIPT_ERROR} with {@code data {browser?, message, stack}}: the message's first line at most 2000
+     * characters, the stack at most 8000, whatever the page sent (S43).
+     */
     static AgentRpcException scriptError(String primitive, Object detail, String browserRef) {
         String message = "the script threw";
         String stack = "";
         if (detail instanceof Map<?, ?> d) {
-            if (d.get("message") instanceof String s && !s.isEmpty()) {
-                message = s;
+            if (d.get("message") instanceof String s && !WebLib.scriptMessage(s).isEmpty()) {
+                message = WebLib.scriptMessage(s);
             }
             if (d.get("stack") instanceof String s) {
-                stack = s;
+                stack = WebLib.scriptStack(s);
             }
         }
         Map<String, Object> data = new LinkedHashMap<>();
@@ -119,30 +150,25 @@ final class Shapes {
         return error(primitive, ErrorCodes.SCRIPT_ERROR, message, data);
     }
 
-    /** The error a library {@code __error} object names, with the library's {@code data} unchanged. */
-    static AgentRpcException libraryError(String primitive, String codeName, Object rawData) {
-        Integer code = LIBRARY_CODES.get(codeName);
+    /**
+     * The error a library {@code __error} object names, mapped by {@link WebLib#errorOf} as the agent path maps it
+     * (security fix S47): {@code NOT_FOUND}, {@code AMBIGUOUS} and {@code INVALID_PARAMS} with the library's data and
+     * the agent's messages; any other name, {@code TIMEOUT} or {@code STALE_HANDLE} among them, is
+     * {@code INTERNAL_ERROR} with {@code data.error}, so that a page cannot make the executor wait or recover. The
+     * browser's ref is added as {@code data.browser} when known and the data does not name one.
+     *
+     * @param lib the library's {@code {__error, data}} object
+     */
+    static AgentRpcException libraryError(String primitive, Map<?, ?> lib, String browserRef) {
+        RpcError mapped = WebLib.errorOf(lib);
         Map<String, Object> data = new LinkedHashMap<>();
-        if (rawData instanceof Map<?, ?> d) {
-            for (Map.Entry<?, ?> e : d.entrySet()) {
-                data.put(String.valueOf(e.getKey()), e.getValue());
-            }
+        if (mapped.data() != null) {
+            data.putAll(mapped.data());
         }
-        if (code == null) {
-            data.put("error", codeName);
-            return error(primitive, ErrorCodes.INTERNAL_ERROR, "the page library answered an unknown error "
-                    + codeName, data);
+        if (browserRef != null && !data.containsKey("browser")) {
+            data.put("browser", browserRef);
         }
-        String message = switch (code) {
-            case ErrorCodes.NOT_FOUND -> "no element in the page matches " + Json.write(data);
-            case ErrorCodes.AMBIGUOUS -> "several elements in the page match"
-                    + (data.get("candidates") instanceof List<?> l ? " (" + l.size() + ")" : "")
-                    + "; name one with index";
-            case ErrorCodes.INVALID_PARAMS -> "invalid parameters"
-                    + (data.get("reason") instanceof String r ? ": " + r : "");
-            default -> codeName + " from the page library";
-        };
-        return error(primitive, code, message, data);
+        return error(primitive, mapped.code(), mapped.message(), data);
     }
 
     /** An {@link AgentRpcException} for {@code primitive}, the type and shape {@code AgentConnection.call} throws. */
@@ -222,13 +248,5 @@ final class Shapes {
             }
         }
         return m;
-    }
-
-    private static Map<String, Integer> codes(int... codes) {
-        Map<String, Integer> m = new LinkedHashMap<>();
-        for (int code : codes) {
-            m.put(ErrorCodes.name(code), code);
-        }
-        return Map.copyOf(m);
     }
 }

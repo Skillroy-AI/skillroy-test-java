@@ -142,6 +142,73 @@ class EventsAndTapTest {
         }
     }
 
+    /**
+     * Security fix S43: a page that replaced the library cannot push past the bounds: a 70 KiB tap {@code detail} is
+     * kept as its JSON text cut at 64 KiB with {@code truncated: true}, a drain answer over 1 MiB is not published,
+     * and a 100 KiB console source, load URL and load error are cut at 4096 characters.
+     */
+    @Test
+    void pageProducedEventDataIsBoundedOnTheAgent() throws Exception {
+        try (Harness h = harness()) {
+            final java.util.concurrent.atomic.AtomicInteger drains = new java.util.concurrent.atomic.AtomicInteger();
+            browser.responder = new ScriptedBrowser.Responder() {
+                @Override
+                public CompletableFuture<String> answer(WebEval eval) {
+                    String text = eval.expression();
+                    if (text.contains(";return window[" + WebLib.SLOT + "].drain(")) {
+                        int n = drains.incrementAndGet();
+                        if (n == 1) {
+                            return CompletableFuture.completedFuture(ai.skillroy.testjava.protocol.Json.write(
+                                    Harness.args("events", Arrays.asList(Harness.args("name", "desk.big", "detail",
+                                            Harness.args("blob", repeat('d', 70 * 1024)))), "dropped",
+                                            Long.valueOf(0))));
+                        }
+                        if (n == 2) {
+                            return CompletableFuture.completedFuture(ai.skillroy.testjava.protocol.Json.write(
+                                    Harness.args("events", Arrays.asList(Harness.args("name", "desk.huge", "detail",
+                                            repeat('h', 2 << 20))), "dropped", Long.valueOf(0))));
+                        }
+                        return CompletableFuture.completedFuture("{\"events\":[],\"dropped\":0}");
+                    }
+                    return CompletableFuture.completedFuture("{\"installed\":1}");
+                }
+            };
+            long seq = h.ctx.events.lastSeq();
+            h.ctx.map("web.tap", Harness.args("patterns", Arrays.asList("desk.*")));
+            Event tapped = h.ctx.events.awaitTopic("web.tap", seq, null, BOUND_MS);
+            assertNotNull(tapped);
+            assertEquals("desk.big", tapped.payload().get("name"));
+            assertEquals(Boolean.TRUE, tapped.payload().get("truncated"));
+            assertEquals(WebLib.MAX_DETAIL_CHARS, ((String) tapped.payload().get("detail")).length(),
+                    "the detail's JSON text, cut");
+            long deadline = System.currentTimeMillis() + BOUND_MS;
+            while (drains.get() < 3 && System.currentTimeMillis() < deadline) {
+                Thread.sleep(20);
+            }
+            assertTrue(drains.get() >= 3, "the poller went on after the oversized drain");
+            for (Event e : h.ctx.events.since(seq, ai.skillroy.testjava.protocol.TopicFilter.parse("web.tap"), 10)) {
+                assertFalse("desk.huge".equals(e.payload().get("name")), "an oversized drain publishes nothing");
+            }
+            h.ctx.call("web.tap", Harness.args("patterns", Collections.emptyList()));
+
+            seq = h.ctx.events.lastSeq();
+            String longUrl = "app://desk/" + repeat('u', 100 * 1024);
+            browser.fire(WebEvent.console("log", "text", longUrl, 1));
+            browser.fire(WebEvent.loadFailed(null, longUrl, repeat('e', 100 * 1024)));
+            Event console = h.ctx.events.awaitTopic("web.console", seq, null, BOUND_MS);
+            assertEquals(WebLib.MAX_URL_CHARS, ((String) console.payload().get("source")).length());
+            Event load = h.ctx.events.awaitTopic("web.load", seq, null, BOUND_MS);
+            assertEquals(WebLib.MAX_URL_CHARS, ((String) load.payload().get("url")).length());
+            assertEquals(WebLib.MAX_URL_CHARS, ((String) load.payload().get("error")).length());
+        }
+    }
+
+    private static String repeat(char c, int n) {
+        char[] chars = new char[n];
+        Arrays.fill(chars, c);
+        return new String(chars);
+    }
+
     @Test
     void theTapInstallsAnInitScriptArmsTheDocumentAndThePollerPublishesTappedEvents() throws Exception {
         try (Harness h = harness()) {

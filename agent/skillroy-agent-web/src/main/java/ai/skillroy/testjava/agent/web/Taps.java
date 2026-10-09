@@ -78,7 +78,7 @@ final class Taps {
     /** Bound of one {@code drain} evaluation. */
     static final long DRAIN_BOUND_MS = 2000;
     /** The JSON size a {@code drain} returns at most (the library's {@code maxChars}). */
-    static final int DRAIN_CHARS = 900000;
+    static final int DRAIN_CHARS = WebLib.DRAIN_CHARS;
     /** At most this many {@code drain} calls per browser and round. */
     static final int DRAINS_PER_ROUND = 8;
     /** The adapter's bound of one {@code drain}: how long its answer may still come and be published. */
@@ -378,7 +378,7 @@ final class Taps {
             throw Await.map(ex, e, "web.tap", WebCapabilities.EVENTS, boundMs);
         }
         try {
-            return Json.parse(f.get(Math.max(1, boundMs), TimeUnit.MILLISECONDS));
+            return parseBounded(e, f.get(Math.max(1, boundMs), TimeUnit.MILLISECONDS));
         } catch (TimeoutException late) {
             synchronized (this) {
                 outstanding.put(e, Boolean.TRUE);
@@ -416,7 +416,7 @@ final class Taps {
             @Override
             public void run() {
                 try {
-                    published(e, Json.parse(json));
+                    published(e, parseBounded(e, json));
                 } catch (RuntimeException ex) {
                     // an answer that cannot be read publishes nothing
                 }
@@ -444,7 +444,7 @@ final class Taps {
         Map<?, ?> m = (Map<?, ?>) value;
         Object events = m.get("events");
         if (events instanceof List && !((List<?>) events).isEmpty()) {
-            String url = Selection.safeUrl(e.browser());
+            String url = WebLib.cut(Selection.safeUrl(e.browser()), WebLib.MAX_URL_CHARS);
             for (Object ev : (List<?>) events) {
                 publish(e, ev, url);
             }
@@ -466,23 +466,43 @@ final class Taps {
         if (!(name instanceof String)) {
             return;
         }
+        // S43: the detail and the name are bounded here, whatever the page's library did.
+        String eventName = WebLib.cut((String) name, WebLib.MAX_URL_CHARS);
         Map<String, Object> payload = new LinkedHashMap<String, Object>();
         payload.put("browser", e.ref);
-        payload.put("name", name);
+        payload.put("name", eventName);
+        boolean truncated = Boolean.TRUE.equals(ev.get("truncated"));
         if (ev.containsKey("detail") && ev.get("detail") != null) {
-            payload.put("detail", ev.get("detail"));
+            Object detail = ev.get("detail");
+            if (WebLib.detailTooLong(detail)) {
+                detail = WebLib.cutDetail(detail);
+                truncated = true;
+            }
+            payload.put("detail", detail);
         }
-        if (Boolean.TRUE.equals(ev.get("truncated"))) {
+        if (truncated) {
             payload.put("truncated", Boolean.TRUE);
         }
         ctx.events().publish(WebTopics.TAP, WebTopics.SOURCE, payload);
-        bridge.ready(e, url, "TAP", (String) name);
+        bridge.ready(e, url, "TAP", eventName);
     }
 
-    /** Evaluates a library expression and returns its value parsed from the JSON text; throws mapped errors. */
+    /**
+     * Evaluates a library expression and returns its value parsed from the JSON text; throws mapped errors. A text
+     * longer than {@link WebLib#MAX_JSON_CHARS} is refused before it is parsed (S43: a genuine drain answers at most
+     * about {@link #DRAIN_CHARS}).
+     */
     private static Object evaluate(Entry e, String expression, long boundMs) {
         WebEval eval = WebEval.of(expression).timeoutMs(Math.max(1, boundMs)).build();
         String json = Await.get(e.browser().evaluate(eval), boundMs, e, "web.tap", WebCapabilities.EVENTS);
+        return parseBounded(e, json);
+    }
+
+    /** A library answer's value; one longer than {@link WebLib#MAX_JSON_CHARS} is refused unparsed (S43). */
+    private static Object parseBounded(Entry e, String json) {
+        if (json != null && json.length() > WebLib.MAX_JSON_CHARS) {
+            throw Errors.oversized(e.ref, "the page library's value", WebLib.MAX_JSON_CHARS);
+        }
         return Json.parse(json);
     }
 

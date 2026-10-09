@@ -75,6 +75,41 @@ class EventBusTest {
         assertEquals(Long.valueOf(20), bus.since(19, null, 1).get(0).payload().get("i"));
     }
 
+    /**
+     * Security fix S43 (P1 2.4 {@code eventRingChars}): the ring is bounded by its payloads' characters as well as by
+     * count: the oldest events leave first, never the newest; one payload over the bound alone is cut and marked.
+     */
+    @Test
+    void theRingIsBoundedByCharactersAsWellAsByCount() throws Exception {
+        RingEventBus bus = new RingEventBus(1000, 1000, log);
+        StringBuilder text = new StringBuilder();
+        for (int i = 0; i < 300; i++) {
+            text.append('d');
+        }
+        for (int i = 1; i <= 10; i++) {
+            assertEquals(i, bus.publish("web.tap", "t", payload("detail", text.toString())));
+        }
+        assertTrue(bus.chars() <= 1000, "the total stays under the bound: " + bus.chars());
+        assertEquals(10, bus.lastSeq());
+        assertEquals(8, bus.oldestSeq(), "the oldest went first");
+        List<Event> kept = bus.since(0, null, 100);
+        assertEquals(3, kept.size());
+        assertEquals(8, kept.get(0).seq());
+        assertEquals(kept.get(0), bus.await(0, null, null, 0), "a waiter sees the oldest kept event");
+        StringBuilder huge = new StringBuilder();
+        for (int i = 0; i < 5000; i++) {
+            huge.append('h');
+        }
+        long seq = bus.publish("web.tap", "t", payload("detail", huge.toString(), "n", Long.valueOf(1)));
+        Event cut = bus.since(seq - 1, null, 1).get(0);
+        assertEquals(Boolean.TRUE, cut.payload().get("truncated"));
+        assertTrue(((String) cut.payload().get("detail")).length() <= 64, "cut to 1/64 of the bound");
+        assertEquals(Long.valueOf(1), cut.payload().get("n"), "the other values are kept");
+        assertTrue(bus.chars() <= 1000);
+        assertEquals(seq, bus.oldestSeq() + bus.since(0, null, 100).size() - 1);
+        assertEquals(64L << 20, RingEventBus.DEFAULT_MAX_CHARS);
+    }
+
     @Test
     void concurrentPublishersGetUniqueSequenceNumbersAndSubscribersSeeThemInOrder() throws Exception {
         final RingEventBus bus = new RingEventBus(64, log);

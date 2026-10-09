@@ -104,6 +104,15 @@ public final class PrimitiveSpec {
         return descriptor.destructive();
     }
 
+    /**
+     * True if the call evaluates a caller-supplied expression or script in the target; rejected with READ_ONLY in
+     * read-only mode, as a mutating call is (phase6-contracts.md 12.9, D156). Implies nothing else: a script primitive
+     * that is not mutating stays a read for the step protocol.
+     */
+    public boolean script() {
+        return descriptor.script();
+    }
+
     /** The {@code GET /schema} entry for this spec ({@code thread} as the policy's name). */
     public PrimitiveDescriptor describe() {
         return descriptor;
@@ -141,6 +150,7 @@ public final class PrimitiveSpec {
         private String capabilityId;
         private boolean mutating;
         private boolean destructive;
+        private boolean script;
 
         private Builder(String name) {
             if (name == null || !NAME.matcher(name).matches()) {
@@ -245,6 +255,15 @@ public final class PrimitiveSpec {
             return this;
         }
 
+        /**
+         * The call evaluates a caller-supplied expression or script in the target ({@code web.evaluate},
+         * {@code web.waitFlag}): refused in read-only mode, as a mutating call is (D156). Implies nothing else.
+         */
+        public Builder script() {
+            this.script = true;
+            return this;
+        }
+
         /** An immutable spec; later builder changes do not affect it. */
         public PrimitiveSpec build() {
             Map<String, Object> params;
@@ -257,7 +276,7 @@ public final class PrimitiveSpec {
                 params.put("required", required);
             }
             PrimitiveDescriptor descriptor = new PrimitiveDescriptor(name, description, params, resultSchema,
-                    thread.name(), timeoutMs, capabilityId, mutating, destructive);
+                    thread.name(), timeoutMs, capabilityId, mutating, destructive, script);
             return new PrimitiveSpec(thread, descriptor);
         }
 

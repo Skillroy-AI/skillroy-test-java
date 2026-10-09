@@ -17,8 +17,6 @@
 package ai.skillroy.testjava.cdp;
 
 import ai.skillroy.testjava.protocol.Json;
-import com.sun.net.httpserver.HttpExchange;
-import com.sun.net.httpserver.HttpServer;
 
 import java.io.ByteArrayOutputStream;
 import java.io.EOFException;
@@ -26,7 +24,6 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.InetAddress;
-import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
@@ -43,13 +40,17 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * A fake remote-debugging endpoint for {@link TargetProbe}: {@code /json/version} and {@code /json/list} on an {@link
- * HttpServer}, and the targets' WebSockets on a hand-rolled server (the opening handshake with {@code
- * Sec-WebSocket-Accept}, masked client frames, unmasked server frames, ping and close). Each target answers {@code
- * Runtime.evaluate} as its {@link Behaviour} says; an answering target first sends an unrelated event, which the probe
- * must ignore. Every client frame is checked for its mask.
+ * A fake remote-debugging endpoint for {@link TargetProbe}, on one port as a browser's is: {@code /json/version} and
+ * {@code /json/list} answered over HTTP/1.1 ({@code Connection: close}), and the targets' WebSockets on the same port
+ * (the opening handshake with {@code Sec-WebSocket-Accept}, masked client frames, unmasked server frames, ping and
+ * close), told apart by the request's {@code Sec-WebSocket-Key} (the probe dials only the endpoint's own authority,
+ * security fix S44). Each target answers {@code Runtime.evaluate} as its {@link Behaviour} says; an answering target
+ * first sends an unrelated event, which the probe must ignore. Every client frame is checked for its mask.
+ * {@link #versionBytes} makes {@code /json/version} stream that many bytes instead, with or without a
+ * {@code Content-Length} ({@link #versionDeclared}); {@link #versionWritten} counts what it could write.
  */
 final class FakeDevTools implements AutoCloseable {
 
@@ -71,25 +72,27 @@ final class FakeDevTools implements AutoCloseable {
     volatile String listBody;
     final CountDownLatch hang = new CountDownLatch(1);
     volatile boolean versionHangs;
+    /** When positive, {@code /json/version} streams this many bytes of a JSON string instead of its body. */
+    volatile long versionBytes;
+    /** Whether that stream declares its {@code Content-Length}. */
+    volatile boolean versionDeclared = true;
+    /** The bytes of that stream written before the client went away. */
+    final AtomicLong versionWritten = new AtomicLong();
+    /** Every HTTP request line, in order. */
+    final List<String> httpRequests = new CopyOnWriteArrayList<>();
 
-    private final HttpServer http;
     private final ServerSocket ws;
     private final ExecutorService threads = Executors.newVirtualThreadPerTaskExecutor();
     private final List<Socket> sockets = new CopyOnWriteArrayList<>();
 
     FakeDevTools() throws IOException {
         InetAddress loopback = InetAddress.getLoopbackAddress();
-        http = HttpServer.create(new InetSocketAddress(loopback, 0), 0);
-        http.setExecutor(threads);
-        http.createContext("/json/version", this::version);
-        http.createContext("/json/list", this::list);
-        http.start();
         ws = new ServerSocket(0, 50, loopback);
         threads.submit(this::acceptLoop);
     }
 
     CdpEndpoint endpoint() {
-        return CdpEndpoint.local(http.getAddress().getPort());
+        return CdpEndpoint.local(ws.getLocalPort());
     }
 
     int wsPort() {
@@ -124,7 +127,6 @@ final class FakeDevTools implements AutoCloseable {
     @Override
     public void close() {
         hang.countDown();
-        http.stop(0);
         try {
             ws.close();
         } catch (IOException ignored) {
@@ -140,28 +142,62 @@ final class FakeDevTools implements AutoCloseable {
         threads.shutdownNow();
     }
 
-    private void version(HttpExchange exchange) throws IOException {
-        if (versionHangs) {
-            try {
-                hang.await(30, TimeUnit.SECONDS);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
+    /** Answers one HTTP request (the socket is closed afterwards). */
+    private void http(String path, OutputStream out) throws IOException {
+        if (path.startsWith("/json/version")) {
+            if (versionHangs) {
+                try {
+                    hang.await(30, TimeUnit.SECONDS);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
             }
+            long stream = versionBytes;
+            if (stream > 0) {
+                streamVersion(out, stream);
+                return;
+            }
+            reply(out, versionStatus, versionBody);
+        } else if (path.startsWith("/json/list")) {
+            reply(out, 200, listBody != null ? listBody : Json.write(targets));
+        } else {
+            reply(out, 404, "{}");
         }
-        reply(exchange, versionStatus, versionBody);
     }
 
-    private void list(HttpExchange exchange) throws IOException {
-        reply(exchange, 200, listBody != null ? listBody : Json.write(targets));
+    /** {@code "aaaa…"}: a JSON string of {@code total} bytes, written in 64 KiB pieces until the client goes away. */
+    private void streamVersion(OutputStream out, long total) throws IOException {
+        String head = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\n"
+                + (versionDeclared ? "Content-Length: " + total + "\r\n" : "") + "\r\n";
+        out.write(head.getBytes(StandardCharsets.US_ASCII));
+        byte[] piece = new byte[64 * 1024];
+        java.util.Arrays.fill(piece, (byte) 'a');
+        piece[0] = '"';
+        long left = total;
+        boolean first = true;
+        while (left > 0) {
+            int n = (int) Math.min(piece.length, left);
+            if (!first) {
+                piece[0] = 'a';
+            }
+            if (left == n) {
+                piece[n - 1] = '"';
+            }
+            out.write(piece, 0, n);
+            out.flush();
+            versionWritten.addAndGet(n);
+            left -= n;
+            first = false;
+        }
     }
 
-    private static void reply(HttpExchange exchange, int status, String body) throws IOException {
+    private static void reply(OutputStream out, int status, String body) throws IOException {
         byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
-        exchange.getResponseHeaders().add("Content-Type", "application/json; charset=UTF-8");
-        exchange.sendResponseHeaders(status, bytes.length);
-        try (OutputStream out = exchange.getResponseBody()) {
-            out.write(bytes);
-        }
+        String head = "HTTP/1.1 " + status + (status == 200 ? " OK" : " Error") + "\r\nContent-Type: application/json;"
+                + " charset=UTF-8\r\nContent-Length: " + bytes.length + "\r\nConnection: close\r\n\r\n";
+        out.write(head.getBytes(StandardCharsets.US_ASCII));
+        out.write(bytes);
+        out.flush();
     }
 
     private void acceptLoop() {
@@ -177,7 +213,7 @@ final class FakeDevTools implements AutoCloseable {
     }
 
     private void serve(Socket socket) {
-        peakOpenSockets.accumulateAndGet(openSockets.incrementAndGet(), Math::max);
+        boolean counted = false;
         try (socket) {
             InputStream in = socket.getInputStream();
             OutputStream out = socket.getOutputStream();
@@ -192,6 +228,13 @@ final class FakeDevTools implements AutoCloseable {
                     key = line.substring(colon + 1).trim();
                 }
             }
+            if (key == null && path.startsWith("/json")) {
+                httpRequests.add(head.get(0));
+                http(path, out);
+                return;
+            }
+            counted = true;
+            peakOpenSockets.accumulateAndGet(openSockets.incrementAndGet(), Math::max);
             Behaviour behaviour = behaviours.get(id);
             if (key == null || behaviour == null) {
                 out.write("HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n".getBytes(StandardCharsets.US_ASCII));
@@ -259,7 +302,9 @@ final class FakeDevTools implements AutoCloseable {
         } catch (Exception e) {
             // the probe aborts sockets; that ends here
         } finally {
-            openSockets.decrementAndGet();
+            if (counted) {
+                openSockets.decrementAndGet();
+            }
         }
     }
 

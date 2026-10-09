@@ -181,11 +181,30 @@ public final class Credentials {
         return load(file, CredentialFiles.REAL);
     }
 
+    /**
+     * Loads the credentials file of a {@link Location}: as {@link #load(Path)}, but a file named by
+     * {@code $SKILLROY_CREDENTIALS} or {@code -Dskillroy.credentials} is named by the variable or the property in
+     * every message about the file itself (missing, not a regular file, too open, unreadable), never by its value,
+     * which may be the file's content by mistake (security fix S38). A null location means no credentials.
+     *
+     * @throws CredentialsException as {@link #load(Path)}
+     */
+    public static Credentials loadFound(Location location) throws CredentialsException {
+        if (location == null) {
+            return EMPTY;
+        }
+        return load(location.file(), location.label(), CredentialFiles.REAL);
+    }
+
     static Credentials load(Path file, CredentialFiles.Access access) throws CredentialsException {
+        return load(file, file == null ? null : file.toString(), access);
+    }
+
+    static Credentials load(Path file, String label, CredentialFiles.Access access) throws CredentialsException {
         if (file == null) {
             throw new CredentialsException("no credentials file was named");
         }
-        String name = file.toString();
+        String name = label == null ? file.toString() : label;
         if (!Files.exists(file)) {
             throw new CredentialsException("credentials file " + name + " does not exist");
         }
@@ -251,26 +270,84 @@ public final class Credentials {
         return locate(explicit, bindingsRoot, envId, System::getProperty, System::getenv);
     }
 
+    /**
+     * As {@link #locate(Path, Path, String)}.
+     *
+     * @throws IllegalArgumentException when the property or the variable is not a file name (security fix S38; the
+     *     message names the property or the variable, never the value): {@link #find} reports it as a
+     *     {@link CredentialsException}
+     */
     static Path locate(Path explicit, Path bindingsRoot, String envId, UnaryOperator<String> properties,
                        UnaryOperator<String> environment) {
+        try {
+            Location location = find(explicit, bindingsRoot, envId, properties, environment);
+            return location == null ? null : location.file();
+        } catch (CredentialsException e) {
+            throw new IllegalArgumentException(e.getMessage(), e);
+        }
+    }
+
+    /**
+     * A credentials file and how messages name it (security fix S38): the file's path, or the variable or the
+     * property that named it ({@code $SKILLROY_CREDENTIALS}, {@code -Dskillroy.credentials}), whose value is never
+     * echoed.
+     *
+     * @param file the file to load
+     * @param label what messages call it
+     */
+    public record Location(Path file, String label) {
+    }
+
+    /** The longest value of the property or the variable taken as a file name (S38). */
+    static final int MAX_LOCATION_CHARS = 4096;
+
+    /**
+     * Where the credentials of an invocation are, by the rule of {@link #locate(Path, Path, String)}, with how messages
+     * name the file; null when there are none.
+     *
+     * @throws CredentialsException when {@code -Dskillroy.credentials} or {@code $SKILLROY_CREDENTIALS} holds a line
+     *     break or more than 4096 characters: it is not a file name (it may be a credentials file's content); the
+     *     message never holds the value
+     */
+    public static Location find(Path explicit, Path bindingsRoot, String envId) throws CredentialsException {
+        return find(explicit, bindingsRoot, envId, System::getProperty, System::getenv);
+    }
+
+    static Location find(Path explicit, Path bindingsRoot, String envId, UnaryOperator<String> properties,
+                         UnaryOperator<String> environment) throws CredentialsException {
         if (explicit != null) {
-            return explicit;
+            return new Location(explicit, explicit.toString());
         }
         String property = properties.apply(PROPERTY);
         if (property != null && !property.isBlank()) {
-            return Path.of(property.strip());
+            return new Location(fileName(property, "-D" + PROPERTY), "named by -D" + PROPERTY);
         }
         String variable = environment.apply(ENV);
         if (variable != null && !variable.isBlank()) {
-            return Path.of(variable.strip());
+            return new Location(fileName(variable, "$" + ENV), "named by $" + ENV);
         }
         if (bindingsRoot != null && envId != null && ENV_ID.matcher(envId).matches()) {
             Path candidate = bindingsRoot.resolve(envId).resolve(FILE_NAME);
             if (Files.isRegularFile(candidate)) {
-                return candidate;
+                return new Location(candidate, candidate.toString());
             }
         }
         return null;
+    }
+
+    /** The value as a path, refused before {@code Path.of} when it cannot be a file name (S38). */
+    private static Path fileName(String value, String source) throws CredentialsException {
+        String text = value.strip();
+        if (text.length() > MAX_LOCATION_CHARS || text.indexOf('\n') >= 0 || text.indexOf('\r') >= 0) {
+            throw new CredentialsException("the credentials path in " + source + " is not a file name (a line break"
+                    + " or more than " + MAX_LOCATION_CHARS + " characters); it must name a file, never hold its"
+                    + " content");
+        }
+        try {
+            return Path.of(text);
+        } catch (java.nio.file.InvalidPathException e) {
+            throw new CredentialsException("the credentials path in " + source + " is not a file name");
+        }
     }
 
     /** True when the realm has an entry with this id (ids are compared as text). */
@@ -421,7 +498,10 @@ public final class Credentials {
                     throw error(raw, realmName, "credentials: " + unquoted(raw, realmName, "realm name")
                             + " must match [a-z0-9-]+");
                 }
-                Map<String, Object> ids = requireMap(raw, realmName, "credentials." + realmName);
+                // S41: a realm whose value is not a mapping is named by its line, never by its text (which may be a
+                // value typed where a key belongs).
+                Map<String, Object> ids = requireMap(raw, realmName, "credentials: " + unquoted(raw, realmName,
+                        "realm"));
                 Map<String, Map<String, String>> entries = new LinkedHashMap<>();
                 for (Map.Entry<String, Object> entry : ids.entrySet()) {
                     String id = entry.getKey();
@@ -429,7 +509,8 @@ public final class Credentials {
                     if (id.isEmpty()) {
                         throw error(ids, id, "an id in realm '" + realmName + "' is empty");
                     }
-                    Map<String, Object> fields = requireMap(ids, id, path);
+                    Map<String, Object> fields = requireMap(ids, id, "credentials." + realmName + ": "
+                            + unquoted(ids, id, "entry"));
                     Map<String, String> values = new LinkedHashMap<>();
                     for (Map.Entry<String, Object> field : fields.entrySet()) {
                         String fieldName = field.getKey();
@@ -456,13 +537,19 @@ public final class Credentials {
                             + " must match [A-Za-z0-9][A-Za-z0-9_.-]*");
                 }
                 String path = "jdbc." + id;
-                Map<String, Object> source = requireMap(raw, id, path);
+                Map<String, Object> source = requireMap(raw, id, "jdbc: " + unquoted(raw, id, "source"));
                 for (String key : source.keySet()) {
                     if (!SOURCE_KEYS.contains(key)) {
                         throw error(source, key, path + ": " + unquoted(source, key, "key") + " is not known;"
                                 + " allowed keys: url, user, password, driver, statementTimeout, loginTimeout,"
                                 + " properties");
                     }
+                }
+                if (source.get("url") == null) {
+                    // S41: the source's own line, since an absent key has none; the id is kept (its value is a
+                    // mapping, so it is an id).
+                    throw new CredentialsException(where(name, doc == null ? 0 : doc.lineOf(source)) + path
+                            + ".url is required");
                 }
                 String url = text(source, "url", path + ".url", true);
                 if (!url.startsWith("jdbc:")) {
@@ -579,7 +666,7 @@ public final class Credentials {
          */
         private String unquoted(Map<String, Object> map, String key, String noun) {
             if (doc != null && doc.keyLine(map, key) > 0) {
-                return "a " + noun;
+                return ("aeiou".indexOf(noun.charAt(0)) >= 0 ? "an " : "a ") + noun;
             }
             int position = 1;
             for (String k : map.keySet()) {

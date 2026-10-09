@@ -23,7 +23,6 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -77,7 +76,8 @@ class StrictYamlTest {
         YamlException e = fails("scenario: a\nsteps: []\nscenario: b\n");
         assertEquals("duplicate key 'scenario'", e.reason());
         assertEquals(3, e.line());
-        assertFalse(e.quotesInput());
+        assertTrue(e.quotesInput(), "security fix S35: the key's text is the document's (a reader of secrets"
+                + " withholds the message; the scenario loader does not consult the flag)");
         assertEquals("line 3: duplicate key 'scenario'", e.getMessage());
     }
 

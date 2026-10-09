@@ -203,7 +203,7 @@ class CredentialsTest {
         assertTrue(fails("version: 1\ncredentials:\n  Staff: {}\n").getMessage().contains("must match [a-z0-9-]+"));
         assertTrue(fails("version: 1\ncredentials:\n  staff: []\n").getMessage().contains("must be a mapping"));
         assertTrue(fails("version: 1\ncredentials:\n  staff:\n    \"100\":\n").getMessage()
-                .contains("credentials.staff.100 must be a mapping"));
+                .contains(":4: credentials.staff: an entry must be a mapping"), "S41: by its line, not its text");
         assertTrue(fails("version: 1\ncredentials:\n  staff:\n    \"100\": { pass-word: x }\n").getMessage()
                 .contains("must be an identifier"));
         assertTrue(fails("version: 1\njdbc:\n  r: { user: x }\n").getMessage().contains("jdbc.r.url is required"));
@@ -221,9 +221,12 @@ class CredentialsTest {
                 .contains("at most 120s"));
         assertTrue(fails("version: 1\njdbc:\n  r: { url: \"jdbc:x\", statementTimeout: 0s }\n").getMessage()
                 .contains("must be a duration"));
-        // YAML's own rules apply: duplicate keys.
+        // YAML's own rules apply: duplicate keys, the reader's message withheld with its line (S35: a key's text may
+        // be a value typed where a key belongs).
         CredentialsException duplicate = fails("version: 1\nversion: 1\n");
-        assertTrue(duplicate.getMessage().contains(":2: duplicate key 'version'"), duplicate.getMessage());
+        assertTrue(duplicate.getMessage().contains(":2: not valid YAML (the reader's message is withheld"),
+                duplicate.getMessage());
+        assertFalse(duplicate.getMessage().contains("duplicate key 'version'"), duplicate.getMessage());
     }
 
     @Test
@@ -273,9 +276,23 @@ class CredentialsTest {
         files.put("version: 1\njdbc:\n  \"-" + secret + "\": { url: \"jdbc:x\" }\n",
                 ":3: jdbc: a source id must match");
         files.put("version: 1\n" + identifier + ": 1\n", ":2: a top-level key is not known");
+        // Security fixes S35 and S41: the sceptics' seven probes.
+        files.put("version: 1\ncredentials:\n  staff:\n    \"100\": { " + secret + ", " + secret + " }\n",
+                ":4: not valid YAML (the reader's message is withheld");
+        files.put("version: 1\ncredentials:\n  staff:\n    \"100\": { " + identifier + ", " + identifier + " }\n",
+                ":4: not valid YAML (the reader's message is withheld");
+        files.put("version: 1\njdbc:\n  rep: { url: \"jdbc:x\", \"" + secret + "\": 1, \"" + secret + "\": 2 }\n",
+                ":3: not valid YAML (the reader's message is withheld");
+        files.put("version: 1\ncredentials:\n  staff: { \"" + secret + "\" }\n",
+                ":3: credentials.staff: an entry must be a mapping");
+        files.put("version: 1\ncredentials:\n  " + secret.toLowerCase(java.util.Locale.ROOT) + ":\n",
+                ":3: credentials: a realm must be a mapping");
+        files.put("version: 1\njdbc:\n  " + secret + ": 7\n", ":3: jdbc: a source must be a mapping");
+        files.put("version: 1\njdbc:\n  rep: { user: u }\n", ":3: jdbc.rep.url is required");
         for (Map.Entry<String, String> file : files.entrySet()) {
             String message = fails(file.getKey()).getMessage();
-            assertFalse(message.contains(secret) || message.contains(identifier), message);
+            assertFalse(message.contains(secret) || message.contains(identifier)
+                    || message.contains(secret.toLowerCase(java.util.Locale.ROOT)), message);
             assertTrue(message.contains(file.getValue()), message);
         }
         Map<String, Object> entry = new LinkedHashMap<>();
@@ -355,6 +372,43 @@ class CredentialsTest {
         assertNull(Credentials.locate(null, dir, "seed-b", none::get, none::get));
         assertNull(Credentials.locate(null, dir, "../seed-a", none::get, none::get), "an invalid env id");
         assertNull(Credentials.locate(null, null, "seed-a", none::get, none::get));
+    }
+
+    /**
+     * Security fix S38: {@code $SKILLROY_CREDENTIALS} (or {@code -Dskillroy.credentials}) holding a file's content,
+     * or a path with a line break, is refused before it is used as a path, and a file it names is reported by the
+     * variable's name, never by its value.
+     */
+    @Test
+    void theLocationVariableIsAPathNeverContent(@TempDir Path dir) throws Exception {
+        Map<String, String> none = Map.of();
+        String content = "version: 1\ncredentials:\n  staff:\n    \"100\": { password: \"" + STAFF_PW + "\" }\n";
+        CredentialsException e = assertThrows(CredentialsException.class, () -> Credentials.find(null, dir,
+                "seed-a", none::get, Map.of(Credentials.ENV, content)::get));
+        for (String line : content.split("\n")) {
+            assertFalse(e.getMessage().contains(line.strip()), "no line of the content: " + e.getMessage());
+        }
+        assertTrue(e.getMessage().contains("$" + Credentials.ENV), e.getMessage());
+        CredentialsException property = assertThrows(CredentialsException.class, () -> Credentials.find(null, dir,
+                "seed-a", Map.of(Credentials.PROPERTY, dir + "/a\nb.yaml")::get, none::get));
+        assertTrue(property.getMessage().contains("-D" + Credentials.PROPERTY), property.getMessage());
+        assertFalse(property.getMessage().contains("b.yaml"), property.getMessage());
+        assertThrows(CredentialsException.class, () -> Credentials.find(null, dir, "seed-a", none::get,
+                Map.of(Credentials.ENV, "x".repeat(4097))::get), "longer than any file name");
+        assertThrows(IllegalArgumentException.class, () -> Credentials.locate(null, dir, "seed-a", none::get,
+                Map.of(Credentials.ENV, content)::get), "locate refuses it too, unchecked");
+
+        String single = "{version: 1, credentials: {staff: {\"100\": {password: \"" + STAFF_PW + "\"}}}}";
+        Credentials.Location location = Credentials.find(null, dir, "seed-a", none::get,
+                Map.of(Credentials.ENV, single)::get);
+        CredentialsException missing = assertThrows(CredentialsException.class,
+                () -> Credentials.loadFound(location));
+        assertFalse(missing.getMessage().contains(STAFF_PW), missing.getMessage());
+        assertEquals("credentials file named by $" + Credentials.ENV + " does not exist", missing.getMessage());
+        Credentials.Location explicit = Credentials.find(dir.resolve("given.yaml"), dir, "seed-a", none::get,
+                none::get);
+        assertEquals(dir.resolve("given.yaml").toString(), explicit.label(), "a path the person typed is named");
+        assertEquals(Credentials.empty(), Credentials.loadFound(null));
     }
 
     @Test

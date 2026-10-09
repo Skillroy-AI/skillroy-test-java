@@ -22,6 +22,8 @@ import ai.skillroy.testjava.agent.api.spi.web.WebCapability;
 import ai.skillroy.testjava.agent.api.spi.web.WebEval;
 import ai.skillroy.testjava.protocol.Json;
 import ai.skillroy.testjava.protocol.JsonView;
+import ai.skillroy.testjava.protocol.text.BoundedRegex;
+import ai.skillroy.testjava.protocol.web.WebLib;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -51,6 +53,13 @@ import java.util.regex.PatternSyntaxException;
  * answers {@code STALE_HANDLE}, a ref of something else {@code INVALID_PARAMS}, a browser that has closed
  * {@code STALE_HANDLE}. A {@code by} or default selection rebuilds an index older than {@link BrowserIndex#STALE_MS}
  * or one in which nothing matched.
+ *
+ * <p>The regular expressions of {@code by.url} and {@code by.title} are searched under the S24 budget (security fix
+ * S46, phase4-contracts.md 4.2; {@link BoundedRegex}): at most {@value BoundedRegex#BUDGET_MS} ms for the whole
+ * selection and never past its own bound, the subject at most 1 Mi characters; a search that runs out answers
+ * {@code INVALID_PARAMS} ("the regex in by.title ran longer than 1000 ms and was stopped; simplify it",
+ * {@code data {param, regex, reason: "regex too slow"}}; {@code "text too long"} for the subject), as the Swing
+ * locator does. A summary's URL and title are cut at {@link WebLib#MAX_URL_CHARS} (S43).
  *
  * <p>Thread-safe; runs on agent workers.
  */
@@ -118,6 +127,8 @@ final class Selection {
         final String tag = by.str("tag");
         final String nativeId = by.str("nativeId");
         long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(budgetMs);
+        long regexBudget = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(BoundedRegex.BUDGET_MS);
+        long regexDeadline = deadline - regexBudget < 0 ? deadline : regexBudget;
         BrowserIndex.Snapshot s = index.snapshot();
         boolean rebuilt = false;
         if (!s.built || s.ageMs() > BrowserIndex.STALE_MS) {
@@ -125,10 +136,10 @@ final class Selection {
             rebuilt = true;
         }
         Map<Entry, String> titles = new IdentityHashMap<Entry, String>();
-        List<Entry> matches = match(s, url, title, tag, nativeId, deadline, titles);
+        List<Entry> matches = match(s, url, title, tag, nativeId, deadline, regexDeadline, titles);
         if (matches.isEmpty() && !rebuilt) {
             s = index.rebuild(remainingMs(deadline));
-            matches = match(s, url, title, tag, nativeId, deadline, titles);
+            matches = match(s, url, title, tag, nativeId, deadline, regexDeadline, titles);
         }
         if (matches.size() == 1) {
             return matches.get(0);
@@ -144,9 +155,12 @@ final class Selection {
                 + "; name one with browser: <ref>", data);
     }
 
-    /** The browsers that match; the titles read for a {@code by.title} match are added to {@code titlesRead}. */
+    /**
+     * The browsers that match; the titles read for a {@code by.title} match are added to {@code titlesRead}. The
+     * regular expressions are searched until {@code regexDeadline} at most (S46).
+     */
     private List<Entry> match(BrowserIndex.Snapshot s, Pattern url, Pattern title, String tag, String nativeId,
-                              long deadline, Map<Entry, String> titlesRead) {
+                              long deadline, long regexDeadline, Map<Entry, String> titlesRead) {
         List<Entry> candidates = new ArrayList<Entry>();
         for (Entry e : s.entries) {
             WebBrowser b = e.browser();
@@ -159,7 +173,7 @@ final class Selection {
             if (nativeId != null && !nativeId.equals(safeNativeId(b))) {
                 continue;
             }
-            if (url != null && !url.matcher(safeUrl(b)).find()) {
+            if (url != null && !find(url, "by.url", safeUrl(b), regexDeadline)) {
                 continue;
             }
             candidates.add(e);
@@ -172,11 +186,24 @@ final class Selection {
         List<Entry> out = new ArrayList<Entry>();
         for (Entry e : candidates) {
             String t = titles.get(e);
-            if (t != null && title.matcher(t).find()) {
+            if (t != null && find(title, "by.title", t, regexDeadline)) {
                 out.add(e);
             }
         }
         return out;
+    }
+
+    /**
+     * A bounded search (S46): {@code INVALID_PARAMS} with {@code data {param, regex, reason}} when it runs out of time,
+     * recurses too deeply or meets a subject over 1 Mi characters; never the subject in the message.
+     */
+    private static boolean find(Pattern pattern, String param, String subject, long regexDeadline) {
+        try {
+            return BoundedRegex.find(pattern, subject, regexDeadline - System.nanoTime());
+        } catch (BoundedRegex.TooSlow e) {
+            throw Errors.invalid(e.describe(param, BoundedRegex.BUDGET_MS), Errors.data("param", param, "regex",
+                    pattern.pattern(), "reason", e.reason()));
+        }
     }
 
     /** The single browser whose component is showing (see the class comment). */
@@ -291,9 +318,9 @@ final class Selection {
         if (nativeId != null) {
             m.put("nativeId", nativeId);
         }
-        m.put("url", safeUrl(b));
+        m.put("url", WebLib.cut(safeUrl(b), WebLib.MAX_URL_CHARS));
         if (title != null) {
-            m.put("title", title);
+            m.put("title", WebLib.cut(title, WebLib.MAX_URL_CHARS));
         }
         m.put("closed", Boolean.valueOf(isClosed(b)));
         m.put("visibleInSwing", Boolean.valueOf(e.showing));

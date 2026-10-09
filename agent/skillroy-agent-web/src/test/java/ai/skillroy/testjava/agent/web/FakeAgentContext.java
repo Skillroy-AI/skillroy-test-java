@@ -67,7 +67,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 /**
  * An in-test {@link AgentContext} that behaves like the agent core where the web module relies on it:
  * <ul>
- *   <li>{@link #call} plays the dispatcher: METHOD_NOT_FOUND, READ_ONLY for a mutating primitive in read-only mode,
+ *   <li>{@link #call} plays the dispatcher: METHOD_NOT_FOUND, READ_ONLY for a mutating or script primitive in
+ *       read-only mode (D156),
  *       NOT_READY for a pending capability, CAPABILITY_UNAVAILABLE with {@code data {primitive, capability, reason}},
  *       {@code _meta.timeoutMs} and {@code _meta.secretParams} (handed to {@link Invocation#secretParams()}), the
  *       primitive run on its thread policy with the timeout (TIMEOUT, the worker interrupted), and a check that the
@@ -180,7 +181,7 @@ final class FakeAgentContext implements AgentContext {
             throw new RpcException(ErrorCodes.METHOD_NOT_FOUND, "unknown method " + method);
         }
         final PrimitiveSpec spec = p.spec();
-        if (spec.mutating() && readOnly) {
+        if ((spec.mutating() || spec.script()) && readOnly) {
             throw new RpcException(ErrorCodes.READ_ONLY, method + " changes the target and the agent is read-only",
                     data("primitive", method));
         }

@@ -20,6 +20,7 @@ import ai.skillroy.testjava.controller.AgentRpcException;
 import ai.skillroy.testjava.controller.CallOptions;
 import ai.skillroy.testjava.protocol.ErrorCodes;
 import ai.skillroy.testjava.protocol.Event;
+import ai.skillroy.testjava.protocol.Json;
 import ai.skillroy.testjava.protocol.RpcResult;
 import ai.skillroy.testjava.protocol.web.WebLib;
 import ai.skillroy.testjava.scenario.web.WebPathException;
@@ -40,6 +41,7 @@ import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -279,6 +281,23 @@ class CdpWebPathCallTest {
                 "the reads are served in read-only mode (D51)");
     }
 
+    /**
+     * phase6-contracts.md 12.9, D156 (security fix S42): {@code web.waitFlag} runs the caller's expression, so a
+     * read-only target hands it to the agent (which answers {@code READ_ONLY}), as it hands {@code web.evaluate}.
+     */
+    @Test
+    void aScriptPrimitiveOnAReadOnlyTargetGoesToTheAgent() throws Exception {
+        agent.readOnly = true;
+        assertNull(path.open(agent, WebSettings.DEFAULT, null));
+        assertEquals("the target is in read-only mode: the agent answers web.waitFlag",
+                unsupported("web.waitFlag", map("expression", "window.ready === true"), null));
+        assertEquals("the target is in read-only mode: the agent answers web.evaluate",
+                unsupported("web.evaluate", map("expression", "1"), null));
+        assertTrue(front.evaluated.isEmpty(), "nothing reached the page");
+        assertTrue(front.waitForFunctions.isEmpty());
+        assertEquals(Set.of("web.evaluate", "web.waitFlag"), CdpWebPath.SCRIPT);
+    }
+
     @Test
     void theSelectionPicksThePageOrFallsBack() throws Exception {
         back.engine = a -> FakeWorld.ok(Map.of("text", "back", "truncated", false));
@@ -320,7 +339,7 @@ class CdpWebPathCallTest {
         assertEquals(Scripts.call("tap", List.of("webhost.*"), "window"), front.evaluated.get(0));
         assertTrue(back.initScripts.isEmpty(), "only the selected browser is tapped, as on the agent path");
 
-        String drain = Scripts.call("drain");
+        String drain = Scripts.call("drain", WebLib.DRAIN_CHARS);
         front.engine = a -> drain.equals(a[0]) ? FakeWorld.ok(Map.of("events", List.of(
                 map("name", "webhost.borrowed", "detail", map("item", "hammer", "qty", 2L)),
                 map("name", "webhost.big", "detail", "cut", "truncated", true)), "dropped", 0L))
@@ -361,7 +380,7 @@ class CdpWebPathCallTest {
                 "1.3", List.of(), 1), (e, o, p) -> world.attach(p, o), true);
         try {
             assertNull(polling.open(agent, WebSettings.DEFAULT, null));
-            String drain = Scripts.call("drain");
+            String drain = Scripts.call("drain", WebLib.DRAIN_CHARS);
             AtomicInteger drains = new AtomicInteger();
             front.engine = a -> {
                 if (!drain.equals(a[0])) {
@@ -468,7 +487,7 @@ class CdpWebPathCallTest {
     void aDrainThatOutlivesItsPollStillPublishesTheEventsItTookAndNoSecondDrainIsSent() throws Exception {
         front.engine = a -> FakeWorld.ok(Map.of("installed", 1L));
         call("web.tap", map("patterns", List.of("webhost.*")));
-        String drain = Scripts.call("drain");
+        String drain = Scripts.call("drain", WebLib.DRAIN_CHARS);
         CountDownLatch inPage = new CountDownLatch(1);
         CountDownLatch pageFree = new CountDownLatch(1);
         AtomicInteger drains = new AtomicInteger();
@@ -612,5 +631,101 @@ class CdpWebPathCallTest {
         Page popup = world.page("T9", "data:,popup", "Popup").page;
         assertFalse(world.pageListeners.isEmpty(), "new pages are watched as they appear");
         world.pageListeners.get(0).accept(popup);
+    }
+
+    /**
+     * Security fix S45: a page that {@code by.url} or {@code by.title} picks must carry a target id the agent reports
+     * (read once more when unknown), else the call goes to the agent; such a page's load events are not appended.
+     */
+    @Test
+    void aForeignPageAtTheEndpointIsNeverActedOn() throws Exception {
+        FakeWorld.FakePage foreign = world.page("T3", "data:text/html,foreign", "Foreign page");
+        foreign.engine = a -> FakeWorld.ok(Map.of("text", "foreign", "truncated", false));
+        int refreshes = agent.callsTo("web.browsers").size();
+        assertEquals("no browser of the target has the CDP page matching url ~ foreign",
+                unsupported("web.dom.text", map("by", map("url", "foreign")), null));
+        assertEquals("no browser of the target has the CDP page matching title ~ ^Foreign",
+                unsupported("web.dom.text", map("by", map("title", "^Foreign")), null));
+        assertTrue(foreign.evaluated.isEmpty(), "nothing reached the foreign page");
+        assertTrue(agent.callsTo("web.browsers").size() > refreshes, "the agent's list was read once more");
+        back.engine = a -> FakeWorld.ok(Map.of("text", "back", "truncated", false));
+        assertEquals("back", ((Map<?, ?>) call("web.dom.text", map("by", map("url", "back$"))).value()).get("text"),
+                "a page the agent reports is served");
+
+        path.eventsSince(0, "*");
+        long before = path.lastEventSeq();
+        for (var listener : world.pageListeners) {
+            listener.accept(foreign.page);
+        }
+        foreign.fireLoad();
+        assertEquals(before, path.lastEventSeq(), "a foreign page's load is not the target's");
+        front.fireLoad();
+        assertEquals(before + 2, path.lastEventSeq(), "the target's own page still is");
+    }
+
+    /**
+     * Security fix S43: the receiving side's bounds on the CDP path: a wrapper's {@code json} over 1 MiB is cut, a
+     * library value over 1 MiB is refused, a tap's 70 KiB {@code detail} and a 100 KiB URL are cut, a 10 KiB
+     * {@code lastError} is cut to its 2000 characters, and the drain asks for {@code DRAIN_CHARS}.
+     */
+    @Test
+    void pageSuppliedDataIsBoundedOnTheCdpPath() throws Exception {
+        String big = "x".repeat(2 << 20);
+        front.engine = a -> FakeWorld.ok(Json.write(Map.of("json", big, "typeofResult", "string", "truncated",
+                false)));
+        Map<?, ?> evaluated = (Map<?, ?>) call("web.evaluate", map("expression", "x")).value();
+        assertEquals(WebLib.MAX_JSON_CHARS, ((String) evaluated.get("json")).length());
+        assertEquals(true, evaluated.get("truncated"));
+
+        front.engine = a -> FakeWorld.ok(Map.of("text", big, "truncated", false));
+        AgentRpcException oversized = rpcError("web.dom.text", map());
+        assertEquals(ErrorCodes.INTERNAL_ERROR, oversized.error().code());
+        assertEquals("oversized", oversized.error().data().get("reason"));
+
+        front.engine = a -> FakeWorld.ok(Map.of("installed", 1L));
+        call("web.tap", map("patterns", List.of("webhost.*")));
+        String drain = Scripts.call("drain", WebLib.DRAIN_CHARS);
+        front.url = "data:text/html," + "u".repeat(100_000);
+        front.engine = a -> drain.equals(a[0]) ? FakeWorld.ok(Map.of("events", List.of(
+                map("name", "webhost.big", "detail", map("blob", "d".repeat(70 * 1024)))), "dropped", 0L))
+                : FakeWorld.ok(Map.of("installed", 0L));
+        path.pollOnce();
+        Event tap = path.eventsSince(0, "web.tap").get(0);
+        assertEquals(true, tap.payload().get("truncated"));
+        assertEquals(WebLib.MAX_DETAIL_CHARS, ((String) tap.payload().get("detail")).length(),
+                "the detail's JSON text, cut, as the library keeps it");
+        Event ready = path.eventsSince(0, "web.ready").get(0);
+        assertEquals(WebLib.MAX_URL_CHARS, ((String) ready.payload().get("url")).length());
+        front.fireLoad();
+        Event load = path.eventsSince(0, "web.load").get(0);
+        assertEquals(WebLib.MAX_URL_CHARS, ((String) load.payload().get("url")).length());
+
+        front.waitForFunction = a -> {
+            if (a[0].equals(Scripts.flagWait("x"))) {
+                throw new TimeoutError("Timeout 100ms exceeded.");
+            }
+            return FakeWorld.handle(Map.of("ready", false, "error", "E".repeat(10 * 1024)));
+        };
+        Map<?, ?> flag = (Map<?, ?>) path.call("web.waitFlag", map("expression", "x", "timeoutMs", 100L),
+                CallOptions.defaults().withTimeoutMs(3000L)).value();
+        assertEquals(false, flag.get("ready"));
+        assertEquals(WebLib.MAX_ERROR_CHARS, ((String) flag.get("lastError")).length());
+    }
+
+    /** Security fix S43: the path's own events are bounded by characters as well as by count. */
+    @Test
+    void thePathsEventsAreBoundedByCharacters() {
+        PathEvents events = new PathEvents(1000);
+        for (int i = 0; i < 10; i++) {
+            events.append("web.tap", Map.of("detail", "d".repeat(300)), null);
+        }
+        assertTrue(events.chars() <= 1000, "the total stays under the bound: " + events.chars());
+        assertEquals(3, events.size(), "the oldest went first");
+        assertEquals(10, events.lastSeq());
+        Event huge = events.append("web.tap", Map.of("detail", "h".repeat(5000)), null);
+        assertEquals(true, huge.payload().get("truncated"));
+        assertTrue(((String) huge.payload().get("detail")).length() <= 1000 / 64 + 64);
+        assertTrue(events.chars() <= 1000);
+        assertEquals(64L << 20, PathEvents.MAX_CHARS);
     }
 }

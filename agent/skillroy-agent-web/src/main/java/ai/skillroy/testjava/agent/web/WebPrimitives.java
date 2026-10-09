@@ -52,7 +52,9 @@ import java.util.concurrent.TimeUnit;
  * The thirteen {@code web.*} primitives of phase4-contracts.md section 4.2, written once against the embedded-browser
  * SPI. Every one runs on {@link ThreadPolicy#WORKER}; the six reads ({@code web.browsers}, {@code web.ariaSnapshot},
  * {@code web.dom.text}, {@code web.waitFlag}, {@code web.bitmap}, {@code web.cdp.status}) are not mutating and are
- * served in read-only mode (D51); the others are mutating. Browser selection follows {@link Selection}; every adapter
+ * served in read-only mode (D51), except {@code web.waitFlag}, which with {@code web.evaluate} carries the
+ * {@code script} flag (it evaluates the caller's expression) and is refused in read-only mode by the dispatcher
+ * (phase6-contracts.md 12.9, D156); the others are mutating. Browser selection follows {@link Selection}; every adapter
  * future is awaited with the call's remaining budget less 100 ms ({@link Await}); a read is retried once after a load
  * event, a mutating call never. The script library's functions are called through
  * {@link WebLib#callExpression} with the argument objects of the library's specification, and an error object it
@@ -212,11 +214,12 @@ final class WebPrimitives {
                 .description("Evaluates a JavaScript expression in the page and returns its value as JSON text "
                         + "{json, typeofResult} (undefined as null, functions and symbols as their String(), DOM "
                         + "nodes as {nodeName, id, className}, cycles as \"[cycle]\", cut at 1 MiB with "
-                        + "truncated: true). A thrown error answers SCRIPT_ERROR. Mutating."), true)
+                        + "truncated: true). A thrown error answers SCRIPT_ERROR. Mutating; runs the caller's script: "
+                        + "refused in read-only mode."), true)
                 .param("expression", "string", true, "a JavaScript expression (not statements)")
                 .param("awaitPromise", "boolean", false, "await the value when it is a promise (default false)")
                 .thread(ThreadPolicy.WORKER).timeoutMs(10000).capability(WebCapabilities.EVALUATE).mutating()
-                .build(), new Primitives.Body() {
+                .script().build(), new Primitives.Body() {
                     @Override
                     public Object invoke(Invocation inv) {
                         return evaluate(inv);
@@ -265,12 +268,12 @@ final class WebPrimitives {
                 .description("Evaluates the expression on the agent worker until it is truthy or the budget ends; "
                         + "publishes web.ready {signal: FLAG} when it turns ready. A poll whose expression throws "
                         + "counts as not ready; answers {ready: false, lastError?} (the last poll's error) before the "
-                        + "call times out. An expression that does not compile is SCRIPT_ERROR at once. Not "
-                        + "mutating."), true)
+                        + "call times out. An expression that does not compile is SCRIPT_ERROR at once. Runs the "
+                        + "caller's expression: refused in read-only mode."), true)
                 .param("expression", "string", true, "a JavaScript expression; truthy means ready")
                 .param("timeoutMs", "integer", false, "0 (default) = the call's budget; at most 600000")
                 .param("pollMs", "integer", false, "poll period (default 50, at least 20)")
-                .thread(ThreadPolicy.WORKER).timeoutMs(10000).capability(WebCapabilities.EVALUATE).build(),
+                .thread(ThreadPolicy.WORKER).timeoutMs(10000).capability(WebCapabilities.EVALUATE).script().build(),
                 new Primitives.Body() {
                     @Override
                     public Object invoke(Invocation inv) {
@@ -334,9 +337,10 @@ final class WebPrimitives {
         if (nativeId != null) {
             m.put("nativeId", nativeId);
         }
-        m.put("url", Selection.safeUrl(b));
+        // S43: a page's URL and title are cut on the receiving side, whatever the page or the adapter gave.
+        m.put("url", WebLib.cut(Selection.safeUrl(b), WebLib.MAX_URL_CHARS));
         if (title != null) {
-            m.put("title", title);
+            m.put("title", WebLib.cut(title, WebLib.MAX_URL_CHARS));
         }
         m.put("closed", Boolean.valueOf(Selection.isClosed(b)));
         m.put("visibleInSwing", Boolean.valueOf(e.showing));
@@ -370,8 +374,8 @@ final class WebPrimitives {
                     if (f.parentKey() != null) {
                         fm.put("parentKey", f.parentKey());
                     }
-                    fm.put("name", f.name());
-                    fm.put("url", f.url());
+                    fm.put("name", WebLib.cut(f.name(), WebLib.MAX_URL_CHARS));
+                    fm.put("url", WebLib.cut(f.url(), WebLib.MAX_URL_CHARS));
                     fm.put("main", Boolean.valueOf(f.main()));
                     frames.add(fm);
                 }
@@ -648,6 +652,10 @@ final class WebPrimitives {
         };
         String json = read ? Await.read(attempt, budget, e, primitive, WebCapabilities.EVALUATE)
                 : Await.get(attempt.start(), budget, e, primitive, WebCapabilities.EVALUATE);
+        if (json != null && json.length() > WebLib.MAX_JSON_CHARS) {
+            // S43: a library value is at most MAX_JSON_CHARS of JSON; a page that replaced the library is refused.
+            throw Errors.oversized(e.ref, "the page library's value", WebLib.MAX_JSON_CHARS);
+        }
         Object value = parse(e, json);
         RpcError error = WebLib.errorOf(value);
         if (error != null) {
@@ -755,7 +763,8 @@ final class WebPrimitives {
                     Map<?, ?> poll = flagResult(e, json);
                     if (Boolean.TRUE.equals(poll.get("ready"))) {
                         long ms = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started);
-                        bridge.ready(e, Selection.safeUrl(e.browser()), "FLAG", null);
+                        bridge.ready(e, WebLib.cut(Selection.safeUrl(e.browser()), WebLib.MAX_URL_CHARS), "FLAG",
+                                null);
                         return flag(true, ms, polls, null);
                     }
                     Object compileError = poll.get("compileError");
@@ -764,7 +773,8 @@ final class WebPrimitives {
                         throw Errors.script(e.ref, String.valueOf(compileError), "");
                     }
                     Object error = poll.get("error");
-                    lastError = error instanceof String ? (String) error : null;
+                    // S43: the guard cuts its line, but a page can break the string functions the guard calls.
+                    lastError = error instanceof String ? WebLib.errorLine((String) error) : null;
                 }
                 long pause = Math.min(pollMs, remaining(deadline));
                 if (pause <= 0) {
@@ -930,7 +940,11 @@ final class WebPrimitives {
         }
     }
 
-    /** The {@code {json, typeofResult, truncated}} of a wrapper: the adapter's JSON text holds it as a string. */
+    /**
+     * The {@code {json, typeofResult, truncated}} of a wrapper: the adapter's JSON text holds it as a string. The
+     * {@code json} is cut at {@link WebLib#MAX_JSON_CHARS} with {@code truncated: true} here, whatever the page's
+     * library did (security fix S43).
+     */
     private static Map<?, ?> wrapperResult(Entry e, String json) {
         Object value = parse(e, json);
         if (value instanceof String) {
@@ -939,7 +953,18 @@ final class WebPrimitives {
         if (!(value instanceof Map) || !((Map<?, ?>) value).containsKey("typeofResult")) {
             throw Errors.internal(e.ref, "browser " + e.ref + " returned no script-library result");
         }
-        return (Map<?, ?>) value;
+        Map<?, ?> w = (Map<?, ?>) value;
+        Object text = w.get("json");
+        Object type = w.get("typeofResult");
+        boolean cut = text instanceof String && ((String) text).length() > WebLib.MAX_JSON_CHARS;
+        if (!cut && !(type instanceof String && ((String) type).length() > 64)) {
+            return w;
+        }
+        Map<String, Object> bounded = new LinkedHashMap<String, Object>();
+        bounded.put("json", cut ? WebLib.cut((String) text, WebLib.MAX_JSON_CHARS) : text);
+        bounded.put("typeofResult", type instanceof String ? WebLib.cut((String) type, 64) : type);
+        bounded.put("truncated", Boolean.valueOf(cut || Boolean.TRUE.equals(w.get("truncated"))));
+        return bounded;
     }
 
     /** One poll of the guard of {@link WebLib#flagExpression}: {@code {ready, error?, compileError?}}. */
@@ -958,9 +983,16 @@ final class WebPrimitives {
         return message != null ? String.valueOf(message) : mapped.error().message();
     }
 
+    /**
+     * The value of an adapter's JSON text; a text longer than {@link WebLib#MAX_CHANNEL_CHARS} is refused before it is
+     * parsed (security fix S43: a third-party adapter may not bound its channel).
+     */
     private static Object parse(Entry e, String json) {
         if (json == null) {
             return null;
+        }
+        if (json.length() > WebLib.MAX_CHANNEL_CHARS) {
+            throw Errors.oversized(e.ref, "browser " + e.ref + "'s answer", WebLib.MAX_CHANNEL_CHARS);
         }
         try {
             return Json.parse(json);

@@ -298,6 +298,30 @@ class WireTypesTest {
         assertThrows(UnsupportedOperationException.class, () -> back.paramsSchema().put("x", 1));
     }
 
+    /** phase6-contracts.md 12.9, D156 (security fix S42): {@code script} is optional, false when absent. */
+    @Test
+    void primitiveDescriptorCarriesTheScriptFlagOnlyWhenSet() {
+        PrimitiveDescriptor script = new PrimitiveDescriptor("web.waitFlag", "flag", null, null, "WORKER", 10000,
+                "web.evaluate", false, false, true);
+        assertTrue(script.script());
+        String text = Json.write(script.toJson());
+        assertTrue(text.endsWith("\"mutating\":false,\"destructive\":false,\"script\":true}"), text);
+        PrimitiveDescriptor back = PrimitiveDescriptor.fromJson(Json.parseObject(text));
+        assertEquals(script, back);
+        assertTrue(back.script());
+        PrimitiveDescriptor plain = new PrimitiveDescriptor("web.waitFlag", "flag", null, null, "WORKER", 10000,
+                "web.evaluate", false, false);
+        assertFalse(plain.script());
+        assertFalse(Json.write(plain.toJson()).contains("\"script\""), "written only when set");
+        assertFalse(plain.equals(script), "the flag is part of the descriptor's identity");
+        assertFalse(PrimitiveDescriptor.fromJson(Json.parseObject("{\"name\":\"a.b\"}")).script(),
+                "an older agent's entry without the key reads as false");
+        assertFalse(PrimitiveDescriptor.fromJson(Json.parseObject("{\"name\":\"a.b\",\"script\":false}")).script());
+        assertMessage(assertThrows(JsonException.class,
+                () -> PrimitiveDescriptor.fromJson(Json.parseObject("{\"name\":\"a.b\",\"script\":\"yes\"}"))),
+                "field \"script\" must be a boolean");
+    }
+
     @Test
     void primitiveDescriptorReadsMinimalJsonWithDefaults() {
         PrimitiveDescriptor minimal = PrimitiveDescriptor.fromJson(Json.parseObject("{\"name\":\"a.b\"}"));

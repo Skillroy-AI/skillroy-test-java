@@ -324,7 +324,9 @@ class InferenceSettingsTest {
         SettingsException malformed = refused(BindMode.LIVE);
         assertFalse(malformed.getMessage().contains(secretish), malformed.getMessage());
         file("version: 1\nversion: 1\n");
-        assertTrue(refused(BindMode.LIVE).getMessage().contains("duplicate key"));
+        String duplicate = refused(BindMode.LIVE).getMessage();
+        assertTrue(duplicate.contains(":2: not valid YAML (the reader's message is withheld"), "security fix S35: a"
+                + " duplicated key's text is withheld with its line: " + duplicate);
         file("version: 1\ngateway: none\nunknownKey: 1\n");
         String unknown = refused(BindMode.LIVE).getMessage();
         assertTrue(unknown.endsWith("a top-level key is not known; allowed keys: version, gateway, recordings, record,"

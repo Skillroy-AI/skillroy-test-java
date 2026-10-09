@@ -28,6 +28,7 @@ import java.util.function.Function;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** The {@code by:} resolution rules of the CDP path (phase4-contracts.md sections 4.2 and 5.2). */
 class SelectionTest {
@@ -115,6 +116,36 @@ class SelectionTest {
         assertEquals("by.title is not a regular expression: Unclosed group",
                 unsupported(Map.of("by", Map.of("title", "("))));
         assertEquals("by.url must be a regular expression", unsupported(Map.of("by", Map.of("url", 3))));
+    }
+
+    /**
+     * Security fix S46: a {@code by.title} or {@code by.url} search runs under the S24 budget (1000 ms per pick) and
+     * stops with {@link Selection.RegexStopped} ({@code INVALID_PARAMS} on the path); a subject over 1 Mi characters is
+     * refused before the search.
+     */
+    @Test
+    void aRegexThatBacktracksWithoutEndIsStoppedWithinItsBudget() throws Exception {
+        Map<String, P> pages = Map.of("T1", new P("data:,x", "a".repeat(78)));
+        long start = System.nanoTime();
+        Selection.RegexStopped e = assertThrows(Selection.RegexStopped.class, () -> Selection.resolve(
+                Map.of("by", Map.of("title", "(.*){1,32000}#")), source(BROWSERS)).pick(pages, P::url, P::title));
+        long ms = (System.nanoTime() - start) / 1_000_000;
+        assertTrue(ms < 1500, "stopped within the budget: " + ms + " ms");
+        assertEquals("by.title", e.param());
+        assertTrue(e.reason().equals("regex too slow"), e.reason());
+        assertTrue(e.getMessage().startsWith("the regex in by.title "), e.getMessage());
+
+        Map<String, P> huge = Map.of("T1", new P("data:," + "u".repeat(2 << 20), "t"));
+        Selection.RegexStopped tooLong = assertThrows(Selection.RegexStopped.class, () -> Selection.resolve(
+                Map.of("by", Map.of("url", "x")), source(BROWSERS)).pick(huge, P::url, P::title));
+        assertEquals("by.url", tooLong.param());
+        assertEquals("text too long", tooLong.reason());
+
+        long deadline = System.nanoTime() + 200_000_000L;
+        long shortStart = System.nanoTime();
+        assertThrows(Selection.RegexStopped.class, () -> Selection.resolve(Map.of("by", Map.of("title",
+                "(.*){1,32000}#")), source(BROWSERS), deadline).pick(pages, P::url, P::title));
+        assertTrue((System.nanoTime() - shortStart) / 1_000_000 < 1000, "the call's deadline bounds it too");
     }
 
     @Test
