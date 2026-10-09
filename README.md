@@ -68,6 +68,7 @@ vision-driven input and the fluent Java API.
 | Design overview, all phases | [docs/design/base-framework-design.md](docs/design/base-framework-design.md) |
 | Research notes | [docs/research/](docs/research/) |
 | Licence, notices, dependency licence audit | [LICENSE](LICENSE), [NOTICE](NOTICE), [docs/licence-audit.md](docs/licence-audit.md) |
+| Security policy (reporting, known limitations) and the release checklist | [SECURITY.md](SECURITY.md), [docs/release-checklist.md](docs/release-checklist.md) |
 | How to contribute | [CONTRIBUTING.md](CONTRIBUTING.md) |
 
 ## Layout
