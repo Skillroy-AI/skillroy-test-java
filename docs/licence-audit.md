@@ -6,9 +6,9 @@ and the artifacts spike BS8 used (section 8), and on 2026-10-07 for Phase 4 (sec
 day the agent home's seventh jar was inspected and the web host scenarios module's scopes read from its POM), and on
 2026-10-09 for Phase 6 (each package updated the sections for its dependencies; the documents pass brought section 1
 and the table of section 3 to the agent home as built, eleven jars). Version
-audited: 0.1.0-SNAPSHOT, all 22 reactor modules (19 in a build without the Maven profile `jcef`; the 3 web host
-samples are built only with `-Pjcef`); the spike project under `spikes/BS8/` is not a reactor module and distributes
-nothing.
+audited: 0.1.0-SNAPSHOT, all 30 reactor modules since Phase 6 (27 in a build without the Maven profile `jcef`; the 3
+web host samples are built only with `-Pjcef`); the spike projects under `spikes/` are not reactor modules and
+distribute nothing.
 Intended licence of the project: Apache-2.0.
 
 This is an engineering inventory built from primary sources that are available locally: the `<licenses>` element of
@@ -78,16 +78,18 @@ status text and in sections 3 and 4.
 
 ## 2. Scope and conventions
 
-Modules audited (24 since Phase 5, 2026-10-08; 22 before): the root POM `skillroy-test-java-parent`; the agent side `skillroy-protocol`,
+Modules audited (31 since Phase 6, 2026-10-09; 24 since Phase 5; 22 before): the root POM `skillroy-test-java-parent`; the agent side `skillroy-protocol`,
 `skillroy-agent-api`, `skillroy-agent-bootstrap`, `skillroy-agent-core`, `skillroy-agent-swing`,
-`skillroy-agent-data`, `skillroy-agent-web` (new in Phase 4), `skillroy-agent-dist`; the controller side
-`skillroy-controller`, `skillroy-data` (new in Phase 2), `skillroy-scenario`, `skillroy-inference` and `skillroy-mcp` (new in
-Phase 5), `skillroy-junit`, `skillroy-cli`, `skillroy-cdp` (new in Phase 4); the lending samples `skillroy-sample-lending-app`, `skillroy-sample-lending-agent`,
-`skillroy-sample-lending-pack`, `skillroy-sample-lending-scenarios`; and the web host samples
+`skillroy-agent-data`, `skillroy-agent-web` (new in Phase 4), `skillroy-agent-spy`, `skillroy-agent-bytebuddy`,
+`skillroy-agent-hooks`, `skillroy-agent-byteman-sys` and `skillroy-agent-byteman` (new in Phase 6), `skillroy-agent-dist`;
+the controller side `skillroy-controller`, `skillroy-data` (new in Phase 2), `skillroy-scenario`, `skillroy-inference` and
+`skillroy-mcp` (new in Phase 5), `skillroy-junit`, `skillroy-cli`, `skillroy-cdp` (new in Phase 4), `skillroy-telemetry` (new in
+Phase 6); the lending samples `skillroy-sample-lending-app`, `skillroy-sample-lending-agent`,
+`skillroy-sample-lending-pack`, `skillroy-sample-lending-pack-branch` (new in Phase 6), `skillroy-sample-lending-scenarios`; and the web host samples
 `skillroy-sample-web-host`, `skillroy-sample-web-host-agent` and `skillroy-sample-web-host-scenarios` (all three new
-in Phase 4). The root POM lists 20 modules in `<modules>` (all but itself and the web host samples; 18 before Phase 5);
-the three web host samples are listed only in its profile `jcef` and are built only with `-Pjcef`, so a build without
-the profile has 21 reactor projects and one with it 24. The agent-side modules (`skillroy-agent-web` included), the sample app and sample
+in Phase 4). The root POM lists 27 modules in `<modules>` (all but itself and the web host samples; 20 before Phase 6, 18 before
+Phase 5); the three web host samples are listed only in its profile `jcef` and are built only with `-Pjcef`, so a build
+without the profile has 28 reactor projects and one with it 31. The agent-side modules (`skillroy-agent-web` included), the sample app and sample
 agent, and the web host and its agent module build with `--release 8`; the controller-side modules (`skillroy-cdp`
 included), the sample pack and the scenarios of both samples build with `--release 25`.
 
