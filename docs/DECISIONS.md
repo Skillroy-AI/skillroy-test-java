@@ -1,6 +1,6 @@
 # Decisions: base framework
 
-Decisions for the base framework (`skillroy-test-java`), as of 2026-10-08 (B1-B24). The project owner answered B1-B14
+Decisions for the base framework (`skillroy-test-java`), as of 2026-10-09 (B1-B26). The project owner answered B1-B14
 on 2026-10-02; each entry records the answer, what it changed, and what the build has established. B15 and B16 follow
 from those answers. B17 and B18 were taken without the owner, on the evidence of the security review and of the
 end-to-end review, B19 as the answers to the open questions of the Phase 2 contract and B20 as those of the Phase 3
@@ -9,7 +9,7 @@ base stays restrictive by default; a private overlay may override it"), and answ
 B10 and B12. **B21** (the answers to the fifteen questions of the Phase 4 contract) was taken without the owner later
 on 2026-10-06 and **confirmed by the owner on 2026-10-07** without a veto. **B22** (the eleven decisions the Phase 4
 build and its review took on their own, the contract's D59-D69) was taken without the owner on 2026-10-07 and
-**confirmed by the owner the same evening** (`B22 ok`). **B23** (the Phase 5 contract's eighteen answers, `design/phase5-contracts.md` §17, Q11 withdrawn) and **B24** (the eighteen decisions of its build and review, D88-D104 and D110) were taken without the owner on 2026-10-08 and **confirmed by the owner the same day** (`B23 ok`, `B24 ok`). Every decision stays changeable
+**confirmed by the owner the same evening** (`B22 ok`). **B23** (the Phase 5 contract's eighteen answers, `design/phase5-contracts.md` §17, Q11 withdrawn) and **B24** (the eighteen decisions of its build and review, D88-D104 and D110) were taken without the owner on 2026-10-08 and **confirmed by the owner the same day** (`B23 ok`, `B24 ok`). **B25** (the live session's three decisions, D111-D113) was taken without the owner in the afternoon of 2026-10-08 and **confirmed by the owner on 2026-10-09** (`B25 ok`). **B26** (the Phase 6 contract's twenty-two answers, `design/phase6-contracts.md` §17) was taken without the owner on 2026-10-09 and is **provisional**; the owner asked for progress the same day, so the build proceeds on it. Every decision stays changeable
 until the first public release, at a cost that grows with the code written on it. Decisions that concern one tenant
 application live in that tenant's private repo, not here.
 
@@ -58,6 +58,8 @@ review items of the end-to-end review, and `Sn` the confirmed findings of the se
 | B22 | Phase 4 build decisions | D59-D69 of `design/phase4-contracts.md` §14, taken by the orchestrator during the build and the review | Taken without the owner 2026-10-07; **confirmed by the owner 2026-10-07** (`B22 ok`, all eleven): the trace policy; the narrowed re-probe; the probe's loading rule; the JCEF re-send rule; one outstanding drain; the CDP viewport override on its own session; the endpoint ownership check; the `web.browsers` floor; `BrowserExtras`; `Invocation.secretParams()`; the JCEF raw channel | Built and tested 2026-10-07; verified in the Linux matrix (`TODO.md`) | |
 | B23 | Phase 5 contract answers | The eighteen questions of `design/phase5-contracts.md` §17, answered by the orchestrator | Taken without the owner 2026-10-08, **confirmed by the owner the same day**: the nightly job writes `APPROVED` and the pull request is the review; `approve` reuses an unchanged verified tier (b) value; confidence and row bounds as gates beside the verifier; the strict `SqlGuard`; committed masked recordings so that CI needs no key; refusal fallbacks on; the MCP server read-only by default, destructive never; the planner as the `claude` CLI headless; triage as a separate command; plan version 5; the `call` verb; `REQUIRED` approval on exports; budget exhaustion as `RESOLUTION_FAILED`; prompts not logged by default; Sonnet/Opus/Haiku by role; verbs as the session's tools; three new controller-side dependencies; `inference.yaml` beside `credentials.yaml` | Specified 2026-10-08 (`design/phase5-contracts.md`); built, reviewed and fixed 2026-10-08; spikes BS6 and BS13 run the same night (BS13's live part next) | **Confirmed by the owner 2026-10-08, all seventeen (eighteen asked, Q11 withdrawn)** |
 | B24 | Phase 5 build and review decisions | D88-D104 and D110 of `design/phase5-contracts.md` §16, taken by the orchestrator during the build and the review's fix wave on 2026-10-08 | Taken without the owner 2026-10-08, **confirmed by the owner the same day**: the Anthropic Java SDK pinned to its current line (2.70.0, MIT) with the client built explicitly and the gateway retrying within its own deadline, MCP as `mcp-core` + `mcp-json-jackson2`; a `confirm` argument of any call sent as `_meta.confirm`; a tier (b) row completed by the pack's `ValueLoader`; the inference record in the ledger entry's details; a verb/primitive tool-name collision resolved by the suffix `_primitive`; the rationale and rejections through `ResolveContext` seams into the provenance and the bindings file; a credential declarable for a session's resolve; the CLI session recovering the target when it closes after a mutating call. From the review's fix wave: a plan run on a client's behalf checked against the server's projection and evaluated on masked values, verb tools reaching a never-offered primitive withheld (D96); MCP exports always `REQUIRED` (D97); `web.evaluate` and `web.waitFlag` offered only with `--allow-evaluate`, never to the planner (D98); `data_query` guarded by an allow-list copy with personal and masked columns unreferenceable (D99); the allow-list checked against the source at bind, load and server start (D100); a session's tier (b) resolves metered on the session budget (D101); a failed gateway call as a ledger entry (D102); the planner's brief exempt from the mask, its vocabulary masked (D103); the MCP server running the allow-list check at start only where the target offers `data.query`, an unreachable source not read rather than refusing the start (D104); the live profiles and §15.3 marked not built until a key works (D110) | Built 2026-10-08 (waves 1, 2a, 2b, 2c, the matrix fix, the review's fix wave; `TODO.md`) | **Confirmed by the owner 2026-10-08, all eighteen** |
+| B25 | The live session's decisions (D111-D113) | as taken | confirmed 2026-10-09 | built and run live 2026-10-08 | – |
+| B26 | Phase 6 contract answers (22 questions: the B4 carve-out's wording, Byteman in process behind BS14, the overlay SPI, the Windows host, telemetry egress, the review's sign-off, SECURITY.md, pass 1's four decision amendments and five accepted lows) | the §17 answers | provisional 2026-10-09 | nothing built | the owner's confirmation; Q1's wording |
 
 Phase 1 details are fixed in `design/phase1-contracts.md`; the same file carries the Phase 1.x specification
 (A17-A33, H1-H3). Phase 2 details are fixed in `design/phase2-contracts.md`, whose open questions B19 answers. What
@@ -1071,11 +1073,65 @@ alternatives rejected and the reason. **Confirmed by the owner on 2026-10-09**, 
 **What it changed.** Built and run live on 2026-10-08 (`TODO.md`, "Phase 5", the live table). **Blocks.** Nothing;
 confirmed, so the built behaviour stands as it is.
 
+## B26 Phase 6 contract answers (2026-10-09; provisional)
+
+**From:** the questions of `design/phase6-contracts.md` §17, answered by the orchestrator on 2026-10-09 without the
+owner so that the build can start; they produced the contract's decisions D114-D159 (§16; D149 and D150 as first
+written were superseded by D156 and D159 in the contract review of the same day and stand as struck rows). Spike BS3
+(the hook go/no-go) reported the same day, passed with conditions, and its facts are in the contract
+(`spikes/BS3/RESULT.md`); the repeat security review's first pass (lenses L3-L6) finished the same day with 28
+confirmed findings, S35-S62 (1 high, 6 medium, 21 low), every one dispositioned by the Phase 6 build as its fifth
+work package: fixed, contract first, or, for five low parts, accepted by the owner with a release note (Q22)
+(`notes/2026-10-09/phase6/security/pass1/dispositions.md`). **Provisional** until the owner answers (`B26 ok`, or the
+vetoes by name).
+**Question.** Twenty-two points the contract could have decided either way; nine of them rest on knowledge only the
+owner has (the private layers, the Windows host, the telemetry backends, the disclosure channel); four (Q18-Q21) amend
+decisions the owner confirmed in B21, B23 and B24, because pass 1 found their premises wrong; one (Q22) accepts five
+low findings of pass 1 with a release note each.
+
+| Q | Question | Provisional answer | Veto form offered |
+|---|---|---|---|
+| Q1 | The carve-out of "no third-party classes inside the target JVM", in words, for `CLAUDE.md`, `NOTICE`, `CONTRIBUTING.md` and the audit: shaded, relocated Byte Buddy and ASM inside the optional hooks module `optional/skillroy-agent-hooks.jar`, loaded only when `optionalModules` names it, only `Spy` on the bootstrap path; may the jar ship in the default home under these words? | Yes, with the wording of §17 Q1 (D114, D115) | `B26 Q1 veto`: a separate download, the home third-party-free; `B26 Q1 veto wording`, with the text to use |
+| Q2 | Byteman in Phase 6: build the thin in-process module behind spike BS14, or specify only? | Build it behind BS14 (D132, D134); specified only if the spike fails | `B26 Q2 veto`: specified only |
+| Q3 | A second project jar (`skillroy-agent-byteman-sys.jar`, the curated helper and the manager class, compiled against Byteman at `provided` scope) on the target's system class path, inside the B8 exception? | Yes (D132) | `B26 Q3 veto`: no project jar there; `rule.fired` events impossible, Byteman's default helper denied |
+| Q4 | How the private layers consume an overlay: a second jar through `DomainPackOverlay`, or a wrapper class of their own registered instead of the base? | The second jar through the SPI (D144) | `B26 Q4 veto`: `DomainPacks` prefers a marked `DomainPack` of the base's id over the base; the SPI is dropped |
+| Q5 | Does a private catalogue shape exist that the §5.1 format must carry unchanged? | No: §5.1 is the first catalogue (D121) | `B26 Q5 veto`, naming the fields (`… <field>`) or `… versions` |
+| Q6 | Third-party hook targets: off by default, `enabled: true` outside the pack's packages accepted with a warning; does any layer need one in Phase 6? | None in Phase 6; the warning stands (D121, D124) | `B26 Q6 veto`: the reader refuses it |
+| Q7 | The Windows host's JDKs (vendor, bitness) and whether tests may run in an interactive logon session there? | Temurin 25 and 8, 64-bit, an interactive session (D137) | `B26 Q7 veto`, naming the JDKs or `… no interactive session` |
+| Q8 | `ATTACH` on Windows in scope, or `JAVAAGENT` plus the documented exclusion? | Best effort only (D139) | `B26 Q8 veto`: `ATTACH` joins the Windows exit when the host exists |
+| Q9 | Ship `bin/skillroy.bat` unverified from the next commit, marked so? | Yes (D137) | `B26 Q9 veto`: assembled only after the host ran it |
+| Q10 | Telemetry backends and what may leave the host: OTLP/HTTP protobuf through the JDK sender, loopback-http or https only, `standard` attributes by default? | Yes (D141, D142) | `B26 Q10 veto grpc` (OkHttp sender, gRPC); `… minimal` (default set); `… loopback` (no off-host export) |
+| Q11 | The rule "no third-party classes inside the target JVM" closed for a relocated OpenTelemetry copy? | Closed (D140) | `B26 Q11 veto`: the door stays open for a later agent-side exporter |
+| Q12 | Who signs the repeat review (the owner, B28), and is an outside human reader a gate of the first release? | The owner signs; an outside reading recommended, recorded, not a gate (D147) | `B26 Q12 veto`: a gate |
+| Q13 | `SECURITY.md`'s disclosure channel and supported versions? | The repository host's private reporting plus the `NOTICE` address; the latest minor only (D148) | `B26 Q13 veto`, naming the channel or the policy |
+| Q14 | The one CDS warning line a Java 25 host prints in hooks mode (the bootstrap append; BS3 fact 8): acceptable and documented, or a system-class-path placement option for `Spy`? | Acceptable, documented (D116) | `B26 Q14 veto`: the option `hooks.spyPlacement = bootstrap | system` |
+| Q15 | May the first public release ship with the Windows items marked "not verified"? | Yes (§14) | `B26 Q15 veto`: the release waits for the host |
+| Q16 | The repeat review may accept or defer a low finding only, in writing, with a release note, deferred only to a named phase, a documentation-only change counting as an acceptance; nothing medium or above? | Yes (D147) | `B26 Q16 veto none` (nothing accepted at all); `B26 Q16 veto any` (the owner may accept any in writing) |
+| Q17 | May read-only mode install `OBSERVE` and `CAPTURE` hooks, with only `STUB` disabled (design §2.2 step 7)? | Yes: `hook.install` is not mutating (D119) | `B26 Q17 veto`: `hook.install` mutating too |
+| Q18 | Pass 1's S42: `web.waitFlag` runs a caller's expression, so D51 (B21 Q5) rested on a wrong premise. The descriptor flag `script`, refused in read-only mode by the agent's dispatcher and the CDP path; D98's offer rule unchanged. Confirm the amendment of D51? | Yes (D156) | `B26 Q18 veto`: the flag marks and projects only; S42 accepted (low) with a release note |
+| Q19 | Pass 1's S56: a client's `skillroy_scenario_run` spends tier (b) calls outside the session budget. D101 (B24) widened: one `SESSION` meter per MCP server bounds `skillroy_session_ask`, `skillroy_resolve` and a run's tier (b) slots. Confirm? | Yes (D157) | `B26 Q19 veto`: a run stays on the scenario budget; S56 (medium) would then be accepted, which §12.5 forbids, so the owner names another fix |
+| Q20 | Pass 1's S57, S59, S62: the MCP server acted under `person("mcp")`, so a verb's own `confirm` was honoured, and D96's verb gate ran on three probes at start. `Origin.Kind.CLIENT` never confirms; the gate runs at call time on the compiled calls for the MCP server and the session service; `author` passes `--client planner`. Confirm the amendment of D96 and of P5 §12.4's host text? | Yes (D158) | `B26 Q20 veto client`: a `PERSON` origin stays and a verb's `confirm` is honoured for every client (accepted in writing); `B26 Q20 veto gate`: probes only, S57 (medium) accepted, which §12.5 forbids as in Q19 |
+| Q21 | Pass 1's S58: captures reached the MCP client as unmasked, uncut blobs. A capture's bytes leave the controller to a client only under the inference settings' `images: true` (D84 widened to MCP; D76 amended); otherwise a text resource names the written file; no separate flag. Confirm? | Yes (D159) | `B26 Q21 veto flag`: a separate `skillroy mcp --serve-captures`; `B26 Q21 veto today`: served as today, S58 (medium) accepted, which §12.5 forbids as in Q19 |
+| Q22 | Five low parts of pass 1 deferred or fixed by documentation only, each with a release note: S36 part (b), S37 option (i), the pinning part of S40, S48, the `CLAUDE_CONFIG_DIR` part of S60 (the phase each goes to is in §17 Q22). Under §12.5 these are acceptances and need the owner's word. Accept the five? | Yes: accepted as lows, named here and repeated in B28 (D147) | `B26 Q22 veto`, naming the finding to fix now (`… S37`, `… S48`, …): FX builds that part in the same wave |
+
+**What it changes.** The Phase 6 contract and, through its §15.1, the Phase 1-5 contracts and the design overview
+(written in when the build starts); `CLAUDE.md`, `NOTICE`, `CONTRIBUTING.md` and the licence audit with Q1's wording;
+D51, D76, D84, D96 and D101 as Q18-Q21 say. **State of the build.** Nothing is built; the contract is specified and
+reviewed (72 raw findings, 65 confirmed, 7 refuted, 27 added by the sceptics, every confirmed one applied); BS3 passed
+with conditions; pass 1 of the security review is dispositioned. **Blocks.** Nothing: the owner asked for progress on
+2026-10-09 ("please continue"), so the build proceeds on the provisional answers, as the Phase 5 build did on B23;
+spike BS14 (Byteman in process) runs first in any case; `CLAUDE.md`, `NOTICE` and `CONTRIBUTING.md` wait for Q1's
+wording.
+
 ---
 
 ## Questions for the owner
 
-**None open as of 2026-10-09.** The owner confirmed **B25** (the three decisions of the live session of 2026-10-08,
+**Open as of 2026-10-09: B26**, the twenty-two provisional answers of the Phase 6 contract (`design/phase6-contracts.md` §17), nine of which rest on the
+owner's knowledge (Q2, Q4, Q5, Q6, Q7, Q10, Q12, Q13, Q15), four of which amend confirmed decisions (Q18-Q21: D51,
+D101, D96, D76/D84) and one of which accepts five low findings of the repeat review's first pass (Q22); one message
+answers them (`B26 ok`, or the vetoes by name). **B27** (the build's and review's decisions) and **B28** (the sign-off
+of the repeat security review) follow. The owner confirmed **B25** (the three decisions of the live session of 2026-10-08,
 D111 to D113) on 2026-10-09, every row. **B23** (the Phase 5 contract's eighteen provisional answers, one withdrawn) and **B24** (the seven decisions the Phase 5
 build and the review's fix wave took, D88-D104 and D110) were confirmed by the owner on 2026-10-08, every row.
 Before it, none was open as of the evening of 2026-10-07: the owner confirmed **B21** (the fifteen answers of the Phase 4 contract)

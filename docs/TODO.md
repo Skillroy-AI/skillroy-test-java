@@ -1,7 +1,7 @@
 # TODO: base framework
 
 What exists, what was proven and what is open for the base framework (`skillroy-test-java`), as of
-2026-10-08. Decisions are in `DECISIONS.md` (B1-B23); the design is in `docs/design/` (Phase 1 and Phase 1.x as
+2026-10-08. Decisions are in `DECISIONS.md` (B1-B26); the design is in `docs/design/` (Phase 1 and Phase 1.x as
 built in `phase1-contracts.md`, Phase 2 as built in `phase2-contracts.md`, Phase 3 as built in
 `phase3-contracts.md`, Phase 4 as built in `phase4-contracts.md`, Phase 5 specified in `phase5-contracts.md`);
 research notes are in `docs/research/`; the dependency licence audit is `docs/licence-audit.md`.
@@ -389,6 +389,30 @@ low; none high or critical), 1 rejected. The confirmed findings are S1-S34; `DEC
 - The Windows-specific fixes (S7, S15: access control on file systems without POSIX permissions) are built and
   unit-tested on built ACL values, but cannot be verified without a Windows host: not verified on Windows.
 - The review is to be repeated before the first release.
+
+### Security review (repeat, pass 1, 2026-10-09)
+
+The first pass of the repeat review B13 asks for before the first release, run on the committed tree `e86e8e2` with
+the four lenses whose code Phase 6 does not change (L3 credentials, data channels and run outputs; L4 embedded web
+views; L5 the model boundary; L6 the model as an actor), one reviewer and one independent sceptic each, probes in
+scratch copies, no live model call. 28 raw findings (25 from the reviewers, 3 raised by the sceptics from refuted
+"sound" claims): 28 confirmed (1 high, 6 medium, 21 low; 18 counted, 10 operator-only), 0 rejected. The confirmed
+findings are S35-S62; the record is in the session notes (`2026-10-09/phase6/security/pass1/record.json` and `dispositions.md`).
+- The high finding: `data_query` substitutes `$slot.field` references into the guarded SQL after `SqlGuard` ran, so a
+  stored value or a model's reference rebuilds the statement past every guard rule (S55, FX-mcp).
+- The six medium findings: page-produced data bounded only by page-side code (S43), the debug-port probe's unbounded
+  `/json` bodies (S44), unbounded author regexes on page text written by an MCP client (S46), all FX-web;
+  `skillroy_scenario_run` spending outside the session budget (S56), the verb gate decided by probes only under an
+  origin that confirms (S57), captures served to the MCP client unmasked (S58), all FX-mcp.
+- Dispositions: every finding fixed inside Phase 6's build in five packages (FX-scenario, FX-web, FX-inference,
+  FX-mcp, FX-ci), contract first, but five low parts proposed for the owner's acceptance (B26 Q22, provisional) with a release note each (S37 and
+  S48 by documentation only, an acceptance under P6 §12.5); four fixes carry a decision of the Phase 6 contract (D156
+  the `script` flag against D51, D158 the client origin against D96, D157 D101 widened, D159 captures over MCP against
+  D76/D84).
+- Not verified here: Windows, the drivers' read-only semantics, GitHub's multi-line masking, the real `claude` CLI;
+  pass 2 runs all eight lenses on the Phase 6 tree with L3-L6 as deltas, and the sign-off is the owner's.
+- State on 2026-10-09: specified in `design/phase6-contracts.md` §12 (amendments A40-A60 assigned); the fixes are
+  being built (Phase 6, package FX).
 
 ## Base spikes
 
@@ -1279,6 +1303,14 @@ commits. The key lived in the operator's login shell and reached a JVM by name o
 
 ### Phase 6: hooks, Byteman, Windows, OTel, hardening
 
+**Specified 2026-10-09** (`design/phase6-contracts.md`, with `design/threat-model.md`): written from seven readers' maps
+and spike BS3 (passed with conditions), reviewed by three lenses with a sceptic each (72 raw findings, 65 confirmed,
+27 more found by the sceptics, all applied) and rechecked twice; decisions D114-D159; its twenty-two questions are
+**B26**, provisional. The build proceeds on them (the owner asked for progress on 2026-10-09) in five packages: HK
+(hooks and spy), CP (controller, pack, the sample's branch edition, scenario E, JDK 25), TL (telemetry), BW (Byteman
+behind spike BS14, and the Windows path), FX (the security fixes of the repeat review's pass 1, S35-S62).
+
+
 - [ ] `skillroy-agent-spy` and `skillroy-agent-hooks`: hook engine, probes, health, hook-catalogue format, post-detach byte verification (BS3 passed with conditions 2026-10-09)
 - [ ] `skillroy-agent-byteman` (optional and unbundled, B8)
 - [ ] JDK 25 target through `JAVAAGENT`: no JEP 451 warning; capability matrix equal to the JDK 8 matrix. The
@@ -1454,6 +1486,13 @@ Kept generic on purpose: nothing here names a machine, a user or a local path.
   136 MB on arm64, into `PLAYWRIGHT_DRIVER_TMPDIR` or else the Java temporary directory, and is deleted at the JVM's
   exit. The web host acceptance points it at its module's `target/playwright-driver` and extracts it once per test JVM
   (0.7 to 1.7 s in the runs of 2026-10-07).
+
+- **Phase 6 dependencies** (fetched online once on 2026-10-09 into the local Maven repository, B3's "install what
+  is needed"; the build is offline): OpenTelemetry Java **1.66.0** (released 2026-09-11; 1.67.0 was released on
+  2026-10-09 itself and is not pinned) with its tree: `opentelemetry-api`, `-context`, `-common`, `-sdk-common`,
+  `-sdk-trace`, `-exporter-otlp`, `-exporter-otlp-common`, `-sdk-metrics`, `-sdk-logs`, `-exporter-sender-jdk`,
+  `-exporter-common`; for tests `-sdk-testing` and `-sdk`; `-exporter-sender-okhttp` excluded. Byteman **4.0.27**
+  (test and provided scope only, B8). Byte Buddy 1.18.14 and maven-shade-plugin 3.6.2 were fetched by spike BS3.
 
 ## Walls
 
