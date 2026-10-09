@@ -316,8 +316,11 @@ abstract class HookChecks extends LoadModeChecks {
 
     /**
      * Items 1 and 6: the target's merged log holds exactly one CDS line on Java 25 (the one bootstrap append of the
-     * JVM's life, re-attaches included) and none on Java 8, no JEP 451 text, and no line of Byte Buddy,
-     * {@code sun.misc.Unsafe} or a stack frame of the agent.
+     * JVM's life, re-attaches included) and none on Java 8, and no line of Byte Buddy, {@code sun.misc.Unsafe} or a
+     * stack frame of the agent. JEP 451: check 1b found no warning after the launch; the only dynamic loads since are
+     * checks 16 and 17's own re-attaches (an {@code ATTACH} of the bootstrap jar, which a Java 21+ target reports),
+     * so every "loaded dynamically" line names {@code skillroy-agent-bootstrap.jar} and none another jar: the engine
+     * never loads an agent of its own. On Java 8 there is no such text at all.
      */
     @Test
     @Order(205)
@@ -325,7 +328,13 @@ abstract class HookChecks extends LoadModeChecks {
         List<String> log = Files.readAllLines(target.launched.logFile(), StandardCharsets.UTF_8);
         long cds = log.stream().filter(l -> l.contains(CDS_LINE)).count();
         assertEquals(javaFeature(java) == 8 ? 0L : 1L, cds, "CDS lines on Java " + java);
-        assertEquals(List.of(), jep451Lines(log));
+        if (javaFeature(java) == 8) {
+            assertEquals(List.of(), jep451Lines(log));
+        } else {
+            List<String> foreign = log.stream().filter(l -> l.contains("A Java agent has been loaded dynamically")
+                    && !l.endsWith("skillroy-agent-bootstrap.jar)")).toList();
+            assertEquals(List.of(), foreign, "a dynamic load other than the checks' re-attaches");
+        }
         List<String> engine = log.stream().filter(l -> l.contains("bytebuddy") || l.contains("ByteBuddy")
                 || l.contains("sun.misc.Unsafe") || l.matches("\\s*at ai\\.skillroy\\.testjava\\.agent\\..*"))
                 .toList();

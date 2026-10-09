@@ -45,7 +45,6 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
-import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
  * Phase 2 acceptance 14.1 item 11 and Phase 3 acceptance 11.1 item 6: every committed bindings file
@@ -284,9 +283,6 @@ class BindingsUpToDateTest {
      */
     @Test
     void theBranchVariantsFilesAreCanonicalAndTiedToItsPlans() throws Exception {
-        // PENDING-HK: written by BranchEndToEndIT with -Dskillroy.bindings.update=true once the hooks module is in the
-        // agent home; until then their absence is a skip.
-        assumeTrue(Files.isDirectory(BranchVariant.bindingsRoot()), "the branch variant's bindings are not written yet");
         List<Path> files = new ArrayList<>();
         try (Stream<Path> walk = Files.walk(BranchVariant.bindingsRoot())) {
             walk.filter(Files::isRegularFile).sorted().forEach(files::add);

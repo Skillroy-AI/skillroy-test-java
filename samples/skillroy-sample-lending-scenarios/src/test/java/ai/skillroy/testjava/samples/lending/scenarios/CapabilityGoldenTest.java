@@ -32,7 +32,6 @@ import java.util.stream.Stream;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
  * The golden normalisation (phase6-contracts.md 8.2, 13.1 item 7): ids, states and strategy strict, reason by presence,
@@ -109,14 +108,8 @@ class CapabilityGoldenTest {
         try (Stream<Path> list = Files.list(dir)) {
             files = list.map(p -> p.getFileName().toString()).sorted().toList();
         }
-        // PENDING-HK: javaagent-hooks.json is written by LendingEndToEndIT$JavaAgentHooks with
-        // -Dskillroy.golden.write=true once the hooks module is in the agent home; until then its absence is a skip.
-        boolean hooksGolden = files.contains("javaagent-hooks.json");
-        assertEquals(hooksGolden
-                ? List.of("allow-differences.json", "attach.json", "embedded.json", "java-tool-options.json",
-                        "javaagent-hooks.json", "javaagent.json")
-                : List.of("allow-differences.json", "attach.json", "embedded.json", "java-tool-options.json",
-                        "javaagent.json"), files);
+        assertEquals(List.of("allow-differences.json", "attach.json", "embedded.json", "java-tool-options.json",
+                "javaagent-hooks.json", "javaagent.json"), files);
         for (String file : files) {
             if (file.equals("allow-differences.json")) {
                 continue;
@@ -130,7 +123,6 @@ class CapabilityGoldenTest {
             assertTrue(entries.keySet().stream().noneMatch(id -> String.valueOf(id).startsWith("hook.")
                     && !"hook.engine".equals(id)), file + ": read before any catalogue is installed");
         }
-        assumeTrue(hooksGolden, "javaagent-hooks.json is not written yet (the hooks leg's golden)");
     }
 
     private static Map<Object, Object> withoutNull(Map<?, ?> map) {

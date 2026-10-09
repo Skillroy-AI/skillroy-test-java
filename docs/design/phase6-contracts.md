@@ -2743,6 +2743,12 @@ the golden (`javaagent-hooks.json`).
    holds **one** CDS line on Java 25 and none on Java 8; `hook.probe.spy.onBootPath` true before the install); check
    19 stays last. The target's log is scanned for any line from Byte Buddy, `sun.misc.Unsafe` or an exception with
    `skillroy` in its trace: none.
+
+   As built (Phase 6, CP): `HookChecks` (a subclass of `LoadModeChecks`, orders 65, 66, 67, 165 and 205, and
+   `afterReattach` called from checks 16 and 17); orders 166 to 169 are left for BW's item 7. The log scan at 205
+   also reads the JEP 451 text: checks 16 and 17 re-attach through `ATTACH`, a dynamic load that a Java 25 target
+   reports, so every "loaded dynamically" line must name `skillroy-agent-bootstrap.jar` (none another jar: the engine
+   never loads an agent) and a Java 8 log holds none.
 2. **The exit criterion's restore**: item 1's `hook.remove` on `AccessControl.check` and `returnLimit` (the methods
    BS3 and E hook) reports `OK` with `bytesBefore == bytesAfter` and `foreignEvents 0`, on the Java 8 and the Java 25
    target.

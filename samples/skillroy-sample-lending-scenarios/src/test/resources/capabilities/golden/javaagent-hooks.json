@@ -1,0 +1,170 @@
+{
+  "capabilities": {
+    "data.query": {
+      "state": "OK",
+      "strategy": null,
+      "reason": false
+    },
+    "hook.engine": {
+      "state": "OK",
+      "strategy": "advice",
+      "reason": false
+    },
+    "jvm.instrumentation": {
+      "state": "OK",
+      "strategy": "Instrumentation",
+      "reason": false
+    },
+    "lending.access.check": {
+      "state": "OK",
+      "strategy": "snapshot",
+      "reason": false
+    },
+    "lending.deposit": {
+      "state": "OK",
+      "strategy": "snapshot",
+      "reason": false
+    },
+    "lending.input": {
+      "state": "OK",
+      "strategy": "inbox",
+      "reason": false
+    },
+    "lending.limits": {
+      "state": "OK",
+      "strategy": "snapshot",
+      "reason": false
+    },
+    "lending.loan": {
+      "state": "OK",
+      "strategy": "snapshot",
+      "reason": false
+    },
+    "lending.loan.authorisations": {
+      "state": "OK",
+      "strategy": "loan snapshot",
+      "reason": false
+    },
+    "lending.prompt": {
+      "state": "OK",
+      "strategy": "snapshot",
+      "reason": false
+    },
+    "lending.prompt.answer": {
+      "state": "OK",
+      "strategy": "snapshot",
+      "reason": false
+    },
+    "lending.slip": {
+      "state": "OK",
+      "strategy": "snapshot",
+      "reason": false
+    },
+    "lending.sql": {
+      "state": "OK",
+      "strategy": "read-only JDBC",
+      "reason": false
+    },
+    "lending.state": {
+      "state": "OK",
+      "strategy": "snapshot",
+      "reason": false
+    },
+    "lending.waiver.evaluate": {
+      "state": "OK",
+      "strategy": "snapshot",
+      "reason": false
+    },
+    "swing.capture.paint": {
+      "state": "OK",
+      "strategy": null,
+      "reason": false
+    },
+    "swing.click.action": {
+      "state": "OK",
+      "strategy": null,
+      "reason": false
+    },
+    "swing.click.component": {
+      "state": "OK",
+      "strategy": null,
+      "reason": false
+    },
+    "swing.click.dispatch": {
+      "state": "OK",
+      "strategy": null,
+      "reason": false
+    },
+    "swing.click.robot": {
+      "state": "UNAVAILABLE",
+      "strategy": null,
+      "reason": true
+    },
+    "swing.tree": {
+      "state": "OK",
+      "strategy": null,
+      "reason": false
+    },
+    "target.ready": {
+      "state": "OK",
+      "strategy": null,
+      "reason": false
+    },
+    "web.adapter.jcef": {
+      "state": "UNAVAILABLE",
+      "strategy": null,
+      "reason": true
+    },
+    "web.adapter.jxbrowser": {
+      "state": "UNAVAILABLE",
+      "strategy": null,
+      "reason": true
+    },
+    "web.bitmap": {
+      "state": "UNAVAILABLE",
+      "strategy": null,
+      "reason": true
+    },
+    "web.browsers": {
+      "state": "UNAVAILABLE",
+      "strategy": null,
+      "reason": true
+    },
+    "web.cdp": {
+      "state": "UNAVAILABLE",
+      "strategy": null,
+      "reason": true
+    },
+    "web.evaluate": {
+      "state": "UNAVAILABLE",
+      "strategy": null,
+      "reason": true
+    },
+    "web.events": {
+      "state": "UNAVAILABLE",
+      "strategy": null,
+      "reason": true
+    },
+    "web.hittest": {
+      "state": "UNAVAILABLE",
+      "strategy": null,
+      "reason": true
+    },
+    "web.initScript": {
+      "state": "UNAVAILABLE",
+      "strategy": null,
+      "reason": true
+    },
+    "web.pointer": {
+      "state": "UNAVAILABLE",
+      "strategy": null,
+      "reason": true
+    },
+    "web.resize": {
+      "state": "UNAVAILABLE",
+      "strategy": null,
+      "reason": true
+    }
+  }
+}
+
