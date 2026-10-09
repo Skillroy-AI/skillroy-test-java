@@ -41,8 +41,10 @@ import ai.skillroy.testjava.scenario.PlanCompiler;
 import ai.skillroy.testjava.scenario.ScenarioException;
 import ai.skillroy.testjava.scenario.SessionOpenException;
 import ai.skillroy.testjava.scenario.SessionOptions;
+import ai.skillroy.testjava.scenario.hooks.HooksMode;
 import ai.skillroy.testjava.scenario.StepJournal;
 import ai.skillroy.testjava.scenario.StepOutcome;
+import ai.skillroy.testjava.scenario.observe.RunObserver;
 import ai.skillroy.testjava.scenario.pack.DomainPack;
 import ai.skillroy.testjava.scenario.pack.PlannedCall;
 import ai.skillroy.testjava.scenario.pack.Sync;
@@ -165,6 +167,8 @@ final class SessionCommand implements Command {
                 OptionSpec.value(SCRIPT, "file", "read the commands from this file instead of the terminal")));
         options.addAll(InferenceArgs.gateway());
         options.add(InferenceArgs.BUDGET_SESSION_OPTION);
+        options.add(HooksArgs.OPTION);
+        options.addAll(TelemetryArgs.OPTIONS);
         options.add(OptionSpec.flag("--json", "print each command's result as one JSON object per line"));
         return Connector.withConnection(options.toArray(OptionSpec[]::new));
     }
@@ -198,6 +202,8 @@ final class SessionCommand implements Command {
             throw new UsageException(ID + " must match [a-z0-9-]+, found '" + id + "'");
         }
         BindArgs.Settings settings = BindArgs.parse(args, List.of(), BindMode.LIVE);
+        HooksMode hooks = HooksArgs.mode(args);
+        RunObserver observer = RunObserver.NONE;
         ClassLoader previous = Thread.currentThread().getContextClassLoader();
         try (Packs packs = Packs.load(args.values(Packs.OPTION), cli.classLoader())) {
             Thread.currentThread().setContextClassLoader(packs.loader());
@@ -217,7 +223,11 @@ final class SessionCommand implements Command {
             Clock clock = Clock.systemUTC();
             String sessionId = id != null ? id : "session-" + Long.toString(clock.millis(), 36);
             Path dir = out != null ? out : Path.of("run-output", sessionId);
+            // phase6-contracts.md 10.3: before the agent is contacted; <dir>/telemetry/ for the file exporter.
+            observer = TelemetryArgs.open(TelemetryArgs.load(args, BindArgs.credentialsDir(settings), dir), cli);
             Target target = Connector.connect(args, cli);
+            TelemetryArgs.started(observer, TelemetryArgs.runStart(observer, "session", null, BindMode.LIVE.label(),
+                    settings.envId(), target, null));
             try (target) {
                 CostLedger ledger = new CostLedger();
                 BindOptions bind = BindOptions.defaults().withMode(BindMode.LIVE).withEnvId(settings.envId())
@@ -226,7 +236,8 @@ final class SessionCommand implements Command {
                 // Recover on close (D95): the desk is left as a run leaves it, so that the export replays at once.
                 SessionOptions options = SessionOptions.defaults(dir).withClock(clock).withBind(bind)
                         .withReadOnly(args.flag(READ_ONLY)).withRecoverOnClose(true)
-                        .withWebPathLoader(packs.loader()).withId(sessionId);
+                        .withWebPathLoader(packs.loader()).withId(sessionId).withHooks(hooks)
+                        .withObserver(observer);
                 ExecutorSession session;
                 try {
                     session = ExecutorSession.open(pack, target.client(), options);
@@ -269,6 +280,7 @@ final class SessionCommand implements Command {
                 return repl.agentLost || repl.lastExportFailed ? Exit.FAILED : Exit.OK;
             }
         } finally {
+            TelemetryArgs.finish(observer, json ? cli.err() : cli.out());
             Thread.currentThread().setContextClassLoader(previous);
         }
     }

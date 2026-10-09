@@ -69,7 +69,8 @@ class ScenarioSchemaCommittedTest {
     void everyCommittedScenarioIsValidAgainstThePacksSchema() throws Exception {
         Map<String, Object> schema = ScenarioSchema.generate(pack, List.of());
         List<Path> files = everyScenario();
-        assertEquals(17, files.size(), "the six committed scenarios and the eleven negative ones");
+        assertEquals(18, files.size(), "the seven committed scenarios (scenario E with them) and the eleven negative"
+                + " ones");
         for (Path yaml : files) {
             assertEquals(List.of(), ScenarioSchema.validate(schema, document(yaml)), yaml.getFileName().toString());
         }

@@ -32,6 +32,7 @@ import ai.skillroy.testjava.protocol.CapabilityState;
 import ai.skillroy.testjava.protocol.ErrorCodes;
 import ai.skillroy.testjava.protocol.LoadMode;
 import ai.skillroy.testjava.protocol.RpcException;
+import ai.skillroy.testjava.samples.lending.Edition;
 import ai.skillroy.testjava.samples.lending.Engine;
 import ai.skillroy.testjava.samples.lending.LendingApp;
 import ai.skillroy.testjava.samples.lending.LendingInput;
@@ -525,6 +526,34 @@ class LendingModuleTest {
     }
 
     /**
+     * phase6-contracts.md 11.3: {@code app.state} reports the desk's edition ({@code standard} by default,
+     * {@code branch} for a desk launched with {@code lending.edition=branch}), and the branch desk answers the access
+     * check and the limits from its own column and setting names with the same values.
+     */
+    @Test
+    void appStateReportsTheEdition() throws Exception {
+        LendingFixture standard = LendingFixture.start();
+        try {
+            assertEquals("standard", standard.ctx.spi.first(AppStateProvider.class).appState().get("edition"));
+        } finally {
+            standard.close();
+        }
+        LendingFixture branch = LendingFixture.start(Edition.BRANCH);
+        try {
+            assertEquals("branch", branch.ctx.spi.first(AppStateProvider.class).appState().get("edition"));
+            assertEquals("A", branch.ctx.spi.first(AppStateProvider.class).appState().get("seed"));
+            assertEquals(args("maxReturn", "500.00"), branch.ctx.call("lending.limits", args()));
+            @SuppressWarnings("unchecked")
+            Map<String, Object> decision = (Map<String, Object>) branch.ctx.call("lending.access.check",
+                    args("staff", "100", "permission", "RETURN", "amount", "20.01"));
+            assertEquals(Boolean.FALSE, decision.get("allowed"));
+            assertEquals("20.00", decision.get("limit"));
+        } finally {
+            branch.close();
+        }
+    }
+
+    /**
      * The {@code lending} section of {@code app.state} reports the port the desk's database listener is bound to
      * ({@code dbPort}), which is how a test that let the desk pick a free port ({@code lending.dbPort=0}) learns it,
      * and {@code null} for a desk without a listener. The field is reported, not a fingerprint component.
@@ -562,7 +591,7 @@ class LendingModuleTest {
             Map<String, Object> state = lending.ctx.spi.first(AppStateProvider.class).appState();
             assertEquals(Arrays.asList("running", "name", "prompt", "validInputs", "staff", "returnMode", "locked",
                     "awaitingInput", "modalPrompt", "loanOpen", "lastLoanId", "slips", "engineListeners", "seed",
-                    "dbPort", "today"), new java.util.ArrayList<String>(state.keySet()));
+                    "edition", "dbPort", "today"), new java.util.ArrayList<String>(state.keySet()));
         } finally {
             lending.close();
         }

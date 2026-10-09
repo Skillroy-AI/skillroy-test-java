@@ -105,6 +105,12 @@ class ValueLoadersOnRealSchemaTest {
             this.envId = envId;
         }
 
+        /** Both contexts default it (phase6-contracts.md 11.1): a class implementing both chooses. */
+        @Override
+        public ai.skillroy.testjava.scenario.pack.PackSettings settings() {
+            return new ai.skillroy.testjava.samples.lending.pack.LendingPack().settings();
+        }
+
         @Override
         public AgentConnection agent() {
             return desk;

@@ -131,7 +131,20 @@ skillroy-agent/
   lib/skillroy-protocol.jar  lib/skillroy-agent-api.jar  lib/skillroy-agent-core.jar
   modules/skillroy-agent-swing.jar  modules/skillroy-agent-data.jar      # plus any domain module jars dropped in
   modules/skillroy-agent-web.jar   # (Phase 4, built 2026-10-07; P4 §2.1, §11)
+  skillroy-agent-spy.jar           # (Phase 6, built 2026-10-09, HK; P6 §2.1) appended to the bootstrap path by the
+                                   # hooks module at its first hook.install, never earlier
+  optional/skillroy-agent-hooks.jar   # (Phase 6, built 2026-10-09, HK; P6 §2.1) never scanned; loaded only when the
+                                      # option optionalModules names it; carries the relocated Byte Buddy and ASM
 ```
+
+**Phase 6 (built 2026-10-09, HK; P6 §2.1, §2.5).** The home gains `skillroy-agent-spy.jar` at its root (outside
+`lib/` and `modules/`, so that no agent loader defines `Spy`) and the directory `optional/`, which `ModuleLoader`
+never scans (D114). `DistributionContentIT`'s list has eleven entries (thirteen once the Byteman module adds its two
+jars under `optional/`, BW) and two new rules: no jar but `skillroy-agent-spy.jar` holds an entry of
+`ai/skillroy/testjava/agent/spy/`, and `optional/skillroy-agent-hooks.jar` holds no entry under `net/`. Every jar
+still holds only `ai/skillroy/` and `META-INF/` entries: the relocated Byte Buddy lives under
+`ai/skillroy/testjava/agent/hooks/shaded/` and its notices under `META-INF/third-party/`. `HomeConstantPoolIT`
+(D152) scans every class of the home for class references outside the JDK's and the project's prefixes.
 
 Jar names inside the home carry **no version** (the bootstrap must be found by a stable name; attach re-runs
 `agentmain` of the first-loaded jar and shadows a renamed one). **Licence files (1.x, built 2026-10-02):** every jar
@@ -151,6 +164,14 @@ host loader (system loader, or the loader that called EmbeddedAgent.start)
 
 Modules see `skillroy-agent-api`/`skillroy-protocol` through the agent loader and host application classes through
 the host loader. Nothing of the agent except the bootstrap jar is visible to the host.
+
+**Phase 6 (built 2026-10-09, HK; P6 §2.1, D116).** The hooks' `Spy` package `ai.skillroy.testjava.agent.spy.` exists
+once in a JVM: `AgentClassLoader.isChildFirst` excludes it as it excludes the bootstrap package, and
+`ModuleClassLoader`'s parent-first list (classes and resources) gains it, so that every loader of the agent resolves
+`Spy` to the one copy the hooks module appends to the bootstrap search path (in hooks mode only, from the first
+`hook.install` on, for the JVM's life). Before that append the parent chain has no `Spy`, and a copy inside a module
+jar would be defined there, which is why no jar but the spy jar may hold one (§2.1). Visible to the host in hooks
+mode: `Spy`, `Spy$Handler` and `Spy$Stub` in the bootstrap loader, nothing else (`SharedLoadersIT`).
 
 A module loader is parent-first for the JDK (`java.`, `javax.`, `sun.`, `com.sun.`, `jdk.`) and for the shared agent
 types (`ai.skillroy.testjava.protocol.`, `ai.skillroy.testjava.agent.api.`), which must exist exactly once or
@@ -287,6 +308,13 @@ intact; from 1025 the load is refused with an `IOException` on the attaching sid
 | `port` | `0` | loopback port; `0` = ephemeral |
 | `home` | directory of the bootstrap jar | agent home |
 | `modules` | – | extra module jar paths, comma-separated, in addition to `home/modules/*.jar` |
+| `optionalModules` | – | **(Phase 6, built 2026-10-09, HK; P6 §2.1, D114.)** file stems of jars under `<home>/optional/` to load as module jars, comma-separated (`skillroy-agent-hooks`); loaded between `<home>/modules/*.jar` and the `modules` paths. A stem that is not a plain file name, names no jar, or is given without a home, and a jar without a service file, is a `FAILED` record (S14). The `;` of the argument string still separates options: `optionalModules=skillroy-agent-hooks;discoveryDir=…` |
+| `hooks.spyJar` | `<home>/skillroy-agent-spy.jar` | **(Phase 6, built 2026-10-09, HK; P6 §3.7.)** the jar the hooks module appends to the bootstrap search path at its first install, after the content check of P6 §3.2 step 3; read live (A20) |
+| `hooks.maxClassBytes` | `262144` | **(Phase 6, HK; P6 §3.7.)** a class whose class file is larger is never retransformed; also the byte bound of one retransformation batch; 1024 to 16 MiB |
+| `hooks.maxMethods` | `2000` | **(Phase 6, HK; P6 §3.7.)** a class declaring more methods and constructors is never retransformed; 1 to 65535 |
+| `hooks.maxClasses` | `64` | **(Phase 6, HK; P6 §3.7.)** the most classes the hooks' ledger holds; 1 to 1024 |
+| `hooks.detachBudgetMs` | `8000` | **(Phase 6, HK; P6 §3.5, §3.7.)** the restore budget of the hooks module's uninstall; 1000 to 9000 |
+| `hooks.capture.maxBytes` | `16384` | **(Phase 6, HK; P6 §4.3.)** the input budget of one `CAPTURE` event's encoding, also its output bound; 1024 to 1 MiB |
 | `mainClassGuard` | – | JAVAAGENT only: start only if the system property `sun.java.command` names this launch target (lets `JAVA_TOOL_OPTIONS` inject the agent into one JVM of a process tree). **S17 (1.x, built 2026-10-02):** the guard must match the whole launch target (the main class, or the jar path for `-jar`): the command, trimmed, equals the trimmed value or continues with white space directly after it. A value that is only a prefix of a longer main-class name does not match |
 | `readOnly` | `false` | reject primitives whose spec is `mutating` |
 | `discoveryDir` | `${java.io.tmpdir}/skillroy-<user>` | where discovery and token files are written; a per-user directory, see §2.5. **S8/S19 (1.x, built 2026-10-02):** when the option is absent and the default is occupied by another user, the fall-back `<user.home>/.skillroy/run` is used (§2.5); a directory named explicitly is never substituted |
@@ -563,6 +591,10 @@ public final class ErrorCodes {
         BUSY = -32033;                                   // S30 (1.x, built 2026-10-02): see "Bounded dispatch" in §5
     // (Phase 4, built 2026-10-07; P4 §8.1: SCRIPT_ERROR = -32008, a script the agent ran in a page threw;
     // data {browser, message, stack})
+    // (Phase 6, built 2026-10-09, HK; P6 §4.5: HOOK_CONFLICT = -32021, another hook catalogue is installed and
+    // replace is false; RULE_REJECTED = -32022, a Byteman rule the lint or the type check refused; HOOK_VERIFY_FAILED
+    // is raised for the first time, by hook.remove, data {classes: [{class, loader, bytesBefore, bytesAfter,
+    // foreignEvents}]})
     public static String name(int code);
 }
 
@@ -603,7 +635,14 @@ public final class Topics {                           // generic topics; domain 
     // WEB_BROWSERS_CHANGED, published with source "web": web.load {browser, url, kind, frameKey?, error?},
     // web.ready {browser, url, signal, name?}, web.console {browser, level, text, source?, line?, truncated?},
     // web.tap {browser, name, detail?, truncated?}, web.closed {browser}, web.browsers.changed {added, removed})
+    // (Phase 6, built 2026-10-09, HK; P6 §4.4: HOOK_PREFIX = "hook." (every hook's topic, hook.<id> by default),
+    // HOOKS_INSTALLED, HOOKS_REMOVED, HOOKS_STUBBED (source "hooks"), RULE_FIRED, RULES_CHANGED (the Byteman module))
 }
+
+// (Phase 6, built 2026-10-09, HK; P6 §4.1) package ai.skillroy.testjava.protocol.hook, the wire types of the hook.*
+// primitives, shared by the agent's hooks module and the controller's catalogue: HookMode {OBSERVE, CAPTURE, STUB},
+// HookState {INSTALLED, FIRING, STALE, ERROR}, HookSpec (with HookTarget and HookCapture; strict fromJson, hash(),
+// violation() for the name rules), HookProbe, HookStatus, HookHealth (lenient fromJson, as every answer type).
 
 /** One entry of GET /schema. */
 public final class PrimitiveDescriptor {
@@ -691,6 +730,12 @@ public interface AgentContext {
     AgentLog log();
     boolean readOnly();
     boolean targetReady();
+    // (Phase 6, built 2026-10-09, HK; P6 §3.6, D118) three defaults, so that every test fake compiles unchanged:
+    default HookEngine hooks();               // spi().first(HookEngine.class), null without the hooks module
+    default boolean isSecretKey(String key);  // the core's contexts: the runtime's Redactor rule (SecretKeys, the
+                                              // redact option, every RedactionKeys); the default: SecretKeys only
+    default String redactText(String text);   // the core's contexts: the Redactor's free-text redaction; the default:
+                                              // the text unchanged
 }
 
 public interface Primitive {
@@ -894,6 +939,16 @@ public interface ProductionMarker { String productionReason(); }
 
 /** Applied to every value data.query returns before it leaves the JVM. */
 public interface MaskPolicy { Object mask(String sourceId, String column, Object value); }
+// (Phase 6, built 2026-10-09, HK; P6 §4.3) also applied to every encoded scalar a CAPTURE hook copies, as
+// mask("hook.<id>", "arg<i>" | "self" | "return", value), and to a Byteman rule's bindings. The thread rule is
+// amended: called on agent worker threads, or, for a CAPTURE hook or a Byteman rule's bindings, on the application
+// thread that called the hooked method; it must be thread-safe, cheap, and must never block or take a lock of the
+// application. A policy that throws there counts as a hook failure and the value becomes <redacted>.
+
+// (Phase 6, built 2026-10-09, HK; P6 §3.6, D118, D153) package …agent.api.spi.hook: HookEngine {probe, install, stub,
+// remove, health, catalogue}, registered by the optional hooks module, found with spi().first or AgentContext.hooks();
+// package …agent.api.instrument (shared by the hooks and Byteman modules): ClassFileRefs, ByteVerification,
+// RetransformBatches.
 
 // (Phase 4, built 2026-10-07; P4 §3: package …agent.api.spi.web adds WebEngineAdapter, one per embedded-browser
 // technology, which turns seeds into WebBrowser handles, and the technology-neutral BrowserRegistryAdapter,
@@ -952,6 +1007,12 @@ jar already named is skipped on that class-path pass, not loaded twice and not f
 `ServiceLoader<AgentModule>` per module jar; built this way because in the EMBEDDED layout a module jar also sits on
 the application's class path, where `ServiceLoader` through the host loader hit a `NoClassDefFoundError` for
 `AgentModule`, and under S14 that record closed the production gate: the sample's embedded mode never became ready.)
+**Phase 6 (built 2026-10-09, HK; P6 §2.1, D114):** a third source sits between `<home>/modules/*.jar` and the
+`modules` paths: the jars under `<home>/optional/` that the option `optionalModules` names by file stem, each in its
+own module loader; `optional/` itself is never scanned, so an unnamed jar there is not even opened. A stem that names
+no jar, or a jar without a service file, is a `FAILED` record. The events of the hooks module (source `hooks`) are
+`hook.<id>` (or the spec's `emits`) per hooked call, and `hooks.installed {catalogue: {id, hash}, hooks, touched}`,
+`hooks.removed {ids, restored, verified}`, `hooks.stubbed {id, armed, by}` (P6 §4.3).
 
 **A18 withdrawn capabilities (1.x, built 2026-10-02).** The core records who declared or set each capability (a
 module, or the core) and withdraws everything a module owns after its `uninstall()` or a failed install; the core's
@@ -1823,6 +1884,13 @@ show is recorded in `../TODO.md`.
 
 ---
 
+**Telemetry's trace parent (Phase 6, built 2026-10-09, TL; P6 §10.2, D142).** `CallOptions` gains a fifth component,
+`traceparent` (the W3C trace parent of the controller's open call span; the four- and three-argument constructors
+stay and carry none; `withTraceparent` copies), and `AgentClient` writes it as `_meta.traceparent` when it is set:
+"the controller sends correlation id, timeout, confirmation and secret params, **and nothing else**" is amended to
+"and, when telemetry supplies one, the trace parent". A `_meta` among the params is still dropped, its `traceparent`
+included. The agent is unchanged: it already reads `_meta.traceparent` and stamps it on the call's events.
+
 ## 8. `skillroy-scenario`, `skillroy-junit`, `skillroy-cli`
 
 ### 8.1 Scenario YAML (Phase 1 subset; the keys are final, the supported values grow in later phases)
@@ -2129,6 +2197,15 @@ each page's `text`, read through the run's web path; a pack root named `web` hid
 `swing.dialogs` (`dialogs[0].text`); `caps` = `agent.capabilities` as a list of `{id, state, reason, strategy}` sorted
 by id, because an id with dots cannot be a path field (`caps[id=swing.tree].state`).
 
+(Phase 6, built 2026-10-09, CP; P6 §6.3, D131) A seventh base root `hooks`, after `web`, a list as `caps` is (a hook id
+holds dots): `[{id, state, count, lastFiredMs, armed, last}]` sorted by id, read with the filter form
+(`hooks[id=limit.applied].last.returned`). The ids and states come from `hook.health {}`; per id,
+`hook.events {since: stepsSinceSeq, id, limit: 1000}` gives `count` (the number of those events), `last` (the newest
+one's payload) and `lastFiredMs` (its time), where `stepsSinceSeq` is the start mark's sequence (§8.5), so that the root
+describes the run's steps only (a session counts from its own start mark). `METHOD_NOT_FOUND`,
+`CAPABILITY_UNAVAILABLE` or `NOT_READY` from `hook.health` (or `hook.events`) give an empty list. A pack root named
+`hooks` hides it. `DomainPack` gains `hooks()` and `settings()` (P2 §6.1).
+
 ### 8.4 Expectations
 
 Path grammar: `root(.field | [n] | [field=value] | [field~regex])*`; `last` and `first` are accepted as list
@@ -2307,6 +2384,18 @@ neither a `cleanup` nor a `recover` record, and failure evidence is collected on
 re-bound the fixtures to do so; the H2 lost-state rule is unchanged.) The rule also governs the Phase 2 `resolve`
 command, which binds and stops (P2 §12.1).
 
+**Step 0b: hooks (Phase 6, built 2026-10-09, CP; P6 §5.3, §6.1, §6.4, D127, D129, D130).** Between the first read of the
+capability matrix and the `requires` check (`requires:` may name a `hook.<id>` capability that exists only after the
+install), `HookInstaller` installs the pack's hook catalogue under `RunOptions.hooks` (`AUTO`, the default, `ON` or
+`OFF`; the eleventh component, every earlier constructor kept): one `hooks` record (`{mode, skipped}`,
+`{mode, alreadyInstalled, catalogue, armed}` or `{mode, catalogue, installed, unavailable: [{id, state, reason,
+fallback}], armed, touched, ms, otherAgents}`); an armed stub under `replay`, another catalogue on the target or an
+agent error of the install is ERROR / ENVIRONMENT, hooks `ON` without a catalogue or a usable `hook.engine`
+PRECONDITION_FAILED (nothing else is sent: the rule above holds). The matrix is read again when something was
+installed or found installed, archived as `capabilities.json` with a `capabilities {hash, ids, file}` record, and then
+checked against `requires`. The start mark's sequence is kept as `stepsSinceSeq` for the base root `hooks` (§8.3).
+Hooks stay installed after the run; nothing of them enters `plan.json` or the fingerprint.
+
 Outputs in `RunOptions.outputDir` (one directory per scenario: files of an earlier run there are replaced or
 removed):
 
@@ -2316,6 +2405,7 @@ removed):
 | `bindings.json` | `{scenarioId, planHash, resolutions:{slot:{strategy, value}}}`, the Phase 1 subset of the design's shape. **(Phase 2, built 2026-10-02)** written when the bind ends and again at run end, in the shape of P2 §11.3 (with `resolveHash`, `mode`, `envId`, `env`, `oracles`, `captured`, and per slot its credential reference, never a joined field) |
 | `failure/` (failures during steps or verify; never after the agent is lost) | `snapshot.json`, `app-state.json`, `dialogs.json`, `events.json` (the last 200 events) and `capture.png` (when `swing.capture.paint` is OK). The UI as indented text is also in `RunResult.detail.snapshot`. (Phase 4, built 2026-10-07; P4 §6.4: for a target with an indexed browser also `web-browsers.json` and, for each browser visible in Swing, at most four, `web-<ref>-aria.json` and `web-<ref>.png`, or `web-<ref>-error.txt` for a failed read; `web-trace.zip` when the scenario traced the CDP path and no call may carry a secret; P4 §6.2: `RunResult.detail.snapshot` renders a `WEB` surface after the Swing windows) |
 | `artifacts/capture.png` | kept on success when the scenario lists `artifacts: [capture]` |
+| `capabilities.json` (Phase 6, built 2026-10-09, CP; P6 §6.4, D130) | the matrix the run used, once final (after step 0b), in the wire shape of `GET /capabilities` (`CapabilityMatrix.toJson()`), ids sorted, masked; `run.jsonl` names its hash (`CapabilityMatrix.hash()`) in the `capabilities` record. `ExecutorSession.open` writes the same file into its output directory, the MCP server into its `--out` |
 | `inference.jsonl` (Phase 5, built 2026-10-08; P5 §7.4) | beside `cost-ledger.jsonl` (P2 §11.3): one masked record per gateway call of the run, with the provider, the requested and the answering model, the request id and fingerprint, the stop reason, the token counts, the cost and the masked structured answer; the masked prompt text only under `--log-prompts`. `re-resolve`, `triage` and `session` write one into their own output directories |
 | `failure/triage.json`, `failure/triage.md` (Phase 5, built 2026-10-08; P5 §11.2) | written by `skillroy triage` over a finished run that ended `FAIL` or `ERROR`, never by the run: the label and the summary a model gave (both answers, the models, request ids and cost) and a readable copy. The command's own `inference.jsonl` and `cost-ledger.jsonl` go to `<run dir>/triage/`; the run's `run.jsonl`, `junit.xml` and status are untouched |
 
@@ -2360,6 +2450,17 @@ kind), and `DEGRADED` a `<skipped>` whose message lists the skipped expectations
 (`render(suiteName, results, environmentFailure, UnaryOperator<String> scrub)`, which the CLI's `run` uses), never
 the finished document, so that a `<redacted>` mark arrives as text and the report stays well-formed.
 
+**Telemetry (Phase 6, built 2026-10-09, TL; P6 §10.2-§10.4).** `RunOptions` gains the component `observer` (a
+`RunObserver`, default `NONE`; `withObserver`; P6 §6.1 places it twelfth after CP's `hooks`), which the executor tells
+what the run does beside the records it writes: `scenarioStarted` before `run-start` (whose record then carries the
+observer's `traceId`), each step and its end, each step and cleanup call with its waits (the call sending the open
+call span as `_meta.traceparent`), every bind record and the final `bind` record, the `requires`,
+`launchProperties`, `preflight`, `hooks`, `capabilities`, `recover`, `cleanup`, `expect`, `db`, `prompt`,
+`fidelity` and `capture` records as written (`RunLog.observe`), each model call of the ledger, and `scenarioEnded`
+after `run-end`. A throwing observer is logged once and replaced by `NONE` for the rest of the run; nothing of it
+changes a verdict. With telemetry on, the CLI's `--telemetry file` writes `<out>/telemetry/spans.jsonl` beside the
+scenario directories, and `JunitXmlReporter.withTraceId` ends the report with `<system-out>traceId=<hex></system-out>`.
+
 ### 8.6 `skillroy-junit` and `skillroy-cli`
 
 `skillroy-junit`: `ScenarioTests.dynamicTests(ScenarioSource source, Supplier<AgentConnection> connection)` (also
@@ -2367,7 +2468,9 @@ with `RunOptions` and with an explicit `DomainPack`) returns JUnit 5 `DynamicTes
 `ScenarioSource.directory(Path)` and `ScenarioSource.classpath(String…)` list the scenario files. PASS returns,
 FAIL fails the test, ERROR throws `ScenarioRunException`, DEGRADED follows `RunOptions.degradedAs` (aborted, shown
 as skipped, by default). A file that does not load or compile is a test that throws its `ScenarioException`. The
-connection is obtained lazily and never closed by the glue.
+connection is obtained lazily and never closed by the glue. (Phase 6, built 2026-10-09, CP; P6 §5.3, §6.1) The
+overload without `RunOptions` reads `-Dskillroy.hooks=auto|on|off` (default `auto`) into `RunOptions.hooks`; another
+value is the single test `environment`.
 
 `skillroy-cli` (`ai.skillroy.testjava.cli.Main`). The build assembles `target/skillroy-cli/` (`bin/skillroy`, a
 POSIX `sh` launcher, plus `lib/*.jar`, and at the top level `LICENSE`, `NOTICE` and `THIRD-PARTY.txt`; **1.x, built
@@ -2396,6 +2499,7 @@ distribution (`cli-layout.xml`'s per-file `lineEnding`), mode 0644; `BatLauncher
 | `events [--since n] [--topics globs] [--count n] [--timeout <d>]` | streams events until interrupted |
 | `compile <yaml\|dir>… [--out <dir>] [--check] [--pack <jar>]…` | writes `<scenario-id>.plan.json` next to the YAML or into `--out`; `--check` writes nothing and reports a missing or stale plan |
 | `run <yaml\|plan.json\|dir>… [--out <dir>] [--junit <file>] [--suite <name>] [--degraded-as skipped\|failure\|pass] [--step-timeout <d>] [--pack <jar>]…` | compiles and loads every file first (a broken file means nothing runs), then runs them in order; with `--out` each scenario writes into `<out>/<scenario-id>/`. **(Phase 2, built 2026-10-02; P2 §7.2)** `--pack <jar>` accepts any jar (or class directory), with or without a `DomainPack` in it, so that a JDBC driver for a controller-side source reaches the loader the CLI sets as context class loader while scenarios run (that loader is as in Phase 1); the Phase 2 `run` options (`--mode`, `--env`, `--bindings`, `--credentials`, `--yes`, `--approved-by`, `--write-bindings`) and the commands `resolve` and `diff-bindings` are P2 §12.1 |
+| `hooks status\|install\|remove`, `--hooks` (Phase 6, built 2026-10-09, CP; P6 §6.1, §6.2) | `skillroy hooks status` shows the target's `hook.health` (states, counts, the armed stubs, the spy's counters, the installed catalogue) and the probe's `otherAgents` beside the pack's catalogue (id, version, hash, entries, warnings) and whether they match; `install` runs `HookInstaller` in mode `ON` and prints the `hooks` record (exit 1 when refused); `remove [--ids a,b]` runs `hook.remove` and prints each class's verification (exit 1 for `HOOK_VERIFY_FAILED`). Listed after `session`. `run`, `session` and `mcp` take `--hooks auto\|on\|off` (a usage error, 64, before the agent is contacted otherwise); `mcp` installs at the server's start through its session |
 | `re-resolve`, `mcp`, `author`, `triage`, `session` (Phase 5, built 2026-10-08; P5 §13.4) | the commands of the AI layer: batch re-resolution of an environment's bindings (P5 §8.2; it needs a job budget), the MCP server over stdio (P5 §9.2), the planner (P5 §10.2), triage of a finished run (P5 §11.2) and the interactive session (P5 §12.4). Each takes `--help` and `--json`, the connection options below where it connects, and the exit codes below unless P5 states otherwise |
 | `run` and `resolve`, inference options (Phase 5, built 2026-10-08; P5 §13.4) | `--inference claude\|recorded\|none`, `--recordings <dir>`, `--inference-file <path>`, `--budget-scenario <usd>` and `--log-prompts`; the summary prints `model cost: $x (budget $y)` after `model calls: N`, and `--json` carries `modelCost`, `budget` and a summary of the `inference` records. `run --mode re-resolve` is refused (P2 §12.1) |
 
@@ -2431,6 +2535,16 @@ Built for the CLI **(1.x, built 2026-10-02)**:
 | 3 | the agent could not be found, reached, attached or kept |
 | 64 | usage error |
 | 70 | internal error (a bug in the CLI or a pack) |
+
+**Telemetry options (Phase 6, built 2026-10-09, TL; P6 §10.3).** `run`, `session`, `mcp`, `re-resolve`, `triage`
+and `author` take `--telemetry none|otlp|file`, `--telemetry-endpoint <url>`, `--telemetry-attributes
+standard|minimal` and `--telemetry-file <path>`; a settings error is exit code 64 before the agent is contacted (and
+`run`'s `environment` testcase); with telemetry on, `run --json` carries `telemetry: {exporter, traceId}` and every
+command ends with `telemetry: <exporter> <host:port or directory>, trace <id>, <n> batches dropped`. The JUnit glue's
+overload without `RunOptions` reads `skillroy.telemetry`, `skillroy.telemetry.endpoint`,
+`skillroy.telemetry.attributes`, `skillroy.telemetry.out`, `skillroy.telemetry.serviceName`,
+`skillroy.telemetry.timeoutMs` and `skillroy.telemetry.file`, finds the provider through `ServiceLoader` and closes
+it at JVM exit; an unusable setting is the `environment` test.
 
 ---
 
@@ -2718,6 +2832,21 @@ seven awaited UI steps, one explicit wait) and of each new negative scenario.
 ---
 
 ## 10. End-to-end acceptance for Phase 1
+
+(Phase 6, built 2026-10-09, CP; P6 §8, §9.5, §13.2) `LoadModeChecks` gains check **1b** (no JEP 451 text in the
+target's merged log in `JAVAAGENT`, `JAVA_TOOL_OPTIONS`, the hooks leg and `EMBEDDED`, on Java 8 and Java 25; in
+`ATTACH` on a target of Java 21 or newer the texts must be there, the positive control) and check **1c** (the matrix
+after `target.ready` equals the committed golden of the mode, `src/test/resources/capabilities/golden/<mode slug>.json`,
+normalised by `CapabilityGolden`: ids, states and strategy strict, reason by presence, the allow-list
+`allow-differences.json`, empty; `-Dskillroy.golden.write=true` rewrites). The `@Order` values are renumbered in tens
+(check 1 is 10, 1b and 1c are 20 and 30, checks 2 to 19 are 40 to 210) so that `HookChecks` takes values between them.
+Check 13 also clicks the keypad's `SIGN_OFF` on the `DISPATCH` rung; check 14 expects seven committed scenarios (E is
+DEGRADED, reported as skipped, without hooks and PASS in the hooks leg) and every glue run's `hooks` record and
+`capabilities.json`; checks 1 and 15 list the `hooks` module in the hooks leg, where `hook.engine` is `OK` (absent in
+every other mode). The hooks leg is a fifth mode, `JAVAAGENT_HOOKS` (`-javaagent` with
+`optionalModules=skillroy-agent-hooks`; `LendingTarget.attach()` reuses the launch's options), run by
+`LendingEndToEndIT.JavaAgentHooks` with `HookChecks` (P6 §13.2 items 1-3, 6); `ResolutionJavaAgentHooksSeedA/B`,
+`InferenceEndToEndIT.JavaAgentHooksSeedA/B` and `BranchEndToEndIT` are P6 §13.2 items 4, 5 and 8.
 
 `LendingEndToEndIT` (failsafe, needs a display) launches the sample lending desk as a child process with the Java
 executable named by `-Dskillroy.it.targetJava` (default: the running JVM's), with `-Dlending.pin=<a value>`, and,

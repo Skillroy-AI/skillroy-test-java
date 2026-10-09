@@ -186,6 +186,37 @@ class ScenarioRunPolicyTest {
         }
     }
 
+    /**
+     * phase6-contracts.md 4.2, 13.1 item 12: {@code PlanPolicy} refuses every {@code hook.*} and {@code rule.*}
+     * primitive in a client's plan but the three reads, which run.
+     */
+    @Test
+    void hookAndRulePrimitivesAreRefusedButTheThreeReads() throws Exception {
+        try (McpFixture fx = new McpFixture(dir)) {
+            for (String name : List.of("hook.probe", "hook.install", "hook.remove", "hook.health", "hook.events",
+                    "rule.check", "rule.unload", "rule.list")) {
+                fx.desk.agent.describe(name, false, false, null);
+            }
+            fx.desk.agent.describe("hook.stub", true, true, null);
+            fx.desk.agent.describe("rule.submit", true, true, null);
+            fx.desk.agent.value("hook.health", Map.of("hooks", Map.of(), "stubs", List.of()));
+            fx.desk.agent.value("hook.events", Map.of("events", List.of()));
+            fx.desk.agent.value("rule.list", Map.of("rules", List.of()));
+            fx.start(fx.options(extended(fx.desk)).mutating(true).build());
+            for (String never : List.of("hook.probe", "hook.install", "hook.remove", "rule.check", "rule.unload")) {
+                refused(fx, scenario("never-" + never.replace('.', '-'), "  - call: {primitive: " + never
+                        + ", args: {}}\n"), "step s1 (call", never, "never run for a client");
+                assertTrue(fx.desk.agent.callsTo(never).isEmpty(), never);
+            }
+            for (String read : List.of("hook.health", "hook.events", "rule.list")) {
+                McpSchema.CallToolResult result = run(fx, scenario("read-" + read.replace('.', '-'),
+                        "  - call: {primitive: " + read + ", args: {}}\n"));
+                assertFalse(result.isError(), read + ": " + McpFixture.text(result));
+                assertEquals(1, fx.desk.agent.callsTo(read).size(), read);
+            }
+        }
+    }
+
     @Test
     void aScenarioOfWhatTheServerOffersRuns() throws Exception {
         try (McpFixture fx = new McpFixture(dir)) {

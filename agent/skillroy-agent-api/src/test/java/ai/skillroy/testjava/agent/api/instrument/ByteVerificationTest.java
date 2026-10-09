@@ -61,13 +61,39 @@ class ByteVerificationTest {
     }
 
     @Test
-    void aReferenceUnderThePrefixIsResidueEvenWhenTheBytesAreEqual() throws IOException {
+    void aReferenceUnderThePrefixThatTheFirstBytesDidNotHoldIsResidue() throws IOException {
         byte[] advised = bytesOf(Advised.class);
         String prefix = "ai/skillroy/testjava/agent/api/instrument/ByteVerificationTest$Marker";
-        assertEquals(ByteVerification.RESIDUE, ByteVerification.compare(bytesOf(Marker.class), advised, prefix));
-        assertEquals(ByteVerification.RESIDUE, ByteVerification.compare(advised, advised, prefix));
-        assertEquals(ByteVerification.RESIDUE, ByteVerification.compare(advised, advised, prefix.replace('/', '.')),
-                "a dotted prefix is read as slashes");
+        assertEquals(ByteVerification.RESIDUE, ByteVerification.compare(bytesOf(Plain.class), advised, prefix));
+        assertEquals(ByteVerification.RESIDUE, ByteVerification.compare(bytesOf(Plain.class), advised,
+                prefix.replace('/', '.')), "a dotted prefix is read as slashes");
+    }
+
+    /**
+     * A class redefined after an earlier transformation is reconstituted with the constant-pool entries the JVM merged
+     * across the redefinitions: its first bytes may already name the prefix, and restoring them is no residue.
+     */
+    @Test
+    void aReferenceTheFirstBytesAlreadyHeldIsNoResidue() throws IOException {
+        byte[] advised = bytesOf(Advised.class);
+        String prefix = "ai/skillroy/testjava/agent/api/instrument/ByteVerificationTest$Marker";
+        assertEquals(ByteVerification.IDENTICAL, ByteVerification.compare(advised, advised.clone(), prefix));
+        assertEquals(ByteVerification.FOREIGN_CHANGE, ByteVerification.compare(advised, bytesOf(AlsoAdvised.class),
+                prefix), "a difference that adds no new reference is a foreign change");
+    }
+
+    /** No reference to the marker. */
+    static final class Plain {
+        Object call() {
+            return null;
+        }
+    }
+
+    /** Another class that references the marker. */
+    static final class AlsoAdvised {
+        Object call() {
+            return Marker.enter();
+        }
     }
 
     @Test

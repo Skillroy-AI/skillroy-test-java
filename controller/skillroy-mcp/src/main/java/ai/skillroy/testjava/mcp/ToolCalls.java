@@ -628,7 +628,7 @@ final class ToolCalls {
         Path dir = server.outDir().resolve("runs").resolve(runId);
         BindOptions bind = session().options().bind().withMode(bindMode).withWriteBindings(false);
         RunOptions options = RunOptions.defaults().withOutputDir(dir).withBind(bind).withClock(server.clock())
-                .withExpectationsOnMaskedValues(true);
+                .withExpectationsOnMaskedValues(true).withObserver(session().observer());
         PlanExecutor executor = new PlanExecutor(pack(), server.agent(), options,
                 session().options().webPathLoader());
         PlanExecutor.Resolved ran = executor.runWithOutcome(plan);

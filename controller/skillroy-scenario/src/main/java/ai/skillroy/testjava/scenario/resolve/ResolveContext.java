@@ -20,6 +20,7 @@ import ai.skillroy.testjava.controller.AgentConnection;
 import ai.skillroy.testjava.data.DataChannel;
 import ai.skillroy.testjava.protocol.sql.Rows;
 import ai.skillroy.testjava.scenario.ResolutionException;
+import ai.skillroy.testjava.scenario.pack.PackSettings;
 
 /**
  * What a {@link Resolver} may use while it finds candidates for one slot. Implemented by the engine; valid only
@@ -115,4 +116,12 @@ public interface ResolveContext {
      * @throws ResolutionException reason {@code TRUNCATED} when the result was cut at the row cap
      */
     Rows requireComplete(Rows rows) throws ResolutionException;
+    /**
+     * The running pack's settings (phase6-contracts.md 11.1, decision D145): the constants an overlay may change, read
+     * with a default ({@code settings().get("<packId>.<name>", "<default>")}). {@link PackSettings#EMPTY} by default,
+     * for a test's fake; the engine's contexts return the running pack's.
+     */
+    default PackSettings settings() {
+        return PackSettings.EMPTY;
+    }
 }

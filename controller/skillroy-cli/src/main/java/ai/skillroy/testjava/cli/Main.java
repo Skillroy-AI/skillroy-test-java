@@ -32,7 +32,8 @@ import java.util.Map;
  * The {@code skillroy} command line: {@code jvms}, {@code attach}, {@code info}, {@code caps}, {@code schema},
  * {@code call}, {@code snapshot}, {@code events}, {@code compile}, {@code run} (contract section 8.5), from
  * Phase 2 {@code resolve} and {@code diff-bindings} (phase2-contracts.md 12.1), and from Phase 5
- * {@code re-resolve}, {@code mcp}, {@code author}, {@code triage} and {@code session} (phase5-contracts.md 13.4). It
+ * {@code re-resolve}, {@code mcp}, {@code author}, {@code triage} and {@code session} (phase5-contracts.md 13.4), and
+ * from Phase 6 {@code hooks} (phase6-contracts.md 6.2). It
  * lets a person, a CI job or an AI agent drive a target application through its in-JVM agent without writing Java.
  *
  * <p>Human-readable output goes to standard output, diagnostics to standard error; {@code --json} gives
@@ -166,7 +167,7 @@ public final class Main {
         text.append("""
 
                 Connecting (info, caps, schema, call, snapshot, events, run, resolve, re-resolve, mcp, author,
-                session):
+                session, hooks):
                   --pid <pid>                     the agent of this JVM, found through its discovery file
                   --port <port> --token-file <f>  the agent at 127.0.0.1:<port> with its token in <f>
                   neither                         the only live agent in the discovery directory
@@ -189,7 +190,8 @@ public final class Main {
         return text.toString();
     }
 
-    private static String version() {
+    /** The CLI's version (the jar's Implementation-Version), {@code (development build)} when absent. */
+    static String version() {
         String version = Main.class.getPackage() == null ? null : Main.class.getPackage().getImplementationVersion();
         return version == null ? "(development build)" : version;
     }
@@ -205,7 +207,7 @@ public final class Main {
                 new SchemaCommand(), new CallCommand(), new SnapshotCommand(), new EventsCommand(),
                 new CompileCommand(), new RunCommand(), new ResolveCommand(), new DiffBindingsCommand(),
                 new ReResolveCommand(), new McpCommand(), new AuthorCommand(), new TriageCommand(),
-                new SessionCommand())) {
+                new SessionCommand(), new HooksCommand())) {
             commands.put(command.spec().name(), command);
         }
         return Collections.unmodifiableMap(commands);

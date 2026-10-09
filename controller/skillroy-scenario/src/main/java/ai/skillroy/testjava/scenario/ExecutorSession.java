@@ -28,16 +28,23 @@ import ai.skillroy.testjava.protocol.Capability;
 import ai.skillroy.testjava.protocol.CapabilityState;
 import ai.skillroy.testjava.protocol.ErrorCodes;
 import ai.skillroy.testjava.protocol.Event;
+import ai.skillroy.testjava.protocol.Json;
 import ai.skillroy.testjava.protocol.JsonException;
 import ai.skillroy.testjava.protocol.PrimitiveDescriptor;
 import ai.skillroy.testjava.protocol.RpcResult;
+import ai.skillroy.testjava.scenario.hooks.HookInstaller;
 import ai.skillroy.testjava.scenario.pack.DomainPack;
 import ai.skillroy.testjava.scenario.pack.FactProvider;
+import ai.skillroy.testjava.scenario.pack.PackSettings;
 import ai.skillroy.testjava.scenario.pack.PlannedCall;
 import ai.skillroy.testjava.scenario.pack.PreflightCheck;
 import ai.skillroy.testjava.scenario.pack.PromptPolicy;
 import ai.skillroy.testjava.scenario.pack.StepLibrary;
 import ai.skillroy.testjava.scenario.pack.SyncPolicy;
+import ai.skillroy.testjava.scenario.observe.RunObserver;
+import ai.skillroy.testjava.scenario.observe.RunObservers;
+import ai.skillroy.testjava.scenario.observe.SessionStart;
+import ai.skillroy.testjava.scenario.observe.StepStart;
 import ai.skillroy.testjava.scenario.resolve.BindMode;
 import ai.skillroy.testjava.scenario.resolve.CostLedger;
 import ai.skillroy.testjava.scenario.resolve.CredentialRef;
@@ -50,6 +57,7 @@ import ai.skillroy.testjava.scenario.web.WebSettings;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -87,6 +95,13 @@ import java.util.regex.Pattern;
  * Expectations ({@link #check}, the {@code expect} verb) are evaluated once, now, on the value as the mask leaves it:
  * a session does not wait for them to hold, and a value the mask changes satisfies none.
  *
+ * <p>Telemetry (phase6-contracts.md 10.2; as built, Phase 6, TL): {@link SessionOptions#observer()}, wrapped so that
+ * it never throws, is told that the session opened ({@code sessionStarted}, before the journal's first record), each
+ * step's start and outcome ({@code sessionStepStarted}, {@code sessionStep}, the outcome masked), the type of every
+ * journal record ({@code sessionRecord}), and the close ({@code sessionEnded}); the session's calls are observed as a
+ * run's are ({@link CallRunner}), and {@link #observer()} hands the same observer to the session service and the MCP
+ * server for their turns and tool calls.
+ *
  * <p>Not thread-safe: one session is driven by one thread at a time; it starts no threads (a web path may run its
  * own). {@link #close()} is idempotent.
  */
@@ -111,6 +126,8 @@ public final class ExecutorSession implements AutoCloseable {
     private final CapabilityMatrix caps;
     private final Map<String, PrimitiveDescriptor> primitives;
     private final DataChannels data;
+    /** The {@code hooks} record of the open's install (phase6-contracts.md 5.3), or null before {@link #open} ends. */
+    private Map<String, Object> hooksRecord;
     private final Map<String, FactProvider> facts = new LinkedHashMap<>();
     private final AgentConnection factConnection = new FactConnection();
     private final int ledgerStart;
@@ -128,6 +145,10 @@ public final class ExecutorSession implements AutoCloseable {
     private int stepCount;
     private boolean mutated;
     private boolean closed;
+    /** The session's observer, wrapped (phase6-contracts.md 10.2). */
+    private final RunObserver observer;
+    /** Whether the current step's {@code sessionStepStarted} was sent. */
+    private boolean stepObserved;
 
     private ExecutorSession(DomainPack pack, AgentConnection agent, SessionOptions options, String id, RunLog log,
                             WebRun web, CallRunner runner, StepJournal journal, EnvFingerprint fingerprint,
@@ -147,6 +168,7 @@ public final class ExecutorSession implements AutoCloseable {
         this.data = data;
         this.ledgerStart = options.bind().ledger().size();
         this.mask = options.bind().credentials().mask();
+        this.observer = runner.observer;
         List<FactProvider> packFacts;
         try {
             packFacts = pack.facts();
@@ -154,9 +176,11 @@ public final class ExecutorSession implements AutoCloseable {
             packFacts = List.of();
         }
         boolean webRoot = false;
+        boolean hooksRoot = false;
         for (FactProvider fact : packFacts == null ? List.<FactProvider>of() : packFacts) {
             facts.putIfAbsent(fact.root(), fact);
             webRoot |= "web".equals(fact.root());
+            hooksRoot |= "hooks".equals(fact.root());
         }
         for (FactProvider fact : BaseFacts.all()) {
             facts.putIfAbsent(fact.root(), fact);
@@ -165,19 +189,28 @@ public final class ExecutorSession implements AutoCloseable {
             facts.put("web", BaseFacts.web(BaseFacts.AGENT_READS, clock, (ref, reason) -> {
             }));
         }
+        if (!hooksRoot) {
+            // phase6-contracts.md 6.3: a session's hook counts start at its own start mark, as a run's at its first step.
+            long startSeq = runner.lastActionSeq;
+            facts.put("hooks", BaseFacts.hooks(() -> startSeq));
+        }
     }
 
     // ------------------------------------------------------------------------------------------------ open
 
     /**
-     * Opens a session: reads the target's capability matrix and catalogue, runs the pack's pre-flight checks as a
-     * run does, opens the web path (P4 6.1) with the session's web settings (without tracing: a session keeps no
+     * Opens a session: reads the target's capability matrix, installs the pack's hook catalogue under
+     * {@link SessionOptions#hooks()} as a run's step 0b does (phase6-contracts.md 5.3; an armed stub is recorded, not
+     * refused) and archives the final matrix as {@code capabilities.json} in the output directory, reads the target's
+     * catalogue, runs the pack's pre-flight checks as a run does, opens the web path (P4 6.1) with the session's web settings (without tracing: a session keeps no
      * failure evidence, and any step may type a secret), computes the environment fingerprint, marks the start
      * ({@code trace.mark}, so that waits and prompt checks never see an earlier event) and writes the journal's first
      * record. No model is involved.
      *
      * @param options null means {@link SessionOptions#defaults} without an output directory
-     * @throws SessionOpenException ENVIRONMENT for a failed pre-flight check, fingerprint, start mark or journal,
+     * @throws SessionOpenException ENVIRONMENT for a failed pre-flight check, fingerprint, start mark or journal, or a
+     *     refused hook install (another catalogue installed, an agent error); PRECONDITION_FAILED for hooks {@code ON}
+     *     without a catalogue or a usable engine;
      *     PRECONDITION_FAILED (or ENVIRONMENT) for a pinned web path that cannot be used
      * @throws AgentLostException if the agent is gone
      * @throws InterruptedException if the thread is interrupted
@@ -198,6 +231,20 @@ public final class ExecutorSession implements AutoCloseable {
         if (caps == null) {
             caps = new CapabilityMatrix(Map.of());
         }
+        // phase6-contracts.md 5.3, 6.4 (decisions D129, D130): the pack's hooks under the session's switch, as a run's
+        // step 0b installs them (a session is live: an armed stub is recorded, not refused), then the final matrix
+        // archived beside the journal.
+        HookInstaller.Result hooks;
+        try {
+            hooks = HookInstaller.install(pack, agent, caps, effective.hooks(), false, clock);
+        } catch (HookInstaller.Refused e) {
+            throw new SessionOpenException(e.kind(), mask.apply(e.getMessage()), mask(mask, e.detail()));
+        }
+        if (!hooks.skipped()) {
+            CapabilityMatrix after = agent.capabilities();
+            caps = after == null ? new CapabilityMatrix(Map.of()) : after;
+        }
+        archiveCapabilities(effective.outputDir(), caps, mask);
         Map<String, PrimitiveDescriptor> primitives = new TreeMap<>();
         List<PrimitiveDescriptor> schema = agent.schema();
         for (PrimitiveDescriptor descriptor : schema == null ? List.<PrimitiveDescriptor>of() : schema) {
@@ -229,6 +276,8 @@ public final class ExecutorSession implements AutoCloseable {
                         + " computed: " + e.getMessage()), mask(mask, e.detail()));
             }
             CallRunner runner = new CallRunner(agent, log, clock, web, effective.stepTimeout().toMillis(), Set::of);
+            runner.observer = RunObservers.safe(effective.observer());
+            log.observe(runner.observer);
             runner.bindings = Bindings.empty();
             configure(runner, pack);
             mark(runner, id);
@@ -238,8 +287,12 @@ public final class ExecutorSession implements AutoCloseable {
             } catch (IOException e) {
                 throw new SessionOpenException(FailureKind.ENVIRONMENT, "the journal cannot be written: " + e, null);
             }
+            journal.observer = runner.observer;
+            runner.observer.sessionStarted(new SessionStart(id, pack.id(), pack.version(), effective.readOnly()
+                    ? "read-only" : "acting"));
             ExecutorSession session = new ExecutorSession(pack, agent, effective, id, log, web, runner, journal,
                     fingerprint, caps, primitives, data);
+            session.hooksRecord = mask(mask, hooks.record());
             session.start();
             ok = true;
             return session;
@@ -249,6 +302,24 @@ public final class ExecutorSession implements AutoCloseable {
                 data.close();
                 log.close();
             }
+        }
+    }
+
+    /**
+     * {@code capabilities.json} in the session's output directory (phase6-contracts.md 6.4), as a run writes it beside
+     * {@code run.jsonl}; nothing without a directory. Best effort: a session opens even when the file cannot be
+     * written.
+     */
+    private static void archiveCapabilities(Path dir, CapabilityMatrix caps, SecretMask mask) {
+        if (dir == null) {
+            return;
+        }
+        try {
+            Files.createDirectories(dir);
+            Files.write(dir.resolve(PlanExecutor.CAPABILITIES_FILE), (Json.writePretty(mask.apply(caps.toJson()))
+                    + "\n").getBytes(StandardCharsets.UTF_8));
+        } catch (IOException | RuntimeException e) {
+            // Best effort: the session opens all the same.
         }
     }
 
@@ -284,6 +355,12 @@ public final class ExecutorSession implements AutoCloseable {
             @Override
             public String envId() {
                 return options.bind().envId();
+            }
+
+            @Override
+            public PackSettings settings() {
+                PackSettings settings = pack.settings();
+                return settings == null ? PackSettings.EMPTY : settings;
             }
         };
         SecretMask mask = options.bind().credentials().mask();
@@ -352,6 +429,9 @@ public final class ExecutorSession implements AutoCloseable {
         }
         if (options.web() != null) {
             sessionOptions.put("web", Plan.webJson(options.web()));
+        }
+        if (hooksRecord != null) {
+            sessionOptions.put("hooks", hooksRecord);
         }
         Map<String, String> capabilityOf = new TreeMap<>();
         List<String> reads = new ArrayList<>();
@@ -464,6 +544,7 @@ public final class ExecutorSession implements AutoCloseable {
             }
         }
         long seqBefore = runner.lastSeenSeq;
+        observeStepStart(stepId, verb, origin);
         runner.currentStep = stepId;
         runner.stepFidelity = new ArrayList<>();
         runner.stepEvents = new ArrayList<>();
@@ -573,10 +654,30 @@ public final class ExecutorSession implements AutoCloseable {
         outcomeJson.put("seqAfter", runner.lastSeenSeq);
         outcomeJson.put("durationMs", duration.toMillis());
         outcomeJson.put("degradedFidelity", maskedFidelity);
+        observeStepStart(stepId, verb, origin);
         journal.append(new StepJournal.StepEntry(stepId, origin, verb, jsonForm(givenArgs), callRecords,
                 outcomeJson, snapshotHash), mask);
         runner.stepEvents = null;
+        stepObserved = false;
+        observer.sessionStep(outcome);
         return outcome;
+    }
+
+    /** {@code sessionStepStarted} once per step: before its first call, or before a refusal's outcome. */
+    private void observeStepStart(String stepId, String verb, Origin origin) {
+        if (!stepObserved) {
+            stepObserved = true;
+            observer.sessionStepStarted(new StepStart(stepId, verb, 0, origin.kind().name()));
+        }
+    }
+
+    /**
+     * The session's observer (phase6-contracts.md 10.2), wrapped so that it never throws: what the session service
+     * tells about its turns and the MCP server about its tool calls. {@link RunObserver#NONE} without telemetry. The
+     * observer is the opener's; the session never closes it.
+     */
+    public RunObserver observer() {
+        return observer;
     }
 
     /** The journal's {@code calls}: each call with its arguments as they will be sent (substituted). */
@@ -1087,6 +1188,13 @@ public final class ExecutorSession implements AutoCloseable {
         return options;
     }
 
+    /**
+     * What the open's hook install did (phase6-contracts.md 5.3): the {@code hooks} record's fields, masked; a copy.
+     */
+    public Map<String, Object> hooks() {
+        return hooksRecord == null ? Map.of() : new LinkedHashMap<>(hooksRecord);
+    }
+
     /** The session id. */
     public String id() {
         return id;
@@ -1128,6 +1236,7 @@ public final class ExecutorSession implements AutoCloseable {
             }
             journal.append(new StepJournal.SessionEnd(runner.agentLost ? "agent lost" : "closed", stepCount, cost()),
                     mask);
+            observer.sessionEnded(runner.agentLost ? "agent lost" : "closed");
         } finally {
             web.close();
             data.close();

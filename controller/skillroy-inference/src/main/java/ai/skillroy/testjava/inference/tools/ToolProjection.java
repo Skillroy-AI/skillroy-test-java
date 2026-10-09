@@ -54,7 +54,11 @@ import java.util.TreeSet;
  *
  * <p>What a {@link Policy} offers: the reads always (when it offers primitive reads at all); mutating verbs, domain
  * and base primitives by flags; a destructive primitive never; {@code data_query} only for a source with an allow-list
- * (and the model's SQL is then guarded); nothing of the agent's own namespace ({@code agent.*}).
+ * (and the model's SQL is then guarded); nothing of the agent's own namespace ({@code agent.*}). Hooks and rules
+ * (phase6-contracts.md 4.2): {@link #HOOK_READS} ({@code hook.health}, {@code hook.events}, {@code rule.list}) are
+ * offered as reads by every policy, the {@link #NEVER_OFFERED} seven never, whatever the policy and whatever their
+ * flags ({@code hook.install} and {@code hook.remove} are not mutating): a hook spec or a rule is a pack author's or a
+ * person's, never a client's or a model's.
  *
  * <p>Stateless; safe from any thread.
  */
@@ -71,6 +75,16 @@ public final class ToolProjection {
      * which evaluates an expression until it is true): offered by no policy unless a person opted in (D98).
      */
     public static final Set<String> SCRIPT_PRIMITIVES = Set.of("web.evaluate", "web.waitFlag");
+    /**
+     * The hook and rule primitives offered by no policy (phase6-contracts.md 4.2, 9.3): named, not decided by namespace
+     * or flag, since {@code hook.install} and {@code hook.remove} are not mutating. A client's {@code CAPTURE} on a
+     * password-taking method would disclose a credential to a model, and a client's {@code hook.remove} would drop a
+     * person's evidence mid-run.
+     */
+    public static final Set<String> NEVER_OFFERED = Set.of("hook.probe", "hook.install", "hook.stub", "hook.remove",
+            "rule.check", "rule.submit", "rule.unload");
+    /** The hook and rule primitives every policy offers as reads (phase6-contracts.md 4.2). */
+    public static final Set<String> HOOK_READS = Set.of("hook.health", "hook.events", "rule.list");
     /** Keywords the provider's strict schemas do not take. */
     private static final Set<String> UNSUPPORTED_KEYWORDS = Set.of("minimum", "maximum", "exclusiveMinimum",
             "exclusiveMaximum", "multipleOf", "minLength", "maxLength", "maxItems", "uniqueItems", "minProperties",
@@ -178,8 +192,11 @@ public final class ToolProjection {
 
     private static boolean offered(PrimitiveDescriptor d, String domain, Policy policy, boolean allowLists) {
         String name = d.name();
-        if (d.destructive() || policy.excluded().contains(name)) {
+        if (d.destructive() || policy.excluded().contains(name) || NEVER_OFFERED.contains(name)) {
             return false;
+        }
+        if (HOOK_READS.contains(name)) {
+            return !d.mutating();
         }
         if (DATA_QUERY.equals(name)) {
             return policy.dataQuery() && allowLists;

@@ -35,6 +35,8 @@ import ai.skillroy.testjava.scenario.RunOptions;
 import ai.skillroy.testjava.scenario.RunResult;
 import ai.skillroy.testjava.scenario.ScenarioException;
 import ai.skillroy.testjava.scenario.Status;
+import ai.skillroy.testjava.scenario.observe.RunObserver;
+import ai.skillroy.testjava.scenario.observe.RunObservers;
 import ai.skillroy.testjava.scenario.pack.DomainPack;
 import ai.skillroy.testjava.scenario.resolve.BindMode;
 import ai.skillroy.testjava.scenario.resolve.CostLedger;
@@ -141,6 +143,7 @@ final class AuthorCommand implements Command {
                 OptionSpec.flag(RUN, "run the scenario once live after it is written"),
                 OptionSpec.value(CLAUDE_COMMAND, "path", "the claude executable (default: claude on the PATH)")));
         options.addAll(InferenceArgs.gateway());
+        options.addAll(TelemetryArgs.OPTIONS);
         options.add(OptionSpec.flag("--json", "print the authoring outcome as JSON when done"));
         return Connector.withConnection(options.toArray(OptionSpec[]::new));
     }
@@ -170,6 +173,7 @@ final class AuthorCommand implements Command {
         BigDecimal budget = budget(args);
         Path claude = claudeCommand(args);
         BindArgs.Settings settings = BindArgs.parse(args, List.of(), BindMode.LIVE);
+        RunObserver observer = RunObserver.NONE;
         ClassLoader previous = Thread.currentThread().getContextClassLoader();
         try (Packs packs = Packs.load(args.values(Packs.OPTION), cli.classLoader())) {
             Thread.currentThread().setContextClassLoader(packs.loader());
@@ -188,7 +192,12 @@ final class AuthorCommand implements Command {
             SecretMask mask = credentials.mask();
             InferenceSettings inference = InferenceArgs.load(args, BindMode.LIVE, BindArgs.credentialsDir(settings));
             String model = model(args, inference);
+            // phase6-contracts.md 10.3: --out is the scenarios directory, so the file exporter needs out: in
+            // telemetry.yaml or skillroy.telemetry.out; the planner's calls are its ledger's (modelCall).
+            observer = TelemetryArgs.open(TelemetryArgs.load(args, BindArgs.credentialsDir(settings), null), cli);
             Target target = Connector.connect(args, cli);
+            TelemetryArgs.started(observer, TelemetryArgs.runStart(observer, "author", null, BindMode.LIVE.label(),
+                    settings.envId(), target, null));
             UnaryOperator<String> scrub = text -> mask.apply(target.scrub(text));
             try (target) {
                 String preflight = Preconditions.preflight(pack, target.client(), credentials, settings.envId());
@@ -231,6 +240,7 @@ final class AuthorCommand implements Command {
                     Files.deleteIfExists(config);
                 }
                 result.ledger().forEach(ledger::record);
+                result.ledger().forEach(RunObservers.safe(observer)::modelCall);
                 BindOptions live = BindOptions.defaults().withMode(BindMode.LIVE).withEnvId(settings.envId())
                         .withBindingsRoot(settings.root()).withCredentials(credentials).withLedger(ledger)
                         .withInference(inference);
@@ -238,8 +248,8 @@ final class AuthorCommand implements Command {
                 Boolean resolved = null;
                 String resolveLine;
                 if (plan.needsBindings()) {
-                    RunResult bound = new PlanExecutor(pack, target.client(), RunOptions.defaults().withBind(live),
-                            packs.loader()).resolve(plan).result();
+                    RunResult bound = new PlanExecutor(pack, target.client(), RunOptions.defaults().withBind(live)
+                            .withObserver(observer), packs.loader()).resolve(plan).result();
                     resolved = passed(bound);
                     resolveLine = resolved ? "check: its slots resolve on " + settings.envId() + " (live, nothing"
                             + " written)" : "check: the bind failed: " + bound.failureKind() + BindArgs.reason(
@@ -257,7 +267,8 @@ final class AuthorCommand implements Command {
                                 + " it offers as tools): " + String.join("; ", refusals);
                     } else {
                         RunResult run = new PlanExecutor(pack, target.client(), RunOptions.defaults().withBind(live)
-                                .withExpectationsOnMaskedValues(true), packs.loader()).run(plan);
+                                .withExpectationsOnMaskedValues(true).withObserver(observer), packs.loader())
+                                .run(plan);
                         ran = passed(run);
                         runText = "check: run once live: " + RunCommand.describe(run, null);
                     }
@@ -268,6 +279,7 @@ final class AuthorCommand implements Command {
                 return Exit.OK;
             }
         } finally {
+            TelemetryArgs.finish(observer, json ? cli.err() : cli.out());
             Thread.currentThread().setContextClassLoader(previous);
         }
     }

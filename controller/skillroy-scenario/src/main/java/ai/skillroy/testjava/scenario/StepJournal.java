@@ -19,6 +19,7 @@ package ai.skillroy.testjava.scenario;
 import ai.skillroy.testjava.data.SecretMask;
 import ai.skillroy.testjava.protocol.Json;
 import ai.skillroy.testjava.protocol.JsonException;
+import ai.skillroy.testjava.scenario.observe.RunObserver;
 import ai.skillroy.testjava.scenario.pack.DomainPack;
 import ai.skillroy.testjava.scenario.resolve.CredentialSpec;
 import ai.skillroy.testjava.scenario.resolve.Resolution;
@@ -66,6 +67,11 @@ public final class StepJournal {
     private final List<Entry> entries = new ArrayList<>();
     private BufferedWriter out;
     private String error;
+    /**
+     * Told the type of every record appended (phase6-contracts.md 10.4: the session span's events are the journal's
+     * record types, never their content); set by the session, already wrapped so that it never throws.
+     */
+    RunObserver observer = RunObserver.NONE;
 
     private StepJournal(DomainPack pack, Path file, BufferedWriter out) {
         this.pack = pack;
@@ -165,6 +171,7 @@ public final class StepJournal {
                 closeQuietly();
             }
         }
+        observer.sessionRecord(kept.type());
         return kept;
     }
 

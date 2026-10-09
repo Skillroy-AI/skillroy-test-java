@@ -73,10 +73,15 @@ the fluent Java API.
 
 ```
 agent/        Java 8, runs inside the target JVM, no third-party classes; agent/skillroy-agent-web holds the web.*
-              primitives and the reflective jcef and jxbrowser adapters, and its test-jar the adapter contract kit
+              primitives and the reflective jcef and jxbrowser adapters, and its test-jar the adapter contract kit;
+              agent/skillroy-agent-hooks is the optional hook engine (home: optional/skillroy-agent-hooks.jar, loaded
+              only with the agent option optionalModules=skillroy-agent-hooks), the one module that carries third-
+              party code: Byte Buddy and its ASM, relocated by agent/skillroy-agent-bytebuddy; agent/skillroy-agent-spy
+              is its one class in front of the host, appended to the bootstrap search path in hooks mode only
 controller/   Java 25: attach and client, data channels and credentials (controller/skillroy-data), scenario
               compiler, resolution and executor, JUnit glue, CLI; controller/skillroy-cdp is the optional CDP path
-              (Playwright), which no other module depends on
+              (Playwright), which no other module depends on; controller/skillroy-telemetry the OpenTelemetry export
+              (Phase 6), which the CLI bundles and nothing else depends on
 samples/      the sample lending desk: the issue desk of a tool library, a small Swing application with an engine
               thread, custom widgets, modal prompts and an embedded database; plus its agent module, domain pack
               and scenarios (skillroy-sample-lending-app, -agent, -pack, -scenarios); and, behind the Maven profile
@@ -96,7 +101,10 @@ Needs Maven 3.9 and JDK 25 or newer (the build refuses an older one). Agent-side
 mvn -q verify
 ```
 
-This runs every test that needs no display. Tests that need a display, including the end-to-end tests that launch
+This runs every test that needs no display. The hooks module (`agent/skillroy-agent-hooks`) compiles against the
+packaged, relocated Byte Buddy of `agent/skillroy-agent-bytebuddy`, so it builds only in a reactor run that reaches
+`package`: `mvn -q verify` and `mvn -o verify -pl <module> -am` work, a root `mvn compile` or `mvn test` fails in that
+module by design (`package …shaded.bytebuddy does not exist`). Tests that need a display, including the end-to-end tests that launch
 the sample lending desk, are skipped (`-Dskillroy.headless=true` is the default). Do not switch that off on a
 desktop: the tests open real windows. Run them in the Linux image (JDK 25), under an Xvfb without a window
 manager:
@@ -215,6 +223,47 @@ The Windows path is specified in full and built where a Linux image can test it 
 - `ci\run-on-windows.cmd` runs `mvn verify` with the Java 8 and the Java 25 targets (`JAVA_HOME` a JDK 25,
   `SKILLROY_JDK8_HOME` a JDK 8). Run it from the repository root in an interactive logon session: the tests open real
   windows.
+
+## Exporting spans (OpenTelemetry)
+
+(Phase 6, built 2026-10-09, TL; [phase6-contracts.md](docs/design/phase6-contracts.md) section 10.) A run, a session and
+the MCP server can export what they do as OpenTelemetry spans, from the controller only: nothing of OpenTelemetry
+enters a target JVM. It is **off by default**: without `--telemetry` (or the property or the file naming an exporter)
+no OpenTelemetry class loads and no thread starts. `run`, `session`, `mcp`, `re-resolve`, `triage` and `author` take
+`--telemetry none|otlp|file`, `--telemetry-endpoint <url>`, `--telemetry-attributes standard|minimal` and
+`--telemetry-file <path>`; the JUnit glue reads `skillroy.telemetry`, `skillroy.telemetry.endpoint`,
+`skillroy.telemetry.attributes`, `skillroy.telemetry.out`, `skillroy.telemetry.serviceName`,
+`skillroy.telemetry.timeoutMs` and `skillroy.telemetry.file`, with `skillroy-telemetry` on the test class path, and
+flushes at JVM exit. One trace per invocation (or JUnit stream): `skillroy <command>`, then `scenario <id>`, `bind`,
+`step <id>`, `call <primitive>` with a reconstructed `agent <primitive>` and its `await`s, and `chat <model>` for each
+model call; a session's `session <id>`, `turn <n>` and steps; an MCP `tools/call <tool>` continues the client's trace.
+Attributes are ids, enumerations, counts, durations, hashes and masked one-line messages, never a call's parameters,
+values, payloads, rows, SQL or prompts; `minimal` also drops the messages and the pack, suite, slot and file names and
+hashes the ids.
+
+`--telemetry file` writes `<out>/telemetry/spans.jsonl` beside the run's outputs, one span per line in the project's
+own format `skillroy-spans/1` (a CI artifact without a collector). `--telemetry otlp` posts OTLP/HTTP (protobuf) to
+`<endpoint>/v1/traces` through the JDK's HTTP client, default `http://127.0.0.1:4318`: `http://` is accepted only for
+a literal loopback address or `localhost`, any other host needs `https://` (the JDK's default trust store; there is
+no insecure setting). Nothing is read from `OTEL_*` variables. A backend's token goes into `telemetry.yaml` (beside the
+credentials file, or `--telemetry-file`) as the name of an environment variable, never as a value, and never one of
+the model key's (`ANTHROPIC_*`):
+
+```yaml
+version: 1
+exporter: otlp
+endpoint: https://collector.example.org
+headers: {Authorization: env:OTLP_AUTHORIZATION}
+attributes: standard
+timeoutMs: 10000
+```
+
+With telemetry on, `run-start` in `run.jsonl`, `--json` (`telemetry: {exporter, traceId}`) and the JUnit report name
+the trace, and the command ends with `telemetry: otlp <host:port>, trace <id>, <n> batches dropped`. An endpoint that
+cannot be reached is reported once on stderr and never fails or slows the run beyond the timeout. To try it against a
+real OpenTelemetry Collector (an opt-in, not part of the acceptance): start one on the operator's machine with an
+OTLP/HTTP receiver on `127.0.0.1:4318` and a debug exporter, then add `--telemetry otlp` to a `run` of the commands
+above and look for the trace id the summary prints.
 
 ## Extending it to a real application
 

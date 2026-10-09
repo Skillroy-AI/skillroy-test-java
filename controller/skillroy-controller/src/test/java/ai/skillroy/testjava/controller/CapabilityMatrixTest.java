@@ -119,4 +119,28 @@ class CapabilityMatrixTest {
         assertThrows(JsonException.class,
                 () -> CapabilityMatrix.fromJson(Json.parseObject("{\"capabilities\":{\"a\":{\"state\":\"NO\"}}}")));
     }
+
+    /** phase6-contracts.md 6.4: the archived wire shape, ids sorted, and its hash over the canonical JSON. */
+    @Test
+    void toJsonIsTheEndpointShapeAndTheHashFollowsEveryField() {
+        Map<String, Object> json = matrix.toJson();
+        assertEquals(List.of("capabilities"), List.copyOf(json.keySet()));
+        Map<?, ?> entries = (Map<?, ?>) json.get("capabilities");
+        assertEquals(List.of("data.query", "lending.loan", "swing.capture.paint", "swing.click.robot", "swing.tree"),
+                List.copyOf(entries.keySet()));
+        Map<?, ?> paint = (Map<?, ?>) entries.get("swing.capture.paint");
+        assertEquals("DEGRADED", paint.get("state"));
+        assertEquals("slow", paint.get("reason"));
+        assertEquals("paint", paint.get("strategy"));
+        assertTrue(((Map<?, ?>) entries.get("lending.loan")).containsKey("reason"), "absent fields are written null");
+        assertEquals(matrix, CapabilityMatrix.fromJson(Json.parseObject(Json.write(json))), "it reads back");
+
+        String hash = matrix.hash();
+        assertTrue(hash.matches("sha256:[0-9a-f]{64}"), hash);
+        assertEquals(hash, CapabilityMatrix.fromJson(Json.parseObject(Json.write(json))).hash(), "stable");
+        CapabilityMatrix otherReason = matrix(new Capability("lending.loan", CapabilityState.OK, "x", null));
+        CapabilityMatrix sameIds = matrix(new Capability("lending.loan", CapabilityState.OK, null, null));
+        assertFalse(otherReason.hash().equals(sameIds.hash()), "a reason changes it");
+        assertEquals(new CapabilityMatrix(null).hash(), new CapabilityMatrix(Map.of()).hash());
+    }
 }

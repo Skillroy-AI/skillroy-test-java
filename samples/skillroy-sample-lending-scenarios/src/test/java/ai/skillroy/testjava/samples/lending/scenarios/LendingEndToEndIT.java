@@ -208,4 +208,47 @@ class LendingEndToEndIT {
     @Order(13)
     class PerTargetJava extends PerTargetJavaChecks {
     }
+
+    /**
+     * The hooks leg (phase6-contracts.md 13.2 items 1 to 3, 6): {@code -javaagent} with the optional hooks module,
+     * every check of {@link LoadModeChecks} with {@link HookChecks} woven in.
+     */
+    @Nested
+    @Order(14)
+    class JavaAgentHooks extends HookChecks {
+        @Override
+        LendingTarget.Mode mode() {
+            return LendingTarget.Mode.JAVAAGENT_HOOKS;
+        }
+    }
+
+    /** Scenarios A, B, C and E on seed A with the hooks module loaded (phase6-contracts.md 13.2 items 4, 5). */
+    @Nested
+    @Order(15)
+    class ResolutionJavaAgentHooksSeedA extends ResolutionChecks {
+        @Override
+        LendingTarget.Mode mode() {
+            return LendingTarget.Mode.JAVAAGENT_HOOKS;
+        }
+
+        @Override
+        Env env() {
+            return Env.SEED_A;
+        }
+    }
+
+    /** Scenarios A, B, C and E on seed B with the hooks module loaded (phase6-contracts.md 13.2 items 4, 5). */
+    @Nested
+    @Order(16)
+    class ResolutionJavaAgentHooksSeedB extends ResolutionChecks {
+        @Override
+        LendingTarget.Mode mode() {
+            return LendingTarget.Mode.JAVAAGENT_HOOKS;
+        }
+
+        @Override
+        Env env() {
+            return Env.SEED_B;
+        }
+    }
 }

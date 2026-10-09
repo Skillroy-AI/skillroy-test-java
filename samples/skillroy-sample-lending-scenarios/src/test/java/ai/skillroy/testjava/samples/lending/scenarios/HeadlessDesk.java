@@ -119,6 +119,15 @@ final class HeadlessDesk implements AgentConnection {
     private final Env env;
     private final LendingDb db;
     private final Engine engine;
+    /**
+     * Phase 6 (phase6-contracts.md 13.1 item 7): a scripted hooks module with the pack's catalogue installed, which
+     * reports {@code hook.limit.applied} for every return line the engine commits; off by default.
+     */
+    private final boolean hooks;
+    /** Whether the matrix declares {@code swing.tree}, which a plan with an {@code ActionKey} slot requires. */
+    private final boolean swingTree;
+    /** The returned lines of the current loan already reported (the engine thread only). */
+    private int returnedLinesSeen;
     private final Clock clock = Clock.fixed(NOW, ZoneOffset.UTC);
     private final List<Event> bus = new ArrayList<>();
     private final Map<LendingInput, CountDownLatch> acks = new IdentityHashMap<>();
@@ -126,14 +135,30 @@ final class HeadlessDesk implements AgentConnection {
     /** The primitives asked, in order (the executor's {@code evt.query} and {@code trace.mark} included). */
     final List<String> calls = new ArrayList<>();
 
-    private HeadlessDesk(Env env, LendingDb db, Engine engine) {
+    private HeadlessDesk(Env env, LendingDb db, Engine engine, boolean hooks, boolean swingTree) {
         this.env = env;
         this.db = db;
         this.engine = engine;
+        this.hooks = hooks;
+        this.swingTree = swingTree;
     }
 
     /** A seeded desk, its engine waiting for a staff code. */
     static HeadlessDesk launch(Env env) throws Exception {
+        return launch(env, false, false);
+    }
+
+    /**
+     * A seeded desk, with the scripted hooks module when {@code hooks} (phase6-contracts.md 13.1 item 7):
+     * {@code hook.engine} and {@code hook.limit.applied} {@code OK} in its matrix, {@code hook.health} naming the pack's
+     * catalogue as installed, and one {@code hook.limit.applied} event for every return line the engine commits, with
+     * the signed-on staff code and the limit the desk's access rules give, published before the engine asks for the
+     * next input (as the real advice fires inside the engine's return path). With {@code swingTree} the matrix also
+     * declares {@code swing.tree}, which a plan with an {@code ActionKey} slot requires (its verifier asks
+     * {@code swing.find}, which this desk answers for the pack's key actions); the session recordings' desk declares
+     * neither.
+     */
+    static HeadlessDesk launch(Env env, boolean hooks, boolean swingTree) throws Exception {
         LendingDb db = LendingDb.create("headless" + env.seed + DATABASES.incrementAndGet(), Seed.parse(env.seed),
                 TODAY);
         try {
@@ -147,7 +172,7 @@ final class HeadlessDesk implements AgentConnection {
             SlipPrinter printer = new SlipPrinter(db.settings().get("slip_header"));
             Engine engine = new Engine(db, catalogue, access, waivers, new PromptService(), printer,
                     Clock.fixed(NOW, ZoneOffset.UTC), 0);
-            HeadlessDesk desk = new HeadlessDesk(env, db, engine);
+            HeadlessDesk desk = new HeadlessDesk(env, db, engine, hooks, swingTree);
             engine.addListener(desk.new Callbacks());
             engine.start();
             return desk;
@@ -257,6 +282,7 @@ final class HeadlessDesk implements AgentConnection {
 
         @Override
         public void inputRequested(LendingState state, String prompt) {
+            limitApplied();
             publish(Topics.INPUT_REQUESTED, map("state", name(state), "prompt", prompt, "validInputs",
                     new ArrayList<>(engine.status().validInputs())));
         }
@@ -297,6 +323,56 @@ final class HeadlessDesk implements AgentConnection {
         }
     }
 
+    /** The scripted {@code hook.limit.applied}: one event per return line the engine committed since the last. */
+    private void limitApplied() {
+        Loan loan = engine.currentLoan();
+        int returned = 0;
+        if (loan != null) {
+            for (LoanLine line : loan.lines()) {
+                if (line.returned()) {
+                    returned++;
+                }
+            }
+        }
+        if (hooks && returned > returnedLinesSeen && engine.currentStaff() != null) {
+            String staff = engine.currentStaff().code();
+            publish("hook.limit.applied", map("hook", "limit.applied", "class", AccessControl.class.getName(),
+                    "method", "returnLimit", "descriptor", "(Ljava/lang/String;)Ljava/math/BigDecimal;", "thread",
+                    Engine.THREAD_NAME, "durationNs", 1L, "stubbed", false, "args", map("0", staff), "returned",
+                    money(engine.access().limit(staff, AccessControl.LIMIT_RETURN))));
+        }
+        returnedLinesSeen = returned;
+    }
+
+    /** {@code hook.health} of the scripted module: the pack's catalogue installed, {@code limit.applied} only. */
+    private synchronized Map<String, Object> hookHealth() {
+        long fired = bus.stream().filter(e -> e.topic().equals("hook.limit.applied")).count();
+        Map<String, Object> limit = map("state", fired == 0 ? "INSTALLED" : "FIRING", "count", fired, "armed", false);
+        HookCatalogueRef catalogue = HookCatalogueRef.of();
+        return map("hooks", map("limit.applied", limit), "stubs", List.of(), "spy", map("version", 1L),
+                "catalogue", map("id", catalogue.id(), "hash", catalogue.hash(), "installedAt", NOW.toEpochMilli()));
+    }
+
+    /** {@code hook.events}: the bus's events of the hook's topic after {@code since}, oldest first. */
+    private synchronized Map<String, Object> hookEvents(Map<String, Object> p) {
+        long since = p.get("since") instanceof Number n ? n.longValue() : 0L;
+        String topic = "hook." + (p.get("id") == null ? "limit.applied" : p.get("id"));
+        List<Object> out = new ArrayList<>();
+        for (Event event : bus) {
+            if (event.seq() > since && event.topic().equals(topic)) {
+                out.add(event.toJson());
+            }
+        }
+        return map("events", out);
+    }
+
+    /** The pack's catalogue as the scripted module reports it installed. */
+    private record HookCatalogueRef(String id, String hash) {
+        static HookCatalogueRef of() {
+            return new HookCatalogueRef(Runs.PACK.hooks().id(), Runs.PACK.hooks().hash());
+        }
+    }
+
     // ------------------------------------------------------------------------------------------------ calls
 
     @Override
@@ -331,6 +407,18 @@ final class HeadlessDesk implements AgentConnection {
                 case "trace.mark" -> map("seq", publish(Topics.TRACE_MARK, new LinkedHashMap<>(p)));
                 case "evt.query" -> query(p);
                 case "sync.await" -> syncAwait(p);
+                case "hook.health" -> {
+                    if (!hooks) {
+                        throw new RpcException(ErrorCodes.METHOD_NOT_FOUND, "unknown method " + method);
+                    }
+                    yield hookHealth();
+                }
+                case "hook.events" -> {
+                    if (!hooks) {
+                        throw new RpcException(ErrorCodes.METHOD_NOT_FOUND, "unknown method " + method);
+                    }
+                    yield hookEvents(p);
+                }
                 default -> throw new RpcException(ErrorCodes.METHOD_NOT_FOUND, "unknown method " + method);
             };
         } catch (RpcException e) {
@@ -568,6 +656,14 @@ final class HeadlessDesk implements AgentConnection {
         }
         for (String name : List.of("lending.sql", "lending.loan.authorisations")) {
             caps.put(name, new Capability(name, CapabilityState.OK, null, "headless desk"));
+        }
+        if (hooks) {
+            for (String name : List.of("hook.engine", "hook.limit.applied")) {
+                caps.put(name, new Capability(name, CapabilityState.OK, null, "advice"));
+            }
+        }
+        if (swingTree) {
+            caps.put("swing.tree", new Capability("swing.tree", CapabilityState.OK, null, "headless desk"));
         }
         return new CapabilityMatrix(caps);
     }

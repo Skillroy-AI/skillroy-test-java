@@ -53,7 +53,12 @@ final class LendingTarget implements AutoCloseable {
         JAVAAGENT("javaagent", LoadMode.JAVAAGENT),
         JAVA_TOOL_OPTIONS("java-tool-options", LoadMode.JAVAAGENT),
         ATTACH("attach", LoadMode.ATTACH),
-        EMBEDDED("embedded", LoadMode.EMBEDDED);
+        EMBEDDED("embedded", LoadMode.EMBEDDED),
+        /**
+         * The hooks leg (phase6-contracts.md 13.2): {@code -javaagent} with {@code optionalModules=skillroy-agent-hooks},
+         * so that the agent loads the optional hooks module from the home's {@code optional/}.
+         */
+        JAVAAGENT_HOOKS("javaagent-hooks", LoadMode.JAVAAGENT);
 
         final String slug;
         final LoadMode loadMode;
@@ -66,6 +71,8 @@ final class LendingTarget implements AutoCloseable {
 
     static final String MAIN_CLASS = "ai.skillroy.testjava.samples.lending.LendingApp";
     static final String PLUGIN_CLASS = "ai.skillroy.testjava.samples.lending.agent.embedded.SkillroyLendingPlugin";
+    /** The agent option that loads the optional hooks module (phase6-contracts.md 2.1, D114). */
+    static final String OPTIONAL_MODULES = "optionalModules";
     /**
      * A desk PIN the target is launched with ({@code -Dlending.pin}): a key only the lending module's
      * {@code RedactionKeys} names secret (amendment A21), so the agent must never show this value.
@@ -82,6 +89,8 @@ final class LendingTarget implements AutoCloseable {
     final Mode mode;
     final AgentHome home;
     final Path discoveryDir;
+    /** The agent options the target was launched (or first attached) with; {@link #attach()} reuses them. */
+    final Map<String, String> agentOptions;
     final LaunchedTarget launched;
     Endpoint endpoint;
     AgentClient client;
@@ -107,11 +116,13 @@ final class LendingTarget implements AutoCloseable {
      */
     String attachReply;
 
-    private LendingTarget(Mode mode, AgentHome home, Path discoveryDir, LaunchedTarget launched, Endpoint endpoint,
-                       AgentClient client, long agentMs, long readyMs, String dbPassword, int dbPort) {
+    private LendingTarget(Mode mode, AgentHome home, Path discoveryDir, Map<String, String> agentOptions,
+                          LaunchedTarget launched, Endpoint endpoint, AgentClient client, long agentMs, long readyMs,
+                          String dbPassword, int dbPort) {
         this.mode = mode;
         this.home = home;
         this.discoveryDir = discoveryDir;
+        this.agentOptions = agentOptions;
         this.launched = launched;
         this.endpoint = endpoint;
         this.client = client;
@@ -139,24 +150,50 @@ final class LendingTarget implements AutoCloseable {
      * {@code app.state} once the target is ready ({@link #dbPort}).
      */
     static LendingTarget launch(Mode mode, String seed, boolean databaseListener) throws Exception {
+        return launch(mode, seed, databaseListener, null);
+    }
+
+    /**
+     * {@link #launch(Mode, String, boolean)} of the desk's {@code edition} ({@code -Dlending.edition}, null for the
+     * default, the standard edition; phase6-contracts.md 11.3). A branch desk's log is {@code <mode>-branch-seed-<seed>}.
+     */
+    static LendingTarget launch(Mode mode, String seed, boolean databaseListener, String edition) throws Exception {
+        return launch(mode, seed, databaseListener, edition, ItEnv.targetJava());
+    }
+
+    /**
+     * {@link #launch(Mode, String, boolean, String)} on the given {@code java} (phase6-contracts.md 8.2: the Java 8
+     * leg's extra target on the test JVM's own Java, whose matrix is compared live with the Java 8 target's); its log
+     * is {@code <label>-java-<feature>}.
+     */
+    static LendingTarget launch(Mode mode, String seed, boolean databaseListener, String edition, Path javaBinary)
+            throws Exception {
         AgentHome home = ItEnv.agentHome();
-        String label = mode.slug + "-seed-" + seed.toLowerCase(java.util.Locale.ROOT)
-                + (databaseListener ? "-jdbc" : "");
+        boolean otherJava = !javaBinary.equals(ItEnv.targetJava());
+        String label = mode.slug + (edition == null ? "" : "-" + edition) + "-seed-"
+                + seed.toLowerCase(java.util.Locale.ROOT) + (databaseListener ? "-jdbc" : "")
+                + (otherJava ? "-java-" + Runtime.version().feature() : "");
         Path dir = ItEnv.newDiscoveryDir(label);
         List<Path> classPath = new ArrayList<>(ItEnv.applicationClassPath());
-        TargetLauncher.Builder builder = TargetLauncher.java(ItEnv.targetJava())
+        TargetLauncher.Builder builder = TargetLauncher.java(javaBinary)
                 .mainClass(MAIN_CLASS)
                 .jvmArg("-Dlending.seed=" + seed)
                 .jvmArg("-Dlending.pin=" + PIN)
                 .discoveryDir(dir)
-                .inheritOutputTo(ItEnv.log((seed.equals("A") && !databaseListener ? mode.slug : label) + ".log"));
+                .inheritOutputTo(ItEnv.log((seed.equals("A") && !databaseListener && edition == null && !otherJava
+                        ? mode.slug : label) + ".log"));
+        if (edition != null) {
+            builder.jvmArg("-Dlending.edition=" + edition);
+        }
         String dbPassword = databaseListener ? generatePassword() : null;
         if (databaseListener) {
             builder.jvmArg("-Dlending.dbPort=0").jvmArg("-Dlending.dbPassword=" + dbPassword);
         }
-        Map<String, String> agentOptions = Map.of("discoveryDir", dir.toString());
+        Map<String, String> agentOptions = mode == Mode.JAVAAGENT_HOOKS
+                ? Map.of("discoveryDir", dir.toString(), OPTIONAL_MODULES, "skillroy-agent-hooks")
+                : Map.of("discoveryDir", dir.toString());
         switch (mode) {
-            case JAVAAGENT -> builder.javaAgent(home, agentOptions);
+            case JAVAAGENT, JAVAAGENT_HOOKS -> builder.javaAgent(home, agentOptions);
             case JAVA_TOOL_OPTIONS -> builder.javaAgent(home, agentOptions).viaJavaToolOptions(true);
             case ATTACH -> {
                 // Launched without the agent; it is attached once the JVM runs.
@@ -190,8 +227,8 @@ final class LendingTarget implements AutoCloseable {
             awaitReady(client);
             long tReady = System.nanoTime();
             int dbPort = databaseListener ? listenerPort(client) : -1;
-            LendingTarget target = new LendingTarget(mode, home, dir, launched, endpoint, client, millis(t0, tAgent),
-                    millis(t0, tReady), dbPassword, dbPort);
+            LendingTarget target = new LendingTarget(mode, home, dir, agentOptions, launched, endpoint, client,
+                    millis(t0, tAgent), millis(t0, tReady), dbPassword, dbPort);
             target.attachReply = attachReply;
             return target;
         } catch (Exception | Error e) {
@@ -300,9 +337,12 @@ final class LendingTarget implements AutoCloseable {
         return ready;
     }
 
-    /** Attaches the agent again (re-attach to a running agent, or a fresh agent after {@code agent.disable}). */
+    /**
+     * Attaches the agent again (re-attach to a running agent, or a fresh agent after {@code agent.disable}) with the
+     * options of the launch (phase6-contracts.md 13.2: the hooks leg's re-attach loads the hooks module again).
+     */
     Endpoint attach() throws AttachFailedException {
-        return AttachSession.attach(launched.pid(), home, Map.of("discoveryDir", discoveryDir.toString()));
+        return AttachSession.attach(launched.pid(), home, agentOptions);
     }
 
     long pid() {

@@ -49,18 +49,26 @@ final class SeedData {
         return seed == Seed.A ? 1001L : 50001L;
     }
 
-    /** Inserts the seed's rows. */
+    /** Inserts the seed's rows into a standard-edition schema. */
     static void apply(Connection c, Seed seed, LocalDate today) throws SQLException {
+        apply(c, seed, today, Edition.STANDARD);
+    }
+
+    /**
+     * Inserts the seed's rows into a schema of {@code edition}: the same data in both editions, the role limits in the
+     * edition's column and the system maximum under the edition's setting name (phase6-contracts.md 11.3).
+     */
+    static void apply(Connection c, Seed seed, LocalDate today, Edition edition) throws SQLException {
         if (seed == Seed.A) {
-            seedA(c, today);
+            seedA(c, today, edition);
         } else {
-            seedB(c, today);
+            seedB(c, today, edition);
         }
     }
 
-    private static void seedA(Connection c, LocalDate today) throws SQLException {
+    private static void seedA(Connection c, LocalDate today, Edition edition) throws SQLException {
         settings(c, new String[][] {
-            {"max_return", "500.00"},
+            {edition.maxReturnSetting(), "500.00"},
             {"slip_header", "TOOL LIBRARY - MILL LANE"},
         });
         roles(c, new Object[][] {
@@ -72,7 +80,7 @@ final class SeedData {
             {3, "SIGN_ON"}, {3, "RETURN"}, {3, "RETURN_OVERRIDE"},
             {4, "SIGN_ON"}, {4, "RETURN"}, {4, "RETURN_OVERRIDE"},
         });
-        limits(c, new Object[][] {
+        limits(c, edition, new Object[][] {
             {1, "RETURN", "20.00"},
             {3, "RETURN", "300.00"},
         });
@@ -113,9 +121,9 @@ final class SeedData {
         });
     }
 
-    private static void seedB(Connection c, LocalDate today) throws SQLException {
+    private static void seedB(Connection c, LocalDate today, Edition edition) throws SQLException {
         settings(c, new String[][] {
-            {"max_return", "350.00"},
+            {edition.maxReturnSetting(), "350.00"},
             {"slip_header", "TOOL LIBRARY - CANAL STREET"},
         });
         roles(c, new Object[][] {
@@ -129,7 +137,7 @@ final class SeedData {
             {14, "SIGN_ON"}, {14, "RETURN"}, {14, "RETURN_OVERRIDE"},
             {16, "RETURN"},
         });
-        limits(c, new Object[][] {
+        limits(c, edition, new Object[][] {
             {11, "RETURN", "15.00"},
             {13, "RETURN", "200.00"},
             {16, "RETURN", "40.00"},
@@ -203,9 +211,9 @@ final class SeedData {
         }
     }
 
-    private static void limits(Connection c, Object[][] rows) throws SQLException {
+    private static void limits(Connection c, Edition edition, Object[][] rows) throws SQLException {
         try (PreparedStatement ps = c.prepareStatement(
-                "INSERT INTO role_cap (role_id, kind, amount) VALUES (?, ?, ?)")) {
+                "INSERT INTO role_cap (role_id, kind, " + edition.limitColumn() + ") VALUES (?, ?, ?)")) {
             for (Object[] r : rows) {
                 ps.setInt(1, (Integer) r[0]);
                 ps.setString(2, (String) r[1]);

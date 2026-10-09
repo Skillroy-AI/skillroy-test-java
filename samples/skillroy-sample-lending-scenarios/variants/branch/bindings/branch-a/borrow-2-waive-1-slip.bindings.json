@@ -1,0 +1,339 @@
+{
+  "bindingsVersion": 1,
+  "scenarioId": "borrow-2-waive-1-slip",
+  "envId": "branch-a",
+  "pack": "lending",
+  "packVersion": "0.5.0+lending-branch@0.1.0",
+  "planHash": "sha256:76788d4d27e644b852c8f6b8f567f92e1cbcb0cb8db495932fbc3ed0b3eabc56",
+  "resolveHash": "sha256:230844f8e74f7927167f534bc20a6abb1725b1eb9126c039e07207c2458e4b21",
+  "env": {
+    "fingerprint": "sha256:db90ae4d1408953ee10fd242072169bdfeb2878a1fc72a4ae49cbaccf8005b5f",
+    "components": {
+      "lending.schema": "sha256:df408c68ccf4d07faa972e1491dc3f2109ac9d64e328979669ac0ff47f0a86c5",
+      "lending.seed": "A",
+      "lending.site": "TOOL LIBRARY - MILL LANE",
+      "skillroy.fingerprint": "1",
+      "skillroy.protocolMajor": "0"
+    }
+  },
+  "resolutions": {
+    "assistant": {
+      "query": "StaffWithPermission",
+      "args": {
+        "interactiveSignOn": true,
+        "perform": [
+          "SIGN_ON"
+        ]
+      },
+      "argsHash": "sha256:0dade4955e16865a96f0abcbbaddc6c403787e8f05b35ec6cbc9ae6db200c363",
+      "value": {
+        "code": "100",
+        "limits": {
+          "RETURN": "20.00"
+        },
+        "permissions": [
+          "RETURN",
+          "SIGN_ON"
+        ]
+      },
+      "credential": {
+        "realm": "staff",
+        "id": "100"
+      },
+      "strategy": "CANONICAL_SQL",
+      "provenance": {
+        "resolver": "lending.sql.StaffWithPermission",
+        "statements": [
+          {
+            "channel": "agent",
+            "source": "lending",
+            "sql": "SELECT s.code AS code, s.auto_sign_on AS auto_sign_on, (SELECT MAX(rl.ceiling) FROM staff_role sr JOIN role_cap rl ON rl.role_id = sr.role_id WHERE sr.staff_code = s.code AND rl.kind = ?) AS limit_amount FROM staff s WHERE s.active = TRUE ORDER BY s.code",
+            "params": [
+              "RETURN"
+            ],
+            "rowCount": 6,
+            "truncated": false
+          },
+          {
+            "channel": "agent",
+            "source": "lending",
+            "sql": "SELECT DISTINCT rp.permission AS permission FROM staff_role sr JOIN role_permission rp ON rp.role_id = sr.role_id WHERE sr.staff_code = ? ORDER BY permission",
+            "params": [
+              "100"
+            ],
+            "rowCount": 2,
+            "truncated": false
+          },
+          {
+            "channel": "agent",
+            "source": "lending",
+            "sql": "SELECT DISTINCT rp.permission AS permission FROM staff_role sr JOIN role_permission rp ON rp.role_id = sr.role_id WHERE sr.staff_code = ? ORDER BY permission",
+            "params": [
+              "101"
+            ],
+            "rowCount": 1,
+            "truncated": false
+          },
+          {
+            "channel": "agent",
+            "source": "lending",
+            "sql": "SELECT DISTINCT rp.permission AS permission FROM staff_role sr JOIN role_permission rp ON rp.role_id = sr.role_id WHERE sr.staff_code = ? ORDER BY permission",
+            "params": [
+              "104"
+            ],
+            "rowCount": 0,
+            "truncated": false
+          },
+          {
+            "channel": "agent",
+            "source": "lending",
+            "sql": "SELECT DISTINCT rp.permission AS permission FROM staff_role sr JOIN role_permission rp ON rp.role_id = sr.role_id WHERE sr.staff_code = ? ORDER BY permission",
+            "params": [
+              "200"
+            ],
+            "rowCount": 3,
+            "truncated": false
+          },
+          {
+            "channel": "agent",
+            "source": "lending",
+            "sql": "SELECT DISTINCT rp.permission AS permission FROM staff_role sr JOIN role_permission rp ON rp.role_id = sr.role_id WHERE sr.staff_code = ? ORDER BY permission",
+            "params": [
+              "300"
+            ],
+            "rowCount": 3,
+            "truncated": false
+          }
+        ],
+        "calls": [],
+        "candidates": 1,
+        "candidatesTruncated": false,
+        "rejected": []
+      },
+      "verifier": [
+        {
+          "id": "lending.access.check",
+          "passed": true,
+          "reason": "SIGN_ON permitted; limit 20.00; asked for a password"
+        }
+      ],
+      "confidence": 1.0,
+      "approval": {
+        "state": "APPROVED",
+        "by": "approve"
+      },
+      "llm": null
+    },
+    "rule": {
+      "query": "ActiveWaiverRuleWithTriggers",
+      "args": {
+        "exclusiveItems": true,
+        "kind": "BORROW_N_WAIVE_M"
+      },
+      "argsHash": "sha256:c03d826cb7248486a0df548149b89938083f2ee9aa9906a307a567e1366ca5a0",
+      "value": {
+        "borrowQty": 2,
+        "code": "B2W1-HAND",
+        "items": [
+          {
+            "barcode": "5000000000062",
+            "code": "HND-003",
+            "deposit": "0.99",
+            "inductionRequired": false,
+            "perDay": false,
+            "title": "Screwdriver set"
+          },
+          {
+            "barcode": "5000000000048",
+            "code": "HND-001",
+            "deposit": "1.10",
+            "inductionRequired": false,
+            "perDay": false,
+            "title": "Claw hammer"
+          },
+          {
+            "barcode": "5000000000055",
+            "code": "HND-002",
+            "deposit": "1.45",
+            "inductionRequired": false,
+            "perDay": false,
+            "title": "Hand saw"
+          }
+        ],
+        "kind": "BORROW_N_WAIVE_M",
+        "waivedQty": 1
+      },
+      "strategy": "CANONICAL_SQL",
+      "provenance": {
+        "resolver": "lending.sql.ActiveWaiverRuleWithTriggers",
+        "statements": [
+          {
+            "channel": "agent",
+            "source": "lending",
+            "sql": "SELECT r.id, r.code, r.kind, r.borrow_qty, r.waived_qty, r.starts_on, r.ends_on, i.code, i.barcode, i.title, i.deposit, i.per_day, i.induction_required FROM waiver_rule r JOIN waiver_rule_item ri ON ri.rule_id = r.id JOIN item i ON i.code = ri.item_code WHERE r.active = TRUE AND r.kind = ? AND i.active = TRUE AND i.barcode IS NOT NULL ORDER BY r.id, i.deposit, i.code",
+            "params": [
+              "BORROW_N_WAIVE_M"
+            ],
+            "rowCount": 4,
+            "truncated": false
+          }
+        ],
+        "calls": [
+          {
+            "primitive": "app.state",
+            "params": {}
+          }
+        ],
+        "candidates": 1,
+        "candidatesTruncated": false,
+        "rejected": []
+      },
+      "verifier": [
+        {
+          "id": "lending.waiver.evaluate",
+          "passed": true,
+          "reason": "the desk waives 0.99 for 3 units of HND-003 under B2W1-HAND"
+        }
+      ],
+      "confidence": 1.0,
+      "approval": {
+        "state": "APPROVED",
+        "by": "approve"
+      },
+      "llm": null
+    },
+    "item": {
+      "query": "ItemsTriggering",
+      "args": {
+        "rule": {
+          "borrowQty": 2,
+          "code": "B2W1-HAND",
+          "items": [
+            {
+              "barcode": "5000000000062",
+              "code": "HND-003",
+              "deposit": "0.99",
+              "inductionRequired": false,
+              "perDay": false,
+              "title": "Screwdriver set"
+            },
+            {
+              "barcode": "5000000000048",
+              "code": "HND-001",
+              "deposit": "1.10",
+              "inductionRequired": false,
+              "perDay": false,
+              "title": "Claw hammer"
+            },
+            {
+              "barcode": "5000000000055",
+              "code": "HND-002",
+              "deposit": "1.45",
+              "inductionRequired": false,
+              "perDay": false,
+              "title": "Hand saw"
+            }
+          ],
+          "kind": "BORROW_N_WAIVE_M",
+          "waivedQty": 1
+        }
+      },
+      "argsHash": "sha256:e7a66188e8043e1504be8c574524b3c17f8b29d1ec7bf03df235058bbf18fcd6",
+      "value": {
+        "barcode": "5000000000062",
+        "code": "HND-003",
+        "deposit": "0.99",
+        "title": "Screwdriver set"
+      },
+      "strategy": "CANONICAL_JAVA",
+      "provenance": {
+        "resolver": "lending.java.ItemsTriggering",
+        "statements": [],
+        "calls": [],
+        "candidates": 1,
+        "candidatesTruncated": false,
+        "rejected": []
+      },
+      "verifier": [
+        {
+          "id": "lending.deposit",
+          "passed": true,
+          "reason": "a scan of 5000000000062 finds HND-003 at 0.99, active, counted, no induction check"
+        }
+      ],
+      "confidence": 1.0,
+      "approval": {
+        "state": "APPROVED",
+        "by": "approve"
+      },
+      "llm": null
+    },
+    "keys": {
+      "query": "ActionKey",
+      "args": {
+        "actions": [
+          "DUE"
+        ]
+      },
+      "argsHash": "sha256:dcd69978e27cd104973cc5dd044597be60885af119f869b5bb363efaf39649b2",
+      "value": {
+        "DUE": "DUE"
+      },
+      "strategy": "CANONICAL_JAVA",
+      "provenance": {
+        "resolver": "lending.java.ActionKey",
+        "statements": [],
+        "calls": [],
+        "candidates": 1,
+        "candidatesTruncated": false,
+        "rejected": []
+      },
+      "verifier": [
+        {
+          "id": "swing.find",
+          "passed": true,
+          "reason": "the window has one key for each of [DUE]"
+        }
+      ],
+      "confidence": 1.0,
+      "approval": {
+        "state": "APPROVED",
+        "by": "approve"
+      },
+      "llm": null
+    }
+  },
+  "oracles": {
+    "needed": {
+      "fn": "LoanFromTrigger",
+      "inputsHash": "sha256:a30ed7de6503c1ebd7f5b607098f25a8ce3bf0ef83bb5f7b085e8c1efefd9418",
+      "value": {
+        "code": "HND-003",
+        "qty": 3,
+        "unitDeposit": "0.99"
+      }
+    },
+    "waiver": {
+      "fn": "ExpectedWaiver",
+      "inputsHash": "sha256:503116ef04b406046265661d71e054d9dd3381cc5b3e3f83d365bfdda15e8609",
+      "value": {
+        "amount": "0.99",
+        "ruleCode": "B2W1-HAND",
+        "waivedUnits": 1
+      },
+      "crossCheck": {
+        "check": "lending.waiver.evaluate",
+        "tolerance": "0.00"
+      }
+    },
+    "due": {
+      "fn": "ExpectedTotals",
+      "inputsHash": "sha256:18ca8f82c0dc29c961ec63b8db3f35d605c5d4275b0601618ec8fae205f8c8ae",
+      "value": {
+        "subtotal": "2.97",
+        "total": "1.98",
+        "waiverTotal": "0.99"
+      }
+    }
+  }
+}

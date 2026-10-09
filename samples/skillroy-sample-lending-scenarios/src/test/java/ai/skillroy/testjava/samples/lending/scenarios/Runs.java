@@ -17,6 +17,7 @@
 package ai.skillroy.testjava.samples.lending.scenarios;
 
 import ai.skillroy.testjava.controller.AgentConnection;
+import ai.skillroy.testjava.controller.CapabilityMatrix;
 import ai.skillroy.testjava.data.Credentials;
 import ai.skillroy.testjava.data.CredentialsException;
 import ai.skillroy.testjava.protocol.Json;
@@ -177,6 +178,34 @@ final class Runs {
                 "the scenario synchronises on events");
         assertFalse(log.stream().anyMatch(r -> "prompt".equals(r.get("type")) && Boolean.FALSE.equals(
                 r.get("expected"))), "no unexpected prompt");
+    }
+
+    /**
+     * phase6-contracts.md 5.3, 6.4, 13.2 item 4: the run's {@code hooks} record says the pack's catalogue was
+     * installed or found installed (the hooks legs) or that the install was skipped (every other leg), and its
+     * {@code capabilities.json} is there, with the hash its {@code capabilities} record names.
+     *
+     * @return the archived matrix's hash
+     */
+    static String assertHooksRecord(Path dir, boolean hooksLeg) throws IOException {
+        List<Map<String, Object>> log = runLog(dir);
+        Map<String, Object> hooks = log.stream().filter(r -> "hooks".equals(r.get("type"))).findFirst()
+                .orElseThrow(() -> new AssertionError("no hooks record in " + dir));
+        if (hooksLeg) {
+            assertTrue(Boolean.TRUE.equals(hooks.get("alreadyInstalled")) || hooks.get("installed") instanceof List<?>
+                    installed && !installed.isEmpty(), "installed or alreadyInstalled: " + hooks);
+        } else {
+            assertTrue(hooks.get("skipped") instanceof String, "skipped without the hooks module: " + hooks);
+        }
+        Map<String, Object> capabilities = log.stream().filter(r -> "capabilities".equals(r.get("type")))
+                .findFirst().orElseThrow(() -> new AssertionError("no capabilities record in " + dir));
+        Path file = dir.resolve("capabilities.json");
+        assertTrue(Files.isRegularFile(file), file + " is archived");
+        String hash = CapabilityMatrix.fromJson(Json.parseObject(Files.readString(file))).hash();
+        assertEquals(hash, capabilities.get("hash"), "the record names the archived matrix");
+        assertEquals(hooksLeg, CapabilityMatrix.fromJson(Json.parseObject(Files.readString(file)))
+                .isOk("hook.engine"), "hook.engine in the archived matrix");
+        return hash;
     }
 
     /** The successful {@code call} records of a run's {@code run.jsonl} for one primitive, in order. */

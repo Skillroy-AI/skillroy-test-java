@@ -1,0 +1,50 @@
+# Scenario E (phase6-contracts.md 6.3): a return within the assistant's return limit. The desk applies the assistant's
+# limit to every return line; with the hooks module loaded the pack's CAPTURE hook on that check reports the limit
+# the desk applied, and the guarded expectations compare it with the bound assistant's limit. Without hooks they are
+# skipped and the run is DEGRADED: the same file passes both ways, and the matrix says which.
+scenario: return-within-limit-observed
+pack: lending
+tags: [returns, hooks]
+requires: [lending.input, lending.state, lending.loan, lending.slip]
+resolve:
+  systemMax: { query: SystemLimit, args: { type: RETURN } }
+  item:
+    query: LendableItem
+    args: { deposit: { between: ["20.00", "200.00"], lte: $systemMax } }
+    strategy: [sql]
+    verify: lending.deposit
+  assistant:
+    query: StaffWithPermission
+    args: { perform: [SIGN_ON, RETURN], limit: { type: RETURN, gte: $item.deposit }, interactiveSignOn: true }
+    verify: lending.access.check
+    credential: { realm: staff, key: code }
+  keys: { query: ActionKey, args: { actions: [RETURN, DUE] } }
+oracle:
+  auth:
+    fn: ExpectedAuthorisation
+    args: { staffLimit: $assistant.limits.RETURN, systemMax: $systemMax, amount: $item.deposit }
+    must_equal: NONE                           # a binding that would need a supervisor is rejected, not run
+  returnLine: { fn: Money.negate, args: [$item.deposit] }
+steps:
+  - signOn: { staff: $assistant }
+  - expect: { "state.name": IDLE, "state.staff.code": $assistant.code }
+  - key: { action: $keys.RETURN }
+  - expect: { "state.name": RETURN, "state.returnMode": true }
+  - scan: { item: $item }
+  - expect:
+      "loan.lines[code=$item.code].returned": true
+      "loan.lines[code=$item.code].amount": $oracle.returnLine
+      "hooks[id=limit.applied].count": { gte: 1, capability: hook.limit.applied }
+      "hooks[id=limit.applied].last.args.0": { equals: $assistant.code, capability: hook.limit.applied }
+      "hooks[id=limit.applied].last.returned": { equals: $assistant.limits.RETURN, capability: hook.limit.applied }
+  - key: { action: $keys.DUE }
+  - expect: { "state.name": DEPOSIT, "loan.total": $oracle.returnLine }
+  - deposit: {}
+  - waitFor: { topic: loan.posted, within: 10s, capture: { slot: loan, fields: { id: loanId, total: total } } }
+verify:
+  - { "state.name": IDLE }
+  - db.loan: { where: { id: $loan.id }, staff_code: $assistant.code, total: $oracle.returnLine }
+  - db.loan_line: { where: { loan_id: $loan.id, item_code: $item.code }, returned: true, amount: $oracle.returnLine }
+  - { "slip.last.text": { contains: $item.title } }
+on_prompt: { unexpected: fail }
+timeouts: { step: 30s }

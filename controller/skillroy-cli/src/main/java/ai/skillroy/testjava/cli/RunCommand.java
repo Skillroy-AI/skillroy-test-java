@@ -34,6 +34,9 @@ import ai.skillroy.testjava.scenario.ScenarioException;
 import ai.skillroy.testjava.scenario.ScenarioLoader;
 import ai.skillroy.testjava.scenario.Status;
 import ai.skillroy.testjava.scenario.StepResult;
+import ai.skillroy.testjava.scenario.hooks.HooksMode;
+import ai.skillroy.testjava.scenario.observe.RunObserver;
+import ai.skillroy.testjava.scenario.observe.TelemetrySettings;
 import ai.skillroy.testjava.scenario.pack.DomainPack;
 import ai.skillroy.testjava.scenario.resolve.BindMode;
 import ai.skillroy.testjava.scenario.resolve.CostLedger;
@@ -93,6 +96,13 @@ import java.util.function.UnaryOperator;
  * summary prints {@code model cost: $x (budget $y)} after {@code model calls: N}; {@code --json} carries
  * {@code modelCost}, {@code budget} (the per-scenario budget) and the {@code inference} summary, and each result its
  * model calls under {@code inference}.
+ *
+ * <p>Phase 6 (phase6-contracts.md 10.3): the telemetry options ({@link TelemetryArgs}) are read after the inference
+ * settings and before the agent is contacted (a settings error is exit code 64 and the {@code environment} testcase);
+ * with an exporter named, every scenario's run reports to one observer (one trace per invocation, each scenario a
+ * child of the root span {@code skillroy run}), {@code run-start} and the JUnit report carry the trace id,
+ * {@code --json} carries {@code telemetry: {exporter, traceId}}, {@code --telemetry file} writes
+ * {@code <out>/telemetry/spans.jsonl}, and the summary ends with the {@code telemetry:} line.
  */
 final class RunCommand implements Command {
 
@@ -124,7 +134,8 @@ final class RunCommand implements Command {
             within --budget-scenario; replay never calls a model. With --out each scenario also writes
             inference.jsonl, the masked record of its model calls. The summary ends with model calls: N and
             model cost: $x (budget $y). An inference setting that cannot be used (--inference claude without the
-            key) is exit code 64 before anything runs.""",
+            key) is exit code 64 before anything runs. --telemetry otlp exports the run's spans over OTLP/HTTP (to a
+            loopback address, or https://), --telemetry file writes <out>/telemetry/spans.jsonl; off by default.""",
             runOptions(), 1, CommandSpec.UNLIMITED);
 
     /** The options of {@code run}, in help order. */
@@ -143,8 +154,10 @@ final class RunCommand implements Command {
         options.addAll(InferenceArgs.gateway());
         options.add(InferenceArgs.BUDGET_SCENARIO_OPTION);
         options.add(Packs.OPTION_SPEC);
+        options.add(HooksArgs.OPTION);
+        options.addAll(TelemetryArgs.OPTIONS);
         options.add(OptionSpec.flag("--json", "print {results:[...], summary, junit, modelCalls, modelCost,\n"
-                + "budget, inference} as JSON when done; progress goes to\nstderr"));
+                + "budget, inference, telemetry} as JSON when done; progress goes\nto stderr"));
         return Connector.withConnection(options.toArray(OptionSpec[]::new));
     }
 
@@ -166,6 +179,7 @@ final class RunCommand implements Command {
         Path junit = args.path(JUNIT);
         String suite = args.value(SUITE) == null ? DEFAULT_SUITE : args.value(SUITE);
         RunOptions.DegradedAs degradedAs = degradedAs(args.value(DEGRADED_AS));
+        HooksMode hooks = HooksArgs.mode(args);
         Long stepTimeoutMs = args.durationMs(STEP_TIMEOUT);
         boolean json = args.flag("--json");
         List<Path> files = ScenarioFiles.expand(args.positionals());
@@ -173,6 +187,7 @@ final class RunCommand implements Command {
         BindArgs.Settings bindSettings = BindArgs.parse(args, files, null);
         Approver approver = BindArgs.approver(bindSettings, cli);
 
+        RunObserver observer = RunObserver.NONE;
         ClassLoader previous = Thread.currentThread().getContextClassLoader();
         try (Packs packs = Packs.load(args.values(Packs.OPTION), cli.classLoader())) {
             Thread.currentThread().setContextClassLoader(packs.loader());
@@ -222,6 +237,15 @@ final class RunCommand implements Command {
                         + e.getMessage(), cli, UnaryOperator.identity());
                 throw e;
             }
+            TelemetrySettings telemetry;
+            try {
+                telemetry = TelemetryArgs.load(args, BindArgs.credentialsDir(bindSettings), out);
+                observer = TelemetryArgs.open(telemetry, cli);
+            } catch (UsageException e) {
+                // phase6-contracts.md 10.3: a settings error is found before the agent is contacted (exit 64).
+                writeJunit(reporter, junit, suite, List.of(), e.getMessage(), cli, UnaryOperator.identity());
+                throw e;
+            }
             if (bindSettings.mode() == BindMode.REPLAY && InferenceArgs.given(args)) {
                 cli.err().println("skillroy run: note: replay makes no model call; the inference options are not"
                         + " used");
@@ -233,17 +257,23 @@ final class RunCommand implements Command {
             try {
                 target = Connector.connect(args, cli);
             } catch (CliException e) {
+                TelemetryArgs.started(observer, TelemetryArgs.runStart(observer, "run", suite,
+                        bindSettings.mode().label(), bindSettings.envId(), null, mask.apply(e.getMessage())));
                 writeJunit(reporter, junit, suite, List.of(), e.getMessage(), cli, UnaryOperator.identity());
                 throw e;
             }
+            TelemetryArgs.started(observer, TelemetryArgs.runStart(observer, "run", suite,
+                    bindSettings.mode().label(), bindSettings.envId(), target, null));
+            reporter = reporter.withTraceId(observer.traceId());
             UnaryOperator<String> scrub = text -> mask.apply(target.scrub(text));
             List<RunResult> results = new ArrayList<>();
             List<Map<String, Object>> jsonResults = new ArrayList<>();
             try (target) {
-                RunOptions base = RunOptions.defaults().withDegradedAs(degradedAs)
+                RunOptions base = RunOptions.defaults().withDegradedAs(degradedAs).withHooks(hooks)
                         .withTargetRestarted(restartProbe(target))
                         .withBind(BindArgs.options(bindSettings, credentials, approver, inference,
-                                !args.flag(InferenceArgs.NO_REUSE_BINDINGS)));
+                                !args.flag(InferenceArgs.NO_REUSE_BINDINGS)))
+                        .withObserver(observer);
                 if (stepTimeoutMs != null) {
                     base = base.withStepTimeout(Duration.ofMillis(stepTimeoutMs));
                 }
@@ -301,6 +331,7 @@ final class RunCommand implements Command {
                 document.put("modelCost", InferenceArgs.cost(calls).toPlainString());
                 document.put("budget", budget);
                 document.put("inference", InferenceArgs.summary(inference, calls));
+                document.put("telemetry", TelemetryArgs.json(telemetry, observer));
                 cli.out().print(scrub.apply(Json.writePretty(mask.apply(document))));
                 cli.err().println(summary);
                 cli.err().println("model calls: " + modelCalls);
@@ -312,6 +343,8 @@ final class RunCommand implements Command {
             }
             return exit;
         } finally {
+            // phase6-contracts.md 10.3: the export ends (bounded) and the summary's telemetry line follows it.
+            TelemetryArgs.finish(observer, json ? cli.err() : cli.out());
             Thread.currentThread().setContextClassLoader(previous);
         }
     }

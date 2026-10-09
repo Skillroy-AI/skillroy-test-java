@@ -292,6 +292,8 @@ public final class LendingModule implements AgentModule {
             m.put("slips", Long.valueOf(app.printer().count()));
             m.put("engineListeners", Long.valueOf(engine.listenerCount()));
             m.put("seed", app.seed() == null ? null : app.seed().name());
+            // phase6-contracts.md 11.3: the desk's edition, the one key Phase 6 adds to the section.
+            m.put("edition", app.edition() == null ? null : app.edition().label());
             LendingDbServer server = app.dbServer();
             m.put("dbPort", server == null ? null : Long.valueOf(server.port()));
             m.put("today", LendingWaivers.businessDate(app).toString());

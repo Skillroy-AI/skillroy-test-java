@@ -1223,6 +1223,14 @@ the plain agent connection.
 this section's selection: `SessionOptions.web` carries the settings that the scenario's `web` key carries, and
 `SessionOptions.webPathLoader` is the class loader that finds the `WebPath` providers. `close` closes the path.
 
+(Phase 6, built 2026-10-09, CP; P6 §5.3, §6.4) Before the path, `ExecutorSession.open` installs the pack's hooks under
+`SessionOptions.hooks` (an eleventh component, default `AUTO`; the ten-argument constructor kept) as a run's step 0b
+does (a session is live, so an armed stub is recorded, not refused; a refusal is a `SessionOpenException` with the
+installer's kind), reads the matrix again when something was installed or found installed, and writes
+`capabilities.json` into its output directory; the `hooks` record goes into the journal's start record under
+`options.hooks` and is `ExecutorSession.hooks()`. As built: the contract named `RunOptions.hooks` for the session, which
+has no `RunOptions`; the switch is `SessionOptions.hooks` (D-CP-2).
+
 ### 6.2 The `web` base fact root and the `WEB` snapshot surface
 
 `BaseFacts.ROOTS` gains `web` (sixth root, after `devices`; a pack root named `web` hides it, P1 §8.3 rule):
@@ -1452,6 +1460,10 @@ served by the agent, never by the CDP path (§5.2); the agent masks the console 
 `toString()` of `WebEval` and `WebEvent` never shows the expression or the console text (§3); the library never
 echoes a filled text into error data, `web.dom.fill` answers only the count it typed, and neither path logs a call's
 arguments.)
+
+(Phase 6, built 2026-10-09, TL; P6 §10.4.) The rows of P2 §11.4 that Phase 6 adds hold here too: a web call's span
+names its primitive, path and correlation id, never its expression, selector, filled text or console text, and the
+`web.*` records are not among those the observer receives.
 
 ---
 

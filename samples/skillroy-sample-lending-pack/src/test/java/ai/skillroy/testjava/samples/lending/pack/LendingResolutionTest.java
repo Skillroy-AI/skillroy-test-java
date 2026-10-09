@@ -700,6 +700,14 @@ class LendingResolutionTest {
         int max = 20;
         /** The desk the resolver may ask (read-only calls), or null when no agent call is expected. */
         AgentConnection agent;
+        /** The settings the context hands out (phase6-contracts.md 11.1). */
+        ai.skillroy.testjava.scenario.pack.PackSettings settings = ai.skillroy.testjava.scenario.pack.PackSettings
+                .EMPTY;
+
+        @Override
+        public ai.skillroy.testjava.scenario.pack.PackSettings settings() {
+            return settings;
+        }
 
         void answer(String sql, Function<List<Object>, Rows> answer) {
             answers.put(sql, answer);

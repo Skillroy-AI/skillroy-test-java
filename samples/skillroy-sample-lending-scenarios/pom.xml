@@ -110,6 +110,23 @@
       <artifactId>skillroy-mcp</artifactId>
       <scope>test</scope>
     </dependency>
+    <!-- Phase 6 (phase6-contracts.md 10.6, 13.2 item 9): the telemetry providers, which the JUnit glue's stream test
+         finds through ServiceLoader (-Dskillroy.telemetry=file); test scope only, nothing of it reaches the pack or a
+         target. -->
+    <dependency>
+      <groupId>ai.skillroy</groupId>
+      <artifactId>skillroy-telemetry</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <!-- Phase 6 (phase6-contracts.md 11.4): the overlay of the branch edition. Built before this module, kept off the
+         test class path (classpathDependencyExcludes below: on it, ServiceLoader would overlay the pack of every
+         standard-edition test) and handed to the tests as a jar they load in a class loader of their own
+         (skillroy.it.overlayJar). -->
+    <dependency>
+      <groupId>ai.skillroy</groupId>
+      <artifactId>skillroy-sample-lending-pack-branch</artifactId>
+      <scope>test</scope>
+    </dependency>
     <!-- Phase 6 (phase6-contracts.md 13.2 item 7, D134; BW): Byteman (LGPL-2.1-or-later) at test scope only, so that
          the hooks leg's Byteman check takes the jar's path from this test class path; it never reaches the pack, the
          agent home or a distribution (docs/licence-audit.md 5). -->
@@ -135,6 +152,13 @@
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-dependency-plugin</artifactId>
         <executions>
+          <!-- Phase 6: ${ai.skillroy:skillroy-sample-lending-pack-branch:jar}, the overlay's file, for the tests. -->
+          <execution>
+            <id>dependency-paths</id>
+            <goals>
+              <goal>properties</goal>
+            </goals>
+          </execution>
           <execution>
             <id>unpack-agent-home</id>
             <phase>pre-integration-test</phase>
@@ -240,7 +264,11 @@
             <skillroy.it.moduleDir>${project.basedir}</skillroy.it.moduleDir>
             <skillroy.it.cliDist>${skillroy.it.cliDist}</skillroy.it.cliDist>
             <skillroy.it.packJar>${skillroy.it.packJar}</skillroy.it.packJar>
+            <skillroy.it.overlayJar>${ai.skillroy:skillroy-sample-lending-pack-branch:jar}</skillroy.it.overlayJar>
           </systemPropertyVariables>
+          <classpathDependencyExcludes>
+            <classpathDependencyExclude>ai.skillroy:skillroy-sample-lending-pack-branch</classpathDependencyExclude>
+          </classpathDependencyExcludes>
         </configuration>
       </plugin>
       <plugin>
@@ -249,7 +277,11 @@
         <configuration>
           <systemPropertyVariables>
             <skillroy.it.moduleDir>${project.basedir}</skillroy.it.moduleDir>
+            <skillroy.it.overlayJar>${ai.skillroy:skillroy-sample-lending-pack-branch:jar}</skillroy.it.overlayJar>
           </systemPropertyVariables>
+          <classpathDependencyExcludes>
+            <classpathDependencyExclude>ai.skillroy:skillroy-sample-lending-pack-branch</classpathDependencyExclude>
+          </classpathDependencyExcludes>
         </configuration>
       </plugin>
     </plugins>

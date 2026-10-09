@@ -1,0 +1,499 @@
+{
+  "planVersion": 5,
+  "scenarioId": "borrow-2-waive-1-slip",
+  "pack": "lending",
+  "packVersion": "0.5.0+lending-branch@0.1.0",
+  "sourceHash": "sha256:dcbc6bbe50d05400ebdf214d59726910e125dc9670ee7651b4de200b578978fb",
+  "inference": "none",
+  "requires": [
+    "lending.input",
+    "lending.state",
+    "lending.loan",
+    "lending.slip",
+    "lending.access.check",
+    "lending.deposit",
+    "lending.waiver.evaluate",
+    "swing.tree"
+  ],
+  "slots": [
+    {
+      "name": "assistant",
+      "kind": "query",
+      "query": "StaffWithPermission",
+      "args": {
+        "interactiveSignOn": true,
+        "perform": [
+          "SIGN_ON"
+        ]
+      },
+      "verify": [
+        "lending.access.check"
+      ],
+      "credential": {
+        "realm": "staff",
+        "key": "code"
+      }
+    },
+    {
+      "name": "rule",
+      "kind": "query",
+      "query": "ActiveWaiverRuleWithTriggers",
+      "args": {
+        "exclusiveItems": true,
+        "kind": "BORROW_N_WAIVE_M"
+      },
+      "strategy": [
+        "sql"
+      ],
+      "verify": [
+        "lending.waiver.evaluate"
+      ]
+    },
+    {
+      "name": "item",
+      "kind": "query",
+      "query": "ItemsTriggering",
+      "args": {
+        "rule": "$rule"
+      },
+      "verify": [
+        "lending.deposit"
+      ]
+    },
+    {
+      "name": "keys",
+      "kind": "query",
+      "query": "ActionKey",
+      "args": {
+        "actions": [
+          "DUE"
+        ]
+      },
+      "verify": [
+        "swing.find"
+      ]
+    },
+    {
+      "name": "loan",
+      "kind": "capture",
+      "step": "s9",
+      "fields": [
+        "id",
+        "total"
+      ]
+    },
+    {
+      "name": "slip",
+      "kind": "capture",
+      "step": "s10",
+      "fields": [
+        "loanId"
+      ]
+    }
+  ],
+  "oracles": [
+    {
+      "name": "needed",
+      "fn": "LoanFromTrigger",
+      "args": {
+        "item": "$item",
+        "rule": "$rule"
+      }
+    },
+    {
+      "name": "waiver",
+      "fn": "ExpectedWaiver",
+      "args": {
+        "lines": [
+          "$oracle.needed"
+        ],
+        "rule": "$rule"
+      },
+      "crossCheck": {
+        "check": "lending.waiver.evaluate",
+        "tolerance": "0.00"
+      }
+    },
+    {
+      "name": "due",
+      "fn": "ExpectedTotals",
+      "args": {
+        "lines": [
+          "$oracle.needed"
+        ],
+        "waivers": [
+          "$oracle.waiver.amount"
+        ]
+      }
+    }
+  ],
+  "resolutionGraph": [
+    "assistant",
+    "rule",
+    "item",
+    "keys",
+    "oracle.needed",
+    "oracle.waiver",
+    "oracle.due"
+  ],
+  "steps": [
+    {
+      "id": "s1",
+      "verb": "signOn",
+      "source": {
+        "line": 36
+      },
+      "calls": [
+        {
+          "primitive": "lending.input",
+          "args": {
+            "source": "Entry",
+            "value": "$assistant.code"
+          },
+          "sync": "READY",
+          "timeoutMs": 30000
+        },
+        {
+          "primitive": "lending.input",
+          "args": {
+            "source": "Entry",
+            "value": "$assistant.password"
+          },
+          "sync": "READY",
+          "timeoutMs": 30000
+        }
+      ],
+      "expect": []
+    },
+    {
+      "id": "s2",
+      "verb": "expect",
+      "source": {
+        "line": 37
+      },
+      "calls": [],
+      "expect": [
+        {
+          "path": "state.name",
+          "matcher": {
+            "equals": "IDLE"
+          }
+        },
+        {
+          "path": "state.staff.code",
+          "matcher": {
+            "equals": "$assistant.code"
+          }
+        }
+      ]
+    },
+    {
+      "id": "s3",
+      "verb": "quantity",
+      "source": {
+        "line": 38
+      },
+      "calls": [
+        {
+          "primitive": "lending.input",
+          "args": {
+            "source": "Key.QTY",
+            "value": "$oracle.needed.qty"
+          },
+          "sync": "READY",
+          "timeoutMs": 30000
+        }
+      ],
+      "expect": []
+    },
+    {
+      "id": "s4",
+      "verb": "scan",
+      "source": {
+        "line": 39
+      },
+      "calls": [
+        {
+          "primitive": "lending.input",
+          "args": {
+            "source": "Barcode",
+            "value": "$item.barcode"
+          },
+          "sync": "READY",
+          "timeoutMs": 30000
+        }
+      ],
+      "expect": []
+    },
+    {
+      "id": "s5",
+      "verb": "expect",
+      "source": {
+        "line": 40
+      },
+      "calls": [],
+      "expect": [
+        {
+          "path": "state.name",
+          "matcher": {
+            "equals": "LOAN"
+          }
+        },
+        {
+          "path": "loan.lines[code=$item.code].qty",
+          "matcher": {
+            "equals": "$oracle.needed.qty"
+          }
+        }
+      ]
+    },
+    {
+      "id": "s6",
+      "verb": "key",
+      "source": {
+        "line": 41
+      },
+      "calls": [
+        {
+          "primitive": "lending.input",
+          "args": {
+            "source": "Key.$keys.DUE"
+          },
+          "sync": "READY",
+          "timeoutMs": 30000
+        }
+      ],
+      "expect": []
+    },
+    {
+      "id": "s7",
+      "verb": "expect",
+      "source": {
+        "line": 42
+      },
+      "calls": [],
+      "expect": [
+        {
+          "path": "state.name",
+          "matcher": {
+            "equals": "DEPOSIT"
+          }
+        },
+        {
+          "path": "loan.waivers[ruleCode=$rule.code].amount",
+          "matcher": {
+            "equals": "$oracle.waiver.amount"
+          }
+        },
+        {
+          "path": "loan.waiverTotal",
+          "matcher": {
+            "equals": "$oracle.waiver.amount"
+          }
+        },
+        {
+          "path": "loan.total",
+          "matcher": {
+            "equals": "$oracle.due.total"
+          }
+        }
+      ]
+    },
+    {
+      "id": "s8",
+      "verb": "deposit",
+      "source": {
+        "line": 47
+      },
+      "calls": [
+        {
+          "primitive": "lending.input",
+          "args": {
+            "source": "Key.DEPOSIT",
+            "value": "$oracle.due.total"
+          },
+          "sync": "READY",
+          "timeoutMs": 30000
+        }
+      ],
+      "expect": []
+    },
+    {
+      "id": "s9",
+      "verb": "waitFor",
+      "source": {
+        "line": 48
+      },
+      "calls": [
+        {
+          "primitive": "sync.await",
+          "args": {
+            "timeoutMs": 10000,
+            "topics": "loan.posted"
+          },
+          "sync": "NONE",
+          "timeoutMs": 11000,
+          "capture": {
+            "slot": "loan",
+            "fields": {
+              "id": "loanId",
+              "total": "total"
+            }
+          }
+        }
+      ],
+      "expect": []
+    },
+    {
+      "id": "s10",
+      "verb": "waitFor",
+      "source": {
+        "line": 49
+      },
+      "calls": [
+        {
+          "primitive": "sync.await",
+          "args": {
+            "timeoutMs": 10000,
+            "topics": "slip.printed"
+          },
+          "sync": "NONE",
+          "timeoutMs": 11000,
+          "capture": {
+            "slot": "slip",
+            "fields": {
+              "loanId": "loanId"
+            }
+          }
+        }
+      ],
+      "expect": []
+    }
+  ],
+  "verify": [
+    {
+      "path": "state.name",
+      "matcher": {
+        "equals": "IDLE"
+      }
+    },
+    {
+      "db": "loan",
+      "source": "lending",
+      "sql": "SELECT id, staff_code, posted_at, total FROM loan WHERE id = ? ORDER BY id",
+      "params": [
+        {
+          "kind": "INTEGER",
+          "value": "$loan.id"
+        }
+      ],
+      "rows": {
+        "equals": 1
+      },
+      "expect": {
+        "staff_code": {
+          "equals": "$assistant.code"
+        },
+        "total": {
+          "equals": "$oracle.due.total"
+        }
+      }
+    },
+    {
+      "db": "loan_line",
+      "source": "lending",
+      "sql": "SELECT loan_id, line_no, item_code, qty, unit_deposit, amount, returned FROM loan_line WHERE loan_id = ? ORDER BY loan_id, line_no",
+      "params": [
+        {
+          "kind": "INTEGER",
+          "value": "$loan.id"
+        }
+      ],
+      "rows": {
+        "equals": 1
+      },
+      "expect": {
+        "amount": {
+          "equals": "$oracle.due.subtotal"
+        },
+        "item_code": {
+          "equals": "$item.code"
+        },
+        "qty": {
+          "equals": "$oracle.needed.qty"
+        }
+      }
+    },
+    {
+      "db": "loan_waiver",
+      "source": "lending",
+      "sql": "SELECT loan_id, rule_code, amount FROM loan_waiver WHERE loan_id = ? ORDER BY loan_id, rule_code",
+      "params": [
+        {
+          "kind": "INTEGER",
+          "value": "$loan.id"
+        }
+      ],
+      "rows": {
+        "equals": 1
+      },
+      "expect": {
+        "rule_code": {
+          "equals": "$rule.code"
+        }
+      },
+      "aggregates": {
+        "sum(amount)": {
+          "equals": "$oracle.waiver.amount"
+        }
+      }
+    },
+    {
+      "path": "slip.last.loanId",
+      "matcher": {
+        "equals": "$slip.loanId"
+      }
+    },
+    {
+      "path": "slip.last.text",
+      "matcher": {
+        "contains": "$rule.code"
+      }
+    },
+    {
+      "path": "slip.last.text",
+      "matcher": {
+        "contains": "$item.title"
+      }
+    },
+    {
+      "path": "devices[id=printer].state.last.loanId",
+      "matcher": {
+        "equals": "$slip.loanId"
+      }
+    },
+    {
+      "path": "devices[id=printer].state.last.text",
+      "matcher": {
+        "contains": "$rule.code"
+      }
+    }
+  ],
+  "cleanup": [
+    {
+      "primitive": "lending.input",
+      "args": {
+        "source": "Key.SIGN_OFF"
+      },
+      "sync": "READY",
+      "timeoutMs": 30000
+    }
+  ],
+  "launchProperties": {},
+  "artifacts": [],
+  "onPrompt": {
+    "unexpected": "fail"
+  },
+  "stepTimeoutMs": 30000,
+  "bindTimeoutMs": 60000
+}

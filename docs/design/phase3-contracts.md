@@ -185,6 +185,10 @@ published since that input: the executor's `since` is the `seq.before` of the la
 
 ## 4. `plan.json` version 3
 
+(Phase 6, built 2026-10-09, CP; P6 §5.2, §11.1, D127) Unchanged by Phase 6: version 5 (P5 §13.2) stays the written
+version; nothing of hooks, telemetry or the overlay enters a plan beyond `packVersion`'s composite form
+(`0.5.0+lending-branch@0.1.0` for a plan an overlaid pack compiled).
+
 `planVersion` becomes **3**: two new keys appear in a plan (`crossCheck` on an oracle, `aggregates` on a `db`
 element), and an executor that knows only version 2 would run such a plan without the cross-check and without the
 aggregate, which is "executed wrongly" by P2 §5's version rule.

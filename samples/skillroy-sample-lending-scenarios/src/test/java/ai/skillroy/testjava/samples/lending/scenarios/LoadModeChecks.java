@@ -86,8 +86,14 @@ import static org.junit.jupiter.api.Assumptions.assumeFalse;
  * {@link #mode()}. The process is shared by the checks of that mode and they run in order; each check leaves the desk
  * signed off, as the scenarios themselves do, except the last, which ends the process.
  *
+ * <p>The {@code @Order} values (phase6-contracts.md 8.1): check 1 is 10, the Phase 6 checks 1b and 1c are 20 and 30,
+ * checks 2 to 19 are 40 to 210 (check n at (n + 2) * 10), so that the hooks leg's {@link HookChecks} take values
+ * between them (65: after 1c and before 5; 165: after 14).
+ *
  * <ol>
  *   <li>{@link #handshakeLoadModeAndInstrumentation()}: section 10 item 1;</li>
+ *   <li>(1b) {@link #noJep451WarningButOnADynamicLoad()}: phase6-contracts.md 8.1, D135;</li>
+ *   <li>(1c) {@link #theCapabilityMatrixIsTheGoldenOfTheMode()}: phase6-contracts.md 8.2, D136;</li>
  *   <li>{@link #theHandshakeIsHmacAndTheOldBearerHeaderIsRefused()}: hardening H2 against the real agent;</li>
  *   <li>{@link #theLendingModuleRedactsTheDesksPin()}: amendment A21;</li>
  *   <li>{@link #keypadKeysAreNamedByTheirActionId()}: item 2;</li>
@@ -195,7 +201,7 @@ abstract class LoadModeChecks {
     // ------------------------------------------------------------------ section 10, item 1
 
     @Test
-    @Order(1)
+    @Order(10)
     void handshakeLoadModeAndInstrumentation() throws Exception {
         Map<String, Object> ping = client().ping();
         assertEquals(Boolean.TRUE, ping.get("ready"));
@@ -209,8 +215,7 @@ abstract class LoadModeChecks {
             Map<?, ?> module = (Map<?, ?>) m;
             modules.put(String.valueOf(module.get("id")), module.get("state"));
         }
-        assertEquals(Map.of("swing", "INSTALLED", "data", "INSTALLED", "lending", "INSTALLED", "web", "INSTALLED"),
-                modules);
+        assertEquals(expectedModules(), modules);
 
         CapabilityMatrix caps = client().capabilities();
         if (mode().loadMode == LoadMode.EMBEDDED) {
@@ -225,6 +230,12 @@ abstract class LoadModeChecks {
             assertTrue(caps.isOk(id), id + ": " + caps.get(id));
         }
         assertEquals(CapabilityState.UNAVAILABLE, caps.get("swing.click.robot").state());
+        // phase6-contracts.md 2.5: the optional hooks module loads only in the hooks leg; elsewhere nothing of it.
+        if (hooksLeg()) {
+            assertTrue(caps.isOk("hook.engine"), String.valueOf(caps.get("hook.engine")));
+        } else {
+            assertNull(caps.get("hook.engine"), "no hooks module without optionalModules");
+        }
 
         if (mode() == LendingTarget.Mode.JAVA_TOOL_OPTIONS) {
             String toolOptions = target.launched.environment().get("JAVA_TOOL_OPTIONS");
@@ -280,6 +291,82 @@ abstract class LoadModeChecks {
         Files.write(ItEnv.log(mode().slug + "-agent-warnings.txt"), warnings, StandardCharsets.UTF_8);
     }
 
+    // ------------------------------------------------------------------ Phase 6: JEP 451 and the golden matrix
+
+    /**
+     * Check 1b (phase6-contracts.md 8.1, decision D135): the target's own merged log ({@code it-logs/<mode>.log}, a
+     * redirect, so the lines are in the file once the agent answered) holds no JEP 451 warning in the modes that load
+     * the agent at launch or embed it, on Java 8 and Java 25 alike; in {@code ATTACH} on a target of Java 21 or newer
+     * the warning <b>must</b> be there (the desk is launched without {@code -XX:+EnableDynamicAgentLoading}): the
+     * positive control that the detector works. It matches the texts, never "the log is empty" (the
+     * {@code JAVA_TOOL_OPTIONS} leg's log legitimately says {@code Picked up JAVA_TOOL_OPTIONS}).
+     */
+    @Test
+    @Order(20)
+    void noJep451WarningButOnADynamicLoad() throws Exception {
+        List<String> warnings = jep451Lines(Files.readAllLines(target.launched.logFile(), StandardCharsets.UTF_8));
+        int feature = javaFeature(java);
+        ItEnv.timing("java=" + java + " mode=" + mode().slug + " jep451Lines=" + warnings.size());
+        if (mode() == LendingTarget.Mode.ATTACH && feature >= 21) {
+            assertFalse(warnings.isEmpty(), "the positive control: a Java " + feature + " target warns about the"
+                    + " dynamic load (" + target.launched.logFile() + ")");
+            assertTrue(warnings.stream().anyMatch(l -> l.contains("A Java agent has been loaded dynamically")),
+                    String.valueOf(warnings));
+        } else {
+            assertEquals(List.of(), warnings, "no JEP 451 warning in " + mode().slug + " on Java " + feature);
+        }
+    }
+
+    /** The lines of the two JEP 451 texts (attach F12, BS3 RESULT 8). */
+    static List<String> jep451Lines(List<String> log) {
+        return log.stream().filter(l -> l.contains("A Java agent has been loaded dynamically")
+                || l.contains("EnableDynamicAgentLoading")).toList();
+    }
+
+    /** {@code 8} for {@code 1.8.0_x}, else the number before the first dot or dash ({@code 25}). */
+    static int javaFeature(String version) {
+        if (version.startsWith("1.")) {
+            return Integer.parseInt(version.substring(2, version.indexOf('.', 2) < 0 ? version.length()
+                    : version.indexOf('.', 2)));
+        }
+        String digits = version.split("[.\\-+]")[0];
+        return Integer.parseInt(digits);
+    }
+
+    /**
+     * Check 1c (phase6-contracts.md 8.2, decision D136): after {@code target.ready} (pending probes read "not probed
+     * yet" before it), the target's matrix equals the committed golden of its mode, normalised (ids, states and
+     * strategy strict, reason by presence, the allow-list); the hooks leg's is read before any catalogue is installed,
+     * so it holds {@code hook.engine} and no {@code hook.<id>}.
+     */
+    @Test
+    @Order(30)
+    void theCapabilityMatrixIsTheGoldenOfTheMode() throws Exception {
+        CapabilityGolden.check(mode().slug, client().capabilities());
+    }
+
+    /** The modules {@code agent.info} lists: the four of every mode, and {@code hooks} in the hooks leg. */
+    Map<String, Object> expectedModules() {
+        Map<String, Object> modules = new java.util.TreeMap<>(Map.of("swing", "INSTALLED", "data", "INSTALLED",
+                "lending", "INSTALLED", "web", "INSTALLED"));
+        if (hooksLeg()) {
+            modules.put("hooks", "INSTALLED");
+        }
+        return modules;
+    }
+
+    /** True in the hooks leg ({@link LendingTarget.Mode#JAVAAGENT_HOOKS}). */
+    boolean hooksLeg() {
+        return mode() == LendingTarget.Mode.JAVAAGENT_HOOKS;
+    }
+
+    /**
+     * Called in checks 16 and 17 right after the fresh agent is ready (phase6-contracts.md 13.2 item 1: the hooks
+     * leg's re-attach carries the same options); nothing outside the hooks leg.
+     */
+    void afterReattach() throws Exception {
+    }
+
     // ------------------------------------------------------------------ hardening H2: HMAC, no bearer token
 
     /**
@@ -290,7 +377,7 @@ abstract class LoadModeChecks {
      * another key is 401. No reply carries the token.
      */
     @Test
-    @Order(2)
+    @Order(40)
     void theHandshakeIsHmacAndTheOldBearerHeaderIsRefused() throws Exception {
         int port = target.endpoint.port();
         String token = target.endpoint.token();
@@ -358,7 +445,7 @@ abstract class LoadModeChecks {
      * show {@code <redacted>} and nowhere the value, while the desk's other properties are shown as they are.
      */
     @Test
-    @Order(3)
+    @Order(50)
     void theLendingModuleRedactsTheDesksPin() throws Exception {
         assertFalse(SecretKeys.looksSecret("lending.pin"), "only the module's rule makes it secret");
         Map<String, Object> properties = value(client().call("jvm.properties", Map.of("names",
@@ -379,7 +466,7 @@ abstract class LoadModeChecks {
     // ------------------------------------------------------------------ item 2
 
     @Test
-    @Order(4)
+    @Order(60)
     void keypadKeysAreNamedByTheirActionId() throws Exception {
         Map<String, Object> snapshot = value(client().call("swing.snapshot", Map.of(), CALL));
         Set<String> keyNames = new HashSet<>();
@@ -415,7 +502,7 @@ abstract class LoadModeChecks {
     // ------------------------------------------------------------------ item 3, run.jsonl, JUnit XML
 
     @Test
-    @Order(5)
+    @Order(70)
     void committedScenariosPassWithoutSleeping() throws Exception {
         List<RunResult> results = new ArrayList<>();
         for (String id : List.of("basic-loan", "basic-loan-ui")) {
@@ -444,7 +531,7 @@ abstract class LoadModeChecks {
     // ------------------------------------------------------------------ item 4
 
     @Test
-    @Order(6)
+    @Order(80)
     void aWrongExpectationFailsAsAssertionWithSnapshotAndCapture() throws Exception {
         Runs.Outcome outcome = Runs.run(client(), Runs.negative("wrong-expectation.yaml"),
                 ItEnv.runDir(mode().slug, "wrong-expectation"));
@@ -469,7 +556,7 @@ abstract class LoadModeChecks {
     // ------------------------------------------------------------------ item 5
 
     @Test
-    @Order(7)
+    @Order(90)
     void recoverSignsOffAfterAFailureAndTheNextScenarioPasses() throws Exception {
         Runs.Outcome failed = Runs.run(client(), Runs.negative("prompt-left-open.yaml"),
                 ItEnv.runDir(mode().slug, "prompt-left-open"));
@@ -490,7 +577,7 @@ abstract class LoadModeChecks {
     }
 
     @Test
-    @Order(8)
+    @Order(100)
     void aMissingCapabilityIsAPreconditionFailureAndAnUnavailableGuardDegrades() throws Exception {
         Runs.Outcome missing = Runs.run(client(), Runs.negative("missing-capability.yaml"),
                 ItEnv.runDir(mode().slug, "missing-capability"));
@@ -512,7 +599,7 @@ abstract class LoadModeChecks {
     // ------------------------------------------------------------------ item 6
 
     @Test
-    @Order(9)
+    @Order(110)
     void componentRungOnAWindowThatCannotTakeTheFocusReportsFocusFailed() throws Exception {
         send("Entry", "100");
         assertEquals("IDLE", send("Entry", "1111").payload().get("state"));
@@ -597,7 +684,7 @@ abstract class LoadModeChecks {
      * in the step, in {@code run.jsonl} and in the JUnit report.
      */
     @Test
-    @Order(10)
+    @Order(120)
     void aClickThatFellBackToTheActionRungDegradesTheRunAndIsListed() throws Exception {
         Runs.Outcome outcome = Runs.run(client(), Runs.negative("click-fallback-degraded.yaml"),
                 ItEnv.runDir(mode().slug, "click-fallback-degraded"));
@@ -639,7 +726,7 @@ abstract class LoadModeChecks {
      * prompt that is still open.
      */
     @Test
-    @Order(11)
+    @Order(130)
     void withStrictTheClickThatCannotTakeTheFocusFailsAsAssertion() throws Exception {
         Runs.Outcome outcome = Runs.run(client(), Runs.negative("click-strict-fails.yaml"),
                 ItEnv.runDir(mode().slug, "click-strict-fails"));
@@ -666,7 +753,7 @@ abstract class LoadModeChecks {
      * environment error, and the failure names the dialog's text.
      */
     @Test
-    @Order(12)
+    @Order(140)
     void aModalDialogInTheWayOfAStepFailsItAsAssertion() throws Exception {
         Runs.Outcome outcome = Runs.run(client(), Runs.negative("modal-open-step.yaml"),
                 ItEnv.runDir(mode().slug, "modal-open-step"));
@@ -695,7 +782,7 @@ abstract class LoadModeChecks {
      * fall-back is never used and the run passes with no degraded-fidelity entry.
      */
     @Test
-    @Order(13)
+    @Order(150)
     void theUiScenarioActivatesTheWindowAndClicksAtFullFidelityAfterAPrompt() throws Exception {
         Map<String, Object> windows = value(client().call("swing.windows", Map.of(), CALL));
         Object focused = ((List<?>) windows.get("windows")).stream().map(w -> (Map<?, ?>) w).filter(w ->
@@ -707,12 +794,25 @@ abstract class LoadModeChecks {
         Runs.assertPassedWithoutSleeping(outcome);
         Runs.assertComponentClicksAtFullFidelity(outcome.dir(), UI_CLICKS);
         assertSignedOff();
+        // phase6-contracts.md 9.5: the DISPATCH rung (a mouse press, release and click through dispatchEvent) fires on
+        // the keypad too, so that every rung but ROBOT is proven in one place.
+        send("Entry", "100");
+        assertEquals("IDLE", send("Entry", "1111").payload().get("state"));
+        Map<String, Object> click = new LinkedHashMap<>();
+        click.put("by", Map.of("action", "SIGN_OFF"));
+        click.put("rung", "DISPATCH");
+        RpcResult dispatched = client().call("swing.click", click, CALL);
+        assertEquals("DISPATCH", value(dispatched).get("rung"), String.valueOf(dispatched.value()));
+        assertEquals(Boolean.TRUE, value(dispatched).get("fired"), String.valueOf(dispatched.value()));
+        assertNotNull(client().await("input.requested", dispatched.seqBefore(), Map.of("state", "SIGNED_OFF"), WAIT),
+                "the dispatched click on SIGN_OFF reached the desk");
+        assertSignedOff();
     }
 
     // ------------------------------------------------------------------ JUnit glue
 
     /**
-     * The JUnit glue over the committed scenario directory: the two Phase 1 scenarios and scenarios A, B, C and D
+     * The JUnit glue over the committed scenario directory: the two Phase 1 scenarios and scenarios A, B, C, D and E
      * (phase3-contracts.md 10.4, phase5-contracts.md 14.2, 14.3, 15.2 items 1 and 3), which run in {@code replay} on
      * this seed A target with the {@code seed-a} bindings (scenario C's authoring record beside them is not a
      * scenario), then the stream's trailing {@code skillroy: zero model calls} test (phase2-contracts.md 12.2), because
@@ -720,7 +820,7 @@ abstract class LoadModeChecks {
      * binding, with no model call.
      */
     @TestFactory
-    @Order(14)
+    @Order(160)
     Stream<DynamicTest> junitGlueRunsTheCommittedScenarios() {
         RunOptions options = RunOptions.defaults().withOutputDir(ItEnv.runDir(mode().slug, "junit-glue"))
                 .withBind(Runs.bind(SampleCredentials.Env.SEED_A));
@@ -728,16 +828,20 @@ abstract class LoadModeChecks {
                 ScenarioSource.directory(ItEnv.moduleDir().resolve("scenarios"))), this::client, options).toList();
         List<String> names = tests.stream().map(DynamicTest::getDisplayName).toList();
         List<String> ids = List.of("basic-loan", "basic-loan-ui", ScenarioB.ID, ScenarioA.ID, ScenarioC.ID,
-                ScenarioD.ID);
-        assertEquals(ids, names.subList(0, 6).stream().sorted().toList(), String.valueOf(names));
-        assertEquals("skillroy: zero model calls", names.get(6), "the stream ends with the ledger check");
-        assertEquals(7, names.size());
+                ScenarioE.ID, ScenarioD.ID);
+        assertEquals(ids, names.subList(0, 7).stream().sorted().toList(), String.valueOf(names));
+        assertEquals("skillroy: zero model calls", names.get(7), "the stream ends with the ledger check");
+        assertEquals(8, names.size());
         List<DynamicTest> checked = new ArrayList<>(tests);
         checked.add(DynamicTest.dynamicTest("run.jsonl written by the glue", () -> {
             for (String id : ids) {
                 List<Map<String, Object>> log = Runs.runLog(ItEnv.runDir(mode().slug, "junit-glue").resolve(id));
-                assertEquals("PASS", log.get(log.size() - 1).get("status"), id);
+                // phase6-contracts.md 6.3: scenario E is PASS with the pack's hooks, DEGRADED (reported as skipped)
+                // without; every other committed scenario is PASS either way.
+                String expected = id.equals(ScenarioE.ID) && !hooksLeg() ? "DEGRADED" : "PASS";
+                assertEquals(expected, log.get(log.size() - 1).get("status"), id);
                 assertFalse(log.stream().anyMatch(r -> "fidelity".equals(r.get("type"))), id + ": full fidelity");
+                Runs.assertHooksRecord(ItEnv.runDir(mode().slug, "junit-glue").resolve(id), hooksLeg());
             }
             Runs.assertComponentClicksAtFullFidelity(ItEnv.runDir(mode().slug, "junit-glue").resolve("basic-loan-ui"),
                     UI_CLICKS);
@@ -749,7 +853,7 @@ abstract class LoadModeChecks {
     // ------------------------------------------------------------------ re-attach
 
     @Test
-    @Order(15)
+    @Order(170)
     void aSecondAttachReusesTheRunningAgent() throws Exception {
         Endpoint again = target.attach();
         assertEquals(target.endpoint.port(), again.port(), "the same agent answers");
@@ -760,7 +864,7 @@ abstract class LoadModeChecks {
             assertEquals(mode().loadMode.name(), info.get("loadMode"), "still the original agent");
             List<String> ids = ((List<?>) info.get("modules")).stream().map(m -> String.valueOf(((Map<?, ?>) m)
                     .get("id"))).sorted().toList();
-            assertEquals(List.of("data", "lending", "swing", "web"), ids, "one of each module");
+            assertEquals(List.copyOf(expectedModules().keySet()), ids, "one of each module");
             assertEquals(2L, lendingState(second).get("engineListeners"), "the window's listener and one agent's");
         }
         assertEquals(2L, lendingState(client()).get("engineListeners"));
@@ -769,7 +873,7 @@ abstract class LoadModeChecks {
     // ------------------------------------------------------------------ item 7
 
     @Test
-    @Order(16)
+    @Order(180)
     void disableLeavesTheApplicationRunningAndRemovesTheEngineListener() throws Exception {
         assertEquals(2L, lendingState(client()).get("engineListeners"));
         // What the attached, idle agent runs in the application: daemon threads named skillroy-* only.
@@ -801,6 +905,7 @@ abstract class LoadModeChecks {
         target.endpoint = fresh;
         target.client = AgentClient.connect(fresh);
         LendingTarget.awaitReady(client());
+        afterReattach();
         // Hardening H2: the new agent start has a new session, so the captured request is worthless against it
         // whatever the token is; it is refused before anything in it is used.
         String newSession = String.valueOf(client().ping().get("sessionId"));
@@ -850,7 +955,7 @@ abstract class LoadModeChecks {
      * attached as soon as the desk waits for input again and the next scenario passes.
      */
     @Test
-    @Order(17)
+    @Order(190)
     void anAgentAttachedWhileAPromptIsOpenIsReadyAndThePackRecovers() throws Exception {
         send("Entry", "100");
         assertEquals("IDLE", send("Entry", "1111").payload().get("state"));
@@ -863,6 +968,7 @@ abstract class LoadModeChecks {
         target.endpoint = fresh;
         target.client = AgentClient.connect(fresh);
         LendingTarget.awaitReady(client());
+        afterReattach();
         CapabilityMatrix caps = client().capabilities();
         assertEquals(CapabilityState.UNAVAILABLE, caps.get("lending.input").state(), String.valueOf(caps.get(
                 "lending.input")));
@@ -915,7 +1021,7 @@ abstract class LoadModeChecks {
      * text. A match is the password as a value of its own, not a part of a longer number such as a time stamp.
      */
     @Test
-    @Order(18)
+    @Order(200)
     void thePasswordAppearsInNoRunOutput() throws Exception {
         // The detector itself: it finds the password as a value, in any quoting, and nothing else.
         assertEquals(4, passwordOccurrences("{\"password\":\"1111\"} text=1111; typed 1111. <v>1111</v>").size());
@@ -1046,7 +1152,7 @@ abstract class LoadModeChecks {
      * process's discovery and token files. Last check of the mode: it ends the target.
      */
     @Test
-    @Order(19)
+    @Order(210)
     void theDiscoveryFilesOfAKilledTargetAreRemovedByDiscovery() throws Exception {
         long pid = target.pid();
         Path dir = target.discoveryDir;

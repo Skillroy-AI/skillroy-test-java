@@ -653,7 +653,17 @@ public interface DomainPack {
     // a List<SqlAllowList> with one entry per data source (default List.of(): tier (b) is unavailable for the
     // pack), and assistAnswerPrimitive(), by which a pack names the primitive that answers an in-application
     // overlay (default null: no overlay)
+    // (Phase 6, built 2026-10-09, CP; P6 §5.2, §11.1, D121, D145) two more default members: hooks(), the pack's
+    // hook catalogue (HookCatalogues.ofPack(this): the resource META-INF/skillroy/hooks/<id()>.yaml of the pack
+    // class's loader, read once; HookCatalogue.EMPTY without one; a malformed one an IllegalStateException that a
+    // compile reports as a compile error naming the resource), and settings(), the pack's constants
+    // (PackSettings.EMPTY by default)
 }
+// (Phase 6, built 2026-10-09, CP; P6 §11.1, D144) the tenant-pack overlay: DomainPackOverlay {baseId(), id(),
+// version(), overlay(base)} found by ServiceLoader beside DomainPack and applied by DomainPacks.discover to the base it
+// names (in id order, chained; a missing base an error naming both ids); DelegatingDomainPack (main code) forwards
+// every member, keeps the base's id and reports version <base>+<overlay id>@<overlay version>; PackSettings (an
+// immutable sorted map of strings: get(key, default), asMap(), with(overrides), of(map), EMPTY).
 
 public record PlannedCall(String primitive, Map<String,Object> args, Sync sync, long timeoutMs, AwaitSpec await,
                           CaptureSpec capture /* nullable */) {
@@ -677,7 +687,10 @@ public interface PreflightCheck {
     // … Phase 1 members unchanged: String id(); String check(AgentConnection agent) …
     /** Phase 2 entry; the executor calls this one. data() routes by source like every other read (§7.2). */
     default String check(PreflightContext ctx) throws Exception { return check(ctx.agent()); }
-    interface PreflightContext { AgentConnection agent(); DataChannel data(); String envId(); }
+    interface PreflightContext { AgentConnection agent(); DataChannel data(); String envId();
+        // (Phase 6, built 2026-10-09, CP; P6 §11.1) default PackSettings settings(): the running pack's, EMPTY for
+        // a test's fake
+    }
 }
 // (Phase 5, built 2026-10-08; P5 §9.5)
 public interface StepLibrary {
@@ -848,6 +861,8 @@ public interface ResolveContext {
     void note(String text);                  // added to Provenance.notes
     /** For a statement whose result the resolver needs whole: throws ResolutionException(reason TRUNCATED). */
     Rows requireComplete(Rows rows) throws ResolutionException;
+    // (Phase 6, built 2026-10-09, CP; P6 §11.1, D145) default PackSettings settings(): the running pack's constants
+    // (the engine's context returns DomainPack.settings()); EMPTY by default, for a test's fake
 }
 public interface CredentialIndex { boolean has(String realm, String id); }
 
@@ -864,6 +879,9 @@ public interface Verifier<Q extends Query<T>, T> {
             throws DataException, AgentRpcException, AgentLostException, InterruptedException;
 }
 public interface VerifyContext { AgentConnection agent(); DataChannel data(); String envId(); long remainingMs(); }
+// (Phase 6, built 2026-10-09, CP; P6 §11.1) VerifyContext gains default PackSettings settings() as ResolveContext
+// does. As built: a class that implements two of the contexts inherits two unrelated defaults and must override
+// settings() itself (the sample's ValueLoadersOnRealSchemaTest does)
 
 public final class ResolutionCatalogue {
     public static final ResolutionCatalogue EMPTY;
@@ -984,6 +1002,8 @@ public interface EnvFingerprinter {
             throws DataException, AgentRpcException, AgentLostException, InterruptedException;
 }
 public interface FingerprintContext { AgentConnection agent(); DataChannel data(); String envId(); long remainingMs(); }
+// (Phase 6, built 2026-10-09, CP; P6 §11.1) FingerprintContext gains default PackSettings settings() too; hooks never
+// enter the fingerprint (P6 §6.5, D128)
 
 public enum BindMode { REPLAY, APPROVE, LIVE }   // as built 2026-10-02: label() ("replay", …) and parse(String),
                                                 // which refuses re-resolve ("not part of this version")
@@ -1756,6 +1776,19 @@ refused the call), `web.recover` (per frozen-target recovery), `web.trace` (what
 path that failed to close), `fact` (a `text` the `web` root left out), `path` on every `call` record of a `web.*`
 primitive, and `pathSince` and `source` on the `sync` record of a wait that read a path's events.)
 
+(Phase 6, built 2026-10-09, CP; P6 §5.3, §6.4) `run.jsonl` gains `hooks` (step 0b, before `requires`: the mode and
+what the install did, `{mode, skipped}`, `{mode, alreadyInstalled, catalogue: {id, hash}, armed}` or `{mode,
+catalogue: {id, version, hash}, installed, unavailable: [{id, state, reason, fallback}], armed, touched, ms,
+otherAgents}`, and `ok: false` with the error when refused) and `capabilities` (`{hash, ids, file}`: the archived
+matrix's hash, its id count and `capabilities.json`, the file the run writes beside `run.jsonl` in the wire shape of
+`GET /capabilities`).
+
+(Phase 6, built 2026-10-09, TL; P6 §10.2, §10.3.) The `resolve`, `oracle` and `fingerprint` records end with
+`durationMs` (the slot's time since it started, the oracle's evaluation, the fingerprint's computation), an additive
+change, so that a bind span's events show where model latency and SQL time went; with telemetry on, `run-start` gains
+`traceId`, and `--telemetry file` writes `<out>/telemetry/spans.jsonl` (`skillroy-spans/1`) beside the scenario
+directories.
+
 ### 11.4 What is never written
 
 A value from `credentials.yaml` (a credential field, a JDBC password, a driver property, URL user-info) is never
@@ -1863,6 +1896,13 @@ integration).**
   the core log a param, which no contract line guaranteed. (As built, that end-to-end proof is made by the Phase 1
   secret check of every load mode, P1 §10 check 18, see §14.2 item 10.)
 
+(Phase 6, built 2026-10-09, TL; P6 §10.1, §10.4.) The never-written list gains **a span attribute, a span event's
+attribute and a span name**: spans carry the allow-list of `TelemetryAttributes` only (identifiers, enumerations,
+counts, durations, hashes, masked one-line messages), never a call's parameters or values, an event's payload, a
+resolved value, SQL, rows, a prompt, a credential, the workspace id or a path under a user's home; and **the values of
+the environment variables a telemetry header names**, which the exporter reads at its start and nothing writes,
+logs or prints (a header naming an `ANTHROPIC_*` variable is refused).
+
 ### 11.5 Reserved for interactive use (not built)
 
 The type names `ExecutorSession` (with `StepOutcome execute(PlannedCall call)`: one call with the step protocol,
@@ -1956,6 +1996,10 @@ accepts any jar or class directory (§7.2). The help texts list `resolve` and `d
 Everything the CLI prints passes the run's `SecretMask` and the control-character rule of S26.
 
 ### 12.2 `skillroy-junit`
+
+(Phase 6, built 2026-10-09, CP; P6 §6.1, §6.2) `run`, `session` and `mcp` take `--hooks auto|on|off`; the command
+`skillroy hooks status|install|remove` is P1 §8.6's row; the glue's overloads without `RunOptions` read
+`-Dskillroy.hooks` into `RunOptions.hooks` (a value other than the three is the single test `environment`).
 
 `ScenarioTests.dynamicTests(source, connection, runOptions)` uses `runOptions.bind()` as it is. The overloads
 without `RunOptions` build `RunOptions.defaults().withBind(BindOptions.fromSystemProperties())` (as built

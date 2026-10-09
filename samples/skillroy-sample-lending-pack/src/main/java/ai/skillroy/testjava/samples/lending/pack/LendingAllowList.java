@@ -47,20 +47,32 @@ import java.util.List;
  * A test proves the list against the embedded database: every column named exists, the named columns are exactly the
  * table's, each type is the schema's, and no readable column is secret.
  *
+ * <p>Public from pack 0.5.0 (phase6-contracts.md 11.3): {@link #of} builds the list for a desk that names the role limit
+ * column and the system maximum's setting differently, which is what the branch edition's overlay needs; the
+ * standard list is {@link #LIST}.
+ *
  * <p>Immutable; safe to share between threads.
  */
-final class LendingAllowList {
+public final class LendingAllowList {
 
     private static final String MONEY = "DECIMAL(10,2)";
     private static final String CODE = "VARCHAR(16)";
 
-    /** The one list of the pack, built once. */
-    static final SqlAllowList LIST = build();
+    /** The one list of the standard pack, built once: limit column {@code amount}, setting {@code max_return}. */
+    public static final SqlAllowList LIST = of("amount", "max_return");
 
     private LendingAllowList() {
     }
 
-    private static SqlAllowList build() {
+    /**
+     * The allow-list of source {@code lending} for a desk whose {@code role_cap} limit column is {@code limitColumn}
+     * and whose system maximum return is the {@code desk_setting} named {@code maxReturnSetting}; every other table,
+     * column and description is the standard desk's.
+     *
+     * @param limitColumn {@code amount} in the standard desk, {@code ceiling} in the branch edition
+     * @param maxReturnSetting {@code max_return} in the standard desk, {@code return_ceiling} in the branch edition
+     */
+    public static SqlAllowList of(String limitColumn, String maxReturnSetting) {
         return SqlAllowList.builder(LendingResolvers.SOURCE, SqlDialect.HSQLDB)
                 .table("staff", List.of("code"), "The desk's staff members. A staff member signs on with their"
                                 + " code and a password; what they may do comes from their roles (staff_role).",
@@ -94,15 +106,15 @@ final class LendingAllowList {
                                 column("kind", "VARCHAR(16)", "What the limit applies to. RETURN, the only kind"
                                         + " the desk uses, caps the deposits a staff member may hand back on one"
                                         + " return without a supervisor."),
-                                column("amount", MONEY, "The limit: money as a decimal string, such as"
+                                column(limitColumn, MONEY, "The limit: money as a decimal string, such as"
                                         + " \"20.00\".")),
                         List.of())
                 .table("desk_setting", List.of("name"), "The desk's settings, one row per setting.",
-                        List.of(sampled("name", "VARCHAR(32)", "The setting's key: max_return is the largest return"
-                                        + " the desk accepts at all, supervisor or not; slip_header is the first"
-                                        + " line of every slip."),
-                                column("value", "VARCHAR(128)", "The setting's value, as text; max_return is money"
-                                        + " as a decimal string, such as \"500.00\".")),
+                        List.of(sampled("name", "VARCHAR(32)", "The setting's key: " + maxReturnSetting + " is the"
+                                        + " largest return the desk accepts at all, supervisor or not; slip_header is"
+                                        + " the first line of every slip."),
+                                column("value", "VARCHAR(128)", "The setting's value, as text; " + maxReturnSetting
+                                        + " is money as a decimal string, such as \"500.00\".")),
                         List.of())
                 .table("item", List.of("code"), "The tools the library lends: one row per item, with its deposit"
                                 + " and whether and how it can be lent.",

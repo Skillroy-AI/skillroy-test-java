@@ -99,6 +99,10 @@ final class Packs implements AutoCloseable {
         } catch (ServiceConfigurationError | LinkageError e) {
             closeQuietly(jarLoader);
             throw new CliException(Exit.SCENARIO, "a domain pack cannot be loaded: " + e.getMessage(), e);
+        } catch (IllegalStateException e) {
+            // phase6-contracts.md 11.1: an overlay whose base pack is absent is refused before anything runs.
+            closeQuietly(jarLoader);
+            throw new CliException(Exit.SCENARIO, e.getMessage(), e);
         } catch (CliException | RuntimeException e) {
             closeQuietly(jarLoader);
             throw e;

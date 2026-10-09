@@ -1,0 +1,25 @@
+# The CLI test pack's hook catalogue (HooksCommandTest): one enabled hook, one off with a secret-looking capture.
+catalogue: clitest
+version: 1
+application: the CLI's fake target
+hooks:
+  - id: counter.read
+    mode: CAPTURE
+    target:
+      class: org.example.cli.Counter
+      method: read
+      descriptors: ["()J"]
+    capture: { result: true }
+    fallbacks:
+      - seam: test.poke
+  - id: pin.checked
+    mode: CAPTURE
+    enabled: false
+    target:
+      class: org.example.cli.Counter
+      method: pinMatches
+      descriptors: ["(Ljava/lang/String;)Z"]
+    capture: { args: [0] }
+    fallbacks:
+      - seam: test.poke
+packages: [org.example.cli]

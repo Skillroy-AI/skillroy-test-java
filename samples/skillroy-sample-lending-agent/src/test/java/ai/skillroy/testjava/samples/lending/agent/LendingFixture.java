@@ -21,6 +21,7 @@ import ai.skillroy.testjava.protocol.Event;
 import ai.skillroy.testjava.protocol.LoadMode;
 import ai.skillroy.testjava.protocol.TopicFilter;
 import ai.skillroy.testjava.samples.lending.LendingApp;
+import ai.skillroy.testjava.samples.lending.Edition;
 import ai.skillroy.testjava.samples.lending.LendingOptions;
 import ai.skillroy.testjava.samples.lending.Seed;
 
@@ -68,6 +69,11 @@ final class LendingFixture implements AutoCloseable {
      * A desk on the given clock: its business date, and so the seeded waiver rules' dates, which are relative to the
      * day the desk was seeded, come from that clock.
      */
+    /** A desk of {@code edition} on seed A (phase6-contracts.md 11.3). */
+    static LendingFixture start(Edition edition) throws Exception {
+        return new LendingFixture(LendingOptions.defaults().seed(Seed.A).edition(edition));
+    }
+
     static LendingFixture start(Seed seed, Clock clock) throws Exception {
         return new LendingFixture(LendingOptions.defaults().seed(seed).clock(clock));
     }

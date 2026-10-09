@@ -556,6 +556,29 @@ abstract class PerTargetJavaChecks {
      * The run's summary ends with {@code model calls: 0} and then the model cost line, {@code model cost: $0 (...)}
      * (phase5-contracts.md 13.4).
      */
+    /**
+     * phase6-contracts.md 8.2 (decision D136), the literal proof of "the capability matrix equals the JDK 8 one": when
+     * the target runs on another Java than this JVM (the Java 8 leg: {@code -Dskillroy.it.targetJava}), one more
+     * target, launched alike ({@code JAVAAGENT}, the database listener), runs on this JVM's own Java, and the two
+     * matrices, normalised as the goldens are (ids, states and strategy strict, reason by presence, the allow-list),
+     * are equal. On the Java 25 leg both Javas are one: the goldens are the gate there.
+     */
+    @Test
+    @Order(8)
+    void theMatrixOnThisJvmsJavaEqualsTheTargetsLive() throws Exception {
+        Path own = Path.of(System.getProperty("java.home"), "bin", "java");
+        org.junit.jupiter.api.Assumptions.assumeFalse(own.toRealPath().equals(ItEnv.targetJava().toRealPath()),
+                "the target runs on this JVM's Java: the goldens are the gate");
+        Map<String, Object> theirs = CapabilityGolden.normalise(client().capabilities());
+        try (LendingTarget other = LendingTarget.launch(LendingTarget.Mode.JAVAAGENT, ENV.seed, true, null, own)) {
+            Map<String, Object> ours = CapabilityGolden.normalise(other.client.capabilities());
+            String diff = CapabilityGolden.compare(theirs, ours, CapabilityGolden.allowed(CapabilityGolden.dir()
+                    .resolve("allow-differences.json")));
+            ItEnv.timing("perTargetJava liveMatrixDiff=" + (diff == null ? "none" : diff.replace('\n', ' ')));
+            assertTrue(diff == null, "the matrices of the two Javas differ:\n" + diff);
+        }
+    }
+
     void assertNoModelCall(Result result) {
         List<String> lines = result.out.strip().lines().toList();
         assertTrue(lines.size() >= 2 && lines.get(lines.size() - 2).equals("model calls: 0")

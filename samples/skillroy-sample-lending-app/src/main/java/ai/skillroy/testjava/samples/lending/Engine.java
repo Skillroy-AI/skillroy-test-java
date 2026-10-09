@@ -142,6 +142,8 @@ public final class Engine {
     private final LendingDb db;
     private final Catalogue catalogue;
     private final AccessControl access;
+    /** The branch edition's return ceilings; null in the standard edition (phase6-contracts.md 11.3). */
+    private final ReturnCeilings returnCeilings;
     private final WaiverEngine waiverRules;
     private final PromptService prompts;
     private final SlipPrinter printer;
@@ -197,9 +199,23 @@ public final class Engine {
      */
     public Engine(LendingDb db, Catalogue catalogue, AccessControl access, WaiverEngine waiverRules,
                   PromptService prompts, SlipPrinter printer, Clock clock, long idleLockMillis) {
+        this(db, catalogue, access, waiverRules, prompts, printer, clock, idleLockMillis, Edition.STANDARD);
+    }
+
+    /**
+     * An engine of {@code edition}: in the branch edition the return path computes the applicable limit through
+     * {@link ReturnCeilings#applicable}, in the standard edition through {@link AccessControl#returnLimit}
+     * (phase6-contracts.md 11.3); everything else is the same.
+     *
+     * @param edition the desk's edition
+     */
+    public Engine(LendingDb db, Catalogue catalogue, AccessControl access, WaiverEngine waiverRules,
+                  PromptService prompts, SlipPrinter printer, Clock clock, long idleLockMillis, Edition edition) {
         this.db = Objects.requireNonNull(db, "db");
         this.catalogue = Objects.requireNonNull(catalogue, "catalogue");
         this.access = Objects.requireNonNull(access, "access");
+        this.returnCeilings = Objects.requireNonNull(edition, "edition") == Edition.BRANCH
+            ? new ReturnCeilings(access) : null;
         this.waiverRules = Objects.requireNonNull(waiverRules, "waiverRules");
         this.prompts = Objects.requireNonNull(prompts, "prompts");
         this.printer = Objects.requireNonNull(printer, "printer");
@@ -824,7 +840,7 @@ public final class Engine {
             ask(PROMPT_RETURN_NOT_ALLOWED, TEXT_RETURN_NOT_ALLOWED, OK);
             return;
         }
-        BigDecimal limit = access.returnLimit(staff.code());
+        BigDecimal limit = applicableLimit(staff.code());
         boolean ownAuthority = limit == null || value.compareTo(limit) <= 0;
         boolean covered = authorised && (authorisedLimit == null || value.compareTo(authorisedLimit) <= 0);
         if (ownAuthority || covered) {
@@ -855,8 +871,21 @@ public final class Engine {
         }
         Loan base = loan != null ? loan : Loan.open(staff.code(), true);
         authorised = true;
-        authorisedLimit = access.returnLimit(code);
+        authorisedLimit = applicableLimit(code);
         commit(base.withLines(lines).withAuthorisation(new LoanAuthorisation(AUTH_RETURN_OVERRIDE, code)));
+    }
+
+    /**
+     * The return limit the return path applies to a staff member: {@link ReturnCeilings#applicable} in the branch
+     * edition, {@link AccessControl#returnLimit} in the standard edition. Null for unlimited.
+     */
+    /** The branch edition's return ceilings, or null (the application's own tests read their call count). */
+    ReturnCeilings returnCeilings() {
+        return returnCeilings;
+    }
+
+    private BigDecimal applicableLimit(String code) {
+        return returnCeilings != null ? returnCeilings.applicable(code) : access.returnLimit(code);
     }
 
     private void commit(Loan changed) {

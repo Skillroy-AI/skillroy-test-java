@@ -25,6 +25,7 @@ import ai.skillroy.testjava.inference.triage.Triage;
 import ai.skillroy.testjava.inference.triage.TriageOptions;
 import ai.skillroy.testjava.inference.triage.TriageResult;
 import ai.skillroy.testjava.protocol.Json;
+import ai.skillroy.testjava.scenario.observe.RunObserver;
 import ai.skillroy.testjava.scenario.resolve.BindMode;
 import ai.skillroy.testjava.scenario.resolve.InferenceSettings;
 import ai.skillroy.testjava.scenario.resolve.SettingsException;
@@ -70,6 +71,7 @@ final class TriageCommand implements Command {
     private static List<OptionSpec> options() {
         List<OptionSpec> options = new ArrayList<>(InferenceArgs.gateway());
         options.add(OptionSpec.flag(LABELS_ONLY, "ask for the label only, no summary"));
+        options.addAll(TelemetryArgs.OPTIONS);
         options.add(OptionSpec.flag("--json", "print {results:[...], modelCalls, modelCost, budget, inference}\n"
                 + "as JSON when done"));
         return options;
@@ -106,6 +108,19 @@ final class TriageCommand implements Command {
         } catch (SettingsException e) {
             throw new UsageException(e.getMessage());
         }
+        // phase6-contracts.md 10.3 (as built, TL: triage exports its root span; its model calls are in each run's
+        // triage/ records): the file exporter needs out: in telemetry.yaml or skillroy.telemetry.out.
+        RunObserver observer = TelemetryArgs.open(TelemetryArgs.load(args, null, null), cli);
+        TelemetryArgs.started(observer, TelemetryArgs.runStart(observer, "triage", null, null, null, null, null));
+        try {
+            return triage(args, cli, json, labelsOnly, dirs, inference, prices);
+        } finally {
+            TelemetryArgs.finish(observer, json ? cli.err() : cli.out());
+        }
+    }
+
+    private int triage(ParsedArgs args, Cli cli, boolean json, boolean labelsOnly, List<Path> dirs,
+                       InferenceSettings inference, PriceTable prices) throws Exception {
         PromptMask mask = PromptMask.keysOnly();
         TriageOptions options;
         try {

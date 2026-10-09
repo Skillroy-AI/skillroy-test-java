@@ -25,7 +25,9 @@ import ai.skillroy.testjava.scenario.resolve.StoredTable;
 import ai.skillroy.testjava.scenario.pack.AwaitSpec;
 import ai.skillroy.testjava.scenario.pack.CompileContext;
 import ai.skillroy.testjava.scenario.pack.DomainPack;
+import ai.skillroy.testjava.scenario.hooks.HookCatalogue;
 import ai.skillroy.testjava.scenario.pack.FactProvider;
+import ai.skillroy.testjava.scenario.pack.PackSettings;
 import ai.skillroy.testjava.scenario.pack.PlannedCall;
 import ai.skillroy.testjava.scenario.pack.PreflightCheck;
 import ai.skillroy.testjava.scenario.pack.PromptPolicy;
@@ -71,6 +73,10 @@ public final class ToyPack implements DomainPack {
     List<RowMask> rowMasks = List.of();
     /** The SQL allow-lists (Phase 5): empty, so that llm-sql is a compile error unless a test sets one. */
     List<SqlAllowList> sqlAllowLists = List.of();
+    /** The hook catalogue (Phase 6); null reads the default resource, which the toy pack does not have. */
+    HookCatalogue hooks;
+    /** The pack's settings (Phase 6). */
+    PackSettings settings = PackSettings.EMPTY;
 
     @Override
     public String id() {
@@ -125,6 +131,16 @@ public final class ToyPack implements DomainPack {
     @Override
     public List<RowMask> rowMasks() {
         return rowMasks;
+    }
+
+    @Override
+    public HookCatalogue hooks() {
+        return hooks != null ? hooks : DomainPack.super.hooks();
+    }
+
+    @Override
+    public PackSettings settings() {
+        return settings;
     }
 
     @Override

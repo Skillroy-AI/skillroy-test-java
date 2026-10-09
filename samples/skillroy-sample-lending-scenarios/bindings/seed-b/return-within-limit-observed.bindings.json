@@ -1,0 +1,277 @@
+{
+  "bindingsVersion": 1,
+  "scenarioId": "return-within-limit-observed",
+  "envId": "seed-b",
+  "pack": "lending",
+  "packVersion": "0.5.0",
+  "planHash": "sha256:b920829d510495727dead585bfc9de762186daf4d1aa950ad9e1b964d7eb2ea0",
+  "resolveHash": "sha256:92157418e4f8e3a985388ec085107e2b8bd37233414aaf95222d9477b02f62e8",
+  "env": {
+    "fingerprint": "sha256:f13ef74b54cc11e3cdc4875b35119fe1c728e4121517cb91ed273b5ea5bb6cc5",
+    "components": {
+      "lending.schema": "sha256:f8e03d38af714e3af3af6542a10c70a8acb6157e8f00dda21f7903e379e58504",
+      "lending.seed": "B",
+      "lending.site": "TOOL LIBRARY - CANAL STREET",
+      "skillroy.fingerprint": "1",
+      "skillroy.protocolMajor": "0"
+    }
+  },
+  "resolutions": {
+    "systemMax": {
+      "query": "SystemLimit",
+      "args": {
+        "type": "RETURN"
+      },
+      "argsHash": "sha256:16ecee15b4af1b822c78830591c99ec482d13d649375ea268b2b144e06ff696c",
+      "value": "350.00",
+      "strategy": "CANONICAL_SQL",
+      "provenance": {
+        "resolver": "lending.sql.SystemLimit",
+        "statements": [
+          {
+            "channel": "agent",
+            "source": "lending",
+            "sql": "SELECT value FROM desk_setting WHERE name = ? ORDER BY name",
+            "params": [
+              "max_return"
+            ],
+            "rowCount": 1,
+            "truncated": false
+          }
+        ],
+        "calls": [],
+        "candidates": 1,
+        "candidatesTruncated": false,
+        "rejected": []
+      },
+      "verifier": [
+        {
+          "id": "lending.limits",
+          "passed": true,
+          "reason": "the desk reports maxReturn 350.00"
+        }
+      ],
+      "confidence": 1.0,
+      "approval": {
+        "state": "APPROVED",
+        "by": "approve"
+      },
+      "llm": null
+    },
+    "item": {
+      "query": "LendableItem",
+      "args": {
+        "deposit": {
+          "between": [
+            "20.00",
+            "200.00"
+          ],
+          "lte": "350.00"
+        }
+      },
+      "argsHash": "sha256:068013d4e8af5a1f269d1be03786866d746636cfbeccd8ab5379817f4521aab5",
+      "value": {
+        "barcode": "4006000000080",
+        "code": "T1009",
+        "deposit": "27.50",
+        "title": "Jigsaw"
+      },
+      "strategy": "CANONICAL_SQL",
+      "provenance": {
+        "resolver": "lending.sql.LendableItem",
+        "statements": [
+          {
+            "channel": "agent",
+            "source": "lending",
+            "sql": "SELECT code, barcode, title, deposit FROM item WHERE active = TRUE AND barcode IS NOT NULL AND per_day = ? AND deposit >= CAST(? AS DECIMAL(10,2)) AND deposit <= CAST(? AS DECIMAL(10,2)) ORDER BY deposit, code",
+            "params": [
+              false,
+              "20.00",
+              "200.00"
+            ],
+            "rowCount": 1,
+            "truncated": false
+          }
+        ],
+        "calls": [],
+        "candidates": 1,
+        "candidatesTruncated": false,
+        "rejected": []
+      },
+      "verifier": [
+        {
+          "id": "lending.deposit",
+          "passed": true,
+          "reason": "a scan of 4006000000080 finds T1009 at 27.50, active, counted"
+        }
+      ],
+      "confidence": 1.0,
+      "approval": {
+        "state": "APPROVED",
+        "by": "approve"
+      },
+      "llm": null
+    },
+    "assistant": {
+      "query": "StaffWithPermission",
+      "args": {
+        "interactiveSignOn": true,
+        "limit": {
+          "gte": "27.50",
+          "type": "RETURN"
+        },
+        "perform": [
+          "SIGN_ON",
+          "RETURN"
+        ]
+      },
+      "argsHash": "sha256:ddf903574f02f720cd548454ee0e264cf8debc7b274aa53f312ff2570a74fa81",
+      "value": {
+        "code": "4715",
+        "limits": {
+          "RETURN": "40.00"
+        },
+        "permissions": [
+          "RETURN",
+          "SIGN_ON"
+        ]
+      },
+      "credential": {
+        "realm": "staff",
+        "id": "4715"
+      },
+      "strategy": "CANONICAL_SQL",
+      "provenance": {
+        "resolver": "lending.sql.StaffWithPermission",
+        "statements": [
+          {
+            "channel": "agent",
+            "source": "lending",
+            "sql": "SELECT s.code AS code, s.auto_sign_on AS auto_sign_on, (SELECT MAX(rl.amount) FROM staff_role sr JOIN role_cap rl ON rl.role_id = sr.role_id WHERE sr.staff_code = s.code AND rl.kind = ?) AS limit_amount FROM staff s WHERE s.active = TRUE ORDER BY s.code",
+            "params": [
+              "RETURN"
+            ],
+            "rowCount": 7,
+            "truncated": false
+          },
+          {
+            "channel": "agent",
+            "source": "lending",
+            "sql": "SELECT DISTINCT rp.permission AS permission FROM staff_role sr JOIN role_permission rp ON rp.role_id = sr.role_id WHERE sr.staff_code = ? ORDER BY permission",
+            "params": [
+              "4712"
+            ],
+            "rowCount": 1,
+            "truncated": false
+          },
+          {
+            "channel": "agent",
+            "source": "lending",
+            "sql": "SELECT DISTINCT rp.permission AS permission FROM staff_role sr JOIN role_permission rp ON rp.role_id = sr.role_id WHERE sr.staff_code = ? ORDER BY permission",
+            "params": [
+              "4715"
+            ],
+            "rowCount": 2,
+            "truncated": false
+          },
+          {
+            "channel": "agent",
+            "source": "lending",
+            "sql": "SELECT DISTINCT rp.permission AS permission FROM staff_role sr JOIN role_permission rp ON rp.role_id = sr.role_id WHERE sr.staff_code = ? ORDER BY permission",
+            "params": [
+              "4716"
+            ],
+            "rowCount": 0,
+            "truncated": false
+          },
+          {
+            "channel": "agent",
+            "source": "lending",
+            "sql": "SELECT DISTINCT rp.permission AS permission FROM staff_role sr JOIN role_permission rp ON rp.role_id = sr.role_id WHERE sr.staff_code = ? ORDER BY permission",
+            "params": [
+              "4720"
+            ],
+            "rowCount": 3,
+            "truncated": false
+          },
+          {
+            "channel": "agent",
+            "source": "lending",
+            "sql": "SELECT DISTINCT rp.permission AS permission FROM staff_role sr JOIN role_permission rp ON rp.role_id = sr.role_id WHERE sr.staff_code = ? ORDER BY permission",
+            "params": [
+              "4790"
+            ],
+            "rowCount": 3,
+            "truncated": false
+          }
+        ],
+        "calls": [],
+        "candidates": 1,
+        "candidatesTruncated": false,
+        "rejected": []
+      },
+      "verifier": [
+        {
+          "id": "lending.access.check",
+          "passed": true,
+          "reason": "SIGN_ON and RETURN permitted; RETURN of 27.50 allowed; limit 40.00; asked for a password"
+        }
+      ],
+      "confidence": 1.0,
+      "approval": {
+        "state": "APPROVED",
+        "by": "approve"
+      },
+      "llm": null
+    },
+    "keys": {
+      "query": "ActionKey",
+      "args": {
+        "actions": [
+          "RETURN",
+          "DUE"
+        ]
+      },
+      "argsHash": "sha256:489b62d6fbf82d239b636183bfcbee0fdda5cb4264bfa68eca404d37f3971e28",
+      "value": {
+        "DUE": "DUE",
+        "RETURN": "RETURN"
+      },
+      "strategy": "CANONICAL_JAVA",
+      "provenance": {
+        "resolver": "lending.java.ActionKey",
+        "statements": [],
+        "calls": [],
+        "candidates": 1,
+        "candidatesTruncated": false,
+        "rejected": []
+      },
+      "verifier": [
+        {
+          "id": "swing.find",
+          "passed": true,
+          "reason": "the window has one key for each of [DUE, RETURN]"
+        }
+      ],
+      "confidence": 1.0,
+      "approval": {
+        "state": "APPROVED",
+        "by": "approve"
+      },
+      "llm": null
+    }
+  },
+  "oracles": {
+    "auth": {
+      "fn": "ExpectedAuthorisation",
+      "inputsHash": "sha256:615fd96f2b83df9e74ed1420d43b767718c3e601db0e7d994cf71b24b14c99da",
+      "value": "NONE",
+      "mustEqual": "NONE"
+    },
+    "returnLine": {
+      "fn": "Money.negate",
+      "inputsHash": "sha256:3990d0222323226dcfbdd9acd441b9481e046ce42b422922ebe8a958797b7ecc",
+      "value": "-27.50"
+    }
+  }
+}

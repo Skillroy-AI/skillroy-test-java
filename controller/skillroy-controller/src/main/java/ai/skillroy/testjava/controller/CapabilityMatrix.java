@@ -18,11 +18,17 @@ package ai.skillroy.testjava.controller;
 
 import ai.skillroy.testjava.protocol.Capability;
 import ai.skillroy.testjava.protocol.CapabilityState;
+import ai.skillroy.testjava.protocol.Json;
 import ai.skillroy.testjava.protocol.JsonException;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.HexFormat;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -161,6 +167,37 @@ public final class CapabilityMatrix {
         }
         String reason = capability.reason();
         return reason == null || reason.isBlank() ? "UNAVAILABLE" : "UNAVAILABLE (" + reason + ")";
+    }
+
+    /**
+     * The wire shape {@code GET /capabilities} serves (phase6-contracts.md 6.4, decision D130):
+     * {@code {"capabilities": {id: {"state", "reason", "strategy"}}}}, ids sorted, {@code reason} and {@code strategy}
+     * written as null when absent. What a run archives as {@code capabilities.json}; {@link #fromJson} reads it back.
+     *
+     * @return a new mutable map
+     */
+    public Map<String, Object> toJson() {
+        Map<String, Object> entries = new LinkedHashMap<>();
+        for (Map.Entry<String, Capability> e : byId.entrySet()) {
+            entries.put(e.getKey(), e.getValue().toJson());
+        }
+        Map<String, Object> json = new LinkedHashMap<>();
+        json.put("capabilities", entries);
+        return json;
+    }
+
+    /**
+     * {@code "sha256:"} and the lower-case hex SHA-256 of the canonical JSON of {@link #toJson()}: two matrices with
+     * the same ids, states, reasons and strategies have the same hash (phase6-contracts.md 6.4).
+     */
+    public String hash() {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256").digest(Json.writeCanonical(toJson())
+                    .getBytes(StandardCharsets.UTF_8));
+            return "sha256:" + HexFormat.of().formatHex(digest);
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 is part of every Java runtime", e);
+        }
     }
 
     @Override

@@ -76,16 +76,18 @@ public final class LendingDb implements AutoCloseable {
 
     private final String name;
     private final Seed seed;
+    private final Edition edition;
     private final Connection connection;
     private final String adminUser;
     private final String adminPassword;
     private final boolean servable;
     private volatile boolean closed;
 
-    private LendingDb(String name, Seed seed, Connection connection, String adminUser, String adminPassword,
-                      boolean servable) {
+    private LendingDb(String name, Seed seed, Edition edition, Connection connection, String adminUser,
+                      String adminPassword, boolean servable) {
         this.name = name;
         this.seed = seed;
+        this.edition = edition;
         this.connection = connection;
         this.adminUser = adminUser;
         this.adminPassword = adminPassword;
@@ -101,7 +103,15 @@ public final class LendingDb implements AutoCloseable {
      * @param today business date that waiver rule windows are relative to
      */
     public static LendingDb create(String name, Seed seed, LocalDate today) throws SQLException {
-        return create(name, seed, today, DEFAULT_ADMIN, "", false);
+        return create(name, seed, Edition.STANDARD, today, DEFAULT_ADMIN, "", false);
+    }
+
+    /**
+     * As {@link #create(String, Seed, LocalDate)}, with the schema and settings of {@code edition}
+     * (phase6-contracts.md 11.3).
+     */
+    public static LendingDb create(String name, Seed seed, Edition edition, LocalDate today) throws SQLException {
+        return create(name, seed, edition, today, DEFAULT_ADMIN, "", false);
     }
 
     /**
@@ -113,12 +123,19 @@ public final class LendingDb implements AutoCloseable {
      *     first); the message then names no account
      */
     public static LendingDb createServable(String name, Seed seed, LocalDate today) throws SQLException {
-        return create(name, seed, today, "ADMIN_" + randomHex(16), randomHex(24), true);
+        return createServable(name, seed, Edition.STANDARD, today);
     }
 
-    private static LendingDb create(String name, Seed seed, LocalDate today, String adminUser, String adminPassword,
-                                    boolean servable) throws SQLException {
+    /** As {@link #createServable(String, Seed, LocalDate)}, with the schema and settings of {@code edition}. */
+    public static LendingDb createServable(String name, Seed seed, Edition edition, LocalDate today)
+            throws SQLException {
+        return create(name, seed, edition, today, "ADMIN_" + randomHex(16), randomHex(24), true);
+    }
+
+    private static LendingDb create(String name, Seed seed, Edition edition, LocalDate today, String adminUser,
+                                    String adminPassword, boolean servable) throws SQLException {
         Objects.requireNonNull(seed, "seed");
+        Objects.requireNonNull(edition, "edition");
         Objects.requireNonNull(today, "today");
         if (name == null || !name.matches("[A-Za-z0-9_]+")) {
             throw new IllegalArgumentException("database name must be [A-Za-z0-9_]+: " + name);
@@ -142,11 +159,11 @@ public final class LendingDb implements AutoCloseable {
                 st.execute("DROP SCHEMA PUBLIC CASCADE");
                 st.execute("SET DATABASE TRANSACTION CONTROL MVCC");
             }
-            LendingSchema.create(c, SeedData.firstLoanId(seed));
-            SeedData.apply(c, seed, today);
+            LendingSchema.create(c, SeedData.firstLoanId(seed), edition);
+            SeedData.apply(c, seed, today, edition);
             c.setAutoCommit(false);
             ok = true;
-            return new LendingDb(name, seed, c, adminUser, adminPassword, servable);
+            return new LendingDb(name, seed, edition, c, adminUser, adminPassword, servable);
         } finally {
             if (!ok) {
                 closeQuietly(c);
@@ -181,6 +198,11 @@ public final class LendingDb implements AutoCloseable {
 
     public Seed seed() {
         return seed;
+    }
+
+    /** @return the edition whose schema and settings the database holds */
+    public Edition edition() {
+        return edition;
     }
 
     /** @return the JDBC URL of the database */

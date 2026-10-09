@@ -49,6 +49,7 @@ import ai.skillroy.testjava.scenario.BindingsFormatException;
 import ai.skillroy.testjava.scenario.FailureKind;
 import ai.skillroy.testjava.scenario.Plan;
 import ai.skillroy.testjava.scenario.pack.DomainPack;
+import ai.skillroy.testjava.scenario.pack.PackSettings;
 import ai.skillroy.testjava.scenario.pack.PreflightCheck;
 import ai.skillroy.testjava.scenario.resolve.Approval;
 import ai.skillroy.testjava.scenario.resolve.BindMode;
@@ -816,6 +817,12 @@ public final class ReResolver {
                     @Override
                     public String envId() {
                         return base.envId();
+                    }
+
+                    @Override
+                    public PackSettings settings() {
+                        PackSettings settings = pack.settings();
+                        return settings == null ? PackSettings.EMPTY : settings;
                     }
                 };
                 for (PreflightCheck check : checks) {

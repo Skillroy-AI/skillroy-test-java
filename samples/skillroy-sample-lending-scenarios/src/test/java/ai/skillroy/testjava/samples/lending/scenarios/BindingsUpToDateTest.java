@@ -76,6 +76,7 @@ class BindingsUpToDateTest {
             expected.add(ScenarioB.committedBindings(env));
             expected.add(ScenarioA.committedBindings(env));
             expected.add(ScenarioC.committedBindings(env));
+            expected.add(ScenarioE.committedBindings(env));
             if (ScenarioD.HAS_BINDINGS) {
                 expected.add(ScenarioD.committedBindings(env));
             }
@@ -91,7 +92,7 @@ class BindingsUpToDateTest {
             assertEquals(plan.hash(), read.planHash(), file + " was approved for the committed plan");
             assertEquals(file.getParent().getFileName().toString(), read.envId());
             assertEquals("lending", read.pack());
-            assertEquals("0.4.0", read.packVersion());
+            assertEquals(ai.skillroy.testjava.samples.lending.pack.LendingPack.VERSION, read.packVersion());
             assertTrue(text.endsWith("}\n"), "ends with a newline");
             assertFalse(ScenarioB.ISO_DATE.matcher(text.replaceAll("\"by\": \"[^\"]*\"", "")).find(), file
                     + " holds no date outside an approval's label: it is the same on every day");
@@ -107,6 +108,10 @@ class BindingsUpToDateTest {
                     BindingsFile.read(ScenarioB.committedBindings(env)).env(), "one environment, one fingerprint");
             assertEquals(BindingsFile.read(ScenarioA.committedBindings(env)).env(),
                     BindingsFile.read(ScenarioC.committedBindings(env)).env(), "one environment, one fingerprint");
+            // phase6-contracts.md 6.5 (D128): hooks never enter the fingerprint, so scenario E's one file per seed
+            // serves its runs with and without hooks.
+            assertEquals(BindingsFile.read(ScenarioA.committedBindings(env)).env(),
+                    BindingsFile.read(ScenarioE.committedBindings(env)).env(), "one environment, one fingerprint");
         }
     }
 
@@ -129,7 +134,7 @@ class BindingsUpToDateTest {
                 needing.add(plan.scenarioId());
             }
         }
-        assertEquals(List.of(ScenarioB.ID, ScenarioA.ID, ScenarioC.ID, ScenarioD.ID), needing,
+        assertEquals(List.of(ScenarioB.ID, ScenarioA.ID, ScenarioC.ID, ScenarioE.ID, ScenarioD.ID), needing,
                 "the scenarios with query slots");
         assertEquals(ScenarioD.HAS_BINDINGS, ScenarioD.anyBindingsCommitted(), "ScenarioD.HAS_BINDINGS says whether"
                 + " scenario D's bindings are committed");
@@ -244,6 +249,65 @@ class BindingsUpToDateTest {
                 assertEquals(a.oracles().get(oracle).value(), d.oracles().get(oracle).value(), oracle);
             }
             assertEquals(a.env(), d.env(), "one environment, one fingerprint");
+        }
+    }
+
+    /**
+     * Scenario E's files (phase6-contracts.md 6.3): the query slots of its {@code resolve}, every verifier passed, the
+     * assistant's limit at least the item's deposit (so the oracle {@code auth} is {@code NONE}: the assistant takes
+     * the return alone), the return line the deposit negated; both seeds' files share the plan and resolve hashes.
+     */
+    @Test
+    void scenarioEsFilesBindAnAssistantWhoMayTakeTheReturnAlone() throws Exception {
+        Set<String> planHashes = new HashSet<>();
+        for (Env env : Env.values()) {
+            BindingsFile file = BindingsFile.read(ScenarioE.committedBindings(env));
+            assertEquals(ScenarioE.QUERY_SLOTS, List.copyOf(file.resolutions().keySet()), env.id);
+            for (Resolution r : file.resolutions().values()) {
+                assertTrue(r.verified().stream().allMatch(VerifierResult::passed), r.slot() + ": " + r.verified());
+                assertNull(r.usage(), r.slot() + ": no model behind it");
+            }
+            assertEquals("NONE", file.oracles().get("auth").value(), env.id);
+            assertEquals(new CredentialRef("staff", String.valueOf(((Map<?, ?>) file.resolutions().get("assistant")
+                    .value()).get("code"))), file.resolutions().get("assistant").credential());
+            planHashes.add(file.planHash());
+        }
+        assertEquals(1, planHashes.size(), String.valueOf(planHashes));
+    }
+
+    /**
+     * The branch variant's files (phase6-contracts.md 11.4): {@code variants/branch/bindings/branch-a/} holds scenarios
+     * A, B and E, canonical, tied to the variant's committed plans, approved with the label {@code approve}, the
+     * overlaid pack's composite version; the environment is the branch edition's (its {@code lending.schema} checksum
+     * differs from seed A's, the seed and the site do not), so bindings never cross editions.
+     */
+    @Test
+    void theBranchVariantsFilesAreCanonicalAndTiedToItsPlans() throws Exception {
+        List<Path> files = new ArrayList<>();
+        try (Stream<Path> walk = Files.walk(BranchVariant.bindingsRoot())) {
+            walk.filter(Files::isRegularFile).sorted().forEach(files::add);
+        }
+        List<Path> expected = BranchVariant.SCENARIOS.stream().map(BranchVariant::committedBindings).sorted()
+                .toList();
+        assertEquals(expected, files);
+        BindingsFile seedA = BindingsFile.read(ScenarioA.committedBindings(Env.SEED_A));
+        for (Path file : files) {
+            String text = Files.readString(file, StandardCharsets.UTF_8);
+            BindingsFile read = BindingsFile.read(file);
+            assertEquals(text, read.toJsonText(), file + " is in canonical form");
+            Plan plan = Plan.read(BranchVariant.plan(read.scenarioId()));
+            assertEquals(plan.resolveHash(), read.resolveHash(), file.toString());
+            assertEquals(plan.hash(), read.planHash(), file.toString());
+            assertEquals(BranchVariant.ENV, read.envId());
+            assertEquals(BranchVariant.PACK_VERSION, read.packVersion());
+            for (Resolution r : read.resolutions().values()) {
+                assertEquals("approve", r.approval().by(), file + " " + r.slot());
+            }
+            assertNotEquals(seedA.env().hash(), read.env().hash(), "another edition, another fingerprint");
+            assertNotEquals(seedA.env().components().get("lending.schema"), read.env().components().get(
+                    "lending.schema"), "the branch edition's schema");
+            assertEquals(seedA.env().components().get("lending.seed"), read.env().components().get("lending.seed"));
+            assertFalse(text.contains("\"jdbc\""), "recorded as the end-to-end agent channel sees it");
         }
     }
 

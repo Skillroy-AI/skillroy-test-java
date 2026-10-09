@@ -52,16 +52,20 @@ final class EngineHarness implements AutoCloseable {
     final Engine engine;
 
     private EngineHarness(Seed seed, long idleLockMillis, boolean servable) throws SQLException {
+        this(seed, Edition.STANDARD, idleLockMillis, servable);
+    }
+
+    private EngineHarness(Seed seed, Edition edition, long idleLockMillis, boolean servable) throws SQLException {
         String name = "engine_" + COUNTER.incrementAndGet();
-        db = servable ? LendingDb.createServable(name, seed, LocalDate.now(CLOCK))
-            : LendingDb.create(name, seed, LocalDate.now(CLOCK));
-        access = AccessControl.load(db.connection());
+        db = servable ? LendingDb.createServable(name, seed, edition, LocalDate.now(CLOCK))
+            : LendingDb.create(name, seed, edition, LocalDate.now(CLOCK));
+        access = AccessControl.load(db.connection(), edition);
         catalogue = Catalogue.load(db.connection());
         waiverRules = WaiverEngine.load(db.connection());
         db.connection().commit();
         printer = new SlipPrinter(db.settings().get("slip_header"));
         prompts.setView(view);
-        engine = new Engine(db, catalogue, access, waiverRules, prompts, printer, CLOCK, idleLockMillis);
+        engine = new Engine(db, catalogue, access, waiverRules, prompts, printer, CLOCK, idleLockMillis, edition);
         engine.addListener(rec);
         engine.start();
         rec.await(0, e -> e.kind == Recorder.Kind.REQUESTED);
@@ -69,6 +73,11 @@ final class EngineHarness implements AutoCloseable {
 
     static EngineHarness start(Seed seed) throws SQLException {
         return new EngineHarness(seed, 0, false);
+    }
+
+    /** A desk of {@code edition} (phase6-contracts.md 11.3). */
+    static EngineHarness start(Seed seed, Edition edition) throws SQLException {
+        return new EngineHarness(seed, edition, 0, false);
     }
 
     static EngineHarness start(Seed seed, long idleLockMillis) throws SQLException {

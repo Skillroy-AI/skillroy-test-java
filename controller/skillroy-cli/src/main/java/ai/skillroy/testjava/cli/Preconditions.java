@@ -30,6 +30,7 @@ import ai.skillroy.testjava.protocol.RpcResult;
 import ai.skillroy.testjava.scenario.FailureKind;
 import ai.skillroy.testjava.scenario.Plan;
 import ai.skillroy.testjava.scenario.pack.DomainPack;
+import ai.skillroy.testjava.scenario.pack.PackSettings;
 import ai.skillroy.testjava.scenario.pack.PreflightCheck;
 
 import java.util.ArrayList;
@@ -132,6 +133,12 @@ final class Preconditions {
                 @Override
                 public String envId() {
                     return envId;
+                }
+
+                @Override
+                public PackSettings settings() {
+                    PackSettings settings = pack.settings();
+                    return settings == null ? PackSettings.EMPTY : settings;
                 }
             };
             for (PreflightCheck check : checks) {

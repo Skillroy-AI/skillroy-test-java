@@ -17,6 +17,7 @@
 package ai.skillroy.testjava.junit;
 
 import ai.skillroy.testjava.controller.AgentConnection;
+import ai.skillroy.testjava.data.Credentials;
 import ai.skillroy.testjava.data.CredentialsException;
 import ai.skillroy.testjava.protocol.Json;
 import ai.skillroy.testjava.scenario.BindOptions;
@@ -30,9 +31,15 @@ import ai.skillroy.testjava.scenario.Scenario;
 import ai.skillroy.testjava.scenario.ScenarioException;
 import ai.skillroy.testjava.scenario.ScenarioLoader;
 import ai.skillroy.testjava.scenario.StepResult;
+import ai.skillroy.testjava.scenario.hooks.HooksMode;
+import ai.skillroy.testjava.scenario.observe.RunObserver;
+import ai.skillroy.testjava.scenario.observe.RunObservers;
+import ai.skillroy.testjava.scenario.observe.RunStart;
+import ai.skillroy.testjava.scenario.observe.TelemetrySettings;
 import ai.skillroy.testjava.scenario.pack.DomainPack;
 import ai.skillroy.testjava.scenario.resolve.BindMode;
 import ai.skillroy.testjava.scenario.resolve.CostLedger;
+import ai.skillroy.testjava.scenario.resolve.SettingsException;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.DynamicTest;
@@ -40,6 +47,7 @@ import org.junit.jupiter.api.DynamicTest;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -73,7 +81,9 @@ import java.util.stream.Stream;
  * The overload without them builds {@code RunOptions.defaults().withBind(BindOptions.fromSystemProperties(root))}
  * from {@code skillroy.mode}, {@code skillroy.env}, {@code skillroy.bindings} (default: {@code bindings} in the
  * parent of the source's scenario directory; a class path source has no default), {@code skillroy.credentials} and
- * {@code skillroy.approve} ({@code all} approves everything; there is never an interactive prompt). If the
+ * {@code skillroy.approve} ({@code all} approves everything; there is never an interactive prompt), and its hooks
+ * switch from {@code skillroy.hooks} ({@code auto} by default, {@code on} or {@code off}: phase6-contracts.md 5.3,
+ * 6.1; a value that is none of them is the {@code environment} failure below). If the
  * credentials cannot be loaded, or the mode writes bindings files ({@code approve}, or {@code live} with
  * {@code writeBindings}) and no bindings root is known while a scenario needs bindings, the stream is one failing test
  * named {@code environment} and no scenario runs. In
@@ -88,6 +98,19 @@ import java.util.stream.Stream;
  * path ({@code skillroy-cdp}) on its test class path gets it for {@code web.path: auto} and {@code cdp}; without it
  * the web verbs go through the agent. Nothing about that changes how an outcome is reported.
  *
+ * <p>Telemetry (phase6-contracts.md 10.3, 10.6): the overload without {@code RunOptions} also reads
+ * {@code skillroy.telemetry}, {@code skillroy.telemetry.endpoint}, {@code skillroy.telemetry.attributes},
+ * {@code skillroy.telemetry.out}, {@code skillroy.telemetry.serviceName}, {@code skillroy.telemetry.timeoutMs} and
+ * {@code skillroy.telemetry.file} ({@code telemetry.yaml} beside the credentials file otherwise;
+ * {@link TelemetrySettings#fromSystemProperties}); off by default, when nothing names an exporter no provider is looked
+ * for. With an exporter, the stream's scenarios report to one observer found through {@code ServiceLoader} on the
+ * thread's context class loader ({@code skillroy-telemetry} on the test class path): one trace per stream, the root
+ * span {@code skillroy junit}, its version {@code skillroy-junit}'s {@code Implementation-Version}; the observer is
+ * flushed and closed at JVM exit by a shutdown hook (bounded by its timeout), since a stream of dynamic tests has no
+ * end of its own. A setting that cannot be used (an {@code http://} endpoint that is not loopback, a missing header
+ * variable, no provider on the class path) is the failing {@code environment} test and no scenario runs. The
+ * overloads with {@code RunOptions} use {@code options.observer()} as given.
+ *
  * <p>The connection is obtained lazily inside each test and is never closed here: the caller owns it. Tests run on
  * JUnit's thread; scenarios against one target must not run concurrently.
  */
@@ -96,11 +119,32 @@ public final class ScenarioTests {
     private ScenarioTests() {
     }
 
+    /** The system property of the hooks switch (phase6-contracts.md 6.1): {@code auto}, {@code on} or {@code off}. */
+    public static final String HOOKS_PROPERTY = "skillroy.hooks";
+
+    /**
+     * The hooks switch {@value #HOOKS_PROPERTY} names; {@link HooksMode#AUTO} when it is not set.
+     *
+     * @throws IllegalArgumentException for a value other than {@code auto}, {@code on} or {@code off}
+     */
+    static HooksMode hooksFromSystemProperties() {
+        try {
+            return HooksMode.parse(System.getProperty(HOOKS_PROPERTY));
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException(HOOKS_PROPERTY + ": " + e.getMessage(), e);
+        }
+    }
+
     /** The name of the test that fails when the credentials cannot be loaded. */
     public static final String ENVIRONMENT_TEST = "environment";
 
     /** The name of the trailing test of a replay stream with scenarios that need bindings. */
     public static final String ZERO_MODEL_CALLS_TEST = "skillroy: zero model calls";
+
+    /** The streams' observers, closed at JVM exit (phase6-contracts.md 10.6). */
+    private static final List<RunObserver> OBSERVERS = Collections.synchronizedList(new ArrayList<>());
+    private static final Object HOOK_LOCK = new Object();
+    private static boolean hookAdded;
 
     /**
      * One test per scenario, default {@link RunOptions} with the bind options of the system properties
@@ -132,8 +176,9 @@ public final class ScenarioTests {
         if (effective == null) {
             try {
                 effective = RunOptions.defaults().withBind(BindOptions.fromSystemProperties(defaultBindingsRoot(
-                        source)));
-            } catch (CredentialsException | IllegalArgumentException e) {
+                        source))).withHooks(hooksFromSystemProperties());
+                effective = effective.withObserver(streamObserver(effective.bind(), source));
+            } catch (CredentialsException | IllegalArgumentException | SettingsException e) {
                 // Checked once, before any scenario contacts the agent (12.2): no scenario runs.
                 String reason = e.getMessage();
                 return Stream.of(DynamicTest.dynamicTest(ENVIRONMENT_TEST, () -> Assertions.fail(
@@ -180,6 +225,61 @@ public final class ScenarioTests {
             }));
         }
         return tests.stream();
+    }
+
+    /**
+     * The stream's observer (phase6-contracts.md 10.3): {@link RunObserver#NONE} unless the system properties or
+     * {@code telemetry.yaml} name an exporter; else the provider's, started as the root span {@code skillroy junit} and
+     * closed by the shutdown hook.
+     *
+     * @throws SettingsException when the settings cannot be used or no provider serves the exporter
+     */
+    static RunObserver streamObserver(BindOptions bind, ScenarioSource source) throws SettingsException {
+        Path credentials = Credentials.locate(null, bind.bindingsRoot(), bind.envId());
+        Path credentialsDir = credentials != null ? credentials.toAbsolutePath().getParent()
+                : bind.bindingsRoot() != null ? bind.bindingsRoot().resolve(bind.envId()) : null;
+        TelemetrySettings settings = TelemetrySettings.fromSystemProperties(credentialsDir, version());
+        if (!settings.enabled()) {
+            return RunObserver.NONE;
+        }
+        RunObserver observer = RunObservers.open(settings, Thread.currentThread().getContextClassLoader());
+        closeAtExit(observer);
+        RunObservers.safe(observer).runStarted(new RunStart("junit", null, bind.mode().label(), bind.envId(),
+                version(), null, null));
+        return observer;
+    }
+
+    /** {@code skillroy-junit}'s version (its jar's Implementation-Version), {@code (development build)} when absent. */
+    static String version() {
+        Package p = ScenarioTests.class.getPackage();
+        String version = p == null ? null : p.getImplementationVersion();
+        return version == null ? TelemetrySettings.DEVELOPMENT_BUILD : version;
+    }
+
+    /** Registers the observer with the JVM-exit hook, which closes each (each bounded by its own timeout). */
+    private static void closeAtExit(RunObserver observer) {
+        OBSERVERS.add(observer);
+        synchronized (HOOK_LOCK) {
+            if (hookAdded) {
+                return;
+            }
+            hookAdded = true;
+            Thread hook = new Thread(() -> {
+                List<RunObserver> open;
+                synchronized (OBSERVERS) {
+                    open = new ArrayList<>(OBSERVERS);
+                    OBSERVERS.clear();
+                }
+                for (RunObserver o : open) {
+                    try {
+                        o.close();
+                    } catch (RuntimeException | LinkageError e) {
+                        // Telemetry never fails a test run, not even at its end.
+                    }
+                }
+            }, "skillroy-telemetry-exit");
+            Runtime.getRuntime().addShutdownHook(hook);
+        }
     }
 
     /** {@code bindings} in the parent of the source's scenario directory, or null when it has none (D31). */

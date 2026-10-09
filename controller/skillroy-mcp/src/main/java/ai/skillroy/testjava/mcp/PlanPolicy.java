@@ -47,8 +47,9 @@ import java.util.TreeSet;
  *       or {@value #TRACE_MARK}, the base verb {@code mark}'s marker on the agent's own event bus.</li>
  *   <li>A call a pack verb compiled (or a cleanup call a verb registered) names no primitive the server never offers:
  *       not a destructive one, nothing of {@code agent.*}, not {@code data.query}, nothing the policy excludes
- *       ({@code web.evaluate} and {@code web.waitFlag} unless a person opted in). The pack's verbs are reviewed code,
- *       over primitives of any module.</li>
+ *       ({@code web.evaluate} and {@code web.waitFlag} unless a person opted in), no {@code hook.*} or {@code rule.*}
+ *       primitive but the three reads {@code hook.health}, {@code hook.events} and {@code rule.list}
+ *       (phase6-contracts.md 4.2). The pack's verbs are reviewed code, over primitives of any module.</li>
  *   <li>No call's arguments hold {@code confirm} or {@code _meta}: a confirmation is never a client's to give, and a
  *       call's {@code _meta} is the executor's to build.</li>
  * </ul>
@@ -68,6 +69,8 @@ public final class PlanPolicy {
     private static final String CONFIRM = "confirm";
     private static final String META = "_meta";
     private static final String AGENT_NAMESPACE = "agent.";
+    private static final String HOOK_NAMESPACE = "hook.";
+    private static final String RULE_NAMESPACE = "rule.";
 
     private final Set<String> callable;
     private final Map<String, PrimitiveDescriptor> catalogue;
@@ -316,6 +319,13 @@ public final class PlanPolicy {
         }
         if (primitive.startsWith(AGENT_NAMESPACE)) {
             return "calls " + primitive + ": the agent's own primitives are never offered";
+        }
+        if ((primitive.startsWith(HOOK_NAMESPACE) || primitive.startsWith(RULE_NAMESPACE))
+                && !ToolProjection.HOOK_READS.contains(primitive)) {
+            // phase6-contracts.md 4.2: a hook spec or a rule is a pack author's or a person's, never a client's.
+            return "calls " + primitive + ": hook and rule primitives other than " + String.join(", ",
+                    new TreeSet<>(ToolProjection.HOOK_READS)) + " are never run for a client (the pack's catalogue"
+                    + " is installed by the server at its start under --hooks)";
         }
         if (ToolProjection.DATA_QUERY.equals(primitive)) {
             return "calls data.query, which never runs through a scenario here: data_query reads through SqlGuard";
