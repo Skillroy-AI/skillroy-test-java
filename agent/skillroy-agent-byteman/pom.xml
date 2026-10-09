@@ -134,20 +134,66 @@
           </execution>
         </executions>
       </plugin>
-      <!-- Each test class in a JVM of its own: a test that loads Byteman in process leaves it loaded for the JVM's
-           life (Byteman cannot be unloaded), and the "nothing is loaded" tests need a fresh one. The argLine extends the
-           inherited line (phase6-contracts.md 2.3); no module POM sets skillroy.test.extraArgLine. -->
+      <!-- The argLine extends the inherited line (phase6-contracts.md 2.3); no module POM sets
+           skillroy.test.extraArgLine. Three test classes need a JVM of their own: ProbeTest sets Byteman's "loaded"
+           property, CheckLoadsNothingTest needs a JVM where nothing of Byteman was ever loaded, and InProcessRouteTest
+           leaves Byteman loaded for the JVM's life (Byteman cannot be unloaded); each runs in an execution of its own
+           (a fork per execution; reuseForks=false gave no tests on the Java 8 test JVM). -->
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-surefire-plugin</artifactId>
         <configuration>
-          <reuseForks>false</reuseForks>
           <argLine>-Djava.awt.headless=${skillroy.headless} ${skillroy.test.extraArgLine} -javaagent:${project.build.directory}/${project.build.finalName}-test-agent.jar</argLine>
           <systemPropertyVariables>
             <skillroy.test.bytemanJar>${org.jboss.byteman:byteman:jar}</skillroy.test.bytemanJar>
             <skillroy.test.sysJar>${ai.skillroy:skillroy-agent-byteman-sys:jar}</skillroy.test.sysJar>
           </systemPropertyVariables>
         </configuration>
+        <executions>
+          <execution>
+            <id>default-test</id>
+            <configuration>
+              <excludes>
+                <exclude>**/ProbeTest.java</exclude>
+                <exclude>**/CheckLoadsNothingTest.java</exclude>
+                <exclude>**/InProcessRouteTest.java</exclude>
+              </excludes>
+            </configuration>
+          </execution>
+          <execution>
+            <id>probe</id>
+            <goals>
+              <goal>test</goal>
+            </goals>
+            <configuration>
+              <includes>
+                <include>**/ProbeTest.java</include>
+              </includes>
+            </configuration>
+          </execution>
+          <execution>
+            <id>loads-nothing</id>
+            <goals>
+              <goal>test</goal>
+            </goals>
+            <configuration>
+              <includes>
+                <include>**/CheckLoadsNothingTest.java</include>
+              </includes>
+            </configuration>
+          </execution>
+          <execution>
+            <id>in-process-route</id>
+            <goals>
+              <goal>test</goal>
+            </goals>
+            <configuration>
+              <includes>
+                <include>**/InProcessRouteTest.java</include>
+              </includes>
+            </configuration>
+          </execution>
+        </executions>
       </plugin>
     </plugins>
   </build>
