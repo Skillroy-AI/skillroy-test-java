@@ -30,6 +30,9 @@ import java.awt.Dimension;
 import java.awt.EventQueue;
 import java.awt.GraphicsEnvironment;
 import java.awt.Window;
+import java.awt.event.FocusAdapter;
+import java.awt.event.FocusEvent;
+import java.awt.event.FocusListener;
 import java.awt.event.InputEvent;
 import java.awt.event.KeyEvent;
 import java.awt.event.MouseEvent;
@@ -39,11 +42,15 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.Callable;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import javax.swing.AbstractButton;
+import javax.swing.JFrame;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
+import javax.swing.SwingUtilities;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assumptions;
@@ -57,6 +64,8 @@ import org.junit.jupiter.api.Test;
 class LendingUiDisplayTest {
 
     private static final AtomicInteger COUNTER = new AtomicInteger();
+    /** How often {@link #awaitFocus} re-requests the focus while it waits. */
+    private static final long REFOCUS_MS = 1000;
 
     private LendingApp app;
     private Recorder rec;
@@ -335,7 +344,11 @@ class LendingUiDisplayTest {
         assertEquals("", onEdt(() -> frame.entryField().getText()));
     }
 
-    /** Delivers key events straight to the component, as a keyboard driver without the window focus would. */
+    /**
+     * Delivers key events straight to the component, as a keyboard driver without the window focus would. Typed
+     * characters reach a text field whatever has the focus; Enter does not: {@code JTextField} binds it to an action
+     * that submits the text field that most recently had the focus, not the event's target (see {@link #awaitFocus}).
+     */
     private static void typeInto(Component target, String text, boolean enter) throws Exception {
         onEdt(() -> {
             long when = System.currentTimeMillis();
@@ -352,6 +365,66 @@ class LendingUiDisplayTest {
         });
     }
 
+    /**
+     * Waits until the component has gained the focus, on its focus-gained event and at most
+     * {@link Recorder#TIMEOUT_MS}, re-requesting the focus once every {@link #REFOCUS_MS} while it waits. A freshly
+     * shown frame gives its first component the focus by itself, but only after a round trip to the X server, from
+     * under a millisecond to a few tens of milliseconds after the frame shows; under the window-manager-less Xvfb a
+     * single request is sometimes lost as well (amendment A39), and the re-request is the mitigation A39 gave the
+     * agent's display tests.
+     */
+    private static void awaitFocus(String what, Component c) throws Exception {
+        CountDownLatch gained = new CountDownLatch(1);
+        FocusListener listener = new FocusAdapter() {
+            @Override
+            public void focusGained(FocusEvent e) {
+                gained.countDown();
+            }
+        };
+        onEdt(() -> {
+            c.addFocusListener(listener);
+            if (c.isFocusOwner()) {
+                gained.countDown();
+            }
+            return null;
+        });
+        try {
+            long deadline = System.currentTimeMillis() + Recorder.TIMEOUT_MS;
+            int requests = 0;
+            while (!gained.await(REFOCUS_MS, TimeUnit.MILLISECONDS)) {
+                if (System.currentTimeMillis() >= deadline) {
+                    fail("timed out after " + Recorder.TIMEOUT_MS + " ms waiting for " + what + " to gain the focus"
+                        + " (the focus re-requested " + requests + " times)");
+                }
+                requestFocus(c);
+                requests++;
+            }
+        } finally {
+            onEdt(() -> {
+                c.removeFocusListener(listener);
+                return null;
+            });
+        }
+    }
+
+    /**
+     * Posts {@code toFront()} + {@code requestFocus()} on the component's window (while that is not the focused
+     * window) and {@code requestFocusInWindow()} on the component to the EDT; never waits for the EDT.
+     */
+    private static void requestFocus(Component c) {
+        EventQueue.invokeLater(() -> {
+            if (!c.isDisplayable() || c.isFocusOwner()) {
+                return;
+            }
+            Window w = SwingUtilities.getWindowAncestor(c);
+            if (w != null && !w.isFocused()) {
+                w.toFront();
+                w.requestFocus();
+            }
+            c.requestFocusInWindow();
+        });
+    }
+
     @Test
     void typedKeysFillTheEntryFieldAndEnterSubmitsIt() throws Exception {
         launch(LendingOptions.defaults());
@@ -360,6 +433,10 @@ class LendingUiDisplayTest {
         int mark = rec.size();
         typeInto(frame.entryField(), "100", false);
         assertEquals("100", onEdt(() -> frame.entryField().getText()));
+        // Enter submits the text field that most recently had the focus, so an Enter that comes before the frame has
+        // given the entry field the focus is lost and no engine event ever follows: the race this wait closes
+        // (enterDoesNotSubmitAnEntryFieldThatNeverHadTheFocus shows the lost Enter)
+        awaitFocus("the entry field", frame.entryField());
         typeInto(frame.entryField(), "", true);
         assertEquals(LendingInput.entry("100"), rec.await(mark, e -> e.kind == Recorder.Kind.ACCEPTED).input);
         assertEquals(LendingState.PASSWORD, rec.await(mark, e -> e.kind == Recorder.Kind.REQUESTED).state);
@@ -372,6 +449,44 @@ class LendingUiDisplayTest {
         typeInto(frame.entryField(), "", true);
         assertEquals(LendingState.IDLE, rec.await(mark, e -> e.kind == Recorder.Kind.REQUESTED).state);
         assertEquals("100", app.engine().currentStaff().code());
+    }
+
+    /**
+     * The losing side of the race {@link #typedKeysFillTheEntryFieldAndEnterSubmitsIt} waits out, made certain: in a
+     * window that cannot take the focus an entry field shows and takes typed characters, and an Enter submits
+     * nothing; its own action event still does. Key events reach only a showing component, so this needs a display.
+     */
+    @Test
+    void enterDoesNotSubmitAnEntryFieldThatNeverHadTheFocus() throws Exception {
+        AtomicInteger submitted = new AtomicInteger();
+        EntryField field = onEdt(() -> {
+            EntryField f = new EntryField(10);
+            f.addActionListener(e -> submitted.incrementAndGet());
+            JFrame w = new JFrame("Never focused");
+            w.setFocusableWindowState(false);
+            w.add(f);
+            w.pack();
+            w.setVisible(true);
+            return f;
+        });
+        try {
+            eventually("the field showing", field::isShowing);
+            typeInto(field, "100", false);
+            assertEquals("100", onEdt(field::getText), "typed characters arrive without the focus");
+            assertFalse(onEdt(field::isFocusOwner));
+            typeInto(field, "", true);
+            assertEquals(0, submitted.get(), "Enter submits nothing");
+            onEdt(() -> {
+                field.postActionEvent();
+                return null;
+            });
+            assertEquals(1, submitted.get(), "the field's own action event submits it");
+        } finally {
+            onEdt(() -> {
+                SwingUtilities.getWindowAncestor(field).dispose();
+                return null;
+            });
+        }
     }
 
     @Test

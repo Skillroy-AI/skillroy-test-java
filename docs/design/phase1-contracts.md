@@ -2646,7 +2646,12 @@ A deliberately awkward little desk application. It knows nothing about the frame
   (`JTextArea` named `slip`, the "printer"). An `IconKey` debounces: a press starts a 60 ms `javax.swing.Timer`, and
   when it expires the action is delivered only if the key owns the focus or its `focusGated` flag is false (default
   true). A naive `doClick()` on an unfocused window therefore does nothing. `IconKey.perform()` delivers the action
-  directly.
+  directly. **Fix wave (Phase 6 review, FD, 2026-10-09):** the entry field submits on Enter through `JTextField`'s
+  own key binding, whose action submits the text field that most recently had the focus, not the key event's
+  target. Typed characters delivered with `dispatchEvent` reach the field without the focus; an Enter delivered that
+  way submits it only once it has had the focus (a freshly shown frame gives it the focus by itself, after a round
+  trip to the X server); `postActionEvent()` always does. The behaviour is unchanged; it is recorded because the
+  sample's own display test raced it.
 - **Listeners**: `EngineListener { stateChanged(from,to); inputRequested(state, prompt); inputAccepted(input);
   promptShown(id,text,buttons); promptAnswered(id,choice); loanPosted(loanId); slipPrinted(loanId, lines) }`,
   registered with `Engine.addListener` (a plain `ArrayList`: register only while the engine is blocked waiting for
