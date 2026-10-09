@@ -51,7 +51,7 @@ import java.util.regex.Pattern;
  * @param hooks the hooks switch {@link ExecutorSession#open} installs the pack's hook catalogue under
  *     (phase6-contracts.md 5.3, 6.1, decision D129), as a run's step 0b does; null means {@link HooksMode#AUTO}
  * @param observer what the session tells an exporter (phase6-contracts.md 10.2; as built, Phase 6, TL: the session's
- *     observer travels here, as a run's does on {@code RunOptions}, decision D-TL-3 of the build); null means
+ *     observer travels here, as a run's does on {@code RunOptions}, decision D162 of the build); null means
  *     {@link RunObserver#NONE}. The session wraps it ({@code RunObservers.safe}) and never closes it. The twelfth
  *     component, after {@code hooks}
  */

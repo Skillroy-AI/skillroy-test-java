@@ -1,9 +1,10 @@
 # TODO: base framework
 
 What exists, what was proven and what is open for the base framework (`skillroy-test-java`), as of
-2026-10-08. Decisions are in `DECISIONS.md` (B1-B26); the design is in `docs/design/` (Phase 1 and Phase 1.x as
+2026-10-09. Decisions are in `DECISIONS.md` (B1-B27); the design is in `docs/design/` (Phase 1 and Phase 1.x as
 built in `phase1-contracts.md`, Phase 2 as built in `phase2-contracts.md`, Phase 3 as built in
-`phase3-contracts.md`, Phase 4 as built in `phase4-contracts.md`, Phase 5 specified in `phase5-contracts.md`);
+`phase3-contracts.md`, Phase 4 as built in `phase4-contracts.md`, Phase 5 as built in `phase5-contracts.md`, Phase 6
+as built in `phase6-contracts.md`);
 research notes are in `docs/research/`; the dependency licence audit is `docs/licence-audit.md`.
 
 ## Status at a glance
@@ -86,7 +87,24 @@ with probes; a fix round; the matrix before the commits; "Phase 5, the live item
 2.70.0, scenario D's tier (b) requests re-recorded live on both seeds, the profiles `inference-live` and
 `inference-record` with the live acceptance of P5 §15.3 green in the image (five items; the cache-hit criterion met at
 91.4 % on both nightly jobs), the planner-authored scenario C reviewed, committed and replayed, and about USD 2.05 spent.
-The live table follows this paragraph; the matrix of the final tree is the table after it.
+The live table follows the Phase 6 paragraph below; the matrix of the final Phase 5 tree is the table after it.
+
+**On 2026-10-09 the Phase 6 contract was written and Phase 6 was built the same day** (`design/phase6-contracts.md`, now
+as built; its twenty-two answers are decision **B26** and the 62 decisions the build took, D160-D221, are **B27**, both
+provisional: the owner asked for progress). The method was that of Phases 2 to 5: spike BS3 (the hook go/no-go) passed
+with conditions the same morning, seven readers' maps, a contract reviewed through three lenses with a sceptic each and
+revised, then six packages built in isolated worktrees and merged into `main` in this order, the native reactor green
+after every landing: telemetry (TL), hooks and spy (HK), the controller, pack and sample (CP), Byteman and Windows (BW,
+behind spike BS14, passed with conditions) and, over the merged four, the fixes of the repeat security review's first
+pass in two packages (FX-2, FX-1; S35-S62, one high, six medium, 21 low). What exists: the optional hook engine on a
+shaded, relocated Byte Buddy with its bootstrap `Spy` and a byte-identical restore on detach (installed and removed on
+the sample desk on a Java 8 and a Java 25 target); Byteman loaded in process with no listener; a Java 25 target through
+`JAVAAGENT` with no JEP 451 line and a capability matrix equal to the Java 8 one; OpenTelemetry export from the
+controller, off by default; the tenant-pack overlay proven on the desk's branch edition; the Windows path built where
+Linux can test it (not verified on a Windows host). **Still to do:** the Phase 6 code review (three lenses, a sceptic
+each) and its fix wave; pass 2 of the security review (eight lenses) and the owner's sign-off (B28); the Linux matrix of
+the integrated tree (arm64 twice, amd64 once: the packages ran targeted legs only, section "Phase 6"); the Windows host.
+The tables that follow are those of Phases 1 to 5; the Phase 6 matrix will be the first.
 
 The live runs of 2026-10-08 (afternoon), with the key passed through by name; every figure from the ledger entries the
 tests printed:
@@ -345,11 +363,11 @@ table above. "Java 8 test JVM" = the module's own tests also run on Java 8 (`-Dj
 | Platform | Controller side on Java 25 (`--release 25`, B3); agent side on Java 8 (B4). The Linux test image is JDK 25 (Temurin 25.0.4.1); the previous JDK 21 image is no longer used. Native development JDK is 26 | none |
 | Git and publication | The initial commit was made on 2026-10-06 (everything in the tree, one commit, DCO sign-off); nothing pushed. The remote `Skillroy-AI/skillroy-test-java` is private for now. `LICENSE` (Apache-2.0), `NOTICE`, `CONTRIBUTING.md` (DCO sign-off, no CLA) and the header in every source file (`ci/license-headers.sh`, with the holder's name since 2026-10-06) exist; the root POM carries the publication metadata | Push when the owner says; before the first public release, the repeated security review |
 | Licence audit | `docs/licence-audit.md`: everything the project distributes, bundles or depends on is compatible with Apache-2.0. The packaging gaps (licence files inside the jars and zips, third-party attribution in the CLI distribution, a `<licenses>` element in the root pom) are closed (Phase 1.x, built 2026-10-02). Updated 2026-10-07 for Phase 4: the Playwright and JCEF sets (in no distribution), the new modules, and the agent home's seventh jar, inspected | none |
-| Decisions | B1-B14 answered by the owner 2026-10-02; B15 and B16 follow from the answers; B17-B20, taken without the owner, were confirmed by the owner on 2026-10-06, with two vetoes inside B19 (Q10, Q14) built the same day; **B21** (the Phase 4 contract's fifteen answers) taken without the owner later on 2026-10-06 and confirmed by the owner on 2026-10-07; **B22** (D59-D69, the Phase 4 build's decisions) confirmed the same evening. **B23** (the Phase 5 contract's eighteen answers, D70-D87) and **B24** (the build's and the review's decisions, D88-D104, D110) taken without the owner on 2026-10-08 and confirmed by the owner the same day; **B25** (the live session's D111-D113) taken without the owner in the afternoon of 2026-10-08 and confirmed by the owner on 2026-10-09 | None open; the owner's review of the committed scenario C |
-| Design docs (`docs/design/`) | `phase1-contracts.md` as built, with the Phase 1.x, Phase 2, Phase 3 and Phase 4 passages marked "(1.x, built 2026-10-02)", "(Phase 2, built 2026-10-02)", "(Phase 3, built 2026-10-03)" and "(Phase 4, built 2026-10-07)". `phase2-contracts.md` and `phase3-contracts.md` as built (2026-10-03: every deviation of the build and every fix of the review marked in place; their Phase 4 passages marked built). **`phase4-contracts.md` as built 2026-10-07** (specified 2026-10-06; every deviation of the build and every fix of the review marked in place, the decisions of the build D59-D69). **`phase5-contracts.md` as built 2026-10-08** (specified, built, reviewed and fixed the same day, its §16.1 marks written into the Phase 1-4 contracts and the overview; the live session's passages marked "the live session", D111-D113). Overview: roadmap with Phases 1.x to 5 built, §3.8 as built | None |
+| Decisions | B1-B14 answered by the owner 2026-10-02; B15 and B16 follow from the answers; B17-B20, taken without the owner, were confirmed by the owner on 2026-10-06, with two vetoes inside B19 (Q10, Q14) built the same day; **B21** (the Phase 4 contract's fifteen answers) taken without the owner later on 2026-10-06 and confirmed by the owner on 2026-10-07; **B22** (D59-D69, the Phase 4 build's decisions) confirmed the same evening. **B23** (the Phase 5 contract's eighteen answers, D70-D87) and **B24** (the build's and the review's decisions, D88-D104, D110) taken without the owner on 2026-10-08 and confirmed by the owner the same day; **B25** (the live session's D111-D113) taken without the owner in the afternoon of 2026-10-08 and confirmed by the owner on 2026-10-09. **B26** (the Phase 6 contract's twenty-two answers, D114-D159) and **B27** (the Phase 6 build's 62 decisions, D160-D221) taken without the owner on 2026-10-09 and provisional | B26 and B27 (`B26 ok, B27 ok`, or the vetoes by name); the owner's review of the committed scenario C |
+| Design docs (`docs/design/`) | `phase1-contracts.md` as built, with the Phase 1.x, Phase 2, Phase 3 and Phase 4 passages marked "(1.x, built 2026-10-02)", "(Phase 2, built 2026-10-02)", "(Phase 3, built 2026-10-03)" and "(Phase 4, built 2026-10-07)". `phase2-contracts.md` and `phase3-contracts.md` as built (2026-10-03: every deviation of the build and every fix of the review marked in place; their Phase 4 passages marked built). **`phase4-contracts.md` as built 2026-10-07** (specified 2026-10-06; every deviation of the build and every fix of the review marked in place, the decisions of the build D59-D69). **`phase5-contracts.md` as built 2026-10-08** (specified, built, reviewed and fixed the same day, its §16.1 marks written into the Phase 1-4 contracts and the overview; the live session's passages marked "the live session", D111-D113). **`phase6-contracts.md` as built 2026-10-09** (specified, reviewed, built by six packages the same day; an `As built (Phase 6, <TAG>, 2026-10-09)` note under every section a package built or deviated from, the build's decisions D160-D221 in its §16, `threat-model.md` beside it, marks in the Phase 1 to 5 contracts and the overview). Overview: roadmap with Phases 1.x to 6 built (Phase 6 under review), §3.8 as built | None |
 | Research notes (`docs/research/`) | Round 1 carried over, finding ids unchanged; `embedded-browser-spi` and `vision-input` new (2026-10-02). Pruned of local-environment detail | None |
-| Security review | Run 2026-10-02 on the pre-port tree: 34 confirmed findings (4 medium, 30 low); the fixes H1-H3 are built (Phase 1.x). The Phase 2 code review of 2026-10-03 had a secrets-and-safety lens (below) | Repeat the review before the first release |
-| Spikes | BS7 done. **BS8 run 2026-10-06, passed with conditions** (`spikes/BS8/RESULT.md`). **BS5 met 2026-10-07** by the Phase 4 acceptance against JCEF's Chromium (D53; the stock-Chromium run is the manual procedure `spikes/BS5/README.md`). BS1 answered for Java 8 and Java 25 targets on Linux, parts open. BS2 answered in part. BS4 answered, parts open. BS3 open. **BS6 passed 2026-10-08** and **BS13 passed 2026-10-08** (the offline part in the night, the live part in the afternoon with the owner's key), both as the Phase 5 contract's gates. BS9-BS12 new, not started | See "Base spikes" |
+| Security review | Run 2026-10-02 on the pre-port tree: 34 confirmed findings (4 medium, 30 low); the fixes H1-H3 are built (Phase 1.x). The Phase 2 code review of 2026-10-03 had a secrets-and-safety lens (below). **Repeat, pass 1 (2026-10-09):** 28 confirmed findings (1 high, 6 medium, 21 low), fixed by the Phase 6 build or accepted as lows with release notes (B26 Q22, provisional) | Pass 2 (eight lenses) after the Phase 6 code review, then the owner's sign-off (B28) before the first release |
+| Spikes | BS7 done. **BS8 run 2026-10-06, passed with conditions** (`spikes/BS8/RESULT.md`). **BS5 met 2026-10-07** by the Phase 4 acceptance against JCEF's Chromium (D53; the stock-Chromium run is the manual procedure `spikes/BS5/README.md`). BS1 answered for Java 8 and Java 25 targets on Linux, parts open. BS2 answered in part. BS4 answered, parts open. **BS3 passed with conditions 2026-10-09** (`spikes/BS3/RESULT.md`) and **BS14 passed with conditions 2026-10-09** (`spikes/BS14/RESULT.md`), the hook go/no-go and the gate of the Byteman module. **BS6 passed 2026-10-08** and **BS13 passed 2026-10-08** (the offline part in the night, the live part in the afternoon with the owner's key), both as the Phase 5 contract's gates. BS9-BS12 new, not started | See "Base spikes" |
 | CI for this repo | Not chosen. `ci/Dockerfile` and `ci/run-in-linux.sh` are what a pipeline would run; since 2026-10-06 the image holds Chromium's run-time libraries and the runner takes `SKILLROY_PLATFORM`; the Phase 4 matrix adds `-Pjcef` to every leg | Needs a JDK 8, a JDK >= 25 and Xvfb on the build agents; for the profile `jcef` the JCEF natives (152 MB per platform) and Playwright's jars (the driver bundle about 204 MB) in the Maven cache |
 
 ### What the end-to-end review fixed (2026-10-02)
@@ -411,8 +429,45 @@ findings are S35-S62; the record is in the session notes (`2026-10-09/phase6/sec
   D76/D84).
 - Not verified here: Windows, the drivers' read-only semantics, GitHub's multi-line masking, the real `claude` CLI;
   pass 2 runs all eight lenses on the Phase 6 tree with L3-L6 as deltas, and the sign-off is the owner's.
-- State on 2026-10-09: specified in `design/phase6-contracts.md` §12 (amendments A40-A60 assigned); the fixes are
-  being built (Phase 6, package FX).
+- State on 2026-10-09: **built** in two packages (tag `SR`; the five work packages FX-web, FX-scenario, FX-ci,
+  FX-inference and FX-mcp went to two implementers), contract first (the amendments A40-A60 written into P1, P2, P4 and
+  P5, marked `(Phase 6 security fix S<n>, A<m>, built 2026-10-09)`), every fix with a test that fails before it (S39 and
+  S40 by hand: a `docker` stub and a parsed example; S37 and S48 documentation only); landed on `main` as `755844c`
+  (FX-2) and `822dc58` (FX-1), native reactor green. Dispositions as built:
+  - **Fixed in full: the high and the six mediums, and all the lows but the parts below.** FX-2 (S49-S62): S55 (the
+    high: `data_query` refuses a reference in its SQL or parameters and sends the guarded text byte for byte,
+    `PlannedCall.literalArgs`, D208); S56 (D157: one `SESSION` meter per MCP server for `skillroy_session_ask`,
+    `skillroy_resolve` and a run's tier (b) slots, D211); S57 and S59 (D158: `Origin.Kind.CLIENT`, `mcp --client`,
+    `author --client planner`, the verb gate at call time, D212); S58 (D159: a capture's bytes are served only under
+    `images: true`); S60 (the planner's work and the server's output under one owner-only directory, `--keep-work`);
+    S61 (export never replaces a file); S62 (`CallPolicy` in the session service, D213); S49 (the vocabulary masked in
+    the session's tools, catalogue and recordings, D210); S50 (report and triage Markdown rendered as code); S51
+    (`ANTHROPIC_BASE_URL` https or loopback, no user information); S52 (below); S53 (mask, then cut, D209); S54 (scrub,
+    then cut). FX-1 (S35-S48): S35 and S41 (a value typed where a key belongs is never echoed, duplicate keys withheld
+    with their line); S36 (the T-SQL words and lock-share sequences refused by `StatementGuard`); S38 (a credentials
+    location is a path, never content); S39 (`MAVEN_OPTS` by name only in `ci/run-in-linux.sh`); S40 (the CI example:
+    `persist-credentials: false`, `gh auth setup-git`, the secret renamed); S42 (D156 in full: the descriptor flag
+    `script`, refused in read-only mode by the dispatcher and the CDP path, and by `CallPolicy` for a client); S43
+    (page-supplied data bounded on the receiving side, agent and CDP, D219); S44 (the debug port's `/json` bodies
+    bounded, a listed WebSocket probed at the endpoint's own authority); S45 (a page the agent does not report is never
+    acted on); S46 (a regex budget, `BoundedRegex`, D221); S47 (library errors mapped as on the agent path).
+  - **Accepted as lows, provisional under B26 Q22 (the owner's word is asked; B28 repeats it), each with its release
+    note** (kept here until `docs/release-checklist.md` is written): S36 part (b) ("`StatementGuard` is a safety net,
+    not the boundary: give the data account a read-only role; PostgreSQL sources should set `readOnlyMode: always`");
+    S37 option (i) ("run outputs take the process umask; on a shared host run the controller under `umask 077`
+    (`skillroy run --out`)"; documentation only); S40, the pinning part ("pin the image and the actions in your copy of
+    `ci/examples/nightly-re-resolve.yml`"); S48 ("the Playwright driver inherits the controller's environment;
+    `DEBUG=pw:*`, `NODE_OPTIONS`, `PLAYWRIGHT_NODEJS_PATH` and `PLAYWRIGHT_DRIVER_DIR` change what it runs or logs";
+    documentation only); S60, the `CLAUDE_CONFIG_DIR` part ("the planner's `claude` session transcript stays in the
+    CLI's own data directory; on a shared host run `author` with a key and your own `CLAUDE_CONFIG_DIR`"). S46's
+    optional item 4 (the Swing locator on `BoundedRegex`, no behaviour change) is not done.
+  - **Two behaviour changes the owner should know.** S52 (P5 §7.2, A52): a configured model id that is not in the price
+    table is now refused when the gateway opens (`INVALID_REQUEST`, `model <id> is not in the price table; name it under
+    prices: with its price`), a configuration that worked before; the alternative is a warning at open. D210: the key
+    rule now also masks the tool descriptions a session and the MCP server offer, so the sample's `signOn` and
+    `authorise` descriptions read `credential: <redacted> staff, key: code}` there, as they already did in the planner's prompt (a false
+    positive of the rule on pack prose; the five scripted session recordings were regenerated, no live call); whether
+    the sample's wording should change is the owner's.
 
 ## Base spikes
 
@@ -426,7 +481,7 @@ re-run. BS8 comes from `research/embedded-browser-spi.md` R4 (B9); BS9-BS12 from
 
 | Id | Proves | Status |
 |---|---|---|
-| BS1 | The agent loads into stock JVMs in all load modes, across JDK versions | **Answered for Java 8 and Java 25 targets on Linux** (Java 21 targets before the switch). Open: cross-user attach and jattach, Windows |
+| BS1 | The agent loads into stock JVMs in all load modes, across JDK versions | **Answered for Java 8 and Java 25 targets on Linux** (Java 21 targets before the switch). Since 2026-10-09 (Phase 6, check 1b) the JEP 451 warning is shown for `ATTACH` on a Java 25 target and absent for `JAVAAGENT`, `JAVA_TOOL_OPTIONS` and `EMBEDDED`. Open: cross-user attach and jattach, the refusal under `-XX:-EnableDynamicAgentLoading`, Windows |
 | BS2 | The control channel survives a soak; the agent is isolated from the host class path | **Answered in part**: 3-minute soak per JDK (before the switch, on the JDK server), bounds and isolation tested; the agent's own listener (H1) is built and its per-call cost measured (1.4-5 ms). Open: the one-hour soak, loader collectability, a soak on the agent's own listener. Finding: about 45 ms per call on the JDK HTTP server on Java 8 and Java 21 targets; absent on a Java 25 target; gone with H1 |
 | BS3 | Byte Buddy retransformation with inline Advice and a bootstrap `Spy`; original bytes restored on detach | **Passed with conditions 2026-10-09** (`spikes/BS3/RESULT.md`): on Java 8 and Java 25 targets in the arm64 image, `JAVAAGENT` and `ATTACH`, a hook on the sample's `AccessControl.check` and on a toy class in a custom loader installs in 111-197 ms (later ones 6-23 ms), fires on the host's thread in `OBSERVE`, `CAPTURE` and `STUB`, switches mode without a retransform and restores byte for byte; Byte Buddy 1.18.14 shaded under the project prefix coexists with a host's Byte Buddy 1.12.19, ASM 5.0.3 and JNA 4.5.2; 17 configurations. Conditions: Byte Buddy injects `Nexus` (and on Java 25 a `java.lang` accessor with an `Unsafe` warning) unless its relocated `nexus.disabled` property is set; each bootstrap append prints a class-data-sharing warning on Java 25 (append once per JVM); the byte check holds by construction, so the engine also counts transform events it did not cause; a loader that delegates only `java.*` cannot see `Spy` (probe and refuse, or a `java.*`-package `Spy`); every retransform is a stop-the-world pause (size limit proposed: 256 KiB and 2,000 methods); maven-shade-plugin 3.6.2 or newer |
 | BS4 | Which Swing input rungs work on an Xvfb display with no window manager | **Answered** for Java 8 and 21 (before the switch); the end-to-end check built on it passed on Java 8 and Java 25 targets. Open: the ROBOT rung (not built; see BS9), a large-sample focus statistic, the display-test flake |
@@ -439,6 +494,7 @@ re-run. BS8 comes from `research/embedded-browser-spi.md` R4 (B9); BS9-BS12 from
 | BS11 | `PAINT` capture is deterministic | New, not started |
 | BS12 | Grounding accuracy and cost of a vision loop on the sample | New, not started; needs live model calls (B7) |
 | BS13 | The Claude API facts the Phase 5 contract relies on (structured output, strict tools, effort, caching minimums and TTLs, token counting, the Batch API, the fallback parameter, error mapping, the `claude` CLI's headless envelope), checked live once; the three Phase 5 dependency sets resolved and listed for the licence audit | **Passed: offline part 2026-10-07/08, live part 2026-10-08 (afternoon)** (`spikes/BS13/RESULT.md`): the live part ran through SDK 2.70.0 (the build's line) with the owner's workspace-scoped key, USD 0.032 in all (the resumed CLI call reports the session total, counted once), the `claude` CLI item natively. Settled: structured output as specified (a numeric `minimum` and `minItems` 2 refused, a string `maxLength` accepted; 2.70.0's typed form keeps `effort`); the strict tool called with valid input, a forced tool choice refused; Opus 5.5 returns a thinking block (empty, signed) at effort low, Sonnet 5.5 none; a 1135-token prefix written then read, the one-hour TTL without a beta header; `count_tokens` exact; a batch of two ended after 458 s with its results in reverse order, the second request reading the first's one-hour prefix (not a standard request's entry); `fallbacks` needs the beta header and `usage.iterations` is present whenever it is sent; 404/400 as mapped; the CLI's envelope with `structured_output`, `is_error: false`, `--resume` keeping the session. Found beside the probe: **Haiku 4.5 refuses `output_config.effort`**, so the gateway sends none to the Haiku class (P5 §4.1). The offline findings stand (SDK MIT, `mcp-core` + `mcp-json-jackson2`, per-attempt retries, `fromEnv()`'s reach, the error classes) |
+| BS14 | Byteman loaded in process through the agent's own `Instrumentation`, with no listener: the rule base reached through Byteman's `manager:` option by a project class on the system class path, rules fired into a curated helper, listed and removed with a byte-identical restore, `RuleCheck` in process, nothing listening, no JEP 451 line (the gate of Phase 6's Byteman module, P6 §7.2) | **Passed with conditions 2026-10-09** (`spikes/BS14/RESULT.md`): Java 8 (1.8.0_504) and Java 25 (25.0.4.1) targets in the arm64 image, `-javaagent`, five configurations. Items 1 to 6 pass on both targets and a second module instance reuses a parked `Retransformer`. The five conditions: the option string is `listener:false,manager:<RuleManager>` in that order and has no `prop:` (`prop:org.jboss.byteman.verbose=false` prints on the host's stdout and, Byteman reading the property by presence, turns verbose on; a later `listener:false` clears the manager); Byteman does not match a varargs helper method, so the helper has fixed-arity `fired` overloads; a trigger-time failure prints on the host's stderr through the helper's trace map unless the module redirects it, and a transform-time failure prints nowhere (only `listScripts` shows it); a sys-jar method with a Byteman-typed parameter must be branch-free, or its StackMapTable adds a `CONSTANT_Class` for Byteman; the byte check needs two recorders, one ahead of and one behind Byteman's transformer. Not run: the amd64 image, Windows, `ATTACH` with the real attach client |
 
 ### BS1 Attach matrix on stock JVMs
 
@@ -470,10 +526,17 @@ re-run. BS8 comes from `research/embedded-browser-spi.md` R4 (B9); BS9-BS12 from
     and a dead pid. Natively the CLI attach test ran against a Java 26 target (headless child).
 - **Already shown in round 1 (toy programs).** The same-user rule in both directions (attach F5); jattach 2.2 as
   root into a non-root JDK 8 JVM (F6).
-- **Not shown.** On a Java 25 target: the JEP 451 warning and the refusal under `-XX:-EnableDynamicAgentLoading`,
-  the argument cap and the start-up signal hazard (no measurement after the switch). A different-user attach and
-  jattach through the framework's own `AttachSession`; a deliberately broken agent jar reported with its code end
-  to end (the reply mapping is unit-tested only); `hook.*` capabilities (no hooks module yet); Windows.
+- **Shown on 2026-10-09 (Phase 6, CP; `design/phase6-contracts.md` §8.1, §8.2, check 1b and 1c).** On a Java 25 target
+  in the Linux image (arm64) `ATTACH` prints the JEP 451 warning (the positive control of check 1b) and `JAVAAGENT`,
+  `JAVAAGENT` through `JAVA_TOOL_OPTIONS` and `EMBEDDED` print none (`jep451Lines=0` in every non-`ATTACH` leg). The
+  capability matrix of a Java 8 target equals a Java 25 target's, normalised, in all four modes (committed goldens,
+  reasons by presence, and a live diff between the target's Java and the test JVM's). In the hooks leg a Java 25 target's
+  log holds one class-data-sharing line (the one bootstrap append) and, after checks 16 and 17, one JEP 451 warning per
+  re-attach (`ATTACH` of `skillroy-agent-bootstrap.jar`), none of the engine's own.
+- **Not shown.** On a Java 25 target: the refusal under `-XX:-EnableDynamicAgentLoading`, the argument cap and the
+  start-up signal hazard (no measurement after the switch). A different-user attach and jattach through the framework's
+  own `AttachSession`; a deliberately broken agent jar reported with its code end to end (the reply mapping is
+  unit-tested only); Windows. (`hook.*` capabilities: shown in Phase 6, the hooks leg.)
 
 ### BS2 Control-channel soak and class-loader isolation
 
@@ -677,6 +740,37 @@ Proposed in `research/vision-input.md` R10; they come before any Phase 7 work. N
 | BS10 | Routed in-JVM dispatch: buttons, caret placement, popup menus, combo boxes, tables, wheel, a drag inside a component, a glass pane, a disabled component; Java 8 and Java 25 | each case behaves as with Robot on the same build, or the difference is documented |
 | BS11 | `PAINT` determinism: the same window, 100 captures on one JDK; then across JDK lines and font sets | identical hashes within one environment; differences across environments quantified |
 | BS12 | Grounding and cost on the sample: V1 (references) versus V2 (pixels) on a Sonnet-class and an Opus-class model; seconds per action; tokens per session | measured accuracy, latency and cost replace the estimates of the research note |
+
+### BS14 Byteman in process
+
+- **Proves.** A user-supplied Byteman jar can be loaded in process through the agent's own `Instrumentation`, with no
+  listener: the project's sys jar and Byteman appended to the system class path, `org.jboss.byteman.agent.Main.premain`
+  called reflectively with `listener:false,manager:<RuleManager>`, the `Retransformer` received once in the manager's
+  `initialize`, rules submitted, fired into a curated helper, listed and removed with a byte-identical restore, and
+  `RuleCheck` run in process; nothing listens, no thread is added, no JEP 451 line.
+- **Run.** `spikes/BS14/` (a standalone Maven project, not a reactor module: the aggregator of four modules `sys`,
+  `probe`, `agent` and `toy`, `run.sh` and `scripts/run-config.sh`) in the arm64 image on Temurin 1.8.0_504 and
+  25.0.4.1: `jdk25-javaagent` and `jdk8-javaagent`, the same two with the contract's own option string
+  (`jdk25-contract-options`, `jdk8-contract-options`) and `jdk25-order-reversed` (`listener:false` after `manager:`) as
+  the negative control.
+- **Pass.** Every item of P6 §7.2 on both targets: `premain` called after the two appends, the `Retransformer` signatures
+  as written, a rule with the project helper fires and its removal restores the bytes, `RuleCheck` in process, nothing
+  listening before, after the load and after the unload, no JEP 451 line, and a second module instance reuses the
+  parked `Retransformer` (`premain` refuses a second call).
+- **Result 2026-10-09: passed with conditions** (`spikes/BS14/RESULT.md`; committed as `7640125`). Four configurations
+  PASS, the control without the manager is as expected (no `Retransformer`); `premain` took 16 ms on Java 8 and 59 ms on
+  Java 25, one retransformation 7 ms, a removal 2 to 3 ms. The five conditions, all folded into P6 §7 as built (1, 2,
+  3 and 5 are D194, D195, D197 and D196; 4 is in the note on `RuleManager`, with D200):
+  1. the option string is `listener:false,manager:<RuleManager>` in that order and has no `prop:`; the contract's
+     `prop:org.jboss.byteman.verbose=false` printed 127 (Java 8) and 135 (Java 25) console lines against 24;
+  2. the helper has fixed-arity `fired` overloads of one to eight arguments, because Byteman does not match varargs;
+  3. a trigger-time failure prints on the host's stderr through `Helper.traceMap` unless the module redirects it, and a
+     transform-time failure prints nowhere (the module reads `listScripts` after a submit);
+  4. a sys-jar method whose parameter is a Byteman type must be branch-free (else a `CONSTANT_Class` for Byteman lands
+     in its constant pool);
+  5. the byte check needs two recorders, one ahead of Byteman's transformer and one behind it.
+- **Not run.** The amd64 image, Windows, Java lines between 8 and 25, `ATTACH` with the real attach client (the module's
+  reuse path is simulated through `agentmain` in `BytemanIT`), a large real application.
 
 ## Phase checklist
 
@@ -1306,27 +1400,138 @@ commits. The key lived in the operator's login shell and reached a JVM by name o
 **Specified 2026-10-09** (`design/phase6-contracts.md`, with `design/threat-model.md`): written from seven readers' maps
 and spike BS3 (passed with conditions), reviewed by three lenses with a sceptic each (72 raw findings, 65 confirmed,
 27 more found by the sceptics, all applied) and rechecked twice; decisions D114-D159; its twenty-two questions are
-**B26**, provisional. The build proceeds on them (the owner asked for progress on 2026-10-09) in five packages: HK
-(hooks and spy), CP (controller, pack, the sample's branch edition, scenario E, JDK 25), TL (telemetry), BW (Byteman
+**B26**, provisional. The build proceeded on them (the owner asked for progress on 2026-10-09) in five work packages:
+HK (hooks and spy), CP (controller, pack, the sample's branch edition, scenario E, JDK 25), TL (telemetry), BW (Byteman
 behind spike BS14, and the Windows path), FX (the security fixes of the repeat review's pass 1, S35-S62).
 
+**Built 2026-10-09**, the day it was specified, in six packages (FX went to two implementers), each in an isolated
+worktree (`.claude/worktrees/p6-<tag>`, branch `p6/<tag>`) made by hand from the contract commit `065746d`: HK, CP, TL
+and BW first, four at a time, FX over the merged four. Each implementer committed on its own branch, signed off, and
+touched no `TODO.md`, `DECISIONS.md`, `CLAUDE.md`, `NOTICE` or `CONTRIBUTING.md` (its text for them went into its
+report); the orchestrator merged the branches into `main` in the order below with a native reactor between
+(`mvn -o -q verify`), then brought the documents together (the numbering of the build's decisions, B27, this section).
+Nothing is pushed. The build took 62 decisions, **D160-D221** (`DECISIONS.md` B27, provisional), numbered in landing
+order; the contract carries an `As built (Phase 6, <TAG>, 2026-10-09)` note under every section a package built or
+deviated from, and marks in the Phase 1 to 5 contracts and in the overview.
 
-- [ ] `skillroy-agent-spy` and `skillroy-agent-hooks`: hook engine, probes, health, hook-catalogue format, post-detach byte verification (BS3 passed with conditions 2026-10-09)
-- [ ] `skillroy-agent-byteman` (optional and unbundled, B8)
-- [ ] JDK 25 target through `JAVAAGENT`: no JEP 451 warning; capability matrix equal to the JDK 8 matrix. The
-  handshake through `JAVAAGENT` on a Java 25 target was verified on 2026-10-02; no result for the warning or the
-  matrix comparison is recorded
+| Package (landing order) | What it built | On `main` | The orchestrator's native reactor on `main` after the landing |
+|---|---|---|---|
+| TL (telemetry) | the `RunObserver` SPI in `skillroy-scenario` with its hook points, `CallOptions.traceparent` and the inbound MCP `traceparent`, `durationMs` on the bind records, the module `skillroy-telemetry` (OpenTelemetry 1.66.0: `otlp` over OTLP/HTTP and the project's `skillroy-spans/1` `file`), the CLI options `--telemetry*` on six commands, the JUnit glue's `skillroy.telemetry.*` with a JVM-exit flush, `THIRD-PARTY.txt` and `DistributionNoticesIT` for the eleven OpenTelemetry jars; D160-D168 | `8fc2384` (fast-forward) | exit 0; 4,074 tests, 0 failures, 0 errors, 385 skipped (surefire and failsafe together); 5 min 7 s |
+| HK (hooks and spy) | the wire types `…protocol.hook`, the `HookEngine` SPI and `…api.instrument` in `skillroy-agent-api`, `optionalModules` and the spy package's loader rules in the core and the bootstrap, `skillroy-agent-spy` (`Spy`), `skillroy-agent-bytebuddy` (Byte Buddy 1.18.14 relocated) and `skillroy-agent-hooks` (the engine, the six `hook.*` primitives, the recorder and the restore that is its own verification), the home's `skillroy-agent-spy.jar` and `optional/`, `DistributionContentIT`'s list and rules, `HomeConstantPoolIT`, `OptionalModulesIT`, `SharedLoadersIT`; D169-D183 | `9044c9a` (part 2; part 1 `c42f040`, merged by CP and BW) merged as `720eb6b` | exit 0; 4 min 46 s |
+| CP (controller, pack, sample, JDK 25) | the hook catalogue reader, overlay and installer (step 0b), the `hooks` fact root, `capabilities.json`, `--hooks` and `skillroy hooks status/install/remove`, the never-offered `hook.*`/`rule.*` set, the pack overlay SPI (`DomainPackOverlay`, `DelegatingDomainPack`, `PackSettings`), the sample's branch edition, pack 0.5.0 with its catalogue, the overlay module `skillroy-sample-lending-pack-branch`, scenario E `return-within-limit-observed`, checks 1b and 1c with the committed goldens, the hooks leg (`HookChecks`), `BranchEndToEndIT`, the live matrix diff; D184-D193 | `cf79b52` (fast-forward; the package `91cd1a1`, merges of TL, HK and `main`, `14bd710`, `cf79b52`) | exit 0; 4 min 38 s |
+| BW (Byteman and Windows) | spike BS14; `skillroy-agent-byteman-sys` and `skillroy-agent-byteman` (`rule.check/submit/unload/list`, the lint, `BytemanIT`, the hooks leg's checks 166-168); the Windows half: `bin/skillroy.bat`, `PATHEXT`, plain `cmd.exe /c`, `SecureFiles` public and its sites, `ci/run-on-windows.cmd`; D194-D207 | `b22013e` (fast-forward; spike `7640125`, Windows `26d3c22`, Byteman `3bf51e5`, `8ba12c9`, `9b87ba4`, documents `cd38182`, integration `5457ccb`, `b22013e`) | exit 0; 4 min 47 s |
+| FX-2 (security fixes, tag SR: FX-inference and FX-mcp) | S49-S62 and their contract text (A50-A60), D157-D159 in code; D208-D215 | `755844c` (fast-forward; `6d6ce08`, `ee020ad`, `755844c`) | exit 0; 4 min 45 s |
+| FX-1 (security fixes, tag SR: FX-web, FX-scenario, FX-ci) | S35-S48 and their contract text (A40-A49), D156 in full; D216-D221 | `822dc58` (fast-forward; `8333680` and the merge of FX-2) | not run again on `main`; FX-1's own run of the merged tree is below |
+
+The packages' own native runs (the whole reactor, JDK 26, macOS arm64, headless; read from the XML reports by each
+package, on bases that differ, surefire alone or surefire and failsafe, so they do not add up across rows): TL 4 min 28
+s, green; HK 3,778 tests, 0 failures, 99 skipped (4 min 27 s); CP green, per module among others scenario 645, inference
+961, cli 178 and 17 ITs, mcp 61, lending-app 109 (9 skipped), lending-scenarios 125 unit tests; BW 3,991 tests, 0
+failures, 103 skipped (4 min 39 s) on the merged reactor; FX-2 surefire 3,952, 0 failures, 91 skipped, and failsafe 439,
+388 skipped (4 min 36 s); FX-1 on the merged tree surefire 4,023, 0 failures, 91 skipped, and failsafe 443, 388 skipped
+(4 min 47 s). The skips are the display and live tests.
+
+The image runs of each package (arm64 image `skillroy-test-java-ci:bs8-arm64`, Temurin 25.0.4.1 and the aarch64
+Temurin 8u504; `ci/run-in-linux.sh`, `-Dskillroy.headless=false`; counts read from the reports):
+
+- **TL:** `TelemetryEndToEndIT` 2 of 2 and `TelemetryStreamTest` 1 of 1 on a Java 25 and on a Java 8 target (the file
+  run wrote 59 spans; the OTLP run delivered its batches to the loopback stub with 0 dropped).
+- **HK:** leg A (Java 25 targets, `-pl agent/skillroy-agent-dist -am`): 1,260 tests over the agent modules and the
+  home's ITs, 0 failures, 8 skipped, 2 min 50 s; leg B (Java 8 targets): 1,260 / 0 / 8, 2 min 46 s, the child JVMs of
+  `OptionalModulesIT` and `SharedLoadersIT` on Java 8; leg C (the agent modules' own tests on a Java 8 test JVM, 8u504):
+  protocol 426, agent-api 125, spy 6, bytebuddy 2 (IT), hooks 55, core 190 (2 skipped), bootstrap 40, all 0 failures.
+- **CP:** every CP leg verifying on a Java 25 target: 210 run, 0 failures, 20 skipped; on a Java 8 target 218 / 0 / 20
+  (the skips: scenario E without hooks, which is `DEGRADED` by design, and the checks "once per seed" of the inference
+  legs); the hooks leg's 34 checks ran on both Javas with no skip (E `PASS` with hooks on), the install in 174 ms on
+  Java 25 and 136 ms on Java 8, `hook.remove` restoring every class `verified: OK` with 0 foreign events; the branch
+  variant both halves; the live matrix diff `none`; `jep451Lines=0` in every non-`ATTACH` leg.
+- **BW:** the Byteman modules' unit tests on the Java 8 test JVM, 32 run, 0 failed (every report 1.8.0_504);
+  `BytemanIT` 2, `DistributionContentIT` 6, `HomeConstantPoolIT` 2, `OptionalModulesIT` 2, `SharedLoadersIT` 1 on a Java 8
+  and a Java 25 target, 0 failed (the socket checks ran); `LendingEndToEndIT$JavaAgentHooks` 37 tests, 0 failures, on a
+  Java 25 and a Java 8 desk, checks 166-168 among them (`rule.fired` with a handle and 20.00, unload `verified: OK`, 0
+  foreign events, the same listening sockets); the other hooks-mode classes on Java 25 (36 + 2 + 22 run, 0 failures, 16
+  skipped by design).
+- **FX-2:** `InferenceEndToEndIT$JavaAgentSeedA` 11 tests, 0 failures, 0 skipped, 5 min 5 s (the MCP server as a
+  subprocess under the `CLIENT` origin, the session script and its export, triage and the dry run), and the reactor's
+  unit tests in the image: 3,952 / 0 / 0 / 8.
+- **FX-1:** the web legs with `-Pjcef` (`-pl samples/skillroy-sample-web-host,samples/skillroy-sample-web-host-scenarios -am`),
+  before and after the merge with FX-2: exit 0, 10 min 38 s and 10 min 31 s (on the merged tree the web host 50, its
+  agent 6, its scenarios 14 and 68 ITs, cdp 128, mcp 74, inference 975, scenario 649, cli 191 and 18 ITs; the JCEF kit
+  13 of 13 in both modes, `WebHostEndToEndIT` 64 / 0, `CdpAttachSoakIT` 4 / 0); the agent modules on a Java 8 test JVM
+  (protocol 469, agent-api 126, agent-core 192 with 2 skipped, agent-web 184 with 4 skipped, 0 failures); on the merged
+  tree `LendingEndToEndIT$JavaAgent` 29 / 0 (1 skipped: scenario E without hooks) and `InferenceEndToEndIT$JavaAgentSeedA`
+  11 / 0.
+
+**Surefire traps the build found** (both in "Environment notes" too): (1) surefire 3.6.0 with `reuseForks=false` runs
+no test at all, reports `Tests run: 0` and exits 0, when `-Djvm` names a Java 8 JVM (the fork starts and is never
+handed its class): HK's first Java 8 leg ran **zero** hooks tests and was caught from the reports' `java.version` and
+counts; the hooks module now runs each of its six fresh-JVM test classes in a surefire execution of its own (D175), and
+the Byteman module uses three executions of its own as well. (2) A command-line `-Dtest` **merges** the Byteman
+module's separate executions into one JVM, where `ProbeTest`, `CheckLoadsNothingTest` and `InProcessRouteTest` failed
+for the wrong reason (Byteman already loaded; a copy of the toy left by another test's loader matched a rule); in a
+merged JVM they now skip with a message, and the module's counts are to be read from a run without `-Dtest`. A matrix
+run of the Java 8 leg must read the reports' counts and `java.version`, not the exit code.
+
+**What was not run:** the full Linux matrix of the integrated tree (arm64 twice, amd64 once; the packages ran the
+targeted legs above only, and the first arm64 round of the integrated tree was started on 2026-10-09 and is not
+recorded here); any amd64 image leg of the hooks module and the home's ITs; anything on a Windows host (BW's
+`ci\run-on-windows.cmd` and every item of `design/phase6-contracts.md` §9.5, §13.3); a real OpenTelemetry Collector
+(§13.4, opt-in); `ATTACH` with the real attach client for the Byteman reuse path (simulated through `agentmain`); the
+full `InferenceEndToEndIT` and `ScenarioDRecordIT` legs that CP did not change; the Java 8 target legs of the web host
+and of the lending desk, and the lending desk's other load modes, after the FX-1 changes; the real JxBrowser product
+(its channel bound is tested on the fake); any live model call (none was made or needed).
+
+- [x] `skillroy-agent-spy` and `skillroy-agent-hooks`: hook engine, probes, health, hook-catalogue format, post-detach
+  byte verification (BS3 passed with conditions 2026-10-09); built and tested 2026-10-09 (HK, CP): installed and removed
+  on the sample desk on a Java 8 and a Java 25 target with `verified: OK` and no foreign event (`HookChecks`: CP's 34
+  checks, 37 tests with BW's three);
+  the home's eleven jars and the default path loading no third-party class held by `DistributionContentIT`,
+  `HomeConstantPoolIT`, `OptionalModulesIT` and `SharedLoadersIT`
+- [x] `skillroy-agent-byteman` (optional and unbundled, B8): built 2026-10-09 (BW) behind BS14 (passed with
+  conditions): `rule.check`, `rule.submit` (every submit needs `confirm`), `rule.unload`, `rule.list`, no listener ever;
+  `BytemanIT` and the hooks leg's checks 166-168 green on Java 8 and Java 25 targets, the unit tests green on a Java 8
+  test JVM
+- [x] JDK 25 target through `JAVAAGENT`: no JEP 451 warning; capability matrix equal to the JDK 8 matrix: built and
+  tested 2026-10-09 (CP: checks 1b and 1c in the four load modes on both Javas, the committed goldens, the live diff)
 - [ ] Windows: `JAVAAGENT` as the logged-on user; `SEMANTIC`, `ACTION`, `COMPONENT` and `DISPATCH` rungs and paint
-  capture verified; `ROBOT` excluded; attach from another logon session documented as unsupported; a `.bat`
-  launcher for the CLI; the access-control fixes S7 and S15 verified
-- [ ] OTel export (B11)
+  capture verified; `ROBOT` excluded; attach from another logon session documented as unsupported; a `.bat` launcher
+  for the CLI; the access-control fixes S7 and S15 verified. **Split 2026-10-09 (contract §14):** [x] the part Linux can
+  test is built and tested (BW: `bin/skillroy.bat` with `BatLauncherTest` and `LauncherIT`, `PATHEXT`, plain
+  `cmd.exe /c` with its refusals, `SecureFiles` public and its sites, the documentation of cross-session attach as
+  unsupported); [ ] **verification on a Windows host waits for the host** (Walls): the `.bat` run, the planner through a
+  launcher path and a `--pack` path with a space, the ACL branches, `JAVAAGENT` as the logged-on user with the rungs and
+  paint capture, S7 and S15
+- [x] OTel export (B11): built 2026-10-09 (TL), controller only, off by default, no class loaded without it
+  (`ClassLoadingProbeTest`); `TelemetryEndToEndIT` green in the image on both Javas; [ ] the live, opt-in run against a
+  real OpenTelemetry Collector (§13.4)
 - [ ] Repeat the security review before the first release (the findings of 2026-10-02 are closed by H1-H3 in
-  Phase 1.x)
-- [ ] Tenant-pack overlay proven on a second variant of the sample lending desk: resolvers, constants and hook
-  catalogue overridden, scenarios unchanged
-- [ ] **Exit:** a hook is installed and removed on the sample lending desk with byte-identical restore; the sample
-  scenarios pass unchanged with hooks enabled and with hooks disabled, and on a JDK 25 target loaded through
-  `JAVAAGENT`; the repeated security review is signed off.
+  Phase 1.x): **pass 1 built** 2026-10-09 (S35-S62 fixed or accepted as low, "Security review (repeat, pass 1)" above);
+  pass 2 (eight lenses on the Phase 6 tree), its record and dispositions, the matrix after the fixes and the **owner's
+  signature (B28)** remain, the signature being the owner's alone
+- [x] Tenant-pack overlay proven on a second variant of the sample lending desk (the branch edition): resolvers,
+  constants, the allow-list and the hook catalogue overridden, scenarios A, B and E unchanged; built and tested
+  2026-10-09 (CP: `BranchEndToEndIT`, both halves, E's negative showing the overlay's catalogue is needed)
+- [ ] **Exit:** a hook is installed and removed on the sample lending desk with byte-identical restore (**met** in the
+  packages' image runs, Java 8 and Java 25 targets); the sample scenarios pass unchanged with hooks enabled and with hooks
+  disabled, and on a JDK 25 target loaded through `JAVAAGENT` (**met** in the same legs, E being the designed exception:
+  `PASS` with hooks, `DEGRADED` without); on Windows the agent loads through `JAVAAGENT` as the logged-on user (**cannot
+  be met without the Windows host**, contract §14); the repeated security review is signed off (**the owner's**). Not
+  ticked: two criteria wait, and the integrated tree's Linux matrix is still to run
+- [ ] The Phase 6 code review (three lenses, a sceptic each) on the integrated tree and its fix wave (tags `FA`-`FD`)
+- [ ] The Linux matrix of the integrated tree (arm64 twice, amd64 once; Java 8 and Java 25 targets; the agent side on a
+  Java 8 test JVM, the matrix command's `-pl` list now seventeen modules, see "Environment notes")
+- [ ] `SECURITY.md` and `docs/release-checklist.md` (D148, §12.8) are not in the tree: no package wrote them; the
+  release notes of the five accepted lows are kept under "Security review (repeat, pass 1)" until they are
+- [ ] The amd64 image legs of the hooks module and the home's ITs (HK: only arm64 run)
+- [ ] (later, gap 55) `RpcResult.startedAt` for an exact agent span; (later, gap 56) OpenTelemetry metrics and logs
+- [ ] (code review) `minimal` keeps the scenario id inside `skillroy.correlation_id` (the exact list does not name it,
+  D166); the BSP worker thread's name (D163); whether `re-resolve` and `triage` should export more than the root span
+  (gap 59, D168)
+- [ ] (owner) S52 refuses a configuration that worked before (a configured model id outside the price table; the
+  alternative is a warning at open); D210: the key rule rewrites the sample's `signOn` and `authorise` descriptions in the
+  tools and the planner's prompt, and whether the sample's wording should change
+- [ ] (optional) S46 item 4: the Swing locator on `BoundedRegex`, no behaviour change
+- [ ] Gap 49 (an `inductionRequired` argument on `LendableItem`) was not taken (D193); it waits for the next pack change
 
 The B12 item that stood here (`COMPONENT` with window activation for UI-verification steps) is now Phase 1.x
 (A28, A29), as an opt-in per scenario.
@@ -1367,7 +1572,8 @@ change that fits before Phase 2. "Closed (built)" means the change was built in 
 without a new phase; their Phase column still shows where they were first placed. "Closed (built)" marks the gaps
 Phase 1.x closed on 2026-10-02; they stay in the table until the merged tree's verification is recorded. Gaps 34-47
 were recorded by Phase 4 (`design/phase4-contracts.md` §13, which also says what Phase 4 did for gaps 21, 22, 28 and
-31); "P4 §n" is a section of that contract.
+31); "P4 §n" is a section of that contract. Gaps 50-57 were numbered by the Phase 6 contract (§15.2, "P6 §n") and 58-59 by
+its build; the contract's §15.2 also says what Phase 6 did for gaps 31, 32, 33 and 49.
 
 Closed by Phase 1, and therefore no longer listed: the provider-executed form of `DataSourceProvider`,
 `SyncPolicy.promptTopics`, cleanup calls and `recover`, `DomainPack.preflight()`, guarded expectations with
@@ -1407,9 +1613,9 @@ reflectively callable `EmbeddedAgent.start`, and redaction of secrets in JVM arg
 | 28 | Pack-defined artifact kinds | `artifacts:` implements `capture` only; another kind is logged and ignored | An SPI in `DomainPack` that produces a named artifact | 2 |
 | 29 | A pack-contributed CLI subcommand | For example an exporter to an application's own test format | Decide; `ServiceLoader` of a small command SPI | later |
 | 30 | `AgentConnection.await` cannot report a JSON-RPC error | Anything but `TIMEOUT` surfaces as `IllegalStateException` | A31: `AgentRpcException` in the signature | closed (built) |
-| 31 | `ROBOT` type mode, `OPTION_VALUE` dismissal, `swing.events` | In the design's catalogue, not in the Phase 1 contract | Add them to the contract when their phase starts | 6 |
-| 32 | Hook catalogue: an `enabled` flag per hook | A pack catalogues a target and leaves it off | In the design (§2.6); build with the hooks module | 6 |
-| 33 | Third-party isolation when the host ships an older copy of the same library | The agent loader is child-first only for the agent's own package prefix | Relocate under that prefix; covered by the added BS3 case | 6 |
+| 31 | `ROBOT` type mode, `OPTION_VALUE` dismissal, `swing.events` | In the design's catalogue, not in the Phase 1 contract | Add them to the contract when their phase starts | later (nothing of Phase 6 needed them; moved from 6, P6 §15.2) |
+| 32 | Hook catalogue: an `enabled` flag per hook | A pack catalogues a target and leaves it off | In the design (§2.6); build with the hooks module | closed (built 2026-10-09, Phase 6, CP: P6 §5.1; the sample's `sign.on.checked` is off) |
+| 33 | Third-party isolation when the host ships an older copy of the same library | The agent loader is child-first only for the agent's own package prefix | Relocate under that prefix; covered by the added BS3 case | closed (built 2026-10-09, Phase 6, HK: Byte Buddy relocated; `ShadedContentIT`, `HomeConstantPoolIT`) |
 | 34 | A `PAINT` capture must guard embedded-browser components | BS8: `printAll` throws for an off-screen JCEF canvas and paints a windowed one blank, so a Swing capture of a window with such a browser would fail | The guard: the capture paints part by part, a part that throws becomes a placeholder listed in `skipped` (P1 §6) | closed (built, Phase 4) |
 | 35 | A browser with no view and no seed is invisible | JxBrowser has no process-wide list of browsers: an engine whose browser is in no window is found only through a seed (browser-spi §F23) | The pack's `BrowserRegistryAdapter` hands it in (P4 §9.2 is the example); nothing more in the base | later, if a target needs it |
 | 36 | `web.dom.click` is a DOM click, not a pointer click | `el.click()` fires no `pointerdown`, `mousedown` or `mouseup`; a page that listens for those does not react | `INPUT` (reserved) and `web.pointer` with the vision bolt-on | 7 |
@@ -1425,7 +1631,17 @@ reflectively callable `EmbeddedAgent.start`, and redaction of secrets in JVM arg
 | 46 | A killed JVM leaves a traced CDP path's trace directory | The private, owner-only `skillroy-cdp-trace-*` directory is deleted at close; a JVM killed meanwhile leaves it in the temporary directory (P4 §6.4) | Delete stale ones at the next open, or accept and document (done) | accepted |
 | 48 | Over CDP, `web.waitFlag` on a page whose content security policy forbids `eval` fails at Playwright's second poll | Playwright's `waitForFunction` evaluates its own predicate with `eval` from the page's timer after the first poll, which such a policy refuses before the guard runs; it surfaces as `INTERNAL_ERROR` with an unhelpful message (found by A35, 2026-10-08; the agent path's `Runtime.evaluate` is not subject to the policy) | A clearer message, or a first-poll-only fallback to the agent path for such pages | later, if a target shows it |
 | 47 | JxBrowser's observer registration and `cdpEndpoints` call the vendor without a bound | Every other vendor call of the adapter runs on its own threads with a bound; whether `on`, `set` and the endpoint read can block needs the product (P4 §4.5) | Bound them as the accessors are, once a run against the product shows the need | with gap 41 |
-| 49 | The sample's `LendableItem` query cannot say "an item that needs no induction" | The planner was briefed to choose such an item for scenario C (P5 §14.3) and could only choose a plain counted item (`perDay: false`); the brief holds by the resolver's order on both seeds, not by the scenario's words (`ItemsTriggering` has an `inductionRequired` argument, `LendableItem` has none) | An `inductionRequired` argument on `LendableItem` (pack 0.5.0; every committed plan carries the pack version) | later, with the next pack change |
+| 49 | The sample's `LendableItem` query cannot say "an item that needs no induction" | The planner was briefed to choose such an item for scenario C (P5 §14.3) and could only choose a plain counted item (`perDay: false`); the brief holds by the resolver's order on both seeds, not by the scenario's words (`ItemsTriggering` has an `inductionRequired` argument, `LendableItem` has none) | An `inductionRequired` argument on `LendableItem` (every committed plan carries the pack version) | not taken in Phase 6 (D193: no room, pack 0.5.0 went without it); with the next pack change |
+| 50 | A target behind a strict-delegation loader cannot be hooked | BS3 RESULT §9 facts 6 and 7: a loader that delegates only `java.*` to its parent cannot see `Spy` on the bootstrap path, so the hook is refused at install (P6 §3.3 item 6) | A `java.*`-package `Spy` would serve it and is rejected (D116) | later, if a target needs it |
+| 51 | Another bytecode agent's change registered before the first retransformation, or dropped before it, is invisible to the byte check and the event ledger | BS3 fact 14; the engine reports the other agents as `otherAgents` (D154, D180) and never refuses or degrades for them | none: documented | open (documented limit) |
+| 52 | On Java 25 with class data sharing on, the one bootstrap append prints a VM warning on the host's stderr and ends sharing of non-boot classes | BS3 fact 8; shown in the hooks leg (one CDS line); accepted and documented under B26 Q14 (provisional) | The option `hooks.spyPlacement` (bootstrap or system), if the owner vetoes Q14 | open (documented limit) |
+| 53 | The retransformation pause was measured with a spinning thread and the safepoint logs, not on a painting event-dispatch thread of a real application | BS3 RESULT §10 (D124): 11 ms on Java 8 at the size limit and 51 ms at 1.8 MiB, measured with a spinning thread; the effect on a UI is unmeasured | Measure on the desk with a UI | open |
+| 54 | The pre-filter's effect on the class-loading cost of a registered transformer, and the `makeRaw()` route against `installOn`, are not measured | BS3 fact 20; D155. HK: both are proven to work (the module's tests, both legs), not measured | Measure | open |
+| 55 | `RpcResult.startedAt` for an exact agent span | The agent span is reconstructed and centred in its call (`skillroy.agent.timing = reconstructed`, D142) | An additive wire field (a 6.x amendment) if the approximation misleads | later |
+| 56 | OpenTelemetry metrics and logs | Phase 6 exports spans only (P6 §10.5); the instruments are named | Build behind the same observer once spans are proven | later |
+| 57 | A Byteman the host loaded on its own command line cannot be reused by the module | P6 §7.4; the module reuses only a `Retransformer` its own earlier instance parked | none: documented | open (documented limit) |
+| 58 | After another agent's `redefineClasses`, HotSpot reconstitutes a class with the constant pool it merged across redefinitions | The hooks module verifies a restore relative to the first bytes because of it (D172); whether a Byteman restore meets the same on a real redefinition, and whether a Java 8 JVM behaves alike, is not measured (new, HK) | Measure on both Javas with a second agent that redefines | open |
+| 59 | `re-resolve` and `triage` export their root span only, and the planner's `skillroy mcp` child exports nothing | Their model calls are in their own ledgers and reports; spans beyond the root and a child started with telemetry are a further egress decision (D168; new, TL) | Pass the observer through the batch job and triage; options to the child | later |
 
 Small items for the module owners, none of them a contract matter: `swing.snapshot` shows Swing's own made-up
 names such as `null.layeredPane`; module version strings are inconsistent (`0.1.0` and `0.1.0-SNAPSHOT`); in
@@ -1493,6 +1709,34 @@ Kept generic on purpose: nothing here names a machine, a user or a local path.
   `-sdk-trace`, `-exporter-otlp`, `-exporter-otlp-common`, `-sdk-metrics`, `-sdk-logs`, `-exporter-sender-jdk`,
   `-exporter-common`; for tests `-sdk-testing` and `-sdk`; `-exporter-sender-okhttp` excluded. Byteman **4.0.27**
   (test and provided scope only, B8). Byte Buddy 1.18.14 and maven-shade-plugin 3.6.2 were fetched by spike BS3.
+- **Phase 6 build notes (2026-10-09; HK, BW, TL, CP, FX).**
+  - The hooks module compiles against the packaged, relocated `skillroy-agent-bytebuddy` (a shading module): build it with
+    `mvn -o verify -pl agent/skillroy-agent-hooks -am`; a root `mvn compile` or `mvn test` fails there by design
+    (`package …shaded.bytebuddy does not exist`). The same needs `verify`, never `install`.
+  - The matrix command's `-pl` list of the agent-side modules is now **seventeen**: the twelve of the Phase 4 and 5
+    tables plus `agent/skillroy-agent-spy`, `agent/skillroy-agent-bytebuddy`, `agent/skillroy-agent-hooks`,
+    `agent/skillroy-agent-byteman-sys` and `agent/skillroy-agent-byteman`.
+  - Surefire 3.6.0 with `reuseForks=false` runs **no test** and exits 0 when `-Djvm` names a Java 8 JVM (`Tests run: 0`);
+    the hooks module isolates its six fresh-JVM classes in executions of their own (D175) and the Byteman module uses
+    three. A command-line `-Dtest` merges those executions into one JVM, where the Byteman module's `ProbeTest`,
+    `CheckLoadsNothingTest` and `InProcessRouteTest` skip with a message. A Java 8 leg's counts and the reports'
+    `java.version` are to be read, not only the exit code; the Byteman module's counts come from a run without `-Dtest`.
+  - On a JDK 25 or newer test JVM the hooks module's test output carries `OpenJDK 64-Bit Server VM warning: Sharing is
+    only supported for boot loader classes because bootstrap classpath has been appended` once per test JVM that appends
+    the spy jar: expected (P6 §2.5, B26 Q14). In the hooks leg a Java 25 target's log holds that one line and, after
+    checks 16 and 17, one JEP 451 warning per re-attach (`ATTACH` of `skillroy-agent-bootstrap.jar`), none of the
+    engine's own.
+  - Byteman 4.0.27 (`org.jboss.byteman:byteman`, LGPL) is in the local Maven cache and in the image's mounted
+    `/root/.m2`, at test scope (the Byteman module, `skillroy-agent-dist`, the scenarios module) and `provided` scope
+    (the sys jar); never in a distribution. `BytemanIT` and the hooks leg's checks 166-168 skip their listening-socket
+    checks on a host without `/proc` (macOS) and say so on stdout.
+  - OpenTelemetry Java 1.66.0 is in the local cache with its tree (no BOM, no OkHttp sender, no autoconfigure artifact);
+    the CLI's `lib/` holds 55 jars (8 project, 47 third-party) and the zip 62 entries.
+  - `ci/run-in-linux.sh` no longer sets an empty `MAVEN_OPTS` in the container, and passes a `MAVEN_OPTS` the host has by
+    name only (S39). The web host's legs need `-Pjcef` together with `-pl samples/skillroy-sample-web-host…`: those
+    modules are in that profile only.
+  - The neutrality check scans agents' worktrees under `.claude/worktrees` as well; run it on a `git archive` export of
+    the tree, not on a tree with worktrees inside.
 
 ## Walls
 
@@ -1503,7 +1747,8 @@ Work that cannot proceed without the project owner, or without something only th
 | The push | B1 | The initial commit exists (2026-10-06); the push to the private remote `Skillroy-AI/skillroy-test-java` waits for the owner's word. History is permanent once pushed |
 | Model provider API key | B7 | **Resolved 2026-10-08, and the live items done the same day.** The first key (organisation-level) was refused by the API without an `anthropic-workspace-id` header (BS13, the night of 2026-10-08), so nothing live ran that night and the profiles were marked not built (D110). The owner's workspace-scoped key, exported as `ANTHROPIC_API_KEY` in the operator's own environment only (never a file of this repository, never a property, never a command line; the contract's §2.3), answered the models endpoint with no workspace header; in the afternoon of 2026-10-08 it carried BS13's live part, scenario D's live re-record, the live profiles and §15.3, scenario C's authoring and the nightly job's live figures ("Phase 5, the live items" above), about USD 2.05 in all. Nothing waits on it. |
 | A JxBrowser licence | B9 | Real verification of the `jxbrowser` adapter. The adapter exists (built 2026-10-07) and passes the contract kit against the neutral fake, plainly and with the init-script chaining option; the kit (`skillroy-agent-web`'s `test-jar`) runs against the real product only in a repository that holds a licence, outside this repo, through a `WebAdapterFixture` over a real engine. That run also settles three member names of the descriptor and whether some vendor calls can block (gaps 41 and 47). Phase 4 reached its public exit without it. The owner (2026-10-06): a licence is available, so that verification can follow in the private overlay's repository |
-| A Windows host | B13, Phase 6 | Verification of the fixes S7 and S15 (not verified on Windows); the Windows path of Phase 6. The owner (2026-10-06): later, a Windows 11 machine, which also runs the tenant layers' testing under Windows and under WSL2 |
+| A Windows host | B13, Phase 6 | Verification of the fixes S7 and S15 (not verified on Windows); the Windows path of Phase 6, built 2026-10-09 where Linux can test it and **waiting for the host** for: `ci\run-on-windows.cmd` run twice without a flake and the list of `design/phase6-contracts.md` §9.5 and §13.3 (`bin\skillroy.bat` run, the planner started through a launcher path and a `--pack` path with a space, which decides the quoted `cmd.exe` form, the ACL branches checked with `icacls`, `JAVAAGENT` as the logged-on user with the `SEMANTIC`, `ACTION`, `COMPONENT`, `DISPATCH` rungs and paint capture, one cross-session attach for its failure text, the 5 s start-up margin), and the exit criterion that names Windows; when it has run, the "not verified on Windows" marks come off `README.md`, `SECURITY.md`, `design/threat-model.md` §8, P1 §2.5 and this file. The matrix table rows for it are `| windows, Java 25 targets | ci\run-on-windows.cmd | … |` and `| windows, Java 8 targets | ci\run-on-windows.cmd (SKILLROY_JDK8_HOME) | … |`. The owner (2026-10-06): later, a Windows 11 machine, which also runs the tenant layers' testing under Windows and under WSL2 |
+| The owner's word on Phase 6 | B26, B27, B28 | `B26 ok, B27 ok` (or the vetoes by name), among them Q1's wording of the hard rule in `CLAUDE.md` (`NOTICE` and `CONTRIBUTING.md` carry it already) and Q22's five accepted lows; then, after pass 2 of the repeat security review, the signature of B28. Nothing is blocked meanwhile (the build proceeded on the provisional answers), but a veto changes the code the answer names |
 
 Not walls any more: the licence, the holder's name, the first commit and the remote (B1), the final names and the
 domain behind the groupId (B2) and the sample domain with its deposits (B10) are decided. B17-B20 are confirmed
@@ -1524,8 +1769,8 @@ The review items of the end-to-end review, now decided (gap numbers refer to the
 
 ## Next steps I would take
 
-1. **The push**, when the owner says (the commits of 2026-10-06 and the Phase 4 commit of 2026-10-07 are local);
-   the repeated security review before the first public release.
+1. **The push**, when the owner says (every commit since the initial commit of 2026-10-06 is local); the repeated
+   security review before the first public release (item 5).
 2. **Phase 4 follow-ups**: the JxBrowser kit run in the private repository that holds the
    licence (the wall "A JxBrowser licence"); why windowed JCEF on a Java 8 target creates no browser (unverified since
    BS8, gap 44) and why a `srcdoc` iframe never loads in the image; then the open gaps of the table above (38, 40, 42
@@ -1537,9 +1782,20 @@ The review items of the end-to-end review, now decided (gap numbers refer to the
    2026-10-09. Open for the owner: the review of the committed scenario C. Open from the review, not fixed: the table-unaware personal rule (L2 F10, a documented
    over-masking), a row mask whose effect depends on the value (not found by the start probe), a verb that compiles with
    none of the probe argument sets (offered as is), key nullability of allow-listed tables (unchecked); and gap 49 (the
-   item query's missing induction argument). Worth a re-measure later: the model's self-reported confidence at other
+   item query's missing induction argument; not taken in Phase 6, D193). Worth a re-measure later: the model's self-reported confidence at other
    efforts (D113 rests on four answers), and the session's strict tools once the provider's union limit moves.
 4. **The display-test focus flake is explained and mitigated** (2026-10-08, A39; "Open flake" under "Status at a
    glance"). Still open there: the native reason why the Java 8 toolkit thread does not flush an EDT-issued focus request
    while idle, and the garbage-collection-dependent skip of `SwingDisplayTest.refBecomesStaleOnceTheComponentIsCollected`
    (3 of 60 runs on 2026-10-08, once under emulation on 2026-10-03).
+5. **Phase 6 is built** (2026-10-09; six packages; `design/phase6-contracts.md` as built; B26 and B27 provisional).
+   In this order: (a) the Linux matrix of the integrated tree (arm64 twice, amd64 once; the first arm64 round was
+   started on 2026-10-09), reading the reports' counts and `java.version`, not only the exit codes; (b) the Phase 6 code
+   review (three lenses, a sceptic each) and its fix wave, whose decisions join B27 from D222; (c) pass 2 of the repeat
+   security review (eight lenses, L3-L6 as deltas), its record and dispositions, with `SECURITY.md` and
+   `docs/release-checklist.md` written beside it (D148; neither is in the tree yet); (d) then **B26 and B27** for the
+   owner (`B26 ok, B27 ok`, or the vetoes by name; two effects to read first: S52 and D210) and, after pass 2, the
+   signature of **B28**; (e) the Windows host, when it exists: the §9.5 list and the exit criterion that names Windows.
+   Open from the packages: the amd64 image legs of the hooks module and the home's ITs; a real OpenTelemetry Collector
+   (§13.4); gaps 53, 54, 58 and 59 (measurements and spans beyond the root); the code-review questions of D163, D166
+   and D168; S46 item 4.

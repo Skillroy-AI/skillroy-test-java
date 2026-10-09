@@ -40,7 +40,7 @@ import java.util.TreeMap;
  *
  * <ul>
  *   <li>{@code status}: the agent's {@code hook.health} (states, counts, the armed stubs, the spy's counters, the
- *       installed catalogue, the other bytecode agents, decision D-HK-12), beside the pack's catalogue (id, version,
+ *       installed catalogue, the other bytecode agents, decision D180), beside the pack's catalogue (id, version,
  *       hash, the entries, the warnings of phase6-contracts.md 5.1) and whether they match; exit 0.</li>
  *   <li>{@code install}: {@code HookInstaller} with mode {@code ON}; prints the {@code hooks} record; exit 0 when the
  *       install ran (hooks unavailable with their fallbacks included), 1 when it was refused (PRECONDITION_FAILED,

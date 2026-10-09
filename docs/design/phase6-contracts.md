@@ -1,9 +1,11 @@
 # Phase 6 contracts: hooks, Byteman, Windows, OTel, hardening (the hook engine and `Spy`, the optional Byteman module, a JDK 25 target through `JAVAAGENT`, the Windows path, OpenTelemetry export, the tenant-pack overlay, the repeat security review and release hardening)
 
-**Status: specified 2026-10-09, revised the same day after the contract review; not built.** The questions of §17
-are answered by the orchestrator and recorded as decision **B26** (`../DECISIONS.md`); the decisions the build and its
-review take without the owner will be D-numbered in §16 and recorded as **B27**; the sign-off of the repeat security
-review is the owner's and will be **B28** (§12.6). Spike **BS3** (the hook go/no-go) reported on 2026-10-09 while this
+**Status: specified 2026-10-09, revised the same day after the contract review; built the same day by six packages
+(TL, HK, CP, BW and the two security-fix packages of FX, FX-2 and FX-1, in the order they landed), under review.** The questions of §17
+are answered by the orchestrator and recorded as decision **B26** (`../DECISIONS.md`, provisional); the 62 decisions the
+build took without the owner are D160-D221 in §16 and recorded as **B27** (provisional); the sign-off of the repeat
+security review is the owner's and will be **B28** (§12.6). What the build did to each section is its "As built" notes;
+the code review, its fix wave, pass 2 of the security review and the Linux matrix follow. Spike **BS3** (the hook go/no-go) reported on 2026-10-09 while this
 contract was written: **passed with conditions** (`../../spikes/BS3/RESULT.md`: Java 8 and Java 25 targets,
 `JAVAAGENT` and `ATTACH`, 17 configurations, every probe verdict PASS), and its six conditions are rules of §2 and §3;
 a statement that rests on the spike cites it as `BS3 RESULT §n` (its §9 is the numbered list of facts). The security
@@ -21,11 +23,11 @@ the design overview `base-framework-design.md`, `attach §Fn/Rn/Cn` and `control
 `../research/attach-instrumentation.md` and `../research/control-channel.md`, and `map n §m` is one of the seven
 reader maps of 2026-10-09 kept in the session notes (not in this repository). Decisions taken here are **D114 to
 D159** (§16; D105-D109 were never minted and are not back-filled; D149 and D150 are superseded by D156 and D159);
-the build's decisions start at **D160** and are numbered by the orchestrator at integration (§16's preamble);
-amendment ids continue the global sequence from **A40**, assigned by the orchestrator in `dispositions.md` for the
-security fixes (A40-A60, §12.2) and by the orchestrator at integration, from A61, for any other the build needs (never
-by an implementer, §2.3); gaps continue from **50** (§15.2); the repeat review's
-findings are S35 onwards; the one new spike is **BS14** (§7.2).
+the build's decisions are **D160 to D221**, numbered by the orchestrator at integration in landing order (§16's
+preamble); amendment ids continue the global sequence from **A40**, assigned by the orchestrator in `dispositions.md`
+for the security fixes (A40-A60, §12.2) and by the orchestrator at integration, from A61, for any other the build
+needs (never by an implementer, §2.3); gaps continue from **50** (§15.2), the build's own from **58**; the repeat
+review's findings are S35 onwards; the one new spike is **BS14** (§7.2).
 
 What Phase 6 is for, in one paragraph. Phases 1 to 5 built everything a scenario needs through public seams: the
 application's own input seam, its decision code as verifiers, its data through guarded reads, its web views through
@@ -348,7 +350,8 @@ the hooks module needs (§2.1); the assembly descriptors and the content tests a
   security fix S<n>, A<m>, built …)" (§12.2).
 - **Decision and amendment numbers are never minted by an implementer.** A build decision is recorded in the
   implementer's own notes as `D-<tag>-<n>` and numbered **D160 onwards** by the orchestrator at integration, in the
-  order the packages land (§16's preamble); the security fixes' A-numbers (A40 onwards, in S order, one per finding
+  order the packages land (§16's preamble; done on 2026-10-09, D160-D221, and every `D-<tag>-<n>` of the notes below
+  replaced by its number); the security fixes' A-numbers (A40 onwards, in S order, one per finding
   that changes a contract passage) are assigned by the orchestrator in `dispositions.md` before the wave (§12.2).
 - **Spike BS14** (§7.2) is a standalone Maven project under `spikes/BS14/` in the form of `spikes/BS6` and
   `spikes/BS13` (README, RESULT.md with a verdict line and "Facts for the Phase 6 build"), run before the Byteman
@@ -383,7 +386,7 @@ the surefire line is as specified, the spy module excluded, `skillroy.agent.hook
 `maven-dependency-plugin:properties`. Beyond the contract each `*FreshJvmTest` class of the hooks module runs in a
 surefire execution, and so a JVM, of its own (six of them: the first install, the strict loader, the detach budget,
 the planted reference, the `Nexus` measure, the collectable loader), and the other classes share the default
-execution's JVM (D-HK-7). `reuseForks=false` would give every class a JVM, but surefire 3.6.0 runs no test at all that
+execution's JVM (D175). `reuseForks=false` would give every class a JVM, but surefire 3.6.0 runs no test at all that
 way when `-Djvm` names a Java 8 JVM (found in the Java 8 leg: the fork starts and is never handed its class). The
 shared classes are made independent of each other: the spec helper of the tests pins a fixture class to
 `loader: system`, so a copy of the same class that another test left in a child loader never widens a spec. Two more
@@ -655,26 +658,26 @@ the advice's path, which reads the volatile slot only).
   a hooked method, for example an overridden `toString`) returns null at once and counts in `Spy`'s `enters` only.
 
 **As built (Phase 6, HK, 2026-10-09):**
-- **The advice binds a site key, not the bare hook id** (D-HK-3): §4.3's payload names the class, the method and the
+- **The advice binds a site key, not the bare hook id** (D171): §4.3's payload names the class, the method and the
   descriptor, and `Spy`'s three-argument shape hands the handler nothing but the bound string, the receiver and the
   arguments, so the `@HookId` constant of each hooked method is `<id> <class> <method><descriptor>` (a space cannot
   occur in any of the parts), which the handler's registry resolves to the hook and the event's names with one map
   read. A hook with several descriptors, or a class defined by several loaders, has several sites.
 - **The restore's recorder** is a second, short-lived instance (`Transformers.After`) registered last for the
   restore's retransformation and removed after it, while the recorder that keeps the first bytes and counts the
-  events stays registered ahead of the hook transformer for the hooks' life (D-HK-5): §3.5's "re-registered last" moved
+  events stays registered ahead of the hook transformer for the hooks' life (D173): §3.5's "re-registered last" moved
   the one recorder behind the hook transformer for good, so that a later install would have captured advised bytes as
   a new class's reference.
 - **The hook transformer is never removed while the ledger holds a class** (§3.5 allows "answers null … or is removed
   with `removeTransformer` when no hook is left"): it answers null for a class being restored and is removed, with the
   recorder, only when the ledger is empty, which keeps D117's invariant without a second case.
-- Steps 1 to 6 are as specified. A catalogue of which nothing installs is **not recorded** as installed (D-HK-15), so
+- Steps 1 to 6 are as specified. A catalogue of which nothing installs is **not recorded** as installed (D183), so
   that the next run's install probes again (a class loaded later can then be hooked) rather than answering
   `alreadyInstalled` for nothing. A spy jar refused at step 3 makes `hook.engine` `UNAVAILABLE` with the refusal until
   the next install, which checks the jar again (the operator may have replaced it).
 - **`<n>` of "Spy slot held by a disarmed handler of an earlier agent; `<n>` classes still carry advice"** comes from
   the system property `skillroy.hooks.adviceLeft`, which a detach that ran out of budget sets to the number of classes
-  it left (D-HK-9): the earlier engine's loader is unreachable from the new one, and the property is the one place both
+  it left (D177): the earlier engine's loader is unreachable from the new one, and the property is the one place both
   can see; without it the text says "an unknown number of".
 - The `Nexus` measure, `makeRaw()`, the pre-filter (which also refuses, at transform time, a class whose class file the
   JVM hands larger than `hooks.maxClassBytes`) and the explicit batches are as specified; the advice of a site is
@@ -743,10 +746,10 @@ spec: it installs the ones that pass, reports the others with their state, and t
 fallbacks (§5.3).
 
 **As built (Phase 6, HK, 2026-10-09):**
-- **Several loaders define the class:** the spec's state is decided by the first class that fails (D-HK-10), so a
+- **Several loaders define the class:** the spec's state is decided by the first class that fails (D178), so a
   spec is installed on all of them or on none; `loaders` and `loaderIds` report each.
 - **A method already hooked** by an installed hook or an earlier spec of the call is `UNAVAILABLE("method already
-  hooked: <class>.<method><descriptor>")` (D-HK-11); two advices on one method would fire twice. `capture` on a hook
+  hooked: <class>.<method><descriptor>")` (D179); two advices on one method would fire twice. `capture` on a hook
   whose mode is not `CAPTURE` is `INVALID_PARAMS` with `data.param specs[n].capture` (the catalogue reader's rule,
   enforced by the agent as well); duplicate ids in one call likewise.
 - **"Ledger full"** counts the distinct new classes of the call against `hooks.maxClasses`.
@@ -870,7 +873,7 @@ install; a class they had not loaded would fail inside `Spy`'s catch, counted, n
 unbuilt (design §2.2 step 6).
 
 **As built (Phase 6, HK, 2026-10-09):**
-- **A residue is a reference to `Spy` the restored bytes hold and the first bytes did not** (D-HK-4; `ByteVerification`
+- **A residue is a reference to `Spy` the restored bytes hold and the first bytes did not** (D172; `ByteVerification`
   of §3.6 changed with it). Found by the build: HotSpot merges constant pools across redefinitions, and after another
   agent's `redefineClasses` the JVM keeps no cached initial bytes and reconstitutes a class with the merged pool, so a
   class hooked, fully restored, redefined by someone else and hooked again hands the next install "first" bytes that
@@ -945,7 +948,7 @@ duplicates, an array class entry as its element class (`[Ljava/lang/String;` as 
 primitive type not at all; the class adds `majorVersion(byte[])` (the spy jar's `--release 8` check of §3.2 step 3)
 and `thisClass(byte[])`. `ByteVerification.compare` answers `RESIDUE` when `after` references a class under the
 prefix (dots read as slashes), whatever the byte comparison says, else `IDENTICAL` or `FOREIGN_CHANGE`. **A batch needs
-the classes' sizes, which the signature above cannot know** (D-HK-2): `RetransformBatches` has the nested interface
+the classes' sizes, which the signature above cannot know** (D170): `RetransformBatches` has the nested interface
 `Sizes { long bytes(Class<?>) }`, the four-argument `of(List<Class<?>>, Sizes, long maxBytes, int maxClasses)`, and the
 three-argument form above using `CLASS_FILE_RESOURCE` (the size of the class's `<name>.class` resource from its
 defining loader, the bootstrap's through the system loader); an unknown size counts as `maxBytes`, a class larger than
@@ -975,7 +978,7 @@ record naming the key, §3.2):
 | `hooks.capture.maxBytes` | `16384` | the budget of one `CAPTURE` event's encoding, counted on the input (§4.3) |
 | `byteman.jar` | – | the user-supplied Byteman jar, an absolute path (§7.4); **no default and no environment fallback**: without the option `rule.engine` is `UNAVAILABLE("no byteman.jar configured")` |
 
-**As built (Phase 6, HK, 2026-10-09):** the ranges the contract left open (D-HK-8): `hooks.maxClassBytes` 1024 to
+**As built (Phase 6, HK, 2026-10-09):** the ranges the contract left open (D176): `hooks.maxClassBytes` 1024 to
 16 MiB, `hooks.maxMethods` 1 to 65535, `hooks.maxClasses` 1 to 1024, `hooks.detachBudgetMs` 1000 to 9000,
 `hooks.capture.maxBytes` 1024 to 1 MiB; a value out of range or not a number fails the install with
 `IllegalArgumentException("option <key> …")`, which the core records as the module's `FAILED` message.
@@ -1026,7 +1029,7 @@ the engine's capability or a primitive's name), `topic()` (`emits` or `hook.<id>
 `secretArgs` when not empty, `secretResult` when true), so the hash of a spec read from JSON with the defaults spelled
 out equals that of one without them. `HookSpec`, `HookTarget` and `HookCapture` refuse unknown keys; `HookProbe`,
 `HookStatus` and `HookHealth` are answers and are read leniently, as `PrimitiveDescriptor` is. **`HookProbe` gains
-`loaderIds?: [string]`** beside the count `loaders` (D-HK-1): §4.1 lets `target.loader` name "the hexadecimal identity
+`loaderIds?: [string]`** beside the count `loaders` (D169): §4.1 lets `target.loader` name "the hexadecimal identity
 the agent reported for a loader in an earlier probe answer", and the shape had no field that reports one; each entry
 is `system` for the system loader and otherwise the loader's `System.identityHashCode` in hexadecimal. `HookProbe.state`
 is a `CapabilityState`, and `spyVisibility` the nested enum `HookProbe.SpyVisibility`. **`HookStatus.state`** is the
@@ -1068,13 +1071,13 @@ client's `hook.remove` would drop a person's evidence mid-run.
 
 **As built (Phase 6, HK, 2026-10-09):** the six primitives, flags, timeouts and threads are as in the table.
 `hook.probe` and `hook.install` take at most 64 specs. `hook.health` also answers `otherAgents` and `spy.onBootPath`
-(D-HK-12: `skillroy hooks status` prints `otherAgents`, §6.2, and reads them from `hook.health`); without a `Spy` on the
+(D180: `skillroy hooks status` prints `otherAgents`, §6.2, and reads them from `hook.health`); without a `Spy` on the
 bootstrap path `spy.version` is null and the counters are zero. `hook.events` refuses a `limit` outside 1 to 1000 with
 `INVALID_PARAMS`; for an id that is not installed it filters on `hook.<id>`. `hook.stub` refuses a JSON object or array
 as `value`.
 
 As built (Phase 6, CP): `ToolProjection.NEVER_OFFERED` and `ToolProjection.HOOK_READS`; the three reads are offered by
-every policy, the session service's included, whose policy otherwise offers no primitive read (P5 §12.4) (D-CP-4);
+every policy, the session service's included, whose policy otherwise offers no primitive read (P5 §12.4) (D187);
 `PlanPolicy` refuses a base verb's and a pack verb's call of any other `hook.*` or `rule.*` primitive.
 
 ### 4.3 Events, the value encoding and the masking
@@ -1121,7 +1124,7 @@ every policy, the session service's included, whose policy otherwise offers no p
   `hooks.stubbed {id, armed: bool, by: "call" | "spi"}` (every arm or clear, by `hook.stub` or by the SPI; never the
   value), source `hooks`.
 
-**As built (Phase 6, HK, 2026-10-09):** the encoding is as specified, with these readings (D-HK-14): a number
+**As built (Phase 6, HK, 2026-10-09):** the encoding is as specified, with these readings (D182): a number
 is encoded when its class is a JDK box (`Integer`, `Long`, `Short`, `Byte`, `Float`, `Double`), `BigDecimal` or
 `BigInteger` exactly, so that no application subclass's method runs; a NaN or infinite number becomes its text (JSON
 has none, and the event would be refused); `BigDecimal` is plain text unless its scale or precision is extreme (then
@@ -1133,7 +1136,7 @@ handle, and so are the JDK collections whose iteration takes a lock (the synchro
 the wrapped collection's). A map key is the text of a JDK scalar, else the key object's handle. A mask policy that
 returns something other than a string, a number, a boolean or null redacts the value. **The output bound equals the
 input budget** (`hooks.capture.maxBytes` both ways, §4.3), so an event whose encoding used the whole budget carries
-JSON beyond it and drops `args`, then `self`, then `returned` (D-HK-13): a capture keeps its values whole only well
+JSON beyond it and drops `args`, then `self`, then `returned` (D181): a capture keeps its values whole only well
 below the budget. A policy that throws makes the handler throw one preallocated `MaskFailure` to `Spy` after the
 event is published, which is how `Spy.counters()[2]` counts it.
 
@@ -1231,7 +1234,7 @@ disabled entries too (the sample's `sign.on.checked` has it: it captures `passwo
 `secretResult`). The entry hash is the protocol's `HookSpec.hash()` of `HookEntry.toSpec()`; `emits` is kept as written
 (an explicit default topic is a different spec from an absent one). `HookCatalogue.descriptor()` is the
 `{id, version, hash, application?}` that `hook.install` takes; `HookCatalogues.overlayResource` and `resourceName` serve
-an overlay's resource. (D-CP-1)
+an overlay's resource. (D184)
 
 ### 5.2 The pack side
 
@@ -1293,7 +1296,7 @@ As built (Phase 6, CP): a catalogue without an enabled entry counts as none (`sk
 under `ON` PRECONDITION_FAILED "… has no enabled hook in its catalogue …"). Step 4's fallback is the first `seam` whose
 primitive the target serves: its descriptor in `GET /schema` names no capability, or a capability the matrix shows
 `OK` (a primitive id is not a capability id); the schema is read only when a hook is unavailable, and without it a
-capability of the primitive's own id decides (D-CP-3). A refused install writes the `hooks` record with `ok: false`,
+capability of the primitive's own id decides (D186). A refused install writes the `hooks` record with `ok: false`,
 `error` and the detail before the run ends. A replaced catalogue adds `replaced: true` to the record. The installer is
 `HookInstaller.install(pack, agent, caps, mode, refuseArmedStubs, clock)`, `refuseArmedStubs` true for `replay` only
 (a session, the MCP server and `skillroy hooks install` record armed stubs). Another value of `skillroy.hooks` is the
@@ -1319,7 +1322,7 @@ As built (Phase 6, CP): a session has no `RunOptions`, so `SessionOptions` gains
 (default `AUTO`, the ten-argument constructor kept, `withHooks`); `ExecutorSession.open` installs under it, before the
 pre-flight and the web path, writes the `hooks` record into the journal's start record (`options.hooks`) and exposes it
 as `hooks()`; the MCP server keeps the switch when it fills in its session's output directory. `--hooks` with another
-value is a usage error (64) before the agent is contacted (D-CP-2). Merged with TL: in both records `hooks` is the
+value is a usage error (64) before the agent is contacted (D185). Merged with TL: in both records `hooks` is the
 eleventh component and `observer` the twelfth; the ten-argument constructors give `AUTO` and `RunObserver.NONE`, every
 `with…` copy keeps both, and the MCP server's copy passes both.
 
@@ -1338,7 +1341,7 @@ eleventh component and `observer` the twelfth; the ten-argument constructors giv
 
 The command is listed in `Main` after `session`; `P1 §8.6`'s command list gains it (§15.1).
 
-As built (Phase 6, CP): `status` reads `otherAgents` from `hook.health`'s answer (D-HK-12), so it calls nothing but
+As built (Phase 6, CP): `status` reads `otherAgents` from `hook.health`'s answer (D180), so it calls nothing but
 `hook.health` (no `hook.probe`). A refused `install` is exit 1 for
 PRECONDITION_FAILED and ENVIRONMENT alike (another catalogue on the target is refused by the installer before
 `HOOK_CONFLICT` could be).
@@ -1366,7 +1369,7 @@ newest event's `ts`; `NOT_READY` also gives the empty list, and the same three c
 headless test of §13.1 item 7 drives a scripted hooks module in `HeadlessDesk` (`launch(env, hooks, swingTree)`):
 the matrix declares `hook.engine` and `hook.limit.applied`, `hook.health` names the pack's catalogue as installed, and
 one `hook.limit.applied` event is published for every return line the engine commits, before it asks for the next
-input, with the signed-on code and the limit the desk's access rules give (D-CP-9). Scenario E's seed bindings are
+input, with the signed-on code and the limit the desk's access rules give (D192). Scenario E's seed bindings are
 approved by `ResolutionChecks` (label `approve`) and written under `-Dskillroy.bindings.update=true`.
 
 **The sample application changes once for it**: `AccessControl.check` reads the `RETURN` limit through
@@ -1629,7 +1632,7 @@ reflecting on internals, out of scope (§7.1, `threat-model.md` §7).
 As built (Phase 6, BW, 2026-10-09):
 
 - **The helper.** `fired(Object)` to `fired(Object, …, Object)` (one to eight bindings, fixed arity: BS14 condition 2;
-  D-BW-2); the one constructor is the branch-free `(org.jboss.byteman.rule.Rule)`, which keeps the rule as `Object` in
+  D195); the one constructor is the branch-free `(org.jboss.byteman.rule.Rule)`, which keeps the rule as `Object` in
   a non-final field; the name, trigger class and method come from the rule's `getName()`, `getTriggerClass()`,
   `getTriggerMethod()` by reflection (cached `Method`s). `count`, `countOf`, `flag`, `flagged`, `clear` are per rule
   (keyed by the rule's name), at most 1024 keys in the JVM; the package-private `forget(rule)` drops a rule's keys at
@@ -1637,31 +1640,31 @@ As built (Phase 6, BW, 2026-10-09):
   (`getClassLoader() == null`), else `<class name>`. The handler slot keeps counters `{fired, unhandled, failures}`.
 - **`RuleManager`.** `initialize` is branch-free and delegates to a private `accept(Object)` (BS14 condition 4); it
   stores the **first** `Retransformer` of the JVM only and ignores every later call, so that no class can replace or
-  clear what Byteman handed over through the public method (D-BW-7). The slot holds the `Retransformer` when parked, or
-  the list of the names of rules a cut-short uninstall left behind (§7.5; D-BW-8); the probe reads the private slot by
+  clear what Byteman handed over through the public method (D200). The slot holds the `Retransformer` when parked, or
+  the list of the names of rules a cut-short uninstall left behind (§7.5; D201); the probe reads the private slot by
   reflection without taking it (no third accessor). `SysConstantPoolTest` holds the jar's three class files to
   `CONSTANT_Class` entries under `java/` and `ai/skillroy/` and major 52.
 - **The lint** as specified, and: `CLASS`/`INTERFACE` must be a fully qualified name (an unqualified one matches a class
   of that simple name in any package, a JDK class loaded later included); outside `RULE … ENDRULE` only blank lines
   and `#` comments (Byteman applies a `HELPER`, `IMPORT` or `COMPILE` line there as the default of the rules after it)
-  (D-BW-11); the deny-list matches whole identifiers in every component of a dotted name and prefixes starting at any
+  (D204); the deny-list matches whole identifiers in every component of a dotted name and prefixes starting at any
   component, after white space around dots is closed up (`java.lang.System.exit`, `System . exit`). `RuleLintTest`
   holds the corpus: one refused rule per entry with "line 6: '<entry>' is not allowed (<reason>)", one accepted rule
   per entry with the word inside its name, and for the identifier-shaped entries inside its method.
 - **`rule.check`** runs `RuleCheck` only while this module instance holds the `Retransformer` and the rule's class is
   defined by the system loader; `RuleCheck`'s errors, parse errors, type errors **and type warnings** are `errors`
-  (a type warning means Byteman would not inject the rule, such as `$!` at `ENTRY`: D-BW-9), its warnings and the
+  (a type warning means Byteman would not inject the rule, such as `$!` at `ENTRY`: D202), its warnings and the
   `WARNING` lines of its buffer are `warnings`.
 - **`rule.submit`** answers `classes` from `listScripts` read right after `installScript`: `injected` (not triggered
   yet), `compiled`, `failed to compile: …` or `threw: …`. A `threw` (a transform-time failure: the rule was not
   injected, and Byteman printed nothing) removes the rule and answers `RULE_REJECTED` with the statuses; an exception
-  out of `installScript` is `RULE_REJECTED` as well (D-BW-10). `messages` are `installScript`'s lines.
+  out of `installScript` is `RULE_REJECTED` as well (D203). `messages` are `installScript`'s lines.
 - **`rule.unload`** of a name the module does not hold answers `{removed: false, restored: []}`. A class another rule
   of the module still touches is not verified (it is not in `restored`); a class whose removal retransformation the
   behind recorder did not see is `DEGRADED("no restore observed")`; foreign events are counted on the ahead recorder
   since the rule's install.
 - **The encoding** follows §4.3 with `mask("rule.<name>", "binding<i>", value)`; a container is read only when its class
-  is the JDK's (iterating an application's own collection would run its code; otherwise it is a handle) (D-BW-12).
+  is the JDK's (iterating an application's own collection would run its code; otherwise it is a handle) (D205).
   `rule.fired.rule` is the name without the `skillroy:` prefix, and only the module's live rules publish.
 
 ### 7.4 Loading Byteman
@@ -1704,14 +1707,14 @@ argument, and a JDK 25 target sees no second JEP 451 warning: the agent itself w
 As built (Phase 6, BW, 2026-10-09):
 
 - **Step 3's option string is `listener:false,manager:ai.skillroy.testjava.agent.byteman.sys.RuleManager`, in that order
-  and nothing else** (BS14 condition 1; D-BW-1): `prop:org.jboss.byteman.verbose=false` is dropped. The sys jar is
+  and nothing else** (BS14 condition 1; D194): `prop:org.jboss.byteman.verbose=false` is dropped. The sys jar is
   `<home>/optional/skillroy-agent-byteman-sys.jar` (the agent option `home`); there is no option for it.
-- **The residue rule** of `ByteVerification` as HK changed it (D-HK-4: a residue is a reference under the prefix that
+- **The residue rule** of `ByteVerification` as HK changed it (D172: a residue is a reference under the prefix that
   the restored bytes hold and the reference bytes did not) suits the module's check: its reference is the ahead
   recorder's first bytes of a class before any rule of the module was on it, so a Byteman reference those bytes
   already carried (a constant-pool entry the JVM merged across an earlier redefinition) is no longer a false `FAILED`,
   while a trigger left behind still is.
-- **Step 4 has two recorders** (BS14 condition 5; D-BW-3): the ahead recorder registered before `premain`, whose first
+- **Step 4 has two recorders** (BS14 condition 5; D196): the ahead recorder registered before `premain`, whose first
   bytes per class are the reference, and the behind recorder registered right after it, whose last bytes after a
   removal are what the JVM installed; §3.5's single recorder re-registered last would, for every later submit, see
   Byteman's output instead of the reference. They record only the classes a rule of the module names (by name, and the
@@ -1719,7 +1722,7 @@ As built (Phase 6, BW, 2026-10-09):
   so before a submit the module retransforms the matched classes whose reference it has not seen yet, in the batches
   of §3.2 (no rule of the module is on them then, so Byteman returns nothing and the recorder sees the initial bytes):
   one extra pause per class, in the reuse case only.
-- **Byteman's console output** (BS14 condition 3; D-BW-4): right after the load the module puts one `PrintStream` of its
+- **Byteman's console output** (BS14 condition 3; D197): right after the load the module puts one `PrintStream` of its
   own into `org.jboss.byteman.rule.helper.Helper.traceMap` (a private static, by reflection) under `out`, `err`, `vrb`,
   `dbg` and `nzy`; it writes each line to the agent's log at WARN (`byteman: …`, at most 2,000 lines, each cut at 1,000
   characters), and the module removes it by identity at `uninstall`. A rule's type error at its first trigger (a rule
@@ -1754,11 +1757,11 @@ As built (Phase 6, BW, 2026-10-09):
   the byte check per class is logged, the `Retransformer` parked, the helper's slot released, both recorders removed,
   the trace streams removed. When it does not: the WARN names the rules, the module **parks the list of their names**
   in `RuleManager`'s slot in place of the `Retransformer` (this is where the next instance's "<names from the log>"
-  come from; D-BW-8), the ahead recorder stays registered holding the disarmed handler in its `keep` field, the behind
+  come from; D201), the ahead recorder stays registered holding the disarmed handler in its `keep` field, the behind
   recorder and the trace streams are removed (so a later failure of the leftover rule prints on the host's stderr
   again: a limit of the abnormal state). The test seam is the JVM system property
   `skillroy.agent.byteman.test.keepRulesAtUninstall=true`, read only by `uninstall`, which then leaves the rules as a
-  cut-short budget would (D-BW-13).
+  cut-short budget would (D206).
 - **Capability `rule.engine`**: declared at `install` with a probe: `UNAVAILABLE("no Instrumentation in <mode>
   mode")`, `UNAVAILABLE("no byteman.jar configured")`, `UNAVAILABLE("not a Byteman jar: …")`,
   `UNAVAILABLE("byteman.jar is writable by others: …")`, `UNAVAILABLE("Byteman was loaded by the host; …")`,
@@ -1984,12 +1987,12 @@ executable).
 
 As built (Phase 6, BW, 2026-10-09; not run on Windows): `AuthorCommand.findOnPath(Map<String,String> env, String
 osName)` is the lookup; on Windows it tries the `PATHEXT` names **before** a file named exactly `claude` (npm installs
-an extensionless shell shim beside `claude.cmd` that Windows cannot start; D-BW-5), reads `PATH` and `PATHEXT`
+an extensionless shell shim beside `claude.cmd` that Windows cannot start; D198), reads `PATH` and `PATHEXT`
 without regard to the variable names' case (`Path`), compares extensions as given, lower- and upper-case, and on Windows
 asks for a regular file (no executable bit); elsewhere `PATHEXT` is ignored and the file must be executable, as
 before. `AuthorCommand.serverCommand(launcher, args)` writes the plain `cmd.exe /c` form and refuses, with exit code 64
 and the remedy, a launcher path or argument holding `"`, `%`, `^`, `&`, `|`, `<`, `>`, a space, a tab or a control
-character (the contract's list plus the two redirection characters and the other white space; D-BW-6).
+character (the contract's list plus the two redirection characters and the other white space; D199).
 `AuthorCommandWindowsTest` (five tests) proves the lookup, the form and the refusals on Linux.
 
 ### 9.3 Every owner-only file through `SecureFiles` (D138) (Linux-testable for the POSIX branch; the ACL branch
@@ -2160,7 +2163,7 @@ where model latency and SQL time went.
 
 *As built (Phase 6, TL, 2026-10-09):*
 
-- **The SPI's additions (decision D-TL-2 of the build).** A span must be open before its children, and the table of
+- **The SPI's additions (decision D161 of the build).** A span must be open before its children, and the table of
   §10.4 parents a session step under its turn and a tool call's work under the client's trace, which after-the-fact
   methods cannot do. `RunObserver` therefore has, as `default` no-ops beside the methods above,
   `sessionStarted(SessionStart)` (`SessionStart(id, pack, packVersion, policy)`, the policy `read-only` or `acting`
@@ -2173,11 +2176,11 @@ where model latency and SQL time went.
   `hooks` (CP) did not exist there; the integration places `hooks` eleventh and `observer` twelfth as §6.1 says, and
   every caller uses `withObserver` and the older constructors only. The session's observer is
   **`SessionOptions.observer`** (an eleventh component with `withObserver` and the ten-argument constructor kept;
-  decision D-TL-3): `ExecutorSession` wraps it, and `ExecutorSession.observer()` hands the same wrapped observer to
+  decision D162): `ExecutorSession` wraps it, and `ExecutorSession.observer()` hands the same wrapped observer to
   `SessionService` (`turnStarted` at the start of `ask`, `sessionTurn` when the turn is recorded) and to the MCP
   server (`toolCallStarted` and `toolCall` around each call's dispatch, under the session lock, so that concurrent
   calls never interleave; `skillroy_scenario_run`'s runs carry it too). `ServerOptions` is unchanged.
-- **The scenario records reach the observer through `RunLog` (decision D-TL-5).** `RunLog.observe(observer)` passes
+- **The scenario records reach the observer through `RunLog` (decision D164).** `RunLog.observe(observer)` passes
   every record of the types `requires`, `launchProperties`, `preflight`, `hooks`, `capabilities`, `recover`,
   `cleanup` (the seven) and `expect`, `db`, `prompt`, `fidelity`, `capture` (the step span's events of §10.4, which
   the SPI had no method for) to `scenarioRecord`, as written (masked, JSON form, without `type` and `t`), whoever
@@ -2228,7 +2231,7 @@ line `telemetry: otlp <endpoint host:port>, trace <id>, <n> batches dropped` (th
 its headers; the dropped count from the module's own failure handler, §10.4).
 
 *As built (Phase 6, TL, 2026-10-09):* the reader is **`TelemetrySettings.load`** in `skillroy-scenario`'s `observe`
-package (decision D-TL-1 of the build), not in `skillroy-telemetry`: the JUnit glue, which does not depend on the
+package (decision D160 of the build), not in `skillroy-telemetry`: the JUnit glue, which does not depend on the
 module, reads the file and the properties the same way, and the CLI decides `none` without loading anything; the
 module's `create` checks the endpoint rule again and reads the header values. Rules beyond the table: an endpoint
 with user information, a query or a fragment is refused; **every `ANTHROPIC_*` variable** is refused as a header's
@@ -2286,7 +2289,7 @@ already carry `ts`, `seq`, `topic`, `source`, `correlationId`, `traceparent`.
 
 *As built (Phase 6, TL, 2026-10-09):*
 
-- **Threads (decision D-TL-4 of the build).** `BatchSpanProcessor` 1.66.0 offers no thread factory: its daemon worker
+- **Threads (decision D163 of the build).** `BatchSpanProcessor` 1.66.0 offers no thread factory: its daemon worker
   is named by the SDK (`BatchSpanProcessor_WorkerThread-1`). The JDK sender's `HttpClient` runs on an executor of
   daemon threads named `skillroy-telemetry` (`setExecutorService`), which `close` shuts down; the JDK adds its own
   selector thread. The exporter runs **without retry** (`setRetryPolicy(null)`) and with the settings' timeout as the
@@ -2481,16 +2484,16 @@ As built (Phase 6, CP): `Edition {STANDARD, BRANCH}` carries the limit column an
 `LendingDb.create/createServable(name, seed, edition, today)`, `AccessControl.load(connection, edition)` and
 `Engine(…, edition)` take it, the old signatures meaning `STANDARD`; `ReturnCeilings(access).applicable(code)`;
 `LendingApp.edition()`. For §13.1 item 6's "which path calls it", `AccessControl` and `ReturnCeilings` carry
-package-private call counters that only the application's own tests read (D-CP-8). The pack's public surface:
+package-private call counters that only the application's own tests read (D191). The pack's public surface:
 `LendingResolvers` public with public, non-final resolver classes, a public constructor taking the statement where a
 resolver runs one (`SystemLimitResolver(sql)`, `StaffResolver(staffSql)`), the resolver ids as constants
 (`STAFF_ID`, …) and the SQL texts; the verifier ids as `LendingPack` constants; `LendingAllowList.of(limitColumn,
 maxReturnSetting)` (whose standard descriptions are byte for byte the 0.4.0 ones, so scenario D's recorded requests
 still match); `LendingPack.MAX_RETURN_SETTING` and `DEFAULT_MAX_RETURN_SETTING`. The overlay's `BranchPack` builds its
-resolution catalogue and its hook catalogue once, on first use. Gap 49 is not taken (D-CP-10). Pack 0.5.0 changes the
+resolution catalogue and its hook catalogue once, on first use. Gap 49 is not taken (D193). Pack 0.5.0 changes the
 session's vocabulary text ("The pack: lending 0.5.0"), so the five scripted stand-in recordings of the interactive
 session were regenerated by the fixture update path (`-Dskillroy.inference.fixtures.update=true`), the export's YAML,
-plan and bindings with them (version and hashes only); scenario D's two live recordings are untouched (D-CP-7).
+plan and bindings with them (version and hashes only); scenario D's two live recordings are untouched (D190).
 
 ### 11.4 Plans, bindings and the variant's acceptance
 
@@ -2516,7 +2519,7 @@ As built (Phase 6, CP): the overlay's jar is **not** on the scenarios module's t
 (for the reactor order) excluded from the surefire and failsafe class paths (`classpathDependencyExcludes`) and handed
 to the tests as `-Dskillroy.it.overlayJar` (`maven-dependency-plugin:properties`), which `BranchVariant` loads in a class
 loader of its own over the test class path; on the class path itself, `ServiceLoader` would overlay the pack of every
-standard-edition test, the JUnit glue's included (D-CP-6). The variant's bindings carry the label `approve` and are
+standard-edition test, the JUnit glue's included (D189). The variant's bindings carry the label `approve` and are
 written by `BranchEndToEndIT` under `-Dskillroy.bindings.update=true` (compared byte for byte otherwise). The negative
 half runs E's standard plan with the variant's `branch-a` bindings (the same resolve hash and fingerprint) and a 10 s
 step timeout.
@@ -2713,12 +2716,12 @@ CP, TL and BW build nothing of them; CP's own `ToolProjection` and `PlanPolicy` 
   reversing D98, and makes the step protocol settle and recover after a wait); the controller-only named set (a
   third-party adapter or a later primitive would be missed, map 5 §8 Q11). **As built (Phase 6, SR, 2026-10-09):**
   the descriptor writes `"script": true` only when the flag is set (a primitive without it serialises as before, so
-  an older reader and the pinned wire test are unchanged; D-SR-1); `PrimitiveDescriptor` keeps its nine-argument
+  an older reader and the pinned wire test are unchanged; D216); `PrimitiveDescriptor` keeps its nine-argument
   constructor and gains a tenth `script` argument; the projection's `readOnly` uses the same fallback as its
   exclusions (`ToolProjection.isScript(d)`: the flag, or a name of `SCRIPT_PRIMITIVES`), so an older agent's unflagged
-  `web.waitFlag` is not annotated `readOnlyHint: true` either (D-SR-2); "the policy excludes script primitives" is
+  `web.waitFlag` is not annotated `readOnlyHint: true` either (D217); "the policy excludes script primitives" is
   `Policy.excludesScripts()`, true when `excluded` holds every name of `SCRIPT_PRIMITIVES` (`readOnly(false)`,
-  `mutating(false)`, `session(...)`), a derived method rather than a new record component (D-SR-3); the shared
+  `mutating(false)`, `session(...)`), a derived method rather than a new record component (D218); the shared
   never-for-a-client rule refuses a flagged primitive under the same condition (`CallPolicy.scriptRefusal`, called by
   `CallPolicy.never`, so that `PlanPolicy` and, after FX-2's S62, the session service's verb checks both apply
   it); the dispatcher's refusal is a second check after the mutating one, with its own message ("… evaluates a
@@ -2765,9 +2768,9 @@ lives on `BudgetMeter` (`markExhausted`, `exhausted`), which `SessionService` no
 so that the service and `skillroy_scenario_run` share it; a run's refused reservation exhausts the session (D74), as a
 refused resolve does; the estimate and the settlement are `…inference.budget.SessionMetering`'s, shared with
 `SessionService.resolve`; a `skillroy_resolve` the server runs without an actor is metered on the same meter
-(D-SR2-4). D158: `ExecutorSession.compile(verb, args)` answers `Compiled(calls, cleanup, refusal)`, with an overload
+(D211). D158: `ExecutorSession.compile(verb, args)` answers `Compiled(calls, cleanup, refusal)`, with an overload
 `compile(verb, args, origin)` that strips the arguments as `execute` does for that origin (the session service checks
-with it, D-SR2-5); the never-for-a-client rule and the start-time probe arguments are `…inference.tools.CallPolicy`'s
+with it, D212); the never-for-a-client rule and the start-time probe arguments are `…inference.tools.CallPolicy`'s
 (`never`, `arguments`, `refusals`, `probes`), to which `PlanPolicy` delegates; a verb the session service withholds is
 listed by its `skillroy_catalogue` under `withheldVerbs` and not logged (the service has no log). D159: the text
 resource is `skillroy://mcp/<n>.png.txt`; images are served when `ServerOptions.inference().images()` is true.
@@ -3076,9 +3079,9 @@ after 57.
 | # | Gap | In Phase 6 |
 |---|---|---|
 | 31 | `ROBOT` type mode, `OPTION_VALUE` dismissal, `swing.events` | unchanged: nothing of Phase 6 needs them; moved to "later" |
-| 32 | Hook catalogue: an `enabled` flag per hook | closed (specified): §5.1, the sample's `sign.on.checked` |
-| 33 | Third-party isolation when the host ships an older copy of the same library | closed (specified): §2.1's relocation and BS3 RESULT §9 fact 10; `ShadedContentIT` and `HomeConstantPoolIT` keep it closed |
-| 49 | `LendableItem` cannot say "an item that needs no induction" | taken if the build has room: pack 0.5.0 regenerates every plan anyway (§6.3) |
+| 32 | Hook catalogue: an `enabled` flag per hook | closed (built 2026-10-09, CP): §5.1, the sample's `sign.on.checked` |
+| 33 | Third-party isolation when the host ships an older copy of the same library | closed (built 2026-10-09, HK): §2.1's relocation and BS3 RESULT §9 fact 10; `ShadedContentIT` and `HomeConstantPoolIT` keep it closed |
+| 49 | `LendableItem` cannot say "an item that needs no induction" | not taken (D193): the build had no room and nothing depends on it; it waits for the next pack change (§6.3) |
 
 New, for the gaps table, numbered **50-57**: **(50)** a target behind a strict-delegation loader cannot be hooked
 (BS3 RESULT §9 facts 6 and 7; the `java.*` placement of `Spy` would serve it and is rejected, D116); **(51)** another
@@ -3092,14 +3095,24 @@ the `makeRaw()` route itself are specified and not yet measured against `install
 for an exact agent span (D142); **(56)** OpenTelemetry metrics and logs (§10.5); **(57)** a Byteman the host loaded
 on its own command line cannot be reused by the module (§7.4).
 
+The build added two, numbered **58-59**: **(58)** after another agent's `redefineClasses` HotSpot reconstitutes a class
+with the constant pool it merged across redefinitions, so the hooks module verifies a restore relative to the first
+bytes (D172); whether a Byteman restore meets the same on a real redefinition, and whether a Java 8 JVM behaves alike,
+is not measured; **(59)** `re-resolve` and `triage` export their root span only and the planner's `skillroy mcp` child
+exports nothing (D168): spans beyond the root, and a child started with telemetry, are a further egress decision.
+
 ---
 
-## 16. Decisions taken in this contract
+## 16. Decisions taken in this contract and in its build (D114-D221)
 
 D114-D159 were taken by this contract (D149 and D150 as first written are superseded by D156 and D159 and kept as
-struck rows, so that the numbering stays stable). **During the build an implementer records a new decision as
-`D-<tag>-<n>` in its own notes; the orchestrator numbers them D160 onwards at integration, in landing order, and
-writes them into this table** (B27).
+struck rows, so that the numbering stays stable). **D160-D221 were taken by the build of 2026-10-09**: each package
+recorded its decisions as `D-<tag>-<n>` in its own report, and the orchestrator numbered them at integration, in the
+order the packages landed (TL D160-D168, HK D169-D183, CP D184-D193, BW D194-D207, FX-2 D208-D215, FX-1 D216-D221; each
+package's ids ran from 1 without a gap or an extra member), replaced every `D-<tag>-<n>` of the "As built" notes and of
+the other documents by its number, and wrote the rows below, each naming the section it touches and the package that
+took it (B27, provisional). A decision the code review or its fix wave needs is recorded the same way and numbered
+from D222.
 
 | # | Decision | Alternatives rejected | Reason |
 |---|---|---|---|
@@ -3149,6 +3162,68 @@ writes them into this table** (B27).
 | D157 | One `SESSION` budget meter per MCP server bounds `skillroy_session_ask`, `skillroy_resolve` and the tier (b) slots of `skillroy_scenario_run`, a run being refused `BUDGET` before any model call when there is no room or the session is exhausted; built by FX-mcp (= P6-SEC-2, S56; §12.9) | a run on the scenario budget only (the build's behaviour); a per-run cap without settlement | B15 gives a session one money budget and D74 ends its model calls at exhaustion; `scenarioUsd` times a client's patience is no bound. Widens D101 (B24); §17 Q19 |
 | D158 | `Origin.Kind.CLIENT`, which never confirms, is the MCP server's origin (`--client <label>`, `planner` for `author`); a pack verb called through the MCP server or the session service is checked at call time on its compiled calls with the real arguments, the start-time probes deciding only the catalogue; the journal and export say `client <label>`; built by FX-mcp with FX-scenario's seams and FX-inference's `CallPolicy` (= P6-SEC-3, S57, S59, S62; §12.9) | keeping `person("mcp")` and widening the probes; stripping `confirm` only for the planner's server | no finite set of probes covers a verb whose calls depend on its arguments; a client's request is often a model's and is never a confirmation (design §3.4). Amends D96 (B24) and P5 §12.4's host text; §17 Q20 |
 | D159 | A capture's bytes leave the controller to an MCP client only under the inference settings' `images: true` (D84's opt-in, widened to MCP); otherwise the file is written and a text resource names its path; no `--serve-captures`; built by FX-mcp (= P6-SEC-4, S58; §12.9) | a separate `--serve-captures` flag (the superseded D150); serving as today | one question, one switch (D84 already answers "may an image leave the controller"); a capture is personal data until masked (design §3.10) and the client is often a model. Amends D76 (B23 Q7) and widens D84 (B23 Q15); §17 Q21 |
+| D160 | The telemetry settings reader (`telemetry.yaml`, the `skillroy.telemetry.*` properties, the loopback rule, the header rules) is `TelemetrySettings.load` in `skillroy-scenario`'s `observe` package; the module's `create` re-checks the endpoint and reads the header values (§10.3; TL) | the reader in `skillroy-telemetry` (the contract notes' first place) | the JUnit glue does not depend on the module and must read the file and the properties alike; the CLI must decide `none` without loading the module; the reader is plain JDK and StrictYaml |
+| D161 | `RunObserver` gains the default no-op methods `sessionStarted`, `sessionStepStarted`, `sessionRecord`, `sessionEnded`, `turnStarted`, `toolCallStarted` and `traceId`; `StepStart` gains `origin` and `CallEnd` gains `rttMs` (§10.2; TL) | after-the-fact spans only; buffering a session's steps until the turn ends | a span must be open before its children: §10.4 parents a session step under its turn and a tool call's work under the client's trace; `traceId` is what `run-start`, `run --json` and the JUnit report need; `rttMs` is what centring the agent span needs |
+| D162 | A session's observer is `SessionOptions.observer`; `ExecutorSession.observer()` hands it to the session service and the MCP server (§10.2; TL) | a setter on `ExecutorSession`; a component on `ServerOptions` | the session's own start is observed at `open`; one place for every session host; `ServerOptions` is unchanged |
+| D163 | The SDK's `BatchSpanProcessor` worker keeps its own thread name; the JDK sender runs on daemon threads named `skillroy-telemetry`; no retry; no-op meter providers, and nothing asks `GlobalOpenTelemetry` (§10.4; TL) | a hand-written batch processor to name its thread; the SDK's default retry | 1.66.0 has no thread factory, and a processor of our own is more code to audit than a thread name; a refused endpoint must cost one attempt per batch within the timeout |
+| D164 | The seven scenario records and the five step records (among them `expect`, `db`, `prompt`, `fidelity` and `capture`, for which the SPI had no method) reach `scenarioRecord` through a tap in `RunLog` (`RunLog.observe`), by record type, as written (§10.2; TL) | an observer call beside each write site (about twelve sites, some of them CP's) | the records and the spans cannot disagree; CP's `hooks` and `capabilities` writes are covered whichever package lands second; the step span's events (§10.4) had no hook point |
+| D165 | A telemetry header may name no `ANTHROPIC_*` variable (a superset of the four names of D141, `ANTHROPIC_BASE_URL` included); an endpoint may carry no user information, query or fragment (§10.3; TL) | the four named variables only; any URL with an allowed scheme and host | a variable the gateway reads, or will read, is as much the model's as the key is; user information in a URL is a secret in an option |
+| D166 | `minimal` names the `agent` span without its primitive (with `skillroy.id.hash`); `session <id>` and `turn <n>` keep theirs. The exact list does not name the correlation id, which keeps the scenario id: left as a question for the code review (§10.3, §10.4; TL) | the five names of §10.3 only | the agent span's name repeated the primitive that `minimal` replaces |
+| D167 | The root span is `skillroy <command>` (`run`, `session`, `mcp`, `re-resolve`, `triage`, `author`), and `skillroy junit` for a JUnit stream (§10.4; TL) | `skillroy run` for every command | the trace says what produced it; a session or an MCP server is not a run |
+| D168 | `re-resolve` and `triage` export their root span only; `author` exports its root, the planner's ledger entries and its bind and run; the planner's `skillroy mcp` child is started without telemetry (§10.3, §10.4; TL) | plumbing the observer through the batch job, triage and the planner's child | those paths have no executor run to observe and their model calls are in their own ledgers and reports; passing options to a child the planner starts is a further egress decision |
+| D169 | `HookProbe` gains `loaderIds?: [string]` (`system`, or the loader's identity hash in hex) beside the count `loaders` (§4.1; HK) | reading `loaders` as the list; no way to learn a loader's id | §4.1 lets `target.loader` name the hexadecimal identity the agent reported for a loader in an earlier probe answer, and the shape had no field that reports one |
+| D170 | `RetransformBatches.Sizes` and `of(List, Sizes, long, int)`; the three-argument form reads each class's resource size and counts an unknown size as the byte bound (§3.6; HK) | the three-argument form only | a batch bounded by bytes needs the classes' sizes, which a `List<Class<?>>` cannot give; the engine passes the bytes its recorder captured |
+| D171 | The advice binds a site key `<id> <class> <method><descriptor>`, resolved by the handler's registry (§3.2, §4.3; HK) | the bare hook id with a second lookup by class and descriptor (impossible: `Spy` passes nothing else); several constants (`Spy`'s shape is fixed at three arguments) | §4.3's payload names the class, the method and the descriptor; one map read on the application's thread |
+| D172 | A residue is a `Spy` reference that the restored bytes hold **and the first bytes did not**: `ByteVerification` changed after CP and BW had merged part 1 of HK; BW's two recorders are compatible with it (§3.5, §3.6, §7.4; HK) | the constant-pool scan of the restored bytes alone (the contract's wording) | HotSpot merges constant pools across redefinitions and, after another agent's `redefineClasses`, reconstitutes a class with them: a class hooked, restored, redefined and hooked again starts from bytes that already name `Spy` in unused entries (reproduced; `Spy`'s counters show the running code calls nothing); the old rule failed such a restore and held the slot for the JVM's life |
+| D173 | The restore's recorder is a second instance, registered last for one restore and removed after it; the first recorder stays ahead of the hook transformer (§3.5; HK) | re-registering the one recorder last (the contract's wording) | re-registered last for good, the recorder would capture advised bytes as a later class's reference |
+| D174 | The hook transformer stays registered until the ledger is empty, answering null for a class being restored (§3.5; HK) | `removeTransformer` as soon as no hook is left (the contract's other option) | the pre-filter is what keeps the handler strongly reachable while an advice exists (D117); one case instead of two |
+| D175 | Each of the six `*FreshJvmTest` classes of the hooks module runs in a surefire execution, so a JVM, of its own; the other classes share the default execution's JVM and are made independent of each other (the tests' spec helper pins a fixture class to `loader: system`) (§2.3; HK) | `reuseForks=false` for every class (the first build) | a bootstrap append and the slot last for the JVM's life, so those cases need fresh JVMs; but surefire 3.6.0 with `reuseForks=false` runs no test at all when `-Djvm` names a Java 8 JVM (the fork starts and is never handed its class; `reuseForks=true` runs it), which silently emptied the Java 8 leg of the module |
+| D176 | The option ranges the contract left open: `hooks.maxClassBytes` 1024 to 16 MiB, `hooks.maxMethods` 1 to 65535, `hooks.maxClasses` 1 to 1024, `hooks.capture.maxBytes` 1024 to 1 MiB (§3.7; HK) | unbounded | a value out of range must fail the install naming the key (§3.2); the bounds keep a typo from disabling the size limit or the budget |
+| D177 | A detach that leaves classes sets the system property `skillroy.hooks.adviceLeft` to their count; the next probe's reason reads it ("an unknown number of" without it) (§3.5; HK) | a constant text without the count | the contract's reason names `<n>`, and the earlier engine's loader is unreachable from the new one |
+| D178 | Over several loaders a spec is installed on all its classes or on none (the first failing class decides) (§3.3; HK) | hooking the classes that pass | a partly installed hook would report OK while some copies fire nothing; simpler to reason about |
+| D179 | A method already hooked is `UNAVAILABLE("method already hooked: …")`; `capture` on a spec that is not `CAPTURE`, and duplicate ids, are `INVALID_PARAMS` (§3.3; HK) | two advices on one method; leaving the catalogue reader as the only check | two advices give double events per call; the agent is reachable through the SPI and through `skillroy hooks install` as well |
+| D180 | `hook.health` also answers `otherAgents` and `spy.onBootPath` (§4.2; HK; CP's `skillroy hooks status` reads them there) | `otherAgents` only in the probe and install answers | §6.2's `skillroy hooks status` prints `otherAgents` from `hook.health` |
+| D181 | The output bound of a capture equals its input budget (`hooks.capture.maxBytes`): an event that used the whole budget drops `args`, then `self`, then `returned` (§4.3; HK) | a larger output bound | the contract states one limit for both; recorded so that a catalogue author knows that captures keep their values whole only well below the budget |
+| D182 | Encoding readings: JDK number boxes, `BigDecimal` and `BigInteger` exactly; NaN and infinities as text; extreme `BigDecimal` scales as scientific text; a `BigInteger` above 6,000 bits cut; JDK collections iterated except those whose iteration takes a lock (synchronized wrappers, `Vector`, `Stack`, `Hashtable`, `Properties`, blocking queues), JDK wrappers such as unmodifiable views iterated; map keys as JDK-scalar text or handles; a policy's non-scalar result redacted (§4.3; HK) | encoding any `Number` or `Collection` as such | no application method may run on the application's thread, no application lock may be taken, and the event must be JSON (NaN is refused) |
+| D183 | A catalogue of which nothing installs is not recorded as installed (§3.2; HK) | recording it (then `alreadyInstalled` for nothing) | the next run probes again, so a class loaded later is hooked; nothing permanent happened |
+| D184 | The catalogue reader: `HookCatalogues.read` throws `ScenarioException` with source and line; `ofPack` caches per pack class and id and rethrows a malformed resource as `IllegalStateException` on every call (a compile error or `ENVIRONMENT`); `packages` absent means every entry off unless `enabled: true`; a `reflect` fallback is an error at its line; the secret-name warning also covers disabled entries; `emits` is kept as written, so that an explicit default topic hashes differently from an absent one (§5.1; CP) | normalising `emits` | the catalogue hash must be the agent's |
+| D185 | `SessionOptions.hooks` is the eleventh component (the ten-argument constructor is kept; `observer` is the twelfth after the merge with TL): a session has no `RunOptions` (§6.1; CP) | a parameter of `ExecutorSession.open` | the MCP server and the CLI already carry options |
+| D186 | Step 4's fallback is the first `seam` whose primitive the target serves, read from `GET /schema` (a primitive's descriptor names its capability, or none) and only when a hook is unavailable; without a schema, a capability of the primitive's own id decides (§5.3; CP) | treating the seam id as a capability id | wrong for most seams |
+| D187 | `hook.health`, `hook.events` and `rule.list` are offered by every MCP and session policy, the session service's read-only one included, although P5 §12.4's policy otherwise offers no primitive read (§4.2; CP) | offering them only under `--allow-base` | a person's evidence is what a client is meant to read |
+| D188 | A catalogue with no enabled entry counts as "no catalogue": `AUTO` skips it, `ON` is `PRECONDITION_FAILED` (§5.3; CP) | none recorded by the implementer | none recorded; the controller's side of the rule of D183 (nothing installed, nothing recorded) |
+| D189 | The branch overlay's jar is off the scenarios module's test class path (`classpathDependencyExcludes`), handed in as `-Dskillroy.it.overlayJar` and loaded by `BranchVariant` in a class loader of its own (§11.4; CP) | a separate module for the variant's tests | on the class path `ServiceLoader` would overlay every standard-edition test's pack; a separate module is heavier, and the variant needs the scenarios module's harness |
+| D190 | Pack 0.5.0 changes the session prompt's vocabulary line, so the five scripted session stand-in recordings were regenerated by the fixture update path, with the export's YAML, plan and bindings; scenario D's two live recordings are untouched (§11.3; CP; FX-2 regenerated the five again for D210) | re-recording scenario D's live requests | their requests still match: the standard allow-list descriptions are byte-identical |
+| D191 | `AccessControl` and `ReturnCeilings` carry package-private call counters that only the application's own tests read (§11.3; CP) | none recorded by the implementer | §13.1 item 6 asks which path calls them |
+| D192 | `HeadlessDesk.launch(env, hooks, swingTree)` scripts a hooks module (a matrix with `hook.engine` and `hook.limit.applied`, `hook.health` naming the pack's catalogue, one `hook.limit.applied` event per committed return line), so that scenario E's headless test runs without the hook engine (§11.4, §13.1; CP) | none recorded by the implementer | E's headless test must run without HK's engine |
+| D193 | Gap 49 (an `inductionRequired` argument on `LendableItem`, the contract's optional item) is not taken in Phase 6 (§11.3, §15.2; CP) | taking it with pack 0.5.0, which regenerated every plan anyway | no room, and nothing depends on it |
+| D194 | Byteman is started with the options `listener:false,manager:<the sys jar's RuleManager>`, in that order, and nothing else (§7.4; BW) | the contract's string with `prop:org.jboss.byteman.verbose=false`; `manager:` before `listener:false` | BS14: `prop:` prints on the host's stdout and, because Byteman reads the property by presence, `=false` turns verbose on; a later `listener:false` clears the manager |
+| D195 | The helper's `fired` is a set of fixed-arity overloads of one to eight `Object`s (§7.3; BW) | `fired(Object...)` | BS14: Byteman's type checker does not match a varargs method |
+| D196 | Two byte recorders, one ahead of Byteman (registered before `premain`) and one behind it (after `premain`); in the reuse case a priming retransformation of the matched classes not yet seen (§7.4; BW) | §3.5's single recorder re-registered last; no reference in the reuse case | BS14 condition 5: a recorder after Byteman sees Byteman's output, never the reference, for every later submit |
+| D197 | Byteman's trace map is redirected into the agent's log (WARN, bounded) and removed at uninstall (§7.4, §7.5; BW) | leaving Byteman's stderr output and recording the limit; relying on the type check alone | BS14 condition 3: a rule on a class of a loader other than the system loader escapes `RuleCheck`, and its first-trigger failure would reach the host's console |
+| D198 | On Windows `claude` plus each `PATHEXT` extension is tried before a bare `claude`; `PATH` and `PATHEXT` are read case-insensitively (§9.2; BW) | the bare name first; an unspecified order | npm installs an extensionless shell shim beside `claude.cmd`, which Windows cannot start |
+| D199 | The refusal set for a launcher path or argument written into a `cmd.exe /c` configuration: the double quote, `%`, `^`, `&`, the pipe, `<`, `>`, white space and control characters (§9.2; BW) | the contract's list only | `<` and `>` are redirections; a tab splits like a space |
+| D200 | `RuleManager.initialize` keeps the first `Retransformer` of the JVM and ignores later calls (§7.3; BW) | a plain store | the public method is callable by any class; set-once stops replacing or clearing what Byteman handed over |
+| D201 | A cut-short uninstall parks the list of the leftover rule names in `RuleManager`'s slot (§7.5; BW) | a system property; reading the agent's log; a third accessor | the names must cross agent instances without a new public surface or host-visible state |
+| D202 | `RuleCheck`'s type warnings are errors in `rule.check` and `rule.submit` (§7.3; BW) | treating them as warnings | BS14: `$!` at `ENTRY` is only a warning ("failed to find any matching trigger method") and would install a rule that never fires |
+| D203 | A `threw` status after `installScript` removes the rule and answers `RULE_REJECTED` (§7.3; BW) | reporting `installed: true` with the status | the rule was not injected and Byteman printed nothing; leaving it would be a silent no-op |
+| D204 | The lint requires a fully qualified `CLASS` or `INTERFACE` and nothing outside `RULE … ENDRULE` but blank lines and `#` comments (§7.3; BW) | unqualified names; script-level lines | an unqualified name matches any package's class, a later-loaded JDK class included; script-level `HELPER`, `IMPORT` and `COMPILE` lines set the defaults of the rules after them |
+| D205 | The binding encoding reads a container only when its class is the JDK's (§7.3; BW) | iterating any `Collection` or `Map` | iterating an application's collection runs its code on the application's thread |
+| D206 | The cut-short test seam is the JVM system property `skillroy.agent.byteman.test.keepRulesAtUninstall` (§7.5, §7.6; BW) | an agent option; a slow transformer | no option is added to the agent's surface; an IT can set the property in the child |
+| D207 | `AuthorCommand` writes the planner's MCP configuration as one owner-only file `skillroy-mcp-<16 hex>.json` in the temporary directory, through `writeOwnerOnly` (§9.3; BW) | an owner-only temporary directory holding the file | one file to delete as before; the fix of S60 (FX-2) puts the planner's work under one owner-only directory anyway |
+| D208 | The MCP `data_query` tool refuses a `$` reference in `sql` or `params` by its syntax (`References.containsReference`), whether or not a slot of that name exists; a literal such as `'a$$b'` or `'US$ 5'` runs byte for byte (`PlannedCall.literalArgs`) (§12.9; P5 §9.3, A54; S55; FX-2) | refusing only a reference to a slot the session holds | the same text would then be refused or run depending on what was resolved before; the disposition's fix and its test (c) disagreed (`'$notaslot'` was listed as running byte for byte), and the contract text (refuse) won |
+| D209 | The overlay bridge never cuts before the mask: it keeps a request whole up to 100000 characters, answers a longer one without a model call, and asks through `SessionService.ask(text, 10000)` (mask the whole, then cut) (P5 §6.2, A53; S53; FX-2) | cutting at 100000 plus a margin; keeping up to `PromptMask.MAX_TEXT` | any margin fails for a secret longer than the margin, which is the finding itself; keeping up to 100000 would still cut a straddling secret at 100000 |
+| D210 | The projected tools of a session and of an MCP server are masked after `strict(...)` by a wrapper (`ToolProjection.masked`), not inside `primitive(...)` and `verb(...)`; the key rule therefore rewrites the sample's `signOn` and `authorise` descriptions ("credential: {realm: staff, key: code}") in the tools as it already did in the planner's prompt, and the five committed session stand-in recordings were regenerated (P5 §6.1, §6.2, A50; S49; FX-2) | masking inside `primitive(...)` and `verb(...)` | masking only removes data keywords and masks texts, so the result equals masking before; the wrapper keeps FX-1's edits of `primitive` and `offered` conflict-free. A false positive of the key rule on pack prose, put to the owner: the sample's text could be reworded |
+| D211 | The exhausted state of a scope lives on `BudgetMeter`; a run's refused reservation exhausts the session (D74); an actor-less `skillroy_resolve` that names a model is metered too (§12.9, D157; S56; FX-2) | a run refusal that leaves the session open for smaller resolves; leaving the actor-less path unmetered | the first gives two rules for one budget; a gateway that serves the binds while the actor cannot be made would be unbounded |
+| D212 | `ExecutorSession.compile(verb, args, origin)` beside the specified two-argument form (§12.9, D158; S57, S62; FX-2) | the two-argument form only | the session service checks exactly the arguments `execute` will compile |
+| D213 | A session verb withheld by the call-time gate is listed by the service's `skillroy_catalogue` and not logged (P5 §12.4, A60; S62; FX-2) | logging it (the disposition's word) | the service has no log of its own |
+| D214 | The secret-looking property in S49's test is `password`, not `pin` (P5 §6.1, A50; S49; FX-2) | `pin`, the disposition's example | `pin` is not a secret word of `SecretKeys.looksSecret`, so the example would not exercise the rule |
+| D215 | S58's test of a run's failure capture calls `registerRun` directly with a planted `failure/` directory (P5 §9.4, A57; S58; FX-2) | a desk run | a desk run does not write a PNG deterministically |
+| D216 | `PrimitiveDescriptor.toJson` writes `"script": true` only when the flag is set (§12.9, D156; P1 §3; S42; FX-1) | always writing the key (the descriptor's other keys are always present) | a primitive without the flag serialises byte for byte as before: older readers, the pinned wire test and any catalogue golden |
+| D217 | `ToolProjection`'s `readOnly` uses the same fallback as its exclusions (`isScript`: the flag, or a name of `SCRIPT_PRIMITIVES` for an older agent's descriptors) (§12.9, D156; S42; FX-1) | the flag alone (the disposition's step 5) | an older agent's unflagged `web.waitFlag` would still be annotated `readOnlyHint: true` |
+| D218 | "The policy excludes script primitives" is the derived `Policy.excludesScripts()` (true when `excluded` holds every name of `SCRIPT_PRIMITIVES`), applied by the projection and, through `CallPolicy.scriptRefusal`, by the MCP server and the session service (§12.9, D156; S42; FX-1) | a new boolean record component | it keeps `Policy`'s canonical constructor and every caller (FX-2 and CP touch the same file); one rule for both hosts |
+| D219 | The raw channel bound is 6 x `MAX_JSON_CHARS` + 64 KiB (`WebLib.MAX_CHANNEL_CHARS`), screenshots exempt; the receiving side's own 1 MiB rules apply to the parsed value (P4 §4.6, A45; P1 §2.4; S43; FX-1) | `MAX_JSON_CHARS` + 64 KiB (the disposition's figure) | a genuine 1 MiB value crosses the channel escaped twice, so a quote-heavy or non-ASCII value near 1 MiB is 2 to 6 MiB of raw text; the disposition's figure would refuse values the library produces and the adapter kit's 2 MiB-string item exercises |
+| D220 | S38 goes through `Credentials.find`, `Credentials.Location` and `Credentials.loadFound`; `locate` refuses the same values with an unchecked `IllegalArgumentException` (P2 §4; S38; FX-1) | a checked `CredentialsException` from `locate` | no change to the callers in other packages' files (`AuthorCommand`, `BindArgs.credentialsDir`, `ScenarioTests.streamObserver`); one provenance for the CLI and the JUnit glue; the overload is `loadFound`, not `load`, because `load(null)` would become ambiguous |
+| D221 | A subject over 1 Mi characters in a browser selection is `INVALID_PARAMS {reason: "text too long"}` on both paths (P4 §4.2, A48; P1 §8.4; S46; FX-1) | skipping that browser (no match) | "refused, never silently cut" (S24's rule); the same code on both paths |
 
 ### 16.1 Where the §17 answers went
 

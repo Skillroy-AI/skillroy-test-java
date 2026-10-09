@@ -921,7 +921,7 @@ Rules.
   its head). As built: the overlay bridge (§12.4) no longer cuts a request before the mask either: it keeps a request's
   text whole up to `OverlayBridge.MAX_QUEUED_TEXT` (100000) and asks with `SessionService.ask(text, MAX_TEXT)`, which
   masks the whole text and then cuts it at the bridge's 10000 characters; a longer request is answered "the request is
-  longer than 100000 characters; shorten it" without a model call (D-SR2-2).
+  longer than 100000 characters; shorten it" without a model call (D209).
 
 The mask is tested with the project's existing adversarial fixtures (short and long secrets, quoted secrets, secrets
 inside JSON strings, the key patterns) and with the sample's `password` column; a test proves that a prompt built for
@@ -1249,7 +1249,7 @@ client cannot even ask.
 policy whatever the flags (`hook.install` and `hook.remove` are not mutating, `hook.probe` is a read), and
 `PlanPolicy` refuses every `hook.*` and `rule.*` primitive in a client's plan ("never run for a client") except the
 three reads of `ToolProjection.HOOK_READS`, `hook.health`, `hook.events` and `rule.list`, which every policy offers as
-reads, the session service's included (D-CP-4). The pack's catalogue is installed by the server itself at its start
+reads, the session service's included (D187). The pack's catalogue is installed by the server itself at its start
 under `--hooks` (P6 §6.1), through its session's open; the server reads the matrix again after it and writes
 `capabilities.json` into its `--out`.
 
@@ -1288,7 +1288,7 @@ that the statement the agent receives is byte-equal to the guarded text (a `$$` 
 reaches the agent as written). The executor substitutes references in the arguments of every other call after the
 guard would have run; a resolved value is target content (`threat-model.md` §5). As built: a reference is recognised by
 its syntax (`References.containsReference`, `$$` excluded), whether or not a slot of that name exists, so `'$notaslot'`
-is refused as well (D-SR2-1).
+is refused as well (D208).
 
 (Phase 6 security fix S56, A55, built 2026-10-09, SR; D157) `skillroy_scenario_run` is metered on the session's budget
 as `skillroy_resolve` is: one tier (b) estimate per slot whose strategy names a model is reserved on the server's

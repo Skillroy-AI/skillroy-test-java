@@ -22,8 +22,11 @@ Commits without a sign-off cannot be merged.
   application. Layers for particular applications live in their own repositories and depend on this one. A need
   from such a layer is expressed here as a generic SPI and exercised with the bundled sample application.
 - **Java levels.** Everything under `agent/`, the sample application and the sample agent module is Java 8
-  language and API (`--release 8`), tests included, with no third-party classes inside the target JVM. The
-  controller side is Java 25.
+  language and API (`--release 8`), tests included, with no third-party classes inside the target JVM, with one
+  carve-out (decision B4, Phase 6; its wording awaits the owner's confirmation, B26 Q1): Byte Buddy and the ASM it
+  bundles, shaded and relocated under the project's prefix inside the optional hooks module
+  `optional/skillroy-agent-hooks.jar`, which loads only when the agent option `optionalModules` names it; only
+  `Spy`, project code, ever reaches the bootstrap search path. The controller side is Java 25.
 - **Contract first.** The files under `docs/design/` that are named contracts are the specification. Change the
   contract, then the code.
 - **The agent never harms its host.** Bounded waits everywhere; actions on the event dispatch thread are posted,

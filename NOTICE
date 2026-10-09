@@ -3,7 +3,10 @@ Copyright 2026 Mike Mills (mike.mills@skillroy.ai).
 
 This product is licensed under the Apache License, Version 2.0 (see LICENSE).
 
-The agent that runs inside a target JVM contains no third-party code.
+The agent that runs inside a target JVM contains no third-party code, except
+that its optional hooks module carries a relocated copy of Byte Buddy
+(Apache-2.0) and the ASM it bundles (BSD-3-Clause), whose notices travel inside
+that jar under META-INF/third-party/; the module is loaded only when named.
 The command line distribution redistributes a few third-party libraries
 unmodified; they are listed, with their licences, in its THIRD-PARTY.txt.
 Third-party libraries used by the controller, the sample application and the

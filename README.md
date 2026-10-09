@@ -25,11 +25,11 @@ a model looks at the screen and the framework turns what it decides into recorde
 bolt-on that the design keeps room for and does not build yet.
 
 **Status (2026-10-09):** Phase 1, Phase 1.x, Phase 2 and Phase 3 are built and verified, Phase 4 is built, reviewed
-and fixed, and **Phase 5** (the AI layer) is built, reviewed, fixed and closed live (2026-10-08; its answers B23 and the decisions of its build and review, B24, confirmed by the owner the same day; the live items ran the same afternoon with the owner's model key: the live profiles, live recordings for the sample's tier (b) scenario, a sample scenario authored by the planner and reviewed, and the nightly job's cache figures; the live session's three decisions, B25, confirmed by the owner on 2026-10-09). **Phase 6** (hooks, Byteman, Windows, OpenTelemetry export, hardening) is specified (2026-10-09; its answers B26 provisional) after spike BS3 passed with conditions, and the repeat security review's first pass has run (28 findings, fixed by the Phase 6 build); nothing is released and nothing is published. Phase 1 is the thin vertical slice: the agent (core, Swing and
+and fixed, and **Phase 5** (the AI layer) is built, reviewed, fixed and closed live (2026-10-08; its answers B23 and the decisions of its build and review, B24, confirmed by the owner the same day; the live items ran the same afternoon with the owner's model key: the live profiles, live recordings for the sample's tier (b) scenario, a sample scenario authored by the planner and reviewed, and the nightly job's cache figures; the live session's three decisions, B25, confirmed by the owner on 2026-10-09). **Phase 6** (hooks, Byteman, Windows, OpenTelemetry export, hardening) is built (2026-10-09, in six packages, on the contract's provisional answers B26 and the build's 62 provisional decisions B27; spikes BS3 and BS14 passed with conditions) and is under review: the hook engine and the in-process Byteman module as optional pieces of the agent home, a JDK 25 target through `JAVAAGENT`, the Windows path built where Linux can test it and not verified on a Windows host, OpenTelemetry export from the controller (off by default), the tenant-pack overlay proven on a second variant of the sample desk, and the repeat security review's first pass (28 findings, fixed, or accepted as low with a release note); its code review, the second pass of the security review and the full Linux matrix follow, and the review's sign-off is the owner's; nothing is released and nothing is published. Phase 1 is the thin vertical slice: the agent (core, Swing and
 data modules), the controller, the scenario compiler and executor, JUnit glue, a CLI, and a bundled sample application,
 the lending desk of a tool library, with its agent module, domain pack and scenarios. Its gates are a Java 8 target and
 a Java 25 target, in every load mode; the numbers (tests, configurations, runtimes) are kept in
-[docs/TODO.md](docs/TODO.md). B1 to B24 are answered or confirmed by the owner ([docs/DECISIONS.md](docs/DECISIONS.md)); the
+[docs/TODO.md](docs/TODO.md). B1 to B25 are answered or confirmed by the owner, B26 and B27 are provisional ([docs/DECISIONS.md](docs/DECISIONS.md)); the
 initial commit was made on 2026-10-06, and the repository is not yet pushed or published. **Phase 1.x**
 added a set of contract amendments and the hardening that followed from a security review of the control channel: an
 agent-owned HTTP listener, keyed request and reply authentication instead of a bearer token on the wire, and the
@@ -46,9 +46,9 @@ applies and the printed slip shows the waiver. **Phase 4** (2026-10-07) added em
 a scenario runs either over CDP, with Playwright attached to the remote-debugging port of the embedded Chromium, or in
 process, through one SPI with reflective JCEF and JxBrowser adapters, and each step records which path served it. A
 second sample target, a small JCEF web host behind the Maven profile `jcef`, runs one committed scenario over both
-paths, and an adapter contract kit runs against real JCEF in the Linux test image. Not yet built: model-authored
-resolution and the rest of the model layer, the interactive session service, vision-driven input, bytecode hooks and
-the fluent Java API.
+paths, and an adapter contract kit runs against real JCEF in the Linux test image. Phase 5 (2026-10-08) added the model layer and Phase 6
+(2026-10-09) the bytecode hooks, Byteman, the Windows path and OpenTelemetry export, as described above. Not yet built:
+vision-driven input and the fluent Java API.
 
 ## Where to look
 
@@ -61,9 +61,10 @@ the fluent Java API.
 | Phase 3 contract (oracle cross-checks with `ORACLE_SUSPECT`, stored-row aggregates, the `devices` fact root, sample scenario B), as built | [docs/design/phase3-contracts.md](docs/design/phase3-contracts.md) |
 | Phase 4 contract (embedded web views: `skillroy-cdp`, the web SPI, `skillroy-agent-web` with the `jcef` and `jxbrowser` adapters, the adapter contract kit, the web host sample), as built | [docs/design/phase4-contracts.md](docs/design/phase4-contracts.md) |
 | Phase 5 contract (the AI layer: the `InferenceGateway` SPI with its Claude, recorded and scripted implementations, model-written SQL behind `SqlGuard`, approval and budgets, batch re-resolution, `skillroy-mcp`, the planner, triage, the interactive profile), specified and built 2026-10-08 (its answers B23 and the build's and review's decisions B24 confirmed by the owner the same day; the live items closed the same afternoon, their decisions B25 confirmed by the owner on 2026-10-09), with an "As built" note under every section the build changed | [docs/design/phase5-contracts.md](docs/design/phase5-contracts.md) |
-| Phase 6 contract (hooks: `skillroy-agent-spy` and `skillroy-agent-hooks` on shaded Byte Buddy, the hook catalogue and the `hook.*` primitives; Byteman in process; a JDK 25 target through `JAVAAGENT`; the Windows path; OpenTelemetry export; the tenant-pack overlay and the sample's branch edition; the repeat security review), specified 2026-10-09 (B26 provisional); the threat model | [docs/design/phase6-contracts.md](docs/design/phase6-contracts.md), [docs/design/threat-model.md](docs/design/threat-model.md) |
+| Phase 6 contract (hooks: `skillroy-agent-spy` and `skillroy-agent-hooks` on shaded Byte Buddy, the hook catalogue and the `hook.*` primitives; Byteman in process; a JDK 25 target through `JAVAAGENT`; the Windows path; OpenTelemetry export; the tenant-pack overlay and the sample's branch edition; the repeat security review), built 2026-10-09 (B26 and B27 provisional); the threat model | [docs/design/phase6-contracts.md](docs/design/phase6-contracts.md), [docs/design/threat-model.md](docs/design/threat-model.md) |
 | Spike BS8 (JCEF in the Linux test image), run 2026-10-06; spike BS5 (Playwright over CDP), met by the Phase 4 acceptance, with the manual procedure against a stock Chromium | [spikes/BS8/RESULT.md](spikes/BS8/RESULT.md), [spikes/BS5/README.md](spikes/BS5/README.md) |
 | Spike BS3 (Byte Buddy retransformation, inline Advice, a bootstrap `Spy`, restore on detach), run 2026-10-09, passed with conditions | [spikes/BS3/RESULT.md](spikes/BS3/RESULT.md) |
+| Spike BS14 (Byteman loaded in process through the agent's `Instrumentation`, no listener), run 2026-10-09, passed with conditions | [spikes/BS14/RESULT.md](spikes/BS14/RESULT.md) |
 | Design overview, all phases | [docs/design/base-framework-design.md](docs/design/base-framework-design.md) |
 | Research notes | [docs/research/](docs/research/) |
 | Licence, notices, dependency licence audit | [LICENSE](LICENSE), [NOTICE](NOTICE), [docs/licence-audit.md](docs/licence-audit.md) |

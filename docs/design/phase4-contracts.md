@@ -1285,7 +1285,7 @@ does (a session is live, so an armed stub is recorded, not refused; a refusal is
 installer's kind), reads the matrix again when something was installed or found installed, and writes
 `capabilities.json` into its output directory; the `hooks` record goes into the journal's start record under
 `options.hooks` and is `ExecutorSession.hooks()`. As built: the contract named `RunOptions.hooks` for the session, which
-has no `RunOptions`; the switch is `SessionOptions.hooks` (D-CP-2).
+has no `RunOptions`; the switch is `SessionOptions.hooks` (D185).
 
 ### 6.2 The `web` base fact root and the `WEB` snapshot surface
 

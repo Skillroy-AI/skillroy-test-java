@@ -58,7 +58,7 @@ import java.util.function.UnaryOperator;
  *
  * <p>As built (Phase 6, TL): the {@link BatchSpanProcessor} names its own daemon worker thread
  * ({@code BatchSpanProcessor_WorkerThread-1}; version 1.66.0 offers no thread factory), and the JDK sender's HTTP client
- * runs on an executor of daemon threads named {@value #THREAD_NAME} that {@code close} shuts down (decision D-TL-4 of
+ * runs on an executor of daemon threads named {@value #THREAD_NAME} that {@code close} shuts down (decision D163 of
  * the build).
  *
  * <p>Stateless; safe from any thread.

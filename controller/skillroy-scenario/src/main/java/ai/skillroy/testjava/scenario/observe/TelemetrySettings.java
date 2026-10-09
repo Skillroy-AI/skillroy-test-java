@@ -75,7 +75,7 @@ import java.util.regex.Pattern;
  *
  * <p>As built (Phase 6, TL): the reader lives here rather than in {@code skillroy-telemetry}, so that the JUnit glue,
  * which does not depend on that module, reads the file and the properties alike, and so that the CLI decides "none"
- * without loading anything (decision D-TL-1 of the build).
+ * without loading anything (decision D160 of the build).
  *
  * <p>Immutable (the map is an unmodifiable copy); safe to share between threads.
  *

@@ -3,7 +3,9 @@
 Audit date: 2026-10-02, updated 2026-10-03 for Phase 2, 2026-10-06 for the holder's name and the publication
 metadata of the root POM, later on 2026-10-06 for the test image's Chromium run-time libraries (spike BS8, section 7)
 and the artifacts spike BS8 used (section 8), and on 2026-10-07 for Phase 4 (sections 1 to 5, 8 and 9; later that
-day the agent home's seventh jar was inspected and the web host scenarios module's scopes read from its POM). Version
+day the agent home's seventh jar was inspected and the web host scenarios module's scopes read from its POM), and on
+2026-10-09 for Phase 6 (each package updated the sections for its dependencies; the documents pass brought section 1
+and the table of section 3 to the agent home as built, eleven jars). Version
 audited: 0.1.0-SNAPSHOT, all 22 reactor modules (19 in a build without the Maven profile `jcef`; the 3 web host
 samples are built only with `-Pjcef`); the spike project under `spikes/BS8/` is not a reactor module and distributes
 nothing.
@@ -19,14 +21,23 @@ the tables say "not determined locally".
 **Result: everything the project distributes, bundles or depends on is compatible with distributing the project
 under Apache-2.0.** No dependency carries a copyleft licence that reaches a distributed artifact.
 
-- **The agent contains no third-party code.** The agent home holds seven jars. Every entry in all seven is one of the
-  project's own classes or resources, and their classes refer to nothing outside the JDK and the project (section 3).
-  The seventh, `skillroy-agent-web` (Phase 4, inspected 2026-10-07), reaches JCEF and JxBrowser only by reflection,
-  through class names that its two descriptors hold as text. The statement in the root `NOTICE` that the agent
-  contains no third-party code is correct.
-- **The CLI distribution is the only place third-party code is redistributed:** since Phase 5 (2026-10-08) 36
-  jars, 27 Apache-2.0, 8 MIT and 1 MIT-0 (until then five, all Apache-2.0: four Jackson jars and SnakeYAML). The
-  additions are the Anthropic Java SDK with its tree, JSqlParser, the MCP Java SDK with its tree and the SLF4J
+- **The agent contains no third-party code, with one carve-out** (the sentence of the root `NOTICE`, Phase 6, B26 Q1,
+  provisional): its optional hooks module carries a relocated copy of Byte Buddy (Apache-2.0) and the ASM it bundles
+  (BSD-3-Clause), whose notices travel inside that jar under `META-INF/third-party/`; the module is loaded only when
+  the agent option `optionalModules` names it. The agent home holds **eleven jars** (thirteen files with `LICENSE` and
+  `NOTICE`): the seven of Phase 4, `skillroy-agent-spy.jar` at its root and three in `optional/` (Phase 6, built
+  2026-10-09): `skillroy-agent-hooks.jar`, `skillroy-agent-byteman.jar` and `skillroy-agent-byteman-sys.jar`. Every
+  entry in ten of them is one of the project's own classes or resources, and their classes refer to nothing outside the
+  JDK and the project (section 3); the eleventh, the hooks jar, holds the relocated copy besides. The seventh jar,
+  `skillroy-agent-web` (Phase 4, inspected 2026-10-07), reaches JCEF and JxBrowser only by reflection, through class
+  names that its two descriptors hold as text; the two Byteman jars hold no Byteman class (Byteman is the user's jar,
+  at test and provided scope only, B8; section 5), the sys jar naming Byteman's types in method descriptors alone.
+  `DistributionContentIT` holds the home to its eleven jars, and `HomeConstantPoolIT` and `OptionalModulesIT` to what
+  they refer to and when they load.
+- **The CLI distribution is the only other place third-party code is redistributed** (besides the hooks jar's
+  relocated copy above): since Phase 5 (2026-10-08) 36 jars, 27 Apache-2.0, 8 MIT and 1 MIT-0 (until then five, all
+  Apache-2.0: four Jackson jars and SnakeYAML), and since Phase 6 (2026-10-09, TL) 47, the eleven OpenTelemetry Java
+  jars (Apache-2.0) added (section 4). The additions of Phase 5 are the Anthropic Java SDK with its tree, JSqlParser, the MCP Java SDK with its tree and the SLF4J
   no-operation provider. The jackson-core jar embeds small MIT, BSL-1.0 and BSD-2-Clause components and carries their
   notices inside the jar; the MIT and MIT-0 jars carry no licence file, so `THIRD-PARTY.txt` carries their copyright
   lines and licence texts; OkHttp's public-suffix data file is MPL-2.0 and ships unmodified with its notice (section
@@ -122,10 +133,12 @@ included), the sample pack and the scenarios of both samples build with `--relea
 
 ## 3. What ships inside a target JVM
 
-The agent home is built by `skillroy-agent-dist` from `agent-home-layout.xml`, which lists exactly seven project
+The agent home is built by `skillroy-agent-dist` from `agent-home-layout.xml`, which lists exactly eleven project
 artifacts by coordinates (`ai.skillroy:skillroy-agent-bootstrap`, `-protocol`, `-agent-api`, `-agent-core`,
-`-agent-swing`, `-agent-data`, `-agent-web`). Third-party artifacts cannot enter it: the module has no third-party
-compile dependency, and the descriptor uses explicit includes. The built zip was inspected when the audit was written,
+`-agent-swing`, `-agent-data`, `-agent-web`, and since Phase 6 `-agent-spy`, `-agent-hooks`, `-agent-byteman` and
+`-agent-byteman-sys`). Third-party artifacts cannot enter it: the module has no third-party compile dependency, the
+descriptor uses explicit includes (the `optional/` set without transitive dependencies), and the one third-party copy is
+inside the hooks module's own jar (the shaded copy, below). The built zip was inspected when the audit was written,
 when it held six jars; the seventh, added by Phase 4, was inspected on 2026-10-07 as the module's own jar
 (`agent/skillroy-agent-web/target/skillroy-agent-web-0.1.0-SNAPSHOT.jar` of the final tree), which the home holds as
 `modules/skillroy-agent-web.jar`.
@@ -140,7 +153,9 @@ when it held six jars; the seventh, added by Phase 4, was inspected on 2026-10-0
 | `modules/skillroy-agent-swing.jar` | 73 classes, one properties file, one service file | none |
 | `modules/skillroy-agent-data.jar` | 8 classes, one service file | none |
 | `skillroy-agent-spy.jar` | (Phase 6, built 2026-10-09, HK) 3 classes (`ai.skillroy.testjava.agent.spy.Spy`, `Spy$Handler`, `Spy$Stub`), the manifest and the project's `META-INF/LICENSE` and `NOTICE`, nothing else (no Maven descriptor: the hooks module refuses to append a jar holding any other entry); 8,128 bytes | none |
-| `optional/skillroy-agent-hooks.jar` | (Phase 6, built 2026-10-09, HK) the optional hooks module, loaded only when the agent option `optionalModules` names it: 50 classes of its own (`ai.skillroy.testjava.agent.hooks`), `hooks-module.properties`, one service file, and **3,048 classes of Byte Buddy 1.18.14 (its bundled ASM 9.10.1 included) relocated under `ai.skillroy.testjava.agent.hooks.shaded.bytebuddy`**, with Byte Buddy's references to JNA renamed to `ai.skillroy.testjava.agent.hooks.shaded.absent.jna` (a package that exists nowhere); 3,098 class files, 5,004,885 bytes | **yes: Byte Buddy (Apache-2.0) and ASM (BSD-3-Clause), relocated; their notices inside the jar** |
+| `optional/skillroy-agent-hooks.jar` | (Phase 6, built 2026-10-09, HK) the optional hooks module, loaded only when the agent option `optionalModules` names it: 51 classes of its own (`ai.skillroy.testjava.agent.hooks`), `hooks-module.properties`, one service file, and **3,048 classes of Byte Buddy 1.18.14 (its bundled ASM 9.10.1 included) relocated under `ai.skillroy.testjava.agent.hooks.shaded.bytebuddy`**, with Byte Buddy's references to JNA renamed to `ai.skillroy.testjava.agent.hooks.shaded.absent.jna` (a package that exists nowhere); 3,099 class files, 5,006,772 bytes (counted on the jar of the main tree, 2026-10-09) | **yes: Byte Buddy (Apache-2.0) and ASM (BSD-3-Clause), relocated; their notices inside the jar** |
+| `optional/skillroy-agent-byteman.jar` | (Phase 6, built 2026-10-09, BW) the optional Byteman module, loaded only when `optionalModules` names it: 27 classes of its own (`ai.skillroy.testjava.agent.byteman`), `byteman-module.properties`, one service file, the manifest, the Maven descriptor and the project's `META-INF/LICENSE` and `NOTICE`; 72,557 bytes. It loads the user's Byteman jar (agent option `byteman.jar`) in process on the first confirmed `rule.submit`; that jar is never in the home (B8) | none (Byteman 4.0.27, LGPL-2.1-or-later, is the user's jar) |
+| `optional/skillroy-agent-byteman-sys.jar` | (Phase 6, built 2026-10-09, BW) the project jar the Byteman module appends to the target's system class path: 3 classes (`ai.skillroy.testjava.agent.byteman.sys.RuleManager`, `RuleHelper`, `RuleHelper$Handler`), the manifest, the Maven descriptor and the project's licence files; 13,222 bytes. Compiled against Byteman at `provided` scope: its constant pools name classes under `java/` and `ai/skillroy/` only (`SysConstantPoolTest`), and Byteman's types appear in method descriptors alone | none |
 | `modules/skillroy-agent-web.jar` | 156 classes since the Phase 4.x amendments of 2026-10-08 (155 in Phase 4: `BrowserExtras` removed, `WebModule$Pace` and `WebModule$Pace$1` added) (`ai.skillroy.testjava.agent.web` and its sub-packages `jcef`, `jxbrowser` and `reflect`): the agent's `web.*` primitives, the browser index and events, and two reflective adapters; the descriptors `jcef.json` and `jxbrowser.json`, `web-module.properties`, one service file (Phase 4) | none |
 
 Checks made on the six jars inspected (221 class files in all):
@@ -188,6 +203,15 @@ jar, `HomeConstantPoolIT` for the whole home, the mechanical form of this sectio
 The default agent path loads none of it: the home's `optional/` is never scanned, and `OptionalModulesIT` proves with
 `-verbose:class` that no class of the hooks module, of the relocated prefix or of `Spy` loads without the option. A
 consumer who wants no third-party code in the home deletes `optional/skillroy-agent-hooks.jar`.
+
+**The Byteman jars (Phase 6, built 2026-10-09, BW; `phase6-contracts.md` §7.4, D134).** Neither holds a Byteman class.
+Byteman 4.0.27 (`org.jboss.byteman:byteman`, LGPL-2.1-or-later) is the user's jar, named by the agent option
+`byteman.jar` and loaded in process; in the build it is a test-scoped dependency of the module, of `skillroy-agent-dist`
+and of the scenarios module and a `provided` dependency of the sys jar (section 5), so the sys jar is a work that uses
+the library, compiled against it with nothing of it inside. What holds the home to that: `DistributionContentIT` fixes
+the list of files (a Byteman jar in the home fails it), `HomeConstantPoolIT` reads every class's constant pool, and
+`SysConstantPoolTest` holds the sys jar's three class files to `CONSTANT_Class` entries under `java/` and
+`ai/skillroy/`; `BytemanIT` loads the real jar from the test class path in a child JVM.
 
 Modules that are loaded into a target JVM only in the sample set-up are not part of the agent home. The sample
 agent module `skillroy-sample-lending-agent` declares everything it compiles against as `provided` and its jar

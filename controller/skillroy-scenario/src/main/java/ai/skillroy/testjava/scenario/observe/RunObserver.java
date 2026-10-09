@@ -47,7 +47,7 @@ import java.util.Map;
  * ({@link #sessionStarted}, {@link #sessionStepStarted}, {@link #turnStarted}, {@link #toolCallStarted}),
  * {@link #sessionRecord}, {@link #sessionEnded} and {@link #traceId}, all default no-ops: a span is opened before its
  * children, so that a session step is a child of its turn and a tool call carries the client's trace into the work it
- * does (decision D-TL-2 of the build).
+ * does (decision D161 of the build).
  *
  * <p>An implementation must be safe to call from any thread (the MCP server calls from its transport's threads, one
  * call at a time), must never block beyond its own bounded export, and should never throw: the executor wraps every
