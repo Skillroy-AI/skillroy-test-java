@@ -18,6 +18,7 @@ package ai.skillroy.testjava.agent.byteman;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -132,6 +133,21 @@ class RuleLintTest {
                 "string literals and comments are not scanned");
         assertTrue(RuleLint.check(rule("audit", "ceiling", "RETURN null")).ok(), "RETURN is a fault injection");
         assertTrue(RuleLint.check(rule("audit", "ceiling", "THROW new IllegalStateException(\"x\")")).ok());
+    }
+
+    /**
+     * Fix wave (L2-F8, D133): what the lint does not promise. Its list stops Byteman's built-ins and the entry points it
+     * names; a {@code DO} clause can still block, write, create processes or reach reflection through other JDK names
+     * or through calls on bound objects, and the lint accepts those: {@code confirm} on every submit is the gate
+     * (phase6-contracts.md 7.3, the fix-wave note). Pinned, so that a wider promise is a change of the contract first.
+     */
+    @Test
+    void theLintIsATripwireNotASandbox() {
+        for (String action : Arrays.asList("$0.wait()", "java.util.concurrent.locks.LockSupport.park()",
+                "new java.util.concurrent.CountDownLatch(1).await()", "java.beans.Beans.instantiate(null, \"x.Y\")")) {
+            RuleLint.Result r = RuleLint.check(rule("limit", "ceiling", action));
+            assertTrue(r.ok(), action + ": " + r.errors());
+        }
     }
 
     @Test

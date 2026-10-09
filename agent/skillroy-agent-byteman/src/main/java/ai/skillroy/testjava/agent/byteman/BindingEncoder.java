@@ -24,24 +24,34 @@ import java.lang.reflect.Array;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Date;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * The encoding of a rule's bindings for {@code rule.fired} (phase6-contracts.md 7.3, the rule of 4.3, D125), applied on
- * the application's thread that triggered the rule. Scalars as JSON (a string cut at 2000 UTF-16 code units, 256 inside
- * a collection); an enum by {@code name()}; {@code BigDecimal} and {@code BigInteger} as their plain string; a
- * {@code java.util.Date} and a {@code java.time} value as ISO-8601 text; an array, collection or map of the JDK as a
- * list or object of at most 100 elements, each encoded one level deep (a nested container becomes a handle); anything
- * else as {@code {"class", "ref"}} with a weak handle, so that nothing of an application object's state leaves the JVM
- * and <b>no {@code toString()} of an application object is ever called</b> (as built: a container is read only when
- * its class is the JDK's, since iterating an application's own collection would run its code).
+ * The encoding of a rule's bindings for {@code rule.fired} (phase6-contracts.md 7.3, the rule of 4.3, D125, D182),
+ * applied on the application's thread that triggered the rule. Scalars as JSON, for the JDK's exact types only (a
+ * string cut at 2000 UTF-16 code units, 256 inside a collection; the boxes {@code Integer}, {@code Long},
+ * {@code Short}, {@code Byte}, {@code Float}, {@code Double}, {@code Boolean}, {@code Character}); an enum by
+ * {@code name()}; {@code BigDecimal} as its plain string unless its scale is extreme (then its scientific text) and
+ * {@code BigInteger} as its string, either cut ({@code null}, {@code truncated}) when its (unscaled) value is above
+ * 6,000 bits, before any text is made; a {@code java.util.Date} and a {@code java.time} value as ISO-8601 text; an array
+ * as a list, and a collection or map of the allow-list {@link #ITERABLE} as a list or object, of at most 100 elements
+ * each encoded one level deep (a nested container becomes a handle); anything else as {@code {"class", "ref"}} with a
+ * weak handle, so that nothing of an application object's state leaves the JVM and <b>no method of an application
+ * object is ever called</b> (no {@code toString()}, no {@code longValue()} of an accumulator, no iteration of an
+ * application's collection) <b>and no lock of the application is taken</b> (no iteration of a synchronized wrapper, a
+ * {@code Vector}, a {@code Hashtable}, a blocking queue, or of any view, whose iterator is the wrapped collection's).
+ * Fix wave (L2-F1, L2-S1, L2-F3): the allow-list and the exact types replace "a container or number whose class is the
+ * JDK's".
  *
  * <p>Masking: every encoded scalar, inside containers too, passes every registered {@link MaskPolicy} as
  * {@code mask("rule.<name>", "binding<i>", value)} (P1 section 4's thread rule as amended: on the application thread);
@@ -56,7 +66,32 @@ final class BindingEncoder {
     static final int MAX_STRING = 2000;
     static final int MAX_STRING_IN_COLLECTION = 256;
     static final int MAX_ELEMENTS = 100;
+    /** A {@code BigInteger}, or a {@code BigDecimal}'s unscaled value, above this many bits is cut (D182). */
+    static final int MAX_BITS = 6000;
     static final String REDACTED = "<redacted>";
+
+    /**
+     * The JDK collection and map classes the encoder iterates, by exact class: their iteration takes no lock and calls
+     * no method of an element (no {@code compareTo}, {@code hashCode} or {@code equals}). Everything else, a view of
+     * one of these included, is a handle. {@code TreeSet} and {@code ConcurrentSkipListSet} are not on the list: their
+     * {@code subSet}, {@code headSet}, {@code tailSet} and {@code descendingSet} answer an instance of the same class
+     * over a bounded sub-map, whose iteration compares the keys (the application's {@code compareTo}). The list is the
+     * hooks module's ({@code Capture}).
+     */
+    static final Set<String> ITERABLE = Collections.unmodifiableSet(new HashSet<String>(Arrays.asList(
+            "java.util.ArrayList", "java.util.LinkedList", "java.util.ArrayDeque", "java.util.PriorityQueue",
+            "java.util.HashSet", "java.util.LinkedHashSet", "java.util.RegularEnumSet",
+            "java.util.JumboEnumSet", "java.util.HashMap", "java.util.LinkedHashMap", "java.util.TreeMap",
+            "java.util.EnumMap", "java.util.IdentityHashMap", "java.util.Arrays$ArrayList",
+            "java.util.Collections$EmptyList", "java.util.Collections$EmptySet", "java.util.Collections$EmptyMap",
+            "java.util.Collections$SingletonList", "java.util.Collections$SingletonSet",
+            "java.util.Collections$SingletonMap", "java.util.concurrent.ConcurrentHashMap",
+            "java.util.concurrent.ConcurrentSkipListMap", "java.util.concurrent.ConcurrentLinkedQueue", "java.util.concurrent.ConcurrentLinkedDeque",
+            "java.util.concurrent.CopyOnWriteArrayList", "java.util.concurrent.CopyOnWriteArraySet")));
+    /** The immutable collections of Java 9 and later ({@code List.of} and the like), by class-name prefix. */
+    static final String IMMUTABLE_PREFIX = "java.util.ImmutableCollections$";
+
+    private static final Object NOT_SCALAR = new Object();
 
     private final AgentContext ctx;
     private final int budget;
@@ -128,49 +163,13 @@ final class BindingEncoder {
         if (v == null) {
             return null;
         }
-        boolean jdk = v.getClass().getClassLoader() == null;
-        if (v instanceof String) {
-            String s = (String) v;
-            int max = depth == 0 ? MAX_STRING : MAX_STRING_IN_COLLECTION;
-            int take = (int) Math.max(0, Math.min(Math.min(s.length(), max), pass.left));
-            pass.left -= take;
-            if (take < s.length()) {
-                pass.truncated = true;
-                s = s.substring(0, take);
-            }
-            return mask(pass, column, s);
+        Object scalar = scalar(pass, v, depth);
+        if (scalar != NOT_SCALAR) {
+            return scalar == null ? null : mask(pass, column, scalar);
         }
-        if (v instanceof Boolean) {
-            return mask(pass, column, v);
-        }
-        if (v instanceof Character) {
-            return mask(pass, column, String.valueOf(((Character) v).charValue()));
-        }
-        if (v instanceof Enum) {
-            return mask(pass, column, ((Enum<?>) v).name());
-        }
-        if (jdk && (v instanceof BigDecimal)) {
-            return mask(pass, column, ((BigDecimal) v).toPlainString());
-        }
-        if (jdk && (v instanceof BigInteger)) {
-            return mask(pass, column, v.toString());
-        }
-        if (jdk && v instanceof Number) {
-            Number n = (Number) v;
-            if (v instanceof Double || v instanceof Float) {
-                double d = n.doubleValue();
-                return mask(pass, column, Double.isNaN(d) || Double.isInfinite(d) ? String.valueOf(d) : (Object) d);
-            }
-            return mask(pass, column, n.longValue());
-        }
-        if (jdk && v instanceof Date) {
-            return mask(pass, column, new Date(((Date) v).getTime()).toInstant().toString());
-        }
-        if (jdk && v.getClass().getName().startsWith("java.time.")) {
-            return mask(pass, column, v.toString());
-        }
-        if (depth == 0 && jdk) {
-            if (v.getClass().isArray()) {
+        Class<?> type = v.getClass();
+        if (depth == 0) {
+            if (type.isArray()) {
                 List<Object> list = new ArrayList<Object>();
                 int length = Array.getLength(v);
                 for (int i = 0; i < length; i++) {
@@ -182,7 +181,7 @@ final class BindingEncoder {
                 }
                 return list;
             }
-            if (v instanceof Collection) {
+            if (v instanceof Collection && iterable(type)) {
                 List<Object> list = new ArrayList<Object>();
                 Iterator<?> it = ((Collection<?>) v).iterator();
                 for (int i = 0; it.hasNext(); i++) {
@@ -194,7 +193,7 @@ final class BindingEncoder {
                 }
                 return list;
             }
-            if (v instanceof Map) {
+            if (v instanceof Map && iterable(type)) {
                 Map<String, Object> map = new LinkedHashMap<String, Object>();
                 int i = 0;
                 for (Map.Entry<?, ?> e : ((Map<?, ?>) v).entrySet()) {
@@ -211,21 +210,81 @@ final class BindingEncoder {
         return handle(v);
     }
 
+    /**
+     * The JSON value of a JDK scalar of an exact type (unmasked; {@code null} for a big number that is cut), or
+     * {@link #NOT_SCALAR}. Runs no method of an application class: every type tested is final or the JDK's own.
+     */
+    private Object scalar(Pass pass, Object v, int depth) {
+        Class<?> type = v.getClass();
+        int max = depth == 0 ? MAX_STRING : MAX_STRING_IN_COLLECTION;
+        if (type == String.class) {
+            return cut(pass, (String) v, max);
+        }
+        if (type == Boolean.class) {
+            return v;
+        }
+        if (type == Character.class) {
+            return String.valueOf(((Character) v).charValue());
+        }
+        if (v instanceof Enum) {
+            return ((Enum<?>) v).name();
+        }
+        if (type == Integer.class || type == Long.class || type == Short.class || type == Byte.class) {
+            return ((Number) v).longValue();
+        }
+        if (type == Double.class || type == Float.class) {
+            double d = ((Number) v).doubleValue();
+            return Double.isNaN(d) || Double.isInfinite(d) ? String.valueOf(d) : (Object) d;
+        }
+        if (type == BigDecimal.class) {
+            BigDecimal d = (BigDecimal) v;
+            if (d.unscaledValue().bitLength() > MAX_BITS) {
+                pass.truncated = true;
+                return null;
+            }
+            return cut(pass, d.scale() >= -64 && d.scale() <= MAX_STRING ? d.toPlainString() : d.toString(), max);
+        }
+        if (type == BigInteger.class) {
+            BigInteger i = (BigInteger) v;
+            if (i.bitLength() > MAX_BITS) {
+                pass.truncated = true;
+                return null;
+            }
+            return cut(pass, i.toString(), max);
+        }
+        String name = type.getName();
+        if (name.startsWith("java.") && v instanceof Date) {
+            return new Date(((Date) v).getTime()).toInstant().toString();
+        }
+        if (name.startsWith("java.time.")) {
+            return cut(pass, v.toString(), max);
+        }
+        return NOT_SCALAR;
+    }
+
+    private static String cut(Pass pass, String s, int max) {
+        int take = (int) Math.max(0, Math.min(Math.min(s.length(), max), pass.left));
+        pass.left -= take;
+        if (take < s.length()) {
+            pass.truncated = true;
+            return s.substring(0, take);
+        }
+        return s;
+    }
+
+    /** True for a collection or map class of {@link #ITERABLE} or of the JDK's immutable collections. */
+    static boolean iterable(Class<?> type) {
+        String name = type.getName();
+        return ITERABLE.contains(name) || name.startsWith(IMMUTABLE_PREFIX);
+    }
+
     private String key(Pass pass, Object k) {
         if (k == null) {
             return "null";
         }
-        if (k instanceof String) {
-            String s = (String) k;
-            pass.left -= Math.min(s.length(), MAX_STRING_IN_COLLECTION);
-            return s.length() > MAX_STRING_IN_COLLECTION ? s.substring(0, MAX_STRING_IN_COLLECTION) : s;
-        }
-        if (k instanceof Enum) {
-            return ((Enum<?>) k).name();
-        }
-        if (k.getClass().getClassLoader() == null && (k instanceof Number || k instanceof Boolean
-                || k instanceof Character)) {
-            return String.valueOf(k);
+        Object scalar = scalar(pass, k, 1);
+        if (scalar != NOT_SCALAR) {
+            return String.valueOf(scalar);
         }
         Object h = handle(k);
         return h instanceof Map ? String.valueOf(((Map<?, ?>) h).get("ref")) : String.valueOf(h);

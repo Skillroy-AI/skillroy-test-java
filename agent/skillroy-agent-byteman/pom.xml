@@ -39,6 +39,10 @@
   <properties>
     <!-- Agent side: Java 8 language and API, no third-party class at run time. -->
     <maven.compiler.release>8</maven.compiler.release>
+    <!-- Every surefire execution below holds at least one test, so one that runs none is a defect (the Java 8 test JVM
+         once ran zero tests and exited 0): it fails the build. A command-line -Dtest merges the executions and may
+         leave some empty, so the profile merged-test-run turns the guard off then (fix wave, L3-F1). -->
+    <skillroy.failIfNoTests>true</skillroy.failIfNoTests>
   </properties>
 
   <dependencies>
@@ -135,14 +139,16 @@
         </executions>
       </plugin>
       <!-- The argLine extends the inherited line (phase6-contracts.md 2.3); no module POM sets
-           skillroy.test.extraArgLine. Three test classes need a JVM of their own: ProbeTest sets Byteman's "loaded"
+           skillroy.test.extraArgLine. Four test classes need a JVM of their own: ProbeTest sets Byteman's "loaded"
            property, CheckLoadsNothingTest needs a JVM where nothing of Byteman was ever loaded, and InProcessRouteTest
-           leaves Byteman loaded for the JVM's life (Byteman cannot be unloaded); each runs in an execution of its own
-           (a fork per execution; reuseForks=false gave no tests on the Java 8 test JVM). -->
+           and DetachBudgetTest leave Byteman loaded for the JVM's life (Byteman cannot be unloaded, and a cut-short
+           detach keeps its rule base); each runs in an execution of its own (a fork per execution; reuseForks=false
+           gave no tests on the Java 8 test JVM). -->
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-surefire-plugin</artifactId>
         <configuration>
+          <failIfNoTests>${skillroy.failIfNoTests}</failIfNoTests>
           <argLine>-Djava.awt.headless=${skillroy.headless} ${skillroy.test.extraArgLine} -javaagent:${project.build.directory}/${project.build.finalName}-test-agent.jar</argLine>
           <systemPropertyVariables>
             <skillroy.test.bytemanJar>${org.jboss.byteman:byteman:jar}</skillroy.test.bytemanJar>
@@ -157,6 +163,7 @@
                 <exclude>**/ProbeTest.java</exclude>
                 <exclude>**/CheckLoadsNothingTest.java</exclude>
                 <exclude>**/InProcessRouteTest.java</exclude>
+                <exclude>**/DetachBudgetTest.java</exclude>
               </excludes>
             </configuration>
           </execution>
@@ -193,8 +200,35 @@
               </includes>
             </configuration>
           </execution>
+          <execution>
+            <id>detach-budget</id>
+            <goals>
+              <goal>test</goal>
+            </goals>
+            <configuration>
+              <includes>
+                <include>**/DetachBudgetTest.java</include>
+              </includes>
+            </configuration>
+          </execution>
         </executions>
       </plugin>
     </plugins>
   </build>
+
+  <profiles>
+    <!-- A command-line -Dtest runs the named classes in every execution, so most executions then run nothing: no
+         failure for that (the guard above is for the module's own runs). -->
+    <profile>
+      <id>merged-test-run</id>
+      <activation>
+        <property>
+          <name>test</name>
+        </property>
+      </activation>
+      <properties>
+        <skillroy.failIfNoTests>false</skillroy.failIfNoTests>
+      </properties>
+    </profile>
+  </profiles>
 </project>

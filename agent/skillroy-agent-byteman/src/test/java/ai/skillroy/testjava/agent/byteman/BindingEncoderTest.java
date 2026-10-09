@@ -23,14 +23,47 @@ import org.junit.jupiter.api.Test;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.time.LocalDate;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Date;
+import java.util.EnumMap;
+import java.util.EnumSet;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Hashtable;
+import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.PriorityQueue;
+import java.util.Properties;
+import java.util.Stack;
+import java.util.TreeMap;
+import java.util.TreeSet;
+import java.util.Vector;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedDeque;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.ConcurrentSkipListMap;
+import java.util.concurrent.ConcurrentSkipListSet;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CopyOnWriteArraySet;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.DelayQueue;
+import java.util.concurrent.Delayed;
+import java.util.concurrent.LinkedBlockingDeque;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.LinkedTransferQueue;
+import java.util.concurrent.PriorityBlockingQueue;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.LongAccumulator;
+import java.util.concurrent.atomic.LongAdder;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -120,6 +153,190 @@ class BindingEncoderTest {
         };
         Map<?, ?> h = (Map<?, ?>) bindings(e, appList).get("0");
         assertTrue(h.containsKey("ref"), h.toString());
+    }
+
+    /** A delayed element for a {@code DelayQueue}. */
+    static final class Due implements Delayed {
+        @Override
+        public long getDelay(TimeUnit unit) {
+            return 0;
+        }
+
+        @Override
+        public int compareTo(Delayed o) {
+            return 0;
+        }
+    }
+
+    private static boolean isHandle(Object encoded) {
+        return encoded instanceof Map && ((Map<?, ?>) encoded).containsKey("ref")
+                && ((Map<?, ?>) encoded).containsKey("class");
+    }
+
+    /**
+     * Fix wave (L2-F1, L2-S1): only an allow-list of JDK collection and map classes is read, those whose iteration
+     * takes no lock and runs no method of an element; a locking collection, a blocking queue, a synchronized wrapper,
+     * and every view (an unmodifiable or synchronized wrapper, a sub-map, a key set) is a handle.
+     */
+    @Test
+    void aCollectionWhoseIterationTakesALockOrIsAViewIsAHandle() {
+        BindingEncoder e = new BindingEncoder(ctx, 16384);
+        Map<String, Object> plain = new HashMap<String, Object>();
+        plain.put("k", 1);
+        Vector<Object> vector = new Vector<Object>(Arrays.asList(1, 2));
+        Stack<Object> stack = new Stack<Object>();
+        stack.push(1);
+        Hashtable<String, Object> table = new Hashtable<String, Object>(plain);
+        Properties properties = new Properties();
+        properties.setProperty("k", "v");
+        DelayQueue<Due> delays = new DelayQueue<Due>();
+        delays.add(new Due());
+        TreeMap<String, Object> tree = new TreeMap<String, Object>(plain);
+        Object[] refused = {vector, stack, table, properties, new ArrayBlockingQueue<Object>(4, false, Arrays.asList(1)),
+            new LinkedBlockingQueue<Object>(Arrays.asList(1)), new LinkedBlockingDeque<Object>(Arrays.asList(1)),
+            new PriorityBlockingQueue<Object>(Arrays.asList(1)), delays,
+            new LinkedTransferQueue<Object>(Arrays.asList(1)),
+            Collections.synchronizedList(new ArrayList<Object>(Arrays.asList(1))),
+            Collections.synchronizedMap(new HashMap<String, Object>(plain)),
+            Collections.unmodifiableList(vector), Collections.unmodifiableMap(Collections.synchronizedMap(plain)),
+            Collections.unmodifiableCollection(Arrays.asList(1)), tree.headMap("z"), plain.keySet(),
+            plain.values(), tree.descendingMap(), new TreeSet<Integer>(Arrays.asList(1)),
+            new ConcurrentSkipListSet<Integer>(Arrays.asList(1))};
+        Map<String, Object> b = bindings(e, refused);
+        for (int i = 0; i < refused.length; i++) {
+            assertTrue(isHandle(b.get(Integer.toString(i))), refused[i].getClass().getName() + " is a handle: "
+                    + b.get(Integer.toString(i)));
+            assertEquals(refused[i].getClass().getName(), ((Map<?, ?>) b.get(Integer.toString(i))).get("class"));
+        }
+    }
+
+    @Test
+    void theJdkCollectionsWithoutALockAreRead() {
+        BindingEncoder e = new BindingEncoder(ctx, 16384);
+        List<Integer> one = Arrays.asList(7);
+        Map<String, Object> single = Collections.<String, Object>singletonMap("k", 7);
+        Object[] read = {new ArrayList<Integer>(one), new LinkedList<Integer>(one), new ArrayDeque<Integer>(one),
+            new PriorityQueue<Integer>(one), new HashSet<Integer>(one), new LinkedHashSet<Integer>(one),
+            EnumSet.of(TimeUnit.SECONDS), new ConcurrentLinkedQueue<Integer>(one),
+            new ConcurrentLinkedDeque<Integer>(one), new CopyOnWriteArrayList<Integer>(one),
+            new CopyOnWriteArraySet<Integer>(one), one,
+            Collections.singletonList(7), Collections.singleton(7), Collections.emptyList(),
+            new HashMap<String, Object>(single), new LinkedHashMap<String, Object>(single),
+            new TreeMap<String, Object>(single), new ConcurrentHashMap<String, Object>(single),
+            new ConcurrentSkipListMap<String, Object>(single), new IdentityHashMap<String, Object>(single), single,
+            Collections.emptyMap()};
+        Map<String, Object> b = bindings(e, read);
+        for (int i = 0; i < read.length; i++) {
+            Object v = b.get(Integer.toString(i));
+            assertFalse(isHandle(v), read[i].getClass().getName() + " is read: " + v);
+            assertTrue(v instanceof List || v instanceof Map, read[i].getClass().getName() + ": " + v);
+        }
+        Map<TimeUnit, Object> byUnit = new EnumMap<TimeUnit, Object>(TimeUnit.class);
+        byUnit.put(TimeUnit.SECONDS, 1);
+        assertEquals(Collections.singletonMap("SECONDS", 1L), bindings(e, byUnit).get("0"));
+        assertEquals(Arrays.asList("SECONDS"), bindings(e, EnumSet.of(TimeUnit.SECONDS)).get("0"));
+    }
+
+    /** An application key that counts its comparisons. */
+    static final class Code implements Comparable<Code> {
+        static final AtomicInteger COMPARED = new AtomicInteger();
+        final int n;
+
+        Code(int n) {
+            this.n = n;
+        }
+
+        @Override
+        public int compareTo(Code o) {
+            COMPARED.incrementAndGet();
+            return Integer.compare(n, o.n);
+        }
+    }
+
+    /**
+     * Fix wave (L2-S1): a {@code TreeSet} may be a view (its {@code subSet} is a {@code TreeSet} over a bounded sub-map,
+     * whose iteration compares the keys), so it is a handle and no {@code compareTo} of the application runs.
+     */
+    @Test
+    void aSortedSetViewRunsNoCompareToOfTheApplication() {
+        BindingEncoder e = new BindingEncoder(ctx, 16384);
+        java.util.TreeSet<Code> codes = new java.util.TreeSet<Code>();
+        for (int i = 0; i < 5; i++) {
+            codes.add(new Code(i));
+        }
+        java.util.NavigableSet<Code> middle = codes.subSet(new Code(1), true, new Code(3), true);
+        java.util.concurrent.ConcurrentSkipListSet<Code> skip = new java.util.concurrent.ConcurrentSkipListSet<Code>(
+                codes);
+        java.util.NavigableSet<Code> skipMiddle = skip.subSet(new Code(1), true, new Code(3), true);
+        java.util.NavigableSet<Code> descending = codes.descendingSet();
+        Code.COMPARED.set(0);
+        Map<String, Object> b = bindings(e, middle, skipMiddle, descending);
+        assertEquals(0, Code.COMPARED.get(), "no compareTo of the application ran");
+        assertTrue(isHandle(b.get("0")) && isHandle(b.get("1")) && isHandle(b.get("2")), b.toString());
+    }
+
+    /** Fix wave (L2-F1): the encoding takes no lock of the application, so a held monitor cannot block it. */
+    @Test
+    void aLockHeldByTheApplicationDoesNotBlockTheEncoding() throws Exception {
+        final BindingEncoder e = new BindingEncoder(ctx, 16384);
+        final Vector<Object> vector = new Vector<Object>(Arrays.asList(1, 2));
+        final CountDownLatch held = new CountDownLatch(1);
+        final CountDownLatch release = new CountDownLatch(1);
+        Thread holder = new Thread(new Runnable() {
+            @Override
+            public void run() {
+                synchronized (vector) {
+                    held.countDown();
+                    try {
+                        release.await(5, TimeUnit.SECONDS);
+                    } catch (InterruptedException ignored) {
+                        Thread.currentThread().interrupt();
+                    }
+                }
+            }
+        }, "test-vector-holder");
+        holder.setDaemon(true);
+        holder.start();
+        try {
+            assertTrue(held.await(5, TimeUnit.SECONDS));
+            long t0 = System.nanoTime();
+            Map<String, Object> b = bindings(e, vector, Collections.unmodifiableList(vector));
+            long ms = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - t0);
+            assertTrue(ms < 1000, "the encoding waited " + ms + " ms for the application's lock");
+            assertTrue(isHandle(b.get("0")) && isHandle(b.get("1")), b.toString());
+        } finally {
+            release.countDown();
+            holder.join(10000);
+        }
+    }
+
+    /**
+     * Fix wave (L2-F3): D182's number rules. Only the JDK's boxes, {@code BigDecimal} and {@code BigInteger} are
+     * numbers (an accumulator or an atomic is a handle, its {@code longValue()} never runs); a {@code BigInteger} or a
+     * {@code BigDecimal} whose unscaled value is above 6,000 bits is cut ({@code null}, {@code truncated}) before any
+     * text is made; a {@code BigDecimal} of extreme scale is its scientific text.
+     */
+    @Test
+    void bigNumbersAreGuardedAndOnlyTheJdkBoxesAreNumbers() {
+        BindingEncoder e = new BindingEncoder(ctx, 16384);
+        BigInteger huge = BigInteger.ONE.shiftLeft(4000000);
+        LongAccumulator accumulator = new LongAccumulator(Math::max, 3);
+        LongAdder adder = new LongAdder();
+        Map<String, Object> out = e.encode("limit", new Object[] {huge, new BigDecimal(huge, 2),
+            new BigDecimal("1E-20000000"), new BigDecimal("1E+20000000"), new BigDecimal("150.00"),
+            new BigInteger("12345"), accumulator, adder, new AtomicInteger(4)});
+        @SuppressWarnings("unchecked")
+        Map<String, Object> b = (Map<String, Object>) out.get("bindings");
+        assertTrue(b.containsKey("0") && b.get("0") == null, "a BigInteger above 6,000 bits is cut: " + b.keySet());
+        assertTrue(b.containsKey("1") && b.get("1") == null, "so is a BigDecimal whose unscaled value is");
+        assertEquals("1E-20000000", b.get("2"), "an extreme scale is the scientific text");
+        assertEquals("1E+20000000", b.get("3"));
+        assertEquals("150.00", b.get("4"));
+        assertEquals("12345", b.get("5"));
+        assertTrue(isHandle(b.get("6")), "an accumulator is a handle: " + b.get("6"));
+        assertTrue(isHandle(b.get("7")), "an adder is a handle: " + b.get("7"));
+        assertTrue(isHandle(b.get("8")), "an atomic is a handle: " + b.get("8"));
+        assertEquals(Boolean.TRUE, out.get("truncated"));
     }
 
     @Test

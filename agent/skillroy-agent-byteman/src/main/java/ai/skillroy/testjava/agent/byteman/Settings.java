@@ -22,8 +22,9 @@ import ai.skillroy.testjava.agent.api.AgentContext;
  * The module's options (phase6-contracts.md 3.7): {@code byteman.jar} (no default, no environment fallback) and the
  * bounds it shares with the hooks module, {@code hooks.maxClasses} (the most classes one rule may retransform),
  * {@code hooks.maxClassBytes}, {@code hooks.maxMethods}, {@code hooks.detachBudgetMs} and
- * {@code hooks.capture.maxBytes} (the input budget of one {@code rule.fired}'s encoding). A value that is not a number
- * or out of its range fails the module's install, naming the key (S14: a FAILED record, never fatal).
+ * {@code hooks.capture.maxBytes} (the input budget of one {@code rule.fired}'s encoding), each with the hooks module's
+ * range (3.7 as built, D176; fix wave, L1-F4: {@code hooks.maxClasses} is 1 to 1024 here too). A value that is not a
+ * number or out of its range fails the module's install, naming the key (S14: a FAILED record, never fatal).
  */
 final class Settings {
 
@@ -64,7 +65,7 @@ final class Settings {
     static Settings read(AgentContext ctx) {
         String jar = ctx.option(BYTEMAN_JAR);
         return new Settings(jar == null || jar.trim().isEmpty() ? null : jar.trim(),
-                (int) number(ctx, MAX_CLASSES, 64, 1, 4096),
+                (int) number(ctx, MAX_CLASSES, 64, 1, 1024),
                 number(ctx, MAX_CLASS_BYTES, 262144, 1024, 16L * 1024 * 1024),
                 (int) number(ctx, MAX_METHODS, 2000, 1, 65535),
                 number(ctx, DETACH_BUDGET_MS, 8000, 1000, 9000),

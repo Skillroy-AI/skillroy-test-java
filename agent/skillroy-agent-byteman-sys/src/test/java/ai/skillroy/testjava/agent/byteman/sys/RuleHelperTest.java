@@ -22,6 +22,7 @@ import org.junit.jupiter.api.Test;
 import java.lang.ref.WeakReference;
 import java.lang.reflect.Field;
 import java.math.BigDecimal;
+import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -221,5 +222,26 @@ class RuleHelperTest {
         assertEquals(RuleHelper.MAX_FORMAT, h.format(longText.toString()).length());
         assertEquals("<" + Loud.class.getName() + ">", h.format(new Loud()));
         assertEquals("<" + AppNumber.class.getName() + ">", h.format(new AppNumber()));
+    }
+
+    /**
+     * Fix wave (L2-F3): D182's number rules in {@code format} too. Only the JDK's boxes, {@code BigDecimal} and
+     * {@code BigInteger} are numbers (an accumulator's or an atomic's text is never made); a number whose unscaled value
+     * is above 6,000 bits is its class name, before any text is made; an extreme scale is the scientific text.
+     */
+    @Test
+    void formatGuardsBigNumbersAndReadsOnlyTheJdkBoxes() throws Exception {
+        RuleHelper h = helper("skillroy:n");
+        BigInteger huge = BigInteger.ONE.shiftLeft(4000000);
+        assertEquals("<java.math.BigInteger>", h.format(huge));
+        assertEquals("<java.math.BigDecimal>", h.format(new BigDecimal(huge, 2)));
+        assertEquals("1E-20000000", h.format(new BigDecimal("1E-20000000")));
+        assertEquals("12345", h.format(new BigInteger("12345")));
+        assertEquals("7", h.format(7));
+        assertEquals("2.5", h.format(2.5d));
+        assertEquals("<java.util.concurrent.atomic.LongAccumulator>",
+                h.format(new java.util.concurrent.atomic.LongAccumulator(Math::max, 3)));
+        assertEquals("<java.util.concurrent.atomic.AtomicInteger>",
+                h.format(new java.util.concurrent.atomic.AtomicInteger(4)));
     }
 }

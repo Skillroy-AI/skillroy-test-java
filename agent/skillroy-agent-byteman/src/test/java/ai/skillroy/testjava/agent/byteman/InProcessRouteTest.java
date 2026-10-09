@@ -43,9 +43,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * the first {@code rule.submit} loads Byteman in process, the rule fires into {@code rule.fired} with its bindings
  * encoded, {@code rule.list} shows it, {@code rule.check} now type-checks, a type error and a {@code killJVM} rule are
  * refused, {@code rule.unload} restores with {@code verified: OK}; the uninstall parks the {@code Retransformer} and a
- * second module instance reuses it; a third finds the rule a cut-short uninstall left (the test seam) and refuses,
- * while the rule keeps running its action with no {@code rule.fired}. A test class of its own (a fresh JVM): Byteman
- * stays loaded for the JVM's life.
+ * second module instance reuses it; a third finds the rule a cut-short uninstall left and refuses, while the rule keeps
+ * running its action with no {@code rule.fired}. The second instance's uninstall is cut short by a call that holds the
+ * module past its detach budget of 1000 ms (fix wave, L2-S4): the uninstall still returns within the budget, and the
+ * state it leaves is 7.5's (the seam of D206 is played by {@code BytemanIT}). A test class of its own (a fresh JVM):
+ * Byteman stays loaded for the JVM's life.
  */
 class InProcessRouteTest {
 
@@ -152,6 +154,7 @@ class InProcessRouteTest {
 
         // ---- a second instance reuses the parked Retransformer: no append, no premain
         FakeAgentContext ctx2 = context();
+        ctx2.options.put(Settings.DETACH_BUDGET_MS, Long.toString(DetachBudgetTest.BUDGET_MS));
         BytemanModule second = module(ctx2);
         Capability reused = ctx2.capabilities.probe(BytemanModule.CAPABILITY);
         assertEquals("in-process, reused", reused.strategy(), reused.toString());
@@ -168,12 +171,11 @@ class InProcessRouteTest {
 
         // ---- a cut-short uninstall leaves a rule: the next instance refuses, the rule keeps running its action
         submit(ctx2, LIMIT.replace("RULE limit", "RULE left behind"));
-        System.setProperty(Engine.KEEP_RULES_SEAM, "true");
-        try {
-            second.uninstall();
-        } finally {
-            System.clearProperty(Engine.KEEP_RULES_SEAM);
-        }
+        Thread holder = DetachBudgetTest.holdLock(second.engine(), DetachBudgetTest.HOLD_MS);
+        long ms = DetachBudgetTest.timedUninstall(second);
+        assertTrue(ms < DetachBudgetTest.BUDGET_MS + DetachBudgetTest.MARGIN_MS, "uninstall took " + ms + " ms with a"
+                + " detach budget of " + DetachBudgetTest.BUDGET_MS + " ms while a call held the module");
+        holder.join(DetachBudgetTest.HOLD_MS + 10000);
         assertTrue(ctx2.log.all().contains("rules still installed after detach: [left behind]"), ctx2.log.all());
         assertTrue(RuleHelper.held(), "the disarmed handler keeps the slot while the rule exists");
         FakeAgentContext ctx3 = context();

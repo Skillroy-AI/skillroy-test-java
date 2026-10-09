@@ -16,7 +16,10 @@
 
 package ai.skillroy.testjava.agent.byteman;
 
+import ai.skillroy.testjava.fixture.byteman.BranchDesk;
 import ai.skillroy.testjava.fixture.byteman.DepositDesk;
+import ai.skillroy.testjava.protocol.ErrorCodes;
+import ai.skillroy.testjava.protocol.RpcException;
 import org.junit.jupiter.api.Test;
 
 import java.io.File;
@@ -35,8 +38,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * {@code rule.check} and {@code rule.list} on a fresh agent load nothing (phase6-contracts.md 7.3, 7.6): no
  * {@code org.jboss.byteman} class is defined, nothing of the sys jar is loaded, Byteman's {@code loaded} property is
- * not set, and the answer says the type check was skipped. A test class of its own (a fresh JVM): the Byteman jar is on
- * the test class path, so anything that touched it would show.
+ * not set, and the answer says the type check was skipped. A confirmed {@code rule.submit} that the class bound refuses
+ * loads nothing either: the bound runs before the load (fix wave, L2-F5). A test class of its own (a fresh JVM): the
+ * Byteman jar is on the test class path, so anything that touched it would show.
  */
 class CheckLoadsNothingTest {
 
@@ -56,8 +60,10 @@ class CheckLoadsNothingTest {
         assertNotNull(inst, "the test agent's Instrumentation");
         FreshJvm.assume(true);
         new DepositDesk().ceiling("STAFF-1");
+        new BranchDesk().ceiling("STAFF-1");
         FakeAgentContext ctx = new FakeAgentContext(inst);
         ctx.options.put(Settings.BYTEMAN_JAR, System.getProperty("skillroy.test.bytemanJar"));
+        ctx.options.put(Settings.MAX_CLASSES, "1");
         BytemanModule module = new BytemanModule(new File(System.getProperty("skillroy.test.sysJar")), null);
         module.install(ctx);
         @SuppressWarnings("unchecked")
@@ -77,6 +83,12 @@ class CheckLoadsNothingTest {
         Map<String, Object> list = (Map<String, Object>) ctx.call("rule.list", args());
         assertEquals(false, list.get("loaded"));
         assertEquals(new ArrayList<Object>(), list.get("rules"));
+        RpcException bound = ctx.fails("rule.submit", args("rule", RuleLintTest.rule("wide", "ceiling", "fired($0)")
+                .replace("CLASS " + RuleLintTest.TOY, "CLASS ^" + RuleLintTest.TOY)));
+        assertEquals(ErrorCodes.RULE_REJECTED, bound.error().code());
+        assertTrue(String.valueOf(bound.error().data().get("errors")).contains("rule would retransform 2 classes"),
+                String.valueOf(bound.error().data()));
+        assertFalse(ctx.log.all().contains("byteman: appended"), ctx.log.all());
         assertEquals(new ArrayList<String>(), loaded(inst, "org.jboss.byteman."), "no Byteman class is defined");
         assertEquals(new ArrayList<String>(), loaded(inst, "ai.skillroy.testjava.agent.byteman.sys."),
                 "nothing of the sys jar is loaded");

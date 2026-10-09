@@ -984,6 +984,10 @@ record naming the key, §3.2):
 `IllegalArgumentException("option <key> …")`, which the core records as the module's `FAILED` message.
 `hooks.spyJar` is read live through `AgentContext.option`.
 
+Fix wave (Phase 6 review, FB, 2026-10-09): the Byteman module, which reads the same five keys as the bounds of one
+rule (§7.3), accepted `hooks.maxClasses` from 1 to 4096; it now has the ranges above for all five (`Settings`,
+`SettingsTest`), so one key has one range and the bound a rule may reach is the one D176 fixed (findings L1-F4, L2-F4).
+
 ---
 
 ## 4. The `hook.*` primitives, capabilities, events and errors
@@ -1579,6 +1583,9 @@ refuses (`RULE_REJECTED`, "rule would retransform <n> classes") above `hooks.max
 `hooks.maxClassBytes` or `hooks.maxMethods` (§3.7), or when any is defined by the bootstrap, platform or extension
 loader or by a loader of the agent (the loader rule of §3.3 item 2: `RULE_REJECTED`, "class is the agent's own or the
 JDK's"); every retransformation is a stop-the-world pause (BS3 RESULT §9 fact 17), and a rule is bounded as a hook is.
+Fix wave (Phase 6 review, FB, 2026-10-09): the bound runs **before Byteman is loaded** (§7.4), over the loaded classes
+read once, so that a rule it refuses appends nothing to the system class path and runs no `premain` (both appends
+are permanent); the type check, which needs Byteman, stays after the load (finding L2-F5).
 
 **The lint (`RuleLint`)**, before anything reaches Byteman, errors naming the line: exactly one `RULE … ENDRULE`;
 `CLASS` or `INTERFACE` present, its name not under `java.`, `javax.`, `sun.`, `com.sun.`, `jdk.`,
@@ -1601,6 +1608,19 @@ assignments and calls on bound objects are **allowed**: a fault injection is the
 The deny-list is a `Pattern` constant with its reason per entry, so that the security review reads one place; the
 corpus test (§7.6) holds, per entry, one refused rule and one accepted rule whose name or target method contains the
 word as a substring.
+
+Fix wave (Phase 6 review, FB, 2026-10-09): **what the lint promises, and what it does not** (finding L2-F8; D133). It
+promises the structure above, that no Byteman built-in is named (the module's helper does not extend Byteman's
+`Helper`, so they would not resolve anyway), and that none of the listed entry points is named as an identifier or a
+qualified-name prefix. It does **not** promise that a rule cannot block, write, kill, create processes or reach
+reflection: a `DO` clause may call any method of a bound object and any public static of a class the trigger class's
+loader sees, the JDK's included (`$0.wait()`, `java.util.concurrent.locks.LockSupport.park()`, `new
+java.util.concurrent.CountDownLatch(1).await()`, `java.beans.Beans.instantiate(…)`, a `java.util.logging.FileHandler`,
+`ProcessHandle`), and no list of names closes that; the sentence above lists the reasons for the entries it names,
+not a property of every accepted rule. The list is not widened name by name (a longer list would read as a promise
+it cannot keep); **`confirm` on every `rule.submit` is the gate** (D133: "no lint can make a `DO` clause with calls on
+bound objects safe"). `RuleLintTest.theLintIsATripwireNotASandbox` pins four such accepted rules, so that a wider
+promise is a change of this paragraph first.
 
 **The curated helper** (`skillroy-agent-byteman-sys`, on the system class path because Byteman loads a helper through
 the trigger class's loader, map 7 §4.5): `RuleHelper` (public, non-final) with the `(Rule)` constructor Byteman
@@ -1638,6 +1658,10 @@ As built (Phase 6, BW, 2026-10-09):
   (keyed by the rule's name), at most 1024 keys in the JVM; the package-private `forget(rule)` drops a rule's keys at
   its unload. `format` answers a string (cut at 256), an enum's name, a boolean, a character or a number of the JDK
   (`getClassLoader() == null`), else `<class name>`. The handler slot keeps counters `{fired, unhandled, failures}`.
+  Fix wave (Phase 6 review, FB, 2026-10-09): `format`'s numbers are the JDK's exact types only (the six boxes,
+  `BigDecimal`, `BigInteger`: an accumulator's `toString()` applies its function), a `BigInteger` or a `BigDecimal`'s
+  unscaled value above 6,000 bits is `<class name>` before any text is made, and a `BigDecimal` of extreme scale is
+  its scientific text, D182's rules (finding L2-F3).
 - **`RuleManager`.** `initialize` is branch-free and delegates to a private `accept(Object)` (BS14 condition 4); it
   stores the **first** `Retransformer` of the JVM only and ignores every later call, so that no class can replace or
   clear what Byteman handed over through the public method (D200). The slot holds the `Retransformer` when parked, or
@@ -1666,12 +1690,36 @@ As built (Phase 6, BW, 2026-10-09):
 - **The encoding** follows §4.3 with `mask("rule.<name>", "binding<i>", value)`; a container is read only when its class
   is the JDK's (iterating an application's own collection would run its code; otherwise it is a handle) (D205).
   `rule.fired.rule` is the name without the `skillroy:` prefix, and only the module's live rules publish.
+  Fix wave (Phase 6 review, FB, 2026-10-09; findings L2-F1, L2-S1, L2-F3): the encoding applies §4.3's value rules in
+  full, which "the JDK's" did not. **Scalars** are the JDK's exact types only (`String`, the six boxes, `Boolean`,
+  `Character`, an enum by `name()`, `BigDecimal`, `BigInteger`; a `Date` and a `java.time` value of a `java.` class):
+  an accumulator, an adder or an atomic is a handle, so its `longValue()` (which may apply the application's
+  function) never runs. **Big numbers** (D182): a `BigInteger` of more than 6,000 bits, and a `BigDecimal` whose unscaled
+  value has more, is `null` with `truncated` before any text is made (the unscaled bit length is the cheap test; D182's
+  precision test would itself compute a power of ten of the value's size); a `BigDecimal` whose scale is outside -64
+  to 2000 is its scientific text; every text is cut and counted on the input budget. **Containers**: an array is a
+  list; a collection or map is read only when its exact class is on an allow-list of JDK classes whose iteration
+  takes no lock and calls no method of an element (`ArrayList`, `LinkedList`, `ArrayDeque`, `PriorityQueue`,
+  `HashSet`, `LinkedHashSet`, the two `EnumSet` classes, `HashMap`, `LinkedHashMap`, `TreeMap`, `EnumMap`,
+  `IdentityHashMap`, `Arrays$ArrayList`, the empty and singleton collections of `Collections`, `ConcurrentHashMap`,
+  `ConcurrentSkipListMap`, `ConcurrentLinkedQueue`/`Deque`, `CopyOnWriteArrayList`/`Set`, and the
+  `ImmutableCollections` of Java 9 and later; not `TreeSet` or `ConcurrentSkipListSet`, whose `subSet`, `headSet`,
+  `tailSet` and `descendingSet` answer an instance of the same class over a bounded sub-map that compares the keys on
+  iteration); everything else is a handle, the JDK's locking collections (`Vector`,
+  `Stack`, `Hashtable`, `Properties`, the synchronized wrappers, every blocking queue including `DelayQueue` and
+  `LinkedTransferQueue`) and **every view** included (an unmodifiable or synchronized wrapper, a sub-map, a key set:
+  a view's iterator is the wrapped collection's, which may lock or be the application's). This is D182's reason, "no
+  application lock may be taken", applied by allow-list rather than by a deny-list of names, which missed the
+  blocking queues whose names lack "Blocking" and every view. The list is the one the hooks module's `Capture` reads
+  after its own fix (the hooks half of L2-S1 and L2-F2); one shared predicate in agent-api would keep the two from
+  drifting.
 
 ### 7.4 Loading Byteman
 
 **Only under `rule.submit`**, after the dispatcher's read-only and confirm gates have passed, on an agent worker,
 once per JVM (a read never loads an agent into the host; `rule.check` and `rule.list` answer `loaded: false` until
-then):
+then). Fix wave (Phase 6 review, FB, 2026-10-09): and only after the lint and the class bound of §7.3 have accepted
+the rule (finding L2-F5):
 
 1. The jar: the agent option `byteman.jar` (§3.7) and nothing else, an absolute path to a readable jar whose manifest
    names `Premain-Class: org.jboss.byteman.agent.Main` (`UNAVAILABLE("not a Byteman jar: <path>")`), in a directory
@@ -1679,6 +1727,14 @@ then):
    S19, H3; `UNAVAILABLE("byteman.jar is writable by others: <path>")`). No environment fallback: whoever installed a
    Byteman on the machine or set a variable in a shared profile must not decide which jar's `premain` runs inside the
    target (the contract's own stance against `OTEL_*`, D140); the operator names the jar.
+   Fix wave (Phase 6 review, FB, 2026-10-09): **a symbolic link is resolved first** (`toRealPath`): the checks apply
+   to the real jar and its real directory, and the real jar is the one appended, so that a link in a safe directory
+   to a jar in a directory others may write to is refused, and a link swapped after the check changes nothing
+   (finding L2-S2). On an ACL file system the jar and its directory must be **owned by the current user** (the owner of
+   a file this process creates) **or by the system account, the administrators group or the installer service**,
+   each resolved as a principal and never matched by a bare name, and no ALLOW entry may give anyone else a write
+   right (finding L2-F6; the judgement `JarCheck.aclProblem` is tested on built ACL values, and the branch is not
+   verified on a Windows host). The POSIX rule is unchanged (owned by the current user or root).
 2. **Reuse.** If `RuleManager` is loadable from the system loader and holds a parked `Retransformer` (an earlier agent
    instance of this JVM loaded Byteman in process, unloaded its rules and parked it at its `uninstall`), the module
    takes it (reflectively, §7.3): no append, no `premain`, `rule.engine` `OK(strategy "in-process, reused")`; a parked
@@ -1762,6 +1818,27 @@ As built (Phase 6, BW, 2026-10-09):
   again: a limit of the abnormal state). The test seam is the JVM system property
   `skillroy.agent.byteman.test.keepRulesAtUninstall=true`, read only by `uninstall`, which then leaves the rules as a
   cut-short budget would (D206).
+- Fix wave (Phase 6 review, FB, 2026-10-09): **the detach budget bounds the whole `uninstall`** (findings L1-F5,
+  L2-S4). As built above, the worker held the module's lock for all of `removeScripts` and `uninstall` took the lock
+  again after the join, so a slow removal held it past the budget (and the snapshot at its start waited without bound
+  behind a running `rule.*` call); a removal that ended after the cut then logged and verified from module code after
+  the core had moved on. Now: (1) `uninstall` first marks the module **detaching** (every `rule.*` call that takes
+  the lock afterwards answers `CAPABILITY_UNAVAILABLE("the byteman module is detaching")`, and no `rule.fired` is
+  published) and disarms the handler; (2) it waits for the module's lock (a `ReentrantLock`) **at most the budget**
+  and then keeps it to its end; (3) the worker `skillroy-uninstall-byteman` does **nothing but `removeScripts`** and
+  records its outcome by compare-and-set; `uninstall` joins it for what is left of the budget, and the bookkeeping,
+  the byte check, its log lines and the parking run on the uninstall's own thread, only when the removal completed in
+  time; (4) a cut short (the lock not had within the budget, the removal not finished, or failed) leaves exactly the
+  state of the bullet above, with the names of the module's rules (when the lock was not had: the names of the rules
+  installed or being installed, read without it). A `rule.submit` that the cut-short `uninstall` stopped waiting for
+  installs nothing more once it sees the module detaching, and when no rule of the module is installed gives the
+  `Retransformer` back to the manager (parked, the helper's slot and both recorders released) as an uninstall with no
+  rule does; when the lock was not had and the module had not loaded Byteman, `uninstall` parks nothing and logs a
+  WARN that says so. **A removal that ends after the cut** runs
+  no code of the module (no log line, nothing to the default uncaught-exception handler; its class needs nothing the
+  closed module loader would have to load), and **the parked names then over-report**: Byteman removed the rules
+  after all, but the next instance still refuses with their names ("restart the target"), the safe direction; a
+  parked `Retransformer` still always means that no rule of the module is left. The seam of D206 is unchanged.
 - **Capability `rule.engine`**: declared at `install` with a probe: `UNAVAILABLE("no Instrumentation in <mode>
   mode")`, `UNAVAILABLE("no byteman.jar configured")`, `UNAVAILABLE("not a Byteman jar: …")`,
   `UNAVAILABLE("byteman.jar is writable by others: …")`, `UNAVAILABLE("Byteman was loaded by the host; …")`,
@@ -1825,6 +1902,29 @@ re-attach without the attach API: the toy `LendingToyMain` runs with a second `-
 command, calls the bootstrap's `agentmain` with that `Instrumentation`, which is what an attach calls; it also covers
 the read-only refusal in a second child. Run: natively (macOS: the socket checks skip, no `/proc`), and in the arm64
 image on the Java 8 and Java 25 targets, the module tests also on the Java 8 test JVM (`-Djvm`).
+
+Fix wave (Phase 6 review, FB, 2026-10-09). A fourth class runs in an execution of its own, `DetachBudgetTest`
+(`detach-budget`): with `hooks.detachBudgetMs=1000`, a call that holds the module's lock for 3 s and a removal that a
+slow foreign transformer stretches to 3 s each give an `uninstall` that returns within the budget plus 1.5 s; the
+late end of the removal adds no log line and nothing reaches the default uncaught-exception handler, the rule is
+gone, and the next instance is still refused naming it (§7.5's over-report). `InProcessRouteTest`'s cut-short third
+instance now comes from a call holding the module past a 1000 ms budget (the bound of the wait at the start of
+`uninstall`); the seam of D206 stays covered by `BytemanIT`. `CheckLoadsNothingTest` adds a confirmed `rule.submit`
+the class bound refuses (`hooks.maxClasses=1`, a `^` rule over the toy and its subclass): `RULE_REJECTED`, and still no
+Byteman class, no sys-jar class, no append, no property. New in the default execution: `SettingsTest` (the five
+ranges, `hooks.maxClasses` 1025 refused), `JarCheckTest` (a link to a jar in a directory others may write to refused
+and the real jar appended; the ACL judgement on built values), `FreshJvmTest`; `BindingEncoderTest` gains the locking
+collections, the views and the queues as handles, the allow-listed classes read, a sorted-set view over application
+keys encoded with no `compareTo`, a `Vector` whose monitor another thread holds encoded at once, and the big-number and
+exact-type rules; `RuleHelperTest` the same rules for `format`;
+`RuleLintTest` the pinned limits of the lint (§7.3). **The dedicated JVMs**: `FreshJvm` skips a class whose JVM is not
+fresh only when a command-line `-Dtest` merged the executions (surefire hands `test` to the fork), and fails it
+otherwise, so that a dedicated execution that is not fresh can never pass as a skip (finding L3-S2). **No silent
+empty run**: both Byteman modules set surefire's `failIfNoTests` from the property `skillroy.failIfNoTests`, `true` by
+default, so an execution that runs no test fails the build (the Java 8 test JVM once ran zero tests and exited 0); a
+profile activated by the property `test` sets it to `false`, so the documented `-Dtest=… -Dsurefire.failIfNoSpecifiedTests=false`
+runs still pass in every module of the reactor (finding L3-F1, the Byteman half). The counts to read from the reports
+on every leg: `skillroy-agent-byteman` 37 tests in ten classes, 0 skipped; `skillroy-agent-byteman-sys` 10 in three.
 
 ---
 
