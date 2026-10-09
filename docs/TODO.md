@@ -81,7 +81,7 @@ key with a stray character could leak through a provider exception, a session ch
 allow-list was never checked against the schema, triage sent row samples unmasked by column; section "Phase 5 code
 review" below), **and fixed by four fixers** (decisions D96-D103 and D110; the review's as-built and "fix wave" notes are
 in the contract). The final tree's matrix is the first table below. **In the afternoon of 2026-10-08 the live items were closed** with the owner's workspace-scoped key (the method of
-the night: contract first, D111-D113 as B25; two implementers in worktrees and a third for scenario C; one review lens
+the night: contract first, D111-D113 as B25, confirmed by the owner on 2026-10-09; two implementers in worktrees and a third for scenario C; one review lens
 with probes; a fix round; the matrix before the commits; "Phase 5, the live items" below): BS13's live part on SDK
 2.70.0, scenario D's tier (b) requests re-recorded live on both seeds, the profiles `inference-live` and
 `inference-record` with the live acceptance of P5 §15.3 green in the image (five items; the cache-hit criterion met at
@@ -345,7 +345,7 @@ table above. "Java 8 test JVM" = the module's own tests also run on Java 8 (`-Dj
 | Platform | Controller side on Java 25 (`--release 25`, B3); agent side on Java 8 (B4). The Linux test image is JDK 25 (Temurin 25.0.4.1); the previous JDK 21 image is no longer used. Native development JDK is 26 | none |
 | Git and publication | The initial commit was made on 2026-10-06 (everything in the tree, one commit, DCO sign-off); nothing pushed. The remote `Skillroy-AI/skillroy-test-java` is private for now. `LICENSE` (Apache-2.0), `NOTICE`, `CONTRIBUTING.md` (DCO sign-off, no CLA) and the header in every source file (`ci/license-headers.sh`, with the holder's name since 2026-10-06) exist; the root POM carries the publication metadata | Push when the owner says; before the first public release, the repeated security review |
 | Licence audit | `docs/licence-audit.md`: everything the project distributes, bundles or depends on is compatible with Apache-2.0. The packaging gaps (licence files inside the jars and zips, third-party attribution in the CLI distribution, a `<licenses>` element in the root pom) are closed (Phase 1.x, built 2026-10-02). Updated 2026-10-07 for Phase 4: the Playwright and JCEF sets (in no distribution), the new modules, and the agent home's seventh jar, inspected | none |
-| Decisions | B1-B14 answered by the owner 2026-10-02; B15 and B16 follow from the answers; B17-B20, taken without the owner, were confirmed by the owner on 2026-10-06, with two vetoes inside B19 (Q10, Q14) built the same day; **B21** (the Phase 4 contract's fifteen answers) taken without the owner later on 2026-10-06 and confirmed by the owner on 2026-10-07; **B22** (D59-D69, the Phase 4 build's decisions) confirmed the same evening. **B23** (the Phase 5 contract's eighteen answers, D70-D87) and **B24** (the build's and the review's decisions, D88-D104, D110) taken without the owner on 2026-10-08 and confirmed by the owner the same day; **B25** (the live session's D111-D113) taken without the owner in the afternoon of 2026-10-08, provisional | B25 open (`B25 ok` or `B25 D113 veto 0.8`); the owner's review of the committed scenario C |
+| Decisions | B1-B14 answered by the owner 2026-10-02; B15 and B16 follow from the answers; B17-B20, taken without the owner, were confirmed by the owner on 2026-10-06, with two vetoes inside B19 (Q10, Q14) built the same day; **B21** (the Phase 4 contract's fifteen answers) taken without the owner later on 2026-10-06 and confirmed by the owner on 2026-10-07; **B22** (D59-D69, the Phase 4 build's decisions) confirmed the same evening. **B23** (the Phase 5 contract's eighteen answers, D70-D87) and **B24** (the build's and the review's decisions, D88-D104, D110) taken without the owner on 2026-10-08 and confirmed by the owner the same day; **B25** (the live session's D111-D113) taken without the owner in the afternoon of 2026-10-08 and confirmed by the owner on 2026-10-09 | None open; the owner's review of the committed scenario C |
 | Design docs (`docs/design/`) | `phase1-contracts.md` as built, with the Phase 1.x, Phase 2, Phase 3 and Phase 4 passages marked "(1.x, built 2026-10-02)", "(Phase 2, built 2026-10-02)", "(Phase 3, built 2026-10-03)" and "(Phase 4, built 2026-10-07)". `phase2-contracts.md` and `phase3-contracts.md` as built (2026-10-03: every deviation of the build and every fix of the review marked in place; their Phase 4 passages marked built). **`phase4-contracts.md` as built 2026-10-07** (specified 2026-10-06; every deviation of the build and every fix of the review marked in place, the decisions of the build D59-D69). **`phase5-contracts.md` as built 2026-10-08** (specified, built, reviewed and fixed the same day, its §16.1 marks written into the Phase 1-4 contracts and the overview; the live session's passages marked "the live session", D111-D113). Overview: roadmap with Phases 1.x to 5 built, §3.8 as built | None |
 | Research notes (`docs/research/`) | Round 1 carried over, finding ids unchanged; `embedded-browser-spi` and `vision-input` new (2026-10-02). Pruned of local-environment detail | None |
 | Security review | Run 2026-10-02 on the pre-port tree: 34 confirmed findings (4 medium, 30 low); the fixes H1-H3 are built (Phase 1.x). The Phase 2 code review of 2026-10-03 had a secrets-and-safety lens (below) | Repeat the review before the first release |
@@ -1218,8 +1218,8 @@ The review's reports, verdicts, briefs and fixer reports are with the session's 
 ### Phase 5, the live items (2026-10-08, afternoon)
 
 The owner's workspace-scoped key made the live items possible the same day the phase was confirmed. The method of the
-night: contract first (`design/phase5-contracts.md`, the passages marked "the live session"; decisions D111-D113, B25
-provisional), two implementers in isolated worktrees (the inference module with the root POM and the CLI; the sample's
+night: contract first (`design/phase5-contracts.md`, the passages marked "the live session"; decisions D111-D113, B25,
+confirmed by the owner on 2026-10-09), two implementers in isolated worktrees (the inference module with the root POM and the CLI; the sample's
 scenarios module), one review lens with probes over the integrated change, a fix round, the Linux matrix before the
 commits. The key lived in the operator's login shell and reached a JVM by name only (`zsh -lc` to export it,
 `ci/run-in-linux.sh`'s pass-through into the container); it never touched the repository, the notes or a page.
@@ -1488,9 +1488,9 @@ The review items of the end-to-end review, now decided (gap numbers refer to the
    and 45 were closed by the Phase 4.x amendments on 2026-10-08; gap 48 is new). D59-D69 are B22, confirmed by the
    owner on 2026-10-07.
 3. **Phase 5 is built, reviewed, fixed and closed live** (`design/phase5-contracts.md`, 2026-10-08; B23 and B24
-   confirmed by the owner on 2026-10-08; the live items of the afternoon under "Phase 5, the live items"). Open for the
-   owner: B25 (D111-D113: the live profiles' mechanics, the envelope file, the confidence threshold 0.6) and the review
-   of the committed scenario C. Open from the review, not fixed: the table-unaware personal rule (L2 F10, a documented
+   confirmed by the owner on 2026-10-08; the live items of the afternoon under "Phase 5, the live items"). B25 (D111-D113:
+   the live profiles' mechanics, the envelope file, the confidence threshold 0.6) was confirmed by the owner on
+   2026-10-09. Open for the owner: the review of the committed scenario C. Open from the review, not fixed: the table-unaware personal rule (L2 F10, a documented
    over-masking), a row mask whose effect depends on the value (not found by the start probe), a verb that compiles with
    none of the probe argument sets (offered as is), key nullability of allow-listed tables (unchecked); and gap 49 (the
    item query's missing induction argument). Worth a re-measure later: the model's self-reported confidence at other
