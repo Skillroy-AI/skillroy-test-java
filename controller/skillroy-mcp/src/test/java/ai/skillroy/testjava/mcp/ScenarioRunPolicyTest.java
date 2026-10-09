@@ -304,7 +304,7 @@ class ScenarioRunPolicyTest {
         }
     }
 
-    /** The session service over the server's session, metered on the server's meter, as {@code skillroy mcp} builds it. */
+    /** The session service over the server's session, metered on the server's meter, as skillroy mcp builds it. */
     private static SessionActor serviceActor(ExecutorSession session, ServerOptions options, TierB tierB,
                                              CostLedger ledger) {
         PromptMask mask = PromptMask.of(Desk.credentials().mask(), List.of(), List.of());

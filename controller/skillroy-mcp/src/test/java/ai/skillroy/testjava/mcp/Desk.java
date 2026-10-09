@@ -266,6 +266,72 @@ final class Desk {
     }
 
     /**
+     * The desk's pack whose verb {@code lend} declares this argument schema (phase6 security fix S49: a schema with a
+     * secret-looking property and data in it).
+     */
+    DomainPack packWithLendSchema(Map<String, Object> schema) {
+        DomainPack base = pack;
+        StepLibrary baseSteps = base.steps();
+        StepLibrary steps = new StepLibrary() {
+            @Override
+            public Set<String> verbs() {
+                return baseSteps.verbs();
+            }
+
+            @Override
+            public List<PlannedCall> compile(String verb, Object args, CompileContext ctx) throws ScenarioException {
+                return baseSteps.compile(verb, args, ctx);
+            }
+
+            @Override
+            public Map<String, Object> argsSchema(String verb) {
+                return verb.equals("lend") ? schema : baseSteps.argsSchema(verb);
+            }
+        };
+        return new DomainPack() {
+            @Override
+            public String id() {
+                return base.id();
+            }
+
+            @Override
+            public String version() {
+                return base.version();
+            }
+
+            @Override
+            public StepLibrary steps() {
+                return steps;
+            }
+
+            @Override
+            public SyncPolicy syncPolicy() {
+                return base.syncPolicy();
+            }
+
+            @Override
+            public List<FactProvider> facts() {
+                return base.facts();
+            }
+
+            @Override
+            public void recover(AgentConnection connection) throws Exception {
+                base.recover(connection);
+            }
+
+            @Override
+            public ResolutionCatalogue resolution() {
+                return base.resolution();
+            }
+
+            @Override
+            public List<SqlAllowList> sqlAllowLists() {
+                return base.sqlAllowLists();
+            }
+        };
+    }
+
+    /**
      * The desk's pack with the two verbs of the security review's probe (pass 1, S57), each of which compiles to the
      * destructive {@code desk.wipe} with its own {@code confirm} only for some arguments, so that no probe at the
      * server's start finds it: {@code tidy {hard?}} ({@code desk.wipe} when {@code hard} is true, else

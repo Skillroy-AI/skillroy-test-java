@@ -380,7 +380,9 @@ breakpoint flag out as well; `Content.Image` has `sha256()`; `Usage` has `toJson
 ### 4.1 `ClaudeGateway` (`…inference.claude`)
 
 Built on `com.anthropic:anthropic-java` (the version of §2.2), one `AnthropicOkHttpClient` per gateway, closed with it,
-**built explicitly** from `ANTHROPIC_API_KEY` (and `ANTHROPIC_BASE_URL` when set), with `maxRetries(0)` and the SDK's
+**built explicitly** from `ANTHROPIC_API_KEY` (and `ANTHROPIC_BASE_URL` when set, which (Phase 6 security fix S51,
+A51, built 2026-10-09, SR) must be `https` (or `http` on `127.0.0.1`, `::1` or `localhost`) and carry no user-info,
+else `AUTH` naming the variable and never its value, since the key travels there), with `maxRetries(0)` and the SDK's
 logging off: not `fromEnv()`, which also reads `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_PROFILE`, the workload-identity
 variables, profiles on disk, `ANTHROPIC_CUSTOM_HEADERS` and `ANTHROPIC_LOG`, and would make the gateway's credential
 source and its logging depend on an operator's shell (BS13 F-9). Structured output goes through the manual
@@ -444,7 +446,8 @@ reads a key from anywhere but the environment; it never selects a model the sett
 `Image` part when `IMAGES` is disabled in the settings (`images: false`, the default until Phase 7: a capture is
 personal data until masked, design §5), and over MCP (§9.4; Phase 6 security fix S58, A57, built 2026-10-09, SR;
 D159). Zero-data-retention: the 5.5 models and Haiku are eligible, Fable is not and is
-never configured by default (ai-inference F10, R15).
+never configured by default (ai-inference F10, R15). (Phase 6 security fix S52, A52, built 2026-10-09, SR) Fable may be
+named only with a `prices:` row, and naming it leaves the zero-data-retention regime.
 
 ### 4.2 `RecordedGateway` and `RecordingGateway` (`…inference.recorded`)
 
@@ -866,6 +869,22 @@ roots, stored tables, verbs and their schemas), which goes through the mask: eve
 bounds, and in a schema every description, default, example, enum and constant, a property whose name looks secret
 losing its values whole while keeping its name. The planner reads no data, so its prompt carries no row and no sample.
 
+(Phase 6 security fix S49, A50, built 2026-10-09, SR) The pack's vocabulary goes through the mask wherever a model
+receives it: the planner's prompt, the session's system part and `skillroy_catalogue` result, and the projected tools
+of the session and of the MCP server (`ToolProjection.project(primitives, pack, policy, PromptMask)` and
+`ToolProjection.masked`, which `WorkflowTools.session(…, mask)` and `SkillroyMcpServer` use; `PlanPolicy`, which reads
+names and flags only, keeps the unmasked projection), and a recording's `request.tools` (`Recording`, the fingerprint
+staying the request's as sent). The one rule is `PromptMask.schema`: in a schema a property whose name looks secret
+loses `default`, `examples`, `example`, `const` and `enum` whole, keeping its name and type, so that the schema stays
+valid (the planner's walk used to write `<redacted>` in their place, which could make a strict schema invalid); every
+text through the key rule and the bounds. As built: a projected tool is masked after its schema is made strict
+(masking removes data keywords only, so the strict shape stays). The five committed session stand-ins of §14.5 were
+regenerated (`-Dskillroy.inference.fixtures.update=true`, no live call; the exported scenario did not change): no
+sample verb's schema holds a secret-looking property, but the key rule now rewrites the `signOn` and `authorise`
+descriptions' "credential: {realm: staff, key: code}" to "credential: <redacted> staff, key: code}" in the tools as
+it already did in the planner's prompt (D103), which changed the requests' fingerprints. A pack author who wants the
+example kept writes it without a `key: value` shape after a secret word.
+
 ### 6.2 `PromptMask` (`…inference.prompt`)
 
 ```java
@@ -895,8 +914,14 @@ Rules.
   The person's own request to a session is data too (`<person>`).
 - *Captures.* An `Image` part is personal data until Phase 7 says how a capture is masked (design §3.10); with `images:
   false` (the default) the mask refuses it with `IllegalStateException`, and no Phase 5 request builder creates one.
-- *Bounded.* A text part is cut at 100000 characters and a rows sample at 20 rows before masking, with `[truncated]`
-  appended, so that a runaway snapshot cannot carry a secret past the mask by size.
+- *Bounded.* A text part is ~~cut at 100000 characters and a rows sample at 20 rows before masking~~ **masked, then**
+  cut at 100000 characters (and a rows sample at 20 rows) with `[truncated]` appended, so that a runaway snapshot cannot
+  carry a secret past the mask by size (Phase 6 security fix S53, A53, built 2026-10-09, SR; the build's margin of 1000
+  characters past the cut is replaced by masking the whole text first, since a longer secret straddling the cut kept
+  its head). As built: the overlay bridge (§12.4) no longer cuts a request before the mask either: it keeps a request's
+  text whole up to `OverlayBridge.MAX_QUEUED_TEXT` (100000) and asks with `SessionService.ask(text, MAX_TEXT)`, which
+  masks the whole text and then cuts it at the bridge's 10000 characters; a longer request is answered "the request is
+  longer than 100000 characters; shorten it" without a model call (D-SR2-2).
 
 The mask is tested with the project's existing adversarial fixtures (short and long secrets, quoted secrets, secrets
 inside JSON strings, the key patterns) and with the sample's `password` column; a test proves that a prompt built for
@@ -907,7 +932,9 @@ As built (2026-10-08, fix wave): the session's and the summary's requests are pr
 builder (`SessionServiceTest`: values only the key rule catches, under a secret-looking key and in `key=value` runs,
 fed through the facts, the snapshot and the events the model reads, the person's text and a folded summary, and a
 credential inside a text, reach no part of any request, the summary call's included; `OverlayBridgeTest` does the same
-for an overlay's text), the planner's vocabulary in `PlannerTest` (D103), triage's request in `TriageTest`. Three
+for an overlay's text), the planner's vocabulary in `PlannerTest` (D103), the verbs' schemas included (Phase 6
+security fix S49, A50, built 2026-10-09, SR: `SessionServiceTest`, `RecordingTest`, the MCP `ToolListTest`), triage's
+request in `TriageTest`. Three
 limits are recorded. The module key patterns of A21 cannot reach the controller (no wire type carries them, and the
 agent applies them to its own outputs before anything leaves the target): `PromptMask.withKeys` is the seam a later
 amendment fills, and no caller uses it now. The tier (b) contributor's mask knows the allow-lists, the row masks and
@@ -970,9 +997,15 @@ public final class PriceTable {
                         BigDecimal cacheWrite5mFactor, BigDecimal cacheWrite1hFactor, BigDecimal batchFactor) { }
     public static PriceTable builtIn();                   // this version's table, below
     public static PriceTable load(Path yaml) throws SettingsException;   // overrides and additions, strict YAML
-    public BigDecimal cost(Usage usage);                 // 6 decimals, HALF_UP, from the usage's own cache-write split; a dated id (a known id followed by -YYYYMMDD, as the provider names Haiku 4.5's snapshot; BS13 live) is priced as the known id; an unknown model costs at the OPUS_CLASS price and is noted
+    public BigDecimal cost(Usage usage);                 // 6 decimals, HALF_UP, from the usage's own cache-write split; a dated id (a known id followed by -YYYYMMDD, as the provider names Haiku 4.5's snapshot; BS13 live) is priced as the known id; an unknown answering model costs at the OPUS_CLASS price and is noted
 }
 ```
+
+(Phase 6 security fix S52, A52, built 2026-10-09, SR) A dated id is priced as the known id; an unknown **answering**
+model costs at the `OPUS_CLASS` price and is noted; **a configured model must be in the effective table, else the
+gateway refuses to open** (`INVALID_REQUEST`: "model <id> is not in the price table; name it under `prices:` with its
+price"), so that a configured id is never under-counted. The owner may prefer a warning on stderr at `open` instead (a
+configuration that worked before is now refused).
 
 The built-in table, from the published rates of ai-inference F10 (USD per million tokens; to be re-checked when built,
 and replaced by the file when they move):
@@ -1075,7 +1108,12 @@ JUnit `environment` test).
    `ENVIRONMENT` with the report's own reason `BATCH_TIMEOUT`, a reason of the job, not a `FailureKind`); the job's cost, the budget, the number of batches and requests, the cache-hit ratio
    (`cacheReadTokens / (inputTokens + cacheReadTokens)` over the job's ledger), the model ids; and the instruction for
    the reviewer ("approve by merging; a slot's statement and rationale are in the file's provenance"). The job's
-   `cost-ledger.jsonl` and `inference.jsonl` are written beside it.
+   `cost-ledger.jsonl` and `inference.jsonl` are written beside it. (Phase 6 security fix S50, built 2026-10-09, SR; no
+   amendment number) Model- and binder-origin texts are rendered as code: a failed scenario's reason and message and
+   every note are inline code (a backtick replaced, one line, at most 1000 characters), as the changed and new lines
+   already were, so that a link or an image a model steered into them is inert in the pull request; `triage.md`
+   (§11.2) likewise writes the label's line and each `lookAt` item as inline code and the summary and the proposal in
+   a fenced block one backtick longer than the longest backtick run of the text.
 6. **Exit codes**: 0 when every scenario resolved (changed or not); 1 when any scenario failed (the report says which;
    files of the others are still written); 2, 3, 64, 70 as `resolve`.
 
@@ -1412,6 +1450,12 @@ it in CI. What it produces is a YAML file and a plan for a person to review; the
    CVE-2024-27980 fix; until a Windows host shows which quoted form survives the planner's client (P6 §9.5) this plain
    form is written, and a launcher path or argument holding `"`, `%`, `^`, `&`, `|`, `<`, `>` or white space is refused
    (exit code 64, "move the installation or the pack to a path without spaces or special characters").
+   (Phase 6 security fix S60, A58, built 2026-10-09, SR) The server's arguments also carry `--client planner` (D158,
+   S59) and `--out <work>/mcp`, under the planner's private working directory, which the command now makes first
+   (`Planner.workDirectory()`, handed to the planner as `PlannerRequest.workDirectory`), so that the server's journal,
+   run evidence and captures are deleted with it when the command ends; `--keep-work` keeps it and prints its path on
+   stderr. (Before the fix the server, started without `--out`, kept a `skillroy-mcp-*` temporary directory that
+   `author` never deleted.)
 4. **The prompt**: the planner instructions (explore with the read tools first; use the verbs, never the low-level
    primitives, in steps; name no person or item, resolve them with queries; expectations through facts and `db`
    checks, never through what the UI shows unless the brief asks for the UI; prefer committed strategies; return
@@ -1422,7 +1466,10 @@ it in CI. What it produces is a YAML file and a plan for a person to review; the
    "<prompt>"` (`--tools ""` leaves the CLI's built-in shell and file tools out; `--strict-mcp-config` admits no other
    server; `--max-budget-usd` is the CLI's own budget, BS13 F-10) with `ANTHROPIC_API_KEY` inherited when set (the CLI
    also accepts its own login; a key that needs a workspace id needs it here too, through `ANTHROPIC_CUSTOM_HEADERS`,
-   to be verified when the live run is possible), the working directory a private temporary directory, stdin closed,
+   to be verified when the live run is possible), the working directory a private temporary directory (Phase 6
+   security fix S60, A58, built 2026-10-09, SR: the `claude` CLI's own session store and configuration live in the
+   CLI's configuration directory, outside the base's control, and a `--resume` needs them; a release note says so, and
+   relocating them with `CLAUDE_CONFIG_DIR` is not built, B26 Q22), stdin closed,
    stdout read in full under a deadline of `timeouts.plannerMs` (default 15 min), stderr to the command's log, masked.
 5. **The result**: the JSON envelope's `structured_output` (the scenario; optional in the envelope), `total_cost_usd`,
    `session_id`, `num_turns`, `is_error`, `mcp_server_errors` (optional). Success is exit code 0 with `is_error: false`,
@@ -1785,6 +1832,14 @@ The loop of one `ask` (design §5, "Session service"):
    `allowBasePrimitives` the base `swing_*` and `web_*` mutating primitives (off by default: the verbs are the
    vocabulary a scenario can export); and `done {answer}` and `ask_person {question}`. Never a destructive primitive,
    never `data_query`, never `evaluate` (design §5: nothing the model produces reaches `data.query`, hooks or uploads).
+   (Phase 6 security fix S62, A60, built 2026-10-09, SR; D158) A pack verb the policy offers is checked by the same
+   rule as the MCP server's verb tools (D96, `…inference.tools.CallPolicy`, to which `PlanPolicy.never` and
+   `arguments` delegate): at start with probe arguments (`CallPolicy.probes`: an empty mapping, then placeholders for
+   the schema's required keys, then for all), and at call time on the calls it compiles to with the model's arguments
+   (`ExecutorSession.compile(verb, args, origin)`); a verb reaching a destructive, `agent.*`, `data.query`, `hook.*` or
+   `rule.*` (but the three reads) or script primitive, or carrying `confirm` or `_meta`, is withheld (left out of the
+   tools and listed by `skillroy_catalogue` under `withheldVerbs`; not logged, the service having no log of its own) or
+   its call refused as a tool result error naming the primitive, nothing run or journaled.
    The tool definitions are the same `ToolSpec`s the MCP server projects (§9.3), built by one projection class
    (`…inference.tools.ToolProjection`), so that a scenario authored over MCP and a session's actions share one
    vocabulary.
@@ -1916,8 +1971,8 @@ unless stated):
 | Command | Does |
 |---|---|
 | `re-resolve …` | §8.2 |
-| `mcp …` | §9.2; exit 0 when the client closed the stream, 3 when the agent was lost |
-| `author …` | §10.2 |
+| `mcp …` | §9.2; exit 0 when the client closed the stream, 3 when the agent was lost; (Phase 6 security fixes S56, S57, built 2026-10-09, SR) `--client <label>` (default `mcp`), and `--session-budget` bounding `skillroy_session_ask`, `skillroy_resolve` and `skillroy_scenario_run` together |
+| `author …` | §10.2; (Phase 6 security fix S60, built 2026-10-09, SR) `--keep-work` |
 | `triage …` | §11.2 |
 | `session [connection] [--pack]… [--env] [--credentials] [--out <dir>] [--read-only] [--allow-base-primitives] [--inference …] [--budget-session <usd>] [--max-actions <n>] [--id <sessionId>]` | opens an `ExecutorSession` and, unless `--inference none`, a `SessionService`; a REPL on the terminal (§12.4; scripted in tests through the `Terminal` seam): `ask <text>`, `do <verb> <json>`, `call <primitive> <json>`, `resolve <slot> <kind> <json> [--strategy a,b]`, `check <path> <matcher-json>`, `observe <path>`, `snapshot [max]`, `facts <root> [path]`, `events [since]`, `note <text>`, `export <scenarioId> [--approved-by <label>] [--out <dir>]`, `quit`. Without a terminal, `--script <file>` runs the same commands from a file and exits; exit 0, or 1 when the agent was lost or the script's last `export` failed |
 

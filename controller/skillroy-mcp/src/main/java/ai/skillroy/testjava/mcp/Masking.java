@@ -56,6 +56,11 @@ final class Masking {
         this.joined = joined;
     }
 
+    /** The prompt mask (the key rule, the allow-lists' personal columns, the bound): the projected tools' (S49). */
+    PromptMask prompt() {
+        return prompt;
+    }
+
     /** A value read from the target or the run: secret values, then secret keys; a new value. */
     Object value(Object jsonLike) {
         return prompt.jsonLike(plain(jsonLike));

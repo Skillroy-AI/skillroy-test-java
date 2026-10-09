@@ -369,19 +369,21 @@ public final class Triage {
                 .append(step == null ? "" : ", failed step " + step).append(". Triaged ").append(date)
                 .append(" by ").append(models.isEmpty() ? "no model" : String.join(", ", models))
                 .append("; model cost $").append(cost.toPlainString()).append(".\n\n");
+        // Phase 6 security fix S50: a model's texts are rendered as code (inline or fenced), so that a link, an image
+        // or a heading in them is inert in a rendered triage.md.
         md.append("## Label\n\n").append(label.label()).append(" (confidence ").append(label.confidence())
-                .append("): ").append(oneLine(label.oneLine())).append("\n");
+                .append("): ").append(code(label.oneLine())).append("\n");
         if (summary != null) {
-            md.append("\n## Summary\n\n").append(summary.summary().strip()).append("\n");
+            md.append("\n## Summary\n\n").append(fenced(summary.summary().strip()));
             if (!summary.lookAt().isEmpty()) {
                 md.append("\n## Look at\n\n");
                 for (String item : summary.lookAt()) {
-                    md.append("- ").append(oneLine(item)).append('\n');
+                    md.append("- ").append(code(item)).append('\n');
                 }
             }
             if (!summary.proposal().isBlank()) {
                 md.append("\n## Proposal (prose for a person; nothing was applied)\n\n")
-                        .append(summary.proposal().strip()).append('\n');
+                        .append(fenced(summary.proposal().strip()));
             }
         }
         if (failure != null) {
@@ -398,6 +400,26 @@ public final class Triage {
 
     private static String oneLine(String text) {
         return text == null ? "" : text.replace('\n', ' ').replace('\r', ' ');
+    }
+
+    /** A model's one-line text as inline code, a backtick in it replaced (S50). */
+    static String code(String text) {
+        return "`" + oneLine(text).replace('`', '\'') + "`";
+    }
+
+    /**
+     * A model's prose in a fenced block whose fence is one backtick longer than the longest run of backticks in it (at
+     * least three), so that the prose is kept and its markup is inert (S50).
+     */
+    static String fenced(String text) {
+        int longest = 0;
+        int run = 0;
+        for (int i = 0; i < text.length(); i++) {
+            run = text.charAt(i) == '`' ? run + 1 : 0;
+            longest = Math.max(longest, run);
+        }
+        String fence = "`".repeat(Math.max(3, longest + 1));
+        return fence + "text\n" + text + "\n" + fence + "\n";
     }
 
     private static String bounded(String text, int max) {

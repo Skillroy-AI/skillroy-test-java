@@ -2748,6 +2748,19 @@ CP, TL and BW build nothing of them; CP's own `ToolProjection` and `PlanPolicy` 
   **FX-mcp**. Alternatives rejected: a separate flag (a second switch for the one question D84 already answers);
   serving as today (a capture is personal data until masked, and the client is often a model).
 
+**As built (Phase 6, SR, FX-2, 2026-10-09):** D157-D159 as stated, with these details (the amendment texts are in P5
+§9.2-§9.4, §10.2, §12.2-§12.4 and §13.4, marked "Phase 6 security fix S<n>, A<m>"). D157: the meter's exhausted state
+lives on `BudgetMeter` (`markExhausted`, `exhausted`), which `SessionService` now reads instead of a field of its own,
+so that the service and `skillroy_scenario_run` share it; a run's refused reservation exhausts the session (D74), as a
+refused resolve does; the estimate and the settlement are `…inference.budget.SessionMetering`'s, shared with
+`SessionService.resolve`; a `skillroy_resolve` the server runs without an actor is metered on the same meter
+(D-SR2-4). D158: `ExecutorSession.compile(verb, args)` answers `Compiled(calls, cleanup, refusal)`, with an overload
+`compile(verb, args, origin)` that strips the arguments as `execute` does for that origin (the session service checks
+with it, D-SR2-5); the never-for-a-client rule and the start-time probe arguments are `…inference.tools.CallPolicy`'s
+(`never`, `arguments`, `refusals`, `probes`), to which `PlanPolicy` delegates; a verb the session service withholds is
+listed by its `skillroy_catalogue` under `withheldVerbs` and not logged (the service has no log). D159: the text
+resource is `skillroy://mcp/<n>.png.txt`; images are served when `ServerOptions.inference().images()` is true.
+
 ---
 
 ## 13. Tests and acceptance

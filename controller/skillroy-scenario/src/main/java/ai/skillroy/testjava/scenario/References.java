@@ -32,9 +32,9 @@ import java.util.regex.Pattern;
  * number a number); a reference embedded in a longer string is replaced by the value's text. {@code $$} writes a
  * literal {@code $}; a {@code $} not followed by a slot name is kept as it is. Map keys are never substituted.
  *
- * <p>Public for one predicate only (phase6 security fix S55): a host that hands a client's text to a call whose arguments
- * must stay literal ({@code data_query}'s SQL) asks {@link #containsReference(String)} and {@link #anyReference(Object)}
- * first; the substitution itself stays the package's.
+ * <p>Public for one predicate only (phase6 security fix S55): a host that hands a client's text to a call whose
+ * arguments must stay literal ({@code data_query}'s SQL) asks {@link #containsReference(String)} and
+ * {@link #anyReference(Object)} first; the substitution itself stays the package's.
  *
  * <p>Stateless; safe from any thread.
  */

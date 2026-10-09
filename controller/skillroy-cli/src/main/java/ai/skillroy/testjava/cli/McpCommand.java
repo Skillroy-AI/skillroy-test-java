@@ -83,9 +83,9 @@ final class McpCommand implements Command {
 
     static final String MUTATING = "--mutating";
     static final String ALLOW_EVALUATE = "--allow-evaluate";
-    /** The label of the server's client origin (phase6 security fix S57, D158); {@code author} passes {@code planner}. */
+    /** The label of the server's client origin (phase6 security fix S57, D158); {@code author} passes planner. */
     static final String CLIENT = "--client";
-    private static final String OUT = "--out";
+    static final String OUT = "--out";
     /** How often the watch looks at the event stream while the server runs. */
     private static final Duration WATCH = Duration.ofMillis(250);
 

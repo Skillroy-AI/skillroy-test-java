@@ -221,8 +221,9 @@ public final class SessionService implements AutoCloseable {
         meter.identify(session.id());
         List<PrimitiveDescriptor> primitives = new ArrayList<>(session.primitives().values());
         this.excluded = ToolProjection.Policy.session(policy.offersVerbs(), policy.offersBasePrimitives()).excluded();
+        // S49: the projected tools through the session's mask, as the MCP server lists them.
         List<ToolSpec> projected = WorkflowTools.session(primitives, pack, policy.offersVerbs(),
-                policy.offersBasePrimitives());
+                policy.offersBasePrimitives(), mask);
         if (policy.offersVerbs()) {
             for (String verb : new TreeSet<>(pack.steps().verbs())) {
                 verbTools.put(ToolProjection.verbToolName(pack.id(), verb), verb);
@@ -331,6 +332,22 @@ public final class SessionService implements AutoCloseable {
         }
         recordBudget(usages);
         return finish(new Turn(index, text, actions, answer, outcome, total(usages), elapsed(t0)), turn);
+    }
+
+    /**
+     * {@link #ask(String)} with a request that is masked whole and then cut at {@code maxChars} characters (with
+     * {@link PromptMask#TRUNCATED}): what the overlay bridge asks with (phase6 security fix S53: a text is never cut
+     * before the mask, so no part of a secret that straddles the cut reaches the model).
+     *
+     * @throws AgentLostException never in this version (see {@link #ask(String)})
+     * @throws InterruptedException if the thread is interrupted
+     */
+    public synchronized Turn ask(String request, int maxChars) throws AgentLostException, InterruptedException {
+        String masked = mask.text(request == null ? "" : request);
+        if (masked.length() > maxChars) {
+            masked = masked.substring(0, Math.max(0, maxChars)) + PromptMask.TRUNCATED;
+        }
+        return ask(masked);
     }
 
     /**
@@ -830,7 +847,7 @@ public final class SessionService implements AutoCloseable {
             Map<String, Object> schema = pack.steps().argsSchema(e.getValue());
             Map<String, Object> v = new LinkedHashMap<>();
             v.put("tool", e.getKey());
-            v.put("argsSchema", schema);
+            v.put("argsSchema", schema == null ? null : mask.schema(schema));
             verbs.put(e.getValue(), v);
         }
         out.put("verbs", verbs);
@@ -847,7 +864,7 @@ public final class SessionService implements AutoCloseable {
             } catch (IllegalArgumentException e) {
                 schema = Map.of("type", "object");
             }
-            kinds.put(kind, schema);
+            kinds.put(mask.text(kind), mask.schema(schema));
         }
         out.put("queryKinds", kinds);
         out.put("oracleFunctions", new ArrayList<>(new TreeSet<>(catalogue.oracleFns())));
@@ -952,8 +969,9 @@ public final class SessionService implements AutoCloseable {
                     + " $item.code names a resolved slot's field):\n");
             for (Map.Entry<String, String> e : verbTools.entrySet()) {
                 Map<String, Object> schema = pack.steps().argsSchema(e.getValue());
-                text.append("- ").append(e.getValue()).append(" (tool ").append(e.getKey()).append("): ")
-                        .append(schema == null ? "free-form arguments" : Json.writeCanonical(schema)).append('\n');
+                // S49: the vocabulary through the mask, as the planner's prompt (D103).
+                text.append(mask.text("- " + e.getValue() + " (tool " + e.getKey() + "): " + (schema == null
+                        ? "free-form arguments" : Json.writeCanonical(mask.schema(schema))))).append('\n');
             }
         }
         List<String> names = new ArrayList<>();

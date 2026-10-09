@@ -558,7 +558,8 @@ public final class SkillroyMcpServer implements AutoCloseable {
         List<ToolSpec> projected;
         Set<String> verbNames;
         try {
-            projected = ToolProjection.project(new ArrayList<>(primitives.values()), pack, policy);
+            // S49: the tools' descriptions and input schemas through the prompt mask, as the session service's.
+            projected = ToolProjection.project(new ArrayList<>(primitives.values()), pack, policy, masking.prompt());
             verbNames = ToolProjection.verbToolNames(pack);
             planPolicy = PlanPolicy.of(new ArrayList<>(primitives.values()), pack, policy);
         } catch (IllegalArgumentException e) {

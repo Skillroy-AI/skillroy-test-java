@@ -16,6 +16,7 @@
 
 package ai.skillroy.testjava.inference.tools;
 
+import ai.skillroy.testjava.inference.prompt.PromptMask;
 import ai.skillroy.testjava.inference.spi.ToolSpec;
 import ai.skillroy.testjava.protocol.PrimitiveDescriptor;
 import ai.skillroy.testjava.scenario.pack.DomainPack;
@@ -188,6 +189,39 @@ public final class ToolProjection {
             }
         }
         return unique(out);
+    }
+
+    /**
+     * {@link #project(List, DomainPack, Policy)} through the mask (phase6 security fix S49; D103 widened to every place
+     * a model receives the vocabulary): each tool's description through {@link PromptMask#text} and its input schema
+     * through {@link PromptMask#schema} ({@link #masked}). What the session service and the MCP server list; a host
+     * that needs the names and flags only ({@code PlanPolicy}) uses the projection unmasked.
+     *
+     * @throws IllegalArgumentException as {@link #project(List, DomainPack, Policy)}
+     */
+    public static List<ToolSpec> project(List<PrimitiveDescriptor> primitives, DomainPack pack, Policy policy,
+                                         PromptMask mask) {
+        List<ToolSpec> out = new ArrayList<>();
+        for (ToolSpec tool : project(primitives, pack, policy)) {
+            out.add(masked(tool, mask));
+        }
+        return out;
+    }
+
+    /**
+     * A tool through the mask (S49): its description through {@link PromptMask#text}, its input schema through
+     * {@link PromptMask#schema} (a secret-looking property keeps its name and type and loses its {@code default},
+     * {@code examples}, {@code example}, {@code const} and {@code enum}, so the strict schema stays valid); the name
+     * and the flags as they are. As built: masked after the schema is made strict, which removes data keywords only;
+     * the same tool when {@code mask} is null.
+     */
+    @SuppressWarnings("unchecked")
+    public static ToolSpec masked(ToolSpec tool, PromptMask mask) {
+        if (mask == null) {
+            return tool;
+        }
+        return new ToolSpec(tool.name(), mask.text(tool.description()),
+                (Map<String, Object>) mask.schema(tool.inputSchema()), tool.readOnly(), tool.destructive());
     }
 
     private static boolean offered(PrimitiveDescriptor d, String domain, Policy policy, boolean allowLists) {

@@ -265,8 +265,8 @@ public record ReResolveReport(String jobId, String envId, boolean dryRun, String
                 if (s.status() == Status.FAILED) {
                     md.append("- ").append(code(s.scenarioId())).append(": ")
                             .append(s.failureKind() == null ? "FAILED" : s.failureKind().name())
-                            .append(s.reason() == null ? "" : " " + s.reason())
-                            .append(s.message() == null ? "" : ": " + oneLine(s.message())).append('\n');
+                            .append(s.reason() == null ? "" : " " + code(s.reason()))
+                            .append(s.message() == null ? "" : ": " + code(s.message(), TEXT_MAX)).append('\n');
                 }
             }
         }
@@ -275,7 +275,7 @@ public record ReResolveReport(String jobId, String envId, boolean dryRun, String
         if (!notes.isEmpty()) {
             md.append("\n## Notes\n\n");
             for (String note : notes) {
-                md.append("- ").append(oneLine(note)).append('\n');
+                md.append("- ").append(code(note, TEXT_MAX)).append('\n');
             }
         }
         md.append("\n## For the reviewer\n\n").append(REVIEWER_INSTRUCTION).append('\n');
@@ -337,13 +337,24 @@ public record ReResolveReport(String jobId, String envId, boolean dryRun, String
 
     /** A text in backticks, with a backtick in it replaced (the report is Markdown a pull request renders). */
     private static String code(String text) {
+        return code(text, CHANGE_VALUE_MAX * 3);
+    }
+
+    /**
+     * A text in backticks, on one line, a backtick in it replaced and cut at {@code max} characters: every text a
+     * model or the binder wrote (a failure's message, a note) is rendered as code, so that its markup (a link, an
+     * image, a heading) is inert in the pull request (phase6 security fix S50).
+     */
+    private static String code(String text, int max) {
         if (text == null) {
             return "`-`";
         }
         String t = oneLine(text).replace('`', '\'');
-        return "`" + (t.length() > CHANGE_VALUE_MAX * 3 ? t.substring(0, CHANGE_VALUE_MAX * 3 - 3) + "..." : t)
-                + "`";
+        return "`" + (t.length() > max ? t.substring(0, max - 3) + "..." : t) + "`";
     }
+
+    /** The most characters of a failure's message or a note in the Markdown report. */
+    private static final int TEXT_MAX = 1000;
 
     private static String oneLine(String text) {
         StringBuilder out = new StringBuilder(text.length());

@@ -161,6 +161,45 @@ class OverlayBridgeTest {
         }
     }
 
+    /**
+     * Phase 6 security fix S53: an overlay's text is masked whole before it is cut at {@link OverlayBridge#MAX_TEXT}: a
+     * credential that straddles the cut (at offset 9995) reaches no part of the request (before the fix the bridge cut
+     * first and the credential's head survived); a text longer than {@link OverlayBridge#MAX_QUEUED_TEXT} is answered
+     * as too long without a model call.
+     */
+    @Test
+    void anOverlaysTextIsMaskedWholeBeforeItIsCut() throws Exception {
+        Map<String, Object> doc = new java.util.LinkedHashMap<>();
+        doc.put("version", 1L);
+        doc.put("credentials", Map.of("staff", Map.of("S01", Map.of("password", SessionServiceTest.CREDENTIAL))));
+        try (ExecutorSession masked = ExecutorSession.open(pack, agent, SessionOptions.defaults(tmp.resolve("cut"))
+                .withBind(BindOptions.defaults().withEnvId("test-env").withCredentials(
+                        ai.skillroy.testjava.data.Credentials.of(doc, "test"))).withId("overlay-cut"))) {
+            CostLedger ledger = new CostLedger();
+            BudgetMeter meter = new BudgetMeter(BudgetMeter.Scope.SESSION, null, new java.math.BigDecimal("1.00"),
+                    ledger);
+            ScriptedGateway gateway = ScriptedGateway.sequence(List.of(done("Noted.")));
+            SessionService service = new SessionService(masked, gateway, SessionPolicy.acting(), meter,
+                    new LedgerWriter(ledger, meter, null, PromptMask.keysOnly(), false, Clock.systemUTC()),
+                    PriceTable.builtIn(), null);
+            try (OverlayBridge bridge = OverlayBridge.open(service, agent, pack, events(), 0L)) {
+                consumer.accept(event(7, Map.of("requestId", "rq-cut", "text", "w".repeat(9995)
+                        + SessionServiceTest.CREDENTIAL + " and more")));
+                assertTrue(bridge.serveNext(Duration.ofMillis(10)).answered());
+                consumer.accept(event(8, Map.of("requestId", "rq-long", "text", "w".repeat(
+                        OverlayBridge.MAX_QUEUED_TEXT + 1))));
+                OverlayBridge.Handled tooLong = bridge.serveNext(Duration.ofMillis(10));
+                assertNull(tooLong.turn(), "no model call");
+            }
+            assertEquals(1, gateway.requests().size());
+            String all = SessionServiceTest.everything(gateway.requests().get(0));
+            assertFalse(all.contains(SessionServiceTest.CREDENTIAL.substring(0, 4)), "no part of the credential");
+            assertTrue(all.contains("w".repeat(9995)), "the text before it is kept");
+            assertTrue(agent.callsTo("desk.assistAnswer").get(1).params().get("answer").toString()
+                    .contains("longer than " + OverlayBridge.MAX_QUEUED_TEXT), "answered as too long");
+        }
+    }
+
     @Test
     void malformedAndExcessRequestsAreDroppedAndCounted() throws Exception {
         try (OverlayBridge bridge = OverlayBridge.open(service(List.of()), agent, pack, events(), -1L)) {

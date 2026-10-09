@@ -126,8 +126,8 @@ final class ToolCalls {
     static final String BUDGET = "BUDGET";
     /** The journal's {@code budget} scope of the session meter. */
     private static final String BUDGET_SCOPE = "SESSION";
-    private static final String BUDGET_SCOPE_NOTE = " (the session's budget, --session-budget, bounds skillroy_session_ask,"
-            + " skillroy_resolve and skillroy_scenario_run together)";
+    private static final String BUDGET_SCOPE_NOTE = " (the session's budget, --session-budget, bounds"
+            + " skillroy_session_ask, skillroy_resolve and skillroy_scenario_run together)";
     /** {@code data_query}'s refusal of a reference (phase6 security fix S55): the rule, never a value. */
     static final String LITERAL_ONLY = "data_query takes literal SQL and literal parameter values; a slot's field"
             + " ($slot.field) is not substituted here";
@@ -756,7 +756,10 @@ final class ToolCalls {
      * run once with {@link PlanExecutor} in {@code live} (nothing written) or {@code approve} (the session's approver
      * and bindings root decide), with recover and every expectation on masked values
      * ({@code RunOptions.withExpectationsOnMaskedValues}, so that PASS or FAIL never answers whether a credential
-     * starts with a prefix), its evidence in {@code <out>/runs/<run id>/}; the run's summary.
+     * starts with a prefix), its evidence in {@code <out>/runs/<run id>/}; the run's summary. Metered on the server's
+     * session meter (phase6 security fix S56, D157): one tier (b) estimate per slot whose strategy names a model is
+     * reserved first ({@link #meter}; refused {@code BUDGET} with no model call when there is no room), the run executes
+     * under a cap of the session's room, and what it spent is settled and journaled afterwards.
      */
     Reply run(Map<String, Object> args) throws AgentLostException, ToolError {
         String yaml = Arguments.text(args, "yaml", true);

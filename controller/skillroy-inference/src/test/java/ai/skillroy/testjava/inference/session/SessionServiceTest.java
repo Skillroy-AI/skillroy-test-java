@@ -165,6 +165,85 @@ class SessionServiceTest {
                 20_000), "1.00").tools()).contains("swing_click"), "read-only wins over the other flags");
     }
 
+    /**
+     * Phase 6 security fix S62 (D96, D158): the session service offers a pack verb only when no probe of it compiles to
+     * what a session never runs for a model ({@code purge}, the destructive {@code desk.wipeLedger}: withheld and listed
+     * by the catalogue), and checks a verb at call time on the calls it compiles to with the model's arguments: a call
+     * of {@code peek} that compiles to {@code data.query} is refused as a tool result error naming the primitive, and
+     * the agent receives no {@code data.query} (before the fix it ran); the same verb with harmless arguments runs.
+     */
+    @Test
+    void aVerbIsWithheldOrRefusedByTheCallsItCompilesTo() throws Exception {
+        try (ExecutorSession probed = ExecutorSession.open(pack.withProbeVerbs(), agent, SessionOptions.defaults(
+                tmp.resolve("probed")).withClock(clock).withBind(BindOptions.defaults().withEnvId("test-env")
+                .withLedger(ledger)).withId("sess-2"))) {
+            ScriptedGateway gateway = ScriptedGateway.sequence(List.of(
+                    tools("r1", use("t1", "lending_peek", Map.of("deep", true))),
+                    tools("r2", use("t2", "lending_peek", Map.of("deep", false))),
+                    tools("r3", use("t3", "skillroy_catalogue", Map.of())),
+                    done("r4", "Read the loan.")));
+            BudgetMeter meter = BudgetMeter.of(BudgetMeter.Scope.SESSION, null, "1.00", ledger);
+            LedgerWriter writer = new LedgerWriter(ledger, meter, log, PromptMask.keysOnly(), false, clock);
+            SessionService service = new SessionService(probed, gateway, SessionPolicy.acting(), meter, writer,
+                    PriceTable.builtIn(), clock);
+            List<String> tools = names(service.tools());
+            assertTrue(tools.contains("lending_peek"), tools.toString());
+            assertFalse(tools.contains("lending_purge"), "withheld at the start: " + tools);
+
+            Turn turn = service.ask("read the loan");
+            assertEquals(Turn.Outcome.DONE, turn.outcome(), turn.answer());
+            Turn.Action deep = turn.actions().get(0);
+            assertNull(deep.step(), "nothing ran");
+            assertTrue(deep.result().contains("data.query") && deep.result().contains("nothing ran"), deep.result());
+            assertTrue(agent.callsTo("data.query").isEmpty(), "the agent received no data.query");
+            assertEquals(Status.PASS, turn.actions().get(1).step().status(), "a harmless call of the verb runs");
+            assertEquals(1, turn.actions().get(1).step().executed());
+            assertTrue(turn.actions().get(2).result().contains("lending_purge"), "the catalogue lists the withheld"
+                    + " verb: " + turn.actions().get(2).result());
+            assertEquals(1, probed.journal().entries().stream().filter(e -> e instanceof StepJournal.StepEntry)
+                    .count(), "the refused call was not journaled");
+        }
+    }
+
+    /** The values of {@link SessionDesk#withSecretSchema()} that no request part may hold (S49). */
+    private static final List<String> SCHEMA_SECRETS = List.of("Vocab-Tok-8812", "Vocab-Default-4021",
+            "Vocab-Enum-6613");
+
+    /**
+     * Phase 6 security fix S49 (D103 widened): the pack's vocabulary goes through the mask wherever the session's model
+     * receives it. A verb schema's secret-looking property ({@code password}) keeps its name and type and loses its
+     * {@code default} and {@code enum}, and a {@code key=value} secret in a description is masked, in the system part,
+     * in the tools and in the {@code skillroy_catalogue} result; the masked tool schema stays a valid strict schema
+     * (before the fix every value reached the request).
+     */
+    @Test
+    void theVocabularyIsMaskedInTheSystemPartTheToolsAndTheCatalogue() throws Exception {
+        try (ExecutorSession secretive = ExecutorSession.open(pack.withSecretSchema(), agent, SessionOptions.defaults(
+                tmp.resolve("secretive")).withClock(clock).withBind(BindOptions.defaults().withEnvId("test-env")
+                .withLedger(ledger)).withId("sess-3"))) {
+            ScriptedGateway gateway = ScriptedGateway.sequence(List.of(
+                    tools("r1", use("t1", "skillroy_catalogue", Map.of())),
+                    done("r2", "Read the catalogue.")));
+            BudgetMeter meter = BudgetMeter.of(BudgetMeter.Scope.SESSION, null, "1.00", ledger);
+            LedgerWriter writer = new LedgerWriter(ledger, meter, log, PromptMask.keysOnly(), false, clock);
+            SessionService service = new SessionService(secretive, gateway, SessionPolicy.acting(), meter, writer,
+                    PriceTable.builtIn(), clock);
+            ToolSpec signOn = service.tools().stream().filter(t -> t.name().equals("lending_sign_on")).findFirst()
+                    .orElseThrow();
+            assertTrue(Json.write(signOn.inputSchema()).contains("\"password\""), "the name stays");
+            assertEquals(false, signOn.inputSchema().get("additionalProperties"), "still a strict schema");
+            ai.skillroy.testjava.inference.tools.ToolProjection.strict(signOn.inputSchema());
+            Turn turn = service.ask("what can I do?");
+            assertEquals(Turn.Outcome.DONE, turn.outcome(), turn.answer());
+            String all = everything(gateway.requests().get(0)) + everything(gateway.requests().get(1));
+            assertTrue(all.contains("lending_sign_on") && all.contains("password"), all);
+            for (String hidden : SCHEMA_SECRETS) {
+                assertFalse(all.contains(hidden), hidden + " reached a request");
+                assertFalse(turn.actions().get(0).result().contains(hidden), hidden + " in the catalogue");
+            }
+        }
+    }
+
     // ------------------------------------------------------------------------------------------------ the loop
 
     @Test

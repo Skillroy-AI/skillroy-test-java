@@ -1,5 +1,5 @@
 {
-  "fingerprint": "8f2081223cdfae0b313067b975ccb109bcf04c32637534f3309cdb42e9842f3c",
+  "fingerprint": "3966af22931c35c8454829235fddc2d3ef7b3488d407ed6ec453087a57345aab",
   "model": "scripted-model",
   "modelClass": "SONNET_CLASS",
   "purpose": "session",
@@ -80,35 +80,6 @@
             "content": "<target-state>\n{\n  \"stepId\": \"s2\",\n  \"verb\": \"scan\",\n  \"status\": \"PASS\",\n  \"executed\": 1,\n  \"events\": [],\n  \"snapshotHash\": \"sha256:04828d486e062946916b7ae0b26b7b13a34763e54bb261ee0383e11786ae5b13\"\n}\n\n</target-state>",
             "error": false,
             "toolUseId": "toolu_scripted_2",
-            "type": "tool_result"
-          }
-        ],
-        "role": "USER"
-      },
-      {
-        "parts": [
-          {
-            "text": "Ask for the deposit due.",
-            "type": "text"
-          },
-          {
-            "id": "toolu_scripted_3",
-            "input": {
-              "action": "DUE",
-              "value": null
-            },
-            "name": "lending_key",
-            "type": "tool_use"
-          }
-        ],
-        "role": "ASSISTANT"
-      },
-      {
-        "parts": [
-          {
-            "content": "<target-state>\n{\n  \"stepId\": \"s3\",\n  \"verb\": \"key\",\n  \"status\": \"PASS\",\n  \"executed\": 1,\n  \"events\": [],\n  \"snapshotHash\": \"sha256:aeaa638bcbb66cada3a75a8c84745c35931058d2008538c143effdb8af6e50fc\"\n}\n\n</target-state>",
-            "error": false,
-            "toolUseId": "toolu_scripted_3",
             "type": "tool_result"
           }
         ],
@@ -364,7 +335,7 @@
           "description": "A supervisor authorises what the desk asked for with the supervisor-required prompt: answers it with OK, then enters the supervisor's code and password, which comes from credentials.yaml, each time waiting until the desk is ready again. If the desk refuses, its authorisation-failed prompt fails the step.",
           "properties": {
             "staff": {
-              "description": "The supervisor who authorises: a $reference to a slot that declares a credential (credential: {realm: staff, key: code}), such as $assistant; never a staff member or a password written out.",
+              "description": "The supervisor who authorises: a $reference to a slot that declares a credential (credential: <redacted> staff, key: code}), such as $assistant; never a staff member or a password written out.",
               "pattern": "^\\$[A-Za-z_][A-Za-z0-9_]*$",
               "type": "string"
             }
@@ -702,7 +673,7 @@
           "description": "Signs a staff member on at the desk: enters their code, then their password, which comes from credentials.yaml and never from the scenario, each time waiting until the desk is ready again. A scenario that passes signs off again at its end.",
           "properties": {
             "staff": {
-              "description": "The staff member to sign on: a $reference to a slot that declares a credential (credential: {realm: staff, key: code}), such as $assistant; never a staff member or a password written out.",
+              "description": "The staff member to sign on: a $reference to a slot that declares a credential (credential: <redacted> staff, key: code}), such as $assistant; never a staff member or a password written out.",
               "pattern": "^\\$[A-Za-z_][A-Za-z0-9_]*$",
               "type": "string"
             }
@@ -759,15 +730,16 @@
   "response": {
     "parts": [
       {
-        "text": "Take exactly the deposit due.",
+        "text": "Ask for the deposit due.",
         "type": "text"
       },
       {
-        "id": "toolu_scripted_4",
+        "id": "toolu_scripted_3",
         "input": {
-          "amount": null
+          "action": "DUE",
+          "value": null
         },
-        "name": "lending_deposit",
+        "name": "lending_key",
         "type": "tool_use"
       }
     ],
@@ -780,12 +752,12 @@
       "cacheWrite5mTokens": 0,
       "costUsd": "0",
       "elapsedMs": 0,
-      "inputTokens": 5213,
+      "inputTokens": 5149,
       "model": "scripted-model",
       "note": null,
-      "outputTokens": 22,
+      "outputTokens": 23,
       "provider": "scripted",
-      "requestId": "scripted-5213-22",
+      "requestId": "scripted-5149-23",
       "requestedModel": "scripted-model"
     }
   },

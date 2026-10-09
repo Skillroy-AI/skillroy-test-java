@@ -25,6 +25,7 @@ import ai.skillroy.testjava.inference.spi.ModelResponse;
 import ai.skillroy.testjava.inference.spi.Prompts;
 import ai.skillroy.testjava.inference.spi.ToolSpec;
 import ai.skillroy.testjava.inference.spi.Usage;
+import ai.skillroy.testjava.inference.tools.ToolProjection;
 import ai.skillroy.testjava.protocol.Json;
 import ai.skillroy.testjava.protocol.JsonException;
 
@@ -100,7 +101,8 @@ public record Recording(String fingerprint, String purpose, ModelResponse respon
         req.put("messages", messages);
         List<Object> tools = new ArrayList<>();
         for (ToolSpec t : request.tools()) {
-            tools.add(Prompts.tool(t));
+            // S49: a tool's description and input schema through the mask too; the fingerprint is the request's as sent.
+            tools.add(Prompts.tool(ToolProjection.masked(t, mask)));
         }
         req.put("tools", tools);
         req.put("outputSchema", request.outputSchema());

@@ -51,8 +51,8 @@ import java.util.regex.Pattern;
  *   <li><b>By origin.</b> Text read from the target or written by a person enters a prompt only in a labelled block
  *       ({@link #block}), inside a user message; the system text declares such blocks to be data.</li>
  *   <li><b>Captures.</b> An image part is refused unless images are enabled (false until Phase 7).</li>
- *   <li><b>Bounded.</b> A text is cut at {@value #MAX_TEXT} characters and a row sample at {@value #MAX_ROWS} rows,
- *       with {@value #TRUNCATED} appended.</li>
+ *   <li><b>Bounded.</b> A text is masked, then cut at {@value #MAX_TEXT} characters, and a row sample cut at
+ *       {@value #MAX_ROWS} rows, with {@value #TRUNCATED} appended.</li>
  * </ul>
  *
  * <p>Immutable; safe to share between threads.
@@ -74,7 +74,6 @@ public final class PromptMask {
 
     private static final int MAX_DEPTH = 200;
     /** A secret may straddle the cut: the text is masked this far past it before being cut. */
-    private static final int CUT_MARGIN = SecretMask.MAX_MIN_SUBSTRING;
     private static final Pattern LABEL_TAG = Pattern.compile("<(/?)(target-ui|target-event|target-state|person)\\b",
             Pattern.CASE_INSENSITIVE);
 
@@ -151,21 +150,75 @@ public final class PromptMask {
     }
 
     /**
-     * A text through the rules: cut at {@link #MAX_TEXT} characters (masked far enough past the cut that a secret
-     * straddling it is replaced first), every known secret value replaced, and the value of every {@code key: value}
-     * or {@code key=value} run whose key names a secret replaced. Null stays null.
+     * A text through the rules: every known secret value replaced and the value of every {@code key: value} or
+     * {@code key=value} run whose key names a secret replaced, over the whole text, and then cut at {@link #MAX_TEXT}
+     * characters with {@link #TRUNCATED} (phase6 security fix S53: masked, then cut, so that no part of a secret of
+     * any length that straddles the cut survives; the build's margin of 1000 characters past the cut is gone). Null
+     * stays null.
      */
     public String text(String text) {
         if (text == null) {
             return null;
         }
-        boolean cut = text.length() > MAX_TEXT;
-        String head = cut ? text.substring(0, Math.min(text.length(), MAX_TEXT + CUT_MARGIN)) : text;
-        String masked = keyRule(secrets.apply(head));
-        if (cut) {
-            masked = (masked.length() > MAX_TEXT ? masked.substring(0, MAX_TEXT) : masked) + TRUNCATED;
+        String masked = keyRule(secrets.apply(text));
+        if (masked.length() > MAX_TEXT) {
+            masked = masked.substring(0, MAX_TEXT) + TRUNCATED;
         }
         return masked;
+    }
+
+    /** The schema keywords whose values are a schema's data rather than its structure. */
+    private static final Set<String> SCHEMA_VALUES = Set.of("default", "examples", "example", "enum", "const");
+
+    /**
+     * A JSON Schema (a pack verb's argument schema, a query kind's, a projected tool's input schema) through the mask,
+     * wherever a model receives the pack's vocabulary (decision D103; phase6 security fix S49): a property's name is
+     * kept (it is the vocabulary) and its schema walked with the name's secrecy; a property whose name looks secret
+     * ({@link #secretKey}) loses its {@code default}, {@code examples}, {@code example}, {@code const} and {@code enum}
+     * whole (its {@code type} and structure stay, so that the schema stays valid and strict; a list or a scalar is
+     * never replaced by a text); every text value goes through {@link #text} (the secret values, the key rule, the
+     * bound); numbers, booleans and null stay. Deeper than 64 levels, {@code "<too deep>"}. A new value; the schema is
+     * not modified.
+     */
+    public Object schema(Object schema) {
+        return schema(schema, false, 0);
+    }
+
+    private Object schema(Object schema, boolean secretProperty, int depth) {
+        if (depth > 64) {
+            return "<too deep>";
+        }
+        if (schema instanceof String s) {
+            return text(s);
+        }
+        if (schema instanceof Map<?, ?> map) {
+            Map<String, Object> out = new LinkedHashMap<>();
+            for (Map.Entry<?, ?> e : map.entrySet()) {
+                String key = String.valueOf(e.getKey());
+                Object value = e.getValue();
+                if (key.equals("properties") && value instanceof Map<?, ?> properties) {
+                    Map<String, Object> named = new LinkedHashMap<>();
+                    for (Map.Entry<?, ?> property : properties.entrySet()) {
+                        String name = String.valueOf(property.getKey());
+                        named.put(name, schema(property.getValue(), secretKey(name), depth + 1));
+                    }
+                    out.put(key, named);
+                } else if (secretProperty && SCHEMA_VALUES.contains(key)) {
+                    continue;
+                } else {
+                    out.put(key, schema(value, secretProperty, depth + 1));
+                }
+            }
+            return out;
+        }
+        if (schema instanceof List<?> list) {
+            List<Object> out = new ArrayList<>(list.size());
+            for (Object item : list) {
+                out.add(schema(item, secretProperty, depth + 1));
+            }
+            return out;
+        }
+        return schema;
     }
 
     /**

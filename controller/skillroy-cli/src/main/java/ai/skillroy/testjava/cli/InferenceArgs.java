@@ -83,8 +83,8 @@ final class InferenceArgs {
     static final OptionSpec BUDGET_SESSION_OPTION = OptionSpec.value(BUDGET_SESSION, "usd",
             "the session's model budget in US dollars (default 1.00)");
     static final OptionSpec SESSION_BUDGET_OPTION = OptionSpec.value(SESSION_BUDGET, "usd",
-            "the session's model budget in US dollars (default 1.00):\nbounds skillroy_session_ask, skillroy_resolve and\n"
-                    + "skillroy_scenario_run together");
+            "the session's model budget in US dollars (default 1.00):\nbounds skillroy_session_ask, skillroy_resolve"
+                    + " and\nskillroy_scenario_run together");
     static final OptionSpec NO_REUSE_OPTION = OptionSpec.flag(NO_REUSE_BINDINGS,
             "approve: resolve every model-written slot afresh, never\nreusing an unchanged, verified recorded value");
 

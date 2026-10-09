@@ -58,6 +58,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -469,6 +470,34 @@ class ClaudeGatewayTest {
         }
     }
 
+    /**
+     * Phase 6 security fix S54: the provider's message is scrubbed of the key before it is cut, so that a key at offset
+     * 290 (cut at 300) leaves no part of itself, in a call's error and in a batch result's.
+     */
+    @Test
+    void aKeyTheCutWouldSplitIsScrubbedFirst() throws Exception {
+        String echoed = "x".repeat(290) + KEY + " and more";
+        fake.otherwise(Answer.error(400, "invalid_request_error", echoed, Map.of()));
+        try (ClaudeGateway g = gateway()) {
+            InferenceException e = assertThrows(InferenceException.class, () -> g.complete(request().build()));
+            assertFalse(e.getMessage().contains(KEY.substring(0, 6)), e.getMessage());
+        }
+        String created = "{\"id\":\"msgbatch_9\",\"type\":\"message_batch\",\"processing_status\":\"ended\","
+                + "\"request_counts\":{\"processing\":0,\"succeeded\":0,\"errored\":1,\"canceled\":0,\"expired\":0},"
+                + "\"created_at\":\"2026-10-08T00:00:00Z\",\"expires_at\":\"2026-10-09T00:00:00Z\",\"ended_at\":null,"
+                + "\"cancel_initiated_at\":null,\"archived_at\":null,\"results_url\":null}";
+        fake.answer(Answer.json(created), Answer.json("{\"custom_id\":\"0\",\"result\":{\"type\":\"errored\","
+                + "\"error\":{\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\""
+                + echoed + "\"}}}}\n"));
+        try (ClaudeGateway g = gateway()) {
+            BatchHandle h = g.submitBatch(List.of(request().build()));
+            List<BatchResult> out = g.collectBatch(h);
+            String message = out.get(0).error().getMessage();
+            assertTrue(message.startsWith("batch request 0: invalid_request_error: xxx"), message);
+            assertFalse(message.contains(KEY.substring(0, 6)), message);
+        }
+    }
+
     @ParameterizedTest(name = "{0} {1} -> {2}")
     @CsvSource({"429, rate_limit_error, RATE_LIMIT", "529, overloaded_error, OVERLOADED",
             "500, overloaded_error, OVERLOADED"})
@@ -705,6 +734,52 @@ class ClaudeGatewayTest {
         }
         assertFalse(captured.toString(StandardCharsets.UTF_8).contains(KEY), "nothing logged with the key");
         assertEquals("", captured.toString(StandardCharsets.UTF_8), "the SDK's logging is off");
+    }
+
+    /**
+     * Phase 6 security fix S51: {@code ANTHROPIC_BASE_URL} must be {@code https}, or {@code http} on a loopback host,
+     * and carry no user-info; otherwise the gateway refuses to open with {@code AUTH} naming the variable and never
+     * its value (before the fix any scheme and host were accepted and the key travelled there).
+     */
+    @Test
+    void aBaseUrlMustBeHttpsOrLoopbackAndCarryNoUserInfo() throws Exception {
+        for (String url : List.of("http://proxy.example/", "https://user:pw-0451@api.example/", "ftp://api.example/",
+                "api.example:443", "http ://api.example")) {
+            Map<String, String> env = Map.of(ClaudeGateway.KEY_VARIABLE, KEY, ClaudeGateway.BASE_URL_VARIABLE, url);
+            InferenceException e = assertThrows(InferenceException.class, () -> ClaudeGateway.open(settings(null),
+                    env::get), url);
+            assertEquals(Kind.AUTH, e.kind(), url);
+            assertTrue(e.getMessage().startsWith(ClaudeGateway.BASE_URL_VARIABLE + " "), e.getMessage());
+            assertFalse(e.getMessage().contains("api.example") || e.getMessage().contains("proxy.example")
+                    || e.getMessage().contains("pw-0451"), e.getMessage());
+        }
+        for (String url : List.of(fake.url(), "http://localhost:1/", "http://[::1]:1/", "https://api.example/")) {
+            try (ClaudeGateway g = ClaudeGateway.open(settings(null), Map.of(ClaudeGateway.KEY_VARIABLE, KEY,
+                    ClaudeGateway.BASE_URL_VARIABLE, url)::get)) {
+                assertNotNull(g, url);
+            }
+        }
+    }
+
+    /**
+     * Phase 6 security fix S52: a configured model id the price table does not know is refused when the gateway opens
+     * ({@code INVALID_REQUEST}, naming the id and {@code prices:}); a dated snapshot id of a known model passes.
+     */
+    @Test
+    void aConfiguredModelOutsideThePriceTableIsRefused() throws Exception {
+        Map<String, String> env = Map.of(ClaudeGateway.KEY_VARIABLE, KEY, ClaudeGateway.BASE_URL_VARIABLE, fake.url());
+        InferenceSettings unknown = new InferenceSettings("claude", null, false, null, Map.of(
+                InferenceSettings.MODEL_SONNET, "claude-example-9"), null, null, null, null, false, false, null,
+                false, null);
+        InferenceException e = assertThrows(InferenceException.class, () -> ClaudeGateway.open(unknown, env::get));
+        assertEquals(Kind.INVALID_REQUEST, e.kind());
+        assertTrue(e.getMessage().contains("claude-example-9") && e.getMessage().contains("prices:"), e.getMessage());
+        InferenceSettings dated = new InferenceSettings("claude", null, false, null, Map.of(
+                InferenceSettings.MODEL_HAIKU, "claude-haiku-4-5-20251001"), null, null, null, null, false, false,
+                null, false, null);
+        try (ClaudeGateway g = ClaudeGateway.open(dated, env::get)) {
+            assertNotNull(g);
+        }
     }
 
     /**

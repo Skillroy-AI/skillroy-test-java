@@ -16,6 +16,7 @@
 
 package ai.skillroy.testjava.inference.tools;
 
+import ai.skillroy.testjava.inference.prompt.PromptMask;
 import ai.skillroy.testjava.inference.spi.ToolSpec;
 import ai.skillroy.testjava.protocol.PrimitiveDescriptor;
 import ai.skillroy.testjava.scenario.pack.DomainPack;
@@ -127,10 +128,20 @@ public final class WorkflowTools {
      */
     public static List<ToolSpec> session(List<PrimitiveDescriptor> primitives, DomainPack pack,
                                          boolean allowMutatingVerbs, boolean allowBasePrimitives) {
+        return session(primitives, pack, allowMutatingVerbs, allowBasePrimitives, null);
+    }
+
+    /**
+     * {@link #session(List, DomainPack, boolean, boolean)} with the projected tools through the session's mask
+     * (phase6 security fix S49: {@link ToolProjection#project(List, DomainPack, ToolProjection.Policy, PromptMask)});
+     * null projects them unmasked.
+     */
+    public static List<ToolSpec> session(List<PrimitiveDescriptor> primitives, DomainPack pack,
+                                         boolean allowMutatingVerbs, boolean allowBasePrimitives, PromptMask mask) {
         List<ToolSpec> out = new ArrayList<>(List.of(SNAPSHOT, FACTS, EVENTS, CATALOGUE, RESOLVE, CHECK, OBSERVE,
                 NOTE));
         out.addAll(ToolProjection.project(primitives, pack, ToolProjection.Policy.session(allowMutatingVerbs,
-                allowBasePrimitives)));
+                allowBasePrimitives), mask));
         out.add(DONE);
         out.add(ASK_PERSON);
         return List.copyOf(out);

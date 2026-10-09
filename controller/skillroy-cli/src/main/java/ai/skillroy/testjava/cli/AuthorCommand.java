@@ -69,7 +69,11 @@ import java.util.function.UnaryOperator;
  * nothing written), with {@code --run} runs it once in {@code live} when every call of it is one the planner's server
  * offers (D96; otherwise the check fails and nothing runs), its expectations on masked values, records both checks in
  * the authoring record ({@link AuthoringResult#recordChecks}), records the planner's calls in the invocation's ledger
- * beside the checks' own, prints the instruction for the reviewer and deletes the configuration file.
+ * beside the checks' own, prints the instruction for the reviewer and deletes the configuration file. The planner's
+ * private working directory is made first and its server writes under it ({@code --out <work>/mcp}: the journal, the
+ * run evidence and any capture of the planner's exploration), so that they are deleted with it at the end;
+ * {@code --keep-work} keeps it and prints its path (phase6 security fix S60). The server's origin is
+ * {@code client planner} (D158).
  *
  * <p>This CLI's own launcher is the system property {@code skillroy.launcher} ({@code bin/skillroy} sets it to
  * itself); without it (in-process, an IDE) the configuration names this JVM's {@code java} with its class path.
@@ -98,6 +102,10 @@ final class AuthorCommand implements Command {
     private static final String MAX_REPAIRS = "--max-repairs";
     private static final String BUDGET_USD = "--budget-usd";
     private static final String RUN = "--run";
+    /** Keeps the planner's private working directory and prints its path (phase6 security fix S60). */
+    static final String KEEP_WORK = "--keep-work";
+    /** The planner's server's {@code --out}, under the planner's private working directory (S60). */
+    static final String SERVER_OUT = "mcp";
     private static final String CLAUDE_COMMAND = "--claude-command";
     /** The system property naming the planner's executable when {@code --claude-command} is not given. */
     static final String PROP_CLAUDE_COMMAND = "skillroy.claude.command";
@@ -124,7 +132,9 @@ final class AuthorCommand implements Command {
             (claude -p --resume), at most --max-repairs times. Then binds the scenario live, writing nothing, and
             with --run runs it once live; both checks are recorded in the authoring record. Nothing is approved:
             review the YAML and the plan, then skillroy resolve approves its bindings; delete the envelope file
-            before committing, or keep it as the fixture of the planner's replay. Needs the claude command
+            before committing, or keep it as the fixture of the planner's replay. The planner's server writes its
+            journal and evidence into the planner's private working directory, deleted at the end (--keep-work
+            keeps it and prints its path). Needs the claude command
             (--claude-command, or claude on the PATH) and its login or ANTHROPIC_API_KEY. Exit code 0 when the
             scenario was written and compiled, 1 when the planner failed or its repairs ran out, 64 for a usage
             error.""",
@@ -143,6 +153,8 @@ final class AuthorCommand implements Command {
                 OptionSpec.value(MAX_REPAIRS, "n", "the most repair rounds (default 2)"),
                 OptionSpec.value(BUDGET_USD, "usd", "the planner's budget in US dollars (default 2.00)"),
                 OptionSpec.flag(RUN, "run the scenario once live after it is written"),
+                OptionSpec.flag(KEEP_WORK, "keep the planner's private working directory (its\nserver's journal,"
+                        + " run evidence and captures) and print\nits path; deleted by default"),
                 OptionSpec.value(CLAUDE_COMMAND, "path", "the claude executable (default: claude on the PATH)")));
         options.addAll(InferenceArgs.gateway());
         options.addAll(TelemetryArgs.OPTIONS);
@@ -215,7 +227,22 @@ final class AuthorCommand implements Command {
                             + "; the planner was not started");
                 }
                 CostLedger ledger = new CostLedger();
-                Path config = mcpConfig(args, cli, settings);
+                // S60: the private working directory first, so that the planner's server writes its journal, run
+                // evidence and captures under it (--out <work>/mcp) and they are deleted with it.
+                Path work;
+                try {
+                    work = Planner.workDirectory();
+                } catch (IOException | RuntimeException e) {
+                    throw new CliException(Exit.FAILED, "a private working directory for the planner cannot be made: "
+                            + e.getMessage() + "; the planner was not started");
+                }
+                Path config;
+                try {
+                    config = mcpConfig(args, cli, settings, work.resolve(SERVER_OUT));
+                } catch (IOException | UsageException | RuntimeException e) {
+                    endWork(work, false, cli);
+                    throw e;
+                }
                 AuthoringResult result;
                 try {
                     // The catalogue of what the planner's server offers (D96): the scenario schema's call names those.
@@ -224,7 +251,7 @@ final class AuthorCommand implements Command {
                     PlannerRequest request = new PlannerRequest(brief, id, out, pack, policy.callableCatalogue(),
                             config, model, maxTurns == null ? PlannerRequest.DEFAULT_MAX_TURNS : maxTurns.intValue(),
                             maxRepairs == null ? PlannerRequest.DEFAULT_MAX_REPAIRS : maxRepairs.intValue(), budget,
-                            args.flag(RUN), claude, plannerDeadline(inference), null, mask);
+                            args.flag(RUN), claude, plannerDeadline(inference), null, mask, work);
                     result = Planner.author(request);
                 } catch (AuthoringException e) {
                     e.ledger().forEach(ledger::record);
@@ -240,6 +267,7 @@ final class AuthorCommand implements Command {
                     return e.exitCode();
                 } finally {
                     Files.deleteIfExists(config);
+                    endWork(work, args.flag(KEEP_WORK), cli);
                 }
                 result.ledger().forEach(ledger::record);
                 result.ledger().forEach(RunObservers.safe(observer)::modelCall);
@@ -485,12 +513,33 @@ final class AuthorCommand implements Command {
     }
 
     /**
-     * Writes the planner's MCP configuration (10.2 step 3) into a new owner-only temporary file: this CLI's launcher
-     * with {@code mcp --mutating --inference none --client planner}, the connection options as given (paths made
-     * absolute, the discovery directory always named), the pack jars, the environment, the bindings root and the
-     * credentials file.
+     * The end of the planner's private working directory: deleted with everything under it (its server's journal, run
+     * evidence and captures), or with {@code --keep-work} kept and its path printed on stderr (phase6 security fix
+     * S60).
      */
+    private static void endWork(Path work, boolean keep, Cli cli) {
+        if (keep) {
+            cli.err().println("skillroy author: the planner's working directory is kept: " + work);
+        } else {
+            Planner.deleteWorkDirectory(work);
+        }
+    }
+
+    /** {@link #mcpConfig(ParsedArgs, Cli, BindArgs.Settings, Path)} without an output directory for the server. */
     static Path mcpConfig(ParsedArgs args, Cli cli, BindArgs.Settings settings) throws IOException, UsageException {
+        return mcpConfig(args, cli, settings, null);
+    }
+
+    /**
+     * Writes the planner's MCP configuration (10.2 step 3) into a new owner-only temporary file: this CLI's launcher
+     * with {@code mcp --mutating --inference none --client planner}, the server's {@code --out} under the planner's
+     * private working directory (S60), the connection options as given (paths made absolute, the discovery directory
+     * always named), the pack jars, the environment, the bindings root and the credentials file.
+     *
+     * @param serverOut the planner's server's {@code --out}; null leaves the server its own temporary directory
+     */
+    static Path mcpConfig(ParsedArgs args, Cli cli, BindArgs.Settings settings, Path serverOut) throws IOException,
+            UsageException {
         List<Object> serverArgs = new ArrayList<>();
         String command;
         String launcher = System.getProperty(PROP_LAUNCHER);
@@ -506,6 +555,10 @@ final class AuthorCommand implements Command {
                 InferenceSettings.GATEWAY_NONE));
         // D158: the planner's model acts as client planner, which confirms nothing and is journaled as itself.
         serverArgs.addAll(List.of(McpCommand.CLIENT, PLANNER_CLIENT));
+        if (serverOut != null) {
+            // S60: the server's journal, run evidence and captures die with the planner's working directory.
+            serverArgs.addAll(List.of(McpCommand.OUT, serverOut.toAbsolutePath().toString()));
+        }
         if (args.value(Connector.PORT) != null) {
             serverArgs.addAll(List.of(Connector.PORT, args.value(Connector.PORT), Connector.TOKEN_FILE,
                     args.path(Connector.TOKEN_FILE).toAbsolutePath().toString()));

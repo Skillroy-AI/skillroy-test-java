@@ -54,11 +54,14 @@ import java.util.List;
  * @param clock the authoring date's clock; null means the system UTC clock
  * @param secrets the secret values the planner's log and envelope file are masked by (the CLI passes its credentials'
  *     mask: a model's text that repeats a credential reaches neither); null knows none, leaving the key rule alone
+ * @param workDirectory the planner's private working directory, made by the caller before it wrote the MCP
+ *     configuration (whose server writes its output under it, {@code --out <work>/mcp}; phase6 security fix S60), and
+ *     deleted by the caller; null means the planner makes one ({@link Planner#workDirectory()}) and deletes it
  */
 public record PlannerRequest(String brief, String scenarioId, Path outDir, DomainPack pack,
                              List<PrimitiveDescriptor> primitives, Path mcpConfig, String model, int maxTurns,
                              int maxRepairs, BigDecimal budgetUsd, boolean run, Path claudeCommand, Duration deadline,
-                             Clock clock, SecretMask secrets) {
+                             Clock clock, SecretMask secrets, Path workDirectory) {
 
     /** The default turn limit. */
     public static final int DEFAULT_MAX_TURNS = 40;
@@ -80,19 +83,28 @@ public record PlannerRequest(String brief, String scenarioId, Path outDir, Domai
         secrets = secrets == null ? SecretMask.NONE : secrets;
     }
 
+    /** A request whose planner makes its own working directory (the shape before phase6 security fix S60). */
+    public PlannerRequest(String brief, String scenarioId, Path outDir, DomainPack pack,
+                          List<PrimitiveDescriptor> primitives, Path mcpConfig, String model, int maxTurns,
+                          int maxRepairs, BigDecimal budgetUsd, boolean run, Path claudeCommand, Duration deadline,
+                          Clock clock, SecretMask secrets) {
+        this(brief, scenarioId, outDir, pack, primitives, mcpConfig, model, maxTurns, maxRepairs, budgetUsd, run,
+                claudeCommand, deadline, clock, secrets, null);
+    }
+
     /** A request whose log and envelope file know no secret value (the key rule alone). */
     public PlannerRequest(String brief, String scenarioId, Path outDir, DomainPack pack,
                           List<PrimitiveDescriptor> primitives, Path mcpConfig, String model, int maxTurns,
                           int maxRepairs, BigDecimal budgetUsd, boolean run, Path claudeCommand, Duration deadline,
                           Clock clock) {
         this(brief, scenarioId, outDir, pack, primitives, mcpConfig, model, maxTurns, maxRepairs, budgetUsd, run,
-                claudeCommand, deadline, clock, null);
+                claudeCommand, deadline, clock, null, null);
     }
 
     /** A request with the contract's defaults for the turns, repairs, budget and deadline. */
     public static PlannerRequest of(String brief, String scenarioId, Path outDir, DomainPack pack,
                                     List<PrimitiveDescriptor> primitives, Path mcpConfig, Path claudeCommand) {
         return new PlannerRequest(brief, scenarioId, outDir, pack, primitives, mcpConfig, null, DEFAULT_MAX_TURNS,
-                DEFAULT_MAX_REPAIRS, null, false, claudeCommand, null, null, null);
+                DEFAULT_MAX_REPAIRS, null, false, claudeCommand, null, null, null, null);
     }
 }

@@ -20,6 +20,7 @@ import ai.skillroy.testjava.controller.AgentConnection;
 import ai.skillroy.testjava.controller.AgentLostException;
 import ai.skillroy.testjava.controller.AgentRpcException;
 import ai.skillroy.testjava.controller.CallOptions;
+import ai.skillroy.testjava.inference.prompt.PromptMask;
 import ai.skillroy.testjava.protocol.Event;
 import ai.skillroy.testjava.scenario.pack.DomainPack;
 
@@ -56,8 +57,16 @@ public final class OverlayBridge implements AutoCloseable {
     public static final String TOPIC = "assist.requested";
     /** The most requests queued at a time. */
     public static final int MAX_PENDING = 16;
-    /** The longest a request's text may be; a longer one is cut (the service bounds it again). */
+    /**
+     * The most characters of a request's text the model is given: the text is masked whole first and then cut here
+     * (phase6 security fix S53: never cut before the mask, so that no part of a secret straddling the cut survives).
+     */
     public static final int MAX_TEXT = 10_000;
+    /**
+     * The longest request text the bridge takes: a longer one is not cut (a cut before the mask could leave part of a
+     * secret) but answered that it is too long, without a model call (phase6 security fix S53).
+     */
+    public static final int MAX_QUEUED_TEXT = PromptMask.MAX_TEXT;
     /** How long the answer primitive may take. */
     public static final long ANSWER_TIMEOUT_MS = 10_000L;
 
@@ -109,7 +118,11 @@ public final class OverlayBridge implements AutoCloseable {
     private final SessionService service;
     private final AgentConnection agent;
     private final String answerPrimitive;
-    private final BlockingQueue<Request> queue = new ArrayBlockingQueue<>(MAX_PENDING);
+    private final BlockingQueue<Pending> queue = new ArrayBlockingQueue<>(MAX_PENDING);
+
+    /** A queued request, or one whose text was longer than {@link #MAX_QUEUED_TEXT} (its text not kept). */
+    private record Pending(Request request, boolean oversized) {
+    }
     private final AtomicInteger dropped = new AtomicInteger();
     private volatile AutoCloseable subscription;
     private volatile boolean closed;
@@ -164,10 +177,8 @@ public final class OverlayBridge implements AutoCloseable {
             return;
         }
         String t = text instanceof String s ? s : "";
-        if (t.length() > MAX_TEXT) {
-            t = t.substring(0, MAX_TEXT);
-        }
-        if (!queue.offer(new Request(requestId, t))) {
+        boolean oversized = t.length() > MAX_QUEUED_TEXT;
+        if (!queue.offer(new Pending(new Request(requestId, oversized ? "" : t), oversized))) {
             dropped.incrementAndGet();
         }
     }
@@ -186,17 +197,20 @@ public final class OverlayBridge implements AutoCloseable {
             return null;
         }
         long millis = wait == null ? 0 : Math.max(0, wait.toMillis());
-        Request request = millis == 0 ? queue.poll() : queue.poll(millis, TimeUnit.MILLISECONDS);
-        if (request == null || closed) {
+        Pending pending = millis == 0 ? queue.poll() : queue.poll(millis, TimeUnit.MILLISECONDS);
+        if (pending == null || closed) {
             return null;
         }
+        Request request = pending.request();
         Turn turn;
-        if (request.text().isBlank()) {
+        if (pending.oversized() || request.text().isBlank()) {
             turn = null;
         } else {
-            turn = service.ask(request.text());
+            // S53: masked whole, then cut at MAX_TEXT, by the service.
+            turn = service.ask(request.text(), MAX_TEXT);
         }
-        String answer = turn == null ? "The request had no text." : turn.answer();
+        String answer = pending.oversized() ? "The request is longer than " + MAX_QUEUED_TEXT + " characters; shorten"
+                + " it." : turn == null ? "The request had no text." : turn.answer();
         Map<String, Object> params = new LinkedHashMap<>();
         params.put("requestId", request.requestId());
         params.put("answer", answer == null ? "" : answer);

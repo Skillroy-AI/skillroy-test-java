@@ -518,9 +518,9 @@ public final class ExecutorSession implements AutoCloseable {
     }
 
     /**
-     * What a verb compiles to with these arguments, as {@link #execute(String, Object, Origin)} would compile it, without
-     * running or journaling anything (phase6 security fix S57, D158): the calls of its one step and the cleanup calls it
-     * registered, each with its arguments as the verb wrote them (a verb's own {@code confirm} included, which
+     * What a verb compiles to with these arguments, as {@link #execute(String, Object, Origin)} would compile it,
+     * without running or journaling anything (phase6 security fix S57, D158): the calls of its one step and the cleanup
+     * calls it registered, each with its arguments as the verb wrote them (a verb's own {@code confirm} included, which
      * {@code execute} strips for every origin but a person's). A host that offers a verb to a client or a model checks
      * these with the client's real arguments before the first call runs (the MCP server's {@code PlanPolicy}, the
      * session service's {@code CallPolicy}). A step that does not compile is a refusal reason, never an exception.
