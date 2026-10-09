@@ -46,13 +46,21 @@ final class TierB implements AutoCloseable {
      * @param gatewayName a name no other test serves (the registration is the JVM's)
      */
     TierB(String gatewayName, Desk desk) {
+        this(gatewayName, desk, COST);
+    }
+
+    /**
+     * @param gatewayName a name no other test serves (the registration is the JVM's)
+     * @param cost what each scripted call costs, in US dollars
+     */
+    TierB(String gatewayName, Desk desk, String cost) {
         settings = new InferenceSettings(gatewayName, null, false, null, null, null, null, null, null, true, false,
                 null, false, null);
         SqlProposal proposal = new SqlProposal(STATEMENT, List.of(new SqlProposal.Param("category", "tools",
                 "STRING")), "The items of the category, by code.", List.of("item"), "code", 0.9,
                 new SqlProposal.RowBounds(1, 5), false, "");
         gateway = ScriptedGateway.answering(request -> ScriptedGateway.structured(proposal,
-                ScriptedGateway.usage(400, 60, COST)));
+                ScriptedGateway.usage(400, 60, cost)));
         served = Gateways.serve(settings, gateway);
         desk.agent.on("data.query", params -> {
             String sql = String.valueOf(params.get("sql"));

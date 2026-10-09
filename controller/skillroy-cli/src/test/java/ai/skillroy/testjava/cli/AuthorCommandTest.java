@@ -197,6 +197,8 @@ class AuthorCommandTest {
         assertEquals(List.of("mcp", "--mutating", "--inference", "none"), serverArgs.subList(mcp, mcp + 4),
                 "the planner may act; no second model");
         assertFalse(serverArgs.contains(McpCommand.ALLOW_EVALUATE), "never web_evaluate for the planner (D98)");
+        assertEquals("planner", after(serverArgs, McpCommand.CLIENT), "the planner's model acts as client planner,"
+                + " never a person (phase6 security fix S59, D158)");
         assertEquals("ai.skillroy.testjava.cli.Main", serverArgs.get(mcp - 1));
         assertEquals(Integer.toString(agent.port()), after(serverArgs, "--port"));
         assertEquals(tokenFile.toAbsolutePath().toString(), after(serverArgs, "--token-file"));

@@ -104,6 +104,8 @@ final class AuthorCommand implements Command {
      * {@link #mcpConfig} writes it; what its scenario may call (D96).
      */
     static final ToolProjection.Policy PLANNER_POLICY = ToolProjection.Policy.mutating(false);
+    /** The client label of the planner's server ({@code mcp --client planner}; phase6 security fix S59, D158). */
+    static final String PLANNER_CLIENT = "planner";
 
     private static final CommandSpec SPEC = new CommandSpec("author", "author a scenario from a brief with Claude Code",
             "", """
@@ -430,8 +432,9 @@ final class AuthorCommand implements Command {
 
     /**
      * Writes the planner's MCP configuration (10.2 step 3) into a new owner-only temporary file: this CLI's launcher
-     * with {@code mcp --mutating --inference none}, the connection options as given (paths made absolute, the
-     * discovery directory always named), the pack jars, the environment, the bindings root and the credentials file.
+     * with {@code mcp --mutating --inference none --client planner}, the connection options as given (paths made
+     * absolute, the discovery directory always named), the pack jars, the environment, the bindings root and the
+     * credentials file.
      */
     static Path mcpConfig(ParsedArgs args, Cli cli, BindArgs.Settings settings) throws IOException, UsageException {
         List<Object> serverArgs = new ArrayList<>();
@@ -447,6 +450,8 @@ final class AuthorCommand implements Command {
         }
         serverArgs.addAll(List.of("mcp", McpCommand.MUTATING, InferenceArgs.INFERENCE,
                 InferenceSettings.GATEWAY_NONE));
+        // D158: the planner's model acts as client planner, which confirms nothing and is journaled as itself.
+        serverArgs.addAll(List.of(McpCommand.CLIENT, PLANNER_CLIENT));
         if (args.value(Connector.PORT) != null) {
             serverArgs.addAll(List.of(Connector.PORT, args.value(Connector.PORT), Connector.TOKEN_FILE,
                     args.path(Connector.TOKEN_FILE).toAbsolutePath().toString()));

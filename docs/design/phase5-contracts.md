@@ -442,7 +442,8 @@ What the gateway never does: it never logs a prompt or a response body (the run 
 with metadata and masked structured answers only, and the prompt text itself only under `--log-prompts`); it never
 reads a key from anywhere but the environment; it never selects a model the settings do not name; it never sends an
 `Image` part when `IMAGES` is disabled in the settings (`images: false`, the default until Phase 7: a capture is
-personal data until masked, design §5). Zero-data-retention: the 5.5 models and Haiku are eligible, Fable is not and is
+personal data until masked, design §5), and over MCP (§9.4; Phase 6 security fix S58, A57, built 2026-10-09, SR;
+D159). Zero-data-retention: the 5.5 models and Haiku are eligible, Fable is not and is
 never configured by default (ai-inference F10, R15).
 
 ### 4.2 `RecordedGateway` and `RecordingGateway` (`…inference.recorded`)
@@ -1160,6 +1161,11 @@ stream or the agent is lost (then it exits 3 after reporting the loss as a tool 
 log goes to stderr, masked. The `claude` CLI's `--mcp-config` names it as `{"mcpServers": {"skillroy": {"command":
 "skillroy", "args": ["mcp", …]}}}`; `skillroy author` writes that file itself (§10).
 
+(Phase 6 security fix S57, A56, built 2026-10-09, SR) `--client <label>` (a short name, `[A-Za-z0-9._-]{1,64}`, default
+`mcp`): the label of the server's origin, `Origin.client(<label>)` (§12.3), under which the journal and the export name
+the client's steps (`client <label>`); `skillroy author` passes `--client planner` (§10.2). `--session-budget`'s help
+says that it bounds `skillroy_session_ask`, `skillroy_resolve` and `skillroy_scenario_run` together (S56, A55).
+
 ### 9.3 Tools
 
 Names use `[a-z0-9_]` only (the Anthropic API forbids dots, control-channel F22), at most 64 characters: a primitive
@@ -1169,7 +1175,8 @@ A collision is a start-up error. Every tool carries MCP annotations: `readOnlyHi
 schema is the descriptor's `paramsSchema` (less `_meta`) or the verb's `argsSchema`; its description is the
 descriptor's, prefixed with the thread and timeout. Results are text content: the call's `value` as pretty JSON,
 masked, cut at 25000 characters with `[truncated: N more]` (control-channel F19); a result that holds an image (a
-capture, a bitmap) is written to `<out>/mcp/<id>.png` and returned as a resource link.
+capture, a bitmap) is written to `<out>/mcp/<id>.png` and returned as a resource link (Phase 6 security fix S58, A57,
+built 2026-10-09, SR; D159: a link to the PNG only under `images: true`, else to a text resource naming the file, §9.4).
 
 | Group | Tools | Offered |
 |---|---|---|
@@ -1226,6 +1233,28 @@ Code's tool search), not a field of the protocol. Open: a read primitive called 
 exported as a `call` step (the export could leave read-only raw calls out); the prompts a `skillroy_scenario_run`
 handled are unknown to the session's prompt cursor (a seam on `ExecutorSession`).
 
+(Phase 6 security fix S55, A54, built 2026-10-09, SR) `sql` and `params` are literal: a `$reference` anywhere in
+`sql`, or in a `params` string at any depth, is refused as a tool error that names the rule ("`data_query` takes literal
+SQL and literal parameter values; a slot's field (`$slot.field`) is not substituted here"), never a value, before the
+guard runs; and the call runs with the executor's reference substitution off (`PlannedCall.literalArgs`, §12.2), so
+that the statement the agent receives is byte-equal to the guarded text (a `$$` or a `$` that starts no reference
+reaches the agent as written). The executor substitutes references in the arguments of every other call after the
+guard would have run; a resolved value is target content (`threat-model.md` §5). As built: a reference is recognised by
+its syntax (`References.containsReference`, `$$` excluded), whether or not a slot of that name exists, so `'$notaslot'`
+is refused as well (D-SR2-1).
+
+(Phase 6 security fix S56, A55, built 2026-10-09, SR; D157) `skillroy_scenario_run` is metered on the session's budget
+as `skillroy_resolve` is: one tier (b) estimate per slot whose strategy names a model is reserved on the server's
+session meter first (refused `BUDGET`, with the meter's figures (`refused`, `scope`, `id`, `limitUsd`, `spentUsd`,
+`estimateUsd`) and no model call, when there is no room or the session is exhausted; a refused reservation exhausts it,
+D74), the run executes under a cap of the session's room keyed by the server's ledger (`BudgetCaps`), the entries it
+added are settled afterwards and a `budget` record journaled. The server owns the meter (`ServerOptions.sessionMeter`,
+built by `skillroy mcp` from `budget.sessionUsd` and the session's ledger when a gateway is named, and handed to the
+`skillroy_session_ask` actor), so that the three tools share one meter and one exhausted state
+(`BudgetMeter.markExhausted`/`exhausted`); a `skillroy_resolve` without an actor that names a model is metered on it the
+same way. As built: the estimate and the settlement are `SessionMetering`'s (`…inference.budget`), which
+`SessionService.resolve` uses too.
+
 As built (2026-10-08, fix wave; `…mcp.PlanPolicy`, `DataQueryLists`, `StdioPipe`): a scenario
 is never stronger than the tools the same server offers one by one (D96). `skillroy_scenario_run` compiles the YAML
 and checks the plan before anything runs: a call of a base verb (`call`, the UI, web and wait verbs, `mark`) must name
@@ -1237,17 +1266,27 @@ primitives; no call's arguments may hold `confirm` or `_meta`. A refusal is a to
 verb, line) or cleanup call and its primitive, never a value. The same rule applies to the verb tools: at start the
 server compiles each verb the policy would offer, alone, with probe arguments (an empty mapping, then placeholders for
 its schema's required keys, then for all of them), and does not offer a verb a probe of which compiles to a call or a
-cleanup call that reaches what the server never offers or carries `confirm` or `_meta` (its tool's origin is
-`person("mcp")`, so a verb's own `confirm` would be honoured); the withheld verbs are logged once and listed by
-`skillroy_catalogue` under `withheldVerbs` (verb, tool, reason). A verb that compiles with no probe is offered; one
-whose arguments choose other primitives is judged by the probes only. A scenario run for a client evaluates every
+cleanup call that reaches what the server never offers or carries `confirm` or `_meta`; the withheld verbs are logged
+once and listed by `skillroy_catalogue` under `withheldVerbs` (verb, tool, reason). (Phase 6 security fix S57, A56,
+built 2026-10-09, SR; this replaces "its tool's origin is `person("mcp")`, so a verb's own `confirm` would be
+honoured" and "a verb that compiles with no probe is offered; one whose arguments choose other primitives is judged by
+the probes only") A verb tool's step is compiled with the client's arguments (`ExecutorSession.compile`), and its calls
+and cleanup calls are checked by the same rule (`PlanPolicy.packRefusals`, over `CallPolicy`) before the first call
+runs (a refusal is a tool error naming each primitive, never a value; nothing runs or is journaled); the probes at start
+decide only the catalogue's `withheldVerbs`. The server's origin is `client(<label>)` (`--client`, default `mcp`;
+`author` passes `planner`): a client's request is never a confirmation, so `confirm` and `_meta` are stripped from its
+arguments and from every call a verb compiles to, and a verb's own `confirm` fails `CONFIRM_REQUIRED`. A scenario run
+for a client evaluates every
 expectation on masked values (the executor's `RunOptions.withExpectationsOnMaskedValues(true)`, as a session check
 does), so that PASS or FAIL is no oracle on a credential. `skillroy://schema/scenario` lets the base verb `call` name
 only what the server offers (`ScenarioSchema.generate(pack, primitives, callable)`; the two-argument form keeps the
 whole catalogue). A pack verb's tool now strips `_meta` as well as `confirm` from the client's arguments (top level and
 a nested `args`), as the note above says. `skillroy_session_export` takes no approver (D97): a model-found binding is
 always written `REQUIRED`, an `approvedBy` sent anyway is ignored and the report says so, and a person approves with
-`skillroy resolve`, which reuses the recorded value without a model call (D82). `web.evaluate` and `web.waitFlag`
+`skillroy resolve`, which reuses the recorded value without a model call (D82). (Phase 6 security fix S61, A59, built
+2026-10-09, SR) It refuses an id whose files exist in `<out>` (`<id>.yaml`, `plan/<id>.plan.json` or the bindings file:
+"`<file>` exists; export under another id", nothing written) and creates each file new (`CREATE_NEW`), as `author`
+does; the CLI's `session export` (a person's) may overwrite. `web.evaluate` and `web.waitFlag`
 (`ToolProjection.SCRIPT_PRIMITIVES`) are excluded by `Policy.readOnly()`, `Policy.mutating()` and
 `Policy.session(…)`; `readOnly(true)` offers `web_wait_flag` and `mutating(true)` both, through
 `ServerOptions.allowEvaluate` (`skillroy mcp --allow-evaluate`, D98); the plan check refuses either, the base verb
@@ -1296,6 +1335,14 @@ started, which it has before the client's first message is read) and signals the
 this pack); `skillroy://run/<id>/run.jsonl`, `skillroy://run/<id>/journal.jsonl` and `skillroy://run/<id>/failure/<file>`
 for runs and sessions the server started. Resources are listed with `tools/list`-style annotations (`readOnly`) and
 served as text, or as `image/png` for a capture.
+
+(Phase 6 security fix S58, A57, built 2026-10-09, SR; D159) A capture's bytes (`skillroy://mcp/<n>.png`,
+`skillroy://run/<id>/failure/*.png`) are served only when the server's inference settings set `images: true`, the same
+opt-in that lets an image part reach a model (D84; null settings count as `false`); otherwise the file is written and a
+text resource (`skillroy://mcp/<n>.png.txt`, `text/plain`: "capture written to <path>; served over MCP only with
+inference.yaml images: true (a capture is personal data until masked, design 3.10)") names its path for the person to
+open, the tool's resource link names that text, and a run's `failure/*.png` is not listed. The planner's server
+(`--inference none`) never serves them. There is no `--serve-captures` flag.
 
 (Phase 6, built 2026-10-09, CP; P6 §4.2, §6.4) `skillroy://env/profile`'s matrix is the one read after the start's
 hook install (with the `hook.<id>` capabilities); a run the server started holds its `capabilities.json` beside its
@@ -1602,6 +1649,21 @@ intent text), the type of every journal record and its close, observes its calls
 observer to the session service (`turnStarted`, `sessionTurn` with a `TurnRecord` of the turn's facts) and the MCP
 server (`toolCallStarted` with the client's `_meta.traceparent`, `toolCall`) through `ExecutorSession.observer()`.
 
+(Phase 6 security fix S55, A54, built 2026-10-09, SR) `PlannedCall` gains the boolean component `literalArgs` (the
+six-, five- and four-argument constructors stay and give `false`; `withLiteralArgs()`): a call with `literalArgs` is
+compiled and run without reference substitution (every `$` of its string arguments, at any depth, is escaped as `$$`
+before `PlanCompiler.sessionCall`, so that the runner's substitution gives each string back unchanged), and the journal
+records its arguments as given. The MCP server's `data_query` is the one caller (§9.3).
+
+(Phase 6 security fix S57, A56, built 2026-10-09, SR; D158) `Origin.Kind` gains `CLIENT` (`Origin.client(by)`, read by
+`fromJson`): an MCP client, often a model, which acts through the session like a person but confirms nothing; the
+session strips `confirm` and `_meta` from a `CLIENT` origin's arguments and from every call its verb compiles to, as it
+does a `MODEL`'s or the `SYSTEM`'s (`confirms` stays `PERSON` only). `ExecutorSession.compile(verb, args)` answers
+`Compiled(calls, cleanup, refusal)`: the calls of the one-step scenario the verb compiles to with these arguments and the
+cleanup calls it registered, each as the verb wrote them, without running or journaling anything (a step that does not
+compile is the refusal reason), so that a host checks a verb's calls with the real arguments before the first runs (the
+MCP server's verb tools and the session service, §9.3, §12.4).
+
 ### 12.3 `StepJournal` and the export
 
 **The journal file**, `<outputDir>/journal.jsonl`, is written as the session runs (append-only, masked), one record per
@@ -1614,7 +1676,9 @@ with provenance, verifier results, confidence, approval, usage)}`, `oracle {name
 {path, matcher, actual, held, reason}`, `observe {path, value}`, `note {origin, text}`, `budget {scope, spentUsd,
 limitUsd, exhausted}`, `session-end {reason, steps, cost}`. Model provenance lives in `origin` (`kind: MODEL, by: the
 model id, requestId, intent`); the cost of a model call is in the session's `cost-ledger.jsonl` and `inference.jsonl`,
-not in the journal.
+not in the journal. (Phase 6 security fix S57, A56, built 2026-10-09, SR) `origin.kind` is `PERSON`, `MODEL`, `SYSTEM`
+or `CLIENT` (an MCP client, labelled with its server's `--client`; never a confirmation); the export's head names a
+client's steps `client <label>` ("Acted: client mcp: 3 steps"), never `person`.
 
 **`StepJournal` (the in-memory side)** is read back from the file or kept by the session: `List<Entry> entries()`,
 `ExportResult export(ExportOptions)`.
@@ -1741,7 +1805,10 @@ refused `RESOLUTION_FAILED` / `BUDGET` (the meter's figures in the detail, no mo
 has no room or the service is exhausted; otherwise it runs with its scenario budget capped at what was left of the
 session's (`BudgetCaps`, keyed by the session's ledger, which both hosts pass to the session's binds and to the
 service; the contributor's scenario meter takes the smaller limit), and the ledger entries it added are settled on the
-session meter afterwards, whatever its outcome, with the journal's `budget` record written. The service also reads the
+session meter afterwards, whatever its outcome, with the journal's `budget` record written (Phase 6 security fix S56,
+A55, built 2026-10-09, SR; D157: and the MCP server meters `skillroy_scenario_run` on the same meter; the server owns
+one SESSION meter from `budget.sessionUsd`, shared with the `skillroy_session_ask` actor, `SessionServices.open` taking
+it, and the service's exhausted state is the meter's). The service also reads the
 session's settings from its bind options (where both hosts put the invocation's settings): the turns' calls take
 `effort.session`, the summary `effort.summary`, and the estimates the model ids the settings give the Sonnet and Haiku
 classes. As found live (2026-10-08): the sample's verbs projected as strict tools hold 20 union-typed parameters,
@@ -1754,9 +1821,10 @@ not sleep: it waits on the gateway's call and on the session's step.
 
 **Hosts.** (1) `skillroy session` (§13.4): a REPL where the person types `ask …`, `do <verb> {…}`, `call <primitive>
 {…}`, `resolve …`, `check …`, `observe …`, `snapshot`, `note …`, `export <id>`, `quit`; (2) the MCP server's
-`skillroy_session_*` tools, where the MCP client is the person's side and `skillroy_session_ask` lets a *second* model
-act (the client's own model is then the person's assistant and the service's model the actor; both are journaled by
-origin); (3) **the overlay bridge** (`OverlayBridge`): subscribes to the topic `assist.requested` through an
+`skillroy_session_*` tools, where (Phase 6 security fix S57, A56, built 2026-10-09, SR; D158; this replaces "the MCP
+client is the person's side") the MCP client is a client (`Origin.Kind.CLIENT`): it acts through the session like a
+person but confirms nothing, and the journal and the export name it `client <label>`; `skillroy_session_ask` lets a
+*second* model act (the service's model is the actor; both are journaled by origin); (3) **the overlay bridge** (`OverlayBridge`): subscribes to the topic `assist.requested` through an
 `EventSubscription` seam (`AutoCloseable subscribe(long sinceSeq, String topics, Consumer<Event>)`, which the CLI binds
 to `AgentClient.events`), takes `{requestId, text}` from each event (masked, `<person>`), runs `ask(text)` and answers
 through the primitive the pack names in `DomainPack.assistAnswerPrimitive()` (a new default method returning null = no

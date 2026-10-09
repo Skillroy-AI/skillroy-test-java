@@ -104,8 +104,10 @@ import java.util.stream.Stream;
  * {@code web.waitFlag} only when a person opted in, no {@code data.query} on a source without an allow-list (and the
  * statement passes {@code SqlGuard} over the list less its personal and row-masked columns, {@link DataQueryLists}),
  * never a {@code confirm} on the client's behalf, no pack verb whose calls reach any of those; a scenario run for a
- * client is checked against the same projection first ({@link PlanPolicy}). Every pack verb and primitive runs through
- * the session entry with {@code Origin.person("mcp")}.
+ * client is checked against the same projection first ({@link PlanPolicy}), and so is every verb tool's call, on the
+ * calls the verb compiles to with the client's arguments, before the first call runs (phase6 security fix S57, D158).
+ * Every pack verb and primitive runs through the session entry with {@code Origin.client(<label>)}
+ * ({@link ServerOptions#clientLabel()}, {@code mcp} by default): a client's request confirms nothing.
  *
  * <p>Answers are text: the value as pretty JSON through the session's secret mask and the prompt mask, cut at 25000
  * characters with {@code [truncated: N more]}; an image (a capture, a bitmap) is written to {@code <out>/mcp/<n>.png}
@@ -113,7 +115,10 @@ import java.util.stream.Stream;
  * Resources (9.4): {@code skillroy://env/profile}, {@code state/current}, {@code events/recent},
  * {@code schema/primitives}, {@code schema/scenario}, and {@code run/<id>/journal.jsonl}, {@code run/<id>/run.jsonl},
  * {@code run/<id>/failure/<file>} for the session and the scenario runs the server started, and the captures
- * {@code mcp/<n>.png}. The server's own log goes to stderr (or the stream given), masked.
+ * {@code mcp/<n>.png}. A capture's bytes are served only when the inference settings say {@code images: true} (phase6
+ * security fix S58, D159: the opt-in that lets an image part reach a model, D84): otherwise the capture is written and
+ * the link names a text resource {@code mcp/<n>.png.txt} that gives its path, and a run's {@code failure/*.png} is not
+ * listed. The server's own log goes to stderr (or the stream given), masked.
  *
  * <p>Telemetry (phase6-contracts.md 10.2, 10.4): the session's observer ({@code SessionOptions.observer}, through
  * {@link ExecutorSession#observer()}) is told each {@code tools/call} under the session lock, opened with the client's
@@ -146,8 +151,6 @@ public final class SkillroyMcpServer implements AutoCloseable {
     /** The scheme of the server's resources. */
     public static final String SCHEME = "skillroy://";
 
-    /** Who acts through the server's tools (phase5-contracts.md 12.4: the MCP client is the person's side). */
-    static final Origin ORIGIN = Origin.person("mcp");
     static final String DATA_QUERY = ToolProjection.DATA_QUERY;
     /** How long a call waits for the session while another call holds it. */
     static final Duration BUSY_WAIT = Duration.ofMinutes(10);
@@ -162,9 +165,18 @@ public final class SkillroyMcpServer implements AutoCloseable {
     private static final String JSON = "application/json";
     private static final String JSONL = "application/jsonl";
     private static final String PNG = "image/png";
+    private static final String TEXT = "text/plain";
+    /** The text resource of a capture that is not served (D159): the file and the opt-in. */
+    static final String CAPTURE_WITHHELD = "capture written to %s; served over MCP only with inference.yaml images: true"
+            + " (a capture is personal data until masked, design 3.10)";
     private static final long READ_TIMEOUT_MS = 10_000L;
 
     private final ServerOptions options;
+    /**
+     * Who acts through the server's tools (phase6 security fix S57, D158; phase5-contracts.md 12.4): the MCP client, a
+     * {@code CLIENT} origin with the server's label, which never confirms (a client is often a model).
+     */
+    private final Origin origin;
     private final AgentConnection agent;
     private final DomainPack pack;
     private final InputStream in;
@@ -225,6 +237,7 @@ public final class SkillroyMcpServer implements AutoCloseable {
 
     private SkillroyMcpServer(ServerOptions options, InputStream in, OutputStream out, PrintStream log) {
         this.options = Objects.requireNonNull(options, "options");
+        this.origin = Origin.client(options.clientLabel());
         this.agent = options.agent();
         this.pack = options.pack();
         this.in = Objects.requireNonNull(in, "in");
@@ -928,6 +941,19 @@ public final class SkillroyMcpServer implements AutoCloseable {
         return pack;
     }
 
+    /**
+     * The server's one {@code SESSION} budget meter (phase6 security fix S56, D157), shared with the actor; null when
+     * inference is not enabled.
+     */
+    ai.skillroy.testjava.inference.budget.BudgetMeter sessionMeter() {
+        return options.sessionMeter();
+    }
+
+    /** The origin of every action the client asks for: {@code client <label>} (D158). */
+    Origin origin() {
+        return origin;
+    }
+
     AgentConnection agent() {
         return agent;
     }
@@ -1053,7 +1079,17 @@ public final class SkillroyMcpServer implements AutoCloseable {
     }
 
     /**
-     * Lists a finished run's files as resources: {@code run.jsonl} and every text and PNG file of {@code failure/}.
+     * Whether a capture's bytes may be served to the client (phase6 security fix S58, D159): only under the inference
+     * settings' {@code images: true}, the one opt-in that lets an image leave the controller (D84); null settings count
+     * as false, so the planner's server ({@code --inference none}) never serves one.
+     */
+    boolean servesImages() {
+        return options.inference() != null && options.inference().images();
+    }
+
+    /**
+     * Lists a finished run's files as resources: {@code run.jsonl} and every text file of {@code failure/}, and its PNG
+     * files only when the server serves images ({@link #servesImages()}, D159).
      *
      * @return their URIs
      */
@@ -1077,7 +1113,7 @@ public final class SkillroyMcpServer implements AutoCloseable {
             for (Path file : files) {
                 String name = file.getFileName().toString();
                 String mime = mimeOf(name);
-                if (mime == null) {
+                if (mime == null || PNG.equals(mime) && !servesImages()) {
                     continue;
                 }
                 String uri = SCHEME + "run/" + runId + "/failure/" + name;
@@ -1089,7 +1125,12 @@ public final class SkillroyMcpServer implements AutoCloseable {
         return uris;
     }
 
-    /** Writes a capture to {@code <out>/mcp/<n>.png} and lists it; its resource link, or null if it was not written. */
+    /**
+     * Writes a capture to {@code <out>/mcp/<n>.png} and lists it; its resource link, or null if it was not written.
+     * While the server does not serve images ({@link #servesImages()}, phase6 security fix S58, D159), the listed
+     * resource is the text {@code skillroy://mcp/<n>.png.txt} naming the file and the opt-in, for the person to open;
+     * the bytes never reach the client.
+     */
     McpSchema.ResourceLink registerImage(byte[] png, String what) {
         int n = images.incrementAndGet();
         Path file = outDir.resolve("mcp").resolve(n + ".png");
@@ -1099,6 +1140,19 @@ public final class SkillroyMcpServer implements AutoCloseable {
         } catch (IOException e) {
             log.info("the image of " + what + " cannot be written: " + e);
             return null;
+        }
+        if (!servesImages()) {
+            String uri = SCHEME + "mcp/" + n + ".png.txt";
+            String text = masking.text(CAPTURE_WITHHELD.formatted(file));
+            addResource(resource(uri, "capture " + n, "where the image returned by " + what + " was written",
+                    TEXT, u -> text(u, TEXT, text)));
+            return McpSchema.ResourceLink.builder()
+                    .name(n + ".png.txt")
+                    .uri(uri)
+                    .description("an image returned by " + what + ", written for the person (not served here)")
+                    .mimeType(TEXT)
+                    .size((long) text.getBytes(StandardCharsets.UTF_8).length)
+                    .build();
         }
         String uri = SCHEME + "mcp/" + n + ".png";
         addResource(fileResource(uri, "capture " + n, "an image returned by " + what + ", written to " + file,
@@ -1120,7 +1174,7 @@ public final class SkillroyMcpServer implements AutoCloseable {
             return JSONL;
         }
         if (name.endsWith(".txt")) {
-            return "text/plain";
+            return TEXT;
         }
         if (name.endsWith(".png")) {
             return PNG;

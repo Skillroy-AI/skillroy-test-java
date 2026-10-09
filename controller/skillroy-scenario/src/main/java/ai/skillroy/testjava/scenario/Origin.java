@@ -21,11 +21,12 @@ import java.util.Map;
 import java.util.Objects;
 
 /**
- * Who asked for an action of an interactive session (phase5-contracts.md 12.2), as the journal records it: a person
- * (with a label of their choosing), a model (its id and the request id of the call that chose the action) or the
- * system. Only a {@link Kind#PERSON} may confirm a destructive call: the session strips {@code confirm} and
- * {@code _meta} from the arguments of every other origin's call, a {@link Kind#MODEL}'s or the {@link Kind#SYSTEM}'s
- * (design 3.4; phase5-contracts.md 12.2).
+ * Who asked for an action of an interactive session (phase5-contracts.md 12.2, 12.3), as the journal records it: a
+ * person (with a label of their choosing), a model (its id and the request id of the call that chose the action), an
+ * MCP client (with the label its server was started with: {@code skillroy mcp --client}, phase6-contracts.md D158) or
+ * the system. Only a {@link Kind#PERSON} may confirm a destructive call: the session strips {@code confirm} and
+ * {@code _meta} from the arguments of every other origin's call, a {@link Kind#MODEL}'s, a {@link Kind#CLIENT}'s or the
+ * {@link Kind#SYSTEM}'s (design 3.4; phase5-contracts.md 12.2).
  *
  * <p>Immutable; safe to share between threads.
  *
@@ -39,12 +40,17 @@ public record Origin(Kind kind, String by, String intent, String requestId, Stri
 
     /** Who acted. */
     public enum Kind {
-        /** A person at the session's terminal, MCP client or overlay. */
+        /** A person at the session's terminal or overlay. */
         PERSON,
         /** A model through the session service. */
         MODEL,
         /** The session or its host itself. */
-        SYSTEM
+        SYSTEM,
+        /**
+         * An MCP client, often a model (phase6 security fix S57, D158): it acts through the session like a person but
+         * confirms nothing; the journal and the export name it {@code client <label>}.
+         */
+        CLIENT
     }
 
     /** @throws NullPointerException if the kind is null */
@@ -60,6 +66,11 @@ public record Origin(Kind kind, String by, String intent, String requestId, Stri
     /** A model with its id, its reason and the request id of the call that chose the action. */
     public static Origin model(String model, String intent, String requestId) {
         return new Origin(Kind.MODEL, model, intent, requestId, null);
+    }
+
+    /** An MCP client with the label its server was started with ({@code mcp} by default; {@code planner} for author). */
+    public static Origin client(String by) {
+        return new Origin(Kind.CLIENT, by, null, null, null);
     }
 
     /** The system, with a note. */
@@ -87,7 +98,7 @@ public record Origin(Kind kind, String by, String intent, String requestId, Stri
     }
 
     /**
-     * Reads {@link #toJson()}'s shape.
+     * Reads {@link #toJson()}'s shape (every {@link Kind}, {@code CLIENT} included).
      *
      * @throws IllegalArgumentException if the kind is missing or unknown
      */

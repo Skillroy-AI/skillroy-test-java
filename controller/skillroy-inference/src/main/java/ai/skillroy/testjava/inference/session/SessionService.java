@@ -22,6 +22,7 @@ import ai.skillroy.testjava.inference.budget.BudgetException;
 import ai.skillroy.testjava.inference.budget.BudgetMeter;
 import ai.skillroy.testjava.inference.budget.LedgerWriter;
 import ai.skillroy.testjava.inference.budget.PriceTable;
+import ai.skillroy.testjava.inference.budget.SessionMetering;
 import ai.skillroy.testjava.inference.prompt.PromptMask;
 import ai.skillroy.testjava.inference.resolve.LlmSqlResolver;
 import ai.skillroy.testjava.inference.spi.CacheHint;
@@ -36,6 +37,7 @@ import ai.skillroy.testjava.inference.spi.ModelRequest;
 import ai.skillroy.testjava.inference.spi.ModelResponse;
 import ai.skillroy.testjava.inference.spi.ToolSpec;
 import ai.skillroy.testjava.inference.spi.Usage;
+import ai.skillroy.testjava.inference.tools.CallPolicy;
 import ai.skillroy.testjava.inference.tools.ToolProjection;
 import ai.skillroy.testjava.inference.tools.WorkflowTools;
 import ai.skillroy.testjava.protocol.Event;
@@ -58,7 +60,6 @@ import ai.skillroy.testjava.scenario.resolve.InferenceSettings;
 import ai.skillroy.testjava.scenario.resolve.QueryType;
 import ai.skillroy.testjava.scenario.resolve.Resolution;
 import ai.skillroy.testjava.scenario.resolve.ResolutionCatalogue;
-import ai.skillroy.testjava.scenario.resolve.Strategy;
 
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
@@ -172,13 +173,19 @@ public final class SessionService implements AutoCloseable {
     private final Effort summaryEffort;
     private final List<ToolSpec> tools;
     private final Map<String, String> verbTools = new TreeMap<>();
+    /**
+     * Tool name to {verb, why} for every verb the policy would offer but whose calls, compiled with probe arguments,
+     * reach what a session never runs for a model (phase6 security fix S62, D158); listed by {@code skillroy_catalogue}.
+     */
+    private final Map<String, String[]> withheldVerbs = new TreeMap<>();
+    /** What the session's projection never offers ({@code ToolProjection.Policy.session}): the script primitives. */
+    private final java.util.Set<String> excluded;
     private final Map<String, PrimitiveDescriptor> primitiveTools = new TreeMap<>();
     private final List<Content> system;
     private final List<Turn> turns = new ArrayList<>();
     /** The turns kept in full with their messages, oldest first. */
     private final List<Kept> history = new ArrayList<>();
     private String summary;
-    private boolean exhausted;
     private boolean closed;
 
     /**
@@ -213,12 +220,22 @@ public final class SessionService implements AutoCloseable {
                 safe(pack::rowMasks));
         meter.identify(session.id());
         List<PrimitiveDescriptor> primitives = new ArrayList<>(session.primitives().values());
-        this.tools = WorkflowTools.session(primitives, pack, policy.offersVerbs(), policy.offersBasePrimitives());
+        this.excluded = ToolProjection.Policy.session(policy.offersVerbs(), policy.offersBasePrimitives()).excluded();
+        List<ToolSpec> projected = WorkflowTools.session(primitives, pack, policy.offersVerbs(),
+                policy.offersBasePrimitives());
         if (policy.offersVerbs()) {
             for (String verb : new TreeSet<>(pack.steps().verbs())) {
                 verbTools.put(ToolProjection.verbToolName(pack.id(), verb), verb);
             }
+            withholdVerbs();
         }
+        List<ToolSpec> offered = new ArrayList<>();
+        for (ToolSpec tool : projected) {
+            if (!withheldVerbs.containsKey(tool.name())) {
+                offered.add(tool);
+            }
+        }
+        this.tools = List.copyOf(offered);
         for (PrimitiveDescriptor d : primitives) {
             String name;
             try {
@@ -254,9 +271,13 @@ public final class SessionService implements AutoCloseable {
         return policy;
     }
 
-    /** True once the session meter refused a call: the service makes no further model call. */
+    /**
+     * True once the session meter refused a call: the service makes no further model call. The state is the meter's
+     * ({@link BudgetMeter#exhausted()}), so that every host sharing the meter sees it (the MCP server's
+     * {@code skillroy_scenario_run}, phase6 security fix S56, D157).
+     */
     public synchronized boolean exhausted() {
-        return exhausted;
+        return meter.exhausted();
     }
 
     /** The turns so far, oldest first. */
@@ -285,7 +306,7 @@ public final class SessionService implements AutoCloseable {
         session.observer().turnStarted(index);
         List<Usage> usages = new ArrayList<>();
         List<Turn.Action> actions = new ArrayList<>();
-        if (exhausted) {
+        if (meter.exhausted()) {
             return finish(new Turn(index, text, actions, "The session's model budget is exhausted; no further model"
                     + " call is made. Act through the session yourself, or export it.", Turn.Outcome.BUDGET,
                     total(usages), elapsed(t0)), List.of());
@@ -300,7 +321,7 @@ public final class SessionService implements AutoCloseable {
             outcome = loop.outcome;
             answer = loop.answer;
         } catch (BudgetException e) {
-            exhausted = true;
+            meter.markExhausted();
             outcome = Turn.Outcome.BUDGET;
             answer = "The session's model budget has no room for the next model call: " + e.getMessage()
                     + ". No further model call is made in this session.";
@@ -339,20 +360,19 @@ public final class SessionService implements AutoCloseable {
         if (closed) {
             throw new IllegalStateException("the session service is closed");
         }
-        if (!namesModel(strategy)) {
+        if (!SessionMetering.namesModel(strategy)) {
             return session.resolve(slot, kind, args, strategy, verify, credential, origin);
         }
-        BigDecimal estimate = prices.estimate(model(ModelClass.SONNET_CLASS), LlmSqlResolver.ESTIMATE_EXTRA_TOKENS,
-                LlmSqlResolver.MAX_TOKENS, false);
+        BigDecimal estimate = SessionMetering.tierBEstimate(settings, prices);
         BigDecimal room = meter.remaining();
-        if (exhausted) {
+        if (meter.exhausted()) {
             throw refused(slot, new BudgetException(meter.scope(), meter.id(), meter.limit(), meter.spent(),
                     estimate));
         }
         try {
             meter.reserve(estimate);
         } catch (BudgetException e) {
-            exhausted = true;
+            meter.markExhausted();
             recordBudgetNow();
             throw refused(slot, e);
         }
@@ -361,39 +381,8 @@ public final class SessionService implements AutoCloseable {
         try (BudgetCaps.Cap cap = BudgetCaps.cap(bindLedger, room)) {
             return session.resolve(slot, kind, args, strategy, verify, credential, origin);
         } finally {
-            BigDecimal spent = BigDecimal.ZERO;
-            List<CostLedger.Entry> all = bindLedger.entries();
-            for (int i = before; i < all.size(); i++) {
-                spent = spent.add(cost(all.get(i)));
-            }
-            if (all.size() > before) {
-                meter.settle(Usage.none(gateway.provider(), null).withCost(spent.toPlainString(), null));
-            } else {
-                meter.release();
-            }
+            SessionMetering.settle(meter, bindLedger, before, 1, gateway.provider());
             recordBudgetNow();
-        }
-    }
-
-    /** True when a strategy list names a token whose strategy needs a model. */
-    private static boolean namesModel(List<String> strategy) {
-        if (strategy == null) {
-            return false;
-        }
-        for (String token : strategy) {
-            Strategy s = Strategy.ofToken(token);
-            if (s != null && s.needsModel()) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private static BigDecimal cost(CostLedger.Entry entry) {
-        try {
-            return entry.costUsd() == null ? BigDecimal.ZERO : new BigDecimal(entry.costUsd().strip());
-        } catch (NumberFormatException e) {
-            return BigDecimal.ZERO;
         }
     }
 
@@ -411,7 +400,7 @@ public final class SessionService implements AutoCloseable {
     /** Writes the journal's {@code budget} record now; a session its owner closed takes none. */
     private void recordBudgetNow() {
         try {
-            session.budget(BUDGET_SCOPE, meter.spent(), meter.limit(), exhausted);
+            session.budget(BUDGET_SCOPE, meter.spent(), meter.limit(), meter.exhausted());
         } catch (IllegalStateException e) {
             // The session was closed by its owner; the ledger still has the calls.
         }
@@ -571,7 +560,7 @@ public final class SessionService implements AutoCloseable {
     private ModelResponse complete(ModelRequest request, List<Usage> usages, String estimateModel)
             throws BudgetException, InferenceException, InterruptedException {
         BigDecimal estimate = estimate(request, estimateModel);
-        if (exhausted) {
+        if (meter.exhausted()) {
             // A refused resolve exhausted the service during this turn: no further model call (D74).
             throw new BudgetException(meter.scope(), meter.id(), meter.limit(), meter.spent(), estimate);
         }
@@ -703,6 +692,15 @@ public final class SessionService implements AutoCloseable {
             }
             String verb = verbTools.get(name);
             if (verb != null) {
+                // D158 (phase6 security fix S62): the verb's calls with the model's arguments, checked before the first.
+                ExecutorSession.Compiled compiled = session.compile(verb, in, origin);
+                if (compiled.refusal() == null) {
+                    List<String> refusals = refusals(compiled);
+                    if (!refusals.isEmpty()) {
+                        return Result.error(mask.text("verb " + verb + " is refused with these arguments, nothing ran"
+                                + " (a session never runs these calls for a model): " + String.join("; ", refusals)));
+                    }
+                }
                 return step(session.execute(verb, in, origin));
             }
             PrimitiveDescriptor primitive = primitiveTools.get(name);
@@ -781,6 +779,47 @@ public final class SessionService implements AutoCloseable {
         return new Result(block("target-state", json(j)), !o.succeeded(), o, lost);
     }
 
+    /**
+     * Leaves out every verb a probe of which compiles to a call or a cleanup call that a session never runs for a
+     * model (phase6 security fix S62, D96 and D158: the MCP server's rule, {@link CallPolicy}): the verb is compiled
+     * with each of {@link CallPolicy#probes} through the session, without running anything. A verb that no probe
+     * compiles, or whose arguments choose other calls, is offered and checked when it is called.
+     */
+    private void withholdVerbs() {
+        for (java.util.Iterator<Map.Entry<String, String>> it = verbTools.entrySet().iterator(); it.hasNext(); ) {
+            Map.Entry<String, String> e = it.next();
+            Map<String, Object> schema;
+            try {
+                schema = pack.steps().argsSchema(e.getValue());
+            } catch (RuntimeException ex) {
+                schema = null;
+            }
+            for (Object probe : CallPolicy.probes(schema)) {
+                ExecutorSession.Compiled compiled = session.compile(e.getValue(), probe);
+                List<String> refusals = compiled.refusal() == null ? refusals(compiled) : List.of();
+                if (!refusals.isEmpty()) {
+                    withheldVerbs.put(e.getKey(), new String[] {e.getValue(), refusals.get(0)});
+                    it.remove();
+                    break;
+                }
+            }
+        }
+    }
+
+    /** Why the calls a verb compiled to may not run for a model ({@link CallPolicy}), one line each; empty when none. */
+    private List<String> refusals(ExecutorSession.Compiled compiled) {
+        return CallPolicy.refusals(session.primitives(), judged(compiled.calls()), judged(compiled.cleanup()),
+                excluded);
+    }
+
+    private static List<CallPolicy.Call> judged(List<ai.skillroy.testjava.scenario.Plan.Call> calls) {
+        List<CallPolicy.Call> out = new ArrayList<>();
+        for (ai.skillroy.testjava.scenario.Plan.Call call : calls) {
+            out.add(new CallPolicy.Call(call.primitive(), call.args()));
+        }
+        return out;
+    }
+
     /** The pack's vocabulary for {@code skillroy_catalogue}: verbs with schemas, query kinds, oracle functions. */
     private Map<String, Object> catalogue() {
         Map<String, Object> out = new LinkedHashMap<>();
@@ -795,6 +834,9 @@ public final class SessionService implements AutoCloseable {
             verbs.put(e.getValue(), v);
         }
         out.put("verbs", verbs);
+        List<Object> withheld = new ArrayList<>();
+        withheldVerbs.forEach((tool, why) -> withheld.add(Map.of("verb", why[0], "tool", tool, "reason", why[1])));
+        out.put("withheldVerbs", withheld);
         ResolutionCatalogue catalogue = pack.resolution() == null ? ResolutionCatalogue.EMPTY : pack.resolution();
         Map<String, Object> kinds = new LinkedHashMap<>();
         for (String kind : new TreeSet<>(catalogue.kinds())) {
@@ -882,11 +924,11 @@ public final class SessionService implements AutoCloseable {
     }
 
     private void recordBudget(List<Usage> usages) {
-        if (usages.isEmpty() && !exhausted) {
+        if (usages.isEmpty() && !meter.exhausted()) {
             return;
         }
         try {
-            session.budget(BUDGET_SCOPE, meter.spent(), meter.limit(), exhausted);
+            session.budget(BUDGET_SCOPE, meter.spent(), meter.limit(), meter.exhausted());
         } catch (IllegalStateException e) {
             // The session was closed by its owner; the ledger still has the calls.
         }

@@ -17,6 +17,7 @@
 package ai.skillroy.testjava.mcp;
 
 import ai.skillroy.testjava.inference.spi.ToolSpec;
+import ai.skillroy.testjava.inference.tools.CallPolicy;
 import ai.skillroy.testjava.inference.tools.ToolProjection;
 import ai.skillroy.testjava.protocol.PrimitiveDescriptor;
 import ai.skillroy.testjava.scenario.Plan;
@@ -28,7 +29,6 @@ import ai.skillroy.testjava.scenario.pack.DomainPack;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -55,7 +55,12 @@ import java.util.TreeSet;
  * </ul>
  *
  * <p>The same rule decides which of the pack's verbs the server offers as tools ({@link #verbRefusal}): a verb whose
- * compiled calls reach what the server never offers is not offered at all. {@link #callable()} is what the scenario
+ * compiled calls reach what the server never offers is not offered at all. And it is the gate of every verb tool's
+ * call (phase6 security fix S57, D158): the verb is compiled with the client's real arguments
+ * ({@code ExecutorSession.compile}) and its calls and cleanup calls are checked by {@link #packRefusals} before the
+ * first call runs, since no finite set of probes covers a verb whose calls depend on its arguments; the probes decide
+ * only the catalogue's {@code withheldVerbs}. The rule itself ({@link #never}, {@link #arguments}) is
+ * {@link CallPolicy}'s, shared with the session service (S62). {@link #callable()} is what the scenario
  * JSON schema lets the base verb {@code call} name for such a host ({@code ScenarioSchema.generate(pack, primitives,
  * callable)}): a complement that tells an author, not the gate.
  *
@@ -65,12 +70,6 @@ public final class PlanPolicy {
 
     /** The base verb {@code mark}'s primitive: an event on the agent's own bus, admitted with the offered ones. */
     public static final String TRACE_MARK = "trace.mark";
-
-    private static final String CONFIRM = "confirm";
-    private static final String META = "_meta";
-    private static final String AGENT_NAMESPACE = "agent.";
-    private static final String HOOK_NAMESPACE = "hook.";
-    private static final String RULE_NAMESPACE = "rule.";
 
     private final Set<String> callable;
     private final Map<String, PrimitiveDescriptor> catalogue;
@@ -168,16 +167,25 @@ public final class PlanPolicy {
                 }
             }
         }
-        int n = 0;
-        for (Plan.Call call : plan.cleanup()) {
-            n++;
-            String why = packCall(call.primitive());
-            if (why == null) {
-                why = arguments(call);
-            }
-            if (why != null) {
-                out.add("cleanup call " + n + ": " + why);
-            }
+        out.addAll(packRefusals(List.of(), plan.cleanup()));
+        return out;
+    }
+
+    /**
+     * Why each call a pack verb compiled to, and each cleanup call it registered, may not run on a client's behalf
+     * (phase6 security fix S57, D158; the pack-call and argument rules of D96): one line per refused call naming its
+     * primitive ("cleanup call n: …" for a cleanup call), never a value; empty when every call may run. What the verb
+     * tools check at call time on the calls the verb compiles to with the client's arguments, and what
+     * {@link #refusals} and {@link #verbRefusal} apply to a pack verb's calls.
+     */
+    public List<String> packRefusals(List<Plan.Call> calls, List<Plan.Call> cleanup) {
+        return CallPolicy.refusals(catalogue, judged(calls), judged(cleanup), excluded);
+    }
+
+    private static List<CallPolicy.Call> judged(List<Plan.Call> calls) {
+        List<CallPolicy.Call> out = new ArrayList<>();
+        for (Plan.Call call : calls == null ? List.<Plan.Call>of() : calls) {
+            out.add(new CallPolicy.Call(call.primitive(), call.args()));
         }
         return out;
     }
@@ -187,22 +195,17 @@ public final class PlanPolicy {
      * compiled alone with probe arguments (an empty mapping, then placeholders for its schema's required keys, then for
      * all of them), and a compiled call or cleanup call of any probe that reaches a primitive the server never offers,
      * or carries {@code confirm} or {@code _meta}, withholds it; null when no probe reaches one. A verb that compiles
-     * with no probe is judged by its calls when it runs; its arguments may still choose other calls.
+     * with no probe, or whose arguments choose other calls, is offered and judged on its calls when it is called
+     * ({@link #packRefusals}, phase6 security fix S57).
      */
     public String verbRefusal(DomainPack pack, String verb) {
-        List<Object> probes = new ArrayList<>();
-        probes.add(new LinkedHashMap<String, Object>());
         Map<String, Object> schema;
         try {
             schema = pack.steps().argsSchema(verb);
         } catch (RuntimeException e) {
             schema = null;
         }
-        if (schema != null) {
-            probes.add(placeholder(schema, true, 0));
-            probes.add(placeholder(schema, false, 0));
-        }
-        for (Object args : probes) {
+        for (Object args : CallPolicy.probes(schema)) {
             Plan plan;
             try {
                 plan = PlanCompiler.compile(new Scenario("verb-probe", pack.id(), List.of(), List.of(), Map.of(),
@@ -212,81 +215,19 @@ public final class PlanPolicy {
                 continue;
             }
             for (Plan.Step step : plan.steps()) {
-                for (Plan.Call call : step.calls()) {
-                    String why = packCall(call.primitive());
-                    why = why != null ? why : arguments(call);
-                    if (why != null) {
-                        return why;
-                    }
+                List<String> why = packRefusals(step.calls(), List.of());
+                if (!why.isEmpty()) {
+                    return why.get(0);
                 }
             }
             for (Plan.Call call : plan.cleanup()) {
-                String why = packCall(call.primitive());
-                why = why != null ? why : arguments(call);
-                if (why != null) {
-                    return "its cleanup " + why;
+                List<String> why = packRefusals(List.of(call), List.of());
+                if (!why.isEmpty()) {
+                    return "its cleanup " + why.get(0);
                 }
             }
         }
         return null;
-    }
-
-    /**
-     * A value of the schema's shape for a probe: the first of an enum or the const, the first branch that is not null,
-     * an object with its required keys (or all of them), an empty array, {@code 1}, {@code false}, or a text.
-     */
-    private static Object placeholder(Object schema, boolean requiredOnly, int depth) {
-        if (depth > 8 || !(schema instanceof Map<?, ?> s)) {
-            return "x";
-        }
-        if (s.get("enum") instanceof List<?> values) {
-            for (Object v : values) {
-                if (v != null) {
-                    return v;
-                }
-            }
-        }
-        if (s.containsKey("const")) {
-            return s.get("const");
-        }
-        for (String combined : List.of("anyOf", "oneOf")) {
-            if (s.get(combined) instanceof List<?> branches) {
-                for (Object branch : branches) {
-                    if (!(branch instanceof Map<?, ?> b) || !"null".equals(b.get("type"))) {
-                        return placeholder(branch, requiredOnly, depth + 1);
-                    }
-                }
-            }
-        }
-        Object type = s.get("type");
-        if (type instanceof List<?> types) {
-            Object first = "string";
-            for (Object t : types) {
-                if (!"null".equals(t)) {
-                    first = t;
-                    break;
-                }
-            }
-            type = first;
-        }
-        if ("object".equals(type) || type == null && s.get("properties") instanceof Map<?, ?>) {
-            Map<String, Object> out = new LinkedHashMap<>();
-            if (s.get("properties") instanceof Map<?, ?> properties) {
-                List<?> required = s.get("required") instanceof List<?> r ? r : List.of();
-                properties.forEach((k, v) -> {
-                    if (!requiredOnly || required.contains(k)) {
-                        out.put(String.valueOf(k), placeholder(v, requiredOnly, depth + 1));
-                    }
-                });
-            }
-            return out;
-        }
-        return switch (String.valueOf(type)) {
-            case "array" -> new ArrayList<>();
-            case "integer", "number" -> 1L;
-            case "boolean" -> false;
-            default -> "x";
-        };
     }
 
     /** A base verb's call: the primitive must be one this server offers. */
@@ -310,43 +251,16 @@ public final class PlanPolicy {
         return never(primitive);
     }
 
-    /** Why a primitive is never run on a client's behalf, or null. */
+    /**
+     * Why a primitive is never run on a client's behalf, or null: {@link CallPolicy#never} over this server's
+     * catalogue and exclusions (phase6 security fix S62: the rule is shared with the session service).
+     */
     private String never(String primitive) {
-        PrimitiveDescriptor d = catalogue.get(primitive);
-        if (d != null && d.destructive()) {
-            return "calls the destructive primitive " + primitive + ", which is never run for a client (a person"
-                    + " runs it with skillroy call --confirm)";
-        }
-        if (primitive.startsWith(AGENT_NAMESPACE)) {
-            return "calls " + primitive + ": the agent's own primitives are never offered";
-        }
-        if ((primitive.startsWith(HOOK_NAMESPACE) || primitive.startsWith(RULE_NAMESPACE))
-                && !ToolProjection.HOOK_READS.contains(primitive)) {
-            // phase6-contracts.md 4.2: a hook spec or a rule is a pack author's or a person's, never a client's.
-            return "calls " + primitive + ": hook and rule primitives other than " + String.join(", ",
-                    new TreeSet<>(ToolProjection.HOOK_READS)) + " are never run for a client (the pack's catalogue"
-                    + " is installed by the server at its start under --hooks)";
-        }
-        if (ToolProjection.DATA_QUERY.equals(primitive)) {
-            return "calls data.query, which never runs through a scenario here: data_query reads through SqlGuard";
-        }
-        if (excluded.contains(primitive)) {
-            return "calls " + primitive + ", which this server does not offer"
-                    + (ToolProjection.SCRIPT_PRIMITIVES.contains(primitive) ? " (it runs a script in the target's"
-                    + " pages: a person opts in when starting the server, skillroy mcp --allow-evaluate)" : "");
-        }
-        return null;
+        return CallPolicy.never(catalogue.get(primitive), primitive, excluded);
     }
 
-    /** A call whose arguments carry {@code confirm} or {@code _meta}. */
+    /** A call whose arguments carry {@code confirm} or {@code _meta}: {@link CallPolicy#arguments}. */
     private static String arguments(Plan.Call call) {
-        if (call.args().containsKey(CONFIRM)) {
-            return "the arguments of " + call.primitive() + " carry 'confirm': a confirmation is never a client's to"
-                    + " give";
-        }
-        if (call.args().containsKey(META)) {
-            return "the arguments of " + call.primitive() + " carry '_meta', which only the executor builds";
-        }
-        return null;
+        return CallPolicy.arguments(call.primitive(), call.args());
     }
 }

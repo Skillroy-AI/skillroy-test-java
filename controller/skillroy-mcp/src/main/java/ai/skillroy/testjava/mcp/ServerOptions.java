@@ -17,6 +17,7 @@
 package ai.skillroy.testjava.mcp;
 
 import ai.skillroy.testjava.controller.AgentConnection;
+import ai.skillroy.testjava.inference.budget.BudgetMeter;
 import ai.skillroy.testjava.scenario.SessionOptions;
 import ai.skillroy.testjava.scenario.pack.DomainPack;
 import ai.skillroy.testjava.scenario.resolve.InferenceSettings;
@@ -24,6 +25,7 @@ import ai.skillroy.testjava.scenario.resolve.InferenceSettings;
 import java.nio.file.Path;
 import java.time.Clock;
 import java.util.Objects;
+import java.util.regex.Pattern;
 
 /**
  * What {@link SkillroyMcpServer} serves (phase5-contracts.md 9.2, 13.4: the {@code skillroy mcp} command builds these
@@ -51,20 +53,56 @@ import java.util.Objects;
  * @param allowEvaluate {@code web_wait_flag} is offered, and with {@code mutating} {@code web_evaluate} too: each runs
  *     a caller's script in the target's pages, a person's opt-in ({@code --allow-evaluate}); never the planner's
  *     server (decision D98)
+ * @param clientLabel the label of the server's origin, {@code Origin.client(clientLabel)} (phase6 security fix S57,
+ *     D158; {@code skillroy mcp --client}): every action of the client is journaled and exported as
+ *     {@code client <label>} and confirms nothing; null or blank means {@value #DEFAULT_CLIENT}; {@code author} passes
+ *     {@code planner}
+ * @param sessionMeter the server's one {@code SESSION} budget meter (phase6 security fix S56, D157), shared with the
+ *     actor of {@code skillroy_session_ask}: {@code skillroy_resolve} through the actor and the tier (b) slots of
+ *     {@code skillroy_scenario_run} are metered on it; null when inference is not enabled (a run is then not metered
+ *     beyond its scenario budget, and makes no model call without a gateway)
  */
 public record ServerOptions(AgentConnection agent, DomainPack pack, SessionOptions session, boolean mutating,
                             Path outDir, SessionActorFactory actor, InferenceSettings inference, Clock clock,
-                            boolean allowEvaluate) {
+                            boolean allowEvaluate, String clientLabel, BudgetMeter sessionMeter) {
+
+    /** The client label when none is given. */
+    public static final String DEFAULT_CLIENT = "mcp";
+
+    /** What a client label may be: a short name ({@code [A-Za-z0-9._-]}, at most 64 characters). */
+    private static final Pattern LABEL = Pattern.compile("[A-Za-z0-9._-]{1,64}");
 
     /**
-     * Fills the session's default.
+     * Fills the session's default and the client label's.
      *
      * @throws NullPointerException if the agent or the pack is null
+     * @throws IllegalArgumentException if the client label is not a short name
      */
     public ServerOptions {
         Objects.requireNonNull(agent, "agent");
         Objects.requireNonNull(pack, "pack");
         session = session == null ? SessionOptions.defaults(null) : session;
+        clientLabel = clientLabel == null || clientLabel.isBlank() ? DEFAULT_CLIENT : clientLabel.strip();
+        if (!LABEL.matcher(clientLabel).matches()) {
+            throw new IllegalArgumentException("a client label is a short name of letters, digits, '.', '_' and '-'"
+                    + " (at most 64 characters)");
+        }
+    }
+
+    /**
+     * The options without a client label or a session meter (the shape before phase6 security fixes S56 and S57).
+     *
+     * @throws NullPointerException if the agent or the pack is null
+     */
+    public ServerOptions(AgentConnection agent, DomainPack pack, SessionOptions session, boolean mutating,
+                         Path outDir, SessionActorFactory actor, InferenceSettings inference, Clock clock,
+                         boolean allowEvaluate) {
+        this(agent, pack, session, mutating, outDir, actor, inference, clock, allowEvaluate, null, null);
+    }
+
+    /** Whether a text may be a client label ({@code skillroy mcp --client}). */
+    public static boolean isClientLabel(String label) {
+        return label != null && LABEL.matcher(label).matches();
     }
 
     /**
@@ -94,6 +132,8 @@ public record ServerOptions(AgentConnection agent, DomainPack pack, SessionOptio
         private InferenceSettings inference;
         private Clock clock;
         private boolean allowEvaluate;
+        private String clientLabel;
+        private BudgetMeter sessionMeter;
 
         private Builder(AgentConnection agent, DomainPack pack) {
             this.agent = agent;
@@ -145,13 +185,27 @@ public record ServerOptions(AgentConnection agent, DomainPack pack, SessionOptio
             return this;
         }
 
+        /** The label of the server's client origin ({@code --client}; null: {@value ServerOptions#DEFAULT_CLIENT}). */
+        public Builder clientLabel(String label) {
+            this.clientLabel = label;
+            return this;
+        }
+
+        /** The server's one {@code SESSION} budget meter, shared with the actor (null: none, D157). */
+        public Builder sessionMeter(BudgetMeter meter) {
+            this.sessionMeter = meter;
+            return this;
+        }
+
         /**
          * The options.
          *
          * @throws NullPointerException if the agent or the pack is null
+         * @throws IllegalArgumentException if the client label is not a short name
          */
         public ServerOptions build() {
-            return new ServerOptions(agent, pack, session, mutating, outDir, actor, inference, clock, allowEvaluate);
+            return new ServerOptions(agent, pack, session, mutating, outDir, actor, inference, clock, allowEvaluate,
+                    clientLabel, sessionMeter);
         }
     }
 }
