@@ -43,7 +43,7 @@ class ErrorCodesTest {
                 constants++;
             }
         }
-        assertEquals(20, constants);
+        assertEquals(22, constants);
     }
 
     @Test
@@ -55,6 +55,12 @@ class ErrorCodesTest {
         assertEquals(-32011, ErrorCodes.CAPABILITY_UNAVAILABLE);
         assertEquals(-32032, ErrorCodes.NOT_READY);
         assertEquals(-32033, ErrorCodes.BUSY);
+        // phase6-contracts.md section 4.5
+        assertEquals(-32020, ErrorCodes.HOOK_VERIFY_FAILED);
+        assertEquals(-32021, ErrorCodes.HOOK_CONFLICT);
+        assertEquals(-32022, ErrorCodes.RULE_REJECTED);
+        assertEquals("HOOK_CONFLICT", ErrorCodes.name(-32021));
+        assertEquals("RULE_REJECTED", ErrorCodes.name(-32022));
     }
 
     /** phase4-contracts.md section 8.1: a page script's error crosses the wire as an RpcError with its own code. */

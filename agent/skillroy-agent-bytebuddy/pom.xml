@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Copyright 2026 Mike Mills.
+
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+
+      http://www.apache.org/licenses/LICENSE-2.0
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>ai.skillroy</groupId>
+    <artifactId>skillroy-test-java-parent</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+    <relativePath>../../pom.xml</relativePath>
+  </parent>
+
+  <artifactId>skillroy-agent-bytebuddy</artifactId>
+  <name>skillroy-agent-bytebuddy</name>
+  <description>
+    The shading module of the hooks (phase6-contracts.md 2.1, D115): Byte Buddy and the ASM it bundles, relocated under
+    ai.skillroy.testjava.agent.hooks.shaded, with their notices under META-INF/third-party/. No code of its own. The
+    hooks module compiles against this jar and merges it into optional/skillroy-agent-hooks.jar, so that every test of
+    the hooks runs on the bytes that ship.
+  </description>
+
+  <properties>
+    <!-- Agent side: Java 8 class files (Byte Buddy's regular jar is major 52 since 1.18.7). -->
+    <maven.compiler.release>8</maven.compiler.release>
+  </properties>
+
+  <dependencies>
+    <dependency>
+      <groupId>net.bytebuddy</groupId>
+      <artifactId>byte-buddy</artifactId>
+    </dependency>
+    <!-- ShadedContentIT reads the constant pools with the agent's own reader. -->
+    <dependency>
+      <groupId>ai.skillroy</groupId>
+      <artifactId>skillroy-agent-api</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <!-- The module's own artifact is replaced by the relocated jar (shadedArtifactAttached=false), and its
+           dependency-reduced POM (no byte-buddy dependency) is written under target/, never into the source tree.
+           Two relocations: net.bytebuddy (ASM travels inside it as net.bytebuddy.jar.asm) and com.sun.jna, renamed
+           to a package that exists nowhere so that Byte Buddy's optional ClassInjector.UsingJna can never bind to a
+           JNA on the host's class path (spikes/BS3/RESULT.md section 7). The filters drop the dependency's manifest,
+           its Maven descriptor, its LICENSE, NOTICE and licenses/ASM (kept once under META-INF/third-party/ by this
+           module's resources, so that the project's META-INF/LICENSE and NOTICE are never shadowed), the
+           Multi-Release entries under META-INF/versions/ (whose paths the plugin does not relocate; used only on a VM
+           newer than the bundled ASM) and module-info.class. -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-shade-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>relocate-byte-buddy</id>
+            <phase>package</phase>
+            <goals>
+              <goal>shade</goal>
+            </goals>
+            <configuration>
+              <shadedArtifactAttached>false</shadedArtifactAttached>
+              <createDependencyReducedPom>true</createDependencyReducedPom>
+              <dependencyReducedPomLocation>${project.build.directory}/dependency-reduced-pom.xml</dependencyReducedPomLocation>
+              <artifactSet>
+                <includes>
+                  <include>net.bytebuddy:byte-buddy</include>
+                </includes>
+              </artifactSet>
+              <relocations>
+                <relocation>
+                  <pattern>net.bytebuddy</pattern>
+                  <shadedPattern>ai.skillroy.testjava.agent.hooks.shaded.bytebuddy</shadedPattern>
+                </relocation>
+                <relocation>
+                  <pattern>com.sun.jna</pattern>
+                  <shadedPattern>ai.skillroy.testjava.agent.hooks.shaded.absent.jna</shadedPattern>
+                </relocation>
+              </relocations>
+              <filters>
+                <filter>
+                  <artifact>net.bytebuddy:byte-buddy</artifact>
+                  <excludes>
+                    <exclude>META-INF/MANIFEST.MF</exclude>
+                    <exclude>META-INF/maven/**</exclude>
+                    <exclude>META-INF/LICENSE</exclude>
+                    <exclude>META-INF/NOTICE</exclude>
+                    <exclude>META-INF/licenses/**</exclude>
+                    <exclude>META-INF/versions/**</exclude>
+                    <exclude>module-info.class</exclude>
+                  </excludes>
+                </filter>
+              </filters>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+      <!-- ShadedContentIT reads the shaded jar, which exists only after package. -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-failsafe-plugin</artifactId>
+        <configuration>
+          <systemPropertyVariables>
+            <skillroy.bytebuddy.jar>${project.build.directory}/${project.build.finalName}.jar</skillroy.bytebuddy.jar>
+            <skillroy.root.dir>${skillroy.root.dir}</skillroy.root.dir>
+          </systemPropertyVariables>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+</project>

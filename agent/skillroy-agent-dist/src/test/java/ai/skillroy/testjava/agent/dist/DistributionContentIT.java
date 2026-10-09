@@ -42,9 +42,14 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * The exact content of the assembled agent home, as a directory and as a zip: the seven jars, and the licence files
- * at the top level. Every jar carries the licence files in {@code META-INF}, and nothing in a jar is third-party
- * code (the root NOTICE says so).
+ * The exact content of the assembled agent home, as a directory and as a zip: the jars, and the licence files at the
+ * top level. Every jar carries the project's licence files in {@code META-INF} and holds nothing outside
+ * {@code ai/skillroy/} and {@code META-INF/}. The agent contains no third-party code, except that its optional hooks
+ * module ({@code optional/skillroy-agent-hooks.jar}, loaded only when the agent option {@code optionalModules} names
+ * it) carries a relocated copy of Byte Buddy (Apache-2.0) and the ASM it bundles (BSD-3-Clause), whose notices travel
+ * inside that jar under {@code META-INF/third-party/} (phase6-contracts.md sections 2.1 and 2.5, D114, D115). Two
+ * rules keep it so: no jar but {@code skillroy-agent-spy.jar} holds an entry of {@code Spy}'s package (D116: the
+ * package exists once in a JVM), and the hooks jar holds no entry under {@code net/} (the relocation missed nothing).
  */
 class DistributionContentIT {
 
@@ -58,7 +63,9 @@ class DistributionContentIT {
             "modules/skillroy-agent-data.jar",
             "modules/skillroy-agent-swing.jar",
             "modules/skillroy-agent-web.jar",
-            "skillroy-agent-bootstrap.jar"));
+            "optional/skillroy-agent-hooks.jar",
+            "skillroy-agent-bootstrap.jar",
+            "skillroy-agent-spy.jar"));
 
     private static File base;
     private static File home;
@@ -112,8 +119,58 @@ class DistributionContentIT {
                 .contains("Apache License"), "LICENSE is the Apache licence text");
     }
 
+    /** D116: the spy package exists in one jar only, the one the hooks module appends to the bootstrap path. */
     @Test
-    void everyJarCarriesTheLicenceFilesAndOnlyTheProjectsOwnCode() throws IOException {
+    void noJarButTheSpyJarHoldsAnEntryOfTheSpyPackage() throws IOException {
+        for (String jarName : EXPECTED) {
+            if (!jarName.endsWith(".jar")) {
+                continue;
+            }
+            int spyEntries = 0;
+            ZipFile jar = new ZipFile(new File(home, jarName));
+            try {
+                for (Enumeration<? extends ZipEntry> e = jar.entries(); e.hasMoreElements(); ) {
+                    String name = e.nextElement().getName();
+                    if (name.startsWith("ai/skillroy/testjava/agent/spy/") && !name.endsWith("/")) {
+                        spyEntries++;
+                        assertEquals("skillroy-agent-spy.jar", jarName, name + " in " + jarName);
+                    }
+                }
+            } finally {
+                jar.close();
+            }
+            if ("skillroy-agent-spy.jar".equals(jarName)) {
+                assertEquals(3, spyEntries, "Spy and its two nested types");
+            }
+        }
+    }
+
+    /** D115: the relocation missed nothing, so no class of the dependency's own package ships. */
+    @Test
+    void theHooksJarHoldsNothingUnderNet() throws IOException {
+        ZipFile jar = new ZipFile(new File(home, "optional/skillroy-agent-hooks.jar"));
+        try {
+            int shaded = 0;
+            for (Enumeration<? extends ZipEntry> e = jar.entries(); e.hasMoreElements(); ) {
+                String name = e.nextElement().getName();
+                assertTrue(!name.startsWith("net/"), "unrelocated entry " + name);
+                if (name.startsWith("ai/skillroy/testjava/agent/hooks/shaded/bytebuddy/")) {
+                    shaded++;
+                }
+            }
+            assertTrue(shaded > 3000, "the relocated Byte Buddy is merged in: " + shaded);
+            for (String notice : new String[] {"META-INF/third-party/byte-buddy/LICENSE",
+                "META-INF/third-party/byte-buddy/NOTICE", "META-INF/third-party/asm/LICENSE"}) {
+                assertTrue(jar.getEntry(notice) != null, notice);
+            }
+            assertTrue(jar.getEntry("META-INF/services/ai.skillroy.testjava.agent.api.AgentModule") != null);
+        } finally {
+            jar.close();
+        }
+    }
+
+    @Test
+    void everyJarCarriesTheLicenceFilesAndOnlyTheProjectsPrefix() throws IOException {
         for (String jarName : EXPECTED) {
             if (!jarName.endsWith(".jar")) {
                 continue;

@@ -36,6 +36,16 @@ public final class Topics {
     public static final String WEB_LOAD = "web.load", WEB_READY = "web.ready", WEB_CONSOLE = "web.console",
             WEB_TAP = "web.tap", WEB_CLOSED = "web.closed", WEB_BROWSERS_CHANGED = "web.browsers.changed";
 
+    /**
+     * The hook engine's topics (phase6-contracts.md section 4.4), source {@code hooks}: every hook publishes under a
+     * topic starting with {@link #HOOK_PREFIX} ({@code hook.<id>} by default), and the engine itself publishes
+     * {@code hooks.installed}, {@code hooks.removed} and {@code hooks.stubbed}. The Byteman module (section 7)
+     * publishes {@code rule.fired} and {@code rules.changed}.
+     */
+    public static final String HOOK_PREFIX = "hook.", HOOKS_INSTALLED = "hooks.installed",
+            HOOKS_REMOVED = "hooks.removed", HOOKS_STUBBED = "hooks.stubbed", RULE_FIRED = "rule.fired",
+            RULES_CHANGED = "rules.changed";
+
     private Topics() {
     }
 }

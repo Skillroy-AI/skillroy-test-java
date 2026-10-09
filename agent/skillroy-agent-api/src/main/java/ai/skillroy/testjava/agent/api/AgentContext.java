@@ -16,8 +16,10 @@
 
 package ai.skillroy.testjava.agent.api;
 
+import ai.skillroy.testjava.agent.api.spi.hook.HookEngine;
 import ai.skillroy.testjava.protocol.LoadMode;
 import ai.skillroy.testjava.protocol.Protocol;
+import ai.skillroy.testjava.protocol.SecretKeys;
 
 import java.lang.instrument.Instrumentation;
 import java.util.Map;
@@ -98,4 +100,31 @@ public interface AgentContext {
 
     /** True once every ReadinessSource has reported ready and modules have run {@code onTargetReady}. */
     boolean targetReady();
+
+    /**
+     * The hook engine (phase6-contracts.md section 3.6, D118): {@code spi().first(HookEngine.class)}, null when the
+     * optional hooks module is not loaded. Look it up in {@code onTargetReady}, never in {@code requires()}.
+     */
+    default HookEngine hooks() {
+        SpiRegistry registry = spi();
+        return registry == null ? null : registry.first(HookEngine.class);
+    }
+
+    /**
+     * True if the key names a secret (phase6-contracts.md section 3.6). The core's contexts answer with the agent's
+     * own rule: the protocol's {@link SecretKeys} rule, the operator's {@code redact} option and every registered
+     * {@code RedactionKeys} pattern. This default (for test fakes) applies the protocol's rule only.
+     */
+    default boolean isSecretKey(String key) {
+        return key != null && SecretKeys.looksSecret(key);
+    }
+
+    /**
+     * The text with its secret values hidden (phase6-contracts.md section 3.6): in the core's contexts the agent's
+     * redaction of free text (a secret {@code key=value} pair's value, the password of URL user-info, under the same
+     * keys as {@link #isSecretKey}). This default (for test fakes) returns the text unchanged. Null stays null.
+     */
+    default String redactText(String text) {
+        return text;
+    }
 }

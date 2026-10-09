@@ -51,11 +51,13 @@ final class CoreContext implements AgentContext {
     final CoreSpiRegistry spi;
     final RingLog log;
     private final boolean readOnly;
+    private final Redactor redactor;
 
     CoreContext(AgentRuntime runtime, Instrumentation instrumentation, LoadMode loadMode, Map<String, String> options,
                 ClassLoader hostClassLoader, Object hostContext, CorePrimitiveRegistry primitives,
                 RingEventBus events, WeakHandleRegistry handles, CoreThreadBroker threads,
-                CoreCapabilityRegistry capabilities, CoreSpiRegistry spi, RingLog log, boolean readOnly) {
+                CoreCapabilityRegistry capabilities, CoreSpiRegistry spi, RingLog log, boolean readOnly,
+                Redactor redactor) {
         this.runtime = runtime;
         this.instrumentation = instrumentation;
         this.loadMode = loadMode;
@@ -70,6 +72,7 @@ final class CoreContext implements AgentContext {
         this.spi = spi;
         this.log = log;
         this.readOnly = readOnly;
+        this.redactor = redactor;
     }
 
     @Override
@@ -140,5 +143,20 @@ final class CoreContext implements AgentContext {
     @Override
     public boolean targetReady() {
         return runtime.isReady();
+    }
+
+    /**
+     * The runtime's {@link Redactor} rule (phase6-contracts.md section 3.6): the protocol's secret keys, the
+     * {@code redact} option and every registered {@code RedactionKeys} pattern.
+     */
+    @Override
+    public boolean isSecretKey(String key) {
+        return redactor.isSecret(key);
+    }
+
+    /** The runtime's {@link Redactor#text} (secret pairs and URL user-info passwords hidden); null stays null. */
+    @Override
+    public String redactText(String text) {
+        return redactor.text(text);
     }
 }

@@ -120,6 +120,20 @@ public final class CoreTestModule implements AgentModule {
                         return out;
                     }
                 }));
+        // phase6-contracts.md 3.6: the context's secret-key rule and text redaction, as a module sees them.
+        final AgentContext moduleContext = ctx;
+        ctx.primitives().register(Primitives.of(PrimitiveSpec.builder("test.redact")
+                .param("key", "string", false, null).param("text", "string", false, null).build(),
+                new Primitives.Body() {
+                    @Override
+                    public Object invoke(Invocation inv) {
+                        Map<String, Object> out = new LinkedHashMap<String, Object>();
+                        out.put("secret", Boolean.valueOf(moduleContext.isSecretKey(inv.args().str("key"))));
+                        out.put("coreSecret", Boolean.valueOf(inv.context().isSecretKey(inv.args().str("key"))));
+                        out.put("text", moduleContext.redactText(inv.args().str("text")));
+                        return out;
+                    }
+                }));
         for (final ThreadPolicy policy : ThreadPolicy.values()) {
             String name = "test.where." + lowerCamel(policy.name());
             ctx.primitives().register(Primitives.of(PrimitiveSpec.builder(name).thread(policy).build(),

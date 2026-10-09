@@ -67,6 +67,22 @@
       <groupId>ai.skillroy</groupId>
       <artifactId>skillroy-agent-web</artifactId>
     </dependency>
+    <!-- Phase 6 (phase6-contracts.md 2.1): the spy jar at the home's root, and the optional hooks module under
+         optional/ (one jar, Byte Buddy relocated and merged in; nothing of its tree is needed here). -->
+    <dependency>
+      <groupId>ai.skillroy</groupId>
+      <artifactId>skillroy-agent-spy</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>ai.skillroy</groupId>
+      <artifactId>skillroy-agent-hooks</artifactId>
+      <exclusions>
+        <exclusion>
+          <groupId>*</groupId>
+          <artifactId>*</artifactId>
+        </exclusion>
+      </exclusions>
+    </dependency>
     <dependency>
       <groupId>org.junit.jupiter</groupId>
       <artifactId>junit-jupiter</artifactId>
