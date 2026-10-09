@@ -411,6 +411,8 @@ public final class Binder {
         private final List<String> skipped = new ArrayList<>();
         /** The fingerprint of this bind, once computed. */
         private EnvFingerprint env;
+        /** How long the fingerprint took (the {@code fingerprint} record's {@code durationMs}, Phase 6). */
+        private long fingerprintMs;
         /** The index of the resolution graph node the walk visits next. */
         private int position;
         /** approve's reuse (P5 7.1): the existing bindings file, read once on first need; null when none is usable. */
@@ -433,7 +435,9 @@ public final class Binder {
                 return new BindStep.Done(withoutBindings());
             }
             checkCatalogue();
+            long f0 = options.clock().millis();
             env = engine.fingerprint();
+            fingerprintMs = Math.max(0L, options.clock().millis() - f0);
             if (options.mode() == BindMode.REPLAY) {
                 return new BindStep.Done(replay(env));
             }
@@ -714,6 +718,7 @@ public final class Binder {
             if (options.mode() == BindMode.REPLAY) {
                 fields.put("recorded", recorded);
             }
+            fields.put("durationMs", fingerprintMs);
             listener.event("fingerprint", fields);
         }
 
@@ -1000,11 +1005,14 @@ public final class Binder {
                         + "': its inputs differ from the recorded ones", RunLog.fields("bindingsFile", relative,
                         "expected", recorded.inputsHash(), "actual", inputsHash));
             }
+            long o0 = options.clock().millis();
             Object value = engine.evaluate(oracle.fn(), args);
+            long oracleMs = Math.max(0L, options.clock().millis() - o0);
             Map<String, Object> event = RunLog.fields("name", oracle.name(), "fn", oracle.fn(), "value", value);
             if (options.mode() == BindMode.REPLAY) {
                 event.put("recorded", recorded == null ? null : recorded.value());
             }
+            event.put("durationMs", oracleMs);
             listener.event("oracle", event);
             if (recorded != null && !Json.writeCanonical(value).equals(Json.writeCanonical(recorded.value()))) {
                 throw new BindException(FailureKind.REBIND_NEEDED, "ORACLE_CHANGED", node, "oracle '"

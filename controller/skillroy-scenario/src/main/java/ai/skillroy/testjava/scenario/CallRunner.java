@@ -31,6 +31,10 @@ import ai.skillroy.testjava.scenario.pack.AwaitSpec;
 import ai.skillroy.testjava.scenario.pack.PromptDecision;
 import ai.skillroy.testjava.scenario.pack.PromptPolicy;
 import ai.skillroy.testjava.scenario.pack.SyncPolicy;
+import ai.skillroy.testjava.scenario.observe.AwaitRecord;
+import ai.skillroy.testjava.scenario.observe.CallEnd;
+import ai.skillroy.testjava.scenario.observe.CallStart;
+import ai.skillroy.testjava.scenario.observe.RunObserver;
 import ai.skillroy.testjava.scenario.web.AgentWebPath;
 
 import java.time.Clock;
@@ -53,7 +57,9 @@ import java.util.function.Supplier;
  * comes from the call's options alone, 12.2), routes a {@code web.*} call to the chosen web path, applies the
  * call's sync, binds a captured slot, checks the base verbs' fidelity, looks for unexpected prompts and classifies
  * every failure as an {@link Abort}; it writes the {@code call}, {@code sync}, {@code capture}, {@code fidelity} and
- * {@code prompt} records of {@code run.jsonl}.
+ * {@code prompt} records of {@code run.jsonl}. From Phase 6 (phase6-contracts.md 10.2) it also tells its owner's
+ * {@link #observer} where each call starts and ends (its sync and prompt check included) and every wait it did, and
+ * sends the observer's open call span as the call's {@code _meta.traceparent}.
  *
  * <p>Its fields are the protocol's state, which its owner reads and sets between calls: the sequence numbers every
  * wait starts from, the prompt cursor, whether the agent was lost and whether a secret parameter was sent. Not
@@ -113,6 +119,17 @@ final class CallRunner {
     RpcResult lastResult;
     /** When not null, the events every call's result carried are added here (a session step's outcome). */
     List<Event> stepEvents;
+    /**
+     * The owner's observer, already wrapped so that it never throws (phase6-contracts.md 10.2); set by the owner
+     * before the first call. {@link RunObserver#NONE} builds no record.
+     */
+    RunObserver observer = RunObserver.NONE;
+    /** The observed call in flight: whether one is open, its result, the path that served it and its error code. */
+    private boolean callOpen;
+    private RpcResult callResult;
+    private String callPath;
+    private String callError;
+    private long callRttMs;
 
     /**
      * @param keyRuleSlots the slots whose values the owner's mask collected by A25's key rule (asked once)
@@ -142,6 +159,56 @@ final class CallRunner {
         return Boolean.TRUE.equals(params.remove(CONFIRM));
     }
 
+    /**
+     * Opens the call's {@code call} span (phase6-contracts.md 10.4) and returns the options with its trace parent;
+     * the options as given with {@link RunObserver#NONE}.
+     */
+    private CallOptions startObservedCall(String stepId, int index, String primitive, CallOptions callOptions,
+                                          List<String> secretParams) {
+        callOpen = false;
+        callResult = null;
+        callPath = null;
+        callError = null;
+        callRttMs = -1L;
+        if (observer == RunObserver.NONE) {
+            return callOptions;
+        }
+        callOpen = true;
+        observer.callStarted(new CallStart(stepId, index, primitive, callOptions.correlationId(), secretParams,
+                callOptions.confirm()));
+        return callOptions.withTraceparent(observer.currentTraceparent());
+    }
+
+    /** Ends the open {@code call} span with what the call returned, however it ended. */
+    private void endObservedCall() {
+        if (callOpen) {
+            callOpen = false;
+            observer.callEnded(callEnd(callResult, callPath, callError, callRttMs));
+        }
+    }
+
+    /**
+     * The facts of a call's reply for its span: never its value or the events' payloads. The agent's own duration and
+     * thread only for a reply the agent made (not one the controller assembled from a combined wait).
+     *
+     * @param result the reply, or null when the call failed
+     * @param path the path that served it, or null
+     * @param errorCode the error code's name of a failed call, or null
+     * @param rttMs the call's own round trip, -1 when unknown
+     */
+    static CallEnd callEnd(RpcResult result, String path, String errorCode, long rttMs) {
+        if (result == null) {
+            return new CallEnd(false, path, errorCode, -1L, -1L, rttMs, null, null, List.of());
+        }
+        List<CallEnd.EventFact> events = new ArrayList<>(result.events().size());
+        for (Event event : result.events()) {
+            events.add(new CallEnd.EventFact(event.topic(), event.seq(), event.source(), event.ts()));
+        }
+        boolean byAgent = AgentWebPath.ID.equals(path) && !"controller".equals(result.thread());
+        return new CallEnd(true, path, null, result.seqBefore(), result.seqAfter(), rttMs,
+                byAgent ? result.durationMs() : null, byAgent ? result.thread() : null, events);
+    }
+
     /** The slots of A25's key rule, asked of the owner once. */
     private Set<String> keyRuleSlots() {
         if (keyRuleSlots == null) {
@@ -162,6 +229,16 @@ final class CallRunner {
      */
     void execute(Plan.Step step, int callIndex, Plan.Call call, String correlationId,
                  BooleanSupplier nextStepHandlesPrompt) throws Abort, AgentLostException {
+        try {
+            executeCall(step, callIndex, call, correlationId, nextStepHandlesPrompt);
+        } finally {
+            endObservedCall();
+        }
+    }
+
+    /** {@link #execute}'s body: the call's {@code call} span, when observed, is ended by {@link #execute}. */
+    private void executeCall(Plan.Step step, int callIndex, Plan.Call call, String correlationId,
+                             BooleanSupplier nextStepHandlesPrompt) throws Abort, AgentLostException {
         String stepId = step.id();
         boolean baseUi = BaseSteps.UI_VERBS.contains(step.verb()) && !packVerbs.contains(step.verb());
         boolean baseWeb = BaseSteps.WEB_VERBS.contains(step.verb()) && !packVerbs.contains(step.verb());
@@ -191,6 +268,7 @@ final class CallRunner {
         if (confirm) {
             callOptions = callOptions.withConfirm(true);
         }
+        callOptions = startObservedCall(stepId, callIndex + 1, call.primitive(), callOptions, secretParams);
         boolean webCall = WebRun.isWeb(call.primitive());
         String[] servedBy = new String[1];
         long t0 = clock.millis();
@@ -220,6 +298,8 @@ final class CallRunner {
                 agentSince = result.seqBefore();
             }
         } catch (AgentRpcException e) {
+            callError = ErrorCodes.name(e.error().code());
+            callPath = webCall && servedBy[0] != null ? servedBy[0] : AgentWebPath.ID;
             Map<String, Object> record = RunLog.fields("step", stepId, "index", callIndex + 1, "primitive",
                     call.primitive());
             if (webCall) {
@@ -237,6 +317,8 @@ final class CallRunner {
             log.write("call", record);
             throw rpcFailure(e, stepId, call.primitive(), params);
         } catch (WebRun.PathFailure e) {
+            callError = "PATH_FAILURE";
+            callPath = servedBy[0];
             Map<String, Object> record = RunLog.fields("step", stepId, "index", callIndex + 1, "primitive",
                     call.primitive(), "path", servedBy[0], "params", params, "ok", false, "error", e.getMessage(),
                     "durationMs", clock.millis() - t0);
@@ -252,6 +334,9 @@ final class CallRunner {
         if (agentServed && !fromPath) {
             noteSeq(result.seqAfter());
         }
+        callResult = result;
+        callPath = webCall ? servedBy[0] : fromPath ? web.pathId() : AgentWebPath.ID;
+        callRttMs = clock.millis() - t0;
         Map<String, Object> record = RunLog.fields("step", stepId, "index", callIndex + 1, "primitive",
                 call.primitive());
         if (webCall) {
@@ -655,6 +740,7 @@ final class CallRunner {
         } catch (RuntimeException | AgentRpcException e) {
             record.putAll(RunLog.fields("ok", false, "error", e.toString()));
             log.write("sync", record);
+            observeAwait(call.sync().name(), false, null, null, clock.millis() - t0, null);
             detail.put("error", e.toString());
             throw new Abort(Status.ERROR, FailureKind.ENVIRONMENT, stepId, "waiting for " + describe(wait,
                     topics, match) + " after " + call.primitive() + " failed: " + e.getMessage(), detail);
@@ -665,6 +751,9 @@ final class CallRunner {
             record.put("source", fromPath ? web.pathId() : AgentWebPath.ID);
         }
         log.write("sync", record);
+        observeAwait(call.sync().name(), event != null, event == null ? null : event.seq(), event == null ? null
+                : event.topic(), clock.millis() - t0, event == null ? null : fromPath ? web.pathId()
+                : AgentWebPath.ID);
         if (event == null) {
             detail.putAll(diagnostics());
             throw new Abort(Status.FAIL, FailureKind.SYNC_TIMEOUT, stepId, "no " + describe(wait, topics, match)
@@ -674,6 +763,13 @@ final class CallRunner {
             noteSeq(event.seq());
         }
         return event;
+    }
+
+    /** A wait of the open call for the observer (phase6-contracts.md 10.4's {@code await} span). */
+    private void observeAwait(String mode, boolean ok, Long eventSeq, String topic, long ms, String source) {
+        if (observer != RunObserver.NONE) {
+            observer.await(new AwaitRecord(mode, ok, eventSeq, topic, ms, source));
+        }
     }
 
     /** "ready event (a,b)", or for an EVENT wait "event (a,b)" plus " matching {…}" when it has a match. */
@@ -692,6 +788,7 @@ final class CallRunner {
         } catch (AgentRpcException e) {
             log.write("sync", RunLog.fields("step", stepId, "primitive", call.primitive(), "mode", "SETTLE",
                     "ok", false, "error", e.error().toJson()));
+            observeAwait("SETTLE", false, null, null, clock.millis() - t0, null);
             throw rpcFailure(e, stepId, "swing.settle", params);
         }
         noteSeq(result.seqAfter());
@@ -699,6 +796,7 @@ final class CallRunner {
         log.write("sync", RunLog.fields("step", stepId, "primitive", call.primitive(), "mode", "SETTLE",
                 "timeoutMs", timeoutMs, "ok", settled, "value", result.value(), "ms",
                 clock.millis() - t0));
+        observeAwait("SETTLE", settled, null, null, clock.millis() - t0, null);
         if (!settled) {
             Map<String, Object> detail = RunLog.fields("primitive", call.primitive(), "sync", "SETTLE",
                     "timeoutMs", timeoutMs, "settle", result.value());

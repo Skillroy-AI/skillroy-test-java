@@ -1,0 +1,2 @@
+ai.skillroy.testjava.telemetry.OtlpObserverProvider
+ai.skillroy.testjava.telemetry.FileObserverProvider

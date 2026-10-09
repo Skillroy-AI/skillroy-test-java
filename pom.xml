@@ -69,6 +69,7 @@
     <module>controller/skillroy-junit</module>
     <module>controller/skillroy-cli</module>
     <module>controller/skillroy-cdp</module>
+    <module>controller/skillroy-telemetry</module>
     <module>samples/skillroy-sample-lending-app</module>
     <module>samples/skillroy-sample-lending-agent</module>
     <module>samples/skillroy-sample-lending-pack</module>
@@ -114,6 +115,12 @@
     <!-- SLF4J at the 2.x version the MCP SDK and the Anthropic SDK's tree bring (slf4j-api 2.0.16), MIT. The CLI adds
          the no-operation provider at the same version, so that the API's "no providers" notice does not print. -->
     <slf4j.version>2.0.16</slf4j.version>
+    <!-- Phase 6 (phase6-contracts.md 2.2, decision D140): OpenTelemetry Java, Apache-2.0; audited in
+         docs/licence-audit.md section 4. 1.66.0 (released 2026-09-11) is the current 1.x line the build was pinned to:
+         1.67.0 came out on the day of the build (2026-10-09) and is too fresh to adopt. skillroy-telemetry only (the
+         controller; nothing of it enters a target JVM), with the JDK sender; the OkHttp sender is excluded and the
+         SDK's autoconfiguration is never on the class path. Versions are given per artifact (no BOM import). -->
+    <opentelemetry.version>1.66.0</opentelemetry.version>
 
     <!-- Plugin versions. -->
     <maven-assembly-plugin.version>3.8.0</maven-assembly-plugin.version>
@@ -225,6 +232,20 @@
         <artifactId>skillroy-cdp</artifactId>
         <version>${project.version}</version>
       </dependency>
+      <!-- Phase 6 (phase6-contracts.md 2.1, 10): the OpenTelemetry implementation of RunObserver; and the scenario
+           module's test-jar (FakeAgentConnection and the executor tests' fixtures, 10.6), an entry of its own since a
+           managed entry matches on its type. -->
+      <dependency>
+        <groupId>ai.skillroy</groupId>
+        <artifactId>skillroy-telemetry</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>ai.skillroy</groupId>
+        <artifactId>skillroy-scenario</artifactId>
+        <version>${project.version}</version>
+        <type>test-jar</type>
+      </dependency>
       <dependency>
         <groupId>ai.skillroy</groupId>
         <artifactId>skillroy-sample-lending-app</artifactId>
@@ -299,6 +320,49 @@
         <groupId>org.slf4j</groupId>
         <artifactId>slf4j-nop</artifactId>
         <version>${slf4j.version}</version>
+      </dependency>
+      <!-- Controller side, Phase 6 (skillroy-telemetry): the OpenTelemetry set of phase6-contracts.md 2.2. -->
+      <dependency>
+        <groupId>io.opentelemetry</groupId>
+        <artifactId>opentelemetry-api</artifactId>
+        <version>${opentelemetry.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>io.opentelemetry</groupId>
+        <artifactId>opentelemetry-context</artifactId>
+        <version>${opentelemetry.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>io.opentelemetry</groupId>
+        <artifactId>opentelemetry-sdk-common</artifactId>
+        <version>${opentelemetry.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>io.opentelemetry</groupId>
+        <artifactId>opentelemetry-sdk-trace</artifactId>
+        <version>${opentelemetry.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>io.opentelemetry</groupId>
+        <artifactId>opentelemetry-exporter-otlp</artifactId>
+        <version>${opentelemetry.version}</version>
+        <exclusions>
+          <!-- Exactly one sender (D141): the JDK's, below. -->
+          <exclusion>
+            <groupId>io.opentelemetry</groupId>
+            <artifactId>opentelemetry-exporter-sender-okhttp</artifactId>
+          </exclusion>
+        </exclusions>
+      </dependency>
+      <dependency>
+        <groupId>io.opentelemetry</groupId>
+        <artifactId>opentelemetry-exporter-sender-jdk</artifactId>
+        <version>${opentelemetry.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>io.opentelemetry</groupId>
+        <artifactId>opentelemetry-sdk-testing</artifactId>
+        <version>${opentelemetry.version}</version>
       </dependency>
       <dependency>
         <groupId>org.jetbrains.kotlin</groupId>

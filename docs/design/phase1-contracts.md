@@ -1798,6 +1798,13 @@ show is recorded in `../TODO.md`.
 
 ---
 
+**Telemetry's trace parent (Phase 6, built 2026-10-09, TL; P6 §10.2, D142).** `CallOptions` gains a fifth component,
+`traceparent` (the W3C trace parent of the controller's open call span; the four- and three-argument constructors
+stay and carry none; `withTraceparent` copies), and `AgentClient` writes it as `_meta.traceparent` when it is set:
+"the controller sends correlation id, timeout, confirmation and secret params, **and nothing else**" is amended to
+"and, when telemetry supplies one, the trace parent". A `_meta` among the params is still dropped, its `traceparent`
+included. The agent is unchanged: it already reads `_meta.traceparent` and stamps it on the call's events.
+
 ## 8. `skillroy-scenario`, `skillroy-junit`, `skillroy-cli`
 
 ### 8.1 Scenario YAML (Phase 1 subset; the keys are final, the supported values grow in later phases)
@@ -2357,6 +2364,17 @@ kind), and `DEGRADED` a `<skipped>` whose message lists the skipped expectations
 (`render(suiteName, results, environmentFailure, UnaryOperator<String> scrub)`, which the CLI's `run` uses), never
 the finished document, so that a `<redacted>` mark arrives as text and the report stays well-formed.
 
+**Telemetry (Phase 6, built 2026-10-09, TL; P6 §10.2-§10.4).** `RunOptions` gains the component `observer` (a
+`RunObserver`, default `NONE`; `withObserver`; P6 §6.1 places it twelfth after CP's `hooks`), which the executor tells
+what the run does beside the records it writes: `scenarioStarted` before `run-start` (whose record then carries the
+observer's `traceId`), each step and its end, each step and cleanup call with its waits (the call sending the open
+call span as `_meta.traceparent`), every bind record and the final `bind` record, the `requires`,
+`launchProperties`, `preflight`, `hooks`, `capabilities`, `recover`, `cleanup`, `expect`, `db`, `prompt`,
+`fidelity` and `capture` records as written (`RunLog.observe`), each model call of the ledger, and `scenarioEnded`
+after `run-end`. A throwing observer is logged once and replaced by `NONE` for the rest of the run; nothing of it
+changes a verdict. With telemetry on, the CLI's `--telemetry file` writes `<out>/telemetry/spans.jsonl` beside the
+scenario directories, and `JunitXmlReporter.withTraceId` ends the report with `<system-out>traceId=<hex></system-out>`.
+
 ### 8.6 `skillroy-junit` and `skillroy-cli`
 
 `skillroy-junit`: `ScenarioTests.dynamicTests(ScenarioSource source, Supplier<AgentConnection> connection)` (also
@@ -2426,6 +2444,16 @@ Built for the CLI **(1.x, built 2026-10-02)**:
 | 3 | the agent could not be found, reached, attached or kept |
 | 64 | usage error |
 | 70 | internal error (a bug in the CLI or a pack) |
+
+**Telemetry options (Phase 6, built 2026-10-09, TL; P6 §10.3).** `run`, `session`, `mcp`, `re-resolve`, `triage`
+and `author` take `--telemetry none|otlp|file`, `--telemetry-endpoint <url>`, `--telemetry-attributes
+standard|minimal` and `--telemetry-file <path>`; a settings error is exit code 64 before the agent is contacted (and
+`run`'s `environment` testcase); with telemetry on, `run --json` carries `telemetry: {exporter, traceId}` and every
+command ends with `telemetry: <exporter> <host:port or directory>, trace <id>, <n> batches dropped`. The JUnit glue's
+overload without `RunOptions` reads `skillroy.telemetry`, `skillroy.telemetry.endpoint`,
+`skillroy.telemetry.attributes`, `skillroy.telemetry.out`, `skillroy.telemetry.serviceName`,
+`skillroy.telemetry.timeoutMs` and `skillroy.telemetry.file`, finds the provider through `ServiceLoader` and closes
+it at JVM exit; an unusable setting is the `environment` test.
 
 ---
 

@@ -107,12 +107,13 @@ included), the sample pack and the scenarios of both samples build with `--relea
 | `skillroy-inference` (Phase 5, 2026-10-08) | the Anthropic Java SDK 2.70.0 set (OkHttp, Okio, Kotlin, Jackson's jdk8/jsr310/Kotlin modules, victools, swagger-annotations, errorprone annotations, standardwebhooks, slf4j-api), JSqlParser 5.4; the Jackson set through `skillroy-data` | none | JUnit set, HSQLDB |
 | `skillroy-mcp` (Phase 5, 2026-10-08) | the MCP Java SDK 2.0.1 (`mcp-core`, `mcp-json-jackson2`) with `reactor-core`, `reactive-streams`, `slf4j-api`, `json-schema-validator` and `itu`; the inference set through `skillroy-inference` | none | JUnit set |
 | `skillroy-junit` | Jackson set; `junit-jupiter-api` and its transitive artifacts | none | JUnit set, `junit-platform-launcher` |
-| `skillroy-cli` | Jackson set, through `skillroy-data`, which it also declares itself since Phase 2; since Phase 5 (2026-10-08) the inference set through `skillroy-inference` and the MCP set through `skillroy-mcp`, plus `slf4j-nop` 2.0.16, which it declares itself (D88: the only SLF4J binding, so the libraries' logging is silent) | none | JUnit set |
+| `skillroy-telemetry` (Phase 6, built 2026-10-09, TL) | the OpenTelemetry set of section 4 (1.66.0: `opentelemetry-api`, `-context`, `-common`, `-sdk-common`, `-sdk-trace`, `-sdk-metrics`, `-sdk-logs`, `-exporter-otlp`, `-exporter-otlp-common`, `-exporter-common`, `-exporter-sender-jdk`; the OkHttp sender excluded, no autoconfiguration artifact in the tree); the Jackson set through `skillroy-scenario` | none | JUnit set, HSQLDB, `opentelemetry-sdk-testing` 1.66.0 with `opentelemetry-sdk` 1.66.0, `skillroy-scenario`'s `test-jar` |
+| `skillroy-cli` | Jackson set, through `skillroy-data`, which it also declares itself since Phase 2; since Phase 5 (2026-10-08) the inference set through `skillroy-inference` and the MCP set through `skillroy-mcp`, plus `slf4j-nop` 2.0.16, which it declares itself (D88: the only SLF4J binding, so the libraries' logging is silent); since Phase 6 (2026-10-09, TL) the OpenTelemetry set through `skillroy-telemetry` (section 4) | none | JUnit set |
 | `skillroy-cdp` (Phase 4) | Playwright set; Jackson set, through `skillroy-scenario` and `skillroy-data` | none | JUnit set |
 | `skillroy-sample-lending-app` | HSQLDB | none | JUnit set |
 | `skillroy-sample-lending-agent` | none | HSQLDB (through the sample app) | JUnit set |
 | `skillroy-sample-lending-pack` | Jackson set | none | JUnit set |
-| `skillroy-sample-lending-scenarios` | Jackson set; `junit-jupiter-api` set (through `skillroy-junit`) | none | JUnit set, HSQLDB (through the sample app) |
+| `skillroy-sample-lending-scenarios` | Jackson set; `junit-jupiter-api` set (through `skillroy-junit`) | none | JUnit set, HSQLDB (through the sample app); since Phase 6 (2026-10-09, TL) the OpenTelemetry set through `skillroy-telemetry` (test scope) |
 | `skillroy-sample-web-host` (Phase 4, profile `jcef`) | JCEF set | none | JUnit set; the natives `jcef-natives-<platform>` of the platform in `skillroy.jcef.platform` (default `linux-amd64`) |
 | `skillroy-sample-web-host-agent` (Phase 4, profile `jcef`) | none | JCEF set (through the host module, which it declares `provided`; it declares no third-party artifact itself) | JUnit set |
 | `skillroy-sample-web-host-scenarios` (Phase 4, profile `jcef`) | Jackson set, through `skillroy-scenario` (and `skillroy-data`); it declares no third-party artifact at compile scope | none | JUnit set (`junit-jupiter`); the Playwright set, through `skillroy-cdp`; the JCEF set and the natives `jcef-natives-<platform>`, through the web host, which it declares with the natives; besides, test-scope project artifacts whose transitive dependencies it excludes (the agent home's zip, the host's agent module, the CLI). Read from its POM on 2026-10-07; it does not depend on `skillroy-junit` |
@@ -196,8 +197,49 @@ jars are not in it, and neither are `skillroy-cdp` and Playwright (D49): no POM 
 requires the evidence of each licence to be inside the jar (a licence file, the manifest's `Bundle-License` or the
 embedded POM) or, failing that, in `THIRD-PARTY.txt`'s attributions with the licence text distributed.
 
-The 36 jars, their licences and what the evidence is (the sizes are those of the jars in the local Maven cache on
-2026-10-08):
+**Since Phase 6 (built 2026-10-09, TL; phase6-contracts.md 2.2, 2.6, D140, D141)** `lib/` also holds the project's
+`skillroy-telemetry` jar and eleven OpenTelemetry Java jars at **1.66.0** (released 2026-09-11; 1.67.0 came out on
+the day of the build and was not adopted), all Apache-2.0: `lib/` then holds 55 jars (the zip: 62 entries), eight
+project jars (`DistributionNoticesIT.PROJECT_MODULES` gains `telemetry`) and 47 third-party jars (38 Apache-2.0, 8
+MIT, 1 MIT-0). The set is exactly the resolved runtime tree of `skillroy-telemetry` read with `mvn
+dependency:tree` on 2026-10-09: the API (`opentelemetry-api`, `-context`, `-common`), the SDK's `-sdk-common`,
+`-sdk-trace`, and `-sdk-metrics` and `-sdk-logs` (compile dependencies of the OTLP exporter, which also offers metric
+and log exporters; the module builds spans only), the exporter `-exporter-otlp` with `-exporter-otlp-common` and
+`-exporter-common`, and the JDK's HTTP client sender `-exporter-sender-jdk`. The exporter's runtime dependency
+`opentelemetry-exporter-sender-okhttp` is **excluded** in the root POM's managed entry (exactly one sender, D141), and
+no `opentelemetry-sdk-extension-autoconfigure` or `-autoconfigure-spi` artifact is in the tree at all (the contract's
+section 2.2 named the SPI as a possible transitive; the exporter declares it compile-only, so it is not resolved:
+the `META-INF/services` files of `opentelemetry-exporter-otlp` that name autoconfiguration SPIs are never read, since
+nothing on the class path loads them). `DistributionNoticesIT` fails on an OkHttp sender, an autoconfiguration jar or
+`opentelemetry-sdk-testing` in `lib/`. The jars are built with Gradle and carry no `pom.properties`: the test
+identifies them by file name (its existing rule); none carries a licence or notice file, a `Bundle-License` or an
+embedded POM, so the evidence is the published POM ("The Apache License, Version 2.0") and `THIRD-PARTY.txt`'s
+attribution with the Apache-2.0 text at the top level. Every class is under `io/opentelemetry/` (the one
+`META-INF/versions/9/` entry of `-exporter-common` is the project's own `VarHandleStringEncoder`); nothing is shaded.
+None of it is in the agent home: export is controller-only (D140), and `skillroy-telemetry` is found through
+`ServiceLoader` only when an exporter is named.
+
+| Artifact (Phase 6, TL) | Version | Licence (SPDX) | Evidence | Size, classes |
+|---|---|---|---|---|
+| `io.opentelemetry:opentelemetry-api` | 1.66.0 | Apache-2.0 | POM; no licence file, no `pom.properties` | 176,425 bytes, 171 classes |
+| `io.opentelemetry:opentelemetry-common` | 1.66.0 | Apache-2.0 | POM; as above | 4,496 bytes, 3 classes |
+| `io.opentelemetry:opentelemetry-context` | 1.66.0 | Apache-2.0 | POM; as above | 50,773 bytes, 42 classes |
+| `io.opentelemetry:opentelemetry-exporter-common` | 1.66.0 | Apache-2.0 | POM; as above (Multi-Release, one project class for Java 9) | 113,308 bytes, 71 classes |
+| `io.opentelemetry:opentelemetry-exporter-otlp` | 1.66.0 | Apache-2.0 | POM; as above | 110,174 bytes, 48 classes |
+| `io.opentelemetry:opentelemetry-exporter-otlp-common` | 1.66.0 | Apache-2.0 | POM; as above | 216,438 bytes, 167 classes |
+| `io.opentelemetry:opentelemetry-exporter-sender-jdk` | 1.66.0 | Apache-2.0 | POM; as above | 21,170 bytes, 10 classes |
+| `io.opentelemetry:opentelemetry-sdk-common` | 1.66.0 | Apache-2.0 | POM; as above | 84,670 bytes, 73 classes |
+| `io.opentelemetry:opentelemetry-sdk-logs` | 1.66.0 | Apache-2.0 | POM; as above | 69,487 bytes, 47 classes |
+| `io.opentelemetry:opentelemetry-sdk-metrics` | 1.66.0 | Apache-2.0 | POM; as above | 381,408 bytes, 290 classes |
+| `io.opentelemetry:opentelemetry-sdk-trace` | 1.66.0 | Apache-2.0 | POM; as above | 146,299 bytes, 107 classes |
+
+Obligations when redistributed: the Apache-2.0 text at the top level (`LICENSE`) and the attribution in
+`THIRD-PARTY.txt` (the OpenTelemetry Authors); no NOTICE file is published with the jars. Test scope only, in no
+distribution: `opentelemetry-sdk-testing` 1.66.0 (126,849 bytes) and `opentelemetry-sdk` 1.66.0 (13,008 bytes),
+Apache-2.0, in `skillroy-telemetry`'s tests.
+
+The 36 jars of Phase 5, their licences and what the evidence is (the sizes are those of the jars in the local Maven
+cache on 2026-10-08):
 
 | Artifact | Version | Licence (SPDX) | Evidence | Obligations when redistributed |
 |---|---|---|---|---|
@@ -271,6 +313,7 @@ Other places third-party code could be redistributed, and the result:
 | Project jars published to a Maven repository (the 15 reactor jars audited before Phase 4, `skillroy-data` included) | none: no jar contains an entry outside `ai/skillroy/`, `META-INF/maven`, the manifest, `META-INF/services` and, since 2026-10-02, the project's own `META-INF/LICENSE` and `META-INF/NOTICE`; nothing is shaded |
 | The Phase 4 jars (2026-10-07: `skillroy-agent-web` and its `test-jar`, `skillroy-cdp`, `skillroy-sample-web-host`, `skillroy-sample-web-host-agent`, `skillroy-sample-web-host-scenarios`) | none: 155 and 213, 37, 21, 5 and 5 classes, nothing shaded. Besides `ai/skillroy/` they hold only the manifest, `META-INF/maven`, `META-INF/services` files, the project's own `META-INF/LICENSE` and `META-INF/NOTICE` and, in the host jar, its three own pages `webhost/*.html`; the agent module's descriptors and properties file (section 3) and the `test-jar`'s fake descriptors and kit pages are under `ai/skillroy/`. The `test-jar` (the adapter contract kit) holds no vendor class either: its fakes live under the project's own package. `skillroy-cdp` refers to Playwright types and one gson type but does not contain them |
 | The Phase 5 jars (2026-10-08: `skillroy-inference`, `skillroy-mcp`) | none: 142 and 22 classes, nothing shaded; besides `ai/skillroy/` they hold only the manifest, `META-INF/maven`, `META-INF/services` (the `ResolverContributor` registration of the inference module) and the project's own `META-INF/LICENSE` and `META-INF/NOTICE`. They refer to the Anthropic SDK, JSqlParser and the MCP SDK types but do not contain them |
+| The Phase 6 telemetry jars (2026-10-09, TL: `skillroy-telemetry`, `skillroy-scenario`'s `test-jar`) | none: 14 and 167 classes, nothing shaded; besides `ai/skillroy/` the telemetry jar holds only the manifest, `META-INF/maven`, its `META-INF/services` registration of the two `RunObserverProvider`s and the project's own `META-INF/LICENSE` and `META-INF/NOTICE`; the `test-jar` (not distributed) holds the scenario tests' fixtures, their `META-INF/services` files and two toy scenario files. The telemetry jar refers to the OpenTelemetry types but does not contain them |
 | Published POMs | They name third-party dependencies but do not contain them |
 | Sample application, sample agent module | HSQLDB is not bundled; it is a separate dependency |
 | Test fixtures and resources in the source tree | No vendored third-party files, fonts, images, native libraries or jars were found in the tree (the seven stand-in model recordings and the spike corpora under `spikes/BS6` are the project's own text) |
@@ -486,7 +529,7 @@ licence is claimed here beyond what `docs/DECISIONS.md` already records (cited i
 | JxBrowser | Reflective adapter inside `skillroy-agent-web` (B9; Phase 4) | Commercial licence needed at run time (B9); the base ships no vendor code | the adapter ships without vendor code; JxBrowser itself is in no build and not audited; never bundled |
 | snakeyaml-engine, victools jsonschema-generator | Controller schema and YAML (design table) | not audited | not audited |
 | Jetty 12 | Servlet transport for a remote MCP controller | not audited | not audited |
-| OpenTelemetry Java | Export in Phase 6 (B11) | not audited | not audited |
+| OpenTelemetry Java | Export in Phase 6 (B11) | built 2026-10-09 (Phase 6, TL) at 1.66.0, Apache-2.0, controller only: moved to §4 with its tree (the exact set, the OkHttp sender excluded, no autoconfiguration) | done |
 
 Moved to section 5 on 2026-10-07 (both are built in Phase 4): Playwright Java and JCEF (jcefmaven 152.0.6 and its
 transitive artifacts).

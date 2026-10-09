@@ -40,6 +40,9 @@ import ai.skillroy.testjava.scenario.ScenarioSchema;
 import ai.skillroy.testjava.scenario.SessionOpenException;
 import ai.skillroy.testjava.scenario.SessionOptions;
 import ai.skillroy.testjava.scenario.StepJournal;
+import ai.skillroy.testjava.scenario.observe.RunObserver;
+import ai.skillroy.testjava.scenario.observe.RunObservers;
+import ai.skillroy.testjava.scenario.observe.ToolCallRecord;
 import ai.skillroy.testjava.scenario.pack.DomainPack;
 import ai.skillroy.testjava.scenario.resolve.ContributionException;
 import ai.skillroy.testjava.scenario.resolve.SqlAllowList;
@@ -111,6 +114,11 @@ import java.util.stream.Stream;
  * {@code schema/primitives}, {@code schema/scenario}, and {@code run/<id>/journal.jsonl}, {@code run/<id>/run.jsonl},
  * {@code run/<id>/failure/<file>} for the session and the scenario runs the server started, and the captures
  * {@code mcp/<n>.png}. The server's own log goes to stderr (or the stream given), masked.
+ *
+ * <p>Telemetry (phase6-contracts.md 10.2, 10.4): the session's observer ({@code SessionOptions.observer}, through
+ * {@link ExecutorSession#observer()}) is told each {@code tools/call} under the session lock, opened with the client's
+ * {@code _meta.traceparent} when it sent a valid one (a malformed one is dropped), so that the call's steps and
+ * scenario runs continue the client's trace; {@code skillroy_scenario_run}'s runs carry the same observer.
  *
  * <p>Threads: the SDK's stdio transport (two single-thread executors, ended with its input), its tool calls on Reactor's
  * bounded elastic scheduler, and the daemon {@code skillroy-mcp-stdin} that reads the client's stream (see
@@ -506,7 +514,8 @@ public final class SkillroyMcpServer implements AutoCloseable {
         s = s.withId(id);
         if (s.outputDir() == null) {
             s = new SessionOptions(outDir.resolve("runs").resolve(id), s.stepTimeout(), s.clock(), s.bind(),
-                    s.readOnly(), s.recoverOnClose(), s.web(), s.ui(), s.webPathLoader(), s.id(), s.hooks());
+                    s.readOnly(), s.recoverOnClose(), s.web(), s.ui(), s.webPathLoader(), s.id(), s.hooks(),
+                    s.observer());
         }
         return s;
     }
@@ -655,18 +664,34 @@ public final class SkillroyMcpServer implements AutoCloseable {
         String name = spec.name();
         return McpServerFeatures.SyncToolSpecification.builder()
                 .tool(tool)
-                .callHandler((exchange, request) -> call(name, request.arguments()))
+                .callHandler((exchange, request) -> call(name, request.arguments(), inboundTraceparent(request.meta())))
                 .build();
+    }
+
+    /**
+     * The client's W3C {@code traceparent} from the request's {@code _meta} (phase6-contracts.md 10.2, control-channel
+     * F16), so that a client's trace continues into the work the call does; dropped when absent or malformed.
+     */
+    static String inboundTraceparent(Map<String, Object> meta) {
+        return meta == null ? null : RunObservers.traceparent(meta.get("traceparent"));
     }
 
     // ------------------------------------------------------------------------------------------------ calls
 
     /** One tool call: never throws; every failure is a tool error. */
     McpSchema.CallToolResult call(String tool, Map<String, Object> arguments) {
+        return call(tool, arguments, null);
+    }
+
+    /**
+     * One tool call with the client's trace parent ({@link #inboundTraceparent}; null for none): never throws; every
+     * failure is a tool error.
+     */
+    McpSchema.CallToolResult call(String tool, Map<String, Object> arguments, String traceparent) {
         long t0 = System.nanoTime();
         ToolCalls.Reply reply;
         try {
-            reply = closing || lost.get() ? error(endMessage()) : locked(tool, arguments);
+            reply = closing || lost.get() ? error(endMessage()) : locked(tool, arguments, traceparent);
         } catch (RuntimeException | LinkageError | StackOverflowError e) {
             reply = error("internal error in " + tool + ": " + e);
         }
@@ -675,7 +700,7 @@ public final class SkillroyMcpServer implements AutoCloseable {
         return reply.toResult();
     }
 
-    private ToolCalls.Reply locked(String tool, Map<String, Object> arguments) {
+    private ToolCalls.Reply locked(String tool, Map<String, Object> arguments, String traceparent) {
         Thread self = Thread.currentThread();
         boolean locked = false;
         try {
@@ -688,7 +713,7 @@ public final class SkillroyMcpServer implements AutoCloseable {
                 return error(endMessage());
             }
             busy.add(self);
-            ToolCalls.Reply reply = dispatch(tool, JsonForm.arguments(arguments));
+            ToolCalls.Reply reply = observed(tool, traceparent, () -> dispatch(tool, JsonForm.arguments(arguments)));
             if (agent.isLost()) {
                 agentLost("the connection to the agent is lost");
                 return error(tool + ": the agent was lost; the server ends");
@@ -710,6 +735,36 @@ public final class SkillroyMcpServer implements AutoCloseable {
             if (locked) {
                 sessionLock.unlock();
             }
+        }
+    }
+
+    /** A tool call's body, as {@link #observed} runs it. */
+    @FunctionalInterface
+    private interface ToolBody {
+        ToolCalls.Reply run() throws AgentLostException, InterruptedException, ToolError;
+    }
+
+    /**
+     * Runs a tool call's body inside its {@code tools/call} span (phase6-contracts.md 10.4; the session's observer,
+     * wrapped, so that it never throws): opened under the session lock with the client's trace parent, so that the
+     * call's steps and runs are its children, and ended with the call's outcome.
+     */
+    private ToolCalls.Reply observed(String tool, String traceparent, ToolBody body) throws AgentLostException,
+            InterruptedException, ToolError {
+        RunObserver observer = session == null ? RunObserver.NONE : session.observer();
+        if (RunObservers.isNone(observer)) {
+            return body.run();
+        }
+        long t0 = System.nanoTime();
+        observer.toolCallStarted(tool, traceparent);
+        boolean error = true;
+        try {
+            ToolCalls.Reply reply = body.run();
+            error = reply.error();
+            return reply;
+        } finally {
+            observer.toolCall(new ToolCallRecord(tool, session.id(), error,
+                    TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - t0)));
         }
     }
 

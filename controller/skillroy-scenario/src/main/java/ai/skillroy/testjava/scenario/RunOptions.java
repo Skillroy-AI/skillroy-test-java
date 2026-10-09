@@ -17,6 +17,7 @@
 package ai.skillroy.testjava.scenario;
 
 import ai.skillroy.testjava.scenario.hooks.HooksMode;
+import ai.skillroy.testjava.scenario.observe.RunObserver;
 
 import java.nio.file.Path;
 import java.util.Objects;
@@ -52,11 +53,16 @@ import java.util.function.Supplier;
  *     secret; false (the default) evaluates on the values as read, as for a scenario a person committed
  * @param hooks the run-level hooks switch (phase6-contracts.md 6.1, decision D127): whether step 0b installs the pack's
  *     hook catalogue on the target ({@code HookInstaller}); null means {@link HooksMode#AUTO}. Never a scenario key
+ * @param observer what the run tells an exporter (phase6-contracts.md 10.2, decision D140); null means
+ *     {@link RunObserver#NONE}. The executor wraps it so that one that throws is logged once and ignored for the rest
+ *     of the run, and never closes it: its owner (the CLI, the JUnit glue) does. The twelfth component, after
+ *     {@code hooks} (6.1). Callers use {@link #withHooks}, {@link #withObserver} and the older constructors, never the
+ *     canonical one
  */
 public record RunOptions(Path outputDir, Duration stepTimeout, DegradedAs degradedAs, Clock clock,
                          Duration pollInterval, Sleeper sleeper, Supplier<Boolean> targetRestarted,
                          boolean captureOnFailure, BindOptions bind, boolean expectationsOnMaskedValues,
-                         HooksMode hooks) {
+                         HooksMode hooks, RunObserver observer) {
 
     /** How a DEGRADED run is reported (decision B14). */
     public enum DegradedAs {
@@ -96,14 +102,15 @@ public record RunOptions(Path outputDir, Duration stepTimeout, DegradedAs degrad
         pollInterval = pollInterval == null ? DEFAULT_POLL : pollInterval;
         sleeper = sleeper == null ? duration -> Thread.sleep(Math.max(1L, duration.toMillis())) : sleeper;
         hooks = hooks == null ? HooksMode.AUTO : hooks;
+        observer = observer == null ? RunObserver.NONE : observer;
     }
 
-    /** Options with the hooks switch {@link HooksMode#AUTO} (the Phase 5 shape). */
+    /** Options with the hooks switch {@link HooksMode#AUTO} and no observer (the Phase 5 shape). */
     public RunOptions(Path outputDir, Duration stepTimeout, DegradedAs degradedAs, Clock clock, Duration pollInterval,
                       Sleeper sleeper, Supplier<Boolean> targetRestarted, boolean captureOnFailure, BindOptions bind,
                       boolean expectationsOnMaskedValues) {
         this(outputDir, stepTimeout, degradedAs, clock, pollInterval, sleeper, targetRestarted, captureOnFailure, bind,
-                expectationsOnMaskedValues, HooksMode.AUTO);
+                expectationsOnMaskedValues, HooksMode.AUTO, RunObserver.NONE);
     }
 
     /** Options that evaluate expectations on the values as read (the Phase 2 shape). */
@@ -122,65 +129,65 @@ public record RunOptions(Path outputDir, Duration stepTimeout, DegradedAs degrad
 
     /**
      * No output directory, the plan's step timeout, DEGRADED as skipped, system clock, 100 ms polls, evidence on,
-     * {@link BindOptions#defaults()}, expectations on the values as read.
+     * {@link BindOptions#defaults()}, expectations on the values as read, no observer.
      */
     public static RunOptions defaults() {
         return new RunOptions(null, null, null, null, null, null, null, true, BindOptions.defaults(), false,
-                HooksMode.AUTO);
+                HooksMode.AUTO, RunObserver.NONE);
     }
 
     /** A copy with the given bind options (never null). */
     public RunOptions withBind(BindOptions newBind) {
         return new RunOptions(outputDir, stepTimeout, degradedAs, clock, pollInterval, sleeper, targetRestarted,
-                captureOnFailure, newBind, expectationsOnMaskedValues, hooks);
+                captureOnFailure, newBind, expectationsOnMaskedValues, hooks, observer);
     }
 
     /** A copy with the given output directory (null writes nothing). */
     public RunOptions withOutputDir(Path dir) {
         return new RunOptions(dir, stepTimeout, degradedAs, clock, pollInterval, sleeper, targetRestarted,
-                captureOnFailure, bind, expectationsOnMaskedValues, hooks);
+                captureOnFailure, bind, expectationsOnMaskedValues, hooks, observer);
     }
 
     /** A copy with the given step timeout override (null keeps the plan's). */
     public RunOptions withStepTimeout(Duration timeout) {
         return new RunOptions(outputDir, timeout, degradedAs, clock, pollInterval, sleeper, targetRestarted,
-                captureOnFailure, bind, expectationsOnMaskedValues, hooks);
+                captureOnFailure, bind, expectationsOnMaskedValues, hooks, observer);
     }
 
     /** A copy with the given DEGRADED mapping. */
     public RunOptions withDegradedAs(DegradedAs mapping) {
         return new RunOptions(outputDir, stepTimeout, mapping, clock, pollInterval, sleeper, targetRestarted,
-                captureOnFailure, bind, expectationsOnMaskedValues, hooks);
+                captureOnFailure, bind, expectationsOnMaskedValues, hooks, observer);
     }
 
     /** A copy with the given clock. */
     public RunOptions withClock(Clock newClock) {
         return new RunOptions(outputDir, stepTimeout, degradedAs, newClock, pollInterval, sleeper, targetRestarted,
-                captureOnFailure, bind, expectationsOnMaskedValues, hooks);
+                captureOnFailure, bind, expectationsOnMaskedValues, hooks, observer);
     }
 
     /** A copy with the given poll interval. */
     public RunOptions withPollInterval(Duration interval) {
         return new RunOptions(outputDir, stepTimeout, degradedAs, clock, interval, sleeper, targetRestarted,
-                captureOnFailure, bind, expectationsOnMaskedValues, hooks);
+                captureOnFailure, bind, expectationsOnMaskedValues, hooks, observer);
     }
 
     /** A copy with the given sleeper. */
     public RunOptions withSleeper(Sleeper newSleeper) {
         return new RunOptions(outputDir, stepTimeout, degradedAs, clock, pollInterval, newSleeper, targetRestarted,
-                captureOnFailure, bind, expectationsOnMaskedValues, hooks);
+                captureOnFailure, bind, expectationsOnMaskedValues, hooks, observer);
     }
 
     /** A copy with the given restart probe. */
     public RunOptions withTargetRestarted(Supplier<Boolean> probe) {
         return new RunOptions(outputDir, stepTimeout, degradedAs, clock, pollInterval, sleeper, probe,
-                captureOnFailure, bind, expectationsOnMaskedValues, hooks);
+                captureOnFailure, bind, expectationsOnMaskedValues, hooks, observer);
     }
 
     /** A copy with evidence collection switched on or off. */
     public RunOptions withCaptureOnFailure(boolean on) {
         return new RunOptions(outputDir, stepTimeout, degradedAs, clock, pollInterval, sleeper, targetRestarted, on,
-                bind, expectationsOnMaskedValues, hooks);
+                bind, expectationsOnMaskedValues, hooks, observer);
     }
 
     /**
@@ -189,12 +196,21 @@ public record RunOptions(Path outputDir, Duration stepTimeout, DegradedAs degrad
      */
     public RunOptions withExpectationsOnMaskedValues(boolean on) {
         return new RunOptions(outputDir, stepTimeout, degradedAs, clock, pollInterval, sleeper, targetRestarted,
-                captureOnFailure, bind, on, hooks);
+                captureOnFailure, bind, on, hooks, observer);
     }
 
     /** A copy with the given hooks switch (null: {@link HooksMode#AUTO}); phase6-contracts.md 6.1. */
     public RunOptions withHooks(HooksMode mode) {
         return new RunOptions(outputDir, stepTimeout, degradedAs, clock, pollInterval, sleeper, targetRestarted,
-                captureOnFailure, bind, expectationsOnMaskedValues, mode);
+                captureOnFailure, bind, expectationsOnMaskedValues, mode, observer);
+    }
+
+    /**
+     * A copy with the given observer (phase6-contracts.md 10.2); null means {@link RunObserver#NONE}. The observer is
+     * the caller's: the executor never closes it.
+     */
+    public RunOptions withObserver(RunObserver newObserver) {
+        return new RunOptions(outputDir, stepTimeout, degradedAs, clock, pollInterval, sleeper, targetRestarted,
+                captureOnFailure, bind, expectationsOnMaskedValues, hooks, newObserver);
     }
 }

@@ -19,8 +19,9 @@ package ai.skillroy.testjava.controller;
 import java.util.List;
 
 /**
- * Per-call metadata sent as {@code params._meta}: correlation id, timeout override, destructive-call confirmation and
- * the names of params whose values are secrets. Separate from the params so primitives never see it.
+ * Per-call metadata sent as {@code params._meta}: correlation id, timeout override, destructive-call confirmation, the
+ * names of params whose values are secrets and, from Phase 6, the W3C trace parent of the controller's open call span.
+ * Separate from the params so primitives never see it.
  *
  * <p>Immutable; safe to share between threads.
  *
@@ -30,8 +31,12 @@ import java.util.List;
  * @param secretParams top-level param names whose values the agent must redact wherever it logs, traces or reports
  *     the call (amendment A34, {@code _meta.secretParams}); empty for none. Why on the options: the primitive still
  *     receives the values; only the agent's own records are told what they are
+ * @param traceparent the W3C {@code traceparent} of the controller's open call span (phase6-contracts.md 10.2, decision
+ *     D142: {@code RunObserver.currentTraceparent()}), sent as {@code _meta.traceparent} so that the agent stamps it on
+ *     every event of the call; null when no telemetry runs (nothing is sent). Not a secret: a trace and a span id
  */
-public record CallOptions(String correlationId, Long timeoutMs, boolean confirm, List<String> secretParams) {
+public record CallOptions(String correlationId, Long timeoutMs, boolean confirm, List<String> secretParams,
+                          String traceparent) {
 
     /** The most secret param names one call may announce (the agent refuses more). */
     public static final int MAX_SECRET_PARAMS = 100;
@@ -54,6 +59,16 @@ public record CallOptions(String correlationId, Long timeoutMs, boolean confirm,
                 throw new IllegalArgumentException("a secret param name must not be blank");
             }
         }
+        traceparent = traceparent == null || traceparent.isBlank() ? null : traceparent;
+    }
+
+    /**
+     * Options without a trace parent (the shape of amendment A34).
+     *
+     * @throws IllegalArgumentException as the canonical constructor
+     */
+    public CallOptions(String correlationId, Long timeoutMs, boolean confirm, List<String> secretParams) {
+        this(correlationId, timeoutMs, confirm, secretParams, null);
     }
 
     /**
@@ -62,7 +77,7 @@ public record CallOptions(String correlationId, Long timeoutMs, boolean confirm,
      * @throws IllegalArgumentException if {@code timeoutMs} is not positive
      */
     public CallOptions(String correlationId, Long timeoutMs, boolean confirm) {
-        this(correlationId, timeoutMs, confirm, List.of());
+        this(correlationId, timeoutMs, confirm, List.of(), null);
     }
 
     private static final CallOptions DEFAULTS = new CallOptions(null, null, false);
@@ -74,17 +89,17 @@ public record CallOptions(String correlationId, Long timeoutMs, boolean confirm,
 
     /** A copy with the given correlation id. */
     public CallOptions withCorrelationId(String id) {
-        return new CallOptions(id, timeoutMs, confirm, secretParams);
+        return new CallOptions(id, timeoutMs, confirm, secretParams, traceparent);
     }
 
     /** A copy with the given timeout override (null for the primitive's default). */
     public CallOptions withTimeoutMs(Long ms) {
-        return new CallOptions(correlationId, ms, confirm, secretParams);
+        return new CallOptions(correlationId, ms, confirm, secretParams, traceparent);
     }
 
     /** A copy with the given confirmation flag. */
     public CallOptions withConfirm(boolean on) {
-        return new CallOptions(correlationId, timeoutMs, on, secretParams);
+        return new CallOptions(correlationId, timeoutMs, on, secretParams, traceparent);
     }
 
     /**
@@ -94,6 +109,14 @@ public record CallOptions(String correlationId, Long timeoutMs, boolean confirm,
      * @throws IllegalArgumentException as the canonical constructor
      */
     public CallOptions withSecretParams(List<String> names) {
-        return new CallOptions(correlationId, timeoutMs, confirm, names);
+        return new CallOptions(correlationId, timeoutMs, confirm, names, traceparent);
+    }
+
+    /**
+     * A copy that sends this W3C trace parent as {@code _meta.traceparent} (phase6-contracts.md 10.2); null or blank
+     * sends none.
+     */
+    public CallOptions withTraceparent(String parent) {
+        return new CallOptions(correlationId, timeoutMs, confirm, secretParams, parent);
     }
 }

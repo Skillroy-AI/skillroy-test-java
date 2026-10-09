@@ -1457,6 +1457,10 @@ served by the agent, never by the CDP path (§5.2); the agent masks the console 
 echoes a filled text into error data, `web.dom.fill` answers only the count it typed, and neither path logs a call's
 arguments.)
 
+(Phase 6, built 2026-10-09, TL; P6 §10.4.) The rows of P2 §11.4 that Phase 6 adds hold here too: a web call's span
+names its primitive, path and correlation id, never its expression, selector, filled text or console text, and the
+`web.*` records are not among those the observer receives.
+
 ---
 
 ## 9. The samples: the web host, its agent module, pack and scenarios (profile `jcef`)

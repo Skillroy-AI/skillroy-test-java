@@ -43,6 +43,10 @@ import java.util.function.UnaryOperator;
  * escaped (security finding S27), so that a replacement such as {@code <redacted>} is escaped like any other text and
  * the markup itself is never touched.
  *
+ * <p>Telemetry (phase6-contracts.md 10.3): a reporter made {@link #withTraceId with a trace id} ends the suite with
+ * one {@code <system-out>traceId=<hex></system-out>} (a trace id is not a secret), so that a CI page leads to the
+ * run's spans.
+ *
  * <p>Immutable; safe to share between threads.
  */
 public final class JunitXmlReporter {
@@ -51,6 +55,8 @@ public final class JunitXmlReporter {
     public static final String ENVIRONMENT_TESTCASE = "environment";
 
     private final RunOptions.DegradedAs degradedAs;
+    /** The run's trace id (32 lower-case hex), or null. */
+    private final String traceId;
 
     /** A reporter that shows DEGRADED as skipped. */
     public JunitXmlReporter() {
@@ -61,7 +67,20 @@ public final class JunitXmlReporter {
      * @param degradedAs how to show DEGRADED runs; null means SKIPPED
      */
     public JunitXmlReporter(RunOptions.DegradedAs degradedAs) {
+        this(degradedAs, null);
+    }
+
+    private JunitXmlReporter(RunOptions.DegradedAs degradedAs, String traceId) {
         this.degradedAs = degradedAs == null ? RunOptions.DegradedAs.SKIPPED : degradedAs;
+        this.traceId = traceId != null && traceId.matches("[0-9a-f]{32}") ? traceId : null;
+    }
+
+    /**
+     * A copy whose report ends with the suite's {@code <system-out>traceId=<hex></system-out>} (phase6-contracts.md
+     * 10.3); null, or a text that is not 32 lower-case hex digits, writes none.
+     */
+    public JunitXmlReporter withTraceId(String id) {
+        return new JunitXmlReporter(degradedAs, id);
     }
 
     /**
@@ -147,6 +166,9 @@ public final class JunitXmlReporter {
             }
             for (RunResult result : results) {
                 testcase(xml, suiteName, result);
+            }
+            if (traceId != null) {
+                xml.append("  <system-out>traceId=").append(traceId).append("</system-out>\n");
             }
             xml.append("</testsuite>\n");
             return xml.toString();

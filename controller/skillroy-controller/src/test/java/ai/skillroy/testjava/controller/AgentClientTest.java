@@ -485,6 +485,29 @@ class AgentClientTest {
         }
     }
 
+    /**
+     * Phase 6 (phase6-contracts.md 10.2): the trace parent of the options travels as {@code _meta.traceparent}, only
+     * when there is one; a {@code traceparent} the params carried in a {@code _meta} of their own is dropped with it.
+     */
+    @Test
+    void theTraceParentGoesIntoMetaOnlyWhenGiven() throws Exception {
+        agent.handlers.put("lending.reset", params -> Map.of("reset", true));
+        String parent = "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01";
+        try (AgentClient client = AgentClient.connect(agent.endpoint())) {
+            Map<String, Object> params = new LinkedHashMap<>();
+            params.put("scope", "all");
+            params.put("_meta", Map.of("traceparent", "00-abc-def-01"));
+            client.call("lending.reset", params, CallOptions.defaults().withCorrelationId("s-1")
+                    .withTraceparent(parent));
+            assertEquals(Map.of("correlationId", "s-1", "traceparent", parent),
+                    meta(Json.parseObject(agent.requests("/rpc").get(0).body())));
+
+            client.call("lending.reset", params, CallOptions.defaults().withCorrelationId("s-2"));
+            assertEquals(Map.of("correlationId", "s-2"), meta(Json.parseObject(agent.requests("/rpc").get(1).body())),
+                    "no trace parent, no key; the params' own is dropped");
+        }
+    }
+
     @Test
     void jsonRpcErrorsBecomeAgentRpcException() throws Exception {
         agent.handlers.put("lending.input", params -> {

@@ -1783,6 +1783,12 @@ otherAgents}`, and `ok: false` with the error when refused) and `capabilities` (
 matrix's hash, its id count and `capabilities.json`, the file the run writes beside `run.jsonl` in the wire shape of
 `GET /capabilities`).
 
+(Phase 6, built 2026-10-09, TL; P6 §10.2, §10.3.) The `resolve`, `oracle` and `fingerprint` records end with
+`durationMs` (the slot's time since it started, the oracle's evaluation, the fingerprint's computation), an additive
+change, so that a bind span's events show where model latency and SQL time went; with telemetry on, `run-start` gains
+`traceId`, and `--telemetry file` writes `<out>/telemetry/spans.jsonl` (`skillroy-spans/1`) beside the scenario
+directories.
+
 ### 11.4 What is never written
 
 A value from `credentials.yaml` (a credential field, a JDBC password, a driver property, URL user-info) is never
@@ -1889,6 +1895,13 @@ integration).**
   no line of `agent.log` holds a password as a value. Without A34 that check could only be made by never making
   the core log a param, which no contract line guaranteed. (As built, that end-to-end proof is made by the Phase 1
   secret check of every load mode, P1 §10 check 18, see §14.2 item 10.)
+
+(Phase 6, built 2026-10-09, TL; P6 §10.1, §10.4.) The never-written list gains **a span attribute, a span event's
+attribute and a span name**: spans carry the allow-list of `TelemetryAttributes` only (identifiers, enumerations,
+counts, durations, hashes, masked one-line messages), never a call's parameters or values, an event's payload, a
+resolved value, SQL, rows, a prompt, a credential, the workspace id or a path under a user's home; and **the values of
+the environment variables a telemetry header names**, which the exporter reads at its start and nothing writes,
+logs or prints (a header naming an `ANTHROPIC_*` variable is refused).
 
 ### 11.5 Reserved for interactive use (not built)
 
