@@ -417,6 +417,19 @@ restored to the values they had before the agent first published (cleared if the
 earlier). A second start in the same JVM therefore keeps a fixed port and token file (proven through the real
 bootstrap: same port again, no copy of the operator's token, token file untouched).
 
+**Windows (Phase 6, built 2026-10-09, BW; P6 §9.4, D139; documentation, not verified on a Windows host).** On
+Windows the controller must run as the same user, in the same logon session and at the same integrity level as the
+target, with matching bitness; attaching across logon sessions is not supported, and `JAVAAGENT` is the path for
+services and for CI (control-channel §F28, attach §F11). Detecting the session and refusing with a tailored message is
+not built (it needs Win32 calls the controller does not make); the failure text is recorded when the host exists.
+`ATTACH` on Windows is best effort: `VirtualMachine.list()` (same user), the discovery files, the 5 s start-up margin
+kept (a safety net for a signal Windows does not send, and the JDK's Windows client injects a thread into a JVM that
+may still be starting; measured on the host, then decided), the S18 rule for `java.exe` and `javaw.exe`. The
+`tasklist` / `/proc/<pid>/cmdline` pid fallback of design §2.2 is dropped. `LaunchedTarget.close()` asks for a normal
+termination first, but `Process.destroy()` is forcible on Windows, so a test launch there leaves a discovery and a
+token file behind for A23's clean-up (`Discovery.removeStale`, run by `Discovery.list(dir, true)`). The ACL branch of
+S7/S15 above is now taken by every owner-only file and directory the controller writes (§7, `SecureFiles`).
+
 ---
 
 ## 3. `skillroy-protocol` (package `ai.skillroy.testjava.protocol`)
@@ -1754,6 +1767,17 @@ reached with `--port` and `--token-file`. A discovery file whose name carries a 
 `AttachSession` applies the same rule to the token file a re-attach reads back, with the name pattern
 `skillroy-<attached pid>-<digits>.token` inside the session's directory.
 
+**`SecureFiles` public (Phase 6, built 2026-10-09, BW; P6 §9.3, D138).** The controller's `SecureFiles` is a
+`public final class` with exactly five public static members: `ensureOwnerOnlyDirectory(Path)` (the discovery
+wording), `ensureOwnerOnlyDirectory(Path, String what)` (the refusal names `what`), `createOwnerOnlyTempDirectory(Path
+parent, String prefix)` (new: a random name under `parent`, created exclusively through the POSIX or ACL branch and
+read back; the replacement for every `Files.createTempDirectory`), `writeOwnerOnly(Path, byte[])` (the file must not
+exist) and `untrustedDirectoryReason(Path)`; the token readers and `writeOptionsFile` stay package-private (S6/S28).
+Each refuses a file system with neither view in the agent's wording, naming the role and the remedy ("use a directory
+on a file system that has one of them"), and creates nothing. Its callers outside this module: the planner's work
+directory and MCP configuration file (P5 §10.2), the CDP trace directory (P4 D59), the MCP server's temporary
+`--out`, the end-to-end tests' discovery directories. `CredentialFiles` (P2 §4) is unchanged.
+
 **Attach.** The measurements in this list were taken with a JDK 21 attach client, on Java 8 and Java 21 targets,
 before the controller baseline moved to Java 25 (decision B3). They are kept as measured; what the Java 25 runs
 show is recorded in `../TODO.md`.
@@ -2352,7 +2376,12 @@ the components embedded in `jackson-core`; an integration test keeps it in step 
 each jar's own `pom.properties`, only Apache-2.0 allowed and evidenced inside each jar, every licence or notice file
 inside a third-party jar named in the list). The launcher finds Java through `JAVA_HOME` or `PATH`, refuses a Java
 older than 25 ("the CLI needs Java 25 or newer"), and adds the `jdk.attach` module only for `jvms` and `attach`. The
-agent home is not bundled.
+agent home is not bundled. **`bin/skillroy.bat` (Phase 6, built 2026-10-09, BW; P6 §9.1, D137; not verified on a
+Windows host):** the Windows twin of `bin/skillroy`, line for line (the same three exit-69 messages, the Java 25 check
+from the runtime's `release` file, `--add-modules jdk.attach` for `jvms` and `attach` only, `-Dskillroy.launcher`
+naming itself, the exit code relayed), CRLF in the source (`.gitattributes`, below the LF rule) and in the
+distribution (`cli-layout.xml`'s per-file `lineEnding`), mode 0644; `BatLauncherTest` checks its text,
+`LauncherIT` its bytes in the directory and the zip, `DistributionNoticesIT` its place outside `lib/`.
 
 | Command | Does |
 |---|---|

@@ -20,6 +20,7 @@ import ai.skillroy.testjava.controller.AgentConnection;
 import ai.skillroy.testjava.controller.AgentLostException;
 import ai.skillroy.testjava.controller.AgentRpcException;
 import ai.skillroy.testjava.controller.CallOptions;
+import ai.skillroy.testjava.controller.SecureFiles;
 import ai.skillroy.testjava.protocol.ErrorCodes;
 import ai.skillroy.testjava.protocol.Event;
 import ai.skillroy.testjava.protocol.RpcResult;
@@ -43,11 +44,9 @@ import com.microsoft.playwright.options.WaitForSelectorState;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
-import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
-import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -565,21 +564,24 @@ public final class CdpWebPath implements WebPath {
     }
 
     /**
-     * A new private temporary directory for Playwright's trace ({@value #TRACE_DIR_PREFIX}..., {@code rwx------}
-     * where the file system has POSIX permissions); null, with a warning, when none can be made: the run is then not
-     * traced.
+     * A new private temporary directory for Playwright's trace ({@value #TRACE_DIR_PREFIX}...) under the system's
+     * temporary directory, owner-only through {@link SecureFiles} (POSIX permissions or an owner-only ACL; P4 D59 as
+     * amended by phase6-contracts.md 9.3, D138; Phase 6, built 2026-10-09, BW).
+     *
+     * @throws IOException when none can be made, a file system with neither view included: {@link #open} then fails,
+     *     which the executor reports as {@code ENVIRONMENT} (the agent path under {@code auto}); a trace with a filled
+     *     value in a page snapshot is never written where another user could read it
      */
-    static Path createTraceDir() {
+    static Path createTraceDir() throws IOException {
+        return createTraceDir(Path.of(System.getProperty("java.io.tmpdir")));
+    }
+
+    /** {@link #createTraceDir()} under {@code parent} (the tests' seam). */
+    static Path createTraceDir(Path parent) throws IOException {
         try {
-            if (FileSystems.getDefault().supportedFileAttributeViews().contains("posix")) {
-                return Files.createTempDirectory(TRACE_DIR_PREFIX,
-                        PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rwx------")));
-            }
-            return Files.createTempDirectory(TRACE_DIR_PREFIX);
-        } catch (IOException | RuntimeException e) {
-            LOG.log(System.Logger.Level.WARNING, "CDP tracing is off: no private directory could be made for it: "
-                    + e);
-            return null;
+            return SecureFiles.createOwnerOnlyTempDirectory(parent, TRACE_DIR_PREFIX);
+        } catch (IOException e) {
+            throw new IOException("CDP tracing is on, but its private directory cannot be made: " + e.getMessage(), e);
         }
     }
 

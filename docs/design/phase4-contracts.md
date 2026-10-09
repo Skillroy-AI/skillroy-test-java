@@ -1298,7 +1298,11 @@ and none for a target without browsers; earlier `failure/web-*` files are remove
 
 **The trace** (as built 2026-10-07 after the review, D59). A trace is saved only when the scenario failed with
 `web.trace: true`, steps had started, `captureOnFailure` is on, an output directory is set and a path was opened. The
-CDP path records its trace into a private temporary directory of its own (`skillroy-cdp-trace-*`, owner-only), never
+CDP path records its trace into a private temporary directory of its own (`skillroy-cdp-trace-*`, owner-only; **Phase
+6, built 2026-10-09, BW (P6 §9.3, D138):** made through the controller's public `SecureFiles.createOwnerOnlyTempDirectory`,
+POSIX permissions or an owner-only ACL and read back, and where neither can be had `open` fails, which the executor
+reports as `ENVIRONMENT` (the agent path under `auto`), where it used to fall back to an untraced run or to a plain
+temporary directory), never
 into the run's output directory, and deletes it when the path closes, and when `open` fails after creating it;
 `failure/web-trace.zip` is the only trace file a run keeps. When the scenario sets `web.trace`, the executor decides at
 step 1a, before the path opens, from the plan (and the caller's bindings), whether a step or cleanup call may announce

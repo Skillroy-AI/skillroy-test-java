@@ -1601,6 +1601,18 @@ clone while passing in a worktree that never re-checks it out; a comment there n
 - **(waits for the Windows host)**: running it (`skillroy --help`, `jvms`, `run` of scenario A against the desk);
   `LauncherIT`'s twin with fake Java homes as `.bat` files.
 
+As built (Phase 6, BW, 2026-10-09; not run on Windows): `controller/skillroy-cli/src/main/bat/skillroy.bat` follows
+the table with three refinements that keep `cmd.exe`'s parser out of the way: the script is flat (labels and `goto`,
+no parenthesised block, so that `(set JAVA_HOME)` in the third message and a `%version%` set on the way need no
+escaping or delayed expansion); a message goes to stderr as `>&2 echo …` (a trailing `1>&2` would leave a space at
+the end of the text); `JAVA_VERSION=` is found with `findstr /b /c:"JAVA_VERSION="` (quoted, so that `for /f`'s parser
+does not split at `=`), and a non-numeric major is let through by testing it with `findstr /r /x "[0-9][0-9]*"` before
+the `LSS 25` comparison, rather than by `2>nul` on a comparison `cmd.exe` would make as text. `ci/license-headers.sh`'s
+`rem` kind writes its header lines with CRLF, as the files are, and covers `ci/**/*.yml` and `.yaml`.
+`BatLauncherTest` (seven tests) also checks that `.gitattributes` keeps the two CRLF lines below the LF rule;
+`LauncherIT`'s new test reads the `.bat` back from the directory and the zip (CRLF, equal to the source, not
+executable).
+
 ### 9.2 `skillroy author` on Windows (D137) (Linux-testable)
 
 - **`PATHEXT`.** `AuthorCommand.claudeCommand` accepts, besides a file named exactly `claude`, the names `claude` plus
@@ -1620,6 +1632,16 @@ clone while passing in a worktree that never re-checks it out; a comment there n
   configuration is written that `cmd.exe` would split. Unit-tested with a fake launcher path (the plain form, and the
   refusal for a path with a space and one with a `%`).
 - The planner's work directory and the configuration file go through `SecureFiles` (§9.3).
+
+As built (Phase 6, BW, 2026-10-09; not run on Windows): `AuthorCommand.findOnPath(Map<String,String> env, String
+osName)` is the lookup; on Windows it tries the `PATHEXT` names **before** a file named exactly `claude` (npm installs
+an extensionless shell shim beside `claude.cmd` that Windows cannot start; D-BW-5), reads `PATH` and `PATHEXT`
+without regard to the variable names' case (`Path`), compares extensions as given, lower- and upper-case, and on Windows
+asks for a regular file (no executable bit); elsewhere `PATHEXT` is ignored and the file must be executable, as
+before. `AuthorCommand.serverCommand(launcher, args)` writes the plain `cmd.exe /c` form and refuses, with exit code 64
+and the remedy, a launcher path or argument holding `"`, `%`, `^`, `&`, `|`, `<`, `>`, a space, a tab or a control
+character (the contract's list plus the two redirection characters and the other white space; D-BW-6).
+`AuthorCommandWindowsTest` (five tests) proves the lookup, the form and the refusals on Linux.
 
 ### 9.3 Every owner-only file through `SecureFiles` (D138) (Linux-testable for the POSIX branch; the ACL branch
 waits for the host)
@@ -1649,6 +1671,25 @@ with the agent's wording and names the directory's role. The sites:
 | the run's output tree (`--out`) | the process umask | unchanged: pass 1's S37 is dispositioned as documentation (`umask 077` on a shared host; the owner-only directory of its option (i) is one of the five deferred parts, §12.2), so no `SecureFiles` site is added here and BW and FX do not meet on it |
 
 The agent side is unchanged (its branches exist since 1.x).
+
+As built (Phase 6, BW, 2026-10-09; the ACL branch not run on Windows): the five members are public and nothing else
+(`SecureFilesTest` asserts the set by reflection). `createOwnerOnlyTempDirectory(parent, prefix)` names the directory
+`<prefix><16 hex digits>` from the class's `SecureRandom`, creates it exclusively (a name taken is retried, at most
+eight times), reads it back with `untrustedDirectoryReason` and deletes and refuses it when that fails (the ACL branch
+can inherit entries from the parent); a prefix holding a path separator or `..` is an `IllegalArgumentException`. A
+file system with neither view is refused **before anything is created** by every member, in the agent's wording plus
+the remedy: "the <role> <path> cannot be used: its file system has neither POSIX permissions nor ACLs, so nothing
+written there can be restricted to the current user (use a directory on a file system that has one of them)"; the
+discovery wording of `ensureOwnerOnlyDirectory(Path)` is kept for discovery, and the `what` overload drops the
+`discoveryDir` remedy. The sites: the planner's MCP configuration is written by `AuthorCommand.mcpConfig` (P5 §10.2
+step 3 is the CLI's step), as `skillroy-mcp-<16 hex>.json` under the system's temporary directory through
+`writeOwnerOnly` (`AuthorCommand.writeConfig`, the tests' seam); `Planner.privateDirectory(tmp)`,
+`CdpWebPath.createTraceDir(parent)` and `SkillroyMcpServer.temporaryOutputDirectory(tmp)` are the seams of the other
+three, each tested on the POSIX host and on a zip file system (`PlannerWorkDirectoryTest`, `CdpTraceDirectoryTest`,
+`McpOutputDirectoryTest`); the CDP path, which used to run untraced when no private directory could be made, now
+fails its `open` (`ENVIRONMENT`, the agent path under `auto`). `SecureFilesRulesTest` does not exist: the zip file
+system test is the new `SecureFilesTest`. `ItEnv.newDiscoveryDir` changed in both scenario modules (the lending
+desk's and the web host's).
 
 ### 9.4 Attach on Windows (D139) (documentation now; the behaviour waits for the host)
 
@@ -1688,6 +1729,12 @@ for the "neither" branch); the `.bat` through `LauncherIT`'s twin; the planner s
 space and a `--pack` path with a space (which decides the `cmd.exe` form of §9.2); the CLI's `AttachIT`; the
 owner-only files of §9.3 read back with `icacls`. The owner's questions that decide the host's shape are §17 Q7 and
 Q8.
+
+As built (Phase 6, BW, 2026-10-09; not run): `ci/run-on-windows.cmd` (CRLF, the `rem` header) checks that `JAVA_HOME`
+and `SKILLROY_JDK8_HOME` name a `bin\java.exe`, changes to the repository root and runs the two `mvn verify` commands
+(`call mvn`, the first stopping the script when it fails); a missing variable prints the two commands, the session
+rule and the values found, and exits 2. The matrix row shape for `../TODO.md` is in the build report (the orchestrator
+writes `TODO.md`).
 
 ---
 

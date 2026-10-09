@@ -1342,7 +1342,16 @@ it in CI. What it produces is a YAML file and a plan for a person to review; the
    validates every committed sample scenario against it with the small validator of §13.3.
 3. **The MCP configuration**: a private, owner-only temporary file naming this CLI's own launcher with `mcp
    --mutating` (the planner may try steps; the target is a disposable test instance), the connection options, the pack
-   jars, `--env` and the credentials file; deleted when the command ends.
+   jars, `--env` and the credentials file; deleted when the command ends. **Phase 6, built 2026-10-09, BW (P6 §9.2,
+   §9.3, D137, D138; not verified on a Windows host):** the file is written through the controller's
+   `SecureFiles.writeOwnerOnly` (created exclusively, POSIX `rw-------` or an owner-only ACL, refused where the file
+   system has neither), as is the planner's private work directory (`SecureFiles.createOwnerOnlyTempDirectory(tmp,
+   "skillroy-author-")`, which no longer falls back to a plain temporary directory). A launcher that is a `.bat` or
+   `.cmd` (case-insensitive; `bin\skillroy.bat` names itself) is written as `"command": "cmd.exe", "args": ["/c",
+   "<launcher>", "mcp", …]`, because Node-based clients refuse to spawn a batch file without a shell since the
+   CVE-2024-27980 fix; until a Windows host shows which quoted form survives the planner's client (P6 §9.5) this plain
+   form is written, and a launcher path or argument holding `"`, `%`, `^`, `&`, `|`, `<`, `>` or white space is refused
+   (exit code 64, "move the installation or the pack to a path without spaces or special characters").
 4. **The prompt**: the planner instructions (explore with the read tools first; use the verbs, never the low-level
    primitives, in steps; name no person or item, resolve them with queries; expectations through facts and `db`
    checks, never through what the UI shows unless the brief asks for the UI; prefer committed strategies; return
@@ -1405,7 +1414,12 @@ is refused "the planner's deadline … has passed" before it starts).
 
 `--claude-command <path>` (also `skillroy.claude.command`) names the executable; tests pass a script that prints a
 canned envelope, so that steps 5-7 are tested without the CLI (§15.1). With the real CLI absent the command exits 64
-("claude not found on PATH"). The planner's budget is passed as the CLI's `--max-budget-usd` (present in the 2.1
+("claude not found on PATH"). **`PATHEXT` (Phase 6, built 2026-10-09, BW; P6 §9.2, D137):** on Windows (`os.name`
+starting with `Windows`) the `PATH` lookup also accepts `claude` plus each extension of `PATHEXT` (`.EXE`, `.CMD`,
+`.BAT`, …, in its order and without regard to case) and tries those **before** a file named exactly `claude`, since
+npm installs an extensionless shell shim beside `claude.cmd` that Windows cannot start (as built: the contract named
+no order); the `PATH` and `PATHEXT` names are read without regard to case. The lookup takes the environment as a
+parameter, so `AuthorCommandWindowsTest` proves it on Linux with a fake `PATH` and `PATHEXT`. The planner's budget is passed as the CLI's `--max-budget-usd` (present in the 2.1
 line, BS13 F-10) and `total_cost_usd` is still checked against it afterwards and reported.
 
 As built (2026-10-08, fix wave; steps 2, 3, 4 and 6): the planner's server is `mcp --mutating` without

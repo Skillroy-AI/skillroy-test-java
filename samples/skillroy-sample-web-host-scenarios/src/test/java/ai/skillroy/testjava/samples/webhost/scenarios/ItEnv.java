@@ -17,6 +17,7 @@
 package ai.skillroy.testjava.samples.webhost.scenarios;
 
 import ai.skillroy.testjava.controller.AgentHome;
+import ai.skillroy.testjava.controller.SecureFiles;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -129,14 +130,15 @@ final class ItEnv {
         }
     }
 
-    /** A fresh discovery directory for one launch, owner-only (contract amendment A3). */
+    /**
+     * A fresh discovery directory for one launch, owner-only (contract amendment A3) through the controller's
+     * {@link SecureFiles} (phase6-contracts.md 9.3, D138; Phase 6, built 2026-10-09, BW).
+     */
     static Path newDiscoveryDir(String label) throws IOException {
         Path parent = buildDir().resolve("it-discovery");
         Files.createDirectories(parent);
         Path dir = parent.resolve(label + "-" + ProcessHandle.current().pid() + "-" + DIRS.incrementAndGet());
-        Files.createDirectories(dir);
-        ownerOnly(dir);
-        return dir;
+        return SecureFiles.ensureOwnerOnlyDirectory(dir, "the test discovery directory");
     }
 
     /**

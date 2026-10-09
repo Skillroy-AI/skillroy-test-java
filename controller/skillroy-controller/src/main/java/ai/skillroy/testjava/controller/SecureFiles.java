@@ -77,8 +77,17 @@ import java.util.regex.Pattern;
  *
  * <p>Stateless apart from the shared {@link SecureRandom} and the lazily resolved current user; safe to call from any
  * thread.
+ *
+ * <p>Phase 6 (phase6-contracts.md 9.3, D138; built 2026-10-09, BW): public, so that every owner-only file or
+ * directory the controller's other modules write goes through the same three branches (the planner's work directory
+ * and its MCP configuration, the CDP trace directory, the MCP server's temporary output directory, the tests'
+ * discovery directories). Exactly five members are public: {@link #ensureOwnerOnlyDirectory(Path)},
+ * {@link #ensureOwnerOnlyDirectory(Path, String)}, {@link #createOwnerOnlyTempDirectory(Path, String)},
+ * {@link #writeOwnerOnly(Path, byte[])} and {@link #untrustedDirectoryReason(Path)}; the token readers and
+ * {@code writeOptionsFile} stay package-private (S6/S28). Each refuses on a file system with neither view, naming the
+ * directory's role.
  */
-final class SecureFiles {
+public final class SecureFiles {
 
     /** Characters a token may contain (the agent's token file format). */
     private static final Pattern TOKEN_CHARS = Pattern.compile("[A-Za-z0-9._~+/=-]{1,1024}");
@@ -216,7 +225,7 @@ final class SecureFiles {
      *
      * @return a short reason ("it does not exist", "it is writable by group or others (rwxrwxr-x)", ...) or null
      */
-    static String untrustedDirectoryReason(Path dir) {
+    public static String untrustedDirectoryReason(Path dir) {
         return untrustedDirectoryReason(dir, CurrentUser.PRINCIPAL);
     }
 
@@ -352,12 +361,33 @@ final class SecureFiles {
      * Creates {@code dir} if needed, together with any missing parent, owner-only (POSIX permissions or an owner-only
      * ACL, as the agent creates them), and checks that the directory can be trusted
      * ({@link #untrustedDirectoryReason(Path)}). An existing directory is never changed: one that fails the check is
-     * refused, as the agent refuses it.
+     * refused, as the agent refuses it. The refusal names the discovery directory and the {@code discoveryDir}
+     * option; {@link #ensureOwnerOnlyDirectory(Path, String)} names another role.
      *
      * @throws IOException if it cannot be created or cannot be trusted; the message says why and how to fix it
      */
-    static Path ensureOwnerOnlyDirectory(Path dir) throws IOException {
+    public static Path ensureOwnerOnlyDirectory(Path dir) throws IOException {
+        return ensure(dir, "discovery directory", "choose another discoveryDir");
+    }
+
+    /**
+     * {@link #ensureOwnerOnlyDirectory(Path)} for a directory of another role: the refusal names {@code what} (for
+     * example "the test discovery directory") and the remedy without the discovery option (phase6-contracts.md 9.3).
+     *
+     * @param what the directory's role as the refusal names it, with or without a leading "the "
+     */
+    public static Path ensureOwnerOnlyDirectory(Path dir, String what) throws IOException {
+        return ensure(dir, role(what), "choose another directory");
+    }
+
+    private static String role(String what) {
+        String w = what == null || what.isBlank() ? "directory" : what.strip();
+        return w.startsWith("the ") ? w.substring(4) : w;
+    }
+
+    private static Path ensure(Path dir, String role, String remedy) throws IOException {
         Path absolute = dir.toAbsolutePath().normalize();
+        refuseWithoutProtection(absolute, role);
         if (!Files.exists(absolute, LinkOption.NOFOLLOW_LINKS)) {
             List<Path> missing = new ArrayList<>();
             for (Path p = absolute; p != null && !Files.exists(p, LinkOption.NOFOLLOW_LINKS); p = p.getParent()) {
@@ -373,11 +403,62 @@ final class SecureFiles {
         }
         String problem = untrustedDirectoryReason(absolute);
         if (problem != null) {
-            throw new IOException("the discovery directory " + absolute + " cannot be used: " + problem
+            throw new IOException("the " + role + " " + absolute + " cannot be used: " + problem
                     + " (it must be a directory of the current user that only its owner can write to, e.g. mode 700;"
-                    + " fix it or choose another discoveryDir)");
+                    + " fix it or " + remedy + ")");
         }
         return absolute;
+    }
+
+    /**
+     * The refusal of a file system with neither POSIX permissions nor ACLs, in the agent's wording, naming the role
+     * and the remedy; nothing is created.
+     */
+    private static void refuseWithoutProtection(Path path, String role) throws IOException {
+        if (protection(path) == Protection.NONE) {
+            throw new IOException("the " + role + " " + path + " cannot be used: its file system has neither POSIX "
+                    + "permissions nor ACLs, so nothing written there can be restricted to the current user (use a"
+                    + " directory on a file system that has one of them)");
+        }
+    }
+
+    /**
+     * A new owner-only directory with a random name ({@code prefix} and 16 hex digits) directly under {@code parent},
+     * created through the same branches as {@link #ensureOwnerOnlyDirectory} and read back
+     * ({@link #untrustedDirectoryReason(Path)}); the replacement for every {@code Files.createTempDirectory} of the
+     * controller (phase6-contracts.md 9.3). {@code parent} must exist; it may be shared (the system's temporary
+     * directory): the new directory is created exclusively, never reused.
+     *
+     * @throws IOException when the file system has neither view (nothing is created), when the directory cannot be
+     *     created, or when the new directory fails the read-back (it is deleted)
+     */
+    public static Path createOwnerOnlyTempDirectory(Path parent, String prefix) throws IOException {
+        Path base = parent.toAbsolutePath().normalize();
+        String name = prefix == null ? "" : prefix;
+        if (name.contains("/") || name.contains("\\") || name.contains("..")) {
+            throw new IllegalArgumentException("a prefix is a file name, not a path: " + prefix);
+        }
+        refuseWithoutProtection(base, "temporary directory " + name + "*" + " under");
+        if (!Files.isDirectory(base)) {
+            throw new IOException("cannot create a temporary directory under " + base + ": it is not a directory");
+        }
+        for (int attempt = 0; ; attempt++) {
+            Path dir = base.resolve(name + randomHex(8));
+            try {
+                createOwnerOnlyDirectory(dir);
+            } catch (FileAlreadyExistsException taken) {
+                if (attempt < 8) {
+                    continue;
+                }
+                throw taken;
+            }
+            String problem = untrustedDirectoryReason(dir);
+            if (problem != null) {
+                deleteQuietly(dir);
+                throw new IOException("the temporary directory " + dir + " cannot be used: " + problem);
+            }
+            return dir;
+        }
     }
 
     private static void createOwnerOnlyDirectory(Path dir) throws IOException {
@@ -425,8 +506,8 @@ final class SecureFiles {
      *
      * @throws IOException also when the file system can restrict nothing
      */
-    static void writeOwnerOnly(Path file, byte[] content) throws IOException {
-        switch (protection(file.getParent())) {
+    public static void writeOwnerOnly(Path file, byte[] content) throws IOException {
+        switch (protection(file.toAbsolutePath().getParent())) {
             case POSIX -> Files.createFile(file, PosixFilePermissions.asFileAttribute(OWNER_FILE));
             case ACL -> {
                 UserPrincipal me = CurrentUser.fileOwner();
@@ -446,7 +527,8 @@ final class SecureFiles {
                 }
             }
             default -> throw new IOException("cannot write " + file + " owner-only: its file system has neither "
-                    + "POSIX permissions nor ACLs");
+                    + "POSIX permissions nor ACLs, so nothing written there can be restricted to the current user (use"
+                    + " a directory on a file system that has one of them)");
         }
         try (OutputStream out = Files.newOutputStream(file, StandardOpenOption.WRITE,
                 StandardOpenOption.TRUNCATE_EXISTING)) {

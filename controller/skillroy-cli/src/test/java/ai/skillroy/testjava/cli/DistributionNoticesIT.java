@@ -144,7 +144,8 @@ class DistributionNoticesIT {
         for (String file : filesUnder(dist)) {
             (file.startsWith("lib/") ? libFiles : outsideLib).add(file);
         }
-        assertEquals(Set.of("LICENSE", "NOTICE", "THIRD-PARTY.txt", "bin/skillroy"), outsideLib);
+        // Phase 6 (phase6-contracts.md 9.1, 2.6): bin/skillroy.bat, the Windows twin of the launcher.
+        assertEquals(Set.of("LICENSE", "NOTICE", "THIRD-PARTY.txt", "bin/skillroy", "bin/skillroy.bat"), outsideLib);
         for (String file : libFiles) {
             assertTrue(file.matches("lib/[^/]+\\.jar"), "only jars directly in lib/: " + file);
         }

@@ -21,6 +21,7 @@ import ai.skillroy.testjava.controller.AgentLostException;
 import ai.skillroy.testjava.controller.AgentRpcException;
 import ai.skillroy.testjava.controller.CallOptions;
 import ai.skillroy.testjava.controller.CapabilityMatrix;
+import ai.skillroy.testjava.controller.SecureFiles;
 import ai.skillroy.testjava.data.DataChannels;
 import ai.skillroy.testjava.data.DataException;
 import ai.skillroy.testjava.inference.prompt.PromptMask;
@@ -461,7 +462,7 @@ public final class SkillroyMcpServer implements AutoCloseable {
         Path dir = given;
         try {
             if (dir == null) {
-                dir = Files.createTempDirectory("skillroy-mcp-");
+                dir = temporaryOutputDirectory(Path.of(System.getProperty("java.io.tmpdir")));
                 log.info("no output directory given: writing into " + dir);
             }
             Files.createDirectories(dir);
@@ -470,6 +471,15 @@ public final class SkillroyMcpServer implements AutoCloseable {
                     + " created: " + e, null);
         }
         return dir.toAbsolutePath().normalize();
+    }
+
+    /**
+     * The output directory of a server started without {@code --out}: a new owner-only directory under {@code tmp}
+     * through {@link SecureFiles} (phase6-contracts.md 9.3, D138; Phase 6, built 2026-10-09, BW), refused where the
+     * file system has neither POSIX permissions nor ACLs. The tests' seam.
+     */
+    static Path temporaryOutputDirectory(Path tmp) throws IOException {
+        return SecureFiles.createOwnerOnlyTempDirectory(tmp, "skillroy-mcp-");
     }
 
     /** The session the server opens: see {@link ServerOptions}. */
