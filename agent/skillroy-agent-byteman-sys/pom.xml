@@ -38,6 +38,8 @@
   <properties>
     <!-- Agent side: Java 8 language and API; runs on the target's system class path. -->
     <maven.compiler.release>8</maven.compiler.release>
+    <!-- A test run that runs no test is a defect (fix wave, L3-F1; see skillroy-agent-byteman's POM). -->
+    <skillroy.failIfNoTests>true</skillroy.failIfNoTests>
   </properties>
 
   <dependencies>
@@ -60,4 +62,31 @@
       <scope>test</scope>
     </dependency>
   </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <configuration>
+          <failIfNoTests>${skillroy.failIfNoTests}</failIfNoTests>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+
+  <profiles>
+    <!-- A command-line -Dtest that names no class of this module runs nothing here: no failure for that. -->
+    <profile>
+      <id>merged-test-run</id>
+      <activation>
+        <property>
+          <name>test</name>
+        </property>
+      </activation>
+      <properties>
+        <skillroy.failIfNoTests>false</skillroy.failIfNoTests>
+      </properties>
+    </profile>
+  </profiles>
 </project>

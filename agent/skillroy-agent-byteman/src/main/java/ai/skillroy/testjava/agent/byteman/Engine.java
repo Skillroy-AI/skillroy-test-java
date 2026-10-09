@@ -44,8 +44,11 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.jar.JarFile;
 
 /**
@@ -56,7 +59,8 @@ import java.util.jar.JarFile;
  * reflection through the system class loader; nothing here names one in a signature or a field.
  *
  * <p>Guarded by its own lock: one submit, unload, list or check at a time (they run on agent workers). The firing
- * path ({@link #fired}) runs on the application's thread and takes no lock.
+ * path ({@link #fired}) runs on the application's thread and takes no lock. The {@code uninstall} waits for the
+ * lock at most the detach budget and keeps it to its end, so that the budget bounds it (7.5 and its fix-wave note).
  */
 final class Engine implements FiredSink {
 
@@ -106,23 +110,33 @@ final class Engine implements FiredSink {
     private final File sysJar;
     private final ClassLoader system;
     private final Set<ClassLoader> agentLoaders;
-    private final Object lock = new Object();
+    /**
+     * One {@code rule.*} call at a time; the {@code uninstall} waits for it at most the detach budget
+     * ({@code tryLock}) and then keeps it to its end. Package-private for the detach tests.
+     */
+    final ReentrantLock lock = new ReentrantLock();
     private final AtomicReference<Thread> own = new AtomicReference<Thread>();
     private final AtomicBoolean armed = new AtomicBoolean();
+    /** Set first by {@code uninstall}: from then on no {@code rule.*} call proceeds and nothing is published. */
+    private volatile boolean detached;
+    /** Guarded by {@link #lock}. */
     private final Map<String, RuleRecord> rules = new LinkedHashMap<String, RuleRecord>();
+    /** The names of the rules installed or being installed; read without the lock by a cut-short uninstall. */
     private final Set<String> liveNames = Collections.newSetFromMap(new ConcurrentHashMap<String, Boolean>());
     private final BindingEncoder encoder;
 
-    private Object retransformer;
-    private boolean reused;
+    // Written under the lock; volatile so that a cut-short uninstall may read them without it.
+    private volatile Object retransformer;
+    private volatile boolean reused;
+    private volatile ByteRecorder ahead;
+    private volatile ByteRecorder behind;
+    private volatile Object handler;
+    private volatile Class<?> handlerClass;
+    private volatile PrintStream trace;
+    // Read and written under the lock only.
     private Method installScript;
     private Method removeScripts;
     private Method listScripts;
-    private ByteRecorder ahead;
-    private ByteRecorder behind;
-    private Object handler;
-    private Class<?> handlerClass;
-    private PrintStream trace;
 
     /**
      * @param sysJar the jar appended to the system class path before Byteman ({@code <home>/optional/…})
@@ -145,10 +159,13 @@ final class Engine implements FiredSink {
         if (inst == null) {
             return ProbeResult.unavailable("no Instrumentation in " + ctx.loadMode() + " mode");
         }
-        synchronized (lock) {
+        lock.lock();
+        try {
             if (retransformer != null) {
                 return ProbeResult.ok(reused ? "in-process, reused" : "in-process");
             }
+        } finally {
+            lock.unlock();
         }
         String jar = JarCheck.problem(settings.bytemanJar);
         if (jar != null) {
@@ -169,14 +186,24 @@ final class Engine implements FiredSink {
     }
 
     boolean loaded() {
-        synchronized (lock) {
-            return retransformer != null;
-        }
+        return retransformer != null;
     }
 
     boolean reused() {
-        synchronized (lock) {
+        lock.lock();
+        try {
             return reused;
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    /** Takes the lock for a {@code rule.*} call; refuses once the module is detaching. */
+    private void enter() {
+        lock.lock();
+        if (detached) {
+            lock.unlock();
+            throw unavailable("the byteman module is detaching");
         }
     }
 
@@ -189,7 +216,8 @@ final class Engine implements FiredSink {
         List<String> warnings = new ArrayList<String>();
         boolean typeChecked = false;
         if (lint.ok()) {
-            synchronized (lock) {
+            enter();
+            try {
                 if (retransformer == null) {
                     warnings.add("type check skipped: Byteman is not loaded (the first rule.submit loads it)");
                 } else if (!loadedBySystem(lint.className())) {
@@ -198,6 +226,8 @@ final class Engine implements FiredSink {
                     typeCheck(lint, errors, warnings);
                     typeChecked = true;
                 }
+            } finally {
+                lock.unlock();
             }
         }
         Map<String, Object> out = new LinkedHashMap<String, Object>();
@@ -213,20 +243,28 @@ final class Engine implements FiredSink {
 
     // --------------------------------------------------------------------------------------------- rule.submit
 
-    /** {@code rule.submit} after the dispatcher's gates: lint, load, bound, type check, install, statuses. */
+    /**
+     * {@code rule.submit} after the dispatcher's gates: lint, bound, load, type check, install, statuses. The class
+     * bound runs before the load (fix wave, L2-F5), so that a rule it refuses appends nothing and runs no
+     * {@code premain}.
+     */
     Map<String, Object> submit(String text) throws Exception {
         RuleLint.Result lint = RuleLint.check(text);
         if (!lint.ok()) {
             throw rejected(lint.errors());
         }
-        synchronized (lock) {
-            ensureLoaded();
-            Instrumentation inst = ctx.instrumentation();
+        Instrumentation inst = ctx.instrumentation();
+        if (inst == null) {
+            throw unavailable("no Instrumentation in " + ctx.loadMode() + " mode");
+        }
+        enter();
+        try {
             Class<?>[] loaded = inst.getAllLoadedClasses();
             ClassBound.Result bound = new ClassBound(jvm(inst, loaded), settings, agentLoaders).check(lint);
             if (!bound.ok()) {
                 throw rejected(bound.errors);
             }
+            ensureLoaded();
             if (loadedBySystem(lint.className(), loaded)) {
                 List<String> errors = new ArrayList<String>();
                 typeCheck(lint, errors, new ArrayList<String>());
@@ -252,6 +290,17 @@ final class Engine implements FiredSink {
             }
             StringWriter out = new StringWriter();
             liveNames.add(lint.name());
+            if (detached) {
+                // An uninstall gave up waiting for this call (7.5): nothing more is installed, and when no rule of the
+                // module is left the Retransformer goes back to the manager as an uninstall with no rule leaves it.
+                if (previous == null) {
+                    liveNames.remove(lint.name());
+                }
+                if (rules.isEmpty()) {
+                    giveBack(inst);
+                }
+                throw unavailable("the byteman module is detaching");
+            }
             own.set(Thread.currentThread());
             try {
                 installScript.invoke(retransformer, Collections.singletonList(record.text),
@@ -290,6 +339,8 @@ final class Engine implements FiredSink {
             result.put("classes", maps(statuses));
             result.put("messages", lines(out.toString()));
             return result;
+        } finally {
+            lock.unlock();
         }
     }
 
@@ -297,7 +348,8 @@ final class Engine implements FiredSink {
 
     /** {@code rule.unload}: removes one rule of the module and verifies the classes no other rule of it touches. */
     Map<String, Object> unload(String name) throws Exception {
-        synchronized (lock) {
+        enter();
+        try {
             RuleRecord record = rules.get(RuleLint.NAME_PREFIX + name);
             Map<String, Object> result = new LinkedHashMap<String, Object>();
             if (record == null || retransformer == null) {
@@ -327,6 +379,8 @@ final class Engine implements FiredSink {
                         + " rule " + name + " was removed", data);
             }
             return result;
+        } finally {
+            lock.unlock();
         }
     }
 
@@ -334,7 +388,8 @@ final class Engine implements FiredSink {
 
     /** {@code rule.list}: the module's own rules, with Byteman's statuses when it is loaded. */
     Map<String, Object> describe() throws Exception {
-        synchronized (lock) {
+        enter();
+        try {
             Map<String, List<Listing.ClassStatus>> statuses = retransformer == null
                     ? Collections.<String, List<Listing.ClassStatus>>emptyMap() : Listing.parse(list());
             List<Map<String, Object>> list = new ArrayList<Map<String, Object>>();
@@ -351,6 +406,8 @@ final class Engine implements FiredSink {
             out.put("loaded", retransformer != null);
             out.put("reused", reused);
             return out;
+        } finally {
+            lock.unlock();
         }
     }
 
@@ -359,7 +416,7 @@ final class Engine implements FiredSink {
     @Override
     public void fired(String rule, String className, String method, Object[] bindings) {
         try {
-            if (!armed.get() || rule == null || !rule.startsWith(RuleLint.NAME_PREFIX)) {
+            if (detached || !armed.get() || rule == null || !rule.startsWith(RuleLint.NAME_PREFIX)) {
                 return;
             }
             String name = rule.substring(RuleLint.NAME_PREFIX.length());
@@ -380,88 +437,204 @@ final class Engine implements FiredSink {
     // ------------------------------------------------------------------------------------------------ uninstall
 
     /**
-     * The module's {@code uninstall} (7.5): disarms the handler, unloads every rule of the module under the detach
-     * budget and verifies; only when none is left parks the {@code Retransformer} and releases the helper's slot and
-     * the recorders. A rule left behind keeps running its condition and action (only {@code rule.fired} stops): it
-     * is logged at WARN by name with the remedy, its name is parked in place of the {@code Retransformer} (so the next
-     * instance refuses with the names), and the ahead recorder stays registered holding the disarmed handler.
+     * The module's {@code uninstall} (7.5 and its fix-wave note), bounded by the detach budget: marks the module
+     * detaching and disarms the handler; waits for a running {@code rule.*} call at most the budget; unloads every rule
+     * of the module in one {@code removeScripts} on a worker, joined for what is left of the budget; and only when the
+     * removal completed in time verifies, parks the {@code Retransformer} and releases the helper's slot and the
+     * recorders. Otherwise (a call held the module past the budget, the removal was slower, or it failed) the rules are
+     * left behind: logged at WARN by name with the remedy, their names parked in place of the {@code Retransformer} (so
+     * the next instance refuses with the names), and the ahead recorder stays registered holding the disarmed handler.
+     * A rule left behind keeps running its condition and action (only {@code rule.fired} stops). The worker does
+     * nothing but the removal, so a removal that ends after the cut runs no code of the module (the parked names then
+     * over-report, which the contract records).
      */
     void uninstall() {
+        detached = true;
         armed.set(false);
-        final Object r;
-        final List<RuleRecord> all;
-        synchronized (lock) {
-            r = retransformer;
-            all = new ArrayList<RuleRecord>(rules.values());
-        }
+        long budgetMs = settings.detachBudgetMs;
+        long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(budgetMs);
         Instrumentation inst = ctx.instrumentation();
-        if (r == null) {
-            if (inst != null && ahead != null) {
-                inst.removeTransformer(ahead);
-            }
-            return;
-        }
-        final AtomicBoolean done = new AtomicBoolean();
-        Thread worker = new Thread(new Runnable() {
-            @Override
-            public void run() {
-                synchronized (lock) {
-                    if (Boolean.getBoolean(KEEP_RULES_SEAM)) {
-                        return;
-                    }
-                    try {
-                        Map<RuleRecord, Map<String, Integer>> before = new LinkedHashMap<RuleRecord, Map<String, Integer>>();
-                        for (RuleRecord rec : all) {
-                            before.put(rec, behindCounts(rec));
-                        }
-                        removeAll(all);
-                        for (RuleRecord rec : all) {
-                            rules.remove(rec.storedName);
-                            liveNames.remove(rec.name);
-                            handlerStatic("forget", String.class, rec.storedName);
-                        }
-                        for (Map.Entry<RuleRecord, Map<String, Integer>> e : before.entrySet()) {
-                            ctx.log().info("byteman: restored " + verify(e.getKey(), e.getValue()));
-                        }
-                        done.set(true);
-                    } catch (Throwable t) {
-                        ctx.log().warn("byteman: the rules could not be removed at detach", t);
-                    }
-                }
-            }
-        }, "skillroy-uninstall-byteman");
-        worker.setDaemon(true);
-        worker.start();
+        boolean locked = false;
         try {
-            worker.join(settings.detachBudgetMs);
+            locked = lock.tryLock(budgetMs, TimeUnit.MILLISECONDS);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
-        removeTrace();
-        if (done.get()) {
-            park(r);
-            handlerStatic("release", Object.class, handler);
-            if (inst != null) {
-                inst.removeTransformer(ahead);
-                inst.removeTransformer(behind);
+        if (!locked) {
+            if (retransformer == null) {
+                ctx.log().warn("byteman: a rule.submit still held the module after the detach budget of " + budgetMs
+                        + " ms; no rule of the module is installed, and a Retransformer it loads goes back to the"
+                        + " manager when it ends");
+            } else {
+                leaveBehind(inst, new ArrayList<String>(liveNames), "a rule.* call still held the module after the"
+                        + " detach budget of " + budgetMs + " ms");
             }
-            ctx.log().info("byteman: every rule of the module removed; the Retransformer parked for a later agent"
-                    + " instance (Byteman stays loaded; no rule of the agent is installed)");
-        } else {
-            List<String> names = new ArrayList<String>();
-            for (RuleRecord rec : all) {
-                names.add(rec.name);
-            }
-            ahead.keep.set(handler);
-            if (inst != null && behind != null) {
-                inst.removeTransformer(behind);
-            }
-            park(Collections.unmodifiableList(new ArrayList<String>(names)));
-            ctx.log().warn("byteman: rules still installed after detach: " + names + "; their conditions and actions"
-                    + " keep running (rule.fired stops); restart the target");
+            return;
         }
-        synchronized (lock) {
+        try {
+            Object r = retransformer;
+            if (r == null) {
+                ByteRecorder a = ahead;
+                if (inst != null && a != null) {
+                    inst.removeTransformer(a);
+                }
+                return;
+            }
+            List<RuleRecord> all = new ArrayList<RuleRecord>(rules.values());
+            Map<RuleRecord, Map<String, Integer>> before = new LinkedHashMap<RuleRecord, Map<String, Integer>>();
+            List<String> texts = new ArrayList<String>();
+            for (RuleRecord rec : all) {
+                before.put(rec, behindCounts(rec));
+                texts.add(rec.text);
+            }
+            Removal removal = new Removal(r, removeScripts, texts);
+            Thread worker = new Thread(removal, "skillroy-uninstall-byteman");
+            worker.setDaemon(true);
+            worker.start();
+            joinUntil(worker, deadline);
+            int outcome = removal.outcome();
+            if (outcome == Removal.DONE) {
+                for (RuleRecord rec : all) {
+                    rules.remove(rec.storedName);
+                    liveNames.remove(rec.name);
+                    handlerStatic("forget", String.class, rec.storedName);
+                }
+                for (Map.Entry<RuleRecord, Map<String, Integer>> e : before.entrySet()) {
+                    ctx.log().info("byteman: restored " + verify(e.getKey(), e.getValue()));
+                }
+                giveBack(inst);
+                ctx.log().info("byteman: every rule of the module removed; the Retransformer parked for a later agent"
+                        + " instance (Byteman stays loaded; no rule of the agent is installed)");
+            } else {
+                Throwable failure = outcome == Removal.FAILED ? removal.failure : null;
+                if (failure != null) {
+                    ctx.log().warn("byteman: the rules could not be removed at detach", failure);
+                }
+                List<String> names = new ArrayList<String>();
+                for (RuleRecord rec : all) {
+                    names.add(rec.name);
+                }
+                leaveBehind(inst, names, failure != null ? "the removal failed"
+                        : "the removal did not finish within the detach budget of " + budgetMs + " ms");
+            }
+        } finally {
             retransformer = null;
+            lock.unlock();
+        }
+    }
+
+    /**
+     * The state of 7.5 for rules left behind: the ahead recorder holds the disarmed handler (so the helper's weak slot
+     * cannot free while a rule exists), the behind recorder and the trace streams are removed, and the rules' names are
+     * parked in the manager's slot in place of the {@code Retransformer}.
+     */
+    private void leaveBehind(Instrumentation inst, List<String> names, String why) {
+        ByteRecorder a = ahead;
+        ByteRecorder b = behind;
+        if (a != null) {
+            a.keep.set(handler);
+        }
+        if (inst != null && b != null) {
+            inst.removeTransformer(b);
+        }
+        removeTrace();
+        park(Collections.unmodifiableList(new ArrayList<String>(names)));
+        ctx.log().warn("byteman: rules still installed after detach: " + names + "; their conditions and actions keep"
+                + " running (rule.fired stops); restart the target (" + why + ")");
+    }
+
+    /**
+     * No rule of the module is installed: the {@code Retransformer} goes back to the manager for a later instance, the
+     * helper's slot and both recorders are released. Called under the lock.
+     */
+    private void giveBack(Instrumentation inst) {
+        Object r = retransformer;
+        retransformer = null;
+        if (r == null) {
+            return;
+        }
+        removeTrace();
+        park(r);
+        handlerStatic("release", Object.class, handler);
+        ByteRecorder a = ahead;
+        ByteRecorder b = behind;
+        if (a != null) {
+            a.keep.set(null);
+        }
+        if (inst != null) {
+            if (a != null) {
+                inst.removeTransformer(a);
+            }
+            if (b != null) {
+                inst.removeTransformer(b);
+            }
+        }
+    }
+
+    private static void joinUntil(Thread t, long deadline) {
+        try {
+            for (long left = deadline - System.nanoTime(); left > 0 && t.isAlive();
+                    left = deadline - System.nanoTime()) {
+                t.join(Math.max(1L, TimeUnit.NANOSECONDS.toMillis(left)));
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    /**
+     * The removal of every rule of the module, on the worker {@code skillroy-uninstall-byteman}. It does nothing but
+     * {@code removeScripts} and records its outcome by compare-and-set, so that a removal that ends after the
+     * {@code uninstall} gave up changes nothing and needs no class of the module (the loader may be closed by then):
+     * nothing is logged, nothing escapes to the default handler.
+     */
+    private final class Removal implements Runnable {
+        static final int RUNNING = 0;
+        static final int DONE = 1;
+        static final int FAILED = 2;
+        static final int ABANDONED = 3;
+
+        private final AtomicInteger state = new AtomicInteger(RUNNING);
+        private final Object retransformer;
+        private final Method remove;
+        private final List<String> texts;
+        volatile Throwable failure;
+
+        Removal(Object retransformer, Method remove, List<String> texts) {
+            this.retransformer = retransformer;
+            this.remove = remove;
+            this.texts = texts;
+        }
+
+        @Override
+        public void run() {
+            try {
+                if (Boolean.getBoolean(KEEP_RULES_SEAM)) {
+                    return;
+                }
+                if (!texts.isEmpty()) {
+                    Thread me = Thread.currentThread();
+                    own.set(me);
+                    try {
+                        remove.invoke(retransformer, texts, new PrintWriter(new StringWriter(), true));
+                    } finally {
+                        own.compareAndSet(me, null);
+                    }
+                }
+                state.compareAndSet(RUNNING, DONE);
+            } catch (Throwable t) {
+                failure = t instanceof InvocationTargetException && t.getCause() != null ? t.getCause() : t;
+                state.compareAndSet(RUNNING, FAILED);
+            }
+        }
+
+        /**
+         * {@link #DONE} or {@link #FAILED} when the removal ended in time; otherwise {@link #ABANDONED}, set here, so
+         * that its late end changes nothing.
+         */
+        int outcome() {
+            state.compareAndSet(RUNNING, ABANDONED);
+            return state.get();
         }
     }
 
@@ -476,9 +649,9 @@ final class Engine implements FiredSink {
         if (inst == null) {
             throw unavailable("no Instrumentation in " + ctx.loadMode() + " mode");
         }
-        String jarProblem = JarCheck.problem(settings.bytemanJar);
-        if (jarProblem != null) {
-            throw unavailable(jarProblem);
+        JarCheck.Result jar = JarCheck.check(settings.bytemanJar);
+        if (jar.problem != null) {
+            throw unavailable(jar.problem);
         }
         if ("true".equals(property(LOADED_PROPERTY))) {
             Class<?> manager = loadable(MANAGER);
@@ -492,8 +665,8 @@ final class Engine implements FiredSink {
                 }
                 throw unavailable(leftover(parked));
             }
-            retransformer = parked;
             reused = true;
+            retransformer = parked;
             ahead = new ByteRecorder("ahead", own);
             inst.addTransformer(ahead, true);
             afterLoad(inst);
@@ -503,7 +676,7 @@ final class Engine implements FiredSink {
         ahead = new ByteRecorder("ahead", own);
         inst.addTransformer(ahead, true);
         try {
-            File bytemanJar = new File(settings.bytemanJar);
+            File bytemanJar = jar.path.toFile();
             inst.appendToSystemClassLoaderSearch(new JarFile(sysJar));
             ctx.log().info("byteman: appended " + sysJar + " (" + sysJar.length() + " bytes) to the system class path");
             inst.appendToSystemClassLoaderSearch(new JarFile(bytemanJar));
@@ -522,8 +695,8 @@ final class Engine implements FiredSink {
             if (taken == null || !RETRANSFORMER.equals(taken.getClass().getName())) {
                 throw unavailable("Byteman did not hand its rule base to the manager");
             }
-            retransformer = taken;
             reused = false;
+            retransformer = taken;
             afterLoad(inst);
             ctx.log().info("byteman: loaded in process in " + (System.nanoTime() - t0) / 1000000 + " ms (no listener)");
         } catch (RpcException e) {
@@ -550,7 +723,7 @@ final class Engine implements FiredSink {
         if (handler == null) {
             throw unavailable("the helper's handler slot is held by another handler");
         }
-        armed.set(true);
+        armed.set(!detached);
     }
 
     /** One retransformation of the classes whose reference bytes the ahead recorder has not seen (reuse only). */

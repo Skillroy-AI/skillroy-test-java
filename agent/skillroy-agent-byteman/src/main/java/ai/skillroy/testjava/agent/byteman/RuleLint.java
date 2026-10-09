@@ -47,6 +47,17 @@ import java.util.regex.Pattern;
  *
  * <p>{@code RETURN}, {@code THROW}, assignments and calls on bound objects are allowed: a fault injection is the
  * point, and {@code confirm} on {@code rule.submit} is the gate. Stateless; safe from any thread.
+ *
+ * <p><b>What the lint promises, and what it does not</b> (fix wave, L2-F8; D133; phase6-contracts.md 7.3): it
+ * promises the structure above, that no Byteman built-in is named (they are unreachable anyway: the module's helper
+ * does not extend Byteman's {@code Helper}), and that none of the entry points of {@link #DENY} is named, as an
+ * identifier or a qualified-name prefix. It does <b>not</b> promise that a rule cannot block, write, kill, create
+ * processes or reach reflection: a {@code DO} clause may call any method of a bound object and any public static of a
+ * class the trigger class's loader sees, the JDK's included ({@code $0.wait()},
+ * {@code java.util.concurrent.locks.LockSupport.park()}, {@code java.beans.Beans.instantiate(…)}, a file handler of
+ * {@code java.util.logging}), and no list of names can close that. The reasons in {@link #DENY} say why each entry is
+ * refused, not that every such name is. The lint is a tripwire for the obvious; the person who confirms the submit is
+ * the gate.
  */
 public final class RuleLint {
 
@@ -68,7 +79,8 @@ public final class RuleLint {
 
     /**
      * The deny-list of the text scan, each entry with its reason, in one place for the security review. An entry that
-     * ends with a dot, or {@code ClassLoader}, is a qualified-name prefix; the others are whole identifiers.
+     * ends with a dot, or {@code ClassLoader}, is a qualified-name prefix; the others are whole identifiers. A reason
+     * says why its entry is refused; it does not claim that every name with that effect is (see the class comment).
      */
     public static final Map<String, String> DENY;
 

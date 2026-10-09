@@ -18,6 +18,8 @@ package ai.skillroy.testjava.agent.byteman.sys;
 
 import java.lang.ref.WeakReference;
 import java.lang.reflect.Method;
+import java.math.BigDecimal;
+import java.math.BigInteger;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -54,6 +56,8 @@ public class RuleHelper {
     static final int MAX_KEYS = 1024;
     /** The longest text {@link #format} returns. */
     static final int MAX_FORMAT = 256;
+    /** A {@code BigInteger}, or a {@code BigDecimal}'s unscaled value, above this many bits is not formatted (D182). */
+    static final int MAX_BITS = 6000;
 
     private static final Object SLOT_LOCK = new Object();
     private static volatile WeakReference<Handler> slot;
@@ -228,24 +232,35 @@ public class RuleHelper {
     }
 
     /**
-     * A bounded text of a scalar: a string (at most {@value #MAX_FORMAT} characters), a boolean, a character, a number
-     * of the JDK, an enum constant's name, {@code "null"}; anything else is {@code <class name>}, so that no
-     * application code runs.
+     * A bounded text of a scalar: a string (at most {@value #MAX_FORMAT} characters), a boolean, a character, an enum
+     * constant's name, {@code "null"}, and a number of the JDK's exact types ({@code Integer}, {@code Long},
+     * {@code Short}, {@code Byte}, {@code Float}, {@code Double}, {@code BigDecimal}, {@code BigInteger}); anything else
+     * is {@code <class name>}, so that no application code runs (an accumulator's {@code toString()} applies its
+     * function). Fix wave (L2-F3, D182's rules): a {@code BigInteger}, or a {@code BigDecimal}'s unscaled value, above
+     * {@value #MAX_BITS} bits is {@code <class name>} before any text is made, and a {@code BigDecimal} of extreme scale
+     * is its scientific text, so that no text of millions of digits is made on the application's thread.
      */
     public String format(Object value) {
         try {
             String text;
+            Class<?> type = value == null ? null : value.getClass();
             if (value == null) {
                 text = "null";
-            } else if (value instanceof String) {
+            } else if (type == String.class) {
                 text = (String) value;
             } else if (value instanceof Enum) {
                 text = ((Enum<?>) value).name();
-            } else if ((value instanceof Number || value instanceof Boolean || value instanceof Character)
-                    && value.getClass().getClassLoader() == null) {
+            } else if (type == Boolean.class || type == Character.class || type == Integer.class
+                    || type == Long.class || type == Short.class || type == Byte.class || type == Float.class
+                    || type == Double.class) {
                 text = String.valueOf(value);
+            } else if (type == BigInteger.class && ((BigInteger) value).bitLength() <= MAX_BITS) {
+                text = value.toString();
+            } else if (type == BigDecimal.class && ((BigDecimal) value).unscaledValue().bitLength() <= MAX_BITS) {
+                BigDecimal d = (BigDecimal) value;
+                text = d.scale() >= -64 && d.scale() <= MAX_FORMAT ? d.toPlainString() : d.toString();
             } else {
-                text = "<" + value.getClass().getName() + ">";
+                text = "<" + type.getName() + ">";
             }
             return text.length() > MAX_FORMAT ? text.substring(0, MAX_FORMAT) : text;
         } catch (Throwable t) {
