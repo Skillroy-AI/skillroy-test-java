@@ -1302,6 +1302,21 @@ capability of the primitive's own id decides (D186). A refused install writes th
 (a session, the MCP server and `skillroy hooks install` record armed stubs). Another value of `skillroy.hooks` is the
 glue's single test `environment`.
 
+*Fix wave (Phase 6 review, FC, 2026-10-09):* steps 1 and 2 returned before step 3's `hook.health`, so a `replay` run
+with `--hooks off` (or `-Dskillroy.hooks=off`), or of a pack without an enabled catalogue entry, ran against a stub
+left armed by an earlier run, a person's `hook.stub` or a domain module's SPI (`by: "spi"`), and its record explained
+nothing (finding L1-S2): against D129's "CI must never run against stubbed behaviour". The armed-stub check is
+therefore taken out of step 3 and made **step 0**, before steps 1 and 2 can return a skip (fix-wave decision D-FC-2):
+**whenever the matrix shows `hook.engine` `OK`**, whatever the mode and whether or not the pack has a catalogue, the
+installer reads `hook.health {}` (its 10 s budget) first. Under `replay` an armed stub is `ERROR` / `ENVIRONMENT`
+with step 3's message, and so is a `hook.health` that fails (the run cannot show that no stub is armed); under `live`
+and `approve` the ids are recorded, in the `skipped` record too (`armed: [id…]`, written only when a stub is armed),
+and a failed read is left out of a `skipped` record (the run proceeds, as it would have). Step 3 uses the answer of
+step 0, so an install still costs one `hook.health`. Without `hook.engine` `OK` nothing is read: a module that is not
+loaded holds no stub, and a stub is armed only through an engine that is `OK` (`hook.stub` and the SPI's `stub` name
+`hook.engine`; §3.2's probe keeps an engine `OK` while the slot is held by its own handler). The cost is one bounded
+read per run, and only when the hooks module is loaded with a usable engine.
+
 ---
 
 ## 6. Hooks on and off: the switch, the sample's catalogue, scenario E, the archived matrix
@@ -1371,6 +1386,21 @@ the matrix declares `hook.engine` and `hook.limit.applied`, `hook.health` names 
 one `hook.limit.applied` event is published for every return line the engine commits, before it asks for the next
 input, with the signed-on code and the limit the desk's access rules give (D192). Scenario E's seed bindings are
 approved by `ResolutionChecks` (label `approve`) and written under `-Dskillroy.bindings.update=true`.
+
+*Fix wave (Phase 6 review, FC, 2026-10-09):* `hook.events` answers the oldest events first and at most 1000 (§4.2),
+so one call with `limit: 1000` made `count` stop at 1000 and `last` the thousandth fire, not the newest, for a hook
+that fired more often since the mark (a hot path, or a long `ExecutorSession`, whose window runs from its start mark):
+a wrong verdict on `hooks[id=…].last` (finding L1-S3). The root now **pages** (fix-wave decision D-FC-3): while a page
+is full it asks again with `since` = the page's last event's `seq`, at most **10 calls** per hook (10,000 events, the
+default `eventRing`, which is all the ring holds by default); `count` is the sum and `last` the newest page's last
+payload, exact whenever a page comes back short. When the tenth page is still full the entry gains
+**`truncated: true`**, `count` is a lower bound, and `last` and `lastFiredMs` come from one more read from
+`max(cursor, S − 1000)`, `S` being the agent's sequence after the tenth call (`RpcResult.seqAfter`): the newest of the
+bus's last 1000 events is then the hook's newest fire at `S` or later; when the hook did not fire among them, `last`
+and `lastFiredMs` are null, so that an expectation on `last` does not resolve rather than hold on an older payload.
+Events the ring evicted before the read (`eventRing`, `eventRingChars`, P1 §2.4) are not counted either: a `count` above
+the ring's retention is a lower bound, whether or not `truncated` says so. An event without a numeric `seq` ends the
+paging with `truncated: true`.
 
 **The sample application changes once for it**: `AccessControl.check` reads the `RETURN` limit through
 `limit(code, LIMIT_RETURN)` (public today, with no caller outside the class) instead of `returnLimit(code)`, so that `returnLimit` is called by
@@ -2218,7 +2248,7 @@ trace continues into the run.
 | headers | – | – | `headers: { <Name>: env:<VARIABLE> }` | none; the value of each header is read from the named environment variable at `create` and **never** written, logged or printed; a variable that is not set is a settings error naming the variable, never a value; a header given as a literal (not `env:`) is refused ("a header value is read from an environment variable"); **a variable the inference settings read is refused** ("a telemetry header may not carry the model key"): `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_CUSTOM_HEADERS`, `ANTHROPIC_WORKSPACE_ID` and any variable `inference.yaml` names |
 | the file exporter's directory | `--out` (the CLI uses `<out>/telemetry/`) | `skillroy.telemetry.out` | `out:` | required for `file`; a path under the run's own output |
 | service name and version | – | `skillroy.telemetry.serviceName` | `serviceName:` | `skillroy`; the version is `TelemetrySettings.serviceVersion`, which the CLI fills with its own version (`Main.version()`, private to the CLI, which the telemetry module cannot reference) and the JUnit glue with `skillroy-junit`'s `Implementation-Version`, `(development build)` when absent; `RunStart.cliVersion` carries the same value into `skillroy.cli.version` |
-| attribute set | `--telemetry-attributes standard\|minimal` | `skillroy.telemetry.attributes` | `attributes:` | `standard` (§10.4); `minimal` drops **exactly** the list `TelemetryAttributes.MINIMAL_DROPS`: `skillroy.message`, `skillroy.step.message`, the `environment` event's message, `skillroy.pack`, `skillroy.suite`, `skillroy.bindings.file`, `skillroy.slot`, `skillroy.primitive` (replaced by its namespace: a pack primitive becomes `pack`, `swing.*` stays), `gen_ai.tool.name` (replaced by `verb`, `primitive` or `workflow`), `skillroy.step.verb` for a pack verb (replaced by `verb`), the `expect` event's path (replaced by its root), the `resolve <slot>`, `oracle <name>` and `capture` event names (replaced by `resolve`, `oracle`, `capture`); `test.case.name`, `skillroy.failed_step` and `skillroy.step.line`'s step id become `sha256:` hashes of the id; and the span names become `scenario`, `step`, `call`, `chat`, `tools/call` with the id hashed into `skillroy.id.hash`. The §10.6 unit test asserts the list against every attribute, event and span name of a run |
+| attribute set | `--telemetry-attributes standard\|minimal` | `skillroy.telemetry.attributes` | `attributes:` | `standard` (§10.4); `minimal` treats **every attribute name of `TelemetryAttributes` by exactly one of four lists** (fix wave FC, §10.4): it **drops** `MINIMAL_DROPS`: `skillroy.message`, `skillroy.step.message`, the `environment` event's message, `skillroy.pack`, `skillroy.suite`, `skillroy.bindings.file`, `skillroy.slot`; it **replaces** `MINIMAL_REPLACED` by a class of the value: `skillroy.primitive` by its namespace (a pack primitive becomes `pack`, `swing.*` stays), `gen_ai.tool.name` by `verb`, `primitive` or `workflow`, `skillroy.step.verb` for a pack verb by `verb`, the `expect` event's path by its root, `skillroy.topic` by itself for a topic of `Topics`, by `hook` for a `hook.*` topic and by `pack` for any other; it **keeps** `MINIMAL_KEPT` as written: enumerations, counts, durations, sequence numbers, flags, hashes, the versions of the CLI, the target's Java and the agent, model names, request ids and costs, and the run's, the session's and the connections' own ids; and it **hashes** `MINIMAL_HASHED`, every other text, as the `sha256:` of the whole value (of each element of a list): `test.case.name`, `skillroy.failed_step`, `skillroy.correlation_id`, `skillroy.pack.version`, `skillroy.env.id`, `skillroy.agent.thread`, `skillroy.secret_params`, `skillroy.id`, `skillroy.ids`, `skillroy.armed`, `skillroy.names`, `skillroy.table`, `skillroy.source`, `skillroy.resolver`, `skillroy.verifiers`, `skillroy.fn`, `skillroy.oracle`, `skillroy.contributors`; a text attribute in none of the lists is hashed. The `resolve <slot>`, `oracle <name>` and `capture` event names become `resolve`, `oracle`, `capture`, and the span names become `scenario`, `step`, `call`, `chat`, `tools/call` with the id hashed into `skillroy.id.hash`. The §10.6 unit tests assert that the four lists partition every name of `TelemetryAttributes`, that every attribute of a `minimal` run is kept, replaced or hashed as its list says, and that no identifier of the run's scenarios, steps, pack, overlay, hooks, resolvers, verifiers, oracles, tables, sources, topics or threads is in clear |
 | timeout | – | `skillroy.telemetry.timeoutMs` | `timeoutMs:` | `10000`: the exporter's per-batch timeout and the bound of `flush`/`close` |
 | the file | `--telemetry-file <path>` | `skillroy.telemetry.file` | – | `telemetry.yaml` beside the credentials file (the `inference.yaml` lookup), else none; `version: 1`, strict, no secret |
 
@@ -2309,8 +2339,25 @@ already carry `ts`, `seq`, `topic`, `source`, `correlationId`, `traceparent`.
   `MINIMAL_REPLACED` the four replaced by a class (`skillroy.primitive`, `gen_ai.tool.name`, `skillroy.step.verb`,
   the `expect` event's path as `skillroy.expect.path`); `MINIMAL_HASHED` the two hashed (`test.case.name`,
   `skillroy.failed_step`). A tool's class is `workflow` (`skillroy_*`), `primitive` (a base namespace's tool) or `verb`
-  (the rest, a pack primitive's tool included). The correlation id keeps the scenario id in `minimal`, as the exact
-  list does not name it (a question for the code review).
+  (the rest, a pack primitive's tool included). The correlation id kept the scenario id in `minimal`, as the exact
+  list did not name it (a question for the code review, answered by the fix wave below).
+- **Fix wave (Phase 6 review, FC, 2026-10-09): `minimal` is an allow-list.** The code review found that the exact
+  lists left in clear, on sibling attributes, the names `minimal` exists to hide (findings L1-F1, L2-F9, L1-S1): the
+  correlation id `<scenarioId>/<stepId>/<n>` on every `call` span; `skillroy.pack.version` beside the dropped
+  `skillroy.pack`, which for an overlay is `<base>+<overlayId>@<version>` (§11.1); the `requires` and `hooks` events'
+  ids and armed ids; the `preflight` id and the launch property names; the `resolve` event's resolver and verifier
+  ids; the oracle names and functions of the `oracle`, `guard` and `crosscheck` events; the inference contributors; a
+  stored-row check's table and source; the topics of the `await` spans and of a call's events; the agent's thread;
+  the secret parameters' names; and the environment id. Each name of `TelemetryAttributes` is now in exactly one of
+  `MINIMAL_DROPS` (unchanged), `MINIMAL_REPLACED` (with `skillroy.topic`), `MINIMAL_KEPT` and `MINIMAL_HASHED` (§10.3's
+  row as corrected), and a text attribute that is not dropped, replaced or kept is hashed, so that an attribute added
+  later is hashed until someone lists it as kept (an exact list still, so D142 holds). The correlation id is hashed
+  whole (fix-wave decision D-FC-1, the answer to D166's question): the hashes of its parts would join nothing the
+  span tree does not join already, since the call's parent `step` and `scenario` spans carry their ids' hashes, and the
+  whole value's hash is recomputed from `run.jsonl` as easily. `skillroy.pack.version` is hashed whole, the overlay's
+  id and version with it (a version is the pack author's free text). `skillroy.source` names an agent event's
+  publishing module and a stored-row check's data source alike; both are hashed. `session <id>`, `turn <n>`,
+  `skillroy.session.id`, `mcp.session.id` and `skillroy.agent.session` keep their ids, as D166 decided.
 - **Spans and attributes.** `skillroy.skipped_expectations`, `skillroy.degraded_fidelity`, `skillroy.bind.skipped`
   and `skillroy.step.skipped_expectations` are counts, not texts. The bind span opens at the first bind record and
   ends at the executor's final `bind` record (`ERROR` with the failure kind when `ok` is false); `fingerprint` is an
@@ -2370,7 +2417,9 @@ reports, the JUnit report's line) and `TelemetrySettingsTest` (every rule of §1
 `TelemetryObserverTest` (the tree of a passing, a failing, a `SYNC_TIMEOUT` and a `REBIND_NEEDED` run on the fake
 agent, statuses, the `gen_ai` span, the centred agent span, the trace parent present and absent, `minimal` against
 `standard` with the exact lists, the session and a tool call continuing a client's trace, the secret and
-binding-value scans, the file format), `OtlpTransportTest` (the loopback stub; the header's variable is given through
+binding-value scans, the file format; fix wave FC: the four `minimal` lists partition `TelemetryAttributes`, every
+attribute of a `minimal` run is kept, replaced or hashed as its list says, and a `minimal` run of the fixture plus an
+overlay pack's scenario and session reported with every record type holds none of its identifiers in clear), `OtlpTransportTest` (the loopback stub; the header's variable is given through
 the settings' environment seam in process) and `ClassLoadingProbeTest` (a child JVM with `-Xlog:class+load`: finding
 the providers and asking `none` load no `io.opentelemetry` class; creating an observer does). The executor's
 fixtures are package-private, so the module's tests reach them through `ai.skillroy.testjava.scenario.TelemetryFixture`
@@ -2898,6 +2947,21 @@ resource is `skillroy://mcp/<n>.png.txt`; images are served when `ServerOptions.
   `ByteVerificationTest`, `RetransformBatchesTest`, `DefaultMethodsTest` in `skillroy-agent-api`.
 - Item 13: `DistributionContentIT`, `HomeConstantPoolIT`, `OptionalModulesIT`, `SharedLoadersIT` (§2.5's note).
 
+*Fix wave (Phase 6 review, FC, 2026-10-09):* item 6's `sign.on.checked` sentence had only the display test
+`HookChecks` order 67 (§13.2 item 1), and its check passed on the password index's absence: the committed entry
+captures `args: [0]` only and the engine visits only the captured indexes, so `secretArgs: [1]` was never exercised
+(finding L3-F3 as its sceptic restated it). Both tests now enable a variant of the pack's entry that also captures
+index 1 (`HookChecks.signOnCheckedCapturingThePasswordIndex`; the committed catalogue is unchanged and its entry stays
+off) and assert `<redacted>` at index 1 strictly. **Without a display**, `SignOnCheckedHeadlessIT` in the scenarios
+module (failsafe, since the agent home is unpacked at `pre-integration-test`; no display, so it runs in the normal
+`mvn verify`): the real agent with `optionalModules=skillroy-agent-hooks` in a headless child JVM on the test JVM's own
+Java (`SignOnHeadlessMain`: the seed-A database and the real `AccessControl`, checking staff 100's password every
+100 ms, the password read from a file, never the command line); the variant installed; the first event's `args.0` is
+the code, `args.1` `<redacted>` and `returned` true, and the password is in no event, no `hook.health` answer and no
+line of the child's output. Its agent home is a copy of the module's without the lending module, whose readiness
+waits for a desk the host does not start. With `secretArgs` removed from the variant the test fails with the password
+at index 1. In the image, order 67 does the same on the desk on both target Javas.
+
 ### 13.2 End to end (the Linux image; `ci/run-in-linux.sh … -Dskillroy.headless=false`, Java 8 and Java 25 targets)
 
 Extends P1 §10, P2 §14.2, P3 §11.2, P4 §12.2 and P5 §15.2 inside `LendingEndToEndIT`, `InferenceEndToEndIT` and new
@@ -2982,6 +3046,14 @@ the golden (`javaagent-hooks.json`).
 10. **The secret and A34 scans** of P2 §14.2 and P5 §15.2 item 8 cover the new files: `capabilities.json`,
     `spans.jsonl`, the `hooks` records, `failure/events.json` with `CAPTURE` payloads (the staff password of
     `sign.on.checked`, when a test enables it, appears nowhere).
+
+    *Fix wave (Phase 6 review, FC, 2026-10-09):* check 18 read every file under the mode's run root, but its
+    self-check of the kinds it read was still Phase 2's list (finding L3-S3). It now also asserts `capabilities.json`
+    in every mode (every run archives its matrix, §6.4) and, in the hooks leg, order 67's `sign-on-events.json`, the
+    `CAPTURE` events of `sign.on.checked` with index 1 captured (§13.1's fix-wave note). The `hooks` records are lines
+    of `run.jsonl`, which the check reads; no load mode's run root holds `spans.jsonl` (`TelemetryEndToEndIT` writes
+    its own under `it-runs/telemetry/` and scans it with `SecretScan`), and a file of that name there would be read
+    like any other.
 
 ### 13.3 Windows (waits for the Windows host; a written procedure, not run in this phase)
 

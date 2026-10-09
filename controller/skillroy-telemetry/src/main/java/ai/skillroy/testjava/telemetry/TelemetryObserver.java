@@ -1028,8 +1028,9 @@ final class TelemetryObserver implements RunObserver, ExportStatus {
     }
 
     /**
-     * An attribute set under the allow-list and the attribute set's rules: in {@code minimal} the dropped names are
-     * left out, the replaced ones replaced by their class and the hashed ones hashed; every text is one line cut at
+     * An attribute set under the allow-list and the attribute set's rules: in {@code minimal} every text goes through
+     * {@link TelemetryAttributes#minimal(String, String)} (dropped, replaced by its class, kept, or hashed: a name no
+     * list keeps is hashed, phase6-contracts.md 10.3 as corrected by the fix wave, FC); every text is one line cut at
      * 256 characters.
      */
     private final class Attrs {
@@ -1040,24 +1041,7 @@ final class TelemetryObserver implements RunObserver, ExportStatus {
             if (value == null) {
                 return this;
             }
-            String v = value;
-            if (minimal) {
-                if (TelemetryAttributes.MINIMAL_DROPS.contains(key)) {
-                    return this;
-                }
-                if (TelemetryAttributes.MINIMAL_HASHED.contains(key)) {
-                    v = TelemetryAttributes.hash(v);
-                } else if (TelemetryAttributes.PRIMITIVE.equals(key)) {
-                    v = TelemetryAttributes.primitiveClass(v);
-                } else if (TelemetryAttributes.GEN_AI_TOOL_NAME.equals(key)) {
-                    v = TelemetryAttributes.toolClass(v);
-                } else if (TelemetryAttributes.STEP_VERB.equals(key)) {
-                    v = TelemetryAttributes.verbClass(v);
-                } else if (TelemetryAttributes.EXPECT_PATH.equals(key)) {
-                    v = TelemetryAttributes.pathRoot(v);
-                }
-            }
-            return raw(key, v);
+            return raw(key, minimal ? TelemetryAttributes.minimal(key, value) : value);
         }
 
         Attrs raw(String key, String value) {
@@ -1081,15 +1065,21 @@ final class TelemetryObserver implements RunObserver, ExportStatus {
             return this;
         }
 
+        /** A list of texts; in {@code minimal} each element as {@link #str} would write it (null elements left out). */
         Attrs strs(String key, List<String> values) {
             if (values == null || values.isEmpty() || minimal && TelemetryAttributes.MINIMAL_DROPS.contains(key)) {
                 return this;
             }
             List<String> cut = new ArrayList<>(values.size());
             for (String value : values) {
-                cut.add(TelemetryAttributes.cut(value));
+                String v = minimal ? TelemetryAttributes.minimal(key, value) : value;
+                if (v != null) {
+                    cut.add(TelemetryAttributes.cut(v));
+                }
             }
-            builder.put(AttributeKey.stringArrayKey(key), cut);
+            if (!cut.isEmpty()) {
+                builder.put(AttributeKey.stringArrayKey(key), cut);
+            }
             return this;
         }
 

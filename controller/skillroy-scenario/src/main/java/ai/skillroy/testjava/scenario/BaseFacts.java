@@ -21,6 +21,7 @@ import ai.skillroy.testjava.controller.AgentLostException;
 import ai.skillroy.testjava.controller.AgentRpcException;
 import ai.skillroy.testjava.controller.CallOptions;
 import ai.skillroy.testjava.protocol.ErrorCodes;
+import ai.skillroy.testjava.protocol.RpcResult;
 import ai.skillroy.testjava.scenario.pack.FactProvider;
 
 import java.time.Clock;
@@ -60,7 +61,10 @@ import java.util.function.LongSupplier;
  *       {@code hook.events {since, id, limit: 1000}}, where {@code since} is the agent's sequence the executor
  *       recorded when the first step began, so that {@code count} (the number of those events), {@code last} (the
  *       newest one's payload) and {@code lastFiredMs} (its time) describe this run's steps only: a bind-time
- *       verifier's call or an earlier run's never count. When {@code hook.health} answers {@code METHOD_NOT_FOUND}
+ *       verifier's call or an earlier run's never count. {@code hook.events} answers the oldest first, so the root
+ *       pages on from each full page's last {@code seq}, at most {@value #HOOK_EVENTS_PAGES} pages (fix wave of the
+ *       Phase 6 review, FC); past them the entry is {@code truncated}, {@code count} a lower bound and {@code last} the
+ *       newest of the bus's last {@value #HOOK_EVENTS_TAIL} events, or null. When {@code hook.health} answers {@code METHOD_NOT_FOUND}
  *       (no hooks module), {@code CAPABILITY_UNAVAILABLE} (no {@code Instrumentation}) or {@code NOT_READY}, the root
  *       is an empty list. This class's own provider counts from sequence 0.</li>
  * </ul>
@@ -72,8 +76,17 @@ public final class BaseFacts {
     /** The base root names. */
     public static final List<String> ROOTS = List.of("app", "ui", "dialogs", "caps", "devices", "web", "hooks");
 
-    /** The most events of one hook the root {@code hooks} reads per attempt ({@code hook.events}' cap). */
+    /** The most events of one hook one {@code hook.events} call of the root {@code hooks} reads (its cap). */
     static final long HOOK_EVENTS_LIMIT = 1000L;
+
+    /**
+     * The most {@code hook.events} pages the root {@code hooks} reads per hook and attempt (phase6-contracts.md 6.3, fix
+     * wave FC): 10,000 events, all that the default {@code eventRing} holds.
+     */
+    static final int HOOK_EVENTS_PAGES = 10;
+
+    /** How far back from the agent's sequence the tail read looks for the newest fire past the last page. */
+    static final long HOOK_EVENTS_TAIL = 1000L;
 
     private static final CallOptions READ = CallOptions.defaults().withTimeoutMs(10_000L);
 
@@ -173,32 +186,87 @@ public final class BaseFacts {
         List<Object> out = new ArrayList<>();
         for (Map.Entry<String, Object> e : new TreeMap<String, Object>(stringKeys(byId)).entrySet()) {
             Map<?, ?> fields = e.getValue() instanceof Map<?, ?> f ? f : Map.of();
-            Map<String, Object> params = new LinkedHashMap<>();
-            params.put("since", since);
-            params.put("id", e.getKey());
-            params.put("limit", HOOK_EVENTS_LIMIT);
-            List<?> events;
+            Window window;
             try {
-                Object value = agent.call("hook.events", params, READ).value();
-                events = value instanceof Map<?, ?> m && m.get("events") instanceof List<?> list ? list : List.of();
+                window = window(agent, e.getKey(), since);
             } catch (AgentRpcException failure) {
                 if (noHooks(failure)) {
                     return List.of();
                 }
                 throw failure;
             }
-            Map<?, ?> newest = events.isEmpty() || !(events.get(events.size() - 1) instanceof Map<?, ?> last)
-                    ? null : last;
+            Map<?, ?> newest = window.newest();
             Map<String, Object> entry = new LinkedHashMap<>();
             entry.put("id", e.getKey());
             entry.put("state", fields.get("state"));
-            entry.put("count", (long) events.size());
+            entry.put("count", window.count());
             entry.put("lastFiredMs", newest == null ? null : newest.get("ts"));
             entry.put("armed", Boolean.TRUE.equals(fields.get("armed")));
             entry.put("last", newest == null ? null : newest.get("payload"));
+            if (window.truncated()) {
+                entry.put("truncated", true);
+            }
             out.add(entry);
         }
         return out;
+    }
+
+    /**
+     * What the root knows of one hook's fires after {@code since}.
+     *
+     * @param count how many (a lower bound when {@code truncated})
+     * @param newest the newest fire's event as JSON, or null (none, or not within the tail read's reach)
+     * @param truncated true when the pages ran out before a short one
+     */
+    private record Window(long count, Map<?, ?> newest, boolean truncated) {
+    }
+
+    /**
+     * Pages through {@code hook.events} (oldest first, at most {@value #HOOK_EVENTS_LIMIT} a call) from {@code since}:
+     * while a page is full, again from its last event's {@code seq}, at most {@value #HOOK_EVENTS_PAGES} calls. Past
+     * them, one tail read from {@code max(cursor, seqAfter - }{@value #HOOK_EVENTS_TAIL}{@code )} gives the newest
+     * fire (phase6-contracts.md 6.3, fix wave of the Phase 6 review, FC).
+     */
+    private static Window window(AgentConnection agent, String id, long since) throws Exception {
+        long cursor = since;
+        long count = 0;
+        Map<?, ?> newest = null;
+        long seqAfter = -1;
+        for (int page = 0; page < HOOK_EVENTS_PAGES; page++) {
+            RpcResult result = agent.call("hook.events", eventsParams(cursor, id), READ);
+            seqAfter = result.seqAfter();
+            List<?> events = events(result.value());
+            count += events.size();
+            if (!events.isEmpty() && events.get(events.size() - 1) instanceof Map<?, ?> last) {
+                newest = last;
+            }
+            if (events.size() < HOOK_EVENTS_LIMIT) {
+                return new Window(count, newest, false);
+            }
+            if (newest == null || !(newest.get("seq") instanceof Number seq)) {
+                return new Window(count, newest, true);
+            }
+            cursor = seq.longValue();
+        }
+        if (seqAfter < 0) {
+            return new Window(count, null, true);
+        }
+        List<?> tail = events(agent.call("hook.events", eventsParams(Math.max(cursor, seqAfter - HOOK_EVENTS_TAIL),
+                id), READ).value());
+        Map<?, ?> latest = !tail.isEmpty() && tail.get(tail.size() - 1) instanceof Map<?, ?> last ? last : null;
+        return new Window(count, latest, true);
+    }
+
+    private static Map<String, Object> eventsParams(long since, String id) {
+        Map<String, Object> params = new LinkedHashMap<>();
+        params.put("since", since);
+        params.put("id", id);
+        params.put("limit", HOOK_EVENTS_LIMIT);
+        return params;
+    }
+
+    private static List<?> events(Object value) {
+        return value instanceof Map<?, ?> m && m.get("events") instanceof List<?> list ? list : List.of();
     }
 
     /** {@code METHOD_NOT_FOUND}, {@code CAPABILITY_UNAVAILABLE} or {@code NOT_READY}: the target has no hooks now. */

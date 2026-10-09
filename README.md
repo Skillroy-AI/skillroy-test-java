@@ -256,8 +256,10 @@ flushes at JVM exit. One trace per invocation (or JUnit stream): `skillroy <comm
 `step <id>`, `call <primitive>` with a reconstructed `agent <primitive>` and its `await`s, and `chat <model>` for each
 model call; a session's `session <id>`, `turn <n>` and steps; an MCP `tools/call <tool>` continues the client's trace.
 Attributes are ids, enumerations, counts, durations, hashes and masked one-line messages, never a call's parameters,
-values, payloads, rows, SQL or prompts; `minimal` also drops the messages and the pack, suite, slot and file names and
-hashes the ids.
+values, payloads, rows, SQL or prompts; `minimal` also drops the messages and the pack, suite, slot and file names,
+reduces primitives, tools, verbs, paths and topics to a class, and hashes every other identifier (the scenario, step,
+correlation, pack version, hook, resolver, verifier, oracle, table and source ids among them): an attribute it does not
+list as kept is hashed.
 
 `--telemetry file` writes `<out>/telemetry/spans.jsonl` beside the run's outputs, one span per line in the project's
 own format `skillroy-spans/1` (a CI artifact without a collector). `--telemetry otlp` posts OTLP/HTTP (protobuf) to

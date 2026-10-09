@@ -44,17 +44,20 @@ import java.util.Objects;
  * by the CLI command {@code skillroy hooks install}.
  *
  * <ol>
+ *   <li>Step 0 (fix wave of the Phase 6 review, FC, decision D-FC-2 of the fix wave): whenever the matrix shows
+ *       {@code hook.engine} {@code OK}, before anything below can skip, {@code hook.health {}}: an armed stub is ERROR
+ *       / ENVIRONMENT when armed stubs are refused (a {@code replay} run: CI must never run against stubbed behaviour,
+ *       D129), and so is a failed read; else the ids are recorded, in a {@code skipped} record too ({@code armed},
+ *       only when a stub is armed), and a failed read is left out of a skip.</li>
  *   <li>{@link HooksMode#OFF}, or a pack without a catalogue (or without an enabled entry) under {@link HooksMode#AUTO}:
- *       the record {@code {mode, skipped: "off" | "no catalogue"}}, nothing sent. {@code ON} without one:
- *       PRECONDITION_FAILED.</li>
+ *       the record {@code {mode, skipped: "off" | "no catalogue"}}, nothing sent but step 0's read. {@code ON} without
+ *       one: PRECONDITION_FAILED.</li>
  *   <li>The matrix: {@code hook.engine} absent (the module is not loaded) or not {@code OK}: under {@code AUTO} the
  *       record {@code {mode, skipped: "<reason>"}}, nothing sent; under {@code ON} PRECONDITION_FAILED with the
  *       reason.</li>
- *   <li>{@code hook.health {}}: an armed stub is ERROR / ENVIRONMENT when armed stubs are refused (a {@code replay}
- *       run: CI must never run against stubbed behaviour), else the ids are recorded. The same catalogue id and hash
- *       installed: {@code alreadyInstalled}, nothing more is sent. The same id with another hash: the install below
- *       with {@code replace: true}. Another id: ERROR / ENVIRONMENT, so that two suites never silently take turns
- *       retransforming one JVM.</li>
+ *   <li>Step 0's answer: the same catalogue id and hash installed: {@code alreadyInstalled}, nothing more is sent. The
+ *       same id with another hash: the install below with {@code replace: true}. Another id: ERROR / ENVIRONMENT, so
+ *       that two suites never silently take turns retransforming one JVM.</li>
  *   <li>{@code hook.install {specs, catalogue: {id, version, hash, application}}} under the executor's diagnostic
  *       timeout plus 60 s; for every hook whose status is not {@code OK}, the fallback is the first {@code seam} whose
  *       primitive the target serves with its capability {@code OK}, recorded per hook.</li>
@@ -90,8 +93,8 @@ public final class HookInstaller {
      * What an install did.
      *
      * @param record the {@code hooks} record's fields (phase6-contracts.md 5.3 step 5), {@code mode} first
-     * @param skipped true when nothing was sent beyond what the skip needed (off, no catalogue, no usable engine): the
-     *     matrix is unchanged
+     * @param skipped true when nothing was sent beyond what the skip needed (off, no catalogue, no usable engine; step
+     *     0's {@code hook.health} read at most): the matrix is unchanged
      * @param alreadyInstalled true when the catalogue was on the target already
      */
     public record Result(Map<String, Object> record, boolean skipped, boolean alreadyInstalled) {
@@ -138,7 +141,7 @@ public final class HookInstaller {
     }
 
     /**
-     * Steps 1 to 5 of phase6-contracts.md 5.3.
+     * Steps 0 to 5 of phase6-contracts.md 5.3 (step 0: the fix wave of the Phase 6 review, FC).
      *
      * @param pack the running pack; its {@link DomainPack#hooks()} is read once
      * @param agent the target's agent
@@ -155,8 +158,7 @@ public final class HookInstaller {
         Map<String, Object> record = new LinkedHashMap<>();
         record.put("mode", effective.label());
         if (effective == HooksMode.OFF) {
-            record.put("skipped", "off");
-            return new Result(record, true, false);
+            return skip(record, "off", agent, caps, refuseArmedStubs);
         }
         HookCatalogue catalogue;
         try {
@@ -171,25 +173,18 @@ public final class HookInstaller {
                         + (catalogue == null || catalogue.isEmpty() ? " hook catalogue" : " enabled hook in its"
                         + " catalogue " + catalogue.id()), null);
             }
-            record.put("skipped", "no catalogue");
-            return new Result(record, true, false);
+            return skip(record, "no catalogue", agent, caps, refuseArmedStubs);
         }
         String engineProblem = engineProblem(caps);
         if (engineProblem != null) {
             if (effective == HooksMode.ON) {
                 throw refused(FailureKind.PRECONDITION_FAILED, record, "hooks ON, but " + engineProblem, null);
             }
-            record.put("skipped", engineProblem);
-            return new Result(record, true, false);
+            // Step 0 reads nothing without hook.engine OK: no stub can be armed through an engine that is not.
+            return skip(record, engineProblem, agent, caps, refuseArmedStubs);
         }
-        Map<?, ?> health = call(agent, "hook.health", Map.of(), HEALTH_TIMEOUT_MS, record);
+        Map<?, ?> health = health(agent, caps, record, refuseArmedStubs, false);
         List<String> armed = strings(health.get("stubs"));
-        if (!armed.isEmpty() && refuseArmedStubs) {
-            Map<String, Object> detail = new LinkedHashMap<>();
-            detail.put("armed", armed);
-            throw refused(FailureKind.ENVIRONMENT, record, "a stub is armed on the target: " + String.join(", ",
-                    armed) + "; `skillroy hooks status`", detail);
-        }
         boolean replace = false;
         if (health.get("catalogue") instanceof Map<?, ?> installed && installed.get("id") != null) {
             String installedId = String.valueOf(installed.get("id"));
@@ -258,6 +253,53 @@ public final class HookInstaller {
         record.put("ms", ms);
         record.put("otherAgents", strings(answer.get("otherAgents")));
         return new Result(record, false, false);
+    }
+
+    /**
+     * A skip of steps 1 and 2: step 0's read first, then the record {@code {mode, skipped: reason}} with
+     * {@code armed} when a stub is armed (and not refused).
+     */
+    private static Result skip(Map<String, Object> record, String reason, AgentConnection agent, CapabilityMatrix caps,
+                               boolean refuseArmedStubs) throws Refused, AgentLostException {
+        Map<?, ?> health = health(agent, caps, record, refuseArmedStubs, true);
+        record.put("skipped", reason);
+        List<String> armed = health == null ? List.of() : strings(health.get("stubs"));
+        if (!armed.isEmpty()) {
+            record.put("armed", armed);
+        }
+        return new Result(record, true, false);
+    }
+
+    /**
+     * Step 0 (phase6-contracts.md 5.3, fix wave of the Phase 6 review, FC): {@code hook.health {}} when the matrix
+     * shows {@code hook.engine} {@code OK}, else null (nothing read). An armed stub refused under
+     * {@code refuseArmedStubs} is ERROR / ENVIRONMENT, and so is a failed read, unless the install is being skipped and
+     * armed stubs are not refused (the read is then left out: null).
+     *
+     * @param skipping true when steps 1 or 2 end the install
+     */
+    private static Map<?, ?> health(AgentConnection agent, CapabilityMatrix caps, Map<String, Object> record,
+                                    boolean refuseArmedStubs, boolean skipping) throws Refused, AgentLostException {
+        if (engineProblem(caps) != null) {
+            return null;
+        }
+        Map<?, ?> health;
+        try {
+            health = call(agent, "hook.health", Map.of(), HEALTH_TIMEOUT_MS, record);
+        } catch (Refused e) {
+            if (skipping && !refuseArmedStubs) {
+                return null;
+            }
+            throw e;
+        }
+        List<String> armed = strings(health.get("stubs"));
+        if (!armed.isEmpty() && refuseArmedStubs) {
+            Map<String, Object> detail = new LinkedHashMap<>();
+            detail.put("armed", armed);
+            throw refused(FailureKind.ENVIRONMENT, record, "a stub is armed on the target: " + String.join(", ",
+                    armed) + "; `skillroy hooks status`", detail);
+        }
+        return health;
     }
 
     /**

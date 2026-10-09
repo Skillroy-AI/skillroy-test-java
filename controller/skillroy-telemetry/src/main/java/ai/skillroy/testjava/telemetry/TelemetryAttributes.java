@@ -16,6 +16,7 @@
 
 package ai.skillroy.testjava.telemetry;
 
+import ai.skillroy.testjava.protocol.Topics;
 import ai.skillroy.testjava.scenario.BaseSteps;
 
 import java.nio.charset.StandardCharsets;
@@ -39,11 +40,13 @@ import java.util.Set;
  * payloads, snapshot text, resolved values, SQL, rows, prompts, credentials, the workspace id or a path (P2 11.4).
  * Text values are cut at {@value #MAX_VALUE_LENGTH} characters.
  *
- * <p>{@code minimal} (phase6-contracts.md 10.3) drops exactly {@link #MINIMAL_DROPS}, replaces exactly
- * {@link #MINIMAL_REPLACED} by a class of the value, hashes exactly {@link #MINIMAL_HASHED}, and names the spans of
- * {@link #MINIMAL_SPAN_NAMES} without their ids, the id going hashed into {@value #ID_HASH}; the
- * {@code resolve <slot>} and {@code oracle <name>} event names become {@code resolve} and {@code oracle}, and the
- * {@code expect} event's path becomes its root.
+ * <p>{@code minimal} (phase6-contracts.md 10.3, as corrected by the fix wave of the Phase 6 review, FC) treats every
+ * attribute name of this class by exactly one of four lists: it drops {@link #MINIMAL_DROPS}, replaces
+ * {@link #MINIMAL_REPLACED} by a class of the value, keeps {@link #MINIMAL_KEPT} as written and hashes
+ * {@link #MINIMAL_HASHED}; a text attribute in none of them is hashed too ({@link #minimal(String, String)}), so that
+ * an attribute added later is hashed until it is listed as kept. It names the spans of {@link #MINIMAL_SPAN_NAMES}
+ * without their ids, the id going hashed into {@value #ID_HASH}; the {@code resolve <slot>} and {@code oracle <name>}
+ * event names become {@code resolve} and {@code oracle}, and the {@code expect} event's path becomes its root.
  *
  * <p>Stateless; safe from any thread.
  */
@@ -330,12 +333,56 @@ public final class TelemetryAttributes {
      * The attributes the {@code minimal} set replaces by a class of the value: {@value #PRIMITIVE} by its namespace
      * (a pack primitive becomes {@code pack}; {@code swing.*} and the other base namespaces stay),
      * {@value #GEN_AI_TOOL_NAME} by {@code verb}, {@code primitive} or {@code workflow}, {@value #STEP_VERB} of a pack
-     * verb by {@code verb} (a base verb stays), {@value #EXPECT_PATH} by its root.
+     * verb by {@code verb} (a base verb stays), {@value #EXPECT_PATH} by its root, and (fix wave, FC) {@value #TOPIC},
+     * an agent event's topic, by {@link #topicClass(String)}: a topic of {@code Topics} stays, a {@code hook.*} topic
+     * becomes {@code hook} and any other (a domain module's) {@code pack}.
      */
-    public static final Set<String> MINIMAL_REPLACED = Set.of(PRIMITIVE, GEN_AI_TOOL_NAME, STEP_VERB, EXPECT_PATH);
+    public static final Set<String> MINIMAL_REPLACED = Set.of(PRIMITIVE, GEN_AI_TOOL_NAME, STEP_VERB, EXPECT_PATH,
+            TOPIC);
 
-    /** The attributes the {@code minimal} set writes as the {@code sha256:} of the id. */
-    public static final Set<String> MINIMAL_HASHED = Set.of(TEST_CASE_NAME, FAILED_STEP);
+    /**
+     * The attributes the {@code minimal} set writes as the {@code sha256:} of the whole value (of each element of a
+     * list): the scenario's and the failed step's ids, and (fix wave of the Phase 6 review, FC: findings L1-F1, L2-F9,
+     * L1-S1) every other text that names something of the scenario, the pack, its overlay or the target: the
+     * correlation id ({@code <scenarioId>/<stepId>/<n>}), the pack version (for an overlay
+     * {@code <base>+<overlayId>@<version>}), the environment id, the agent's thread, the secret parameters' names, the
+     * {@code preflight} id, the {@code requires} and {@code hooks} events' ids and armed ids, the launch properties'
+     * names, a stored-row check's table and source ({@value #SOURCE} is also an agent event's publishing module), the
+     * resolver and verifier ids, an oracle's function and name, and the inference contributors.
+     */
+    public static final Set<String> MINIMAL_HASHED = Set.of(TEST_CASE_NAME, FAILED_STEP, CORRELATION_ID, PACK_VERSION,
+            ENV_ID, AGENT_THREAD, SECRET_PARAMS, RECORD_ID, IDS, ARMED, NAMES, TABLE, SOURCE, RESOLVER, VERIFIERS, FN,
+            ORACLE, CONTRIBUTORS);
+
+    /**
+     * The attributes the {@code minimal} set keeps as written (fix wave of the Phase 6 review, FC): enumerations,
+     * counts, durations, sequence numbers, flags, hashes, the versions of the CLI, the target's Java and the agent, the
+     * model names, request ids and costs, and the run's, the session's and the connections' own ids (the session
+     * keeps its id in {@code minimal}, D166). Every attribute name of this class is in exactly one of
+     * {@link #MINIMAL_DROPS}, {@link #MINIMAL_REPLACED}, {@link #MINIMAL_HASHED} and this list.
+     */
+    public static final Set<String> MINIMAL_KEPT = Set.of(
+            // the root span
+            RUN_ID, COMMAND, BIND_MODE, CLI_VERSION, TARGET_PID, TARGET_JAVA_VERSION, TARGET_LOAD_MODE, AGENT_VERSION,
+            AGENT_PROTOCOL, AGENT_SESSION,
+            // the scenario span
+            TEST_CASE_RESULT_STATUS, STATUS, FAILURE_KIND, PLAN_VERSION, SOURCE_HASH, SKIPPED_EXPECTATIONS,
+            DEGRADED_FIDELITY, MODEL_CALLS, MODEL_COST_USD, HOOKS_MODE, HOOKS_CATALOGUE_HASH, CAPABILITIES_HASH, ID_HASH,
+            // bind and step
+            BIND_SKIPPED, STEP_LINE, STEP_STATUS, STEP_SKIPPED_EXPECTATIONS,
+            // call, agent, await
+            CALL_INDEX, PATH, OK, ERROR_TYPE, SEQ_BEFORE, SEQ_AFTER, EVENTS, CONFIRM, AGENT_DURATION_MS, AGENT_TIMING,
+            EVENT_SEQ_NUMBER, SYNC_MODE, EVENT_SEQ, SYNC_MS, SYNC_SOURCE,
+            // model calls
+            GEN_AI_OPERATION_NAME, GEN_AI_PROVIDER_NAME, GEN_AI_REQUEST_MODEL, GEN_AI_RESPONSE_MODEL,
+            GEN_AI_RESPONSE_ID, GEN_AI_USAGE_INPUT_TOKENS, GEN_AI_USAGE_OUTPUT_TOKENS, CACHE_READ_TOKENS,
+            CACHE_WRITE_TOKENS, GEN_AI_RESPONSE_FINISH_REASONS, PURPOSE, STRATEGY, BATCH,
+            // the session, MCP
+            SESSION_ID, SESSION_POLICY, TURN_INDEX, TURN_OUTCOME, TURN_ACTIONS, STEP_KIND, STEP_EXECUTED, ORIGIN,
+            DURATION_MS, MCP_METHOD_NAME, MCP_SESSION_ID,
+            // record events
+            COUNT, MATCHER, HELD, CHANNEL, ROW_COUNT, EXPECTED, DECISION, REQUESTED, ACTUAL, CANDIDATES, REJECTED,
+            VERIFIERS_PASSED, CONFIDENCE, APPROVAL, REUSED, HASH, AGREED, SKIPPED, GATEWAY, MODE);
 
     /**
      * The span names {@code minimal} writes without their ids (phase6-contracts.md 10.3: {@code scenario},
@@ -346,6 +393,14 @@ public final class TelemetryAttributes {
      */
     public static final Set<String> MINIMAL_SPAN_NAMES = Set.of("scenario", "step", "call", "agent", "chat",
             "tools/call");
+
+    /** The generic topics ({@code Topics}): an agent event's topic {@code minimal} keeps as it is. */
+    static final Set<String> GENERIC_TOPICS = Set.of(Topics.AGENT_STARTED, Topics.AGENT_STOPPING,
+            Topics.MODULE_INSTALLED, Topics.TARGET_READY, Topics.WINDOW_OPENED, Topics.WINDOW_CLOSED,
+            Topics.INPUT_ACKED, Topics.INPUT_REQUESTED, Topics.INPUT_REJECTED, Topics.PROMPT_WAITING,
+            Topics.STATE_CHANGED, Topics.TRACE_MARK, Topics.GAP, Topics.WEB_LOAD, Topics.WEB_READY, Topics.WEB_CONSOLE,
+            Topics.WEB_TAP, Topics.WEB_CLOSED, Topics.WEB_BROWSERS_CHANGED, Topics.HOOKS_INSTALLED,
+            Topics.HOOKS_REMOVED, Topics.HOOKS_STUBBED, Topics.RULE_FIRED, Topics.RULES_CHANGED);
 
     /** The agent's own primitive namespaces: a primitive of another namespace is a pack's. */
     static final Set<String> BASE_NAMESPACES = Set.of("agent", "app", "caps", "data", "evt", "hook", "jvm", "obj",
@@ -385,6 +440,44 @@ public final class TelemetryAttributes {
         }
         String out = line.toString();
         return out.length() > MAX_VALUE_LENGTH ? out.substring(0, MAX_VALUE_LENGTH - 3) + "..." : out;
+    }
+
+    /**
+     * A text attribute's value in {@code minimal} (phase6-contracts.md 10.3, fix wave FC): null for a name of
+     * {@link #MINIMAL_DROPS}, the class of the value for {@link #MINIMAL_REPLACED}, the value for
+     * {@link #MINIMAL_KEPT}, and the {@code sha256:} of the value for every other name, {@link #MINIMAL_HASHED}'s and
+     * any name no list holds.
+     *
+     * @param key the attribute's name
+     * @param value its value, or null
+     * @return what {@code minimal} writes, or null for nothing
+     */
+    static String minimal(String key, String value) {
+        if (value == null || MINIMAL_DROPS.contains(key)) {
+            return null;
+        }
+        return switch (key) {
+            case PRIMITIVE -> primitiveClass(value);
+            case GEN_AI_TOOL_NAME -> toolClass(value);
+            case STEP_VERB -> verbClass(value);
+            case EXPECT_PATH -> pathRoot(value);
+            case TOPIC -> topicClass(value);
+            default -> MINIMAL_KEPT.contains(key) ? value : hash(value);
+        };
+    }
+
+    /**
+     * An agent event's topic in {@code minimal}: a generic topic ({@link #GENERIC_TOPICS}) as it is, {@code hook} for
+     * a hook's topic ({@code hook.<id>}, the id being the pack's), {@code pack} for any other (a domain module's).
+     */
+    static String topicClass(String topic) {
+        if (topic == null) {
+            return null;
+        }
+        if (GENERIC_TOPICS.contains(topic)) {
+            return topic;
+        }
+        return topic.startsWith(Topics.HOOK_PREFIX) ? "hook" : "pack";
     }
 
     /** A primitive's class in {@code minimal}: its base namespace, or {@code pack}. */

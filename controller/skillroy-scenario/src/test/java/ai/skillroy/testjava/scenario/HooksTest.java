@@ -133,7 +133,7 @@ class HooksTest {
     // ------------------------------------------------------------------------------------------ the installer
 
     @Test
-    void offAndNoCatalogueSkipAndSendNothing() throws Exception {
+    void offAndNoCatalogueSkipAndSendNothingButTheHealthRead() throws Exception {
         assertEquals(Map.of("mode", "off", "skipped", "off"), install(HooksMode.OFF, true).record());
         pack.hooks = HookCatalogue.EMPTY;
         HookInstaller.Result none = install(HooksMode.AUTO, true);
@@ -142,7 +142,49 @@ class HooksTest {
         pack.hooks = HookCatalogue.builder(catalogue("toy", 1)).disable("toy.applied").disable("toy.missing")
                 .build();
         assertEquals("no catalogue", install(HooksMode.AUTO, true).record().get("skipped"), "nothing enabled");
-        assertTrue(agent.callsTo("hook.health").isEmpty() && agent.callsTo("hook.install").isEmpty());
+        // Fix wave (Phase 6 review, FC): step 0 reads hook.health whenever hook.engine is OK, and sends nothing else.
+        assertEquals(3, agent.callsTo("hook.health").size());
+        assertEquals(Long.valueOf(HookInstaller.HEALTH_TIMEOUT_MS),
+                agent.callsTo("hook.health").get(0).options().timeoutMs());
+        assertTrue(agent.callsTo("hook.install").isEmpty());
+    }
+
+    /**
+     * Fix wave (Phase 6 review, FC, 2026-10-09; finding L1-S2, D129): a stub armed on the target is ERROR /
+     * ENVIRONMENT under {@code replay} whatever ends the install, {@code OFF} and a pack without an enabled catalogue
+     * entry included, and is recorded in the {@code skipped} record under {@code live}; a failed health read refuses
+     * {@code replay} and leaves a live skip alone; without {@code hook.engine} {@code OK} nothing is read.
+     */
+    @Test
+    void anArmedStubIsEnvironmentInReplayEvenWhenTheInstallIsSkipped() throws Exception {
+        stubs = List.of("toy.applied");
+        for (HooksMode mode : new HooksMode[] {HooksMode.OFF, HooksMode.AUTO}) {
+            pack.hooks = mode == HooksMode.OFF ? catalogue("toy", 1) : HookCatalogue.EMPTY;
+            HookInstaller.Refused e = assertThrows(HookInstaller.Refused.class, () -> install(mode, true),
+                    mode.label());
+            assertEquals(FailureKind.ENVIRONMENT, e.kind());
+            assertEquals("a stub is armed on the target: toy.applied; `skillroy hooks status`", e.getMessage());
+            assertEquals(List.of("toy.applied"), e.detail().get("armed"));
+            assertEquals(false, e.record().get("ok"));
+            Map<String, Object> live = install(mode, false).record();
+            assertEquals(mode == HooksMode.OFF ? "off" : "no catalogue", live.get("skipped"));
+            assertEquals(List.of("toy.applied"), live.get("armed"), "recorded in the skipped record");
+        }
+        assertTrue(agent.callsTo("hook.install").isEmpty());
+
+        agent.error("hook.health", ErrorCodes.INTERNAL_ERROR, "boom");
+        HookInstaller.Refused failed = assertThrows(HookInstaller.Refused.class, () -> install(HooksMode.OFF, true));
+        assertEquals(FailureKind.ENVIRONMENT, failed.kind());
+        assertTrue(failed.getMessage().startsWith("hook.health failed: INTERNAL_ERROR"), failed.getMessage());
+        assertEquals(Map.of("mode", "off", "skipped", "off"), install(HooksMode.OFF, false).record());
+
+        int reads = agent.callsTo("hook.health").size();
+        pack.hooks = catalogue("toy", 1);
+        agent.capability(HookInstaller.ENGINE, CapabilityState.UNAVAILABLE, "no Instrumentation in EMBEDDED mode");
+        assertEquals(Map.of("mode", "off", "skipped", "off"), install(HooksMode.OFF, true).record());
+        assertEquals("hook.engine is UNAVAILABLE: no Instrumentation in EMBEDDED mode",
+                install(HooksMode.AUTO, true).record().get("skipped"));
+        assertEquals(reads, agent.callsTo("hook.health").size(), "nothing is read without hook.engine OK");
     }
 
     @Test
@@ -340,6 +382,24 @@ class HooksTest {
         assertEquals(List.of("toy.applied"), runLog(dir).get(1).get("armed"));
     }
 
+    /** Fix wave (Phase 6 review, FC; finding L1-S2): {@code --hooks off} does not let a replay run past a stub. */
+    @Test
+    void offStillEndsAReplayRunOnAnArmedStubAndRecordsItInLive(@TempDir Path dir) throws Exception {
+        toyInputFiresTheHook();
+        stubs = List.of("toy.applied");
+        RunResult replay = new PlanExecutor(pack, agent, options().withOutputDir(dir.resolve("replay"))
+                .withHooks(HooksMode.OFF)).run(plan(GUARDED));
+        assertEquals(Status.ERROR, replay.status());
+        assertEquals(FailureKind.ENVIRONMENT, replay.failureKind());
+        assertTrue(replay.message().startsWith("a stub is armed on the target"), replay.message());
+        assertTrue(agent.callsTo("toy.input").isEmpty(), "no step ran");
+        RunResult live = new PlanExecutor(pack, agent, options().withOutputDir(dir.resolve("live"))
+                .withHooks(HooksMode.OFF).withBind(TestCredentials.bind().withMode(BindMode.LIVE))).run(plan(GUARDED));
+        assertEquals(Status.DEGRADED, live.status(), live.message());
+        Map<String, Object> record = PlanExecutorTest.stripTime(runLog(dir.resolve("live")).get(1));
+        assertEquals(Map.of("mode", "off", "skipped", "off", "armed", List.of("toy.applied")), record);
+    }
+
     @Test
     void offInstallsNothingAndTheFactRootIsEmptyWithoutTheModule(@TempDir Path dir) throws Exception {
         toyInputFiresTheHook();
@@ -375,6 +435,77 @@ class HooksTest {
         }
         agent.error("hook.health", ErrorCodes.INTERNAL_ERROR, "boom");
         assertThrows(AgentRpcException.class, () -> BaseFacts.hooks(() -> 0L).fetch(agent));
+    }
+
+    /** {@code hook.events} as the agent answers it (phase6-contracts.md 4.2): the oldest first, at most {@code limit}. */
+    private void eventsHonourTheLimit() {
+        agent.on("hook.events", params -> {
+            long since = ((Number) params.get("since")).longValue();
+            long limit = ((Number) params.get("limit")).longValue();
+            String topic = "hook." + params.get("id");
+            List<Object> events = new ArrayList<>();
+            for (Event e : List.copyOf(agent.bus)) {
+                if (events.size() == limit) {
+                    break;
+                }
+                if (e.seq() > since && e.topic().equals(topic)) {
+                    events.add(e.toJson());
+                }
+            }
+            return Map.of("events", events);
+        });
+    }
+
+    /**
+     * Fix wave (Phase 6 review, FC, 2026-10-09; finding L1-S3): more fires since the mark than one page holds are all
+     * counted, and {@code last} is the newest one's payload, not the thousandth.
+     */
+    @Test
+    void theFactRootPagesToTheNewestFireAndCountsEveryOne() throws Exception {
+        eventsHonourTheLimit();
+        installed = Map.of("id", "toy", "hash", "x");
+        agent.publish("hook.toy.applied", Map.of("n", 0L));
+        long since = agent.lastSeq();
+        for (long n = 1; n <= 1500; n++) {
+            agent.publish("hook.toy.applied", Map.of("n", n));
+        }
+        Map<?, ?> fact = (Map<?, ?>) ((List<?>) BaseFacts.hooks(() -> since).fetch(agent)).get(0);
+        assertEquals(1500L, fact.get("count"));
+        assertEquals(Map.of("n", 1500L), fact.get("last"), "the newest fire");
+        assertFalse(fact.containsKey("truncated"));
+        assertEquals(2, agent.callsTo("hook.events").size(), "a full page, then a short one");
+        assertEquals(since, ((Number) agent.callsTo("hook.events").get(0).params().get("since")).longValue());
+        assertEquals(since + 1000, ((Number) agent.callsTo("hook.events").get(1).params().get("since")).longValue(),
+                "the second page starts after the first page's last seq");
+    }
+
+    /**
+     * Fix wave (Phase 6 review, FC): past ten full pages the count is a lower bound marked {@code truncated}, and
+     * {@code last} comes from the bus's last 1000 events, or is null when the hook did not fire among them.
+     */
+    @Test
+    void pastTenPagesTheCountIsALowerBoundAndLastIsTheNewestOrNull() throws Exception {
+        eventsHonourTheLimit();
+        installed = Map.of("id", "toy", "hash", "x");
+        long since = agent.lastSeq();
+        for (long n = 1; n <= 10_500; n++) {
+            agent.publish("hook.toy.applied", Map.of("n", n));
+        }
+        Map<?, ?> fact = (Map<?, ?>) ((List<?>) BaseFacts.hooks(() -> since).fetch(agent)).get(0);
+        assertEquals(10_000L, fact.get("count"), "ten pages");
+        assertEquals(true, fact.get("truncated"));
+        assertEquals(Map.of("n", 10_500L), fact.get("last"), "the newest, from the tail read");
+        assertTrue(fact.get("lastFiredMs") instanceof Long);
+        assertEquals(11, agent.callsTo("hook.events").size(), "ten pages and the tail read");
+
+        for (int i = 0; i < 1000; i++) {
+            agent.publish("other.topic", Map.of());
+        }
+        Map<?, ?> stale = (Map<?, ?>) ((List<?>) BaseFacts.hooks(() -> since).fetch(agent)).get(0);
+        assertEquals(10_000L, stale.get("count"));
+        assertEquals(true, stale.get("truncated"));
+        assertNull(stale.get("last"), "no older payload in place of the newest");
+        assertNull(stale.get("lastFiredMs"));
     }
 
     // ------------------------------------------------------------------------------------------ the session

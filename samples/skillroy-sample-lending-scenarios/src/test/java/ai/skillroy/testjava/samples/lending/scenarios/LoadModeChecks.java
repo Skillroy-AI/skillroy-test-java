@@ -1074,6 +1074,14 @@ abstract class LoadModeChecks {
         assertEquals(List.of(), leaks, "the password leaked into run outputs");
         assertTrue(kinds.containsAll(List.of("run.jsonl", "bindings.json", "snapshot.json", "app-state.json",
                 "dialogs.json", "events.json", "junit.xml")), "every kind of output was looked at: " + kinds);
+        // Fix wave (Phase 6 review, FC; finding L3-S3): the files Phase 6 writes were looked at too (phase6-contracts.md
+        // 13.2 item 10): every run archives its matrix, and the hooks leg's order 67 writes the CAPTURE events of
+        // sign.on.checked below this root. No load mode's root holds spans.jsonl (the telemetry IT writes and scans
+        // its own under it-runs/telemetry): a file of that name here would be read like any other.
+        assertTrue(kinds.contains("capabilities.json"), "the archived matrices were looked at: " + kinds);
+        if (mode() == LendingTarget.Mode.JAVAAGENT_HOOKS) {
+            assertTrue(kinds.contains("sign-on-events.json"), "the hooks evidence was looked at: " + kinds);
+        }
         assertTrue(text >= 40 && images >= 5, text + " text files, " + images + " images");
         // The password was there to be leaked: it was sent (and recorded masked, with the parameter announced to the
         // agent as secret, A34). Since Phase 2 it comes from credentials.yaml: bindings.json names the credential and
