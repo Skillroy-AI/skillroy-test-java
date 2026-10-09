@@ -2104,6 +2104,15 @@ each page's `text`, read through the run's web path; a pack root named `web` hid
 `swing.dialogs` (`dialogs[0].text`); `caps` = `agent.capabilities` as a list of `{id, state, reason, strategy}` sorted
 by id, because an id with dots cannot be a path field (`caps[id=swing.tree].state`).
 
+(Phase 6, built 2026-10-09, CP; P6 §6.3, D131) A seventh base root `hooks`, after `web`, a list as `caps` is (a hook id
+holds dots): `[{id, state, count, lastFiredMs, armed, last}]` sorted by id, read with the filter form
+(`hooks[id=limit.applied].last.returned`). The ids and states come from `hook.health {}`; per id,
+`hook.events {since: stepsSinceSeq, id, limit: 1000}` gives `count` (the number of those events), `last` (the newest
+one's payload) and `lastFiredMs` (its time), where `stepsSinceSeq` is the start mark's sequence (§8.5), so that the root
+describes the run's steps only (a session counts from its own start mark). `METHOD_NOT_FOUND`,
+`CAPABILITY_UNAVAILABLE` or `NOT_READY` from `hook.health` (or `hook.events`) give an empty list. A pack root named
+`hooks` hides it. `DomainPack` gains `hooks()` and `settings()` (P2 §6.1).
+
 ### 8.4 Expectations
 
 Path grammar: `root(.field | [n] | [field=value] | [field~regex])*`; `last` and `first` are accepted as list
@@ -2282,6 +2291,18 @@ neither a `cleanup` nor a `recover` record, and failure evidence is collected on
 re-bound the fixtures to do so; the H2 lost-state rule is unchanged.) The rule also governs the Phase 2 `resolve`
 command, which binds and stops (P2 §12.1).
 
+**Step 0b: hooks (Phase 6, built 2026-10-09, CP; P6 §5.3, §6.1, §6.4, D127, D129, D130).** Between the first read of the
+capability matrix and the `requires` check (`requires:` may name a `hook.<id>` capability that exists only after the
+install), `HookInstaller` installs the pack's hook catalogue under `RunOptions.hooks` (`AUTO`, the default, `ON` or
+`OFF`; the eleventh component, every earlier constructor kept): one `hooks` record (`{mode, skipped}`,
+`{mode, alreadyInstalled, catalogue, armed}` or `{mode, catalogue, installed, unavailable: [{id, state, reason,
+fallback}], armed, touched, ms, otherAgents}`); an armed stub under `replay`, another catalogue on the target or an
+agent error of the install is ERROR / ENVIRONMENT, hooks `ON` without a catalogue or a usable `hook.engine`
+PRECONDITION_FAILED (nothing else is sent: the rule above holds). The matrix is read again when something was
+installed or found installed, archived as `capabilities.json` with a `capabilities {hash, ids, file}` record, and then
+checked against `requires`. The start mark's sequence is kept as `stepsSinceSeq` for the base root `hooks` (§8.3).
+Hooks stay installed after the run; nothing of them enters `plan.json` or the fingerprint.
+
 Outputs in `RunOptions.outputDir` (one directory per scenario: files of an earlier run there are replaced or
 removed):
 
@@ -2291,6 +2312,7 @@ removed):
 | `bindings.json` | `{scenarioId, planHash, resolutions:{slot:{strategy, value}}}`, the Phase 1 subset of the design's shape. **(Phase 2, built 2026-10-02)** written when the bind ends and again at run end, in the shape of P2 §11.3 (with `resolveHash`, `mode`, `envId`, `env`, `oracles`, `captured`, and per slot its credential reference, never a joined field) |
 | `failure/` (failures during steps or verify; never after the agent is lost) | `snapshot.json`, `app-state.json`, `dialogs.json`, `events.json` (the last 200 events) and `capture.png` (when `swing.capture.paint` is OK). The UI as indented text is also in `RunResult.detail.snapshot`. (Phase 4, built 2026-10-07; P4 §6.4: for a target with an indexed browser also `web-browsers.json` and, for each browser visible in Swing, at most four, `web-<ref>-aria.json` and `web-<ref>.png`, or `web-<ref>-error.txt` for a failed read; `web-trace.zip` when the scenario traced the CDP path and no call may carry a secret; P4 §6.2: `RunResult.detail.snapshot` renders a `WEB` surface after the Swing windows) |
 | `artifacts/capture.png` | kept on success when the scenario lists `artifacts: [capture]` |
+| `capabilities.json` (Phase 6, built 2026-10-09, CP; P6 §6.4, D130) | the matrix the run used, once final (after step 0b), in the wire shape of `GET /capabilities` (`CapabilityMatrix.toJson()`), ids sorted, masked; `run.jsonl` names its hash (`CapabilityMatrix.hash()`) in the `capabilities` record. `ExecutorSession.open` writes the same file into its output directory, the MCP server into its `--out` |
 | `inference.jsonl` (Phase 5, built 2026-10-08; P5 §7.4) | beside `cost-ledger.jsonl` (P2 §11.3): one masked record per gateway call of the run, with the provider, the requested and the answering model, the request id and fingerprint, the stop reason, the token counts, the cost and the masked structured answer; the masked prompt text only under `--log-prompts`. `re-resolve`, `triage` and `session` write one into their own output directories |
 | `failure/triage.json`, `failure/triage.md` (Phase 5, built 2026-10-08; P5 §11.2) | written by `skillroy triage` over a finished run that ended `FAIL` or `ERROR`, never by the run: the label and the summary a model gave (both answers, the models, request ids and cost) and a readable copy. The command's own `inference.jsonl` and `cost-ledger.jsonl` go to `<run dir>/triage/`; the run's `run.jsonl`, `junit.xml` and status are untouched |
 
@@ -2342,7 +2364,9 @@ with `RunOptions` and with an explicit `DomainPack`) returns JUnit 5 `DynamicTes
 `ScenarioSource.directory(Path)` and `ScenarioSource.classpath(String…)` list the scenario files. PASS returns,
 FAIL fails the test, ERROR throws `ScenarioRunException`, DEGRADED follows `RunOptions.degradedAs` (aborted, shown
 as skipped, by default). A file that does not load or compile is a test that throws its `ScenarioException`. The
-connection is obtained lazily and never closed by the glue.
+connection is obtained lazily and never closed by the glue. (Phase 6, built 2026-10-09, CP; P6 §5.3, §6.1) The
+overload without `RunOptions` reads `-Dskillroy.hooks=auto|on|off` (default `auto`) into `RunOptions.hooks`; another
+value is the single test `environment`.
 
 `skillroy-cli` (`ai.skillroy.testjava.cli.Main`). The build assembles `target/skillroy-cli/` (`bin/skillroy`, a
 POSIX `sh` launcher, plus `lib/*.jar`, and at the top level `LICENSE`, `NOTICE` and `THIRD-PARTY.txt`; **1.x, built
@@ -2366,6 +2390,7 @@ agent home is not bundled.
 | `events [--since n] [--topics globs] [--count n] [--timeout <d>]` | streams events until interrupted |
 | `compile <yaml\|dir>… [--out <dir>] [--check] [--pack <jar>]…` | writes `<scenario-id>.plan.json` next to the YAML or into `--out`; `--check` writes nothing and reports a missing or stale plan |
 | `run <yaml\|plan.json\|dir>… [--out <dir>] [--junit <file>] [--suite <name>] [--degraded-as skipped\|failure\|pass] [--step-timeout <d>] [--pack <jar>]…` | compiles and loads every file first (a broken file means nothing runs), then runs them in order; with `--out` each scenario writes into `<out>/<scenario-id>/`. **(Phase 2, built 2026-10-02; P2 §7.2)** `--pack <jar>` accepts any jar (or class directory), with or without a `DomainPack` in it, so that a JDBC driver for a controller-side source reaches the loader the CLI sets as context class loader while scenarios run (that loader is as in Phase 1); the Phase 2 `run` options (`--mode`, `--env`, `--bindings`, `--credentials`, `--yes`, `--approved-by`, `--write-bindings`) and the commands `resolve` and `diff-bindings` are P2 §12.1 |
+| `hooks status\|install\|remove`, `--hooks` (Phase 6, built 2026-10-09, CP; P6 §6.1, §6.2) | `skillroy hooks status` shows the target's `hook.health` (states, counts, the armed stubs, the spy's counters, the installed catalogue) and the probe's `otherAgents` beside the pack's catalogue (id, version, hash, entries, warnings) and whether they match; `install` runs `HookInstaller` in mode `ON` and prints the `hooks` record (exit 1 when refused); `remove [--ids a,b]` runs `hook.remove` and prints each class's verification (exit 1 for `HOOK_VERIFY_FAILED`). Listed after `session`. `run`, `session` and `mcp` take `--hooks auto\|on\|off` (a usage error, 64, before the agent is contacted otherwise); `mcp` installs at the server's start through its session |
 | `re-resolve`, `mcp`, `author`, `triage`, `session` (Phase 5, built 2026-10-08; P5 §13.4) | the commands of the AI layer: batch re-resolution of an environment's bindings (P5 §8.2; it needs a job budget), the MCP server over stdio (P5 §9.2), the planner (P5 §10.2), triage of a finished run (P5 §11.2) and the interactive session (P5 §12.4). Each takes `--help` and `--json`, the connection options below where it connects, and the exit codes below unless P5 states otherwise |
 | `run` and `resolve`, inference options (Phase 5, built 2026-10-08; P5 §13.4) | `--inference claude\|recorded\|none`, `--recordings <dir>`, `--inference-file <path>`, `--budget-scenario <usd>` and `--log-prompts`; the summary prints `model cost: $x (budget $y)` after `model calls: N`, and `--json` carries `modelCost`, `budget` and a summary of the `inference` records. `run --mode re-resolve` is refused (P2 §12.1) |
 
@@ -2688,6 +2713,21 @@ seven awaited UI steps, one explicit wait) and of each new negative scenario.
 ---
 
 ## 10. End-to-end acceptance for Phase 1
+
+(Phase 6, built 2026-10-09, CP; P6 §8, §9.5, §13.2) `LoadModeChecks` gains check **1b** (no JEP 451 text in the
+target's merged log in `JAVAAGENT`, `JAVA_TOOL_OPTIONS`, the hooks leg and `EMBEDDED`, on Java 8 and Java 25; in
+`ATTACH` on a target of Java 21 or newer the texts must be there, the positive control) and check **1c** (the matrix
+after `target.ready` equals the committed golden of the mode, `src/test/resources/capabilities/golden/<mode slug>.json`,
+normalised by `CapabilityGolden`: ids, states and strategy strict, reason by presence, the allow-list
+`allow-differences.json`, empty; `-Dskillroy.golden.write=true` rewrites). The `@Order` values are renumbered in tens
+(check 1 is 10, 1b and 1c are 20 and 30, checks 2 to 19 are 40 to 210) so that `HookChecks` takes values between them.
+Check 13 also clicks the keypad's `SIGN_OFF` on the `DISPATCH` rung; check 14 expects seven committed scenarios (E is
+DEGRADED, reported as skipped, without hooks and PASS in the hooks leg) and every glue run's `hooks` record and
+`capabilities.json`; checks 1 and 15 list the `hooks` module in the hooks leg, where `hook.engine` is `OK` (absent in
+every other mode). The hooks leg is a fifth mode, `JAVAAGENT_HOOKS` (`-javaagent` with
+`optionalModules=skillroy-agent-hooks`; `LendingTarget.attach()` reuses the launch's options), run by
+`LendingEndToEndIT.JavaAgentHooks` with `HookChecks` (P6 §13.2 items 1-3, 6); `ResolutionJavaAgentHooksSeedA/B`,
+`InferenceEndToEndIT.JavaAgentHooksSeedA/B` and `BranchEndToEndIT` are P6 §13.2 items 4, 5 and 8.
 
 `LendingEndToEndIT` (failsafe, needs a display) launches the sample lending desk as a child process with the Java
 executable named by `-Dskillroy.it.targetJava` (default: the running JVM's), with `-Dlending.pin=<a value>`, and,

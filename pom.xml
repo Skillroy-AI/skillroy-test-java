@@ -72,6 +72,7 @@
     <module>samples/skillroy-sample-lending-app</module>
     <module>samples/skillroy-sample-lending-agent</module>
     <module>samples/skillroy-sample-lending-pack</module>
+    <module>samples/skillroy-sample-lending-pack-branch</module>
     <module>samples/skillroy-sample-lending-scenarios</module>
   </modules>
 
@@ -237,6 +238,11 @@
       <dependency>
         <groupId>ai.skillroy</groupId>
         <artifactId>skillroy-sample-lending-pack</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>ai.skillroy</groupId>
+        <artifactId>skillroy-sample-lending-pack-branch</artifactId>
         <version>${project.version}</version>
       </dependency>
 

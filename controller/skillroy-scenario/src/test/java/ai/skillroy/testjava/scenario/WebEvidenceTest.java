@@ -140,7 +140,7 @@ class WebEvidenceTest {
         assertEquals("page of h7", front.get("text"));
         assertEquals(List.of(), seen);
         assertEquals("web", web.root());
-        assertTrue(BaseFacts.ROOTS.equals(List.of("app", "ui", "dialogs", "caps", "devices", "web")));
+        assertTrue(BaseFacts.ROOTS.equals(List.of("app", "ui", "dialogs", "caps", "devices", "web", "hooks")));
         assertEquals("web", BaseFacts.all().get(5).root());
     }
 

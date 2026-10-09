@@ -160,4 +160,34 @@ class InferenceEndToEndIT {
             return Env.SEED_B;
         }
     }
+
+    /** Item 1 on seed A with the hooks module loaded (phase6-contracts.md 13.2 items 4 and 5). */
+    @Nested
+    @Order(9)
+    class JavaAgentHooksSeedA extends InferenceChecks {
+        @Override
+        LendingTarget.Mode mode() {
+            return LendingTarget.Mode.JAVAAGENT_HOOKS;
+        }
+
+        @Override
+        Env env() {
+            return Env.SEED_A;
+        }
+    }
+
+    /** Item 1 on seed B with the hooks module loaded (phase6-contracts.md 13.2 items 4 and 5). */
+    @Nested
+    @Order(10)
+    class JavaAgentHooksSeedB extends InferenceChecks {
+        @Override
+        LendingTarget.Mode mode() {
+            return LendingTarget.Mode.JAVAAGENT_HOOKS;
+        }
+
+        @Override
+        Env env() {
+            return Env.SEED_B;
+        }
+    }
 }

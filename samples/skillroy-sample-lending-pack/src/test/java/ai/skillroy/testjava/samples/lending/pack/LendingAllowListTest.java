@@ -178,6 +178,6 @@ class LendingAllowListTest {
         Plan plan = PlanCompiler.compile(yaml.getBytes(StandardCharsets.UTF_8), "llm-sql-check.yaml", pack);
         assertEquals(Plan.INFERENCE_BIND, plan.inference());
         assertEquals(List.of("llm-sql"), plan.slot("supervisor").query().strategy());
-        assertEquals("0.4.0", plan.packVersion());
+        assertEquals("0.5.0", plan.packVersion());
     }
 }

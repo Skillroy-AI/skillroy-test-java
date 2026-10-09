@@ -18,6 +18,7 @@ package ai.skillroy.testjava.scenario.resolve;
 
 import ai.skillroy.testjava.controller.AgentConnection;
 import ai.skillroy.testjava.data.DataChannel;
+import ai.skillroy.testjava.scenario.pack.PackSettings;
 
 /**
  * What a {@link Verifier} may use. Implemented by the engine; valid only during the {@code verify} call it was passed
@@ -36,4 +37,12 @@ public interface VerifyContext {
 
     /** What is left of the bind budget, in milliseconds. */
     long remainingMs();
+    /**
+     * The running pack's settings (phase6-contracts.md 11.1, decision D145): the constants an overlay may change, read
+     * with a default ({@code settings().get("<packId>.<name>", "<default>")}). {@link PackSettings#EMPTY} by default,
+     * for a test's fake; the engine's contexts return the running pack's.
+     */
+    default PackSettings settings() {
+        return PackSettings.EMPTY;
+    }
 }

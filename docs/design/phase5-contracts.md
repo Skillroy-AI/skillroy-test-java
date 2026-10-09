@@ -1190,6 +1190,15 @@ calls reach any of these (D96); anything with `confirm: true` set by the server 
 model's request is never the confirmation). In read-only mode (the default) a mutating tool is not listed at all, so a
 client cannot even ask.
 
+(Phase 6, built 2026-10-09, CP; P6 §4.2) "Hook installation" is widened and named: `ToolProjection.NEVER_OFFERED`
+(`hook.probe`, `hook.install`, `hook.stub`, `hook.remove`, `rule.check`, `rule.submit`, `rule.unload`) is offered by no
+policy whatever the flags (`hook.install` and `hook.remove` are not mutating, `hook.probe` is a read), and
+`PlanPolicy` refuses every `hook.*` and `rule.*` primitive in a client's plan ("never run for a client") except the
+three reads of `ToolProjection.HOOK_READS`, `hook.health`, `hook.events` and `rule.list`, which every policy offers as
+reads, the session service's included (D-CP-4). The pack's catalogue is installed by the server itself at its start
+under `--hooks` (P6 §6.1), through its session's open; the server reads the matrix again after it and writes
+`capabilities.json` into its `--out`.
+
 As built (2026-10-08, I1, `…inference.tools.ToolProjection` and `WorkflowTools`): every verb counts as mutating (a
 verb has no mutating flag); a session never offers `web.evaluate`; a verb's optional keys become nullable in the strict
 tool schema, numeric bounds and lengths are dropped and `required` lists the schema's own required keys first, then
@@ -1287,6 +1296,10 @@ started, which it has before the client's first message is read) and signals the
 this pack); `skillroy://run/<id>/run.jsonl`, `skillroy://run/<id>/journal.jsonl` and `skillroy://run/<id>/failure/<file>`
 for runs and sessions the server started. Resources are listed with `tools/list`-style annotations (`readOnly`) and
 served as text, or as `image/png` for a capture.
+
+(Phase 6, built 2026-10-09, CP; P6 §4.2, §6.4) `skillroy://env/profile`'s matrix is the one read after the start's
+hook install (with the `hook.<id>` capabilities); a run the server started holds its `capabilities.json` beside its
+`run.jsonl`. No resource serves a hook spec or takes one.
 
 ### 9.5 `StepLibrary.argsSchema` (`skillroy-scenario`)
 
@@ -1496,6 +1509,10 @@ routing, sync, capture, the prompt check and failure classification. The session
 client of that entry, as the MCP server and the CLI are; the model is a client of the service.
 
 ### 12.2 `ExecutorSession` and `StepOutcome` (`ai.skillroy.testjava.scenario`)
+
+(Phase 6, built 2026-10-09, CP; P6 §5.3, §6.3, §6.4) `open` installs the pack's hooks under `SessionOptions.hooks`
+(P4 §6.1's note), writes `capabilities.json` and exposes the `hooks` record as `hooks()`; the session's base root
+`hooks` counts a hook's events from the session's own start mark.
 
 ```java
 public final class ExecutorSession implements AutoCloseable {
@@ -1767,6 +1784,9 @@ agent with scripted events (§15.1). An overlay's agent module never sees a mode
 
 ### 13.2 `plan.json` version 5
 
+(Phase 6, built 2026-10-09, CP; P6 §5.2, D127) Version 5 stays the written version through Phase 6: the hook
+catalogue, the hooks switch and the overlay add nothing to a plan but the composite `packVersion` of an overlaid pack.
+
 `Plan.VERSION` becomes 5; the reader accepts 1-5 (P2 D18, P3 D41, P4 D58: one writer, older executors refuse newer
 plans). The field `inference` is written `bind` when any slot's strategy list contains a token whose strategy
 `needsModel()` and `none` otherwise; the reader accepts `none` and `bind` and refuses `run` with "not in this
@@ -1791,6 +1811,10 @@ the loader sees it and so that a test keeps the generator honest against the com
 JSON Schema library and adds no dependency.
 
 ### 13.4 CLI
+
+(Phase 6, built 2026-10-09, CP; P6 §6.1, §6.2) `run`, `session` and `mcp` gain `--hooks auto|on|off` (`mcp` installs
+at the server's start; `--hooks on` refuses the start when the hooks cannot be installed), and the command
+`skillroy hooks status|install|remove` is listed after `session` (P1 §8.6).
 
 New options of `run` and `resolve` (P2 §12.1 stands): `--inference claude|recorded|none`, `--recordings <dir>`,
 `--inference-file <path>`, `--budget-scenario <usd>`, `--log-prompts`; `run --mode re-resolve` is refused (§8.1).
@@ -1869,6 +1893,17 @@ trailing `skillroy: zero model calls` test is unchanged.
 ## 14. The sample
 
 ### 14.1 Pack (`skillroy-sample-lending-pack`, version 0.4.0)
+
+(Phase 6, built 2026-10-09, CP; P6 §6.3, §11.3) The pack is **0.5.0**: its hook catalogue
+`META-INF/skillroy/hooks/lending.yaml` (`limit.applied`, `access.checked`, `waiver.evaluated`, `sign.on.checked` off,
+`line.amount`), `settings()` (`lending.maxReturnSetting = max_return`, which the `SystemLimit` resolver reads through
+its context), and the public surface an overlay needs (`LendingResolvers` with its resolver classes, their ids and SQL
+texts and constructors taking a statement; `LendingAllowList.of(limitColumn, maxReturnSetting)`; the verifier ids as
+`LendingPack` constants). The allow-list's descriptions are unchanged for the standard desk, so scenario D's recorded
+requests still match; the session's scripted stand-ins, whose vocabulary names the pack version, were regenerated by the
+fixture update path. Gap 49 (`LendableItem` without induction) is not taken. The sample application gains the branch
+edition (`lending.edition`), and `AccessControl.check` reads the return limit through `limit(code, LIMIT_RETURN)`; the
+agent module's `app.state` gains `edition`.
 
 - **`sqlAllowLists()`**: one list for source `lending`, dialect `HSQLDB`: the tables `staff` (`code` key; `name`
   personal; `active`; `password` **not** allow-listed: it is the secret column, masked by `PASSWORD_MASK`),

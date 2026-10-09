@@ -357,6 +357,14 @@ public final class PlanCompiler {
                         + (e.getMessage() == null ? e.toString() : e.getMessage()));
             }
             this.catalogue = read == null ? ResolutionCatalogue.EMPTY : read;
+            try {
+                // phase6-contracts.md 5.2: a malformed hook catalogue is a compile error naming the resource, although
+                // nothing of it enters the plan.
+                pack.hooks();
+            } catch (RuntimeException e) {
+                throw error(0, "pack '" + pack.id() + "': its hook catalogue is invalid: "
+                        + (e.getMessage() == null ? e.toString() : e.getMessage()));
+            }
             if (stored != null) {
                 for (StoredTable table : stored) {
                     if (table == null || tables.put(table.name(), table) != null) {

@@ -44,7 +44,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class BindingGlueTest {
 
     private static final List<String> PROPERTIES = List.of(BindOptions.PROP_MODE, BindOptions.PROP_ENV,
-            BindOptions.PROP_BINDINGS, BindOptions.PROP_APPROVE, "skillroy.credentials");
+            BindOptions.PROP_BINDINGS, BindOptions.PROP_APPROVE, "skillroy.credentials", ScenarioTests.HOOKS_PROPERTY);
 
     static final String ORACLE = """
             scenario: mini-oracle
@@ -127,6 +127,32 @@ class BindingGlueTest {
                 .dynamicTests(ScenarioSource.directory(scenarios), () -> agent).toList().get(0).getExecutable()
                 .execute());
         assertEquals("NOT_APPROVED", refused.result().detail().get("reason"), "the glue never prompts");
+    }
+
+    /**
+     * phase6-contracts.md 5.3, 6.1: {@code -Dskillroy.hooks} reaches {@code RunOptions.hooks} through the overload
+     * without options: {@code on} with a pack that has no hook catalogue refuses the run as PRECONDITION_FAILED, the
+     * default ({@code auto}) runs it, and a value that is none of the three is the single test {@code environment}.
+     */
+    @Test
+    void theHooksPropertyReachesTheRunsSwitch() throws Throwable {
+        Path scenarios = scenarios("scenario: plain\npack: mini\nsteps: []\n");
+        ScenarioTests.dynamicTests(ScenarioSource.directory(scenarios), () -> agent).toList().get(0).getExecutable()
+                .execute();
+        System.setProperty(ScenarioTests.HOOKS_PROPERTY, "on");
+        ScenarioRunException on = assertThrows(ScenarioRunException.class, () -> ScenarioTests.dynamicTests(
+                ScenarioSource.directory(scenarios), () -> agent).toList().get(0).getExecutable().execute());
+        assertEquals(FailureKind.PRECONDITION_FAILED, on.result().failureKind());
+        assertTrue(on.result().message().contains("has no hook catalogue"), on.result().message());
+        System.setProperty(ScenarioTests.HOOKS_PROPERTY, "off");
+        ScenarioTests.dynamicTests(ScenarioSource.directory(scenarios), () -> agent).toList().get(0).getExecutable()
+                .execute();
+        System.setProperty(ScenarioTests.HOOKS_PROPERTY, "sometimes");
+        List<DynamicTest> bad = ScenarioTests.dynamicTests(ScenarioSource.directory(scenarios), () -> agent).toList();
+        assertEquals(List.of(ScenarioTests.ENVIRONMENT_TEST), names(bad));
+        AssertionFailedError failed = assertThrows(AssertionFailedError.class, () -> bad.get(0).getExecutable()
+                .execute());
+        assertTrue(failed.getMessage().contains("skillroy.hooks"), failed.getMessage());
     }
 
     @Test

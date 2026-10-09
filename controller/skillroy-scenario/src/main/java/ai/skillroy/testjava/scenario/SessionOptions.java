@@ -16,6 +16,7 @@
 
 package ai.skillroy.testjava.scenario;
 
+import ai.skillroy.testjava.scenario.hooks.HooksMode;
 import ai.skillroy.testjava.scenario.resolve.BindMode;
 import ai.skillroy.testjava.scenario.web.WebSettings;
 
@@ -46,10 +47,12 @@ import java.util.regex.Pattern;
  * @param webPathLoader the class loader through which {@code ServiceLoader<WebPath>} finds a controller-side web path;
  *     null means the thread's context class loader when the session opens
  * @param id the session id, {@code [a-z0-9-]+}; null generates one from the clock
+ * @param hooks the hooks switch {@link ExecutorSession#open} installs the pack's hook catalogue under
+ *     (phase6-contracts.md 5.3, 6.1, decision D129), as a run's step 0b does; null means {@link HooksMode#AUTO}
  */
 public record SessionOptions(Path outputDir, Duration stepTimeout, Clock clock, BindOptions bind, boolean readOnly,
                              boolean recoverOnClose, WebSettings web, UiSettings ui, ClassLoader webPathLoader,
-                             String id) {
+                             String id, HooksMode hooks) {
 
     /** The step timeout when none is given. */
     public static final Duration DEFAULT_STEP_TIMEOUT = Duration.ofSeconds(10);
@@ -74,64 +77,79 @@ public record SessionOptions(Path outputDir, Duration stepTimeout, Clock clock, 
         if (id != null && !ID.matcher(id).matches()) {
             throw new IllegalArgumentException("a session id must match [a-z0-9-]+, found \"" + id + "\"");
         }
+        hooks = hooks == null ? HooksMode.AUTO : hooks;
+    }
+
+    /** Options with the hooks switch {@link HooksMode#AUTO} (the Phase 5 shape). */
+    public SessionOptions(Path outputDir, Duration stepTimeout, Clock clock, BindOptions bind, boolean readOnly,
+                          boolean recoverOnClose, WebSettings web, UiSettings ui, ClassLoader webPathLoader,
+                          String id) {
+        this(outputDir, stepTimeout, clock, bind, readOnly, recoverOnClose, web, ui, webPathLoader, id,
+                HooksMode.AUTO);
     }
 
     /** Options writing the journal into {@code outputDir}, with every other component's default. */
     public static SessionOptions defaults(Path outputDir) {
-        return new SessionOptions(outputDir, null, null, null, false, false, null, null, null, null);
+        return new SessionOptions(outputDir, null, null, null, false, false, null, null, null, null, HooksMode.AUTO);
     }
 
     /** A copy with another step timeout (null: 10 s). */
     public SessionOptions withStepTimeout(Duration timeout) {
         return new SessionOptions(outputDir, timeout, clock, bind, readOnly, recoverOnClose, web, ui, webPathLoader,
-                id);
+                id, hooks);
     }
 
     /** A copy with another clock. */
     public SessionOptions withClock(Clock newClock) {
         return new SessionOptions(outputDir, stepTimeout, newClock, bind, readOnly, recoverOnClose, web, ui,
-                webPathLoader, id);
+                webPathLoader, id, hooks);
     }
 
     /** A copy with other bind options (put in {@code live} mode). */
     public SessionOptions withBind(BindOptions newBind) {
         return new SessionOptions(outputDir, stepTimeout, clock, newBind, readOnly, recoverOnClose, web, ui,
-                webPathLoader, id);
+                webPathLoader, id, hooks);
     }
 
     /** A copy that is or is not read-only. */
     public SessionOptions withReadOnly(boolean on) {
         return new SessionOptions(outputDir, stepTimeout, clock, bind, on, recoverOnClose, web, ui, webPathLoader,
-                id);
+                id, hooks);
     }
 
     /** A copy that does or does not recover when it closes after a mutating call. */
     public SessionOptions withRecoverOnClose(boolean on) {
-        return new SessionOptions(outputDir, stepTimeout, clock, bind, readOnly, on, web, ui, webPathLoader, id);
+        return new SessionOptions(outputDir, stepTimeout, clock, bind, readOnly, on, web, ui, webPathLoader, id, hooks);
     }
 
     /** A copy with other web settings (null: the default, and no {@code web} key in an export). */
     public SessionOptions withWeb(WebSettings settings) {
         return new SessionOptions(outputDir, stepTimeout, clock, bind, readOnly, recoverOnClose, settings, ui,
-                webPathLoader, id);
+                webPathLoader, id, hooks);
     }
 
     /** A copy with other UI settings (null: the default, and no {@code ui} key in an export). */
     public SessionOptions withUi(UiSettings settings) {
         return new SessionOptions(outputDir, stepTimeout, clock, bind, readOnly, recoverOnClose, web, settings,
-                webPathLoader, id);
+                webPathLoader, id, hooks);
     }
 
     /** A copy that finds web paths through {@code loader}. */
     public SessionOptions withWebPathLoader(ClassLoader loader) {
         return new SessionOptions(outputDir, stepTimeout, clock, bind, readOnly, recoverOnClose, web, ui, loader,
-                id);
+                id, hooks);
     }
 
     /** A copy with this session id (null: generated). */
     public SessionOptions withId(String newId) {
         return new SessionOptions(outputDir, stepTimeout, clock, bind, readOnly, recoverOnClose, web, ui,
-                webPathLoader, newId);
+                webPathLoader, newId, hooks);
+    }
+
+    /** A copy with this hooks switch (null: {@link HooksMode#AUTO}); phase6-contracts.md 6.1. */
+    public SessionOptions withHooks(HooksMode mode) {
+        return new SessionOptions(outputDir, stepTimeout, clock, bind, readOnly, recoverOnClose, web, ui,
+                webPathLoader, id, mode);
     }
 
     /** The web settings that apply: {@link #web()}, or the default. */

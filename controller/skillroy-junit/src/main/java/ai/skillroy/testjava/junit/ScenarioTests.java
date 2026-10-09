@@ -30,6 +30,7 @@ import ai.skillroy.testjava.scenario.Scenario;
 import ai.skillroy.testjava.scenario.ScenarioException;
 import ai.skillroy.testjava.scenario.ScenarioLoader;
 import ai.skillroy.testjava.scenario.StepResult;
+import ai.skillroy.testjava.scenario.hooks.HooksMode;
 import ai.skillroy.testjava.scenario.pack.DomainPack;
 import ai.skillroy.testjava.scenario.resolve.BindMode;
 import ai.skillroy.testjava.scenario.resolve.CostLedger;
@@ -73,7 +74,9 @@ import java.util.stream.Stream;
  * The overload without them builds {@code RunOptions.defaults().withBind(BindOptions.fromSystemProperties(root))}
  * from {@code skillroy.mode}, {@code skillroy.env}, {@code skillroy.bindings} (default: {@code bindings} in the
  * parent of the source's scenario directory; a class path source has no default), {@code skillroy.credentials} and
- * {@code skillroy.approve} ({@code all} approves everything; there is never an interactive prompt). If the
+ * {@code skillroy.approve} ({@code all} approves everything; there is never an interactive prompt), and its hooks
+ * switch from {@code skillroy.hooks} ({@code auto} by default, {@code on} or {@code off}: phase6-contracts.md 5.3,
+ * 6.1; a value that is none of them is the {@code environment} failure below). If the
  * credentials cannot be loaded, or the mode writes bindings files ({@code approve}, or {@code live} with
  * {@code writeBindings}) and no bindings root is known while a scenario needs bindings, the stream is one failing test
  * named {@code environment} and no scenario runs. In
@@ -94,6 +97,22 @@ import java.util.stream.Stream;
 public final class ScenarioTests {
 
     private ScenarioTests() {
+    }
+
+    /** The system property of the hooks switch (phase6-contracts.md 6.1): {@code auto}, {@code on} or {@code off}. */
+    public static final String HOOKS_PROPERTY = "skillroy.hooks";
+
+    /**
+     * The hooks switch {@value #HOOKS_PROPERTY} names; {@link HooksMode#AUTO} when it is not set.
+     *
+     * @throws IllegalArgumentException for a value other than {@code auto}, {@code on} or {@code off}
+     */
+    static HooksMode hooksFromSystemProperties() {
+        try {
+            return HooksMode.parse(System.getProperty(HOOKS_PROPERTY));
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException(HOOKS_PROPERTY + ": " + e.getMessage(), e);
+        }
     }
 
     /** The name of the test that fails when the credentials cannot be loaded. */
@@ -132,7 +151,7 @@ public final class ScenarioTests {
         if (effective == null) {
             try {
                 effective = RunOptions.defaults().withBind(BindOptions.fromSystemProperties(defaultBindingsRoot(
-                        source)));
+                        source))).withHooks(hooksFromSystemProperties());
             } catch (CredentialsException | IllegalArgumentException e) {
                 // Checked once, before any scenario contacts the agent (12.2): no scenario runs.
                 String reason = e.getMessage();

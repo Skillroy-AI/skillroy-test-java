@@ -43,8 +43,12 @@ import java.util.Map;
  * (phase4-contracts.md 8.2) {@code web.path} (once per run with web calls: the path chosen and why, the CDP attach's
  * details, the script library's hash), {@code web.fallback} (a call the chosen path could not serve went to the
  * agent), {@code web.recover} (written by the CDP path through its run context), {@code fact} (a value the
- * {@code web} fact root left out) and {@code web.close} (only when closing the path failed). A {@code call} record of
- * a {@code web.*} primitive carries {@code path}. Every record passes through the run's {@link SecretMask} first
+ * {@code web} fact root left out) and {@code web.close} (only when closing the path failed), and from Phase 6
+ * (phase6-contracts.md 5.3, 6.4) {@code hooks} (step 0b's install of the pack's hook catalogue: {@code {mode,
+ * skipped}}, {@code {mode, alreadyInstalled, catalogue, armed}} or {@code {mode, catalogue, installed, unavailable,
+ * armed, touched, ms, otherAgents}}; {@code ok: false} and the error when refused) and {@code capabilities} (the
+ * archived matrix: {@code {hash, ids, file}}). A {@code call} record of a {@code web.*} primitive carries
+ * {@code path}. Every record passes through the run's {@link SecretMask} first
  * (amendment A25, phase2-contracts.md 11.4).
  *
  * <p>Best effort: a write error disables the log and is never thrown into the run. Used by the executor's thread;

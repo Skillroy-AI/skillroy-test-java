@@ -1,0 +1,17 @@
+# The branch overlay's hook catalogue (phase6-contracts.md 11.2, 11.3): the base catalogue with limit.applied moved to
+# the class the branch edition's return path calls. Its own id, so that a desk that still holds the base catalogue is
+# an environment the installer refuses, not one it silently takes over.
+catalogue: lending-branch
+version: 1
+application: skillroy-sample-lending-app 0.1.0, branch edition
+hooks:
+  - id: limit.applied
+    mode: CAPTURE
+    target:
+      class: ai.skillroy.testjava.samples.lending.ReturnCeilings
+      method: applicable
+      descriptors: ["(Ljava/lang/String;)Ljava/math/BigDecimal;"]
+    capture: { args: [0], result: true }
+    fallbacks:
+      - seam: lending.limits
+    note: the ceiling the branch desk applies to every return line, called by the return path only

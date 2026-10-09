@@ -666,8 +666,13 @@ class PlanExecutorTest {
         List<String> types = records.stream().map(r -> (String) r.get("type")).toList();
         assertEquals("run-start", types.get(0));
         assertEquals("run-end", types.get(types.size() - 1));
-        assertEquals(List.of("run-start", "requires", "bind", "call", "call", "sync", "sync", "expect", "expect",
-                "ledger", "run-end"), types);
+        assertEquals(List.of("run-start", "hooks", "capabilities", "requires", "bind", "call", "call", "sync", "sync",
+                "expect", "expect", "ledger", "run-end"), types);
+        // phase6-contracts.md 5.3, 6.4: step 0b's record (the toy pack has no catalogue) and the archived matrix.
+        assertEquals(Map.of("mode", "auto", "skipped", "no catalogue"), stripTime(records.get(1)));
+        assertEquals(List.of("capabilities"), List.copyOf(Json.parseObject(Files.readString(dir.resolve(
+                "capabilities.json"))).keySet()));
+        assertEquals("capabilities.json", records.get(2).get("file"));
         Map<String, Object> call = records.stream().filter(r -> "toy.input".equals(r.get("primitive")))
                 .findFirst().orElseThrow();
         assertEquals("s1", call.get("step"));
@@ -691,6 +696,14 @@ class PlanExecutorTest {
         String bindings = Files.readString(dir.resolve("bindings.json"));
         assertTrue(bindings.contains("\"code\": \"YRD-001\""), bindings);
         assertFalse(Files.exists(dir.resolve("failure")));
+    }
+
+    /** A {@code run.jsonl} record without its {@code type} and {@code t}. */
+    static Map<String, Object> stripTime(Map<String, Object> record) {
+        Map<String, Object> copy = new LinkedHashMap<>(record);
+        copy.remove("type");
+        copy.remove("t");
+        return copy;
     }
 
     @Test

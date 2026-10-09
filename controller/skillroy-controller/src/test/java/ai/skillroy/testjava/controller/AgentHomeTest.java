@@ -49,6 +49,19 @@ class AgentHomeTest {
         assertEquals(AgentHome.of(home), agentHome);
     }
 
+    /** phase6-contracts.md 2.1: the spy jar at the root, {@code optional/} and its jars by file stem. */
+    @Test
+    void theOptionalDirectoryAndTheSpyJarAreNamedWhetherOrNotTheyExist() throws IOException {
+        AgentHome agentHome = AgentHome.of(home());
+        assertEquals(agentHome.dir().resolve("skillroy-agent-spy.jar"), agentHome.spyJar());
+        assertEquals(agentHome.dir().resolve("optional"), agentHome.optionalDir());
+        assertEquals(agentHome.dir().resolve("optional/skillroy-agent-hooks.jar"),
+                agentHome.optionalModule(AgentHome.HOOKS_MODULE));
+        for (String bad : new String[] {null, " ", "a/b", "..", "."}) {
+            assertThrows(IllegalArgumentException.class, () -> agentHome.optionalModule(bad), String.valueOf(bad));
+        }
+    }
+
     @Test
     void ofRejectsIncompleteHomes() throws IOException {
         assertThrows(IllegalArgumentException.class, () -> AgentHome.of(dir.resolve("missing")));

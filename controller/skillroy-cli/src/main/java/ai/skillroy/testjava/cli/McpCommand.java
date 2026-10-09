@@ -33,6 +33,7 @@ import ai.skillroy.testjava.scenario.Origin;
 import ai.skillroy.testjava.scenario.ScenarioException;
 import ai.skillroy.testjava.scenario.SessionOpenException;
 import ai.skillroy.testjava.scenario.SessionOptions;
+import ai.skillroy.testjava.scenario.hooks.HooksMode;
 import ai.skillroy.testjava.scenario.pack.DomainPack;
 import ai.skillroy.testjava.scenario.resolve.BindMode;
 import ai.skillroy.testjava.scenario.resolve.CostLedger;
@@ -113,6 +114,7 @@ final class McpCommand implements Command {
                         + "(default: a new temporary directory)")));
         options.addAll(InferenceArgs.gateway());
         options.add(InferenceArgs.SESSION_BUDGET_OPTION);
+        options.add(HooksArgs.OPTION);
         return Connector.withConnection(options.toArray(OptionSpec[]::new));
     }
 
@@ -130,6 +132,7 @@ final class McpCommand implements Command {
             throw new UsageException(OUT + " " + out + " is not a directory");
         }
         BindArgs.Settings settings = BindArgs.parse(args, List.of(), BindMode.LIVE);
+        HooksMode hooks = HooksArgs.mode(args);
         ClassLoader previous = Thread.currentThread().getContextClassLoader();
         try (Packs packs = Packs.load(args.values(Packs.OPTION), cli.classLoader())) {
             Thread.currentThread().setContextClassLoader(packs.loader());
@@ -152,8 +155,10 @@ final class McpCommand implements Command {
                 BindOptions bind = BindOptions.defaults().withMode(BindMode.LIVE).withEnvId(settings.envId())
                         .withBindingsRoot(settings.root()).withCredentials(credentials).withLedger(ledger)
                         .withInference(inference);
+                // phase6-contracts.md 6.1: the server's session installs the pack's hooks at the start, so that every
+                // session over MCP has them; --hooks on refuses the start when they cannot be installed.
                 SessionOptions session = SessionOptions.defaults(null).withBind(bind)
-                        .withWebPathLoader(packs.loader());
+                        .withWebPathLoader(packs.loader()).withHooks(hooks);
                 ServerOptions options = ServerOptions.builder(target.client(), pack).session(session)
                         .mutating(mutating).allowEvaluate(allowEvaluate).outDir(out).inference(inference)
                         .actor(inference.enabled() ? actors(inference, ledger) : null)

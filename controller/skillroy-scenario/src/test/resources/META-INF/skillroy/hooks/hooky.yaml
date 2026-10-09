@@ -1,0 +1,19 @@
+# A test pack's catalogue (HookCataloguesTest, HooksExecutorTest): one enabled hook, one off.
+catalogue: hooky
+version: 1
+hooks:
+  - id: toy.applied
+    mode: CAPTURE
+    target:
+      class: org.example.toy.Desk
+      method: limit
+      descriptors: ["(Ljava/lang/String;)Ljava/math/BigDecimal;"]
+    capture: { args: [0], result: true }
+    fallbacks:
+      - seam: toy.limits
+  - id: toy.off
+    mode: OBSERVE
+    enabled: false
+    target: { class: org.example.toy.Desk, method: other, descriptors: ["()V"] }
+    fallbacks: [{ seam: toy.state }]
+packages: [org.example.toy]

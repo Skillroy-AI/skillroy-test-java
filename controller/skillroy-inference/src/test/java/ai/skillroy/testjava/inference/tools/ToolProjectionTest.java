@@ -303,6 +303,44 @@ class ToolProjectionTest {
                 "never data_query, never evaluate, never a domain primitive");
     }
 
+    /**
+     * phase6-contracts.md 4.2, 13.1 item 12: the seven hook and rule primitives that take a spec or a rule are never
+     * offered, whatever the policy and whatever their flags ({@code hook.install} and {@code hook.remove} are not
+     * mutating, {@code hook.probe} is a read); {@code hook.health}, {@code hook.events} and {@code rule.list} are
+     * offered as reads by every policy.
+     */
+    @Test
+    void hookAndRulePrimitivesAreNeverOfferedButTheThreeReads() {
+        List<PrimitiveDescriptor> hooks = new java.util.ArrayList<>(PRIMITIVES);
+        hooks.add(d("hook.probe", false, false, null));
+        hooks.add(d("hook.install", false, false, null));
+        hooks.add(d("hook.remove", false, false, null));
+        hooks.add(d("hook.stub", true, true, null));
+        hooks.add(d("hook.health", false, false, null));
+        hooks.add(d("hook.events", false, false, null));
+        hooks.add(d("rule.check", false, false, null));
+        hooks.add(d("rule.submit", true, true, null));
+        hooks.add(d("rule.unload", false, false, null));
+        hooks.add(d("rule.list", false, false, null));
+        for (ToolProjection.Policy policy : List.of(ToolProjection.Policy.readOnly(),
+                ToolProjection.Policy.readOnly(true), ToolProjection.Policy.mutating(),
+                ToolProjection.Policy.mutating(true), ToolProjection.Policy.session(true, true),
+                ToolProjection.Policy.session(false, false))) {
+            List<String> names = names(ToolProjection.project(hooks, pack(true, signOnSchema()), policy));
+            for (String never : List.of("hook_probe", "hook_install", "hook_remove", "hook_stub", "rule_check",
+                    "rule_submit", "rule_unload")) {
+                assertFalse(names.contains(never), never + " under " + policy + ": " + names);
+            }
+            for (String read : List.of("hook_health", "hook_events", "rule_list")) {
+                assertTrue(names.contains(read), read + " under " + policy + ": " + names);
+            }
+        }
+        assertEquals(Set.of("hook.probe", "hook.install", "hook.stub", "hook.remove", "rule.check", "rule.submit",
+                "rule.unload"), ToolProjection.NEVER_OFFERED);
+        assertTrue(named(ToolProjection.project(hooks, pack(false, signOnSchema()), ToolProjection.Policy.readOnly()),
+                "hook_events").readOnly());
+    }
+
     @Test
     void theWorkflowAndSessionTools() {
         List<ToolSpec> readOnly = WorkflowTools.workflow(false, false);

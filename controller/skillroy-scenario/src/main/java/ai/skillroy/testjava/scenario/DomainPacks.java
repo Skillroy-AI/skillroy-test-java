@@ -17,16 +17,22 @@
 package ai.skillroy.testjava.scenario;
 
 import ai.skillroy.testjava.scenario.pack.DomainPack;
+import ai.skillroy.testjava.scenario.pack.DomainPackOverlay;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.ServiceConfigurationError;
 import java.util.ServiceLoader;
 
 /**
- * Finds domain packs with {@code ServiceLoader<DomainPack>} and picks the one a scenario names ({@code pack:} may be
- * omitted when exactly one pack is on the class path).
+ * Finds domain packs with {@code ServiceLoader<DomainPack>}, applies the overlays that
+ * {@code ServiceLoader<DomainPackOverlay>} finds on the same loader (phase6-contracts.md 11.1, decision D144), and
+ * picks the pack a scenario names ({@code pack:} may be omitted when exactly one pack is on the class path).
  *
  * <p>Stateless; safe from any thread (each call loads fresh instances).
  */
@@ -36,15 +42,64 @@ public final class DomainPacks {
     }
 
     /**
-     * Every pack visible to {@code loader}, sorted by id.
+     * Every pack visible to {@code loader}, sorted by id, each with the overlays of the same loader applied
+     * (phase6-contracts.md 11.1): the overlays are sorted by their {@code id()}, and every overlay whose
+     * {@code baseId()} names a pack is applied to it in that order, the second to the first's result; the result is
+     * listed under the base's id.
      *
      * @throws ServiceConfigurationError if a {@code META-INF/services} entry names a class that cannot be loaded
+     * @throws IllegalStateException if an overlay names a base pack that is not on the class path (the message names
+     *     both ids), or an overlay returns null or a pack with another id; {@link #forScenario} reports it as a
+     *     {@link ScenarioException}
      */
     public static List<DomainPack> discover(ClassLoader loader) {
         List<DomainPack> packs = new ArrayList<>();
         ServiceLoader.load(DomainPack.class, loader).forEach(packs::add);
         packs.sort(Comparator.comparing(DomainPack::id));
-        return packs;
+        List<DomainPackOverlay> overlays = new ArrayList<>();
+        ServiceLoader.load(DomainPackOverlay.class, loader).forEach(overlays::add);
+        return overlaid(packs, overlays);
+    }
+
+    /**
+     * {@code packs} (sorted by id) with {@code overlays} applied as {@link #discover} applies them.
+     *
+     * @throws IllegalStateException if an overlay's base is not among {@code packs}, or an overlay returns null or a
+     *     pack whose id is not its base's
+     */
+    public static List<DomainPack> overlaid(List<DomainPack> packs, List<DomainPackOverlay> overlays) {
+        if (overlays.isEmpty()) {
+            return packs;
+        }
+        List<DomainPackOverlay> sorted = new ArrayList<>(overlays);
+        sorted.sort(Comparator.comparing(DomainPackOverlay::id));
+        Map<String, DomainPack> byId = new LinkedHashMap<>();
+        for (DomainPack pack : packs) {
+            byId.putIfAbsent(pack.id(), pack);
+        }
+        for (DomainPackOverlay overlay : sorted) {
+            String baseId = overlay.baseId();
+            DomainPack base = byId.get(baseId);
+            if (base == null) {
+                throw new IllegalStateException("pack overlay '" + overlay.id() + "' overlays pack '" + baseId
+                        + "', which is not on the class path; packs found: " + byId.keySet());
+            }
+            DomainPack result = overlay.overlay(base);
+            if (result == null || !baseId.equals(result.id())) {
+                throw new IllegalStateException("pack overlay '" + overlay.id() + "' returned "
+                        + (result == null ? "no pack" : "a pack with id '" + result.id() + "'") + " for pack '"
+                        + baseId + "'");
+            }
+            byId.put(baseId, result);
+        }
+        // The overlaid pack takes the place of the first pack of its id; a second pack of the same id stays as it is
+        // (the CLI refuses duplicate ids as a real error, the overlay being another kind of service).
+        List<DomainPack> out = new ArrayList<>(packs.size());
+        Set<String> placed = new HashSet<>();
+        for (DomainPack pack : packs) {
+            out.add(placed.add(pack.id()) ? byId.get(pack.id()) : pack);
+        }
+        return out;
     }
 
     /**
@@ -83,6 +138,8 @@ public final class DomainPacks {
         } catch (ServiceConfigurationError e) {
             throw new ScenarioException(scenario.id(), 0, "a domain pack on the class path cannot be loaded: "
                     + e.getMessage(), e);
+        } catch (IllegalStateException e) {
+            throw new ScenarioException(scenario.id(), 0, e.getMessage(), e);
         }
     }
 

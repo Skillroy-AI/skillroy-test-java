@@ -34,6 +34,7 @@ import ai.skillroy.testjava.protocol.RpcResult;
 import ai.skillroy.testjava.protocol.SecretKeys;
 import ai.skillroy.testjava.protocol.sql.Rows;
 import ai.skillroy.testjava.scenario.pack.DomainPack;
+import ai.skillroy.testjava.scenario.pack.PackSettings;
 import ai.skillroy.testjava.scenario.resolve.Approval;
 import ai.skillroy.testjava.scenario.resolve.BatchableResolver;
 import ai.skillroy.testjava.scenario.resolve.BindMode;
@@ -472,6 +473,11 @@ public final class ResolutionEngine implements AutoCloseable {
                 @Override
                 public long remainingMs() {
                     return ResolutionEngine.this.remainingMs();
+                }
+
+                @Override
+                public PackSettings settings() {
+                    return packSettings();
                 }
             };
             Map<String, String> pc = packCall("fingerprint", recorder, () -> fingerprinter.components(ctx));
@@ -1446,7 +1452,25 @@ public final class ResolutionEngine implements AutoCloseable {
             public long remainingMs() {
                 return ResolutionEngine.this.remainingMs();
             }
+
+            @Override
+            public PackSettings settings() {
+                return packSettings();
+            }
         };
+    }
+
+    /**
+     * The running pack's settings (phase6-contracts.md 11.1), which every context of a pack call hands out; empty when
+     * the pack answers null or throws (a pack defect the call itself then meets).
+     */
+    private PackSettings packSettings() {
+        try {
+            PackSettings settings = pack.settings();
+            return settings == null ? PackSettings.EMPTY : settings;
+        } catch (RuntimeException e) {
+            return PackSettings.EMPTY;
+        }
     }
 
     /**
@@ -1940,6 +1964,11 @@ public final class ResolutionEngine implements AutoCloseable {
         @Override
         public long remainingMs() {
             return ResolutionEngine.this.remainingMs();
+        }
+
+        @Override
+        public PackSettings settings() {
+            return packSettings();
         }
 
         @Override

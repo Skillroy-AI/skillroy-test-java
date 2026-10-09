@@ -249,6 +249,9 @@ abstract class InferenceChecks {
             assertTrue(log.stream().filter(r -> "resolve".equals(r.get("type")))
                     .allMatch(r -> "REPLAY".equals(r.get("strategy"))), "every slot replayed");
             assertEquals(0L, Files.size(out.resolve(ScenarioD.ID).resolve("cost-ledger.jsonl")), "zero model calls");
+            // phase6-contracts.md 13.2 item 4: in the hooks legs the run found or installed the pack's catalogue; in
+            // every leg it archived its matrix.
+            Runs.assertHooksRecord(out.resolve(ScenarioD.ID), mode() == LendingTarget.Mode.JAVAAGENT_HOOKS);
             assertSignedOffAndQuiet(-1);
         }));
         return checked.stream();

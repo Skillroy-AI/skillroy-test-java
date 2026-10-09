@@ -1223,6 +1223,14 @@ the plain agent connection.
 this section's selection: `SessionOptions.web` carries the settings that the scenario's `web` key carries, and
 `SessionOptions.webPathLoader` is the class loader that finds the `WebPath` providers. `close` closes the path.
 
+(Phase 6, built 2026-10-09, CP; P6 §5.3, §6.4) Before the path, `ExecutorSession.open` installs the pack's hooks under
+`SessionOptions.hooks` (an eleventh component, default `AUTO`; the ten-argument constructor kept) as a run's step 0b
+does (a session is live, so an armed stub is recorded, not refused; a refusal is a `SessionOpenException` with the
+installer's kind), reads the matrix again when something was installed or found installed, and writes
+`capabilities.json` into its output directory; the `hooks` record goes into the journal's start record under
+`options.hooks` and is `ExecutorSession.hooks()`. As built: the contract named `RunOptions.hooks` for the session, which
+has no `RunOptions`; the switch is `SessionOptions.hooks` (D-CP-2).
+
 ### 6.2 The `web` base fact root and the `WEB` snapshot surface
 
 `BaseFacts.ROOTS` gains `web` (sixth root, after `devices`; a pack root named `web` hides it, P1 §8.3 rule):

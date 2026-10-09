@@ -110,6 +110,15 @@
       <artifactId>skillroy-mcp</artifactId>
       <scope>test</scope>
     </dependency>
+    <!-- Phase 6 (phase6-contracts.md 11.4): the overlay of the branch edition. Built before this module, kept off the
+         test class path (classpathDependencyExcludes below: on it, ServiceLoader would overlay the pack of every
+         standard-edition test) and handed to the tests as a jar they load in a class loader of their own
+         (skillroy.it.overlayJar). -->
+    <dependency>
+      <groupId>ai.skillroy</groupId>
+      <artifactId>skillroy-sample-lending-pack-branch</artifactId>
+      <scope>test</scope>
+    </dependency>
     <dependency>
       <groupId>org.junit.jupiter</groupId>
       <artifactId>junit-jupiter</artifactId>
@@ -127,6 +136,13 @@
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-dependency-plugin</artifactId>
         <executions>
+          <!-- Phase 6: ${ai.skillroy:skillroy-sample-lending-pack-branch:jar}, the overlay's file, for the tests. -->
+          <execution>
+            <id>dependency-paths</id>
+            <goals>
+              <goal>properties</goal>
+            </goals>
+          </execution>
           <execution>
             <id>unpack-agent-home</id>
             <phase>pre-integration-test</phase>
@@ -232,7 +248,11 @@
             <skillroy.it.moduleDir>${project.basedir}</skillroy.it.moduleDir>
             <skillroy.it.cliDist>${skillroy.it.cliDist}</skillroy.it.cliDist>
             <skillroy.it.packJar>${skillroy.it.packJar}</skillroy.it.packJar>
+            <skillroy.it.overlayJar>${ai.skillroy:skillroy-sample-lending-pack-branch:jar}</skillroy.it.overlayJar>
           </systemPropertyVariables>
+          <classpathDependencyExcludes>
+            <classpathDependencyExclude>ai.skillroy:skillroy-sample-lending-pack-branch</classpathDependencyExclude>
+          </classpathDependencyExcludes>
         </configuration>
       </plugin>
       <plugin>
@@ -241,7 +261,11 @@
         <configuration>
           <systemPropertyVariables>
             <skillroy.it.moduleDir>${project.basedir}</skillroy.it.moduleDir>
+            <skillroy.it.overlayJar>${ai.skillroy:skillroy-sample-lending-pack-branch:jar}</skillroy.it.overlayJar>
           </systemPropertyVariables>
+          <classpathDependencyExcludes>
+            <classpathDependencyExclude>ai.skillroy:skillroy-sample-lending-pack-branch</classpathDependencyExclude>
+          </classpathDependencyExcludes>
         </configuration>
       </plugin>
     </plugins>

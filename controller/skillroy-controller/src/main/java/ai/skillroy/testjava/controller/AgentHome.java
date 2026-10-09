@@ -23,7 +23,8 @@ import java.util.function.UnaryOperator;
 
 /**
  * The agent home directory produced by {@code skillroy-agent-dist} (contract §2.1): the bootstrap jar that
- * {@code -javaagent} and attach load, {@code lib/} with the agent's own jars, and {@code modules/}. Validated once
+ * {@code -javaagent} and attach load, {@code lib/} with the agent's own jars, and {@code modules/}; from Phase 6 also
+ * the spy jar at its root and {@code optional/} (phase6-contracts.md 2.1). Validated once
  * here so that a misconfigured path fails with a clear message before a target is launched or attached.
  *
  * <p>Immutable; safe to share between threads.
@@ -32,6 +33,15 @@ public final class AgentHome {
 
     /** File name of the bootstrap jar inside the home; versionless by design (contract §2.1). */
     public static final String BOOTSTRAP_JAR = "skillroy-agent-bootstrap.jar";
+
+    /** File name of the spy jar at the home's root (phase6-contracts.md 2.1). */
+    public static final String SPY_JAR = "skillroy-agent-spy.jar";
+
+    /** The directory of optional module jars, never scanned (phase6-contracts.md 2.1). */
+    public static final String OPTIONAL_DIR = "optional";
+
+    /** The hooks module's file stem under {@code optional/}, as the agent option {@code optionalModules} names it. */
+    public static final String HOOKS_MODULE = "skillroy-agent-hooks";
 
     /** System property naming the agent home. */
     public static final String PROPERTY = "skillroy.agent.home";
@@ -111,6 +121,38 @@ public final class AgentHome {
     /** {@code modules/}, where module jars are dropped (it may not exist). */
     public Path modulesDir() {
         return dir.resolve("modules");
+    }
+
+    /**
+     * {@code optional/} (phase6-contracts.md 2.1, decision D114): jars the agent never scans, each loaded as a module
+     * jar only when the agent option {@code optionalModules} names its file stem. It may not exist.
+     */
+    public Path optionalDir() {
+        return dir.resolve(OPTIONAL_DIR);
+    }
+
+    /**
+     * The path of {@code optional/<stem>.jar}, whether or not the file exists
+     * ({@code optionalModule("skillroy-agent-hooks")} is the hooks module that the option
+     * {@code optionalModules=skillroy-agent-hooks} loads).
+     *
+     * @throws IllegalArgumentException if {@code stem} is blank or names a path rather than a file stem
+     */
+    public Path optionalModule(String stem) {
+        if (stem == null || stem.isBlank() || stem.contains("/") || stem.contains("\\") || stem.equals(".")
+                || stem.equals("..")) {
+            throw new IllegalArgumentException("an optional module is named by its file stem, found \"" + stem + "\"");
+        }
+        return optionalDir().resolve(stem + ".jar");
+    }
+
+    /**
+     * {@code skillroy-agent-spy.jar} at the home's root (phase6-contracts.md 2.1, decision D116): the jar the hooks
+     * module appends to the target's bootstrap search path at its first {@code hook.install}. It may not exist (a home
+     * older than Phase 6).
+     */
+    public Path spyJar() {
+        return dir.resolve(SPY_JAR);
     }
 
     @Override

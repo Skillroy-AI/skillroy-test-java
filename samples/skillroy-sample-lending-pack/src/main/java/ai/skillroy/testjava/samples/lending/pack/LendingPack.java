@@ -24,6 +24,7 @@ import ai.skillroy.testjava.data.RowMask;
 import ai.skillroy.testjava.protocol.sql.Rows;
 import ai.skillroy.testjava.scenario.pack.DomainPack;
 import ai.skillroy.testjava.scenario.pack.FactProvider;
+import ai.skillroy.testjava.scenario.pack.PackSettings;
 import ai.skillroy.testjava.scenario.pack.PreflightCheck;
 import ai.skillroy.testjava.scenario.pack.StepLibrary;
 import ai.skillroy.testjava.scenario.pack.SyncPolicy;
@@ -35,6 +36,7 @@ import ai.skillroy.testjava.scenario.resolve.StoredTable;
 
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Domain pack {@value #ID}: the controller half of the sample lending desk (contract section 9.3), next to the agent
@@ -66,6 +68,12 @@ import java.util.List;
  *       credentials name the source).</li>
  *   <li>Recovery: answer any open prompt with its first button, cancel any open loan, sign off
  *       ({@link LendingRecovery}).</li>
+ *   <li>Hooks (phase6-contracts.md 6.3): the catalogue {@code META-INF/skillroy/hooks/lending.yaml}, read by the
+ *       default {@code hooks()}: {@code limit.applied}, {@code access.checked}, {@code waiver.evaluated},
+ *       {@code sign.on.checked} (off) and {@code line.amount} (STUB, never armed by a committed scenario).</li>
+ *   <li>Settings and the public surface an overlay needs (phase6-contracts.md 11.1, 11.3): {@link #settings()}, the
+ *       resolvers, their ids and SQL texts ({@link LendingResolvers}), the allow-list's builder
+ *       ({@link LendingAllowList#of}), the verifier ids.</li>
  * </ul>
  *
  * <p>Stateless and thread-safe; one instance may serve every scenario in the JVM.
@@ -77,9 +85,28 @@ public final class LendingPack implements DomainPack {
     /**
      * Written into every plan; change it whenever a verb compiles differently or the pack's surface grows.
      * {@code 0.3.0}: the waiver queries, oracles and cross-check of phase3-contracts.md 10.3. {@code 0.4.0}: the SQL
-     * allow-list and the verbs' argument schemas of phase5-contracts.md 14.1.
+     * allow-list and the verbs' argument schemas of phase5-contracts.md 14.1. {@code 0.5.0}: the hook catalogue,
+     * {@link #settings()} and the public surface an overlay needs (phase6-contracts.md 6.3, 11.3).
      */
-    public static final String VERSION = "0.4.0";
+    public static final String VERSION = "0.5.0";
+    /**
+     * The pack setting naming the {@code desk_setting} row of the system maximum return (phase6-contracts.md 11.3):
+     * read by the {@code SystemLimit} resolver through its context's {@code settings()}; the branch edition's overlay
+     * sets it to {@code return_ceiling}.
+     */
+    public static final String MAX_RETURN_SETTING = "lending.maxReturnSetting";
+    /** The value of {@link #MAX_RETURN_SETTING} in the standard desk. */
+    public static final String DEFAULT_MAX_RETURN_SETTING = "max_return";
+    /** The id of the verifier of {@code SystemLimit} (the primitive it calls). */
+    public static final String VERIFY_LIMITS = "lending.limits";
+    /** The id of the verifiers of {@code LendableItem} and {@code ItemsTriggering}. */
+    public static final String VERIFY_DEPOSIT = "lending.deposit";
+    /** The id of the verifier of {@code StaffWithPermission}. */
+    public static final String VERIFY_ACCESS = "lending.access.check";
+    /** The id of the verifier of {@code ActiveWaiverRuleWithTriggers}. */
+    public static final String VERIFY_WAIVER = "lending.waiver.evaluate";
+    /** The id of the verifier of {@code ActionKey}. */
+    public static final String VERIFY_KEYS = "swing.find";
     /** Published once per input the desk accepted from {@code lending.input}. */
     public static final String ACK_TOPIC = "input.acked";
     /** Published when the desk waits for input again, or asks a question. */
@@ -98,6 +125,8 @@ public final class LendingPack implements DomainPack {
     private static final EnvFingerprinter FINGERPRINTER = new LendingFingerprinter();
     private static final List<RowMask> ROW_MASKS = List.of(LendingTables.PASSWORD_MASK);
     private static final List<SqlAllowList> ALLOW_LISTS = List.of(LendingAllowList.LIST);
+    private static final PackSettings SETTINGS = PackSettings.of(Map.of(MAX_RETURN_SETTING,
+            DEFAULT_MAX_RETURN_SETTING));
 
     /** Public no-argument constructor for {@code ServiceLoader}. */
     public LendingPack() {
@@ -163,6 +192,15 @@ public final class LendingPack implements DomainPack {
     @Override
     public List<SqlAllowList> sqlAllowLists() {
         return ALLOW_LISTS;
+    }
+
+    /**
+     * The pack's constants (phase6-contracts.md 11.1): {@link #MAX_RETURN_SETTING} = {@code max_return}. An overlay
+     * changes them with {@code base.settings().with(…)}.
+     */
+    @Override
+    public PackSettings settings() {
+        return SETTINGS;
     }
 
     /**

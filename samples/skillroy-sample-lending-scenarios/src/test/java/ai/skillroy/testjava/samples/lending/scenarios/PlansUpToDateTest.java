@@ -71,7 +71,8 @@ class PlansUpToDateTest {
         List<Path> scenarios = committedScenarios();
         assertEquals(List.of("basic-loan-ui.yaml", "basic-loan.yaml", "borrow-2-waive-1-slip.yaml",
                 "return-over-limit-needs-supervisor.yaml", "return-refunds-deposit.yaml",
-                "supervisor-return-llm-sql.yaml"), scenarios.stream().map(p -> p.getFileName().toString()).toList());
+                "return-within-limit-observed.yaml", "supervisor-return-llm-sql.yaml"),
+                scenarios.stream().map(p -> p.getFileName().toString()).toList());
         // skillroy author writes <out>/plan/<id>.plan.json; a scenario it wrote into scenarios/ has its plan moved here
         // with the others, so that a plan's default bindings root (D31: beside its directory) is bindings/.
         assertFalse(Files.exists(moduleDir().resolve("scenarios").resolve("plan")), "the committed plans are in plan/");
@@ -232,7 +233,7 @@ class PlansUpToDateTest {
     @Test
     void scenarioAsPlanHasTheResolutionModel() throws Exception {
         Plan plan = Plan.read(ScenarioA.plan());
-        assertEquals("0.4.0", plan.packVersion());
+        assertEquals(LendingPack.VERSION, plan.packVersion());
         assertEquals(List.of("systemMax/query", "item/query", "assistant/query", "supervisor/query", "keys/query",
                 "loan/capture"), plan.slots().stream().map(sl -> sl.name() + "/" + sl.kind()).toList());
         assertEquals(List.of("SystemLimit", "LendableItem", "StaffWithPermission", "StaffWithPermission",
@@ -289,7 +290,7 @@ class PlansUpToDateTest {
     void scenarioBsPlanHasTheWaiverModel() throws Exception {
         Plan plan = Plan.read(ScenarioB.plan());
         assertEquals(5, plan.planVersion());
-        assertEquals("0.4.0", plan.packVersion());
+        assertEquals(LendingPack.VERSION, plan.packVersion());
         assertEquals(List.of("assistant/query", "rule/query", "item/query", "keys/query", "loan/capture",
                 "slip/capture"), plan.slots().stream().map(sl -> sl.name() + "/" + sl.kind()).toList());
         assertEquals(List.of("StaffWithPermission", "ActiveWaiverRuleWithTriggers", "ItemsTriggering", "ActionKey"),
@@ -338,6 +339,36 @@ class PlansUpToDateTest {
     }
 
     /**
+     * Scenario E's committed plan (phase6-contracts.md 6.3, D131): no hook in {@code requires}, so that it runs without
+     * hooks; three expectations on the base fact root {@code hooks}, each guarded by {@code hook.limit.applied}, so that
+     * it is PASS with the pack's hooks installed and DEGRADED without; nothing of the hook catalogue in the plan (plan
+     * version 5, D127).
+     */
+    @Test
+    void scenarioEsPlanGuardsItsHookExpectations() throws Exception {
+        Plan plan = Plan.read(moduleDir().resolve("plan/return-within-limit-observed.plan.json"));
+        assertEquals("return-within-limit-observed", plan.scenarioId());
+        assertEquals(5, plan.planVersion());
+        assertEquals(LendingPack.VERSION, plan.packVersion());
+        assertTrue(plan.requires().stream().noneMatch(r -> r.startsWith("hook.")), String.valueOf(plan.requires()));
+        List<String> guarded = new ArrayList<>();
+        for (Plan.Step step : plan.steps()) {
+            for (var check : step.expect()) {
+                if (check.capability() != null && check.capability().startsWith("hook.")) {
+                    assertEquals("hook.limit.applied", check.capability());
+                    guarded.add(((ai.skillroy.testjava.scenario.Expectation) check).path());
+                }
+            }
+        }
+        assertEquals(List.of("hooks[id=limit.applied].count", "hooks[id=limit.applied].last.args.0",
+                "hooks[id=limit.applied].last.returned"), guarded);
+        assertEquals(List.of("systemMax/query", "item/query", "assistant/query", "keys/query", "loan/capture"),
+                plan.slots().stream().map(slot -> slot.name() + "/" + slot.kind()).toList());
+        String text = Files.readString(moduleDir().resolve("plan/return-within-limit-observed.plan.json"));
+        assertFalse(text.contains("limit.applied\":") && text.contains("descriptors"), "no catalogue in the plan");
+    }
+
+    /**
      * Scenario D's committed plan (phase5-contracts.md 14.2, 13.2): scenario A's plan with one change, the supervisor
      * slot's strategy {@code [llm-sql]}, which makes its bind need a model ({@code inference: bind}) and gives it a
      * resolve hash of its own; the rest, from the item's and the assistant's committed strategies to the steps, the
@@ -350,7 +381,7 @@ class PlansUpToDateTest {
         Plan a = Plan.read(ScenarioA.plan());
         assertEquals(ScenarioD.ID, plan.scenarioId());
         assertEquals(5, plan.planVersion());
-        assertEquals("0.4.0", plan.packVersion());
+        assertEquals(LendingPack.VERSION, plan.packVersion());
         assertEquals(Plan.INFERENCE_BIND, plan.inference());
         assertEquals(List.of("llm-sql"), plan.slot(ScenarioD.MODEL_SLOT).query().strategy(), "the model only");
         assertEquals(List.of("sql"), plan.slot("item").query().strategy(), "the item keeps its committed strategy");
@@ -393,7 +424,7 @@ class PlansUpToDateTest {
         Plan plan = Plan.read(ScenarioC.plan());
         assertEquals(ScenarioC.ID, plan.scenarioId());
         assertEquals(5, plan.planVersion());
-        assertEquals("0.4.0", plan.packVersion());
+        assertEquals(LendingPack.VERSION, plan.packVersion());
         assertEquals(Plan.INFERENCE_NONE, plan.inference(), "tier (a) only: no model binds it");
         assertEquals(List.of("item/query", "assistant/query", "lent/capture", "returned/capture"), plan.slots()
                 .stream().map(sl -> sl.name() + "/" + sl.kind()).toList());

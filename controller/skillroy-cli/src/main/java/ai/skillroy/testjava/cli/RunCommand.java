@@ -34,6 +34,7 @@ import ai.skillroy.testjava.scenario.ScenarioException;
 import ai.skillroy.testjava.scenario.ScenarioLoader;
 import ai.skillroy.testjava.scenario.Status;
 import ai.skillroy.testjava.scenario.StepResult;
+import ai.skillroy.testjava.scenario.hooks.HooksMode;
 import ai.skillroy.testjava.scenario.pack.DomainPack;
 import ai.skillroy.testjava.scenario.resolve.BindMode;
 import ai.skillroy.testjava.scenario.resolve.CostLedger;
@@ -143,6 +144,7 @@ final class RunCommand implements Command {
         options.addAll(InferenceArgs.gateway());
         options.add(InferenceArgs.BUDGET_SCENARIO_OPTION);
         options.add(Packs.OPTION_SPEC);
+        options.add(HooksArgs.OPTION);
         options.add(OptionSpec.flag("--json", "print {results:[...], summary, junit, modelCalls, modelCost,\n"
                 + "budget, inference} as JSON when done; progress goes to\nstderr"));
         return Connector.withConnection(options.toArray(OptionSpec[]::new));
@@ -166,6 +168,7 @@ final class RunCommand implements Command {
         Path junit = args.path(JUNIT);
         String suite = args.value(SUITE) == null ? DEFAULT_SUITE : args.value(SUITE);
         RunOptions.DegradedAs degradedAs = degradedAs(args.value(DEGRADED_AS));
+        HooksMode hooks = HooksArgs.mode(args);
         Long stepTimeoutMs = args.durationMs(STEP_TIMEOUT);
         boolean json = args.flag("--json");
         List<Path> files = ScenarioFiles.expand(args.positionals());
@@ -240,7 +243,7 @@ final class RunCommand implements Command {
             List<RunResult> results = new ArrayList<>();
             List<Map<String, Object>> jsonResults = new ArrayList<>();
             try (target) {
-                RunOptions base = RunOptions.defaults().withDegradedAs(degradedAs)
+                RunOptions base = RunOptions.defaults().withDegradedAs(degradedAs).withHooks(hooks)
                         .withTargetRestarted(restartProbe(target))
                         .withBind(BindArgs.options(bindSettings, credentials, approver, inference,
                                 !args.flag(InferenceArgs.NO_REUSE_BINDINGS)));

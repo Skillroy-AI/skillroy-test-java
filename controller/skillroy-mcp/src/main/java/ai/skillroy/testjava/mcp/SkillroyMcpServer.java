@@ -361,6 +361,7 @@ public final class SkillroyMcpServer implements AutoCloseable {
         profile = profile();
         SessionOptions effective = effectiveSession(given);
         session = ExecutorSession.open(pack, agent, effective);
+        archiveHooks();
         calls = new ToolCalls(this);
         pipe = new StdioPipe(in, out, this::inputEnded);
         McpJsonMapper mapper = new JacksonMcpJsonMapperSupplier().get();
@@ -472,6 +473,29 @@ public final class SkillroyMcpServer implements AutoCloseable {
         return dir.toAbsolutePath().normalize();
     }
 
+    /**
+     * After the session's open installed the pack's hooks under its switch (the CLI's {@code --hooks},
+     * phase6-contracts.md 5.3, 6.1): the matrix read again, so that {@code skillroy_catalogue} shows the
+     * {@code hook.<id>} capabilities, the install logged, and the matrix archived as {@code capabilities.json} in the
+     * server's {@code --out} (phase6-contracts.md 6.4), as a run writes it beside {@code run.jsonl}.
+     */
+    private void archiveHooks() throws AgentLostException {
+        Map<String, Object> hooks = session.hooks();
+        if (!hooks.isEmpty()) {
+            log.info("hooks: " + Json.write(hooks));
+        }
+        if (!hooks.containsKey("skipped")) {
+            CapabilityMatrix matrix = agent.capabilities();
+            capabilities = matrix == null ? new CapabilityMatrix(Map.of()) : matrix;
+        }
+        try {
+            Files.write(outDir.resolve("capabilities.json"), (Json.writePretty(masking.plain(capabilities.toJson()))
+                    + "\n").getBytes(StandardCharsets.UTF_8));
+        } catch (IOException | RuntimeException e) {
+            log.info("capabilities.json cannot be written: " + e.getClass().getSimpleName());
+        }
+    }
+
     /** The session the server opens: see {@link ServerOptions}. */
     private SessionOptions effectiveSession(SessionOptions given) {
         SessionOptions s = given.withClock(clock).withReadOnly(!mutating);
@@ -482,7 +506,7 @@ public final class SkillroyMcpServer implements AutoCloseable {
         s = s.withId(id);
         if (s.outputDir() == null) {
             s = new SessionOptions(outDir.resolve("runs").resolve(id), s.stepTimeout(), s.clock(), s.bind(),
-                    s.readOnly(), s.recoverOnClose(), s.web(), s.ui(), s.webPathLoader(), s.id());
+                    s.readOnly(), s.recoverOnClose(), s.web(), s.ui(), s.webPathLoader(), s.id(), s.hooks());
         }
         return s;
     }

@@ -70,6 +70,7 @@ import java.awt.GraphicsEnvironment;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -116,6 +117,10 @@ import static org.junit.jupiter.api.Assumptions.assumeFalse;
  *   <li>{@link #scenarioBStillRunsAfterTheWrongOracle()}: P3 item 7;</li>
  *   <li>{@link #scenarioCReplaysGreenAndTheReturnIsStored()}: P5 item 3, scenario C, which the planner
  *       authored;</li>
+ *   <li>{@link #scenarioEApproveWritesTheCommittedBytes()}: scenario E's bindings, as P2 item 2 for scenario A
+ *       (phase6-contracts.md 6.3; {@code -Dskillroy.bindings.update=true} writes them instead);</li>
+ *   <li>{@link #scenarioEReplaysPassWithHooksAndDegradedWithout()}: P6 13.2 item 4, scenario E's replay, and the
+ *       {@code hooks} record and archived matrix of every replay of this target;</li>
  *   <li>{@link #noPasswordIsWrittenAsAValue()}: P2 item 10 and P3 item 8, over the outputs of every check
  *       above;</li>
  *   <li>{@link #theNextScenarioStillRuns()}: P2 item 11.</li>
@@ -144,6 +149,8 @@ abstract class ResolutionChecks {
     Path replayDirB;
     /** The output directory of the {@code replay} run of scenario C, whose calls item 10 looks at too (A34). */
     Path replayDirC;
+    /** The output directory of the {@code replay} run of scenario E (phase6-contracts.md 13.2 item 4). */
+    Path replayDirE;
 
     abstract LendingTarget.Mode mode();
 
@@ -342,8 +349,9 @@ abstract class ResolutionChecks {
         assertEquals(FailureKind.PRECONDITION_FAILED, precondition.result().failureKind(), precondition.describe());
         assertTrue(precondition.result().message().contains(missing), precondition.describe());
         assertTrue(precondition.result().steps().isEmpty(), "no step ran");
-        assertEquals(List.of("capabilities"), agent.sent, "nothing was sent after the capability check");
-        assertEquals(List.of("run-start", "requires", "ledger", "run-end"), types(precondition.dir()));
+        assertEquals(beforeRequires(), agent.sent, "nothing was sent after the capability check");
+        assertEquals(List.of("run-start", "hooks", "capabilities", "requires", "ledger", "run-end"),
+                types(precondition.dir()));
         assertNothingSent(precondition.dir());
 
         Recording again = new Recording(client());
@@ -354,8 +362,9 @@ abstract class ResolutionChecks {
         assertEquals("pre-flight check " + FailingPreflight.ID + ": " + FailingPreflight.REASON,
                 preflight.result().message(), preflight.describe());
         assertTrue(preflight.result().steps().isEmpty(), "no step ran");
-        assertEquals(List.of("capabilities"), again.sent, "nothing was sent after the capability check");
-        assertEquals(List.of("run-start", "requires", "preflight", "ledger", "run-end"), types(preflight.dir()));
+        assertEquals(beforeRequires(), again.sent, "nothing was sent after the capability check");
+        assertEquals(List.of("run-start", "hooks", "capabilities", "requires", "preflight", "ledger", "run-end"),
+                types(preflight.dir()));
         assertNothingSent(preflight.dir());
         assertSignedOffAndQuiet(seq);
     }
@@ -432,7 +441,7 @@ abstract class ResolutionChecks {
      * "no credential".
      */
     @Test
-    @Order(15)
+    @Order(17)
     void noPasswordIsWrittenAsAValue() throws Exception {
         ScenarioA.Expected expected = ScenarioA.expected(env());
         Set<String> passwords = Set.copyOf(List.of(expected.assistantPassword(), expected.supervisorPassword(),
@@ -507,7 +516,7 @@ abstract class ResolutionChecks {
 
     /** Item 11: after the failures above, a scenario still passes without a restart. */
     @Test
-    @Order(16)
+    @Order(18)
     void theNextScenarioStillRuns() throws Exception {
         Runs.Outcome next = env() == Env.SEED_A
                 ? Runs.run(client(), Runs.committed("basic-loan"), runDir("basic-loan-after"), bind(BindMode.REPLAY))
@@ -788,7 +797,88 @@ abstract class ResolutionChecks {
         assertSignedOffAndQuiet(-1);
     }
 
+    /**
+     * Scenario E's bindings (phase6-contracts.md 6.3): {@code approve} with a scripted approver writes the committed
+     * file's bytes into an empty root, as P2 item 2 for scenario A; with {@code -Dskillroy.bindings.update=true} the
+     * written file replaces the committed one instead (how the files were made: hooks never enter a bindings file,
+     * D128, so one file per seed serves the runs with and without hooks).
+     */
+    @Test
+    @Order(15)
+    void scenarioEApproveWritesTheCommittedBytes() throws Exception {
+        Path root = ItEnv.runDir("resolution", slug() + "/e-approve-root");
+        deleteTree(root);
+        long seq = lastSeq();
+        BindOutcome outcome = Binder.bind(Plan.read(ScenarioE.plan()), Runs.PACK, client(),
+                bind(BindMode.APPROVE).withBindingsRoot(root).withApprover(request -> {
+                    assertEquals(ScenarioE.QUERY_SLOTS, request.resolutions().stream().map(Resolution::slot)
+                            .toList());
+                    return new Approver.Decision(true, null, "scripted");
+                }), BindListener.NONE);
+        assertNotNull(outcome.written());
+        outputs.add(outcome.written());
+        assertEquals("NONE", outcome.bindings().oracle("auth"), "the assistant may take the return alone");
+        Path committed = ScenarioE.committedBindings(env());
+        if (Boolean.getBoolean("skillroy.bindings.update")) {
+            Files.createDirectories(committed.getParent());
+            Files.copy(outcome.written(), committed, StandardCopyOption.REPLACE_EXISTING);
+        }
+        assertEquals(Files.readString(committed, StandardCharsets.UTF_8),
+                Files.readString(outcome.written(), StandardCharsets.UTF_8), "byte-identical to the committed file");
+        assertSignedOffAndQuiet(seq);
+    }
+
+    /**
+     * phase6-contracts.md 13.2 item 4: scenario E replays with its committed plan and bindings, PASS with its three
+     * guarded expectations evaluated in the hooks leg ({@code hooks} record: installed or already installed), DEGRADED
+     * with the three skipped and naming {@code hook.limit.applied} in every other leg; and every replay of this target
+     * archived its matrix ({@code capabilities.json}), the same hash for all of them.
+     */
+    @Test
+    @Order(16)
+    void scenarioEReplaysPassWithHooksAndDegradedWithout() throws Exception {
+        boolean hooks = mode() == LendingTarget.Mode.JAVAAGENT_HOOKS;
+        Runs.Outcome outcome = Runs.run(client(), Plan.read(ScenarioE.plan()), runDir("e-replay"),
+                bind(BindMode.REPLAY));
+        replayDirE = outcome.dir();
+        results.add(outcome.result());
+        ItEnv.timing("java=" + java + " mode=" + mode().slug + " env=" + env().id + " scenario=" + ScenarioE.ID
+                + " status=" + outcome.result().status() + " ms=" + outcome.result().duration().toMillis());
+        if (hooks) {
+            Runs.assertPassedWithoutSleeping(outcome);
+            assertEquals(List.of(), outcome.result().skippedExpectations());
+            List<Map<String, Object>> held = Runs.runLog(outcome.dir()).stream().filter(r -> "expect".equals(
+                    r.get("type")) && String.valueOf(r.get("path")).startsWith("hooks[")).toList();
+            assertEquals(ScenarioE.GUARDED, held.stream().map(r -> r.get("path")).toList());
+            assertTrue(held.stream().allMatch(r -> "held".equals(r.get("result"))), String.valueOf(held));
+        } else {
+            assertEquals(Status.DEGRADED, outcome.result().status(), outcome.describe());
+            assertEquals(3, outcome.result().skippedExpectations().size(), outcome.describe());
+            assertTrue(outcome.result().skippedExpectations().stream().allMatch(e -> e.contains(ScenarioE.HOOK)),
+                    String.valueOf(outcome.result().skippedExpectations()));
+            assertEquals(0, outcome.sleeps());
+        }
+        assertTrue(ledger.isEmpty(), "no model call in this target's runs");
+        Set<String> hashes = new LinkedHashSet<>();
+        for (Path dir : List.of(replayDir, replayDirB, replayDirC, replayDirE)) {
+            if (dir != null) {
+                hashes.add(Runs.assertHooksRecord(dir, hooks));
+            }
+        }
+        assertEquals(1, hashes.size(), "one matrix for every run of this target: " + hashes);
+        assertSignedOffAndQuiet(-1);
+    }
+
     // ------------------------------------------------------------------ helpers
+
+    /**
+     * What a run sends before its {@code requires} check (phase6-contracts.md 5.3 step 0b): the capability matrix; in
+     * the hooks leg, where the catalogue is installed by then, also {@code hook.health} and the matrix read again.
+     */
+    List<String> beforeRequires() {
+        return mode() == LendingTarget.Mode.JAVAAGENT_HOOKS ? List.of("capabilities", "hook.health", "capabilities")
+                : List.of("capabilities");
+    }
 
     /**
      * A34 over one run's {@code call} records: every {@code lending.input} call whose {@code value} is recorded as

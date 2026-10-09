@@ -18,6 +18,8 @@ package ai.skillroy.testjava.scenario.pack;
 
 import ai.skillroy.testjava.controller.AgentConnection;
 import ai.skillroy.testjava.data.RowMask;
+import ai.skillroy.testjava.scenario.hooks.HookCatalogue;
+import ai.skillroy.testjava.scenario.hooks.HookCatalogues;
 import ai.skillroy.testjava.scenario.resolve.EnvFingerprinter;
 import ai.skillroy.testjava.scenario.resolve.ResolutionCatalogue;
 import ai.skillroy.testjava.scenario.resolve.SqlAllowList;
@@ -117,5 +119,27 @@ public interface DomainPack {
      */
     default String assistAnswerPrimitive() {
         return null;
+    }
+
+    /**
+     * The pack's hook catalogue (phase6-contracts.md 5): by default the resource
+     * {@code META-INF/skillroy/hooks/<id()>.yaml} of this class's loader, read once; {@link HookCatalogue#EMPTY} when
+     * there is none. An overlay answers a catalogue built from the base's with
+     * {@code HookCatalogue.builder(base.hooks())} or {@code HookCatalogues.overlay(base.hooks(), …)}. Nothing of it enters {@code plan.json}: the controller
+     * installs it on the target at a run's step 0b ({@code HookInstaller}) when the run's hooks switch allows.
+     *
+     * @throws IllegalStateException when the resource exists and is malformed (the message names the resource and the
+     *     line); a compile of any scenario of the pack reports it as a compile error
+     */
+    default HookCatalogue hooks() {
+        return HookCatalogues.ofPack(this);
+    }
+
+    /**
+     * The pack's constants, overridable by an overlay (phase6-contracts.md 11.1, decision D145): resolvers, verifiers,
+     * the fingerprinter and pre-flight checks read them through their contexts' {@code settings()}. Empty by default.
+     */
+    default PackSettings settings() {
+        return PackSettings.EMPTY;
     }
 }

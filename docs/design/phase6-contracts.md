@@ -939,6 +939,10 @@ is installed by the server itself at its start under `--hooks` (§6.1), the pers
 `CAPTURE` on a password-taking method would be a credential disclosure to a model (High on §12.4's scale), and a
 client's `hook.remove` would drop a person's evidence mid-run.
 
+As built (Phase 6, CP): `ToolProjection.NEVER_OFFERED` and `ToolProjection.HOOK_READS`; the three reads are offered by
+every policy, the session service's included, whose policy otherwise offers no primitive read (P5 §12.4) (D-CP-4);
+`PlanPolicy` refuses a base verb's and a pack verb's call of any other `hook.*` or `rule.*` primitive.
+
 ### 4.3 Events, the value encoding and the masking
 
 - **Topic**: the spec's `emits`, default `hook.<id>`; it must start with `hook.` (`INVALID_PARAMS` otherwise), so
@@ -1068,6 +1072,17 @@ change of any entry, of the version or of an `enabled` flag changes it, which is
 on (§4.2: the agent receives the hash and the enabled specs, and answers `HOOK_CONFLICT` when the spec set differs
 under the same hash).
 
+As built (Phase 6, CP): `HookCatalogues.read` throws `ScenarioException` (source and line); `ofPack` reads the resource
+once per pack class and id and throws `IllegalStateException` (the resource and the line) on every call for a
+malformed one, which `PlanCompiler` reports as a compile error and the installer as ENVIRONMENT. A class is "under
+`packages`" when it is in one of them or below; `packages` may be absent, and every entry is then off unless written
+`enabled: true` (with the warning). A `reflect` fallback is an error at its line. The secret-name warning is given for
+disabled entries too (the sample's `sign.on.checked` has it: it captures `passwordMatches`' boolean result without
+`secretResult`). The entry hash is the protocol's `HookSpec.hash()` of `HookEntry.toSpec()`; `emits` is kept as written
+(an explicit default topic is a different spec from an absent one). `HookCatalogue.descriptor()` is the
+`{id, version, hash, application?}` that `hook.install` takes; `HookCatalogues.overlayResource` and `resourceName` serve
+an overlay's resource. (D-CP-1)
+
 ### 5.2 The pack side
 
 `DomainPack` gains one member with a default:
@@ -1124,6 +1139,16 @@ person runs `skillroy hooks remove`, when the agent is disabled (§3.5) or when 
 behaves as the CLI: `-Dskillroy.hooks=on|off|auto` (default `auto`) reaches `RunOptions.hooks` through
 `ScenarioTests`'s overload without options.
 
+As built (Phase 6, CP): a catalogue without an enabled entry counts as none (`skipped: "no catalogue"` under `AUTO`;
+under `ON` PRECONDITION_FAILED "… has no enabled hook in its catalogue …"). Step 4's fallback is the first `seam` whose
+primitive the target serves: its descriptor in `GET /schema` names no capability, or a capability the matrix shows
+`OK` (a primitive id is not a capability id); the schema is read only when a hook is unavailable, and without it a
+capability of the primitive's own id decides (D-CP-3). A refused install writes the `hooks` record with `ok: false`,
+`error` and the detail before the run ends. A replaced catalogue adds `replaced: true` to the record. The installer is
+`HookInstaller.install(pack, agent, caps, mode, refuseArmedStubs, clock)`, `refuseArmedStubs` true for `replay` only
+(a session, the MCP server and `skillroy hooks install` record armed stubs). Another value of `skillroy.hooks` is the
+glue's single test `environment`.
+
 ---
 
 ## 6. Hooks on and off: the switch, the sample's catalogue, scenario E, the archived matrix
@@ -1140,6 +1165,12 @@ installed), the system property **`skillroy.hooks`** by the JUnit glue. The swit
 the YAML cannot carry it; the scenario's own words about hooks are `requires: [hook.<id>]` for a hook it cannot do
 without and `capability: hook.<id>` on an expectation it can do without (B14, design §1.3).
 
+As built (Phase 6, CP): a session has no `RunOptions`, so `SessionOptions` gains `hooks` as its eleventh component
+(default `AUTO`, the ten-argument constructor kept, `withHooks`); `ExecutorSession.open` installs under it, before the
+pre-flight and the web path, writes the `hooks` record into the journal's start record (`options.hooks`) and exposes it
+as `hooks()`; the MCP server keeps the switch when it fills in its session's output directory. `--hooks` with another
+value is a usage error (64) before the agent is contacted (D-CP-2).
+
 ### 6.2 `skillroy hooks`
 
 `skillroy hooks status|install|remove [--pack <jar>…] [--json] <connection options>`:
@@ -1154,6 +1185,11 @@ without and `capability: hook.<id>` on an expectation it can do without (B14, de
   exit 0 for `OK` and `DEGRADED`, 1 for `HOOK_VERIFY_FAILED`.
 
 The command is listed in `Main` after `session`; `P1 §8.6`'s command list gains it (§15.1).
+
+As built (Phase 6, CP): `status` also calls `hook.probe` with the pack's enabled specs, because `otherAgents` is in the
+probe's answer and not in `hook.health`'s; a probe that fails is printed as a note. A refused `install` is exit 1 for
+PRECONDITION_FAILED and ENVIRONMENT alike (another catalogue on the target is refused by the installer before
+`HOOK_CONFLICT` could be).
 
 ### 6.3 The base fact root `hooks`, the sample's catalogue and scenario E
 
@@ -1170,6 +1206,16 @@ status`. When `hook.health` answers `METHOD_NOT_FOUND` (the module is not loaded
 `Instrumentation`, §4.2) the root is an empty list, so a path under it does not resolve, and the guarded expectation that names it is skipped anyway (its
 capability is not `OK`). The root is read fresh at each expectation attempt, like `app`; the base-fact provider seam
 gains the run context it needs for `stepsSinceSeq`.
+
+As built (Phase 6, CP): the run's provider is `BaseFacts.hooks(LongSupplier since)`, put into the run's facts as the
+`web` root is (a pack root `hooks` hides it); `stepsSinceSeq` is the start mark's `seqAfter`; `lastFiredMs` is the
+newest event's `ts`; `NOT_READY` also gives the empty list, and the same three codes from `hook.events` do too.
+`BaseFacts.all()`'s own provider counts from 0, and an `ExecutorSession` counts from its own start mark. The
+headless test of §13.1 item 7 drives a scripted hooks module in `HeadlessDesk` (`launch(env, hooks, swingTree)`):
+the matrix declares `hook.engine` and `hook.limit.applied`, `hook.health` names the pack's catalogue as installed, and
+one `hook.limit.applied` event is published for every return line the engine commits, before it asks for the next
+input, with the signed-on code and the limit the desk's access rules give (D-CP-9). Scenario E's seed bindings are
+approved by `ResolutionChecks` (label `approve`) and written under `-Dskillroy.bindings.update=true`.
 
 **The sample application changes once for it**: `AccessControl.check` reads the `RETURN` limit through
 `limit(code, LIMIT_RETURN)` (public today, with no caller outside the class) instead of `returnLimit(code)`, so that `returnLimit` is called by
@@ -1265,6 +1311,11 @@ in `run.jsonl`, where `hash` is `CapabilityMatrix.hash()`, the `sha256:` of the 
 the file; `ExecutorSession` writes the same file into its directory at `open`; the MCP server's `--out` likewise.
 This is design §2.2 step 5's "archived per run" as promised, and it is what makes a hooks-on and a hooks-off run of
 the same scenario distinguishable in evidence, and what §8.2's comparison reads. The `requires` record is unchanged.
+
+As built (Phase 6, CP): `PlanExecutor.CAPABILITIES_FILE`; the file is the masked pretty JSON of `toJson()`; the record
+is written also without an output directory (`file: null`) and before the `requires` check, so that a run refused by
+`requires` still archives what it saw. The MCP server reads the matrix again after its session's install and writes
+`<out>/capabilities.json`.
 
 ### 6.5 Hooks and the fingerprint (D128)
 
@@ -1948,6 +1999,14 @@ public final class PackSettings { public static final PackSettings EMPTY; String
   contexts, so that an overlay changes one constant with `settings()` alone and replaces a resolver only when its
   logic differs. The keys are the pack's own (`<packId>.<name>`), documented in the pack.
 
+As built (Phase 6, CP): `DomainPacks.overlaid(packs, overlays)` is the discovery's second half, public for tests; an
+overlay that returns null or a pack with another id is refused like a missing base; `forScenario` and the CLI's
+`Packs` report the refusal before anything runs (`ScenarioException`, exit 2). `DelegatingDomainPack` exposes
+`base()`, `overlayId()` and `overlayVersion()` and validates the id (`[a-z][a-z0-9-]*`) and a non-blank version. The
+contexts' `settings()` defaults collide in a class that implements two of them (a test fake implementing both
+`ResolveContext` and `VerifyContext` must override it); the engine's contexts, the executor's, the session's, the CLI's
+and the batch re-resolver's pre-flight contexts return the running pack's settings.
+
 ### 11.2 The hook catalogue of an overlay
 
 An overlay's `hooks()` answers `HookCatalogues.overlay(base.hooks(), resource)`, where the resource
@@ -1992,6 +2051,21 @@ ai.skillroy.testjava.scenario.pack.DomainPackOverlay` entry. Nothing else: the p
 the scenarios are untouched by the overlay (the application's edition and the agent module's one key are the
 variant's, not the overlay's).
 
+As built (Phase 6, CP): `Edition {STANDARD, BRANCH}` carries the limit column and the setting name;
+`LendingDb.create/createServable(name, seed, edition, today)`, `AccessControl.load(connection, edition)` and
+`Engine(…, edition)` take it, the old signatures meaning `STANDARD`; `ReturnCeilings(access).applicable(code)`;
+`LendingApp.edition()`. For §13.1 item 6's "which path calls it", `AccessControl` and `ReturnCeilings` carry
+package-private call counters that only the application's own tests read (D-CP-8). The pack's public surface:
+`LendingResolvers` public with public, non-final resolver classes, a public constructor taking the statement where a
+resolver runs one (`SystemLimitResolver(sql)`, `StaffResolver(staffSql)`), the resolver ids as constants
+(`STAFF_ID`, …) and the SQL texts; the verifier ids as `LendingPack` constants; `LendingAllowList.of(limitColumn,
+maxReturnSetting)` (whose standard descriptions are byte for byte the 0.4.0 ones, so scenario D's recorded requests
+still match); `LendingPack.MAX_RETURN_SETTING` and `DEFAULT_MAX_RETURN_SETTING`. The overlay's `BranchPack` builds its
+resolution catalogue and its hook catalogue once, on first use. Gap 49 is not taken (D-CP-10). Pack 0.5.0 changes the
+session's vocabulary text ("The pack: lending 0.5.0"), so the five scripted stand-in recordings of the interactive
+session were regenerated by the fixture update path (`-Dskillroy.inference.fixtures.update=true`), the export's YAML,
+plan and bindings with them (version and hashes only); scenario D's two live recordings are untouched (D-CP-7).
+
 ### 11.4 Plans, bindings and the variant's acceptance
 
 - The variant's plans are compiled by the overlaid pack from the **same YAML** and committed under
@@ -2011,6 +2085,15 @@ variant's, not the overlay's).
   `hooks[id=limit.applied].count = 0` (the run-scoped root of §6.3): the demonstration that the overlay's catalogue is
   needed and not decorative. Scenarios C and D are not run on the variant (D's recordings are keyed by prompt content,
   which the variant's allow-list changes; a variant recording is a live item, §13.4).
+
+As built (Phase 6, CP): the overlay's jar is **not** on the scenarios module's test class path: it is a test dependency
+(for the reactor order) excluded from the surefire and failsafe class paths (`classpathDependencyExcludes`) and handed
+to the tests as `-Dskillroy.it.overlayJar` (`maven-dependency-plugin:properties`), which `BranchVariant` loads in a class
+loader of its own over the test class path; on the class path itself, `ServiceLoader` would overlay the pack of every
+standard-edition test, the JUnit glue's included (D-CP-6). The variant's bindings carry the label `approve` and are
+written by `BranchEndToEndIT` under `-Dskillroy.bindings.update=true` (compared byte for byte otherwise). The negative
+half runs E's standard plan with the variant's `branch-a` bindings (the same resolve hash and fingerprint) and a 10 s
+step timeout.
 
 ---
 

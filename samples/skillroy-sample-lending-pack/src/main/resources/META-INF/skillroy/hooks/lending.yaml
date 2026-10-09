@@ -1,0 +1,58 @@
+# The lending pack's hook catalogue (phase6-contracts.md 5.1, 6.3): what the controller installs on a desk whose agent
+# loads the optional hooks module, once per target and idempotent by the catalogue's hash. Read by the controller; the
+# agent receives the enabled entries as JSON HookSpecs. Hooks never enter a plan or a fingerprint.
+catalogue: lending
+version: 1
+application: skillroy-sample-lending-app 0.1.0, standard edition
+hooks:
+  - id: limit.applied
+    mode: CAPTURE
+    target:
+      class: ai.skillroy.testjava.samples.lending.AccessControl
+      method: returnLimit
+      descriptors: ["(Ljava/lang/String;)Ljava/math/BigDecimal;"]
+    capture: { args: [0], result: true }
+    fallbacks:
+      - seam: lending.limits
+    note: the limit the desk applies to every return line, called by the return path only
+  - id: access.checked
+    mode: OBSERVE
+    target:
+      class: ai.skillroy.testjava.samples.lending.AccessControl
+      method: check
+      descriptors: ["(Ljava/lang/String;Ljava/lang/String;Ljava/math/BigDecimal;)Lai/skillroy/testjava/samples/lending/AccessDecision;"]
+    fallbacks:
+      - seam: lending.access.check
+    note: the desk's complete access decision; the verifier's own primitive calls it too
+  - id: waiver.evaluated
+    mode: CAPTURE
+    target:
+      class: ai.skillroy.testjava.samples.lending.WaiverEngine
+      method: evaluate
+      descriptors: ["(Ljava/util/List;Ljava/time/LocalDate;)Ljava/util/List;"]
+    capture: { result: true }
+    fallbacks:
+      - seam: lending.waiver.evaluate
+    note: the waivers of a DUE; the result holds application objects, so the event carries handles
+  - id: sign.on.checked
+    mode: CAPTURE
+    enabled: false
+    target:
+      class: ai.skillroy.testjava.samples.lending.AccessControl
+      method: passwordMatches
+      descriptors: ["(Ljava/lang/String;Ljava/lang/String;)Z"]
+    capture: { args: [0], result: true }
+    secretArgs: [1]
+    fallbacks:
+      - seam: lending.access.check
+    note: catalogued and off; when enabled, the password argument is never captured
+  - id: line.amount
+    mode: STUB
+    target:
+      class: ai.skillroy.testjava.samples.lending.Deposits
+      method: money
+      descriptors: ["(Ljava/math/BigDecimal;)Ljava/math/BigDecimal;"]
+    fallbacks:
+      - seam: lending.deposit
+    note: the STUB demonstration of the acceptance; never armed by a committed scenario
+packages: [ai.skillroy.testjava.samples.lending]

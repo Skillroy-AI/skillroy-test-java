@@ -53,6 +53,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.TreeSet;
 
@@ -64,18 +65,39 @@ import java.util.TreeSet;
  * {@code ORDER BY} that determines the order completely, so the same data always gives the same candidates in the
  * same order. No statement selects a secret column, and no parameter is a date, which would change every day.
  *
+ * <p>Public from pack 0.5.0 (phase6-contracts.md 11.3): the resolver classes, their ids and the SQL texts are the
+ * pack's API for an overlay, which replaces a resolver (by id) with a subclass that runs another statement
+ * ({@code new StaffResolver(sql)}) rather than a copy. The variant-sensitive constant, the setting name of the system
+ * maximum, is read from the pack's settings ({@link LendingPack#MAX_RETURN_SETTING}).
+ *
  * <p>Stateless; one instance of each serves every bind in the JVM, called on the executor's thread.
  */
-final class LendingResolvers {
+public final class LendingResolvers {
 
     /** The data source id of the desk's database. */
-    static final String SOURCE = "lending";
+    public static final String SOURCE = "lending";
 
-    /** The configured system maximum of a kind. Parameter: {@code max_<type>}. */
-    static final String SYSTEM_LIMIT_SQL = "SELECT value FROM desk_setting WHERE name = ? ORDER BY name";
+    /** The id of the {@code SystemLimit} resolver. */
+    public static final String SYSTEM_LIMIT_ID = "lending.sql.SystemLimit";
+    /** The id of the {@code LendableItem} resolver. */
+    public static final String LENDABLE_ITEM_ID = "lending.sql.LendableItem";
+    /** The id of the {@code StaffWithPermission} resolver. */
+    public static final String STAFF_ID = "lending.sql.StaffWithPermission";
+    /** The id of the {@code ActionKey} resolver. */
+    public static final String ACTION_KEY_ID = "lending.java.ActionKey";
+    /** The id of the {@code ActiveWaiverRuleWithTriggers} resolver. */
+    public static final String WAIVER_RULE_ID = "lending.sql.ActiveWaiverRuleWithTriggers";
+    /** The id of the {@code ItemsTriggering} resolver. */
+    public static final String ITEMS_TRIGGERING_ID = "lending.java.ItemsTriggering";
+
+    /**
+     * The configured system maximum of a kind. Parameter: the setting's name, for {@code RETURN} the pack setting
+     * {@link LendingPack#MAX_RETURN_SETTING} ({@code max_return} by default), for another kind {@code max_<type>}.
+     */
+    public static final String SYSTEM_LIMIT_SQL = "SELECT value FROM desk_setting WHERE name = ? ORDER BY name";
 
     /** Active scannable items in a deposit range, cheapest first. Parameters: perDay, lower bound, upper bound. */
-    static final String LENDABLE_ITEM_SQL = "SELECT code, barcode, title, deposit FROM item"
+    public static final String LENDABLE_ITEM_SQL = "SELECT code, barcode, title, deposit FROM item"
             + " WHERE active = TRUE AND barcode IS NOT NULL AND per_day = ?"
             + " AND deposit >= CAST(? AS DECIMAL(10,2)) AND deposit <= CAST(? AS DECIMAL(10,2))"
             + " ORDER BY deposit, code";
@@ -84,13 +106,13 @@ final class LendingResolvers {
      * Every active staff member with the auto-sign-on flag and the maximum limit of a kind over their roles (null =
      * unlimited), by code. Parameter: the limit kind.
      */
-    static final String STAFF_SQL = "SELECT s.code AS code, s.auto_sign_on AS auto_sign_on,"
+    public static final String STAFF_SQL = "SELECT s.code AS code, s.auto_sign_on AS auto_sign_on,"
             + " (SELECT MAX(rl.amount) FROM staff_role sr JOIN role_cap rl ON rl.role_id = sr.role_id"
             + " WHERE sr.staff_code = s.code AND rl.kind = ?) AS limit_amount"
             + " FROM staff s WHERE s.active = TRUE ORDER BY s.code";
 
     /** One staff member's permissions, the union over their roles. Parameter: the staff code. */
-    static final String PERMISSIONS_SQL = "SELECT DISTINCT rp.permission AS permission"
+    public static final String PERMISSIONS_SQL = "SELECT DISTINCT rp.permission AS permission"
             + " FROM staff_role sr JOIN role_permission rp ON rp.role_id = sr.role_id"
             + " WHERE sr.staff_code = ? ORDER BY permission";
 
@@ -100,7 +122,7 @@ final class LendingResolvers {
      * applied in Java ({@link WaiverRuleResolver}), so that no statement parameter is a date: a bindings file records
      * its statements' parameters and must not change from day to day. A rule without such an item has no row.
      */
-    static final String WAIVER_RULE_SQL = "SELECT r.id, r.code, r.kind, r.borrow_qty, r.waived_qty, r.starts_on,"
+    public static final String WAIVER_RULE_SQL = "SELECT r.id, r.code, r.kind, r.borrow_qty, r.waived_qty, r.starts_on,"
             + " r.ends_on, i.code, i.barcode, i.title, i.deposit, i.per_day, i.induction_required"
             + " FROM waiver_rule r JOIN waiver_rule_item ri ON ri.rule_id = r.id"
             + " JOIN item i ON i.code = ri.item_code"
@@ -171,12 +193,28 @@ final class LendingResolvers {
         }
     }
 
-    /** {@code lending.sql.SystemLimit}: the {@code desk_setting} row {@code max_<type>}. */
-    static final class SystemLimitResolver implements Resolver<SystemLimit, BigDecimal> {
+    /**
+     * {@code lending.sql.SystemLimit}: the {@code desk_setting} row of the system maximum, named by the pack setting
+     * {@link LendingPack#MAX_RETURN_SETTING} for {@code RETURN} ({@code max_return} unless an overlay changes it) and
+     * {@code max_<type>} for another kind.
+     */
+    public static class SystemLimitResolver implements Resolver<SystemLimit, BigDecimal> {
+
+        private final String sql;
+
+        /** The resolver with {@link #SYSTEM_LIMIT_SQL}. */
+        public SystemLimitResolver() {
+            this(SYSTEM_LIMIT_SQL);
+        }
+
+        /** The resolver with another statement of the same shape (one parameter, the setting's name; one column). */
+        public SystemLimitResolver(String sql) {
+            this.sql = Objects.requireNonNull(sql, "sql");
+        }
 
         @Override
         public String id() {
-            return "lending.sql.SystemLimit";
+            return SYSTEM_LIMIT_ID;
         }
 
         @Override
@@ -193,8 +231,10 @@ final class LendingResolvers {
         public List<ResolverCandidate<BigDecimal>> candidates(SystemLimit query, ResolveContext ctx)
                 throws DataException, AgentLostException, InterruptedException {
             String type = query.type() == null ? "RETURN" : query.type();
-            String name = "max_" + type.toLowerCase(Locale.ROOT);
-            Rows rows = ctx.data().query(SOURCE, SYSTEM_LIMIT_SQL, List.of(name), DataChannel.MAX_ROWS, null);
+            String name = "RETURN".equals(type)
+                    ? ctx.settings().get(LendingPack.MAX_RETURN_SETTING, LendingPack.DEFAULT_MAX_RETURN_SETTING)
+                    : "max_" + type.toLowerCase(Locale.ROOT);
+            Rows rows = ctx.data().query(SOURCE, sql, List.of(name), DataChannel.MAX_ROWS, null);
             if (rows.rowCount() != 1) {
                 return List.of();
             }
@@ -212,11 +252,15 @@ final class LendingResolvers {
      * of an {@code ItemRef} ({@link #lendable}, {@link #itemRef}) are shared with the tier (b) value loader
      * {@link LendingLoaders.ItemLoader} (decision D90).
      */
-    static final class LendableItemResolver implements Resolver<LendableItem, ItemRef> {
+    public static class LendableItemResolver implements Resolver<LendableItem, ItemRef> {
+
+        /** The resolver with {@link #LENDABLE_ITEM_SQL}. */
+        public LendableItemResolver() {
+        }
 
         @Override
         public String id() {
-            return "lending.sql.LendableItem";
+            return LENDABLE_ITEM_ID;
         }
 
         @Override
@@ -292,11 +336,32 @@ final class LendingResolvers {
      * with the tier (b) value loader {@link LendingLoaders.StaffLoader} (decision D90), so that a staff member a model
      * found is loaded exactly as this resolver loads one.
      */
-    static final class StaffResolver implements Resolver<StaffWithPermission, StaffRef> {
+    public static class StaffResolver implements Resolver<StaffWithPermission, StaffRef> {
+
+        private final String staffSql;
+
+        /** The resolver with {@link #STAFF_SQL}. */
+        public StaffResolver() {
+            this(STAFF_SQL);
+        }
+
+        /**
+         * The resolver with another first statement of the same shape as {@link #STAFF_SQL} (one parameter, the limit
+         * kind; the columns code, auto-sign-on flag and limit, by code): an overlay whose desk names the limit column
+         * differently subclasses it with its own statement (phase6-contracts.md 11.3).
+         */
+        public StaffResolver(String staffSql) {
+            this.staffSql = Objects.requireNonNull(staffSql, "staffSql");
+        }
+
+        /** The first statement this resolver runs. */
+        public final String staffSql() {
+            return staffSql;
+        }
 
         @Override
         public String id() {
-            return "lending.sql.StaffWithPermission";
+            return STAFF_ID;
         }
 
         @Override
@@ -318,7 +383,7 @@ final class LendingResolvers {
             List<String> distinct = query.distinctFrom() == null ? List.of() : query.distinctFrom();
             CredentialSpec credential = ctx.credential();
             boolean skipEarly = credential != null && "code".equals(credential.key());
-            Rows staff = activeStaff(kind, ctx);
+            Rows staff = activeStaff(staffSql, kind, ctx);
             List<ResolverCandidate<StaffRef>> out = new ArrayList<>();
             List<Integer> withoutCredential = new ArrayList<>();
             for (int r = 0; r < staff.rowCount() && out.size() < ctx.maxCandidates(); r++) {
@@ -364,7 +429,12 @@ final class LendingResolvers {
          */
         static Rows activeStaff(String kind, ResolveContext ctx)
                 throws DataException, AgentLostException, InterruptedException {
-            return ctx.data().query(SOURCE, STAFF_SQL, List.of(kind), DataChannel.MAX_ROWS, null);
+            return activeStaff(STAFF_SQL, kind, ctx);
+        }
+
+        private static Rows activeStaff(String sql, String kind, ResolveContext ctx)
+                throws DataException, AgentLostException, InterruptedException {
+            return ctx.data().query(SOURCE, sql, List.of(kind), DataChannel.MAX_ROWS, null);
         }
 
         /**
@@ -393,11 +463,15 @@ final class LendingResolvers {
      * actions), so the answer is the identity map, provided every requested action is a key action. The verifier
      * proves it against the running window.
      */
-    static final class ActionKeyResolver implements Resolver<ActionKey, Map<String, String>> {
+    public static class ActionKeyResolver implements Resolver<ActionKey, Map<String, String>> {
+
+        /** The resolver. */
+        public ActionKeyResolver() {
+        }
 
         @Override
         public String id() {
-            return "lending.java.ActionKey";
+            return ACTION_KEY_ID;
         }
 
         @Override
@@ -441,11 +515,15 @@ final class LendingResolvers {
      * decided before {@code borrowQty} and {@code waivedQty} narrow the result, because a rule of other quantities
      * would still waive at the desk. Candidates in rule-id order.
      */
-    static final class WaiverRuleResolver implements Resolver<ActiveWaiverRuleWithTriggers, WaiverRuleRef> {
+    public static class WaiverRuleResolver implements Resolver<ActiveWaiverRuleWithTriggers, WaiverRuleRef> {
+
+        /** The resolver with {@link #WAIVER_RULE_SQL}. */
+        public WaiverRuleResolver() {
+        }
 
         @Override
         public String id() {
-            return "lending.sql.ActiveWaiverRuleWithTriggers";
+            return WAIVER_RULE_ID;
         }
 
         @Override
@@ -575,11 +653,15 @@ final class LendingResolvers {
      * query asks (per day or counted, with or without the induction check; by default a plain counted tool), in the
      * rule's order, cheapest first.
      */
-    static final class ItemsTriggeringResolver implements Resolver<ItemsTriggering, ItemRef> {
+    public static class ItemsTriggeringResolver implements Resolver<ItemsTriggering, ItemRef> {
+
+        /** The resolver. */
+        public ItemsTriggeringResolver() {
+        }
 
         @Override
         public String id() {
-            return "lending.java.ItemsTriggering";
+            return ITEMS_TRIGGERING_ID;
         }
 
         @Override

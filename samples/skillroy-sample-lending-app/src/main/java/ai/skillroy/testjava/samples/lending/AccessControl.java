@@ -29,6 +29,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Staff, permissions and monetary limits: the desk's own access rules, used by the engine for sign-on and
@@ -44,6 +45,11 @@ import java.util.TreeSet;
  *   <li>The system maximum return is {@code desk_setting max_return}; null when not configured.</li>
  * </ul>
  *
+ * <p>In the branch edition ({@link Edition#BRANCH}, phase6-contracts.md 11.3) the limit column is
+ * {@code role_cap.ceiling} and the system maximum's setting is {@code return_ceiling}; the rules are the same. The
+ * access decision ({@link #check}) reads the return limit through {@link #limit}, so that {@link #returnLimit} is
+ * called by the engine's return path alone (phase6-contracts.md 6.3).
+ *
  * <p>The data is read once by {@link #load} at start-up; the database is not written while the desk runs.
  * Immutable after loading and safe to call from any thread.
  */
@@ -57,7 +63,7 @@ public final class AccessControl {
     public static final String RETURN_OVERRIDE = "RETURN_OVERRIDE";
     /** {@code role_cap.kind} of return limits. */
     public static final String LIMIT_RETURN = "RETURN";
-    /** {@code desk_setting} name of the system maximum return. */
+    /** {@code desk_setting} name of the system maximum return (the standard edition's; see {@link Edition}). */
     public static final String SETTING_MAX_RETURN = "max_return";
 
     private static final class StaffRecord {
@@ -75,6 +81,8 @@ public final class AccessControl {
     private final Map<Integer, Set<String>> rolePermissions;
     private final Map<Integer, Map<String, BigDecimal>> roleCaps;
     private final BigDecimal systemMaxReturn;
+    /** Calls of {@link #returnLimit}, for the application's own tests of which path calls it (P6 13.1 item 6). */
+    final AtomicLong returnLimitCalls = new AtomicLong();
 
     private AccessControl(Map<String, StaffRecord> staff, Map<Integer, Set<String>> rolePermissions,
                           Map<Integer, Map<String, BigDecimal>> roleCaps, BigDecimal systemMaxReturn) {
@@ -85,11 +93,21 @@ public final class AccessControl {
     }
 
     /**
-     * Reads staff, roles, permissions, limits and the system maximum return.
+     * Reads staff, roles, permissions, limits and the system maximum return of a standard-edition database.
      *
      * @param connection any connection to the lending database; not closed
      */
     public static AccessControl load(Connection connection) throws SQLException {
+        return load(connection, Edition.STANDARD);
+    }
+
+    /**
+     * Reads staff, roles, permissions, limits and the system maximum return from the columns and settings of
+     * {@code edition}.
+     *
+     * @param connection any connection to the lending database; not closed
+     */
+    public static AccessControl load(Connection connection, Edition edition) throws SQLException {
         Map<String, StaffRecord> staff = new LinkedHashMap<String, StaffRecord>();
         Map<Integer, Set<String>> permissions = new HashMap<Integer, Set<String>>();
         Map<Integer, Map<String, BigDecimal>> limits = new HashMap<Integer, Map<String, BigDecimal>>();
@@ -120,7 +138,7 @@ public final class AccessControl {
                     set.add(rs.getString(2));
                 }
             }
-            try (ResultSet rs = st.executeQuery("SELECT role_id, kind, amount FROM role_cap")) {
+            try (ResultSet rs = st.executeQuery("SELECT role_id, kind, " + edition.limitColumn() + " FROM role_cap")) {
                 while (rs.next()) {
                     Map<String, BigDecimal> byKind = limits.get(rs.getInt(1));
                     if (byKind == null) {
@@ -131,7 +149,7 @@ public final class AccessControl {
                 }
             }
             try (ResultSet rs = st.executeQuery(
-                    "SELECT value FROM desk_setting WHERE name = '" + SETTING_MAX_RETURN + "'")) {
+                    "SELECT value FROM desk_setting WHERE name = '" + edition.maxReturnSetting() + "'")) {
                 if (rs.next() && rs.getString(1) != null) {
                     max = Deposits.money(new BigDecimal(rs.getString(1).trim()));
                 }
@@ -205,8 +223,14 @@ public final class AccessControl {
         return max;
     }
 
-    /** @return the staff member's return limit, null for unlimited (or unknown staff: check {@link #findStaff}) */
+    /**
+     * The limit the standard edition's return path applies to a return line and to a supervisor's authorisation;
+     * nothing else calls it (the access decision reads {@link #limit} directly, phase6-contracts.md 6.3).
+     *
+     * @return the staff member's return limit, null for unlimited (or unknown staff: check {@link #findStaff})
+     */
     public BigDecimal returnLimit(String code) {
+        returnLimitCalls.incrementAndGet();
         return limit(code, LIMIT_RETURN);
     }
 
@@ -248,7 +272,7 @@ public final class AccessControl {
             return new AccessDecision(false, null, "unknown staff code");
         }
         boolean limited = RETURN.equals(permission) || RETURN_OVERRIDE.equals(permission);
-        BigDecimal limit = limited ? returnLimit(code) : null;
+        BigDecimal limit = limited ? limit(code, LIMIT_RETURN) : null;
         if (!s.active()) {
             return new AccessDecision(false, limit, "staff member is not active");
         }

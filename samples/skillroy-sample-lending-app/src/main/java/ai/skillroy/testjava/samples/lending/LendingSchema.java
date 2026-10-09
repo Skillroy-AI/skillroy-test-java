@@ -23,11 +23,15 @@ import java.sql.Statement;
 /**
  * The lending database schema (contract tables and columns). Money columns are {@code DECIMAL(10,2)}; quantities are
  * {@code DECIMAL(10,3)} so that per-day items fit. Loan ids come from the sequence {@code loan_id_seq}, whose start
- * differs per seed.
+ * differs per seed. The role limit column of {@code role_cap} is the edition's ({@code amount}, or {@code ceiling} in
+ * the branch edition: phase6-contracts.md 11.3); every other table and column is the same in both editions.
  */
 final class LendingSchema {
 
     static final String LOAN_ID_SEQUENCE = "loan_id_seq";
+
+    /** Stands for the edition's limit column of {@code role_cap} in {@link #DDL} ({@link Edition#limitColumn()}). */
+    private static final String LIMIT_COLUMN = "${limitColumn}";
 
     private static final String[] DDL = {
         "CREATE TABLE staff (code VARCHAR(16) PRIMARY KEY, name VARCHAR(64) NOT NULL, password VARCHAR(64),"
@@ -38,7 +42,7 @@ final class LendingSchema {
         "CREATE TABLE role_permission (role_id INTEGER NOT NULL REFERENCES role(id),"
             + " permission VARCHAR(32) NOT NULL, PRIMARY KEY (role_id, permission))",
         "CREATE TABLE role_cap (role_id INTEGER NOT NULL REFERENCES role(id), kind VARCHAR(16) NOT NULL,"
-            + " amount DECIMAL(10,2) NOT NULL, PRIMARY KEY (role_id, kind))",
+            + " " + LIMIT_COLUMN + " DECIMAL(10,2) NOT NULL, PRIMARY KEY (role_id, kind))",
         "CREATE TABLE desk_setting (name VARCHAR(32) PRIMARY KEY, value VARCHAR(128))",
         "CREATE TABLE item (code VARCHAR(16) PRIMARY KEY, barcode VARCHAR(32) UNIQUE,"
             + " title VARCHAR(64) NOT NULL, deposit DECIMAL(10,2) NOT NULL,"
@@ -66,11 +70,16 @@ final class LendingSchema {
     private LendingSchema() {
     }
 
-    /** Creates every table and the loan id sequence starting at {@code firstLoanId}. */
+    /** Creates every table of the standard edition and the loan id sequence starting at {@code firstLoanId}. */
     static void create(Connection connection, long firstLoanId) throws SQLException {
+        create(connection, firstLoanId, Edition.STANDARD);
+    }
+
+    /** Creates every table of {@code edition} and the loan id sequence starting at {@code firstLoanId}. */
+    static void create(Connection connection, long firstLoanId, Edition edition) throws SQLException {
         try (Statement st = connection.createStatement()) {
             for (String ddl : DDL) {
-                st.execute(ddl);
+                st.execute(ddl.replace(LIMIT_COLUMN, edition.limitColumn()));
             }
             st.execute("CREATE SEQUENCE " + LOAN_ID_SEQUENCE + " AS BIGINT START WITH " + firstLoanId);
         }

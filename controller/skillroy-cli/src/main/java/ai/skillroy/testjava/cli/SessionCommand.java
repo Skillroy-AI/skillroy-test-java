@@ -41,6 +41,7 @@ import ai.skillroy.testjava.scenario.PlanCompiler;
 import ai.skillroy.testjava.scenario.ScenarioException;
 import ai.skillroy.testjava.scenario.SessionOpenException;
 import ai.skillroy.testjava.scenario.SessionOptions;
+import ai.skillroy.testjava.scenario.hooks.HooksMode;
 import ai.skillroy.testjava.scenario.StepJournal;
 import ai.skillroy.testjava.scenario.StepOutcome;
 import ai.skillroy.testjava.scenario.pack.DomainPack;
@@ -165,6 +166,7 @@ final class SessionCommand implements Command {
                 OptionSpec.value(SCRIPT, "file", "read the commands from this file instead of the terminal")));
         options.addAll(InferenceArgs.gateway());
         options.add(InferenceArgs.BUDGET_SESSION_OPTION);
+        options.add(HooksArgs.OPTION);
         options.add(OptionSpec.flag("--json", "print each command's result as one JSON object per line"));
         return Connector.withConnection(options.toArray(OptionSpec[]::new));
     }
@@ -198,6 +200,7 @@ final class SessionCommand implements Command {
             throw new UsageException(ID + " must match [a-z0-9-]+, found '" + id + "'");
         }
         BindArgs.Settings settings = BindArgs.parse(args, List.of(), BindMode.LIVE);
+        HooksMode hooks = HooksArgs.mode(args);
         ClassLoader previous = Thread.currentThread().getContextClassLoader();
         try (Packs packs = Packs.load(args.values(Packs.OPTION), cli.classLoader())) {
             Thread.currentThread().setContextClassLoader(packs.loader());
@@ -226,7 +229,7 @@ final class SessionCommand implements Command {
                 // Recover on close (D95): the desk is left as a run leaves it, so that the export replays at once.
                 SessionOptions options = SessionOptions.defaults(dir).withClock(clock).withBind(bind)
                         .withReadOnly(args.flag(READ_ONLY)).withRecoverOnClose(true)
-                        .withWebPathLoader(packs.loader()).withId(sessionId);
+                        .withWebPathLoader(packs.loader()).withId(sessionId).withHooks(hooks);
                 ExecutorSession session;
                 try {
                     session = ExecutorSession.open(pack, target.client(), options);

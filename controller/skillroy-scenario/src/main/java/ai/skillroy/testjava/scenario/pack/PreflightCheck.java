@@ -61,5 +61,13 @@ public interface PreflightCheck {
 
         /** The environment id of the run. */
         String envId();
+
+        /**
+         * The running pack's settings (phase6-contracts.md 11.1); {@link PackSettings#EMPTY} by default, for a test's
+         * fake.
+         */
+        default PackSettings settings() {
+            return PackSettings.EMPTY;
+        }
     }
 }

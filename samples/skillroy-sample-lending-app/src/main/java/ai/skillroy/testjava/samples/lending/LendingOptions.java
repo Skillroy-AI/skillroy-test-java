@@ -34,6 +34,8 @@ import java.util.concurrent.TimeUnit;
  *   <caption>System properties</caption>
  *   <tr><th>Property</th><th>Default</th><th>Meaning</th></tr>
  *   <tr><td>{@value #PROP_SEED}</td><td>A</td><td>which seeded environment to create, {@code A} or {@code B}</td></tr>
+ *   <tr><td>{@value #PROP_EDITION}</td><td>standard</td><td>which edition of the desk to run, {@code standard} or
+ *       {@code branch} ({@link Edition}; phase6-contracts.md 11.3)</td></tr>
  *   <tr><td>{@value #PROP_PLUGINS}</td><td>none</td><td>comma-separated {@link LendingPlugin} class names</td></tr>
  *   <tr><td>{@value #PROP_IDLE_LOCK}</td><td>0</td><td>idle seconds before the desk locks; 0 = never</td></tr>
  *   <tr><td>{@value #PROP_TITLE}</td><td>{@value LendingFrame#DEFAULT_TITLE}</td><td>main window title</td></tr>
@@ -49,6 +51,8 @@ import java.util.concurrent.TimeUnit;
 public final class LendingOptions {
 
     public static final String PROP_SEED = "lending.seed";
+    /** The desk's edition, {@code standard} (the default) or {@code branch} ({@link Edition}). */
+    public static final String PROP_EDITION = "lending.edition";
     public static final String PROP_PLUGINS = "lending.plugins";
     public static final String PROP_IDLE_LOCK = "lending.idleLockSeconds";
     public static final String PROP_TITLE = "lending.title";
@@ -58,6 +62,7 @@ public final class LendingOptions {
     public static final int NO_DB_PORT = -1;
 
     private Seed seed = Seed.A;
+    private Edition edition = Edition.STANDARD;
     private List<String> plugins = Collections.emptyList();
     private long idleLockMillis;
     private String title = LendingFrame.DEFAULT_TITLE;
@@ -78,14 +83,15 @@ public final class LendingOptions {
     }
 
     /**
-     * @return options from the given properties ({@value #PROP_SEED}, {@value #PROP_PLUGINS},
+     * @return options from the given properties ({@value #PROP_SEED}, {@value #PROP_EDITION}, {@value #PROP_PLUGINS},
      *     {@value #PROP_IDLE_LOCK}, {@value #PROP_TITLE}, {@value #PROP_DB_PORT}, {@value #PROP_DB_PASSWORD})
-     * @throws IllegalArgumentException for an unknown seed, a malformed idle-lock value or a port that is not a
-     *     whole number between 0 and 65535 (a port without a password is refused by {@link LendingApp#launch})
+     * @throws IllegalArgumentException for an unknown seed or edition, a malformed idle-lock value or a port that is
+     *     not a whole number between 0 and 65535 (a port without a password is refused by {@link LendingApp#launch})
      */
     public static LendingOptions fromProperties(Properties props) {
         LendingOptions o = new LendingOptions();
         o.seed(Seed.parse(props.getProperty(PROP_SEED)));
+        o.edition(Edition.parse(props.getProperty(PROP_EDITION)));
         String plugins = props.getProperty(PROP_PLUGINS);
         if (plugins != null) {
             List<String> names = new ArrayList<String>();
@@ -129,6 +135,12 @@ public final class LendingOptions {
 
     public LendingOptions seed(Seed value) {
         this.seed = Objects.requireNonNull(value, "seed");
+        return this;
+    }
+
+    /** @param value the desk's edition (phase6-contracts.md 11.3) */
+    public LendingOptions edition(Edition value) {
+        this.edition = Objects.requireNonNull(value, "edition");
         return this;
     }
 
@@ -197,6 +209,11 @@ public final class LendingOptions {
 
     public Seed seed() {
         return seed;
+    }
+
+    /** @return the desk's edition; {@link Edition#STANDARD} unless set */
+    public Edition edition() {
+        return edition;
     }
 
     public List<String> plugins() {

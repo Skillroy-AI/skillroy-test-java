@@ -97,11 +97,11 @@ public final class LendingApp {
                     + LendingDb.READER_USER);
         }
         LocalDate today = LocalDate.now(options.clock());
-        LendingDb db = serve ? LendingDb.createServable(options.dbName(), options.seed(), today)
-                : LendingDb.create(options.dbName(), options.seed(), today);
+        LendingDb db = serve ? LendingDb.createServable(options.dbName(), options.seed(), options.edition(), today)
+                : LendingDb.create(options.dbName(), options.seed(), options.edition(), today);
         LendingApp app;
         try {
-            AccessControl access = AccessControl.load(db.connection());
+            AccessControl access = AccessControl.load(db.connection(), options.edition());
             Catalogue catalogue = Catalogue.load(db.connection());
             WaiverEngine waiverRules = WaiverEngine.load(db.connection());
             db.connection().commit();
@@ -109,7 +109,7 @@ public final class LendingApp {
             SlipPrinter printer = new SlipPrinter(settings.get("slip_header"));
             PromptService prompts = new PromptService();
             Engine engine = new Engine(db, catalogue, access, waiverRules, prompts, printer, options.clock(),
-                options.idleLockMillis());
+                options.idleLockMillis(), options.edition());
             app = new LendingApp(options, db, access, catalogue, waiverRules, printer, prompts, engine);
         } catch (Exception e) {
             db.close();
@@ -240,6 +240,11 @@ public final class LendingApp {
 
     public Seed seed() {
         return options.seed();
+    }
+
+    /** @return the desk's edition (phase6-contracts.md 11.3) */
+    public Edition edition() {
+        return options.edition();
     }
 
     public String title() {

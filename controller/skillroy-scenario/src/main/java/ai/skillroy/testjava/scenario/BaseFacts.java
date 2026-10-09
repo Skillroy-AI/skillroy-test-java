@@ -29,6 +29,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
+import java.util.function.LongSupplier;
 
 /**
  * The fact roots every pack has (contract section 8.3), consulted after the pack's own roots:
@@ -53,6 +54,15 @@ import java.util.TreeMap;
  *       logs it) while the root still resolves; a failing {@code web.browsers} fails the read. In a run the
  *       executor reads through the run's chosen web path with the usual fall-back ({@link PlanExecutor}); this
  *       class's own provider reads from the agent.</li>
+ *   <li>{@code hooks} (phase6-contracts.md 6.3, decision D131): a list as {@code caps} is, because a hook id holds
+ *       dots, of {@code {id, state, count, lastFiredMs, armed, last}} sorted by id
+ *       ({@code hooks[id=limit.applied].last.returned}): the ids and states from {@code hook.health {}}, and per id
+ *       {@code hook.events {since, id, limit: 1000}}, where {@code since} is the agent's sequence the executor
+ *       recorded when the first step began, so that {@code count} (the number of those events), {@code last} (the
+ *       newest one's payload) and {@code lastFiredMs} (its time) describe this run's steps only: a bind-time
+ *       verifier's call or an earlier run's never count. When {@code hook.health} answers {@code METHOD_NOT_FOUND}
+ *       (no hooks module), {@code CAPABILITY_UNAVAILABLE} (no {@code Instrumentation}) or {@code NOT_READY}, the root
+ *       is an empty list. This class's own provider counts from sequence 0.</li>
  * </ul>
  *
  * <p>A pack's own root of the same name takes precedence over a base root. Stateless; safe from any thread.
@@ -60,7 +70,10 @@ import java.util.TreeMap;
 public final class BaseFacts {
 
     /** The base root names. */
-    public static final List<String> ROOTS = List.of("app", "ui", "dialogs", "caps", "devices", "web");
+    public static final List<String> ROOTS = List.of("app", "ui", "dialogs", "caps", "devices", "web", "hooks");
+
+    /** The most events of one hook the root {@code hooks} reads per attempt ({@code hook.events}' cap). */
+    static final long HOOK_EVENTS_LIMIT = 1000L;
 
     private static final CallOptions READ = CallOptions.defaults().withTimeoutMs(10_000L);
 
@@ -99,7 +112,7 @@ public final class BaseFacts {
     private BaseFacts() {
     }
 
-    /** The six base providers, in {@link #ROOTS} order. */
+    /** The seven base providers, in {@link #ROOTS} order. */
     public static List<FactProvider> all() {
         return List.of(
                 provider("app", agent -> agent.call("app.state", Map.of(), READ).value()),
@@ -126,7 +139,79 @@ public final class BaseFacts {
                 }),
                 provider("devices", BaseFacts::devices),
                 web(AGENT_READS, Clock.systemUTC(), (ref, reason) -> {
-                }));
+                }),
+                hooks(() -> 0L));
+    }
+
+    /**
+     * The root {@code hooks} counting the events after the agent sequence {@code since} supplies (read at every
+     * fetch: the executor fixes it when the first step begins).
+     */
+    static FactProvider hooks(LongSupplier since) {
+        return provider("hooks", agent -> hooks(agent, since.getAsLong()));
+    }
+
+    /**
+     * {@code [{id, state, count, lastFiredMs, armed, last}]} sorted by id (see the class comment).
+     *
+     * @throws Exception a failure of {@code hook.health} or {@code hook.events} other than the three that mean "no
+     *     hooks here", or a lost agent
+     */
+    private static Object hooks(AgentConnection agent, long since) throws Exception {
+        Object health;
+        try {
+            health = agent.call("hook.health", Map.of(), READ).value();
+        } catch (AgentRpcException e) {
+            if (noHooks(e)) {
+                return List.of();
+            }
+            throw e;
+        }
+        if (!(health instanceof Map<?, ?> map) || !(map.get("hooks") instanceof Map<?, ?> byId)) {
+            return List.of();
+        }
+        List<Object> out = new ArrayList<>();
+        for (Map.Entry<String, Object> e : new TreeMap<String, Object>(stringKeys(byId)).entrySet()) {
+            Map<?, ?> fields = e.getValue() instanceof Map<?, ?> f ? f : Map.of();
+            Map<String, Object> params = new LinkedHashMap<>();
+            params.put("since", since);
+            params.put("id", e.getKey());
+            params.put("limit", HOOK_EVENTS_LIMIT);
+            List<?> events;
+            try {
+                Object value = agent.call("hook.events", params, READ).value();
+                events = value instanceof Map<?, ?> m && m.get("events") instanceof List<?> list ? list : List.of();
+            } catch (AgentRpcException failure) {
+                if (noHooks(failure)) {
+                    return List.of();
+                }
+                throw failure;
+            }
+            Map<?, ?> newest = events.isEmpty() || !(events.get(events.size() - 1) instanceof Map<?, ?> last)
+                    ? null : last;
+            Map<String, Object> entry = new LinkedHashMap<>();
+            entry.put("id", e.getKey());
+            entry.put("state", fields.get("state"));
+            entry.put("count", (long) events.size());
+            entry.put("lastFiredMs", newest == null ? null : newest.get("ts"));
+            entry.put("armed", Boolean.TRUE.equals(fields.get("armed")));
+            entry.put("last", newest == null ? null : newest.get("payload"));
+            out.add(entry);
+        }
+        return out;
+    }
+
+    /** {@code METHOD_NOT_FOUND}, {@code CAPABILITY_UNAVAILABLE} or {@code NOT_READY}: the target has no hooks now. */
+    private static boolean noHooks(AgentRpcException e) {
+        int code = e.error().code();
+        return code == ErrorCodes.METHOD_NOT_FOUND || code == ErrorCodes.CAPABILITY_UNAVAILABLE
+                || code == ErrorCodes.NOT_READY;
+    }
+
+    private static Map<String, Object> stringKeys(Map<?, ?> map) {
+        Map<String, Object> out = new LinkedHashMap<>();
+        map.forEach((k, v) -> out.put(String.valueOf(k), v));
+        return out;
     }
 
     /**

@@ -35,9 +35,11 @@ import ai.skillroy.testjava.protocol.RpcError;
 import ai.skillroy.testjava.protocol.RpcResult;
 import ai.skillroy.testjava.protocol.SecretKeys;
 import ai.skillroy.testjava.protocol.sql.Rows;
+import ai.skillroy.testjava.scenario.hooks.HookInstaller;
 import ai.skillroy.testjava.scenario.pack.AwaitSpec;
 import ai.skillroy.testjava.scenario.pack.DomainPack;
 import ai.skillroy.testjava.scenario.pack.FactProvider;
+import ai.skillroy.testjava.scenario.pack.PackSettings;
 import ai.skillroy.testjava.scenario.pack.PreflightCheck;
 import ai.skillroy.testjava.scenario.pack.PromptPolicy;
 import ai.skillroy.testjava.scenario.pack.StepLibrary;
@@ -82,6 +84,13 @@ import java.util.stream.Stream;
 /**
  * Runs a {@link Plan} against one agent (contract section 8.5). Written only against {@link AgentConnection}, so it
  * runs unchanged over HTTP or against a test double.
+ *
+ * <p>Hooks (phase6-contracts.md 5.3, 6.4): step 0b, between the first read of the capability matrix and the
+ * {@code requires} check, installs the pack's hook catalogue on the target under {@code RunOptions.hooks}
+ * ({@code HookInstaller}: one {@code hooks} record; an armed stub in {@code replay}, another catalogue installed or a
+ * failed install is ERROR / ENVIRONMENT, hooks {@code ON} without a catalogue or an engine PRECONDITION_FAILED), the
+ * final matrix is archived as {@code capabilities.json} with a {@code capabilities} record, and the start mark's
+ * sequence is kept as {@code stepsSinceSeq}, from which the base fact root {@code hooks} counts a hook's events.
  *
  * <p>Run sequence (phase2-contracts.md 11.2): check {@code requires} against the capability matrix and
  * {@code launchProperties} through {@code jvm.properties} (PRECONDITION_FAILED) -> the pack's pre-flight checks
@@ -189,9 +198,15 @@ public final class PlanExecutor {
      */
     public static final String INFERENCE_FILE = "inference.jsonl";
 
+    /**
+     * The capability matrix the run used, archived beside {@code run.jsonl} once it is final (phase6-contracts.md 6.4,
+     * decision D130): the wire shape of {@code GET /capabilities}, ids sorted.
+     */
+    public static final String CAPABILITIES_FILE = "capabilities.json";
+
     /** Every file a run may write below its output directory, files before the directories that hold them. */
     private static final List<String> OUTPUT_FILES = List.of(RunLog.FILE, "bindings.json", LEDGER_FILE,
-            INFERENCE_FILE, "failure/snapshot.json",
+            INFERENCE_FILE, CAPABILITIES_FILE, "failure/snapshot.json",
             "failure/app-state.json", "failure/dialogs.json", "failure/capture.png", "failure/events.json", "failure",
             "artifacts/capture.png", "artifacts");
 
@@ -213,6 +228,8 @@ public final class PlanExecutor {
     private final Map<String, FactProvider> facts = new LinkedHashMap<>();
     /** True when the pack has a fact root named {@code web}, which then hides the base root. */
     private final boolean packWebRoot;
+    /** True when the pack has a fact root named {@code hooks}, which then hides the base root (P6 6.3). */
+    private final boolean packHooksRoot;
 
     /**
      * An executor that finds web paths ({@code ServiceLoader<WebPath>}) through the thread's context class loader at
@@ -257,13 +274,16 @@ public final class PlanExecutor {
                 : (plan, provided) -> SecretParamsForecast.mayAnnounce(plan, provided, envId);
         List<FactProvider> packFacts = pack.facts();
         boolean webRoot = false;
+        boolean hooksRoot = false;
         if (packFacts != null) {
             for (FactProvider fact : packFacts) {
                 facts.putIfAbsent(fact.root(), fact);
                 webRoot |= "web".equals(fact.root());
+                hooksRoot |= "hooks".equals(fact.root());
             }
         }
         this.packWebRoot = webRoot;
+        this.packHooksRoot = hooksRoot;
         for (FactProvider fact : BaseFacts.all()) {
             facts.putIfAbsent(fact.root(), fact);
         }
@@ -491,6 +511,12 @@ public final class PlanExecutor {
          * tracing (phase4-contracts.md 6.4).
          */
         private boolean traceWithheld;
+        /**
+         * The agent's sequence when the first step began (the start mark's), from which the base fact root
+         * {@code hooks} counts a hook's events (phase6-contracts.md 5.3 step 6, 6.3): a bind-time verifier's call or
+         * an earlier run's never count.
+         */
+        private long stepsSinceSeq;
 
         Run(Plan plan, Bindings provided, boolean bindOnly) {
             this.plan = plan;
@@ -504,6 +530,9 @@ public final class PlanExecutor {
             runFacts.putAll(facts);
             if (!packWebRoot) {
                 runFacts.put("web", BaseFacts.web(BaseFacts.AGENT_READS, options.clock(), this::textOmitted));
+            }
+            if (!packHooksRoot) {
+                runFacts.put("hooks", BaseFacts.hooks(() -> stepsSinceSeq));
             }
         }
 
@@ -804,12 +833,58 @@ public final class PlanExecutor {
             if (caps == null) {
                 caps = new CapabilityMatrix(Map.of());
             }
+            installHooks();
+            archiveCapabilities();
             List<String> unmet = caps.unmet(plan.requires());
             log.write("requires", RunLog.fields("requires", plan.requires(), "unmet", unmet));
             if (!unmet.isEmpty()) {
                 throw new Abort(Status.ERROR, FailureKind.PRECONDITION_FAILED, null,
                         "unmet requirements: " + String.join("; ", unmet), RunLog.fields("unmet", unmet));
             }
+        }
+
+        /**
+         * Step 0b (phase6-contracts.md 5.3, decision D129): the pack's hook catalogue onto the target under
+         * {@code RunOptions.hooks}, between the first read of the matrix and the {@code requires} check, because
+         * {@code requires:} may name a {@code hook.<id>} capability that exists only after the install; one record
+         * {@code hooks}; the matrix read again when something was installed or found installed. An armed stub is
+         * ERROR / ENVIRONMENT in {@code replay}; a refused install ends the run before anything else is sent.
+         */
+        private void installHooks() throws Abort, AgentLostException {
+            HookInstaller.Result result;
+            try {
+                result = HookInstaller.install(pack, agent, caps, options.hooks(),
+                        options.bind().mode() == BindMode.REPLAY, options.clock());
+            } catch (HookInstaller.Refused e) {
+                log.write("hooks", e.record());
+                throw new Abort(Status.ERROR, e.kind(), null, e.getMessage(), e.detail());
+            }
+            log.write("hooks", result.record());
+            if (!result.skipped()) {
+                CapabilityMatrix after = agent.capabilities();
+                caps = after == null ? new CapabilityMatrix(Map.of()) : after;
+            }
+        }
+
+        /**
+         * The matrix as the run uses it, archived (phase6-contracts.md 6.4, decision D130): {@code capabilities.json}
+         * beside {@code run.jsonl} (with an output directory) and the record {@code capabilities {hash, ids, file}}.
+         */
+        private void archiveCapabilities() {
+            Path dir = options.outputDir();
+            String file = null;
+            if (dir != null) {
+                try {
+                    Files.createDirectories(dir);
+                    Files.write(dir.resolve(CAPABILITIES_FILE), (Json.writePretty(mask.apply(caps.toJson())) + "\n")
+                            .getBytes(StandardCharsets.UTF_8));
+                    file = CAPABILITIES_FILE;
+                } catch (IOException | RuntimeException e) {
+                    log.write("capabilities", RunLog.fields("ok", false, "error", e.toString()));
+                }
+            }
+            log.write("capabilities", RunLog.fields("hash", caps.hash(), "ids", (long) caps.all().size(), "file",
+                    file));
         }
 
         private void checkLaunchProperties() throws Abort, AgentLostException {
@@ -1044,6 +1119,12 @@ public final class PlanExecutor {
                 public String envId() {
                     return options.bind().envId();
                 }
+
+                @Override
+                public PackSettings settings() {
+                    PackSettings settings = pack.settings();
+                    return settings == null ? PackSettings.EMPTY : settings;
+                }
             };
             for (PreflightCheck check : checks) {
                 String reason;
@@ -1229,6 +1310,7 @@ public final class PlanExecutor {
             }
             noteSeq(result.seqAfter());
             startMarked = true;
+            stepsSinceSeq = result.seqAfter();
             runner.lastActionSeq = result.seqAfter();
             runner.promptCursor = runner.lastActionSeq;
             log.write("call", RunLog.fields("step", null, "primitive", "trace.mark", "params", params, "ok", true,
