@@ -43,10 +43,13 @@ import java.util.Set;
 
 /**
  * Finds the agent modules and puts them in install order. Sources, in order (the first module with a given id wins):
- * {@code <home>/modules/*.jar} sorted by file name, then the paths of the {@code modules} option, each in its own
- * {@link ModuleClassLoader} whose parent is the agent loader; then the providers of the {@code AgentModule} service
- * files visible from the loader of the core itself (what {@code ServiceLoader} would find), so that in-process tests
- * and single-loader embeddings work; a provider class a module jar already named is not loaded twice.
+ * {@code <home>/modules/*.jar} sorted by file name, then the jars under {@code <home>/optional/} that the
+ * {@code optionalModules} option names by file stem (phase6-contracts.md section 2.1, D114: that directory is never
+ * scanned, so a jar in it is not even opened unless named), then the paths of the {@code modules} option, each in its
+ * own {@link ModuleClassLoader} whose parent is the agent loader; then the providers of the {@code AgentModule}
+ * service files visible from the loader of the core itself (what {@code ServiceLoader} would find), so that
+ * in-process tests and single-loader embeddings work; a provider class a module jar already named is not loaded
+ * twice.
  *
  * <p>Nothing here is fatal for the agent: a {@code modules} path that does not exist, unreadable jars, jars without a
  * service entry, providers that cannot be created or linked, unknown requirements and cycles are logged and reported
@@ -57,6 +60,10 @@ import java.util.Set;
 final class ModuleLoader {
 
     static final String SERVICE_FILE = "META-INF/services/" + AgentModule.class.getName();
+    /** The agent option that names the optional module jars to load, by file stem (D114). */
+    static final String OPTIONAL_MODULES = "optionalModules";
+    /** The home's directory of optional module jars, never scanned (D114). */
+    static final String OPTIONAL_DIR = "optional";
     private static final Charset UTF8 = Charset.forName("UTF-8");
     private static final int MAX_SERVICE_ERRORS = 100;
 
@@ -145,6 +152,7 @@ final class ModuleLoader {
                 }
             }
         }
+        optional(home, options.get(OPTIONAL_MODULES), agentLoader, byId);
         String extra = options.get("modules");
         if (extra != null) {
             for (String path : extra.split(",")) {
@@ -163,6 +171,42 @@ final class ModuleLoader {
         }
         fromClassPath(agentLoader, byId);
         return new ArrayList<Record>(byId.values());
+    }
+
+    /**
+     * The {@code optionalModules} source (D114): each comma-separated file stem names {@code <home>/optional/<stem>.jar},
+     * loaded as a module jar. A stem that is not a plain file name, names no jar, or is given without a home is a
+     * FAILED record (S14: never fatal, visible in {@code agent.info}); a jar without a service file is one as well.
+     */
+    private void optional(String home, String stems, ClassLoader agentLoader, Map<String, Record> byId) {
+        if (stems == null || stems.trim().isEmpty()) {
+            return;
+        }
+        for (String part : stems.split(",")) {
+            String stem = part.trim();
+            if (stem.isEmpty()) {
+                continue;
+            }
+            if (stem.indexOf('/') >= 0 || stem.indexOf('\\') >= 0 || stem.startsWith(".")) {
+                log.warn("optionalModules: '" + stem + "' is not a file stem");
+                failedRecord(OPTIONAL_DIR + "/" + stem, "optionalModules: '" + stem
+                        + "' is not a file stem of a jar under <home>/" + OPTIONAL_DIR, byId);
+                continue;
+            }
+            if (home == null || home.trim().isEmpty()) {
+                log.warn("optionalModules names " + stem + ", but the agent has no home");
+                failedRecord(OPTIONAL_DIR + "/" + stem + ".jar", "optionalModules names " + stem
+                        + ", but the agent has no home", byId);
+                continue;
+            }
+            File jar = new File(new File(home.trim(), OPTIONAL_DIR), stem + ".jar");
+            if (!jar.isFile()) {
+                log.warn("optionalModules names " + stem + ", but there is no " + jar);
+                failedRecord(jar.getPath(), "optional module jar does not exist: " + jar, byId);
+                continue;
+            }
+            fromJar(jar, agentLoader, byId);
+        }
     }
 
     private void fromJar(File jar, ClassLoader agentLoader, Map<String, Record> byId) {

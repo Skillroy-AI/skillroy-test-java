@@ -33,7 +33,10 @@ public final class ErrorCodes {
             // a script the agent ran in an embedded web page threw (Phase 4, phase4-contracts.md section 8.1)
             SCRIPT_ERROR = -32008,
             CAPABILITY_DEGRADED = -32010, CAPABILITY_UNAVAILABLE = -32011,
-            HOOK_VERIFY_FAILED = -32020, CONFIRM_REQUIRED = -32030, READ_ONLY = -32031, NOT_READY = -32032,
+            // the hook engine (Phase 6, phase6-contracts.md section 4.5): a restore left a reference to Spy behind;
+            // another hook catalogue is installed; a Byteman rule the lint or the type check refused
+            HOOK_VERIFY_FAILED = -32020, HOOK_CONFLICT = -32021, RULE_REJECTED = -32022,
+            CONFIRM_REQUIRED = -32030, READ_ONLY = -32031, NOT_READY = -32032,
             // the agent's pools are full, or an earlier timed-out call of the same primitive is still running (S30)
             BUSY = -32033;
 
@@ -75,6 +78,10 @@ public final class ErrorCodes {
                 return "CAPABILITY_UNAVAILABLE";
             case HOOK_VERIFY_FAILED:
                 return "HOOK_VERIFY_FAILED";
+            case HOOK_CONFLICT:
+                return "HOOK_CONFLICT";
+            case RULE_REJECTED:
+                return "RULE_REJECTED";
             case CONFIRM_REQUIRED:
                 return "CONFIRM_REQUIRED";
             case READ_ONLY:

@@ -19,6 +19,7 @@ package ai.skillroy.testjava.protocol;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** The names both ends of the channel must spell identically (hardening H2 and H3). */
 class ProtocolConstantsTest {
@@ -30,5 +31,18 @@ class ProtocolConstantsTest {
         assertEquals("sessionId", Protocol.KEY_SESSION_ID);
         assertEquals(100, Protocol.MAX_BATCH);
         assertEquals("secretParams", Protocol.META_SECRET_PARAMS);
+    }
+
+    /** phase6-contracts.md section 4.4: the hook engine's and the Byteman module's topics. */
+    @Test
+    void hookAndRuleTopics() {
+        assertEquals("hook.", Topics.HOOK_PREFIX);
+        assertEquals("hooks.installed", Topics.HOOKS_INSTALLED);
+        assertEquals("hooks.removed", Topics.HOOKS_REMOVED);
+        assertEquals("hooks.stubbed", Topics.HOOKS_STUBBED);
+        assertEquals("rule.fired", Topics.RULE_FIRED);
+        assertEquals("rules.changed", Topics.RULES_CHANGED);
+        assertTrue(TopicFilter.parse("hook.*").matches(Topics.HOOK_PREFIX + "limit.applied"),
+                "the SSE filter hook.* sees every hook");
     }
 }

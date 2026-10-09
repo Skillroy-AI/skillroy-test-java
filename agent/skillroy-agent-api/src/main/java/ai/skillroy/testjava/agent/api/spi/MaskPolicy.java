@@ -18,9 +18,14 @@ package ai.skillroy.testjava.agent.api.spi;
 
 /**
  * Applied to every value data.query returns before it leaves the JVM. Keeps sensitive column values (passwords,
- * personal data) out of controller logs and reports.
+ * personal data) out of controller logs and reports. Since Phase 6 also applied to every encoded scalar a
+ * {@code CAPTURE} hook copies out of a call, as {@code mask("hook.<id>", "arg<i>" | "self" | "return", value)}
+ * (phase6-contracts.md section 4.3), and to a Byteman rule's bindings.
  *
- * <p>Called on agent worker threads, possibly concurrently; must be thread-safe and fast.
+ * <p>Called on agent worker threads, or, for a {@code CAPTURE} hook or a Byteman rule's bindings, on the application
+ * thread that called the hooked method; possibly concurrently. It must be thread-safe, cheap, and must never block or
+ * take a lock of the application. A policy that throws is counted as a hook failure and the value is replaced by
+ * {@code <redacted>}.
  */
 public interface MaskPolicy {
 

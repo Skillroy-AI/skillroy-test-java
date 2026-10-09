@@ -80,6 +80,67 @@ class ModuleClassLoaderTest {
         }
     }
 
+    /**
+     * The hooks' {@code Spy} package is parent-first in a module loader (phase6-contracts.md 2.1, D116): once
+     * {@code Spy} is on the bootstrap path the parent chain resolves it there, and a stray copy in a module jar must not
+     * shadow it (before the append it would be defined from the jar, which is why no jar but the spy jar may hold
+     * one, a rule of {@code DistributionContentIT}).
+     */
+    @Test
+    void theSpyPackageIsParentFirstSoTheParentsSpyWinsOverACopyInTheModuleJar() throws Exception {
+        assertTrue(ModuleClassLoader.isParentFirst("ai.skillroy.testjava.agent.spy.Spy"));
+        assertTrue(ModuleClassLoader.isParentFirst("ai.skillroy.testjava.agent.spy.Spy$Stub"));
+        String spy = "ai/skillroy/testjava/agent/spy/Spy";
+        File parentJar = tmp.resolve("boot-path.jar").toFile();
+        Map<String, byte[]> parentEntries = new HashMap<String, byte[]>();
+        parentEntries.put(spy + ".class", minimalClass(spy));
+        TestJars.jar(parentJar, parentEntries);
+        File jar = tmp.resolve("spy-copy.jar").toFile();
+        Map<String, byte[]> entries = TestJars.packageClasses("ai.skillroy.testjava.agent.core.jarfixture");
+        entries.put(spy + ".class", minimalClass(spy));
+        TestJars.jar(jar, entries);
+        URLClassLoader parent = new URLClassLoader(new URL[] {parentJar.toURI().toURL()},
+                ModuleClassLoaderTest.class.getClassLoader());
+        ModuleClassLoader loader = new ModuleClassLoader(new URL[] {jar.toURI().toURL()}, parent);
+        try {
+            assertSame(parent, loader.loadClass("ai.skillroy.testjava.agent.spy.Spy").getClassLoader(),
+                    "the parent's Spy, not the module jar's copy");
+            assertTrue(loader.getResource(spy + ".class").toString().contains("boot-path.jar"));
+            List<URL> all = Collections.list(loader.getResources(spy + ".class"));
+            assertTrue(all.get(0).toString().contains("boot-path.jar"), "the parent's resource first: " + all);
+        } finally {
+            loader.close();
+            parent.close();
+        }
+    }
+
+    /** A public class with no members: just enough of a class file for a loader to define. */
+    static byte[] minimalClass(String internalName) throws IOException {
+        java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream();
+        java.io.DataOutputStream out = new java.io.DataOutputStream(bytes);
+        out.writeInt(0xCAFEBABE);
+        out.writeShort(0);
+        out.writeShort(52);
+        out.writeShort(5);
+        out.writeByte(1);
+        out.writeUTF(internalName);
+        out.writeByte(7);
+        out.writeShort(1);
+        out.writeByte(1);
+        out.writeUTF("java/lang/Object");
+        out.writeByte(7);
+        out.writeShort(3);
+        out.writeShort(0x0021);
+        out.writeShort(2);
+        out.writeShort(4);
+        out.writeShort(0);
+        out.writeShort(0);
+        out.writeShort(0);
+        out.writeShort(0);
+        out.flush();
+        return bytes.toByteArray();
+    }
+
     @Test
     void serviceFilesAreReadFromTheJarOnly() throws Exception {
         File jar = tmp.resolve("svc.jar").toFile();

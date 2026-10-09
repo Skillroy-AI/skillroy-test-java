@@ -236,7 +236,7 @@ public final class AgentRuntime implements AutoCloseable {
         CoreCapabilityRegistry capabilities = new CoreCapabilityRegistry(log);
         this.ctx = new CoreContext(this, inst, loadMode, options, hostLoader, hostContext,
                 new CorePrimitiveRegistry(), bus, new WeakHandleRegistry(), broker, capabilities, spi, log,
-                "true".equalsIgnoreCase(options.get("readOnly")));
+                "true".equalsIgnoreCase(options.get("readOnly")), redactor);
         capabilities.attach(broker, ctx);
     }
 
