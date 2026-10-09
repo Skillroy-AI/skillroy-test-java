@@ -26,9 +26,11 @@ import java.util.List;
 
 /**
  * The isolated agent loader over {@code <home>/lib/*.jar} (phase1-contracts.md 2.2). Child-first for
- * {@code ai.skillroy.testjava.*} except the bootstrap package, so that the agent always runs its own copy of the
- * protocol, API and core even when the host class path carries other copies; everything else (the JDK, host
- * classes) is delegated to the host loader as usual. Nothing loaded here is visible to the host.
+ * {@code ai.skillroy.testjava.*} except the bootstrap package and the hooks' {@code Spy} package
+ * ({@code ai.skillroy.testjava.agent.spy}, phase6-contracts.md section 2.1, D116: it exists once in a JVM, on the
+ * bootstrap search path), so that the agent always runs its own copy of the protocol, API and core even when the
+ * host class path carries other copies; everything else (the JDK, host classes) is delegated to the host loader as
+ * usual. Nothing loaded here is visible to the host.
  *
  * <p>Parallel capable; safe to use from any thread.
  */
@@ -40,8 +42,10 @@ final class AgentClassLoader extends URLClassLoader {
 
     private static final String OWN_PREFIX = "ai.skillroy.testjava.";
     private static final String BOOTSTRAP_PREFIX = "ai.skillroy.testjava.agent.bootstrap.";
+    private static final String SPY_PREFIX = "ai.skillroy.testjava.agent.spy.";
     private static final String OWN_RESOURCE_PREFIX = "ai/skillroy/testjava/";
     private static final String BOOTSTRAP_RESOURCE_PREFIX = "ai/skillroy/testjava/agent/bootstrap/";
+    private static final String SPY_RESOURCE_PREFIX = "ai/skillroy/testjava/agent/spy/";
 
     AgentClassLoader(URL[] urls, ClassLoader parent) {
         super(urls, parent);
@@ -49,11 +53,13 @@ final class AgentClassLoader extends URLClassLoader {
 
     /** True for the classes this loader defines itself before asking the parent. */
     static boolean isChildFirst(String className) {
-        return className.startsWith(OWN_PREFIX) && !className.startsWith(BOOTSTRAP_PREFIX);
+        return className.startsWith(OWN_PREFIX) && !className.startsWith(BOOTSTRAP_PREFIX)
+                && !className.startsWith(SPY_PREFIX);
     }
 
     private static boolean isChildFirstResource(String name) {
-        return name.startsWith(OWN_RESOURCE_PREFIX) && !name.startsWith(BOOTSTRAP_RESOURCE_PREFIX);
+        return name.startsWith(OWN_RESOURCE_PREFIX) && !name.startsWith(BOOTSTRAP_RESOURCE_PREFIX)
+                && !name.startsWith(SPY_RESOURCE_PREFIX);
     }
 
     @Override

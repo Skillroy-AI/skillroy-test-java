@@ -28,8 +28,10 @@ import java.util.List;
  * The loader of one module jar (phase1-contracts.md 2.2): child-first for the classes and resources the jar contains,
  * so that a module may bundle its own helpers without clashing with the host; parent-first for the JDK and for the
  * shared agent types ({@code skillroy-protocol}, {@code skillroy-agent-api}), which must exist exactly once or
- * {@code ServiceLoader} and every SPI cast would fail. The parent is the agent loader, which in turn delegates to the
- * host loader, so a module sees the agent API and the host application's classes.
+ * {@code ServiceLoader} and every SPI cast would fail, and for the hooks' {@code Spy} package
+ * ({@code ai.skillroy.testjava.agent.spy}, phase6-contracts.md section 2.1, D116), which must resolve to the one copy
+ * on the bootstrap search path. The parent is the agent loader, which in turn delegates to the host loader, so a
+ * module sees the agent API and the host application's classes.
  *
  * <p>Parallel capable; safe from any thread.
  */
@@ -41,11 +43,11 @@ final class ModuleClassLoader extends URLClassLoader {
 
     private static final String[] PARENT_FIRST = {
         "java.", "javax.", "sun.", "com.sun.", "jdk.",
-        "ai.skillroy.testjava.protocol.", "ai.skillroy.testjava.agent.api."
+        "ai.skillroy.testjava.protocol.", "ai.skillroy.testjava.agent.api.", "ai.skillroy.testjava.agent.spy."
     };
     private static final String[] PARENT_FIRST_RESOURCES = {
         "java/", "javax/", "sun/", "com/sun/", "jdk/",
-        "ai/skillroy/testjava/protocol/", "ai/skillroy/testjava/agent/api/"
+        "ai/skillroy/testjava/protocol/", "ai/skillroy/testjava/agent/api/", "ai/skillroy/testjava/agent/spy/"
     };
 
     ModuleClassLoader(URL[] urls, ClassLoader parent) {

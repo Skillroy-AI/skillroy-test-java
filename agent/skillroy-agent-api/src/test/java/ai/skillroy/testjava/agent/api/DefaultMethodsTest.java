@@ -17,6 +17,11 @@
 package ai.skillroy.testjava.agent.api;
 
 import ai.skillroy.testjava.agent.api.spi.ThreadPolicyProvider;
+import ai.skillroy.testjava.agent.api.spi.hook.HookEngine;
+import ai.skillroy.testjava.protocol.hook.HookHealth;
+import ai.skillroy.testjava.protocol.hook.HookProbe;
+import ai.skillroy.testjava.protocol.hook.HookSpec;
+import ai.skillroy.testjava.protocol.hook.HookStatus;
 import ai.skillroy.testjava.protocol.JsonView;
 import ai.skillroy.testjava.protocol.LoadMode;
 import org.junit.jupiter.api.AfterEach;
@@ -24,17 +29,21 @@ import org.junit.jupiter.api.Test;
 
 import java.lang.instrument.Instrumentation;
 import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Default methods of the API: {@code AgentContext.option} (A20), {@code ThreadPolicyProvider.available} (A19) and
- * {@code Invocation.secretParams} (A34, phase4-contracts.md section 4.3).
+ * Default methods of the API: {@code AgentContext.option} (A20), {@code ThreadPolicyProvider.available} (A19),
+ * {@code Invocation.secretParams} (A34, phase4-contracts.md section 4.3) and the Phase 6 defaults
+ * {@code AgentContext.hooks}, {@code isSecretKey} and {@code redactText} (phase6-contracts.md section 3.6).
  */
 class DefaultMethodsTest {
 
@@ -115,8 +124,78 @@ class DefaultMethodsTest {
                 "the default list is read-only");
     }
 
+    @Test
+    void hooksIsTheFirstRegisteredHookEngineOrNull() {
+        assertNull(context(Collections.<String, String>emptyMap()).hooks(), "no SPI registry at all");
+        final HookEngine engine = new HookEngine() {
+            @Override
+            public HookProbe probe(HookSpec spec) {
+                return null;
+            }
+
+            @Override
+            public List<HookStatus> install(List<HookSpec> specs, String catalogueId, String catalogueHash,
+                                            boolean replace) {
+                return null;
+            }
+
+            @Override
+            public boolean stub(String id, Object value, boolean clear) {
+                return false;
+            }
+
+            @Override
+            public List<HookStatus> remove(List<String> ids) {
+                return null;
+            }
+
+            @Override
+            public Map<String, HookHealth> health(List<String> ids) {
+                return null;
+            }
+
+            @Override
+            public Map<String, Object> catalogue() {
+                return Collections.emptyMap();
+            }
+        };
+        SpiRegistry spi = new SpiRegistry() {
+            @Override
+            public <T> AutoCloseable register(Class<T> type, T implementation) {
+                return null;
+            }
+
+            @Override
+            public <T> List<T> all(Class<T> type) {
+                return Collections.emptyList();
+            }
+
+            @Override
+            public <T> T first(Class<T> type) {
+                return type == HookEngine.class ? type.cast(engine) : null;
+            }
+        };
+        assertSame(engine, context(Collections.<String, String>emptyMap(), spi).hooks());
+    }
+
+    @Test
+    void theSecretRuleAndTheTextRedactionDefaultToTheProtocolsRuleAndTheIdentity() {
+        AgentContext ctx = context(Collections.<String, String>emptyMap());
+        assertTrue(ctx.isSecretKey("password"));
+        assertTrue(ctx.isSecretKey("db.apiToken"));
+        assertFalse(ctx.isSecretKey("staffCode"));
+        assertFalse(ctx.isSecretKey(null));
+        assertEquals("password=hunter2", ctx.redactText("password=hunter2"), "the default leaves text as it is");
+        assertNull(ctx.redactText(null));
+    }
+
     /** A context whose only real member is {@link AgentContext#options()}. */
     private static AgentContext context(final Map<String, String> options) {
+        return context(options, null);
+    }
+
+    /** A context whose only real members are {@link AgentContext#options()} and {@link AgentContext#spi()}. */
+    private static AgentContext context(final Map<String, String> options, final SpiRegistry spi) {
         return new AgentContext() {
             @Override
             public Instrumentation instrumentation() {
@@ -170,7 +249,7 @@ class DefaultMethodsTest {
 
             @Override
             public SpiRegistry spi() {
-                return null;
+                return spi;
             }
 
             @Override

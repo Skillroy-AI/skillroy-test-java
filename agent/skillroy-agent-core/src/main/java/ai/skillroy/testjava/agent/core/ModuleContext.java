@@ -134,6 +134,16 @@ final class ModuleContext implements AgentContext {
         return core.targetReady();
     }
 
+    @Override
+    public boolean isSecretKey(String key) {
+        return core.isSecretKey(key);
+    }
+
+    @Override
+    public String redactText(String text) {
+        return core.redactText(text);
+    }
+
     private final class Primitives implements PrimitiveRegistry {
         private final Set<String> names = new LinkedHashSet<String>();
 

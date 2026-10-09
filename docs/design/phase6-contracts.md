@@ -824,6 +824,19 @@ a sixty-line constant-pool reader that refuses a malformed file with `IllegalArg
 String residueClassPrefix)`), and `RetransformBatches.of(List<Class<?>>, long maxBytes, int maxClasses)`. The package
 is API of the agent only in the sense that modules may use it; the controller never sees it.
 
+**As built (Phase 6, HK, 2026-10-09):** `ClassFileRefs.classReferences` returns the names in internal form
+(`java/lang/String`, the form the JVMS calls binary names in internal form), in constant-pool order without
+duplicates, an array class entry as its element class (`[Ljava/lang/String;` as `java/lang/String`) and an array of a
+primitive type not at all; the class adds `majorVersion(byte[])` (the spy jar's `--release 8` check of §3.2 step 3)
+and `thisClass(byte[])`. `ByteVerification.compare` answers `RESIDUE` when `after` references a class under the
+prefix (dots read as slashes), whatever the byte comparison says, else `IDENTICAL` or `FOREIGN_CHANGE`. **A batch needs
+the classes' sizes, which the signature above cannot know** (D-HK-2): `RetransformBatches` has the nested interface
+`Sizes { long bytes(Class<?>) }`, the four-argument `of(List<Class<?>>, Sizes, long maxBytes, int maxClasses)`, and the
+three-argument form above using `CLASS_FILE_RESOURCE` (the size of the class's `<name>.class` resource from its
+defining loader, the bootstrap's through the system loader); an unknown size counts as `maxBytes`, a class larger than
+`maxBytes` gets a batch of its own (the size limit that refuses it is the caller's), and the input order is kept. The
+hooks engine passes the sizes of the bytes its recorder captured.
+
 ### 3.7 Options
 
 Agent options (P1 §2.4's table gains these rows; unknown keys were already kept, so no core change is needed for
@@ -873,6 +886,28 @@ public final class HookHealth { … }
 `HookSpec.hash()` is the SHA-256 (hex, prefixed `sha256:`) of its canonical JSON (`Json.writeCanonical`); the
 catalogue hash of §5.1 is the hash over the catalogue id, its version and every entry's spec hash with its `enabled`
 flag.
+
+**As built (Phase 6, HK, 2026-10-09):** the types are as above, with public constructors taking every field and these
+additions, so that the controller's catalogue reader and the agent apply one rule: `HookSpec.violation()` returns the
+first name-rule violation of §3.3 item 1, §4.3 and §4.6 as a `HookSpec.Violation {field, message}` (the field relative
+to the spec: `id`, `target.class`, `target.method`, `target.descriptors[i]`, `emits`, `note`), or null; the agent
+answers it as `INVALID_PARAMS` with `data.param` `specs[n].<field>`, the reader reports it with the file's line.
+`HookSpec` also carries `ID_REGEX`, `MAX_ID_LENGTH` (64), `MAX_NOTE_LENGTH` (200), `TOPIC_PREFIX` (`hook.`),
+`RESERVED_IDS` (`engine`, `probe`, `install`, `stub`, `remove`, `health`, `events`: the hook ids whose `hook.<id>` is
+the engine's capability or a primitive's name), `topic()` (`emits` or `hook.<id>`) and `capabilityId()`
+(`hook.<id>`). `toJson()` writes an optional key only when it says something (`emits`, `capture`, `note` when set,
+`secretArgs` when not empty, `secretResult` when true), so the hash of a spec read from JSON with the defaults spelled
+out equals that of one without them. `HookSpec`, `HookTarget` and `HookCapture` refuse unknown keys; `HookProbe`,
+`HookStatus` and `HookHealth` are answers and are read leniently, as `PrimitiveDescriptor` is. **`HookProbe` gains
+`loaderIds?: [string]`** beside the count `loaders` (D-HK-1): §4.1 lets `target.loader` name "the hexadecimal identity
+the agent reported for a loader in an earlier probe answer", and the shape had no field that reports one; each entry
+is `system` for the system loader and otherwise the loader's `System.identityHashCode` in hexadecimal. `HookProbe.state`
+is a `CapabilityState`, and `spyVisibility` the nested enum `HookProbe.SpyVisibility`. **`HookStatus.state`** is the
+`CapabilityState` of the hook's capability: from `hook.install`, `OK` (strategy `advice`) for an installed hook and the
+probe's `DEGRADED` or `UNAVAILABLE` with its reason otherwise, `capability` `hook.<id>` when declared and else null;
+from `hook.remove`, `OK` for a hook removed and restored, `DEGRADED` with the verification's reason, `UNAVAILABLE`
+with `"not installed"` for an id that was not installed or `"residue after remove"` for a class left `FAILED`, and
+`capability` the withdrawn id.
 
 ### 4.2 Primitives (module `hooks`)
 

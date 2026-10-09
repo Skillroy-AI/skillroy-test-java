@@ -23,6 +23,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.io.File;
 import java.net.URL;
+import java.net.URLClassLoader;
 import java.nio.file.Path;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -49,6 +50,9 @@ class AgentClassLoaderTest {
         assertFalse(AgentClassLoader.isChildFirst("ai.skillroy.testjava.agent.bootstrap.EmbeddedAgent"));
         assertFalse(AgentClassLoader.isChildFirst("java.lang.String"));
         assertFalse(AgentClassLoader.isChildFirst("org.example.App"));
+        assertFalse(AgentClassLoader.isChildFirst("ai.skillroy.testjava.agent.spy.Spy"),
+                "the hooks' Spy package exists once, on the bootstrap path (phase6-contracts.md 2.1)");
+        assertFalse(AgentClassLoader.isChildFirst("ai.skillroy.testjava.agent.spy.Spy$Handler"));
 
         File jar = tmp.resolve("lib.jar").toFile();
         Map<String, byte[]> entries = new LinkedHashMap<String, byte[]>();
@@ -72,6 +76,7 @@ class AgentClassLoaderTest {
             assertSame(AgentClassLoaderTest.class, loader.loadClass(AgentClassLoaderTest.class.getName()),
                     "a bootstrap-package class the jar lacks comes from the parent");
             assertThrows(ClassNotFoundException.class, () -> loader.loadClass("ai.skillroy.testjava.Nope"));
+
             URL resource = loader.getResource("ai/skillroy/testjava/agent/core/res.txt");
             assertTrue(resource.toString().contains("lib.jar"), String.valueOf(resource));
             String runtimeResource = "ai/skillroy/testjava/agent/core/AgentRuntime.class";
@@ -82,6 +87,62 @@ class AgentClassLoaderTest {
         } finally {
             loader.close();
         }
+    }
+
+    /**
+     * The hooks' {@code Spy} package is asked of the parent first (phase6-contracts.md 2.1, D116): once {@code Spy} is
+     * on the bootstrap path the host loader resolves it there, and a stray copy in an agent jar must not shadow it.
+     */
+    @Test
+    void theSpyPackageIsTheParentsEvenWhenAnAgentJarHoldsACopy() throws Exception {
+        String spy = "ai/skillroy/testjava/agent/spy/Spy";
+        File parentJar = tmp.resolve("boot-path.jar").toFile();
+        Map<String, byte[]> parentEntries = new LinkedHashMap<String, byte[]>();
+        parentEntries.put(spy + ".class", minimalClass(spy));
+        BootJars.jar(parentJar, parentEntries);
+        File agentJar = tmp.resolve("agent-lib.jar").toFile();
+        Map<String, byte[]> agentEntries = new LinkedHashMap<String, byte[]>();
+        agentEntries.put(spy + ".class", minimalClass(spy));
+        BootJars.jar(agentJar, agentEntries);
+        URLClassLoader parent = new URLClassLoader(new URL[] {parentJar.toURI().toURL()},
+                AgentClassLoaderTest.class.getClassLoader());
+        AgentClassLoader loader = new AgentClassLoader(new URL[] {agentJar.toURI().toURL()}, parent);
+        try {
+            Class<?> loaded = loader.loadClass("ai.skillroy.testjava.agent.spy.Spy");
+            assertSame(parent, loaded.getClassLoader(), "the parent's Spy, not the agent jar's copy");
+            assertTrue(loader.getResource(spy + ".class").toString().contains("boot-path.jar"),
+                    "the parent's resource first");
+        } finally {
+            loader.close();
+            parent.close();
+        }
+    }
+
+    /** A public class with no members: just enough of a class file for a loader to define. */
+    static byte[] minimalClass(String internalName) throws Exception {
+        java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream();
+        java.io.DataOutputStream out = new java.io.DataOutputStream(bytes);
+        out.writeInt(0xCAFEBABE);
+        out.writeShort(0);
+        out.writeShort(52);
+        out.writeShort(5);
+        out.writeByte(1);
+        out.writeUTF(internalName);
+        out.writeByte(7);
+        out.writeShort(1);
+        out.writeByte(1);
+        out.writeUTF("java/lang/Object");
+        out.writeByte(7);
+        out.writeShort(3);
+        out.writeShort(0x0021);
+        out.writeShort(2);
+        out.writeShort(4);
+        out.writeShort(0);
+        out.writeShort(0);
+        out.writeShort(0);
+        out.writeShort(0);
+        out.flush();
+        return bytes.toByteArray();
     }
 
     private static void put(Map<String, byte[]> entries, Class<?> type) throws Exception {
