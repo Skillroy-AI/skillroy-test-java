@@ -145,10 +145,12 @@ class HookWireTypesTest {
         assertViolation("target.class", spec("a", "a/B", "m", "()V", null, null));
         assertViolation("target.class", spec("a", "a..B", "m", "()V", null, null));
         assertNull(spec("a", "a.B$Inner", "m", "()V", null, null).violation(), "a nested class's binary name");
-        HookSpec.Violation ctor = spec("a", "a.B", "<init>", "()V", null, null).violation();
-        assertEquals("target.method", ctor.field());
-        assertEquals("constructors are not hookable", ctor.message());
-        assertViolation("target.method", spec("a", "a.B", "<clinit>", "()V", null, null));
+        assertNull(spec("a", "a.B", "<init>", "()V", null, null).violation(),
+                "a constructor is the agent's per-hook state UNAVAILABLE, not a name rule (section 3.3 item 1)");
+        HookSpec.Violation clinit = spec("a", "a.B", "<clinit>", "()V", null, null).violation();
+        assertEquals("target.method", clinit.field());
+        assertEquals("a static initialiser is not hookable", clinit.message());
+        assertViolation("target.method", spec("a", "a.B", "<other>", "()V", null, null));
         assertViolation("target.method", spec("a", "a.B", "1m", "()V", null, null));
         assertViolation("target.descriptors[0]", spec("a", "a.B", "m", "(Ljava.lang.String;)V", null, null));
         assertViolation("target.descriptors[0]", spec("a", "a.B", "m", "(I)", null, null));

@@ -79,6 +79,8 @@ final class FakeHookContext implements AgentContext {
     volatile ClassLoader hostLoader = ClassLoader.getSystemClassLoader();
     /** Extra secret keys (the core's redact option, for the tests); null: the protocol's rule only. */
     volatile Pattern redact;
+    /** Every text the module handed to {@link #redactText}, in order (what reaches the wire went through it). */
+    final List<String> redacting = new CopyOnWriteArrayList<String>();
 
     FakeHookContext() {
         this.instrumentation = TestAgent.instrumentation();
@@ -179,6 +181,7 @@ final class FakeHookContext implements AgentContext {
         if (text == null) {
             return null;
         }
+        redacting.add(text);
         return text.replaceAll("(?i)(password|token|secret)=[^\\s;,&]*", "$1=" + SecretKeys.REDACTED);
     }
 

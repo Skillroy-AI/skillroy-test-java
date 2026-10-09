@@ -126,7 +126,7 @@ abstract class HookChecks extends LoadModeChecks {
      * {@code OK} ({@code sign.on.checked} is off, so absent) with no other agent; {@code hook.install} installs the
      * four in under 60 s touching AccessControl, WaiverEngine and Deposits once each; the matrix shows the four
      * {@code hook.<id>} {@code OK(advice)}; a return line fires {@code limit.applied} on the desk's own engine thread
-     * with the staff code and the limit; a {@code DUE} fires {@code waiver.evaluated} with handles only; the same
+     * with the staff code and the limit; a {@code DUE} fires {@code waiver.evaluated} with a handle only; the same
      * install again is {@code alreadyInstalled}, a second catalogue id {@code HOOK_CONFLICT}.
      */
     @Test
@@ -191,7 +191,9 @@ abstract class HookChecks extends LoadModeChecks {
         Runs.PACK.recover(client());
         assertSignedOff();
 
-        // A DUE of three hand tools: the waivers the engine evaluated arrive as handles, no application field.
+        // A DUE of three hand tools: the engine's result, an unmodifiable view over its list of waivers, arrives as one
+        // handle, no application field (phase6-contracts.md 4.3: a view is never iterated, it may sit over a locking
+        // or an application collection; the review's L2-S1).
         send("Entry", "100");
         send("Entry", "1111");
         long sinceLoan = client().call("trace.mark", Map.of("label", "hooks.due"), CALL).seqAfter();
@@ -203,11 +205,11 @@ abstract class HookChecks extends LoadModeChecks {
         List<Map<String, Object>> waivers = events("waiver.evaluated", sinceLoan);
         assertEquals(1, waivers.size(), String.valueOf(waivers));
         Object returned = payload(waivers.get(0)).get("returned");
-        assertTrue(returned instanceof List<?> list && list.size() == 1, String.valueOf(returned));
-        Map<?, ?> handle = (Map<?, ?>) ((List<?>) returned).get(0);
+        assertTrue(returned instanceof Map<?, ?>, String.valueOf(returned));
+        Map<?, ?> handle = (Map<?, ?>) returned;
         assertEquals(List.of("class", "ref"), handle.keySet().stream().map(String::valueOf).sorted().toList(),
-                "a handle and nothing of the object's state: " + handle);
-        assertEquals(APP + "LoanWaiver", handle.get("class"));
+                "a handle and nothing of the list's or the waivers' state: " + handle);
+        assertEquals("java.util.Collections$UnmodifiableRandomAccessList", handle.get("class"));
         Runs.PACK.recover(client());
         assertSignedOff();
 

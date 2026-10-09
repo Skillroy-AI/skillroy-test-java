@@ -393,6 +393,18 @@ shared classes are made independent of each other: the spec helper of the tests 
 properties reach the tests, `skillroy.hooks.classes` and `skillroy.hooks.bytebuddyJar`, for the tests that load the
 module in a child-first loader of its own as the agent does (the `Nexus` measure and the collectable loader).
 
+**Fix wave (Phase 6 review, FA, 2026-10-09):** two guards for that layout (L3-F1, L3-F2). The module's surefire
+configuration sets `failIfNoTests` from the property `skillroy.failIfNoTests`, `true` by default, so an execution
+that ran no test fails the build ("No tests were executed!") instead of exiting 0: D175's Java 8 trap made a build
+failure rather than a reminder. A module profile activated by a command-line `-Dtest` sets it `false`, because
+`-Dtest` filters every execution of the module (and of every module `-am` builds) and leaves most of them empty; a
+literal `true` would break `-pl … -am -Dtest=X -Dsurefire.failIfNoSpecifiedTests=false`. Each of the six
+`*FreshJvmTest` classes starts with `Harness.assumeFreshJvm()` (`@BeforeAll`): when a `Spy` is already on the
+bootstrap path the class is skipped with the reason "needs a fresh JVM (run without -Dtest …)" if the `test` property
+is set (a command-line `-Dtest` merges the executions into one JVM, and surefire hands the property to the fork), and
+fails otherwise, so a dedicated JVM that is not fresh is never a green skip (D-FA-5). The matrix's Java 8 leg still
+reads the reports: 15 `TEST-*.xml` files in the hooks module, `skipped="0"`, `java.version` `1.8.0_*`.
+
 ### 2.4 Threads and bounds
 
 - The hooks module starts **no thread of its own**. Probes, installs, removals and health run on the agent's worker
@@ -675,6 +687,11 @@ the advice's path, which reads the volatile slot only).
   that the next run's install probes again (a class loaded later can then be hooked) rather than answering
   `alreadyInstalled` for nothing. A spy jar refused at step 3 makes `hook.engine` `UNAVAILABLE` with the refusal until
   the next install, which checks the jar again (the operator may have replaced it).
+- **Fix wave (Phase 6 review, FA, 2026-10-09; L2-F7):** §3.5's step 5 (the transformers removed and the slot
+  released when the ledger is empty) also ends every install. Steps 3 and 4 append and fill the slot before steps 5
+  and 6 can refuse every spec; an install that leaves no class carrying an advice (every spec refused at step 5 or 6,
+  each refused hook's classes restored and verified first, §3.3's note) gives both back at once rather than at the
+  next `hook.remove {}` or the detach. Step 6 is skipped, and nothing is registered, when step 5 left no spec.
 - **`<n>` of "Spy slot held by a disarmed handler of an earlier agent; `<n>` classes still carry advice"** comes from
   the system property `skillroy.hooks.adviceLeft`, which a detach that ran out of budget sets to the number of classes
   it left (D177): the earlier engine's loader is unreachable from the new one, and the property is the one place both
@@ -748,6 +765,29 @@ fallbacks (§5.3).
 **As built (Phase 6, HK, 2026-10-09):**
 - **Several loaders define the class:** the spec's state is decided by the first class that fails (D178), so a
   spec is installed on all of them or on none; `loaders` and `loaderIds` report each.
+- **Fix wave (Phase 6 review, FA, 2026-10-09; L2-S3):** "on all of them or on none" holds after step 6 as well.
+  The build refused a hook whose classes retransformed only partly (another copy's batch threw, the pre-filter
+  refused it, Byte Buddy failed) and dropped its sites, while the classes that had taken its advice kept it: the
+  ledger forgot them, `hook.remove` then freed the slot beside a live advice (D117), and a later `STUB` of the same id
+  pinned to the other loader reached them too (a site key names no loader, D171). Now, before the call answers, a
+  hook refused at step 6 is taken out of every class of the call that took its advice: a class whose batch threw kept
+  its earlier bytes (`Instrumentation.retransformClasses`: "If this method throws an exception, no classes have been
+  retransformed") and needs nothing; a class that keeps other hooks' sites is retransformed once without the refused
+  ones, as `hook.remove` does; a class with no site left that took the advice is restored and verified as §3.5
+  restores (`OK` or `DEGRADED` drops its entry, `FAILED` keeps it and so the slot); an entry the call created for a
+  class that never took the advice is dropped. Only then does §3.2's note release the slot. When a class may still
+  carry the refused hook's advice (its restore was `FAILED`, or the retransformation without it threw), the hook's
+  reason ends "…(hook.remove {} retries it)" and `hook.health` lists it as `ERROR("residue after a refused
+  install")`. The id of a hook in either residue state (this one or §3.5's `ERROR("residue after remove")`) is
+  refused by a later `hook.install` with `UNAVAILABLE("a residue of hook <id> is left: hook.remove {} retries its
+  classes")` until a remove restores the class, since a new site of the id, on any loader's copy, would answer the
+  advice left behind (D-FA-1).
+- **Fix wave (Phase 6 review, FA, 2026-10-09; L1-F3):** a constructor (`<init>`) is the per-hook state
+  `UNAVAILABLE("constructors are not hookable")` as item 1 says, decided first in the probe, so that `hook.install`
+  installs the other specs and the catalogue's fallback applies (§5.3). HK's build had made it a name-rule violation
+  (`INVALID_PARAMS` for the whole call, a read error for the whole catalogue, even for a disabled entry).
+  `HookSpec.violation()` accepts `<init>` (`HookSpec.CONSTRUCTOR`) and refuses `<clinit>` ("a static initialiser is
+  not hookable"), which is neither an identifier nor a constructor (D-FA-4).
 - **A method already hooked** by an installed hook or an earlier spec of the call is `UNAVAILABLE("method already
   hooked: <class>.<method><descriptor>")` (D179); two advices on one method would fire twice. `capture` on a hook
   whose mode is not `CAPTURE` is `INVALID_PARAMS` with `data.param specs[n].capture` (the catalogue reader's rule,
@@ -880,13 +920,23 @@ unbuilt (design §2.2 step 6).
   already name `Spy` in unused constant-pool entries (the running code calls nothing: `Spy`'s counters stay still).
   Restoring exactly those bytes is no residue; failing it would leave the class `FAILED` and the slot held for the
   JVM's life for no reason. A reference the first bytes did not hold is still `HOOK_VERIFY_FAILED`.
+- **Fix wave (Phase 6 review, FA, 2026-10-09; L2-F10): an accepted corner of D172.** In a class whose reference
+  bytes already name `Spy` (D172's case), a genuine residue cannot be told apart from the merged pool's unused entries
+  by a `CONSTANT_Class` comparison: it reads `FOREIGN_CHANGE`, so `DEGRADED("bytes differ: another transformer is
+  present")`, the entry is dropped and, with the ledger empty, the slot is released beside it. It needs an undetected
+  residue (advised code a restore left behind, which no path of the engine is known to produce) on top of another
+  agent's redefinition of a class that was hooked, restored and hooked again. Failing on "the bytes differ and both
+  name `Spy`" would bring back D172's false `FAILED`, and the slot held for the JVM's life, whenever another
+  transformer is present. The precise discriminator, a scan of the `Code` attributes for an instruction that
+  references a `Spy` member, is left open (D-FA-6).
 - `hook.remove` restores **in the batches of §3.2** (one `After` recorder per batch); the detach restores **class by
   class** and checks its budget before each class. A class that keeps other hooks is retransformed once without the
   removed ones and is not verified (it still carries advice); an id that is not installed is answered
   `UNAVAILABLE("not installed")`; a class already unloaded is reported `OK` with "class unloaded: nothing to restore".
   `HOOK_VERIFY_FAILED`'s `data` also carries `restored`, the lines of every class. A residue hook stays in
   `hook.health` as `ERROR("residue after remove")` until a later remove restores its class (which `hook.remove {}`
-  retries). The catalogue is cleared when no hook remains.
+  retries); **(Fix wave, FA: until then a `hook.install` of the same id is refused, §3.3's note, D-FA-1.)** The
+  catalogue is cleared when no hook remains.
 - The detach waits for the engine's lock at most its budget: an install or remove still running leaves every class
   disarmed and returns; the capabilities are withdrawn by the core's rollback (A18).
 
@@ -961,6 +1011,14 @@ pre-filter or Byte Buddy threw, or the class grew past the size bound), until it
 and forwarded by `ModuleContext`; the default `isSecretKey` applies the protocol's `SecretKeys` rule. `HookEngine`'s
 methods throw `RpcException` with the primitives' codes, as its Javadoc says.
 
+**Fix wave (Phase 6 review, FA, 2026-10-09; L1-F2):** the `ERROR` row's "redacted" is built where a failure's text
+leaves the engine, whichever step produced it: the reasons of `hook.install`'s statuses, the `reason` of
+`hook.remove`'s `restored` lines (and so of `HOOK_VERIFY_FAILED`'s `data.restored`), `hook.health`'s `ERROR` reason
+and the reason of the capability `hook.<id>` pass through `ctx.redactText` and are cut at 500 characters, as a thrown
+message is (§4.3). The build passed the exception's class and message through unredacted (D-FA-7). (The instrument
+layer hands a failed retransformation's `ClassFormatError` or `UnsupportedOperationException` without the JVM's
+message; Byte Buddy's and the pre-filter's messages name types.)
+
 ### 3.7 Options
 
 Agent options (P1 §2.4's table gains these rows; unknown keys were already kept, so no core change is needed for
@@ -1026,6 +1084,8 @@ additions, so that the controller's catalogue reader and the agent apply one rul
 first name-rule violation of §3.3 item 1, §4.3 and §4.6 as a `HookSpec.Violation {field, message}` (the field relative
 to the spec: `id`, `target.class`, `target.method`, `target.descriptors[i]`, `emits`, `note`), or null; the agent
 answers it as `INVALID_PARAMS` with `data.param` `specs[n].<field>`, the reader reports it with the file's line.
+**(Fix wave, FA, 2026-10-09: `<init>`, `HookSpec.CONSTRUCTOR`, is no violation but the agent's per-hook state of
+§3.3 item 1; `<clinit>` is one; §3.3's note, D-FA-4.)**
 `HookSpec` also carries `ID_REGEX`, `MAX_ID_LENGTH` (64), `MAX_NOTE_LENGTH` (200), `TOPIC_PREFIX` (`hook.`),
 `RESERVED_IDS` (`engine`, `probe`, `install`, `stub`, `remove`, `health`, `events`: the hook ids whose `hook.<id>` is
 the engine's capability or a primitive's name), `topic()` (`emits` or `hook.<id>`) and `capabilityId()`
@@ -1131,18 +1191,39 @@ every policy, the session service's included, whose policy otherwise offers no p
 **As built (Phase 6, HK, 2026-10-09):** the encoding is as specified, with these readings (D182): a number
 is encoded when its class is a JDK box (`Integer`, `Long`, `Short`, `Byte`, `Float`, `Double`), `BigDecimal` or
 `BigInteger` exactly, so that no application subclass's method runs; a NaN or infinite number becomes its text (JSON
-has none, and the event would be refused); `BigDecimal` is plain text unless its scale or precision is extreme (then
-its scientific text, so that `toPlainString` cannot allocate a million digits on the application's thread); a
-`BigInteger` above 6,000 bits is cut (`null`, `truncated`); `Date` and `java.time` are encoded for `java.*` classes
-only. A collection or map is iterated only when its class is the JDK's: an application's own collection class is a
-handle, and so are the JDK collections whose iteration takes a lock (the synchronized wrappers, `Vector`, `Stack`,
-`Hashtable`, `Properties`, the blocking queues); a JDK wrapper such as an unmodifiable view is iterated (its iterator is
-the wrapped collection's). A map key is the text of a JDK scalar, else the key object's handle. A mask policy that
-returns something other than a string, a number, a boolean or null redacts the value. **The output bound equals the
-input budget** (`hooks.capture.maxBytes` both ways, §4.3), so an event whose encoding used the whole budget carries
-JSON beyond it and drops `args`, then `self`, then `returned` (D181): a capture keeps its values whole only well
-below the budget. A policy that throws makes the handler throw one preallocated `MaskFailure` to `Spy` after the
-event is published, which is how `Spy.counters()[2]` counts it.
+has none, and the event would be refused); `BigDecimal` is plain text unless its scale is extreme (then its
+scientific text, so that `toPlainString` cannot allocate a million digits on the application's thread); a `BigInteger`
+above 6,000 bits is cut (`null`, `truncated`), **and so is a `BigDecimal` whose unscaled value is (Fix wave (Phase 6
+review, FA, 2026-10-09), the rule FB's probe found for both encoders: the build's guard read `precision()` and then
+made the whole `toString()` of a huge unscaled value, about 2.7 s for 4 million bits on the application's thread,
+against microseconds for `unscaledValue().bitLength()`; within 6,000 bits the precision is at most about 1,800
+digits, so the precision test is gone)**; `Date` and `java.time` are encoded for `java.*` classes only. A collection
+or map is iterated only when its class is one of an allow-list of exact JDK classes whose iteration takes no lock and
+calls no method of an element: `ArrayList`, `LinkedList`, `ArrayDeque`, `PriorityQueue`, `HashSet`, `LinkedHashSet`, the
+two `EnumSet` classes, `HashMap`, `LinkedHashMap`, `TreeMap`, `EnumMap`, `IdentityHashMap`, `Arrays$ArrayList`, the
+empty and singleton classes of `Collections`, `ConcurrentHashMap`, `ConcurrentLinkedQueue`, `ConcurrentLinkedDeque`,
+`CopyOnWriteArrayList`, `CopyOnWriteArraySet`, `ConcurrentSkipListMap` and every `ImmutableCollections$*` class;
+everything else is a handle: an application's own collection class, a subclass, every view and wrapper (unmodifiable,
+synchronized, checked, a sub-list, a sub-map, a key set), the collections whose iteration takes a lock (`Vector`,
+`Stack`, `Hashtable`, `Properties`, every blocking queue), and `TreeSet` and `ConcurrentSkipListSet`, whose instances
+may themselves be views over a bounded sub-map (`subSet`, `headSet`, `tailSet`). **(Fix wave (Phase 6 review, FA,
+2026-10-09; L2-F2, L2-S1):** the build iterated every `java.*` class but a deny-list, which let `DelayQueue` through and
+iterated every view: "a JDK wrapper such as an unmodifiable view is iterated" contradicted the rule's own reason, since
+`unmodifiableList(vector)` and `unmodifiableMap(synchronizedMap(m))`, the documented idiom for iterating a synchronized
+map, took the wrapped collection's lock on the application's thread, and `TreeMap.headMap` ran the application's
+`compareTo`; D-FA-2.) A map key is the text of a JDK scalar, else the key object's handle. A mask policy that returns
+something other than a string, a number, a boolean or null redacts the value. **The output bound equals the input
+budget** (`hooks.capture.maxBytes` both ways, §4.3), so an event whose encoding used the whole budget carries JSON
+beyond it and drops `args`, then `self`, then `returned` (D181): a capture keeps its values whole only well below the
+budget. A policy that throws makes the handler throw one preallocated `MaskFailure` to `Spy` after the event is
+published, which is how `Spy.counters()[2]` counts it.
+
+**Fix wave (Phase 6 review, FA, 2026-10-09; L2-F11):** `thrown.message` calls the throwable's `getMessage()` on the
+application's thread, which for an application's exception is application code: accepted, as the one exception to "no
+`toString()` of an application object is ever called". The application's own messages are the useful ones; a check
+for an overriding `getMessage` would resolve methods through the application's loader on that thread (it may load
+classes and take the loader's locks), which is worse than the risk it removes; a throw is caught, the text is redacted
+and cut at 500 characters, and A34 already leaves event payloads otherwise unredacted (D-FA-3).
 
 ### 4.4 Topics
 
@@ -1420,7 +1501,7 @@ room; every committed plan carries the pack version, so the plans are regenerate
 |---|---|---|---|---|---|
 | `limit.applied` | `CAPTURE` | `AccessControl.returnLimit(String) BigDecimal` | `args: [0], result: true` | `seam: lending.limits` | the limit the desk applies to every return line, called by the return path only (above); scenario E observes it |
 | `access.checked` | `OBSERVE` | `AccessControl.check(String, String, BigDecimal) AccessDecision` | – | `seam: lending.access.check` | the complete decision; the verifier's own primitive calls it, so the hook also shows the verifier at work (and, in the standard edition, nothing else does during E's steps) |
-| `waiver.evaluated` | `CAPTURE` | `WaiverEngine.evaluate(List, LocalDate) List` | `result: true` | `seam: lending.waiver.evaluate` | the waivers of a `DUE`; the result is a list of application objects, so the event carries handles (§4.3): the demonstration that no application state leaks |
+| `waiver.evaluated` | `CAPTURE` | `WaiverEngine.evaluate(List, LocalDate) List` | `result: true` | `seam: lending.waiver.evaluate` | the waivers of a `DUE`; the result is a list of application objects, so the event carries handles (§4.3): the demonstration that no application state leaks (**fix wave, FA:** the desk returns an unmodifiable view, so the event carries one handle, D-FA-2) |
 | `sign.on.checked` | `CAPTURE`, **`enabled: false`** | `AccessControl.passwordMatches(String, String) boolean` | `args: [0], result: true`, `secretArgs: [1]` | `seam: lending.access.check` | catalogued and off (gap 32); when a test enables it, the password index is never captured (§13.1 item 6) |
 | `line.amount` | `STUB` | `Deposits.money(BigDecimal) BigDecimal` (static) | – | `seam: lending.deposit` | the acceptance's `STUB` demonstration (§13.2 item 1): armed with `"1.00"` every amount the desk rounds becomes 1.00 (the method is reached by every `LoanLine` and by `AccessControl.check`) and the loan shows it; cleared, the desk computes again; never armed by a committed scenario |
 
@@ -3062,6 +3143,23 @@ line of the child's output. Its agent home is a copy of the module's without the
 waits for a desk the host does not start. With `secretArgs` removed from the variant the test fails with the password
 at index 1. In the image, order 67 does the same on the desk on both target Javas.
 
+**Fix wave (Phase 6 review, FA, 2026-10-09):** item 3 gains `PartialInstallTest` (5 tests: a hook over two loaders whose
+copy fails is taken out of the system class, which is restored `OK` before the call answers, the ledger empty, the
+handler and the transformers gone, the slot free, and a `STUB` of the same id pinned to the copy stubs the copy only; a
+refused hook taken out of a class that keeps another hook; a restore that fails keeps the entry and the slot, the hook
+`ERROR("residue after a refused install")` and its id refused until `hook.remove {}` restores the class; an install
+whose only class fails releases the slot at once, its reason through `redactText`; an `ERROR` reason redacted in
+`hook.health` and the capability), `CaptureTest` +3 (the allow-list against every excluded shape; a view over a
+synchronized map held by another thread encoded as a handle without waiting; a `BigDecimal` of 4 million unscaled bits
+cut by its bit length in milliseconds), `ProbeItemsTest` +1 (a constructor is `UNAVAILABLE("constructors are not
+hookable")` and the call installs the other spec), so 64 tests in 15 classes; the six fresh-JVM classes start with
+`Harness.assumeFreshJvm()`, `PlantedReferenceFreshJvmTest` also has the residue's id refused by a second install, and
+`LoaderCollectableFreshJvmTest` waits for its application thread at most 30 s (§2.3's note). Item 4: `HookWireTypesTest`
+(`<init>` valid, `<clinit>` refused). Item 5: `HookCataloguesTest` (a constructor entry is read; the corpus's `<clinit>`
+row). Item 13: `ChildJvm.pid` takes the leading digits of the `pid=` line, since on a Java 8 child run with
+`-verbose:class` a `[Loaded …]` line can land between the digits and their newline (`ChildJvmIT`; found by the first
+Linux matrix round's Java 8 test-JVM leg in `OptionalModulesIT`).
+
 ### 13.2 End to end (the Linux image; `ci/run-in-linux.sh … -Dskillroy.headless=false`, Java 8 and Java 25 targets)
 
 Extends P1 §10, P2 §14.2, P3 §11.2, P4 §12.2 and P5 §15.2 inside `LendingEndToEndIT`, `InferenceEndToEndIT` and new
@@ -3083,15 +3181,16 @@ the golden (`javaagent-hooks.json`).
    `hook.waiver.evaluated`, `hook.line.amount` `OK(advice)`; a return line makes `hook.limit.applied` fire on the
    desk's engine thread `LendingEngine` (`Engine.THREAD_NAME`, the application's own thread) with `args.0` the staff
    code and `returned` the limit, and `hook.health` shows `FIRING` with `last`; a `DUE` makes `hook.waiver.evaluated`
-   carry a list of handles and no application field; `hook.stub {id: line.amount, value: "1.00"}` without `confirm` is
-   `CONFIRM_REQUIRED`, with it `hook.health` lists the stub, the next scanned line shows `amount 1.00` in
-   `lending.loan`, `clear: true` restores the computation and empties `stubs`; the same install again answers
-   `alreadyInstalled`; a second catalogue id is `HOOK_CONFLICT`; **after check 14** the `hook.remove {}` demonstration
-   restores every class with `verified: OK` and `foreignEvents 0` and the matrix drops the `hook.<id>` ids; **in checks
-   16 and 17** the re-attach carries the same options and installs again without a second append (the target's log
-   holds **one** CDS line on Java 25 and none on Java 8; `hook.probe.spy.onBootPath` true before the install); check
-   19 stays last. The target's log is scanned for any line from Byte Buddy, `sun.misc.Unsafe` or an exception with
-   `skillroy` in its trace: none.
+   carry a list of handles and no application field (**Fix wave, FA, 2026-10-09:** one handle: the desk returns an
+   unmodifiable view, which §4.3's amended rule never iterates, D-FA-2); `hook.stub {id: line.amount, value:
+   "1.00"}` without `confirm` is `CONFIRM_REQUIRED`, with it `hook.health` lists the stub, the next scanned line
+   shows `amount 1.00` in `lending.loan`, `clear: true` restores the computation and empties `stubs`; the same install
+   again answers `alreadyInstalled`; a second catalogue id is `HOOK_CONFLICT`; **after check 14** the `hook.remove {}`
+   demonstration restores every class with `verified: OK` and `foreignEvents 0` and the matrix drops the `hook.<id>`
+   ids; **in checks 16 and 17** the re-attach carries the same options and installs again without a second append (the
+   target's log holds **one** CDS line on Java 25 and none on Java 8; `hook.probe.spy.onBootPath` true before the
+   install); check 19 stays last. The target's log is scanned for any line from Byte Buddy, `sun.misc.Unsafe` or an
+   exception with `skillroy` in its trace: none.
 
    As built (Phase 6, CP): `HookChecks` (a subclass of `LoadModeChecks`, orders 65, 66, 67, 165 and 205, and
    `afterReattach` called from checks 16 and 17); orders 166 to 169 are left for BW's item 7. The log scan at 205
@@ -3349,14 +3448,14 @@ from D222.
 | D172 | A residue is a `Spy` reference that the restored bytes hold **and the first bytes did not**: `ByteVerification` changed after CP and BW had merged part 1 of HK; BW's two recorders are compatible with it (§3.5, §3.6, §7.4; HK) | the constant-pool scan of the restored bytes alone (the contract's wording) | HotSpot merges constant pools across redefinitions and, after another agent's `redefineClasses`, reconstitutes a class with them: a class hooked, restored, redefined and hooked again starts from bytes that already name `Spy` in unused entries (reproduced; `Spy`'s counters show the running code calls nothing); the old rule failed such a restore and held the slot for the JVM's life |
 | D173 | The restore's recorder is a second instance, registered last for one restore and removed after it; the first recorder stays ahead of the hook transformer (§3.5; HK) | re-registering the one recorder last (the contract's wording) | re-registered last for good, the recorder would capture advised bytes as a later class's reference |
 | D174 | The hook transformer stays registered until the ledger is empty, answering null for a class being restored (§3.5; HK) | `removeTransformer` as soon as no hook is left (the contract's other option) | the pre-filter is what keeps the handler strongly reachable while an advice exists (D117); one case instead of two |
-| D175 | Each of the six `*FreshJvmTest` classes of the hooks module runs in a surefire execution, so a JVM, of its own; the other classes share the default execution's JVM and are made independent of each other (the tests' spec helper pins a fixture class to `loader: system`) (§2.3; HK) | `reuseForks=false` for every class (the first build) | a bootstrap append and the slot last for the JVM's life, so those cases need fresh JVMs; but surefire 3.6.0 with `reuseForks=false` runs no test at all when `-Djvm` names a Java 8 JVM (the fork starts and is never handed its class; `reuseForks=true` runs it), which silently emptied the Java 8 leg of the module |
+| D175 | Each of the six `*FreshJvmTest` classes of the hooks module runs in a surefire execution, so a JVM, of its own; the other classes share the default execution's JVM and are made independent of each other (the tests' spec helper pins a fixture class to `loader: system`) (§2.3; HK). **Fix wave (FA, 2026-10-09):** an execution that runs no test fails the build, and a fresh-JVM class skips under a merging `-Dtest` and fails otherwise (§2.3's note; D-FA-5) | `reuseForks=false` for every class (the first build) | a bootstrap append and the slot last for the JVM's life, so those cases need fresh JVMs; but surefire 3.6.0 with `reuseForks=false` runs no test at all when `-Djvm` names a Java 8 JVM (the fork starts and is never handed its class; `reuseForks=true` runs it), which silently emptied the Java 8 leg of the module |
 | D176 | The option ranges the contract left open: `hooks.maxClassBytes` 1024 to 16 MiB, `hooks.maxMethods` 1 to 65535, `hooks.maxClasses` 1 to 1024, `hooks.capture.maxBytes` 1024 to 1 MiB (§3.7; HK) | unbounded | a value out of range must fail the install naming the key (§3.2); the bounds keep a typo from disabling the size limit or the budget |
 | D177 | A detach that leaves classes sets the system property `skillroy.hooks.adviceLeft` to their count; the next probe's reason reads it ("an unknown number of" without it) (§3.5; HK) | a constant text without the count | the contract's reason names `<n>`, and the earlier engine's loader is unreachable from the new one |
-| D178 | Over several loaders a spec is installed on all its classes or on none (the first failing class decides) (§3.3; HK) | hooking the classes that pass | a partly installed hook would report OK while some copies fire nothing; simpler to reason about |
+| D178 | Over several loaders a spec is installed on all its classes or on none (the first failing class decides) (§3.3; HK). **Fix wave (FA, 2026-10-09):** after step 6 as well: a hook refused there is taken out of the classes that took its advice before the call answers (§3.3's note; D-FA-1) | hooking the classes that pass | a partly installed hook would report OK while some copies fire nothing; simpler to reason about |
 | D179 | A method already hooked is `UNAVAILABLE("method already hooked: …")`; `capture` on a spec that is not `CAPTURE`, and duplicate ids, are `INVALID_PARAMS` (§3.3; HK) | two advices on one method; leaving the catalogue reader as the only check | two advices give double events per call; the agent is reachable through the SPI and through `skillroy hooks install` as well |
 | D180 | `hook.health` also answers `otherAgents` and `spy.onBootPath` (§4.2; HK; CP's `skillroy hooks status` reads them there) | `otherAgents` only in the probe and install answers | §6.2's `skillroy hooks status` prints `otherAgents` from `hook.health` |
 | D181 | The output bound of a capture equals its input budget (`hooks.capture.maxBytes`): an event that used the whole budget drops `args`, then `self`, then `returned` (§4.3; HK) | a larger output bound | the contract states one limit for both; recorded so that a catalogue author knows that captures keep their values whole only well below the budget |
-| D182 | Encoding readings: JDK number boxes, `BigDecimal` and `BigInteger` exactly; NaN and infinities as text; extreme `BigDecimal` scales as scientific text; a `BigInteger` above 6,000 bits cut; JDK collections iterated except those whose iteration takes a lock (synchronized wrappers, `Vector`, `Stack`, `Hashtable`, `Properties`, blocking queues), JDK wrappers such as unmodifiable views iterated; map keys as JDK-scalar text or handles; a policy's non-scalar result redacted (§4.3; HK) | encoding any `Number` or `Collection` as such | no application method may run on the application's thread, no application lock may be taken, and the event must be JSON (NaN is refused) |
+| D182 | Encoding readings: JDK number boxes, `BigDecimal` and `BigInteger` exactly; NaN and infinities as text; extreme `BigDecimal` scales as scientific text; a `BigInteger` above 6,000 bits cut; JDK collections iterated except those whose iteration takes a lock (synchronized wrappers, `Vector`, `Stack`, `Hashtable`, `Properties`, blocking queues), JDK wrappers such as unmodifiable views iterated (**Fix wave (FA, 2026-10-09):** replaced by an allow-list of exact JDK classes; every view and wrapper, `TreeSet` and `ConcurrentSkipListSet` are handles; §4.3's note, D-FA-2); map keys as JDK-scalar text or handles; a policy's non-scalar result redacted (§4.3; HK) | encoding any `Number` or `Collection` as such | no application method may run on the application's thread, no application lock may be taken, and the event must be JSON (NaN is refused) |
 | D183 | A catalogue of which nothing installs is not recorded as installed (§3.2; HK) | recording it (then `alreadyInstalled` for nothing) | the next run probes again, so a class loaded later is hooked; nothing permanent happened |
 | D184 | The catalogue reader: `HookCatalogues.read` throws `ScenarioException` with source and line; `ofPack` caches per pack class and id and rethrows a malformed resource as `IllegalStateException` on every call (a compile error or `ENVIRONMENT`); `packages` absent means every entry off unless `enabled: true`; a `reflect` fallback is an error at its line; the secret-name warning also covers disabled entries; `emits` is kept as written, so that an explicit default topic hashes differently from an absent one (§5.1; CP) | normalising `emits` | the catalogue hash must be the agent's |
 | D185 | `SessionOptions.hooks` is the eleventh component (the ten-argument constructor is kept; `observer` is the twelfth after the merge with TL): a session has no `RunOptions` (§6.1; CP) | a parameter of `ExecutorSession.open` | the MCP server and the CLI already carry options |

@@ -22,15 +22,19 @@ import ai.skillroy.testjava.agent.api.spi.hook.HookEngine;
 import ai.skillroy.testjava.fixture.hooks.ChildFirstLoader;
 import ai.skillroy.testjava.fixture.hooks.DepositRule;
 import ai.skillroy.testjava.protocol.hook.HookMode;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 import java.lang.ref.WeakReference;
 import java.util.Collections;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static ai.skillroy.testjava.agent.hooks.Harness.spec;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * After a complete uninstall the module's loader is collectable while the application threads that ran hooked
@@ -39,22 +43,36 @@ import static org.junit.jupiter.api.Assertions.assertNull;
  */
 class LoaderCollectableFreshJvmTest {
 
+    /** A JVM of its own (section 2.3 as built): skipped under a merging -Dtest, a failure otherwise. */
+    @BeforeAll
+    static void freshJvm() {
+        Harness.assumeFreshJvm();
+    }
+
     @Test
     public void theModuleLoaderIsCollectedWhileApplicationThreadsLive() throws Exception {
         final DepositRule rule = new DepositRule();
         rule.depositFor("T0");
         final CountDownLatch fired = new CountDownLatch(1);
         final CountDownLatch release = new CountDownLatch(1);
-        WeakReference<ClassLoader> ref = installFireUninstall(rule, fired, release);
-        long deadline = System.currentTimeMillis() + 30000;
-        while (ref.get() != null && System.currentTimeMillis() < deadline) {
-            System.gc();
-            Thread.sleep(50);
+        try {
+            WeakReference<ClassLoader> ref = installFireUninstall(rule, fired, release);
+            long deadline = System.currentTimeMillis() + 30000;
+            while (ref.get() != null && System.currentTimeMillis() < deadline) {
+                System.gc();
+                Thread.sleep(50);
+            }
+            assertNull(ref.get(), "the module's loader was collected");
+        } finally {
+            release.countDown();
         }
-        assertNull(ref.get(), "the module's loader was collected");
-        release.countDown();
     }
 
+    /**
+     * The application thread counts {@code fired} down whether or not the hooked call returned, and the test waits for
+     * it at most 30 s (the Phase 6 review's L3-S1): a call that throws into the host fails the test, never hangs the
+     * fork.
+     */
     private static WeakReference<ClassLoader> installFireUninstall(final DepositRule rule,
                                                                    final CountDownLatch fired,
                                                                    final CountDownLatch release) throws Exception {
@@ -66,13 +84,19 @@ class LoaderCollectableFreshJvmTest {
         HookEngine engine = ctx.hooks();
         engine.install(Collections.singletonList(spec("deposit.computed", HookMode.CAPTURE, DepositRule.class,
                 "depositFor", Harness.capture(false, true, 0))), "toys", "sha256:04", false);
+        final AtomicReference<Throwable> thrown = new AtomicReference<Throwable>();
         Thread application = new Thread(new Runnable() {
             @Override
             public void run() {
-                rule.depositFor("P1");
-                fired.countDown();
                 try {
-                    release.await();
+                    rule.depositFor("P1");
+                } catch (Throwable t) {
+                    thrown.set(t);
+                } finally {
+                    fired.countDown();
+                }
+                try {
+                    release.await(120, TimeUnit.SECONDS);
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                 }
@@ -80,7 +104,8 @@ class LoaderCollectableFreshJvmTest {
         }, "lending-desk-engine");
         application.setDaemon(true);
         application.start();
-        fired.await();
+        assertTrue(fired.await(30, TimeUnit.SECONDS), "the application thread ran the hooked method");
+        assertNull(thrown.get(), "the hooked method threw into the application's thread");
         rule.depositFor("P2");
         assertEquals(2, ctx.events.topic("hook.deposit.computed").size());
         engine.remove(Collections.<String>emptyList());

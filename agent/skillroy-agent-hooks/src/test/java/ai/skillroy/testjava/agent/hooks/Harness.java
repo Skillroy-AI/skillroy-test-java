@@ -36,6 +36,8 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
  * The hooks module installed on a {@link FakeHookContext} with the test agent's {@code Instrumentation}, and the
@@ -137,6 +139,23 @@ final class Harness implements AutoCloseable {
         } catch (ClassNotFoundException e) {
             return null;
         }
+    }
+
+    /**
+     * The precondition of every {@code *FreshJvmTest} class (phase6-contracts.md section 2.3 as built; the Phase 6
+     * review's L3-F2): no {@code Spy} on the bootstrap path yet. The module's surefire executions give each such class
+     * a JVM of its own; a command-line {@code -Dtest} merges them into one, and then a class that finds {@code Spy}
+     * appended is skipped with the reason rather than failing for the wrong one. Without {@code -Dtest} (surefire
+     * hands the property to the fork) a JVM that is not fresh fails: never a green skip in the matrix.
+     */
+    static void assumeFreshJvm() {
+        if (bootSpy() == null) {
+            return;
+        }
+        String why = "needs a fresh JVM (run without -Dtest: the module's surefire executions give it one): Spy is"
+                + " already on the bootstrap path";
+        assumeTrue(System.getProperty("test") == null, why);
+        fail(why);
     }
 
     static boolean slotHeld() {

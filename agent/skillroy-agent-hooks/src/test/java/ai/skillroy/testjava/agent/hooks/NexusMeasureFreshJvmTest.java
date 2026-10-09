@@ -21,6 +21,7 @@ import ai.skillroy.testjava.agent.api.AgentModule;
 import ai.skillroy.testjava.fixture.hooks.ChildFirstLoader;
 import ai.skillroy.testjava.fixture.hooks.DepositRule;
 import ai.skillroy.testjava.protocol.hook.HookMode;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -40,6 +41,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * bootstrap loader nothing of the agent's but {@code Spy} and its two nested types (no {@code ByteBuddyAccessor}).
  */
 class NexusMeasureFreshJvmTest {
+
+    /** A JVM of its own (section 2.3 as built): skipped under a merging -Dtest, a failure otherwise. */
+    @BeforeAll
+    static void freshJvm() {
+        Harness.assumeFreshJvm();
+    }
 
     /** What a shared loader defines of the agent's: the relocated prefix, Byte Buddy's accessor, Nexus, Spy. */
     private static Set<String> agentsIn(ClassLoader loader) {

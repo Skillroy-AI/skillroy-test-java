@@ -25,25 +25,28 @@ import java.lang.reflect.Array;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Date;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * The encoding of a captured value (phase6-contracts.md section 4.3, D125), run on the application thread that called
  * the hooked method: scalars as JSON, an enum by name, big numbers as plain text, dates and {@code java.time} values as
  * ISO-8601 text, a JDK array, collection or map as at most 100 elements one level deep, and everything else as a weak
  * handle {@code {"class", "ref"}}. <b>No {@code toString()}, {@code hashCode()} or {@code equals()} of an application
- * object is called</b>, and a collection or map is iterated only when its class is the JDK's ({@code java.*}): an
- * application's own collection class is a handle, and so are the JDK collections whose iteration takes a lock (the
- * synchronized wrappers, {@code Vector}, {@code Stack}, {@code Hashtable}, {@code Properties}, the blocking queues),
- * so the encoding touches no lock of the application. (A JDK wrapper such as an unmodifiable view is iterated; its
- * iterator is the wrapped collection's, which an application's own code would call the same way.) Every encoded
- * scalar passes every registered {@link MaskPolicy} as {@code mask("hook.<id>", column, value)}; a map entry whose key
- * the agent calls secret is {@code <redacted>}.
+ * object is called</b>, and a collection or map is iterated only when its class is one of an allow-list of exact JDK
+ * classes whose iteration takes no lock and calls no method of an element ({@link #iterable}): an application's own
+ * collection class is a handle, and so are the JDK collections whose iteration takes a lock (the synchronized
+ * wrappers, {@code Vector}, {@code Stack}, {@code Hashtable}, {@code Properties}, every blocking queue) and every view
+ * or wrapper (an unmodifiable view may sit over any of those), so the encoding touches no lock of the application.
+ * Every encoded scalar passes every registered {@link MaskPolicy} as {@code mask("hook.<id>", column, value)}; a map
+ * entry whose key the agent calls secret is {@code <redacted>}.
  *
  * <p>The budget is counted on the input (the code units and elements read), so a call never reads more than
  * {@code hooks.capture.maxBytes} of the application's values. One {@link Run} per event; not thread-safe, never shared.
@@ -54,6 +57,14 @@ final class Capture {
     static final int NESTED_STRING_CUT = 256;
     static final int MAX_ELEMENTS = 100;
     static final int MESSAGE_CUT = 500;
+    /**
+     * A {@code BigInteger}, or a {@code BigDecimal}'s unscaled value, longer than this is cut before any text is made
+     * (about 1,800 decimal digits): its decimal text costs time quadratic in its length on the application's thread
+     * (D182 as amended by the Phase 6 review's fix wave: a 4-million-bit unscaled value took about 2.7 s through
+     * {@code precision()} and {@code toString()}, its bit length a few microseconds). The Byteman encoder applies the
+     * same bound.
+     */
+    static final int MAX_BITS = 6000;
     static final String REDACTED = SecretKeys.REDACTED;
 
     private final AgentContext ctx;
@@ -155,13 +166,18 @@ final class Capture {
             }
             if (type == BigDecimal.class) {
                 BigDecimal d = (BigDecimal) value;
-                String text = d.scale() >= -64 && d.scale() <= STRING_CUT && d.precision() <= STRING_CUT
-                        ? d.toPlainString() : d.toString();
+                if (d.unscaledValue().bitLength() > MAX_BITS) {
+                    truncated = true;
+                    budget--;
+                    return null;
+                }
+                // Within MAX_BITS: at most about 1,800 digits, so only an extreme scale needs the scientific text.
+                String text = d.scale() >= -64 && d.scale() <= STRING_CUT ? d.toPlainString() : d.toString();
                 return cutText(text, nested);
             }
             if (type == BigInteger.class) {
                 BigInteger i = (BigInteger) value;
-                if (i.bitLength() > 6000) {
+                if (i.bitLength() > MAX_BITS) {
                     truncated = true;
                     budget--;
                     return null;
@@ -275,16 +291,41 @@ final class Capture {
         }
     }
 
-    /** True for a collection or map of the JDK whose iteration takes no lock of the application. */
+    /**
+     * The JDK containers that are iterated, by exact class (D182 as amended by the Phase 6 review's L2-F2 and L2-S1):
+     * those whose iteration takes no lock and calls no method of an element or of the application. A subclass, a view
+     * or a wrapper of one is not on the list (an unmodifiable view, a sub-list, a sub-map or a key set may sit over a
+     * {@code Vector}, a synchronized map, an application's collection or an application's {@code compareTo}), nor are
+     * {@code TreeSet} and {@code ConcurrentSkipListSet}, whose instances may be views ({@code subSet},
+     * {@code headSet}, {@code tailSet} return one of the same class over a bounded sub-map). Everything else is a
+     * handle.
+     */
+    private static final Set<String> ITERABLE = new HashSet<String>(Arrays.asList(
+            "java.util.ArrayList", "java.util.LinkedList", "java.util.ArrayDeque", "java.util.PriorityQueue",
+            "java.util.HashSet", "java.util.LinkedHashSet", "java.util.RegularEnumSet", "java.util.JumboEnumSet",
+            "java.util.HashMap", "java.util.LinkedHashMap", "java.util.TreeMap", "java.util.EnumMap",
+            "java.util.IdentityHashMap", "java.util.Arrays$ArrayList",
+            "java.util.Collections$EmptyList", "java.util.Collections$EmptySet", "java.util.Collections$EmptyMap",
+            "java.util.Collections$SingletonList", "java.util.Collections$SingletonSet",
+            "java.util.Collections$SingletonMap",
+            "java.util.concurrent.ConcurrentHashMap", "java.util.concurrent.ConcurrentLinkedQueue",
+            "java.util.concurrent.ConcurrentLinkedDeque", "java.util.concurrent.CopyOnWriteArrayList",
+            "java.util.concurrent.CopyOnWriteArraySet", "java.util.concurrent.ConcurrentSkipListMap"));
+    /** The JDK's immutable collections (Java 9 and later): they hold their elements and nothing else. */
+    private static final String IMMUTABLE = "java.util.ImmutableCollections$";
+
+    /** True for a JDK collection or map whose iteration takes no lock and runs no code of the application. */
     static boolean iterable(Object value) {
         String name = value.getClass().getName();
-        return name.startsWith("java.") && !name.startsWith("java.util.Collections$Synchronized")
-                && !"java.util.Vector".equals(name) && !"java.util.Stack".equals(name)
-                && !"java.util.Hashtable".equals(name) && !"java.util.Properties".equals(name)
-                && !name.contains("Blocking");
+        return ITERABLE.contains(name) || name.startsWith(IMMUTABLE);
     }
 
-    /** The redacted text of a throwable's message, cut at {@value #MESSAGE_CUT} characters. */
+    /**
+     * The redacted text of a throwable's message, cut at {@value #MESSAGE_CUT} characters. {@code getMessage()} of an
+     * application's exception is application code on the application's thread: accepted (section 4.3 as amended by
+     * the Phase 6 review's L2-F11), since the application's own messages are the useful ones and checking for an
+     * override would resolve methods through the application's loader on that thread; a throw is caught.
+     */
     String message(Throwable t) {
         String message;
         try {

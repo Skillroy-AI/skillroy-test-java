@@ -20,6 +20,7 @@ package ai.skillroy.testjava.agent.hooks;
 import ai.skillroy.testjava.fixture.hooks.DepositRule;
 import ai.skillroy.testjava.fixture.hooks.Returns;
 import ai.skillroy.testjava.protocol.hook.HookMode;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 import java.lang.instrument.ClassFileTransformer;
@@ -37,6 +38,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * By design the slot stays held for the JVM's life, so this runs in a JVM of its own.
  */
 class DetachBudgetFreshJvmTest {
+
+    /** A JVM of its own (section 2.3 as built): skipped under a merging -Dtest, a failure otherwise. */
+    @BeforeAll
+    static void freshJvm() {
+        Harness.assumeFreshJvm();
+    }
 
     @Test
     void aSlowRestoreLeavesInertAdviceAndTheSlotHeld() throws Exception {

@@ -120,10 +120,16 @@ final class Probes {
         return index;
     }
 
-    /** Items 2 to 5 and 7, and item 6 as far as it can be decided now ({@code boot}: the bootstrap Spy or null). */
+    /**
+     * Item 1's constructor state, items 2 to 5 and 7, and item 6 as far as it can be decided now ({@code boot}: the
+     * bootstrap Spy or null).
+     */
     Outcome probe(HookSpec spec, Map<String, List<Class<?>>> index, Class<?> boot) {
         String id = spec.id();
         String className = spec.target().className();
+        if (HookSpec.CONSTRUCTOR.equals(spec.target().method())) {
+            return refused(spec, "constructors are not hookable", null, null);
+        }
         for (String prefix : PROTECTED) {
             if (className.startsWith(prefix)) {
                 return refused(spec, "class in a protected package", null, null);

@@ -22,6 +22,7 @@ import ai.skillroy.testjava.protocol.ErrorCodes;
 import ai.skillroy.testjava.protocol.RpcException;
 import ai.skillroy.testjava.protocol.Topics;
 import ai.skillroy.testjava.protocol.hook.HookMode;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 import java.lang.instrument.ClassFileTransformer;
@@ -43,6 +44,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * held for the JVM's life, so this runs in a JVM of its own.
  */
 class PlantedReferenceFreshJvmTest {
+
+    /** A JVM of its own (section 2.3 as built): skipped under a merging -Dtest, a failure otherwise. */
+    @BeforeAll
+    static void freshJvm() {
+        Harness.assumeFreshJvm();
+    }
 
     /** Keeps the advised bytes it sees and plants them back at the next retransformation. */
     static final class Planter implements ClassFileTransformer {
@@ -93,6 +100,14 @@ class PlantedReferenceFreshJvmTest {
         int events = harness.ctx.events.topic("hook.deposit.computed").size();
         rule.depositFor("T1");
         assertEquals(events, harness.ctx.events.topic("hook.deposit.computed").size(), "the hook is disarmed");
+        // Fix wave (FA, D-FA-1): while the class may carry the residue, a hook of the same id is refused.
+        Map<String, Object> again = (Map<String, Object>) ((List<Object>) harness.ctx.map("hook.install", map("specs",
+                Harness.json(spec("deposit.computed", HookMode.OBSERVE, DepositRule.class, "depositFor")),
+                "catalogue", map("id", "again", "hash", "sha256:a2"))).get("hooks")).get(0);
+        assertEquals("UNAVAILABLE", again.get("state"));
+        assertTrue(String.valueOf(again.get("reason")).startsWith("a residue of hook deposit.computed is left"),
+                String.valueOf(again));
+        assertEquals(1, harness.engine().ledger.size(), "nothing retransformed");
         Harness.inst().removeTransformer(planter);
         harness.module.uninstall();
     }

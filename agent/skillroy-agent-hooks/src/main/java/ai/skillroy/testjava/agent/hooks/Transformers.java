@@ -138,8 +138,14 @@ final class Transformers {
 
     /** What one install or remove's retransformations produced, by {@code name@loaderId}. */
     static final class Round {
+        /** The classes Byte Buddy produced advised bytes for (the JVM installed them unless the batch threw). */
         final Set<String> transformed = Collections.newSetFromMap(new ConcurrentHashMap<String, Boolean>());
         final Map<String, String> errors = new ConcurrentHashMap<String, String>();
+        /**
+         * The classes of a batch whose {@code retransformClasses} threw: the JVM kept their earlier bytes
+         * ({@code Instrumentation}: "If this method throws an exception, no classes have been retransformed").
+         */
+        final Set<String> kept = Collections.newSetFromMap(new ConcurrentHashMap<String, Boolean>());
 
         static String key(String name, ClassLoader loader) {
             return name + "@" + Ledger.loaderId(loader);

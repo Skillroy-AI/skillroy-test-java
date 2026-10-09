@@ -39,6 +39,7 @@ import java.io.File;
 import java.lang.instrument.Instrumentation;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
@@ -71,6 +72,8 @@ final class HookEngineImpl implements HookEngine {
     static final String ADVICE_LEFT_PROPERTY = "skillroy.hooks.adviceLeft";
     static final int MAX_BATCH_CLASSES = 8;
     static final int MAX_SPECS = 64;
+    /** The health reason of a hook refused at install whose advice a class kept (its restore left it FAILED). */
+    static final String RESIDUE_AFTER_REFUSAL = "residue after a refused install";
 
     private final AgentContext ctx;
     private final Instrumentation inst;
@@ -357,6 +360,11 @@ final class HookEngineImpl implements HookEngine {
         Set<Class<?>> newClasses = Collections.newSetFromMap(new IdentityHashMap<Class<?>, Boolean>());
         for (HookSpec spec : specs) {
             Probes.Outcome o = probes.probe(spec, index, boot);
+            if (o.passes() && residue.containsKey(spec.id())) {
+                // A class may still carry this id's advice, whose site key a new site of the id would answer (L2-S3).
+                o.refuse("a residue of hook " + spec.id() + " is left: hook.remove {} retries its classes",
+                        o.probe.spyVisibility());
+            }
             if (o.passes()) {
                 String clash = null;
                 int adding = 0;
@@ -442,7 +450,56 @@ final class HookEngineImpl implements HookEngine {
                 }
             }
         }
-        // (6) the transformer, the registry and the retransformation
+        // (6) the transformer, the registry and the retransformation, for the specs still passing
+        List<Object> touched = new ArrayList<Object>();
+        List<HookEntry> installed = passing(outcomes) ? retransformAndDecide(outcomes, touched)
+                : new ArrayList<HookEntry>();
+        // (7) the capabilities, the catalogue and the event
+        for (HookEntry hook : installed) {
+            declare(hook);
+        }
+        Catalogue installedCatalogue = null;
+        if (!installed.isEmpty()) {
+            installedCatalogue = new Catalogue(catalogueId, info.get("version"), catalogueHash,
+                    string(info.get("application")), System.currentTimeMillis(), specs);
+            catalogue = installedCatalogue;
+        }
+        Map<String, Object> result = result(catalogueId, catalogueHash, installedCatalogue, outcomes, installed,
+                touched);
+        Map<String, Object> event = new LinkedHashMap<String, Object>();
+        Map<String, Object> cat = new LinkedHashMap<String, Object>();
+        cat.put("id", catalogueId);
+        cat.put("hash", catalogueHash);
+        event.put("catalogue", cat);
+        List<Object> ids = new ArrayList<Object>();
+        for (HookEntry hook : installed) {
+            ids.add(hook.id);
+        }
+        event.put("hooks", ids);
+        event.put("touched", Long.valueOf(touched.size()));
+        ctx.events().publish(Topics.HOOKS_INSTALLED, HooksModule.SOURCE, event);
+        // Section 3.5 step 5 at the end of an install as well (L2-F7): an install that left no class carrying an
+        // advice (every spec refused at step 5 or 6, each refused hook's classes restored and verified) gives back
+        // the slot and the transformers; a class whose restore failed keeps its entry and so the slot (D117).
+        releaseIfEmpty();
+        return result;
+    }
+
+    private static boolean passing(List<Probes.Outcome> outcomes) {
+        for (Probes.Outcome o : outcomes) {
+            if (o.passes()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Step 6 of section 3.2 for the specs that passed step 5: the transformers registered, the sites added, the classes
+     * retransformed, and per hook the decision; a hook with a class that failed is refused and taken out of the classes
+     * that did take its advice ({@link #takeOut}) before the call answers. Returns the hooks installed.
+     */
+    private List<HookEntry> retransformAndDecide(List<Probes.Outcome> outcomes, List<Object> touched) {
         if (transformers == null) {
             transformers = new Transformers(ledger, handler, options.maxClassBytes, log);
         }
@@ -497,9 +554,9 @@ final class HookEngineImpl implements HookEngine {
             all.addAll(e.getValue());
             e.getKey().sites = Collections.unmodifiableList(all);
         }
-        List<Object> touched = new ArrayList<Object>();
         Transformers.Round round = retransform(new ArrayList<Ledger.Entry>(added.keySet()), touched, "install");
         List<HookEntry> installed = new ArrayList<HookEntry>();
+        Map<HookEntry, String> refused = new LinkedHashMap<HookEntry, String>();
         for (Map.Entry<HookEntry, Probes.Outcome> e : installing.entrySet()) {
             HookEntry hook = e.getKey();
             String failure = null;
@@ -517,40 +574,98 @@ final class HookEngineImpl implements HookEngine {
             if (failure == null) {
                 installed.add(hook);
             } else {
-                e.getValue().refuse(failure, e.getValue().probe.spyVisibility());
+                refused.put(hook, failure);
                 dropSites(hook);
             }
         }
-        for (Ledger.Entry entry : created) {
-            if (entry.sites.isEmpty()) {
-                ledger.remove(entry);
+        Map<HookEntry, String> left = takeOut(refused.keySet(), created, round);
+        for (Map.Entry<HookEntry, String> e : refused.entrySet()) {
+            HookEntry hook = e.getKey();
+            String why = left.get(hook);
+            if (why != null) {
+                hook.error = RESIDUE_AFTER_REFUSAL;
+                residue.put(hook.id, hook);
+            }
+            Probes.Outcome o = installing.get(hook);
+            o.refuse(why == null ? e.getValue() : e.getValue() + "; " + why, o.probe.spyVisibility());
+        }
+        return installed;
+    }
+
+    /**
+     * A refused hook taken out of every class of the call that took its advice (D178: a hook is installed on all its
+     * classes or on none; D117; the Phase 6 review's L2-S3), its sites already dropped. Per class of the refused hooks:
+     * <ul>
+     *   <li>a class whose batch threw kept its earlier bytes and needs nothing;</li>
+     *   <li>a class that still holds other hooks' sites is retransformed once without the refused ones (as
+     *       {@code hook.remove} does for a class that keeps other hooks);</li>
+     *   <li>a class with no site left that took the advice is restored and verified as {@code hook.remove} restores
+     *       (section 3.5 steps 2 and 3): {@code OK} or {@code DEGRADED} drops its entry, {@code FAILED} keeps it and
+     *       so the slot;</li>
+     *   <li>an entry this call created for a class that never took the advice is dropped.</li>
+     * </ul>
+     * Returns, for each refused hook one of whose classes may still carry its advice, why; that class keeps its ledger
+     * entry, and {@code hook.remove {}} retries it.
+     */
+    private Map<HookEntry, String> takeOut(Collection<HookEntry> refused, Set<Ledger.Entry> created,
+                                           Transformers.Round round) {
+        Map<HookEntry, String> left = new LinkedHashMap<HookEntry, String>();
+        if (refused.isEmpty()) {
+            return left;
+        }
+        Set<Ledger.Entry> seen = Collections.newSetFromMap(new IdentityHashMap<Ledger.Entry, Boolean>());
+        List<Ledger.Entry> partial = new ArrayList<Ledger.Entry>();
+        List<Ledger.Entry> restore = new ArrayList<Ledger.Entry>();
+        for (HookEntry hook : refused) {
+            for (Ledger.Entry entry : hook.classes) {
+                if (!seen.add(entry)) {
+                    continue;
+                }
+                String key = Transformers.Round.key(entry.name, entry.loader.get());
+                boolean kept = round.kept.contains(key);
+                if (!entry.sites.isEmpty()) {
+                    if (!kept) {
+                        partial.add(entry);
+                    }
+                } else if (round.transformed.contains(key) && !kept) {
+                    restore.add(entry);
+                } else if (created.contains(entry)) {
+                    ledger.remove(entry);
+                }
             }
         }
-        // (7) the capabilities, the catalogue and the event
-        for (HookEntry hook : installed) {
-            declare(hook);
+        Map<Ledger.Entry, String> dirty = new IdentityHashMap<Ledger.Entry, String>();
+        if (!partial.isEmpty()) {
+            Transformers.Round again = retransform(partial, null, "install (a refused hook taken out)");
+            for (Ledger.Entry entry : partial) {
+                String key = Transformers.Round.key(entry.name, entry.loader.get());
+                if (again.kept.contains(key)) {
+                    dirty.put(entry, entry.name + " (" + entry.loaderId + ") kept its advice: "
+                            + again.errors.get(key));
+                }
+            }
         }
-        Catalogue installedCatalogue = null;
-        if (!installed.isEmpty()) {
-            installedCatalogue = new Catalogue(catalogueId, info.get("version"), catalogueHash,
-                    string(info.get("application")), System.currentTimeMillis(), specs);
-            catalogue = installedCatalogue;
+        if (!restore.isEmpty()) {
+            Map<Ledger.Entry, String> verdicts = new IdentityHashMap<Ledger.Entry, String>();
+            restore(restore, Long.MAX_VALUE, false, new ArrayList<Object>(), new ArrayList<Object>(), verdicts,
+                    new String[] {"OK"});
+            for (Ledger.Entry entry : restore) {
+                if ("FAILED".equals(verdicts.get(entry)) || verdicts.get(entry) == null) {
+                    dirty.put(entry, "the restore of " + entry.name + " (" + entry.loaderId + ") failed: "
+                            + entry.error);
+                }
+            }
         }
-        Map<String, Object> result = result(catalogueId, catalogueHash, installedCatalogue, outcomes, installed,
-                touched);
-        Map<String, Object> event = new LinkedHashMap<String, Object>();
-        Map<String, Object> cat = new LinkedHashMap<String, Object>();
-        cat.put("id", catalogueId);
-        cat.put("hash", catalogueHash);
-        event.put("catalogue", cat);
-        List<Object> ids = new ArrayList<Object>();
-        for (HookEntry hook : installed) {
-            ids.add(hook.id);
+        for (HookEntry hook : refused) {
+            for (Ledger.Entry entry : hook.classes) {
+                String why = dirty.get(entry);
+                if (why != null) {
+                    left.put(hook, why + " (hook.remove {} retries it)");
+                    break;
+                }
+            }
         }
-        event.put("hooks", ids);
-        event.put("touched", Long.valueOf(touched.size()));
-        ctx.events().publish(Topics.HOOKS_INSTALLED, HooksModule.SOURCE, event);
-        return result;
+        return left;
     }
 
     private Map<String, Object> result(String catalogueId, String catalogueHash, Catalogue installed,
@@ -563,9 +678,9 @@ final class HookEngineImpl implements HookEngine {
         List<Object> statuses = new ArrayList<Object>();
         for (Probes.Outcome o : outcomes) {
             HookStatus status = ok.contains(o.spec.id())
-                    ? new HookStatus(o.spec.id(), o.probe.state(), o.probe.reason(), Probes.STRATEGY,
+                    ? new HookStatus(o.spec.id(), o.probe.state(), wire(o.probe.reason()), Probes.STRATEGY,
                     o.spec.capabilityId())
-                    : new HookStatus(o.spec.id(), CapabilityState.UNAVAILABLE, o.probe.reason(), null, null);
+                    : new HookStatus(o.spec.id(), CapabilityState.UNAVAILABLE, wire(o.probe.reason()), null, null);
             lastStatuses.put(o.spec.id(), status);
             statuses.add(status.toJson());
         }
@@ -612,8 +727,9 @@ final class HookEngineImpl implements HookEngine {
                     inst.retransformClasses(batch.toArray(new Class<?>[0]));
                 } catch (Throwable t) {
                     for (Class<?> c : batch) {
-                        round.errors.put(Transformers.Round.key(c.getName(), c.getClassLoader()),
-                                t.getClass().getName() + ": " + t.getMessage());
+                        String key = Transformers.Round.key(c.getName(), c.getClassLoader());
+                        round.errors.put(key, t.getClass().getName() + ": " + t.getMessage());
+                        round.kept.add(key);
                     }
                 }
                 long ms = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - t0);
@@ -837,6 +953,43 @@ final class HookEngineImpl implements HookEngine {
         List<Object> failures = new ArrayList<Object>();
         String[] overall = {"OK"};
         Map<Ledger.Entry, String> verdicts = new IdentityHashMap<Ledger.Entry, String>();
+        restore(restore, deadline, classByClass, restored, failures, verdicts, overall);
+        // 4. statuses, capabilities, the event
+        removed(removing, restore, verdicts, statuses);
+        Map<String, Object> event = new LinkedHashMap<String, Object>();
+        String overallVerdict = overall[0];
+        List<Object> removedIds = new ArrayList<Object>();
+        for (HookEntry hook : removing) {
+            removedIds.add(hook.id);
+        }
+        List<Object> classes = new ArrayList<Object>();
+        for (Object line : restored) {
+            classes.add(((Map<?, ?>) line).get("class"));
+        }
+        event.put("ids", removedIds);
+        event.put("restored", classes);
+        event.put("verified", overallVerdict);
+        ctx.events().publish(Topics.HOOKS_REMOVED, HooksModule.SOURCE, event);
+        // 5. only when the ledger is empty: the transformers go and the slot is released
+        releaseIfEmpty();
+        if (!failures.isEmpty() && throwOnFailure) {
+            throw new RpcException(ErrorCodes.HOOK_VERIFY_FAILED, "a restored class still references Spy",
+                    data("classes", failures, "restored", restored));
+        }
+        Map<String, Object> out = new LinkedHashMap<String, Object>();
+        out.put("hooks", statuses);
+        out.put("restored", restored);
+        return out;
+    }
+
+    /**
+     * Steps 2 and 3 of section 3.5 for these entries (none holds a site any more): the restore and its verification,
+     * one retransformation per batch of section 3.2 ({@code classByClass}: one class per batch, the detach's) with the
+     * {@code After} recorder registered last, until the deadline ({@link System#nanoTime}); a class not reached keeps
+     * its entry and gets no verdict. Shared by {@code hook.remove}, the detach and an install's refused hook.
+     */
+    private void restore(List<Ledger.Entry> restore, long deadline, boolean classByClass, List<Object> restored,
+                         List<Object> failures, Map<Ledger.Entry, String> verdicts, String[] overall) {
         final Map<Class<?>, Ledger.Entry> byClass = new IdentityHashMap<Class<?>, Ledger.Entry>();
         List<Class<?>> live = new ArrayList<Class<?>>();
         for (Ledger.Entry entry : restore) {
@@ -894,7 +1047,11 @@ final class HookEngineImpl implements HookEngine {
                 verify(byClass.get(type), after.bytes(type), failure, restored, failures, verdicts, overall);
             }
         }
-        // 4. statuses, capabilities, the event
+    }
+
+    /** Step 4 of section 3.5 for the hooks removed: their statuses, their capabilities withdrawn, the residues. */
+    private void removed(Set<HookEntry> removing, List<Ledger.Entry> restore, Map<Ledger.Entry, String> verdicts,
+                         List<Object> statuses) {
         for (HookEntry hook : removing) {
             String worst = "OK";
             String why = null;
@@ -944,30 +1101,6 @@ final class HookEngineImpl implements HookEngine {
         if (hooks.isEmpty()) {
             catalogue = null;
         }
-        Map<String, Object> event = new LinkedHashMap<String, Object>();
-        String overallVerdict = overall[0];
-        List<Object> removedIds = new ArrayList<Object>();
-        for (HookEntry hook : removing) {
-            removedIds.add(hook.id);
-        }
-        List<Object> classes = new ArrayList<Object>();
-        for (Object line : restored) {
-            classes.add(((Map<?, ?>) line).get("class"));
-        }
-        event.put("ids", removedIds);
-        event.put("restored", classes);
-        event.put("verified", overallVerdict);
-        ctx.events().publish(Topics.HOOKS_REMOVED, HooksModule.SOURCE, event);
-        // 5. only when the ledger is empty: the transformers go and the slot is released
-        releaseIfEmpty();
-        if (!failures.isEmpty() && throwOnFailure) {
-            throw new RpcException(ErrorCodes.HOOK_VERIFY_FAILED, "a restored class still references Spy",
-                    data("classes", failures, "restored", restored));
-        }
-        Map<String, Object> out = new LinkedHashMap<String, Object>();
-        out.put("hooks", statuses);
-        out.put("restored", restored);
-        return out;
     }
 
     /** Step 3 of section 3.5 for one class: the outcome, its line, and the ledger entry dropped unless FAILED. */
@@ -1000,7 +1133,7 @@ final class HookEngineImpl implements HookEngine {
         }
         line.put("verified", verified);
         if (reason != null) {
-            line.put("reason", reason);
+            line.put("reason", wire(reason));
         }
         line.put("foreignEvents", Long.valueOf(foreign));
         restored.add(line);
@@ -1026,18 +1159,40 @@ final class HookEngineImpl implements HookEngine {
                 + (reason == null ? "" : " (" + reason + ")"));
     }
 
+    /**
+     * Section 3.5 step 5: only when the ledger is empty (no class carries an advice the engine put there), the
+     * transformers are removed and the slot released. Called at the end of every remove and of every install (an
+     * install appends and fills the slot at steps 3 and 4, before steps 5 and 6 can refuse everything; L2-F7).
+     */
     private void releaseIfEmpty() {
-        if (!ledger.isEmpty() || !registered) {
+        if (!ledger.isEmpty() || (!registered && !handlerInstalled)) {
             return;
         }
-        inst.removeTransformer(transformers.preFilter);
-        inst.removeTransformer(transformers.recorder);
-        registered = false;
+        if (registered) {
+            inst.removeTransformer(transformers.preFilter);
+            inst.removeTransformer(transformers.recorder);
+            registered = false;
+        }
         if (handlerInstalled) {
             SpyBridge.uninstall(handler);
             handlerInstalled = false;
         }
         log.info("hooks: the ledger is empty; the transformers are removed and the Spy slot released");
+    }
+
+    /**
+     * A failure's text as it leaves the engine, in an install or remove answer, a health reason or a capability's
+     * reason (section 3.6: "the exception's class and message, redacted"; L1-F2): the core's {@code redactText}, cut
+     * as a thrown message is (section 4.3).
+     */
+    private String wire(String text) {
+        if (text == null) {
+            return null;
+        }
+        String cut = text.length() > Capture.MESSAGE_CUT * 4 ? text.substring(0, Capture.MESSAGE_CUT * 4) : text;
+        String redacted = ctx.redactText(cut);
+        return redacted != null && redacted.length() > Capture.MESSAGE_CUT
+                ? redacted.substring(0, Capture.MESSAGE_CUT) : redacted;
     }
 
     // ------------------------------------------------------------------------------------------------------ health
@@ -1077,7 +1232,8 @@ final class HookEngineImpl implements HookEngine {
             }
         }
         if (error != null) {
-            return new HookHealth(HookState.ERROR, count, lastFiredMs, hook.armed(), error, Probes.STRATEGY, last);
+            return new HookHealth(HookState.ERROR, count, lastFiredMs, hook.armed(), wire(error), Probes.STRATEGY,
+                    last);
         }
         for (Ledger.Entry entry : hook.classes) {
             if (entry.stale()) {
@@ -1227,6 +1383,15 @@ final class HookEngineImpl implements HookEngine {
     // For the tests.
     boolean handlerInstalled() {
         return handlerInstalled;
+    }
+
+    boolean registered() {
+        lock.lock();
+        try {
+            return registered;
+        } finally {
+            lock.unlock();
+        }
     }
 
     Transformers transformers() {

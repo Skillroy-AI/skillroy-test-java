@@ -197,7 +197,7 @@ class HookCataloguesTest {
             reserved id            | 4  | '  - id: engine'                                  | 4  | reserved
             bad id                 | 4  | '  - id: Limit'                                   | 4  | does not match
             bad descriptor         | 9  | '      descriptors: ["(Ljava/lang/String)V"]'     | 9  | not a JVM method descriptor
-            constructor            | 8  | '      method: "<init>"'                          | 8  | constructors are not hookable
+            static initialiser     | 8  | '      method: "<clinit>"'                        | 8  | a static initialiser is not hookable
             topic without hook.    | 13 | '    emits: limits.applied'                       | 13 | must start with 'hook.'
             empty descriptors      | 9  | '      descriptors: []'                           | 9  | non-empty list
             long note              | 13 | '    note: NOTE201'                               | 13 | note longer than 200
@@ -210,6 +210,19 @@ class HookCataloguesTest {
         assertEquals("test.yaml", e.scenarioId(), e.getMessage());
         assertTrue(e.getMessage().contains(reason), name + ": " + e.getMessage());
         assertEquals(line, e.line(), name + ": " + e.getMessage() + "\n" + text);
+    }
+
+    /**
+     * Section 3.3 item 1 (the Phase 6 review's L1-F3): a constructor entry is read; the agent answers it with the state
+     * {@code UNAVAILABLE("constructors are not hookable")} and the entry's fallback applies, as for any refused hook.
+     */
+    @Test
+    void aConstructorEntryIsReadAndLeftToTheAgentsState() throws Exception {
+        HookCatalogue catalogue = read(entry(8, "      method: \"<init>\"")
+                .replace("(Ljava/lang/String;)Ljava/math/BigDecimal;", "(Ljava/lang/String;)V")
+                .replace("result: true", "result: false"));
+        assertEquals("<init>", catalogue.hooks().get(0).toSpec().target().method());
+        assertNull(catalogue.hooks().get(0).toSpec().violation());
     }
 
     @Test
