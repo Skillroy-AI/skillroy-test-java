@@ -73,7 +73,11 @@ the fluent Java API.
 
 ```
 agent/        Java 8, runs inside the target JVM, no third-party classes; agent/skillroy-agent-web holds the web.*
-              primitives and the reflective jcef and jxbrowser adapters, and its test-jar the adapter contract kit
+              primitives and the reflective jcef and jxbrowser adapters, and its test-jar the adapter contract kit;
+              agent/skillroy-agent-hooks is the optional hook engine (home: optional/skillroy-agent-hooks.jar, loaded
+              only with the agent option optionalModules=skillroy-agent-hooks), the one module that carries third-
+              party code: Byte Buddy and its ASM, relocated by agent/skillroy-agent-bytebuddy; agent/skillroy-agent-spy
+              is its one class in front of the host, appended to the bootstrap search path in hooks mode only
 controller/   Java 25: attach and client, data channels and credentials (controller/skillroy-data), scenario
               compiler, resolution and executor, JUnit glue, CLI; controller/skillroy-cdp is the optional CDP path
               (Playwright), which no other module depends on
@@ -96,7 +100,10 @@ Needs Maven 3.9 and JDK 25 or newer (the build refuses an older one). Agent-side
 mvn -q verify
 ```
 
-This runs every test that needs no display. Tests that need a display, including the end-to-end tests that launch
+This runs every test that needs no display. The hooks module (`agent/skillroy-agent-hooks`) compiles against the
+packaged, relocated Byte Buddy of `agent/skillroy-agent-bytebuddy`, so it builds only in a reactor run that reaches
+`package`: `mvn -q verify` and `mvn -o verify -pl <module> -am` work, a root `mvn compile` or `mvn test` fails in that
+module by design (`package …shaded.bytebuddy does not exist`). Tests that need a display, including the end-to-end tests that launch
 the sample lending desk, are skipped (`-Dskillroy.headless=true` is the default). Do not switch that off on a
 desktop: the tests open real windows. Run them in the Linux image (JDK 25), under an Xvfb without a window
 manager:

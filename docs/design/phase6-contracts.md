@@ -288,6 +288,14 @@ dist -> every agent jar; **byteman (test)**
 No cycle. `skillroy-scenario` reaches `skillroy-telemetry` only through `ServiceLoader` at run time, as it reaches
 `skillroy-cdp` and `skillroy-inference`; it names no inference type (§10.2).
 
+**As built (Phase 6, HK, 2026-10-09):** the three modules are as specified. `skillroy-agent-spy` turns off Maven's
+descriptor (`addMavenDescriptor=false`), so its jar holds exactly `Spy`, its two nested classes, the manifest and the
+project's licence files, which the content check of §3.2 step 3 requires; `Spy.Stub`'s constructor is package-private
+so that javac adds no synthetic accessor class. Both shading executions write their dependency-reduced POM under
+`target/`. The hooks module's own classes are 50; its jar carries 3,098 class files and the three third-party notice
+files. `skillroy-agent-dist` declares the hooks module with every transitive dependency excluded (`*:*`) and lists it
+in a `dependencySet` of its own with `useTransitiveDependencies=false`.
+
 ### 2.2 Versions
 
 | Piece | Version | Where | Licence (audited in `../licence-audit.md` §3 and §5 when built) |
@@ -357,6 +365,19 @@ the hooks module needs (§2.1); the assembly descriptors and the content tests a
   hooks module's toy classes in `ai.skillroy.testjava.fixture.hooks` (its own `src/test`), `BytemanIT`'s
   `LendingToyMain` in `ai.skillroy.testjava.fixture.byteman` (a new fixture of `skillroy-agent-dist`'s tests, beside
   the `fixture.app` classes, which stay where they are).
+
+**As built (Phase 6, HK, 2026-10-09):** the test agent is a `maven-jar-plugin` execution with the classifier
+`test-agent` at `process-test-classes` (manifest `Premain-Class`, `Can-Retransform-Classes`, `Can-Redefine-Classes`);
+the surefire line is as specified, the spy module excluded, `skillroy.agent.hooks.spyJar` passed from
+`maven-dependency-plugin:properties`. Beyond the contract each `*FreshJvmTest` class of the hooks module runs in a
+surefire execution, and so a JVM, of its own (six of them: the first install, the strict loader, the detach budget,
+the planted reference, the `Nexus` measure, the collectable loader), and the other classes share the default
+execution's JVM (D-HK-7). `reuseForks=false` would give every class a JVM, but surefire 3.6.0 runs no test at all that
+way when `-Djvm` names a Java 8 JVM (found in the Java 8 leg: the fork starts and is never handed its class). The
+shared classes are made independent of each other: the spec helper of the tests pins a fixture class to
+`loader: system`, so a copy of the same class that another test left in a child loader never widens a spec. Two more
+properties reach the tests, `skillroy.hooks.classes` and `skillroy.hooks.bytebuddyJar`, for the tests that load the
+module in a child-first loader of its own as the agent does (the `Nexus` measure and the collectable loader).
 
 ### 2.4 Threads and bounds
 
@@ -428,6 +449,18 @@ the hooks module needs (§2.1); the assembly descriptors and the content tests a
   method descriptors only (§2.1), which the scan does not read, and the scan says so in its comment. The new
   **`OptionalModulesIT`** and **`SharedLoadersIT`** (§13.1 item 13) prove the default path loads none of it and that
   only `Spy` reaches the shared loaders.
+
+**As built (Phase 6, HK, 2026-10-09):** as specified. `DistributionContentIT` has eleven entries and the two
+rules (the spy jar must hold exactly the three classes of the package); its comment carries the carve-out sentence
+of §17 Q1 (the root `NOTICE` is the orchestrator's). `HomeConstantPoolIT` scans 3,000-odd classes and finds no class
+reference outside the allowed prefixes, the relocated Byte Buddy included; a second test pins that `com/sun/jna/` is
+refused although `com/sun/` is allowed. `OptionalModulesIT` and `SharedLoadersIT` launch the toy target
+`ai.skillroy.testjava.fixture.hooks.LoanDeskMain` (new fixtures of the module's tests, beside `fixture.app`), which
+reads commands from its standard input (`call`, `snapshot <label>`); `SharedLoadersIT`'s probe agent is
+`ai.skillroy.testjava.fixture.hooks.probe.ProbeAgent` in a jar of its own, and the snapshot compares, per shared
+loader, the classes of the agent's the loader **defines** (`getInitiatedClasses` filtered by the defining loader),
+before the install and after the remove; the bootstrap loader's gain is a subset of `Spy`, `Spy$Handler`,
+`Spy$Stub` containing `Spy` (`Spy$Stub` loads only when a stub is armed).
 
 ### 2.6 What the CLI distribution carries
 
@@ -502,6 +535,10 @@ public final class Spy {
 - **Re-entrancy** is the handler's business (§3.2): `Spy` itself keeps no thread-local.
 - The jar carries the Apache header and the project's `META-INF/LICENSE` and `NOTICE` like every project jar, one
   class file plus the two nested types, and no service file.
+
+**As built (Phase 6, HK, 2026-10-09):** as specified; `install(handler)` also answers true for the handler that
+already holds the slot (an idempotent re-install), and the slot's set and release run under a private lock (never on
+the advice's path, which reads the volatile slot only).
 
 ### 3.2 `HooksModule`: install, readiness, the first `hook.install`, the transformer
 
@@ -606,6 +643,34 @@ public final class Spy {
 - **Re-entrancy.** An `enter` while the same thread is already inside the handler (the handler's own encoding called
   a hooked method, for example an overridden `toString`) returns null at once and counts in `Spy`'s `enters` only.
 
+**As built (Phase 6, HK, 2026-10-09):**
+- **The advice binds a site key, not the bare hook id** (D-HK-3): §4.3's payload names the class, the method and the
+  descriptor, and `Spy`'s three-argument shape hands the handler nothing but the bound string, the receiver and the
+  arguments, so the `@HookId` constant of each hooked method is `<id> <class> <method><descriptor>` (a space cannot
+  occur in any of the parts), which the handler's registry resolves to the hook and the event's names with one map
+  read. A hook with several descriptors, or a class defined by several loaders, has several sites.
+- **The restore's recorder** is a second, short-lived instance (`Transformers.After`) registered last for the
+  restore's retransformation and removed after it, while the recorder that keeps the first bytes and counts the
+  events stays registered ahead of the hook transformer for the hooks' life (D-HK-5): §3.5's "re-registered last" moved
+  the one recorder behind the hook transformer for good, so that a later install would have captured advised bytes as
+  a new class's reference.
+- **The hook transformer is never removed while the ledger holds a class** (§3.5 allows "answers null … or is removed
+  with `removeTransformer` when no hook is left"): it answers null for a class being restored and is removed, with the
+  recorder, only when the ledger is empty, which keeps D117's invariant without a second case.
+- Steps 1 to 6 are as specified. A catalogue of which nothing installs is **not recorded** as installed (D-HK-15), so
+  that the next run's install probes again (a class loaded later can then be hooked) rather than answering
+  `alreadyInstalled` for nothing. A spy jar refused at step 3 makes `hook.engine` `UNAVAILABLE` with the refusal until
+  the next install, which checks the jar again (the operator may have replaced it).
+- **`<n>` of "Spy slot held by a disarmed handler of an earlier agent; `<n>` classes still carry advice"** comes from
+  the system property `skillroy.hooks.adviceLeft`, which a detach that ran out of budget sets to the number of classes
+  it left (D-HK-9): the earlier engine's loader is unreachable from the new one, and the property is the one place both
+  can see; without it the text says "an unknown number of".
+- The `Nexus` measure, `makeRaw()`, the pre-filter (which also refuses, at transform time, a class whose class file the
+  JVM hands larger than `hooks.maxClassBytes`) and the explicit batches are as specified; the advice of a site is
+  built once at install, while the module's loader is open, and cached, so that a later retransformation by another
+  agent needs nothing from the loader. Measured on the test JVM (JDK 26, macOS arm64): the first install of a JVM,
+  one fire and the remove took 0.23 s together, Byte Buddy's warm-up included.
+
 ### 3.3 Probing a spec: `hook.probe` and the install-time check
 
 For each `HookSpec` (§4.1), in this order, the first failure decides the state; every item's finding is in the
@@ -666,6 +731,21 @@ A spec that passes is `OK(strategy "advice")`. `hook.install` runs the same chec
 spec: it installs the ones that pass, reports the others with their state, and the controller applies the catalogue's
 fallbacks (§5.3).
 
+**As built (Phase 6, HK, 2026-10-09):**
+- **Several loaders define the class:** the spec's state is decided by the first class that fails (D-HK-10), so a
+  spec is installed on all of them or on none; `loaders` and `loaderIds` report each.
+- **A method already hooked** by an installed hook or an earlier spec of the call is `UNAVAILABLE("method already
+  hooked: <class>.<method><descriptor>")` (D-HK-11); two advices on one method would fire twice. `capture` on a hook
+  whose mode is not `CAPTURE` is `INVALID_PARAMS` with `data.param specs[n].capture` (the catalogue reader's rule,
+  enforced by the agent as well); duplicate ids in one call likewise.
+- **"Ledger full"** counts the distinct new classes of the call against `hooks.maxClasses`.
+- Item 6 before the append answers `UNCHECKED`, or `NOT_VISIBLE` with "the class's loader shadows Spy with a copy of its
+  own: <loader class>" when the loader's `getResource` finds a `Spy` class file; after the append the reasons name the
+  loader's class ("the class's loader cannot see Spy: <loader class>").
+- Item 7: `DEGRADED("nothing to capture")` when, for every pinned method, the capture names no in-range argument, no
+  result of a non-void method and no receiver of an instance method (the contract's case included); such a hook is
+  installed and its `hook.<id>` is `DEGRADED` with that reason.
+
 ### 3.4 The three modes and the advice
 
 One advice pair is inlined per hooked method, chosen by the method's return type: `ValueAdvice` (methods with a
@@ -708,6 +788,12 @@ The stub value is converted once, when armed: JSON `null`, booleans, numbers and
 return type (boxed primitives through `Assigner.Typing.DYNAMIC` unboxing; `BigDecimal` from a string; an enum by
 name); any other return type accepts only `null`, and a value that cannot be converted is `INVALID_PARAMS`
 (`data.param: value`, `data.returnType`). A `null` for a primitive return type is refused the same way.
+
+**As built (Phase 6, HK, 2026-10-09):** stub conversion as specified, and: a boolean also from the strings
+`"true"`/`"false"`, a `char` from a string of one character, a number from a JSON number or a numeric string of at
+most 64 characters (`BigDecimal` parsing, exact for the integral types, range-checked), a boxed return type as its
+primitive with `null` allowed; a value that is a JSON object or array is `INVALID_PARAMS`. A hook with several
+descriptors converts the value once per site, and `hook.stub`'s `returnType` lists the distinct types.
 
 ### 3.5 Remove, detach and the byte verification
 
@@ -771,6 +857,24 @@ disarmed handler's path (the registry lookup, the null return) and the pre-filte
 install; a class they had not loaded would fail inside `Spy`'s catch, counted, never thrown. Nothing is thrown
 (`AgentModule.uninstall` "must not throw and must not block for long"). The design's "disable flag file" trigger stays
 unbuilt (design §2.2 step 6).
+
+**As built (Phase 6, HK, 2026-10-09):**
+- **A residue is a reference to `Spy` the restored bytes hold and the first bytes did not** (D-HK-4; `ByteVerification`
+  of §3.6 changed with it). Found by the build: HotSpot merges constant pools across redefinitions, and after another
+  agent's `redefineClasses` the JVM keeps no cached initial bytes and reconstitutes a class with the merged pool, so a
+  class hooked, fully restored, redefined by someone else and hooked again hands the next install "first" bytes that
+  already name `Spy` in unused constant-pool entries (the running code calls nothing: `Spy`'s counters stay still).
+  Restoring exactly those bytes is no residue; failing it would leave the class `FAILED` and the slot held for the
+  JVM's life for no reason. A reference the first bytes did not hold is still `HOOK_VERIFY_FAILED`.
+- `hook.remove` restores **in the batches of §3.2** (one `After` recorder per batch); the detach restores **class by
+  class** and checks its budget before each class. A class that keeps other hooks is retransformed once without the
+  removed ones and is not verified (it still carries advice); an id that is not installed is answered
+  `UNAVAILABLE("not installed")`; a class already unloaded is reported `OK` with "class unloaded: nothing to restore".
+  `HOOK_VERIFY_FAILED`'s `data` also carries `restored`, the lines of every class. A residue hook stays in
+  `hook.health` as `ERROR("residue after remove")` until a later remove restores its class (which `hook.remove {}`
+  retries). The catalogue is cleared when no hook remains.
+- The detach waits for the engine's lock at most its budget: an install or remove still running leaves every class
+  disarmed and returns; the capabilities are withdrawn by the core's rollback (A18).
 
 ### 3.6 Health, the `HookEngine` SPI and the agent-api additions
 
@@ -837,6 +941,12 @@ defining loader, the bootstrap's through the system loader); an unknown size cou
 `maxBytes` gets a batch of its own (the size limit that refuses it is the caller's), and the input order is kept. The
 hooks engine passes the sizes of the bytes its recorder captured.
 
+**As built (Phase 6, HK, 2026-10-09):** `ERROR` also covers a class whose retransformation failed (the
+pre-filter or Byte Buddy threw, or the class grew past the size bound), until its next successful retransformation.
+`isSecretKey` and `redactText` are implemented by `CoreContext` over the runtime's `Redactor` (`isSecret`, `text`)
+and forwarded by `ModuleContext`; the default `isSecretKey` applies the protocol's `SecretKeys` rule. `HookEngine`'s
+methods throw `RpcException` with the primitives' codes, as its Javadoc says.
+
 ### 3.7 Options
 
 Agent options (P1 §2.4's table gains these rows; unknown keys were already kept, so no core change is needed for
@@ -853,6 +963,12 @@ record naming the key, §3.2):
 | `hooks.detachBudgetMs` | `8000` | the restore budget of `uninstall` (§3.5); 1000 to 9000 so that it fits the core's 10 s |
 | `hooks.capture.maxBytes` | `16384` | the budget of one `CAPTURE` event's encoding, counted on the input (§4.3) |
 | `byteman.jar` | – | the user-supplied Byteman jar, an absolute path (§7.4); **no default and no environment fallback**: without the option `rule.engine` is `UNAVAILABLE("no byteman.jar configured")` |
+
+**As built (Phase 6, HK, 2026-10-09):** the ranges the contract left open (D-HK-8): `hooks.maxClassBytes` 1024 to
+16 MiB, `hooks.maxMethods` 1 to 65535, `hooks.maxClasses` 1 to 1024, `hooks.detachBudgetMs` 1000 to 9000,
+`hooks.capture.maxBytes` 1024 to 1 MiB; a value out of range or not a number fails the install with
+`IllegalArgumentException("option <key> …")`, which the core records as the module's `FAILED` message.
+`hooks.spyJar` is read live through `AgentContext.option`.
 
 ---
 
@@ -939,6 +1055,13 @@ is installed by the server itself at its start under `--hooks` (§6.1), the pers
 `CAPTURE` on a password-taking method would be a credential disclosure to a model (High on §12.4's scale), and a
 client's `hook.remove` would drop a person's evidence mid-run.
 
+**As built (Phase 6, HK, 2026-10-09):** the six primitives, flags, timeouts and threads are as in the table.
+`hook.probe` and `hook.install` take at most 64 specs. `hook.health` also answers `otherAgents` and `spy.onBootPath`
+(D-HK-12: `skillroy hooks status` prints `otherAgents`, §6.2, and reads them from `hook.health`); without a `Spy` on the
+bootstrap path `spy.version` is null and the counters are zero. `hook.events` refuses a `limit` outside 1 to 1000 with
+`INVALID_PARAMS`; for an id that is not installed it filters on `hook.<id>`. `hook.stub` refuses a JSON object or array
+as `value`.
+
 ### 4.3 Events, the value encoding and the masking
 
 - **Topic**: the spec's `emits`, default `hook.<id>`; it must start with `hook.` (`INVALID_PARAMS` otherwise), so
@@ -982,6 +1105,22 @@ client's `hook.remove` would drop a person's evidence mid-run.
 - **Engine events**: `hooks.installed {catalogue: {id, hash}, hooks: [id], touched: n}`, `hooks.removed` (§3.5) and
   `hooks.stubbed {id, armed: bool, by: "call" | "spi"}` (every arm or clear, by `hook.stub` or by the SPI; never the
   value), source `hooks`.
+
+**As built (Phase 6, HK, 2026-10-09):** the encoding is as specified, with these readings (D-HK-14): a number
+is encoded when its class is a JDK box (`Integer`, `Long`, `Short`, `Byte`, `Float`, `Double`), `BigDecimal` or
+`BigInteger` exactly, so that no application subclass's method runs; a NaN or infinite number becomes its text (JSON
+has none, and the event would be refused); `BigDecimal` is plain text unless its scale or precision is extreme (then
+its scientific text, so that `toPlainString` cannot allocate a million digits on the application's thread); a
+`BigInteger` above 6,000 bits is cut (`null`, `truncated`); `Date` and `java.time` are encoded for `java.*` classes
+only. A collection or map is iterated only when its class is the JDK's: an application's own collection class is a
+handle, and so are the JDK collections whose iteration takes a lock (the synchronized wrappers, `Vector`, `Stack`,
+`Hashtable`, `Properties`, the blocking queues); a JDK wrapper such as an unmodifiable view is iterated (its iterator is
+the wrapped collection's). A map key is the text of a JDK scalar, else the key object's handle. A mask policy that
+returns something other than a string, a number, a boolean or null redacts the value. **The output bound equals the
+input budget** (`hooks.capture.maxBytes` both ways, §4.3), so an event whose encoding used the whole budget carries
+JSON beyond it and drops `args`, then `self`, then `returned` (D-HK-13): a capture keeps its values whole only well
+below the budget. A policy that throws makes the handler throw one preallocated `MaskFailure` to `Spy` after the
+event is published, which is how `Spy.counters()[2]` counts it.
 
 ### 4.4 Topics
 
@@ -2335,6 +2474,32 @@ CP, TL and BW build nothing of them; CP's own `ToolProjection` and `PlanPolicy` 
     snapshots through `Instrumentation.getInitiatedClasses` the bootstrap loader, the system loader and, on Java 9 and
     later, the platform loader (on Java 8 the extension loader) and finds **nothing of the agent's but `Spy` and its
     two nested types** in the bootstrap loader (BS3 RESULT §9 fact 3 made a test); `BytemanIT` (§7.6).
+
+**As built (Phase 6, HK, 2026-10-09):** items 1 to 4 and 13 as the HK package builds them:
+- Item 1: `SpyTest` (6 tests; the class-file scan allows the package's own three classes, which a class always
+  references, and checks major 52).
+- Item 2: `ShadedContentIT` (2 tests).
+- Item 3, in `skillroy-agent-hooks` (55 tests in 14 classes; the six `*FreshJvmTest` classes each in a JVM of its
+  own, §2.3's note): `InstallFireRemoveTest`,
+  `ProbeItemsTest` (§3.3 item by item; the unmodifiable class through an `Instrumentation` proxy that answers
+  `isModifiableClass` false for it; the bounds through `hooks.maxClassBytes=1024` and `hooks.maxMethods=5`), `InstallTest`
+  (two loaders, idempotency, `HOOK_CONFLICT`, `replace`, the ledger bound, a method hooked twice, the SPI, the
+  restore of one removal in one batch),
+  `ModesTest` (the three modes, `thrown` redacted, no retransformation on arm and clear, `hook.events`, the health
+  states including `STALE` after the hooked class's loader is collected), `CaptureTest` (every scalar kind, the cut at
+  100, a secret key, `secretArgs`, `secretResult`, policies on numbers and strings on the caller's thread, a throwing
+  policy, a handle without `toString()`, the input budget measured on the encoder itself, re-entrancy through a
+  policy that calls a hooked method), `StubTest`, `RestoreTest` (BC1, BC3, BC4, partial removal, the ungated
+  primitives), `HooksModuleTest` (flags, options, the spy jar's content check, `Spy.VERSION`), and in fresh JVMs
+  `FirstInstallFreshJvmTest` (nothing appended for a catalogue that fits nothing or a refused jar; one append),
+  `StrictLoaderFreshJvmTest`, `DetachBudgetFreshJvmTest`, `PlantedReferenceFreshJvmTest`, `NexusMeasureFreshJvmTest`
+  and `LoaderCollectableFreshJvmTest` (the last two with the module in a child-first loader of its own). In
+  `skillroy-agent-core`: `HookSupportTest` (the contexts' `isSecretKey`/`redactText` with the `redact` option and a
+  `RedactionKeys` pattern; `optionalModules`), `ModuleClassLoaderTest`; in `skillroy-agent-bootstrap`:
+  `AgentClassLoaderTest`. The loader tests prove the parent's `Spy` wins over a copy in an agent or module jar.
+- Item 4: `HookWireTypesTest` (9 tests), `ErrorCodesTest`, `ProtocolConstantsTest`; `ClassFileRefsTest`,
+  `ByteVerificationTest`, `RetransformBatchesTest`, `DefaultMethodsTest` in `skillroy-agent-api`.
+- Item 13: `DistributionContentIT`, `HomeConstantPoolIT`, `OptionalModulesIT`, `SharedLoadersIT` (§2.5's note).
 
 ### 13.2 End to end (the Linux image; `ci/run-in-linux.sh … -Dskillroy.headless=false`, Java 8 and Java 25 targets)
 
