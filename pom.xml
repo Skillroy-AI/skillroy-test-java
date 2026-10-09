@@ -60,6 +60,9 @@
     <module>agent/skillroy-agent-swing</module>
     <module>agent/skillroy-agent-data</module>
     <module>agent/skillroy-agent-web</module>
+    <module>agent/skillroy-agent-spy</module>
+    <module>agent/skillroy-agent-bytebuddy</module>
+    <module>agent/skillroy-agent-hooks</module>
     <module>agent/skillroy-agent-dist</module>
     <module>controller/skillroy-controller</module>
     <module>controller/skillroy-data</module>
@@ -121,6 +124,11 @@
          controller; nothing of it enters a target JVM), with the JDK sender; the OkHttp sender is excluded and the
          SDK's autoconfiguration is never on the class path. Versions are given per artifact (no BOM import). -->
     <opentelemetry.version>1.66.0</opentelemetry.version>
+    <!-- Phase 6 (phase6-contracts.md 2.2, decision D115): Byte Buddy, Apache-2.0 (the ASM it bundles BSD-3-Clause);
+         audited in docs/licence-audit.md section 3. The regular jar (Java 8 class files since 1.18.7), the latest on
+         Maven Central on 2026-10-09; used by agent/skillroy-agent-bytebuddy only, which shades and relocates it under
+         ai.skillroy.testjava.agent.hooks.shaded, and never on any class path unrelocated. -->
+    <byte-buddy.version>1.18.14</byte-buddy.version>
 
     <!-- Plugin versions. -->
     <maven-assembly-plugin.version>3.8.0</maven-assembly-plugin.version>
@@ -133,6 +141,10 @@
     <maven-install-plugin.version>3.2.0</maven-install-plugin.version>
     <maven-jar-plugin.version>3.5.1</maven-jar-plugin.version>
     <maven-resources-plugin.version>3.5.0</maven-resources-plugin.version>
+    <!-- Phase 6 (phase6-contracts.md 2.2, decision D115): maven-shade-plugin, Apache-2.0; audited in
+         docs/licence-audit.md section 6. 3.6.2 or newer: 3.6.0 (ASM 9.7) fails on Byte Buddy's Java 24 class files
+         with "Unsupported class file major version 68" (spikes/BS3/RESULT.md section 7). -->
+    <maven-shade-plugin.version>3.6.2</maven-shade-plugin.version>
     <maven-surefire-plugin.version>3.6.0</maven-surefire-plugin.version>
 
     <!-- Build environment required by the enforcer. -->
@@ -176,6 +188,22 @@
       <dependency>
         <groupId>ai.skillroy</groupId>
         <artifactId>skillroy-agent-web</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <!-- Phase 6 (phase6-contracts.md 2.1): the spy jar, the shading module and the optional hooks module. -->
+      <dependency>
+        <groupId>ai.skillroy</groupId>
+        <artifactId>skillroy-agent-spy</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>ai.skillroy</groupId>
+        <artifactId>skillroy-agent-bytebuddy</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>ai.skillroy</groupId>
+        <artifactId>skillroy-agent-hooks</artifactId>
         <version>${project.version}</version>
       </dependency>
       <!-- The adapter contract kit and the neutral fake (phase4-contracts.md 10). A managed entry matches on its type,
@@ -375,6 +403,13 @@
         <version>${kotlin.version}</version>
       </dependency>
 
+      <!-- Phase 6: Byte Buddy for agent/skillroy-agent-bytebuddy only (shaded and relocated there). -->
+      <dependency>
+        <groupId>net.bytebuddy</groupId>
+        <artifactId>byte-buddy</artifactId>
+        <version>${byte-buddy.version}</version>
+      </dependency>
+
       <!-- Sample application database and test database of the data channels; the jdk8 classifier runs on a Java 8
            target. -->
       <dependency>
@@ -503,6 +538,11 @@
           <groupId>org.apache.maven.plugins</groupId>
           <artifactId>maven-enforcer-plugin</artifactId>
           <version>${maven-enforcer-plugin.version}</version>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-shade-plugin</artifactId>
+          <version>${maven-shade-plugin.version}</version>
         </plugin>
       </plugins>
     </pluginManagement>

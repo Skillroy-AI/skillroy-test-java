@@ -137,6 +137,8 @@ when it held six jars; the seventh, added by Phase 4, was inspected on 2026-10-0
 | `lib/skillroy-agent-core.jar` | 75 classes, `agent.properties` | none |
 | `modules/skillroy-agent-swing.jar` | 73 classes, one properties file, one service file | none |
 | `modules/skillroy-agent-data.jar` | 8 classes, one service file | none |
+| `skillroy-agent-spy.jar` | (Phase 6, built 2026-10-09, HK) 3 classes (`ai.skillroy.testjava.agent.spy.Spy`, `Spy$Handler`, `Spy$Stub`), the manifest and the project's `META-INF/LICENSE` and `NOTICE`, nothing else (no Maven descriptor: the hooks module refuses to append a jar holding any other entry); 8,128 bytes | none |
+| `optional/skillroy-agent-hooks.jar` | (Phase 6, built 2026-10-09, HK) the optional hooks module, loaded only when the agent option `optionalModules` names it: 50 classes of its own (`ai.skillroy.testjava.agent.hooks`), `hooks-module.properties`, one service file, and **3,048 classes of Byte Buddy 1.18.14 (its bundled ASM 9.10.1 included) relocated under `ai.skillroy.testjava.agent.hooks.shaded.bytebuddy`**, with Byte Buddy's references to JNA renamed to `ai.skillroy.testjava.agent.hooks.shaded.absent.jna` (a package that exists nowhere); 3,098 class files, 5,004,885 bytes | **yes: Byte Buddy (Apache-2.0) and ASM (BSD-3-Clause), relocated; their notices inside the jar** |
 | `modules/skillroy-agent-web.jar` | 156 classes since the Phase 4.x amendments of 2026-10-08 (155 in Phase 4: `BrowserExtras` removed, `WebModule$Pace` and `WebModule$Pace$1` added) (`ai.skillroy.testjava.agent.web` and its sub-packages `jcef`, `jxbrowser` and `reflect`): the agent's `web.*` primitives, the browser index and events, and two reflective adapters; the descriptors `jcef.json` and `jxbrowser.json`, `web-module.properties`, one service file (Phase 4) | none |
 
 Checks made on the six jars inspected (221 class files in all):
@@ -163,6 +165,27 @@ Checks made on the six jars inspected (221 class files in all):
   reflection through the application's own class loader, so the agent carries no vendor class and no reference a JVM
   would have to link. `DistributionContentIT` holds the jar in the exact file list of the agent home and checks its
   entries as it does the others'.
+
+**The shaded copy (Phase 6, built 2026-10-09, HK; `phase6-contracts.md` §2.1, §2.5, D115, D152).** The audited
+artifact is the shaded jar, as this section's earlier row said it would be ("verify at adoption, including the shaded
+copy"). Source: `net.bytebuddy:byte-buddy:1.18.14` (the regular jar, SHA-1
+`e26b6f5163f36a5ef91f84eea1befae54e11eb76`, 3,074 classes, Java 8 class files), Apache-2.0, bundling ASM 9.10.1 under
+BSD-3-Clause; its POM declares no run-time dependency (JNA, findbugs annotations and jsr305 at `provided` scope only).
+The shading module `skillroy-agent-bytebuddy` relocates `net.bytebuddy` (ASM travels inside it as
+`net.bytebuddy.jar.asm`) and `com.sun.jna`, and drops the dependency's `META-INF/MANIFEST.MF`, `META-INF/maven/**`,
+`META-INF/LICENSE`, `META-INF/NOTICE`, `META-INF/licenses/**`, the 26 Multi-Release entries under
+`META-INF/versions/` and `module-info.class`; it adds the dependency's notices verbatim, once, as
+`META-INF/third-party/byte-buddy/LICENSE` (Apache-2.0, headed by Byte Buddy's note that it bundles ASM),
+`META-INF/third-party/byte-buddy/NOTICE` and `META-INF/third-party/asm/LICENSE` (ASM's BSD-3-Clause text), so that the
+project's own `META-INF/LICENSE` and `NOTICE`, which `DistributionContentIT` compares with the root files, are never
+shadowed. The hooks module merges that jar into its own. Checks made on the built jar: every entry is under
+`ai/skillroy/` or `META-INF/` (`DistributionContentIT`), none under `net/`; no class's constant pool names a class
+under `net/bytebuddy/`, `org/objectweb/asm/` or `com/sun/jna/`, and every class reference of every class of the home
+is under `java/`, `javax/`, `sun/`, `com/sun/`, `jdk/` or `ai/skillroy/` (`ShadedContentIT` for the shading module's
+jar, `HomeConstantPoolIT` for the whole home, the mechanical form of this section's manual constant-pool reading).
+The default agent path loads none of it: the home's `optional/` is never scanned, and `OptionalModulesIT` proves with
+`-verbose:class` that no class of the hooks module, of the relocated prefix or of `Spy` loads without the option. A
+consumer who wants no third-party code in the home deletes `optional/skillroy-agent-hooks.jar`.
 
 Modules that are loaded into a target JVM only in the sample set-up are not part of the agent home. The sample
 agent module `skillroy-sample-lending-agent` declares everything it compiles against as `provided` and its jar
@@ -436,6 +459,7 @@ build time only and are not redistributed.
 | `maven-clean-plugin` | 3.5.0 | `mvn clean` (pinned, not run by `verify`) | Apache-2.0 | same |
 | `maven-install-plugin` | 3.2.0 | `mvn install` (pinned, not run by `verify`) | Apache-2.0 | same |
 | `maven-deploy-plugin` | 3.1.4 | `mvn deploy` (pinned, not run by `verify`) | Apache-2.0 | same |
+| `maven-shade-plugin` | 3.6.2 | (Phase 6, built 2026-10-09, HK) relocates Byte Buddy in `skillroy-agent-bytebuddy` and merges it into `skillroy-agent-hooks` (3.6.0 fails on Byte Buddy's Java 24 class files, `spikes/BS3/RESULT.md` §7) | Apache-2.0 | POM chain `maven-plugins` > `maven-parent` > `apache` |
 
 Apache Maven itself (3.9 or later is required by the enforcer rule) is Apache-2.0, as stated in the `LICENSE` file
 inside its distribution. It is the build tool and is not redistributed. The Maven libraries it bundles were not
@@ -519,7 +543,7 @@ licence is claimed here beyond what `docs/DECISIONS.md` already records (cited i
 
 | Piece | Named for | Licence recorded in the repository | Status |
 |---|---|---|---|
-| Byte Buddy | Bytecode hooks module (shaded and relocated) | Apache-2.0 (B1) | not audited; verify at adoption, including the shaded copy |
+| Byte Buddy | Bytecode hooks module (shaded and relocated) | Apache-2.0 (B1) | adopted 2026-10-09 (Phase 6, HK) at 1.18.14, shaded and relocated into `optional/skillroy-agent-hooks.jar`: moved to §3 (the shaded copy, with its ASM) and §6 (`maven-shade-plugin`) |
 | Byteman 4.0.27 | Optional `rule.*` module | LGPL-2.1-or-later (B8) | optional; the jar is never bundled; the user supplies it |
 | JNA | Optional emulated-attach path | Dual Apache-2.0 / LGPL-2.1-or-later (B1, B8); take Apache-2.0 | optional controller dependency; not audited |
 | jattach | Attach as root or across users | Apache-2.0 (B1) | not redistributed; found on `PATH` or at a configured path (B8) |

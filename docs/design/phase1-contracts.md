@@ -131,7 +131,20 @@ skillroy-agent/
   lib/skillroy-protocol.jar  lib/skillroy-agent-api.jar  lib/skillroy-agent-core.jar
   modules/skillroy-agent-swing.jar  modules/skillroy-agent-data.jar      # plus any domain module jars dropped in
   modules/skillroy-agent-web.jar   # (Phase 4, built 2026-10-07; P4 §2.1, §11)
+  skillroy-agent-spy.jar           # (Phase 6, built 2026-10-09, HK; P6 §2.1) appended to the bootstrap path by the
+                                   # hooks module at its first hook.install, never earlier
+  optional/skillroy-agent-hooks.jar   # (Phase 6, built 2026-10-09, HK; P6 §2.1) never scanned; loaded only when the
+                                      # option optionalModules names it; carries the relocated Byte Buddy and ASM
 ```
+
+**Phase 6 (built 2026-10-09, HK; P6 §2.1, §2.5).** The home gains `skillroy-agent-spy.jar` at its root (outside
+`lib/` and `modules/`, so that no agent loader defines `Spy`) and the directory `optional/`, which `ModuleLoader`
+never scans (D114). `DistributionContentIT`'s list has eleven entries (thirteen once the Byteman module adds its two
+jars under `optional/`, BW) and two new rules: no jar but `skillroy-agent-spy.jar` holds an entry of
+`ai/skillroy/testjava/agent/spy/`, and `optional/skillroy-agent-hooks.jar` holds no entry under `net/`. Every jar
+still holds only `ai/skillroy/` and `META-INF/` entries: the relocated Byte Buddy lives under
+`ai/skillroy/testjava/agent/hooks/shaded/` and its notices under `META-INF/third-party/`. `HomeConstantPoolIT`
+(D152) scans every class of the home for class references outside the JDK's and the project's prefixes.
 
 Jar names inside the home carry **no version** (the bootstrap must be found by a stable name; attach re-runs
 `agentmain` of the first-loaded jar and shadows a renamed one). **Licence files (1.x, built 2026-10-02):** every jar
@@ -151,6 +164,14 @@ host loader (system loader, or the loader that called EmbeddedAgent.start)
 
 Modules see `skillroy-agent-api`/`skillroy-protocol` through the agent loader and host application classes through
 the host loader. Nothing of the agent except the bootstrap jar is visible to the host.
+
+**Phase 6 (built 2026-10-09, HK; P6 §2.1, D116).** The hooks' `Spy` package `ai.skillroy.testjava.agent.spy.` exists
+once in a JVM: `AgentClassLoader.isChildFirst` excludes it as it excludes the bootstrap package, and
+`ModuleClassLoader`'s parent-first list (classes and resources) gains it, so that every loader of the agent resolves
+`Spy` to the one copy the hooks module appends to the bootstrap search path (in hooks mode only, from the first
+`hook.install` on, for the JVM's life). Before that append the parent chain has no `Spy`, and a copy inside a module
+jar would be defined there, which is why no jar but the spy jar may hold one (§2.1). Visible to the host in hooks
+mode: `Spy`, `Spy$Handler` and `Spy$Stub` in the bootstrap loader, nothing else (`SharedLoadersIT`).
 
 A module loader is parent-first for the JDK (`java.`, `javax.`, `sun.`, `com.sun.`, `jdk.`) and for the shared agent
 types (`ai.skillroy.testjava.protocol.`, `ai.skillroy.testjava.agent.api.`), which must exist exactly once or
@@ -287,6 +308,13 @@ intact; from 1025 the load is refused with an `IOException` on the attaching sid
 | `port` | `0` | loopback port; `0` = ephemeral |
 | `home` | directory of the bootstrap jar | agent home |
 | `modules` | – | extra module jar paths, comma-separated, in addition to `home/modules/*.jar` |
+| `optionalModules` | – | **(Phase 6, built 2026-10-09, HK; P6 §2.1, D114.)** file stems of jars under `<home>/optional/` to load as module jars, comma-separated (`skillroy-agent-hooks`); loaded between `<home>/modules/*.jar` and the `modules` paths. A stem that is not a plain file name, names no jar, or is given without a home, and a jar without a service file, is a `FAILED` record (S14). The `;` of the argument string still separates options: `optionalModules=skillroy-agent-hooks;discoveryDir=…` |
+| `hooks.spyJar` | `<home>/skillroy-agent-spy.jar` | **(Phase 6, built 2026-10-09, HK; P6 §3.7.)** the jar the hooks module appends to the bootstrap search path at its first install, after the content check of P6 §3.2 step 3; read live (A20) |
+| `hooks.maxClassBytes` | `262144` | **(Phase 6, HK; P6 §3.7.)** a class whose class file is larger is never retransformed; also the byte bound of one retransformation batch; 1024 to 16 MiB |
+| `hooks.maxMethods` | `2000` | **(Phase 6, HK; P6 §3.7.)** a class declaring more methods and constructors is never retransformed; 1 to 65535 |
+| `hooks.maxClasses` | `64` | **(Phase 6, HK; P6 §3.7.)** the most classes the hooks' ledger holds; 1 to 1024 |
+| `hooks.detachBudgetMs` | `8000` | **(Phase 6, HK; P6 §3.5, §3.7.)** the restore budget of the hooks module's uninstall; 1000 to 9000 |
+| `hooks.capture.maxBytes` | `16384` | **(Phase 6, HK; P6 §4.3.)** the input budget of one `CAPTURE` event's encoding, also its output bound; 1024 to 1 MiB |
 | `mainClassGuard` | – | JAVAAGENT only: start only if the system property `sun.java.command` names this launch target (lets `JAVA_TOOL_OPTIONS` inject the agent into one JVM of a process tree). **S17 (1.x, built 2026-10-02):** the guard must match the whole launch target (the main class, or the jar path for `-jar`): the command, trimmed, equals the trimmed value or continues with white space directly after it. A value that is only a prefix of a longer main-class name does not match |
 | `readOnly` | `false` | reject primitives whose spec is `mutating` |
 | `discoveryDir` | `${java.io.tmpdir}/skillroy-<user>` | where discovery and token files are written; a per-user directory, see §2.5. **S8/S19 (1.x, built 2026-10-02):** when the option is absent and the default is occupied by another user, the fall-back `<user.home>/.skillroy/run` is used (§2.5); a directory named explicitly is never substituted |
@@ -549,6 +577,10 @@ public final class ErrorCodes {
         BUSY = -32033;                                   // S30 (1.x, built 2026-10-02): see "Bounded dispatch" in §5
     // (Phase 4, built 2026-10-07; P4 §8.1: SCRIPT_ERROR = -32008, a script the agent ran in a page threw;
     // data {browser, message, stack})
+    // (Phase 6, built 2026-10-09, HK; P6 §4.5: HOOK_CONFLICT = -32021, another hook catalogue is installed and
+    // replace is false; RULE_REJECTED = -32022, a Byteman rule the lint or the type check refused; HOOK_VERIFY_FAILED
+    // is raised for the first time, by hook.remove, data {classes: [{class, loader, bytesBefore, bytesAfter,
+    // foreignEvents}]})
     public static String name(int code);
 }
 
@@ -589,7 +621,14 @@ public final class Topics {                           // generic topics; domain 
     // WEB_BROWSERS_CHANGED, published with source "web": web.load {browser, url, kind, frameKey?, error?},
     // web.ready {browser, url, signal, name?}, web.console {browser, level, text, source?, line?, truncated?},
     // web.tap {browser, name, detail?, truncated?}, web.closed {browser}, web.browsers.changed {added, removed})
+    // (Phase 6, built 2026-10-09, HK; P6 §4.4: HOOK_PREFIX = "hook." (every hook's topic, hook.<id> by default),
+    // HOOKS_INSTALLED, HOOKS_REMOVED, HOOKS_STUBBED (source "hooks"), RULE_FIRED, RULES_CHANGED (the Byteman module))
 }
+
+// (Phase 6, built 2026-10-09, HK; P6 §4.1) package ai.skillroy.testjava.protocol.hook, the wire types of the hook.*
+// primitives, shared by the agent's hooks module and the controller's catalogue: HookMode {OBSERVE, CAPTURE, STUB},
+// HookState {INSTALLED, FIRING, STALE, ERROR}, HookSpec (with HookTarget and HookCapture; strict fromJson, hash(),
+// violation() for the name rules), HookProbe, HookStatus, HookHealth (lenient fromJson, as every answer type).
 
 /** One entry of GET /schema. */
 public final class PrimitiveDescriptor {
@@ -677,6 +716,12 @@ public interface AgentContext {
     AgentLog log();
     boolean readOnly();
     boolean targetReady();
+    // (Phase 6, built 2026-10-09, HK; P6 §3.6, D118) three defaults, so that every test fake compiles unchanged:
+    default HookEngine hooks();               // spi().first(HookEngine.class), null without the hooks module
+    default boolean isSecretKey(String key);  // the core's contexts: the runtime's Redactor rule (SecretKeys, the
+                                              // redact option, every RedactionKeys); the default: SecretKeys only
+    default String redactText(String text);   // the core's contexts: the Redactor's free-text redaction; the default:
+                                              // the text unchanged
 }
 
 public interface Primitive {
@@ -880,6 +925,16 @@ public interface ProductionMarker { String productionReason(); }
 
 /** Applied to every value data.query returns before it leaves the JVM. */
 public interface MaskPolicy { Object mask(String sourceId, String column, Object value); }
+// (Phase 6, built 2026-10-09, HK; P6 §4.3) also applied to every encoded scalar a CAPTURE hook copies, as
+// mask("hook.<id>", "arg<i>" | "self" | "return", value), and to a Byteman rule's bindings. The thread rule is
+// amended: called on agent worker threads, or, for a CAPTURE hook or a Byteman rule's bindings, on the application
+// thread that called the hooked method; it must be thread-safe, cheap, and must never block or take a lock of the
+// application. A policy that throws there counts as a hook failure and the value becomes <redacted>.
+
+// (Phase 6, built 2026-10-09, HK; P6 §3.6, D118, D153) package …agent.api.spi.hook: HookEngine {probe, install, stub,
+// remove, health, catalogue}, registered by the optional hooks module, found with spi().first or AgentContext.hooks();
+// package …agent.api.instrument (shared by the hooks and Byteman modules): ClassFileRefs, ByteVerification,
+// RetransformBatches.
 
 // (Phase 4, built 2026-10-07; P4 §3: package …agent.api.spi.web adds WebEngineAdapter, one per embedded-browser
 // technology, which turns seeds into WebBrowser handles, and the technology-neutral BrowserRegistryAdapter,
@@ -938,6 +993,12 @@ jar already named is skipped on that class-path pass, not loaded twice and not f
 `ServiceLoader<AgentModule>` per module jar; built this way because in the EMBEDDED layout a module jar also sits on
 the application's class path, where `ServiceLoader` through the host loader hit a `NoClassDefFoundError` for
 `AgentModule`, and under S14 that record closed the production gate: the sample's embedded mode never became ready.)
+**Phase 6 (built 2026-10-09, HK; P6 §2.1, D114):** a third source sits between `<home>/modules/*.jar` and the
+`modules` paths: the jars under `<home>/optional/` that the option `optionalModules` names by file stem, each in its
+own module loader; `optional/` itself is never scanned, so an unnamed jar there is not even opened. A stem that names
+no jar, or a jar without a service file, is a `FAILED` record. The events of the hooks module (source `hooks`) are
+`hook.<id>` (or the spec's `emits`) per hooked call, and `hooks.installed {catalogue: {id, hash}, hooks, touched}`,
+`hooks.removed {ids, restored, verified}`, `hooks.stubbed {id, armed, by}` (P6 §4.3).
 
 **A18 withdrawn capabilities (1.x, built 2026-10-02).** The core records who declared or set each capability (a
 module, or the core) and withdraws everything a module owns after its `uninstall()` or a failed install; the core's

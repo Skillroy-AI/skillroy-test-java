@@ -1,0 +1,301 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Copyright 2026 Mike Mills.
+
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+
+      http://www.apache.org/licenses/LICENSE-2.0
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>ai.skillroy</groupId>
+    <artifactId>skillroy-test-java-parent</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+    <relativePath>../../pom.xml</relativePath>
+  </parent>
+
+  <artifactId>skillroy-agent-hooks</artifactId>
+  <name>skillroy-agent-hooks</name>
+  <description>
+    The optional agent module 'hooks' (phase6-contracts.md 3, 4): the hook engine on the relocated Byte Buddy of
+    skillroy-agent-bytebuddy, merged into one jar that the agent home ships as optional/skillroy-agent-hooks.jar and
+    loads only when the agent option optionalModules names it. Builds only in a reactor run that reaches package
+    (mvn -q verify, or -pl ... -am verify): it compiles against the packaged, relocated shading module.
+  </description>
+
+  <properties>
+    <!-- Agent side: Java 8 language and API. -->
+    <maven.compiler.release>8</maven.compiler.release>
+    <!-- The test-only premain jar that hands the tests an Instrumentation (phase6-contracts.md 2.3). -->
+    <skillroy.hooks.testAgent>${project.build.directory}/${project.build.finalName}-test-agent.jar</skillroy.hooks.testAgent>
+  </properties>
+
+  <dependencies>
+    <!-- The agent's shared types and Spy: provided by the agent home (lib/ and the bootstrap path), never merged. -->
+    <dependency>
+      <groupId>ai.skillroy</groupId>
+      <artifactId>skillroy-agent-api</artifactId>
+      <scope>provided</scope>
+    </dependency>
+    <dependency>
+      <groupId>ai.skillroy</groupId>
+      <artifactId>skillroy-protocol</artifactId>
+      <scope>provided</scope>
+    </dependency>
+    <dependency>
+      <groupId>ai.skillroy</groupId>
+      <artifactId>skillroy-agent-spy</artifactId>
+      <scope>provided</scope>
+    </dependency>
+    <!-- The relocated Byte Buddy, merged into this module's jar. Within one reactor build Maven resolves the shading
+         module's original dependencies, not its dependency-reduced POM, so the exclusion is what keeps unrelocated
+         net/bytebuddy classes out of this jar (and the enforcer below bans them from the tree). -->
+    <dependency>
+      <groupId>ai.skillroy</groupId>
+      <artifactId>skillroy-agent-bytebuddy</artifactId>
+      <exclusions>
+        <exclusion>
+          <groupId>net.bytebuddy</groupId>
+          <artifactId>byte-buddy</artifactId>
+        </exclusion>
+      </exclusions>
+    </dependency>
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <resources>
+      <!-- Only the version file is filtered; the service registration is copied as it is. -->
+      <resource>
+        <directory>src/main/resources</directory>
+        <filtering>true</filtering>
+        <includes>
+          <include>**/hooks-module.properties</include>
+        </includes>
+      </resource>
+      <resource>
+        <directory>src/main/resources</directory>
+        <filtering>false</filtering>
+        <excludes>
+          <exclude>**/hooks-module.properties</exclude>
+        </excludes>
+      </resource>
+    </resources>
+    <plugins>
+      <!-- An IDE-completed "import net.bytebuddy..." must fail the build instead of passing the unit tests. -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-enforcer-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>ban-unrelocated-byte-buddy</id>
+            <goals>
+              <goal>enforce</goal>
+            </goals>
+            <configuration>
+              <rules>
+                <bannedDependencies>
+                  <excludes>
+                    <exclude>net.bytebuddy:*</exclude>
+                  </excludes>
+                </bannedDependencies>
+              </rules>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+      <!-- Sets ${ai.skillroy:skillroy-agent-spy:jar} to the reactor's spy jar, which the tests append to the bootstrap
+           search path as production does. -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-dependency-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>spy-jar-path</id>
+            <goals>
+              <goal>properties</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+      <!-- The test agent: a premain jar over target/test-classes whose TestAgent keeps the Instrumentation. -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-jar-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>test-agent</id>
+            <phase>process-test-classes</phase>
+            <goals>
+              <goal>jar</goal>
+            </goals>
+            <configuration>
+              <classifier>test-agent</classifier>
+              <classesDirectory>${project.build.testOutputDirectory}</classesDirectory>
+              <archive>
+                <addMavenDescriptor>false</addMavenDescriptor>
+                <manifestEntries>
+                  <Premain-Class>ai.skillroy.testjava.agent.hooks.TestAgent</Premain-Class>
+                  <Can-Retransform-Classes>true</Can-Retransform-Classes>
+                  <Can-Redefine-Classes>true</Can-Redefine-Classes>
+                </manifestEntries>
+              </archive>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+      <!-- The surefire line extends the inherited one (a command-line skillroy.test.extraArgLine still applies) with
+           the test agent; the spy module is kept off the test class path (a Spy there would be defined by the
+           application loader before the engine's append, BS3 RESULT section 9 fact 9) and its jar is passed as the
+           live option hooks.spyJar. A bootstrap append and the Spy slot last for the JVM's life, and some cases leave
+           the slot held by design (D117): each *FreshJvmTest class runs in an execution, and so a JVM, of its own; the
+           other classes share one. (reuseForks=false would give every class a JVM, but surefire 3.6.0 runs no test at
+           all that way when -Djvm names a Java 8 JVM.) -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <configuration>
+          <argLine>-Djava.awt.headless=${skillroy.headless} ${skillroy.test.extraArgLine} -javaagent:${skillroy.hooks.testAgent}</argLine>
+          <classpathDependencyExcludes>
+            <classpathDependencyExclude>ai.skillroy:skillroy-agent-spy</classpathDependencyExclude>
+          </classpathDependencyExcludes>
+          <systemPropertyVariables>
+            <skillroy.agent.hooks.spyJar>${ai.skillroy:skillroy-agent-spy:jar}</skillroy.agent.hooks.spyJar>
+            <skillroy.hooks.testAgent>${skillroy.hooks.testAgent}</skillroy.hooks.testAgent>
+            <skillroy.hooks.testClasses>${project.build.testOutputDirectory}</skillroy.hooks.testClasses>
+            <skillroy.hooks.classes>${project.build.outputDirectory}</skillroy.hooks.classes>
+            <skillroy.hooks.bytebuddyJar>${ai.skillroy:skillroy-agent-bytebuddy:jar}</skillroy.hooks.bytebuddyJar>
+          </systemPropertyVariables>
+        </configuration>
+        <executions>
+          <execution>
+            <id>default-test</id>
+            <configuration>
+              <excludes>
+                <exclude>**/*FreshJvmTest.java</exclude>
+              </excludes>
+            </configuration>
+          </execution>
+          <execution>
+            <id>fresh-jvm-first-install</id>
+            <goals>
+              <goal>test</goal>
+            </goals>
+            <configuration>
+              <includes>
+                <include>**/FirstInstallFreshJvmTest.java</include>
+              </includes>
+            </configuration>
+          </execution>
+          <execution>
+            <id>fresh-jvm-strict-loader</id>
+            <goals>
+              <goal>test</goal>
+            </goals>
+            <configuration>
+              <includes>
+                <include>**/StrictLoaderFreshJvmTest.java</include>
+              </includes>
+            </configuration>
+          </execution>
+          <execution>
+            <id>fresh-jvm-detach-budget</id>
+            <goals>
+              <goal>test</goal>
+            </goals>
+            <configuration>
+              <includes>
+                <include>**/DetachBudgetFreshJvmTest.java</include>
+              </includes>
+            </configuration>
+          </execution>
+          <execution>
+            <id>fresh-jvm-planted-reference</id>
+            <goals>
+              <goal>test</goal>
+            </goals>
+            <configuration>
+              <includes>
+                <include>**/PlantedReferenceFreshJvmTest.java</include>
+              </includes>
+            </configuration>
+          </execution>
+          <execution>
+            <id>fresh-jvm-nexus-measure</id>
+            <goals>
+              <goal>test</goal>
+            </goals>
+            <configuration>
+              <includes>
+                <include>**/NexusMeasureFreshJvmTest.java</include>
+              </includes>
+            </configuration>
+          </execution>
+          <execution>
+            <id>fresh-jvm-loader-collectable</id>
+            <goals>
+              <goal>test</goal>
+            </goals>
+            <configuration>
+              <includes>
+                <include>**/LoaderCollectableFreshJvmTest.java</include>
+              </includes>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+      <!-- One jar per module: the relocated Byte Buddy of skillroy-agent-bytebuddy is merged in (nothing else), and
+           the dependency-reduced POM is written under target/. -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-shade-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>merge-relocated-byte-buddy</id>
+            <phase>package</phase>
+            <goals>
+              <goal>shade</goal>
+            </goals>
+            <configuration>
+              <shadedArtifactAttached>false</shadedArtifactAttached>
+              <createDependencyReducedPom>true</createDependencyReducedPom>
+              <dependencyReducedPomLocation>${project.build.directory}/dependency-reduced-pom.xml</dependencyReducedPomLocation>
+              <artifactSet>
+                <includes>
+                  <include>ai.skillroy:skillroy-agent-bytebuddy</include>
+                </includes>
+              </artifactSet>
+              <filters>
+                <filter>
+                  <artifact>ai.skillroy:skillroy-agent-bytebuddy</artifact>
+                  <excludes>
+                    <exclude>META-INF/MANIFEST.MF</exclude>
+                    <exclude>META-INF/maven/**</exclude>
+                    <exclude>META-INF/LICENSE</exclude>
+                    <exclude>META-INF/NOTICE</exclude>
+                  </excludes>
+                </filter>
+              </filters>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+</project>
