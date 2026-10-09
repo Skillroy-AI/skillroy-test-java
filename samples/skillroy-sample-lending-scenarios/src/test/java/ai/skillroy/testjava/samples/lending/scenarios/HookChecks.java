@@ -19,23 +19,32 @@ package ai.skillroy.testjava.samples.lending.scenarios;
 import ai.skillroy.testjava.controller.AgentRpcException;
 import ai.skillroy.testjava.controller.CapabilityMatrix;
 import ai.skillroy.testjava.protocol.Capability;
+import ai.skillroy.testjava.protocol.CapabilityState;
 import ai.skillroy.testjava.protocol.ErrorCodes;
+import ai.skillroy.testjava.protocol.Event;
 import ai.skillroy.testjava.protocol.Json;
 import ai.skillroy.testjava.protocol.RpcResult;
 import ai.skillroy.testjava.protocol.SecretKeys;
+import ai.skillroy.testjava.protocol.Topics;
 import ai.skillroy.testjava.protocol.hook.HookSpec;
 import ai.skillroy.testjava.scenario.hooks.HookCatalogue;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 
+import java.io.File;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeMap;
+import java.util.TreeSet;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -49,7 +58,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * ({@link LendingTarget.Mode#JAVAAGENT_HOOKS}): after check 1c and before check 5 (65), the pack's catalogue is probed,
  * installed and fires, the {@code STUB} demonstration, the idempotent install and the conflict, and
  * {@code sign.on.checked} enabled once to show that the password argument is never captured; after check 14 (165), the
- * restore of every class with its byte verification; in checks 16 and 17, the re-attach with the same options; before
+ * restore of every class with its byte verification; at 166 to 168 (BW, item 7), Byteman on the desk; in checks 16 and 17, the re-attach with the same options; before
  * check 19 (205), the target's log: one CDS line on Java 25 (none on Java 8) and nothing of Byte Buddy,
  * {@code sun.misc.Unsafe} or an agent stack trace.
  */
@@ -295,7 +304,153 @@ abstract class HookChecks extends LoadModeChecks {
     //
     // Reserved for phase6-contracts.md 13.2 item 7, built by package BW as the standalone BytemanDeskIT and moved
     // here at integration: after the hook.remove demonstration above (165, every class restored, no hook left) and
-    // before check 15 (170).
+    // before check 15 (170). The hooks leg loads the optional Byteman module beside the hooks module
+    // (LendingTarget.HOOKS_LEG_MODULES, byteman.jar the test class path's Byteman). The return line is driven through
+    // lending.input, not through a scenario run: a run's step 0b would install the pack's hooks again under AUTO, and
+    // that retransformation of AccessControl would be a foreign event for the rule's byte check.
+
+    /** The rule of item 7: {@code AccessControl.returnLimit} at exit, the object and the limit to the helper. */
+    static final String LIMIT_RULE = "RULE limit read\n"
+            + "CLASS " + APP + "AccessControl\n"
+            + "METHOD returnLimit\n"
+            + "AT EXIT\n"
+            + "IF true\n"
+            + "DO fired($0, $!)\n"
+            + "ENDRULE\n";
+
+    /** The desk's listening ports before the first {@code rule.submit}; null on a host without {@code /proc}. */
+    private Set<Integer> socketsBeforeRules;
+
+    /**
+     * The process's listening TCP ports: {@code /proc/<pid>/net/tcp} and {@code tcp6} entries in state {@code 0A}
+     * whose inode is the target of one of {@code /proc/<pid>/fd/*} (phase6-contracts.md 7.6); null on a host without
+     * {@code /proc}.
+     */
+    static Set<Integer> listening(long pid) throws IOException {
+        Path proc = Paths.get("/proc", Long.toString(pid));
+        if (!Files.isDirectory(proc.resolve("fd")) || !Files.isReadable(proc.resolve("net/tcp"))) {
+            return null;
+        }
+        Set<String> inodes = new HashSet<>();
+        File[] fds = proc.resolve("fd").toFile().listFiles();
+        if (fds != null) {
+            for (File fd : fds) {
+                try {
+                    String link = Files.readSymbolicLink(fd.toPath()).toString();
+                    if (link.startsWith("socket:[")) {
+                        inodes.add(link.substring(8, link.length() - 1));
+                    }
+                } catch (IOException gone) {
+                    // closed while listing
+                }
+            }
+        }
+        Set<Integer> ports = new TreeSet<>();
+        for (String table : List.of("net/tcp", "net/tcp6")) {
+            Path p = proc.resolve(table);
+            if (!Files.isReadable(p)) {
+                continue;
+            }
+            List<String> lines = Files.readAllLines(p, StandardCharsets.US_ASCII);
+            for (int i = 1; i < lines.size(); i++) {
+                String[] f = lines.get(i).trim().split("\\s+");
+                if (f.length > 9 && "0A".equals(f[3]) && inodes.contains(f[9])) {
+                    ports.add(Integer.parseInt(f[1].substring(f[1].indexOf(':') + 1), 16));
+                }
+            }
+        }
+        return ports;
+    }
+
+    /**
+     * Item 7, before Byteman is loaded: {@code rule.engine} is {@code OK(in-process)}; only the agent listens;
+     * {@code rule.check} of the rule on {@code AccessControl.returnLimit} is {@code ok} with {@code typeChecked: false};
+     * {@code rule.submit} without {@code confirm} is {@code CONFIRM_REQUIRED}, and a rule naming {@code killJVM} is
+     * {@code RULE_REJECTED} by the lint, confirmed or not loaded.
+     */
+    @Test
+    @Order(166)
+    void bytemanChecksARuleBeforeItIsLoadedAndRefusesAForbiddenOne() throws Exception {
+        Capability engine = client().capabilities().get("rule.engine");
+        assertTrue(engine != null && engine.state() == CapabilityState.OK, String.valueOf(engine));
+        assertEquals("in-process", engine.strategy());
+        socketsBeforeRules = listening(target.launched.pid());
+        if (socketsBeforeRules == null) {
+            System.out.println("HookChecks: no /proc on this host; the listening-socket checks of item 7 are skipped");
+        } else {
+            assertEquals(Set.of(client().endpoint().port()), socketsBeforeRules, "only the agent listens");
+        }
+        Map<String, Object> check = value(client().call("rule.check", Map.of("rule", LIMIT_RULE), CALL));
+        assertEquals(Boolean.TRUE, check.get("ok"), String.valueOf(check));
+        assertEquals(Boolean.FALSE, check.get("typeChecked"), "Byteman is not loaded before the first submit");
+        AgentRpcException unconfirmed = assertThrows(AgentRpcException.class,
+                () -> client().call("rule.submit", Map.of("rule", LIMIT_RULE), CALL));
+        assertEquals(ErrorCodes.CONFIRM_REQUIRED, unconfirmed.error().code());
+        AgentRpcException kill = assertThrows(AgentRpcException.class, () -> client().call("rule.submit",
+                Map.of("rule", LIMIT_RULE.replace("fired($0, $!)", "killJVM()").replace("RULE limit read",
+                        "RULE stop")), CALL.withConfirm(true)));
+        assertEquals(ErrorCodes.RULE_REJECTED, kill.error().code(), String.valueOf(kill.error()));
+        assertEquals(Boolean.FALSE, value(client().call("rule.list", Map.of(), CALL)).get("loaded"));
+    }
+
+    /**
+     * Item 7: {@code rule.submit} with {@code confirm} loads Byteman and installs the rule; a return line publishes
+     * {@code rule.fired} with two bindings, a handle of the {@code AccessControl} and the limit applied (staff 100's
+     * 20.00); {@code rule.list} shows the rule.
+     */
+    @Test
+    @Order(167)
+    void aSubmittedRuleFiresOnTheReturnLineAndIsListed() throws Exception {
+        Map<String, Object> submitted = value(client().call("rule.submit", Map.of("rule", LIMIT_RULE),
+                CALL.withConfirm(true)));
+        assertEquals(Boolean.TRUE, submitted.get("installed"), String.valueOf(submitted));
+        send("Entry", "100");
+        assertEquals("IDLE", send("Entry", "1111").payload().get("state"));
+        RpcResult returning = client().call("lending.input", Map.of("source", "Key.RETURN"), CALL);
+        assertNotNull(client().await("input.requested", returning.seqBefore(), Map.of("state", "RETURN"), WAIT));
+        long sinceScan = client().call("trace.mark", Map.of("label", "byteman.scan"), CALL).seqAfter();
+        send("Barcode", "5000000000055");
+        Event fired = client().await(Topics.RULE_FIRED, sinceScan, Map.of("rule", "limit read"), WAIT);
+        assertNotNull(fired, "the return line fired the rule");
+        assertEquals(APP + "AccessControl", fired.payload().get("class"));
+        assertEquals("returnLimit", fired.payload().get("method"));
+        Map<?, ?> bindings = (Map<?, ?>) fired.payload().get("bindings");
+        assertEquals(2, bindings.size(), String.valueOf(bindings));
+        assertEquals(APP + "AccessControl", ((Map<?, ?>) bindings.get("0")).get("class"), "$0 is a handle");
+        assertEquals("20.00", bindings.get("1"), "$! is the limit");
+        Runs.PACK.recover(client());
+        assertSignedOff();
+        Map<String, Object> listed = value(client().call("rule.list", Map.of(), CALL));
+        assertEquals(Boolean.TRUE, listed.get("loaded"));
+        List<?> rules = (List<?>) listed.get("rules");
+        assertEquals(1, rules.size(), String.valueOf(listed));
+        assertEquals("limit read", ((Map<?, ?>) rules.get(0)).get("name"));
+    }
+
+    /**
+     * Item 7: {@code rule.unload} restores {@code AccessControl} with {@code verified: OK} and no foreign event; the
+     * listening sockets after it equal those before the first submit (exactly the agent's port); nothing of Byteman
+     * reached the desk's own output.
+     */
+    @Test
+    @Order(168)
+    void unloadRestoresTheClassAndNothingListens() throws Exception {
+        Map<String, Object> unloaded = value(client().call("rule.unload", Map.of("name", "limit read"), CALL));
+        assertEquals(Boolean.TRUE, unloaded.get("removed"));
+        List<?> restored = (List<?>) unloaded.get("restored");
+        assertEquals(1, restored.size(), String.valueOf(unloaded));
+        Map<?, ?> entry = (Map<?, ?>) restored.get(0);
+        assertEquals(APP + "AccessControl", entry.get("class"));
+        assertEquals("OK", entry.get("verified"), String.valueOf(entry));
+        assertEquals(0L, ((Number) entry.get("foreignEvents")).longValue(), String.valueOf(entry));
+        assertEquals(List.of(), value(client().call("rule.list", Map.of(), CALL)).get("rules"));
+        if (socketsBeforeRules != null) {
+            assertEquals(socketsBeforeRules, listening(target.launched.pid()), "the same listening sockets after");
+        }
+        List<String> log = Files.readAllLines(target.launched.logFile(), StandardCharsets.UTF_8);
+        assertEquals(List.of(), log.stream().filter(l -> l.contains("org.jboss.byteman")).toList(),
+                "nothing of Byteman on the desk's output");
+    }
 
     // ------------------------------------------------------------------ checks 16, 17: the re-attach
 

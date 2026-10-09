@@ -56,7 +56,9 @@ final class LendingTarget implements AutoCloseable {
         EMBEDDED("embedded", LoadMode.EMBEDDED),
         /**
          * The hooks leg (phase6-contracts.md 13.2): {@code -javaagent} with {@code optionalModules=skillroy-agent-hooks},
-         * so that the agent loads the optional hooks module from the home's {@code optional/}.
+         * so that the agent loads the optional hooks module from the home's {@code optional/}; and (BW, 13.2 item 7) the
+         * optional Byteman module beside it, {@code optionalModules=skillroy-agent-hooks,skillroy-agent-byteman} with
+         * {@code byteman.jar} the Byteman of this module's test class path ({@link #bytemanJar()}).
          */
         JAVAAGENT_HOOKS("javaagent-hooks", LoadMode.JAVAAGENT);
 
@@ -73,6 +75,10 @@ final class LendingTarget implements AutoCloseable {
     static final String PLUGIN_CLASS = "ai.skillroy.testjava.samples.lending.agent.embedded.SkillroyLendingPlugin";
     /** The agent option that loads the optional hooks module (phase6-contracts.md 2.1, D114). */
     static final String OPTIONAL_MODULES = "optionalModules";
+    /** The hooks leg's optional modules: the hooks module and (BW, phase6-contracts.md 13.2 item 7) Byteman's. */
+    static final String HOOKS_LEG_MODULES = "skillroy-agent-hooks,skillroy-agent-byteman";
+    /** The agent option naming the user's Byteman jar (phase6-contracts.md 3.7, 7.4). */
+    static final String BYTEMAN_JAR = "byteman.jar";
     /**
      * A desk PIN the target is launched with ({@code -Dlending.pin}): a key only the lending module's
      * {@code RedactionKeys} names secret (amendment A21), so the agent must never show this value.
@@ -190,7 +196,7 @@ final class LendingTarget implements AutoCloseable {
             builder.jvmArg("-Dlending.dbPort=0").jvmArg("-Dlending.dbPassword=" + dbPassword);
         }
         Map<String, String> agentOptions = mode == Mode.JAVAAGENT_HOOKS
-                ? Map.of("discoveryDir", dir.toString(), OPTIONAL_MODULES, "skillroy-agent-hooks")
+                ? Map.of("discoveryDir", dir.toString(), OPTIONAL_MODULES, HOOKS_LEG_MODULES, BYTEMAN_JAR, bytemanJar())
                 : Map.of("discoveryDir", dir.toString());
         switch (mode) {
             case JAVAAGENT, JAVAAGENT_HOOKS -> builder.javaAgent(home, agentOptions);
@@ -241,6 +247,20 @@ final class LendingTarget implements AutoCloseable {
             }
             launched.close();
             throw e;
+        }
+    }
+
+    /**
+     * The Byteman jar of this module's test class path (test scope, D134; never in the agent home): the code source of
+     * {@code org.jboss.byteman.agent.Main}, loaded without initialising it (phase6-contracts.md 7.6).
+     */
+    static String bytemanJar() {
+        try {
+            Class<?> main = Class.forName("org.jboss.byteman.agent.Main", false, LendingTarget.class.getClassLoader());
+            return Path.of(main.getProtectionDomain().getCodeSource().getLocation().toURI()).toAbsolutePath()
+                    .toString();
+        } catch (ReflectiveOperationException | java.net.URISyntaxException e) {
+            throw new IllegalStateException("no Byteman on the test class path", e);
         }
     }
 

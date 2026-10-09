@@ -120,6 +120,8 @@ class CapabilityGoldenTest {
                     entries.keySet().stream().map(String::valueOf).toList(), file + ": ids sorted");
             boolean hooksLeg = file.equals("javaagent-hooks.json");
             assertEquals(hooksLeg, entries.containsKey("hook.engine"), file);
+            // BW (phase6-contracts.md 13.2 item 7): the hooks leg loads the optional Byteman module too.
+            assertEquals(hooksLeg, entries.containsKey("rule.engine"), file);
             assertTrue(entries.keySet().stream().noneMatch(id -> String.valueOf(id).startsWith("hook.")
                     && !"hook.engine".equals(id)), file + ": read before any catalogue is installed");
         }

@@ -75,6 +75,11 @@
       "strategy": "snapshot",
       "reason": false
     },
+    "rule.engine": {
+      "state": "OK",
+      "strategy": "in-process",
+      "reason": false
+    },
     "swing.capture.paint": {
       "state": "OK",
       "strategy": null,

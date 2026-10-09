@@ -345,12 +345,16 @@ abstract class LoadModeChecks {
         CapabilityGolden.check(mode().slug, client().capabilities());
     }
 
-    /** The modules {@code agent.info} lists: the four of every mode, and {@code hooks} in the hooks leg. */
+    /**
+     * The modules {@code agent.info} lists: the four of every mode, and {@code hooks} and (BW, phase6-contracts.md 13.2
+     * item 1) {@code byteman} in the hooks leg.
+     */
     Map<String, Object> expectedModules() {
         Map<String, Object> modules = new java.util.TreeMap<>(Map.of("swing", "INSTALLED", "data", "INSTALLED",
                 "lending", "INSTALLED", "web", "INSTALLED"));
         if (hooksLeg()) {
             modules.put("hooks", "INSTALLED");
+            modules.put("byteman", "INSTALLED");
         }
         return modules;
     }
