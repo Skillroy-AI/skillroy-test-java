@@ -19,7 +19,6 @@ package ai.skillroy.testjava.cli;
 import ai.skillroy.testjava.controller.AgentRpcException;
 import ai.skillroy.testjava.protocol.ErrorCodes;
 import ai.skillroy.testjava.protocol.Json;
-import ai.skillroy.testjava.protocol.hook.HookSpec;
 import ai.skillroy.testjava.scenario.ScenarioException;
 import ai.skillroy.testjava.scenario.hooks.HookCatalogue;
 import ai.skillroy.testjava.scenario.hooks.HookEntry;
@@ -41,8 +40,8 @@ import java.util.TreeMap;
  *
  * <ul>
  *   <li>{@code status}: the agent's {@code hook.health} (states, counts, the armed stubs, the spy's counters, the
- *       installed catalogue) and the probe's {@code otherAgents}, beside the pack's catalogue (id, version, hash, the
- *       entries, the warnings of phase6-contracts.md 5.1) and whether they match; exit 0.</li>
+ *       installed catalogue, the other bytecode agents, decision D-HK-12), beside the pack's catalogue (id, version,
+ *       hash, the entries, the warnings of phase6-contracts.md 5.1) and whether they match; exit 0.</li>
  *   <li>{@code install}: {@code HookInstaller} with mode {@code ON}; prints the {@code hooks} record; exit 0 when the
  *       install ran (hooks unavailable with their fallbacks included), 1 when it was refused (PRECONDITION_FAILED,
  *       another catalogue installed, {@code HOOK_CONFLICT}), 3 when the agent cannot be reached.</li>
@@ -135,18 +134,8 @@ final class HooksCommand implements Command {
             throws Exception {
         Map<?, ?> health = map(target.client().call("hook.health", Map.of()).value());
         List<String> otherAgents = new ArrayList<>();
-        String probeNote = null;
-        try {
-            List<Object> specs = new ArrayList<>();
-            for (HookSpec spec : catalogue.toSpecs()) {
-                specs.add(spec.toJson());
-            }
-            Map<?, ?> probe = map(target.client().call("hook.probe", Map.of("specs", specs)).value());
-            if (probe.get("otherAgents") instanceof List<?> list) {
-                list.forEach(a -> otherAgents.add(String.valueOf(a)));
-            }
-        } catch (AgentRpcException e) {
-            probeNote = "hook.probe: " + ErrorCodes.name(e.error().code()) + ": " + e.error().message();
+        if (health.get("otherAgents") instanceof List<?> list) {
+            list.forEach(a -> otherAgents.add(String.valueOf(a)));
         }
         Map<?, ?> installed = health.get("catalogue") instanceof Map<?, ?> c ? c : null;
         boolean matches = installed != null && catalogue.id().equals(String.valueOf(installed.get("id")))
@@ -157,9 +146,6 @@ final class HooksCommand implements Command {
             out.put("otherAgents", otherAgents);
             out.put("catalogue", catalogueJson(pack, catalogue));
             out.put("matches", matches);
-            if (probeNote != null) {
-                out.put("probe", probeNote);
-            }
             cli.out().print(target.scrub(Json.writePretty(out)));
             return Exit.OK;
         }
@@ -177,9 +163,6 @@ final class HooksCommand implements Command {
         }
         text.append("other agents: ").append(otherAgents.isEmpty() ? "none" : String.join(", ", otherAgents))
                 .append('\n');
-        if (probeNote != null) {
-            text.append("note: ").append(probeNote).append('\n');
-        }
         List<List<String>> rows = new ArrayList<>();
         if (health.get("hooks") instanceof Map<?, ?> hooks) {
             new TreeMap<>(stringKeys(hooks)).forEach((id, h) -> {

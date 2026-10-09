@@ -291,6 +291,12 @@ abstract class HookChecks extends LoadModeChecks {
         assertEquals(Map.of(), value(client().call("hook.health", Map.of(), CALL)).get("hooks"));
     }
 
+    // ------------------------------------------------------------------ item 7: Byteman (BW), orders 166 to 169
+    //
+    // Reserved for phase6-contracts.md 13.2 item 7, built by package BW as the standalone BytemanDeskIT and moved
+    // here at integration: after the hook.remove demonstration above (165, every class restored, no hook left) and
+    // before check 15 (170).
+
     // ------------------------------------------------------------------ checks 16, 17: the re-attach
 
     /**

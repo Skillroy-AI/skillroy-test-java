@@ -68,10 +68,9 @@ class HooksCommandTest {
             if (installed != null) {
                 answer.put("catalogue", installed);
             }
+            answer.put("otherAgents", List.of("profiler.jar", "byteman"));
             return answer;
         });
-        agent.handlers.put("hook.probe", p -> Map.of("hooks", List.of(), "spy", Map.of("onBootPath", true),
-                "otherAgents", List.of("profiler.jar", "byteman")));
         agent.handlers.put("hook.install", p -> {
             @SuppressWarnings("unchecked")
             Map<String, Object> params = (Map<String, Object>) p.raw();
