@@ -21,6 +21,7 @@ import ai.skillroy.testjava.fixture.hooks.DepositRule;
 import ai.skillroy.testjava.protocol.ErrorCodes;
 import ai.skillroy.testjava.protocol.RpcException;
 import ai.skillroy.testjava.protocol.hook.HookMode;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
@@ -51,6 +52,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 class FirstInstallFreshJvmTest {
+
+    /** A JVM of its own (section 2.3 as built): skipped under a merging -Dtest, a failure otherwise. */
+    @BeforeAll
+    static void freshJvm() {
+        Harness.assumeFreshJvm();
+    }
 
     @TempDir
     static Path tmp;

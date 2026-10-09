@@ -55,6 +55,12 @@ public final class HookSpec {
     /** Every hook's topic starts with this; the default topic is {@code hook.<id>}. */
     public static final String TOPIC_PREFIX = "hook.";
     /**
+     * A constructor's method name: a valid name, which the agent answers with the per-hook state
+     * {@code UNAVAILABLE("constructors are not hookable")} (section 3.3 item 1), so that the call goes on with the
+     * other specs and a catalogue's fallback applies.
+     */
+    public static final String CONSTRUCTOR = "<init>";
+    /**
      * Hook ids that are refused because {@code hook.<id>} would be the engine's capability or one of the primitives'
      * names (section 4.6).
      */
@@ -153,9 +159,10 @@ public final class HookSpec {
 
     /**
      * The first name-rule violation of section 3.3 item 1 (and of sections 4.3 and 4.6), or null when there is none:
-     * the id's pattern and length and the reserved ids, the class as a binary name, the method as an identifier
-     * ({@code <init>}: constructors are not hookable in Phase 6), each descriptor as a JVM method descriptor, the
-     * topic's {@code hook.} prefix, and the note's length.
+     * the id's pattern and length and the reserved ids, the class as a binary name, the method as an identifier or
+     * {@link #CONSTRUCTOR} (a constructor is not a violation: the agent answers it with a per-hook state; a static
+     * initialiser is one), each descriptor as a JVM method descriptor, the topic's {@code hook.} prefix, and the note's
+     * length.
      */
     public Violation violation() {
         if (id.length() > MAX_ID_LENGTH) {
@@ -170,10 +177,10 @@ public final class HookSpec {
         if (!isBinaryName(target.className())) {
             return new Violation("target.class", "not a binary class name: " + target.className());
         }
-        if ("<init>".equals(target.method()) || "<clinit>".equals(target.method())) {
-            return new Violation("target.method", "constructors are not hookable");
+        if ("<clinit>".equals(target.method())) {
+            return new Violation("target.method", "a static initialiser is not hookable");
         }
-        if (!isIdentifier(target.method())) {
+        if (!CONSTRUCTOR.equals(target.method()) && !isIdentifier(target.method())) {
             return new Violation("target.method", "not a method name: " + target.method());
         }
         for (int i = 0; i < target.descriptors().size(); i++) {

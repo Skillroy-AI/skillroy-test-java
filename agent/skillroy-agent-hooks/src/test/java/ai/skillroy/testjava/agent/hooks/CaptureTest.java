@@ -28,13 +28,45 @@ import org.junit.jupiter.api.Test;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.time.LocalDate;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Date;
+import java.util.EnumMap;
+import java.util.EnumSet;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Hashtable;
+import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.PriorityQueue;
+import java.util.Properties;
+import java.util.Stack;
+import java.util.TreeMap;
+import java.util.TreeSet;
+import java.util.Vector;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedDeque;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.ConcurrentSkipListMap;
+import java.util.concurrent.ConcurrentSkipListSet;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CopyOnWriteArraySet;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.DelayQueue;
+import java.util.concurrent.Delayed;
+import java.util.concurrent.LinkedBlockingDeque;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.LinkedTransferQueue;
+import java.util.concurrent.PriorityBlockingQueue;
+import java.util.concurrent.SynchronousQueue;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static ai.skillroy.testjava.agent.hooks.FakeHookContext.map;
@@ -247,6 +279,122 @@ class CaptureTest {
         p = take(many, "after", null);
         assertEquals(Boolean.TRUE, p.get("truncated"));
         assertFalse(p.containsKey("args") && p.toString().length() > 3 * 16384, "the payload stays bounded");
+    }
+
+    /**
+     * Section 4.3 as built (D182; the Phase 6 review's L2-F2 and L2-S1): only exact JDK container classes whose
+     * iteration takes no lock and calls no method of an element are iterated; a view or wrapper of one (it may sit over
+     * a locking or an application collection, or compare with the application's {@code compareTo}), a locking
+     * collection and every blocking queue are handles.
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    void onlyTheJdkContainersWhoseIterationTakesNoLockAreIterated() throws Exception {
+        List<String> list = new ArrayList<String>(Arrays.asList("a", "b"));
+        Map<String, String> map = new HashMap<String, String>();
+        map.put("k", "v");
+        Map<Returns.Kind, String> byKind = new EnumMap<Returns.Kind, String>(Returns.Kind.class);
+        byKind.put(Returns.Kind.STANDARD, "v");
+        List<Object> iterated = new ArrayList<Object>(Arrays.<Object>asList(list, new LinkedList<String>(list),
+                new ArrayDeque<String>(list), new PriorityQueue<String>(list), new HashSet<String>(list),
+                new LinkedHashSet<String>(list), EnumSet.of(Returns.Kind.STANDARD), EnumSet.allOf(Returns.Kind.class),
+                new HashMap<String, String>(map), new LinkedHashMap<String, String>(map),
+                new TreeMap<String, String>(map), byKind, new IdentityHashMap<String, String>(map),
+                Arrays.asList("a", "b"), Collections.emptyList(), Collections.emptySet(), Collections.emptyMap(),
+                Collections.singletonList("a"), Collections.singleton("a"), Collections.singletonMap("k", "v"),
+                new ConcurrentHashMap<String, String>(map), new ConcurrentLinkedQueue<String>(list),
+                new ConcurrentLinkedDeque<String>(list), new CopyOnWriteArrayList<String>(list),
+                new CopyOnWriteArraySet<String>(list), new ConcurrentSkipListMap<String, String>(map)));
+        try {
+            iterated.add(List.class.getMethod("of", Object.class, Object.class).invoke(null, "a", "b"));
+            iterated.add(Map.class.getMethod("of", Object.class, Object.class).invoke(null, "k", "v"));
+        } catch (NoSuchMethodException java8) {
+            // ImmutableCollections exist from Java 9 on.
+        }
+        for (Object o : iterated) {
+            assertTrue(Capture.iterable(o), o.getClass().getName() + " is iterated");
+        }
+        Object[] handles = {new Vector<String>(list), new Stack<String>(), new Hashtable<String, String>(map),
+            new Properties(), Collections.synchronizedList(list), Collections.synchronizedMap(map),
+            Collections.unmodifiableList(new Vector<String>(list)),
+            Collections.unmodifiableMap(Collections.synchronizedMap(map)), Collections.unmodifiableList(list),
+            Collections.unmodifiableSet(new HashSet<String>(list)), new ArrayBlockingQueue<String>(4),
+            new LinkedBlockingQueue<String>(), new LinkedBlockingDeque<String>(), new PriorityBlockingQueue<String>(),
+            new DelayQueue<Delayed>(), new SynchronousQueue<String>(), new LinkedTransferQueue<String>(),
+            list.subList(0, 1), new TreeMap<String, String>(map).headMap("z"), new TreeSet<String>(list),
+            new TreeSet<String>(list).subSet("a", "b"), new ConcurrentSkipListSet<String>(list),
+            new HashMap<String, String>(map).keySet(), new HashMap<String, String>(map).values(), map.entrySet(),
+            new CopyOnWriteArrayList<String>(list).subList(0, 1)};
+        for (Object o : handles) {
+            assertFalse(Capture.iterable(o), o.getClass().getName() + " is a handle");
+        }
+        Map<String, Object> p = take(new DelayQueue<Delayed>(), Collections.unmodifiableList(new Vector<String>(list)),
+                new TreeMap<String, String>(map).headMap("z"));
+        for (String i : new String[] {"0", "1", "2"}) {
+            assertTrue(((Map<String, Object>) args(p).get(i)).containsKey("ref"), i + ": " + args(p).get(i));
+        }
+    }
+
+    /**
+     * D182 as amended by the fix wave (FB's probe of the shared rule): a {@code BigDecimal} is judged by its unscaled
+     * value's bit length before any text is made, as a {@code BigInteger} is. Its {@code precision()} and its 1.2
+     * million-character {@code toString()} took seconds on the application's thread.
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    void aHugeBigDecimalIsCutByItsBitLengthBeforeAnyTextIsMade() {
+        BigDecimal huge = new BigDecimal(BigInteger.ONE.shiftLeft(4000000), 0);
+        BigDecimal fits = new BigDecimal(BigInteger.ONE.shiftLeft(Capture.MAX_BITS - 1), 3);
+        Capture.Run run = new Capture(harness.ctx, 16384).run("hook.take");
+        long t0 = System.nanoTime();
+        Object cut = run.top(huge, "arg0");
+        long ms = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - t0);
+        assertEquals(null, cut);
+        assertTrue(run.truncated);
+        assertTrue(ms < 1000, "judged by its bit length, not its text: " + ms + " ms");
+        assertEquals(fits.toPlainString(), new Capture(harness.ctx, 16384).run("hook.take").top(fits, "arg0"),
+                "a value within the bound (about 1,800 digits) is its plain text");
+        Map<String, Object> p = take(huge, new BigDecimal("12.50"), null);
+        assertEquals(null, args(p).get("0"));
+        assertEquals("12.50", args(p).get("1"));
+        assertEquals(Boolean.TRUE, p.get("truncated"));
+    }
+
+    /** The documented idiom for iterating a synchronized map, held by another thread, never blocks the caller. */
+    @Test
+    @SuppressWarnings("unchecked")
+    void aViewOverASynchronizedMapHeldByAnotherThreadDoesNotBlockTheCaller() throws Exception {
+        final Map<String, String> shared = Collections.synchronizedMap(new HashMap<String, String>());
+        shared.put("k", "v");
+        final CountDownLatch held = new CountDownLatch(1);
+        final CountDownLatch done = new CountDownLatch(1);
+        Thread holder = new Thread(new Runnable() {
+            @Override
+            public void run() {
+                synchronized (shared) {
+                    held.countDown();
+                    try {
+                        done.await(3, TimeUnit.SECONDS);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                }
+            }
+        }, "lending-desk-holder");
+        holder.setDaemon(true);
+        holder.start();
+        assertTrue(held.await(10, TimeUnit.SECONDS), "the holder took the map's lock");
+        long t0 = System.nanoTime();
+        Map<String, Object> p;
+        try {
+            p = take(Collections.unmodifiableMap(shared), null, null);
+        } finally {
+            done.countDown();
+        }
+        long ms = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - t0);
+        holder.join(10000);
+        assertTrue(((Map<String, Object>) args(p).get("0")).containsKey("ref"), String.valueOf(args(p).get("0")));
+        assertTrue(ms < 2000, "the caller waited for the application's lock: " + ms + " ms");
     }
 
     @Test

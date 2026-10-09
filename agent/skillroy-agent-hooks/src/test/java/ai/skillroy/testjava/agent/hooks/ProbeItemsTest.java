@@ -214,11 +214,11 @@ class ProbeItemsTest {
                 spec("engine", HookMode.OBSERVE, DepositRule.class, "waives"))));
         assertEquals(ErrorCodes.INVALID_PARAMS, e.error().code());
         assertEquals("specs[1].id", e.error().data().get("param"), String.valueOf(e.error().data()));
-        RpcException ctor = harness.ctx.error("hook.probe", map("specs", Arrays.asList(map("id", "a", "mode",
-                "OBSERVE", "target", map("class", "a.B", "method", "<init>", "descriptors",
+        RpcException clinit = harness.ctx.error("hook.probe", map("specs", Arrays.asList(map("id", "a", "mode",
+                "OBSERVE", "target", map("class", "a.B", "method", "<clinit>", "descriptors",
                         Collections.singletonList("()V"))))));
-        assertEquals("specs[0].target.method", ctor.error().data().get("param"));
-        assertEquals("constructors are not hookable", ctor.getMessage());
+        assertEquals(ErrorCodes.INVALID_PARAMS, clinit.error().code());
+        assertEquals("specs[0].target.method", clinit.error().data().get("param"));
         RpcException shape = harness.ctx.error("hook.probe", map("specs", Arrays.asList(map("id", "a"))));
         assertEquals(ErrorCodes.INVALID_PARAMS, shape.error().code());
         assertEquals("specs[0]", shape.error().data().get("param"));
@@ -226,6 +226,29 @@ class ProbeItemsTest {
                 "OBSERVE", "target", map("class", "a.B", "method", "m", "descriptors",
                         Collections.singletonList("()V")), "capture", map("result", true)))));
         assertEquals("specs[0].capture", capture.error().data().get("param"));
+    }
+
+    /**
+     * Section 3.3 item 1: a constructor is the per-hook state {@code UNAVAILABLE("constructors are not hookable")},
+     * not a name-rule violation, so that the call goes on with the other specs and the catalogue's fallback applies
+     * (section 5.3; the Phase 6 review's L1-F3).
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    void aConstructorIsAStateOfItsHookNotAViolationOfTheCall() throws Exception {
+        new DepositRule();
+        harness = new Harness();
+        HookSpec ctor = Harness.spec("deposit.made", HookMode.OBSERVE, DepositRule.class.getName(), "<init>", "()V",
+                "system", null, null, false);
+        assertRefused(ctor, "constructors are not hookable");
+        Map<String, Object> result = harness.install("toys", ctor, spec("deposit.computed", HookMode.OBSERVE,
+                DepositRule.class, "depositFor"));
+        List<Object> hooks = (List<Object>) result.get("hooks");
+        Map<String, Object> refused = (Map<String, Object>) hooks.get(0);
+        assertEquals("UNAVAILABLE", refused.get("state"));
+        assertEquals("constructors are not hookable", refused.get("reason"));
+        assertEquals("OK", ((Map<String, Object>) hooks.get(1)).get("state"), "the other spec is installed");
+        harness.ctx.call("hook.remove", map());
     }
 
     @Test

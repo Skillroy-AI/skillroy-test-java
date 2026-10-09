@@ -40,6 +40,10 @@
     <maven.compiler.release>8</maven.compiler.release>
     <!-- The test-only premain jar that hands the tests an Instrumentation (phase6-contracts.md 2.3). -->
     <skillroy.hooks.testAgent>${project.build.directory}/${project.build.finalName}-test-agent.jar</skillroy.hooks.testAgent>
+    <!-- Every surefire execution of this module holds at least one test, so one that ran none is a failure in
+         disguise (the Java 8 test JVM once ran zero and exited 0; the Phase 6 review's L3-F1): true, except under a
+         command-line -Dtest (the profile below), which filters every execution and leaves most of them empty. -->
+    <skillroy.failIfNoTests>true</skillroy.failIfNoTests>
   </properties>
 
   <dependencies>
@@ -172,6 +176,7 @@
         <artifactId>maven-surefire-plugin</artifactId>
         <configuration>
           <argLine>-Djava.awt.headless=${skillroy.headless} ${skillroy.test.extraArgLine} -javaagent:${skillroy.hooks.testAgent}</argLine>
+          <failIfNoTests>${skillroy.failIfNoTests}</failIfNoTests>
           <classpathDependencyExcludes>
             <classpathDependencyExclude>ai.skillroy:skillroy-agent-spy</classpathDependencyExclude>
           </classpathDependencyExcludes>
@@ -298,4 +303,21 @@
       </plugin>
     </plugins>
   </build>
+
+  <profiles>
+    <!-- A command-line -Dtest names classes for the whole reactor (-am included): an execution it leaves empty is
+         not a defect then, and the fresh-JVM classes skip through Harness.assumeFreshJvm when it merges them into one
+         JVM. -->
+    <profile>
+      <id>single-test</id>
+      <activation>
+        <property>
+          <name>test</name>
+        </property>
+      </activation>
+      <properties>
+        <skillroy.failIfNoTests>false</skillroy.failIfNoTests>
+      </properties>
+    </profile>
+  </profiles>
 </project>

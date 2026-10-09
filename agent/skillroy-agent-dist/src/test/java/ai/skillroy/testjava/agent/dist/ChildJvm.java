@@ -134,9 +134,27 @@ final class ChildJvm implements AutoCloseable {
 
     long pid() throws Exception {
         if (pid < 0) {
-            pid = Long.parseLong(awaitLine("pid"));
+            pid = pidOf(awaitLine("pid"));
         }
         return pid;
+    }
+
+    /**
+     * The pid at the start of the {@code pid=} line's value. A child run with {@code -verbose:class} shares its
+     * standard output with the JVM's class-loading lines, and on Java 8 {@code println} writes the text and the line
+     * separator as two writes (an auto-flushing {@code PrintStream}), so a whole {@code [Loaded … from …]} line can
+     * land between the digits and their newline: {@code pid=3403[Loaded …]}. The JVM writes each of its lines in one
+     * call, so the digits themselves are never split.
+     */
+    static long pidOf(String value) {
+        int end = 0;
+        while (end < value.length() && Character.isDigit(value.charAt(end))) {
+            end++;
+        }
+        if (end == 0) {
+            throw new NumberFormatException("no pid at the start of '" + value + "'");
+        }
+        return Long.parseLong(value.substring(0, end));
     }
 
     /** Waits for this child's discovery file in the directory and returns it parsed. */
