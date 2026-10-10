@@ -115,11 +115,11 @@ fixed; eight lows are accepted, each with a release note in `SECURITY.md`, and t
 (B28, 2026-10-10). The native
 reactor was green after every landing. The native reactor on `main` at `4f9962f` and the Linux matrix of the final tree
 (arm64 twice, amd64 once): green on every leg: native 4692 tests, 0 failures, 0 errors, 493 skipped; arm64 rounds 2 and 3 and amd64 round 1 (the FORK launch mechanism under emulation), each with the whole reactor on Java 25 targets 4853/0/0/105, on Java 8 targets 4853/0/0/132 and the agent side on a Java 8 test JVM 1668/0/0/26 (reports read: hooks 70 and Byteman 43 tests on `java.version` 1.8.0_*); `-fae`, so no leg stopped early (the table "Phase 6 final matrix" below). **On 2026-10-10 the owner confirmed B26 and B27 and signed off the repeat
-security review (B28), no veto.** **Still to do:** the push (on the owner's word, B1); the Windows host; the live check of the planner's stdin route (P5 section 15.3) with the key; Phase 7. The tables that follow are those of
+security review (B28), no veto.** **Still to do:** the push (on the owner's word, B1); the Windows host; Phase 7. **On 2026-10-10** the planner's stdin route was checked live (P5 section 15.3 item 5 natively on macOS, and a forced `--resume` repair round; both green, USD 2.05; the last row of the live table below), and the four Phase 7 spikes ran: BS9 (Robot input) and BS10 (routed dispatch) passed with conditions, BS11 (`PAINT` capture determinism) passed with conditions, BS12 (grounding accuracy and cost of a vision loop) passed live, USD 5.64; the live spend of that day so far is USD 7.69. The tables that follow are those of
 Phases 1 to 5.
 
-The live runs of 2026-10-08 (afternoon), with the key passed through by name; every figure from the ledger entries the
-tests printed:
+The live runs of 2026-10-08 (afternoon) and, in the last row, of 2026-10-10, with the key passed through by name; every
+figure from the ledger entries the tests printed:
 
 | What | Where | Result |
 |---|---|---|
@@ -129,6 +129,11 @@ tests printed:
 | `InferenceLiveIT` (`-Pinference-live`), §15.3 items 3 to 6, first run | the arm64 image | 2 failures, 2 errors (the confidence gate at 0.8 refusing a correct answer at 0.7, the strict tools above the provider's 16-union limit, the planner's `$schema` key, a missing test directory): all fixed |
 | `InferenceLiveIT`, second run | the arm64 image, the Linux `claude` 2.1.294 mounted | 5 tests, 0 failures, 485.7 s: scenario D live through the agent channel to the committed supervisor (USD 0.022); the nightly job A+B `UNCHANGED` and D twice `CHANGED` with the same value, USD 0.0054 and 0.0051, **cache hits 91.4 % on both**, batches 154 s and 184 s; `skillroy author` on the brief exit 0 in 119 s (Opus 5.5, 35 turns, USD 0.907); one session turn `DONE` in 20 s after nine actions (USD 0.166), its export compiles; 26 files scanned clean; USD 1.11 in all |
 | Scenario C authored (`skillroy author --id return-refunds-deposit --run`) | the arm64 image | Opus 5.5, 43 turns, no repair, USD 0.80, 161 s with the checks; compiled, resolved, ran green on seed A; reviewed and kept; bindings approved on both seeds with no model call |
+| The planner's stdin route live (P5 section 15.3 item 5; the fix of S93, P2-L7-F3), 2026-10-10 | natively on macOS (Java 25.0.1), `claude` 2.1.286 | Run A, `InferenceLiveIT` item 5 and its secret scan alone (`-Dit.test=InferenceLiveIT#theAuthorCommandAuthorsTheBriefOfScenarioC+noSecretInAnythingThisClassWrote`): exit 0 in 159 s, 49 turns, no repair, compiled and resolved, USD 1.108. Run B, `skillroy author --claude-command <a logging wrapper> --budget-usd 1.70` with the first envelope's first verb renamed to an unknown one: two `-p` invocations, each with its prompt on stdin (14625 and 374 bytes; no text of the brief, the instructions or the problems in any argument; each command line ending with `--max-budget-usd`), the second `-p --resume <session> … --max-budget-usd 0.80` with the schema's problem as its prompt; the session resumed and answered with the original document; `repairs: 1`, 43 turns (41 + 2), exit 0, compiled and resolved; ledger 0.8965614 + 0.0483568 = 0.9449182, the last running total; both envelopes in the envelope file; USD 0.945. **New fact:** a resumed envelope's `total_cost_usd` and `modelUsage` are the session's running totals, while its `num_turns`, `usage` and `duration_ms` are its own, which is how the planner reads them. No key in any of 105 files scanned. Not verified live: a repair started by a compile problem alone (the same code path), a failed repair, Windows. USD 2.05 in all |
+
+The live spend of 2026-10-10 so far is USD 7.69: the planner check 2.05 (run A 1.108, run B 0.945; each run counted as
+the last envelope's `total_cost_usd`, equal to the sum of the ledger entries) and BS12 5.64 (the sum over every call of
+usage times price; "BS12" under "Base spikes"). The two figures are rounded; unrounded they add up to 7.697.
 
 Verification of the final tree of the live session (the tree committed as `7690322` and `22ae574`; the live classes
 skip in it, no key being passed), 2026-10-08 evening: the arm64 image natively twice in a row, then the amd64 image
@@ -395,7 +400,7 @@ table above. "Java 8 test JVM" = the module's own tests also run on Java 8 (`-Dj
 | Design docs (`docs/design/`) | `phase1-contracts.md` as built, with the Phase 1.x, Phase 2, Phase 3 and Phase 4 passages marked "(1.x, built 2026-10-02)", "(Phase 2, built 2026-10-02)", "(Phase 3, built 2026-10-03)" and "(Phase 4, built 2026-10-07)". `phase2-contracts.md` and `phase3-contracts.md` as built (2026-10-03: every deviation of the build and every fix of the review marked in place; their Phase 4 passages marked built). **`phase4-contracts.md` as built 2026-10-07** (specified 2026-10-06; every deviation of the build and every fix of the review marked in place, the decisions of the build D59-D69). **`phase5-contracts.md` as built 2026-10-08** (specified, built, reviewed and fixed the same day, its §16.1 marks written into the Phase 1-4 contracts and the overview; the live session's passages marked "the live session", D111-D113). **`phase6-contracts.md` as built 2026-10-09** (specified, reviewed, built by six packages the same day; an `As built (Phase 6, <TAG>, 2026-10-09)` note under every section a package built or deviated from, the build's decisions D160-D221 and the decisions of its review's fixes D222-D286 in its §16, `threat-model.md` beside it, marks in the Phase 1 to 5 contracts and the overview; reviewed, fixed and security-reviewed twice the same day). Overview: roadmap with Phases 1.x to 6 built, reviewed and fixed, §3.8 as built | None |
 | Research notes (`docs/research/`) | Round 1 carried over, finding ids unchanged; `embedded-browser-spi` and `vision-input` new (2026-10-02). Pruned of local-environment detail | None |
 | Security review | Run 2026-10-02 on the pre-port tree: 34 confirmed findings (4 medium, 30 low); the fixes H1-H3 are built (Phase 1.x). The Phase 2 code review of 2026-10-03 had a secrets-and-safety lens (below). **Repeat, pass 1 (2026-10-09):** 28 confirmed findings (1 high, 6 medium, 21 low), fixed by the Phase 6 build or accepted as lows with release notes (B26 Q22, confirmed by the owner 2026-10-10). **Repeat, pass 2 (2026-10-09):** 38 confirmed findings (1 high, 12 medium, 25 low) on all eight lenses, fixed by six fix rounds except three lows accepted with release notes (B28). Together S35-S100: 66 findings, 2 high, 18 medium, 46 low; `SECURITY.md` and `docs/release-checklist.md` are in the tree. **Signed off by the owner on 2026-10-10** (B28), the eight lows accepted | None before the first release; an outside reader is recommended, not a gate (B26 Q12: "done" or "waived by the owner" in the release checklist) |
-| Spikes | BS7 done. **BS8 run 2026-10-06, passed with conditions** (`spikes/BS8/RESULT.md`). **BS5 met 2026-10-07** by the Phase 4 acceptance against JCEF's Chromium (D53; the stock-Chromium run is the manual procedure `spikes/BS5/README.md`). BS1 answered for Java 8 and Java 25 targets on Linux, parts open. BS2 answered in part. BS4 answered, parts open. **BS3 passed with conditions 2026-10-09** (`spikes/BS3/RESULT.md`) and **BS14 passed with conditions 2026-10-09** (`spikes/BS14/RESULT.md`), the hook go/no-go and the gate of the Byteman module. **BS6 passed 2026-10-08** and **BS13 passed 2026-10-08** (the offline part in the night, the live part in the afternoon with the owner's key), both as the Phase 5 contract's gates. BS9-BS12 new, not started | See "Base spikes" |
+| Spikes | BS7 done. **BS8 run 2026-10-06, passed with conditions** (`spikes/BS8/RESULT.md`). **BS5 met 2026-10-07** by the Phase 4 acceptance against JCEF's Chromium (D53; the stock-Chromium run is the manual procedure `spikes/BS5/README.md`). BS1 answered for Java 8 and Java 25 targets on Linux, parts open. BS2 answered in part. BS4 answered, parts open. **BS3 passed with conditions 2026-10-09** (`spikes/BS3/RESULT.md`) and **BS14 passed with conditions 2026-10-09** (`spikes/BS14/RESULT.md`), the hook go/no-go and the gate of the Byteman module. **BS6 passed 2026-10-08** and **BS13 passed 2026-10-08** (the offline part in the night, the live part in the afternoon with the owner's key), both as the Phase 5 contract's gates. **BS9, BS10 and BS11 passed with conditions 2026-10-10** (`spikes/BS9/RESULT.md`, `spikes/BS10/RESULT.md`, `spikes/BS11/RESULT.md`) and **BS12 passed 2026-10-10, live** (`spikes/BS12/RESULT.md`, USD 5.64): all four Phase 7 spikes have run, swing-driving F13 is settled by BS9, and the capture defect they found is gap 76 | See "Base spikes" |
 | CI for this repo | Not chosen. `ci/Dockerfile` and `ci/run-in-linux.sh` are what a pipeline would run; since 2026-10-06 the image holds Chromium's run-time libraries and the runner takes `SKILLROY_PLATFORM`; the Phase 4 matrix adds `-Pjcef` to every leg | Needs a JDK 8, a JDK >= 25 and Xvfb on the build agents; for the profile `jcef` the JCEF natives (152 MB per platform) and Playwright's jars (the driver bundle about 204 MB) in the Maven cache |
 
 ### What the end-to-end review fixed (2026-10-02)
@@ -517,7 +522,8 @@ at S35-S100: 66 findings, 2 high, 18 medium, 46 low.
   `claude.cmd` wins the `PATH` search, the repair prompt carries the model's own values raw as the last argument, and the JDK's
   legacy quoting lets an embedded quote close the wrap, so a model could run a command as the controller's account and expand
   `%ANTHROPIC_API_KEY%` into the prompt. Fixed: the prompt is the planner's stdin, a `.cmd` or `.bat` planner is refused, the
-  schema argument is pre-quoted by the C runtime's rules (SD, D250-D254); read, not run: there is no Windows host.
+  schema argument is pre-quoted by the C runtime's rules (SD, D250-D254); read, not run on Windows, where no host exists. The stdin route
+  itself, a forced `--resume` repair round included, was run live on macOS on 2026-10-10 (the last row of the live table at the top).
 - **The twelve medium findings**, one line each: S63 a token-less process pinned the unauthenticated body budget so a controller
   call on a new connection failed with a 503 (the body hash now travels in a signed header); S64 the agent read its options
   file with no owner, permission or link check (counted as operator-only, lifted from low); S67 a confirmed Byteman rule on an
@@ -555,11 +561,12 @@ at S35-S100: 66 findings, 2 high, 18 medium, 46 low.
   through `claude.exe` on stdin and `claude.cmd` refused; the pre-quoted schema argument; localised principals), where no host
   exists; a second OS user (the cross-user windows of S64, S95, S97 are tested with one user, built ACL values and the `Access`
   seam); SQL Server (the T-SQL consequences of S75 and S76 rest on vendor documentation; the read path's order is proved on
-  HSQLDB and a recording proxy); the real `claude` CLI and the planner's stdin route live (verified offline against a local
-  listener with claude 2.1.286, a repair round through `--resume` not run); whether the planner can read MCP resources under
+  HSQLDB and a recording proxy); whether the planner can read MCP resources under
   `--tools ""`; the JxBrowser adapter's console budget (the fake only; the kit items 13 and 14 ran against real JCEF 152);
   Linux `vfat` (not mounted: the image is not privileged); the real agent's `hook.install {replace: true}` against a real
-  residue (the fake agent only); an outside human reader (B26 Q12: recommended, not a gate; none has read the record yet).
+  residue (the fake agent only); an outside human reader (B26 Q12: recommended, not a gate; none has read the record yet). The real `claude` CLI and the
+  planner's stdin route, verified offline against a local listener with claude 2.1.286 when this pass was written, were
+  run live on 2026-10-10 with a forced `--resume` repair round (the last row of the live table at the top).
 
 The mapping, S-number to the id the contract's marks keep (`P2-L<lens>-<F|S><n>`; F is the reviewer's, S the sceptic's new
 finding; P2-L1-F2 was refuted and has no number):
@@ -620,15 +627,15 @@ re-run. BS8 comes from `research/embedded-browser-spi.md` R4 (B9); BS9-BS12 from
 | BS1 | The agent loads into stock JVMs in all load modes, across JDK versions | **Answered for Java 8 and Java 25 targets on Linux** (Java 21 targets before the switch). Since 2026-10-09 (Phase 6, check 1b) the JEP 451 warning is shown for `ATTACH` on a Java 25 target and absent for `JAVAAGENT`, `JAVA_TOOL_OPTIONS` and `EMBEDDED`. Open: cross-user attach and jattach, the refusal under `-XX:-EnableDynamicAgentLoading`, Windows |
 | BS2 | The control channel survives a soak; the agent is isolated from the host class path | **Answered in part**: 3-minute soak per JDK (before the switch, on the JDK server), bounds and isolation tested; the agent's own listener (H1) is built and its per-call cost measured (1.4-5 ms). Open: the one-hour soak, loader collectability, a soak on the agent's own listener. Finding: about 45 ms per call on the JDK HTTP server on Java 8 and Java 21 targets; absent on a Java 25 target; gone with H1 |
 | BS3 | Byte Buddy retransformation with inline Advice and a bootstrap `Spy`; original bytes restored on detach | **Passed with conditions 2026-10-09** (`spikes/BS3/RESULT.md`): on Java 8 and Java 25 targets in the arm64 image, `JAVAAGENT` and `ATTACH`, a hook on the sample's `AccessControl.check` and on a toy class in a custom loader installs in 111-197 ms (later ones 6-23 ms), fires on the host's thread in `OBSERVE`, `CAPTURE` and `STUB`, switches mode without a retransform and restores byte for byte; Byte Buddy 1.18.14 shaded under the project prefix coexists with a host's Byte Buddy 1.12.19, ASM 5.0.3 and JNA 4.5.2; 17 configurations. Conditions: Byte Buddy injects `Nexus` (and on Java 25 a `java.lang` accessor with an `Unsafe` warning) unless its relocated `nexus.disabled` property is set; each bootstrap append prints a class-data-sharing warning on Java 25 (append once per JVM); the byte check holds by construction, so the engine also counts transform events it did not cause; a loader that delegates only `java.*` cannot see `Spy` (probe and refuse, or a `java.*`-package `Spy`); every retransform is a stop-the-world pause (size limit proposed: 256 KiB and 2,000 methods); maven-shade-plugin 3.6.2 or newer |
-| BS4 | Which Swing input rungs work on an Xvfb display with no window manager | **Answered** for Java 8 and 21 (before the switch); the end-to-end check built on it passed on Java 8 and Java 25 targets. Open: the ROBOT rung (not built; see BS9), a large-sample focus statistic, the display-test flake |
+| BS4 | Which Swing input rungs work on an Xvfb display with no window manager | **Answered** for Java 8 and 21 (before the switch); the end-to-end check built on it passed on Java 8 and Java 25 targets. The ROBOT rung is not built; its facts, and the mechanism behind "nothing gives the focus back" after a dialog closes, are BS9's (2026-10-10). Open: a large-sample focus statistic, the display-test flake |
 | BS5 | Playwright attaches over CDP to an already-running Chromium safely | **Met 2026-10-07 by the Phase 4 acceptance** against JCEF's Chromium in the image (D53): 50 of 50 attach attempts against a frozen page ended with `FROZEN_TARGETS` within the deadline, the slowest in about 2.02 s. A stock-Chromium run is a manual procedure, `spikes/BS5/README.md` |
 | BS6 | `SqlGuard` accepts and rejects correctly across SQL dialects | **Passed 2026-10-08** (`spikes/BS6/RESULT.md`): a prototype guard on JSqlParser 5.4 accepts all 264 accept statements and refuses all 382 reject statements with the reason named, on HSQLDB, MySQL, MariaDB, PostgreSQL, DB2, Oracle, SQL Server and generic SQL; all 41 HSQLDB rewrites execute on the embedded database; about 0.1 ms per statement; 741 tests. It found holes in the contract's first rules (database links, dropped comments, ambiguous literals, correlated names, parenthesis depth, a tie-breaker rule that gave invalid SQL after `GROUP BY`), now corrected in P5 §5.3. Open: the other dialects' accept corpora on real servers before production use; Oracle 11g unavailable. The agent-side statement guard of `data.query` is a different, simpler check and is built |
 | BS7 | `javac --release 8` still works on current JDKs | Done 2026-10-01 |
 | BS8 | A real JCEF browser runs in the Linux test image and the in-process DevTools path works | **Run 2026-10-06, passed with conditions**: both rendering modes on a Java 25 target, off-screen on a Java 8 target; the DevTools channel verified; Chromium 152's first-run terms dialog must be pre-accepted; `Target.getTargetInfo` does not answer (the main frame id is the target id); windowed JCEF on Java 8 creates no browser. `spikes/BS8/RESULT.md`. Since Phase 4 (2026-10-07): the timeouts and the unanswered `Target.*` calls were JCEF's client losing an answer that arrives early, which the `jcef` adapter avoids (D69) |
-| BS9 | Robot input on the test display and on a desktop session | New, not started; comes before Phase 7 |
-| BS10 | Routed in-JVM dispatch behaves like Robot | New, not started |
-| BS11 | `PAINT` capture is deterministic | New, not started |
-| BS12 | Grounding accuracy and cost of a vision loop on the sample | New, not started; needs live model calls (B7) |
+| BS9 | Robot input on the test display and on a desktop session | **Passed with conditions 2026-10-10** (`spikes/BS9/RESULT.md`): Java 8 (1.8.0_504) and Java 25 (25.0.4.1) targets, the WM-less Xvfb (the CI image) and openbox on the same display (arm64; Java 25 also amd64), and this Mac (macOS 26.6.2, Java 25.0.1, strict mode). Robot pointer events land as a person's in every case tried (16 toy cases, three focus-gated keypad keys of the sample); Robot and XTEST keys land in the AWT focus owner if and only if the JVM has a focused window. swing-driving F13 settled: WM-less, the X focus is `PointerRoot` until a Java window asks; the window receives the keys and AWT drops posted key events when no window is focused; a window shown without asking, and every frame after a modal dialog is disposed, has no focus (BS4's mechanism); openbox refocuses after a dialog. On the Mac Robot delivered nothing, silently; self-activation and `ROBOT` capture worked. `ROBOT` capture equals a `PAINT` of the root pane pixel for pixel on Linux; `frame.printAll`, which the built `swing.capture` does, carries imitation Motif decorations from `XFramePeer.print`, on the content when the insets are 0 (gap 76). Conditions: a Robot delivery probe, an activation check before keys (re-activation after a dialog closes, WM-less), the point in an uncovered window of the JVM, the JVM holding the focus on a person's desktop, root-pane painting for capture. Not run: Windows, Wayland, macOS with Accessibility granted |
+| BS10 | Routed in-JVM dispatch behaves like Robot | **Passed with conditions 2026-10-10** (`spikes/BS10/RESULT.md`): the same legs. Routed window-sourced dispatch matched Robot's outcome in 14 of 16 cases (button with rollover, tool tip, caret at a pixel, selection drag, double-click, two kinds of popup menu, combo, table, wheel, slider drag, a glass pane with and without a listener, disabled button) and AWT's dispatched events in 13 of those 14 (X11 drops the click of a popup-opening press; routed delivers it); Java 8 = Java 25; on the Mac the same 16 routed outcomes. By construction it differs for a modal-blocked window (routed input reaches it) and a window on top (routing cannot see it). The built `DISPATCH` rung clicks the centre, bypasses glass panes and sends no enter or move. Conditions: the modal check and a covering-window check in `swing.pointer`, the native sequence imitated (move first, popup trigger per platform, release after a drag with click count 0), the actual press target reported; the hit-test's public-API mouse-target search needs the `componentPopupMenu` and `autoscrolls` rules |
+| BS11 | `PAINT` capture is deterministic | **Passed with conditions 2026-10-10** (`spikes/BS11/RESULT.md`): the built `swing.capture` on the sample desk through the real launcher and client, Java 25 (25.0.4.1) and Java 8 (1.8.0_504) targets in the arm64 image, 15 environments in all. Within one environment 100 of 100 captures of an unfocused window hash identically on both targets (ARGB raster and PNG bytes), and five launches, type-and-clear, a dialog opened and closed, a covering window and a move reproduce the same hashes; the one exception is the blinking caret of a focused field (1 x 24 px, max 204: two variants), as large as a one-character change (28-50 px). Across environments: architecture, Xvfb depth, `swing.aatext`, AA off and the JDK 8 update change nothing; the JDK line 0.30 % of the main window (shapes, table header), text AA on/lcd 0.14-0.82 %, two font packages 3.3-4.7 %, macOS 7.9-14.7 %; no tolerance separates that noise from a one-character change. Conditions: carets masked at the source, focus state recorded, baselines bound to a fingerprint of rendering inputs and compared exactly, raster hashes and not PNG bytes. Not run: Windows, HiDPI, a 25.x update |
+| BS12 | Grounding accuracy and cost of a vision loop on the sample | **Passed 2026-10-10, live** (`spikes/BS12/RESULT.md`): 27 targets on five desk screens, Sonnet 5.5, Opus 5.5 and Haiku 5.5 at effort `low` (and a default-effort sample), 1,175 grounding attempts and 29 short sessions in the arm64 image on a Java 8 desk, USD 5.64. V1 with marks and V2 through the computer toolset were right every time on Sonnet and Opus (135 of 135 attempts each); V1 by text 96 % (the text snapshot hides the table header and rows); V2 with a custom click tool 93 % on Sonnet and 100 % on Opus, every pixel miss another whole component chosen by meaning, none by a few pixels. Sessions: 25 of 25 done on Sonnet and Opus, V1 4-5 actions, V2 6-14 (icon-only keys; 4-5 with a pack legend), USD 0.02-0.06 each, 1.0-1.5 s per Sonnet call, about 2 s per Opus call. Found: a frame's `PAINT` prints a substitute title bar on the X toolkit (capture the root pane); an error `tool_result` may carry only text; `PriceTable` lacks `claude-haiku-5-5` |
 | BS13 | The Claude API facts the Phase 5 contract relies on (structured output, strict tools, effort, caching minimums and TTLs, token counting, the Batch API, the fallback parameter, error mapping, the `claude` CLI's headless envelope), checked live once; the three Phase 5 dependency sets resolved and listed for the licence audit | **Passed: offline part 2026-10-07/08, live part 2026-10-08 (afternoon)** (`spikes/BS13/RESULT.md`): the live part ran through SDK 2.70.0 (the build's line) with the owner's workspace-scoped key, USD 0.032 in all (the resumed CLI call reports the session total, counted once), the `claude` CLI item natively. Settled: structured output as specified (a numeric `minimum` and `minItems` 2 refused, a string `maxLength` accepted; 2.70.0's typed form keeps `effort`); the strict tool called with valid input, a forced tool choice refused; Opus 5.5 returns a thinking block (empty, signed) at effort low, Sonnet 5.5 none; a 1135-token prefix written then read, the one-hour TTL without a beta header; `count_tokens` exact; a batch of two ended after 458 s with its results in reverse order, the second request reading the first's one-hour prefix (not a standard request's entry); `fallbacks` needs the beta header and `usage.iterations` is present whenever it is sent; 404/400 as mapped; the CLI's envelope with `structured_output`, `is_error: false`, `--resume` keeping the session. Found beside the probe: **Haiku 4.5 refuses `output_config.effort`**, so the gateway sends none to the Haiku class (P5 §4.1). The offline findings stand (SDK MIT, `mcp-core` + `mcp-json-jackson2`, per-attempt retries, `fromEnv()`'s reach, the error classes) |
 | BS14 | Byteman loaded in process through the agent's own `Instrumentation`, with no listener: the rule base reached through Byteman's `manager:` option by a project class on the system class path, rules fired into a curated helper, listed and removed with a byte-identical restore, `RuleCheck` in process, nothing listening, no JEP 451 line (the gate of Phase 6's Byteman module, P6 §7.2) | **Passed with conditions 2026-10-09** (`spikes/BS14/RESULT.md`): Java 8 (1.8.0_504) and Java 25 (25.0.4.1) targets in the arm64 image, `-javaagent`, five configurations. Items 1 to 6 pass on both targets and a second module instance reuses a parked `Retransformer`. The five conditions: the option string is `listener:false,manager:<RuleManager>` in that order and has no `prop:` (`prop:org.jboss.byteman.verbose=false` prints on the host's stdout and, Byteman reading the property by presence, turns verbose on; a later `listener:false` clears the manager); Byteman does not match a varargs helper method, so the helper has fixed-arity `fired` overloads; a trigger-time failure prints on the host's stderr through the helper's trace map unless the module redirects it, and a transform-time failure prints nowhere (only `listScripts` shows it); a sys-jar method with a Byteman-typed parameter must be branch-free, or its StackMapTable adds a `CONSTANT_Class` for Byteman; the byte check needs two recorders, one ahead of and one behind Byteman's transformer. Not run: the amd64 image, Windows, `ATTACH` with the real attach client |
 
@@ -754,7 +761,11 @@ module's `target/`).
   opts in with `ui: {clickRung: COMPONENT}`, which uses window activation and falls back to `ACTION` recorded as
   degraded fidelity, or fails with `strict: true` (A28, A29; built in Phase 1.x). The sample's UI scenario clicks at
   full fidelity in every load mode on both targets with `focusTimeoutMs: 5000` on its clicks (B12).
-- **Not shown.** The `ROBOT` rung (not built; BS9); the proposed statistic of 1000 attempts.
+- **Explained 2026-10-10 (BS9, below).** Under a window-manager-less display nothing gives the frame its focus back after
+  a modal dialog is disposed: the X focus reverts to `PointerRoot`, the Java window still receives the keys from X, and
+  AWT drops a posted key event when the JVM has no focused window (swing-driving F13 settled). With a window manager the
+  frame is refocused.
+- **Not shown.** The `ROBOT` rung (not built; its facts are BS9's); the proposed statistic of 1000 attempts.
 
 ### BS5 Playwright over CDP to a running Chromium
 
@@ -868,7 +879,8 @@ module's `target/`).
 
 ### BS9-BS12 Vision and human-like input
 
-Proposed in `research/vision-input.md` R10; they come before any Phase 7 work. Not started.
+Proposed in `research/vision-input.md` R10; they come before any Phase 7 work. All four ran on 2026-10-10 (BS9, BS10 and BS11
+passed with conditions, BS12 passed; rows in the table above, sections below).
 
 | Id | Question | Pass criterion |
 |---|---|---|
@@ -876,6 +888,204 @@ Proposed in `research/vision-input.md` R10; they come before any Phase 7 work. N
 | BS10 | Routed in-JVM dispatch: buttons, caret placement, popup menus, combo boxes, tables, wheel, a drag inside a component, a glass pane, a disabled component; Java 8 and Java 25 | each case behaves as with Robot on the same build, or the difference is documented |
 | BS11 | `PAINT` determinism: the same window, 100 captures on one JDK; then across JDK lines and font sets | identical hashes within one environment; differences across environments quantified |
 | BS12 | Grounding and cost on the sample: V1 (references) versus V2 (pixels) on a Sonnet-class and an Opus-class model; seconds per action; tokens per session | measured accuracy, latency and cost replace the estimates of the research note |
+
+### BS9 and BS10 Robot input and routed dispatch
+
+- **Proves.** BS9: whether `java.awt.Robot` pointer and key events land in a Swing application on the window-manager-less
+  Xvfb and on desktop sessions, on Java 8 and Java 25 targets; `ROBOT` against `PAINT` capture of the sample; why XTEST
+  keys did not reach a Swing application under a window-manager-less Xvfb (swing-driving F13). BS10: whether a mouse
+  event whose source is the heavyweight window, in window coordinates, dispatched non-posted on the EDT, behaves like
+  Robot's (research vision-input F7, Risk2).
+- **Run.** `spikes/BS9/` (a key probe and a sample probe, a derived image with openbox, xdotool and x11-utils from
+  Ubuntu 26.04's repositories, `run.sh`) and `spikes/BS10/` (a toy window with 16 cases and a harness loaded with
+  `-javaagent` that drives each case by Robot, by routed dispatch and by the delivery of the built `DISPATCH` rung,
+  recording the outcome, the focus, the press target, the hit-test and every mouse event AWT dispatched), both Java 8
+  language and API, standalone Maven projects built offline. Legs, one container each through `ci/run-in-linux.sh`
+  (Xvfb 1024x768x24): WM-less and openbox on Temurin 1.8.0_504 and 25.0.4.1 (arm64), WM-less Java 25 on the emulated
+  amd64 image, and this Mac (macOS 26.6.2, Oracle OpenJDK 25.0.1) once, in strict mode under the display lock; 70 target
+  JVMs, all exit 0.
+- **Pass.** BS9: a written table like BS4's, and F13 explained. BS10: each case behaves as with Robot on the same build,
+  or the difference is documented.
+- **Facts (result 2026-10-10: both passed with conditions).**
+  - Robot pointer events land as a person's on Linux in every case tried, on both Javas, with and without a window
+    manager: clicks, hover, pixel-accurate clicks (caret, table cell, list item), drags, the wheel, popups, a combo box,
+    a double-click; a glass pane with a listener takes the click, another window of the JVM on top takes it, a window
+    blocked by a modal dialog gets nothing. Three focus-gated, debounced keypad keys of the sample fired 3 of 3.
+  - Robot and XTEST keys land in the AWT focus owner if and only if the JVM has a focused window; keys never follow the
+    pointer (with the focus on a button the letters are typed into the button, which looks like "keys are ignored").
+    **F13 explained:** a window-manager-less X server starts with the focus at `PointerRoot`; Java sets the X focus only
+    when a frame is shown with `autoRequestFocus`, on `toFront()` plus `requestFocus()`, or when a component of an
+    unfocused window asks for it; the Java window receives the key events from X, but `DefaultKeyboardFocusManager`
+    drops a posted key event when there is no focus owner and no focused window. A window shown with
+    `setAutoRequestFocus(false)` has none, and **after a modal dialog is disposed nothing gives the focus back to the
+    frame** (not within 2 s; BS4's observation, now with its mechanism). Openbox refocuses the frame within 1 ms. Not
+    the keymap (every key gave its letter). Self-activation took 266-424 ms WM-less, 25-30 ms with openbox, 32 ms on
+    the Mac. With xdotool on Java 8 the click that activates a never-activated window lost a race in 1 of 6 clicks (2
+    of 7 with the smoke run); Robot 0 of 12.
+  - On the Mac (no Accessibility permission for the process) Robot was constructed, threw nothing and delivered nothing,
+    pointer or key; the window activated itself (frame focused 48-168 ms after show) and `ROBOT` capture returned the
+    window's pixels with macOS's title bar.
+  - Capture: `ROBOT` and a `PAINT` of the root pane are identical on Linux (0 differing pixels in 23 of 24
+    comparisons; 24 px, the caret, in the 24th); `ROBOT` against `PAINT` of the frame, which is what the built
+    `swing.capture` does: 12,021 px WM-less, 30,364 with openbox (27,084 in the decoration band), 37,390 on the Mac
+    (28,672 of them the 28 px title band). The cause is `XFramePeer.print` (gap 76). On a Retina Mac `ROBOT` and the root pane differ by
+    8,718 px of antialiasing (a 2x capture scaled to user space against 1x painting). The cursor is absent from X11
+    `ROBOT` captures.
+  - BS10: routed dispatch matched Robot's outcome in 14 of 16 cases on every Linux leg and Java line (a button with
+    rollover, tool tip, caret at a pixel, selection drag, double-click, popup menus of both kinds, combo, table, wheel,
+    slider drag, glass pane with and without a listener, disabled button) and AWT's dispatched events in 13 of those 14
+    (the X11 toolkit drops the `MOUSE_CLICKED` of the press that opens a combo box's popup; routed delivers it, with no
+    effect). Java 8 = Java 25 throughout; on the Mac the same 16 routed outcomes. The two differences are by
+    construction: a modal-blocked window receives routed events, and routing cannot see a window on top. The built
+    `DISPATCH` rung differs from Robot wherever the position inside the component matters (it clicks the centre),
+    bypasses a glass pane, and sends no enter or move. The native release after a drag has click count 0 and no click
+    follows; a retargeted button-3 event carries `META` in its extended modifiers. A public-API search for the mouse
+    target named the component that received the press in 13 of 14 cases; it missed a label with
+    `setComponentPopupMenu` (an enabled event mask, no listener).
+- **Conditions.**
+  1. A `ROBOT` rung and the V3 tier need a delivery probe (Robot's move must arrive within 1 s, else
+     `ROBOT_UNAVAILABLE` with the reason), because on a Mac without permission Robot delivers nothing and says nothing.
+  2. Keys only when the intended window is focused and the intended component owns the focus; otherwise activate first,
+     and on a window-manager-less display activate again after every dialog closes.
+  3. The point must lie in a window of the target JVM that nothing covers; on a person's desktop act only while the
+     target JVM holds the focused window, and restore the pointer.
+  4. `swing.capture` paints the root pane, not the frame (gap 76).
+  5. `swing.pointer` keeps the modal check and checks for a covering window of the JVM (routing sees neither), imitates
+     the native sequence (a move first, the popup trigger per platform, the release after a drag with click count 0) and
+     reports the component that actually received the press; the hit-test needs the `componentPopupMenu` and
+     `autoscrolls` rules and says its mouse target is inferred.
+- **What the Phase 7 contract takes from it.** `swing.capture` paints the root pane of a window and reports `origin`
+  (the root pane's offset) with the decorations outside the image; `ROBOT` mode captures the window's screen bounds in
+  user-space size and says that decorations are included. `swing.hitTest` reports the window, the other showing windows
+  of the JVM that cover the point, `deepest`, `mouseTarget` (inferred), the wheel target, `enabled`, the modal blocker and
+  the local point. `swing.pointer` `ROUTED` follows BS10's sequence (one `invokeLater` task per event, one wheel event
+  per notch with amount 3 on X11, refusal on `MODAL_OPEN` or a covered point unless `force`) and reports the actual press
+  target, the focus owner afterwards and any window activation the press caused. The `ROBOT` rung reports
+  `NOT_DELIVERED` when no press arrives within its deadline. The test environment keeps the window-manager-less display
+  (routed input and `PAINT` capture need no window manager); a Robot-keyboard test runs with openbox (the recipe is in
+  `spikes/BS9/docker/`) or activates explicitly.
+- **Not run.** Windows (UIPI, session 0, the popup trigger on release), Wayland, a locked session, macOS with
+  Accessibility granted, heavyweight popups, native drag and drop, components that read `MouseInfo`, HiDPI on Linux, JDK
+  lines between 8 and 25, more than one final run per leg (the smoke runs agreed).
+
+### BS11 PAINT capture determinism
+
+- **Proves.** The built `swing.capture` (`printAll` into an image on the EDT) gives the same pixels for the same window
+  state within one environment, how much and where the pixels change across environments, and whether a tolerance can
+  make a baseline portable.
+- **Run.** `spikes/BS11/` (a standalone Maven project, not a reactor module: a Java 8 toy window and a Java 25 harness,
+  `run.sh`, `scripts/run-env.sh`, `scripts/run-mac.sh`, derived images under `images/`; built from `main` at `11fce4e`
+  with the reactor's artifacts of `4f9962f`): the sample desk (seed A) with the built agent home plus the sample's
+  agent module through `TargetLauncher`, `swing.capture` over the control channel through `AgentClient`, each capture
+  decoded and hashed (SHA-256 of the ARGB raster; of the PNG bytes). State changes through the agent's own `swing.type`
+  and `swing.dismiss`, waits on the desk's events and `swing.settle`. Fifteen environments: the arm64 image on Temurin
+  25.0.4.1 and 1.8.0_504 (100 captures per series, 5 launches), the unmodified image as a control, the emulated amd64
+  image (25.0.4.1, 1.8.0_492), `awt.useSystemAAFontSettings` on, off and lcd, `swing.aatext`, Xvfb depth 16, two derived
+  font images (`fonts-liberation2` and `fonts-noto-core`; a `local.conf` preferring Liberation), and macOS 26.6.2
+  natively (OpenJDK 25.0.1, under the display lock).
+- **Pass.** Identical hashes within one environment; differences across environments quantified.
+- **Facts (result 2026-10-10: passed with conditions).**
+  - Within one environment 100 of 100 captures of the main window with no focus owner hash identically on the Java 25
+    and the Java 8 target (raster and PNG bytes). Five fresh launches, a field typed and cleared, a dialog opened and
+    closed, the window covered by another process's window and moved (`xdotool`), two dialogs and the toy reproduce the
+    same hashes. The one exception is the blinking caret of a focused field: a 1 x 24 px column (24 of 786,432 pixels,
+    per-channel difference 204) gives two alternating variants (50/50 of 100 on both targets in the recorded runs),
+    the same size as a real one-character change (28-50 px).
+  - Across environments, unchanged: the CPU architecture (same JDK build, freetype 2.14.2, fontconfig 2.17.1), the
+    Xvfb depth, `swing.aatext`, `useSystemAAFontSettings=off`, the JDK 8 update. Changed: the JDK line 8 against 25
+    (0.30 % of the main window, max 187: antialiased shapes of the icon keys and the table header; the dialogs 0.08-0.16
+    %, max 28; the toy nothing), text antialiasing on or lcd (0.14-0.82 %, max 111-180: glyphs), two font packages
+    (3.3-4.7 %, max 238: the default sans face moves from DejaVu to Noto), a `local.conf` preferring Liberation (1.0 %
+    of the main window), macOS (7.9-14.7 %: Aqua, fonts, a 28 px title bar inside the frame).
+  - Real changes within one run: 28 px (one character of a label), 50 px (one character in the entry field), 1,725 px
+    (a button disabled), 3,264 px (a colour; at max 6 for a subtle tint). No per-channel tolerance with a pixel budget
+    makes the antialiasing, font or macOS pairs equal and still sees a one-character change (the noise inside that one
+    label is up to 1,056 px); for Java 8 against 25 the dialogs compare equal at tolerance 32 but the main window needs
+    187, which hides the label change. Inside one fingerprint the noise is zero, so the comparison there is exact.
+  - A 1024 x 768 capture takes 18-33 ms natively, PNG encoding and HTTP included.
+- **Conditions.**
+  1. Carets, and any other time-dependent painting, are masked on both sides of a comparison.
+  2. The focus owner and whether its window is active are part of the captured state (on Aqua losing the focus repaints
+     the field's focus ring, 9,625 px; without a window manager nothing returns the focus after another window closes).
+  3. A baseline or pixel anchor is bound to a fingerprint of the rendering inputs (JDK line and update, operating
+     system, look and feel, the effective text antialiasing, the logical fonts' resolution, the screen scale, the
+     window's size and insets), and compared exactly inside it, after the masks.
+  4. The hash is over the decoded raster, never the PNG bytes (the same raster encodes to 2,419 bytes on Java 8 and
+     3,536 on Java 25).
+- **What the Phase 7 contract takes from it.** `swing.capture` gains `carets: [{ref, rect}]` (every showing focused
+  text component with a visible caret, computed in the same EDT read as `printAll`; the host's caret is never hidden)
+  and `focus: {owner, windowActive}`. The image guard and `expectImage` compare the decoded raster exactly after masking
+  the union of both sides' caret rectangles and the pack's masks, then take a pixel difference for the report only
+  (default tolerance 0 and budget 0; an expectation may set a small tolerance); a focus-state mismatch masks the focus
+  owner's bounds and says so. The environment fingerprint of a scenario with pixel anchors or image baselines carries the
+  rendering inputs above (architecture and X depth for information only) and a probe-render hash as a tripwire (a fixed
+  off-screen panel with labels, a field, a table header, a button and an antialiased shape, painted in the target); a
+  mismatch makes an anchor `REBIND_NEEDED` and an `expectImage` "not applicable" (reported, not failed), and baselines are
+  kept per fingerprint. The research note `vision-input` can cite BS11 at F11 and F15; its Risk3 holds, with the caret
+  and the focus state added. BS9 found afterwards that the built capture of a frame on Linux includes `XFramePeer.print`'s
+  imitation decorations (gap 76); they are deterministic, so BS11's findings stand, but a baseline taken before the
+  capture paints the root pane is invalid after it.
+- **Not run.** Windows, a HiDPI scale, a JDK update within the 25 line, a Linux desktop with a window manager or a
+  compositor, embedded web views, captures under load, a window larger than 4096 px.
+
+### BS12 Grounding and cost of a vision loop on the sample
+
+- **Proves.** How well, how fast and how cheaply current Claude models find an element of a Swing desk, by reference
+  (V1: the text snapshot or numbered marks on the capture) and by pixel (V2: a custom click tool or the computer
+  toolset), and what a short loop (capture, model, act, wait for the desk, capture) costs per task.
+- **Run.** `spikes/BS12/` (a standalone Maven project, live only, `README.md`) in the arm64 image under the WM-less
+  Xvfb through `ci/run-in-linux.sh`, the key passed by name; the harness on Temurin 25, the desk on Java 8 with the
+  agent; the Anthropic Java SDK 2.70.0; observations from the built primitives (`swing.windows`, `swing.snapshot`,
+  `app.state`, `swing.capture` `PAINT` of each window's root pane, composited in the frame's space), the hit-test in the
+  harness from the snapshot's bounds, actions through the existing rungs (never Robot). 27 targets on five screens, four
+  variants, three models, effort `low` (three repetitions, two for Opus) and a default-effort sample; two tasks (lend a
+  spade; lend a ladder through the induction prompt) as loops with the toolset and with ref tools, one cache breakpoint
+  after the tools and system text and one advancing on the latest tool result. Spend capped at USD 10.00.
+- **Pass.** Measured accuracy, latency and cost replace the estimates of the research note (F3, F4, F14, R6).
+- **Facts (result 2026-10-10: passed, USD 5.64; 1,587 API calls).**
+  - Accuracy at effort `low` (correct of attempts): V1-marks Sonnet 81/81, Opus 54/54, Haiku 77/81; V2-toolset 81/81,
+    54/54, 75/81; V1-text 78/81, 52/54, 78/81; V2-custom 75/81, 54/54, 65/81 (12 of Haiku's calls written as text).
+    Default effort (nine targets once): all right except one Haiku call. Effort changed neither accuracy nor output
+    tokens on single-element questions.
+  - No pixel answer of any model missed its target by a few pixels: every miss hit another whole component chosen by
+    meaning (a power icon for "the key that leaves return mode", the entry field for "the prompt line"), the same
+    wrong answer on every repetition (313 of 324 groups gave the same answer each time).
+  - A 1024x768 capture is 1,039 tokens on all three models; the computer toolset's declaration 4,522 (4,111 with
+    `zoom` off, which no model ever called in 828 toolset calls). A grounding answer costs USD 0.004-0.006 on Sonnet,
+    0.008-0.010 on Opus, 0.0002-0.0003 on Haiku. One model call 1.0-1.5 s median on Sonnet and Haiku, about 2 s on Opus
+    (p90 under 3.5 s); the desk's side of a step 0.2-0.3 s, plus 3.1 s when the desk drops an input silently.
+  - Sessions: 25 of 25 done on Sonnet and Opus. V1 used 4-5 UI actions, V2 6-14 (the keypad keys are icons without
+    text; Sonnet read "or DUE" in the prompt line as "type DUE"), 4-5 with a one-paragraph legend. USD 0.02-0.06 per
+    session on Sonnet and Opus (Haiku USD 0.0013-0.0022; its V2 sessions stopped one action short, 0 of 2), 61-89 % of
+    the tokens read from the cache.
+  - Haiku 5.5 is on the high-resolution tier and takes the toolset; its weakness is format (22 calls written as text)
+    and judging completion. Downscaling hurts icons first (at 0.5 Sonnet confused three keys; at 0.75 it kept its
+    accuracy).
+- **Conditions.** None on the verdict. Findings that change built code or the contract: a window's `PAINT` on the X
+  toolkit with zero insets prints a substitute title bar (title and two boxes) over the content's top 20 px, so a window
+  is captured as its root pane (BS9 found the cause, `XFramePeer.print`'s imitation Motif decorations, gap 76); the text snapshot (`UiSnapshotText`) cuts a table's value at 80 characters and drops
+  unnamed container-role nodes, so it hides table rows and the table header (V1-text 0 of 8 on "the column headings");
+  the stale-capture rule of design §3.10 step 1 is too strict for a batch (a click after a dialog-closing click was
+  refused; re-hit-testing and acting when the same component is under the point let 16 through and refused none);
+  `PriceTable` has no `claude-haiku-5-5`; an error `tool_result` may carry only text (400 otherwise).
+- **What the Phase 7 contract takes from it.** The default tier is V1 with marks (the reserved `marks` result field: a
+  number, ref, row and bounds per interactive component, named icon-like custom component, label with text, table
+  header and visible table row) on Sonnet 5.5 at effort `low`; V1 with the text snapshot is the fallback; Opus 5.5 only
+  for a step that failed twice. V2 through `computer_toolset_20260801` is the opt-in "clicks like a human", with
+  `zoom` disabled up to about 1366 px and a short pack-supplied legend for icon-only controls (a new optional pack
+  hint, named by the contract). Haiku 5.5 only for V1, preferably with structured output, never for V2. The capture is
+  the composite of the target's showing windows in the frame's space (`windows`, `origin`, `space`), each window as its
+  root pane, at its own size, scaled down only above about 1920 px on the long edge and never below 0.75. The text
+  snapshot for a model keeps table rows (bounded) and unnamed interactive components. Loop rules: settle after every
+  batch and before every screenshot; a model's `wait` is a settle, never a sleep; the capture goes on the last result
+  unless it is an error result or the batch ended with its own screenshot; the post-action wait is bounded short, or the
+  pack names an "input dropped" event. Budgets: USD 1.00 and 30 UI actions per session as before, plus a 20-turn limit
+  (a 30-turn session extrapolates to about USD 0.30 on Sonnet and 0.5-0.7 on Opus). `claude-haiku-5-5` joins
+  `PriceTable` (USD 0.10 / 0.50 per million tokens, cache read 0.01).
+- **Not run.** The amd64 image, Windows, macOS, Java 25 or other look and feels and fonts on the desk, screens larger
+  than 1024x768 or HiDPI, V3 (Robot; BS9's ground), embedded web views, combo boxes and menus (the desk has none), tasks
+  longer than 14 actions, an application that changes on its own between capture and action. Two to six sessions per
+  cell and 27 targets on one application.
 
 ### BS14 Byteman in process
 
@@ -1530,6 +1740,14 @@ commits. The key lived in the operator's login shell and reached a JVM by name o
 - **Spend of the live session**: about USD 2.05 in all (BS13 0.032 and its probes 0.008, the record route 0.029, the
   CLI dry run of D 0.022, the gateway live test 0.005, the first image run 0.04, the second 1.11, scenario C's
   authoring 0.80, the approvals nothing).
+- **The planner's stdin route, checked live on 2026-10-10** (after Phase 6's fix of S93, P2-L7-F3, which moved the
+  prompts to stdin; natively on macOS, `claude` 2.1.286, USD 2.05 in all): item 5 alone, exit 0 in 159 s, 49 turns, no
+  repair, USD 1.11; then a forced `--resume` repair round through a logging wrapper (the first document's first verb
+  renamed to an unknown one), exit 0, `repairs: 1`, 43 turns, USD 0.94. The prompts were the CLI's stdin each time and
+  no brief, instruction or problem text was an argument. One new fact: a resumed envelope's `total_cost_usd` and
+  `modelUsage` are running totals while its `num_turns`, `usage` and `duration_ms` are its own, which the planner
+  already reads so. Not verified live: a repair started by a compile problem alone, a failed repair, Windows. The
+  row of the live table at the top has the figures.
 
 ### Phase 6: hooks, Byteman, Windows, OTel, hardening
 
@@ -1760,7 +1978,9 @@ Decision B16. Nothing is built; the seams are reserved now in the design catalog
 `aiAct`, `aiExpect`, `pointer`, `expectImage`, the agent SPI `RegionResolver`). Interactive use with run-time
 inference is decision B15; its session service is Phase 5.
 
-- [ ] BS9-BS12 passed
+- [x] BS9-BS12 passed on 2026-10-10 (BS9, BS10 and BS11 with conditions, BS12 outright; the conditions are inputs of the
+  Phase 7 contract, "Base spikes" below)
+- [ ] `swing.capture` (`PAINT`) paints the root pane and reports its origin (gap 76, found by BS9; also BS12's fix)
 - [ ] Agent: `swing.hitTest`, `swing.pointer`, the extended `swing.capture`, their `web.*` counterparts
 - [ ] Controller: `skillroy-vision` (optional) with the V1-V3 loop inside interactive sessions, the recorder,
   `RegionResolver` support, pixel-anchored replay with an image guard, `expectImage`, the capability
@@ -1790,7 +2010,7 @@ Phase 1.x closed on 2026-10-02; they stay in the table until the merged tree's v
 were recorded by Phase 4 (`design/phase4-contracts.md` §13, which also says what Phase 4 did for gaps 21, 22, 28 and
 31); "P4 §n" is a section of that contract. Gaps 50-57 were numbered by the Phase 6 contract (§15.2, "P6 §n"), 58-59 by
 its build and 60-75 by the Phase 6 code review's fix wave and the security pass 2 fix rounds (their sources are named in
-the rows); the contract's §15.2 also says what Phase 6 did for gaps 31, 32, 33 and 49.
+the rows); gap 76 by the Phase 7 spikes (2026-10-10); the contract's §15.2 also says what Phase 6 did for gaps 31, 32, 33 and 49.
 
 Closed by Phase 1, and therefore no longer listed: the provider-executed form of `DataSourceProvider`,
 `SyncPolicy.promptTopics`, cleanup calls and `recover`, `DomainPack.preflight()`, guarded expectations with
@@ -1875,6 +2095,7 @@ reflectively callable `EmbeddedAgent.start`, and redaction of secrets in JVM arg
 | 73 | The sample's two older focus tests (`iconKeyNeedsFocusButPerformAlwaysWorks`, `aMouseClickOnAKeyDeliversItsActionAndHandsTheFocusBackToTheEntryField`) request the focus once and print "not checked" if it does not come in 5 s | `awaitFocus` could replace both waits (FD) | Use `awaitFocus` | optional |
 | 74 | The JxBrowser adapter's console budget (D266) runs against the neutral fake only | No product here (SB) | The kit against the real product, with gap 41 | with gap 41 |
 | 75 | P4 §4.3 (`drain(900000)` in the tap poller sentence) and §4.6 (`DRAIN_CHARS` 900000) still carry the figure before pass 2 | The pass-2 paragraphs beside them state 500000 (D268); SB did not rewrite the older sentences | Reword the older sentences | Closed 2026-10-09: both sentences say 500000 with the earlier figure in brackets |
+| 76 | `swing.capture` in `PAINT` mode, given a frame on Linux, includes imitation window decorations | On the X toolkit `XFramePeer.print` paints the frame's children and then draws a Motif title bar (17 px from y = 6, with the title and two buttons), cross-hair lines 5 px in and outer lines at fixed positions whatever the insets are; with the insets of 0 that a window-manager-less display gives, they lie on the content (the desk's prompt line half hidden; 12,021 pixels differ from a `ROBOT` capture). Found 2026-10-10 by BS9 (`spikes/BS9/RESULT.md`, the image `results/nowm-j25-paint-frame-initial.png`) and met by BS12; the same on Java 8 and Java 25; every `PAINT` capture of a frame taken on the CI display so far carries it, a dialog does not (`XDialogPeer` has no `print`); a painted root pane equals a `ROBOT` capture pixel for pixel there | Paint the root pane (`RootPaneContainer.getRootPane()`) at its offset and report its origin in the result, decorations outside the image (the extended `swing.capture` of Phase 7; P1 §6 and P4 §2.5 to be amended with it); baselines and recordings taken before the change are not comparable after it (BS11) | open: to be fixed in Phase 7 |
 
 Small items for the module owners, none of them a contract matter: `swing.snapshot` shows Swing's own made-up
 names such as `null.layeredPane`; module version strings are inconsistent (`0.1.0` and `0.1.0-SNAPSHOT`); in
@@ -2002,7 +2223,7 @@ Work that cannot proceed without the project owner, or without something only th
 | Wall | Decision | What waits |
 |---|---|---|
 | The push | B1 | The initial commit exists (2026-10-06); the push to the private remote `Skillroy-AI/skillroy-test-java` waits for the owner's word. History is permanent once pushed |
-| Model provider API key | B7 | **Resolved 2026-10-08, and the live items done the same day.** The first key (organisation-level) was refused by the API without an `anthropic-workspace-id` header (BS13, the night of 2026-10-08), so nothing live ran that night and the profiles were marked not built (D110). The owner's workspace-scoped key, exported as `ANTHROPIC_API_KEY` in the operator's own environment only (never a file of this repository, never a property, never a command line; the contract's §2.3), answered the models endpoint with no workspace header; in the afternoon of 2026-10-08 it carried BS13's live part, scenario D's live re-record, the live profiles and §15.3, scenario C's authoring and the nightly job's live figures ("Phase 5, the live items" above), about USD 2.05 in all. Nothing waits on it. |
+| Model provider API key | B7 | **Resolved 2026-10-08, and the live items done the same day.** The first key (organisation-level) was refused by the API without an `anthropic-workspace-id` header (BS13, the night of 2026-10-08), so nothing live ran that night and the profiles were marked not built (D110). The owner's workspace-scoped key, exported as `ANTHROPIC_API_KEY` in the operator's own environment only (never a file of this repository, never a property, never a command line; the contract's §2.3), answered the models endpoint with no workspace header; in the afternoon of 2026-10-08 it carried BS13's live part, scenario D's live re-record, the live profiles and §15.3, scenario C's authoring and the nightly job's live figures ("Phase 5, the live items" above), about USD 2.05 in all. On 2026-10-10 it carried the planner's stdin check (USD 2.05) and BS12 (USD 5.64): USD 7.69 that day so far. Nothing waits on it. |
 | A JxBrowser licence | B9 | Real verification of the `jxbrowser` adapter. The adapter exists (built 2026-10-07) and passes the contract kit against the neutral fake, plainly and with the init-script chaining option; the kit (`skillroy-agent-web`'s `test-jar`) runs against the real product only in a repository that holds a licence, outside this repo, through a `WebAdapterFixture` over a real engine. That run also settles three member names of the descriptor and whether some vendor calls can block (gaps 41 and 47). Phase 4 reached its public exit without it. The owner (2026-10-06): a licence is available, so that verification can follow in the private overlay's repository |
 | A Windows host | B13, Phase 6 | Verification of the fixes S7 and S15 (not verified on Windows); the Windows path of Phase 6, built 2026-10-09 where Linux can test it and **waiting for the host** for: `ci\run-on-windows.cmd` run twice without a flake and the list of `design/phase6-contracts.md` §9.5 and §13.3 (`bin\skillroy.bat` run, the planner started through a launcher path and a `--pack` path with a space, which decides the quoted `cmd.exe` form, the ACL branches checked with `icacls`, `JAVAAGENT` as the logged-on user with the `SEMANTIC`, `ACTION`, `COMPONENT`, `DISPATCH` rungs and paint capture, one cross-session attach for its failure text, the 5 s start-up margin; and, added by the pass-2 fix rounds, `bin\skillroy.bat` run from a directory holding a decoy `findstr.cmd` and the runner from a checkout holding a decoy `mvn.cmd`, the planner through the native `claude.exe` with the prompt on stdin and npm's `claude.cmd` refused with the remedy, the schema's pre-quoted argument read back intact, a command line near 32767 characters, a FAT32 and an exFAT volume refused by every owner-only member, the new ACL branches of `OutputFiles`, `SettingsFiles`, `JarTrust`, the ancestor rule and the bootstrap's `OptionsFileCheck`, and the localised-Windows case of S94), and the exit criterion that names Windows; when it has run, the "not verified on Windows" marks come off `README.md`, `SECURITY.md`, `design/threat-model.md` §8, P1 §2.5 and this file. The matrix table rows for it are `\| windows, Java 25 targets \| ci\run-on-windows.cmd \| … \|` and `\| windows, Java 8 targets \| ci\run-on-windows.cmd (SKILLROY_JDK8_HOME) \| … \|`. The owner (2026-10-06): later, a Windows 11 machine, which also runs the tenant layers' testing under Windows and under WSL2 |
 | The owner's word on Phase 6 | B26, B27, B28 | **Resolved 2026-10-10** (`B26 ok, B27 ok, B28 ok`, no veto): every answer of B26, Q1's wording of the hard rule now in `CLAUDE.md` among them, every decision of B27, and the sign-off of the repeat security review with the eight lows accepted (B28). The build had proceeded on the then provisional answers; the built behaviour stands as it is. Nothing waits on it. |
@@ -2053,7 +2274,8 @@ The review items of the end-to-end review, now decided (gap numbers refer to the
    S52, D210 and the five behaviour changes stand, the eight lows are accepted, S84 beside S96 stands as it is); (b) **the push**, on the owner's word; (c) the Windows host, when it exists: the §9.5 list, the exit criterion that
    names Windows and the host items the fix rounds added (`skillroy.bat` with a decoy `findstr.cmd`, the planner through
    `claude.exe` on stdin, localised principals, FAT32 and exFAT); (d) **the live check of the planner's stdin route** (P5
-   §15.3) with the key, a repair round through `--resume` included; (e) Phase 7.
+   §15.3) with the key, a repair round through `--resume` included: **done 2026-10-10** (natively on macOS, `claude`
+   2.1.286, USD 2.05; the last row of the live table at the top); (e) Phase 7.
    Open from the packages and the fix rounds: the amd64 image legs of the hooks module and the home's ITs; a real
-   OpenTelemetry Collector (§13.4); gaps 53, 54, 58 and 59 (measurements and spans beyond the root) and 60-75; the
+   OpenTelemetry Collector (§13.4); gaps 53, 54, 58 and 59 (measurements and spans beyond the root) and 60-75 (gap 76 belongs to Phase 7); the
    code-review questions of D163 and D168; S46 item 4.

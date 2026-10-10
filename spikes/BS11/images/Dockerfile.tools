@@ -1,0 +1,24 @@
+#
+# Copyright 2026 Mike Mills.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# Spike BS11, derived image skillroy-spike-bs11:tools (from the arm64 test image, never modifying it): adds xdotool from
+# the distribution's own apt repositories, so that the harness can move the desk's window on the WM-less Xvfb. xdotool
+# brings no fonts; the run "arm64-j25-base" on the unmodified image is the control that the image renders the same.
+#
+#   docker build --platform linux/arm64 -t skillroy-spike-bs11:tools -f spikes/BS11/images/Dockerfile.tools spikes/BS11/images
+FROM skillroy-test-java-ci:bs8-arm64
+RUN apt-get update \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends xdotool \
+ && rm -rf /var/lib/apt/lists/*

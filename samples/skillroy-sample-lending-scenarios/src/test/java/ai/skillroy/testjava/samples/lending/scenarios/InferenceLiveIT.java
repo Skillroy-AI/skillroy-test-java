@@ -117,7 +117,11 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
  * without the key ("no model key"; {@link Live}) or without a display; never run in CI. Run it in the Linux image with
  * the key passed through the environment: {@code ci/run-in-linux.sh mvn -o verify -pl
  * samples/skillroy-sample-lending-scenarios -am -Pinference-live -Dskillroy.headless=false -Dit.test=InferenceLiveIT
- * -Dfailsafe.failIfNoSpecifiedTests=false}.
+ * -Dfailsafe.failIfNoSpecifiedTests=false}. In the image, item 5 needs a Linux build of the CLI mounted through
+ * {@code SKILLROY_CLAUDE_BIN} ({@code ci/run-in-linux.sh}). On a host with the CLI and a display, item 5 and the scan
+ * run natively and alone (checked on 2026-10-10 on macOS): the same Maven command without {@code ci/run-in-linux.sh},
+ * with {@code -Dtest=none -Dsurefire.failIfNoSpecifiedTests=false} added and {@code -Dit.test} set to
+ * {@code InferenceLiveIT#theAuthorCommandAuthorsTheBriefOfScenarioC+noSecretInAnythingThisClassWrote}.
  * Every model call's figures are printed with the prefix {@code [live]} (the request id, the model, the tokens, the
  * cache reads and writes, the cost, the elapsed time): never a prompt, never the key. Outputs are in
  * {@code target/it-runs/inference-live/}.

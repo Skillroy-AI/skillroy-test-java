@@ -1534,15 +1534,16 @@ it in CI. What it produces is a YAML file and a plan for a person to review; the
    exactly one scenario document) with the brief inside a `<brief>` block, the catalogue summary and the verbs with
    their schemas. The command runs
    `claude -p --bare --output-format json --json-schema <schema> --mcp-config <file> --strict-mcp-config --tools ""
-   --allowedTools "mcp__skillroy__*" --permission-mode dontAsk --model <id> --max-turns <n> --max-budget-usd <usd>
-   "<prompt>"` (`--tools ""` leaves the CLI's built-in shell and file tools out; `--strict-mcp-config` admits no other
-   server; `--max-budget-usd` is the CLI's own budget, BS13 F-10) with `ANTHROPIC_API_KEY` inherited when set (the CLI
-   also accepts its own login; a key that needs a workspace id needs it here too, through `ANTHROPIC_CUSTOM_HEADERS`,
-   to be verified when the live run is possible), the working directory a private temporary directory (Phase 6
-   security fix S60, A58, built 2026-10-09, SR: the `claude` CLI's own session store and configuration live in the
-   CLI's configuration directory, outside the base's control, and a `--resume` needs them; a release note says so, and
-   relocating them with `CLAUDE_CONFIG_DIR` is not built, B26 Q22), stdin closed,
-   stdout read in full under a deadline of `timeouts.plannerMs` (default 15 min), stderr to the command's log, masked.
+   --allowedTools "mcp__skillroy__*" --permission-mode dontAsk --model <id> --max-turns <n> --max-budget-usd <usd>`,
+   the prompt on standard input (the paragraph below) (`--tools ""` leaves the CLI's built-in shell and file tools
+   out; `--strict-mcp-config` admits no other server; `--max-budget-usd` is the CLI's own budget, BS13 F-10) with
+   `ANTHROPIC_API_KEY` inherited when set (the CLI also accepts its own login; a key that needs a workspace id needs
+   it here too, through `ANTHROPIC_CUSTOM_HEADERS`, to be verified when the live run is possible), the working
+   directory a private temporary directory (Phase 6 security fix S60, A58, built 2026-10-09, SR: the `claude` CLI's
+   own session store and configuration live in the CLI's configuration directory, outside the base's control, and a
+   `--resume` needs them; a release note says so, and relocating them with `CLAUDE_CONFIG_DIR` is not built, B26 Q22),
+   stdin the prompt file (the paragraph below), stdout read in full under a deadline of `timeouts.plannerMs` (default
+   15 min), stderr to the command's log, masked.
    **(Phase 6 security fix, pass 2, P2-L7-F3, built 2026-10-09, SD) No text of the brief, of the model or of a
    repair is ever an argument.** The prompt, the first invocation's and each repair's, is written as UTF-8 to
    `prompt-<n>.txt` in the private working directory and is the CLI's **standard input** (`claude -p` reads its prompt
@@ -1564,7 +1565,13 @@ it in CI. What it produces is a YAML file and a plan for a person to review; the
    reached `cmd.exe` (code execution in the controller's account, and the model key expanded into the prompt).
    `PlannerTest` reads the substitute's arguments and stdin; `PlannerCommandLineTest` builds the Windows command line
    as the JDK does and parses it back by the C runtime's rules (not run on a Windows host: §15.3 and P6 §9.5 keep the
-   live and host checks).
+   live and host checks). **As checked live (2026-10-10, native macOS, `claude` 2.1.286; §15.3):** the first
+   invocation and a forced repair round read their prompts on stdin (14625 and 374 bytes), no text of the brief, the
+   instructions or the problems was in any argument, each command line ended with `--max-budget-usd <usd>`, and
+   `claude -p --resume <session_id>` with the problems on stdin resumed the session. A resumed envelope's
+   `total_cost_usd` and `modelUsage` are the session's running totals, while its `num_turns`, `usage` and
+   `duration_ms` are the invocation's own, which is how the planner reads them (one ledger entry per invocation at
+   the difference of the totals, turns summed).
 5. **The result**: the JSON envelope's `structured_output` (the scenario; optional in the envelope), `total_cost_usd`,
    `session_id`, `num_turns`, `is_error`, `mcp_server_errors` (optional). Success is exit code 0 with `is_error: false`,
    never the envelope's `subtype` (it reads `success` on failures too, BS13 F-10); a non-zero exit, `is_error`, a
@@ -2515,6 +2522,20 @@ which), and the second, made as soon as the first returns (the gap is printed, n
 questions are answered by rules 6 and 20, so each result is checked by the number its own question names and not the
 other's; a batch that has not ended at 20 minutes is cancelled, and so is one whose status read failed. Each call
 prints one line: the request id, the model, the stop reason, the tokens, the cost and the elapsed time.
+
+As checked live (2026-10-10, natively on macOS, `claude` 2.1.286, after the Phase 6 fix that moved the planner's
+prompts to stdin, SD): item 5 run alone (`-Dit.test=InferenceLiveIT#theAuthorCommandAuthorsTheBriefOfScenarioC+
+noSecretInAnythingThisClassWrote`) exited 0 after 49 turns with no repair, compiled and resolved, the secret scan
+green, USD 1.11. A second run, `author` through `--claude-command` naming a logging wrapper that renamed the first
+document's first verb to an unknown one, forced one repair round: two `-p` invocations with their prompts on stdin
+(14625 and 374 bytes; no text of the brief, the instructions or the problems in any argument; each command line ending
+with `--max-budget-usd`), the second `-p --resume <session_id> … --max-budget-usd 0.80` (what was left of 1.70) with the
+schema's problem as its prompt; the session resumed and answered with the original document, without the unknown verb;
+`repairs: 1`, exit 0, compiled and resolved, 43 turns (41 + 2), USD 0.94. A resumed envelope's `total_cost_usd` and
+`modelUsage` are the session's running totals, while its `num_turns`, `usage` and `duration_ms` are the invocation's
+own; the ledger holds 0.8965614 and 0.0483568, the difference of the totals, which add up to the last total, 0.9449182.
+Not checked live: a repair started by a problem that passes the schema and fails only in `PlanCompiler` (the same path
+in the code), a failed repair, Windows.
 
 Exit criteria of the roadmap (design §8): (1) is §14.3 with §15.2 item 3; (2) is §15.3 item 4; (3) is §14.4 with §15.2
 item 4; all three are also exercised without a key through the recordings.

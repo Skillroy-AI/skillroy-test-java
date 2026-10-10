@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Copyright 2026 Mike Mills.
+
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+
+      http://www.apache.org/licenses/LICENSE-2.0
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <!-- Spike BS9: Robot input on the WM-less Xvfb and on desktop sessions. A standalone project (not a module of the
+       root reactor) that builds one jar, target/bs9-probe.jar, with two probes that run inside the target JVM:
+       KeysProbe (its main class; a small window of its own, Robot and xdotool keys under different focus and
+       activation states, the X focus read beside the AWT focus) and SampleProbe (its Premain-Class; loaded with
+       -javaagent into the sample lending desk launched from its built jar: Robot clicks and keys, routed and DISPATCH
+       clicks for comparison, and a ROBOT capture against a PAINT capture of the same window). The pointer cases of the
+       toy window are spike BS10's harness (spikes/BS10), run in the same environments. Build with
+       "mvn -o -f spikes/BS9/pom.xml package" (never install); run with spikes/BS9/run.sh. -->
+  <groupId>ai.skillroy.spikes</groupId>
+  <artifactId>skillroy-spike-bs9</artifactId>
+  <version>0.1.0-SNAPSHOT</version>
+  <packaging>jar</packaging>
+  <name>skillroy-spike-bs9</name>
+
+  <properties>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <!-- Everything here runs inside a target JVM (Java 8 or Java 25): Java 8 language and API, no dependencies. -->
+    <maven.compiler.release>8</maven.compiler.release>
+  </properties>
+
+  <build>
+    <finalName>bs9-probe</finalName>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <version>3.16.0</version>
+        <configuration>
+          <release>8</release>
+          <compilerArgs>
+            <arg>-Xlint:-options</arg>
+          </compilerArgs>
+        </configuration>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-resources-plugin</artifactId>
+        <version>3.5.0</version>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-jar-plugin</artifactId>
+        <version>3.5.1</version>
+        <configuration>
+          <archive>
+            <manifest>
+              <mainClass>ai.skillroy.testjava.spikes.bs9.KeysProbe</mainClass>
+            </manifest>
+            <manifestEntries>
+              <Premain-Class>ai.skillroy.testjava.spikes.bs9.SampleProbe</Premain-Class>
+            </manifestEntries>
+          </archive>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+</project>

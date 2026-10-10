@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Copyright 2026 Mike Mills.
+
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+
+      http://www.apache.org/licenses/LICENSE-2.0
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <parent>
+    <groupId>ai.skillroy.spikes</groupId>
+    <artifactId>skillroy-spike-bs11</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+  </parent>
+  <!-- The controller-side harness, target/bs11/bs11-harness.jar (Java 25): "run" launches the desk and the toy through
+       the real TargetLauncher and AgentClient and calls swing.capture; "compare" measures the differences between two
+       runs. Compiled against the built controller and protocol jars of the CLI distribution (system scope: they are
+       never installed); at run time its class path is bs11-harness.jar plus that lib/ directory. HSQLDB (the desk's
+       database) is copied to target/bs11/lib/ for the target's class path. -->
+  <artifactId>skillroy-spike-bs11-harness</artifactId>
+  <name>skillroy-spike-bs11-harness</name>
+  <properties>
+    <maven.compiler.release>25</maven.compiler.release>
+  </properties>
+  <dependencies>
+    <dependency>
+      <groupId>ai.skillroy</groupId>
+      <artifactId>skillroy-controller</artifactId>
+      <version>0.1.0-SNAPSHOT</version>
+      <scope>system</scope>
+      <systemPath>${bs11.cli.lib}/skillroy-controller-0.1.0-SNAPSHOT.jar</systemPath>
+    </dependency>
+    <dependency>
+      <groupId>ai.skillroy</groupId>
+      <artifactId>skillroy-protocol</artifactId>
+      <version>0.1.0-SNAPSHOT</version>
+      <scope>system</scope>
+      <systemPath>${bs11.cli.lib}/skillroy-protocol-0.1.0-SNAPSHOT.jar</systemPath>
+    </dependency>
+  </dependencies>
+  <build>
+    <finalName>bs11-harness</finalName>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <configuration>
+          <release>25</release>
+        </configuration>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-jar-plugin</artifactId>
+        <configuration>
+          <outputDirectory>${bs11.dist}</outputDirectory>
+        </configuration>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-dependency-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>target-class-path</id>
+            <phase>package</phase>
+            <goals>
+              <goal>copy</goal>
+            </goals>
+            <configuration>
+              <outputDirectory>${bs11.dist}/lib</outputDirectory>
+              <stripVersion>true</stripVersion>
+              <artifactItems>
+                <artifactItem>
+                  <groupId>org.hsqldb</groupId>
+                  <artifactId>hsqldb</artifactId>
+                  <version>${hsqldb.version}</version>
+                  <classifier>jdk8</classifier>
+                </artifactItem>
+              </artifactItems>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+</project>
