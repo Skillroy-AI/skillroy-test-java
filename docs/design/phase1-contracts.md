@@ -1266,7 +1266,7 @@ constant-time.
   send `EMPTY_BODY_SHA256`; any other value is 401. `/ping` does not use it. Nothing in the body is parsed, logged or
   acted on before both checks passed, and the connection counts as not authenticated until then. The MAC's inputs
   are unchanged, so `Auth.requestMac` and every reply MAC are as before; the protocol version stays `0.2` (nothing was
-  released on it; recorded as D-SA-1 in the fix report).
+  released on it; recorded as D262, `design/phase6-contracts.md` §16).
 - *Header syntax.* `Auth.parseAuthorization` is stricter than RFC 7235: the scheme name `Skillroy-HMAC` exactly
   (case-sensitive), exactly one space, then `name=value` parameters separated by a comma and optional spaces or tabs
   after it; no quotes, no whitespace around `=` or before a comma, no trailing comma or whitespace, parameter names

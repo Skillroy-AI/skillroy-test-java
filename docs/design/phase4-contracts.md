@@ -704,7 +704,7 @@ on the same browser shares (§2.5), so such a client loses `Runtime` events as w
 the page-sized first copy of each console event that arrives before the stop takes effect (about one bucket), and the
 `Page` events whose URL a page chooses (bounded by Chromium's own URL limit and by item 1, not budgeted). Tests:
 `EventBudgetTest`, `JcefConsoleBudgetFakeTest` (both channels; the resumption), `JxBrowserConsoleBudgetFakeTest`, and
-the kit's item 14 (§10.1), which runs against real JCEF in the image. D-SB-1, D-SB-2 (the fix report).
+the kit's item 14 (§10.1), which runs against real JCEF in the image. D266, D267 (`design/phase6-contracts.md` §16).
 
 ### 4.4 Capabilities
 
@@ -1004,7 +1004,7 @@ the channel bound, six times the value bound). Tests: `WebLibTest` (the guard's 
 `EvaluateAndLibraryTest` and `EventsAndTapTest`, the CDP path's `ShapesTest` and `CdpWebPathCallTest`, the fakes'
 emulation of the guard, and the kit's item 13 (§10.1), which runs the guard in Chromium in the image. The guard was
 also run outside the build in Node 24 against the library with a replaced slot, `slice`, `String` and
-`Number.prototype.toString`. D-SB-3 (the fix report).
+`Number.prototype.toString`. D268 (`design/phase6-contracts.md` §16).
 
 (4.x, A35, built 2026-10-08: also `flagExpression(expression)`, the guard of `web.waitFlag` that both paths poll
 (§4.2, §5.2, §16.1), `errorLine(text)` and `MAX_ERROR_CHARS` (2000). The guard is one function expression invoked in
@@ -1175,7 +1175,7 @@ redirect the handshake to another host or to a Unix socket the operator can open
 Playwright's headers and, on a `101`, Playwright's own CDP commands, never the run's scripts or texts (S45). Closing it
 needs a deferred attach (D65 extended: no attach until the agent reports an id) or a relay of the controller's own
 (the controller opens the WebSocket without redirects and relays it to the driver on loopback); both are proposed to
-the owner, D-SB-4 (the fix report). Tests: `TargetProbeTest`, `CdpAttachTest`, `CdpWebPathOpenTest`; `CdpAttachSoakIT`
+the owner, D269 (`design/phase6-contracts.md` §16). Tests: `TargetProbeTest`, `CdpAttachTest`, `CdpWebPathOpenTest`; `CdpAttachSoakIT`
 in the image.
 
 ### 5.2 `CdpWebPath`: the CDP implementation of the web verbs

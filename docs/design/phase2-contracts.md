@@ -1790,7 +1790,7 @@ and is created exclusively when absent. A directory a run writes into is created
 without following links, must be a directory owned by the current user (or root, as `/tmp` is) that others may not
 write to unless it carries the sticky bit; a symbolic link in its place is followed only when the current user (or
 root) owns it; group write is allowed, since a user-private-group umask (`002`) makes every directory so (decision
-D-SF-3 of the fix; `SecureFiles.untrustedDirectoryReason` would refuse those). The executor checks the scenario's
+D282 of the fix; `SecureFiles.untrustedDirectoryReason` would refuse those). The executor checks the scenario's
 output directory and opens `run.jsonl` first: a refused directory, or a `run.jsonl` that cannot be created, ends the
 run ERROR / ENVIRONMENT with the reason before anything is sent to the agent, and nothing is written. `run --out`
 refuses an existing directory that breaks the rule as a usage error (exit 64), a session refuses it when it opens

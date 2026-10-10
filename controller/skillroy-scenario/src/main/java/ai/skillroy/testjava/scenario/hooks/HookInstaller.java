@@ -44,7 +44,7 @@ import java.util.Objects;
  * by the CLI command {@code skillroy hooks install}.
  *
  * <ol>
- *   <li>Step 0 (fix wave of the Phase 6 review, FC, decision D-FC-2 of the fix wave): whenever the matrix shows
+ *   <li>Step 0 (fix wave of the Phase 6 review, FC, decision D231 of the fix wave): whenever the matrix shows
  *       {@code hook.engine} {@code OK}, before anything below can skip, {@code hook.health {}}: an armed stub is ERROR
  *       / ENVIRONMENT when armed stubs are refused (a {@code replay} run: CI must never run against stubbed behaviour,
  *       D129), and so is a failed read; else the ids are recorded, in a {@code skipped} record too ({@code armed},

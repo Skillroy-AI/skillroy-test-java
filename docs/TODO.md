@@ -1,7 +1,7 @@
 # TODO: base framework
 
 What exists, what was proven and what is open for the base framework (`skillroy-test-java`), as of
-2026-10-09. Decisions are in `DECISIONS.md` (B1-B27); the design is in `docs/design/` (Phase 1 and Phase 1.x as
+2026-10-09. Decisions are in `DECISIONS.md` (B1-B28); the design is in `docs/design/` (Phase 1 and Phase 1.x as
 built in `phase1-contracts.md`, Phase 2 as built in `phase2-contracts.md`, Phase 3 as built in
 `phase3-contracts.md`, Phase 4 as built in `phase4-contracts.md`, Phase 5 as built in `phase5-contracts.md`, Phase 6
 as built in `phase6-contracts.md`);
@@ -90,8 +90,8 @@ with probes; a fix round; the matrix before the commits; "Phase 5, the live item
 The live table follows the Phase 6 paragraph below; the matrix of the final Phase 5 tree is the table after it.
 
 **On 2026-10-09 the Phase 6 contract was written and Phase 6 was built the same day** (`design/phase6-contracts.md`, now
-as built; its twenty-two answers are decision **B26** and the 62 decisions the build took, D160-D221, are **B27**, both
-provisional: the owner asked for progress). The method was that of Phases 2 to 5: spike BS3 (the hook go/no-go) passed
+as built; its twenty-two answers are decision **B26** and the 62 decisions the build took, D160-D221, are **B27** (with
+the 65 of the review's fixes, D222-D286, below: 127), both provisional: the owner asked for progress). The method was that of Phases 2 to 5: spike BS3 (the hook go/no-go) passed
 with conditions the same morning, seven readers' maps, a contract reviewed through three lenses with a sceptic each and
 revised, then six packages built in isolated worktrees and merged into `main` in this order, the native reactor green
 after every landing: telemetry (TL), hooks and spy (HK), the controller, pack and sample (CP), Byteman and Windows (BW,
@@ -101,10 +101,20 @@ shaded, relocated Byte Buddy with its bootstrap `Spy` and a byte-identical resto
 the sample desk on a Java 8 and a Java 25 target); Byteman loaded in process with no listener; a Java 25 target through
 `JAVAAGENT` with no JEP 451 line and a capability matrix equal to the Java 8 one; OpenTelemetry export from the
 controller, off by default; the tenant-pack overlay proven on the desk's branch edition; the Windows path built where
-Linux can test it (not verified on a Windows host). **Still to do:** the Phase 6 code review (three lenses, a sceptic
-each) and its fix wave; pass 2 of the security review (eight lenses) and the owner's sign-off (B28); the Linux matrix of
-the integrated tree (arm64 twice, amd64 once: the packages ran targeted legs only, section "Phase 6"); the Windows host.
-The tables that follow are those of Phases 1 to 5; the Phase 6 matrix will be the first.
+Linux can test it (not verified on a Windows host). **Phase 6 was then reviewed, fixed and security-reviewed twice the
+same day**, with the same method, the fixes integrated on a branch (`p6/int`) so that the sceptics of the security review
+read a stable `main`: a code review of three lenses with a sceptic each (19 raw findings and 10 added by the sceptics, none
+refuted: one high, eight medium, 20 low; section "Phase 6 code review (2026-10-09)") and its fix wave in four packages (FA the
+hooks engine, FB the Byteman modules, FC the controller and telemetry, FD the sample's typed-keys display flake); then pass 2
+of the repeat security review over all eight lenses (section "Security review (repeat, pass 2, 2026-10-09)": 38 confirmed
+findings, S63-S100, one high, 12 medium, 25 low, and one refuted) and its six fix rounds (SA the control channel, SB the web
+views, SC the model boundary and the model as an actor, SD Windows and SQL Server, SE hooks and Byteman, SF telemetry and run
+outputs). The 65 decisions of these fixers are D222-D286 and join B27. Every finding of medium or above of both passes is
+fixed; eight lows are proposed for the owner's acceptance, each with a release note in `SECURITY.md` (B28). The native
+reactor was green after every landing. The native reactor on `main` at `4f9962f` and the Linux matrix of the final tree
+(arm64 twice, amd64 once): [final matrix]. **Still to do:** the owner's word on B26, B27 and B28 and the push; the Windows
+host; the live check of the planner's stdin route (P5 section 15.3) with the key; Phase 7. The tables that follow are those of
+Phases 1 to 5.
 
 The live runs of 2026-10-08 (afternoon), with the key passed through by name; every figure from the ledger entries the
 tests printed:
@@ -304,6 +314,22 @@ the times are slow. Java 21 targets are no longer run (B3).
   The two key focus logs and the run summaries are kept with the session notes. Open: the native reason for (2); the
   garbage-collection-dependent skip of `SwingDisplayTest.refBecomesStaleOnceTheComponentIsCollected`, seen in 3 of 60
   runs.
+- **`LendingUiDisplayTest.typedKeysFillTheEntryFieldAndEnterSubmitsIt` (matrix 2026-10-08 and 2026-10-09, arm64, Java 25
+  test JVM): explained and fixed in the test (Phase 6 review fix wave, FD).** Not the A39 focus loss: `JTextField`'s Enter
+  binding submits the text field that most recently had the focus, not the event's target, and the test dispatched its Enter
+  before the freshly shown frame had given the entry field the focus (a round trip to the X server, under 1 ms or about
+  21-32 ms after the frame shows), so the Enter was lost and no engine event followed. The test now waits for the field's
+  focus-gained event (30 s, re-requesting once a second, as A39), and `enterDoesNotSubmitAnEntryFieldThatNeverHadTheFocus`
+  pins the lost Enter. In the arm64 image, one fresh JVM per run: 5 failures in 240 runs before (Java 8 2/100 warm, 1/40
+  fresh container; Java 25 0/60 warm, 2/40 fresh container), 0 in 380 after (D234, D235). The same property holds for
+  `swing.type` DISPATCH with `enter` (gap 60).
+- **Scenario E's capability-matrix hash (one occurrence, 2026-10-09, seen by security fixer SD; not reproduced).**
+  `LendingEndToEndIT$ResolutionJavaAgentHooksSeedA.scenarioEReplaysPassWithHooksAndDegradedWithout` failed once on a Java 25
+  target in the arm64 image ("one matrix for every run of this target": two `capabilities.json` hashes across the seed's
+  four replays); its run directories were overwritten by the Java 8 leg before they could be compared, and it passed on the
+  rerun (`LendingEndToEndIT*` 341/0/0/5) and with Java 8 targets. Nothing of SD's fix enters a capability probe except
+  `JarCheck`'s volume test for `rule.engine`, which reads the same `FileStore` every time. Open: watch it in the matrix, and
+  keep the run directories of a failing leg to compare the two `capabilities.json`.
 - **A transport defect that looked like a flake (one occurrence in the matrix, 2026-10-08; once more natively during
   the fix wave): found and fixed.** In the third arm64 run of the final Phase 5 tree the whole-reactor leg stopped at
   `skillroy-mcp`: `ScenarioRunPolicyTest.aRunOnAClientsBehalfEvaluatesExpectationsOnMaskedValues` ended with the MCP
@@ -363,10 +389,10 @@ table above. "Java 8 test JVM" = the module's own tests also run on Java 8 (`-Dj
 | Platform | Controller side on Java 25 (`--release 25`, B3); agent side on Java 8 (B4). The Linux test image is JDK 25 (Temurin 25.0.4.1); the previous JDK 21 image is no longer used. Native development JDK is 26 | none |
 | Git and publication | The initial commit was made on 2026-10-06 (everything in the tree, one commit, DCO sign-off); nothing pushed. The remote `Skillroy-AI/skillroy-test-java` is private for now. `LICENSE` (Apache-2.0), `NOTICE`, `CONTRIBUTING.md` (DCO sign-off, no CLA) and the header in every source file (`ci/license-headers.sh`, with the holder's name since 2026-10-06) exist; the root POM carries the publication metadata | Push when the owner says; before the first public release, the repeated security review |
 | Licence audit | `docs/licence-audit.md`: everything the project distributes, bundles or depends on is compatible with Apache-2.0. The packaging gaps (licence files inside the jars and zips, third-party attribution in the CLI distribution, a `<licenses>` element in the root pom) are closed (Phase 1.x, built 2026-10-02). Updated 2026-10-07 for Phase 4: the Playwright and JCEF sets (in no distribution), the new modules, and the agent home's seventh jar, inspected | none |
-| Decisions | B1-B14 answered by the owner 2026-10-02; B15 and B16 follow from the answers; B17-B20, taken without the owner, were confirmed by the owner on 2026-10-06, with two vetoes inside B19 (Q10, Q14) built the same day; **B21** (the Phase 4 contract's fifteen answers) taken without the owner later on 2026-10-06 and confirmed by the owner on 2026-10-07; **B22** (D59-D69, the Phase 4 build's decisions) confirmed the same evening. **B23** (the Phase 5 contract's eighteen answers, D70-D87) and **B24** (the build's and the review's decisions, D88-D104, D110) taken without the owner on 2026-10-08 and confirmed by the owner the same day; **B25** (the live session's D111-D113) taken without the owner in the afternoon of 2026-10-08 and confirmed by the owner on 2026-10-09. **B26** (the Phase 6 contract's twenty-two answers, D114-D159) and **B27** (the Phase 6 build's 62 decisions, D160-D221) taken without the owner on 2026-10-09 and provisional | B26 and B27 (`B26 ok, B27 ok`, or the vetoes by name); the owner's review of the committed scenario C |
-| Design docs (`docs/design/`) | `phase1-contracts.md` as built, with the Phase 1.x, Phase 2, Phase 3 and Phase 4 passages marked "(1.x, built 2026-10-02)", "(Phase 2, built 2026-10-02)", "(Phase 3, built 2026-10-03)" and "(Phase 4, built 2026-10-07)". `phase2-contracts.md` and `phase3-contracts.md` as built (2026-10-03: every deviation of the build and every fix of the review marked in place; their Phase 4 passages marked built). **`phase4-contracts.md` as built 2026-10-07** (specified 2026-10-06; every deviation of the build and every fix of the review marked in place, the decisions of the build D59-D69). **`phase5-contracts.md` as built 2026-10-08** (specified, built, reviewed and fixed the same day, its §16.1 marks written into the Phase 1-4 contracts and the overview; the live session's passages marked "the live session", D111-D113). **`phase6-contracts.md` as built 2026-10-09** (specified, reviewed, built by six packages the same day; an `As built (Phase 6, <TAG>, 2026-10-09)` note under every section a package built or deviated from, the build's decisions D160-D221 in its §16, `threat-model.md` beside it, marks in the Phase 1 to 5 contracts and the overview). Overview: roadmap with Phases 1.x to 6 built (Phase 6 under review), §3.8 as built | None |
+| Decisions | B1-B14 answered by the owner 2026-10-02; B15 and B16 follow from the answers; B17-B20, taken without the owner, were confirmed by the owner on 2026-10-06, with two vetoes inside B19 (Q10, Q14) built the same day; **B21** (the Phase 4 contract's fifteen answers) taken without the owner later on 2026-10-06 and confirmed by the owner on 2026-10-07; **B22** (D59-D69, the Phase 4 build's decisions) confirmed the same evening. **B23** (the Phase 5 contract's eighteen answers, D70-D87) and **B24** (the build's and the review's decisions, D88-D104, D110) taken without the owner on 2026-10-08 and confirmed by the owner the same day; **B25** (the live session's D111-D113) taken without the owner in the afternoon of 2026-10-08 and confirmed by the owner on 2026-10-09. **B26** (the Phase 6 contract's twenty-two answers, D114-D159) and **B27** (the Phase 6 build's 62 decisions, D160-D221, and the 65 of its code review's fix wave and the security fix rounds, D222-D286) taken without the owner on 2026-10-09 and provisional; **B28** (the repeat security review's sign-off) open, the owner's | B26, B27 and B28 (`B26 ok, B27 ok, B28 ok`, or the vetoes by name); the owner's review of the committed scenario C |
+| Design docs (`docs/design/`) | `phase1-contracts.md` as built, with the Phase 1.x, Phase 2, Phase 3 and Phase 4 passages marked "(1.x, built 2026-10-02)", "(Phase 2, built 2026-10-02)", "(Phase 3, built 2026-10-03)" and "(Phase 4, built 2026-10-07)". `phase2-contracts.md` and `phase3-contracts.md` as built (2026-10-03: every deviation of the build and every fix of the review marked in place; their Phase 4 passages marked built). **`phase4-contracts.md` as built 2026-10-07** (specified 2026-10-06; every deviation of the build and every fix of the review marked in place, the decisions of the build D59-D69). **`phase5-contracts.md` as built 2026-10-08** (specified, built, reviewed and fixed the same day, its §16.1 marks written into the Phase 1-4 contracts and the overview; the live session's passages marked "the live session", D111-D113). **`phase6-contracts.md` as built 2026-10-09** (specified, reviewed, built by six packages the same day; an `As built (Phase 6, <TAG>, 2026-10-09)` note under every section a package built or deviated from, the build's decisions D160-D221 and the decisions of its review's fixes D222-D286 in its §16, `threat-model.md` beside it, marks in the Phase 1 to 5 contracts and the overview; reviewed, fixed and security-reviewed twice the same day). Overview: roadmap with Phases 1.x to 6 built, reviewed and fixed, §3.8 as built | None |
 | Research notes (`docs/research/`) | Round 1 carried over, finding ids unchanged; `embedded-browser-spi` and `vision-input` new (2026-10-02). Pruned of local-environment detail | None |
-| Security review | Run 2026-10-02 on the pre-port tree: 34 confirmed findings (4 medium, 30 low); the fixes H1-H3 are built (Phase 1.x). The Phase 2 code review of 2026-10-03 had a secrets-and-safety lens (below). **Repeat, pass 1 (2026-10-09):** 28 confirmed findings (1 high, 6 medium, 21 low), fixed by the Phase 6 build or accepted as lows with release notes (B26 Q22, provisional) | Pass 2 (eight lenses) after the Phase 6 code review, then the owner's sign-off (B28) before the first release |
+| Security review | Run 2026-10-02 on the pre-port tree: 34 confirmed findings (4 medium, 30 low); the fixes H1-H3 are built (Phase 1.x). The Phase 2 code review of 2026-10-03 had a secrets-and-safety lens (below). **Repeat, pass 1 (2026-10-09):** 28 confirmed findings (1 high, 6 medium, 21 low), fixed by the Phase 6 build or proposed as lows with release notes (B26 Q22, provisional). **Repeat, pass 2 (2026-10-09):** 38 confirmed findings (1 high, 12 medium, 25 low) on all eight lenses, fixed by six fix rounds except three lows proposed with release notes (B28). Together S35-S100: 66 findings, 2 high, 18 medium, 46 low; `SECURITY.md` and `docs/release-checklist.md` are in the tree | The owner's sign-off (B28) before the first release; an outside reader is recommended (B26 Q12) |
 | Spikes | BS7 done. **BS8 run 2026-10-06, passed with conditions** (`spikes/BS8/RESULT.md`). **BS5 met 2026-10-07** by the Phase 4 acceptance against JCEF's Chromium (D53; the stock-Chromium run is the manual procedure `spikes/BS5/README.md`). BS1 answered for Java 8 and Java 25 targets on Linux, parts open. BS2 answered in part. BS4 answered, parts open. **BS3 passed with conditions 2026-10-09** (`spikes/BS3/RESULT.md`) and **BS14 passed with conditions 2026-10-09** (`spikes/BS14/RESULT.md`), the hook go/no-go and the gate of the Byteman module. **BS6 passed 2026-10-08** and **BS13 passed 2026-10-08** (the offline part in the night, the live part in the afternoon with the owner's key), both as the Phase 5 contract's gates. BS9-BS12 new, not started | See "Base spikes" |
 | CI for this repo | Not chosen. `ci/Dockerfile` and `ci/run-in-linux.sh` are what a pipeline would run; since 2026-10-06 the image holds Chromium's run-time libraries and the runner takes `SKILLROY_PLATFORM`; the Phase 4 matrix adds `-Pjcef` to every leg | Needs a JDK 8, a JDK >= 25 and Xvfb on the build agents; for the profile `jcef` the JCEF natives (152 MB per platform) and Playwright's jars (the driver bundle about 204 MB) in the Maven cache |
 
@@ -452,7 +478,7 @@ findings are S35-S62; the record is in the session notes (`2026-10-09/phase6/sec
     bounded, a listed WebSocket probed at the endpoint's own authority); S45 (a page the agent does not report is never
     acted on); S46 (a regex budget, `BoundedRegex`, D221); S47 (library errors mapped as on the agent path).
   - **Accepted as lows, provisional under B26 Q22 (the owner's word is asked; B28 repeats it), each with its release
-    note** (kept here until `docs/release-checklist.md` is written): S36 part (b) ("`StatementGuard` is a safety net,
+    note** (now also in `SECURITY.md` "Known limitations", marked provisional until the owner's sign-off, B28): S36 part (b) ("`StatementGuard` is a safety net,
     not the boundary: give the data account a read-only role; PostgreSQL sources should set `readOnlyMode: always`");
     S37 option (i) ("run outputs take the process umask; on a shared host run the controller under `umask 077`
     (`skillroy run --out`)"; documentation only); S40, the pinning part ("pin the image and the actions in your copy of
@@ -468,6 +494,111 @@ findings are S35-S62; the record is in the session notes (`2026-10-09/phase6/sec
     `authorise` descriptions read `credential: <redacted> staff, key: code}` there, as they already did in the planner's prompt (a false
     positive of the rule on pack prose; the five scripted session recordings were regenerated, no live call); whether
     the sample's wording should change is the owner's.
+
+### Security review (repeat, pass 2, 2026-10-09)
+
+The second pass of the repeat review B13 asks for before the first release, run on the Phase 6 tree with all eight lenses of
+P6 §12.3 (L1 the control channel, L2 host safety and the instrumentation path, L3 credentials and data channels, L4 embedded web
+views, L5 the model boundary, L6 the model as an actor, L7 Windows and file-system trust, L8 telemetry and evidence at rest;
+L3-L6 as deltas on pass 1's fixes), **one reviewer and one independent sceptic each**, probes in scratch copies, no live model
+call. **L1 and L3-L7 ran on `f546363`** (the tree before the code review's fix wave was integrated into `main`, so that the
+sceptics read a stable tree) and **L2 and L8 on `ce1f41f`** (after it). 39 raw findings (32 from the reviewers, 7 raised by the
+sceptics from claims they broke): **38 confirmed (1 high, 12 medium, 25 low; 18 counted, 16 operator-only, 4 token-holder
+only), 1 refuted (P2-L1-F2, no number), 0 unverified.** Per lens: L1 4, L2 8, L3 2, L4 4, L5 5, L6 5, L7 4, L8 6. The sceptics
+re-rated six (S64 low to medium; S73 token-holder only to counted; S78 low to medium; S92 and S95 high to medium; S97 low to
+medium). The confirmed findings are S63-S100 (the table below maps each to the id the contract's marks keep); the record is in
+the session notes (`2026-10-09/phase6/security/pass2/record.json` and `dispositions.md`). With pass 1 the repeat review stands
+at S35-S100: 66 findings, 2 high, 18 medium, 46 low.
+
+- **The high finding:** the planner handed model-controlled text to an implicit `cmd.exe` on Windows (S93, P2-L7-F3): npm's
+  `claude.cmd` wins the `PATH` search, the repair prompt carries the model's own values raw as the last argument, and the JDK's
+  legacy quoting lets an embedded quote close the wrap, so a model could run a command as the controller's account and expand
+  `%ANTHROPIC_API_KEY%` into the prompt. Fixed: the prompt is the planner's stdin, a `.cmd` or `.bat` planner is refused, the
+  schema argument is pre-quoted by the C runtime's rules (SD, D250-D254); read, not run: there is no Windows host.
+- **The twelve medium findings**, one line each: S63 a token-less process pinned the unauthenticated body budget so a controller
+  call on a new connection failed with a 503 (the body hash now travels in a signed header); S64 the agent read its options
+  file with no owner, permission or link check (counted as operator-only, lifted from low); S67 a confirmed Byteman rule on an
+  unloaded JDK class broke it for the JVM's life; S74 a hook removed from a class whose retransformation threw was no residue, so
+  a stub armed for another copy stubbed the untargeted class; S78 an oversized drain was asked for again every 100 ms; S80 a
+  page's console output reached the JVM whole, at the page's rate; S86 a client's `skillroy_scenario_run` ignored the server's
+  `--hooks` switch; S87 a capture's bytes reached the MCP client through `run.jsonl`; S91 the "neither POSIX nor ACL" refusal was
+  decided per provider, never per volume; S92 `skillroy.bat` ran `findstr` by bare name; S95 `telemetry.yaml` was read with no
+  trust check and alone turned export on; S97 the run-output writers followed planted links.
+- **Dispositions:** every finding of medium or above is **fixed** (contract first, a test that fails on the old code, the review
+  id in the contract's mark), by six fix rounds merged into `main` on 2026-10-09: SC `2ab0f72` (L5, L6: S81-S90), SD `49becf3`
+  (L7 and L3's SQL Server items: S75, S76, S91-S94), SA `3be43b9` (L1: S63-S66; merged with SD by a resolver, the volume rule
+  inside `JarTrust` and the single-channel write in `SecureFiles`), SB `84eeab6` (L4: S77-S80), SE `378b5e0` (L2: S67-S74, and
+  the bootstrap's options file on FAT/exFAT that the SA x SD merge left open: D279), SF `4f9962f` (L8: S95-S100). Their 43
+  decisions are **D244-D286** (SC D244-D249, SD D250-D261, SA D262-D265, SB D266-D270, SE D271-D279, SF D280-D286), after the
+  code review's fix wave (D222-D243). 35 findings are fixed in full; S77 is fixed with a residual; S84 and S94 are left as
+  they are. Nothing is deferred.
+- **Proposed for the owner's acceptance (B28), each with a release note in `SECURITY.md` "Known limitations", marked provisional:**
+  S77's residual (Playwright's driver follows a redirect of the attach's WebSocket handshake while the agent reports no CDP
+  target id; D269), S84 (a loopback `http` model base URL sends the key in clear to whatever holds the port) and S94 (on a
+  Windows with localised built-in account names every owner-only path fails closed). With pass 1's five (S36 part (b), S37
+  option (i), the pinning part of S40, S48, the `CLAUDE_CONFIG_DIR` part of S60) that is eight in B28. Read S84 beside S96 (a
+  telemetry header over loopback `http`, fixed by SF, D281): the key may use loopback `http`, a header may not, by SF's choice;
+  the owner decides the two together.
+- **Behaviour changes to read first:** a request with a body must carry the signed header `X-Skillroy-Body-Sha256` (a controller
+  older than the fix cannot call a newer agent; nothing was released on protocol 0.2); a `.cmd` or `.bat` planner is refused; a
+  telemetry header needs an `https://` endpoint, the default included; `telemetry.yaml` and `inference.yaml` must be the current
+  user's and not writable by others; a run refuses an output directory another user owns or others may write to and never
+  writes through a link or into a file already in place; an options file on a FAT or exFAT volume is refused; a Byteman rule may
+  no longer name a JDK class.
+- **Not verified here:** everything Windows (the ACL branches of `SecureFiles`, `OutputFiles`, `SettingsFiles`, `JarTrust`,
+  `JarCheck` and the bootstrap's `OptionsFileCheck` on a real volume; `skillroy.bat` with a decoy `findstr.cmd`; the planner
+  through `claude.exe` on stdin and `claude.cmd` refused; the pre-quoted schema argument; localised principals), where no host
+  exists; a second OS user (the cross-user windows of S64, S95, S97 are tested with one user, built ACL values and the `Access`
+  seam); SQL Server (the T-SQL consequences of S75 and S76 rest on vendor documentation; the read path's order is proved on
+  HSQLDB and a recording proxy); the real `claude` CLI and the planner's stdin route live (verified offline against a local
+  listener with claude 2.1.286, a repair round through `--resume` not run); whether the planner can read MCP resources under
+  `--tools ""`; the JxBrowser adapter's console budget (the fake only; the kit items 13 and 14 ran against real JCEF 152);
+  Linux `vfat` (not mounted: the image is not privileged); the real agent's `hook.install {replace: true}` against a real
+  residue (the fake agent only); an outside human reader (B26 Q12).
+
+The mapping, S-number to the id the contract's marks keep (`P2-L<lens>-<F|S><n>`; F is the reviewer's, S the sceptic's new
+finding; P2-L1-F2 was refuted and has no number):
+
+| S | Pass-2 id | Severity, reach | Finding | Fixer (decisions) | Disposition |
+|---|---|---|---|---|---|
+| S63 | P2-L1-F1 | medium, counted | a token-less process pins the body budget (503 on new connections) | SA (D262) | fixed |
+| S64 | P2-L1-F3 | medium, operator-only | options file read with no owner, permission or link check | SA (D263) | fixed |
+| S65 | P2-L1-F4 | low, operator-only | no floor on a supplied token's strength | SA (D265) | fixed |
+| S66 | P2-L1-F5 | low, operator-only | spy jar and `modules` paths lack a directory and owner rule | SA (D264) | fixed |
+| S67 | P2-L2-F1 | medium, token-holder-only | a Byteman rule on an unloaded JDK class breaks it for the JVM's life | SE (D276) | fixed |
+| S68 | P2-L2-F2 | low, counted | Byteman engine left half-loaded when the handler cannot arm | SE (D277) | fixed |
+| S69 | P2-L2-F3 | low, counted | `replace: true` loses the implicit remove's `HOOK_VERIFY_FAILED` | SE (D273) | fixed |
+| S70 | P2-L2-F4 | low, counted | partial retransformation at `hook.remove` answered OK; own events over-counted | SE (D272) | fixed |
+| S71 | P2-L2-F5 | low, token-holder-only | Byteman recorders unbounded | SE (D278) | fixed |
+| S72 | P2-L2-F6 | low, token-holder-only | lock-less detach without WARN and count; the install completes into the detached engine | SE (D274) | fixed |
+| S73 | P2-L2-F7 | low, counted | captured strings not passed through `redactText` | SE (D275) | fixed |
+| S74 | P2-L2-S1 | medium, token-holder-only | removed hook with a failed partial retransformation is no residue (stale stub) | SE (D271) | fixed |
+| S75 | P2-L3-F1 | low, operator-only | `SET IMPLICIT_TRANSACTIONS` keeps a lock-holding transaction open (SQL Server) | SD (D260) | fixed |
+| S76 | P2-L3-S1 | low, operator-only | open transaction handed back to a pooled provider connection | SD (D260) | fixed |
+| S77 | P2-L4-F1 | low, counted | the attach re-reads `/json/version` and dials what it names | SB (D269) | fixed; residual proposed |
+| S78 | P2-L4-F2 | medium, counted | an oversized drain asked for again every 100 ms | SB (D268, D270) | fixed |
+| S79 | P2-L4-F3 | low, counted | CDP: a bare-string library value escapes the 1 MiB bound | SB (D268) | fixed |
+| S80 | P2-L4-S1 | medium, counted | a page's console output reaches the JVM whole, at the page's rate | SB (D266, D267) | fixed |
+| S81 | P2-L5-F1 | low, operator-only | `PromptMask.schema` secrecy not carried into nested schemas | SC (-) | fixed |
+| S82 | P2-L5-F2 | low, operator-only | `triage.md` renders provider strings as Markdown | SC (-) | fixed |
+| S83 | P2-L5-F3 | low, operator-only | provider ids unscrubbed and unbounded | SC (D247) | fixed |
+| S84 | P2-L5-F4 | low, operator-only | a loopback `http` base URL hands the key to a port squatter | SC (-) | proposed for acceptance |
+| S85 | P2-L5-S1 | low, operator-only | data keywords of a non-secret property keep secret-named keys | SC (-) | fixed |
+| S86 | P2-L6-F1 | medium, counted | a client's `scenario_run` ignores the server's `--hooks` switch | SC (D249) | fixed |
+| S87 | P2-L6-F2 | medium, counted | capture bytes reach the client through `run.jsonl` | SC (D244, D245, D246) | fixed |
+| S88 | P2-L6-F3 | low, counted | only a step's value scanned for images, to depth 8 | SC (D244) | fixed |
+| S89 | P2-L6-F4 | low, operator-only | `author` has no `--hooks` | SC (D248) | fixed |
+| S90 | P2-L6-S1 | low, operator-only | triage sends a failed step's capture bytes to the model | SC (D244) | fixed |
+| S91 | P2-L7-F1 | medium, operator-only | the 'neither' refusal decided per provider (FAT/exFAT pass as POSIX) | SD (D255, D256, D257, D258, D259, D261, D279) | fixed |
+| S92 | P2-L7-F2 | medium, counted | `skillroy.bat` runs `findstr` by bare name | SD (-) | fixed |
+| S93 | P2-L7-F3 | high, counted | the planner passes model text to an implicit `cmd.exe` | SD (D250, D251, D252, D253, D254) | fixed |
+| S94 | P2-L7-F4 | low, operator-only | built-in principals by English name (fails closed) | SD (-) | proposed for acceptance |
+| S95 | P2-L8-F1 | medium, counted | `telemetry.yaml` read with no trust check | SF (D280, D284) | fixed |
+| S96 | P2-L8-F2 | low, operator-only | a telemetry header over loopback `http` | SF (D281, D286) | fixed |
+| S97 | P2-L8-F3 | medium, counted | run-output writers follow planted links | SF (D282, D283, D284) | fixed |
+| S98 | P2-L8-F4 | low, counted | the environment event carries the discovery directory | SF (D285) | fixed |
+| S99 | P2-L8-S1 | low, counted | `umask 077` does not hold against a pre-created output | SF (D282) | fixed |
+| S100 | P2-L8-S2 | low, operator-only | the planner's MCP child exports under `telemetry.yaml` | SF (-) | fixed |
 
 ## Base spikes
 
@@ -1472,7 +1603,7 @@ for the wrong reason (Byteman already loaded; a copy of the toy left by another 
 merged JVM they now skip with a message, and the module's counts are to be read from a run without `-Dtest`. A matrix
 run of the Java 8 leg must read the reports' counts and `java.version`, not the exit code.
 
-**What was not run:** the full Linux matrix of the integrated tree (arm64 twice, amd64 once; the packages ran the
+**What was not run (at the packages' reports; the matrix of the final tree is in the checklist below):** the full Linux matrix of the integrated tree (arm64 twice, amd64 once; the packages ran the
 targeted legs above only, and the first arm64 round of the integrated tree was started on 2026-10-09 and is not
 recorded here); any amd64 image leg of the hooks module and the home's ITs; anything on a Windows host (BW's
 `ci\run-on-windows.cmd` and every item of `design/phase6-contracts.md` §9.5, §13.3); a real OpenTelemetry Collector
@@ -1480,6 +1611,66 @@ recorded here); any amd64 image leg of the hooks module and the home's ITs; anyt
 full `InferenceEndToEndIT` and `ScenarioDRecordIT` legs that CP did not change; the Java 8 target legs of the web host
 and of the lending desk, and the lending desk's other load modes, after the FX-1 changes; the real JxBrowser product
 (its channel bound is tested on the fake); any live model call (none was made or needed).
+
+#### Phase 6 code review (2026-10-09)
+
+The method of Phases 2 to 5: three lenses, each run by one reviewer on the committed tree (`f13657d`, the build with its
+documents) with a shared brief, and each verified by a sceptic who tried to refute every finding with probes in a copy of the
+tree and added what the lens had missed. **Contract fit** (L1): 5 findings (0 high, 1 medium, 4 low); the sceptic restated F1
+and F5 (F5 raised from low to medium) and added S1, S2 and S3 (all medium). **Host safety, secrets and bounds** (L2): 11 findings
+(0 high, 1 medium, 10 low); the sceptic added S3 (high), S1 and S4 (medium) and S2 (low). **Tests, determinism and the matrix**
+(L3): 3 findings (low); the sceptic restated all three and added S1, S2 and S3 (low). In all **19 raw findings and 10 added by
+the sceptics, none refuted: 1 high, 8 medium, 20 low** (the reports are in the session notes, `2026-10-09/phase6/review/`).
+The most important:
+
+- **A hook whose classes retransform only partly left live advice in a class the ledger forgot** (L2-S3, high, found by the
+  sceptic): an install refused at step 6 while some classes had already taken its advice answered the refusal and released the
+  slot, so a stale site key could still fire. Now a refused hook is taken out class by class before the call answers, a class
+  that may keep its advice keeps its ledger entry, and the id of such a residue is refused until a remove restores the class
+  (D236).
+- **`minimal` telemetry still carried the scenario id, the step id, the pack version and the pack's vocabulary** (L1-F1 = L2-F9
+  and L1-S1, medium): the exact list of dropped names did not name the correlation id or the sibling attributes. Now `minimal`
+  is an allow-list with hash by default (D230).
+- **Byteman's uninstall was not bounded by the detach budget** (L1-F5 = L2-S4, medium): 3016 ms against a 1000 ms budget, and
+  module code ran in a worker after the module's loader was cut. Now a bounded lock and a detaching state (D222).
+- **`HookInstaller` skipped the armed-stub refusal** whenever step 1 or 2 ended the install (L1-S2, medium): a replay could run
+  past an armed stub. Now step 0 reads `hook.health` first (D231).
+- **The `hooks` fact root's `last` was stale after 1000 fires** (L1-S3, medium): it took the oldest-first page's last entry as
+  the newest, and `count` stopped at 1000. Now the root pages (D232).
+- **Both encoders iterated JDK collections and views whose iteration takes a lock or runs the application's `compareTo`**
+  (L2-F1 = L2-S1, medium): a `Vector`, a blocking queue, a `subSet` view of a `TreeSet`. Now exact JDK allow-lists in the hooks
+  module and in the Byteman module, and a bit-length guard on numbers (D224, D237).
+- The lows: the Byteman lint's reasons against its list, `getMessage()` of an application exception, a constructor entry failing
+  every compile, a failure's text not redacted, `hooks.maxClasses` ranges, `JarCheck` following a link and skipping the owner,
+  an unbounded latch in a test, a skip-always guard that turned a non-fresh JVM into a green skip, check 18's self-check, order
+  67's inability to see `secretArgs`.
+
+The fix wave: four fixers in worktrees from `edbc325`, integrated on a branch (`p6/int`) while pass 2's group a read the tree;
+each with a report, the tests that fail on the old code and the contract text first (decisions D222-D243, B27):
+
+| Fixer | What it fixed | Fixer's commit | Merge |
+|---|---|---|---|
+| FB the Byteman modules (D222-D229) | all findings of the Byteman half: the detach budget (L1-F5, L2-S4), the encoder's allow-list and number guard (L2-F1, L2-S1, L2-F3), `maxClasses` one range (L1-F4, L2-F4), the class bound before the load (L2-F5), `JarCheck`'s owner rule and real path (L2-F6, L2-S2), the lint's limits documented (L2-F8), `FreshJvm` and `failIfNoTests` (L3-S2, L3-F1). Native 4038 surefire + 439 failsafe, 0 failures; image: Java 8 test JVM Byteman 37 + 10, `BytemanIT`, the hooks leg 37 on both Javas | `5ed6780` | `f9c8033` |
+| FC controller and telemetry (D230-D233) | `minimal` as an allow-list (L1-F1, L2-F9, L1-S1), the armed-stub check as step 0 (L1-S2), the `hooks` fact root paging (L1-S3), order 67 strict plus the headless `SignOnCheckedHeadlessIT` (L3-F3), check 18's kinds (L3-S3). Native 4029 + 440, 0 failures; image: hooks legs on both Javas | `9cd9183` | `f0e8477` |
+| FD the sample's display test (D234-D235) | the typed-keys display flake (below), fixed in the test; the Enter semantics recorded in P1's sample UI bullet | `797b5ae` | `ffa83cd` |
+| FA the hooks engine and the agent home's tests (D236-D243) | L2-S3 (high), L2-F7 (the slot and transformers released after an install of nothing), L2-F2/S1 (hooks half: `Capture`'s allow-list), L1-F2 (failure texts redacted), L1-F3 (`<init>` a per-hook state), L3-F1/F2/S1 (`failIfNoTests`, `assumeFreshJvm`, a bounded latch), the `BigDecimal` bit-length guard, `HookChecks` order 65 (the desk's unmodifiable list is one handle), the matrix's `OptionalModulesIT` on Java 8; L2-F10 and L2-F11 recorded in the contract. Native 4473 / 0 / 0 / 479; image: Java 8 test JVM 1356 / 0 / 0 / 8, hooks end-to-end 73 / 0 on both Javas | `55fe538` | `ce1f41f` |
+
+After the four, the native reactor on `p6/int` (= `main` at `ce1f41f`) was green: 4496 tests, 0 failures, 0 errors, 480 skipped.
+
+**The two findings of the first matrix round, fixed in the fix wave.** (1) `OptionalModulesIT.theDefaultHomeLoadsNoClassOfTheHooks`
+failed on the Java 8 test JVM with a `NumberFormatException` in `ChildJvm.pid`: an auto-flushing `PrintStream` on Java 8 writes
+`pid=3403` and its newline as two writes, and the JVM's whole `-verbose:class` line lands between them; `ChildJvm.pid` now takes
+the leading digits (FA, D243; `ChildJvmIT` holds the matrix's exact string). (2) `LendingUiDisplayTest.typedKeysFillTheEntryFieldAndEnterSubmitsIt`,
+twice in two days: a race in the test (the Enter was sent before the freshly shown frame had given the entry field the focus,
+and `JTextField`'s Enter acts on the field that last had it), not the A39 focus loss and not an application defect; the test
+waits for the focus and a new test pins the lost Enter (FD, D234, D235): **5 failures in 240 runs before, 0 in 380 after** (arm64
+image, one fresh JVM per run, Java 8 and Java 25, warm and fresh containers). The same property of `swing.type` DISPATCH with
+`enter` is gap 60.
+
+**Status of the checklist.** The security review item: pass 1 and pass 2 run, every medium and high fixed; the sign-off is B28,
+the owner's. The code review item is ticked below; the matrix lines carry `[final matrix]`.
+
+**Checklist.**
 
 - [x] `skillroy-agent-spy` and `skillroy-agent-hooks`: hook engine, probes, health, hook-catalogue format, post-detach
   byte verification (BS3 passed with conditions 2026-10-09); built and tested 2026-10-09 (HK, CP): installed and removed
@@ -1505,9 +1696,9 @@ and of the lending desk, and the lending desk's other load modes, after the FX-1
   (`ClassLoadingProbeTest`); `TelemetryEndToEndIT` green in the image on both Javas; [ ] the live, opt-in run against a
   real OpenTelemetry Collector (§13.4)
 - [ ] Repeat the security review before the first release (the findings of 2026-10-02 are closed by H1-H3 in
-  Phase 1.x): **pass 1 built** 2026-10-09 (S35-S62 fixed or accepted as low, "Security review (repeat, pass 1)" above);
-  pass 2 (eight lenses on the Phase 6 tree), its record and dispositions, the matrix after the fixes and the **owner's
-  signature (B28)** remain, the signature being the owner's alone
+  Phase 1.x): **pass 1 and pass 2 run, every medium and high fixed; the sign-off is B28, the owner's** (S35-S62 and S63-S100,
+  "Security review (repeat, pass 1)" above and "(repeat, pass 2)" below; eight lows proposed for acceptance with release
+  notes; the matrix after the fixes is the checklist line below; the signature is the owner's alone)
 - [x] Tenant-pack overlay proven on a second variant of the sample lending desk (the branch edition): resolvers,
   constants, the allow-list and the hook catalogue overridden, scenarios A, B and E unchanged; built and tested
   2026-10-09 (CP: `BranchEndToEndIT`, both halves, E's negative showing the overlay's catalogue is needed)
@@ -1515,18 +1706,21 @@ and of the lending desk, and the lending desk's other load modes, after the FX-1
   packages' image runs, Java 8 and Java 25 targets); the sample scenarios pass unchanged with hooks enabled and with hooks
   disabled, and on a JDK 25 target loaded through `JAVAAGENT` (**met** in the same legs, E being the designed exception:
   `PASS` with hooks, `DEGRADED` without); on Windows the agent loads through `JAVAAGENT` as the logged-on user (**cannot
-  be met without the Windows host**, contract §14); the repeated security review is signed off (**the owner's**). Not
-  ticked: two criteria wait, and the integrated tree's Linux matrix is still to run
-- [ ] The Phase 6 code review (three lenses, a sceptic each) on the integrated tree and its fix wave (tags `FA`-`FD`)
-- [ ] The Linux matrix of the integrated tree (arm64 twice, amd64 once; Java 8 and Java 25 targets; the agent side on a
-  Java 8 test JVM, the matrix command's `-pl` list now seventeen modules, see "Environment notes")
-- [ ] `SECURITY.md` and `docs/release-checklist.md` (D148, §12.8) are not in the tree: no package wrote them; the
-  release notes of the five accepted lows are kept under "Security review (repeat, pass 1)" until they are
+  be met without the Windows host**, contract §14); the repeated security review is signed off (**the owner's**, B28). Not
+  ticked: two criteria wait (the Windows host and the owner's signature); the Linux matrix of the final tree: [final matrix]
+- [x] The Phase 6 code review (three lenses, a sceptic each) on the integrated tree and its fix wave (tags `FA`-`FD`):
+  done 2026-10-09 ("Phase 6 code review (2026-10-09)" above; D222-D243)
+- [ ] The Linux matrix of the final tree (arm64 twice, amd64 once; Java 8 and Java 25 targets; the agent side on a
+  Java 8 test JVM, the matrix command's `-pl` list now seventeen modules, see "Environment notes"): [final matrix]
+- [x] `SECURITY.md` and `docs/release-checklist.md` (D148, §12.8): written 2026-10-09 (`edbc325`: no package had written
+  them); the release notes of the lows proposed for acceptance (pass 1's five, pass 2's three) are in `SECURITY.md`
+  "Known limitations", marked provisional until the owner's sign-off (B28)
 - [ ] The amd64 image legs of the hooks module and the home's ITs (HK: only arm64 run)
 - [ ] (later, gap 55) `RpcResult.startedAt` for an exact agent span; (later, gap 56) OpenTelemetry metrics and logs
-- [ ] (code review) `minimal` keeps the scenario id inside `skillroy.correlation_id` (the exact list does not name it,
-  D166); the BSP worker thread's name (D163); whether `re-resolve` and `triage` should export more than the root span
-  (gap 59, D168)
+- [x] (code review) `minimal` keeps the scenario id inside `skillroy.correlation_id`: fixed by FC, D230 (an allow-list,
+  hash by default; D166's clause superseded)
+- [ ] (code review) the BSP worker thread's name (D163); whether `re-resolve` and `triage` should export more than the
+  root span (gap 59, D168)
 - [ ] (owner) S52 refuses a configuration that worked before (a configured model id outside the price table; the
   alternative is a warning at open); D210: the key rule rewrites the sample's `signOn` and `authorise` descriptions in the
   tools and the planner's prompt, and whether the sample's wording should change
@@ -1572,8 +1766,9 @@ change that fits before Phase 2. "Closed (built)" means the change was built in 
 without a new phase; their Phase column still shows where they were first placed. "Closed (built)" marks the gaps
 Phase 1.x closed on 2026-10-02; they stay in the table until the merged tree's verification is recorded. Gaps 34-47
 were recorded by Phase 4 (`design/phase4-contracts.md` §13, which also says what Phase 4 did for gaps 21, 22, 28 and
-31); "P4 §n" is a section of that contract. Gaps 50-57 were numbered by the Phase 6 contract (§15.2, "P6 §n") and 58-59 by
-its build; the contract's §15.2 also says what Phase 6 did for gaps 31, 32, 33 and 49.
+31); "P4 §n" is a section of that contract. Gaps 50-57 were numbered by the Phase 6 contract (§15.2, "P6 §n"), 58-59 by
+its build and 60-75 by the Phase 6 code review's fix wave and the security pass 2 fix rounds (their sources are named in
+the rows); the contract's §15.2 also says what Phase 6 did for gaps 31, 32, 33 and 49.
 
 Closed by Phase 1, and therefore no longer listed: the provider-executed form of `DataSourceProvider`,
 `SyncPolicy.promptTopics`, cleanup calls and `recover`, `DomainPack.preflight()`, guarded expectations with
@@ -1642,6 +1837,22 @@ reflectively callable `EmbeddedAgent.start`, and redaction of secrets in JVM arg
 | 57 | A Byteman the host loaded on its own command line cannot be reused by the module | P6 §7.4; the module reuses only a `Retransformer` its own earlier instance parked | none: documented | open (documented limit) |
 | 58 | After another agent's `redefineClasses`, HotSpot reconstitutes a class with the constant pool it merged across redefinitions | The hooks module verifies a restore relative to the first bytes because of it (D172); whether a Byteman restore meets the same on a real redefinition, and whether a Java 8 JVM behaves alike, is not measured (new, HK) | Measure on both Javas with a second agent that redefines | open |
 | 59 | `re-resolve` and `triage` export their root span only, and the planner's `skillroy mcp` child exports nothing | Their model calls are in their own ledgers and reports; spans beyond the root and a child started with telemetry are a further egress decision (D168; new, TL) | Pass the observer through the batch job and triage; options to the child | later |
+| 60 | `swing.type` with mode `DISPATCH` and `enter: true` acts on the text field that last had the focus, not necessarily the target | `JTextField`'s Enter binding submits the text field that most recently had the focus (a `JPasswordField` is a `JTextField` too), so a dispatched Enter can submit another field or none; P1 "Type modes" and `Typing`'s Javadoc do not say so, and `SwingDisplayTest.typeDispatchSendsKeyEventsWithoutFocus` passes only because its field had the focus (FD's report) | Document it in P1 "Type modes" now; later have DISPATCH on a `JTextField` that has not had the focus fall back to `postActionEvent()` and report it. `SET` mode (what the sample scenarios use) is not affected | documentation now, a fix later |
+| 61 | `Page` events whose URL a page chooses (`Page.navigatedWithinDocument` through `history.pushState`) are queued within the hand-off bound but not rate-budgeted | D266's budget covers console events only (SB's report, "for a later pass") | A bucket for page events too, if a page shows the need | later |
+| 62 | `web.evaluate`'s wrapper text and a thrown error's description remain page-sized first copies | One per call, script primitives only; the library guard (D268) bounds every library call but not these (SB) | Bound the wrapper at its source as the guard does | later |
+| 63 | `hook.events` accepts an `id` that is not a hook id | A comma in the `id` widens the topic filter to every topic on the bus; no actor gains (P2-L1-F2 was refuted), but P6 §4.2 reads "the hook's emits, or every `hook.*` topic" (SA's report) | Refuse an `id` that fails `HookSpec.ID_REGEX` (`INVALID_PARAMS`) and keep only `hook.*` topics | conformance, later |
+| 64 | One container predicate for the hooks module's `Capture` and the Byteman `BindingEncoder` | The two allow-lists are identical copies (D224, D237) and can drift (FB, FA) | Move the predicate into `agent-api` | later |
+| 65 | A `FAILED` ledger entry keeps `restoring = true` | A later install of another id on that class is refused "the class was not retransformed" until `hook.remove {}` restores it (older engine behaviour found by FA; its other observation, `own` counted for every class of a batch that threw, was fixed by SE, D272) | Clear the flag when a restore is retried or the entry is dropped | later |
+| 66 | A `Code`-attribute scan for instructions that reference a `Spy` member | Would make the residue check exact in D172's corner, reference bytes that already name `Spy` (D241; FA) | About 150 lines of class-file decoding in `agent-api`, shared with Byteman's verification | later |
+| 67 | A nested-schema variant of `SessionDesk.withSecretSchema` | SC left it out so that the committed session recordings do not change; `PromptMaskSchemaTest` covers the nested shapes | Add the variant and regenerate the recordings | later (SC) |
+| 68 | Byteman: a copy of an accepted application class name defined after a `rule.submit` is not counted against `hooks.maxClassBytes` / `hooks.maxMethods`, and a name only a sibling module's jar holds is not looked up by the class-bound gate | A load-time transform is not the stop-the-world pause the bound exists for (SE; recorded in P6 §7.3) | Count late copies if a target shows the need | open (documented limit) |
+| 69 | A capture cut that splits a user-info password before its `@` may leave its first characters | `redactText` runs after the cut (D275; SE); a wider window before the cut would read beyond the capture's input budget on the application's thread | none: documented in P6 §4.3 | open (documented limit) |
+| 70 | `OutputFiles`: a directory shared with a group can have an entry renamed by a member between the check and the open; a link in a directory above the one checked is followed; `Triage` reads a run's `failure/` files following links (a read) | Written into P2 §11.3 (SF) | none: a group-shared directory is the operator's choice | open (documented limit) |
+| 71 | A volume mounted with ignore-ownership whose type keeps permissions (APFS or HFS+ "Ignore ownership on this volume") is not detected; an unset `%SystemRoot%` would make the `.bat`'s `findstr` resolve under the current drive's root | The JDK does not expose mount options; Windows always sets `%SystemRoot%` (SD) | none: documented | open (documented limit) |
+| 72 | P6 §10.4's `hooks` event row says "installed and unavailable ids" while the code carries a count of the unavailable ones | A documentation difference found by the code review's L1 sceptic and left by FC | Reword the row, or send the ids | later |
+| 73 | The sample's two older focus tests (`iconKeyNeedsFocusButPerformAlwaysWorks`, `aMouseClickOnAKeyDeliversItsActionAndHandsTheFocusBackToTheEntryField`) request the focus once and print "not checked" if it does not come in 5 s | `awaitFocus` could replace both waits (FD) | Use `awaitFocus` | optional |
+| 74 | The JxBrowser adapter's console budget (D266) runs against the neutral fake only | No product here (SB) | The kit against the real product, with gap 41 | with gap 41 |
+| 75 | P4 §4.3 (`drain(900000)` in the tap poller sentence) and §4.6 (`DRAIN_CHARS` 900000) still carry the figure before pass 2 | The pass-2 paragraphs beside them state 500000 (D268); SB did not rewrite the older sentences | Reword the older sentences | documentation |
 
 Small items for the module owners, none of them a contract matter: `swing.snapshot` shows Swing's own made-up
 names such as `null.layeredPane`; module version strings are inconsistent (`0.1.0` and `0.1.0-SNAPSHOT`); in
@@ -1738,6 +1949,30 @@ Kept generic on purpose: nothing here names a machine, a user or a local path.
   - The neutrality check scans agents' worktrees under `.claude/worktrees` as well; run it on a `git archive` export of
     the tree, not on a tree with worktrees inside.
 
+- **Phase 6 fix rounds (2026-10-09; FA-FD, SA-SF): test traps and their guards.**
+  - Surefire traps and their guards: `failIfNoTests` of the hooks module comes from `skillroy.failIfNoTests` (default true)
+    with the profile `single-test`, activated by `-Dtest`; both Byteman POMs take it from the same property with the profile
+    `merged-test-run` (D228, D240); `Harness.assumeFreshJvm` and the Byteman `FreshJvm` skip a dedicated-JVM test only under
+    `-Dtest` and fail otherwise (D229, D240). An execution that runs no test therefore fails the build by itself. Still read
+    **counts, not exit codes** on the Java 8 test-JVM leg: after the pass-2 fixes the hooks module has **70 tests in 17 report
+    files** (eight fresh-JVM classes), the Byteman module **43 in 12** and `-byteman-sys` 10 in 3, 0 skipped, every report's
+    `java.version` `1.8.0_*` (the earlier figures in this file, 64 in 15 and 37 in 10, are those before SE). `-Dtest` runs of the
+    in-process Byteman tests need `package` or `verify` (at `test` the sys jar is still `target/classes`).
+  - The matrix scripts run `mvn -fae` (fail at end): without it the first arm64 round's java8-targets leg stopped at the sample
+    application module after the typed-keys failure and its lending ITs on Java 8 targets did not run until the leg was re-run.
+  - `SignOnCheckedHeadlessIT` (failsafe, no display, about 2 s, in the normal `mvn verify`) needs the agent home unpacked at
+    `pre-integration-test` and copies it to `target/it-hooks-home` without the lending module; `ChildJvmIT` replaces the
+    `ChildJvmTest` that never ran (the `pom` packaging of `skillroy-agent-dist` binds no surefire).
+  - The real-volume tests (`PermissionlessVolumeTest` in the controller and the agent core, `JarTrustTest`, `OptionsFileVolumeTest`)
+    attach FAT and exFAT disk images with `hdiutil` into the test's temporary directory (about 3 s per class) and are skipped
+    where `hdiutil` is absent, so they run natively on macOS and not in the Linux image (D261).
+  - The CI example: if it ever adds `telemetry.yaml` or `inference.yaml` beside `$RUNNER_TEMP/credentials.yaml`, the container
+    runs as root and the file is the runner user's, so the owner rule of D280 refuses it; write it with `--telemetry-file` from
+    inside the container or `chown` it.
+  - An operator's options file that holds a `token` must be owner-only; one without may be readable by others; a discovery
+    directory below a group- or world-writable parent without the sticky bit is refused (choose another `--discovery-dir`); a
+    Byteman rule may not name a JDK class (`RULE_REJECTED("<name>: class is the JDK's")`).
+
 ## Walls
 
 Work that cannot proceed without the project owner, or without something only the owner can provide.
@@ -1747,8 +1982,8 @@ Work that cannot proceed without the project owner, or without something only th
 | The push | B1 | The initial commit exists (2026-10-06); the push to the private remote `Skillroy-AI/skillroy-test-java` waits for the owner's word. History is permanent once pushed |
 | Model provider API key | B7 | **Resolved 2026-10-08, and the live items done the same day.** The first key (organisation-level) was refused by the API without an `anthropic-workspace-id` header (BS13, the night of 2026-10-08), so nothing live ran that night and the profiles were marked not built (D110). The owner's workspace-scoped key, exported as `ANTHROPIC_API_KEY` in the operator's own environment only (never a file of this repository, never a property, never a command line; the contract's §2.3), answered the models endpoint with no workspace header; in the afternoon of 2026-10-08 it carried BS13's live part, scenario D's live re-record, the live profiles and §15.3, scenario C's authoring and the nightly job's live figures ("Phase 5, the live items" above), about USD 2.05 in all. Nothing waits on it. |
 | A JxBrowser licence | B9 | Real verification of the `jxbrowser` adapter. The adapter exists (built 2026-10-07) and passes the contract kit against the neutral fake, plainly and with the init-script chaining option; the kit (`skillroy-agent-web`'s `test-jar`) runs against the real product only in a repository that holds a licence, outside this repo, through a `WebAdapterFixture` over a real engine. That run also settles three member names of the descriptor and whether some vendor calls can block (gaps 41 and 47). Phase 4 reached its public exit without it. The owner (2026-10-06): a licence is available, so that verification can follow in the private overlay's repository |
-| A Windows host | B13, Phase 6 | Verification of the fixes S7 and S15 (not verified on Windows); the Windows path of Phase 6, built 2026-10-09 where Linux can test it and **waiting for the host** for: `ci\run-on-windows.cmd` run twice without a flake and the list of `design/phase6-contracts.md` §9.5 and §13.3 (`bin\skillroy.bat` run, the planner started through a launcher path and a `--pack` path with a space, which decides the quoted `cmd.exe` form, the ACL branches checked with `icacls`, `JAVAAGENT` as the logged-on user with the `SEMANTIC`, `ACTION`, `COMPONENT`, `DISPATCH` rungs and paint capture, one cross-session attach for its failure text, the 5 s start-up margin), and the exit criterion that names Windows; when it has run, the "not verified on Windows" marks come off `README.md`, `SECURITY.md`, `design/threat-model.md` §8, P1 §2.5 and this file. The matrix table rows for it are `| windows, Java 25 targets | ci\run-on-windows.cmd | … |` and `| windows, Java 8 targets | ci\run-on-windows.cmd (SKILLROY_JDK8_HOME) | … |`. The owner (2026-10-06): later, a Windows 11 machine, which also runs the tenant layers' testing under Windows and under WSL2 |
-| The owner's word on Phase 6 | B26, B27, B28 | `B26 ok, B27 ok` (or the vetoes by name), among them Q1's wording of the hard rule in `CLAUDE.md` (`NOTICE` and `CONTRIBUTING.md` carry it already) and Q22's five accepted lows; then, after pass 2 of the repeat security review, the signature of B28. Nothing is blocked meanwhile (the build proceeded on the provisional answers), but a veto changes the code the answer names |
+| A Windows host | B13, Phase 6 | Verification of the fixes S7 and S15 (not verified on Windows); the Windows path of Phase 6, built 2026-10-09 where Linux can test it and **waiting for the host** for: `ci\run-on-windows.cmd` run twice without a flake and the list of `design/phase6-contracts.md` §9.5 and §13.3 (`bin\skillroy.bat` run, the planner started through a launcher path and a `--pack` path with a space, which decides the quoted `cmd.exe` form, the ACL branches checked with `icacls`, `JAVAAGENT` as the logged-on user with the `SEMANTIC`, `ACTION`, `COMPONENT`, `DISPATCH` rungs and paint capture, one cross-session attach for its failure text, the 5 s start-up margin; and, added by the pass-2 fix rounds, `bin\skillroy.bat` run from a directory holding a decoy `findstr.cmd` and the runner from a checkout holding a decoy `mvn.cmd`, the planner through the native `claude.exe` with the prompt on stdin and npm's `claude.cmd` refused with the remedy, the schema's pre-quoted argument read back intact, a command line near 32767 characters, a FAT32 and an exFAT volume refused by every owner-only member, the new ACL branches of `OutputFiles`, `SettingsFiles`, `JarTrust`, the ancestor rule and the bootstrap's `OptionsFileCheck`, and the localised-Windows case of S94), and the exit criterion that names Windows; when it has run, the "not verified on Windows" marks come off `README.md`, `SECURITY.md`, `design/threat-model.md` §8, P1 §2.5 and this file. The matrix table rows for it are `| windows, Java 25 targets | ci\run-on-windows.cmd | … |` and `| windows, Java 8 targets | ci\run-on-windows.cmd (SKILLROY_JDK8_HOME) | … |`. The owner (2026-10-06): later, a Windows 11 machine, which also runs the tenant layers' testing under Windows and under WSL2 |
+| The owner's word on Phase 6 | B26, B27, B28 | `B26 ok, B27 ok, B28 ok` (or the vetoes by name), among them Q1's wording of the hard rule in `CLAUDE.md` (`NOTICE` and `CONTRIBUTING.md` carry it already), Q22's five lows and the three more of pass 2 (B28 lists the eight with their release notes), and the signature of the repeat security review (B28). Nothing is blocked meanwhile (the build proceeded on the provisional answers), but a veto changes the code the answer names |
 
 Not walls any more: the licence, the holder's name, the first commit and the remote (B1), the final names and the
 domain behind the groupId (B2) and the sample domain with its deposits (B10) are decided. B17-B20 are confirmed
@@ -1788,14 +2023,14 @@ The review items of the end-to-end review, now decided (gap numbers refer to the
    glance"). Still open there: the native reason why the Java 8 toolkit thread does not flush an EDT-issued focus request
    while idle, and the garbage-collection-dependent skip of `SwingDisplayTest.refBecomesStaleOnceTheComponentIsCollected`
    (3 of 60 runs on 2026-10-08, once under emulation on 2026-10-03).
-5. **Phase 6 is built** (2026-10-09; six packages; `design/phase6-contracts.md` as built; B26 and B27 provisional).
-   In this order: (a) the Linux matrix of the integrated tree (arm64 twice, amd64 once; the first arm64 round was
-   started on 2026-10-09), reading the reports' counts and `java.version`, not only the exit codes; (b) the Phase 6 code
-   review (three lenses, a sceptic each) and its fix wave, whose decisions join B27 from D222; (c) pass 2 of the repeat
-   security review (eight lenses, L3-L6 as deltas), its record and dispositions, with `SECURITY.md` and
-   `docs/release-checklist.md` written beside it (D148; neither is in the tree yet); (d) then **B26 and B27** for the
-   owner (`B26 ok, B27 ok`, or the vetoes by name; two effects to read first: S52 and D210) and, after pass 2, the
-   signature of **B28**; (e) the Windows host, when it exists: the §9.5 list and the exit criterion that names Windows.
-   Open from the packages: the amd64 image legs of the hooks module and the home's ITs; a real OpenTelemetry Collector
-   (§13.4); gaps 53, 54, 58 and 59 (measurements and spans beyond the root); the code-review questions of D163, D166
-   and D168; S46 item 4.
+5. **Phase 6 is built, reviewed, fixed and security-reviewed twice** (2026-10-09; six packages, four review fixers, six
+   security fixers; `design/phase6-contracts.md` as built; B26 and B27 provisional, B28 open). In this order: (a) **B26, B27
+   and B28 for the owner** (`B26 ok, B27 ok, B28 ok`, or the vetoes by name; effects to read first: S52, D210, the five
+   behaviour changes of the fix rounds in B27, and the eight lows B28 puts to the owner with their release notes; S84 beside
+   S96); (b) **the push**, on the owner's word; (c) the Windows host, when it exists: the §9.5 list, the exit criterion that
+   names Windows and the host items the fix rounds added (`skillroy.bat` with a decoy `findstr.cmd`, the planner through
+   `claude.exe` on stdin, localised principals, FAT32 and exFAT); (d) **the live check of the planner's stdin route** (P5
+   §15.3) with the key, a repair round through `--resume` included; (e) Phase 7.
+   Open from the packages and the fix rounds: the amd64 image legs of the hooks module and the home's ITs; a real
+   OpenTelemetry Collector (§13.4); gaps 53, 54, 58 and 59 (measurements and spans beyond the root) and 60-75; the
+   code-review questions of D163 and D168; S46 item 4.

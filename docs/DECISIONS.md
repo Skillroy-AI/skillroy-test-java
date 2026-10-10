@@ -1,6 +1,6 @@
 # Decisions: base framework
 
-Decisions for the base framework (`skillroy-test-java`), as of 2026-10-09 (B1-B27). The project owner answered B1-B14
+Decisions for the base framework (`skillroy-test-java`), as of 2026-10-09 (B1-B28). The project owner answered B1-B14
 on 2026-10-02; each entry records the answer, what it changed, and what the build has established. B15 and B16 follow
 from those answers. B17 and B18 were taken without the owner, on the evidence of the security review and of the
 end-to-end review, B19 as the answers to the open questions of the Phase 2 contract and B20 as those of the Phase 3
@@ -9,7 +9,7 @@ base stays restrictive by default; a private overlay may override it"), and answ
 B10 and B12. **B21** (the answers to the fifteen questions of the Phase 4 contract) was taken without the owner later
 on 2026-10-06 and **confirmed by the owner on 2026-10-07** without a veto. **B22** (the eleven decisions the Phase 4
 build and its review took on their own, the contract's D59-D69) was taken without the owner on 2026-10-07 and
-**confirmed by the owner the same evening** (`B22 ok`). **B23** (the Phase 5 contract's eighteen answers, `design/phase5-contracts.md` §17, Q11 withdrawn) and **B24** (the eighteen decisions of its build and review, D88-D104 and D110) were taken without the owner on 2026-10-08 and **confirmed by the owner the same day** (`B23 ok`, `B24 ok`). **B25** (the live session's three decisions, D111-D113) was taken without the owner in the afternoon of 2026-10-08 and **confirmed by the owner on 2026-10-09** (`B25 ok`). **B26** (the Phase 6 contract's twenty-two answers, `design/phase6-contracts.md` §17) was taken without the owner on 2026-10-09 and is **provisional**; the owner asked for progress the same day, so the build proceeded on it, and **B27** (the 62 decisions of that build, D160-D221) is provisional too. Every decision stays changeable
+**confirmed by the owner the same evening** (`B22 ok`). **B23** (the Phase 5 contract's eighteen answers, `design/phase5-contracts.md` §17, Q11 withdrawn) and **B24** (the eighteen decisions of its build and review, D88-D104 and D110) were taken without the owner on 2026-10-08 and **confirmed by the owner the same day** (`B23 ok`, `B24 ok`). **B25** (the live session's three decisions, D111-D113) was taken without the owner in the afternoon of 2026-10-08 and **confirmed by the owner on 2026-10-09** (`B25 ok`). **B26** (the Phase 6 contract's twenty-two answers, `design/phase6-contracts.md` §17) was taken without the owner on 2026-10-09 and is **provisional**; the owner asked for progress the same day, so the build proceeded on it, and **B27** (the 127 decisions of that build, of the code review's fix wave and of the security fix rounds, D160-D286) is provisional too; **B28**, the sign-off of the repeat security review, is the owner's and open. Every decision stays changeable
 until the first public release, at a cost that grows with the code written on it. Decisions that concern one tenant
 application live in that tenant's private repo, not here.
 
@@ -60,7 +60,8 @@ review items of the end-to-end review, and `Sn` the confirmed findings of the se
 | B24 | Phase 5 build and review decisions | D88-D104 and D110 of `design/phase5-contracts.md` §16, taken by the orchestrator during the build and the review's fix wave on 2026-10-08 | Taken without the owner 2026-10-08, **confirmed by the owner the same day**: the Anthropic Java SDK pinned to its current line (2.70.0, MIT) with the client built explicitly and the gateway retrying within its own deadline, MCP as `mcp-core` + `mcp-json-jackson2`; a `confirm` argument of any call sent as `_meta.confirm`; a tier (b) row completed by the pack's `ValueLoader`; the inference record in the ledger entry's details; a verb/primitive tool-name collision resolved by the suffix `_primitive`; the rationale and rejections through `ResolveContext` seams into the provenance and the bindings file; a credential declarable for a session's resolve; the CLI session recovering the target when it closes after a mutating call. From the review's fix wave: a plan run on a client's behalf checked against the server's projection and evaluated on masked values, verb tools reaching a never-offered primitive withheld (D96); MCP exports always `REQUIRED` (D97); `web.evaluate` and `web.waitFlag` offered only with `--allow-evaluate`, never to the planner (D98); `data_query` guarded by an allow-list copy with personal and masked columns unreferenceable (D99); the allow-list checked against the source at bind, load and server start (D100); a session's tier (b) resolves metered on the session budget (D101); a failed gateway call as a ledger entry (D102); the planner's brief exempt from the mask, its vocabulary masked (D103); the MCP server running the allow-list check at start only where the target offers `data.query`, an unreachable source not read rather than refusing the start (D104); the live profiles and §15.3 marked not built until a key works (D110) | Built 2026-10-08 (waves 1, 2a, 2b, 2c, the matrix fix, the review's fix wave; `TODO.md`) | **Confirmed by the owner 2026-10-08, all eighteen** |
 | B25 | The live session's decisions (D111-D113) | as taken | confirmed 2026-10-09 | built and run live 2026-10-08 | – |
 | B26 | Phase 6 contract answers (22 questions: the B4 carve-out's wording, Byteman in process behind BS14, the overlay SPI, the Windows host, telemetry egress, the review's sign-off, SECURITY.md, pass 1's four decision amendments and five accepted lows) | the §17 answers | provisional 2026-10-09 | built 2026-10-09 on the provisional answers (`TODO.md`, "Phase 6"); `NOTICE` and `CONTRIBUTING.md` carry Q1's proposed wording, `CLAUDE.md` does not yet | the owner's confirmation; Q1's wording in `CLAUDE.md` |
-| B27 | Phase 6 build decisions (62: D160-D221 of `design/phase6-contracts.md` §16, taken by six packages during the build of 2026-10-09) | as taken | provisional 2026-10-09 | built and tested 2026-10-09 (`TODO.md`, "Phase 6"); the code review, its fix wave, pass 2 of the security review and the Linux matrix follow | the owner's confirmation |
+| B27 | Phase 6 build, review and security-fix decisions (127: D160-D286 of `design/phase6-contracts.md` §16, 62 taken by six packages during the build of 2026-10-09 and 65 by the code review's fix wave and the fix rounds of the repeat security review's pass 2) | as taken | provisional 2026-10-09 | built, reviewed, fixed and security-reviewed twice 2026-10-09 (`TODO.md`, "Phase 6"; the final Linux matrix is recorded there) | the owner's confirmation |
+| B28 | The repeat security review's sign-off (S35-S100: 66 confirmed findings, 2 high, 18 medium, 46 low; everything of medium or above fixed; eight lows proposed for acceptance with a release note each; the "not verified" list; no outside reader yet) | the orchestrator recommends yes once the final matrix is green | open, the owner's | records written 2026-10-09 (`TODO.md`, "Security review (repeat, pass 1)" and "(repeat, pass 2)"); `SECURITY.md` and `docs/release-checklist.md` in the tree | the owner's signature: `B28 ok`, `B28 S<n> fix`, `B28 outside reader first` |
 
 Phase 1 details are fixed in `design/phase1-contracts.md`; the same file carries the Phase 1.x specification
 (A17-A33, H1-H3). Phase 2 details are fixed in `design/phase2-contracts.md`, whose open questions B19 answers. What
@@ -1124,22 +1125,28 @@ low findings of pass 1 with a release note each.
 D51, D76, D84, D96 and D101 as Q18-Q21 say. **State of the build.** The contract was specified and reviewed (72 raw
 findings, 65 confirmed, 7 refuted, 27 added by the sceptics, every confirmed one applied) and BS3 passed with
 conditions; pass 1 of the security review was dispositioned. **Built the same day** on the provisional answers by six
-packages (B27 records the 62 decisions the build took): spike BS14 passed with conditions, so Byteman is built (Q2, Q3);
+packages (B27 records the decisions the build took, 62 of its 127): spike BS14 passed with conditions, so Byteman is built (Q2, Q3);
 the hooks jar ships in the default home's `optional/` (Q1); Windows is built where Linux can test it and not verified on
 a Windows host (Q7-Q9, Q15); pass 1's 28 findings are fixed or, for the five low parts of Q22, accepted with a release
 note. `NOTICE` and `CONTRIBUTING.md` carry Q1's proposed wording since 2026-10-09 (`NOTICE` was untrue once the hooks jar
 was in the home); `CLAUDE.md` waits for the owner's word. **Blocks.** Nothing: the owner asked for progress on
 2026-10-09 ("please continue"), so the build proceeded on the provisional answers, as the Phase 5 build did on B23.
 
-## B27 Phase 6 build decisions (2026-10-09; provisional)
+## B27 Phase 6 build, review and security-fix decisions (2026-10-09; provisional)
 
 **From:** the decisions taken while building Phase 6 on 2026-10-09 without the owner, by six packages in worktrees
 (HK hooks and spy, TL telemetry, CP controller, pack and sample, BW Byteman and Windows, and the two security-fix
 packages of FX, S35-S62), recorded as D160-D221 in `design/phase6-contracts.md` §16 (each with the alternatives rejected
 and the reason), numbered in the order the packages landed on `main`: TL D160-D168, HK D169-D183, CP D184-D193, BW
-D194-D207, FX-2 D208-D215, FX-1 D216-D221. **Provisional** until the owner answers (`B27 ok`, or the vetoes by
-name), as B26 is; the build proceeded on both because the owner asked for progress on 2026-10-09. **Question.** Sixty-two
-points the build could have decided either way.
+D194-D207, FX-2 D208-D215, FX-1 D216-D221; and the decisions taken afterwards, the same day and again without the owner,
+by the fixers of the Phase 6 code review (FA the hooks engine, FB the Byteman modules, FC the controller and telemetry, FD the
+sample's display test) and by the fix rounds of the repeat security review's pass 2 (SA the control channel, SB the web
+views, SC the model boundary and the model as an actor, SD Windows and SQL Server, SE hooks and Byteman, SF telemetry and
+run outputs), recorded as D222-D286 in the same place and numbered in the order the fixers landed on `main`: FB D222-D229,
+FC D230-D233, FD D234-D235, FA D236-D243, SC D244-D249, SD D250-D261, SA D262-D265, SB D266-D270, SE D271-D279, SF D280-D286 (65
+decisions, each fixer's ids from 1 without a gap). **Provisional** until the owner answers (`B27 ok`, or the vetoes by
+name), as B26 is; the build proceeded on both because the owner asked for progress on 2026-10-09. **Question.** One hundred
+and twenty-seven points the build, the review and the security fixes could have decided either way (62 + 65).
 
 | D | Question | Answer | Veto form offered |
 |---|---|---|---|
@@ -1149,7 +1156,7 @@ points the build could have decided either way.
 | D163 | Threads and retries of the exporter? | The SDK's batch worker keeps its name; the sender runs on daemon threads named `skillroy-telemetry`; no retry; no-op meter providers | `B27 D163 veto`: a hand-written batch processor with a named thread, or the SDK's retries |
 | D164 | How do the scenario and step records reach the observer? | Through a tap in `RunLog`, by record type, as written | `B27 D164 veto`: an observer call beside each write site |
 | D165 | Which header variables and endpoints are refused? | Any `ANTHROPIC_*` variable (not only the four of D141); an endpoint with user information, a query or a fragment | `B27 D165 veto`: the four named variables only, or any URL with an allowed scheme and host |
-| D166 | What does `minimal` do with the agent span's name and the correlation id? | Names `agent` without its primitive; `session <id>` and `turn <n>` keep theirs; the correlation id keeps the scenario id (a question left for the code review) | `B27 D166 veto`: the five names of §10.3 only; `B27 D166 veto id`: hash the correlation id too |
+| D166 | What does `minimal` do with the agent span's name and the correlation id? | Names `agent` without its primitive; `session <id>` and `turn <n>` keep theirs; the correlation id keeps the scenario id (a question left for the code review; **answered by D230**: it is hashed whole, so `B27 D166 veto id` is in effect taken) | `B27 D166 veto`: the five names of §10.3 only; `B27 D166 veto id`: hash the correlation id too |
 | D167 | What is the root span called? | `skillroy <command>`, and `skillroy junit` for a JUnit stream | `B27 D167 veto`: `skillroy run` for every command |
 | D168 | What do `re-resolve`, `triage` and `author` export? | `re-resolve` and `triage` their root span only; `author` its root, the planner's ledger entries, its bind and its run; the planner's MCP child none | `B27 D168 veto`: plumb the observer through the batch job, triage and the planner's child |
 | D169 | How does a caller learn a loader's id for `target.loader`? | `HookProbe.loaderIds` beside the count `loaders` | `B27 D169 veto`: read `loaders` as the list (no id to name) |
@@ -1205,30 +1212,165 @@ points the build could have decided either way.
 | D219 | The raw channel bound of page-supplied text? | 6 x `MAX_JSON_CHARS` + 64 KiB, screenshots exempt, the parsed value held to 1 MiB | `B27 D219 veto`: `MAX_JSON_CHARS` + 64 KiB (it refuses genuine values) |
 | D220 | How does S38 reach the credentials location? | `Credentials.find`, `Location`, `loadFound`; `locate` unchecked | `B27 D220 veto`: a checked exception from `locate` |
 | D221 | A browser selection subject over 1 Mi characters? | `INVALID_PARAMS {reason: "text too long"}` on both paths | `B27 D221 veto`: skip that browser |
+| D222 | How is the Byteman uninstall bounded by the detach budget? | A lock taken with a bounded `tryLock`, a `detaching` state, a worker that only removes, the rest on the uninstall's own thread | `B27 D222 veto`: the reviewers' abandoned flag with an outer catch, or a self-healing re-park |
+| D223 | Does the cut-short uninstall test need a new seam? | No: a held lock and a slow foreign transformer; D206's property stays the only seam | `B27 D223 veto`: a second seam |
+| D224 | Where does the Byteman encoder's container allow-list live? | In the Byteman module, identical to the hooks module's list (D237), with a bit-length guard on numbers | `B27 D224 veto`: one shared predicate in `agent-api` now |
+| D225 | What does `RuleHelper.format` print for an oversize number? | Its class name | `B27 D225 veto`: the digits, cut |
+| D226 | Is the rule lint a sandbox? | No: a documented tripwire, the deny list unchanged | `B27 D226 veto`: extend the list, or refuse every qualified `java.` reference |
+| D227 | How does `JarCheck` judge a link and an ACL owner? | The real path; the owner is the current user, SYSTEM, Administrators or TrustedInstaller, resolved as principals | `B27 D227 veto`: `SecureFiles`' owner rule |
+| D228 | How do the Byteman POMs fail an empty execution? | `failIfNoTests` from a property, switched off under `-Dtest` by the profile `merged-test-run` | `B27 D228 veto`: a literal true, or the old default |
+| D229 | What does `FreshJvm` do when the JVM is not fresh? | Skips under `-Dtest`, fails otherwise | `B27 D229 veto`: skip always |
+| D230 | Does `minimal` stay an exact list, with the correlation id kept in clear? | An allow-list with hash by default; the correlation id and the pack version hashed whole (D166's clause superseded; the veto `B27 D166 veto id` taken) | `B27 D230 veto`: only the named attributes hashed; `B27 D230 veto cut`: the version cut at `+` |
+| D231 | When is `hook.health` read for an armed stub? | Whenever the matrix shows `hook.engine` `OK`, before any skip; an armed stub or a failed read ends a replay `ERROR` / `ENVIRONMENT` | `B27 D231 veto`: read in any engine state, or make a failed read in a live skip an error |
+| D232 | How does the `hooks` fact root read a long event ring? | Up to ten pages of 1000, then `truncated` and one tail read for `last` | `B27 D232 veto`: page by the ring's size, or a `newest` parameter on `hook.events` |
+| D233 | How do the `sign.on.checked` tests capture the password index? | A variant catalogue; the committed `lending.yaml` unchanged | `B27 D233 veto`: change `lending.yaml` to capture `[0, 1]` |
+| D234 | The typed-keys display flake: the test or the application? | The test waits for the entry field's focus before its Enter | `B27 D234 veto`: bind Enter in `EntryField` to submit itself |
+| D235 | Is the lost-Enter mechanism pinned? | A deterministic display test and a note in P1's sample UI bullet | `B27 D235 veto`: no test |
+| D236 | A hook refused after some classes took its advice? | Taken out class by class before the answer; a residue keeps its entry and its id is refused until a remove restores the class | `B27 D236 veto`: treat the refusal as a `hook.remove`, or put the loader into the site key |
+| D237 | Which containers does a capture iterate? | An exact JDK allow-list; views, locking collections, blocking queues and the sorted sets are handles | `B27 D237 veto`: a name deny-list with `BlockingQueue` |
+| D238 | Is `getMessage()` of an application exception captured? | Yes, redacted and cut | `B27 D238 veto`: JDK exceptions only |
+| D239 | `<init>` and `<clinit>` in a spec? | `<init>` is a per-hook `UNAVAILABLE`, `<clinit>` a violation | `B27 D239 veto`: `<init>` a violation too |
+| D240 | How does the hooks module fail an empty execution? | `failIfNoTests` from a property with the profile `single-test`; `assumeFreshJvm` skips only under `-Dtest` | `B27 D240 veto`: a literal true |
+| D241 | The corner of D172 where the first bytes already name `Spy`? | Accepted and recorded; the `Code`-attribute scan stays open (gap 66) | `B27 D241 veto`: build the scan now |
+| D242 | Where is a failure's text redacted? | Where it leaves the engine, and cut at 500 characters | `B27 D242 veto`: a `Redactor` seam in `Transformers` |
+| D243 | How does `ChildJvm.pid` read the child's line? | The leading digits | `B27 D243 veto`: a separate class-loading log |
+| D244 | May a capture's bytes reach a client on a text route? | Never; under `images: true` only as an image; elided at the write and when served | `B27 D244 veto`: elide only when served |
+| D245 | What is an image to the elision? | A map's `base64`, a base64 run with the PNG signature, a JSON `"base64"` member | `B27 D245 veto`: name the shapes you want |
+| D246 | Where is the elision applied? | At the write and at the two mask boundaries | `B27 D246 veto`: at the producer only |
+| D247 | What happens to a provider's ids and model that do not look genuine? | Scrubbed of secrets and bounded; no `requestedModel` substitution | `B27 D247 veto`: substitute |
+| D248 | Does `author` take `--hooks`? | Yes, always written into the planner's server configuration (`auto` by default) | `B27 D248 veto`: no switch |
+| D249 | Which hooks switch does a client's scenario run take? | The server's | `B27 D249 veto`: always `OFF` |
+| D250 | How does the planner get its prompt? | On stdin, from a file in the private work directory | `B27 D250 veto`: an argument escaped for `cmd.exe`, or a pipe |
+| D251 | Is `allowAmbiguousCommands=false` pinned on the launchers? | No | `B27 D251 veto`: pin it |
+| D252 | May a `.cmd` or `.bat` file be the planner? | Never: passed over for another candidate, refused with the remedy when alone | `B27 D252 veto`: refuse on Windows only |
+| D253 | Which session ids does `--resume` take? | `[A-Za-z0-9_-]{1,128}` | `B27 D253 veto`: hex only |
+| D254 | How is the schema argument passed on Windows? | Pre-quoted by the C runtime's rules, the command line bounded at 32767 characters | `B27 D254 veto`: a schema file |
+| D255 | Where does the per-volume rule live? | `Volumes` in `skillroy-protocol` | `B27 D255 veto`: copies |
+| D256 | Which volume types keep no permissions? | `msdos`, `vfat`, `fat`, `fat12`, `fat16`, `fat32`, `exfat`, `umsdos` | `B27 D256 veto`: add `fuseblk`, or the names you give |
+| D257 | What is read back after an owner-only creation? | The exact mode, on both sides; the object is deleted and refused otherwise | `B27 D257 veto`: the provider's views |
+| D258 | A credentials file on a FAT or exFAT volume? | Refused | `B27 D258 veto`: accepted with a warning |
+| D259 | Which owner comparison does the agent use? | The provider's view, as the controller's `Discovery` does | `B27 D259 veto`: per volume |
+| D260 | How is a leftover transaction on SQL Server ended? | Every statement runs in a transaction the read path rolls back; two more guard words | `B27 D260 veto`: auto-commit off in `JdbcDataChannel` only, or more guard words |
+| D261 | Do the real-volume tests run in the normal build? | On macOS, with `hdiutil` | `B27 D261 veto`: opt-in by a property |
+| D262 | How does the control channel verify a body? | A signed `X-Skillroy-Body-Sha256` header, the MAC checked on the head; the protocol stays `0.2` | `B27 D262 veto`: an optional header, or version `0.3` |
+| D263 | What does the agent require of its options file? | The current user's, no group or other write bit, owner-only when it holds a token; the controller writes it through one channel and refuses an ancestor others may rename | `B27 D263 veto`: refuse every group or other bit, or judge the ancestors' owners |
+| D264 | One rule for the jars an operator names? | `JarTrust` for a spy jar, the `modules` paths and `byteman.jar`; the home's jars trusted | `B27 D264 veto`: the home's jars too |
+| D265 | How short may a supplied token be? | At least 16 characters | `B27 D265 veto`: 32 hex characters, or a warning |
+| D266 | What bounds a page's console output? | A token bucket, `Runtime.disable` or unsubscribing, resumed at a later main-frame navigation | `B27 D266 veto`: never resume, or enable `Runtime` only while a run waits |
+| D267 | What bounds the hand-off queue? | 2 x `MAX_CHANNEL_CHARS` of queued characters per browser, dropping past it | `B27 D267 veto`: a count bound |
+| D268 | How is a library answer bounded at its source? | A guard returning a primitive string; `DRAIN_CHARS` 500000 | `B27 D268 veto`: the marker object, or the guard on `drain` only |
+| D269 | The CDP attach after the probe? | Dials the probed browser WebSocket re-pointed to the endpoint; the handshake-redirect residual is proposed for acceptance (B28) | `B27 D269 veto`: refuse a foreign URL, or build the deferred attach or a relay |
+| D270 | When does a tap end? | On an oversized drain only | `B27 D270 veto`: on any refusal |
+| D271 | A removed hook whose class's retransformation failed? | A residue, its id refused | `B27 D271 veto`: only when the batch threw |
+| D272 | How are the engine's own transform events counted? | Per thread | `B27 D272 veto`: decrement per failed batch |
+| D273 | Does `replace: true` report a failed implicit remove? | `replaced: {restored, verified}`; `FAILED` is `ERROR` / `ENVIRONMENT` | `B27 D273 veto`: refuse the install |
+| D274 | What does a detach that cannot take the lock do? | Logs and counts like the locked path; the install declares nothing after | `B27 D274 veto`: the WARN and the count only |
+| D275 | Which captured strings go through `redactText`? | Every string scalar and map-key text, after the cut | `B27 D275 veto`: a larger window before the cut |
+| D276 | How are Byteman rules on the JDK's classes refused? | By name, when the JDK's or the agent's loaders find the class file | `B27 D276 veto`: refuse an empty match, or a prefix list |
+| D277 | A half-loaded Byteman engine? | Arm first, undo everything on failure | `B27 D277 veto`: a refused state |
+| D278 | What bounds the Byteman recorders? | `hooks.maxClasses` records, no copy above `hooks.maxClassBytes`, unwatch at unload | `B27 D278 veto`: no bound |
+| D279 | The bootstrap's options file on a FAT or exFAT volume? | Refused, by a private copy of D256's list | `B27 D279 veto`: accepted |
+| D280 | Whose rule trusts `telemetry.yaml` and `inference.yaml`? | The file's: the current user's (or root's), no other-write bit, a user-private group allowed | `B27 D280 veto`: every group bit refused, or a directory rule |
+| D281 | May a telemetry header travel over `http://`? | No: `https://` only, the default endpoint included (decided together with B28's S84) | `B27 D281 veto`: allowed to loopback |
+| D282 | Which output directories does a run accept? | The current user's (or root's), not writable by others without the sticky bit | `B27 D282 veto`: `untrustedDirectoryReason`, or exclusive creation alone |
+| D283 | A refused output directory? | Ends the run `ERROR` / `ENVIRONMENT` before the agent is contacted | `B27 D283 veto`: run without a log |
+| D284 | Where do `OutputFiles` and `SettingsFiles` live? | `skillroy-controller` and `skillroy-data` | `B27 D284 veto`: one class in `skillroy-scenario` |
+| D285 | What does a telemetry message carry of a path? | Nothing: the whole path becomes `<path>` | `B27 D285 veto`: cut to the last segment |
+| D286 | Do the CLI's tests share the scenario module's `TlsStub`? | No, their own copy | `B27 D286 veto`: the test-jar |
 
 **What it changed.** Each is built and tested (`TODO.md`, "Phase 6"), and the contract carries an "As built" note at
-every section a decision touches. **Two behaviour changes the owner should know**, one of which has no D number: D210
+every section a decision touches (the code review's fix wave and the pass-2 fix rounds mark their passages "fix wave" and
+"Phase 6 security fix, pass 2"). D230 supersedes D166's correlation-id clause (the veto `B27 D166 veto id` is in effect taken);
+D236 and D271 apply one rule (a refused or half-removed hook is a residue whose id is refused) to the install and the remove
+path; D252 refines D198 (npm's `claude.cmd` no longer wins), D264 refines D227, D281 amends D141. **Behaviour changes the owner should know** (the first two as of the build, the next five from the fix rounds): D210
 (a false positive of the key rule on pack prose: the sample's `signOn` and `authorise` descriptions now read
 `credential: <redacted> staff, key: code}` in the session's tools and the MCP tool list, as they already did in the
 planner's prompt, and the five scripted session recordings were regenerated) and S52 (P5 §7.2, A52: a configured model id that is not in the
 price table is now refused at the gateway's open with a message naming the `prices:` key, a configuration that worked before;
-the alternative is a warning). **State of the build.** Built 2026-10-09: the native reactor is green after each landing;
-the image runs of the packages are in `TODO.md`; the full Linux matrix of the integrated tree, the code review of three
-lenses, its fix wave, and pass 2 of the security review follow. Decisions the review and its fix wave take join this
-entry from D222. **Blocks.** Nothing; provisional.
+the alternative is a warning). Also from the fix rounds: (a) a request with a body must carry the signed header `X-Skillroy-Body-Sha256` (D262), so a
+controller older than the fix cannot call a newer agent (nothing was released on protocol 0.2); (b) the planner's prompt is
+its stdin and a `.cmd` or `.bat` planner is refused (D250, D252); (c) a telemetry header is sent to an `https://` endpoint
+only, the default `http://127.0.0.1:4318` included (D281, to be read with B28's S84); (d) `telemetry.yaml` and
+`inference.yaml` are read only when they are the current user's and no other user may write them (D280); (e) a run refuses an
+output directory another user owns or others may write to, and never writes through a link or into a file already in place
+(D282, D283). **State of the build.** Built, reviewed, fixed and security-reviewed twice 2026-10-09: the native reactor is
+green after each landing; the image runs of the fixers and the final Linux matrix are recorded in `TODO.md`. **Blocks.**
+Nothing; provisional.
+
+## B28 The repeat security review's sign-off (2026-10-09; open, the owner's)
+
+**From:** the repeat of the security review that B13 asks for before the first public release, run in two passes on
+2026-10-09 and specified in `design/phase6-contracts.md` §12 (the sign-off rule is §12.6: the owner writes it, the
+orchestrator does not). Its records are in the session notes, outside the repository:
+`notes/2026-10-09/phase6/security/pass1/` and `pass2/` (each with `record.json` in the 2026-10-02 shape and
+`dispositions.md`, with the lens reports and the sceptics' verdicts beside them); `TODO.md` summarises them under
+"Security review (repeat, pass 1, 2026-10-09)" and "(repeat, pass 2, 2026-10-09)".
+
+- **Pass 1** (lenses L3-L6 on `e86e8e2`, one reviewer and one sceptic each): S35-S62, 28 confirmed, **1 high** (S55,
+  `data_query` substituted `$references` into the SQL after the guard ran), **6 medium**, 21 low; 18 counted, 10
+  operator-only.
+- **Pass 2** (all eight lenses on the Phase 6 tree: L1 and L3-L7 on `f546363`, L2 and L8 on `ce1f41f`): S63-S100, 38
+  confirmed, **1 high** (S93, the planner passed model-controlled text as an argument of `claude.cmd`, which Windows
+  starts through an implicit `cmd.exe`), **12 medium**, 25 low; 18 counted, 16 operator-only, 4 token-holder only; one
+  reviewer finding refuted (P2-L1-F2, no number). Seven findings were raised by the sceptics from claims they broke.
+- **Together** S35-S100: 66 confirmed findings, 2 high, 18 medium, 46 low.
+- **Dispositions:** every finding of medium or above is **fixed** (contract first, a test that fails on the old code,
+  marked in the contract with the review id; pass 1 by the fifth work package, pass 2 by six fix rounds SA-SF with
+  decisions D244-D286). Of the lows, all are fixed in code or documentation except the eight below, which are
+  **proposed for the owner's acceptance** (a documentation-only change counts as an acceptance, §12.5): pass 1's five
+  (B26 Q22) and pass 2's three. Nothing is deferred.
+- **Not verified** (also in `README.md`, `SECURITY.md` and `design/threat-model.md` §8): everything on Windows (the ACL
+  branches of every owner-only file, the `.bat` launcher, the planner on a Windows host, `JAVAAGENT` as the logged-on
+  user, the input rungs), where no host exists; the `jxbrowser` adapter against the real product; the paths that need a
+  live model key (the planner's stdin route was verified offline only); a hook detach that ran out of its budget and a
+  Byteman rule left by it on a real application; SQL Server's behaviour (the guard's T-SQL consequences rest on vendor
+  documentation); a second OS user (cross-user windows are argued and tested with one); Linux `vfat` mounted;
+  the amd64 image legs of the hooks module; and the other items of `threat-model.md` §8.
+- **Outside reader:** none has read the record yet (B26 Q12: recommended, recorded, not a gate).
+- **Matrix:** the Linux matrix after the fixes is recorded in `TODO.md`.
+
+**Question.** Does the owner sign the review off, with the eight lows below accepted? **Provisional answer:** the
+orchestrator recommends yes, once the final matrix is green and the owner has read the eight release notes. **Open until
+the owner answers.**
+
+| Item | Low finding proposed for acceptance, with its release note (also in `SECURITY.md` "Known limitations", marked provisional until this sign-off) | Veto form offered |
+|---|---|---|
+| S36 (b) | `StatementGuard` is a safety net, not the boundary: give the data account a read-only role; PostgreSQL sources should set `readOnlyMode: always` (a deny-list of side-effect function names not built; pass 1) | `B28 S36 fix` |
+| S37 (i) | Run outputs take the process umask; on a shared host run the controller under `umask 077` and give `--out` a directory you own (documentation only; pass 1, its advice completed by pass 2's S97 and S99, which refuse an output directory another user owns) | `B28 S37 fix` |
+| S40 (pinning) | Pin the image and the actions in your copy of `ci/examples/nightly-re-resolve.yml` (pass 1) | `B28 S40 fix` |
+| S48 | The Playwright driver inherits the controller's environment; `DEBUG=pw:*`, `NODE_OPTIONS`, `PLAYWRIGHT_NODEJS_PATH` and `PLAYWRIGHT_DRIVER_DIR` change what it runs or logs (documentation only; pass 1) | `B28 S48 fix` |
+| S60 (`CLAUDE_CONFIG_DIR`) | The planner's `claude` session transcript stays in the CLI's own data directory; on a shared host run `author` with a key and your own `CLAUDE_CONFIG_DIR` (pass 1) | `B28 S60 fix` |
+| S77 (residual) | When the CDP path attaches while the agent reports no CDP target id, a process that holds the configured debug port before the application's engine binds it can answer the attach's WebSocket handshake with a redirect, which Playwright's driver follows to another host or to a Unix socket the operator can open; it gains an outbound connection with Playwright's headers and commands, never the run's scripts. Bind the port in the application first, or use `web.path: agent` (the finding itself, P2-L4-F1, is fixed; the closing designs are a deferred attach or a controller-side WebSocket relay) | `B28 S77 fix` |
+| S84 (P2-L5-F4) | A loopback `http` model base URL sends the key in clear to whatever holds that port: use it only for a proxy you run, never on a shared host; prefer `https` on loopback | `B28 S84 fix` (plain `http` refused, the tests' fakes then need TLS) |
+| S94 (P2-L7-F4) | On a Windows whose built-in account names are not English the owner-only checks fail closed and the framework refuses to run; remedy with `icacls` (nothing is exposed; a redesign of the ACL branches needs the host) | `B28 S94 fix` (waits for the Windows host) |
+
+Read S84 and the fixed S96 together: the model key may travel over loopback `http` (S84, proposed), but a telemetry
+header may not (S96, fixed by SF as D281), so the two rules disagree by choice. `B28 S84 fix` makes both strict; to relax
+the header rule instead, name S96 (it is one method, `TelemetrySettings.checkHeaders`, and its two callers).
+
+**Veto forms.** `B28 ok` signs the review off with the eight lows accepted. `B28 S<n> fix` refuses one proposed
+acceptance by name; the fix is then built and the sign-off waits for it. `B28 outside reader first` makes an outside
+human reader of the record a gate of the sign-off (B26 Q12 vetoed). **What it changes.** On `B28 ok`: the "Reviews"
+paragraph of `SECURITY.md` is given the signature, `docs/release-checklist.md` item 2 is ticked by the owner's word and
+the Phase 6 exit item in `TODO.md`; the eight release notes are repeated in the release note (checklist item 11). **State
+of the build.** Everything is built and merged into `main` (head `4f9962f` for the last fix; nothing pushed). **Blocks.**
+The first public release; nothing else.
 
 ---
 
 ## Questions for the owner
 
-**Open as of 2026-10-09: B26 and B27.** **B26** is the twenty-two provisional answers of the Phase 6 contract (`design/phase6-contracts.md` §17), nine of which rest on the
+**Open as of 2026-10-09: B26, B27 and B28.** **B26** is the twenty-two provisional answers of the Phase 6 contract (`design/phase6-contracts.md` §17), nine of which rest on the
 owner's knowledge (Q2, Q4, Q5, Q6, Q7, Q10, Q12, Q13, Q15), four of which amend confirmed decisions (Q18-Q21: D51,
-D101, D96, D76/D84) and one of which accepts five low findings of the repeat review's first pass (Q22). **B27** is the 62
-decisions the Phase 6 build took (D160-D221, §16 of the same contract), each with a veto form; two of its effects are
-worth reading first: D210 (the key rule rewrites two of the sample's tool descriptions) and S52 (a configured model
-outside the price table is refused). One message answers both: `B26 ok, B27 ok`, or the vetoes by name. **B28** (the
-sign-off of the repeat security review) follows pass 2; the decisions of the Phase 6 code review and its fix wave, if
-any, join B27 from D222. The owner confirmed **B25** (the three decisions of the live session of 2026-10-08,
+D101, D96, D76/D84) and one of which accepts five low findings of the repeat review's first pass (Q22). **B27** is the 127
+decisions the Phase 6 build, its code review's fix wave and the security fix rounds took (D160-D286, §16 of the same
+contract), each with a veto form; its effects worth reading first are D210 (the key rule rewrites two of the sample's tool
+descriptions), S52 (a configured model outside the price table is refused) and the five behaviour changes of the fix rounds
+listed in the entry (the signed body hash header, the planner's stdin, the https-only telemetry header, the owner rule on
+settings files, the output-directory rule). **B28** is the sign-off of the repeat security review (S35-S100, everything
+of medium or above fixed), with eight lows put to the owner for acceptance, each with its release note: the five of pass 1
+(B26 Q22) and S77's residual, S84 and S94 of pass 2; the veto forms are `B28 ok`, `B28 S<n> fix` and `B28 outside reader
+first`. One message answers all three: `B26 ok, B27 ok, B28 ok`, or the vetoes by name. The owner confirmed **B25** (the three decisions of the live session of 2026-10-08,
 D111 to D113) on 2026-10-09, every row. **B23** (the Phase 5 contract's eighteen provisional answers, one withdrawn) and **B24** (the seven decisions the Phase 5
 build and the review's fix wave took, D88-D104 and D110) were confirmed by the owner on 2026-10-08, every row.
 Before it, none was open as of the evening of 2026-10-07: the owner confirmed **B21** (the fifteen answers of the Phase 4 contract)

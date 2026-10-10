@@ -26,6 +26,6 @@ Tick each item in the release's own record (the release note or its pull request
    no `-SNAPSHOT` left.
 9. **Coordinates**: the domain behind the `ai.skillroy` groupId is under the project's control (B2).
 10. **The DCO trail**: every commit since the last release carries a `Signed-off-by` line.
-11. **The release note** names every accepted or deferred low finding with its release-note text (the five of B26
-    Q22 for the first release), the "not verified" list, and the outcome of item 3.
+11. **The release note** names every accepted or deferred low finding with its release-note text (the eight of B28
+    for the first release: the five of B26 Q22 and S77's residual, S84 and S94 of pass 2), the "not verified" list, and the outcome of item 3.
 12. **Neutrality**: the private deny-list check of the sibling repository passes on the release commit.

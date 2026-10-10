@@ -100,7 +100,7 @@ class PlantedReferenceFreshJvmTest {
         int events = harness.ctx.events.topic("hook.deposit.computed").size();
         rule.depositFor("T1");
         assertEquals(events, harness.ctx.events.topic("hook.deposit.computed").size(), "the hook is disarmed");
-        // Fix wave (FA, D-FA-1): while the class may carry the residue, a hook of the same id is refused.
+        // Fix wave (FA, D236): while the class may carry the residue, a hook of the same id is refused.
         Map<String, Object> again = (Map<String, Object>) ((List<Object>) harness.ctx.map("hook.install", map("specs",
                 Harness.json(spec("deposit.computed", HookMode.OBSERVE, DepositRule.class, "depositFor")),
                 "catalogue", map("id", "again", "hash", "sha256:a2"))).get("hooks")).get(0);

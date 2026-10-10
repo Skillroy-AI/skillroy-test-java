@@ -1441,7 +1441,7 @@ inference.yaml images: true (a capture is personal data until masked, design 3.1
 open, the tool's resource link names that text, and a run's `failure/*.png` is not listed. The planner's server
 (`--inference none`) never serves them. There is no `--serve-captures` flag.
 
-(Phase 6 security fix, pass 2, P2-L6-F2, P2-L6-F3, built 2026-10-09, SC; D159 kept as one rule, D-SC-1) **A capture's
+(Phase 6 security fix, pass 2, P2-L6-F2, P2-L6-F3, built 2026-10-09, SC; D159 kept as one rule, D244) **A capture's
 bytes leave the server only under `images: true`, and then only as the PNG blob behind a tool's resource link; on every
 text route they are elided, whatever `images` says**: a tool's result (§9.3), a resource served as text
 (`state/current`, `events/recent`, the session journal, a run's `run.jsonl` and `failure/*.json`), a fact, an event, a
