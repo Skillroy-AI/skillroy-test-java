@@ -439,9 +439,12 @@ public record Plan(int planVersion, String scenarioId, String pack, String packV
      *     {@code CompileContext.markHandlesPrompt})
      * @param capture the slot bound from the event that ended the call's wait, or null; only with sync
      *     {@link Sync#EVENT} or on {@code sync.await}
+     * @param guard the image guard of an anchored {@code swing.pointer} call (phase7-contracts.md 6.7, 8.2, decision
+     *     D357; plan version 6), or null: the executor compares the anchor of the current render key before it sends
+     *     the call
      */
     public record Call(String primitive, Map<String, Object> args, Sync sync, long timeoutMs, AwaitSpec await,
-                       boolean handlesPrompt, CaptureSpec capture) {
+                       boolean handlesPrompt, CaptureSpec capture, Guard guard) {
 
         /**
          * Freezes the args and the await match.
@@ -472,17 +475,31 @@ public record Plan(int planVersion, String scenarioId, String pack, String packV
                 Map<String, Object> match = (Map<String, Object>) freeze(await.match());
                 await = new AwaitSpec(await.topics(), match, await.timeoutMs());
             }
+            if (guard != null && !"swing.pointer".equals(primitive)) {
+                throw new IllegalArgumentException("call " + primitive + ": a guard is allowed on swing.pointer only");
+            }
+        }
+
+        /** A call without a guard (the Phase 2 shape). */
+        public Call(String primitive, Map<String, Object> args, Sync sync, long timeoutMs, AwaitSpec await,
+                    boolean handlesPrompt, CaptureSpec capture) {
+            this(primitive, args, sync, timeoutMs, await, handlesPrompt, capture, null);
         }
 
         /** A call without a capture (the Phase 1 shape). */
         public Call(String primitive, Map<String, Object> args, Sync sync, long timeoutMs, AwaitSpec await,
                     boolean handlesPrompt) {
-            this(primitive, args, sync, timeoutMs, await, handlesPrompt, null);
+            this(primitive, args, sync, timeoutMs, await, handlesPrompt, null, null);
         }
 
         /** A call with any sync but {@link Sync#EVENT}, which needs an {@link AwaitSpec}. */
         public Call(String primitive, Map<String, Object> args, Sync sync, long timeoutMs, boolean handlesPrompt) {
-            this(primitive, args, sync, timeoutMs, null, handlesPrompt, null);
+            this(primitive, args, sync, timeoutMs, null, handlesPrompt, null, null);
+        }
+
+        /** This call with another guard (null: none). */
+        public Call withGuard(Guard newGuard) {
+            return new Call(primitive, args, sync, timeoutMs, await, handlesPrompt, capture, newGuard);
         }
 
         /**
@@ -512,7 +529,30 @@ public record Plan(int planVersion, String scenarioId, String pack, String packV
                 captureJson.put("fields", new LinkedHashMap<>(capture.fields()));
                 json.put("capture", captureJson);
             }
+            if (guard != null) {
+                Map<String, Object> guardJson = new LinkedHashMap<>();
+                guardJson.put("label", guard.label());
+                json.put("guard", guardJson);
+            }
             return json;
+        }
+    }
+
+    /**
+     * The image guard of an anchored {@code pointer} step (phase7-contracts.md 6.7, 8.2, decision D357): the label of
+     * the anchor in the bindings file's {@code images} section. The guard's rectangle is environment data and lives in
+     * the bindings entry of the current render key, never in the plan. {@code plan.json}: {@code "guard": {"label"}}.
+     *
+     * @param label the anchor's label, {@code [A-Za-z0-9][A-Za-z0-9._-]{0,63}}
+     */
+    public record Guard(String label) {
+
+        /** @throws IllegalArgumentException if the label is malformed */
+        public Guard {
+            if (label == null || !ImageCheck.LABEL.matcher(label).matches()) {
+                throw new IllegalArgumentException("a guard label must match [A-Za-z0-9][A-Za-z0-9._-]{0,63}, found "
+                        + label);
+            }
         }
     }
 

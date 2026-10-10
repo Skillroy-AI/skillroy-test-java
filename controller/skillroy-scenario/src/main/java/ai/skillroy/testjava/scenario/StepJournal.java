@@ -46,7 +46,7 @@ import java.util.Objects;
  * <p>Records, each starting with {@code type}: {@code session-start {id, pack, packVersion, envId, env: {fingerprint,
  * components}, readOnly, options, startedAt, primitives}}, {@code step {stepId, origin, verb?, args?, calls:
  * [{primitive, args, sync, timeoutMs, await?, capture?}], outcome: {status, kind?, message?, detail?, executed,
- * seqBefore, seqAfter, durationMs, degradedFidelity}, snapshotHash?}}, {@code resolve {slot, kind, args, strategy,
+ * seqBefore, seqAfter, durationMs, degradedFidelity}, snapshotHash?, provenance?}} (provenance: phase7-contracts.md 9.2), {@code resolve {slot, kind, args, strategy,
  * verify, credential?, resolution}}, {@code oracle {name, fn, args, inputsHash, value}}, {@code check {path, matcher,
  * actual, held, reason}}, {@code observe {path, value}}, {@code note {origin, text}}, {@code budget {scope, spentUsd,
  * limitUsd, exhausted}}, {@code session-end {reason, steps, cost}}. A step's {@code args} are as given (references in
@@ -286,9 +286,14 @@ public final class StepJournal {
      * @param outcome {@code {status, kind?, message?, detail?, executed, seqBefore, seqAfter, durationMs,
      *     degradedFidelity}}
      * @param snapshotHash {@code sha256:} of the snapshot text after a passed step a model chose, or null
+     * @param provenance what a vision tool that chose the step handed in with the act (phase7-contracts.md 9.2,
+     *     decisions D331, D351): {@code tier}, {@code via?}, {@code intent?} (masked, at most 500 characters),
+     *     {@code model?}, {@code requestId?}, {@code capture?}, {@code point?}, {@code hitTest?}, {@code anchor?},
+     *     {@code verdict?}; no bytes; null for a step no vision tool chose. The eighth component
      */
     public record StepEntry(String stepId, Origin origin, String verb, Object args, List<Map<String, Object>> calls,
-                            Map<String, Object> outcome, String snapshotHash) implements Entry {
+                            Map<String, Object> outcome, String snapshotHash, Map<String, Object> provenance)
+            implements Entry {
 
         /** Copies and freezes. */
         @SuppressWarnings("unchecked")
@@ -298,6 +303,13 @@ public final class StepJournal {
             args = Plan.freeze(args);
             calls = calls == null ? List.of() : (List<Map<String, Object>>) Plan.freeze(calls);
             outcome = outcome == null ? Map.of() : (Map<String, Object>) Plan.freeze(outcome);
+            provenance = provenance == null ? null : (Map<String, Object>) Plan.freeze(provenance);
+        }
+
+        /** A step without provenance (the Phase 5 shape). */
+        public StepEntry(String stepId, Origin origin, String verb, Object args, List<Map<String, Object>> calls,
+                         Map<String, Object> outcome, String snapshotHash) {
+            this(stepId, origin, verb, args, calls, outcome, snapshotHash, null);
         }
 
         /** The outcome's status. */
@@ -330,6 +342,9 @@ public final class StepJournal {
             if (snapshotHash != null) {
                 json.put("snapshotHash", snapshotHash);
             }
+            if (provenance != null) {
+                json.put("provenance", provenance);
+            }
             return json;
         }
 
@@ -342,7 +357,8 @@ public final class StepJournal {
                 }
             }
             return new StepEntry(text(json, "stepId"), Origin.fromJson(json.get("origin")), text(json, "verb"),
-                    json.get("args"), calls, map(json, "outcome"), text(json, "snapshotHash"));
+                    json.get("args"), calls, map(json, "outcome"), text(json, "snapshotHash"),
+                    json.get("provenance") instanceof Map<?, ?> ? map(json, "provenance") : null);
         }
     }
 

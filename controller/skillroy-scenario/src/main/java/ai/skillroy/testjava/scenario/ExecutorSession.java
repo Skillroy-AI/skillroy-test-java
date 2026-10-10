@@ -140,6 +140,8 @@ public final class ExecutorSession implements AutoCloseable {
     private final Map<String, OracleValue> oracleValues = new LinkedHashMap<>();
     private final Map<String, CredentialRef> credentialRefs = new LinkedHashMap<>();
     private final Map<String, Map<String, String>> joins = new LinkedHashMap<>();
+    /** The credential-joined slots whose secret no person's step has consumed yet (phase7-contracts.md 9.2, D342). */
+    private final Set<String> inFlight = new java.util.LinkedHashSet<>();
     /** The resolved slots as a compiled step sees them (a verb may ask for a slot's kind or credential). */
     private final Map<String, Scenario.Slot> declaredSlots = new LinkedHashMap<>();
     private final Map<String, Scenario.OracleEntry> declaredOracles = new LinkedHashMap<>();
@@ -150,6 +152,8 @@ public final class ExecutorSession implements AutoCloseable {
     private final RunObserver observer;
     /** Whether the current step's {@code sessionStepStarted} was sent. */
     private boolean stepObserved;
+    /** The provenance the current step's acting call handed in (phase7-contracts.md 9.2), or null. */
+    private Map<String, Object> provenance;
 
     private ExecutorSession(DomainPack pack, AgentConnection agent, SessionOptions options, String id, RunLog log,
                             WebRun web, CallRunner runner, StepJournal journal, EnvFingerprint fingerprint,
@@ -474,9 +478,24 @@ public final class ExecutorSession implements AutoCloseable {
      * @throws InterruptedException if the thread is interrupted
      */
     public StepOutcome execute(PlannedCall call, Origin origin) throws AgentLostException, InterruptedException {
+        return execute(call, origin, null);
+    }
+
+    /**
+     * {@link #execute(PlannedCall, Origin)} with the provenance a vision tool hands in with the act
+     * (phase7-contracts.md 9.2, decisions D331, D351): written (masked, {@code intent} cut at 500 characters) into the
+     * step's journal record, so that the journal holds it on the step's own line; null writes none.
+     *
+     * @param provenance the provenance object of P7 9.2, or null
+     * @throws AgentLostException if the agent is gone (the step is journaled first)
+     * @throws InterruptedException if the thread is interrupted
+     */
+    public StepOutcome execute(PlannedCall call, Origin origin, Map<String, Object> provenance)
+            throws AgentLostException, InterruptedException {
         Objects.requireNonNull(call, "call");
         Objects.requireNonNull(origin, "origin");
         requireOpen();
+        this.provenance = provenance;
         String stepId = nextStepId();
         PlannedCall given = confirms(origin) ? call : withoutConfirmation(call);
         Plan.Step step;
@@ -500,9 +519,24 @@ public final class ExecutorSession implements AutoCloseable {
      */
     public StepOutcome execute(String verb, Object args, Origin origin) throws AgentLostException,
             InterruptedException {
+        return execute(verb, args, origin, null);
+    }
+
+    /**
+     * {@link #execute(String, Object, Origin)} with the provenance a vision tool hands in with the act
+     * (phase7-contracts.md 9.2, decisions D331, D351): written (masked, {@code intent} cut at 500 characters) into the
+     * step's journal record; null writes none.
+     *
+     * @param provenance the provenance object of P7 9.2, or null
+     * @throws AgentLostException if the agent is gone (the step is journaled first)
+     * @throws InterruptedException if the thread is interrupted
+     */
+    public StepOutcome execute(String verb, Object args, Origin origin, Map<String, Object> provenance)
+            throws AgentLostException, InterruptedException {
         Objects.requireNonNull(verb, "verb");
         Objects.requireNonNull(origin, "origin");
         requireOpen();
+        this.provenance = provenance;
         String stepId = nextStepId();
         Object given = confirms(origin) ? args : withoutConfirmation(args);
         Plan.Step step;
@@ -722,8 +756,10 @@ public final class ExecutorSession implements AutoCloseable {
         outcomeJson.put("durationMs", duration.toMillis());
         outcomeJson.put("degradedFidelity", maskedFidelity);
         observeStepStart(stepId, verb, origin);
+        Map<String, Object> stepProvenance = provenance(provenance);
+        provenance = null;
         journal.append(new StepJournal.StepEntry(stepId, origin, verb, jsonForm(givenArgs), callRecords,
-                outcomeJson, snapshotHash), mask);
+                outcomeJson, snapshotHash, stepProvenance), mask);
         runner.stepEvents = null;
         stepObserved = false;
         observer.sessionStep(outcome);
@@ -1093,8 +1129,8 @@ public final class ExecutorSession implements AutoCloseable {
      */
     public String snapshotText(int maxChars) throws AgentLostException, InterruptedException {
         requireOpen();
-        Object snapshot = read("swing.snapshot", Map.of());
-        Object appState = read("app.state", Map.of());
+        Object snapshot = quietRead("swing.snapshot", Map.of());
+        Object appState = quietRead("app.state", Map.of());
         List<UiSnapshotText.WebView> views = new ArrayList<>();
         Capability capability = caps.get("web.browsers");
         if (capability != null && capability.state() != CapabilityState.UNAVAILABLE) {
@@ -1122,7 +1158,8 @@ public final class ExecutorSession implements AutoCloseable {
                 Math.max(100, maxChars));
     }
 
-    private Object read(String primitive, Map<String, Object> params) throws AgentLostException {
+    /** A read for the snapshot text: an error answers null (the part is left out). */
+    private Object quietRead(String primitive, Map<String, Object> params) throws AgentLostException {
         try {
             RpcResult result = agent.call(primitive, params, CallRunner.options(READ_TIMEOUT_MS, null));
             runner.noteSeq(result.seqAfter());
@@ -1197,6 +1234,165 @@ public final class ExecutorSession implements AutoCloseable {
             out.add(maskEvent(event));
         }
         return out;
+    }
+
+    // ------------------------------------------------------------------------------------------------ Phase 7
+
+    /** The longest {@code intent} a step's provenance keeps (phase7-contracts.md 9.2). */
+    static final int PROVENANCE_INTENT_MAX = 500;
+
+    /** The longest bounded read {@link #read} allows, when a primitive's own timeout is longer than 10 s. */
+    static final long READ_TIMEOUT_CAP_MS = 120_000L;
+
+    /** The {@code hook.*} and {@code rule.*} reads {@link #read} serves (phase7-contracts.md 9.1). */
+    static final Set<String> HOOK_READS = Set.of("hook.health", "hook.events", "rule.list");
+
+    /** The provenance as the journal keeps it: a JSON-like copy, {@code intent} cut; null for none. */
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> provenance(Map<String, Object> given) {
+        if (given == null) {
+            return null;
+        }
+        Object form = jsonForm(given);
+        if (!(form instanceof Map<?, ?> map)) {
+            return null;
+        }
+        Map<String, Object> copy = new LinkedHashMap<>((Map<String, Object>) map);
+        if (copy.get("intent") instanceof String intent && intent.length() > PROVENANCE_INTENT_MAX) {
+            copy.put("intent", intent.substring(0, PROVENANCE_INTENT_MAX));
+        }
+        return copy;
+    }
+
+    /**
+     * One unjournaled read of the target (phase7-contracts.md 9.2, decision D308): a capture, a hit-test,
+     * {@code swing.rendering}. Only a primitive the target's catalogue lists as neither mutating, destructive nor
+     * {@code script}, and not on the session's exclusion list ({@code data.query}, {@code agent.*}, {@code hook.*} and
+     * {@code rule.*} beyond {@code hook.health}, {@code hook.events} and {@code rule.list}, and a {@code swing.capture}
+     * with {@code mode: ROBOT} or {@code redact: false}, since a read has no origin). Bounded: 10 s, or the primitive's
+     * own timeout when longer, at most 120 s. Masked: every text value through the session's secret mask, except an
+     * image result's {@code base64} entry (its pixels the agent redacted; it never reaches a text route). Not
+     * journaled.
+     *
+     * @param args the primitive's arguments; null means none
+     * @return the masked result value
+     * @throws IllegalArgumentException if the primitive is not one {@code read} serves
+     * @throws AgentRpcException with the agent's code, message and data when the agent answers an error
+     * @throws AgentLostException if the agent is gone
+     * @throws InterruptedException if the thread is interrupted
+     */
+    public Object read(String primitive, Map<String, Object> args) throws AgentRpcException, AgentLostException,
+            InterruptedException {
+        Objects.requireNonNull(primitive, "primitive");
+        requireOpen();
+        Map<String, Object> params = args == null ? Map.of() : args;
+        String refusal = readRefusal(primitive, params);
+        if (refusal != null) {
+            throw new IllegalArgumentException(refusal);
+        }
+        PrimitiveDescriptor descriptor = primitives.get(primitive);
+        long timeout = Math.min(READ_TIMEOUT_CAP_MS, Math.max(READ_TIMEOUT_MS, descriptor.timeoutMs()));
+        RpcResult result;
+        try {
+            result = agent.call(primitive, params, CallRunner.options(timeout, null));
+        } catch (AgentLostException e) {
+            runner.agentLost = true;
+            throw e;
+        }
+        if (Thread.interrupted()) {
+            throw new InterruptedException("interrupted during " + primitive);
+        }
+        runner.noteSeq(result.seqAfter());
+        return maskRead(result.value());
+    }
+
+    /** Why {@link #read} refuses this primitive and these arguments, or null when it serves them. */
+    String readRefusal(String primitive, Map<String, Object> args) {
+        PrimitiveDescriptor descriptor = primitives.get(primitive);
+        if (descriptor == null) {
+            return primitive + " is not in the target's catalogue";
+        }
+        if (descriptor.mutating() || descriptor.destructive()) {
+            return primitive + " changes the target: a read serves no mutating or destructive primitive";
+        }
+        if (descriptor.script() || "data.query".equals(primitive) || primitive.startsWith("agent.")
+                || ((primitive.startsWith("hook.") || primitive.startsWith("rule.")) && !HOOK_READS.contains(primitive))) {
+            return primitive + " is not served by a read";
+        }
+        if ("swing.capture".equals(primitive)) {
+            if ("ROBOT".equals(args.get("mode"))) {
+                return "swing.capture {mode: ROBOT} is a person's evidence: never a read";
+            }
+            if (Boolean.FALSE.equals(args.get("redact"))) {
+                return "swing.capture {redact: false} is a person's call: never a read";
+            }
+        }
+        return null;
+    }
+
+    /** A read's value through the mask, an image's {@code base64} entry kept as it is (P7 9.2). */
+    @SuppressWarnings("unchecked")
+    private Object maskRead(Object value) {
+        if (value instanceof Map<?, ?> map && map.get("base64") instanceof String base64) {
+            Map<String, Object> rest = new LinkedHashMap<>();
+            map.forEach((k, v) -> {
+                if (!"base64".equals(k)) {
+                    rest.put(String.valueOf(k), v);
+                }
+            });
+            Map<String, Object> masked = new LinkedHashMap<>((Map<String, Object>) mask.apply(jsonForm(rest)));
+            Map<String, Object> out = new LinkedHashMap<>();
+            for (Object key : map.keySet()) {
+                String k = String.valueOf(key);
+                out.put(k, "base64".equals(k) ? base64 : masked.get(k));
+            }
+            return out;
+        }
+        return mask.apply(jsonForm(value));
+    }
+
+    /**
+     * The session's merged capability matrix (phase7-contracts.md 8.5, decision D348): the agent's, with what the
+     * controller-side contributors added at {@link #open} under {@link SessionOptions#host()}; each entry's
+     * {@link CapabilityMatrix#source} says where it came from.
+     *
+     * @throws IllegalStateException after {@link #close()}
+     */
+    public CapabilityMatrix capabilities() {
+        requireOpen();
+        return caps;
+    }
+
+    /**
+     * Whether a credential is in flight (phase7-contracts.md 9.2, decision D342): true from the moment a credential
+     * join resolves a secret into the session's bindings (a person's {@link #resolve} of a credential slot) until a
+     * step of a {@link Origin.Kind#PERSON} origin has consumed every such reference (its compiled calls referenced the
+     * slot's secret field). While it is true, {@code execute} refuses, for every origin but a person's, every
+     * {@code type}, every printable {@code press} and every raw {@code swing.type} or {@code swing.key}.
+     *
+     * @throws IllegalStateException after {@link #close()}
+     */
+    public boolean secretsInFlight() {
+        requireOpen();
+        return !inFlight.isEmpty();
+    }
+
+    /**
+     * Runs an {@code expectImage} step, or an anchored {@code pointer} step, through the image steps' one code path
+     * (phase7-contracts.md 6.7, 6.8): the scenario player's route. The step is a compiled plan step (its calls and its
+     * {@link ImageCheck}, or its guarded {@code swing.pointer} call); it is journaled as one step with its verb.
+     *
+     * @param step the compiled step
+     * @param origin who runs it (the player passes the person's origin)
+     * @throws AgentLostException if the agent is gone (the step is journaled first)
+     * @throws InterruptedException if the thread is interrupted
+     */
+    public StepOutcome expectImage(Plan.Step step, Origin origin) throws AgentLostException, InterruptedException {
+        Objects.requireNonNull(step, "step");
+        Objects.requireNonNull(origin, "origin");
+        requireOpen();
+        throw new UnsupportedOperationException("ExecutorSession.expectImage: Phase 7 VC body lands after the API"
+                + " commit");
     }
 
     // ------------------------------------------------------------------------------------------------ journal
