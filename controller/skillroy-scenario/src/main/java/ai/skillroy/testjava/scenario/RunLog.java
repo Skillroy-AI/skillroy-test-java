@@ -16,6 +16,7 @@
 
 package ai.skillroy.testjava.scenario;
 
+import ai.skillroy.testjava.controller.OutputFiles;
 import ai.skillroy.testjava.data.SecretMask;
 
 import ai.skillroy.testjava.protocol.Json;
@@ -23,8 +24,6 @@ import ai.skillroy.testjava.scenario.observe.RunObserver;
 
 import java.io.BufferedWriter;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;
 import java.util.ArrayList;
@@ -92,17 +91,21 @@ final class RunLog implements AutoCloseable {
         this.startMs = clock.millis();
     }
 
-    /** A log writing to {@code dir/run.jsonl} (replacing an old one), or a no-op log when {@code dir} is null. */
+    /**
+     * A log writing to {@code dir/run.jsonl} (replacing an old one), or a no-op log when {@code dir} is null. The file
+     * is created exclusively in a directory of the current user, never through what is in its place
+     * ({@link OutputFiles}; Phase 6 security fix, pass 2, P2-L8-F3); when it cannot be, the log has no file and
+     * {@link #error()} says why.
+     */
     static RunLog open(Path dir, Clock clock) {
         if (dir == null) {
             return new RunLog(null, clock);
         }
         try {
-            Files.createDirectories(dir);
-            return new RunLog(Files.newBufferedWriter(dir.resolve(FILE), StandardCharsets.UTF_8), clock);
+            return new RunLog(OutputFiles.newWriter(dir.resolve(FILE)), clock);
         } catch (IOException e) {
             RunLog log = new RunLog(null, clock);
-            log.error = e.toString();
+            log.error = e.getMessage() == null ? e.toString() : e.getMessage();
             return log;
         }
     }

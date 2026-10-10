@@ -16,6 +16,7 @@
 
 package ai.skillroy.testjava.scenario;
 
+import ai.skillroy.testjava.controller.OutputFiles;
 import ai.skillroy.testjava.protocol.Json;
 import ai.skillroy.testjava.protocol.JsonException;
 import ai.skillroy.testjava.protocol.RpcException;
@@ -678,13 +679,12 @@ public record Plan(int planVersion, String scenarioId, String pack, String packV
         return ScenarioLoader.sourceHash(Json.writeCanonical(json).getBytes(StandardCharsets.UTF_8));
     }
 
-    /** Writes {@link #toJsonText()} as UTF-8, creating parent directories. */
+    /**
+     * Writes {@link #toJsonText()} as UTF-8, creating parent directories; created exclusively in a directory of the
+     * current user, never through what is in its place (Phase 6 security fix, pass 2, P2-L8-F3).
+     */
     public void write(Path file) throws IOException {
-        Path parent = file.toAbsolutePath().getParent();
-        if (parent != null) {
-            Files.createDirectories(parent);
-        }
-        Files.write(file, toJsonText().getBytes(StandardCharsets.UTF_8));
+        OutputFiles.writeString(file, toJsonText());
     }
 
     /**

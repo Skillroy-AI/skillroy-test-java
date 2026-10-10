@@ -16,14 +16,15 @@
 
 package ai.skillroy.testjava.scenario.resolve;
 
+import ai.skillroy.testjava.data.SettingsFiles;
 import ai.skillroy.testjava.data.yaml.StrictYaml;
 import ai.skillroy.testjava.data.yaml.YamlException;
 
 import java.io.IOException;
-import java.io.InputStream;
 import java.math.BigDecimal;
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -314,7 +315,9 @@ public record InferenceSettings(String gateway, Path recordings, boolean record,
             }
         } else if (credentialsDir != null) {
             Path beside = credentialsDir.resolve(FILE_NAME);
-            if (Files.isRegularFile(beside)) {
+            // P2-L8-F1: any entry of that name is read under the owner rule, so that a planted file or link is
+            // refused, never silently followed or skipped.
+            if (Files.exists(beside, LinkOption.NOFOLLOW_LINKS) && !Files.isDirectory(beside)) {
                 file = beside;
             }
         }
@@ -510,8 +513,14 @@ public record InferenceSettings(String gateway, Path recordings, boolean record,
 
         void read(Builder b) throws SettingsException {
             byte[] bytes;
-            try (InputStream in = Files.newInputStream(file)) {
-                bytes = in.readNBytes(MAX_FILE_BYTES + 1);
+            try {
+                // Phase 6 security fix, pass 2, P2-L8-F1: read only a file nobody but the current user could have
+                // written (SettingsFiles), since the file alone changes what the command sends and where.
+                bytes = SettingsFiles.read(file, MAX_FILE_BYTES);
+            } catch (SettingsFiles.RefusedException e) {
+                throw new SettingsException("inference settings file " + name + " cannot be used: " + e.getMessage()
+                        + " (a settings file must be a regular file of the current user that nobody else may write"
+                        + " to, e.g. chmod go-w; fix it or remove it)");
             } catch (IOException e) {
                 throw new SettingsException("inference settings file " + name + " cannot be read ("
                         + e.getClass().getName() + ")");

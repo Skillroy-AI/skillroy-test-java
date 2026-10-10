@@ -459,6 +459,9 @@ class AuthorCommandTest {
         Map<?, ?> server = (Map<?, ?>) ((Map<?, ?>) Json.parseObject(Files.readString(bin.resolve("mcp-1.json")))
                 .get("mcpServers")).get("skillroy");
         assertEquals("off", after((List<?>) server.get("args"), "--hooks"), String.valueOf(server.get("args")));
+        // D168 (Phase 6 security fix, pass 2, P2-L8-S2): the planner's server exports nothing, whatever a
+        // telemetry.yaml beside the credentials file names (an option wins over the file).
+        assertEquals("none", after((List<?>) server.get("args"), "--telemetry"), String.valueOf(server.get("args")));
 
         answer(2, envelope(document("hooks-default"), false, "0.10"));
         author("--brief", BRIEF, "--id", "hooks-default", "--out", out.toString(), "--claude-command",

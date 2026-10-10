@@ -21,6 +21,7 @@ import ai.skillroy.testjava.controller.AgentLostException;
 import ai.skillroy.testjava.controller.AgentRpcException;
 import ai.skillroy.testjava.controller.CallOptions;
 import ai.skillroy.testjava.controller.CapabilityMatrix;
+import ai.skillroy.testjava.controller.OutputFiles;
 import ai.skillroy.testjava.data.DataChannel;
 import ai.skillroy.testjava.data.DataChannels;
 import ai.skillroy.testjava.data.DataException;
@@ -61,8 +62,8 @@ import ai.skillroy.testjava.scenario.web.WebSettings;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.math.BigInteger;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.LocalDateTime;
@@ -510,6 +511,16 @@ public final class PlanExecutor {
         /** The {@code crosscheck} records the bind emitted, as run.jsonl holds them, also when it failed (P3 9). */
         private final List<Map<String, Object>> crossCheckRecords = new ArrayList<>();
         private RunLog log;
+        /**
+         * The run's output directory: {@code RunOptions.outputDir()}, or null when there is none or it was refused
+         * ({@link #outputRefused}), so that nothing is written then.
+         */
+        private Path outDir;
+        /**
+         * Why the output directory or the run log cannot be used (Phase 6 security fix, pass 2, P2-L8-F3, P2-L8-S1),
+         * or null: the run then ends ERROR / ENVIRONMENT before anything is sent to the agent.
+         */
+        private String outputRefused;
         private CapabilityMatrix caps;
         private boolean stepsStarted;
         /** The step protocol (decision D79): the calls, their syncs and the protocol's state; set in execute(). */
@@ -611,8 +622,14 @@ public final class PlanExecutor {
         }
 
         RunResult execute() {
-            clearOldOutputs();
-            log = RunLog.open(options.outputDir(), options.clock());
+            prepareOutput();
+            log = RunLog.open(outDir, options.clock());
+            if (outDir != null && log.error() != null) {
+                // P2-L8-F3: run.jsonl is created exclusively; something in its place that the run cannot remove (a
+                // link or another user's file) refuses the run rather than receiving its log.
+                outputRefused = "the run log cannot be written: " + log.error();
+                outDir = null;
+            }
             // phase6-contracts.md 10.2: the scenario and step records reach the observer as written (RunLog.observe).
             log.observe(observer);
             web = new WebRun(agent, log, options.clock(), webPathLoader);
@@ -654,6 +671,7 @@ public final class PlanExecutor {
             log.write("run-start", start);
             Abort failure = null;
             try {
+                refuseOutput();
                 requireBindingsRoot();
                 init();
                 checkRequires();
@@ -680,9 +698,11 @@ public final class PlanExecutor {
                 failure = new Abort(Status.ERROR, FailureKind.ENVIRONMENT, runner.currentStep,
                         "the run was interrupted", null);
             } catch (RuntimeException | StackOverflowError | LinkageError e) {
-                // Not OutOfMemoryError or another VirtualMachineError: the JVM may not be able to go on.
-                failure = new Abort(Status.ERROR, FailureKind.ENVIRONMENT, runner.currentStep, "internal error: " + e,
-                        RunLog.fields("exception", e.toString()));
+                // Not OutOfMemoryError or another VirtualMachineError: the JVM may not be able to go on. The message
+                // names the exception's class only, its text (which can name a file) stays in the detail, which no
+                // span carries (Phase 6 security fix, pass 2, P2-L8-F4).
+                failure = new Abort(Status.ERROR, FailureKind.ENVIRONMENT, runner.currentStep, "internal error: "
+                        + e.getClass().getName(), RunLog.fields("exception", e.toString()));
             }
             List<CostLedger.Entry> modelCalls = modelCalls();
             log.write("ledger", RunLog.fields("count", modelCalls.size()));
@@ -720,9 +740,9 @@ public final class PlanExecutor {
             web.close();
             Map<String, Object> summary = web.summary();
             webSummary = summary == null ? null : logged(summary);
-            if (runner.bindings != null && options.outputDir() != null) {
+            if (runner.bindings != null && outDir != null) {
                 try {
-                    writeBindings(options.outputDir().resolve("bindings.json"));
+                    writeBindings(outDir.resolve("bindings.json"));
                 } catch (IOException | RuntimeException e) {
                     log.write("bind", RunLog.fields("ok", true, "writeError", e.toString()));
                 }
@@ -813,7 +833,7 @@ public final class PlanExecutor {
                     observer.modelCall(entry);
                 }
             }
-            Path dir = options.outputDir();
+            Path dir = outDir;
             if (dir == null) {
                 return;
             }
@@ -826,17 +846,45 @@ public final class PlanExecutor {
                 }
             }
             try {
-                Files.createDirectories(dir);
-                Files.write(dir.resolve(LEDGER_FILE), text.toString().getBytes(StandardCharsets.UTF_8));
+                OutputFiles.writeString(dir.resolve(LEDGER_FILE), text.toString());
             } catch (IOException e) {
                 log.write("ledger", RunLog.fields("ok", false, "error", e.toString()));
             }
             if (!inference.isEmpty()) {
                 try {
-                    Files.write(dir.resolve(INFERENCE_FILE), inference.toString().getBytes(StandardCharsets.UTF_8));
+                    OutputFiles.writeString(dir.resolve(INFERENCE_FILE), inference.toString());
                 } catch (IOException e) {
                     log.write("ledger", RunLog.fields("ok", false, "file", INFERENCE_FILE, "error", e.toString()));
                 }
+            }
+        }
+
+        /**
+         * The output directory, checked (Phase 6 security fix, pass 2, P2-L8-F3, P2-L8-S1): created if needed and
+         * refused unless it is the current user's ({@link OutputFiles#directory}); a refusal leaves {@link #outDir}
+         * null and ends the run before anything is sent ({@link #refuseOutput}). Then the files an earlier run left
+         * there are removed ({@link #clearOldOutputs}).
+         */
+        private void prepareOutput() {
+            outDir = options.outputDir();
+            if (outDir == null) {
+                return;
+            }
+            try {
+                OutputFiles.directory(outDir);
+            } catch (IOException e) {
+                outputRefused = e.getMessage();
+                outDir = null;
+                return;
+            }
+            clearOldOutputs();
+        }
+
+        /** Ends the run when its output cannot be used, before the agent is contacted (P2-L8-F3, P2-L8-S1). */
+        private void refuseOutput() throws Abort {
+            if (outputRefused != null) {
+                throw new Abort(Status.ERROR, FailureKind.ENVIRONMENT, null, outputRefused,
+                        RunLog.fields("outputDir", String.valueOf(options.outputDir())));
             }
         }
 
@@ -845,17 +893,20 @@ public final class PlanExecutor {
          * failure is never read as belonging to this run. Only the files the executor itself writes are touched.
          */
         private void clearOldOutputs() {
-            Path dir = options.outputDir();
+            Path dir = outDir;
             if (dir == null) {
                 return;
             }
-            // phase4-contracts.md 6.4: the web evidence files are named after the browsers' refs.
+            // phase4-contracts.md 6.4: the web evidence files are named after the browsers' refs. P2-L8-F3: an entry
+            // is judged without following links, so that a link of that name goes too (a dangling one included),
+            // never the file it names.
             Path failure = dir.resolve("failure");
-            if (Files.isDirectory(failure)) {
+            if (Files.isDirectory(failure, LinkOption.NOFOLLOW_LINKS)) {
                 try (Stream<Path> files = Files.list(failure)) {
                     for (Path file : files.toList()) {
                         if (file.getFileName().toString().startsWith(WEB_EVIDENCE_PREFIX)
-                                && Files.isRegularFile(file)) {
+                                && (Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)
+                                || Files.isSymbolicLink(file))) {
                             Files.deleteIfExists(file);
                         }
                     }
@@ -867,7 +918,9 @@ public final class PlanExecutor {
                 try {
                     Files.deleteIfExists(dir.resolve(name));
                 } catch (IOException | RuntimeException e) {
-                    // Best effort: a file that cannot be removed is overwritten or reported when it is written.
+                    // Best effort: every file is written through OutputFiles, which removes the entry again and
+                    // creates the file exclusively, so an entry that cannot be removed is reported when it is
+                    // written, never written through (P2-L8-F3).
                 }
             }
         }
@@ -934,13 +987,12 @@ public final class PlanExecutor {
          * beside {@code run.jsonl} (with an output directory) and the record {@code capabilities {hash, ids, file}}.
          */
         private void archiveCapabilities() {
-            Path dir = options.outputDir();
+            Path dir = outDir;
             String file = null;
             if (dir != null) {
                 try {
-                    Files.createDirectories(dir);
-                    Files.write(dir.resolve(CAPABILITIES_FILE), (Json.writePretty(mask.apply(caps.toJson())) + "\n")
-                            .getBytes(StandardCharsets.UTF_8));
+                    OutputFiles.writeString(dir.resolve(CAPABILITIES_FILE), Json.writePretty(mask.apply(
+                            caps.toJson())) + "\n");
                     file = CAPABILITIES_FILE;
                 } catch (IOException | RuntimeException e) {
                     log.write("capabilities", RunLog.fields("ok", false, "error", e.toString()));
@@ -1047,7 +1099,7 @@ public final class PlanExecutor {
 
             @Override
             public Path artifactsDir() {
-                return options.outputDir();
+                return outDir;
             }
 
             @Override
@@ -1141,16 +1193,19 @@ public final class PlanExecutor {
          */
         private void saveWebTrace() {
             if (!plan.effectiveWeb().trace() || traceWithheld || !web.hasOpenedPath()
-                    || options.outputDir() == null) {
+                    || outDir == null) {
                 return;
             }
             if (runner.secretsSent) {
                 log.write("web.trace", RunLog.fields("skipped", true, "reason", "secrets"));
                 return;
             }
-            Path dir = options.outputDir().resolve("failure");
+            Path dir = outDir.resolve("failure");
             try {
-                Files.createDirectories(dir);
+                // P2-L8-F3: the directory is the current user's and nothing of that name is left for the path's
+                // writer to follow.
+                OutputFiles.directory(dir);
+                Files.deleteIfExists(dir.resolve("web-trace.zip"));
                 if (web.saveTrace(dir.resolve("web-trace.zip"))) {
                     log.write("web.trace", RunLog.fields("ok", true, "file", "failure/web-trace.zip"));
                 } else {
@@ -1276,9 +1331,9 @@ public final class PlanExecutor {
                 record.put("skipped", outcome.skipped());
             }
             bindRecord(record);
-            if (options.outputDir() != null) {
+            if (outDir != null) {
                 try {
-                    writeBindings(options.outputDir().resolve("bindings.json"));
+                    writeBindings(outDir.resolve("bindings.json"));
                 } catch (IOException | RuntimeException e) {
                     log.write("bind", RunLog.fields("ok", true, "writeError", e.toString()));
                 }
@@ -1349,11 +1404,7 @@ public final class PlanExecutor {
                 }
                 json.put("resolutions", maskedResolutions);
             }
-            Path parent = file.toAbsolutePath().getParent();
-            if (parent != null) {
-                Files.createDirectories(parent);
-            }
-            Files.write(file, Json.writePretty(mask.apply(json)).getBytes(StandardCharsets.UTF_8));
+            OutputFiles.writeString(file, Json.writePretty(mask.apply(json)));
         }
 
         /**
@@ -1427,7 +1478,8 @@ public final class PlanExecutor {
                 message = "interrupted";
                 throw e;
             } catch (RuntimeException | StackOverflowError | LinkageError e) {
-                message = "internal error: " + e;
+                // P2-L8-F4: the class only; the run's detail keeps the exception's text.
+                message = "internal error: " + e.getClass().getName();
                 throw e;
             } finally {
                 StepResult result = new StepResult(id, verb, line, status, message, stepSkipped, since(t0),
@@ -1881,7 +1933,7 @@ public final class PlanExecutor {
         }
 
         private void collectEvidence(Map<String, Object> detail) {
-            Path dir = options.outputDir() == null ? null : options.outputDir().resolve("failure");
+            Path dir = outDir == null ? null : outDir.resolve("failure");
             boolean[] lost = {false};
             Object snapshot = evidence("swing.snapshot", Map.of(), 10_000L, lost);
             writeJson(dir, "snapshot.json", snapshot);
@@ -2055,8 +2107,7 @@ public final class PlanExecutor {
 
         private void writeText(Path dir, String name, String text) {
             try {
-                Files.createDirectories(dir);
-                Files.write(dir.resolve(name), mask.apply(Images.elidedText(text)).getBytes(StandardCharsets.UTF_8));
+                OutputFiles.writeString(dir.resolve(name), mask.apply(Images.elidedText(text)));
             } catch (IOException e) {
                 log.write("evidence", RunLog.fields("file", name, "ok", false, "error", e.toString()));
             }
@@ -2087,10 +2138,8 @@ public final class PlanExecutor {
                 return;
             }
             try {
-                Files.createDirectories(dir);
                 // P2-L6-F2: a failure file carries no image's bytes; the pixels go to the PNG files only.
-                Files.write(dir.resolve(name), RunLog.pretty(mask.apply(Images.elided(value)))
-                        .getBytes(StandardCharsets.UTF_8));
+                OutputFiles.writeString(dir.resolve(name), RunLog.pretty(mask.apply(Images.elided(value))));
             } catch (IOException | JsonException e) {
                 log.write("evidence", RunLog.fields("file", name, "ok", false, "error", e.toString()));
             }
@@ -2101,8 +2150,7 @@ public final class PlanExecutor {
                 return;
             }
             try {
-                Files.createDirectories(file.getParent());
-                Files.write(file, Base64.getMimeDecoder().decode(base64));
+                OutputFiles.write(file, Base64.getMimeDecoder().decode(base64));
             } catch (IOException | IllegalArgumentException e) {
                 log.write("evidence", RunLog.fields("file", file.getFileName().toString(), "ok", false, "error",
                         e.toString()));
@@ -2116,7 +2164,7 @@ public final class PlanExecutor {
                             "unknown artifact kind; Phase 1 keeps 'capture' only"));
                     continue;
                 }
-                if (options.outputDir() == null) {
+                if (outDir == null) {
                     continue;
                 }
                 if (caps == null || !caps.isOk("swing.capture.paint")) {
@@ -2125,7 +2173,7 @@ public final class PlanExecutor {
                     continue;
                 }
                 Object capture = evidence("swing.capture", Map.of(), 15_000L, new boolean[1]);
-                writePng(options.outputDir().resolve("artifacts").resolve("capture.png"), capture);
+                writePng(outDir.resolve("artifacts").resolve("capture.png"), capture);
                 log.write("artifact", RunLog.fields("kind", kind, "ok", capture != null));
             }
         }

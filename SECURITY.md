@@ -45,7 +45,15 @@ Read these before you run the agent on a shared host.
 - **Hooks on Java 25.** With hooks installed, a Java 25 target prints one class-data-sharing warning line on its
   standard error when the agent's spy jar is appended to the bootstrap path (once per JVM; B26 Q14).
 - **Run outputs take the process umask.** `run.jsonl`, captures, bindings, ledgers and span files hold UI snapshots,
-  events and row samples. On a shared host run the controller under `umask 077`.
+  events and row samples. On a shared host run the controller under `umask 077`, and give `--out` a directory you own
+  that other users cannot write to, never a path directly under `/tmp`: a run refuses an output directory another user
+  owns or others may write to (without the sticky bit), and never writes through a file or link already in place of
+  one of its files (security pass 2, P2-L8-F3, P2-L8-S1).
+- **Settings files must be your own.** `telemetry.yaml` and `inference.yaml` beside the credentials file (or in the
+  bindings environment directory) are read only when no other user could have written them: a file others (or a
+  shared group) may write to, or another user's, stops the command with a settings error naming it; on a Linux host
+  with `umask 002` a file your own user-private group may write is accepted. A telemetry header is sent to an
+  `https://` endpoint only, never over the default loopback `http://` (security pass 2, P2-L8-F1, P2-L8-F2).
 - **Not verified on Windows.** No Windows host has run this code: the access-control branches that make the token,
   credential and discovery files owner-only, the `.bat` launcher, the planner's `cmd.exe /c` form, `JAVAAGENT` as the
   logged-on user and the input rungs. Until the project says otherwise, treat Windows as unverified.

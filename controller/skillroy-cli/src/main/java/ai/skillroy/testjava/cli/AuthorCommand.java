@@ -38,6 +38,7 @@ import ai.skillroy.testjava.scenario.Status;
 import ai.skillroy.testjava.scenario.hooks.HooksMode;
 import ai.skillroy.testjava.scenario.observe.RunObserver;
 import ai.skillroy.testjava.scenario.observe.RunObservers;
+import ai.skillroy.testjava.scenario.observe.TelemetrySettings;
 import ai.skillroy.testjava.scenario.pack.DomainPack;
 import ai.skillroy.testjava.scenario.resolve.BindMode;
 import ai.skillroy.testjava.scenario.resolve.CostLedger;
@@ -556,7 +557,7 @@ final class AuthorCommand implements Command {
 
     /**
      * Writes the planner's MCP configuration (10.2 step 3) into a new owner-only temporary file: this CLI's launcher
-     * with {@code mcp --mutating --inference none --client planner}, the server's {@code --out} under the planner's
+     * with {@code mcp --mutating --inference none --telemetry none --client planner} (D168; P2-L8-S2), the server's {@code --out} under the planner's
      * private working directory (S60), the person's {@code --hooks} switch ({@code auto} when not given; phase6
      * security fix, pass 2, P2-L6-F4), the connection options as given (paths made absolute, the discovery directory
      * always named), the pack jars, the environment, the bindings root and the credentials file.
@@ -578,6 +579,9 @@ final class AuthorCommand implements Command {
         }
         serverArgs.addAll(List.of("mcp", McpCommand.MUTATING, InferenceArgs.INFERENCE,
                 InferenceSettings.GATEWAY_NONE));
+        // D168 (Phase 6 security fix, pass 2, P2-L8-S2): the planner's server exports nothing, whatever a
+        // telemetry.yaml beside the credentials file says (an option wins over the file).
+        serverArgs.addAll(List.of(TelemetryArgs.TELEMETRY, TelemetrySettings.EXPORTER_NONE));
         // D158: the planner's model acts as client planner, which confirms nothing and is journaled as itself.
         serverArgs.addAll(List.of(McpCommand.CLIENT, PLANNER_CLIENT));
         if (serverOut != null) {

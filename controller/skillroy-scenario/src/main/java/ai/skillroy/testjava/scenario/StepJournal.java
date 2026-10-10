@@ -16,6 +16,7 @@
 
 package ai.skillroy.testjava.scenario;
 
+import ai.skillroy.testjava.controller.OutputFiles;
 import ai.skillroy.testjava.data.SecretMask;
 import ai.skillroy.testjava.protocol.Json;
 import ai.skillroy.testjava.protocol.JsonException;
@@ -89,9 +90,9 @@ public final class StepJournal {
         if (dir == null) {
             return new StepJournal(pack, null, null);
         }
-        Files.createDirectories(dir);
         Path file = dir.resolve(FILE);
-        return new StepJournal(pack, file, Files.newBufferedWriter(file, StandardCharsets.UTF_8));
+        // Phase 6 security fix, pass 2, P2-L8-F3: created exclusively in a directory of the current user.
+        return new StepJournal(pack, file, OutputFiles.newWriter(file));
     }
 
     /**

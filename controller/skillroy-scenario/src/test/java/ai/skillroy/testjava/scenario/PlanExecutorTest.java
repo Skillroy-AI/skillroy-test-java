@@ -763,4 +763,93 @@ class PlanExecutorTest {
         assertOutcome(result, Status.PASS, null);
         assertFalse(agent.isClosed(), "the executor does not close the connection");
     }
+
+    // ------------------------------------------------------------------------------------------------ planted entries
+
+    private static boolean posix() {
+        return java.nio.file.FileSystems.getDefault().supportedFileAttributeViews().contains("posix");
+    }
+
+    private static boolean root() {
+        return "root".equals(System.getProperty("user.name"));
+    }
+
+    /**
+     * Phase 6 security fix, pass 2, P2-L8-F3 (the sceptic's probe P1): in an output directory others could write to,
+     * a link in place of {@code run.jsonl} is replaced, never followed, and a dangling link in place of a web evidence
+     * file goes with the old outputs, so nothing is created where it pointed. Against the old executor the dangling
+     * {@code web-*} link survived (only regular files were removed), ready to create its target at the next write.
+     */
+    @Test
+    void plantedLinksInTheOutputDirectoryAreRemovedNeverFollowed(@TempDir Path dir) throws Exception {
+        Path victim = Files.writeString(dir.resolve("victim.txt"), "operator's own\n");
+        Path out = Files.createDirectories(dir.resolve("out"));
+        Files.createSymbolicLink(out.resolve("run.jsonl"), victim);
+        Path failure = Files.createDirectories(out.resolve("failure"));
+        Path startup = dir.resolve(".bash_aliases");
+        Files.createSymbolicLink(failure.resolve("web-ref2-aria.json"), startup);
+        Files.createSymbolicLink(failure.resolve("web-ref1-aria.json"), victim);
+        options = options.withOutputDir(out).withStepTimeout(Duration.ofMillis(100));
+        assertOutcome(run("steps:\n  - expect: { \"state.name\": BUSY }\n"), Status.FAIL, FailureKind.ASSERTION);
+        assertEquals("operator's own\n", Files.readString(victim));
+        assertFalse(Files.isSymbolicLink(out.resolve("run.jsonl")));
+        assertTrue(Files.readString(out.resolve("run.jsonl")).startsWith("{\"type\":\"run-start\""));
+        assertFalse(Files.exists(failure.resolve("web-ref2-aria.json"), java.nio.file.LinkOption.NOFOLLOW_LINKS),
+                "the dangling web-* link went with the old outputs");
+        assertFalse(Files.exists(failure.resolve("web-ref1-aria.json"), java.nio.file.LinkOption.NOFOLLOW_LINKS));
+        assertFalse(Files.exists(startup, java.nio.file.LinkOption.NOFOLLOW_LINKS), "nothing where it pointed");
+    }
+
+    /**
+     * P2-L8-F3 and P2-L8-S1 (the sceptic's probes P2 and P3): in an output directory whose entries the run cannot
+     * remove (another user's directory with the sticky bit; here, one without the owner's write bit), a link in place
+     * of {@code run.jsonl} and a world-writable file in place of {@code bindings.json} are never written through: the
+     * run ends ERROR / ENVIRONMENT naming the file before anything is sent to the agent, and both are left as they
+     * were. Against the old executor the run log replaced the link's target and the run went on.
+     */
+    @Test
+    void anEntryTheRunCannotRemoveEndsTheRunBeforeItStarts(@TempDir Path dir) throws Exception {
+        org.junit.jupiter.api.Assumptions.assumeTrue(posix());
+        org.junit.jupiter.api.Assumptions.assumeFalse(root(), "root may remove any entry");
+        Path victim = Files.writeString(dir.resolve("victim.txt"), "operator's own\n");
+        Path out = Files.createDirectories(dir.resolve("out"));
+        Files.createSymbolicLink(out.resolve("run.jsonl"), victim);
+        Path planted = Files.writeString(out.resolve("bindings.json"), "planted\n");
+        Files.setPosixFilePermissions(planted, java.nio.file.attribute.PosixFilePermissions.fromString("rw-rw-rw-"));
+        Files.setPosixFilePermissions(out, java.nio.file.attribute.PosixFilePermissions.fromString("r-xr-xr-x"));
+        RunResult result;
+        try {
+            options = options.withOutputDir(out);
+            result = run("steps:\n  - enter: { value: 1 }\n");
+        } finally {
+            Files.setPosixFilePermissions(out, java.nio.file.attribute.PosixFilePermissions.fromString("rwx------"));
+        }
+        assertOutcome(result, Status.ERROR, FailureKind.ENVIRONMENT);
+        assertTrue(result.message().startsWith("the run log cannot be written: ") && result.message().contains(
+                "run.jsonl") && result.message().contains("cannot be removed"), result.message());
+        assertEquals(List.of(), agent.methods(), "nothing was sent to the agent");
+        assertEquals("operator's own\n", Files.readString(victim));
+        assertEquals("planted\n", Files.readString(planted));
+    }
+
+    /**
+     * P2-L8-S1: an output directory others may write to without the sticky bit (as a shared {@code /tmp/<name>}
+     * another user created is) is refused before anything runs; nothing is written into it. Against the old executor
+     * the run passed and wrote its evidence there.
+     */
+    @Test
+    void anOutputDirectoryOthersMayWriteToIsRefused(@TempDir Path dir) throws Exception {
+        org.junit.jupiter.api.Assumptions.assumeTrue(posix());
+        Path out = Files.createDirectories(dir.resolve("shared"));
+        Files.setPosixFilePermissions(out, java.nio.file.attribute.PosixFilePermissions.fromString("rwxrwxrwx"));
+        options = options.withOutputDir(out);
+        RunResult result = run("steps:\n  - enter: { value: 1 }\n");
+        assertOutcome(result, Status.ERROR, FailureKind.ENVIRONMENT);
+        assertTrue(result.message().contains("the output directory " + out) && result.message().contains(
+                "others may write to it without the sticky bit"), result.message());
+        assertEquals(List.of(), agent.methods());
+        try (java.util.stream.Stream<Path> entries = Files.list(out)) {
+            assertEquals(0L, entries.count(), "nothing written");
+        }
+    }
 }

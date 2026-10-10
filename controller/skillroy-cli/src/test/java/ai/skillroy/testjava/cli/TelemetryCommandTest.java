@@ -17,15 +17,12 @@
 package ai.skillroy.testjava.cli;
 
 import ai.skillroy.testjava.protocol.Json;
-import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
-import java.net.InetAddress;
-import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -59,7 +56,7 @@ class TelemetryCommandTest {
     private FakeAgent agent;
     private List<String> connection;
     private Path scenarios;
-    private HttpServer stub;
+    private TlsStub tls;
     private final List<String> authorizations = new CopyOnWriteArrayList<>();
 
     @BeforeEach
@@ -75,8 +72,8 @@ class TelemetryCommandTest {
     @AfterEach
     void tearDown() {
         agent.close();
-        if (stub != null) {
-            stub.stop(0);
+        if (tls != null) {
+            tls.close();
         }
     }
 
@@ -149,9 +146,23 @@ class TelemetryCommandTest {
         assertUsage(run(file("pass.yaml"), "--telemetry-file", yaml.toString()), "telemetry.yaml:3");
         Files.writeString(yaml, "version: 1\nexporter: otlp\nheaders: {x-api-key: env:ANTHROPIC_API_KEY}\n");
         assertUsage(run(file("pass.yaml"), "--telemetry-file", yaml.toString()), "may not carry the model key");
-        Files.writeString(yaml, "version: 1\nexporter: otlp\nheaders: {x-key: env:SKILLROY_TEST_NEVER_SET}\n");
+        Files.writeString(yaml, "version: 1\nexporter: otlp\nendpoint: https://collector.example.org\nheaders:"
+                + " {x-key: env:SKILLROY_TEST_NEVER_SET}\n");
         assertUsage(run(file("pass.yaml"), "--telemetry-file", yaml.toString(), "--out", out.toString()),
                 "SKILLROY_TEST_NEVER_SET");
+        // P2-L8-F2: a header goes to an https:// endpoint only; the default endpoint is http://.
+        Files.writeString(yaml, "version: 1\nexporter: otlp\nheaders: {x-key: env:SKILLROY_TEST_NEVER_SET}\n");
+        assertUsage(run(file("pass.yaml"), "--telemetry-file", yaml.toString(), "--out", out.toString()),
+                "a telemetry header needs an https:// endpoint (the default endpoint http://127.0.0.1:4318 is not"
+                        + " one");
+        // P2-L8-F1: a settings file others may write to is refused, naming the file.
+        if (java.nio.file.FileSystems.getDefault().supportedFileAttributeViews().contains("posix")) {
+            Files.writeString(yaml, "version: 1\nexporter: file\n");
+            Files.setPosixFilePermissions(yaml, java.nio.file.attribute.PosixFilePermissions.fromString(
+                    "rw-rw-rw-"));
+            assertUsage(run(file("pass.yaml"), "--telemetry-file", yaml.toString(), "--out", out.toString()),
+                    yaml + " cannot be used: others may write to it");
+        }
         assertEquals(0, agent.rpcRequests("trace.mark").size(), "found before the agent is contacted");
     }
 
@@ -168,9 +179,14 @@ class TelemetryCommandTest {
     }
 
     private Child child(Map<String, String> env, String... args) throws Exception {
+        return child(env, List.of(), args);
+    }
+
+    private Child child(Map<String, String> env, List<String> jvmOptions, String... args) throws Exception {
         List<String> command = new ArrayList<>(List.of(Path.of(System.getProperty("java.home"), "bin", "java")
-                .toString(), "-Xlog:class+load=info:file=" + tmp.resolve("class-load.log"), "-cp",
-                System.getProperty("java.class.path"), Main.class.getName(), "run"));
+                .toString(), "-Xlog:class+load=info:file=" + tmp.resolve("class-load.log")));
+        command.addAll(jvmOptions);
+        command.addAll(List.of("-cp", System.getProperty("java.class.path"), Main.class.getName(), "run"));
         command.addAll(List.of(args));
         command.addAll(connection);
         command.addAll(List.of("--discovery-dir", tmp.resolve("unused-discovery").toString()));
@@ -198,29 +214,32 @@ class TelemetryCommandTest {
         assertEquals(0, openTelemetryClassesLoaded(), "no io.opentelemetry class without --telemetry");
     }
 
+    /**
+     * The header reaches its endpoint, which is a TLS stub since a header needs {@code https://} (Phase 6 security fix,
+     * pass 2, P2-L8-F2); the child JVM trusts the stub's certificate through the standard trust-store properties
+     * (the CLI has no trust-store option, §10.3).
+     */
     @Test
     void aHeadersValueReachesTheEndpointAndNoOutputOrFile() throws Exception {
-        stub = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
-        stub.createContext("/v1/traces", exchange -> {
+        tls = TlsStub.start(tmp.resolve("tls"), exchange -> {
             exchange.getRequestBody().readAllBytes();
             authorizations.add(String.valueOf(exchange.getRequestHeaders().getFirst("Authorization")));
             exchange.sendResponseHeaders(200, 0);
             exchange.close();
         });
-        stub.start();
         Path yaml = tmp.resolve("telemetry.yaml");
-        Files.writeString(yaml, "version: 1\nexporter: otlp\nendpoint: http://127.0.0.1:" + stub.getAddress().getPort()
+        Files.writeString(yaml, "version: 1\nexporter: otlp\nendpoint: " + tls.endpoint()
                 + "\nheaders: {Authorization: env:SKILLROY_TEST_OTLP_TOKEN}\n");
         Path out = tmp.resolve("out");
         Path junit = tmp.resolve("junit.xml");
-        Child child = child(Map.of("SKILLROY_TEST_OTLP_TOKEN", TOKEN), file("pass.yaml"), file("wrong.yaml"),
-                "--telemetry-file", yaml.toString(), "--out", out.toString(), "--junit", junit.toString());
+        Child child = child(Map.of("SKILLROY_TEST_OTLP_TOKEN", TOKEN), tls.trustStoreOptions(), file("pass.yaml"),
+                file("wrong.yaml"), "--telemetry-file", yaml.toString(), "--out", out.toString(), "--junit",
+                junit.toString());
         assertEquals(Exit.FAILED, child.exit(), child.err());
         assertFalse(authorizations.isEmpty(), "the batches reached the endpoint");
         assertTrue(authorizations.stream().allMatch(TOKEN::equals), String.valueOf(authorizations.size()));
         assertTrue(openTelemetryClassesLoaded() > 0, "the exporter ran in the child");
-        assertTrue(child.out().contains("telemetry: otlp 127.0.0.1:" + stub.getAddress().getPort() + ", trace "),
-                child.out());
+        assertTrue(child.out().contains("telemetry: otlp 127.0.0.1:" + tls.port() + ", trace "), child.out());
 
         assertFalse(child.out().contains(TOKEN) || child.err().contains(TOKEN), "not printed");
         List<Path> files;

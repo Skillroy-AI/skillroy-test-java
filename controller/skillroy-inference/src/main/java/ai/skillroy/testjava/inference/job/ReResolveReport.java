@@ -16,14 +16,13 @@
 
 package ai.skillroy.testjava.inference.job;
 
+import ai.skillroy.testjava.controller.OutputFiles;
 import ai.skillroy.testjava.protocol.Json;
 import ai.skillroy.testjava.scenario.FailureKind;
 
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
@@ -306,17 +305,18 @@ public record ReResolveReport(String jobId, String envId, boolean dryRun, String
 
     /**
      * Writes {@value #MARKDOWN_FILE}, {@value #JSON_FILE}, {@value #LEDGER_FILE} and {@value #INFERENCE_FILE} into the
-     * directory (created when needed), replacing them.
+     * directory (created when needed), replacing them; each created exclusively in a directory of the current user,
+     * never through what is in its place (Phase 6 security fix, pass 2, P2-L8-F3).
      *
-     * @throws IOException if a file cannot be written
+     * @throws IOException if a file cannot be written, or the directory or an entry in a file's place is refused
      */
     public void writeTo(Path dir) throws IOException {
         Objects.requireNonNull(dir, "dir");
-        Files.createDirectories(dir);
-        Files.writeString(dir.resolve(MARKDOWN_FILE), toMarkdown(), StandardCharsets.UTF_8);
-        Files.writeString(dir.resolve(JSON_FILE), Json.writePretty(toJson()), StandardCharsets.UTF_8);
-        Files.writeString(dir.resolve(LEDGER_FILE), lines(ledger), StandardCharsets.UTF_8);
-        Files.writeString(dir.resolve(INFERENCE_FILE), lines(inference), StandardCharsets.UTF_8);
+        OutputFiles.directory(dir);
+        OutputFiles.writeString(dir.resolve(MARKDOWN_FILE), toMarkdown());
+        OutputFiles.writeString(dir.resolve(JSON_FILE), Json.writePretty(toJson()));
+        OutputFiles.writeString(dir.resolve(LEDGER_FILE), lines(ledger));
+        OutputFiles.writeString(dir.resolve(INFERENCE_FILE), lines(inference));
     }
 
     private static String lines(List<Map<String, Object>> records) {

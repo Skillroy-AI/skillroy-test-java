@@ -16,6 +16,7 @@
 
 package ai.skillroy.testjava.inference.recorded;
 
+import ai.skillroy.testjava.controller.OutputFiles;
 import ai.skillroy.testjava.inference.prompt.PromptMask;
 import ai.skillroy.testjava.inference.spi.Content;
 import ai.skillroy.testjava.inference.spi.JsonLike;
@@ -129,11 +130,18 @@ public record Recording(String fingerprint, String purpose, ModelResponse respon
      */
     public static Path write(Path dir, ModelRequest request, ModelResponse response, PromptMask mask,
                              Instant recordedAt) throws IOException {
-        Files.createDirectories(dir);
         Path file = file(dir, request.fingerprint());
-        Path tmp = dir.resolve(request.fingerprint() + ".json.tmp");
-        Files.write(tmp, bytes(json(request, response, mask, recordedAt)));
-        Files.move(tmp, file, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+        // Phase 6 security fix, pass 2, P2-L8-F3: the temporary file has a name nobody can predict and is created
+        // exclusively (OutputFiles); the move replaces the entry of the final name itself, never what a link there
+        // names.
+        Path tmp = dir.resolve(request.fingerprint() + "." + java.util.UUID.randomUUID() + ".json.tmp");
+        OutputFiles.write(tmp, bytes(json(request, response, mask, recordedAt)));
+        try {
+            Files.move(tmp, file, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+        } catch (IOException | RuntimeException e) {
+            Files.deleteIfExists(tmp);
+            throw e;
+        }
         return file;
     }
 

@@ -16,6 +16,7 @@
 
 package ai.skillroy.testjava.inference.triage;
 
+import ai.skillroy.testjava.controller.OutputFiles;
 import ai.skillroy.testjava.inference.budget.InferenceLog;
 import ai.skillroy.testjava.inference.budget.LedgerWriter;
 import ai.skillroy.testjava.inference.budget.PriceTable;
@@ -162,7 +163,9 @@ public final class Triage {
                     + status);
         }
         Path ledgerDir = runDir.resolve(LEDGER_DIR);
-        Files.createDirectories(ledgerDir);
+        // Phase 6 security fix, pass 2, P2-L8-F3: triage writes only into directories of the current user, and every
+        // file it writes is created exclusively (OutputFiles).
+        OutputFiles.directory(ledgerDir);
         Files.deleteIfExists(ledgerDir.resolve("inference.jsonl"));
         Files.deleteIfExists(ledgerDir.resolve("cost-ledger.jsonl"));
         CostLedger ledger = new CostLedger();
@@ -220,7 +223,7 @@ public final class Triage {
         }
         writeLedger(ledgerDir, ledger, m);
         Path dir = runDir.resolve(FAILURE_DIR);
-        Files.createDirectories(dir);
+        OutputFiles.directory(dir);
         Path json = dir.resolve(JSON_FILE);
         Path md = dir.resolve(MARKDOWN_FILE);
         BigDecimal cost = cost(ledger);
@@ -228,9 +231,9 @@ public final class Triage {
         Map<String, Object> record = json(scenarioId, status, failureKind, text(ev.end, "failedStepId"), label,
                 summary, o.labelsOnly(), models, requestIds, cost, date, failure);
         record.put("estimatedUsd", estimated.toPlainString());
-        Files.writeString(json, Json.writePretty(record), StandardCharsets.UTF_8);
-        Files.writeString(md, markdown(scenarioId, status, failureKind, text(ev.end, "failedStepId"), label, summary,
-                models, cost, date, failure), StandardCharsets.UTF_8);
+        OutputFiles.writeString(json, Json.writePretty(record));
+        OutputFiles.writeString(md, markdown(scenarioId, status, failureKind, text(ev.end, "failedStepId"), label,
+                summary, models, cost, date, failure));
         return new TriageResult(runDir, failure == null ? TriageResult.Outcome.TRIAGED : TriageResult.Outcome.FAILED,
                 scenarioId, status, failureKind, label, summary, models, requestIds, cost, failure, json, md);
     }
@@ -324,7 +327,7 @@ public final class Triage {
         for (CostLedger.Entry e : ledger.entries()) {
             text.append(Json.write(mask.jsonLike(e.toJson()))).append('\n');
         }
-        Files.writeString(dir.resolve("cost-ledger.jsonl"), text.toString(), StandardCharsets.UTF_8);
+        OutputFiles.writeString(dir.resolve("cost-ledger.jsonl"), text.toString());
     }
 
     private static Map<String, Object> json(String scenarioId, String status, String failureKind, String step,

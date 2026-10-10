@@ -238,6 +238,78 @@ class TelemetrySettingsTest {
         assertThrows(IllegalArgumentException.class, () -> load(Map.of("skillroy.telemetry.headers", "x")));
     }
 
+    /**
+     * Phase 6 security fix, pass 2, P2-L8-F2: a header goes to an {@code https://} endpoint only. The default endpoint
+     * is {@code http://}, so a header given without an endpoint is refused and the message says so; a named loopback
+     * {@code http://} endpoint with a header is refused too. Against the old rule both loaded.
+     */
+    @Test
+    void aHeaderNeedsAnHttpsEndpoint() throws Exception {
+        env.put("OTLP_TOKEN", TOKEN);
+        file("version: 1\nexporter: otlp\nheaders: {Authorization: env:OTLP_TOKEN}\n");
+        SettingsException byDefault = refused(Map.of());
+        assertTrue(byDefault.getMessage().contains("a telemetry header needs an https:// endpoint (the default"
+                + " endpoint http://127.0.0.1:4318 is not one"), byDefault.getMessage());
+        assertFalse(byDefault.getMessage().contains("Authorization"), "the header's name is not echoed");
+        file("version: 1\nexporter: otlp\nendpoint: http://127.0.0.1:4318\nheaders: {Authorization:"
+                + " env:OTLP_TOKEN}\n");
+        SettingsException loopback = refused(Map.of());
+        assertTrue(loopback.getMessage().contains("telemetry.yaml:3") && loopback.getMessage().contains(
+                "needs an https:// endpoint"), loopback.getMessage());
+        SettingsException option = refused(Map.of(TelemetrySettings.PROP_ENDPOINT, "http://localhost:4318"));
+        assertTrue(option.getMessage().startsWith(TelemetrySettings.PROP_ENDPOINT + ": a telemetry header"),
+                option.getMessage());
+        assertEquals("https://localhost:4318", load(Map.of(TelemetrySettings.PROP_ENDPOINT,
+                "https://localhost:4318")).endpoint(), "https:// on loopback carries the header");
+        file("version: 1\nexporter: otlp\n");
+        assertEquals(Map.of(), load(Map.of()).headerVariables(), "a loopback collector without TLS takes no header");
+    }
+
+    private static boolean posix() {
+        return java.nio.file.FileSystems.getDefault().supportedFileAttributeViews().contains("posix");
+    }
+
+    /**
+     * Phase 6 security fix, pass 2, P2-L8-F1: the file beside the credentials is read only when nobody but the current
+     * user could have written it. A file others may write to, a file another user could have replaced (here: a link
+     * to one), and a dangling link are refused, naming the file and the rule, never ignored; the operator's own file,
+     * readable by others, is read. Against the old lookup the first two loaded {@code otlp} and the third loaded
+     * {@code none}.
+     */
+    @Test
+    void aSettingsFileOthersMayHaveWrittenIsRefusedNamingTheFile() throws Exception {
+        org.junit.jupiter.api.Assumptions.assumeTrue(posix());
+        Path planted = file("version: 1\nexporter: otlp\nendpoint: https://collector.example.org\n");
+        Files.setPosixFilePermissions(planted, java.nio.file.attribute.PosixFilePermissions.fromString("rw-r--rw-"));
+        SettingsException writable = refused(Map.of());
+        assertTrue(writable.getMessage().contains(planted.toString()) && writable.getMessage().contains(
+                "others may write to it"), writable.getMessage());
+
+        Path elsewhere = Files.createDirectories(dir.resolve("elsewhere")).resolve("telemetry.yaml");
+        Files.move(planted, elsewhere);
+        Files.createSymbolicLink(planted, elsewhere);
+        SettingsException linked = refused(Map.of());
+        assertTrue(linked.getMessage().contains(planted.toString()) && linked.getMessage().contains(
+                "others may write to it"), "the file a link names is judged: " + linked.getMessage());
+
+        Files.delete(planted);
+        Files.createSymbolicLink(planted, dir.resolve("missing.yaml"));
+        SettingsException dangling = refused(Map.of());
+        assertTrue(dangling.getMessage().contains("does not exist"), dangling.getMessage());
+
+        Files.delete(planted);
+        file("version: 1\nexporter: otlp\nendpoint: https://collector.example.org\n");
+        Files.setPosixFilePermissions(planted, java.nio.file.attribute.PosixFilePermissions.fromString("rw-r--r--"));
+        assertEquals("otlp", load(Map.of()).exporter(), "the operator's own file, readable by others");
+        SettingsException named = assertThrows(SettingsException.class, () -> {
+            Files.setPosixFilePermissions(elsewhere, java.nio.file.attribute.PosixFilePermissions.fromString(
+                    "rw-rw-rw-"));
+            load(Map.of(TelemetrySettings.PROP_FILE, elsewhere.toString()));
+        });
+        assertTrue(named.getMessage().contains(elsewhere.toString()), "a named file follows the same rule: "
+                + named.getMessage());
+    }
+
     @Test
     void traceparentsAreValidatedAsW3c() {
         String valid = "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01";

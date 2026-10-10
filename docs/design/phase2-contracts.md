@@ -1774,6 +1774,40 @@ directory is owner-only regardless (D59). Owner-only run output directories by d
 not built: one of the five low parts the owner accepted (P6 §12.2, §17 Q22), with the release note "run outputs take
 the process umask; on a shared host run the controller under `umask 077` (`skillroy run --out`)".
 
+**(Phase 6 security fix, pass 2, P2-L8-F3, P2-L8-S1, built 2026-10-09, SF.) A run-output file is created exclusively
+and never through a symbolic link; a directory a run writes into must be the current user's.** Every writer of a
+run's output goes through `OutputFiles` (`skillroy-controller`): `run.jsonl`, `bindings.json`, both ledgers,
+`capabilities.json`, the `failure/` and `artifacts/` files, `spans.jsonl`, a session's journal, ledger and
+`inference.jsonl` and its `export`, triage's files and ledgers, the re-resolve report's four files, the JUnit report,
+`plan.json` and a bindings file written by `Plan.write`/`Bindings.write`, the planner's `.authoring.json` and
+`.envelope.json`, the MCP server's `capabilities.json` and `mcp/<n>.png`, and the inference file log; a recording is
+written to a temporary file of an unpredictable name, created the same way, then moved over the final name. A file that
+is replaced has its old entry removed (a link itself, never what it names) and is created with `CREATE_NEW` without
+following links: an entry the run cannot remove, or one that appears in between, makes that write fail with a message
+naming the file, and nothing is written through it. A file that is appended to (`spans.jsonl`, a session's
+`inference.jsonl`, the inference file log) must be a regular file of the current user, opened without following links,
+and is created exclusively when absent. A directory a run writes into is created when missing and then, looked at
+without following links, must be a directory owned by the current user (or root, as `/tmp` is) that others may not
+write to unless it carries the sticky bit; a symbolic link in its place is followed only when the current user (or
+root) owns it; group write is allowed, since a user-private-group umask (`002`) makes every directory so (decision
+D-SF-3 of the fix; `SecureFiles.untrustedDirectoryReason` would refuse those). The executor checks the scenario's
+output directory and opens `run.jsonl` first: a refused directory, or a `run.jsonl` that cannot be created, ends the
+run ERROR / ENVIRONMENT with the reason before anything is sent to the agent, and nothing is written. `run --out`
+refuses an existing directory that breaks the rule as a usage error (exit 64), a session refuses it when it opens
+(ENVIRONMENT), the MCP server's `--out` likewise. An earlier run's web evidence files (`failure/web-*`) are removed
+whatever they are, a link and a dangling link included. Until then every writer used the JDK's defaults, which follow
+a link, truncate an existing file and keep its owner and mode, and the executor's removal of its old outputs was best
+effort: in a directory whose entries the run cannot remove (another user's directory with the sticky bit, which a
+`/tmp/<name>` another user created first is) the run log replaced whatever file a planted link named, a dangling
+`web-*` link created a file where it pointed, and the run wrote its evidence into a world-readable file another user
+had put there whatever the umask, so the `umask 077` advice above did not hold against a pre-created directory or file
+(P2-L8-S1). Not covered: a directory the operator shares with a group can still have an entry renamed by a member
+between the check and the open (group write is the operator's choice); a symbolic link in a directory *above* the one
+checked is followed (ancestors are the operator's path); the ACL branch (Windows) is not verified on a host. The
+release note of S37 gains: "a run refuses an output directory another user owns or others may write to (without the
+sticky bit), and never writes through a file or link already in place of one of its files: give `--out` a directory
+you own, not a path directly under `/tmp`".
+
 | File | Content |
 |---|---|
 | `run.jsonl` | the Phase 1 record types, plus: `fingerprint` (hash, components, and in `replay` the recorded hash), `resolver` (one per `Resolver.candidates` call: slot, resolver id, candidate count; **never present in `replay`**), `verifier` (one per `Verifier.verify` call: slot, id, passed, reason), `resolve` (one per query slot: slot, query, masked args, mode, strategy, resolver, statements with masked row samples, calls, candidates tried, rejections, verifier results with evidence, credential ref), `oracle` (name, fn, value, recorded value in `replay`), `guard` (oracle, mustEqual, actual, ok), `bind` (as Phase 1, plus mode, envId, the bindings file used or written, or the failure reason), `capture` (step, slot, value), `db` (per attempt: table, source, channel (`agent` or `jdbc`), params, row count, ok; as built: `step`, `table`, `source`, `channel`, `params`, `rowCount`, `ok`; the record of a failed statement carries `error` with `source` and `channel`; a check skipped under its capability writes `table` and `source`; completed 2026-10-03, the build of 2026-10-02 having no `source`), `ledger` (the count at run end). The Phase 1 `call` record also lists the names the call carried in `_meta.secretParams` (`secretParams`, omitted when empty; A34). Every record passes the mask on its JSON form (maps and lists copied, any other object normalised first; 2026-10-03), and a record that cannot be written becomes `{type, t, unwritable: <masked reason>, fields: [names]}` |

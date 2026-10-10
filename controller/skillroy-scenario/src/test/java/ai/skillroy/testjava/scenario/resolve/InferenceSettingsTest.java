@@ -401,4 +401,23 @@ class InferenceSettingsTest {
             System.clearProperty(bad);
         }
     }
+
+    /**
+     * Phase 6 security fix, pass 2, P2-L8-F1 (the same lookup as {@code telemetry.yaml}): an {@code inference.yaml}
+     * beside the credentials that others may write to is refused naming the file (a planted one could send the masked
+     * prompts and answers of live calls into a recordings directory of its choosing); the operator's own file is read.
+     * Against the old lookup the planted file was read.
+     */
+    @Test
+    void aSettingsFileOthersMayWriteToIsRefusedNamingTheFile() throws Exception {
+        org.junit.jupiter.api.Assumptions.assumeTrue(java.nio.file.FileSystems.getDefault()
+                .supportedFileAttributeViews().contains("posix"));
+        Path planted = file("version: 1\ngateway: recorded\nrecordings: elsewhere\n");
+        Files.setPosixFilePermissions(planted, java.nio.file.attribute.PosixFilePermissions.fromString("rw-rw-rw-"));
+        SettingsException e = refused(BindMode.LIVE);
+        assertTrue(e.getMessage().startsWith("inference settings file " + planted + " cannot be used: others may"
+                + " write to it"), e.getMessage());
+        Files.setPosixFilePermissions(planted, java.nio.file.attribute.PosixFilePermissions.fromString("rw-r--r--"));
+        assertEquals(InferenceSettings.GATEWAY_RECORDED, load(BindMode.LIVE).gateway());
+    }
 }

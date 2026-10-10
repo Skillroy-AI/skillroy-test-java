@@ -574,6 +574,18 @@ logPrompts: false               # true writes masked prompt text into inference.
 A `gateway: claude` with no key is a settings error found before any scenario runs (exit 64 / the `environment`
 testcase), with the message "the model key is not set (ANTHROPIC_API_KEY)" and never the value of anything.
 
+(Phase 6 security fix, pass 2, P2-L8-F1, built 2026-10-09, SF) **`inference.yaml` is read only when nobody but the
+current user could have written it**, by the rule `telemetry.yaml` follows (P6 §10.3; `SettingsFiles` in
+`skillroy-data`): a regular file, or a symbolic link of the current user's whose file is then judged; owned by the
+current user or root; not writable by others, nor by its group unless the group is the owner's user-private group (ACL:
+no write right for anybody but the current user, the system account and the administrators group); a volume without
+permissions refused; the same file before and after the read. Others may read it (it holds no secret and may be
+committed). Any entry of that name beside the credentials file (or in `<bindings>/<env>/`) is judged, and a refusal is
+a settings error naming the file and the rule ("inference settings file <file> cannot be used: others may write to it
+(…)"), never a silent skip. Until then a file another user planted there was read: it could set `recordings:` and
+`record: true` (the masked prompts and answers of the operator's live calls written into a directory of its choosing),
+the gateway, the budgets, the prices, `images` and `logPrompts`.
+
 ---
 
 ## 5. Tier (b): model-written SQL behind `SqlGuard`
