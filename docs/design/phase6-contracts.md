@@ -404,6 +404,10 @@ bootstrap path the class is skipped with the reason "needs a fresh JVM (run with
 is set (a command-line `-Dtest` merges the executions into one JVM, and surefire hands the property to the fork), and
 fails otherwise, so a dedicated JVM that is not fresh is never a green skip (D-FA-5). The matrix's Java 8 leg still
 reads the reports: 15 `TEST-*.xml` files in the hooks module, `skipped="0"`, `java.version` `1.8.0_*`.
+(Phase 6 security fix, pass 2, SE: two more fresh-JVM classes, each in an execution of its own,
+`fresh-jvm-detach-lock` (`DetachLockFreshJvmTest`, P2-L2-F6) and `fresh-jvm-replace-residue`
+(`ReplaceResidueFreshJvmTest`, P2-L2-F3), both of which leave the slot held by design: eight fresh-JVM classes, 17
+`TEST-*.xml` files.)
 
 ### 2.4 Threads and bounds
 
@@ -946,6 +950,37 @@ unbuilt (design §2.2 step 6).
   catalogue is cleared when no hook remains.
 - The detach waits for the engine's lock at most its budget: an install or remove still running leaves every class
   disarmed and returns; the capabilities are withdrawn by the core's rollback (A18).
+- **(Phase 6 security fix, pass 2, P2-L2-S1 and P2-L2-F4, built 2026-10-09, SE) A retransformation that throws
+  keeps the class's bytes; the removed hook is then a residue.** The bullet above retransforms a class that keeps
+  other hooks once without the removed ones. When that does not go through (its batch threw, so the JVM kept the
+  class's bytes and with them the removed hook's advice; or the hook transformer failed on the class, or did not
+  advise it), every removed hook with a site in that class is a residue of this section: `hook.remove` answers it
+  `UNAVAILABLE("residue after remove: the retransformation without it failed: <class> (<loader>): <error> (hook.remove
+  {} retries it)")` instead of `OK "removed"`, `hook.health` lists it as `ERROR` with that reason, and **its id is
+  refused by a later `hook.install` as D-FA-1 says** (§3.3's note), since a site key names no loader (D171) and a new
+  site of the id on any loader's copy would answer the advice left behind: a confirmed `STUB` of the id pinned to
+  another copy would also stub this class. (The build answered `OK`, kept no residue, and the sceptic's probe stubbed
+  the system copy through a hook pinned to a child-first copy.) The class keeps its ledger entry (it holds other
+  hooks), so the slot stays held (D117); the residue clears when a remove restores the class (`hook.remove {}`
+  retries it). No `HOOK_VERIFY_FAILED` is raised for it: no class was restored. When the hook transformer failed
+  rather than the batch, the class's remaining hooks lost their advice too and report `ERROR` with the error.
+  **The engine's own transform events are counted where they happen** (step 3's "foreign transform events are the
+  recorder's events the engine did not cause"): the recorder counts an event as the engine's own when it happens on
+  the thread that is calling `retransformClasses` for the engine (an install's, a remove's or a restore's), not one
+  per class of a batch, since a batch that throws stops at its first failing class and the classes after it never
+  reach a transformer; the build's per-batch count hid one foreign event per failed batch, which on Java 8, where the
+  restore reverts a foreign redefinition and the bytes compare equal, is the only witness (BS3 fact 13). D122, D171,
+  D178 and D-FA-1 are unchanged; this applies D-FA-1 to one more path.
+- **(Phase 6 security fix, pass 2, P2-L2-F6, built 2026-10-09, SE) A detach that cannot take the lock still reports
+  what it leaves.** On that path the detach now logs every class of the ledger (a lock-free snapshot, which already
+  holds the classes of a running install's retransformation, and may over-report one the call then takes out: the
+  safe direction) at WARN by name with the remedy and sets D177's `skillroy.hooks.adviceLeft` to their number, as the
+  locked path does; the install or remove that held the lock reports the classes again when it ends, so that the WARN
+  lines and the count reflect what it finished with. An install that sees the detach begun before its step 6
+  retransforms nothing (`CAPABILITY_UNAVAILABLE("the hooks module is uninstalling")`, the slot released when no class
+  carries an advice), and one that sees it after step 6 declares no `hook.<id>` capability and publishes no
+  `hooks.installed` into the detached module (the build declared them after the core's rollback, into an agent that
+  was shutting down; a moot half, but a wrong record).
 
 ### 3.6 Health, the `HookEngine` SPI and the agent-api additions
 
@@ -1138,7 +1173,7 @@ reason, from the primitive itself (the dispatcher's gate never answers for them)
 | Primitive | Params | Result | Flags | Timeout | Thread |
 |---|---|---|---|---|---|
 | `hook.probe` | `{specs: [HookSpec]}` (at most 64) | `{hooks: [HookProbe], spy: {onBootPath, version, slotFree, slotHeldByThisEngine}, otherAgents: [file name or marker…]}` (§3.2, D154) | read-only | 10000 | `WORKER` |
-| `hook.install` | `{specs: [HookSpec], catalogue: {id, version?, hash, application?}, replace?: false}` | `{catalogue: {id, hash, installedAt, alreadyInstalled}, hooks: [HookStatus], touched: [{class, loader, bytes, methods, ms}], otherAgents: […]}` | **not mutating** (D119: an `OBSERVE` or `CAPTURE` hook changes bytecode, not behaviour, and the design's rule is that read-only mode disables `STUB` hooks); idempotent by catalogue hash: the same `catalogue.hash` and the same spec set answer `alreadyInstalled: true` and the current states, installing nothing; a different hash or id while a catalogue is installed, **or the same hash with a different spec set** (the controller's hash is then wrong: `data.reason: "spec set differs under the same hash"`), is `HOOK_CONFLICT` unless `replace: true`, which runs `hook.remove` of everything first | 60000 | `WORKER` |
+| `hook.install` | `{specs: [HookSpec], catalogue: {id, version?, hash, application?}, replace?: false}` | `{catalogue: {id, hash, installedAt, alreadyInstalled}, hooks: [HookStatus], touched: [{class, loader, bytes, methods, ms}], otherAgents: […], replaced?: {restored: [{class, loader, verified, reason?, foreignEvents}], verified: OK|DEGRADED|FAILED}}` (`replaced` only when `replace: true` ran a remove; P2-L2-F3 below) | **not mutating** (D119: an `OBSERVE` or `CAPTURE` hook changes bytecode, not behaviour, and the design's rule is that read-only mode disables `STUB` hooks); idempotent by catalogue hash: the same `catalogue.hash` and the same spec set answer `alreadyInstalled: true` and the current states, installing nothing; a different hash or id while a catalogue is installed, **or the same hash with a different spec set** (the controller's hash is then wrong: `data.reason: "spec set differs under the same hash"`), is `HOOK_CONFLICT` unless `replace: true`, which runs `hook.remove` of everything first | 60000 | `WORKER` |
 | `hook.stub` | `{id, value?, clear?: false}` | `{id, armed: bool, returnType}` | **mutating and destructive** (`_meta.confirm=true` required: a stub changes the target's behaviour for every user of the JVM, which is what `destructive` means in this agent; D119); refused with `INVALID_PARAMS` for a hook whose mode is not `STUB` or that is not installed; `READ_ONLY` in read-only mode by the dispatcher's gate; publishes `hooks.stubbed {id, armed, by: "call"}` (§4.3) | 10000 | `WORKER` |
 | `hook.remove` | `{ids?: [id]}` (absent or empty: every hook) | `{hooks: [HookStatus], restored: [{class, loader, verified: OK|DEGRADED|FAILED, reason?, foreignEvents}]}`; the error `HOOK_VERIFY_FAILED` when any class reports `FAILED` (the restore of the others still happened) | **not mutating, never gated by read-only or confirm**: it restores; no capability | 30000 | `WORKER` |
 | `hook.health` | `{ids?: [id]}` | `{hooks: {id: HookHealth}, stubs: [id…] (the STUB hooks that hold a value), spy: {version, counters: {enters, unhandled, failures, skips}}, catalogue?: {id, hash, installedAt}}` | read-only; no capability | 10000 | `WORKER` |
@@ -1166,6 +1201,17 @@ as `value`.
 As built (Phase 6, CP): `ToolProjection.NEVER_OFFERED` and `ToolProjection.HOOK_READS`; the three reads are offered by
 every policy, the session service's included, whose policy otherwise offers no primitive read (P5 §12.4) (D187);
 `PlanPolicy` refuses a base verb's and a pack verb's call of any other `hook.*` or `rule.*` primitive.
+
+**(Phase 6 security fix, pass 2, P2-L2-F3, built 2026-10-09, SE) `replace: true` reports its remove.** The remove of
+everything that `replace: true` runs first is a `hook.remove {}` whose `HOOK_VERIFY_FAILED` the build discarded: a
+class that kept a reference to `Spy` (another transformer re-planting advised bytes, A12) was then installed over and
+answered as a plain success, and the controller's record said `replaced: true` with no error (when the new version of
+the catalogue dropped the residue's id; when it kept the id, the hook was merely `UNAVAILABLE`). The install's answer
+now carries that remove's outcome as `replaced: {restored, verified}` (`restored` as `hook.remove`'s, `verified` the
+worst of its classes), and the new version is installed as before (its own refusals apply: a residue's id is refused,
+D-FA-1). The controller's `HookInstaller` maps `replaced.verified: FAILED` to ERROR / ENVIRONMENT as it maps the
+remove's error (§5.3 step 5). The SPI's `HookEngine.install(…, replace)` answers the statuses only, as before; a
+residue it leaves is in `health`. D119 and D-FA-1 are unchanged.
 
 ### 4.3 Events, the value encoding and the masking
 
@@ -1247,6 +1293,22 @@ application's thread, which for an application's exception is application code: 
 for an overriding `getMessage` would resolve methods through the application's loader on that thread (it may load
 classes and take the loader's locks), which is worse than the risk it removes; a throw is caught, the text is redacted
 and cut at 500 characters, and A34 already leaves event payloads otherwise unredacted (D-FA-3).
+
+**(Phase 6 security fix, pass 2, P2-L2-F7, built 2026-10-09, SE) Every captured string passes `redactText`, as a
+thrown message does.** A captured `String` (an argument, `self`, the return value, an element of a list, a value or
+the text of a key of a map) passes `ctx.redactText` after its cut (2000 or 256 code units) and before the
+`MaskPolicy`s: the core's rule hides a secret `key=value` pair's value and the password of URL user-info under the
+agent's keys (the protocol's rule, the `redact` option, every `RedactionKeys`), so that a connection string or an
+option string carried by a hooked method's argument does not reach `hook.events` and `hook.health.last` in clear when
+the catalogue author did not mark the index. The marks (`secretArgs`, `secretResult`) and the policies stay as above;
+this is a floor under them, not a replacement. Why the floor is needed: the controller's run log masks by value only
+(the credentials file's values: a captured `password=…` reached `run.jsonl` through an expectation's `actual`), and
+the MCP server's masking has no user-info rule (a `jdbc:x://u:pw@h` reached an MCP client through `hook.events`,
+which every policy offers). The cost on the application's thread is bounded by the cut and the input budget: the
+rule is linear and lock-free (two `indexOf` scans for a text with neither `=` nor `@`), and it consults the same
+`RedactionKeys` patterns `isSecretKey` already consults there; a failure redacts the whole string. Limit: a cut that
+splits a secret (a user-info password before its `@`) may leave its first characters. The Byteman module's
+`rule.fired` encoding applies the same rule to a bound string (§7.3). D125 and D182 are unchanged.
 
 ### 4.4 Topics
 
@@ -1389,7 +1451,11 @@ bind), because `requires:` may name `hook.<id>` capabilities that exist only aft
    fallback: "seam:<primitive>" | null}], armed: [id…], touched: n, ms, otherAgents: […]}` (`otherAgents` from the
    agent's answer, §3.2: the other bytecode agents of the target, whose changes the post-detach verification cannot
    see); `HOOK_CONFLICT`, `HOOK_VERIFY_FAILED`, a transport error or a timeout from the install is `ERROR` /
-   `ENVIRONMENT` with the agent's error as the detail.
+   `ENVIRONMENT` with the agent's error as the detail. **(Phase 6 security fix, pass 2, P2-L2-F3, built 2026-10-09,
+   SE)** So is a `replace: true` install whose answer's `replaced.verified` is `FAILED` (the implicit remove left a
+   reference to `Spy` in a restored class, §4.2): "hook.install failed: HOOK_VERIFY_FAILED: the remove of the installed
+   version (replace: true) left a reference to Spy in a restored class; `skillroy hooks status`, then `skillroy hooks
+   remove`", the detail `{primitive, error: {code, message}, restored}`, the record `ok: false` with `replaced: true`.
 6. The matrix is read again (it now holds `hook.<id>`), archived (§6.4), and `checkRequires` runs on it. The executor
    then records the agent's `lastSeq` when the first step begins, `stepsSinceSeq`, which the `hooks` fact root reads
    from (§6.3).
@@ -1727,6 +1793,29 @@ Fix wave (Phase 6 review, FB, 2026-10-09): the bound runs **before Byteman is lo
 read once, so that a rule it refuses appends nothing to the system class path and runs no `premain` (both appends
 are permanent); the type check, which needs Byteman, stays after the load (finding L2-F5).
 
+**(Phase 6 security fix, pass 2, P2-L2-F1, built 2026-10-09, SE) The JDK's and the agent's classes are refused by
+name, loaded or not.** The loader rule above judges the classes loaded at the submit only, while Byteman injects into
+every class of the name its transformer sees later, in any loader. A confirmed rule on a JDK class outside the lint's
+prefixes that the target had not loaded yet (`org.xml.sax.helpers.LocatorImpl`, `org.w3c.dom.*`, `org.ietf.jgss.*`:
+the "trace the SAX locator" kind of rule §7.1 describes) matched nothing, passed, and at the class's first load got
+Byteman's trigger code, which the bootstrap loader cannot link: every load threw `NoClassDefFoundError` into the
+host, and on Java 25 the class could not be restored (`rule.unload` failed with `InternalError … invalid class`; on
+Java 8 every call threw while the rule was installed). An `INTERFACE` rule escaped likewise through a JDK implementor
+loaded later, even when an application implementor made the match non-empty. Now, **before the count and before the
+load**, the rule's `CLASS` or `INTERFACE` name (the `^` stripped) is looked up as a class file through **the JDK's
+loaders** (the platform loader on Java 9 and later, reached reflectively; the extension loader on Java 8; each
+delegates to the bootstrap loader, and a resource lookup defines nothing) and through **the agent's own loaders** (the
+module's chain, their own jars only, `URLClassLoader.findResource`): a name the first finds is
+`RULE_REJECTED("<name>: class is the JDK's")`, one the second finds `RULE_REJECTED("<name>: class is the agent's
+own")`. A JDK class can only extend or implement JDK types, so the `^` and `INTERFACE` paths close with the `CLASS`
+path, and a rule on an application class the target has not loaded yet stays accepted (`rule.check`'s "type check
+skipped: class not loaded" keeps its use). A prefix list (`org.w3c.`, `org.xml.`, …) was not added to the lint: it
+would also refuse application libraries in those namespaces. **Residual, recorded:** a copy of an accepted application
+name defined after the submit (another loader's) is not counted against `hooks.maxClassBytes` or `hooks.maxMethods`;
+a load-time transform is not the stop-the-world pause the bound exists for. A name only another module's jar holds
+(a sibling module loader, not the Byteman module's chain) is not looked up; its loaded copies meet the loader rule.
+D132-D134 and D204 are unchanged; `boot:` stays unused (B8/D132).
+
 **The lint (`RuleLint`)**, before anything reaches Byteman, errors naming the line: exactly one `RULE … ENDRULE`;
 `CLASS` or `INTERFACE` present, its name not under `java.`, `javax.`, `sun.`, `com.sun.`, `jdk.`,
 `org.jboss.byteman.`, `ai.skillroy.testjava.agent.` or `ai.skillroy.testjava.protocol.` (the agent protects itself
@@ -1826,7 +1915,16 @@ As built (Phase 6, BW, 2026-10-09):
 - **`rule.unload`** of a name the module does not hold answers `{removed: false, restored: []}`. A class another rule
   of the module still touches is not verified (it is not in `restored`); a class whose removal retransformation the
   behind recorder did not see is `DEGRADED("no restore observed")`; foreign events are counted on the ahead recorder
-  since the rule's install.
+  since the rule's install. **(Phase 6 security fix, pass 2, P2-L2-F1, built 2026-10-09, SE)** A removal whose
+  retransformation throws (Byteman catches a `VerifyError` there and nothing else: a `ClassFormatError` from another
+  agent's transformer, or the `InternalError … invalid class` of a class that never linked) is no longer an
+  `InvocationTargetException` out of the engine (`INTERNAL_ERROR`): it is `HOOK_VERIFY_FAILED`, "the rule <name> was
+  removed, but the classes it touched cannot be restored: <cause>" with `data {classes: [{class, loader, verified:
+  FAILED, reason: "cannot be restored: …"}], removed: true}` when Byteman no longer lists the rule (it drops the script
+  before it retransforms, so the class keeps the injected code), and then the module drops its record too (no retry
+  can repair anything; the log names the classes and says "restart the target"); while Byteman still lists it, "could
+  not be removed", `removed: false`, and the record stays for a retry. A submit whose statuses fail and whose removal
+  then throws is refused with both reasons.
 - **The encoding** follows §4.3 with `mask("rule.<name>", "binding<i>", value)`; a container is read only when its class
   is the JDK's (iterating an application's own collection would run its code; otherwise it is a handle) (D205).
   `rule.fired.rule` is the name without the `skillroy:` prefix, and only the module's live rules publish.
@@ -1852,7 +1950,9 @@ As built (Phase 6, BW, 2026-10-09):
   application lock may be taken", applied by allow-list rather than by a deny-list of names, which missed the
   blocking queues whose names lack "Blocking" and every view. The list is the one the hooks module's `Capture` reads
   after its own fix (the hooks half of L2-S1 and L2-F2); one shared predicate in agent-api would keep the two from
-  drifting.
+  drifting. **(Phase 6 security fix, pass 2, P2-L2-F7, built 2026-10-09, SE)** A bound string (top-level, in a list,
+  a map's value or key text) passes `ctx.redactText` after its cut and before the policies, as §4.3 now says for a
+  captured string.
 
 ### 7.4 Loading Byteman
 
@@ -1932,14 +2032,41 @@ As built (Phase 6, BW, 2026-10-09):
 - A load that fails (a `premain` exception, no `Retransformer` handed over) removes the ahead recorder and answers
   `CAPABILITY_UNAVAILABLE` with the reason; Byteman's `loaded` property may then be set, and the next probe answers by
   §7.4 step 2.
+- **(Phase 6 security fix, pass 2, P2-L2-F2, built 2026-10-09, SE) A load whose handler cannot arm is undone.** The
+  build set the engine's `Retransformer` before it armed the handler, so when another handler held the helper's slot
+  (A12: `RuleHelper.install` is a public static on the system class path, and the slot is free between two agent
+  instances) the first `rule.submit` was refused and every later one installed rules whose firings reached the
+  squatter and never `rule.fired`, while `rule.engine` stayed `OK` (on the fresh path the ahead recorder was gone as
+  well). Now, with the `Retransformer` in hand (taken after `premain`, or taken from the manager on reuse), the module
+  **arms the handler first**, then resolves the three methods, registers the behind recorder and redirects the trace;
+  only then is the `Retransformer` the engine's. Anything that fails undoes all of it on both paths: the handler
+  released, the behind and ahead recorders and the trace streams removed, and the `Retransformer` **parked back** in
+  the manager (on the fresh path too, since `premain` never runs twice), so the engine is never half-loaded and the
+  next `rule.submit` retries through the reuse path. The answer is `CAPABILITY_UNAVAILABLE("the helper's handler slot
+  is held by another handler")`, and so is the probe's while a parked `Retransformer` sits beside a held slot (a parked
+  `Retransformer` means the agent released its handler, so a held slot is someone else's; the probe reads
+  `RuleHelper.held()` through the system loader, which can see the sys jar then). A `Retransformer` that lacks one of
+  the three methods (another Byteman version) is undone the same way, "Byteman's rule base cannot be used: …". D200
+  and D201 are unchanged.
+- **(Phase 6 security fix, pass 2, P2-L2-F5, built 2026-10-09, SE) The recorders are bounded.** Each recorder keeps at
+  most `hooks.maxClasses` records (one per name and loader) and copies no class file above `hooks.maxClassBytes`: a
+  definition beyond the record bound is not recorded and its name is marked, one above the byte bound is counted (its
+  events) and its record keeps no bytes, and the byte check then answers `DEGRADED("not recorded: beyond the
+  recorder's bound")` for such a class. A rule's names are unwatched, and their records dropped, at `rule.unload`
+  (and when Byteman dropped the rule, above) when no other rule of the module names them, so an unloaded rule's
+  name is recorded no more. The build kept one record with up to two class-file copies for every loader that defined
+  a watched name, without a bound and for the JVM's life in the left-behind state (a host that defines one name per
+  redeploy or per plugin loader). With the defaults the two recorders hold at most 2 × 64 records of at most two
+  256 KiB copies. D196 is unchanged.
 
 ### 7.5 Safety, lifecycle and the capability
 
 - **Gates**: `rule.submit` under read-only mode is `READ_ONLY`, without `_meta.confirm` `CONFIRM_REQUIRED`, before
   readiness `NOT_READY`, all by the dispatcher (P1 §5); `rule.check`, `rule.list` and `rule.unload` are served in
   read-only mode; **loading Byteman happens only under `rule.submit`**, so a read-only agent never loads it.
-- **Targets**: the lint's deny-list, the class bound and the loader rule (§7.3); `boot:`, `sys:` beyond the two
-  appends, `SETSYSPROPS` and `transform.all` are never used or exposed.
+- **Targets**: the lint's deny-list, the class bound and the loader rule (§7.3), and (Phase 6 security fix, pass 2,
+  P2-L2-F1, built 2026-10-09, SE) the refusal by name of a JDK class and of the agent's own, loaded or not (§7.3);
+  `boot:`, `sys:` beyond the two appends, `SETSYSPROPS` and `transform.all` are never used or exposed.
 - **Restore**: `rule.unload` runs `removeScripts` and then the byte verification of §3.5 for every class the rule
   touched, with the same outcomes and foreign-event count; the module's `uninstall()` unloads **every rule it
   installed**, by name, under the detach budget, then verifies, and **only when no rule of the module is left**
@@ -1987,7 +2114,8 @@ As built (Phase 6, BW, 2026-10-09):
 - **Capability `rule.engine`**: declared at `install` with a probe: `UNAVAILABLE("no Instrumentation in <mode>
   mode")`, `UNAVAILABLE("no byteman.jar configured")`, `UNAVAILABLE("not a Byteman jar: …")`,
   `UNAVAILABLE("byteman.jar is writable by others: …")`, `UNAVAILABLE("Byteman was loaded by the host; …")`,
-  `UNAVAILABLE("Byteman rules of an earlier agent instance are still installed: …")`, else `OK(strategy
+  `UNAVAILABLE("Byteman rules of an earlier agent instance are still installed: …")`, `UNAVAILABLE("the helper's
+  handler slot is held by another handler")` (a parked `Retransformer` beside a held slot; P2-L2-F2, SE), else `OK(strategy
   "in-process")` or `OK(strategy "in-process, reused")`; `agent.info` lists the module as every module. There is no
   per-rule capability: rules are ad hoc by definition, and a scenario that depends on one is wrong by design (design
   §3.2: expectations against primitives and hook events, through the catalogue).
@@ -2070,6 +2198,12 @@ default, so an execution that runs no test fails the build (the Java 8 test JVM 
 profile activated by the property `test` sets it to `false`, so the documented `-Dtest=… -Dsurefire.failIfNoSpecifiedTests=false`
 runs still pass in every module of the reactor (finding L3-F1, the Byteman half). The counts to read from the reports
 on every leg: `skillroy-agent-byteman` 37 tests in ten classes, 0 skipped; `skillroy-agent-byteman-sys` 10 in three.
+(Phase 6 security fix, pass 2, SE: `skillroy-agent-byteman` 43 tests in twelve classes, 0 skipped: `ClassBoundTest`
++1 (the refusal by name, P2-L2-F1), `CheckLoadsNothingTest`'s JDK-name submits (no new test), `BindingEncoderTest` +1
+(P2-L2-F7), `ByteRecorderTest` 3 (new, P2-L2-F5), and `LoadUndoTest` 1 in an execution of its own, `load-undo` (a
+squatter on the helper's slot before the first load: the fresh path and the reuse path undone, the probe
+`UNAVAILABLE`, the rule working once the slot frees; a removal that a malformed class file makes throw answered
+`HOOK_VERIFY_FAILED` with the record and its names dropped; P2-L2-F2, P2-L2-F1, P2-L2-F5).)
 
 ---
 
@@ -3262,6 +3396,17 @@ hookable")` and the call installs the other spec), so 64 tests in 15 classes; th
 row). Item 13: `ChildJvm.pid` takes the leading digits of the `pid=` line, since on a Java 8 child run with
 `-verbose:class` a `[Loaded …]` line can land between the digits and their newline (`ChildJvmIT`; found by the first
 Linux matrix round's Java 8 test-JVM leg in `OptionalModulesIT`).
+
+**(Phase 6 security fix, pass 2, SE, 2026-10-09):** item 3 gains `PartialInstallTest` +1 (a `hook.remove` of one of
+two hooks whose retransformation without it throws: the removed hook a residue, its id refused by a replace pinned to
+the copy, no stub can reach the system class; the replace's `replaced.verified` `FAILED`; P2-L2-S1, P2-L2-F3),
+`RestoreTest` +1 (a batch that throws counts no engine event for the class the JVM never transformed, and a later
+foreign retransformation is the restore's `DEGRADED("foreign redefinition observed: 1 events")`; P2-L2-F4),
+`CaptureTest` +1 (captured strings through `redactText`; P2-L2-F7), `DetachLockFreshJvmTest` (P2-L2-F6) and
+`ReplaceResidueFreshJvmTest` (P2-L2-F3), so 70 tests in 17 classes. In `skillroy-agent-bootstrap`:
+`OptionsFileVolumeTest` (3: the private copy of the volume rule equal to the protocol's `Volumes`, this host's volume,
+and an options file on real FAT and exFAT images refused where `hdiutil` exists). In `skillroy-scenario`: `HooksTest`
++1 (a replace whose remove verified `FAILED` is ERROR / ENVIRONMENT).
 
 ### 13.2 End to end (the Linux image; `ci/run-in-linux.sh … -Dskillroy.headless=false`, Java 8 and Java 25 targets)
 

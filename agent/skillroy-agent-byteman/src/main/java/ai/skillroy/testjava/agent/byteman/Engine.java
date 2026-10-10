@@ -66,6 +66,9 @@ final class Engine implements FiredSink {
 
     static final String MAIN = JarCheck.MAIN;
     static final String MANAGER = "ai.skillroy.testjava.agent.byteman.sys.RuleManager";
+    static final String HELPER = "ai.skillroy.testjava.agent.byteman.sys.RuleHelper";
+    /** The reason of a load whose handler cannot take the helper's slot (7.4, 7.5; P2-L2-F2). */
+    static final String SLOT_HELD = "the helper's handler slot is held by another handler";
     static final String HANDLER = "ai.skillroy.testjava.agent.byteman.FiredHandler";
     static final String RULE_CHECK = "org.jboss.byteman.check.RuleCheck";
     static final String HELPER_TRACE = "org.jboss.byteman.rule.helper.Helper";
@@ -178,7 +181,9 @@ final class Engine implements FiredSink {
             }
             Object parked = peek(manager);
             if (parked != null && RETRANSFORMER.equals(parked.getClass().getName())) {
-                return ProbeResult.ok("in-process, reused");
+                // A parked Retransformer means no rule of the agent is left and the handler was released; a slot
+                // held now is someone else's, and a load could not arm (Phase 6 security fix, pass 2, P2-L2-F2).
+                return helperHeld() ? ProbeResult.unavailable(SLOT_HELD) : ProbeResult.ok("in-process, reused");
             }
             return ProbeResult.unavailable(leftover(parked));
         }
@@ -187,6 +192,16 @@ final class Engine implements FiredSink {
 
     boolean loaded() {
         return retransformer != null;
+    }
+
+    /** The ahead recorder, or null (for the tests). */
+    ByteRecorder aheadRecorder() {
+        return ahead;
+    }
+
+    /** The behind recorder, or null (for the tests). */
+    ByteRecorder behindRecorder() {
+        return behind;
     }
 
     boolean reused() {
@@ -321,9 +336,13 @@ final class Engine implements FiredSink {
                 }
             }
             if (!failures.isEmpty()) {
-                remove(record);
+                Throwable failed = removeCaught(record);
+                if (failed != null) {
+                    failures.add("and its removal failed: " + clip(failed));
+                }
                 liveNames.remove(lint.name());
                 rules.remove(record.storedName);
+                unwatchUnused(record);
                 throw rejected(failures);
             }
             for (Class<?> c : loadedNamed(record.classes)) {
@@ -358,11 +377,15 @@ final class Engine implements FiredSink {
                 return result;
             }
             Map<String, Integer> before = behindCounts(record);
-            remove(record);
+            Throwable removal = removeCaught(record);
+            if (removal != null) {
+                throw removalFailed(record, removal);
+            }
             rules.remove(record.storedName);
             liveNames.remove(record.name);
             handlerStatic("forget", String.class, record.storedName);
             List<Map<String, Object>> restored = verify(record, before);
+            unwatchUnused(record);
             publishChanged(Collections.<String>emptyList(), Collections.singletonList(record.name));
             result.put("removed", true);
             result.put("restored", restored);
@@ -665,15 +688,13 @@ final class Engine implements FiredSink {
                 }
                 throw unavailable(leftover(parked));
             }
-            reused = true;
-            retransformer = parked;
-            ahead = new ByteRecorder("ahead", own);
+            ahead = recorder("ahead");
             inst.addTransformer(ahead, true);
-            afterLoad(inst);
+            afterLoad(inst, parked, true);
             ctx.log().info("byteman: reusing the Retransformer an earlier agent instance parked");
             return;
         }
-        ahead = new ByteRecorder("ahead", own);
+        ahead = recorder("ahead");
         inst.addTransformer(ahead, true);
         try {
             File bytemanJar = jar.path.toFile();
@@ -695,35 +716,96 @@ final class Engine implements FiredSink {
             if (taken == null || !RETRANSFORMER.equals(taken.getClass().getName())) {
                 throw unavailable("Byteman did not hand its rule base to the manager");
             }
-            reused = false;
-            retransformer = taken;
-            afterLoad(inst);
+            afterLoad(inst, taken, false);
             ctx.log().info("byteman: loaded in process in " + (System.nanoTime() - t0) / 1000000 + " ms (no listener)");
         } catch (RpcException e) {
-            inst.removeTransformer(ahead);
+            dropAhead(inst);
             throw e;
         } catch (Throwable t) {
-            inst.removeTransformer(ahead);
+            dropAhead(inst);
             Throwable cause = t instanceof InvocationTargetException ? t.getCause() : t;
             throw unavailable("Byteman could not be loaded: " + clip(cause));
         }
     }
 
-    /** After the Retransformer is in hand: the behind recorder, the methods, the trace map, the handler. */
-    private void afterLoad(Instrumentation inst) throws Exception {
-        behind = new ByteRecorder("behind", own);
-        inst.addTransformer(behind, true);
-        Class<?> rc = retransformer.getClass();
-        installScript = rc.getMethod("installScript", List.class, List.class, PrintWriter.class);
-        removeScripts = rc.getMethod("removeScripts", List.class, PrintWriter.class);
-        listScripts = rc.getMethod("listScripts", PrintWriter.class);
-        redirectTrace();
-        handlerClass = Class.forName(HANDLER, true, Engine.class.getClassLoader());
-        handler = handlerClass.getMethod("arm", FiredSink.class).invoke(null, this);
-        if (handler == null) {
-            throw unavailable("the helper's handler slot is held by another handler");
+    /**
+     * After the Retransformer is in hand: the handler armed first, then the three methods, the behind recorder and the
+     * trace map; only then is the Retransformer the engine's. Anything that fails undoes all of it (Phase 6 security
+     * fix, pass 2, P2-L2-F2): the handler released, the behind and ahead recorders and the trace streams removed, the
+     * Retransformer parked back in the manager (on the fresh path too, since {@code premain} never runs twice), so that
+     * the engine is never half-loaded and the next {@code rule.submit} retries through the reuse path.
+     */
+    private void afterLoad(Instrumentation inst, Object taken, boolean reusing) throws Exception {
+        Object armedHandler = null;
+        ByteRecorder b = null;
+        try {
+            handlerClass = Class.forName(HANDLER, true, Engine.class.getClassLoader());
+            armedHandler = handlerClass.getMethod("arm", FiredSink.class).invoke(null, this);
+            if (armedHandler == null) {
+                throw unavailable(SLOT_HELD);
+            }
+            Class<?> rc = taken.getClass();
+            Method install = rc.getMethod("installScript", List.class, List.class, PrintWriter.class);
+            Method remove = rc.getMethod("removeScripts", List.class, PrintWriter.class);
+            Method listing = rc.getMethod("listScripts", PrintWriter.class);
+            b = recorder("behind");
+            inst.addTransformer(b, true);
+            installScript = install;
+            removeScripts = remove;
+            listScripts = listing;
+            behind = b;
+            handler = armedHandler;
+            redirectTrace();
+            reused = reusing;
+            retransformer = taken;
+            armed.set(!detached);
+        } catch (Throwable t) {
+            if (armedHandler != null) {
+                handlerStatic("release", Object.class, armedHandler);
+            }
+            handler = null;
+            if (b != null) {
+                inst.removeTransformer(b);
+            }
+            behind = null;
+            removeTrace();
+            ByteRecorder a = ahead;
+            if (a != null) {
+                inst.removeTransformer(a);
+            }
+            ahead = null;
+            retransformer = null;
+            park(taken);
+            if (t instanceof RpcException) {
+                throw (RpcException) t;
+            }
+            Throwable cause = t instanceof InvocationTargetException ? t.getCause() : t;
+            throw unavailable("Byteman's rule base cannot be used: " + clip(cause));
         }
-        armed.set(!detached);
+    }
+
+    /** Removes the ahead recorder of a load that failed (a no-op when {@link #afterLoad} already did). */
+    private void dropAhead(Instrumentation inst) {
+        ByteRecorder a = ahead;
+        if (a != null) {
+            inst.removeTransformer(a);
+        }
+        ahead = null;
+    }
+
+    /** A recorder bounded by {@code hooks.maxClasses} entries and {@code hooks.maxClassBytes} per copy (P2-L2-F5). */
+    private ByteRecorder recorder(String role) {
+        return new ByteRecorder(role, own, settings.maxClasses, settings.maxClassBytes);
+    }
+
+    /** True when {@code RuleHelper}'s handler slot is held (the sys jar is on the system class path then). */
+    private boolean helperHeld() {
+        try {
+            Class<?> helper = Class.forName(HELPER, false, system);
+            return Boolean.TRUE.equals(helper.getMethod("held").invoke(null));
+        } catch (ReflectiveOperationException | RuntimeException | LinkageError e) {
+            return false;
+        }
     }
 
     /** One retransformation of the classes whose reference bytes the ahead recorder has not seen (reuse only). */
@@ -787,8 +869,75 @@ final class Engine implements FiredSink {
 
     // -------------------------------------------------------------------------------- remove and verification
 
-    private void remove(RuleRecord record) throws Exception {
-        removeAll(Collections.singletonList(record));
+    /**
+     * The removal of one rule; null when it went through, else what {@code removeScripts} threw (P2-L2-F1: Byteman
+     * removes the script from its rule base before it retransforms, so a retransformation that throws, a class the JVM
+     * refuses to redefine back, leaves the class with the rule's injected code and the rule gone).
+     */
+    private Throwable removeCaught(RuleRecord record) throws Exception {
+        try {
+            removeAll(Collections.singletonList(record));
+            return null;
+        } catch (InvocationTargetException e) {
+            return e.getCause() == null ? e : e.getCause();
+        }
+    }
+
+    /**
+     * {@code rule.unload}'s answer to a removal that threw (Phase 6 security fix, pass 2, P2-L2-F1):
+     * {@code HOOK_VERIFY_FAILED} naming every loaded class of the rule as {@code FAILED} with the cause ("cannot be
+     * restored"); the record is dropped, and its names unwatched, once Byteman no longer lists the rule (it removed the
+     * script before the retransformation threw), and kept, so that a later unload retries, while it still does.
+     */
+    private RpcException removalFailed(RuleRecord record, Throwable cause) throws Exception {
+        boolean listed = Listing.parse(list()).containsKey(record.storedName);
+        List<Map<String, Object>> classes = new ArrayList<Map<String, Object>>();
+        for (Class<?> c : loadedNamed(record.classes)) {
+            Map<String, Object> m = new LinkedHashMap<String, Object>();
+            m.put("class", c.getName());
+            m.put("loader", c.getClassLoader() == null ? "bootstrap" : c.getClassLoader().getClass().getName());
+            m.put("verified", "FAILED");
+            m.put("reason", "cannot be restored: the removal's retransformation failed: " + clip(cause));
+            classes.add(m);
+        }
+        if (!listed) {
+            rules.remove(record.storedName);
+            liveNames.remove(record.name);
+            handlerStatic("forget", String.class, record.storedName);
+            unwatchUnused(record);
+            publishChanged(Collections.<String>emptyList(), Collections.singletonList(record.name));
+        }
+        ctx.log().warn("byteman: the removal of rule " + record.name + " failed (" + clip(cause) + "); "
+                + (listed ? "Byteman still lists it, and rule.unload retries it" : "Byteman dropped it, but the"
+                + " classes it touched keep its injected code: " + record.classes + "; restart the target"));
+        Map<String, Object> data = new LinkedHashMap<String, Object>();
+        data.put("classes", classes);
+        data.put("removed", !listed);
+        return new RpcException(ErrorCodes.HOOK_VERIFY_FAILED, "the rule " + record.name + (listed
+                ? " could not be removed: " : " was removed, but the classes it touched cannot be restored: ")
+                + clip(cause), data);
+    }
+
+    /** Stops recording the classes of {@code record} that no other rule of the module names (P2-L2-F5). */
+    private void unwatchUnused(RuleRecord record) {
+        Set<String> stillUsed = new LinkedHashSet<String>();
+        for (RuleRecord other : rules.values()) {
+            if (other != record) {
+                stillUsed.addAll(other.classes);
+            }
+        }
+        for (String name : record.classes) {
+            if (!stillUsed.contains(name)) {
+                ByteRecorder a = ahead;
+                ByteRecorder b = behind;
+                if (a != null) {
+                    a.unwatch(name);
+                }
+                if (b != null) {
+                    b.unwatch(name);
+                }
+            }
+        }
     }
 
     private void removeAll(List<RuleRecord> records) throws Exception {
@@ -843,7 +992,11 @@ final class Engine implements FiredSink {
             Integer atInstall = record.foreignAtInstall.get(key(c));
             int foreign = Math.max(0, (first == null ? 0 : first.foreign) - (atInstall == null ? 0 : atInstall));
             Integer seen = before.get(key(c));
-            if (first == null || first.first == null || last == null || last.last == null
+            if (ahead.beyondBound(c.getName(), c.getClassLoader())
+                    || behind.beyondBound(c.getName(), c.getClassLoader())) {
+                m.put("verified", "DEGRADED");
+                m.put("reason", "not recorded: beyond the recorder's bound");
+            } else if (first == null || first.first == null || last == null || last.last == null
                     || last.events <= (seen == null ? 0 : seen)) {
                 m.put("verified", "DEGRADED");
                 m.put("reason", "no restore observed");
@@ -878,7 +1031,8 @@ final class Engine implements FiredSink {
         }
         for (Class<?> c : inst.getAllLoadedClasses()) {
             if (c != null && names.contains(c.getName()) && (ahead.entry(c.getName(), c.getClassLoader()) != null
-                    || behind.entry(c.getName(), c.getClassLoader()) != null)) {
+                    || behind.entry(c.getName(), c.getClassLoader()) != null
+                    || ahead.beyondBound(c.getName(), c.getClassLoader()))) {
                 out.add(c);
             }
         }

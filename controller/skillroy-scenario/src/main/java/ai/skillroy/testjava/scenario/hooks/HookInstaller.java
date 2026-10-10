@@ -63,7 +63,9 @@ import java.util.Objects;
  *       primitive the target serves with its capability {@code OK}, recorded per hook.</li>
  *   <li>The record {@code {mode, catalogue: {id, version, hash}, installed, unavailable: [{id, state, reason,
  *       fallback}], armed, touched, ms, otherAgents}}. {@code HOOK_CONFLICT}, {@code HOOK_VERIFY_FAILED}, a transport
- *       error or a timeout from the install is ERROR / ENVIRONMENT with the agent's error as the detail.</li>
+ *       error or a timeout from the install is ERROR / ENVIRONMENT with the agent's error as the detail, and so is a
+ *       {@code replace: true} install whose answer's {@code replaced.verified} is {@code FAILED} (the implicit
+ *       remove's {@code HOOK_VERIFY_FAILED}; Phase 6 security fix, pass 2, P2-L2-F3).</li>
  * </ol>
  *
  * <p>Hooks stay installed after the run: the next run of the same pack finds them ({@code alreadyInstalled}); they go
@@ -217,6 +219,25 @@ public final class HookInstaller {
         long t0 = clock.millis();
         Map<?, ?> answer = call(agent, "hook.install", params, INSTALL_TIMEOUT_MS, record);
         long ms = Math.max(0, clock.millis() - t0);
+        if (replace && answer.get("replaced") instanceof Map<?, ?> replaced
+                && "FAILED".equals(String.valueOf(replaced.get("verified")))) {
+            // Phase 6 security fix, pass 2, P2-L2-F3: the implicit remove of the installed version left a reference
+            // to Spy in a restored class; that is the remove's HOOK_VERIFY_FAILED, ERROR / ENVIRONMENT as step 5 says,
+            // whatever the new version installed.
+            record.put("catalogue", catalogueRef(catalogue, true));
+            record.put("replaced", true);
+            Map<String, Object> error = new LinkedHashMap<>();
+            error.put("code", ErrorCodes.HOOK_VERIFY_FAILED);
+            error.put("message", "the remove of the installed version (replace: true) left a reference to Spy in a"
+                    + " restored class");
+            Map<String, Object> detail = new LinkedHashMap<>();
+            detail.put("primitive", "hook.install");
+            detail.put("error", error);
+            detail.put("restored", replaced.get("restored"));
+            throw refused(FailureKind.ENVIRONMENT, record, "hook.install failed: "
+                    + ErrorCodes.name(ErrorCodes.HOOK_VERIFY_FAILED) + ": " + error.get("message")
+                    + "; `skillroy hooks status`, then `skillroy hooks remove`", detail);
+        }
         List<String> installed = new ArrayList<>();
         List<Object> unavailable = new ArrayList<>();
         Map<String, PrimitiveDescriptor> schema = null;

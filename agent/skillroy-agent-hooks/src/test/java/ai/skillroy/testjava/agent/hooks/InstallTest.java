@@ -113,14 +113,14 @@ class InstallTest {
         Event installed = harness.ctx.events.last(Topics.HOOKS_INSTALLED);
         assertEquals(Arrays.asList("deposit.computed", "deposit.waived"), installed.payload().get("hooks"));
         assertEquals(1L, ((Number) installed.payload().get("touched")).longValue(), "one class for two hooks");
-        long retransformsBefore = harness.engine().ledger.entries().get(0).own;
+        long retransformsBefore = harness.engine().ledger.entries().get(0).own.get();
 
         Map<String, Object> again = harness.ctx.map("hook.install", map("specs", Harness.json(b, a),
                 "catalogue", catalogue));
         assertEquals(Boolean.TRUE, ((Map<String, Object>) again.get("catalogue")).get("alreadyInstalled"));
         assertTrue(((List<Object>) again.get("touched")).isEmpty());
         assertEquals(2, ((List<Object>) again.get("hooks")).size());
-        assertEquals(retransformsBefore, harness.engine().ledger.entries().get(0).own, "nothing retransformed");
+        assertEquals(retransformsBefore, harness.engine().ledger.entries().get(0).own.get(), "nothing retransformed");
 
         RpcException other = harness.ctx.error("hook.install", map("specs", Harness.json(a), "catalogue",
                 map("id", "other", "hash", "sha256:bb")));

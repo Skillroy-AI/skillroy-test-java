@@ -38,6 +38,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * The engine's three class-file transformers (phase6-contracts.md sections 3.2 and 3.5, D122, D155):
@@ -76,12 +77,18 @@ final class Transformers {
     final PreFilter preFilter;
     /** The install or remove in progress, whose transformations are collected; null between them. */
     volatile Round round;
+    /**
+     * The thread on which the engine is retransforming right now (an install's, a remove's or a restore's
+     * {@code retransformClasses}), else null: the recorder counts a transform event on it as the engine's own
+     * (Phase 6 security fix, pass 2, P2-L2-F4).
+     */
+    final AtomicReference<Thread> own = new AtomicReference<Thread>();
 
     Transformers(Ledger ledger, Object handler, long maxClassBytes, AgentLog log) {
         this.ledger = ledger;
         this.log = log;
         disableNexus();
-        this.recorder = new Recorder(ledger);
+        this.recorder = new Recorder(ledger, own);
         ClassFileTransformer raw = new AgentBuilder.Default()
                 .disableClassFormatChanges()
                 .with(AgentBuilder.RedefinitionStrategy.DISABLED)
@@ -217,12 +224,20 @@ final class Transformers {
         }
     }
 
-    /** No-op, retransformation-capable, registered ahead of the hook transformer (D122). */
+    /**
+     * No-op, retransformation-capable, registered ahead of the hook transformer (D122). It counts every transform
+     * event of a ledger class, and counts it as the engine's own when it happens on the thread the engine is
+     * retransforming on (Phase 6 security fix, pass 2, P2-L2-F4): the engine's own count is what the JVM actually
+     * transformed, not one per class of a batch, since a batch that throws stops at its first failing class and the
+     * classes after it never reach a transformer.
+     */
     static final class Recorder implements ClassFileTransformer {
         private final Ledger ledger;
+        private final AtomicReference<Thread> own;
 
-        Recorder(Ledger ledger) {
+        Recorder(Ledger ledger, AtomicReference<Thread> own) {
             this.ledger = ledger;
+            this.own = own;
         }
 
         @Override
@@ -233,6 +248,9 @@ final class Transformers {
                     Ledger.Entry e = ledger.find(className, classBeingRedefined);
                     if (e != null) {
                         e.events.incrementAndGet();
+                        if (own.get() == Thread.currentThread()) {
+                            e.own.incrementAndGet();
+                        }
                         if (e.first == null) {
                             e.first = classfileBuffer.clone();
                         }

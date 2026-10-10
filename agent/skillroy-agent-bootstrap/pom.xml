@@ -40,6 +40,13 @@
   </properties>
 
   <dependencies>
+    <!-- Test scope only (Phase 6 security fix, pass 2, SE): OptionsFileVolumeTest holds the bootstrap's private copy of
+         the volume rule equal to the protocol's Volumes. Nothing of it reaches the bootstrap jar. -->
+    <dependency>
+      <groupId>ai.skillroy</groupId>
+      <artifactId>skillroy-protocol</artifactId>
+      <scope>test</scope>
+    </dependency>
     <dependency>
       <groupId>org.junit.jupiter</groupId>
       <artifactId>junit-jupiter</artifactId>

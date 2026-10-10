@@ -175,6 +175,33 @@ class CaptureTest {
         assertEquals("<redacted>", encoded.get("apiKey"));
     }
 
+    /**
+     * Phase 6 security fix, pass 2, P2-L2-F7: a captured string, top-level, inside a list and inside a map (its key
+     * too), passes the core's {@code redactText} after its cut, as a thrown message does: a secret {@code key=value}
+     * pair's value and the password of URL user-info never leave the agent, although the catalogue marked no index.
+     * Before the fix the three values reached the event in clear.
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    void aCapturedStringPassesTheAgentsTextRedaction() {
+        Map<String, Object> options = new LinkedHashMap<String, Object>();
+        options.put("url", "jdbc:x://desk:pw-inner@h/db");
+        options.put("note password=k3y", "kept");
+        Map<String, Object> p = take("url=jdbc:x://desk:pw-outer@h/db;password=hunter2 mode=desk",
+                Arrays.asList("token=abc123", "plain"), options);
+        String text = String.valueOf(p);
+        for (String secret : Arrays.asList("hunter2", "pw-outer", "abc123", "pw-inner", "k3y")) {
+            assertFalse(text.contains(secret), secret + " left the agent: " + text);
+        }
+        assertEquals("url=jdbc:x://desk:<redacted>@h/db;password=<redacted> mode=desk", args(p).get("0"));
+        assertEquals(Arrays.asList("token=<redacted>", "plain"), args(p).get("1"));
+        Map<String, Object> encoded = (Map<String, Object>) args(p).get("2");
+        assertEquals("jdbc:x://desk:<redacted>@h/db", encoded.get("url"));
+        assertTrue(encoded.containsKey("note password=<redacted>"), "a map key's text too: " + encoded);
+        assertTrue(harness.ctx.redacting.contains("plain"), "every string went through the core's rule");
+        assertEquals("url=jdbc:x://desk:<redacted>@h/db;password=<redacted> mode=desk", p.get("returned"));
+    }
+
     @Test
     void theCataloguesSecretArgumentsAndResultAreNeverCaptured() {
         assertTrue(capturing.signOn("100", "hunter2"));

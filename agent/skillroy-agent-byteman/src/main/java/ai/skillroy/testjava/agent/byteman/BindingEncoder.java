@@ -53,7 +53,9 @@ import java.util.concurrent.atomic.AtomicLong;
  * Fix wave (L2-F1, L2-S1, L2-F3): the allow-list and the exact types replace "a container or number whose class is the
  * JDK's".
  *
- * <p>Masking: every encoded scalar, inside containers too, passes every registered {@link MaskPolicy} as
+ * <p>Masking: every bound string (a map key's text included) passes the core's {@code redactText} after its cut
+ * (Phase 6 security fix, pass 2, P2-L2-F7); every encoded scalar, inside containers too, then passes every registered
+ * {@link MaskPolicy} as
  * {@code mask("rule.<name>", "binding<i>", value)} (P1 section 4's thread rule as amended: on the application thread);
  * a policy that throws is counted and the value becomes {@code <redacted>}; a map entry whose key the agent calls
  * secret ({@link AgentContext#isSecretKey}) is {@code <redacted>}. Bounds: the encoder counts the code units and
@@ -218,7 +220,7 @@ final class BindingEncoder {
         Class<?> type = v.getClass();
         int max = depth == 0 ? MAX_STRING : MAX_STRING_IN_COLLECTION;
         if (type == String.class) {
-            return cut(pass, (String) v, max);
+            return redact(cut(pass, (String) v, max));
         }
         if (type == Boolean.class) {
             return v;
@@ -270,6 +272,20 @@ final class BindingEncoder {
             return s.substring(0, take);
         }
         return s;
+    }
+
+    /**
+     * A bound string after its cut, through the core's {@code redactText} (Phase 6 security fix, pass 2, P2-L2-F7: the
+     * rule of 4.3 for a captured string), so that a secret {@code key=value} pair's value and the password of URL
+     * user-info are hidden before the mask policies see it; a failure redacts the whole string.
+     */
+    private String redact(String text) {
+        try {
+            String redacted = ctx.redactText(text);
+            return redacted == null ? text : redacted;
+        } catch (RuntimeException e) {
+            return REDACTED;
+        }
     }
 
     /** True for a collection or map class of {@link #ITERABLE} or of the JDK's immutable collections. */

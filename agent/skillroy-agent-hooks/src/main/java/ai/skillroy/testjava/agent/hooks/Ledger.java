@@ -50,8 +50,11 @@ final class Ledger {
         volatile boolean restoring;
         /** Every transform event of the class the recorder saw (the engine's own and anyone else's). */
         final AtomicInteger events = new AtomicInteger();
-        /** The engine's own retransformations of the class (written under the engine's lock). */
-        volatile int own;
+        /**
+         * The transform events of the class the recorder saw on the engine's own thread while it retransformed (Phase
+         * 6 security fix, pass 2, P2-L2-F4: counted where they happen, not one per class of a batch).
+         */
+        final AtomicInteger own = new AtomicInteger();
         volatile String error;
         /** True when a restore left a reference to Spy: the entry stays (section 3.5). */
         volatile boolean failed;
@@ -70,7 +73,7 @@ final class Ledger {
 
         /** The foreign transform events: the recorder's count less the engine's own retransformations. */
         int foreignEvents() {
-            return Math.max(0, events.get() - own);
+            return Math.max(0, events.get() - own.get());
         }
 
         /** True once the class (and so its loader) has been collected. */

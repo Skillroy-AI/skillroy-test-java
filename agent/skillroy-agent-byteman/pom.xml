@@ -139,9 +139,9 @@
         </executions>
       </plugin>
       <!-- The argLine extends the inherited line (phase6-contracts.md 2.3); no module POM sets
-           skillroy.test.extraArgLine. Four test classes need a JVM of their own: ProbeTest sets Byteman's "loaded"
-           property, CheckLoadsNothingTest needs a JVM where nothing of Byteman was ever loaded, and InProcessRouteTest
-           and DetachBudgetTest leave Byteman loaded for the JVM's life (Byteman cannot be unloaded, and a cut-short
+           skillroy.test.extraArgLine. Five test classes need a JVM of their own: ProbeTest sets Byteman's "loaded"
+           property, CheckLoadsNothingTest needs a JVM where nothing of Byteman was ever loaded, and InProcessRouteTest,
+           LoadUndoTest and DetachBudgetTest leave Byteman loaded for the JVM's life (Byteman cannot be unloaded, and a cut-short
            detach keeps its rule base); each runs in an execution of its own (a fork per execution; reuseForks=false
            gave no tests on the Java 8 test JVM). -->
       <plugin>
@@ -164,6 +164,7 @@
                 <exclude>**/CheckLoadsNothingTest.java</exclude>
                 <exclude>**/InProcessRouteTest.java</exclude>
                 <exclude>**/DetachBudgetTest.java</exclude>
+                <exclude>**/LoadUndoTest.java</exclude>
               </excludes>
             </configuration>
           </execution>
@@ -197,6 +198,17 @@
             <configuration>
               <includes>
                 <include>**/InProcessRouteTest.java</include>
+              </includes>
+            </configuration>
+          </execution>
+          <execution>
+            <id>load-undo</id>
+            <goals>
+              <goal>test</goal>
+            </goals>
+            <configuration>
+              <includes>
+                <include>**/LoadUndoTest.java</include>
               </includes>
             </configuration>
           </execution>

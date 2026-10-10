@@ -255,6 +255,47 @@ class HooksTest {
         assertEquals(true, newer.record().get("replaced"));
     }
 
+    /**
+     * Phase 6 security fix, pass 2, P2-L2-F3: a replace whose implicit remove left a reference to {@code Spy} in a
+     * restored class (the answer's {@code replaced.verified} is {@code FAILED}) is ERROR / ENVIRONMENT as the remove's
+     * {@code HOOK_VERIFY_FAILED} would be, with the restore lines as the detail; a replace whose remove verified
+     * {@code OK} or {@code DEGRADED} records {@code replaced: true} as before. Before the fix every replace was a plain
+     * success.
+     */
+    @Test
+    void aReplaceWhoseRemoveLeftAReferenceToSpyIsEnvironment() throws Exception {
+        install(HooksMode.AUTO, true);
+        pack.hooks = catalogue("toy", 2);
+        for (String verified : List.of("OK", "DEGRADED", "FAILED")) {
+            List<Object> restored = List.of(Map.of("class", "org.example.toy.Desk", "loader", "system", "verified",
+                    verified, "foreignEvents", 0L));
+            agent.on("hook.install", params -> {
+                installs.add(params);
+                Map<?, ?> catalogue = (Map<?, ?>) params.get("catalogue");
+                installed = Map.of("id", catalogue.get("id"), "hash", catalogue.get("hash"), "installedAt", 2L);
+                return Map.of("catalogue", Map.of("id", catalogue.get("id"), "hash", catalogue.get("hash"),
+                        "alreadyInstalled", false), "hooks", List.of(Map.of("id", "toy.applied", "state", "OK",
+                        "strategy", "advice", "capability", "hook.toy.applied")), "touched", List.of(),
+                        "otherAgents", List.of(), "replaced", Map.of("restored", restored, "verified", verified));
+            });
+            installed = Map.of("id", "toy", "hash", "sha256:older");
+            if (!"FAILED".equals(verified)) {
+                assertEquals(true, install(HooksMode.AUTO, true).record().get("replaced"), verified);
+                continue;
+            }
+            HookInstaller.Refused e = assertThrows(HookInstaller.Refused.class, () -> install(HooksMode.AUTO, true));
+            assertEquals(FailureKind.ENVIRONMENT, e.kind());
+            assertTrue(e.getMessage().startsWith("hook.install failed: HOOK_VERIFY_FAILED: the remove of the installed"
+                    + " version (replace: true) left a reference to Spy"), e.getMessage());
+            assertEquals(ErrorCodes.HOOK_VERIFY_FAILED, ((Number) ((Map<?, ?>) e.detail().get("error")).get("code"))
+                    .intValue());
+            assertEquals(restored, e.detail().get("restored"));
+            assertEquals(true, e.record().get("replaced"));
+            assertEquals(false, e.record().get("ok"));
+        }
+        assertEquals(true, installs.get(installs.size() - 1).get("replace"));
+    }
+
     @Test
     void anotherCatalogueOnTheTargetIsEnvironment() {
         installed = Map.of("id", "other", "hash", "sha256:00");

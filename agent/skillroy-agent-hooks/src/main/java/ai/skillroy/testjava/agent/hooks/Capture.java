@@ -45,8 +45,9 @@ import java.util.Set;
  * collection class is a handle, and so are the JDK collections whose iteration takes a lock (the synchronized
  * wrappers, {@code Vector}, {@code Stack}, {@code Hashtable}, {@code Properties}, every blocking queue) and every view
  * or wrapper (an unmodifiable view may sit over any of those), so the encoding touches no lock of the application.
- * Every encoded scalar passes every registered {@link MaskPolicy} as {@code mask("hook.<id>", column, value)}; a map
- * entry whose key the agent calls secret is {@code <redacted>}.
+ * Every captured string (a map key's text included) passes the core's {@code redactText} after its cut (Phase 6
+ * security fix, pass 2, P2-L2-F7), and every encoded scalar then passes every registered {@link MaskPolicy} as
+ * {@code mask("hook.<id>", column, value)}; a map entry whose key the agent calls secret is {@code <redacted>}.
  *
  * <p>The budget is counted on the input (the code units and elements read), so a call never reads more than
  * {@code hooks.capture.maxBytes} of the application's values. One {@link Run} per event; not thread-safe, never shared.
@@ -142,9 +143,9 @@ final class Capture {
                 budget -= Math.max(1, take);
                 if (take < s.length()) {
                     truncated = true;
-                    return s.substring(0, take);
+                    return redact(s.substring(0, take));
                 }
-                return s;
+                return redact(s);
             }
             if (type == Integer.class || type == Long.class || type == Short.class || type == Byte.class
                     || type == Boolean.class) {
@@ -270,6 +271,22 @@ final class Capture {
             ref.put("class", value.getClass().getName());
             ref.put("ref", ctx.handles().handleFor(value, "hook"));
             return ref;
+        }
+
+        /**
+         * A captured string after its cut, through the core's {@code redactText} (Phase 6 security fix, pass 2,
+         * P2-L2-F7), as a thrown message is: a secret {@code key=value} pair's value and the password of URL user-info
+         * are hidden under the agent's keys (the protocol's rule, the {@code redact} option, every registered
+         * {@code RedactionKeys}) before the mask policies see it. Linear in the cut text and lock-free; a failure
+         * redacts the whole string.
+         */
+        private String redact(String text) {
+            try {
+                String redacted = ctx.redactText(text);
+                return redacted == null ? text : redacted;
+            } catch (RuntimeException e) {
+                return REDACTED;
+            }
         }
 
         /** Every registered policy, in order; a policy that throws redacts the value and marks the run. */
