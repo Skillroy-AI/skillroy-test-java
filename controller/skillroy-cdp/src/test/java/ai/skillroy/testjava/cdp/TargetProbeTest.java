@@ -184,6 +184,31 @@ class TargetProbeTest {
     }
 
     /**
+     * Security fix P2-L4-F1: the browser WebSocket the attach dials is {@code /json/version}'s, re-pointed at the
+     * endpoint's own authority whatever scheme, host or user information it named; one whose path is not
+     * {@code /devtools/browser/<id>} (a {@code ws+unix:} socket, another path, none) is not kept.
+     */
+    @Test
+    void theBrowserWebSocketIsTheVersionAnswersPathAtTheEndpointsOwnAuthority() throws Exception {
+        String own = "ws://" + devTools.endpoint().authority() + "/devtools/browser/0b1c-2d3e";
+        for (String listed : List.of(own, "ws://198.51.100.7:9/devtools/browser/0b1c-2d3e",
+                "wss://" + devTools.endpoint().authority() + "/devtools/browser/0b1c-2d3e",
+                "ws://user:secret@" + devTools.endpoint().authority() + "/devtools/browser/0b1c-2d3e",
+                "ws://localhost:1/devtools/browser/0b1c-2d3e?x=1#y")) {
+            devTools.versionBody = Json.write(Map.of("Browser", "FakeChrome/152", "webSocketDebuggerUrl", listed));
+            assertEquals(own, TargetProbe.run(devTools.endpoint(), options(DEADLINE_MS)).browserWebSocketUrl(),
+                    listed);
+        }
+        for (String listed : List.of("ws+unix:u.sock:/devtools/browser/UNIX", "ws://127.0.0.1:1/devtools/page/X",
+                "ws://127.0.0.1:1/devtools/browser/../x", "ws://127.0.0.1:1/", "not a url", "")) {
+            devTools.versionBody = Json.write(Map.of("Browser", "FakeChrome/152", "webSocketDebuggerUrl", listed));
+            assertNull(TargetProbe.run(devTools.endpoint(), options(DEADLINE_MS)).browserWebSocketUrl(), listed);
+        }
+        devTools.versionBody = "{\"Browser\":\"FakeChrome/152\"}";
+        assertNull(TargetProbe.run(devTools.endpoint(), options(DEADLINE_MS)).browserWebSocketUrl(), "none named");
+    }
+
+    /**
      * Security fix S44: a {@code /json/version} body over 64 KiB is {@code PROTOCOL}, refused by its
      * {@code Content-Length} before the body is read, or, without one, read no further than the bound; the 16 MiB
      * body is never read whole.

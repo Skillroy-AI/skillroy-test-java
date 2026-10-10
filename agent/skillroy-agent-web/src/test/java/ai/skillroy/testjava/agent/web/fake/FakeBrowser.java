@@ -363,6 +363,22 @@ public final class FakeBrowser {
         return document;
     }
 
+    /** The page logs {@code text} on its console, as a page script would (P2-L4-S1). */
+    public void pageConsole(String text) {
+        host().console(document, "log", text);
+    }
+
+    /** How many observers of the given event type are subscribed (for tests). */
+    public int observerCount(Class<?> type) {
+        int n = 0;
+        for (Object[] entry : observers) {
+            if (entry[0] == type) {
+                n++;
+            }
+        }
+        return n;
+    }
+
     private FakeDocument.Host host() {
         return new FakeDocument.Host() {
             @Override

@@ -250,6 +250,83 @@ class WebLibTest {
         assertTrue(WebLib.callJsonExpression("drain").endsWith(".stringify(" + LIB + ".drain());})()"));
     }
 
+    /**
+     * Security fix P2-L4-F2: the guard is the caller's own text around the library's JSON call, and it answers from
+     * {@code typeof}, primitive lengths and the {@code +} of primitives only: the text it returns, or one of its own.
+     */
+    @Test
+    void boundedCallExpressionIsTheGuardAroundTheJsonCall() {
+        String inner = WebLib.callJsonExpression("drain", Integer.valueOf(WebLib.DRAIN_CHARS));
+        String expression = WebLib.boundedCallExpression("drain", Integer.valueOf(WebLib.DRAIN_CHARS));
+        assertEquals(WebLib.boundedOpen() + inner + WebLib.boundedClose(), expression);
+        assertEquals(1, count(expression, WebLib.source()), "the library once");
+        assertEquals("(function(){var t,m,s;try{t=", WebLib.boundedOpen());
+        String close = WebLib.boundedClose();
+        assertTrue(close.endsWith("if(typeof t!==\"string\"){return \"#skillroy-guard:not text\";}"
+                + "return t.length>1048576?\"#skillroy-guard:oversized\":t;})()"), close);
+        assertTrue(close.contains("return \"#skillroy-guard:threw:\"+m.length+\":\"+m+s;}"), close);
+        assertTrue(close.contains("if(typeof m!==\"string\"||m.length>2000){m=\"a thrown value whose text cannot be"
+                + " bounded\";}"), "a message past its bound after the cut is replaced, whatever slice did");
+        assertTrue(close.contains("if(typeof s!==\"string\"||s.length>8000){s=\"\";}"));
+        assertFalse(close.contains("window") || close.contains("JSON") || close.contains("stringify"),
+                "the guard reads no global and calls no library function: " + close);
+        assertEquals("#skillroy-guard:", WebLib.GUARD_PREFIX);
+        assertThrows(IllegalArgumentException.class, () -> WebLib.boundedCallExpression("nope"));
+        assertTrue(2L * WebLib.DRAIN_CHARS + 200 <= WebLib.MAX_JSON_CHARS,
+                "a genuine drain's stringify text, its quotes escaped once more, stays within the guard's bound");
+    }
+
+    @Test
+    void boundedReadsTheGuardsAnswers() {
+        Map<String, Object> value = new LinkedHashMap<String, Object>();
+        value.put("events", Collections.emptyList());
+        value.put("dropped", Long.valueOf(0));
+        WebLib.Bounded ok = WebLib.Bounded.of(stringifyText(Json.write(value), false));
+        assertEquals(WebLib.Bounded.Kind.VALUE, ok.kind());
+        assertEquals(value, ok.value());
+        assertNull(ok.refusal());
+        assertEquals(WebLib.Bounded.Kind.OVERSIZED, WebLib.Bounded.of(stringifyText("1", true)).kind(),
+                "a text the library cut");
+        char[] big = new char[WebLib.MAX_JSON_CHARS + 1];
+        Arrays.fill(big, 'x');
+        assertEquals(WebLib.Bounded.Kind.OVERSIZED, WebLib.Bounded.of(new String(big)).kind(),
+                "a text over the bound, whatever arrives");
+        WebLib.Bounded refused = WebLib.Bounded.of("#skillroy-guard:oversized");
+        assertEquals(WebLib.Bounded.Kind.OVERSIZED, refused.kind());
+        assertEquals(ErrorCodes.INTERNAL_ERROR, refused.refusal().code());
+        assertEquals("oversized", refused.refusal().data().get("reason"));
+        assertEquals(Long.valueOf(WebLib.MAX_JSON_CHARS), refused.refusal().data().get("bound"));
+        WebLib.Bounded notText = WebLib.Bounded.of("#skillroy-guard:not text");
+        assertEquals(WebLib.Bounded.Kind.NOT_TEXT, notText.kind());
+        assertEquals("not library text", notText.refusal().data().get("reason"));
+        for (Object other : Arrays.<Object>asList(null, Long.valueOf(1), value, "not json", "[1]", "{\"json\":1}",
+                "{\"json\":\"{\"}", "#skillroy-guard:threw:9:short", "#skillroy-guard:threw:x:y",
+                "#skillroy-guard:other")) {
+            assertEquals(WebLib.Bounded.Kind.NOT_TEXT, WebLib.Bounded.of(other).kind(), String.valueOf(other));
+        }
+        WebLib.Bounded threw = WebLib.Bounded.of("#skillroy-guard:threw:11:Error: boomError: boom\n    at x");
+        assertEquals(WebLib.Bounded.Kind.SCRIPT_ERROR, threw.kind());
+        assertEquals("Error: boom", threw.message());
+        assertEquals("Error: boom\n    at x", threw.stack());
+        assertNull(threw.refusal());
+        char[] longer = new char[30000];
+        Arrays.fill(longer, 'm');
+        String m = "Error: " + new String(longer);
+        WebLib.Bounded cut = WebLib.Bounded.of("#skillroy-guard:threw:" + m.length() + ":" + m + m);
+        assertEquals(WebLib.MAX_ERROR_CHARS, cut.message().length(), "cut again on the receiving side");
+        assertEquals(WebLib.MAX_STACK_CHARS, cut.stack().length());
+        assertEquals("the script threw", WebLib.Bounded.of("#skillroy-guard:threw:0:").message());
+    }
+
+    /** The text the library's {@code stringify} makes of a value whose JSON text is {@code json}. */
+    private static String stringifyText(String json, boolean truncated) {
+        Map<String, Object> wrapper = new LinkedHashMap<String, Object>();
+        wrapper.put("json", json);
+        wrapper.put("typeofResult", "object");
+        wrapper.put("truncated", Boolean.valueOf(truncated));
+        return Json.write(wrapper);
+    }
+
     @Test
     void callExpressionWithANullArrayPassesOneNull() {
         assertTrue(WebLib.callExpression("stringify", (Object[]) null).endsWith(".stringify(null);})()"));

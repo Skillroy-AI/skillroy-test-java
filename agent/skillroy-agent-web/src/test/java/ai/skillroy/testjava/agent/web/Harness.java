@@ -18,7 +18,9 @@ package ai.skillroy.testjava.agent.web;
 
 import ai.skillroy.testjava.agent.api.AgentContext;
 import ai.skillroy.testjava.agent.api.spi.web.WebEngineAdapter;
+import ai.skillroy.testjava.agent.web.fake.FakeScript;
 import ai.skillroy.testjava.protocol.Capability;
+import ai.skillroy.testjava.protocol.Json;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -83,6 +85,19 @@ final class Harness implements AutoCloseable {
             m.put(String.valueOf(kv[i]), kv[i + 1]);
         }
         return m;
+    }
+
+    /**
+     * What an adapter hands for the guard of {@code WebLib.boundedCallExpression} (P2-L4-F2) when the library's value
+     * is {@code value}: the JSON text of the {@code stringify} text, a string.
+     */
+    static String guarded(Object value) {
+        return Json.write(FakeScript.stringify(value));
+    }
+
+    /** What an adapter hands for a text of the guard's own (a {@code WebLib.GUARD_PREFIX} text). */
+    static String guardedText(String text) {
+        return Json.write(text);
     }
 
     @Override

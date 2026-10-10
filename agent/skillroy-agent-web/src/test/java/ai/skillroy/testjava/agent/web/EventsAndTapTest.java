@@ -155,22 +155,24 @@ class EventsAndTapTest {
                 @Override
                 public CompletableFuture<String> answer(WebEval eval) {
                     String text = eval.expression();
-                    if (text.contains(";return window[" + WebLib.SLOT + "].drain(")) {
+                    if (text.contains(";return window[" + WebLib.SLOT + "].stringify(window[" + WebLib.SLOT
+                            + "].drain(")) {
                         int n = drains.incrementAndGet();
                         if (n == 1) {
-                            return CompletableFuture.completedFuture(ai.skillroy.testjava.protocol.Json.write(
-                                    Harness.args("events", Arrays.asList(Harness.args("name", "desk.big", "detail",
-                                            Harness.args("blob", repeat('d', 70 * 1024)))), "dropped",
-                                            Long.valueOf(0))));
+                            return CompletableFuture.completedFuture(Harness.guarded(Harness.args("events",
+                                    Arrays.asList(Harness.args("name", "desk.big", "detail", Harness.args("blob",
+                                            repeat('d', 70 * 1024)))), "dropped", Long.valueOf(0))));
                         }
                         if (n == 2) {
-                            return CompletableFuture.completedFuture(ai.skillroy.testjava.protocol.Json.write(
-                                    Harness.args("events", Arrays.asList(Harness.args("name", "desk.huge", "detail",
-                                            repeat('h', 2 << 20))), "dropped", Long.valueOf(0))));
+                            // What the guard of P2-L4-F2 answers for a drain whose text exceeds its bound.
+                            return CompletableFuture.completedFuture(Harness.guardedText(WebLib.GUARD_PREFIX
+                                    + "oversized"));
                         }
-                        return CompletableFuture.completedFuture("{\"events\":[],\"dropped\":0}");
+                        return CompletableFuture.completedFuture(Harness.guarded(Harness.args("events",
+                                Collections.emptyList(), "dropped", Long.valueOf(0))));
                     }
-                    return CompletableFuture.completedFuture("{\"installed\":1}");
+                    return CompletableFuture.completedFuture(Harness.guarded(Harness.args("installed",
+                            Long.valueOf(1))));
                 }
             };
             long seq = h.ctx.events.lastSeq();
@@ -181,14 +183,29 @@ class EventsAndTapTest {
             assertEquals(Boolean.TRUE, tapped.payload().get("truncated"));
             assertEquals(WebLib.MAX_DETAIL_CHARS, ((String) tapped.payload().get("detail")).length(),
                     "the detail's JSON text, cut");
+            // P2-L4-F2: the oversized drain ends the tap (logged once); the poller sends no further drain.
+            Taps taps = h.module.tapsForTest();
+            Entry entry = h.module.indexForTest().snapshot().byRef.get(BrowserIndexTest.ref(h, browser));
             long deadline = System.currentTimeMillis() + BOUND_MS;
-            while (drains.get() < 3 && System.currentTimeMillis() < deadline) {
+            while (taps.tapped(entry) && System.currentTimeMillis() < deadline) {
                 Thread.sleep(20);
             }
-            assertTrue(drains.get() >= 3, "the poller went on after the oversized drain");
+            assertFalse(taps.tapped(entry), "the oversized drain ended the tap");
+            Thread.sleep(10 * Taps.POLL_MS);
+            assertEquals(2, drains.get(), "no drain after the oversized one");
+            int warned = 0;
+            for (String line : h.ctx.log.all()) {
+                if (line.startsWith("WARN web: the tap of browser") && line.contains("drain answer exceeded")) {
+                    warned++;
+                }
+            }
+            assertEquals(1, warned, "logged once");
             for (Event e : h.ctx.events.since(seq, ai.skillroy.testjava.protocol.TopicFilter.parse("web.tap"), 10)) {
                 assertFalse("desk.huge".equals(e.payload().get("name")), "an oversized drain publishes nothing");
             }
+            assertEquals(Long.valueOf(1), h.ctx.map("web.tap", Harness.args("patterns", Arrays.asList("desk.*")))
+                    .get("installed"), "the next web.tap arms it again");
+            assertTrue(taps.tapped(entry));
             h.ctx.call("web.tap", Harness.args("patterns", Collections.emptyList()));
 
             seq = h.ctx.events.lastSeq();
@@ -217,7 +234,8 @@ class EventsAndTapTest {
             assertEquals(Harness.args("installed", Long.valueOf(1), "timing", "DOCUMENT_START"), tap);
             String installer = WebLib.tapInstaller(Arrays.asList("desk.*"), "window");
             assertEquals(Collections.singletonList(installer), browser.scripts, "the init script for new documents");
-            assertTrue(sent(installer), "and the same text evaluated in the current document");
+            assertTrue(sent(WebLib.boundedCallExpression("tap", Arrays.asList("desk.*"), "window")),
+                    "and the same call evaluated in the current document, through the guard (P2-L4-F2)");
             assertTrue(h.module.tapsForTest().polling(), "the poller runs while a tap is installed");
             long seq = h.ctx.events.lastSeq();
             browser.document.pageEvent("desk.borrowed", Harness.args("item", "saw", "qty", Long.valueOf(2)));
@@ -238,7 +256,7 @@ class EventsAndTapTest {
             Map<String, Object> off = h.ctx.map("web.tap", Harness.args("patterns", Collections.emptyList()));
             assertEquals(Long.valueOf(0), off.get("installed"));
             assertTrue(browser.scripts.isEmpty(), "patterns: [] cancels the init script");
-            assertTrue(sent(WebLib.tapInstaller(Collections.<String>emptyList(), "window")),
+            assertTrue(sent(WebLib.boundedCallExpression("tap", Collections.<String>emptyList(), "window")),
                     "and clears the tap in the current document");
             long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(BOUND_MS);
             while (h.module.tapsForTest().polling() && System.nanoTime() < deadline) {
@@ -309,7 +327,7 @@ class EventsAndTapTest {
             String installer = WebLib.tapInstaller(Arrays.asList("desk.*"), "window");
             browser.removed = true; // the adapter no longer lists it; it is not closed
             h.ctx.call("web.browsers", Harness.args());
-            String clear = WebLib.tapInstaller(Collections.<String>emptyList(), "window");
+            String clear = WebLib.boundedCallExpression("tap", Collections.<String>emptyList(), "window");
             long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(BOUND_MS);
             while (!sent(clear) && System.nanoTime() < deadline) {
                 Thread.yield();

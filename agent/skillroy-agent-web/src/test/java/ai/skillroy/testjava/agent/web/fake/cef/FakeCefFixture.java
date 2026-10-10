@@ -158,6 +158,12 @@ public final class FakeCefFixture implements WebAdapterFixture {
         return true;
     }
 
+    /** The built-in adapter budgets the console (P2-L4-S1, kit item 14). */
+    @Override
+    public boolean budgetsConsole() {
+        return true;
+    }
+
     @Override
     public RecordingClassLoader pristineLoader() {
         ClassLoader test = FakeCefFixture.class.getClassLoader();

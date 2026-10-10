@@ -29,6 +29,7 @@ import ai.skillroy.testjava.agent.api.spi.web.WebFrameGoneException;
 import ai.skillroy.testjava.agent.api.spi.web.WebInitScript;
 import ai.skillroy.testjava.agent.api.spi.web.WebScriptException;
 import ai.skillroy.testjava.agent.api.spi.web.WebSubscription;
+import ai.skillroy.testjava.agent.web.reflect.EventBudget;
 import ai.skillroy.testjava.protocol.CapabilityState;
 import ai.skillroy.testjava.protocol.Json;
 import ai.skillroy.testjava.protocol.web.WebLib;
@@ -641,6 +642,81 @@ public abstract class WebEngineAdapterContract {
                         "reload(" + ignoreCache + ") made a new document");
                 assertEquals(KitPages.MAIN_TITLE, Json.parse(eval(b, KitScripts.TITLE)), "of the same page");
             }
+        } finally {
+            subscription.cancel();
+        }
+    }
+
+    // ------------------------------------------------------------------------------------------------ item 13
+
+    /**
+     * Item 13 (security fix P2-L4-F2, phase4-contracts.md 4.6): a library call through the guard of
+     * {@link WebLib#boundedCallExpression} answers the genuine library's value, and a library the page replaced
+     * chooses the value but never the size of what crosses the channel: a drain of 50 Mi characters crosses as the
+     * guard's short refusal, an error with a message of 10 Mi characters as the guard's text of at most about 10000.
+     */
+    @Test
+    void item13ALibraryCallThroughTheGuardIsBoundedInThePage() throws Exception {
+        WebBrowser b = browser(WebAdapterFixture.Which.VISIBLE);
+        assumeTrue(b.capabilities().contains(WebCapability.EVALUATE), "the adapter has no EVALUATE");
+        load(b, KitPages.main());
+        String drain = WebLib.boundedCallExpression("drain", Integer.valueOf(WebLib.DRAIN_CHARS));
+        WebLib.Bounded genuine = WebLib.Bounded.of(Json.parse(eval(b, drain)));
+        assertEquals(WebLib.Bounded.Kind.VALUE, genuine.kind(), "the genuine library's value");
+        assertTrue(genuine.value() instanceof Map && ((Map<?, ?>) genuine.value()).get("events") instanceof List,
+                String.valueOf(genuine.value()));
+        try {
+            assertEquals("replaced", Json.parse(eval(b, KitScripts.REPLACED_LIBRARY_BIG)));
+            String refused = eval(b, drain);
+            assertTrue(refused.length() < 100, "a short text crossed the channel: " + refused.length());
+            assertEquals(WebLib.Bounded.Kind.OVERSIZED, WebLib.Bounded.of(Json.parse(refused)).kind());
+            assertEquals("replaced", Json.parse(eval(b, KitScripts.REPLACED_LIBRARY_THROWS)));
+            String thrown = eval(b, drain);
+            assertTrue(thrown.length() < 12000, "a bounded text crossed the channel: " + thrown.length());
+            WebLib.Bounded error = WebLib.Bounded.of(Json.parse(thrown));
+            assertEquals(WebLib.Bounded.Kind.SCRIPT_ERROR, error.kind());
+            assertTrue(error.message().startsWith("Error: mmm"), error.message().substring(0, 20));
+            assertTrue(error.message().length() <= WebLib.MAX_ERROR_CHARS);
+        } finally {
+            eval(b, KitScripts.RESTORE_LIBRARY);
+        }
+    }
+
+    // ------------------------------------------------------------------------------------------------ item 14
+
+    /**
+     * Item 14 (security fix P2-L4-S1, phase4-contracts.md 4.3), for an adapter that budgets the console
+     * ({@link WebAdapterFixture#budgetsConsole()}): a page that logs more than the browser's console budget at once
+     * stops that browser's console capture: its subscribers get {@link EventBudget#STOPPED_TEXT} once as a
+     * {@code warning}, and no console event of the page after it.
+     */
+    @Test
+    void item14AConsoleFloodStopsTheBrowsersConsoleCaptureOnce() throws Exception {
+        assumeTrue(fx.budgetsConsole(), "the adapter does not budget the console");
+        WebBrowser b = browser(WebAdapterFixture.Which.VISIBLE);
+        assumeTrue(b.capabilities().contains(WebCapability.EVENTS_CONSOLE), "the adapter has no EVENTS_CONSOLE");
+        load(b, KitPages.main());
+        Recorder live = new Recorder();
+        WebSubscription subscription = b.subscribe(live);
+        try {
+            assertEquals(24L, ((Number) Json.parse(eval(b, KitScripts.CONSOLE_FLOOD))).longValue());
+            WebEvent stopped = live.await(WebEvent.Kind.CONSOLE, EventBudget.STOPPED_TEXT);
+            assertEquals("warning", stopped.level());
+            int warnings = 0;
+            int floods = 0;
+            for (WebEvent e : live.events()) {
+                if (e.kind() == WebEvent.Kind.CONSOLE && EventBudget.STOPPED_TEXT.equals(e.text())) {
+                    warnings++;
+                } else if (e.kind() == WebEvent.Kind.CONSOLE && e.text() != null && e.text().startsWith("xxx")) {
+                    floods++;
+                }
+            }
+            assertEquals(1, warnings, "once");
+            assertTrue(floods < 24, "the flood was cut short: " + floods);
+            int seen = live.count(WebEvent.Kind.CONSOLE);
+            eval(b, KitScripts.CONSOLE_LOG);
+            Thread.sleep(500);
+            assertEquals(seen, live.count(WebEvent.Kind.CONSOLE), "no console event after the warning");
         } finally {
             subscription.cancel();
         }

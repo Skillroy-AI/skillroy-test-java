@@ -28,6 +28,7 @@ import ai.skillroy.testjava.agent.api.spi.web.WebInitScript;
 import ai.skillroy.testjava.agent.api.spi.web.WebRendering;
 import ai.skillroy.testjava.agent.api.spi.web.WebScriptException;
 import ai.skillroy.testjava.agent.api.spi.web.WebSubscription;
+import ai.skillroy.testjava.agent.web.reflect.EventBudget;
 import ai.skillroy.testjava.agent.web.reflect.Listeners;
 import ai.skillroy.testjava.agent.web.reflect.ReflectiveException;
 import ai.skillroy.testjava.agent.web.reflect.ResolvedApi;
@@ -107,7 +108,11 @@ import javax.imageio.ImageIO;
  *
  * <p><b>Threads.</b> The client completes futures and calls listeners on CEF's UI thread (the EDT with off-screen
  * rendering): the handle hands each result and event to the adapter's own threads at once (events in order, on a
- * serial executor) and runs nothing else there. No method waits on the EDT; the accessors that ask the page
+ * serial executor) and runs nothing else there. Events are handed over within the browser's receive budget
+ * ({@link EventBudget}, security fix P2-L4-S1): an event over the channel bound is dropped unparsed, the queue is
+ * bounded by characters, and a page whose console output empties the console bucket stops the browser's console
+ * capture ({@code Runtime.disable}, a {@code web.console} warning once, sub-frame evaluation unavailable) until a
+ * main-frame navigation 10 s or more later. No method waits on the EDT; the accessors that ask the page
  * ({@link #frames()}) wait at most {@value #ACCESSOR_BOUND_MS} ms on the calling worker, and answer from the cache when
  * called on the EDT.
  *
@@ -130,6 +135,11 @@ final class JcefBrowser implements WebBrowser {
     static final int EARLY_MAX = 32;
     /** Raw channel: an answer whose id has not arrived within this time is dropped (another party's). */
     static final long EARLY_TTL_NANOS = TimeUnit.SECONDS.toNanos(10);
+    /**
+     * A console event's text is built from its arguments up to this many characters (P2-L4-S1); the module masks it
+     * and cuts it at 2000, so the rest is never copied.
+     */
+    static final int CONSOLE_TEXT_CHARS = 1 << 16;
 
     private static final Set<WebCapability> ALL = Collections.unmodifiableSet(EnumSet.of(WebCapability.EVALUATE,
             WebCapability.AWAIT_PROMISE, WebCapability.FRAMES, WebCapability.EVENTS_LOAD, WebCapability.EVENTS_CONSOLE,
@@ -196,6 +206,10 @@ final class JcefBrowser implements WebBrowser {
     private volatile Dimension override;
     private volatile Dimension lastViewport;
     private volatile List<WebFrame> lastFrames = Collections.emptyList();
+    /** P2-L4-S1: the receive budget of this browser's DevTools events (the hand-off and the console). */
+    private final EventBudget budget = new EventBudget();
+    /** P2-L4-S1: a resumption of the stopped console capture is scheduled. */
+    private final AtomicBoolean resumeScheduled = new AtomicBoolean();
 
     JcefBrowser(JcefAdapter adapter, ResolvedApi api, Object browser) {
         this.adapter = adapter;
@@ -523,8 +537,7 @@ final class JcefBrowser implements WebBrowser {
         contexts.clear();
         CompletableFuture<Map<String, Object>> page = new CompletableFuture<Map<String, Object>>();
         sendRaw("Page.enable", new LinkedHashMap<String, Object>(), page);
-        CompletableFuture<Map<String, Object>> runtime = new CompletableFuture<Map<String, Object>>();
-        sendRaw("Runtime.enable", new LinkedHashMap<String, Object>(), runtime);
+        CompletableFuture<Map<String, Object>> runtime = enableRuntime(null);
         synchronized (lock) {
             pageEnabled = page;
             runtimeEnabled = runtime;
@@ -554,18 +567,7 @@ final class JcefBrowser implements WebBrowser {
                         if ("onDevToolsMethodResult".equals(method.getName()) && args.length == 4) {
                             onAnswer(args[1], args[2], args[3]);
                         } else if ("onDevToolsEvent".equals(method.getName()) && args.length == 3) {
-                            final String name = String.valueOf(args[1]);
-                            final String json = args[2] == null ? "{}" : String.valueOf(args[2]);
-                            try {
-                                events.execute(new Runnable() {
-                                    @Override
-                                    public void run() {
-                                        onDevToolsEvent(name, json);
-                                    }
-                                });
-                            } catch (RejectedExecutionException ignored) {
-                                // the adapter was detached
-                            }
+                            hand(String.valueOf(args[1]), args[2] == null ? "{}" : String.valueOf(args[2]));
                         }
                         return null;
                     }
@@ -810,8 +812,7 @@ final class JcefBrowser implements WebBrowser {
         }
         CompletableFuture<Map<String, Object>> page = send(c, "Page.enable", new LinkedHashMap<String, Object>(),
                 false);
-        CompletableFuture<Map<String, Object>> runtime = send(c, "Runtime.enable",
-                new LinkedHashMap<String, Object>(), false);
+        CompletableFuture<Map<String, Object>> runtime = enableRuntime(c);
         synchronized (lock) {
             pageEnabled = page;
             runtimeEnabled = runtime;
@@ -834,18 +835,7 @@ final class JcefBrowser implements WebBrowser {
                     @Override
                     public Object invoke(Object proxy, Method method, Object[] args) {
                         if ("onEvent".equals(method.getName()) && args != null && args.length == 2) {
-                            final String name = String.valueOf(args[0]);
-                            final String json = args[1] == null ? "{}" : String.valueOf(args[1]);
-                            try {
-                                events.execute(new Runnable() {
-                                    @Override
-                                    public void run() {
-                                        onDevToolsEvent(name, json);
-                                    }
-                                });
-                            } catch (RejectedExecutionException ignored) {
-                                // the adapter was detached
-                            }
+                            hand(String.valueOf(args[0]), args[1] == null ? "{}" : String.valueOf(args[1]));
                         }
                         return null;
                     }
@@ -1132,6 +1122,12 @@ final class JcefBrowser implements WebBrowser {
 
     /** The execution context of a sub-frame: known from the events, or after {@code Runtime.enable} answered. */
     private CompletableFuture<Long> contextOf(final String frame) {
+        if (budget.stopped()) {
+            // P2-L4-S1: the Runtime domain is off for this browser, so its sub-frame contexts are not known.
+            return failed(new UnsupportedOperationException("sub-frame evaluation is unavailable while the console"
+                    + " capture of this browser is stopped (its page's console output exceeded the receive budget;"
+                    + " a main-frame navigation resumes it)"));
+        }
         Long known = contexts.get(frame);
         if (known != null) {
             return CompletableFuture.completedFuture(known);
@@ -1397,6 +1393,162 @@ final class JcefBrowser implements WebBrowser {
         }
     }
 
+    /**
+     * Hands one DevTools event to the serial executor, on CEF's thread, within the browser's receive budget (security
+     * fix P2-L4-S1): a console event ({@code Runtime.consoleAPICalled}, {@code Runtime.exceptionThrown}) is spent from
+     * the console bucket first, and the one that empties it stops console capture ({@link #stopConsole}, on the
+     * adapter's threads); an event over {@link WebLib#MAX_CHANNEL_CHARS} is dropped here, unparsed and never queued
+     * (S43); and an event is queued only while the browser's queued events stay within
+     * {@link EventBudget#QUEUE_CHARS}. Nothing else runs on CEF's thread.
+     */
+    private void hand(final String name, final String json) {
+        if (isConsole(name)) {
+            EventBudget.Verdict v = budget.spend(json.length(), System.nanoTime());
+            if (v == EventBudget.Verdict.STOP) {
+                stopConsoleLater();
+            }
+            if (v != EventBudget.Verdict.PASS) {
+                return;
+            }
+        }
+        if (detached || oversized(name, json)) {
+            return;
+        }
+        final long cost = EventBudget.cost((long) json.length() + name.length());
+        if (!budget.admit(cost)) {
+            return;
+        }
+        try {
+            events.execute(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        onDevToolsEvent(name, json);
+                    } finally {
+                        budget.release(cost);
+                    }
+                }
+            });
+        } catch (RejectedExecutionException ignored) {
+            budget.release(cost); // the adapter was detached
+        }
+    }
+
+    /** The events whose size and rate the page's console sets (P2-L4-S1). */
+    private static boolean isConsole(String name) {
+        return "Runtime.consoleAPICalled".equals(name) || "Runtime.exceptionThrown".equals(name);
+    }
+
+    /**
+     * {@code Runtime.enable} on the channel (the shared client {@code c}, or the raw channel when {@code c} is null on
+     * it), unless console capture is stopped (P2-L4-S1): then an answered future, and the domain stays off.
+     */
+    private CompletableFuture<Map<String, Object>> enableRuntime(Object c) {
+        if (budget.stopped()) {
+            return CompletableFuture.completedFuture((Map<String, Object>) new LinkedHashMap<String, Object>());
+        }
+        return send(c, "Runtime.enable", new LinkedHashMap<String, Object>(), false);
+    }
+
+    /** {@link #stopConsole} on the adapter's threads (never on CEF's); never throws. */
+    private void stopConsoleLater() {
+        try {
+            adapter.threads.executor().execute(new Runnable() {
+                @Override
+                public void run() {
+                    stopConsole();
+                }
+            });
+        } catch (RejectedExecutionException ignored) {
+            // the adapter was detached
+        }
+    }
+
+    /**
+     * Stops this browser's console capture (P2-L4-S1): {@code Runtime.disable} on the channel, so that Chromium sends
+     * no console event and no copy of the page's output reaches this JVM any more, the sub-frame contexts forgotten
+     * (a sub-frame evaluation answers {@code CAPABILITY_UNAVAILABLE} meanwhile), and {@link EventBudget#STOPPED_TEXT}
+     * delivered once to the subscribers as a {@code warning}. {@code Runtime} was enabled by this handle; a client
+     * of the application's that relied on it on the same session loses it as well until capture resumes (the
+     * documented cost, phase4-contracts.md 4.3).
+     */
+    private void stopConsole() {
+        if (closed || detached) {
+            return;
+        }
+        contexts.clear();
+        try {
+            send(channel(), "Runtime.disable", new LinkedHashMap<String, Object>(), false);
+        } catch (IllegalStateException e) {
+            return; // closed or detached meanwhile
+        }
+        try {
+            events.execute(new Runnable() {
+                @Override
+                public void run() {
+                    listeners.deliver(JcefBrowser.this, WebEvent.console("warning", EventBudget.STOPPED_TEXT, null,
+                            0));
+                }
+            });
+        } catch (RejectedExecutionException ignored) {
+            // the adapter was detached
+        }
+    }
+
+    /**
+     * Resumes stopped console capture at a main-frame navigation (P2-L4-S1): at once when
+     * {@link EventBudget#RESUME_AFTER_MS} has passed since it stopped, else when it has; scheduled once.
+     */
+    private void scheduleResume() {
+        if (!resumeScheduled.compareAndSet(false, true)) {
+            return;
+        }
+        long delay = budget.resumeInMs(System.nanoTime());
+        if (delay < 0) {
+            resumeScheduled.set(false);
+            return;
+        }
+        try {
+            adapter.threads.schedule(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        adapter.threads.executor().execute(new Runnable() {
+                            @Override
+                            public void run() {
+                                resumeConsole();
+                            }
+                        });
+                    } catch (RejectedExecutionException e) {
+                        resumeScheduled.set(false);
+                    }
+                }
+            }, delay);
+        } catch (RejectedExecutionException e) {
+            resumeScheduled.set(false);
+        }
+    }
+
+    /** {@code Runtime.enable} again with a full console budget; the contexts are reported anew (P2-L4-S1). */
+    private void resumeConsole() {
+        resumeScheduled.set(false);
+        if (closed || detached || !budget.stopped()) {
+            return;
+        }
+        budget.resume(System.nanoTime());
+        contexts.clear();
+        Object c;
+        try {
+            c = channel();
+        } catch (IllegalStateException e) {
+            return;
+        }
+        CompletableFuture<Map<String, Object>> runtime = enableRuntime(c);
+        synchronized (lock) {
+            runtimeEnabled = runtime;
+        }
+    }
+
     /** One DevTools event, on the serial executor (in order). */
     private void onDevToolsEvent(String name, String json) {
         if (detached || oversized(name, json)) {
@@ -1424,6 +1576,9 @@ final class JcefBrowser implements WebBrowser {
                     mainFrameId = id;
                 }
                 mainUrl = url;
+                if (budget.stopped()) {
+                    scheduleResume(); // P2-L4-S1: a new document resumes the stopped console capture
+                }
             }
             Object unreachable = f.get("unreachableUrl");
             if (unreachable instanceof String && !((String) unreachable).isEmpty()) {
@@ -1513,10 +1668,14 @@ final class JcefBrowser implements WebBrowser {
         Object args = p.get("args");
         if (args instanceof List) {
             for (Object a : (List<?>) args) {
+                if (text.length() >= CONSOLE_TEXT_CHARS) {
+                    break; // P2-L4-S1: the module masks and cuts at 2000; the rest is never copied
+                }
                 if (text.length() > 0) {
                     text.append(' ');
                 }
-                text.append(argText(a));
+                String t = argText(a);
+                text.append(t, 0, Math.min(t.length(), CONSOLE_TEXT_CHARS - text.length()));
             }
         }
         String source = null;

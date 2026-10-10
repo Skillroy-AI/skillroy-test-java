@@ -50,8 +50,11 @@ class CdpAttachTest {
 
     private static final CdpEndpoint ENDPOINT = CdpEndpoint.local(9222);
 
+    /** The browser WebSocket the probes of these tests read (at the endpoint's own authority). */
+    private static final String BROWSER_WS = "ws://127.0.0.1:9222/devtools/browser/0b1c-2d3e";
+
     private static TargetProbe probe(TargetProbe.Target... targets) {
-        return new TargetProbe(ENDPOINT, "FakeChrome/152", "1.3", List.of(targets), 5);
+        return new TargetProbe(ENDPOINT, "FakeChrome/152", "1.3", BROWSER_WS, List.of(targets), 5);
     }
 
     private static TargetProbe.Target page(String id, boolean responsive) {
@@ -114,7 +117,8 @@ class CdpAttachTest {
             assertEquals("skillroy-cdp-playwright", thread.get().getName());
             assertFalse(thread.get().isVirtual(), "a platform worker thread");
             assertEquals("1", env.get().get("PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD"));
-            assertEquals("http://127.0.0.1:9222", connectArgs.get()[0]);
+            assertEquals(BROWSER_WS, connectArgs.get()[0], "P2-L4-F1: the browser WebSocket the probe read, never the"
+                    + " http URL from which the driver would read /json/version itself");
             BrowserType.ConnectOverCDPOptions o = (BrowserType.ConnectOverCDPOptions) connectArgs.get()[1];
             assertTrue(o.timeout > 0 && o.timeout <= 9000, "Playwright's own timeout within the deadline: "
                     + o.timeout);
@@ -129,6 +133,33 @@ class CdpAttachTest {
             attach.close();
         }
         assertEquals(1, closed.get());
+    }
+
+    /**
+     * Security fix P2-L4-F1: a probe that found no usable browser WebSocket (another host's answer re-pointed is
+     * usable; an opaque or foreign path is not) is refused with {@code PROTOCOL} before anything starts; without a
+     * probe the driver is given the endpoint's http URL (tests and the soak only).
+     */
+    @Test
+    void aProbeWithoutABrowserWebSocketIsRefusedBeforeAnythingStarts() throws Exception {
+        TargetProbe none = new TargetProbe(ENDPOINT, "FakeChrome/152", "1.3", null, List.of(page("A", true)), 5);
+        CdpException e = assertThrows(CdpException.class, () -> CdpAttach.connect(ENDPOINT, CdpOptions.defaults(),
+                none, env -> {
+                    throw new AssertionError("nothing may start");
+                }));
+        assertEquals(CdpException.Kind.PROTOCOL, e.kind());
+        assertTrue(e.getMessage().contains("names no browser WebSocket"), e.getMessage());
+        FakeWorld world = new FakeWorld();
+        AtomicReference<Object[]> connectArgs = new AtomicReference<>();
+        CdpAttach attach = CdpAttach.connect(ENDPOINT, CdpOptions.defaults(), null, env -> playwright(a -> {
+            connectArgs.set(a);
+            return world.browser;
+        }, new AtomicInteger(), () -> { }));
+        try {
+            assertEquals("http://127.0.0.1:9222", connectArgs.get()[0], "no probe: the endpoint's http URL");
+        } finally {
+            attach.close();
+        }
     }
 
     @Test

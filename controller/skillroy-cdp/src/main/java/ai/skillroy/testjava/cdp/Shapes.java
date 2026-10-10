@@ -37,8 +37,11 @@ import java.util.Map;
  *
  * <p>Every bound of phase4-contracts.md 4.6 is enforced here as well, on the receiving side (security fix S43): a page
  * may replace the library, so its own cuts are not the guarantee. A guarded result whose JSON text exceeds {@link
- * WebLib#MAX_CHANNEL_CHARS} is refused, and so is a library value (anything but the {@code web.evaluate} wrapper's
- * text) over {@link WebLib#MAX_JSON_CHARS}, both as {@code INTERNAL_ERROR {reason: "oversized"}}; the wrapper's
+ * WebLib#MAX_CHANNEL_CHARS} is refused (sized before it is copied), and so is a library value (anything but the
+ * {@code web.evaluate} wrapper's text, a bare string included) over {@link WebLib#MAX_JSON_CHARS}, both as
+ * {@code INTERNAL_ERROR {reason: "oversized"}}; a library call's answer, bounded in the page by the guard of
+ * {@link WebLib#boundedCallExpression}, is read by {@link #library} as the agent path reads it (security fixes
+ * P2-L4-F2, P2-L4-F3); the wrapper's
  * {@code json} is cut at {@link WebLib#MAX_JSON_CHARS} ({@code truncated: true}); a script error's {@code message} is
  * its first line, at most 2000 characters, and its {@code stack} at most 8000. A library error object maps through
  * {@link WebLib#errorOf}, the agent path's one mapping (security fix S47): only {@code NOT_FOUND}, {@code AMBIGUOUS}
@@ -48,6 +51,9 @@ import java.util.Map;
  * <p>Stateless.
  */
 final class Shapes {
+
+    /** The primitive whose guarded result is the wrapper's text, which is cut rather than refused. */
+    private static final String EVALUATE = "web.evaluate";
 
     private Shapes() {
     }
@@ -91,10 +97,11 @@ final class Shapes {
      *     object, {@code INTERNAL_ERROR} when the result is not a guarded result at all
      */
     static Object unwrap(String primitive, Object raw, String browserRef) throws AgentRpcException {
-        Object value = Values.json(raw);
-        if (TextBounds.exceeds(value, WebLib.MAX_CHANNEL_CHARS)) {
+        // P2-L4-F2: the size is checked on what Playwright returned, before the copy into the normal form.
+        if (TextBounds.exceeds(raw, WebLib.MAX_CHANNEL_CHARS)) {
             throw oversized(primitive, "the page's answer", WebLib.MAX_CHANNEL_CHARS);
         }
+        Object value = Values.json(raw);
         if (!(value instanceof Map<?, ?> m)) {
             throw error(primitive, ErrorCodes.INTERNAL_ERROR, "the guarded script returned no object",
                     data("path", "cdp"));
@@ -107,15 +114,71 @@ final class Shapes {
                     data("path", "cdp"));
         }
         Object ok = m.get("ok");
-        if (!(ok instanceof String) && TextBounds.exceeds(ok, WebLib.MAX_JSON_CHARS)) {
-            // S43: a library value is at most MAX_JSON_CHARS of JSON (the evaluate wrapper's text, a string, is cut
-            // by evaluateValue instead).
+        boolean wrapperText = EVALUATE.equals(primitive) && ok instanceof String;
+        if (!wrapperText && TextBounds.exceeds(ok, WebLib.MAX_JSON_CHARS)) {
+            // S43: a library value is at most MAX_JSON_CHARS of JSON, a bare string included (P2-L4-F3); only the
+            // web.evaluate wrapper's text, a string, is cut by evaluateValue instead.
             throw oversized(primitive, "the page library's value", WebLib.MAX_JSON_CHARS);
         }
         if (ok instanceof Map<?, ?> lib && lib.get("__error") instanceof String) {
             throw libraryError(primitive, lib, browserRef);
         }
         return ok;
+    }
+
+    /**
+     * The library's value in the result of a guarded library call ({@link Scripts#call}, through the guard of
+     * {@link WebLib#boundedCallExpression}; security fix P2-L4-F2): {@code ok} is the guard's answer, read with
+     * {@link WebLib.Bounded} as the agent path reads it, so that both paths give the same value, the same
+     * {@code SCRIPT_ERROR} and the same refusal ({@code INTERNAL_ERROR {reason: "oversized" | "not library text"}}).
+     * A library error object maps as {@link #libraryError}.
+     *
+     * @param browserRef the browser's ref for the error data, or null when unknown
+     * @throws AgentRpcException as {@link #unwrap}, and for the guard's refusals
+     */
+    static Object library(String primitive, Object raw, String browserRef) throws AgentRpcException {
+        if (TextBounds.exceeds(raw, WebLib.MAX_CHANNEL_CHARS)) {
+            throw oversized(primitive, "the page's answer", WebLib.MAX_CHANNEL_CHARS);
+        }
+        Object value = Values.json(raw);
+        if (!(value instanceof Map<?, ?> m)) {
+            throw error(primitive, ErrorCodes.INTERNAL_ERROR, "the guarded script returned no object",
+                    data("path", "cdp"));
+        }
+        if (m.containsKey("__scriptError")) {
+            throw scriptError(primitive, m.get("__scriptError"), browserRef);
+        }
+        if (!m.containsKey("ok")) {
+            throw error(primitive, ErrorCodes.INTERNAL_ERROR, "the guarded script returned neither ok nor an error",
+                    data("path", "cdp"));
+        }
+        WebLib.Bounded answer = WebLib.Bounded.of(m.get("ok"));
+        switch (answer.kind()) {
+            case VALUE: {
+                Object ok = answer.value();
+                if (ok instanceof Map<?, ?> lib && lib.get("__error") instanceof String) {
+                    throw libraryError(primitive, lib, browserRef);
+                }
+                return ok;
+            }
+            case SCRIPT_ERROR:
+                throw scriptError(primitive, data("message", answer.message(), "stack", answer.stack()), browserRef);
+            default: {
+                RpcError refusal = answer.refusal();
+                Map<String, Object> d = new LinkedHashMap<>(refusal.data());
+                d.put("path", CdpWebPath.ID);
+                if (browserRef != null) {
+                    d.put("browser", browserRef);
+                }
+                throw error(primitive, refusal.code(), refusal.message(), d);
+            }
+        }
+    }
+
+    /** True for the error of an answer refused as oversized on the receiving side (S43, P2-L4-F2). */
+    static boolean isOversized(AgentRpcException e) {
+        Map<String, Object> d = e.error().data();
+        return e.error().code() == ErrorCodes.INTERNAL_ERROR && d != null && "oversized".equals(d.get("reason"));
     }
 
     /** {@code INTERNAL_ERROR {reason: "oversized", bound, path}} (S43), the agent path's shape plus the path. */

@@ -40,6 +40,7 @@ import java.util.regex.Pattern;
  *       {@code wrap(expression, awaitPromise)} (the inner expression is extracted and evaluated, then stringified;
  *       awaited, it gives a {@link Promise}); {@code callExpression(function, args...)} and
  *       {@code callJsonExpression(...)} (the function name and the JSON arguments are parsed);
+ *       {@code boundedCallExpression(...)} (P2-L4-F2: the guard around the call, its rule applied here);
  *       {@code deferExpression(expression)} and {@code collectExpression(id)}; {@code flagExpression(expression)},
  *       the guard of {@code web.waitFlag} (A35): an expression whose brackets do not balance, or that ends in an
  *       operator, does not "compile" ({@code {ready: false, compileError}}), any other is evaluated through this
@@ -155,6 +156,10 @@ public final class FakeScript {
         if (e.equals(WebLib.installExpression())) {
             return install(doc);
         }
+        if (e.startsWith(WebLib.boundedOpen()) && e.endsWith(WebLib.boundedClose())) {
+            return bounded(doc, e.substring(WebLib.boundedOpen().length(), e.length()
+                    - WebLib.boundedClose().length()).trim());
+        }
         String flagPrefix = flagPrefix();
         if (e.startsWith(flagPrefix) && e.endsWith(")")) {
             return flag(doc, (String) Json.parse(e.substring(flagPrefix.length(), e.length() - 1)));
@@ -212,6 +217,34 @@ public final class FakeScript {
             }
         }
         return plain(doc, e);
+    }
+
+    /**
+     * The guard of {@link WebLib#boundedCallExpression} (P2-L4-F2) around a library call: the call's {@code stringify}
+     * text when it is a string of at most {@link WebLib#MAX_JSON_CHARS}, else a {@link WebLib#GUARD_PREFIX} text; a
+     * {@link Thrown} becomes {@code "#skillroy-guard:threw:<n>:<message><stack>"}, as the guard's own text does in a
+     * browser.
+     */
+    private static Object bounded(FakeDocument doc, String call) {
+        Object t;
+        try {
+            t = eval(doc, call);
+        } catch (Thrown thrown) {
+            return guardThrew(thrown.getMessage(), thrown.stack());
+        }
+        if (!(t instanceof String)) {
+            return WebLib.GUARD_PREFIX + "not text";
+        }
+        return ((String) t).length() > WebLib.MAX_JSON_CHARS ? WebLib.GUARD_PREFIX + "oversized" : t;
+    }
+
+    /** The guard's text of a thrown value: its message and stack cut at their bounds (P2-L4-F2). */
+    public static String guardThrew(String message, String stack) {
+        String m = message == null ? "" : message;
+        String s = stack == null ? "" : stack;
+        m = m.length() > WebLib.MAX_ERROR_CHARS ? m.substring(0, WebLib.MAX_ERROR_CHARS) : m;
+        s = s.length() > WebLib.MAX_STACK_CHARS ? s.substring(0, WebLib.MAX_STACK_CHARS) : s;
+        return WebLib.GUARD_PREFIX + "threw:" + m.length() + ":" + m + s;
     }
 
     /** {@code fn(args)} of a library call. */
@@ -371,6 +404,23 @@ public final class FakeScript {
             doc.hidden.put("__kitMark", "set");
             return "set";
         }
+        if (KitScripts.REPLACED_LIBRARY_BIG.equals(e) || KitScripts.REPLACED_LIBRARY_THROWS.equals(e)) {
+            doc.replacedLibrary = KitScripts.REPLACED_LIBRARY_BIG.equals(e) ? "big" : "throws";
+            return "replaced";
+        }
+        if (KitScripts.RESTORE_LIBRARY.equals(e)) {
+            doc.replacedLibrary = null;
+            return "restored";
+        }
+        if (KitScripts.CONSOLE_FLOOD.equals(e)) {
+            char[] chars = new char[1 << 20];
+            Arrays.fill(chars, 'x');
+            String s = new String(chars);
+            for (int i = 0; i < 24; i++) {
+                doc.host.console(doc, "log", s);
+            }
+            return Long.valueOf(24);
+        }
         if (KitScripts.DOCUMENT_MARK_NOW.equals(e)) {
             return doc.hidden.containsKey("__kitMark") ? "string" : "undefined";
         }
@@ -497,6 +547,16 @@ public final class FakeScript {
             Map<String, Object> out = new LinkedHashMap<String, Object>();
             out.put("installed", Long.valueOf(new LinkedHashSet<String>(patterns).size()));
             return out;
+        }
+        if ("drain".equals(fn) && "big".equals(doc.replacedLibrary)) {
+            char[] chars = new char[WebLib.MAX_JSON_CHARS + 1];
+            Arrays.fill(chars, 'x');
+            return new String(chars); // a replaced library's drain (item 13); 50 Mi in a browser, past the bound here
+        }
+        if ("drain".equals(fn) && "throws".equals(doc.replacedLibrary)) {
+            char[] chars = new char[1 << 20];
+            Arrays.fill(chars, 'm');
+            throw new Thrown("Error: " + new String(chars), "Error: " + new String(chars) + "\n    at drain");
         }
         if ("drain".equals(fn)) {
             Map<String, Object> out = new LinkedHashMap<String, Object>();

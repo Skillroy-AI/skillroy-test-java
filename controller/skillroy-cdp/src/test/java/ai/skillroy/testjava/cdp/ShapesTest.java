@@ -39,6 +39,7 @@ import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -166,6 +167,67 @@ class ShapesTest {
         AgentRpcException twoLines = assertThrows(AgentRpcException.class, () -> Shapes.unwrap("web.evaluate",
                 Map.of("__scriptError", Map.of("message", "Error: one\ntwo")), null));
         assertEquals("Error: one", twoLines.error().data().get("message"));
+    }
+
+    /**
+     * Security fix P2-L4-F3: a library value that is a bare string is bounded at {@code MAX_JSON_CHARS} as any value
+     * is, for every primitive but {@code web.evaluate}, whose wrapper text {@code evaluateValue} cuts instead.
+     */
+    @Test
+    void aBareStringLibraryValueIsBoundedAsAnyValue() throws Exception {
+        String big = "x".repeat(2 << 20);
+        for (String primitive : List.of("web.dom.click", "web.dom.fill", "web.dispatchEvent", "web.tap",
+                "web.dom.text", "web.ariaSnapshot")) {
+            AgentRpcException e = assertThrows(AgentRpcException.class, () -> Shapes.unwrap(primitive,
+                    FakeWorld.ok(big), "b"), primitive);
+            assertEquals(ErrorCodes.INTERNAL_ERROR, e.error().code(), primitive);
+            assertEquals("oversized", e.error().data().get("reason"), primitive);
+            AgentRpcException guarded = assertThrows(AgentRpcException.class, () -> Shapes.library(primitive,
+                    FakeWorld.ok(big), "b"), primitive);
+            assertEquals("oversized", guarded.error().data().get("reason"), "through the guard: " + primitive);
+        }
+        Map<String, Object> cut = Shapes.evaluateValue((String) Shapes.unwrap("web.evaluate", FakeWorld.ok(
+                Json.write(Map.of("json", big, "typeofResult", "string", "truncated", false))), "b"));
+        assertEquals(WebLib.MAX_JSON_CHARS, ((String) cut.get("json")).length(), "web.evaluate's text is cut");
+        assertEquals(true, cut.get("truncated"));
+    }
+
+    /**
+     * Security fix P2-L4-F2: a guarded library call's answer is read as the agent path reads it: the value inside the
+     * library's text, a library error object as its code, the guard's script error with its message and stack, and
+     * the guard's refusals ({@code oversized}, {@code not library text}) with the browser named.
+     */
+    @Test
+    void aGuardedLibraryAnswerIsReadAsOnTheAgentPath() throws Exception {
+        Map<String, Object> value = Map.of("text", "ready", "truncated", false);
+        assertEquals(value, Shapes.library("web.dom.text", FakeWorld.ok(FakeWorld.libraryText(value)), "b"));
+        AgentRpcException notFound = assertThrows(AgentRpcException.class, () -> Shapes.library("web.dom.click",
+                FakeWorld.ok(FakeWorld.libraryText(Map.of("__error", "NOT_FOUND", "data",
+                        Map.of("selector", "#x")))), "b"));
+        assertEquals(ErrorCodes.NOT_FOUND, notFound.error().code());
+        assertEquals("b", notFound.error().data().get("browser"));
+        String message = "Error: " + "m".repeat(5000);
+        AgentRpcException threw = assertThrows(AgentRpcException.class, () -> Shapes.library("web.dom.click",
+                FakeWorld.ok(WebLib.GUARD_PREFIX + "threw:" + message.length() + ":" + message + "s".repeat(20_000)),
+                "b"));
+        assertEquals(ErrorCodes.SCRIPT_ERROR, threw.error().code());
+        assertEquals(WebLib.MAX_ERROR_CHARS, ((String) threw.error().data().get("message")).length());
+        assertEquals(WebLib.MAX_STACK_CHARS, ((String) threw.error().data().get("stack")).length());
+        AgentRpcException refused = assertThrows(AgentRpcException.class, () -> Shapes.library("web.tap",
+                FakeWorld.ok(WebLib.GUARD_PREFIX + "oversized"), "b"));
+        assertEquals(ErrorCodes.INTERNAL_ERROR, refused.error().code());
+        assertEquals("oversized", refused.error().data().get("reason"));
+        assertEquals("cdp", refused.error().data().get("path"));
+        assertEquals("b", refused.error().data().get("browser"));
+        assertTrue(Shapes.isOversized(refused));
+        AgentRpcException notText = assertThrows(AgentRpcException.class, () -> Shapes.library("web.tap",
+                FakeWorld.ok(Map.of("installed", 1L)), null));
+        assertEquals("not library text", notText.error().data().get("reason"), "a value that skipped the guard");
+        assertFalse(Shapes.isOversized(notText));
+        AgentRpcException channel = assertThrows(AgentRpcException.class, () -> Shapes.library("web.tap",
+                FakeWorld.ok(List.of("y".repeat(WebLib.MAX_CHANNEL_CHARS))), null));
+        assertEquals((long) WebLib.MAX_CHANNEL_CHARS, channel.error().data().get("bound"),
+                "the raw answer is sized before it is copied");
     }
 
     @Test

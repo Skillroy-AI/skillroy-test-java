@@ -54,6 +54,8 @@ public final class FakeDevToolsClient {
     private final Set<EventListener> listeners = new CopyOnWriteArraySet<EventListener>();
     final Map<String, String> scripts = new LinkedHashMap<String, String>();
     volatile int[] override;
+    /** {@code Runtime.disable} was sent on this session: no {@code Runtime.*} event is delivered until enabled. */
+    volatile boolean runtimeOff;
     private volatile boolean closed;
     private volatile boolean failFirstCall;
     private int nextScript;
@@ -147,7 +149,7 @@ public final class FakeDevToolsClient {
 
     /** Delivers an event to the listeners, on the EDT. */
     void fire(final String name, final Map<String, Object> params) {
-        if (closed) {
+        if (closed || runtimeOff && name.startsWith("Runtime.")) {
             return;
         }
         final String json = Json.write(params);

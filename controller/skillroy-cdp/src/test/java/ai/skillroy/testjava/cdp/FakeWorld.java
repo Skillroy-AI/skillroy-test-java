@@ -17,6 +17,7 @@
 package ai.skillroy.testjava.cdp;
 
 import ai.skillroy.testjava.protocol.Json;
+import ai.skillroy.testjava.protocol.web.WebLib;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.microsoft.playwright.Browser;
@@ -100,7 +101,7 @@ final class FakeWorld {
                     return emulated != null ? emulated : innerSize;
                 }
                 evaluated.add((String) a[0]);
-                return engine.answer(a);
+                return guarded((String) a[0], engine.answer(a));
             });
             frameAnswers.put("url()", a -> this.url);
             frameAnswers.put("name()", a -> "");
@@ -183,7 +184,7 @@ final class FakeWorld {
             Frame frame = Fakes.fake(Frame.class, answers);
             answers.put("evaluate(String,Object)", a -> {
                 evaluated.add("child:" + a[0]);
-                return childEngine.answer(a);
+                return guarded((String) a[0], childEngine.answer(a));
             });
             answers.put("url()", a -> frameUrl);
             answers.put("name()", a -> name);
@@ -337,6 +338,36 @@ final class FakeWorld {
         answers.put("jsonValue()", a -> value);
         answers.put("dispose()", a -> null);
         return Fakes.fake(JSHandle.class, answers);
+    }
+
+    /**
+     * What a page answers a guarded library call (security fix P2-L4-F2): an engine's {@code {ok: value}} whose value
+     * is not a string has the value replaced by the guard's text of it ({@link #libraryText}), as the guard of
+     * {@code WebLib.boundedCallExpression} returns it in a browser; anything else, a string {@code ok} included (what a
+     * replaced library's {@code stringify} could answer), is returned as it is.
+     */
+    static Object guarded(String script, Object answer) {
+        if (script == null || !script.contains(WebLib.boundedOpen()) || !(answer instanceof Map<?, ?> m)
+                || !m.containsKey("ok") || m.get("ok") instanceof String) {
+            return answer;
+        }
+        return ok(libraryText(m.get("ok")));
+    }
+
+    /**
+     * The guard's answer for a library value: the text the library's {@code stringify} makes of it, or the guard's
+     * refusal when that text exceeds {@code WebLib.MAX_JSON_CHARS}.
+     */
+    static String libraryText(Object value) {
+        String json = Json.write(value);
+        boolean truncated = json.length() > WebLib.MAX_JSON_CHARS;
+        Map<String, Object> wrapper = new LinkedHashMap<>();
+        wrapper.put("json", truncated ? json.substring(0, WebLib.MAX_JSON_CHARS) : json);
+        wrapper.put("typeofResult", value instanceof String ? "string" : value instanceof Number ? "number"
+                : value instanceof Boolean ? "boolean" : "object");
+        wrapper.put("truncated", truncated);
+        String text = Json.write(wrapper);
+        return text.length() > WebLib.MAX_JSON_CHARS ? WebLib.GUARD_PREFIX + "oversized" : text;
     }
 
     /** {@code {ok: value}}, what a guarded script returns. */

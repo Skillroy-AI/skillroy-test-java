@@ -20,8 +20,9 @@ import ai.skillroy.testjava.protocol.Json;
 import ai.skillroy.testjava.protocol.web.WebLib;
 
 /**
- * The scripts the CDP path evaluates through Playwright: the shared library's calls ({@link WebLib#callExpression})
- * and the {@code web.evaluate} wrapper ({@link WebLib#wrap}) inside a guard that turns a thrown script error into a
+ * The scripts the CDP path evaluates through Playwright: the shared library's calls (as the agent path evaluates them,
+ * {@link WebLib#boundedCallExpression}) and the {@code web.evaluate} wrapper ({@link WebLib#wrap}) inside a guard that
+ * turns a thrown script error into a
  * value, so that a script error is told apart from a failure of Playwright or of the protocol without parsing
  * Playwright's messages.
  *
@@ -57,10 +58,16 @@ final class Scripts {
     private Scripts() {
     }
 
-    /** A guarded call of a library function with JSON-encoded arguments (see {@link WebLib#callExpression}). */
+    /**
+     * A guarded call of a library function with JSON-encoded arguments, through the guard of
+     * {@link WebLib#boundedCallExpression} (security fix P2-L4-F2): {@code ok} is the guard's answer, a primitive
+     * string of at most {@link WebLib#MAX_JSON_CHARS} (the library's {@code stringify} text, or a text of the guard's
+     * own), which {@link Shapes#library} reads; so a page that replaced the library never chooses the size of what the
+     * driver carries into the controller.
+     */
     static String call(String function, Object... args) {
-        return "(function(){var E=" + ERROR_FUNCTION + ";try{return {ok:(" + WebLib.callExpression(function, args)
-                + ")};}catch(e){return {__scriptError:E(e)};}})()";
+        return "(function(){var E=" + ERROR_FUNCTION + ";try{return {ok:("
+                + WebLib.boundedCallExpression(function, args) + ")};}catch(e){return {__scriptError:E(e)};}})()";
     }
 
     /**

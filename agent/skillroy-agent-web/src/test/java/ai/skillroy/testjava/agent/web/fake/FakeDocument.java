@@ -81,6 +81,8 @@ public final class FakeDocument {
     String tapTarget = "window";
     long tapDropped;
     boolean libraryInstalled;
+    /** Kit item 13: the slot holds a replaced library whose drain is "big" or "throws"; null for the genuine one. */
+    String replacedLibrary;
     String initAtParse;
     int nextDefer;
     volatile boolean gone;

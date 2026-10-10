@@ -47,7 +47,12 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * factory and runs {@code connectOverCDP} on a platform worker thread under {@link CdpOptions#connectDeadline()}. When
  * the deadline passes, the Playwright instance is closed, which ends the driver process and with it the hung connect
  * (browser research §F9), and the call ends with {@code TIMEOUT}; the driver's own start counts against the
- * deadline. Playwright's {@code noDefaults} and {@code isLocal} come from the options; pages come from {@code
+ * deadline. With a probe, {@code connectOverCDP} is given the browser WebSocket the probe read, re-pointed at the
+ * endpoint's own authority ({@link TargetProbe#browserWebSocketUrl()}, security fix P2-L4-F1), never the endpoint's
+ * {@code http} URL, so that the driver neither reads {@code /json/version} itself nor dials a host it names; the
+ * driver still follows an HTTP redirect of the WebSocket handshake (Playwright 1.63 has no option to refuse one), the
+ * residual recorded in phase4-contracts.md 5.1. Playwright's {@code noDefaults} and {@code isLocal} come from the
+ * options; pages come from {@code
  * contexts().get(0).pages()}: the attach never calls {@code newContext()} or {@code newPage()} (browser research §C4).
  *
  * <p>Threads: Playwright Java is not thread-safe, so every Playwright call of an attach runs on its own platform
@@ -105,12 +110,15 @@ public final class CdpAttach implements AutoCloseable {
     /**
      * Attaches to the browser at {@code endpoint}.
      *
-     * @param probe the probe made just before, or null to attach without one (the frozen-target check is then
-     *     skipped and only the deadline protects the caller)
+     * @param probe the probe made just before, whose {@link TargetProbe#browserWebSocketUrl()} the attach dials
+     *     (security fix P2-L4-F1); or null to attach without one: the frozen-target check is then skipped, only the
+     *     deadline protects the caller, and Playwright reads {@code /json/version} itself, unbounded, and dials the
+     *     WebSocket it names (tests and the soak only; {@link CdpWebPath} always probes first)
      * @throws CdpException {@code FROZEN_TARGETS} when the probe found a page target that did not answer, whatever
-     *     {@link CdpOptions#frozenTargets()} says (nothing is started); {@code TIMEOUT} when the deadline passed (the
-     *     driver was closed); {@code UNREACHABLE} when Playwright could not reach the endpoint; {@code PROTOCOL} for
-     *     every other failure of the driver or of the attach
+     *     {@link CdpOptions#frozenTargets()} says (nothing is started); {@code PROTOCOL} when the probe found no usable
+     *     browser WebSocket (nothing is started); {@code TIMEOUT} when the deadline passed (the driver was closed);
+     *     {@code UNREACHABLE} when Playwright could not reach the endpoint; {@code PROTOCOL} for every other failure
+     *     of the driver or of the attach
      */
     public static CdpAttach connect(CdpEndpoint endpoint, CdpOptions options, TargetProbe probe) throws CdpException {
         return connect(endpoint, options, probe, PlaywrightFactory.DEFAULT);
@@ -124,12 +132,20 @@ public final class CdpAttach implements AutoCloseable {
         if (probe != null && !probe.unresponsive().isEmpty()) {
             throw frozen(probe.unresponsive());
         }
+        // P2-L4-F1: with a probe, the attach dials the browser WebSocket the probe read, at the endpoint's own
+        // authority, so that the driver reads no /json/version of its own (unbounded) and dials no host it names.
+        String url = probe == null ? endpoint.httpUri().toString() : probe.browserWebSocketUrl();
+        if (url == null) {
+            throw new CdpException(CdpException.Kind.PROTOCOL, "the DevTools endpoint at " + endpoint.httpUri()
+                    + "/json/version names no browser WebSocket at /devtools/browser/<id>; nothing was attached",
+                    targetsOf(probe));
+        }
         long deadlineMs = options.connectDeadline().toMillis();
         long start = System.nanoTime();
         PwThread pw = new PwThread("skillroy-cdp-playwright");
         Pending pending = new Pending();
         try {
-            Connected c = pw.call(() -> open(endpoint, options, factory, pending, start, deadlineMs), deadlineMs);
+            Connected c = pw.call(() -> open(endpoint, url, options, factory, pending, start, deadlineMs), deadlineMs);
             return new CdpAttach(probe, options, pw, c.playwright(), c.browser(), c.context(), elapsedMs(start));
         } catch (TimeoutException | InterruptedException e) {
             closeQuietly(pending.abandon(), CLOSE_GRACE_MS);
@@ -330,7 +346,7 @@ public final class CdpAttach implements AutoCloseable {
         return null;
     }
 
-    private static Connected open(CdpEndpoint endpoint, CdpOptions options, PlaywrightFactory factory,
+    private static Connected open(CdpEndpoint endpoint, String url, CdpOptions options, PlaywrightFactory factory,
                                   Pending pending, long start, long deadlineMs) {
         Playwright created = factory.create(PlaywrightFactory.environment());
         if (!pending.created(created)) {
@@ -345,7 +361,7 @@ public final class CdpAttach implements AutoCloseable {
         if (options.artifactsDir() != null) {
             connect.setArtifactsDir(options.artifactsDir());
         }
-        Browser attached = created.chromium().connectOverCDP(endpoint.httpUri().toString(), connect);
+        Browser attached = created.chromium().connectOverCDP(url, connect);
         List<BrowserContext> contexts = attached.contexts();
         if (contexts.isEmpty()) {
             throw new PlaywrightException("the browser at " + endpoint + " has no browser context to attach to");
