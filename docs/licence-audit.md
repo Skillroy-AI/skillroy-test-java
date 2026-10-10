@@ -22,7 +22,7 @@ the tables say "not determined locally".
 under Apache-2.0.** No dependency carries a copyleft licence that reaches a distributed artifact.
 
 - **The agent contains no third-party code, with one carve-out** (the sentence of the root `NOTICE`, Phase 6, B26 Q1,
-  provisional): its optional hooks module carries a relocated copy of Byte Buddy (Apache-2.0) and the ASM it bundles
+  confirmed by the owner on 2026-10-10): its optional hooks module carries a relocated copy of Byte Buddy (Apache-2.0) and the ASM it bundles
   (BSD-3-Clause), whose notices travel inside that jar under `META-INF/third-party/`; the module is loaded only when
   the agent option `optionalModules` names it. The agent home holds **eleven jars** (thirteen files with `LICENSE` and
   `NOTICE`): the seven of Phase 4, `skillroy-agent-spy.jar` at its root and three in `optional/` (Phase 6, built

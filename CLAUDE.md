@@ -23,7 +23,12 @@ Do not copy that deny-list into this repository.
 ## Engineering rules
 
 - `agent/**`, `samples/skillroy-sample-lending-app`, `samples/skillroy-sample-lending-agent`: Java 8 language and
-  API only (`--release 8`), tests included. No third-party classes inside the target JVM.
+  API only (`--release 8`), tests included. No third-party classes inside the target JVM, with one carve-out (B4,
+  Phase 6; wording confirmed by the owner in B26 Q1): Byte Buddy and the ASM it bundles, shaded and relocated under
+  the project's prefix inside the optional hooks module `optional/skillroy-agent-hooks.jar`, which loads only when
+  the agent option `optionalModules` names it; only `Spy`, project code, ever reaches the bootstrap search path.
+  Nothing else, in no module. (A Byteman jar the user supplies to the optional Byteman module is the user's own and
+  is never bundled, B8.)
 - `controller/**`, `samples/skillroy-sample-lending-pack`, `samples/skillroy-sample-lending-scenarios`: Java 25
   (`--release 25`).
 - Wire types and the JSON codec live in `skillroy-protocol` and are shared by both sides; never duplicate them.
@@ -35,7 +40,7 @@ Do not copy that deny-list into this repository.
 - Tests that need a display must skip when headless and are run with `ci/run-in-linux.sh`.
 - Licence: every source file starts with the Apache-2.0 header; `ci/license-headers.sh` checks it (`--apply` adds
   a missing one). A new dependency needs an entry in `docs/licence-audit.md`; nothing but the JDK may become
-  visible to a target JVM.
+  visible to a target JVM, apart from the carve-out above (B26 Q1).
 - The sample is a tool-library lending desk (domain id `lending`: items, loans, deposits, waiver rules, slips).
   No retail vocabulary anywhere (code, tests, fixtures, comments, docs); write new examples in the lending
   vocabulary or a plainly generic one.

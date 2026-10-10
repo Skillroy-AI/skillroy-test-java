@@ -23,10 +23,11 @@ Commits without a sign-off cannot be merged.
   from such a layer is expressed here as a generic SPI and exercised with the bundled sample application.
 - **Java levels.** Everything under `agent/`, the sample application and the sample agent module is Java 8
   language and API (`--release 8`), tests included, with no third-party classes inside the target JVM, with one
-  carve-out (decision B4, Phase 6; its wording awaits the owner's confirmation, B26 Q1): Byte Buddy and the ASM it
+  carve-out (decision B4, Phase 6; its wording confirmed by the owner on 2026-10-10, B26 Q1): Byte Buddy and the ASM it
   bundles, shaded and relocated under the project's prefix inside the optional hooks module
   `optional/skillroy-agent-hooks.jar`, which loads only when the agent option `optionalModules` names it; only
-  `Spy`, project code, ever reaches the bootstrap search path. The controller side is Java 25.
+  `Spy`, project code, ever reaches the bootstrap search path. Nothing else, in no module. (A Byteman jar the user
+  supplies to the optional Byteman module is the user's own and is never bundled, B8.) The controller side is Java 25.
 - **Contract first.** The files under `docs/design/` that are named contracts are the specification. Change the
   contract, then the code.
 - **The agent never harms its host.** Bounded waits everywhere; actions on the event dispatch thread are posted,
@@ -36,7 +37,7 @@ Commits without a sign-off cannot be merged.
   the Dockerfile and the CLI launcher; not documentation, scenario YAML or committed plans). `ci/license-headers.sh`
   lists the files without one and exits 1 if there are any; `ci/license-headers.sh --apply` adds the header.
 - **New dependencies** need a recorded reason and an entry in `docs/licence-audit.md`. Nothing but the JDK may
-  become visible to a target JVM.
+  become visible to a target JVM, apart from the carve-out under "Java levels" (B26 Q1).
 
 ## Building and testing
 
@@ -46,5 +47,6 @@ headless mode off on a desktop.
 
 ## Reporting security problems
 
-Please do not open a public issue for a vulnerability. Until a security contact is published in this file,
-report it privately to the maintainers.
+Please do not open a public issue for a vulnerability. Report it privately as [SECURITY.md](SECURITY.md) describes:
+through the repository host's private vulnerability reporting, or by mail to the address in [NOTICE](NOTICE)
+(decision B26 Q13, confirmed by the owner on 2026-10-10).

@@ -1041,8 +1041,8 @@ public final class PriceTable {
 (Phase 6 security fix S52, A52, built 2026-10-09, SR) A dated id is priced as the known id; an unknown **answering**
 model costs at the `OPUS_CLASS` price and is noted; **a configured model must be in the effective table, else the
 gateway refuses to open** (`INVALID_REQUEST`: "model <id> is not in the price table; name it under `prices:` with its
-price"), so that a configured id is never under-counted. The owner may prefer a warning on stderr at `open` instead (a
-configuration that worked before is now refused).
+price"), so that a configured id is never under-counted. The owner confirmed the refusal on 2026-10-10 (B27, no veto);
+the alternative, a warning on stderr at `open`, was not taken (a configuration that worked before is now refused).
 
 The built-in table, from the published rates of ai-inference F10 (USD per million tokens; to be re-checked when built,
 and replaced by the file when they move):

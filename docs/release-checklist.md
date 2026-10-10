@@ -9,9 +9,11 @@ Tick each item in the release's own record (the release note or its pull request
    (`-Dskillroy.it.targetJava=/opt/jdk8/bin/java`), and the agent-side modules on a Java 8 test JVM (`-Djvm=…`). The
    live profiles report themselves skipped.
 2. **The security review.** The first public release: the repeat review's record (both passes) and the owner's
-   sign-off, B28 in `DECISIONS.md`. Every later release: a delta review of what changed since the last signed record.
+   sign-off, B28 in `DECISIONS.md`, given on 2026-10-10. Every later release: a delta review of what changed since the
+   last signed record.
    Every confirmed finding is fixed, or, if low, accepted in writing by the owner with a release note.
-3. **Was the record read by someone outside the project?** Record "done" (by whom) or "waived by the owner" (B26 Q12).
+3. **Was the record read by someone outside the project?** Record "done" (by whom) or "waived by the owner"; recommended,
+   not a gate (B26 Q12).
 4. **The licence audit is re-run** (`docs/licence-audit.md` §9 lists its triggers): every new or changed dependency
    audited; the CLI distribution's `THIRD-PARTY.txt` compared with the built zip (`DistributionNoticesIT` green).
 5. **The agent home's content**: `DistributionContentIT` and `HomeConstantPoolIT` green; `NOTICE`'s wording matches

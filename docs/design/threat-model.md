@@ -176,7 +176,7 @@ on its way to disk.
   option to refuse one), so a peer that holds the configured debug port before the application's engine binds it,
   while the agent reports no CDP target id, can redirect the driver to another host or to a Unix socket the operator
   can open; it gains an outbound connection with Playwright's headers and Playwright's own commands, never the run's
-  scripts (P4 §5.1, the residual of security fix P2-L4-F1, proposed to the owner).
+  scripts (P4 §5.1, the residual of security fix P2-L4-F1, accepted by the owner, B28, 2026-10-10).
 - The retransformation pause on a painting event-dispatch thread of a real application (BS3 measured a spinning
   thread and the safepoint logs).
 - A detach that exhausted its budget: the inert advice, the disarmed handler kept in `Spy`'s slot and the refused
@@ -185,6 +185,7 @@ on its way to disk.
 - A Byteman rule left installed by such a detach is not inert: its condition and `DO` clause keep running (only the
   agent's `rule.fired` stops) until the target restarts; the next agent instance reports it and loads no rule
   (P6 §7.5).
-- The Byteman module against a real application with its own agents, if it is built (spike BS14 runs on a toy).
+- The Byteman module (built 2026-10-09 behind BS14, B26 Q2) against a real application with its own agents: BS14 and
+  `BytemanIT` ran on a toy, and the hooks leg's Byteman check on the sample desk.
 
 These are listed again, for a release reader, in `README.md`'s status paragraph and in `SECURITY.md`.

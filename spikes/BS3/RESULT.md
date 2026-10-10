@@ -440,7 +440,9 @@ restricted-method warning); they are not the agent's.
   registered before the first retransformation. Whether the capability probe should look for other agents (JVM
   arguments, known agent classes) and mark hooks `DEGRADED` is a contract decision.
 - **The CDS line on Java 25** (fact 8) is host-visible on every start in hooks mode; whether that is acceptable, or a
-  system class path placement (no line, less reach) is offered as well, is for the owner.
+  system class path placement (no line, less reach) is offered as well, is for the owner. (Answered: acceptable and
+  documented, B26 Q14, confirmed by the owner on 2026-10-10; the system class path placement stays gap 52 in
+  `docs/TODO.md`.)
 - **The class-loading cost** of a registered transformer (fact 20): an engine-wide pre-filter that returns at once for
   classes the engine does not hook was not built or measured.
 - **The Java 8 redefinition behaviour** (fact 13) was observed on 8u504 only; other 8u builds were not checked.

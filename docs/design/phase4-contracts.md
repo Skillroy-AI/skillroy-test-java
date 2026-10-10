@@ -1174,8 +1174,8 @@ the application's engine binds it, while the agent reports no target id (D65's "
 redirect the handshake to another host or to a Unix socket the operator can open; it gains an outbound connection with
 Playwright's headers and, on a `101`, Playwright's own CDP commands, never the run's scripts or texts (S45). Closing it
 needs a deferred attach (D65 extended: no attach until the agent reports an id) or a relay of the controller's own
-(the controller opens the WebSocket without redirects and relays it to the driver on loopback); both are proposed to
-the owner, D269 (`design/phase6-contracts.md` §16). Tests: `TargetProbeTest`, `CdpAttachTest`, `CdpWebPathOpenTest`; `CdpAttachSoakIT`
+(the controller opens the WebSocket without redirects and relays it to the driver on loopback); neither is built, and
+the residual is accepted by the owner (B28, 2026-10-10; D269, `design/phase6-contracts.md` §16). Tests: `TargetProbeTest`, `CdpAttachTest`, `CdpWebPathOpenTest`; `CdpAttachSoakIT`
 in the image.
 
 ### 5.2 `CdpWebPath`: the CDP implementation of the web verbs
