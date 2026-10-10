@@ -174,8 +174,7 @@ class BootLauncherTest {
     @Test
     void attachReadsTokenAndEnabledFromTheOptionsFile() throws IOException {
         File options = tmp.resolve("attach.properties").toFile();
-        Files.write(options.toPath(), ("enabled=true\ntoken=tok\nnonce=non\n" + homeArg() + "\n")
-                .getBytes(Charset.forName("UTF-8")));
+        BootOptionsTest.writeOwnerOnly(options, "enabled=true\ntoken=tok\nnonce=non\n" + homeArg() + "\n");
         AgentBootstrap.agentmain("t=" + options.getPath(), null);
         assertEquals(Collections.singletonList("start ATTACH"), FakeRecorder.CALLS);
         assertEquals("tok", FakeRecorder.lastOptions.get("token"));
@@ -184,6 +183,26 @@ class BootLauncherTest {
         FakeRecorder.CALLS.clear();
         AgentBootstrap.premain("t=" + options.getPath(), null);
         assertTrue(FakeRecorder.CALLS.isEmpty(), "the same file cannot enable JAVAAGENT");
+    }
+
+    /**
+     * Phase 6 security fix, pass 2, P2-L1-F3: an options file that others may write (or that holds a token and others
+     * may read) starts nothing, and the refusal is the one recorded error naming the rule.
+     */
+    @Test
+    void attachRefusesAnOptionsFileOthersCouldHaveWritten() throws IOException {
+        org.junit.jupiter.api.Assumptions.assumeTrue(java.nio.file.FileSystems.getDefault()
+                .supportedFileAttributeViews().contains("posix"), "POSIX permissions");
+        File options = tmp.resolve("planted.properties").toFile();
+        Files.write(options.toPath(), ("enabled=true\nnonce=non\n" + homeArg() + "\n")
+                .getBytes(Charset.forName("UTF-8")));
+        Files.setPosixFilePermissions(options.toPath(),
+                java.nio.file.attribute.PosixFilePermissions.fromString("rw-rw-rw-"));
+        AgentBootstrap.agentmain("t=" + options.getPath(), null);
+        assertTrue(FakeRecorder.CALLS.isEmpty(), "nothing started");
+        String error = System.getProperty(BootLauncher.PROP_ERROR);
+        assertNotNull(error);
+        assertTrue(error.contains("is refused: it is writable by group or others"), error);
     }
 
     @Test

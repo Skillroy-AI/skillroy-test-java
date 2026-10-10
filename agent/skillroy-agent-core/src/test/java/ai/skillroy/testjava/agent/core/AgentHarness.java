@@ -139,6 +139,11 @@ final class AgentHarness implements AutoCloseable {
         return credentials(token, session(), method, pathAndQuery, body);
     }
 
+    /** The {@code X-Skillroy-Body-Sha256} header line of a request with this body (P2-L1-F1), with its CRLF. */
+    static String bodyHashLine(byte[] body) {
+        return Auth.HEADER_BODY_SHA256 + ": " + Auth.sha256hex(body) + "\r\n";
+    }
+
     /** The {@code Authorization} header line of a request without a body. */
     String authLine(String method, String pathAndQuery) {
         return Auth.HEADER_AUTHORIZATION + ": " + credentials(method, pathAndQuery, null)[1];
@@ -208,6 +213,7 @@ final class AgentHarness implements AutoCloseable {
         if (body != null) {
             c.setDoOutput(true);
             c.setRequestProperty("Content-Type", "application/json");
+            c.setRequestProperty(Auth.HEADER_BODY_SHA256, Auth.sha256hex(body));
             OutputStream out = c.getOutputStream();
             out.write(body);
             out.close();
@@ -286,8 +292,8 @@ final class AgentHarness implements AutoCloseable {
         try {
             socket.setSoTimeout(30000);
             String head = "POST " + path + " HTTP/1.1\r\nHost: 127.0.0.1:" + runtime.port()
-                    + "\r\nAuthorization: " + credentials("POST", path, body)[1] + "\r\n" + extraHeaders
-                    + "Connection: close\r\n\r\n";
+                    + "\r\nAuthorization: " + credentials("POST", path, body)[1] + "\r\n" + bodyHashLine(body)
+                    + extraHeaders + "Connection: close\r\n\r\n";
             final OutputStream out = socket.getOutputStream();
             out.write(head.getBytes(UTF8));
             out.flush();
@@ -338,7 +344,7 @@ final class AgentHarness implements AutoCloseable {
             String head = method + " " + pathAndQuery + " HTTP/1.1\r\nHost: 127.0.0.1:" + runtime.port()
                     + "\r\nAuthorization: " + creds[1] + "\r\n"
                     + (body == null ? "" : "Content-Type: application/json\r\nContent-Length: " + bytes.length
-                    + "\r\n") + "\r\n";
+                    + "\r\n" + bodyHashLine(bytes)) + "\r\n";
             byte[] headBytes = head.getBytes(UTF8);
             byte[] all = new byte[headBytes.length + bytes.length];
             System.arraycopy(headBytes, 0, all, 0, headBytes.length);

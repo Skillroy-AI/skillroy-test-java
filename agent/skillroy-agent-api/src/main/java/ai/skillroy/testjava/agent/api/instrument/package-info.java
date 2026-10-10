@@ -19,7 +19,9 @@
  * (phase6-contracts.md section 3.6, D153): the class references of a class file
  * ({@link ai.skillroy.testjava.agent.api.instrument.ClassFileRefs}), the byte comparison of a restore
  * ({@link ai.skillroy.testjava.agent.api.instrument.ByteVerification}) and the retransformation batches
- * ({@link ai.skillroy.testjava.agent.api.instrument.RetransformBatches}). API of the agent only in the sense that
- * modules may use it; the controller never sees it. Java 8, JDK only.
+ * ({@link ai.skillroy.testjava.agent.api.instrument.RetransformBatches}); and the provenance rule of every jar the
+ * agent loads from an operator's path outside its home ({@link ai.skillroy.testjava.agent.api.instrument.JarTrust},
+ * Phase 6 security fix, pass 2, P2-L1-F5: the {@code modules} paths, {@code hooks.spyJar}, {@code byteman.jar}). API
+ * of the agent only in the sense that modules may use it; the controller never sees it. Java 8, JDK only.
  */
 package ai.skillroy.testjava.agent.api.instrument;

@@ -89,7 +89,8 @@ final class Connector {
         return options;
     }
 
-    private static final Pattern TOKEN = Pattern.compile("[A-Za-z0-9._~+/=-]{1,1024}");
+    /** The token format, as the controller's: 16 to 1024 characters (the floor since P2-L1-F4). */
+    private static final Pattern TOKEN = Pattern.compile("[A-Za-z0-9._~+/=-]{16,1024}");
     private static final long MAX_TOKEN_FILE_BYTES = 4096;
 
     private Connector() {
@@ -144,7 +145,8 @@ final class Connector {
             }
             String token = Files.readString(file, StandardCharsets.UTF_8).strip();
             if (!TOKEN.matcher(token).matches()) {
-                throw new UsageException(TOKEN_FILE + " " + file + " does not hold a token");
+                throw new UsageException(TOKEN_FILE + " " + file + " does not hold a token (16 to 1024 letters, "
+                        + "digits and ._~+/=-)");
             }
             return token;
         } catch (IOException e) {

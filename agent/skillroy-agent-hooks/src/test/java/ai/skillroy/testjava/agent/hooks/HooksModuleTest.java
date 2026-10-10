@@ -31,6 +31,7 @@ import java.io.InputStream;
 import java.net.URL;
 import java.net.URLClassLoader;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.util.Enumeration;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -158,6 +159,56 @@ class HooksModuleTest {
         none.remove(SpyBoot.RESOURCE);
         assertTrue(SpyBoot.checkJar(write("none.jar", none)).startsWith("spy jar holds no Spy"));
         assertTrue(SpyBoot.checkJar(new File(tmp.toFile(), "missing.jar")).startsWith("spy jar cannot be read"));
+    }
+
+    /**
+     * Phase 6 security fix, pass 2, P2-L1-F5: a spy jar that {@code hooks.spyJar} names must, before the append, be
+     * writable by nobody but its owner, as {@code byteman.jar}: the jar, its directory and a link's directory. The
+     * home's own jar is trusted as the home is (content check only). Which of the two applies follows the option.
+     */
+    @Test
+    void aNamedSpyJarMustBeWritableByNobodyButItsOwner() throws Exception {
+        org.junit.jupiter.api.Assumptions.assumeTrue(java.nio.file.FileSystems.getDefault()
+                .supportedFileAttributeViews().contains("posix"), "POSIX permissions");
+        File real = new File(System.getProperty("skillroy.agent.hooks.spyJar"));
+        java.nio.file.Path shared = tmp.resolve("shared");
+        java.nio.file.Files.createDirectory(shared);
+        File copy = shared.resolve("skillroy-agent-spy.jar").toFile();
+        java.nio.file.Files.copy(real.toPath(), copy.toPath());
+        java.nio.file.Files.setPosixFilePermissions(copy.toPath(), PosixFilePermissions.fromString("rw-r--r--"));
+        java.nio.file.Files.setPosixFilePermissions(shared, PosixFilePermissions.fromString("rwx------"));
+        assertNull(SpyBoot.checkJar(copy, true), "an owner-only directory");
+
+        java.nio.file.Files.setPosixFilePermissions(shared, PosixFilePermissions.fromString("rwxrwxrwx"));
+        assertEquals("spy jar is writable by others: " + copy, SpyBoot.checkJar(copy, true));
+        assertNull(SpyBoot.checkJar(copy, false), "the home's own jar: the content check only");
+        java.nio.file.Files.setPosixFilePermissions(shared, PosixFilePermissions.fromString("rwx------"));
+        java.nio.file.Files.setPosixFilePermissions(copy.toPath(), PosixFilePermissions.fromString("rw-rw-r--"));
+        assertEquals("spy jar is writable by others: " + copy, SpyBoot.checkJar(copy, true));
+        java.nio.file.Files.setPosixFilePermissions(copy.toPath(), PosixFilePermissions.fromString("rw-r--r--"));
+
+        java.nio.file.Path open = tmp.resolve("open");
+        java.nio.file.Files.createDirectory(open);
+        java.nio.file.Files.setPosixFilePermissions(open, PosixFilePermissions.fromString("rwxrwxrwx"));
+        File link = java.nio.file.Files.createSymbolicLink(open.resolve("spy.jar"), copy.toPath()).toFile();
+        assertEquals("spy jar is writable by others: " + link, SpyBoot.checkJar(link, true),
+                "a link another user could re-point between the check and the append");
+        assertTrue(SpyBoot.checkJar(new File(tmp.toFile(), "missing.jar"), true).startsWith("spy jar cannot be read"));
+
+        FakeHookContext named = new FakeHookContext();
+        assertTrue(HookOptions.read(named).spyJarNamed, "the tests name the reactor's jar: " + HookOptions.read(named)
+                .spyJar);
+        String saved = System.getProperty("skillroy.agent.hooks.spyJar");
+        System.clearProperty("skillroy.agent.hooks.spyJar");
+        try {
+            FakeHookContext home = new FakeHookContext();
+            home.options.put("home", tmp.toString());
+            HookOptions fromHome = HookOptions.read(home);
+            assertFalse(fromHome.spyJarNamed);
+            assertEquals(new File(tmp.toFile(), HookOptions.SPY_JAR_NAME).getPath(), fromHome.spyJar);
+        } finally {
+            System.setProperty("skillroy.agent.hooks.spyJar", saved);
+        }
     }
 
     private static Map<String, byte[]> read(File jar) throws Exception {

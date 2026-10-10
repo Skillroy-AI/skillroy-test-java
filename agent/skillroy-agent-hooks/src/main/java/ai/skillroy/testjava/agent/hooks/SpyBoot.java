@@ -18,6 +18,7 @@
 package ai.skillroy.testjava.agent.hooks;
 
 import ai.skillroy.testjava.agent.api.instrument.ClassFileRefs;
+import ai.skillroy.testjava.agent.api.instrument.JarTrust;
 
 import java.io.ByteArrayOutputStream;
 import java.io.File;
@@ -78,6 +79,23 @@ final class SpyBoot {
         } catch (LinkageError e) {
             return -1;
         }
+    }
+
+    /**
+     * The checks of section 3.2 step 3 for the jar about to be appended: when {@code hooks.spyJar} named it (an
+     * operator's path), first the shared jar rule (Phase 6 security fix, pass 2, P2-L1-F5: the jar, its directory and
+     * a link's directory writable by nobody but their owner, the current user or the administrator, as for
+     * {@code byteman.jar}; {@code "spy jar is writable by others: <path>"}), which also closes the window between this
+     * check and the append against other users; then the content check. The home's own jar is trusted as the home is.
+     *
+     * @param named whether the option named the jar
+     * @return null when the jar may be appended, else the reason it may not
+     */
+    static String checkJar(File jar, boolean named) {
+        if (named && jar != null && JarTrust.WRITABLE_BY_OTHERS.equals(JarTrust.problem(jar.toPath()))) {
+            return "spy jar is writable by others: " + jar;
+        }
+        return checkJar(jar);
     }
 
     /**

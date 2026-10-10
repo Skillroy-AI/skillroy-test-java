@@ -311,9 +311,9 @@ class AgentHomeIT {
         int port = probe.getLocalPort();
         probe.close();
         File tokenFile = new File(work, "operator-" + System.nanoTime() + ".token");
-        Files.write(tokenFile.toPath(), "operator-token".getBytes(ChildJvm.UTF8));
+        Files.write(tokenFile.toPath(), "operator-token-0123456789".getBytes(ChildJvm.UTF8));
         ChildJvm child = launch(list("-Dskillroy.agent.enabled=true", "-Dskillroy.agent.port=" + port,
-                "-Dskillroy.agent.token=operator-token", "-Dskillroy.agent.tokenFile=" + tokenFile.getPath(),
+                "-Dskillroy.agent.token=operator-token-0123456789", "-Dskillroy.agent.tokenFile=" + tokenFile.getPath(),
                 "-Dskillroy.agent.discoveryDir=" + discoveryDir.getPath(),
                 "-Dskillroy.agent.home=" + home.getPath()),
                 appJar.getPath() + File.pathSeparator + new File(home, "skillroy-agent-bootstrap.jar").getPath(),
@@ -326,7 +326,7 @@ class AgentHomeIT {
         for (String name : discoveryDir.list()) {
             assertFalse(name.startsWith(own) && name.endsWith(".token"), "no copy of the operator's token: " + name);
         }
-        assertEquals("operator-token", new String(Files.readAllBytes(tokenFile.toPath()), ChildJvm.UTF8));
+        assertEquals("operator-token-0123456789", new String(Files.readAllBytes(tokenFile.toPath()), ChildJvm.UTF8));
     }
 
     /**

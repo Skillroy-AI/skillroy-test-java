@@ -66,6 +66,10 @@ class FakeAgentAuthTest {
         if (authorization != null) {
             request.header("Authorization", authorization);
         }
+        if (body != null) {
+            // P2-L1-F1: the hash of the body as sent travels in the head, as the controller sends it.
+            request.header(Auth.HEADER_BODY_SHA256, Auth.sha256hex(body.getBytes(StandardCharsets.UTF_8)));
+        }
         request.method(method, body == null ? HttpRequest.BodyPublishers.noBody()
                 : HttpRequest.BodyPublishers.ofString(body));
         return http.send(request.build(), HttpResponse.BodyHandlers.ofString());

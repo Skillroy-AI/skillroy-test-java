@@ -144,7 +144,7 @@ class DiscoveryDirTest {
         Files.setPosixFilePermissions(shared, PosixFilePermissions.fromString("rwxrwxrwx"));
         Map<String, String> options = new LinkedHashMap<String, String>();
         options.put("discoveryDir", shared.toString());
-        options.put("token", "supplied-token");
+        options.put("token", "supplied-token-0123456789");
         options.put("nonce", "n-1");
         runtime = start(options);
         assertNull(runtime.discoveryFile());

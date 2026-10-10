@@ -299,21 +299,81 @@ class HttpLimitsTest {
         AgentHarness.await("the threads are free again", 30000, this::pingAnswers);
     }
 
+    /**
+     * Phase 6 security fix, pass 2, P2-L1-F1: a process without the key cannot hold the body budget against the
+     * controller. Two connections each send a right-shaped {@code Authorization} and body hash, declare 8 MB, send
+     * 6 MB and stall. The MAC fails on the head, so each gets the constant 401 and none of its body is buffered, and
+     * a signed call on a fresh connection (a controller's first request on a new connection) is served meanwhile.
+     * Before the fix the two bodies held the whole budget and that call was answered 503.
+     */
     @Test
-    void bodiesOfConnectionsThatHaveNotAuthenticatedShareABoundedBudget() throws Exception {
-        // The two bodies below stay incomplete on purpose; however slow the machine, they must still be held (and
-        // so hold the budget) when the third request comes in, not cut off at the 30 s body deadline before it.
+    void connectionsWithoutTheKeyCannotHoldTheBodyBudgetAgainstASignedCallOnAFreshConnection() throws Exception {
         ControlServer.bodyDeadlineMs = 120000L;
         agent = AgentHarness.start(tmp);
         String garbage = Auth.formatAuthorization(Auth.newNonce(), ControlServerTest.repeat('0', 64));
         int port = agent.runtime.port();
+        final byte[] part = new byte[6 * 1024 * 1024];
+        final List<Integer> statuses = java.util.Collections.synchronizedList(new ArrayList<Integer>());
+        for (int i = 0; i < 2; i++) {
+            final Socket socket = connect();
+            socket.setSoTimeout(60000);
+            socket.getOutputStream().write(("POST /rpc HTTP/1.1\r\nHost: 127.0.0.1:" + port + "\r\nAuthorization: "
+                    + garbage + "\r\n" + AgentHarness.bodyHashLine(part) + "Content-Length: "
+                    + ControlServer.MAX_BODY_BYTES + "\r\n\r\n").getBytes(AgentHarness.UTF8));
+            socket.getOutputStream().flush();
+            daemon("stall-writer-" + i, new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        socket.getOutputStream().write(part);
+                        socket.getOutputStream().flush();
+                    } catch (IOException refused) {
+                        // Answered and closed before the body went out: the point of the fix.
+                    }
+                }
+            });
+            daemon("stall-reader-" + i, new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        statuses.add(Integer.valueOf(AgentHarness.readReply(socket.getInputStream()).status));
+                    } catch (IOException noReply) {
+                        statuses.add(Integer.valueOf(-1));
+                    }
+                }
+            });
+        }
+        // Old behaviour: the two bodies grow to 8 MB buffers each, the whole budget. New: both are answered at once.
+        AgentHarness.await("the server has dealt with the two stalled bodies", 60000,
+                () -> server().unauthenticatedBodyBytes() == ControlServer.UNAUTHENTICATED_BODY_BUDGET
+                        || statuses.size() == 2);
+        byte[] call = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"agent.info\"}".getBytes(AgentHarness.UTF8);
+        assertEquals(200, agent.rawPost("/rpc", "Content-Length: " + call.length + "\r\n", call),
+                "a signed call on a fresh connection while connections without the key stall");
+        assertEquals(0L, server().unauthenticatedBodyBytes(), "no byte of a body without the key was buffered");
+        AgentHarness.await("both answered", 30000, () -> statuses.size() == 2);
+        assertEquals(java.util.Arrays.asList(401, 401), statuses);
+    }
+
+    /**
+     * The budget stays as defence in depth (P2-L1-F1): bodies of requests whose heads verified, on connections that
+     * have not authenticated yet (only a holder of the key, or of a head captured within this session, sends one),
+     * share 16 MB; a further one is 503 with {@code Retry-After}. An authenticated connection is not limited by it.
+     */
+    @Test
+    void bodiesOfVerifiedHeadsOnConnectionsNotYetAuthenticatedShareABoundedBudget() throws Exception {
+        // The two bodies below stay incomplete on purpose; however slow the machine, they must still be held (and
+        // so hold the budget) when the third request comes in, not cut off at the 30 s body deadline before it.
+        ControlServer.bodyDeadlineMs = 120000L;
+        agent = AgentHarness.start(tmp);
+        int port = agent.runtime.port();
         int declared = ControlServer.MAX_BODY_BYTES;
+        byte[] whole = new byte[declared];
         byte[] part = new byte[6 * 1024 * 1024];
         // Two connections that each hold 6 MB of an 8 MB body: buffers of 8 MB each, the whole budget.
         for (int i = 0; i < 2; i++) {
             Socket socket = connect();
-            socket.getOutputStream().write(("POST /rpc HTTP/1.1\r\nHost: 127.0.0.1:" + port + "\r\nAuthorization: "
-                    + garbage + "\r\nContent-Length: " + declared + "\r\n\r\n").getBytes(AgentHarness.UTF8));
+            socket.getOutputStream().write(signedHead(port, whole).getBytes(AgentHarness.UTF8));
             socket.getOutputStream().write(part);
             socket.getOutputStream().flush();
         }
@@ -325,8 +385,7 @@ class HttpLimitsTest {
                 () -> server().unauthenticatedBodyBytes() == ControlServer.UNAUTHENTICATED_BODY_BUDGET);
         Socket third = connect();
         third.setSoTimeout(30000);
-        third.getOutputStream().write(("POST /rpc HTTP/1.1\r\nHost: 127.0.0.1:" + port + "\r\nAuthorization: "
-                + garbage + "\r\nContent-Length: " + declared + "\r\n\r\n").getBytes(AgentHarness.UTF8));
+        third.getOutputStream().write(signedHead(port, whole).getBytes(AgentHarness.UTF8));
         try {
             third.getOutputStream().write(new byte[256 * 1024]);
         } catch (IOException answeredEarly) {
@@ -347,6 +406,19 @@ class HttpLimitsTest {
         byte[] call = "[{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"agent.info\"}]".getBytes(AgentHarness.UTF8);
         System.arraycopy(call, 0, big, 0, call.length);
         assertEquals(200, agent.rawPost("/rpc", "Content-Length: " + big.length + "\r\n", big));
+    }
+
+    /** The head of a signed {@code POST /rpc} for {@code body} (with its body hash), without the body. */
+    private String signedHead(int port, byte[] body) {
+        return "POST /rpc HTTP/1.1\r\nHost: 127.0.0.1:" + port + "\r\nAuthorization: "
+                + agent.credentials("POST", "/rpc", body)[1] + "\r\n" + AgentHarness.bodyHashLine(body)
+                + "Content-Length: " + body.length + "\r\n\r\n";
+    }
+
+    private static void daemon(String name, Runnable task) {
+        Thread thread = new Thread(task, name);
+        thread.setDaemon(true);
+        thread.start();
     }
 
     private HttpURLConnection openStream() throws IOException {

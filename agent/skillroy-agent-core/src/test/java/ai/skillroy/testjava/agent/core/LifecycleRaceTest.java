@@ -127,7 +127,7 @@ class LifecycleRaceTest {
         options.put("enabled", "true");
         options.put("discoveryDir", tmp.toString());
         options.put("port", String.valueOf(port));
-        options.put("token", "race-token");
+        options.put("token", "race-token-0123456789");
         options.put("coretest.slowInstall", "true");
         Future<AgentRuntime> starting = helper.submit(new Callable<AgentRuntime>() {
             @Override
@@ -138,13 +138,15 @@ class LifecycleRaceTest {
         assertTrue(TestState.entered.await(30, TimeUnit.SECONDS), "install entered");
 
         // Discovery is not published yet: learn the session from a verified /ping, as a client in --port mode does.
-        String session = sessionFromPing(port, "race-token");
+        String session = sessionFromPing(port, "race-token-0123456789");
         byte[] body = ("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"agent.disable\","
                 + "\"params\":{\"_meta\":{\"confirm\":true}}}").getBytes(AgentHarness.UTF8);
         HttpURLConnection c = (HttpURLConnection) new URL("http://127.0.0.1:" + port + "/rpc").openConnection();
         c.setRequestMethod("POST");
         c.setRequestProperty("Authorization",
-                AgentHarness.credentials("race-token", session, "POST", "/rpc", body)[1]);
+                AgentHarness.credentials("race-token-0123456789", session, "POST", "/rpc", body)[1]);
+        c.setRequestProperty(ai.skillroy.testjava.protocol.Auth.HEADER_BODY_SHA256,
+                ai.skillroy.testjava.protocol.Auth.sha256hex(body));
         c.setConnectTimeout(10000);
         c.setReadTimeout(60000);
         c.setDoOutput(true);

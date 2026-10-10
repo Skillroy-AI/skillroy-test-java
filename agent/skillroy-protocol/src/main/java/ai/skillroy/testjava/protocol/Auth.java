@@ -50,7 +50,9 @@ import javax.crypto.spec.SecretKeySpec;
  *   <li>{@code GET /ping?nonce=<clientNonce>}: {@code Authorization: Skillroy-HMAC mac=<hello mac>}
  *       ({@link #helloAuthorization}).</li>
  *   <li>Every other request: {@code Authorization: Skillroy-HMAC nonce=<reqNonce>, mac=<request mac>}
- *       ({@link #requestAuthorization}).</li>
+ *       ({@link #requestAuthorization}); a request with a body also carries {@code X-Skillroy-Body-Sha256:
+ *       <sha256hex(body)>} ({@link #HEADER_BODY_SHA256}), the body hash the request MAC covers, so that the agent
+ *       verifies the MAC on the head alone (Phase 6 security fix, pass 2, P2-L1-F1).</li>
  *   <li>Every reply to an authenticated request: {@code X-Skillroy-Mac: <response mac>} and
  *       {@code X-Skillroy-Session: <sessionId>}. For {@code /ping} the response MAC's {@code reqNonce} is the
  *       client nonce.</li>
@@ -71,12 +73,14 @@ import javax.crypto.spec.SecretKeySpec;
  *       without reading the body.</li>
  *   <li>{@code GET}: verify at once with {@link #verifyHello} ({@code /ping}, client nonce = the raw value of the
  *       query parameter {@link #PING_NONCE_PARAM}) or {@link #verifyRequest} with {@link #EMPTY_BODY_SHA256}.</li>
- *   <li>{@code POST}: the body hash is part of the MAC, so the request is authenticated only once the body is in.
- *       The server reads the body within its limits ({@code Content-Length} required and at most the body cap, else
- *       413 without reading; read under the body deadline), then calls {@link #verifyRequest} with
- *       {@link #sha256hex} of exactly those bytes. Nothing in the body is parsed, logged or acted on before that
- *       call returned true; a false is the same 401 with {@code Connection: close}. Until then the connection
- *       counts as not authenticated.</li>
+ *   <li>A request with a body ({@code POST}): the head carries the body hash in {@link #HEADER_BODY_SHA256} (once,
+ *       64 lower-case hex characters; missing, repeated or malformed is the constant 401), and the server calls
+ *       {@link #verifyRequest} with that hash <em>on the head alone</em>, before any body byte is read: a client
+ *       without the key never gets a body buffered (P2-L1-F1). Only then does it read the body within its limits
+ *       ({@code Content-Length} required and at most the body cap, else 413 without reading; read under the body
+ *       deadline) and require {@link #sha256hex} of exactly those bytes to equal the header's hash (else the same
+ *       401). Nothing in the body is parsed, logged or acted on before both checks passed. Until then the
+ *       connection counts as not authenticated.</li>
  *   <li>Reply: {@link #responseMac} over the status code and the exact reply body bytes (an empty body for
  *       {@code /events}: the MAC covers the response head, and the stream then rides that connection).</li>
  * </ol>
@@ -116,6 +120,15 @@ public final class Auth {
 
     /** Reply header carrying the agent's session id, so that a client can verify a {@code /ping} reply. */
     public static final String HEADER_SESSION = "X-Skillroy-Session";
+
+    /**
+     * Request header carrying {@link #sha256hex} of the request body: required on every request with a body, and the
+     * {@code bodySha256} the request MAC covers, so that the agent verifies the MAC on the head alone and reads a body
+     * only for a request that holds the key (Phase 6 security fix, pass 2, P2-L1-F1; the header the specification
+     * named and 1.x built without). A request without a body may omit it ({@link #EMPTY_BODY_SHA256} is then the
+     * hash); not used on {@code /ping}.
+     */
+    public static final String HEADER_BODY_SHA256 = "X-Skillroy-Body-Sha256";
 
     /** Query parameter of {@code GET /ping} carrying the client nonce. */
     public static final String PING_NONCE_PARAM = "nonce";
@@ -398,8 +411,9 @@ public final class Auth {
      * True if {@code credentials} are the request form (with a nonce) and carry the {@link #requestMac} of this
      * request. Constant-time in the MAC. False for anything malformed, null included.
      *
-     * <p>For a request with a body the server calls this after reading the body within its limits, with
-     * {@link #sha256hex} of exactly those bytes, and acts on nothing in the body before it returned true.
+     * <p>For a request with a body the server calls this on the head alone, with the hash of
+     * {@link #HEADER_BODY_SHA256}, then reads the body and requires {@link #sha256hex} of exactly those bytes to equal
+     * that hash; it acts on nothing in the body before both checks passed (P2-L1-F1).
      */
     public static boolean verifyRequest(String token, String sessionId, Credentials credentials, String method,
             String pathAndQuery, String bodySha256) {

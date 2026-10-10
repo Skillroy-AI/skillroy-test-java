@@ -133,6 +133,12 @@ public final class AgentRuntime implements AutoCloseable {
     static final long MAX_READY_TIMEOUT_MS = 86400000L;
     /** Default of the httpThreads option: the most threads the control server's executor may have. */
     static final int DEFAULT_HTTP_THREADS = 32;
+    /**
+     * The shortest {@code token} an operator may supply (Phase 6 security fix, pass 2, P2-L1-F4): the token is the key
+     * of every MAC and the agent's 401 is not rate-limited, so a short one is a guessable credential. A floor, not an
+     * entropy check; a generated token is 64 hex characters.
+     */
+    static final int MIN_SUPPLIED_TOKEN_LENGTH = 16;
     static final int MIN_HTTP_THREADS = 2;
     static final int MAX_HTTP_THREADS = 1024;
     /**
@@ -385,6 +391,12 @@ public final class AgentRuntime implements AutoCloseable {
         longOption(out, "httpThreads", MIN_HTTP_THREADS, MAX_HTTP_THREADS);
         longOption(out, "httpIdleTimeoutMs", MIN_HTTP_IDLE_TIMEOUT_MS, MAX_HTTP_IDLE_TIMEOUT_MS);
         Redactor.withExtraKeys(out.get("redact"));
+        String token = out.get("token");
+        if (token != null && !token.isEmpty() && token.length() < MIN_SUPPLIED_TOKEN_LENGTH) {
+            // P2-L1-F4: never echo the value, only the rule.
+            throw new IllegalArgumentException("option token must be at least " + MIN_SUPPLIED_TOKEN_LENGTH
+                    + " characters; omit it to let the agent generate one");
+        }
         booleanOption(out, "readOnly");
         booleanOption(out, "allowFailedModules");
         booleanOption(out, "requireProductionMarker");

@@ -73,7 +73,9 @@ import java.util.function.Consumer;
  * <p>Authentication (hardening item H2, {@link Auth}): the token never travels. {@code GET /ping?nonce=<n>} carries
  * {@code Authorization: Skillroy-HMAC mac=<HMAC("hello", n)>} with a fresh client nonce; every other request carries
  * {@code Authorization: Skillroy-HMAC nonce=<r>, mac=<HMAC("req", sessionId, r, method, pathAndQuery,
- * sha256(body))>} with a fresh request nonce. Every reply must carry {@code X-Skillroy-Mac} over the session, the same
+ * sha256(body))>} with a fresh request nonce, and a {@code POST} also carries the body hash in
+ * {@code X-Skillroy-Body-Sha256}, so that the agent verifies the request on its head before it reads the body (Phase 6
+ * security fix, pass 2, P2-L1-F1). Every reply must carry {@code X-Skillroy-Mac} over the session, the same
  * nonce, the status and the SHA-256 of the exact reply body; it is verified before anything in the body is looked at.
  * The session id is taken from the {@code X-Skillroy-Session} header of the first verified {@code /ping} (or, when the
  * endpoint names one, for example from its discovery file, it must be that one); every later ping must report the
@@ -103,7 +105,8 @@ import java.util.function.Consumer;
  * <p>Error mapping: a JSON-RPC error is {@link AgentRpcException}. Everything above, a closed client, an HTTP status
  * other than 200 (403 = Host/Origin rejected) and a reply that is not valid protocol JSON are
  * {@link AgentLostException}. A refusal the agent sends before it has authenticated the request (400, 413, 431, 501,
- * or 503 when its budget for unauthenticated bodies is spent) carries no MAC: it fails the call without setting the
+ * or 503 when its budget for the bodies of connections that have not authenticated is spent, which since P2-L1-F1
+ * only holders of the key can spend) carries no MAC: it fails the call without setting the
  * latch, and its body is not used. Event streams apply the same rule ({@link #isUnsignedRefusal}).
  *
  * <p>Keep-alive and the one retry. The HTTP client pools an idle connection for 30 s
@@ -607,9 +610,11 @@ public final class AgentClient implements AgentConnection {
     }
 
     private HttpRequest rpcRequest(byte[] body, String reqNonce, Duration httpTimeout) throws AgentLostException {
+        String bodyHash = Auth.sha256hex(body);
+        // P2-L1-F1: the body hash travels in the head, so that the agent verifies the MAC before it reads the body.
         return builder(Protocol.PATH_RPC, httpTimeout)
-                .header(Auth.HEADER_AUTHORIZATION, requestAuthorization(POST, Protocol.PATH_RPC, reqNonce,
-                        Auth.sha256hex(body)))
+                .header(Auth.HEADER_AUTHORIZATION, requestAuthorization(POST, Protocol.PATH_RPC, reqNonce, bodyHash))
+                .header(Auth.HEADER_BODY_SHA256, bodyHash)
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofByteArray(body))
                 .build();
@@ -885,7 +890,7 @@ public final class AgentClient implements AgentConnection {
         return switch (status) {
             case 413 -> " (the request body is over the agent's limit)";
             case 431 -> " (the request head is over the agent's limit)";
-            case 503 -> " (the agent is busy reading unauthenticated requests; try again)";
+            case 503 -> " (the agent is busy reading the bodies of requests not yet authenticated; try again)";
             default -> " (the agent could not read the request)";
         };
     }

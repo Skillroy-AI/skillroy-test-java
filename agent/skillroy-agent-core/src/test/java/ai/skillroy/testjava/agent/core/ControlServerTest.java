@@ -172,6 +172,56 @@ class ControlServerTest {
                 earlierSession, "GET", "/schema", null)[1]), "other session");
     }
 
+    /**
+     * P2-L1-F1: the request MAC is verified on the head, over the body hash the head declares in
+     * {@code X-Skillroy-Body-Sha256}; a body is read only after that, and must then hash to the declared value. A body
+     * request without the header, with it twice or malformed, is 401 before its body is read.
+     */
+    @Test
+    void theBodyHashTravelsInTheHeadAndTheBodyMustMatchIt() throws Exception {
+        int port = agent.runtime.port();
+        byte[] body = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"agent.info\"}".getBytes(AgentHarness.UTF8);
+        byte[] other = "{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"agent.info\"}".getBytes(AgentHarness.UTF8);
+        String signed = Auth.HEADER_AUTHORIZATION + ": " + agent.credentials("POST", "/rpc", body)[1] + "\r\n";
+        String hash = AgentHarness.bodyHashLine(body);
+        assertEquals(200, rawPostStatus(port, signed + hash, body), "head and body agree");
+        assertEquals(401, rawPostStatus(port, signed + hash, other), "a signed head with another body of that length");
+        assertEquals(401, rawPostStatus(port, signed, body), "no body hash in the head");
+        assertEquals(401, rawPostStatus(port, signed + hash + hash, body), "the body hash twice");
+        assertEquals(401, rawPostStatus(port, signed + Auth.HEADER_BODY_SHA256 + ": "
+                + Auth.sha256hex(body).toUpperCase(java.util.Locale.ROOT) + "\r\n", body), "not lower-case hex");
+        assertEquals(401, rawPostStatus(port, signed + AgentHarness.bodyHashLine(other), body),
+                "a declared hash the MAC does not cover");
+        // Without a body the header may be absent (the empty hash) or name the empty hash; anything else is 401.
+        String get = agent.authLine("GET", "/schema");
+        assertEquals(200, agent.rawGet("/schema", "Host: 127.0.0.1:" + port, get,
+                Auth.HEADER_BODY_SHA256 + ": " + Auth.EMPTY_BODY_SHA256).status);
+        assertEquals(401, agent.rawGet("/schema", "Host: 127.0.0.1:" + port, get,
+                AgentHarness.bodyHashLine(body).trim()).status);
+        assertEquals(200, agent.get("/ping").status);
+    }
+
+    /** One raw {@code POST /rpc} on its own connection with the given extra head lines; the reply's status. */
+    private static int rawPostStatus(int port, String headLines, byte[] body) throws IOException {
+        Socket socket = new Socket("127.0.0.1", port);
+        try {
+            socket.setSoTimeout(30000);
+            String head = "POST /rpc HTTP/1.1\r\nHost: 127.0.0.1:" + port + "\r\n" + headLines
+                    + "Content-Length: " + body.length + "\r\nConnection: close\r\n\r\n";
+            OutputStream out = socket.getOutputStream();
+            out.write(head.getBytes(AgentHarness.UTF8));
+            try {
+                out.write(body);
+                out.flush();
+            } catch (IOException refusedEarly) {
+                // A 401 on the head may close the connection before the body is sent.
+            }
+            return AgentHarness.readReply(socket.getInputStream()).status;
+        } finally {
+            socket.close();
+        }
+    }
+
     @Test
     void aRequestCapturedFromOneAgentStartIsRefusedByTheNextWithTheSameToken() throws Exception {
         agent.close();
@@ -431,7 +481,8 @@ class ControlServerTest {
                 socket.setSoTimeout(30000);
                 byte[] body = new byte[100];
                 String head = "POST /rpc HTTP/1.1\r\nHost: 127.0.0.1:" + agent.runtime.port() + "\r\n"
-                        + agent.authLine("POST", "/rpc") + "\r\nContent-Length: " + body.length + "\r\n\r\n";
+                        + Auth.HEADER_AUTHORIZATION + ": " + agent.credentials("POST", "/rpc", body)[1] + "\r\n"
+                        + AgentHarness.bodyHashLine(body) + "Content-Length: " + body.length + "\r\n\r\n";
                 OutputStream out = socket.getOutputStream();
                 out.write(head.getBytes(AgentHarness.UTF8));
                 out.write(body, 0, 10);

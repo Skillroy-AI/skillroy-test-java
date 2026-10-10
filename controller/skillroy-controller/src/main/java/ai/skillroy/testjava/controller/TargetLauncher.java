@@ -185,8 +185,8 @@ public final class TargetLauncher {
                 throw new IllegalStateException("viaJavaToolOptions(true) needs javaAgent(...)");
             }
             if (agentOptions.containsKey("token") && !SecureFiles.isValidToken(agentOptions.get("token"))) {
-                throw new IllegalArgumentException("the token option is not a usable token (allowed: letters, "
-                        + "digits and ._~+/=-)");
+                throw new IllegalArgumentException("the token option is not a usable token (16 to 1024 letters, "
+                        + "digits and ._~+/=-; omit it to let the launcher generate one)");
             }
             Path named = agentOptions.containsKey("discoveryDir") ? Path.of(agentOptions.get("discoveryDir"))
                     : discoveryDir;

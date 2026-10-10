@@ -224,6 +224,8 @@ final class ChildJvm implements AutoCloseable {
                 connection.setReadTimeout(120000);
                 if (body != null) {
                     connection.setDoOutput(true);
+                    // P2-L1-F1: the body hash travels in the head, so that the agent verifies it before the body.
+                    connection.setRequestProperty(Auth.HEADER_BODY_SHA256, Auth.sha256hex(body));
                     OutputStream out = connection.getOutputStream();
                     out.write(body);
                     out.close();

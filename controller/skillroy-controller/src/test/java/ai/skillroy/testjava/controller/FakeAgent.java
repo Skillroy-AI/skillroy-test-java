@@ -89,9 +89,12 @@ final class FakeAgent implements AutoCloseable {
     /** Return from a handler (or set as {@link #pingOverride}): send a chunked body that never ends. */
     static final Object ENDLESS = new Object();
 
-    /** One request as received; {@code remotePort} tells the client's connections apart. */
+    /**
+     * One request as received; {@code remotePort} tells the client's connections apart; {@code bodySha256} is the
+     * {@code X-Skillroy-Body-Sha256} value (P2-L1-F1), null when absent.
+     */
     record Request(String method, String path, String query, String authorization, String host, String origin,
-                   String lastEventId, String body, int remotePort) {
+                   String lastEventId, String body, int remotePort, String bodySha256) {
     }
 
     final String token = SecureFiles.newToken();
@@ -268,7 +271,8 @@ final class FakeAgent implements AutoCloseable {
         String host = exchange.getRequestHeaders().getFirst("Host");
         String origin = exchange.getRequestHeaders().getFirst("Origin");
         requests.add(new Request(exchange.getRequestMethod(), path, query, authorization, host, origin,
-                exchange.getRequestHeaders().getFirst("Last-Event-ID"), body, exchange.getRemoteAddress().getPort()));
+                exchange.getRequestHeaders().getFirst("Last-Event-ID"), body, exchange.getRemoteAddress().getPort(),
+                exchange.getRequestHeaders().getFirst(Auth.HEADER_BODY_SHA256)));
         if ("/rpc".equals(path) && closeBeforeReply.getAndUpdate(n -> Math.max(0, n - 1)) > 0) {
             // No response headers sent: the JDK server closes the connection, the client reads no byte at all.
             exchange.close();
@@ -290,8 +294,12 @@ final class FakeAgent implements AutoCloseable {
                 ok = Auth.verifyHello(token, clientNonce, credentials);
                 replyNonce = clientNonce;
             } else {
-                ok = Auth.verifyRequest(token, sessionId, credentials, exchange.getRequestMethod(), pathAndQuery,
-                        Auth.sha256hex(bodyBytes));
+                // P2-L1-F1, as the agent: a body's hash travels once in the head and must be the body's.
+                List<String> declared = exchange.getRequestHeaders().get(Auth.HEADER_BODY_SHA256);
+                String bodyHash = Auth.sha256hex(bodyBytes);
+                ok = (declared == null ? bodyBytes.length == 0 : bodyHash.equals(Auth.onlyValue(declared)))
+                        && Auth.verifyRequest(token, sessionId, credentials, exchange.getRequestMethod(), pathAndQuery,
+                        bodyHash);
                 replyNonce = credentials == null ? null : credentials.nonce();
             }
             if (acceptAnyAuth && credentials != null) {

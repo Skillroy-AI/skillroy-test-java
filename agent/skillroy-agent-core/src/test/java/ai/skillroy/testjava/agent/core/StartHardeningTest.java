@@ -124,9 +124,9 @@ class StartHardeningTest {
     void operatorSetPortTokenFileAndNonceSurviveACloseAndAreUsedByTheNextStart() throws Exception {
         int port = freePort();
         File tokenFile = tmp.resolve("operator.token").toFile();
-        Files.write(tokenFile.toPath(), "operator-secret".getBytes(UTF8));
+        Files.write(tokenFile.toPath(), "operator-secret-0123456789".getBytes(UTF8));
         System.setProperty(Protocol.PROP_PREFIX + "port", String.valueOf(port));
-        System.setProperty(Protocol.PROP_PREFIX + "token", "operator-secret");
+        System.setProperty(Protocol.PROP_PREFIX + "token", "operator-secret-0123456789");
         System.setProperty(Protocol.PROP_PREFIX + "tokenFile", tokenFile.getPath());
         System.setProperty(Protocol.PROP_PREFIX + "nonce", "operator-nonce");
 
@@ -152,7 +152,7 @@ class StartHardeningTest {
         for (File f : tokens == null ? new File[0] : tokens) {
             assertFalse(f.getName().endsWith(".token"), "no copy of the operator's token: " + f);
         }
-        assertEquals("operator-secret", new String(Files.readAllBytes(tokenFile.toPath()), UTF8));
+        assertEquals("operator-secret-0123456789", new String(Files.readAllBytes(tokenFile.toPath()), UTF8));
     }
 
     @Test

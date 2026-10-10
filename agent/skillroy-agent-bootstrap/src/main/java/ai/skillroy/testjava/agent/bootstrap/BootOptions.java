@@ -17,12 +17,19 @@
 package ai.skillroy.testjava.agent.bootstrap;
 
 import java.io.File;
-import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.Reader;
+import java.nio.channels.Channels;
 import java.nio.charset.Charset;
+import java.nio.file.Files;
+import java.nio.file.LinkOption;
+import java.nio.file.NoSuchFileException;
+import java.nio.file.OpenOption;
+import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
@@ -115,20 +122,63 @@ final class BootOptions {
         return out;
     }
 
-    /** Reads a Java properties file as UTF-8; escapes are honoured, so files written by Properties.store work. */
+    /**
+     * Reads a Java properties file as UTF-8; escapes are honoured, so files written by Properties.store work.
+     *
+     * <p>Phase 6 security fix, pass 2, P2-L1-F3: the file can enable the agent in ATTACH mode, hands it its token and
+     * names module jars, so it is read only when {@link OptionsFileCheck} finds that nobody but the current user (or
+     * the administrator) can have written it: a regular file, not a symbolic link, writable by nobody else, and, when
+     * it holds a {@code token}, readable by nobody else. It is opened without following links, and the check runs on
+     * the path after the read and requires the same file (the file key) as before it, so a file swapped in meanwhile
+     * is refused too. Nothing in it is used before the check passed.
+     *
+     * @throws IOException if the file is missing, cannot be read, or fails the check (the message names the rule)
+     */
     static Map<String, String> readOptionsFile(File file) throws IOException {
-        if (!file.isFile()) {
+        Path path = file.toPath();
+        BasicFileAttributes before;
+        try {
+            before = Files.readAttributes(path, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+        } catch (NoSuchFileException e) {
             throw new IOException("options file not found: " + file);
         }
+        if (!before.isRegularFile() && !before.isSymbolicLink()) {
+            throw new IOException("options file not found: " + file);
+        }
+        if (before.isSymbolicLink()) {
+            throw refused(file, "it is a symbolic link");
+        }
         Properties props = new Properties();
-        InputStream in = new FileInputStream(file);
+        InputStream in = Channels.newInputStream(Files.newByteChannel(path,
+                new HashSet<OpenOption>(Arrays.<OpenOption>asList(StandardOpenOption.READ,
+                        LinkOption.NOFOLLOW_LINKS))));
         try {
             Reader reader = new InputStreamReader(in, Charset.forName("UTF-8"));
             props.load(reader);
         } finally {
             in.close();
         }
-        return fromProperties(props);
+        Map<String, String> options = fromProperties(props);
+        String token = options.get("token");
+        String problem = OptionsFileCheck.problem(path, token != null && !token.isEmpty());
+        if (problem == null) {
+            BasicFileAttributes after = Files.readAttributes(path, BasicFileAttributes.class,
+                    LinkOption.NOFOLLOW_LINKS);
+            Object key = before.fileKey();
+            if (key != null && !key.equals(after.fileKey())) {
+                problem = "it was replaced while it was read";
+            }
+        }
+        if (problem != null) {
+            throw refused(file, problem);
+        }
+        return options;
+    }
+
+    private static IOException refused(File file, String problem) {
+        return new IOException("options file " + file + " is refused: " + problem + " (it must be a regular file of "
+                + "the current user that nobody else may write to, and owner-only when it holds a token, as the "
+                + "controller writes it)");
     }
 
     /** The options file named by the highest-precedence {@code t} or {@code config} key, or null. */

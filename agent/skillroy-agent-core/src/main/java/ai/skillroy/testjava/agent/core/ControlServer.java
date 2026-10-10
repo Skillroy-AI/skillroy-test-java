@@ -67,9 +67,11 @@ import java.util.concurrent.atomic.AtomicLong;
  * connection is closed); the socket timeout is re-armed with the remaining time before every read, so a client that
  * trickles bytes cannot extend it. A request with {@code Transfer-Encoding} is 501; a body needs
  * {@code Content-Length} (a {@code POST} without one is 411), above {@link #MAX_BODY_BYTES} it is 413 without being
- * read, and it must arrive within the absolute {@link #bodyDeadlineMs}. Body bytes of a connection that has not
- * authenticated yet are buffered as they arrive, never by the declared length, and all such connections together
- * may buffer at most {@link #UNAUTHENTICATED_BODY_BUDGET} bytes (else 503). An authenticated connection is kept
+ * read, and it must arrive within the absolute {@link #bodyDeadlineMs}. A body is read only for a request whose MAC
+ * verified on the head (P2-L1-F1). Body bytes of a connection that has not authenticated yet are buffered as they
+ * arrive, never by the declared length, and all such connections together may buffer at most
+ * {@link #UNAUTHENTICATED_BODY_BUDGET} bytes (else 503; defence in depth, since only a holder of the key, or of a
+ * head captured within this session, can reach it). An authenticated connection is kept
  * alive (HTTP/1.1, unless the client sends {@code Connection: close}) and closed when no byte of a next request
  * arrives within the option {@code httpIdleTimeoutMs} (default two minutes). That is deliberately longer than the
  * 30 s for which the JDK's {@code HttpClient} keeps an idle connection in its pool: the client then always drops an
@@ -84,9 +86,11 @@ import java.util.concurrent.atomic.AtomicLong;
  * <p><b>Authentication (H2, {@link Auth}).</b> The token never travels. On the head alone the single
  * {@code Authorization} value must parse as {@code Skillroy-HMAC}, in the hello form on {@code /ping} and in the
  * request form everywhere else; anything else (the old {@code Bearer} included) is the constant 401 with
- * {@code WWW-Authenticate: Skillroy-HMAC}, no MAC and {@code Connection: close}, before any body byte is read. A
- * request without a body is then verified at once; a request with a body is verified once the body is in, over the
- * SHA-256 of exactly those bytes, and nothing in the body is used before that. Only then follow {@code Host} (403),
+ * {@code WWW-Authenticate: Skillroy-HMAC}, no MAC and {@code Connection: close}, before any body byte is read. The
+ * MAC is then verified on the head alone: a request with a body declares the body's SHA-256 in
+ * {@link Auth#HEADER_BODY_SHA256}, which the MAC covers (Phase 6 security fix, pass 2, P2-L1-F1); only a request that
+ * verified has its body read, and the SHA-256 of exactly those bytes must equal the declared one (else the same 401).
+ * Nothing in the body is used before that. Only then follow {@code Host} (403),
  * {@code Origin} (403), the path (404) and the method (405). Every reply to an authenticated request carries
  * {@link Auth#HEADER_MAC} (over the status and the exact body bytes sent; an empty body for the {@code /events} head
  * and for HEAD) and {@link Auth#HEADER_SESSION}.
@@ -744,6 +748,22 @@ final class ControlServer {
         if (length > MAX_BODY_BYTES) {
             return x.json(413, message("request body exceeds " + MAX_BODY_BYTES + " bytes"), true);
         }
+        // P2-L1-F1: the MAC is verified on the head alone, over the body hash the head declares, so that a client
+        // without the key never gets a body byte read (and can no longer hold the body budget against the controller).
+        boolean verified;
+        String bodyHash = Auth.EMPTY_BODY_SHA256;
+        if (ping) {
+            x.replyNonce = pingNonce(head.rawQuery);
+            verified = Auth.verifyHello(token, x.replyNonce, credentials);
+        } else {
+            bodyHash = declaredBodyHash(head, length);
+            x.replyNonce = credentials.nonce();
+            verified = bodyHash != null && Auth.verifyRequest(token, sessionId, credentials, head.method,
+                    head.target, bodyHash);
+        }
+        if (!verified) {
+            return x.unauthorized();
+        }
         byte[] body = NO_BODY;
         if (length > 0) {
             long[] reserved = new long[1];
@@ -751,7 +771,8 @@ final class ControlServer {
                 body = c.readBody((int) length, reserved);
             } catch (BodyBudgetExceeded e) {
                 x.extraHeader("Retry-After", "1");
-                return x.json(503, message("too many request bodies from unauthenticated connections"), true);
+                return x.json(503, message("too many request bodies from connections that have not authenticated"),
+                        true);
             } finally {
                 unauthenticatedBodyBytes.addAndGet(-reserved[0]);
             }
@@ -759,16 +780,8 @@ final class ControlServer {
                 return false;
             }
         }
-        boolean verified;
-        if (ping) {
-            x.replyNonce = pingNonce(head.rawQuery);
-            verified = Auth.verifyHello(token, x.replyNonce, credentials);
-        } else {
-            x.replyNonce = credentials.nonce();
-            verified = Auth.verifyRequest(token, sessionId, credentials, head.method, head.target,
-                    length > 0 ? Auth.sha256hex(body) : Auth.EMPTY_BODY_SHA256);
-        }
-        if (!verified) {
+        if (!ping && !bodyHash.equals(length > 0 ? Auth.sha256hex(body) : Auth.EMPTY_BODY_SHA256)) {
+            // The head held the key, the body is not the one it was signed for.
             return x.unauthorized();
         }
         if (!c.markAuthenticated()) {
@@ -1061,6 +1074,20 @@ final class ControlServer {
             }
         }
         return Long.parseLong(text);
+    }
+
+    /**
+     * The body hash a request (not {@code /ping}) declares in {@link Auth#HEADER_BODY_SHA256}, which its MAC covers
+     * (P2-L1-F1): the single well-formed value; {@link Auth#EMPTY_BODY_SHA256} when the header is absent and the
+     * request has no body; null (refused) when the header is repeated or malformed, or absent on a request with a body.
+     */
+    static String declaredBodyHash(HttpHead head, long contentLength) {
+        List<String> values = head.all(Auth.HEADER_BODY_SHA256);
+        if (values.isEmpty()) {
+            return contentLength > 0 ? null : Auth.EMPTY_BODY_SHA256;
+        }
+        String value = Auth.onlyValue(values);
+        return Auth.isHexDigest(value) ? value : null;
     }
 
     /** The raw value of the single {@code nonce} query parameter of a {@code /ping}, or null. */

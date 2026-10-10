@@ -122,8 +122,11 @@ class AgentClientTest {
                 assertFalse(credentials.isHello(), r.toString());
                 assertTrue(nonces.add(credentials.nonce()), "a fresh nonce per request");
                 String pathAndQuery = r.path() + (r.query() == null ? "" : "?" + r.query());
+                String bodyHash = Auth.sha256hex(r.body().getBytes(StandardCharsets.UTF_8));
                 assertTrue(Auth.verifyRequest(agent.token, agent.sessionId, credentials, r.method(), pathAndQuery,
-                        Auth.sha256hex(r.body().getBytes(StandardCharsets.UTF_8))), r.toString());
+                        bodyHash), r.toString());
+                // P2-L1-F1: a POST declares its body hash in the head, so that the agent verifies before it reads.
+                assertEquals(r.method().equals("POST") ? bodyHash : null, r.bodySha256(), r.toString());
                 assertFalse(r.authorization().contains(agent.token), "the token never travels");
             }
             assertEquals(4, nonces.size());
@@ -262,6 +265,9 @@ class AgentClientTest {
                             : HttpRequest.BodyPublishers.ofString(body));
             if (authorization != null) {
                 builder.header("Authorization", authorization);
+            }
+            if (body != null) {
+                builder.header(Auth.HEADER_BODY_SHA256, Auth.sha256hex(body.getBytes(StandardCharsets.UTF_8)));
             }
             return http.send(builder.build(), HttpResponse.BodyHandlers.ofString());
         } finally {
