@@ -24,6 +24,7 @@ import ai.skillroy.testjava.scenario.resolve.InferenceSettings;
 
 import java.nio.file.Path;
 import java.time.Clock;
+import java.util.Map;
 import java.util.Objects;
 import java.util.regex.Pattern;
 
@@ -61,10 +62,16 @@ import java.util.regex.Pattern;
  *     actor of {@code skillroy_session_ask}: {@code skillroy_resolve} through the actor and the tier (b) slots of
  *     {@code skillroy_scenario_run} are metered on it; null when inference is not enabled (a run is then not metered
  *     beyond its scenario budget, and makes no model call without a gateway)
+ * @param vision the vision tool options of {@code skillroy_session_ask}'s actor ({@code skillroy mcp --vision},
+ *     phase7-contracts.md 9.4: {@code vision.tier} and the rest); empty means {@code off}
+ * @param robot a person's {@code --allow-robot} (phase7-contracts.md 9.4, D347): enables V3 inside
+ *     {@code skillroy_session_ask} and nothing else; a client's raw {@code via: ROBOT} and {@code mode: ROBOT} are
+ *     refused whatever it says
  */
 public record ServerOptions(AgentConnection agent, DomainPack pack, SessionOptions session, boolean mutating,
                             Path outDir, SessionActorFactory actor, InferenceSettings inference, Clock clock,
-                            boolean allowEvaluate, String clientLabel, BudgetMeter sessionMeter) {
+                            boolean allowEvaluate, String clientLabel, BudgetMeter sessionMeter,
+                            Map<String, String> vision, boolean robot) {
 
     /** The client label when none is given. */
     public static final String DEFAULT_CLIENT = "mcp";
@@ -87,6 +94,35 @@ public record ServerOptions(AgentConnection agent, DomainPack pack, SessionOptio
             throw new IllegalArgumentException("a client label is a short name of letters, digits, '.', '_' and '-'"
                     + " (at most 64 characters)");
         }
+        vision = vision == null ? Map.of() : java.util.Collections.unmodifiableMap(new java.util.LinkedHashMap<>(
+                vision));
+        if ("v3".equalsIgnoreCase(String.valueOf(vision.get(VISION_TIER)).strip()) && !robot) {
+            throw new IllegalArgumentException("--vision v3 needs --allow-robot (a person's opt-in)");
+        }
+    }
+
+    /** The tool option of the vision tier (the vision module's {@code vision.tier}). */
+    public static final String VISION_TIER = "vision.tier";
+
+    /**
+     * The options without the vision tool options and the robot flag (the shape before Phase 7).
+     *
+     * @throws NullPointerException if the agent or the pack is null
+     */
+    public ServerOptions(AgentConnection agent, DomainPack pack, SessionOptions session, boolean mutating,
+                         Path outDir, SessionActorFactory actor, InferenceSettings inference, Clock clock,
+                         boolean allowEvaluate, String clientLabel, BudgetMeter sessionMeter) {
+        this(agent, pack, session, mutating, outDir, actor, inference, clock, allowEvaluate, clientLabel, sessionMeter,
+                Map.of(), false);
+    }
+
+    /** The vision tier the options name ({@code v1}, {@code v2}, {@code v3}), or null for {@code off}. */
+    public String visionTier() {
+        String tier = vision.get(VISION_TIER);
+        if (tier == null || tier.isBlank() || "off".equalsIgnoreCase(tier.strip())) {
+            return null;
+        }
+        return tier.strip().toLowerCase(java.util.Locale.ROOT);
     }
 
     /**
@@ -134,6 +170,8 @@ public record ServerOptions(AgentConnection agent, DomainPack pack, SessionOptio
         private boolean allowEvaluate;
         private String clientLabel;
         private BudgetMeter sessionMeter;
+        private Map<String, String> vision = Map.of();
+        private boolean robot;
 
         private Builder(AgentConnection agent, DomainPack pack) {
             this.agent = agent;
@@ -197,15 +235,27 @@ public record ServerOptions(AgentConnection agent, DomainPack pack, SessionOptio
             return this;
         }
 
+        /** The vision tool options of {@code skillroy_session_ask}'s actor ({@code --vision}; empty: off). */
+        public Builder vision(Map<String, String> options) {
+            this.vision = options == null ? Map.of() : options;
+            return this;
+        }
+
+        /** A person's {@code --allow-robot}: V3 inside {@code skillroy_session_ask} only. */
+        public Builder robot(boolean on) {
+            this.robot = on;
+            return this;
+        }
+
         /**
          * The options.
          *
          * @throws NullPointerException if the agent or the pack is null
-         * @throws IllegalArgumentException if the client label is not a short name
+         * @throws IllegalArgumentException if the client label is not a short name, or {@code v3} lacks the robot flag
          */
         public ServerOptions build() {
             return new ServerOptions(agent, pack, session, mutating, outDir, actor, inference, clock, allowEvaluate,
-                    clientLabel, sessionMeter);
+                    clientLabel, sessionMeter, vision, robot);
         }
     }
 }

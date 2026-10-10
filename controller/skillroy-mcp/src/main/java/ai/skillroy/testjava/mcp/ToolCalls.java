@@ -27,6 +27,7 @@ import ai.skillroy.testjava.inference.budget.SessionMetering;
 import ai.skillroy.testjava.inference.sql.GuardViolation;
 import ai.skillroy.testjava.inference.sql.GuardedStatement;
 import ai.skillroy.testjava.inference.sql.SqlGuard;
+import ai.skillroy.testjava.inference.tools.CallPolicy;
 import ai.skillroy.testjava.protocol.Capability;
 import ai.skillroy.testjava.protocol.Event;
 import ai.skillroy.testjava.protocol.PrimitiveDescriptor;
@@ -187,6 +188,12 @@ final class ToolCalls {
         Map<String, Object> params = withoutConfirmOrMeta(Arguments.dropNullOptionals(args, d.paramsSchema()));
         if (SkillroyMcpServer.DATA_QUERY.equals(d.name())) {
             return dataQuery(params);
+        }
+        // phase7-contracts.md 9.4 (D341, D347): a person's arguments are refused for a client, never stripped:
+        // redact: false and mode: ROBOT on a capture, force on the acting primitives, via: ROBOT whatever the flags.
+        String why = CallPolicy.arguments(d.name(), params, false);
+        if (why != null) {
+            throw new ToolError(d.name() + " is refused, nothing was sent: " + why);
         }
         PlannedCall call = new PlannedCall(d.name(), params, syncFor(d), timeoutFor(d));
         return step(session().execute(call, server.origin()), d.name());
@@ -428,8 +435,13 @@ final class ToolCalls {
         }
         json.put("oracles", oracles);
         Map<String, Object> caps = new LinkedHashMap<>();
-        for (Map.Entry<String, Capability> e : server.capabilities().all().entrySet()) {
-            caps.put(e.getKey(), e.getValue().toJson());
+        // phase7-contracts.md 9.4, 8.5: the session's merged matrix, each entry with its source (agent or
+        // controller:<contributor>).
+        ai.skillroy.testjava.controller.CapabilityMatrix merged = session().capabilities();
+        for (Map.Entry<String, Capability> e : merged.all().entrySet()) {
+            Map<String, Object> entry = new LinkedHashMap<>(e.getValue().toJson());
+            entry.put("source", merged.source(e.getKey()));
+            caps.put(e.getKey(), entry);
         }
         json.put("capabilities", caps);
         List<Object> sources = new ArrayList<>();
@@ -776,13 +788,14 @@ final class ToolCalls {
             default -> throw new ToolError("skillroy_scenario_run: mode is live or approve, found '" + mode + "'");
         };
         Plan plan;
+        Scenario scenario;
         try {
-            plan = PlanCompiler.compile(ScenarioLoader.load(yaml.getBytes(StandardCharsets.UTF_8), "scenario.yaml"),
-                    pack());
+            scenario = ScenarioLoader.load(yaml.getBytes(StandardCharsets.UTF_8), "scenario.yaml");
+            plan = PlanCompiler.compile(scenario, pack());
         } catch (ScenarioException e) {
             throw new ToolError("skillroy_scenario_run: the scenario does not compile: " + e.getMessage());
         }
-        List<String> refusals = server.planPolicy().refusals(plan);
+        List<String> refusals = server.planPolicy().refusals(plan, scenario);
         if (!refusals.isEmpty()) {
             throw new ToolError("skillroy_scenario_run: the scenario is refused, nothing ran (this server runs only"
                     + " what it offers as tools): " + String.join("; ", refusals));
@@ -880,6 +893,8 @@ final class ToolCalls {
         String request = Arguments.text(args, "request", true);
         SessionActor actor = server.actor();
         Object answer = actor.ask(request);
+        // phase7-contracts.md 9.4: the captures the actor's vision loop acted on, listed under images: true only.
+        server.registerCaptures();
         return reply(JsonForm.of(answer), false, List.of(), "skillroy_session_ask");
     }
 

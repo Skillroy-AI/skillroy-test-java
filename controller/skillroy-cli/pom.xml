@@ -76,6 +76,13 @@
       <groupId>ai.skillroy</groupId>
       <artifactId>skillroy-telemetry</artifactId>
     </dependency>
+    <!-- Phase 7 (phase7-contracts.md 2.1, 2.6, D303): the vision bolt-on, bundled in lib/ beside skillroy-telemetry; found
+         through ServiceLoader (SessionTools, CapabilityContributor) and optional below the CLI. No third-party jar. -->
+    <dependency>
+      <groupId>ai.skillroy</groupId>
+      <artifactId>skillroy-vision</artifactId>
+      <version>${project.version}</version>
+    </dependency>
     <!-- slf4j-api (in the SDKs' trees) finds no provider and prints a notice on stderr once; the no-operation provider
          keeps the CLI's stderr to its own messages (phase5-contracts.md 9.3, as built). Runtime only. -->
     <dependency>

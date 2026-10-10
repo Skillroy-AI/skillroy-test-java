@@ -47,6 +47,7 @@ import ai.skillroy.testjava.scenario.observe.RunObservers;
 import ai.skillroy.testjava.scenario.observe.ToolCallRecord;
 import ai.skillroy.testjava.scenario.pack.DomainPack;
 import ai.skillroy.testjava.scenario.resolve.ContributionException;
+import ai.skillroy.testjava.scenario.resolve.InferenceSettings;
 import ai.skillroy.testjava.scenario.resolve.SqlAllowList;
 import io.modelcontextprotocol.json.McpJsonMapper;
 import io.modelcontextprotocol.json.jackson2.JacksonMcpJsonMapperSupplier;
@@ -540,9 +541,36 @@ public final class SkillroyMcpServer implements AutoCloseable {
         if (s.outputDir() == null) {
             s = new SessionOptions(outDir.resolve("runs").resolve(id), s.stepTimeout(), s.clock(), s.bind(),
                     s.readOnly(), s.recoverOnClose(), s.web(), s.ui(), s.webPathLoader(), s.id(), s.hooks(),
-                    s.observer());
+                    s.observer(), given.robot(), given.host());
         }
-        return s;
+        // phase7-contracts.md 9.4 (D348): the person's robot flag (V3 inside skillroy_session_ask only) and the host
+        // features the capability merge of open reads, set before the session opens.
+        java.util.Set<String> host = new java.util.TreeSet<>(s.host());
+        host.addAll(visionHost(s));
+        return s.withRobot(s.robot() || options.robot()).withHost(host);
+    }
+
+    /**
+     * The host features of {@code skillroy_session_ask}'s vision session (phase7-contracts.md 8.5, 9.4):
+     * {@code vision-session} and {@code vision-tier:<tier>} when {@code --vision} names a tier, the vision module is
+     * on the class path (a {@code SessionTools} of id {@code vision}), the settings name a gateway and
+     * {@code images} is true; none otherwise. The server never names a vision type.
+     */
+    private java.util.Set<String> visionHost(SessionOptions s) {
+        String tier = options.visionTier();
+        InferenceSettings inference = s.bind() == null ? null : s.bind().inference();
+        if (tier == null || inference == null || !inference.enabled() || !inference.images()) {
+            return java.util.Set.of();
+        }
+        ClassLoader loader = s.webPathLoader() != null ? s.webPathLoader()
+                : Thread.currentThread().getContextClassLoader();
+        boolean present = false;
+        for (ai.skillroy.testjava.inference.session.SessionTools tools
+                : ai.skillroy.testjava.inference.session.SessionTools.load(loader)) {
+            present |= "vision".equals(tools.id());
+            tools.close();
+        }
+        return present ? java.util.Set.of("vision-session", "vision-tier:" + tier) : java.util.Set.of();
     }
 
     /**
@@ -1098,6 +1126,42 @@ public final class SkillroyMcpServer implements AutoCloseable {
      */
     boolean servesImages() {
         return options.inference() != null && options.inference().images();
+    }
+
+    /** The capture files already listed as resources, by name. */
+    private final java.util.Set<String> listedCaptures = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+    /**
+     * Lists the session's captures directory ({@code captures/<sha256>.png}, phase7-contracts.md 9.4, 9.6) as the
+     * resources {@code skillroy://captures/<sha256>.png}, only while the server serves images (D159; otherwise nothing
+     * is listed: the journal names the file). The vision loop never writes a {@code ROBOT} capture there (D341).
+     *
+     * @return the URIs listed by this call
+     */
+    List<String> registerCaptures() {
+        List<String> uris = new ArrayList<>();
+        Path dir = session == null || session.options().outputDir() == null ? null
+                : session.options().outputDir().resolve("captures");
+        if (!servesImages() || dir == null || !Files.isDirectory(dir, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+            return uris;
+        }
+        List<Path> files;
+        try (Stream<Path> list = Files.list(dir)) {
+            files = list.filter(f -> Files.isRegularFile(f, java.nio.file.LinkOption.NOFOLLOW_LINKS)).sorted().toList();
+        } catch (IOException e) {
+            return uris;
+        }
+        for (Path file : files) {
+            String name = file.getFileName().toString();
+            if (!name.matches("[0-9a-f]{64}\\.png") || !listedCaptures.add(name)) {
+                continue;
+            }
+            String uri = SCHEME + "captures/" + name;
+            addResource(fileResource(uri, "capture " + name, "a capture the vision loop acted on (masked pixels)",
+                    file, PNG));
+            uris.add(uri);
+        }
+        return uris;
     }
 
     /**

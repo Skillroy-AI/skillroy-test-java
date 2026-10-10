@@ -22,8 +22,10 @@ import ai.skillroy.testjava.inference.budget.InferenceLog;
 import ai.skillroy.testjava.inference.budget.LedgerWriter;
 import ai.skillroy.testjava.inference.budget.PriceTable;
 import ai.skillroy.testjava.inference.prompt.PromptMask;
+import ai.skillroy.testjava.inference.session.SessionExtensions;
 import ai.skillroy.testjava.inference.session.SessionPolicy;
 import ai.skillroy.testjava.inference.session.SessionService;
+import ai.skillroy.testjava.inference.session.SessionTools;
 import ai.skillroy.testjava.inference.session.Turn;
 import ai.skillroy.testjava.inference.spi.InferenceException;
 import ai.skillroy.testjava.inference.spi.InferenceGateway;
@@ -112,9 +114,24 @@ final class SessionServices {
      */
     static Opened open(ExecutorSession session, InferenceSettings settings, SessionPolicy policy, CostLedger ledger,
                        Path outDir, BudgetMeter meter) throws InferenceException, SettingsException {
+        return open(session, settings, policy, ledger, outDir, meter, SessionExtensions.none());
+    }
+
+    /**
+     * {@link #open(ExecutorSession, InferenceSettings, SessionPolicy, CostLedger, Path, BudgetMeter)} with the tool sets
+     * the host loaded and their options (phase7-contracts.md 9.1: {@code SessionTools.load} and the {@code vision.*}
+     * options of {@code --vision}); the service owns and closes the tool sets. The opener's mask passes an image only
+     * under the settings' {@code images: true} (7.3).
+     *
+     * @throws InferenceException when the settings' gateway cannot be opened (no model key)
+     * @throws SettingsException when the price table of the settings cannot be read
+     */
+    static Opened open(ExecutorSession session, InferenceSettings settings, SessionPolicy policy, CostLedger ledger,
+                       Path outDir, BudgetMeter meter, SessionExtensions extensions)
+            throws InferenceException, SettingsException {
         DomainPack pack = session.pack();
         PromptMask mask = PromptMask.of(session.options().bind().credentials().mask(), safe(pack::sqlAllowLists),
-                safe(pack::rowMasks));
+                safe(pack::rowMasks)).withImages(settings.images());
         InferenceGateway gateway = Gateways.open(settings, mask);
         boolean ok = false;
         try {
@@ -122,12 +139,15 @@ final class SessionServices {
             LedgerWriter writer = new LedgerWriter(ledger, meter, log, mask, settings.logPrompts(),
                     session.options().clock());
             SessionService service = new SessionService(session, gateway, policy, meter, writer,
-                    PriceTable.of(settings), null);
+                    PriceTable.of(settings), null, extensions);
             ok = true;
             return new Opened(service, gateway);
         } finally {
             if (!ok) {
                 gateway.close();
+                for (SessionTools tools : extensions.tools()) {
+                    tools.close();
+                }
             }
         }
     }

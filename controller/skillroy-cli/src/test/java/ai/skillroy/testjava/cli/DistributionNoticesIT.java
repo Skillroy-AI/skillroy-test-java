@@ -70,10 +70,10 @@ class DistributionNoticesIT {
 
     /**
      * The project's own jars in lib/: Phase 2 added skillroy-data, Phase 5 skillroy-inference and skillroy-mcp, Phase 6
-     * skillroy-telemetry (phase6-contracts.md 2.6).
+     * skillroy-telemetry (phase6-contracts.md 2.6), Phase 7 skillroy-vision (phase7-contracts.md 2.6).
      */
     private static final List<String> PROJECT_MODULES = List.of("cli", "controller", "data", "inference", "mcp",
-            "protocol", "scenario", "telemetry");
+            "protocol", "scenario", "telemetry", "vision");
 
     /**
      * The third-party artifacts the distribution carries, by artifact id (their versions are THIRD-PARTY.txt's): the

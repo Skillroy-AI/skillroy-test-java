@@ -21,7 +21,9 @@ import ai.skillroy.testjava.controller.OutputFiles;
 import ai.skillroy.testjava.data.Credentials;
 import ai.skillroy.testjava.data.CredentialsException;
 import ai.skillroy.testjava.data.SecretMask;
+import ai.skillroy.testjava.inference.session.SessionExtensions;
 import ai.skillroy.testjava.inference.session.SessionPolicy;
+import ai.skillroy.testjava.inference.session.SessionTools;
 import ai.skillroy.testjava.inference.session.Turn;
 import ai.skillroy.testjava.inference.spi.InferenceException;
 import ai.skillroy.testjava.protocol.Event;
@@ -115,6 +117,10 @@ final class SessionCommand implements Command {
     static final String MAX_ACTIONS = "--max-actions";
     static final String ID = "--id";
     static final String SCRIPT = "--script";
+    /** Phase 7 (phase7-contracts.md 6.8, 9.3): a scenario with aiAct or aiExpect steps, played instead of the REPL. */
+    static final String PLAY = "--play";
+    /** With {@code --play}: the played session exported as this scenario id ({@code export}'s files, PNGs beside). */
+    static final String EXPORT = "--export";
 
     /** The session's commands, exactly those of phase5-contracts.md 13.4. */
     static final List<String> COMMANDS = List.of("ask", "do", "call", "resolve", "check", "observe", "snapshot",
@@ -152,7 +158,13 @@ final class SessionCommand implements Command {
             in a scenario), so that a verb that signs the value on gets its password from the credentials file.
             export writes the journal as a scenario that replays with zero model calls: <dir>/<id>.yaml,
             <dir>/plan/<id>.plan.json and <dir>/bindings/<env>/<id>.bindings.json (default <dir>: the session's
-            --out). Exit code 0, 1 when the agent was lost or the last export failed.""",
+            --out). Exit code 0, 1 when the agent was lost or the last export failed.
+            Vision (Phase 7): --vision v1 | v2 | v3 | off lets the model look at redacted captures of the target's
+            own windows and act on them, every action recorded as the step that will be replayed (default v1 when
+            the vision module is present, a gateway is named and images: true); --vision v3 acts through the real
+            pointer and needs --allow-robot (and the agent option robot=true). --play <scenario.yaml> plays a
+            scenario with aiAct and aiExpect steps instead of reading commands; --export <id> then writes the
+            session as a scenario that replays with zero model calls.""",
             options(), 0, 0);
 
     /** The options of {@code session}, in help order. */
@@ -165,7 +177,13 @@ final class SessionCommand implements Command {
                 OptionSpec.flag(ALLOW_BASE, "offer the model the base swing_* and web_* actions too"),
                 OptionSpec.value(MAX_ACTIONS, "n", "the most actions one turn of the model may take (10)"),
                 OptionSpec.value(ID, "session-id", "the session id, [a-z0-9-]+ (default: generated)"),
-                OptionSpec.value(SCRIPT, "file", "read the commands from this file instead of the terminal")));
+                OptionSpec.value(SCRIPT, "file", "read the commands from this file instead of the terminal"),
+                VisionArgs.vision(true), VisionArgs.MODEL_OPTION, VisionArgs.TOOLS_OPTION,
+                VisionArgs.robot("let --vision v3 act through the real pointer (Robot);\na person's opt-in, beside the"
+                        + " agent option robot=true"),
+                OptionSpec.value(PLAY, "scenario.yaml", "play a scenario with aiAct and aiExpect steps instead\nof"
+                        + " reading commands"),
+                OptionSpec.value(EXPORT, "id", "with --play: export the played session as this scenario")));
         options.addAll(InferenceArgs.gateway());
         options.add(InferenceArgs.BUDGET_SESSION_OPTION);
         options.add(HooksArgs.OPTION);
@@ -182,6 +200,23 @@ final class SessionCommand implements Command {
     @Override
     public int run(ParsedArgs args, Cli cli) throws Exception {
         boolean json = args.flag("--json");
+        VisionArgs.Choice vision = VisionArgs.parse(args, true);
+        Path play = args.path(PLAY);
+        String exportId = args.value(EXPORT);
+        if (exportId != null && play == null) {
+            throw new UsageException(EXPORT + " needs " + PLAY);
+        }
+        byte[] played = null;
+        if (play != null) {
+            if (args.path(SCRIPT) != null) {
+                throw new UsageException(PLAY + " and " + SCRIPT + " are exclusive");
+            }
+            try {
+                played = Files.readAllBytes(play);
+            } catch (IOException e) {
+                throw new UsageException(PLAY + " " + play + " cannot be read: " + e.getClass().getSimpleName());
+            }
+        }
         Path out = args.path(OUT);
         if (out != null && Files.exists(out) && !Files.isDirectory(out)) {
             throw new UsageException(OUT + " " + out + " is not a directory");
@@ -194,7 +229,7 @@ final class SessionCommand implements Command {
             } catch (IOException e) {
                 throw new UsageException(SCRIPT + " " + script + " cannot be read: " + e.getClass().getSimpleName());
             }
-        } else if (!cli.terminal().interactive()) {
+        } else if (play == null && !cli.terminal().interactive()) {
             throw new UsageException("session needs a terminal to read its commands from, or " + SCRIPT + " <file>");
         }
         Long maxActions = args.longValue(MAX_ACTIONS, 1, 100);
@@ -221,6 +256,14 @@ final class SessionCommand implements Command {
                 throw new CliException(Exit.FAILED, "the credentials cannot be loaded: " + e.getMessage(), e);
             }
             InferenceSettings inference = InferenceArgs.load(args, BindMode.LIVE, BindArgs.credentialsDir(settings));
+            // phase7-contracts.md 9.1, 9.3: the tool sets from the pack loader and the CLI's class path, and what the
+            // vision options decide, before the session opens (its capability merge reads the host features).
+            List<SessionTools> tools = SessionTools.load(packs.loader());
+            VisionArgs.Decision decision = VisionArgs.decide(vision, VisionArgs.modulePresent(tools), inference, true);
+            if (play != null && !inference.enabled()) {
+                throw new UsageException(PLAY + " needs a model gateway (--inference claude with ANTHROPIC_API_KEY, or"
+                        + " recorded)");
+            }
             Clock clock = Clock.systemUTC();
             String sessionId = id != null ? id : "session-" + Long.toString(clock.millis(), 36);
             Path dir = out != null ? out : Path.of("run-output", sessionId);
@@ -238,7 +281,7 @@ final class SessionCommand implements Command {
                 SessionOptions options = SessionOptions.defaults(dir).withClock(clock).withBind(bind)
                         .withReadOnly(args.flag(READ_ONLY)).withRecoverOnClose(true)
                         .withWebPathLoader(packs.loader()).withId(sessionId).withHooks(hooks)
-                        .withObserver(observer);
+                        .withObserver(observer).withRobot(vision.robot()).withHost(decision.host());
                 ExecutorSession session;
                 try {
                     session = ExecutorSession.open(pack, target.client(), options);
@@ -246,6 +289,7 @@ final class SessionCommand implements Command {
                     throw new CliException(Exit.FAILED, "the session cannot open: " + e.getMessage(), e);
                 }
                 Repl repl = new Repl(cli, session, target, credentials.mask(), json, dir, settings.envId(), pack);
+                Integer playExit = null;
                 try {
                     if (inference.enabled()) {
                         SessionPolicy policy = args.flag(READ_ONLY) ? SessionPolicy.readOnlyPolicy()
@@ -255,13 +299,22 @@ final class SessionCommand implements Command {
                             policy = policy.withMaxActionsPerTurn(maxActions.intValue());
                         }
                         try {
-                            repl.service = SessionServices.open(session, inference, policy, ledger, dir);
+                            repl.service = SessionServices.open(session, inference, policy, ledger, dir,
+                                    SessionServices.sessionMeter(inference, session.id(), ledger),
+                                    new SessionExtensions(tools, decision.options()));
                         } catch (InferenceException | SettingsException e) {
                             repl.say("the model gateway cannot be opened (" + e.getMessage() + "); ask is not"
                                     + " available");
                         }
+                    } else {
+                        tools.forEach(SessionTools::close);
                     }
-                    repl.loop(lines);
+                    repl.vision = visionLine(decision, repl.service);
+                    if (played != null) {
+                        playExit = play(repl, session, tools, decision, vision, played, play, exportId, credentials);
+                    } else {
+                        repl.loop(lines);
+                    }
                 } finally {
                     repl.close();
                     try {
@@ -278,12 +331,87 @@ final class SessionCommand implements Command {
                     }
                 }
                 repl.summary(ledger.entries(), inference.budgets().get(InferenceSettings.BUDGET_SESSION));
+                if (playExit != null) {
+                    return playExit;
+                }
                 return repl.agentLost || repl.lastExportFailed ? Exit.FAILED : Exit.OK;
             }
         } finally {
             TelemetryArgs.finish(observer, json ? cli.err() : cli.out());
             Thread.currentThread().setContextClassLoader(previous);
         }
+    }
+
+    /**
+     * The start-up line's vision words (phase7-contracts.md 9.3): the tier in effect, or {@code off} with why (the
+     * options' reason, or the target's {@code swing.capture.screen} when the tool set did not apply).
+     */
+    static String visionLine(VisionArgs.Decision decision, SessionServices.Opened service) {
+        if (!decision.on()) {
+            return decision.line();
+        }
+        if (service == null) {
+            return "vision off (no session service)";
+        }
+        if (!service.service().toolSets().contains(VisionArgs.MODULE)) {
+            return "vision off (the target's swing.capture.screen is not OK, or the options do not apply)";
+        }
+        return decision.line();
+    }
+
+    /**
+     * {@code --play} (phase7-contracts.md 6.8, 9.3): the scenario played by the vision module's player over this
+     * session and its service, the person's steps as {@code cli}, a model's question asked at the terminal when there
+     * is one; with {@code --export <id>} the session written as {@code export} writes it. Exit code 0 for a passed or
+     * degraded play, 1 otherwise.
+     */
+    private static int play(Repl repl, ExecutorSession session, List<SessionTools> tools,
+                            VisionArgs.Decision decision, VisionArgs.Choice vision, byte[] yaml, Path file,
+                            String exportId, Credentials credentials) throws Exception {
+        if (repl.service == null || !decision.on()
+                || !repl.service.service().toolSets().contains(VisionArgs.MODULE)) {
+            repl.say(repl.vision);
+            repl.say("--play needs the vision tools in this session; nothing was played");
+            return Exit.FAILED;
+        }
+        repl.say("session " + session.id() + " plays " + file + "; " + repl.vision);
+        ai.skillroy.testjava.vision.VisionSessionTools visionTools = null;
+        for (SessionTools t : tools) {
+            if (t instanceof ai.skillroy.testjava.vision.VisionSessionTools v) {
+                visionTools = v;
+            }
+        }
+        ai.skillroy.testjava.vision.VisionOptions options = ai.skillroy.testjava.vision.VisionOptions.from(
+                decision.options());
+        ai.skillroy.testjava.inference.prompt.PromptMask mask = ai.skillroy.testjava.inference.prompt.PromptMask.of(
+                credentials.mask(), List.of(), List.of()).withImages(session.options().bind().inference().images());
+        Terminal terminal = repl.cli.terminal();
+        ai.skillroy.testjava.vision.ScenarioPlayer.Person person = terminal.interactive()
+                ? question -> terminal.readLine("the model asks: " + repl.mask(question) + "\nyour answer> ") : null;
+        ai.skillroy.testjava.vision.ScenarioPlayer player = new ai.skillroy.testjava.vision.ScenarioPlayer(session,
+                repl.service.service(), visionTools, options, vision.robot(), mask, PERSON, person, null);
+        ai.skillroy.testjava.vision.ScenarioPlayer.Result result;
+        try {
+            result = player.play(yaml, file.getFileName().toString());
+        } catch (ScenarioException e) {
+            throw new UsageException(PLAY + " " + file + ": " + e.getMessage());
+        } catch (AgentLostException e) {
+            repl.agentLost = true;
+            repl.say("the agent was lost: " + e.getMessage());
+            return Exit.FAILED;
+        }
+        for (ai.skillroy.testjava.vision.ScenarioPlayer.StepResult step : result.steps()) {
+            repl.say("  step " + step.index() + " " + step.verb() + ": " + step.status()
+                    + (step.message() == null ? "" : " (" + Text.oneLine(step.message(), 200) + ")"));
+        }
+        repl.say(result.scenarioId() + ": " + result.status() + (result.message() == null ? ""
+                : ": " + Text.oneLine(result.message(), 300)));
+        boolean passed = result.status() == ai.skillroy.testjava.scenario.Status.PASS
+                || result.status() == ai.skillroy.testjava.scenario.Status.DEGRADED;
+        if (exportId != null) {
+            repl.exportPlayed(exportId);
+        }
+        return passed && !repl.lastExportFailed ? Exit.OK : Exit.FAILED;
     }
 
     /** One command's result: what {@code --json} prints, what a person reads, and whether it failed. */
@@ -293,7 +421,7 @@ final class SessionCommand implements Command {
     /** The loop over one session; used on the command's thread. */
     private static final class Repl {
 
-        private final Cli cli;
+        final Cli cli;
         private final ExecutorSession session;
         private final Target target;
         private final SecretMask credentials;
@@ -302,6 +430,8 @@ final class SessionCommand implements Command {
         private final String envId;
         private final DomainPack pack;
         SessionServices.Opened service;
+        /** The start-up line's vision words (phase7-contracts.md 9.3). */
+        String vision;
         boolean agentLost;
         boolean lastExportFailed;
         private int turns;
@@ -319,7 +449,7 @@ final class SessionCommand implements Command {
         }
 
         /** Text with every secret the session knows replaced, and the connection's token. */
-        private String mask(String text) {
+        String mask(String text) {
             String t = credentials.apply(target.scrub(text));
             SecretMask joined = session.bindings() == null ? null : session.bindings().secrets();
             return joined == null ? t : joined.apply(t);
@@ -341,7 +471,8 @@ final class SessionCommand implements Command {
             Iterator<String> lines = script == null ? null : script.iterator();
             say("session " + session.id() + " on pack " + pack.id() + " " + pack.version() + ", environment "
                     + envId + (session.options().readOnly() ? " (read-only)" : "") + "; journal "
-                    + dir.resolve(StepJournal.FILE) + (service == null ? "; no model (ask is not available)" : ""));
+                    + dir.resolve(StepJournal.FILE) + (service == null ? "; no model (ask is not available)" : "")
+                    + (vision == null ? "" : "; " + vision));
             while (!agentLost) {
                 String line;
                 if (lines != null) {
@@ -379,6 +510,17 @@ final class SessionCommand implements Command {
                 }
                 print(word, result);
             }
+        }
+
+        /** {@code --play --export <id>}: the session exported as the {@code export} command does, printed. */
+        void exportPlayed(String scenarioId) throws InterruptedException {
+            Result result;
+            try {
+                result = export(scenarioId);
+            } catch (Usage e) {
+                result = error("export", e.getMessage());
+            }
+            print("export", result);
         }
 
         private void print(String word, Result result) {

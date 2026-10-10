@@ -22,7 +22,9 @@ import ai.skillroy.testjava.data.Credentials;
 import ai.skillroy.testjava.data.CredentialsException;
 import ai.skillroy.testjava.data.SecretMask;
 import ai.skillroy.testjava.inference.budget.BudgetMeter;
+import ai.skillroy.testjava.inference.session.SessionExtensions;
 import ai.skillroy.testjava.inference.session.SessionPolicy;
+import ai.skillroy.testjava.inference.session.SessionTools;
 import ai.skillroy.testjava.mcp.ServerOptions;
 import ai.skillroy.testjava.mcp.SessionActor;
 import ai.skillroy.testjava.mcp.SessionActorFactory;
@@ -105,8 +107,11 @@ final class McpCommand implements Command {
             confirms anything; a verb is checked on the calls it compiles to before it runs. Captures, runs, the
             journal and exports go to --out (default: a new temporary directory); a capture's image is served to
             the client only when the inference settings say images: true (never for author's planner, whose
-            server runs --inference none), otherwise a text resource names the written file. The server's log
-            goes to stderr. It ends when the client closes the stream (exit code 0) or the agent is lost (exit
+            server runs --inference none), otherwise a text resource names the written file. Vision (Phase 7):
+            --vision v1 | v2 | v3 lets skillroy_session_ask's model look at redacted captures of the target's
+            windows (default off); --allow-robot enables v3 there and nothing else (a client's own via: ROBOT,
+            mode: ROBOT, force and redact: false are refused whatever the flags); the captures the loop acted on
+            are listed as resources only under images: true. The server's log goes to stderr. It ends when the client closes the stream (exit code 0) or the agent is lost (exit
             code 3); 1 when it cannot start or the client breaks the protocol.""",
             options(), 0, 0);
 
@@ -129,6 +134,9 @@ final class McpCommand implements Command {
         options.addAll(TelemetryArgs.OPTIONS);
         options.add(OptionSpec.value(CLIENT, "label", "the label the journal and the export give the client's\n"
                 + "steps, client <label> (default mcp); a client's request\nnever confirms anything"));
+        options.add(VisionArgs.vision(false));
+        options.add(VisionArgs.robot("let --vision v3 act through the real pointer inside\nskillroy_session_ask only (a"
+                + " person's opt-in, beside the\nagent option robot=true)"));
         return Connector.withConnection(options.toArray(OptionSpec[]::new));
     }
 
@@ -141,6 +149,7 @@ final class McpCommand implements Command {
     public int run(ParsedArgs args, Cli cli) throws Exception {
         boolean mutating = args.flag(MUTATING);
         boolean allowEvaluate = args.flag(ALLOW_EVALUATE);
+        VisionArgs.Choice vision = VisionArgs.parse(args, false);
         String client = args.value(CLIENT);
         if (client != null && !ServerOptions.isClientLabel(client)) {
             throw new UsageException(CLIENT + " takes a short name of letters, digits, '.', '_' and '-' (at most 64"
@@ -169,6 +178,15 @@ final class McpCommand implements Command {
                 throw new CliException(Exit.FAILED, "the credentials cannot be loaded: " + e.getMessage(), e);
             }
             InferenceSettings inference = InferenceArgs.load(args, BindMode.LIVE, BindArgs.credentialsDir(settings));
+            // phase7-contracts.md 9.4: --vision decides the actor's tool options (off unless given); the server sets
+            // the session's host features from them before it opens.
+            List<SessionTools> probe = SessionTools.load(packs.loader());
+            VisionArgs.Decision decision = VisionArgs.decide(vision, VisionArgs.modulePresent(probe), inference,
+                    false);
+            probe.forEach(SessionTools::close);
+            if (vision.tier() != null) {
+                cli.err().println("skillroy mcp: " + decision.line());
+            }
             // phase6-contracts.md 10.3: before the agent is contacted; the file exporter needs --out (or out:).
             observer = TelemetryArgs.open(TelemetryArgs.load(args, BindArgs.credentialsDir(settings), out), cli);
             Target target = Connector.connect(args, cli);
@@ -189,8 +207,9 @@ final class McpCommand implements Command {
                 BudgetMeter meter = inference.enabled() ? sessionMeter(inference, ledger) : null;
                 ServerOptions options = ServerOptions.builder(target.client(), pack).session(session)
                         .mutating(mutating).allowEvaluate(allowEvaluate).outDir(out).inference(inference)
-                        .actor(inference.enabled() ? actors(inference, ledger, meter) : null)
+                        .actor(inference.enabled() ? actors(inference, ledger, meter, packs.loader()) : null)
                         .clientLabel(client).sessionMeter(meter)
+                        .vision(decision.on() ? decision.options() : java.util.Map.of()).robot(vision.robot())
                         .build();
                 SkillroyMcpServer server;
                 try {
@@ -276,11 +295,24 @@ final class McpCommand implements Command {
      * meter (D157; a new one of the settings' budget when null).
      */
     static SessionActorFactory actors(InferenceSettings inference, CostLedger ledger, BudgetMeter meter) {
+        return actors(inference, ledger, meter, null);
+    }
+
+    /**
+     * {@link #actors(InferenceSettings, CostLedger, BudgetMeter)} with the tool sets {@code ServiceLoader} finds through
+     * {@code loader} (the pack loader and the CLI's class path; null: the context loader) and the server's vision
+     * options (phase7-contracts.md 9.4): the actor's service gets the vision tools when {@code --vision} names a tier.
+     */
+    static SessionActorFactory actors(InferenceSettings inference, CostLedger ledger, BudgetMeter meter,
+                                      ClassLoader loader) {
         return (session, options) -> {
             SessionPolicy policy = options.mutating() ? SessionPolicy.acting() : SessionPolicy.readOnlyPolicy();
             Path dir = session.options().outputDir();
             BudgetMeter shared = meter != null ? meter : SessionServices.sessionMeter(inference, session.id(), ledger);
-            return new ServiceActor(SessionServices.open(session, inference, policy, ledger, dir, shared));
+            SessionExtensions extensions = options.vision().isEmpty() ? SessionExtensions.none()
+                    : new SessionExtensions(SessionTools.load(loader), options.vision());
+            return new ServiceActor(SessionServices.open(session, inference, policy, ledger, dir, shared,
+                    extensions));
         };
     }
 
