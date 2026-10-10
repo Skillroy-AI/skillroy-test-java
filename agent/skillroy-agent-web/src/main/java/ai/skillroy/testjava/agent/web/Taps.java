@@ -23,7 +23,6 @@ import ai.skillroy.testjava.agent.api.spi.web.WebCapability;
 import ai.skillroy.testjava.agent.api.spi.web.WebEval;
 import ai.skillroy.testjava.agent.api.spi.web.WebInitScript;
 import ai.skillroy.testjava.protocol.ErrorCodes;
-import ai.skillroy.testjava.protocol.Json;
 import ai.skillroy.testjava.protocol.RpcError;
 import ai.skillroy.testjava.protocol.RpcException;
 import ai.skillroy.testjava.protocol.web.WebLib;
@@ -56,7 +55,10 @@ import java.util.function.BiConsumer;
  * by {@code web.ready {browser, url, signal: TAP, name}}; dropped events (the page buffer holds 1000) are logged. The
  * thread ends when the last tap is removed, when the tapped browsers left the index, or when the module is
  * uninstalled ({@link #shutdown}); it starts again with the next tap. One drainer per document: the agent's poller
- * is the only consumer of the in-process buffer.
+ * is the only consumer of the in-process buffer. Every library call goes through the guard of
+ * {@link WebLib#boundedCallExpression}, which bounds the answer in the page; a drain whose answer is refused as
+ * oversized ends that browser's tap, logged once, and the next {@code web.tap} arms it again (security fix
+ * P2-L4-F2, phase4-contracts.md 4.3).
  *
  * <p><b>A busy page.</b> {@code drain} empties the page's buffer when it runs, so a drain is never abandoned: the
  * round waits for it at most {@value #DRAIN_BOUND_MS} ms; a drain the page has not answered by then (its main thread
@@ -128,7 +130,7 @@ final class Taps {
             if (previous != null) {
                 drain(e, Math.min(DRAIN_BOUND_MS, budgetMs / 2));
             }
-            Object value = evaluate(e, WebLib.tapInstaller(Collections.<String>emptyList(), on), budgetMs);
+            Object value = evaluate(e, tapCall(Collections.<String>emptyList(), on), budgetMs);
             out.put("installed", Long.valueOf(installedOf(value)));
             out.put("timing", (b.capabilities().contains(WebCapability.INIT_SCRIPT_DOCUMENT_START)
                     ? WebInitScript.Timing.DOCUMENT_START : WebInitScript.Timing.DOCUMENT_LOADED).name());
@@ -145,7 +147,7 @@ final class Taps {
         }
         Object value;
         try {
-            value = evaluate(e, installer, budgetMs);
+            value = evaluate(e, tapCall(patterns, on), budgetMs);
         } catch (RuntimeException ex) {
             cancelQuietly(e, script);
             throw ex;
@@ -203,8 +205,7 @@ final class Taps {
                 @Override
                 public void run() {
                     try {
-                        evaluate(e, WebLib.tapInstaller(Collections.<String>emptyList(), tap.target),
-                                FORGET_BOUND_MS);
+                        evaluate(e, tapCall(Collections.<String>emptyList(), tap.target), FORGET_BOUND_MS);
                     } catch (Throwable t) {
                         // the browser went away meanwhile: nothing to clear
                     }
@@ -238,7 +239,7 @@ final class Taps {
                 continue;
             }
             try {
-                evaluate(t.getKey(), WebLib.tapInstaller(Collections.<String>emptyList(), t.getValue().target),
+                evaluate(t.getKey(), tapCall(Collections.<String>emptyList(), t.getValue().target),
                         Math.min(left, 1000));
             } catch (Throwable ex) {
                 // the browser may be gone; nothing to clear then
@@ -347,6 +348,8 @@ final class Taps {
                 if (ex.error().code() == ErrorCodes.STALE_HANDLE) {
                     forget(e);
                     bridge.closed(e);
+                } else if (oversized(ex)) {
+                    endOversized(e);
                 }
                 return;
             } catch (RuntimeException ex) {
@@ -369,7 +372,7 @@ final class Taps {
                 return null;
             }
         }
-        WebEval eval = WebEval.of(WebLib.callExpression("drain", Integer.valueOf(DRAIN_CHARS)))
+        WebEval eval = WebEval.of(WebLib.boundedCallExpression("drain", Integer.valueOf(DRAIN_CHARS)))
                 .timeoutMs(LATE_DRAIN_MS).build();
         final CompletableFuture<String> f;
         try {
@@ -402,14 +405,24 @@ final class Taps {
      * The answer of an outstanding drain: its events are published (unless the module was uninstalled meanwhile), on
      * the thread that delivered it, or on an agent worker when that is the event-dispatch thread.
      */
-    private void lateAnswer(final Entry e, final String json, Throwable failure) {
+    private void lateAnswer(final Entry e, final String json, final Throwable failure) {
         synchronized (this) {
             outstanding.remove(e);
             if (closed) {
                 return;
             }
         }
-        if (failure != null || json == null) {
+        if (failure != null) {
+            Throwable c = failure;
+            while (c instanceof java.util.concurrent.CompletionException && c.getCause() != null) {
+                c = c.getCause();
+            }
+            if (c instanceof RpcException && oversized((RpcException) c)) {
+                endOversizedLater(e); // the channel refused the answer as oversized (P2-L4-F2)
+            }
+            return;
+        }
+        if (json == null) {
             return;
         }
         Runnable publish = new Runnable() {
@@ -417,6 +430,10 @@ final class Taps {
             public void run() {
                 try {
                     published(e, parseBounded(e, json));
+                } catch (RpcException ex) {
+                    if (oversized(ex)) {
+                        endOversizedLater(e);
+                    }
                 } catch (RuntimeException ex) {
                     // an answer that cannot be read publishes nothing
                 }
@@ -488,9 +505,54 @@ final class Taps {
     }
 
     /**
-     * Evaluates a library expression and returns its value parsed from the JSON text; throws mapped errors. A text
-     * longer than {@link WebLib#MAX_JSON_CHARS} is refused before it is parsed (S43: a genuine drain answers at most
-     * about {@link #DRAIN_CHARS}).
+     * Ends a tap whose drain answer was refused as oversized (security fix P2-L4-F2): the tap is removed as when its
+     * browser leaves the index ({@link #forget}), logged once, and the scenario's next {@code web.tap} arms it again;
+     * so a page that answers oversized drains costs one bounded answer per {@code web.tap}, not one every
+     * {@value #POLL_MS} ms.
+     */
+    private void endOversized(Entry e) {
+        boolean tapped;
+        synchronized (this) {
+            tapped = taps.containsKey(e);
+        }
+        if (!tapped) {
+            return;
+        }
+        forget(e);
+        ctx.log().warn("web: the tap of browser " + e.ref + " was removed: a drain answer exceeded "
+                + WebLib.MAX_JSON_CHARS + " characters (a page may replace the script library); the next web.tap "
+                + "arms it again");
+    }
+
+    /** {@link #endOversized} on an agent worker (from a thread that delivered a late answer); never throws. */
+    private void endOversizedLater(final Entry e) {
+        try {
+            ctx.threads().post(ThreadPolicy.WORKER, new Runnable() {
+                @Override
+                public void run() {
+                    endOversized(e);
+                }
+            });
+        } catch (Throwable t) {
+            // the core refused the task: the next round's drain ends the tap
+        }
+    }
+
+    /** True for the error of an answer the receiving side refused as oversized (S43, P2-L4-F2). */
+    static boolean oversized(RpcException ex) {
+        Map<String, Object> data = ex.error().data();
+        return ex.error().code() == ErrorCodes.INTERNAL_ERROR && data != null && "oversized".equals(data.get("reason"));
+    }
+
+    /** The guarded library call of {@code tap(patterns, target)}, its arguments checked as for the installer. */
+    private static String tapCall(List<String> patterns, String target) {
+        WebLib.tapInstaller(patterns, target);
+        return WebLib.boundedCallExpression("tap", patterns, target == null ? "window" : target);
+    }
+
+    /**
+     * Evaluates a guarded library expression ({@link WebLib#boundedCallExpression}) and returns the library's value;
+     * throws mapped errors (see {@link #parseBounded}).
      */
     private static Object evaluate(Entry e, String expression, long boundMs) {
         WebEval eval = WebEval.of(expression).timeoutMs(Math.max(1, boundMs)).build();
@@ -498,12 +560,14 @@ final class Taps {
         return parseBounded(e, json);
     }
 
-    /** A library answer's value; one longer than {@link WebLib#MAX_JSON_CHARS} is refused unparsed (S43). */
+    /**
+     * The library's value in an adapter's answer to a guarded call: a text over {@link WebLib#MAX_CHANNEL_CHARS} is
+     * refused unparsed (S43), and the guard's answer is read with {@link WebLib.Bounded} (P2-L4-F2: a value whose
+     * {@code stringify} text exceeds {@link WebLib#MAX_JSON_CHARS} is {@code INTERNAL_ERROR {reason: "oversized"}};
+     * a genuine drain answers at most about {@link #DRAIN_CHARS} of JSON, within that bound).
+     */
     private static Object parseBounded(Entry e, String json) {
-        if (json != null && json.length() > WebLib.MAX_JSON_CHARS) {
-            throw Errors.oversized(e.ref, "the page library's value", WebLib.MAX_JSON_CHARS);
-        }
-        return Json.parse(json);
+        return WebPrimitives.boundedValue(e, WebPrimitives.parse(e, json));
     }
 
     private static long installedOf(Object value) {

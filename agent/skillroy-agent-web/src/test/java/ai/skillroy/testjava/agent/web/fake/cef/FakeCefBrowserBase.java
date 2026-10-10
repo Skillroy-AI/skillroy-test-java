@@ -41,7 +41,8 @@ import javax.imageio.ImageIO;
 
 /**
  * The fake CEF browser and the part of the DevTools protocol the {@code jcef} adapter speaks: {@code Page.enable},
- * {@code Runtime.enable} (which reports the execution contexts that exist), {@code Runtime.evaluate} (by value, with
+ * {@code Runtime.enable} (which reports the execution contexts that exist), {@code Runtime.disable} (no
+ * {@code Runtime.*} event on that session until it is enabled again), {@code Runtime.evaluate} (by value, with
  * {@code awaitPromise} and {@code contextId}), {@code Page.getFrameTree}, {@code Page.addScriptToEvaluateOnNewDocument}
  * and its removal, {@code Emulation.setDeviceMetricsOverride} and its clearing, {@code Page.captureScreenshot},
  * {@code Page.reload}; the events of a load ({@code Runtime.executionContextsCleared}, {@code Page.frameNavigated},
@@ -92,6 +93,8 @@ abstract class FakeCefBrowserBase implements FakeCefBrowser {
     private final AtomicInteger evaluations = new AtomicInteger();
     private final AtomicInteger scriptAdditions = new AtomicInteger();
     private final AtomicInteger scriptRemovals = new AtomicInteger();
+    private final AtomicInteger runtimeEnables = new AtomicInteger();
+    private final AtomicInteger runtimeDisables = new AtomicInteger();
     private final List<Object[]> queued = new ArrayList<Object[]>();
     private final List<CompletableFuture<String>> held = new ArrayList<CompletableFuture<String>>();
     private volatile String failNextEvaluation;
@@ -458,6 +461,21 @@ abstract class FakeCefBrowserBase implements FakeCefBrowser {
         return scriptAdditions.get();
     }
 
+    /** How many {@code Runtime.enable} calls the page has carried out (P2-L4-S1). */
+    public int runtimeEnables() {
+        return runtimeEnables.get();
+    }
+
+    /** How many {@code Runtime.disable} calls the page has carried out (P2-L4-S1). */
+    public int runtimeDisables() {
+        return runtimeDisables.get();
+    }
+
+    /** The page logs {@code text} on its console ({@code Runtime.consoleAPICalled}, as a page script would). */
+    public void pageConsole(String level, String text) {
+        host().console(document, level, text);
+    }
+
     /** How many {@code Page.removeScriptToEvaluateOnNewDocument} calls the page has carried out. */
     public int scriptRemovals() {
         return scriptRemovals.get();
@@ -519,7 +537,13 @@ abstract class FakeCefBrowserBase implements FakeCefBrowser {
         Map<String, Object> result = new LinkedHashMap<String, Object>();
         if ("Page.enable".equals(method)) {
             FakeDevToolsClient.complete(out, result);
+        } else if ("Runtime.disable".equals(method)) {
+            c.runtimeOff = true;
+            runtimeDisables.incrementAndGet();
+            FakeDevToolsClient.complete(out, result);
         } else if ("Runtime.enable".equals(method)) {
+            c.runtimeOff = false;
+            runtimeEnables.incrementAndGet();
             List<Map.Entry<Long, FakeDocument>> live;
             synchronized (contexts) {
                 live = new ArrayList<Map.Entry<Long, FakeDocument>>(contexts.entrySet());

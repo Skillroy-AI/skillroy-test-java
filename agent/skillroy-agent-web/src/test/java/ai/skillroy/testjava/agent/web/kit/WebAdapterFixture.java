@@ -133,6 +133,14 @@ public interface WebAdapterFixture {
     }
 
     /**
+     * Item 14: whether the adapter budgets a browser's console output (security fix P2-L4-S1; the built-in adapters
+     * do); false skips the item.
+     */
+    default boolean budgetsConsole() {
+        return false;
+    }
+
+    /**
      * Item 10: how many listeners or observers are registered with the technology itself on the browser right now
      * (the application's and any adapter's), or -1 when the fixture cannot count them (the kit then skips the check
      * that {@code detach()} removed the adapter's on the technology's side).

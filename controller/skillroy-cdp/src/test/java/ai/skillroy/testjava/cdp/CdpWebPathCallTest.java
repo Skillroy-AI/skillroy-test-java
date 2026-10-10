@@ -374,6 +374,42 @@ class CdpWebPathCallTest {
         assertEquals(ErrorCodes.INVALID_PARAMS, rpcError("web.tap", map()).error().code());
     }
 
+    /**
+     * Security fix P2-L4-F2: a drain whose answer is refused as oversized (the guard's refusal, what a page that
+     * replaced the library gets for an answer past the bound) ends that page's tap: its init script is removed, the
+     * tap is cleared in its document, and the next poll sends that page no drain; the next {@code web.tap} arms it
+     * again.
+     */
+    @Test
+    void anOversizedDrainEndsThePagesTap() throws Exception {
+        front.engine = a -> FakeWorld.ok(Map.of("installed", 1L));
+        call("web.tap", map("patterns", List.of("webhost.*")));
+        String drain = Scripts.call("drain", WebLib.DRAIN_CHARS);
+        AtomicInteger drains = new AtomicInteger();
+        front.engine = a -> {
+            if (drain.equals(a[0])) {
+                drains.incrementAndGet();
+                return FakeWorld.ok(WebLib.GUARD_PREFIX + "oversized");
+            }
+            return FakeWorld.ok(Map.of("installed", 0L));
+        };
+        path.pollOnce();
+        assertEquals(1, drains.get());
+        assertEquals(1, front.initScriptsRemoved.get(), "the tap's init script is removed");
+        assertEquals(Scripts.call("tap", List.of(), "window"), front.evaluated.get(front.evaluated.size() - 1),
+                "and the tap cleared in the page's document");
+        path.pollOnce();
+        path.pollOnce();
+        assertEquals(1, drains.get(), "no drain after the oversized one");
+        assertTrue(path.eventsSince(0, "web.tap").isEmpty(), "an oversized drain publishes nothing");
+        front.engine = a -> drain.equals(a[0]) ? FakeWorld.ok(Map.of("events", List.of(map("name", "webhost.ok")),
+                "dropped", 0L)) : FakeWorld.ok(Map.of("installed", 1L));
+        call("web.tap", map("patterns", List.of("webhost.*")));
+        path.pollOnce();
+        assertEquals("webhost.ok", path.eventsSince(0, "web.tap").get(0).payload().get("name"),
+                "the next web.tap arms it again");
+    }
+
     @Test
     void thePollerRunsOnItsOwnWhileThePathIsOpen() throws Exception {
         CdpWebPath polling = new CdpWebPath((e, o, ids) -> new TargetProbe(CdpEndpoint.local(9222), "FakeChrome/152",

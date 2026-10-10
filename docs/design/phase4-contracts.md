@@ -653,7 +653,13 @@ it at most 2 s without cancelling it; one still unanswered stays outstanding, it
 to that page meanwhile (at most one outstanding drain per browser, on both paths: §5.2). The same rule holds for the
 polls of `web.waitFlag` (§4.2). When a tapped browser leaves the index while it is still open, its tap is also cleared
 in its current document (the installer with no patterns, on an agent worker, bounded at 1 s, best effort), so that no
-listener or `dispatchEvent` wrapper of the agent stays behind (review 2026-10-07).
+listener or `dispatchEvent` wrapper of the agent stays behind (review 2026-10-07). (Phase 6 security fix, pass 2,
+P2-L4-F2, built 2026-10-09, SB.) The drain is `drain(500000)` (`WebLib.DRAIN_CHARS`, 900000 before) through the guard
+of §4.6, as every library call is; a drain whose answer is refused as oversized (the guard's refusal, or a text over a
+receiving side's bound) ends that browser's tap as when the browser leaves the index (its init script cancelled, the
+tap cleared in its current document), logged once at WARN; the scenario's next `web.tap` arms it again. A page that
+answers oversized drains so costs one bounded answer per `web.tap`, not one every 100 ms for the life of the tap; the
+CDP path does the same (§5.2).
 
 **Masking of `web.console`** (as built 2026-10-07, D68). The core does not redact event payloads, and console output
 arrives on a browser's thread, outside the call that caused it, so the module masks the text (and the source URL)
@@ -666,6 +672,39 @@ of its own (the core's rule), and a text equal to a value becomes `<redacted>`. 
 pattern, every registered `RedactionKeys`) the value is replaced. Limits: a secret logged more than about a minute
 after its call is masked by key only (and by the controller's mask in `run.jsonl`); a secret split across messages or
 transformed by the page is not recognised.
+
+**The receive budget of a browser's events (Phase 6 security fix, pass 2, P2-L4-S1, built 2026-10-09, SB).** A page's
+console output reaches a built-in adapter without a call of the agent's, on every indexed browser, at the page's own
+rate: the `jcef` adapter enables `Runtime` (for `web.console` and the sub-frame contexts), so Chromium sends every
+`Runtime.consoleAPICalled` with its arguments' values, and JCEF makes a Java `String` of each on CEF's thread. Both
+built-in adapters therefore budget each browser's events on the technology's own thread, before anything is queued
+(`…agent.web.reflect.EventBudget`):
+
+1. *The hand-off.* An event goes to the adapter's serial executor only while the browser's queued events stay within
+   `QUEUE_CHARS` (2 x `MAX_CHANNEL_CHARS`; every event counts at least 256 characters, so the queue is bounded in length
+   too); past it the event is dropped. A DevTools event over `MAX_CHANNEL_CHARS` is dropped there, unparsed and never
+   queued (S43's check, which ran only when the queued task ran, moved to the hand-off).
+2. *The console bucket.* The characters of a browser's console events (JCEF: `Runtime.consoleAPICalled` and
+   `Runtime.exceptionThrown`, an oversized one included; JxBrowser: `ConsoleMessageReceived`, whose text the adapter now
+   reads on the vendor's thread) are spent from a bucket of `CONSOLE_BURST_CHARS` (2 x `MAX_CHANNEL_CHARS`) refilled at
+   `CONSOLE_CHARS_PER_SECOND` (1 Mi characters a second). The event that empties it stops that browser's console
+   capture: JCEF sends `Runtime.disable` on its channel, so that Chromium sends no console event and no copy of the
+   page's output reaches the JVM any more, and forgets the sub-frame contexts (a sub-frame evaluation answers
+   `CAPABILITY_UNAVAILABLE` meanwhile; the main frame evaluates as before); JxBrowser cancels its console subscription;
+   both deliver `EventBudget.STOPPED_TEXT` ("skillroy: console capture of this browser stopped: ...") once, as
+   `web.console {level: "warning"}`, and drop the console events still on their way.
+3. *Resuming.* Capture resumes with a full bucket (JCEF: `Runtime.enable`, which reports the contexts anew; JxBrowser:
+   subscribed again) at the browser's first main-frame navigation that comes 10 s or more after it stopped (one that
+   comes sooner schedules the resumption for the end of the 10 s), so that a page flooding its console costs one bucket
+   per document, not one per second for the life of the run.
+
+A console event's text is built from its arguments up to 64 Ki characters (the module masks it and cuts it at 2000).
+The cost of the stop: `Runtime` is enabled on the browser's one DevTools session, which a client of the application's
+on the same browser shares (§2.5), so such a client loses `Runtime` events as well until capture resumes. Not covered:
+the page-sized first copy of each console event that arrives before the stop takes effect (about one bucket), and the
+`Page` events whose URL a page chooses (bounded by Chromium's own URL limit and by item 1, not budgeted). Tests:
+`EventBudgetTest`, `JcefConsoleBudgetFakeTest` (both channels; the resumption), `JxBrowserConsoleBudgetFakeTest`, and
+the kit's item 14 (§10.1), which runs against real JCEF in the image. D-SB-1, D-SB-2 (the fix report).
 
 ### 4.4 Capabilities
 
@@ -930,6 +969,43 @@ at `MAX_URL_CHARS` on both paths; a drain answer over `MAX_JSON_CHARS` publishes
 `MAX_JSON_CHARS` is refused even where the genuine library could produce one (an `aria` snapshot of many thousand
 nodes with long names): ask for fewer `maxNodes`.
 
+**Every library call through a guard that bounds it at its source (Phase 6 security fix, pass 2, P2-L4-F2 and
+P2-L4-F3, built 2026-10-09, SB).** The checks above run on the receiving side, after the channel made its copy of the
+answer, whose size a page that replaced the library chose (up to Chromium's own message size on the agent path, the
+driver's 256 MiB WebSocket payload on the CDP path), and the tap's poller asked for it again every 100 ms. Both paths
+therefore evaluate every library call (`aria`, `domText`, `domClick`, `domFill`, `dispatch`, `tap`, `drain`) as
+`WebLib.boundedCallExpression(function, args...)`: the text of `callJsonExpression` inside a guard of the caller's own
+that always answers a primitive string, built from `typeof`, a primitive string's `length` and the `+` of primitives
+only, none of which page script can replace:
+
+- the library's `stringify` text, when it is a primitive string of at most `MAX_JSON_CHARS`;
+- else `"#skillroy-guard:oversized"`, or `"#skillroy-guard:not text"` when `stringify` returned no primitive string (a
+  thenable included: the guard awaits nothing);
+- a thrown value as `"#skillroy-guard:threw:<n>:<message><stack>"`, `<n>` the message's length: the message
+  `"<name>: <message>"` for an error object and `String(value)` otherwise, cut at 2000, the stack at 8000, each cut
+  with the string's `slice` and then checked by its `length`, and replaced by a fixed text (the message) or "" (the
+  stack) when it is still no string within its bound (a page may replace `slice`, `String` or a getter).
+
+The first copy of a library answer is so at most `MAX_CHANNEL_CHARS`, whatever the page does, on both paths and on a
+string-only channel (JxBrowser) as well, which carries the answer as a string without a `stringify` of the page's.
+Both paths read the answer with `WebLib.Bounded`: the value parsed from the text (the same value on both paths, D48,
+now by construction); `SCRIPT_ERROR {browser, message, stack}` for a thrown value (the agent path's message for a
+thrown non-error value is now `String(value)`, as the CDP path's was, not "Uncaught <value>"); `INTERNAL_ERROR
+{reason: "oversized", bound: MAX_JSON_CHARS}` for the guard's refusal, a text over the bound, a text the library cut
+(`truncated`) or one whose `json` exceeds the bound; `INTERNAL_ERROR {reason: "not library text"}` for anything
+else; the browser is named in the data on both paths, and the CDP path adds `path: "cdp"`. The rule for a library
+value becomes "its `stringify` text is at most `MAX_JSON_CHARS`": a value whose JSON has many quotes or backslashes
+(which `stringify` escapes once more) is refused from about half a MiB of JSON on; `DRAIN_CHARS` is therefore 500000
+(was 900000), so that a genuine drain stays within the bound. Not library calls, and unchanged: `web.evaluate`'s
+wrapper (its `json` cut at `MAX_JSON_CHARS` on the receiving side) and the guard of `web.waitFlag`. On the CDP path
+`Shapes.unwrap`, which now serves `web.evaluate` only, sizes Playwright's value before it copies it, and bounds a
+bare-string `ok` at `MAX_JSON_CHARS` for every primitive but `web.evaluate` (P2-L4-F3: a page's string answer met only
+the channel bound, six times the value bound). Tests: `WebLibTest` (the guard's text, `Bounded`), the agent's
+`EvaluateAndLibraryTest` and `EventsAndTapTest`, the CDP path's `ShapesTest` and `CdpWebPathCallTest`, the fakes'
+emulation of the guard, and the kit's item 13 (§10.1), which runs the guard in Chromium in the image. The guard was
+also run outside the build in Node 24 against the library with a replaced slot, `slice`, `String` and
+`Number.prototype.toString`. D-SB-3 (the fix report).
+
 (4.x, A35, built 2026-10-08: also `flagExpression(expression)`, the guard of `web.waitFlag` that both paths poll
 (§4.2, §5.2, §16.1), `errorLine(text)` and `MAX_ERROR_CHARS` (2000). The guard is one function expression invoked in
 place with the expression as its argument, a JSON string and never code of the guard's own, so the guard always
@@ -1082,6 +1158,26 @@ public final class CdpException extends Exception {
 }
 ```
 
+**(Phase 6 security fix, pass 2, P2-L4-F1, built 2026-10-09, SB.)** The attach dials the browser WebSocket the probe
+read, by the rule the probe applies to a listed page (S44): `TargetProbe.browserWebSocketUrl()` is the path of
+`/json/version`'s `webSocketDebuggerUrl` at the endpoint's own authority, `ws://<host:port>/devtools/browser/<id>`
+(re-pointed whatever scheme, host, port or user information the answer named, so that a browser behind a front that
+rewrites the host still attaches), and null when the answer named none, or one whose path is not
+`/devtools/browser/<id>` (an opaque `ws+unix:` URL among them). `CdpAttach.connect` hands that URL to
+`connectOverCDP`, whose driver uses a `ws` URL as given and reads no `/json/version` of its own (before, the driver read
+it again, unbounded, and dialled the authority, or the Unix socket, its `webSocketDebuggerUrl` named, following an
+HTTP redirect of that read), and refuses a probe without one with `PROTOCOL` before the driver starts. Without a probe
+(`connect(endpoint, options, null)`: tests and the soak only; `CdpWebPath` always probes) the driver is given the
+`http` URL and reads `/json/version` itself. **Residual** (threat model §8): the driver follows an HTTP redirect of the
+WebSocket handshake itself (Playwright 1.63 has no option to refuse one), so a peer holding the configured port before
+the application's engine binds it, while the agent reports no target id (D65's "no id reported: no check"), can still
+redirect the handshake to another host or to a Unix socket the operator can open; it gains an outbound connection with
+Playwright's headers and, on a `101`, Playwright's own CDP commands, never the run's scripts or texts (S45). Closing it
+needs a deferred attach (D65 extended: no attach until the agent reports an id) or a relay of the controller's own
+(the controller opens the WebSocket without redirects and relays it to the driver on loopback); both are proposed to
+the owner, D-SB-4 (the fix report). Tests: `TargetProbeTest`, `CdpAttachTest`, `CdpWebPathOpenTest`; `CdpAttachSoakIT`
+in the image.
+
 ### 5.2 `CdpWebPath`: the CDP implementation of the web verbs
 
 `skillroy-cdp` registers `…cdp.CdpWebPath` through `META-INF/services/ai.skillroy.testjava.scenario.web.WebPath`.
@@ -1117,7 +1213,10 @@ target ids the agent reports. (P6 D156, S42: a `script` primitive, `web.evaluate
 agent in read-only mode as a mutating one is, `CdpWebPath.SCRIPT` beside `MUTATING`, and the agent answers
 `READ_ONLY`.) (S47, no amendment: a library error object is mapped by `WebLib.errorOf` on this path too, so that only
 `NOT_FOUND`, `AMBIGUOUS` and `INVALID_PARAMS` keep their codes and any other name a page writes is `INTERNAL_ERROR`
-with `data.error`, as on the agent path, D48.)
+with `data.error`, as on the agent path, D48.) (Phase 6 security fix, pass 2, P2-L4-F2, built 2026-10-09, SB: the
+library calls go through the guard of §4.6, `Scripts.call` around `WebLib.boundedCallExpression`, and are read by
+`Shapes.library`; a drain refused as oversized ends that page's tap, its init script removed and the tap cleared in its
+current document, with a WARNING logged, as on the agent path, §4.3; the next `web.tap` arms it again.)
 
 **Calls the path hands to the agent** (as built 2026-10-07; each an `UNSUPPORTED` that the executor records as a
 `web.fallback`, §6.1): a call that names secret parameters (`CallOptions.secretParams()`: the agent redacts them in its
@@ -1698,7 +1797,9 @@ item 10. The kit calls its protected `afterDetach()` right after `detach()`, whe
 their fake recorded (rule violations), so that a violation is charged to the test that made it. The pages are
 `main.html`, with a `data:`-URL iframe of `inner.html`, and `second.html`, beside `KitScripts`, `EdtWatchdog`,
 `RecordingClassLoader` and `ClassInitialisations`; the items are the test methods `item01…` to `item11…`, item 10 as
-two tests; 4.x, A37, built 2026-10-08: to `item12…`, thirteen tests.) Its tests, one per rule and operation
+two tests; 4.x, A37, built 2026-10-08: to `item12…`, thirteen tests; Phase 6 security fix, pass 2, built 2026-10-09,
+SB: to `item14…`, fifteen tests, and the optional hook `budgetsConsole()`, false by default, true in the built-in
+adapters' fixtures.) Its tests, one per rule and operation
 (browser-spi "Testing in public CI" item 1):
 
 1. `probe` against a host that did not load the gate class is `UNAVAILABLE` and loads nothing (checked with a
@@ -1746,7 +1847,15 @@ two tests; 4.x, A37, built 2026-10-08: to `item12…`, thirteen tests.) Its test
     `PROTOCOL` or `VENDOR`; then, with `EVENTS_LOAD` (else the rest is skipped), `reload(false)` and then
     `reload(true)`, each on a document of the main page that the kit has marked (a non-enumerable property set by
     evaluation), complete within the bound and are each followed, within the bound, by a `LOAD_FINISHED` of that
-    browser's main frame, after which the marker is gone and the title is the page's (a new document of the same page).
+    browser's main frame, after which the marker is gone and the title is the page's (a new document of the same page);
+13. (Phase 6 security fix, pass 2, P2-L4-F2, built 2026-10-09, SB) a library call through the guard of §4.6: the
+    genuine library's `drain` answers its value; after the page replaced the library's slot with one whose `drain`
+    answers 50 Mi characters, the answer that crosses the channel is the guard's refusal (under 100 characters); with
+    one whose `drain` throws an error of 10 Mi characters, the guard's text (under 12000 characters, `SCRIPT_ERROR`,
+    the message at most 2000);
+14. (P2-L4-S1) for an adapter whose fixture says `budgetsConsole()`: a page that logs 24 strings of 1 Mi characters at
+    once stops the browser's console capture: the subscriber gets `EventBudget.STOPPED_TEXT` once as a `warning`,
+    fewer than 24 of the page's messages, and no console event after it.
 
 ### 10.2 The neutral fake (`skillroy-agent-web` tests, package `…agent.web.fake`)
 

@@ -72,7 +72,10 @@ import java.util.concurrent.TimeoutException;
  * PROTOCOL}; a target's WebSocket is opened only at the endpoint's own authority: a {@code webSocketDebuggerUrl} whose
  * scheme is not {@code ws} or whose authority is not the endpoint's is replaced by {@code ws://<host>:<port>/devtools/
  * page/<id>}, so that a list never makes the probe dial another host. A target's URL and title and the browser version
- * are cut at {@link WebLib#MAX_URL_CHARS} (S43).
+ * are cut at {@link WebLib#MAX_URL_CHARS} (S43). The browser's own WebSocket, which the attach dials, is taken from
+ * {@code /json/version} by the same rule: its path at the endpoint's own authority ({@link #browserWebSocketUrl()},
+ * security fix P2-L4-F1), so that the attach neither reads {@code /json/version} again nor dials a host the answer
+ * names.
  *
  * <p>Each {@code /json} request is bounded by the deadline as its caller waits for it; the request's own timeout is
  * {@value #REQUEST_TIMEOUT_MARGIN_MS} ms longer (it only releases the exchange), and a request that times out either
@@ -149,17 +152,28 @@ public final class TargetProbe {
         }
     }
 
+    /** The path of a browser's own DevTools WebSocket the attach accepts (P2-L4-F1): {@code /devtools/browser/<id>}. */
+    private static final java.util.regex.Pattern BROWSER_PATH =
+            java.util.regex.Pattern.compile("/devtools/browser/[A-Za-z0-9._~-]{1,128}");
+
     private final CdpEndpoint endpoint;
     private final String browserVersion;
     private final String protocolVersion;
+    private final String browserWebSocketUrl;
     private final List<Target> targets;
     private final long millis;
 
     TargetProbe(CdpEndpoint endpoint, String browserVersion, String protocolVersion, List<Target> targets,
                 long millis) {
+        this(endpoint, browserVersion, protocolVersion, null, targets, millis);
+    }
+
+    TargetProbe(CdpEndpoint endpoint, String browserVersion, String protocolVersion, String browserWebSocketUrl,
+                List<Target> targets, long millis) {
         this.endpoint = Objects.requireNonNull(endpoint, "endpoint");
         this.browserVersion = browserVersion == null ? "" : WebLib.cut(browserVersion, WebLib.MAX_URL_CHARS);
         this.protocolVersion = protocolVersion == null ? "" : WebLib.cut(protocolVersion, WebLib.MAX_URL_CHARS);
+        this.browserWebSocketUrl = browserWebSocketUrl;
         this.targets = List.copyOf(targets);
         this.millis = millis;
     }
@@ -235,7 +249,9 @@ public final class TargetProbe {
             }
             List<Target> probed = probeAll(http, threads, listed, deadlineMs);
             return new TargetProbe(endpoint, text(versionMap.get("Browser")),
-                    text(versionMap.get("Protocol-Version")), probed, elapsedMs(start));
+                    text(versionMap.get("Protocol-Version")),
+                    browserWebSocket(text(versionMap.get("webSocketDebuggerUrl")), endpoint), probed,
+                    elapsedMs(start));
         } finally {
             http.shutdownNow();
             threads.shutdownNow();
@@ -255,6 +271,17 @@ public final class TargetProbe {
     /** {@code Protocol-Version} of {@code /json/version}; "" when absent. */
     public String protocolVersion() {
         return protocolVersion;
+    }
+
+    /**
+     * The browser's own DevTools WebSocket, which {@link CdpAttach} dials (security fix P2-L4-F1): the path of
+     * {@code /json/version}'s {@code webSocketDebuggerUrl} at the endpoint's own authority,
+     * {@code ws://<host:port>/devtools/browser/<id>}, whatever scheme, host, port or user information the answer
+     * named; null when the answer named none, or one whose path is not {@code /devtools/browser/<id>} (an opaque URL
+     * such as {@code ws+unix:} among them), and the attach is then refused.
+     */
+    public String browserWebSocketUrl() {
+        return browserWebSocketUrl;
     }
 
     /** Every target of {@code /json/list} in its order, with the probe's findings; unmodifiable. */
@@ -330,6 +357,26 @@ public final class TargetProbe {
                     && endpoint.authority().equalsIgnoreCase(uri.getRawAuthority());
         } catch (java.net.URISyntaxException e) {
             return false;
+        }
+    }
+
+    /**
+     * The browser WebSocket of a {@code /json/version} answer, re-pointed at the endpoint's own authority (see
+     * {@link #browserWebSocketUrl()}); null when it cannot be used.
+     */
+    static String browserWebSocket(String listed, CdpEndpoint endpoint) {
+        if (listed == null || listed.isEmpty() || listed.length() > WebLib.MAX_URL_CHARS) {
+            return null;
+        }
+        try {
+            URI uri = new URI(listed);
+            String path = uri.getRawPath();
+            if (uri.isOpaque() || path == null || !BROWSER_PATH.matcher(path).matches()) {
+                return null;
+            }
+            return "ws://" + endpoint.authority() + path;
+        } catch (java.net.URISyntaxException e) {
+            return null;
         }
     }
 

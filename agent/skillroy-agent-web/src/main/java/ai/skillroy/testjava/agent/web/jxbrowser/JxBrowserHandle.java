@@ -28,6 +28,7 @@ import ai.skillroy.testjava.agent.api.spi.web.WebInitScript;
 import ai.skillroy.testjava.agent.api.spi.web.WebRendering;
 import ai.skillroy.testjava.agent.api.spi.web.WebScriptException;
 import ai.skillroy.testjava.agent.api.spi.web.WebSubscription;
+import ai.skillroy.testjava.agent.web.reflect.EventBudget;
 import ai.skillroy.testjava.agent.web.reflect.Listeners;
 import ai.skillroy.testjava.agent.web.reflect.ReflectiveException;
 import ai.skillroy.testjava.agent.web.reflect.ResolvedApi;
@@ -126,6 +127,14 @@ final class JxBrowserHandle implements WebBrowser {
     private volatile boolean detached;
     private volatile Dimension originalSize;
     private volatile boolean resized;
+    /** P2-L4-S1: the receive budget of this browser's events (the hand-off and the console). */
+    private final EventBudget budget = new EventBudget();
+    /** P2-L4-S1: a resumption of the stopped console capture is scheduled. */
+    private final AtomicBoolean resumeScheduled = new AtomicBoolean();
+    /** The adapter's observer proxy, once made; guarded by {@link #subscriptions}. */
+    private Object observerProxy;
+    /** The console subscription, or null (none, or stopped by the budget); guarded by {@link #subscriptions}. */
+    private Object consoleSubscription;
 
     JxBrowserHandle(JxBrowserAdapter adapter, ResolvedApi api, Object browser) {
         this.adapter = adapter;
@@ -870,21 +879,12 @@ final class JxBrowserHandle implements WebBrowser {
                 @Override
                 public Object invoke(Object proxy, Method method, Object[] args) {
                     if ("on".equals(method.getName()) && args != null && args.length == 1) {
-                        final Object event = args[0];
-                        try {
-                            events.execute(new Runnable() {
-                                @Override
-                                public void run() {
-                                    onVendorEvent(event);
-                                }
-                            });
-                        } catch (RejectedExecutionException ignored) {
-                            // detached
-                        }
+                        hand(args[0]);
                     }
                     return null;
                 }
             });
+            observerProxy = observer;
             try {
                 if (api.complete("navigation")) {
                     Object navigation = api.invoke("browser.navigation", browser);
@@ -897,9 +897,10 @@ final class JxBrowserHandle implements WebBrowser {
                                 api.type("event.frameDocumentLoadFinished"), observer));
                     }
                 }
-                if (api.complete("EVENTS_CONSOLE")) {
-                    subscriptions.add(api.invoke("browser.on", browser, api.type("event.consoleMessageReceived"),
-                            observer));
+                if (api.complete("EVENTS_CONSOLE") && !budget.stopped()) {
+                    consoleSubscription = api.invoke("browser.on", browser,
+                            api.type("event.consoleMessageReceived"), observer);
+                    subscriptions.add(consoleSubscription);
                 }
                 subscriptions.add(api.invoke("browser.on", browser, api.type("event.browserClosed"), observer));
             } catch (ReflectiveException e) {
@@ -929,6 +930,9 @@ final class JxBrowserHandle implements WebBrowser {
                 String key = main ? null : keyOf(frame);
                 String url = str(api.invoke("navigationFinished.url", event));
                 if (Boolean.TRUE.equals(api.invoke("navigationFinished.hasCommitted", event))) {
+                    if (main && budget.stopped()) {
+                        scheduleResume(); // P2-L4-S1: a new document resumes the stopped console capture
+                    }
                     listeners.deliver(this, WebEvent.navigated(key, url));
                 } else if (api.has("navigationFinished.error")) {
                     Object error = api.invoke("navigationFinished.error", event);
@@ -938,21 +942,177 @@ final class JxBrowserHandle implements WebBrowser {
             } else if (api.isInstance("event.frameDocumentLoadFinished", event)) {
                 Object frame = api.invoke("frameDocumentLoadFinished.frame", event);
                 runLateScripts(frame);
-            } else if (api.isInstance("event.consoleMessageReceived", event)) {
-                Object message = api.invoke("consoleMessageReceived.consoleMessage", event);
-                String level = level(api.invoke("consoleMessage.level", message));
-                String text = str(api.invoke("consoleMessage.message", message));
-                String source = api.has("consoleMessage.source") ? str(api.invoke("consoleMessage.source", message))
-                        : null;
-                Object line = api.has("consoleMessage.lineNumber") ? api.invoke("consoleMessage.lineNumber", message)
-                        : null;
-                listeners.deliver(this, WebEvent.console(level, text, source == null || source.isEmpty() ? null
-                        : source, line instanceof Number ? ((Number) line).intValue() : 0));
+            } else if (event instanceof WebEvent) {
+                listeners.deliver(this, (WebEvent) event); // a console event, read on the vendor's thread
             } else if (api.isInstance("event.browserClosed", event)) {
                 markClosed();
             }
         } catch (ReflectiveException e) {
             // an event that cannot be read is dropped
+        }
+    }
+
+    /**
+     * Hands one vendor event to the serial executor, on the vendor's thread, within the browser's receive budget
+     * (security fix P2-L4-S1): a console message is read here (its level, text, source and line, getters of the
+     * event the vendor delivered) and spent from the console bucket, and the one that empties it stops console capture
+     * ({@link #stopConsole}, on the adapter's threads); an event is queued only while the browser's queued events stay
+     * within {@link EventBudget#QUEUE_CHARS} (a non-console event counts {@link EventBudget#MIN_EVENT_COST}).
+     */
+    private void hand(Object event) {
+        if (detached) {
+            return;
+        }
+        Object queued = event;
+        long chars = 0;
+        try {
+            if (api.isInstance("event.consoleMessageReceived", event)) {
+                Object message = api.invoke("consoleMessageReceived.consoleMessage", event);
+                String level = level(api.invoke("consoleMessage.level", message));
+                String text = str(api.invoke("consoleMessage.message", message));
+                String source = api.has("consoleMessage.source") ? str(api.invoke("consoleMessage.source",
+                        message)) : null;
+                Object line = api.has("consoleMessage.lineNumber") ? api.invoke("consoleMessage.lineNumber",
+                        message) : null;
+                chars = (long) text.length() + (source == null ? 0 : source.length());
+                EventBudget.Verdict v = budget.spend(chars, System.nanoTime());
+                if (v == EventBudget.Verdict.STOP) {
+                    stopConsoleLater();
+                }
+                if (v != EventBudget.Verdict.PASS) {
+                    return;
+                }
+                queued = WebEvent.console(level, text, source == null || source.isEmpty() ? null : source,
+                        line instanceof Number ? ((Number) line).intValue() : 0);
+            }
+        } catch (ReflectiveException e) {
+            return; // an event that cannot be read is dropped
+        }
+        final Object task = queued;
+        final long cost = EventBudget.cost(chars);
+        if (!budget.admit(cost)) {
+            return;
+        }
+        try {
+            events.execute(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        onVendorEvent(task);
+                    } finally {
+                        budget.release(cost);
+                    }
+                }
+            });
+        } catch (RejectedExecutionException ignored) {
+            budget.release(cost); // detached
+        }
+    }
+
+    /** {@link #stopConsole} on the adapter's threads; never throws. */
+    private void stopConsoleLater() {
+        try {
+            adapter.threads.executor().execute(new Runnable() {
+                @Override
+                public void run() {
+                    stopConsole();
+                }
+            });
+        } catch (RejectedExecutionException ignored) {
+            // detached
+        }
+    }
+
+    /**
+     * Stops this browser's console capture (P2-L4-S1): the console subscription is cancelled, so that the adapter
+     * reads no console message of this browser any more, and {@link EventBudget#STOPPED_TEXT} is delivered once to
+     * the subscribers as a {@code warning}.
+     */
+    private void stopConsole() {
+        Object s;
+        synchronized (subscriptions) {
+            s = consoleSubscription;
+            consoleSubscription = null;
+            if (s != null) {
+                subscriptions.remove(s);
+            }
+        }
+        if (s != null) {
+            try {
+                api.invoke("subscription.unsubscribe", s);
+            } catch (ReflectiveException e) {
+                // already gone
+            }
+        }
+        if (detached) {
+            return;
+        }
+        try {
+            events.execute(new Runnable() {
+                @Override
+                public void run() {
+                    listeners.deliver(JxBrowserHandle.this, WebEvent.console("warning", EventBudget.STOPPED_TEXT, null,
+                            0));
+                }
+            });
+        } catch (RejectedExecutionException ignored) {
+            // detached
+        }
+    }
+
+    /**
+     * Resumes stopped console capture at a main-frame navigation (P2-L4-S1): at once when
+     * {@link EventBudget#RESUME_AFTER_MS} has passed since it stopped, else when it has; scheduled once.
+     */
+    private void scheduleResume() {
+        if (!resumeScheduled.compareAndSet(false, true)) {
+            return;
+        }
+        long delay = budget.resumeInMs(System.nanoTime());
+        if (delay < 0) {
+            resumeScheduled.set(false);
+            return;
+        }
+        try {
+            adapter.threads.schedule(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        adapter.threads.executor().execute(new Runnable() {
+                            @Override
+                            public void run() {
+                                resumeConsole();
+                            }
+                        });
+                    } catch (RejectedExecutionException e) {
+                        resumeScheduled.set(false);
+                    }
+                }
+            }, delay);
+        } catch (RejectedExecutionException e) {
+            resumeScheduled.set(false);
+        }
+    }
+
+    /** Subscribes to the console again with a full budget (P2-L4-S1). */
+    private void resumeConsole() {
+        resumeScheduled.set(false);
+        if (closed || detached || !budget.stopped()) {
+            return;
+        }
+        synchronized (subscriptions) {
+            if (!observing || observerProxy == null || consoleSubscription != null) {
+                budget.resume(System.nanoTime());
+                return;
+            }
+            budget.resume(System.nanoTime());
+            try {
+                consoleSubscription = api.invoke("browser.on", browser, api.type("event.consoleMessageReceived"),
+                        observerProxy);
+                subscriptions.add(consoleSubscription);
+            } catch (ReflectiveException e) {
+                // console events stay off for this browser
+            }
         }
     }
 
@@ -1283,6 +1443,7 @@ final class JxBrowserHandle implements WebBrowser {
             subs = new ArrayList<Object>(subscriptions);
             subscriptions.clear();
             observing = false;
+            consoleSubscription = null;
         }
         final Dimension o = resized ? originalSize : null;
         resized = false;

@@ -139,7 +139,9 @@ import java.util.stream.Stream;
  * both. The poller drains the tapped pages; {@link #close()} removes the taps it left. The library's {@code drain()}
  * empties the page's buffer, so the events a drain took are published by the drain operation itself, on the
  * Playwright thread: a drain that outlives the poll's 1 s bound (a page that stays busy) still publishes them when it
- * returns, and while it runs no further drain, and no other operation, is sent.
+ * returns, and while it runs no further drain, and no other operation, is sent. Every library call goes through the
+ * guard of {@link WebLib#boundedCallExpression} ({@link Scripts#call}, read by {@link Shapes#library}); a drain whose
+ * answer is refused as oversized ends that page's tap (security fix P2-L4-F2).
  *
  * <h2>Viewport overrides</h2>
  * {@code web.resize} sets a device-metrics override through the path's own {@code CDPSession} of the page ({@code
@@ -840,7 +842,7 @@ public final class CdpWebPath implements WebPath {
                     return onPw(s, primitive, sel, budgetMs, deadline, () -> {
                         Place at = place(s, sel, frameKey);
                         waitActionable(at.frame(), p, deadline);
-                        return Shapes.unwrap(primitive, at.frame().evaluate(script), refOf(s, at));
+                        return Shapes.library(primitive, at.frame().evaluate(script), refOf(s, at));
                     });
                 };
             }
@@ -863,7 +865,7 @@ public final class CdpWebPath implements WebPath {
                     Selection sel = select(s, p, deadline);
                     return onPw(s, primitive, sel, budgetMs, deadline, () -> {
                         Place at = place(s, sel, frameKey);
-                        return Shapes.unwrap(primitive, at.frame().evaluate(script), refOf(s, at));
+                        return Shapes.library(primitive, at.frame().evaluate(script), refOf(s, at));
                     });
                 };
             }
@@ -911,7 +913,7 @@ public final class CdpWebPath implements WebPath {
                     }
                     raw = place(s, sel, frameKey).frame().evaluate(script);
                 }
-                Object value = Shapes.unwrap(primitive, raw, refOf(s, at));
+                Object value = Shapes.library(primitive, raw, refOf(s, at));
                 if (!(value instanceof Map)) {
                     throw Shapes.error(primitive, ErrorCodes.INTERNAL_ERROR, "the page library returned no object",
                             Shapes.data("path", ID));
@@ -933,7 +935,7 @@ public final class CdpWebPath implements WebPath {
             Selection sel = select(s, p, deadline);
             Object[] result = onPw(s, primitive, sel, budgetMs, deadline, () -> {
                 Place at = place(s, sel, null);
-                Object value = Shapes.unwrap(primitive, at.page().evaluate(Scripts.call("tap", patterns, on)),
+                Object value = Shapes.library(primitive, at.page().evaluate(Scripts.call("tap", patterns, on)),
                         refOf(s, at));
                 Tap old = s.taps.remove(at.page());
                 if (old != null) {
@@ -1485,14 +1487,43 @@ public final class CdpWebPath implements WebPath {
                 continue;
             }
             try {
-                Object value = Shapes.unwrap("web.tap", page.evaluate(Scripts.call("drain", WebLib.DRAIN_CHARS)),
+                Object value = Shapes.library("web.tap", page.evaluate(Scripts.call("drain", WebLib.DRAIN_CHARS)),
                         e.getValue().ref);
                 out.add(new Drained(e.getValue(), page.url(), value));
-            } catch (AgentRpcException | PlaywrightException x) {
+            } catch (AgentRpcException x) {
+                if (Shapes.isOversized(x)) {
+                    // P2-L4-F2: an oversized drain ends the page's tap, logged once; the next web.tap arms it again.
+                    Tap tap = e.getValue(); // read before the removal: an IdentityHashMap entry is undefined after it
+                    it.remove();
+                    endTap(page, tap);
+                } else {
+                    LOG.log(System.Logger.Level.DEBUG, "draining a tapped page failed: " + x.getMessage());
+                }
+            } catch (PlaywrightException x) {
                 LOG.log(System.Logger.Level.DEBUG, "draining a tapped page failed: " + x.getMessage());
             }
         }
         return out;
+    }
+
+    /**
+     * Ends a tap whose drain answer was refused as oversized (security fix P2-L4-F2; the caller removed it from the
+     * session): its init script is removed and the tap is cleared in the page's current document, best effort, and a
+     * warning is logged; so a page that answers oversized drains costs one bounded answer per {@code web.tap}, not one
+     * every {@value #POLL_PERIOD_MS} ms. Call only on the Playwright thread.
+     */
+    private static void endTap(Page page, Tap tap) {
+        closeQuietly(tap.initScript);
+        try {
+            if (!page.isClosed()) {
+                page.evaluate(Scripts.call("tap", List.of(), tap.target));
+            }
+        } catch (PlaywrightException x) {
+            LOG.log(System.Logger.Level.DEBUG, "a tap could not be cleared: " + x.getMessage());
+        }
+        LOG.log(System.Logger.Level.WARNING, "the tap of browser " + tap.ref + " was removed: a drain answer exceeded "
+                + WebLib.MAX_JSON_CHARS + " characters (a page may replace the script library); the next web.tap "
+                + "arms it again");
     }
 
     private static void pump(Session s) {

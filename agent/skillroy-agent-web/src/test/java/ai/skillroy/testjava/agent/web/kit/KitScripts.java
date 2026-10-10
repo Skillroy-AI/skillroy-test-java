@@ -63,6 +63,28 @@ public final class KitScripts {
             + "{value: 'set', configurable: true, enumerable: false}), 'set')";
     /** "string" while the document is the one {@link #DOCUMENT_MARK} marked, else "undefined". */
     public static final String DOCUMENT_MARK_NOW = "typeof window.__kitMark";
+    /**
+     * Item 13 (security fix P2-L4-F2): replaces the script library's slot with a library whose {@code drain} answers a
+     * string of 50 Mi characters and whose {@code stringify} hands it on as it is; evaluates to "replaced".
+     */
+    public static final String REPLACED_LIBRARY_BIG = "(Object.defineProperty(window, Symbol.for('skillroy'), "
+            + "{value: {stringify: function (v) { return v; }, drain: function () { return new Array(52428801)"
+            + ".join('x'); }}, configurable: true}), 'replaced')";
+    /**
+     * Item 13: replaces the slot with a library whose {@code drain} throws an error with a message of 10 Mi
+     * characters; evaluates to "replaced".
+     */
+    public static final String REPLACED_LIBRARY_THROWS = "(Object.defineProperty(window, Symbol.for('skillroy'), "
+            + "{value: {stringify: function (v) { return v; }, drain: function () { throw new Error(new Array(10485761)"
+            + ".join('m')); }}, configurable: true}), 'replaced')";
+    /** Item 13: removes whatever library the slot holds; evaluates to "restored". */
+    public static final String RESTORE_LIBRARY = "(delete window[Symbol.for('skillroy')], 'restored')";
+    /**
+     * Item 14 (security fix P2-L4-S1): the page logs 24 strings of 1 Mi characters each, at once, more than a
+     * browser's console budget; evaluates to 24.
+     */
+    public static final String CONSOLE_FLOOD = "(function () { var s = new Array(1048577).join('x'); "
+            + "for (var i = 0; i < 24; i++) { console.log(s); } return 24; })()";
 
     private KitScripts() {
     }

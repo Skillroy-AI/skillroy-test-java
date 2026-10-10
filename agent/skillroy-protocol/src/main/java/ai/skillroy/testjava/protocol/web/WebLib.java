@@ -145,11 +145,56 @@ public final class WebLib {
 
     /**
      * The {@code maxChars} both paths pass to the library's {@code drain} (S43): a drain answers at most about this
-     * much JSON and keeps the rest for the next one ({@code more: true}).
+     * much JSON and keeps the rest for the next one ({@code more: true}). (Security fix P2-L4-F2: half of
+     * {@link #MAX_JSON_CHARS} less a margin, so that the {@code stringify} text of a genuine drain, in which the JSON's
+     * quotes and backslashes are escaped once more, stays within the bound of {@link #boundedCallExpression}.)
      */
-    public static final int DRAIN_CHARS = 900000;
+    public static final int DRAIN_CHARS = 500000;
+
+    /**
+     * The prefix of every answer of {@link #boundedCallExpression} that is not the library's text (security fix
+     * P2-L4-F2): {@code "#skillroy-guard:oversized"} (a text longer than {@link #MAX_JSON_CHARS}),
+     * {@code "#skillroy-guard:not text"} (the library's {@code stringify} returned no primitive string) and
+     * {@code "#skillroy-guard:threw:<n>:<message><stack>"} ({@code <n>} the message's length in UTF-16 code units).
+     * The guard always answers a primitive string, so that a channel that carries strings only (a JxBrowser frame's
+     * {@code executeJavaScript}) carries it without a {@code stringify} of the page's.
+     */
+    public static final String GUARD_PREFIX = "#skillroy-guard:";
 
     private static final String LIB = "window[" + SLOT + "]";
+
+    /**
+     * The guard of {@link #boundedCallExpression} up to the library call (security fix P2-L4-F2): the call's text is
+     * evaluated inside a {@code try}.
+     */
+    private static final String BOUND_OPEN = "(function(){var t,m,s;try{t=";
+
+    /**
+     * The guard after the library call. A thrown value becomes {@code "#skillroy-guard:threw:<n>:<message><stack>"}:
+     * the message {@code "<name>: <message>"} for an error object and {@code String(value)} otherwise, the stack the
+     * error's own; each is cut with the string's {@code slice} and then checked by its primitive {@code length}, which
+     * page script cannot change, and replaced by a fixed text (the message) or "" (the stack) when it is still not a
+     * string within its bound. The call's value is returned only when it is a primitive string of at most
+     * {@link #MAX_JSON_CHARS} code units; otherwise {@code "#skillroy-guard:oversized"} or
+     * {@code "#skillroy-guard:not text"}. The answer is built from {@code typeof}, a primitive string's
+     * {@code length} and the {@code +} of primitives only, none of which page script can replace, so what crosses
+     * the channel is bounded whatever the page did to the library's slot or to the built-ins.
+     */
+    private static final String BOUND_CLOSE = ";}catch(e){"
+            + "try{m=e!==null&&typeof e===\"object\"&&typeof e.message===\"string\""
+            + "?(typeof e.name===\"string\"&&e.name?e.name:\"Error\")+\": \"+e.message:String(e);}"
+            + "catch(x){m=\"a value that cannot be converted to text was thrown\";}"
+            + "try{s=e!==null&&typeof e===\"object\"&&typeof e.stack===\"string\"?e.stack:\"\";}catch(x){s=\"\";}"
+            + "if(typeof m===\"string\"&&m.length>" + MAX_ERROR_CHARS + "){try{m=m.slice(0," + MAX_ERROR_CHARS
+            + ");}catch(x){}}"
+            + "if(typeof m!==\"string\"||m.length>" + MAX_ERROR_CHARS
+            + "){m=\"a thrown value whose text cannot be bounded\";}"
+            + "if(typeof s===\"string\"&&s.length>" + MAX_STACK_CHARS + "){try{s=s.slice(0," + MAX_STACK_CHARS
+            + ");}catch(x){}}"
+            + "if(typeof s!==\"string\"||s.length>" + MAX_STACK_CHARS + "){s=\"\";}"
+            + "return \"" + GUARD_PREFIX + "threw:\"+m.length+\":\"+m+s;}"
+            + "if(typeof t!==\"string\"){return \"" + GUARD_PREFIX + "not text\";}"
+            + "return t.length>" + MAX_JSON_CHARS + "?\"" + GUARD_PREFIX + "oversized\":t;})()";
 
     /**
      * The guard of {@link #flagExpression} up to its argument, the expression as a JSON string. One function
@@ -237,6 +282,35 @@ public final class WebLib {
      */
     public static String callJsonExpression(String function, Object... args) {
         return "(function(){" + source() + ";return " + LIB + ".stringify(" + invocation(function, args) + ");})()";
+    }
+
+    /**
+     * As {@link #callJsonExpression}, inside a guard that bounds the answer at its source (security fix P2-L4-F2,
+     * phase4-contracts.md 4.6): the expression evaluates to the {@code stringify} text of the function's value when
+     * that is a primitive string of at most {@link #MAX_JSON_CHARS} UTF-16 code units, else to a short text of
+     * {@link #GUARD_PREFIX}; a thrown value becomes such a text too, with its message (at most
+     * {@link #MAX_ERROR_CHARS}) and its stack (at most {@link #MAX_STACK_CHARS}). The answer is always a primitive
+     * string. A page that
+     * replaced the library chooses the value, never the size of what crosses the channel: the guard is the caller's
+     * own text, and it trusts only {@code typeof} and a primitive string's {@code length}. Both web paths evaluate
+     * every library call through it and read the answer with {@link Bounded#of}; the text is synchronous (no
+     * promise).
+     *
+     * @throws IllegalArgumentException if {@code function} is not one of {@link #FUNCTIONS}
+     * @throws ai.skillroy.testjava.protocol.JsonException if an argument holds NaN, Infinity or a cycle
+     */
+    public static String boundedCallExpression(String function, Object... args) {
+        return BOUND_OPEN + callJsonExpression(function, args) + BOUND_CLOSE;
+    }
+
+    /** The text of {@link #boundedCallExpression} before the library call (for a fake that recognises it). */
+    public static String boundedOpen() {
+        return BOUND_OPEN;
+    }
+
+    /** The text of {@link #boundedCallExpression} after the library call (for a fake that recognises it). */
+    public static String boundedClose() {
+        return BOUND_CLOSE;
     }
 
     /** {@code window[SLOT].function(<args as JSON>)}, after checking the name. */
@@ -459,6 +533,143 @@ public final class WebLib {
         }
         data.put("error", code);
         return new RpcError(ErrorCodes.INTERNAL_ERROR, "script library error " + code, data);
+    }
+
+    /**
+     * What a {@link #boundedCallExpression} answered, read on the receiving side (security fix P2-L4-F2): the library's
+     * value, a thrown script error, or a refusal. The guard's own bounds are checked again here, since a channel
+     * delivers whatever arrives: a text longer than {@link #MAX_JSON_CHARS}, one the library marked {@code truncated},
+     * and one whose {@code json} exceeds {@link #MAX_JSON_CHARS} are {@link Kind#OVERSIZED}; a text that is not the
+     * {@code stringify} shape, or whose {@code json} does not parse, is {@link Kind#NOT_TEXT}. Immutable.
+     */
+    public static final class Bounded {
+
+        /** The four answers of the guard. */
+        public enum Kind {
+            /** The library's value ({@link #value()}). */
+            VALUE,
+            /** The call threw ({@link #message()}, {@link #stack()}). */
+            SCRIPT_ERROR,
+            /** The text exceeded {@link #MAX_JSON_CHARS}, or the library cut it. */
+            OVERSIZED,
+            /** The library answered no {@code stringify} text. */
+            NOT_TEXT
+        }
+
+        private final Kind kind;
+        private final Object value;
+        private final String message;
+        private final String stack;
+
+        private Bounded(Kind kind, Object value, String message, String stack) {
+            this.kind = kind;
+            this.value = value;
+            this.message = message;
+            this.stack = stack;
+        }
+
+        /**
+         * Reads an answer: the string the guard returned, as the channel's value (a {@link #GUARD_PREFIX} text, or
+         * the {@code stringify} text); anything else is {@link Kind#NOT_TEXT}.
+         */
+        public static Bounded of(Object answer) {
+            if (!(answer instanceof String)) {
+                return new Bounded(Kind.NOT_TEXT, null, null, null);
+            }
+            String text = (String) answer;
+            if (text.startsWith(GUARD_PREFIX)) {
+                return ofGuard(text.substring(GUARD_PREFIX.length()));
+            }
+            return ofText(text);
+        }
+
+        /** A text of the guard's own, after its prefix. */
+        private static Bounded ofGuard(String rest) {
+            if ("oversized".equals(rest)) {
+                return new Bounded(Kind.OVERSIZED, null, null, null);
+            }
+            String threw = "threw:";
+            if (rest.startsWith(threw)) {
+                int colon = rest.indexOf(':', threw.length());
+                if (colon > threw.length()) {
+                    try {
+                        int n = Integer.parseInt(rest.substring(threw.length(), colon));
+                        int from = colon + 1;
+                        if (n >= 0 && from + n <= rest.length()) {
+                            String message = rest.substring(from, from + n);
+                            return new Bounded(Kind.SCRIPT_ERROR, null, scriptMessage(message.isEmpty()
+                                    ? "the script threw" : message), scriptStack(rest.substring(from + n)));
+                        }
+                    } catch (NumberFormatException e) {
+                        // not the guard's form
+                    }
+                }
+            }
+            return new Bounded(Kind.NOT_TEXT, null, null, null);
+        }
+
+        private static Bounded ofText(String text) {
+            if (text.length() > MAX_JSON_CHARS) {
+                return new Bounded(Kind.OVERSIZED, null, null, null);
+            }
+            Map<String, Object> wrapper;
+            try {
+                wrapper = Json.parseObject(text);
+            } catch (RuntimeException e) {
+                return new Bounded(Kind.NOT_TEXT, null, null, null);
+            }
+            Object json = wrapper.get("json");
+            if (Boolean.TRUE.equals(wrapper.get("truncated"))
+                    || json instanceof String && ((String) json).length() > MAX_JSON_CHARS) {
+                return new Bounded(Kind.OVERSIZED, null, null, null);
+            }
+            if (!(json instanceof String)) {
+                return new Bounded(Kind.NOT_TEXT, null, null, null);
+            }
+            try {
+                return new Bounded(Kind.VALUE, Json.parse((String) json), null, null);
+            } catch (RuntimeException e) {
+                return new Bounded(Kind.NOT_TEXT, null, null, null);
+            }
+        }
+
+        /** Which answer this is. */
+        public Kind kind() {
+            return kind;
+        }
+
+        /** The library's value ({@link Kind#VALUE}); null otherwise. */
+        public Object value() {
+            return value;
+        }
+
+        /** The thrown value's message, cut by {@link #scriptMessage} ({@link Kind#SCRIPT_ERROR}); null otherwise. */
+        public String message() {
+            return message;
+        }
+
+        /** The thrown value's stack, cut by {@link #scriptStack} ({@link Kind#SCRIPT_ERROR}); null otherwise. */
+        public String stack() {
+            return stack;
+        }
+
+        /**
+         * The error of a refusal, the same on both paths: {@link Kind#OVERSIZED} is {@link #oversized} of the page
+         * library's value and {@link #MAX_JSON_CHARS}; {@link Kind#NOT_TEXT} is {@code INTERNAL_ERROR} with
+         * {@code data {reason: "not library text"}}; null for a value or a script error.
+         */
+        public RpcError refusal() {
+            if (kind == Kind.OVERSIZED) {
+                return oversized("the page library's value", MAX_JSON_CHARS);
+            }
+            if (kind == Kind.NOT_TEXT) {
+                Map<String, Object> data = new LinkedHashMap<String, Object>();
+                data.put("reason", "not library text");
+                return new RpcError(ErrorCodes.INTERNAL_ERROR, "the page's script library answered no JSON text of"
+                        + " its value (a page may replace the script library)", data);
+            }
+            return null;
+        }
     }
 
     private static String notFoundMessage(Map<String, Object> data) {

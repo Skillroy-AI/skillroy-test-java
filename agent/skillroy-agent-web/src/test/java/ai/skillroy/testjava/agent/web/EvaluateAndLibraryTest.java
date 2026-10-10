@@ -180,31 +180,31 @@ class EvaluateAndLibraryTest {
         try (Harness h = harness()) {
             Map<String, Object> click = h.ctx.map("web.dom.click", Harness.args("selector", "#go"));
             assertEquals("DOM", click.get("fidelity"));
-            assertSent(WebLib.callExpression("domClick", Harness.args("selector", "#go", "expectVisible",
+            assertSent(WebLib.boundedCallExpression("domClick", Harness.args("selector", "#go", "expectVisible",
                     Boolean.TRUE)));
             Map<String, Object> regex = Harness.args("regex", "^Go", "ignoreCase", Boolean.TRUE);
             h.ctx.error("web.dom.click", Harness.args("role", "button", "name", regex, "index", Long.valueOf(1),
                     "expectVisible", Boolean.FALSE));
-            assertSent(WebLib.callExpression("domClick", Harness.args("role", "button", "name", regex, "index",
+            assertSent(WebLib.boundedCallExpression("domClick", Harness.args("role", "button", "name", regex, "index",
                     Long.valueOf(1), "expectVisible", Boolean.FALSE)));
             Map<String, Object> fill = h.ctx.map("web.dom.fill", Harness.args("selector", "#go", "text", "saw",
                     "enter", Boolean.TRUE));
             assertEquals(Long.valueOf(3), fill.get("typed"));
             assertFalse(Json.write(fill).contains("saw"), "the text is never echoed");
-            assertSent(WebLib.callExpression("domFill", Harness.args("selector", "#go", "expectVisible", Boolean.TRUE,
-                    "text", "saw", "clear", Boolean.TRUE, "enter", Boolean.TRUE)));
+            assertSent(WebLib.boundedCallExpression("domFill", Harness.args("selector", "#go", "expectVisible",
+                    Boolean.TRUE, "text", "saw", "clear", Boolean.TRUE, "enter", Boolean.TRUE)));
             Map<String, Object> text = h.ctx.map("web.dom.text", Harness.args("maxChars", Long.valueOf(500000)));
             assertEquals(Boolean.FALSE, text.get("truncated"));
-            assertSent(WebLib.callExpression("domText", Harness.args("selector", "body", "maxChars",
+            assertSent(WebLib.boundedCallExpression("domText", Harness.args("selector", "body", "maxChars",
                     Long.valueOf(100000))));
             Map<String, Object> aria = h.ctx.map("web.ariaSnapshot", Harness.args("maxNodes", Long.valueOf(99999),
                     "interestingOnly", Boolean.FALSE));
             assertTrue(aria.containsKey("nodes"));
-            assertSent(WebLib.callExpression("aria", null, Long.valueOf(20000), Boolean.FALSE));
+            assertSent(WebLib.boundedCallExpression("aria", null, Long.valueOf(20000), Boolean.FALSE));
             Map<String, Object> detail = Harness.args("item", "saw", "qty", Long.valueOf(2));
             assertEquals(Boolean.TRUE, h.ctx.map("web.dispatchEvent", Harness.args("name", "desk.setItem",
                     "detail", detail, "target", "#go")).get("dispatched"));
-            assertSent(WebLib.callExpression("dispatch", Harness.args("target", "#go", "name", "desk.setItem",
+            assertSent(WebLib.boundedCallExpression("dispatch", Harness.args("target", "#go", "name", "desk.setItem",
                     "detail", detail)));
         }
     }
@@ -223,7 +223,7 @@ class EvaluateAndLibraryTest {
             browser.responder = new ScriptedBrowser.Responder() {
                 @Override
                 public CompletableFuture<String> answer(WebEval eval) {
-                    return CompletableFuture.completedFuture(Json.write(ambiguous));
+                    return CompletableFuture.completedFuture(Harness.guarded(ambiguous));
                 }
             };
             RpcException amb = h.ctx.error("web.dom.click", Harness.args("role", "button", "name", "Go"));
@@ -234,7 +234,7 @@ class EvaluateAndLibraryTest {
             browser.responder = new ScriptedBrowser.Responder() {
                 @Override
                 public CompletableFuture<String> answer(WebEval eval) {
-                    return CompletableFuture.completedFuture(Json.write(hidden));
+                    return CompletableFuture.completedFuture(Harness.guarded(hidden));
                 }
             };
             RpcException invisible = h.ctx.error("web.dom.fill", Harness.args("selector", "#go", "text", "x"));
@@ -329,13 +329,45 @@ class EvaluateAndLibraryTest {
                     Map<String, Object> value = new LinkedHashMap<String, Object>();
                     value.put("text", big);
                     value.put("truncated", Boolean.FALSE);
-                    return CompletableFuture.completedFuture(Json.write(value));
+                    return CompletableFuture.completedFuture(Harness.guarded(value));
                 }
             };
             RpcException oversized = h.ctx.error("web.dom.text", Harness.args());
             assertEquals(ErrorCodes.INTERNAL_ERROR, oversized.error().code());
-            assertEquals("oversized", oversized.error().data().get("reason"));
+            assertEquals("oversized", oversized.error().data().get("reason"), "re-checked on the receiving side");
             assertTrue(oversized.error().message().length() < 300, "never the text");
+
+            // P2-L4-F2: the guard's own answers: its refusal, a script error it bounded, and no library text at all.
+            browser.responder = new ScriptedBrowser.Responder() {
+                @Override
+                public CompletableFuture<String> answer(WebEval eval) {
+                    return CompletableFuture.completedFuture(Harness.guardedText(WebLib.GUARD_PREFIX + "oversized"));
+                }
+            };
+            RpcException refused = h.ctx.error("web.ariaSnapshot", Harness.args());
+            assertEquals("oversized", refused.error().data().get("reason"));
+            assertEquals(BrowserIndexTest.ref(h, browser), refused.error().data().get("browser"));
+            browser.responder = new ScriptedBrowser.Responder() {
+                @Override
+                public CompletableFuture<String> answer(WebEval eval) {
+                    // A channel that delivers more than the guard lets through is cut here as well.
+                    String message = "Error: " + repeat('m', 10 * 1024) + "\nnext";
+                    return CompletableFuture.completedFuture(Harness.guardedText(WebLib.GUARD_PREFIX + "threw:"
+                            + message.length() + ":" + message + repeat('s', 100 * 1024)));
+                }
+            };
+            RpcException threw = h.ctx.error("web.dom.click", Harness.args("selector", "#go"));
+            assertEquals(ErrorCodes.SCRIPT_ERROR, threw.error().code());
+            assertEquals(WebLib.MAX_ERROR_CHARS, ((String) threw.error().data().get("message")).length());
+            assertEquals(WebLib.MAX_STACK_CHARS, ((String) threw.error().data().get("stack")).length());
+            browser.responder = new ScriptedBrowser.Responder() {
+                @Override
+                public CompletableFuture<String> answer(WebEval eval) {
+                    return CompletableFuture.completedFuture(Json.write(Harness.args("text", "raw")));
+                }
+            };
+            assertEquals("not library text", h.ctx.error("web.dom.text", Harness.args()).error().data()
+                    .get("reason"), "a value that did not pass the guard is refused");
 
             browser.responder = new ScriptedBrowser.Responder() {
                 @Override

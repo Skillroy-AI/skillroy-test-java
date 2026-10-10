@@ -642,7 +642,9 @@ final class WebPrimitives {
     private Object library(Invocation inv, final Entry e, String primitive, boolean read, String function,
                            Object... args) {
         final String frame = inv.args().str("frame");
-        final String expression = WebLib.callExpression(function, args);
+        // P2-L4-F2: the call goes through the guard that bounds the answer in the page, so that a page that replaced
+        // the library chooses the value but never the size of what crosses the channel into this JVM.
+        final String expression = WebLib.boundedCallExpression(function, args);
         final long budget = Await.budget(inv);
         Await.Attempt<String> attempt = new Await.Attempt<String>() {
             @Override
@@ -652,11 +654,8 @@ final class WebPrimitives {
         };
         String json = read ? Await.read(attempt, budget, e, primitive, WebCapabilities.EVALUATE)
                 : Await.get(attempt.start(), budget, e, primitive, WebCapabilities.EVALUATE);
-        if (json != null && json.length() > WebLib.MAX_JSON_CHARS) {
-            // S43: a library value is at most MAX_JSON_CHARS of JSON; a page that replaced the library is refused.
-            throw Errors.oversized(e.ref, "the page library's value", WebLib.MAX_JSON_CHARS);
-        }
-        Object value = parse(e, json);
+        // S43: a library value is at most MAX_JSON_CHARS of JSON; a page that replaced the library is refused.
+        Object value = boundedValue(e, parse(e, json));
         RpcError error = WebLib.errorOf(value);
         if (error != null) {
             Map<String, Object> data = new LinkedHashMap<String, Object>();
@@ -984,10 +983,30 @@ final class WebPrimitives {
     }
 
     /**
+     * The library's value in the answer of a {@link WebLib#boundedCallExpression} (security fix P2-L4-F2): a thrown
+     * value is {@code SCRIPT_ERROR}, a refusal ({@code oversized}, or no library text) is the shared
+     * {@code INTERNAL_ERROR} with the browser named.
+     */
+    static Object boundedValue(Entry e, Object answer) {
+        WebLib.Bounded b = WebLib.Bounded.of(answer);
+        switch (b.kind()) {
+            case VALUE:
+                return b.value();
+            case SCRIPT_ERROR:
+                throw Errors.script(e.ref, b.message(), b.stack());
+            default:
+                RpcError refusal = b.refusal();
+                Map<String, Object> data = new LinkedHashMap<String, Object>(refusal.data());
+                data.put("browser", e.ref);
+                throw new RpcException(refusal.code(), refusal.message(), data);
+        }
+    }
+
+    /**
      * The value of an adapter's JSON text; a text longer than {@link WebLib#MAX_CHANNEL_CHARS} is refused before it is
      * parsed (security fix S43: a third-party adapter may not bound its channel).
      */
-    private static Object parse(Entry e, String json) {
+    static Object parse(Entry e, String json) {
         if (json == null) {
             return null;
         }
