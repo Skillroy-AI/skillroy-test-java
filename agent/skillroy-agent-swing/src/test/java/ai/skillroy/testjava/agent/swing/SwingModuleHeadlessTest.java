@@ -37,6 +37,7 @@ import java.util.Map;
 import java.util.ServiceLoader;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -61,13 +62,16 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 class SwingModuleHeadlessTest {
 
     private static final List<String> NAMES = Arrays.asList("swing.capture", "swing.click", "swing.dialogs",
-            "swing.dismiss", "swing.edtState", "swing.find", "swing.key", "swing.settle", "swing.snapshot",
-            "swing.type", "swing.windows");
+            "swing.dismiss", "swing.edtState", "swing.find", "swing.hitTest", "swing.key", "swing.pointer",
+            "swing.rendering", "swing.settle", "swing.snapshot", "swing.type", "swing.windows");
     private static final Set<String> MUTATING = new HashSet<String>(Arrays.asList("swing.click", "swing.dismiss",
-            "swing.key", "swing.type"));
+            "swing.key", "swing.pointer", "swing.type"));
     private static final List<String> DISPLAY_CAPS = Arrays.asList(SwingModule.CAP_TREE,
             SwingModule.CAP_CLICK_ACTION, SwingModule.CAP_CLICK_COMPONENT, SwingModule.CAP_CLICK_DISPATCH,
-            SwingModule.CAP_CAPTURE_PAINT);
+            SwingModule.CAP_CAPTURE_PAINT, SwingModule.CAP_HITTEST, SwingModule.CAP_POINTER_ROUTED,
+            SwingModule.CAP_CAPTURE_SCREEN);
+    private static final List<String> ROBOT_CAPS = Arrays.asList(SwingModule.CAP_POINTER_ROBOT,
+            SwingModule.CAP_CAPTURE_ROBOT);
 
     private FakeContext ctx;
     private SwingModule module;
@@ -102,6 +106,9 @@ class SwingModuleHeadlessTest {
         }
         assertEquals(NAMES, names);
         assertEquals(SwingModule.CAP_CAPTURE_PAINT, ctx.primitives.find("swing.capture").spec().capabilityId());
+        assertEquals(SwingModule.CAP_HITTEST, ctx.primitives.find("swing.hitTest").spec().capabilityId());
+        assertEquals(SwingModule.CAP_POINTER_ROUTED, ctx.primitives.find("swing.pointer").spec().capabilityId());
+        assertEquals(SwingModule.CAP_CAPTURE_PAINT, ctx.primitives.find("swing.rendering").spec().capabilityId());
         assertEquals(SwingModule.CAP_TREE, ctx.primitives.find("swing.click").spec().capabilityId());
         assertTrue(ctx.primitives.find("swing.settle").spec().timeoutMs() > SwingPrimitives.MAX_SETTLE_MS,
                 "settle's own timeoutMs governs, not the dispatcher default");
@@ -127,11 +134,75 @@ class SwingModuleHeadlessTest {
     }
 
     @Test
+    void withoutTheRobotOptionTheRobotIdsAreSetAtInstallAndNeverProbed() throws Exception {
+        final AtomicInteger constructed = new AtomicInteger();
+        FakeContext other = new FakeContext();
+        AtomicBoolean edt = new AtomicBoolean();
+        SwingModule plain = new SwingModule(edt::get, device -> {
+            constructed.incrementAndGet();
+            throw new IllegalStateException("never constructed without the option");
+        });
+        try {
+            plain.install(other);
+            for (String id : ROBOT_CAPS) {
+                Capability c = other.capabilities.get(id);
+                assertEquals(CapabilityState.UNAVAILABLE, c.state(), id);
+                assertEquals("robot: not enabled (agent option robot=true)", c.reason(), id);
+            }
+            edt.set(true);
+            plain.onTargetReady(other);
+            for (String id : ROBOT_CAPS) {
+                assertEquals("robot: not enabled (agent option robot=true)", other.capabilities.get(id).reason(), id);
+            }
+            assertEquals(0, constructed.get(), "no Robot is constructed without the option");
+            RpcException e = expectError(ErrorCodes.CAPABILITY_UNAVAILABLE, () -> other.call("swing.pointer",
+                    map("action", "CLICK", "by", map("id", "x"), "via", "ROBOT")));
+            assertTrue(String.valueOf(e.error().data().get("reason")).startsWith("robot: not enabled")
+                    || "headless".equals(e.error().data().get("reason")), e.toString());
+        } finally {
+            plain.uninstall();
+            other.shutdown();
+        }
+    }
+
+    @Test
+    void withTheRobotOptionTheIdsWaitForAwtAndOneProbeDeclaresThem() throws Exception {
+        final AtomicInteger constructed = new AtomicInteger();
+        FakeContext other = new FakeContext();
+        other.options.put("robot", "true");
+        AtomicBoolean edt = new AtomicBoolean();
+        SwingModule withRobot = new SwingModule(edt::get, device -> {
+            constructed.incrementAndGet();
+            throw new java.awt.AWTException("no XTEST here");
+        });
+        try {
+            withRobot.install(other);
+            withRobot.onTargetReady(other);
+            String waiting = SwingModule.headlessProperty() ? "headless" : "AWT not started by the application yet";
+            for (String id : ROBOT_CAPS) {
+                assertEquals(waiting, other.capabilities.get(id).reason(), id + " waits like the display ids");
+            }
+            assertEquals(0, constructed.get(), "never at install, never before checkAwt");
+            edt.set(true);
+            withRobot.onTargetReady(other);
+            boolean headless = GraphicsEnvironment.isHeadless();
+            for (String id : ROBOT_CAPS) {
+                Capability c = other.capabilities.get(id);
+                assertEquals(CapabilityState.UNAVAILABLE, c.state(), id);
+                assertEquals(headless ? "headless" : "robot: no XTEST here", c.reason(), id);
+            }
+            assertEquals(headless ? 0 : 1, constructed.get(), "one probe after checkAwt, none when headless");
+        } finally {
+            withRobot.uninstall();
+            other.shutdown();
+        }
+    }
+
+    @Test
     void headlessMakesEverySwingCapabilityUnavailable() throws Exception {
         assumeTrue(GraphicsEnvironment.isHeadless(), "headless JVM only");
         module.onTargetReady(ctx);
-        for (String id : Arrays.asList(SwingModule.CAP_TREE, SwingModule.CAP_CLICK_ACTION,
-                SwingModule.CAP_CLICK_COMPONENT, SwingModule.CAP_CLICK_DISPATCH, SwingModule.CAP_CAPTURE_PAINT)) {
+        for (String id : DISPLAY_CAPS) {
             Capability c = ctx.capabilities.get(id);
             assertEquals(CapabilityState.UNAVAILABLE, c.state(), id);
             assertEquals("headless", c.reason(), id);

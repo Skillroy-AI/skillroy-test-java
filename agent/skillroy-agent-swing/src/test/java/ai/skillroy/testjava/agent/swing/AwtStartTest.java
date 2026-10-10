@@ -52,8 +52,9 @@ class AwtStartTest {
 
     private static final long CHILD_TIMEOUT_MS = 300000; // the Linux image may run x86-64 under emulation
     private static final String NOT_STARTED = "AWT not started by the application yet";
-    private static final List<String> DISPLAY_CAPS = Arrays.asList("swing.capture.paint", "swing.click.action",
-            "swing.click.component", "swing.click.dispatch", "swing.tree");
+    private static final List<String> DISPLAY_CAPS = Arrays.asList("swing.capture.paint", "swing.capture.screen",
+            "swing.click.action", "swing.click.component", "swing.click.dispatch", "swing.hittest",
+            "swing.pointer.routed", "swing.tree");
 
     @TempDir
     File dir;
@@ -111,6 +112,11 @@ class AwtStartTest {
             assertEquals("UNAVAILABLE|" + reason, out.get("cap.before." + id), id);
         }
         assertEquals("UNAVAILABLE|opt-in rung, not implemented", out.get("cap.before.swing.click.robot"));
+        // Phase 7: without the agent option robot the Robot ids are set once at install and never probed
+        assertEquals("UNAVAILABLE|robot: not enabled (agent option robot=true)",
+                out.get("cap.before.swing.pointer.robot"));
+        assertEquals("UNAVAILABLE|robot: not enabled (agent option robot=true)",
+                out.get("cap.after.swing.capture.robot"));
         Map<String, Object> state = Json.parseObject(out.get("edtStateBefore"));
         assertEquals(map("dispatchThreadAlive", false, "edtBlocked", false, "awtStarted", false,
                 "modalDialogs", list(), "windowCount", 0L), new LinkedHashMap<String, Object>(state));

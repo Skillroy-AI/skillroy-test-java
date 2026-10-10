@@ -75,16 +75,22 @@ class LendingModuleTest {
         FakeAgentContext ctx = new FakeAgentContext(null, LoadMode.JAVAAGENT);
         LendingModule module = new LendingModule();
         assertEquals("lending", module.id());
-        assertEquals("0.1.0", module.version());
+        assertEquals("0.2.0", module.version());
         assertEquals(Collections.emptySet(), module.requires());
         module.install(ctx);
         try {
             for (Class<?> type : Arrays.<Class<?>>asList(ReadinessSource.class, ThreadPolicyProvider.class,
                     AppStateProvider.class, NameEnricher.class, LocatorResolver.class, ActionFirer.class,
                     DialogTextExtractor.class, DataSourceProvider.class, MaskPolicy.class, DeviceAdapter.class,
-                    RedactionKeys.class)) {
+                    RedactionKeys.class, ai.skillroy.testjava.agent.api.spi.RegionResolver.class,
+                    ai.skillroy.testjava.agent.api.spi.CaptureMask.class)) {
                 assertEquals(1, ctx.spi.all(type).size(), type.getSimpleName());
             }
+            assertEquals(13, ctx.spi.count(), "the eleven SPIs of Phase 6 and the two of Phase 7");
+            assertTrue(ctx.spi.first(ai.skillroy.testjava.agent.api.spi.RegionResolver.class)
+                    instanceof LendingRegions);
+            assertTrue(ctx.spi.first(ai.skillroy.testjava.agent.api.spi.CaptureMask.class)
+                    instanceof LendingCaptureMask);
             assertEquals(Arrays.asList("lending.access.check", "lending.deposit", "lending.input", "lending.limits",
                     "lending.loan", "lending.prompt", "lending.prompt.answer", "lending.slip", "lending.state",
                     "lending.waiver.evaluate"), names(ctx));

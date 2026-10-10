@@ -77,6 +77,8 @@ final class FakeContext implements AgentContext {
     final Caps capabilities = new Caps();
     final Spi spi = new Spi();
     final Log log = new Log();
+    /** The start-time options ({@code AgentContext.options()}); a test puts {@code robot=true} here before install. */
+    final Map<String, String> options = new java.util.concurrent.ConcurrentHashMap<String, String>();
 
     private final ExecutorService callers = Executors.newCachedThreadPool(daemon("skillroy-test-caller"));
 
@@ -92,7 +94,7 @@ final class FakeContext implements AgentContext {
 
     @Override
     public Map<String, String> options() {
-        return Collections.emptyMap();
+        return Collections.unmodifiableMap(new HashMap<String, String>(options));
     }
 
     @Override

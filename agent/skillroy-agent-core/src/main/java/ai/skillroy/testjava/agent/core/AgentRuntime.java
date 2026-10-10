@@ -375,6 +375,9 @@ public final class AgentRuntime implements AutoCloseable {
         out.put("httpIdleTimeoutMs", String.valueOf(DEFAULT_HTTP_IDLE_TIMEOUT_MS));
         out.put("allowFailedModules", "false");
         out.put("requireProductionMarker", "false");
+        // Phase 7 (A65, phase7-contracts.md 3.4): the operator's consent that the Swing module may take the real
+        // pointer through java.awt.Robot; the module reads it from ctx.options(), never through the live fallback
+        out.put("robot", "false");
         if (given != null) {
             for (Map.Entry<String, String> entry : given.entrySet()) {
                 if (entry.getKey() != null && entry.getValue() != null) {
@@ -400,6 +403,7 @@ public final class AgentRuntime implements AutoCloseable {
         booleanOption(out, "readOnly");
         booleanOption(out, "allowFailedModules");
         booleanOption(out, "requireProductionMarker");
+        booleanOption(out, "robot");
         if (out.get("discoveryDir").isEmpty()) {
             throw new IllegalArgumentException("option discoveryDir must not be empty");
         }

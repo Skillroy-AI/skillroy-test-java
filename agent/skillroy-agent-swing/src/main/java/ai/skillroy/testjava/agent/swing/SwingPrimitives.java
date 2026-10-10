@@ -27,9 +27,10 @@ import ai.skillroy.testjava.protocol.JsonView;
 
 import java.awt.Component;
 import java.awt.Dialog;
+import java.awt.Point;
+import java.awt.Rectangle;
 import java.awt.Window;
 import java.awt.event.WindowEvent;
-import java.awt.image.BufferedImage;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Collections;
@@ -75,14 +76,19 @@ final class SwingPrimitives {
     private final Clicks clicks;
     private final Typing typing;
     private final EdtWatch watch;
+    private final RecentCaptures captures = new RecentCaptures();
+    private final Pointer pointer;
+    private final RobotPath robot;
 
-    private SwingPrimitives(AgentContext ctx, Windows windows, WindowTap tap, AwtState awt) {
+    SwingPrimitives(AgentContext ctx, Windows windows, WindowTap tap, AwtState awt, RobotFactory robotFactory) {
         this.ctx = ctx;
         this.windows = windows;
         this.tap = tap;
         this.clicks = new Clicks(ctx, windows);
         this.typing = new Typing(ctx, windows);
         this.watch = new EdtWatch(ctx, tap, awt);
+        this.pointer = new Pointer(ctx, windows, captures);
+        this.robot = new RobotPath(ctx, windows, pointer, captures, robotFactory);
     }
 
     /**
@@ -90,19 +96,45 @@ final class SwingPrimitives {
      * when invoked, and the dispatcher invokes the AWT-dependent ones only once their capability is available.
      */
     static List<Primitive> create(AgentContext ctx, Windows windows, WindowTap tap, AwtState awt) {
-        return new SwingPrimitives(ctx, windows, tap, awt).all();
+        return new SwingPrimitives(ctx, windows, tap, awt, RobotFactory.DEFAULT).all();
     }
 
-    private List<Primitive> all() {
+    /** The Robot path (the module declares its capabilities through it after {@code checkAwt}). */
+    RobotPath robot() {
+        return robot;
+    }
+
+    /** The capture geometries kept (for tests). */
+    RecentCaptures captures() {
+        return captures;
+    }
+
+    /** Every primitive of the module, in name order. */
+    List<Primitive> all() {
         List<Primitive> list = new ArrayList<Primitive>();
         list.add(Primitives.of(PrimitiveSpec.builder("swing.capture")
                 .description("PAINT capture of a window or component (printAll into an image; works when the "
-                        + "window is covered). Default target: the active window, else the topmost modal dialog, "
-                        + "else the first showing window. Scaled down to fit 4096 x 4096. A component whose printing "
-                        + "throws (an embedded browser's GL canvas) is painted as a placeholder rectangle and listed "
-                        + "in 'skipped'.")
-                .param("target", "string", false, "ref of the window or component to capture")
-                .param("mode", "string", false, "PAINT (default; the only mode in this version)")
+                        + "window is covered); a window is painted from its root pane, so no decoration is in the "
+                        + "image. Default target: the active window, else the topmost modal dialog, else the first "
+                        + "showing window. Redacted by default: password fields and the components a CaptureMask "
+                        + "names are blanked grey and listed in 'redacted'. Scopes WINDOW, COMPONENT, REGION and "
+                        + "SCREEN (every window of the JVM composited in an assumed stacking order). The result "
+                        + "says where its pixels lie (space, window, origin, scale: pixel (px, py) lies at origin + "
+                        + "p / scale), the windows and non-Swing surfaces in it, the carets, the focus and a hash of "
+                        + "the raster; with annotateRefs the marks' geometry and labels (nothing is drawn). At most "
+                        + "4096 pixels a side. A component whose printing throws is painted as a placeholder and "
+                        + "listed in 'skipped'. Mode ROBOT is a screen capture of the glass for a person's evidence.")
+                .param("target", "string|object", false, "ref of the window or component (or a locator object)")
+                .param("by", "object", false, "locator of the window or component (instead of target)")
+                .param("mode", "string", false, "PAINT (default) or ROBOT (a person's screen capture; needs "
+                        + "swing.capture.robot)")
+                .param("scope", "string", false, "WINDOW (default for a window), COMPONENT (default otherwise), "
+                        + "REGION or SCREEN")
+                .param("region", "object|string", false, "REGION: {x, y, w, h} in the target's own coordinates, or "
+                        + "a region id a RegionResolver knows")
+                .param("scale", "number", false, "image pixels per user-space pixel, 0.25 to 4 (default 1)")
+                .param("redact", "boolean", false, "blank masked components (default true)")
+                .param("annotateRefs", "boolean", false, "answer the marks' geometry and labels (default false)")
                 .capability(SwingModule.CAP_CAPTURE_PAINT).build(), new Primitives.Body() {
                     @Override
                     public Object invoke(Invocation inv) throws Exception {
@@ -191,6 +223,23 @@ final class SwingPrimitives {
                         return find(inv);
                     }
                 }));
+        list.add(Primitives.of(PrimitiveSpec.builder("swing.hitTest")
+                .description("The component under a point (a capture's image coordinates, a window's or the "
+                        + "screen's), or a component named by ref or locator: the deepest component, what AWT would "
+                        + "deliver a mouse event to (inferred), the wheel target, the point inside it, locator "
+                        + "candidates each checked to match exactly that component, the table or list row, whether "
+                        + "an ActionFirer fires it, its RegionResolver region, the surface (SWING, WEB, HEAVYWEIGHT, "
+                        + "NONE), the windows of the JVM covering the point and the modal blocker. Read-only.")
+                .param("point", "object", false, "{x, y} in 'space'")
+                .param("space", "object|string", false, "{captureId}, {window: ref} or SCREEN")
+                .param("target", "string|object", false, "instead of a point: ref of the component (or a locator)")
+                .param("by", "object", false, "instead of a point: locator of the component")
+                .capability(SwingModule.CAP_HITTEST).build(), new Primitives.Body() {
+                    @Override
+                    public Object invoke(Invocation inv) throws Exception {
+                        return hitTest(inv);
+                    }
+                }));
         list.add(Primitives.of(PrimitiveSpec.builder("swing.key")
                 .description("Delivers a key press (pressed, typed, released) with dispatchEvent, so it reaches the "
                         + "target without focus. Default target: the focus owner, else the active window, else the "
@@ -209,6 +258,56 @@ final class SwingPrimitives {
                     @Override
                     public Object invoke(Invocation inv) throws Exception {
                         return key(inv);
+                    }
+                }));
+        list.add(Primitives.of(PrimitiveSpec.builder("swing.pointer")
+                .description("A pointer action at coordinates. ROUTED (default): mouse events sourced from the "
+                        + "window, dispatched on the EDT one task per event so that AWT picks the target; refused with "
+                        + "MODAL_OPEN when a modal dialog blocks the window and INPUT_REJECTED 'covered' when a ranked "
+                        + "window covers the point, unless force; a call that fails delivers nothing later and a "
+                        + "dispatched press is disarmed and released (balanced). ROBOT: the real pointer through "
+                        + "java.awt.Robot (needs the agent option robot and the controller's opt-in; PRESS and "
+                        + "RELEASE refused; requireFocus). Address by point and space, or by component (target/by) "
+                        + "with region, row and at fractions. Returns fired, received, dispatched, focusOwner.")
+                .param("action", "string", true, "MOVE, PRESS, RELEASE, CLICK, DOUBLE_CLICK, DRAG or WHEEL")
+                .param("point", "object", false, "{x, y} in 'space'")
+                .param("space", "object|string", false, "{captureId}, {window: ref} or SCREEN")
+                .param("to", "object", false, "DRAG: the end ({x, y} with a point, {fx, fy} with a component)")
+                .param("target", "string|object", false, "ref of the component (or a locator object)")
+                .param("by", "object", false, "locator of the component (instead of target)")
+                .param("region", "string", false, "a region id of the component (RegionResolver)")
+                .param("row", "integer", false, "a table's model row or a list's index")
+                .param("at", "object", false, "{fx, fy}: fractions of the component's, region's or row's bounds "
+                        + "(default 0.5, 0.5)")
+                .param("button", "string", false, "LEFT (default), MIDDLE or RIGHT")
+                .param("modifiers", "array", false, "any of SHIFT, CTRL, ALT, META")
+                .param("clickCount", "integer", false, "1 to 3 (default 1)")
+                .param("wheel", "object", false, "WHEEL: {notches}, positive towards the user, at most 50")
+                .param("steps", "integer", false, "DRAG: samples between press and release, 1 to 50 (default 6)")
+                .param("via", "string", false, "ROUTED (default) or ROBOT")
+                .param("force", "boolean", false, "act although a modal dialog blocks or a window covers the point")
+                .param("expectTarget", "string", false, "refuse unless the pre-check's target is this ref")
+                .param("requireFocus", "boolean", false, "ROBOT: refuse while the JVM holds no focused window "
+                        + "(default true)")
+                .capability(SwingModule.CAP_POINTER_ROUTED).mutating().build(), new Primitives.Body() {
+                    @Override
+                    public Object invoke(Invocation inv) throws Exception {
+                        return pointerCall(inv);
+                    }
+                }));
+        list.add(Primitives.of(PrimitiveSpec.builder("swing.rendering")
+                .description("The rendering inputs an image baseline is keyed by: the JDK, the OS (for the reviewer "
+                        + "only), the look and feel, the antialiasing, the screen scale and the hash of a fixed probe "
+                        + "render, with renderKey over the keyed ones. Read-only.")
+                .capability(SwingModule.CAP_CAPTURE_PAINT).build(), new Primitives.Body() {
+                    @Override
+                    public Object invoke(Invocation inv) throws Exception {
+                        return Edt.read(ctx, inv.remainingMs(), new Callable<Object>() {
+                            @Override
+                            public Object call() {
+                                return Rendering.read();
+                            }
+                        });
                     }
                 }));
         list.add(Primitives.of(PrimitiveSpec.builder("swing.settle")
@@ -242,9 +341,10 @@ final class SwingPrimitives {
         list.add(Primitives.of(PrimitiveSpec.builder("swing.type")
                 .description("Types text into a component. SET sets the text model (then fires the field's action "
                         + "if 'enter'); DISPATCH delivers key events per character with dispatchEvent (then ENTER "
-                        + "if 'enter'). Fails with MODAL_OPEN when a modal dialog blocks the component's window or a "
-                        + "blocking in-window dialog does not contain it, unless force. Returns once the input is "
-                        + "posted; follow with swing.settle.")
+                        + "if 'enter'). Without target and by, the text goes where swing.key's key goes (the focus "
+                        + "owner first). Fails with MODAL_OPEN when a modal dialog blocks an explicit target's window "
+                        + "or a blocking in-window dialog does not contain it, unless force. Returns once the input "
+                        + "is posted; follow with swing.settle.")
                 .param("target", "string|object", false, "ref of the component (or a locator object)")
                 .param("by", "object", false, "locator of the component (instead of target)")
                 .param("text", "string", true, "the text to type")
@@ -388,50 +488,180 @@ final class SwingPrimitives {
         });
     }
 
-    private Object capture(Invocation inv) throws Exception {
+    private Object capture(final Invocation inv) throws Exception {
         JsonView a = inv.args();
         String mode = upper(a.str("mode", "PAINT"));
-        if (!"PAINT".equals(mode)) {
-            throw Errors.invalid("unknown capture mode '" + a.str("mode") + "': only PAINT is available",
+        if (!"PAINT".equals(mode) && !"ROBOT".equals(mode)) {
+            throw Errors.invalid("unknown capture mode '" + a.str("mode") + "': expected PAINT or ROBOT",
                     Errors.data("param", "mode"));
         }
-        String ref = a.str("target");
-        final Component target = ref == null ? null : ctx.handles().resolve(ref, Component.class);
-        final Object[] skipped = new Object[1];
-        BufferedImage image = Edt.read(ctx, inv.remainingMs(), new Callable<BufferedImage>() {
-            @Override
-            public BufferedImage call() {
-                ComponentView view = new ComponentView(ctx);
-                Component c = target != null ? target : windows.defaultWindow();
-                if (c == null) {
-                    throw Errors.notFound("nothing to capture: no window is showing", Errors.data());
-                }
-                if (!c.isShowing()) {
-                    throw Errors.invalid(view.describe(c) + " is not showing", Errors.data("ref", view.ref(c),
-                            "reason", "not showing"));
-                }
-                List<Capture.Skipped> parts = new ArrayList<Capture.Skipped>();
-                BufferedImage painted = Capture.paint(c, parts);
-                if (!parts.isEmpty()) {
-                    synchronized (skipped) {
-                        skipped[0] = skippedJson(view, parts);
-                    }
-                }
-                return painted;
-            }
-        });
-        byte[] png = Capture.png(image);
-        Map<String, Object> m = new LinkedHashMap<String, Object>();
-        m.put("format", "png");
-        m.put("width", Long.valueOf(image.getWidth()));
-        m.put("height", Long.valueOf(image.getHeight()));
-        m.put("base64", Base64.getEncoder().encodeToString(png));
-        synchronized (skipped) {
-            if (skipped[0] != null) {
-                m.put("skipped", skipped[0]);
+        final Capture.Request req = new Capture.Request();
+        String scope = a.str("scope");
+        if (scope != null) {
+            try {
+                req.scope = Capture.Scope.valueOf(upper(scope));
+            } catch (IllegalArgumentException e) {
+                throw Errors.invalid("unknown scope '" + scope + "': expected WINDOW, COMPONENT, REGION or SCREEN",
+                        Errors.data("param", "scope"));
             }
         }
+        req.scale = a.dbl("scale", 1.0);
+        if (!(req.scale >= Capture.MIN_SCALE && req.scale <= Capture.MAX_SCALE)) {
+            throw Errors.invalid("scale must be 0.25 to 4", Errors.data("param", "scale"));
+        }
+        req.redact = a.bool("redact", true);
+        req.annotate = a.bool("annotateRefs", false);
+        Object region = a.get("region");
+        if (region != null && req.scope != Capture.Scope.REGION) {
+            throw Errors.invalid("'region' is for scope REGION only", Errors.data("param", "region"));
+        }
+        if (req.scope == Capture.Scope.REGION) {
+            if (region instanceof String) {
+                if (!SwingSpis.validRegionId((String) region)) {
+                    throw Errors.invalid("region id '" + region + "' is not valid: " + SwingSpis.REGION_ID.pattern(),
+                            Errors.data("param", "region"));
+                }
+                req.regionId = (String) region;
+            } else {
+                req.region = rect(region);
+            }
+        }
+        if ("ROBOT".equals(mode) && req.annotate) {
+            throw Errors.invalid("annotateRefs is refused with mode ROBOT", Errors.data("param", "annotateRefs"));
+        }
+        if ("ROBOT".equals(mode)) {
+            requireCapability(SwingModule.CAP_CAPTURE_ROBOT, RobotPath.NOT_ENABLED);
+        } else if (req.scope == Capture.Scope.SCREEN) {
+            requireCapability(SwingModule.CAP_CAPTURE_SCREEN, null);
+        }
+        final TargetSpec spec = TargetSpec.parse(a, false);
+        final Component[] resolved = new Component[1];
+        Capture.Shot shot;
+        if ("ROBOT".equals(mode)) {
+            if (req.scope != Capture.Scope.SCREEN) {
+                resolved[0] = Edt.read(ctx, inv.remainingMs(), new Callable<Component>() {
+                    @Override
+                    public Component call() {
+                        return captureTarget(new ComponentView(ctx), spec);
+                    }
+                });
+            }
+            shot = robot.capture(inv, resolved[0], req);
+        } else {
+            shot = Edt.read(ctx, inv.remainingMs(), new Callable<Capture.Shot>() {
+                @Override
+                public Capture.Shot call() {
+                    tap.sync();
+                    long seq = ctx.events().lastSeq();
+                    ComponentView view = new ComponentView(ctx);
+                    Component c = req.scope == Capture.Scope.SCREEN ? null : captureTarget(view, spec);
+                    Capture.Shot s = Capture.take(view, windows, new SwingSpis(ctx), c, req, seq);
+                    if (!s.skipped.isEmpty()) {
+                        s.fields.put("skipped", skippedJson(view, s.skipped));
+                    }
+                    return s;
+                }
+            });
+        }
+        byte[] png = Capture.png(shot.image);
+        Map<String, Object> m = new LinkedHashMap<String, Object>();
+        m.put("format", "png");
+        m.put("width", Long.valueOf(shot.image.getWidth()));
+        m.put("height", Long.valueOf(shot.image.getHeight()));
+        m.put("base64", Base64.getEncoder().encodeToString(png));
+        m.put("captureId", captures.put(shot.geometry));
+        Object skipped = shot.fields.remove("skipped");
+        m.putAll(shot.fields);
+        m.put("hash", Capture.hash(shot.image));
+        if (skipped != null) {
+            m.put("skipped", skipped);
+        }
         return m;
+    }
+
+    /** The capture's target: the named one, else the default window; it must be showing. EDT only. */
+    private Component captureTarget(ComponentView view, TargetSpec spec) {
+        Component c = spec != null ? spec.resolve(view) : windows.defaultWindow();
+        if (c == null) {
+            throw Errors.notFound("nothing to capture: no window is showing", Errors.data());
+        }
+        if (!c.isShowing()) {
+            throw Errors.invalid(view.describe(c) + " is not showing", Errors.data("ref", view.ref(c),
+                    "reason", "not showing"));
+        }
+        return c;
+    }
+
+    /** A rectangle {@code {x, y, w, h}} with a positive size. */
+    @SuppressWarnings("unchecked")
+    private static Rectangle rect(Object v) {
+        if (v instanceof Map) {
+            Map<String, Object> m = (Map<String, Object>) v;
+            Object x = m.get("x");
+            Object y = m.get("y");
+            Object w = m.get("w");
+            Object h = m.get("h");
+            if (x instanceof Number && y instanceof Number && w instanceof Number && h instanceof Number) {
+                long lw = ((Number) w).longValue();
+                long lh = ((Number) h).longValue();
+                long lx = ((Number) x).longValue();
+                long ly = ((Number) y).longValue();
+                if (lw > 0 && lh > 0 && lw <= Integer.MAX_VALUE && lh <= Integer.MAX_VALUE
+                        && Math.abs(lx) <= Integer.MAX_VALUE / 2 && Math.abs(ly) <= Integer.MAX_VALUE / 2) {
+                    return new Rectangle((int) lx, (int) ly, (int) lw, (int) lh);
+                }
+            }
+        }
+        throw Errors.invalid("scope REGION needs 'region': {x, y, w, h} with a positive size, or a region id",
+                Errors.data("param", "region"));
+    }
+
+    private Object hitTest(final Invocation inv) throws Exception {
+        JsonView a = inv.args();
+        final TargetSpec spec = TargetSpec.parse(a, false);
+        Object pointArg = a.get("point");
+        if (spec != null && pointArg != null) {
+            throw Errors.invalid("give either 'point' or 'target'/'by', not both", Errors.data("param", "point"));
+        }
+        if (spec == null && pointArg == null) {
+            throw Errors.invalid("give 'point' (with 'space') or 'target'/'by'", Errors.data("param", "point"));
+        }
+        final Point point = pointArg == null ? null : PointSpace.point(pointArg, "point");
+        final PointSpace space = pointArg == null ? null : PointSpace.parse(a.get("space"));
+        return Edt.read(ctx, inv.remainingMs(), new Callable<Object>() {
+            @Override
+            public Object call() {
+                ComponentView view = new ComponentView(ctx);
+                SwingSpis spis = new SwingSpis(ctx);
+                long seq = ctx.events().lastSeq();
+                if (spec != null) {
+                    Component c = spec.resolve(view);
+                    Window w = c instanceof Window ? (Window) c : Windows.windowOf(c);
+                    if (w == null || !c.isShowing()) {
+                        throw Errors.invalid(view.describe(c) + " is not showing", Errors.data("ref", view.ref(c),
+                                "reason", "not showing"));
+                    }
+                    Point centre = c instanceof Window ? new Point(c.getWidth() / 2, c.getHeight() / 2)
+                            : HitTest.centre(c);
+                    return HitTest.at(view, windows, spis, w, centre, c, false, seq).json;
+                }
+                PointSpace.At at = space.resolve(ctx, windows, captures, point);
+                return HitTest.at(view, windows, spis, at.window, at.point, null, at.screen, seq).json;
+            }
+        });
+    }
+
+    private Object pointerCall(Invocation inv) throws Exception {
+        Pointer.Request r = Pointer.parse(inv.args());
+        if (Pointer.ROBOT.equals(r.via)) {
+            if (r.kind == Pointer.Kind.PRESS || r.kind == Pointer.Kind.RELEASE) {
+                throw Errors.invalid("a Robot press is never left held: use CLICK or DRAG", Errors.data("param",
+                        "action", "via", Pointer.ROBOT));
+            }
+            requireCapability(SwingModule.CAP_POINTER_ROBOT, RobotPath.NOT_ENABLED);
+            return robot.pointer(inv, r);
+        }
+        return pointer.routed(inv, r);
     }
 
     /**
@@ -522,7 +752,7 @@ final class SwingPrimitives {
         boolean clear = a.bool("clear", true);
         boolean enter = a.bool("enter", false);
         boolean force = a.bool("force", false);
-        TargetSpec target = TargetSpec.parse(a, true);
+        TargetSpec target = TargetSpec.parse(a, false);
         return typing.type(inv, target, mode, text, clear, enter, force);
     }
 
@@ -639,7 +869,7 @@ final class SwingPrimitives {
 
     /** The label the button actually carries (its text or name), falling back to what the caller asked for. */
     private static String labelFor(ComponentView view, Component b, String asked) {
-        String text = ComponentText.text(b);
+        String text = view.text(b);
         if (text != null && text.equalsIgnoreCase(asked)) {
             return text;
         }

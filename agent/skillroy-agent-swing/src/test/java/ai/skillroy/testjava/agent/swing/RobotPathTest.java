@@ -1,0 +1,218 @@
+/*
+ * Copyright 2026 Mike Mills.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package ai.skillroy.testjava.agent.swing;
+
+import ai.skillroy.testjava.agent.api.AgentContext;
+import ai.skillroy.testjava.agent.api.Invocation;
+import ai.skillroy.testjava.protocol.CapabilityState;
+import ai.skillroy.testjava.protocol.ErrorCodes;
+import ai.skillroy.testjava.protocol.JsonView;
+import ai.skillroy.testjava.protocol.RpcException;
+
+import java.awt.Point;
+import java.awt.Rectangle;
+import java.awt.event.InputEvent;
+import java.awt.image.BufferedImage;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Map;
+
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Test;
+
+import static ai.skillroy.testjava.agent.swing.JsonCheck.expectError;
+import static ai.skillroy.testjava.agent.swing.JsonCheck.map;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+/**
+ * The Robot path behind the {@link RobotFactory} seam without a display (phase7-contracts.md section 13.1 item 1): the
+ * native sequence's order (a press always paired with its release in one task, every pressed button released in a
+ * {@code finally} before the pointer is restored, also when the task fails between press and release), {@code PRESS}
+ * and {@code RELEASE} refused before anything moves, the capability probe in a headless JVM, and the glass blanked
+ * outside the JVM's windows. The delivery probe, {@code requireFocus}, the covering rule and the observed press need
+ * real windows and run in {@code RobotPathDisplayTest}.
+ */
+class RobotPathTest {
+
+    private final FakeContext ctx = new FakeContext();
+
+    @AfterEach
+    void tearDown() {
+        ctx.shutdown();
+    }
+
+    /** Records what the path asks of the OS; may fail on the n-th move. */
+    static final class FakePort implements RobotPort {
+        final List<String> calls = new ArrayList<String>();
+        int failOnMove = -1;
+        private int moves;
+
+        @Override
+        public void mouseMove(int x, int y) {
+            moves++;
+            if (moves == failOnMove) {
+                throw new IllegalStateException("interrupted mid-drag");
+            }
+            calls.add("move " + x + "," + y);
+        }
+
+        @Override
+        public void mousePress(int buttons) {
+            calls.add("press " + buttons);
+        }
+
+        @Override
+        public void mouseRelease(int buttons) {
+            calls.add("release " + buttons);
+        }
+
+        @Override
+        public void mouseWheel(int notches) {
+            calls.add("wheel " + notches);
+        }
+
+        @Override
+        public BufferedImage createScreenCapture(Rectangle screen) {
+            return new BufferedImage(screen.width, screen.height, BufferedImage.TYPE_INT_RGB);
+        }
+
+        @Override
+        public Point pointer() {
+            return new Point(500, 400);
+        }
+    }
+
+    private static Pointer.Request request(Object... kv) {
+        Map<String, Object> m = map(kv);
+        m.put("by", map("id", "x"));
+        m.put("via", "ROBOT");
+        return Pointer.parse(JsonView.of(m));
+    }
+
+    private static final int B1 = InputEvent.BUTTON1_DOWN_MASK;
+
+    @Test
+    void aClickIsAPairedPressAndReleaseThenThePointerIsRestored() {
+        FakePort port = new FakePort();
+        RobotPath.act(port, request("action", "CLICK"), new Point(10, 20), null);
+        assertEquals(Arrays.asList("move 10,20", "press " + B1, "release " + B1, "move 500,400"), port.calls);
+    }
+
+    @Test
+    void aDoubleClickIsTwoPairs() {
+        FakePort port = new FakePort();
+        RobotPath.act(port, request("action", "DOUBLE_CLICK"), new Point(10, 20), null);
+        assertEquals(Arrays.asList("move 10,20", "press " + B1, "release " + B1, "press " + B1, "release " + B1,
+                "move 500,400"), port.calls);
+    }
+
+    @Test
+    void aFailureBetweenPressAndReleaseStillReleasesBeforeThePointerIsRestored() {
+        FakePort port = new FakePort();
+        port.failOnMove = 3; // the move to the point, the first drag sample, then a failure
+        assertThrows(IllegalStateException.class, () -> RobotPath.act(port,
+                request("action", "DRAG", "to", map("fx", 1.0, "fy", 1.0), "steps", 4L), new Point(10, 20),
+                new Point(50, 20)));
+        assertEquals(Arrays.asList("move 10,20", "press " + B1, "move 20,20", "release " + B1, "move 500,400"),
+                port.calls, "released in the finally, and only then restored");
+    }
+
+    @Test
+    void aWheelTurnsOneNotchAtATime() {
+        FakePort port = new FakePort();
+        RobotPath.act(port, request("action", "WHEEL", "wheel", map("notches", 2L)), new Point(1, 2), null);
+        assertEquals(Arrays.asList("move 1,2", "wheel 1", "wheel 1", "move 500,400"), port.calls);
+    }
+
+    @Test
+    void pressAndReleaseAreRefusedBeforeAnythingMoves() throws Exception {
+        final FakePort port = new FakePort();
+        RobotPath robot = new RobotPath(ctx, new Windows(), new Pointer(ctx, new Windows(), new RecentCaptures()),
+                new RecentCaptures(), device -> port);
+        for (String action : new String[] {"PRESS", "RELEASE"}) {
+            RpcException e = expectError(ErrorCodes.INVALID_PARAMS,
+                    () -> robot.pointer(invocation(ctx), request("action", action)));
+            assertTrue(e.getMessage().contains("never left held"), e.getMessage());
+        }
+        assertTrue(port.calls.isEmpty());
+    }
+
+    @Test
+    void theCapabilityProbeInAHeadlessJvmSaysHeadless() {
+        RobotPath robot = new RobotPath(ctx, new Windows(), new Pointer(ctx, new Windows(), new RecentCaptures()),
+                new RecentCaptures(), device -> new FakePort());
+        robot.declare(true);
+        assertEquals(CapabilityState.UNAVAILABLE, ctx.capabilities.get(SwingModule.CAP_POINTER_ROBOT).state());
+        assertEquals("headless", ctx.capabilities.get(SwingModule.CAP_CAPTURE_ROBOT).reason());
+        RobotPath failing = new RobotPath(ctx, new Windows(), new Pointer(ctx, new Windows(), new RecentCaptures()),
+                new RecentCaptures(), device -> {
+                    throw new java.awt.AWTException("no XTEST");
+                });
+        failing.declare(false);
+        assertEquals(CapabilityState.UNAVAILABLE, ctx.capabilities.get(SwingModule.CAP_POINTER_ROBOT).state());
+        assertTrue(ctx.capabilities.get(SwingModule.CAP_POINTER_ROBOT).reason().startsWith("robot: "),
+                ctx.capabilities.get(SwingModule.CAP_POINTER_ROBOT).reason());
+    }
+
+    @Test
+    void theGlassIsBlankedOutsideTheWindowsOfTheJvm() {
+        BufferedImage image = new BufferedImage(10, 10, BufferedImage.TYPE_INT_RGB);
+        for (int y = 0; y < 10; y++) {
+            for (int x = 0; x < 10; x++) {
+                image.setRGB(x, y, 0xFF102030);
+            }
+        }
+        RobotPath.blankOutside(image, new Rectangle(100, 100, 10, 10), Arrays.asList(new Rectangle(102, 102, 5, 5)));
+        assertEquals(0xFF808080, image.getRGB(0, 0));
+        assertEquals(0xFF808080, image.getRGB(9, 9));
+        assertEquals(0xFF102030, image.getRGB(3, 3));
+        assertEquals(0xFF102030, image.getRGB(6, 6));
+        assertEquals(0xFF808080, image.getRGB(7, 7));
+    }
+
+    static Invocation invocation(final AgentContext ctx) {
+        return new Invocation() {
+            @Override
+            public JsonView args() {
+                return JsonView.of(null);
+            }
+
+            @Override
+            public String correlationId() {
+                return null;
+            }
+
+            @Override
+            public String traceparent() {
+                return null;
+            }
+
+            @Override
+            public AgentContext context() {
+                return ctx;
+            }
+
+            @Override
+            public long remainingMs() {
+                return 10000;
+            }
+        };
+    }
+}

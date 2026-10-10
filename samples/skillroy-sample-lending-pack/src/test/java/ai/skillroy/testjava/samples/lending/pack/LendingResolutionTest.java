@@ -296,6 +296,20 @@ class LendingResolutionTest {
         assertEquals(List.of(Boolean.TRUE, "0", "99999999.99"), ctx.params.get(1), "open bounds");
     }
 
+    /** Gap 49 (pack 0.6.0): an item that needs no induction, read with the induction condition in SQL. */
+    @Test
+    void theItemResolverAddsTheInductionConditionOnlyWhenTheQueryNamesIt() throws Exception {
+        Ctx ctx = new Ctx();
+        ctx.answer(LendingResolvers.LENDABLE_ITEM_BY_INDUCTION_SQL, params -> rows(List.of("CODE", "BARCODE",
+                "TITLE", "DEPOSIT"), List.of(List.of("A", "1", "Plain", "20.00"))));
+        List<ResolverCandidate<ItemRef>> found = new LendingResolvers.LendableItemResolver().candidates(
+                new LendableItem(null, null, false), ctx);
+        assertEquals(List.of("A"), found.stream().map(c -> c.value().code()).toList());
+        assertEquals(List.of(Boolean.FALSE, "0", "99999999.99", Boolean.FALSE), ctx.params.get(0));
+        assertEquals(new LendableItem(null, null, null), new LendableItem(null, null),
+                "the two-argument form names no induction condition");
+    }
+
     @Test
     void theStaffResolverAppliesEveryConditionInCodeOrderAndReadsPermissionsOnlyForRowsStillInQuestion()
             throws Exception {

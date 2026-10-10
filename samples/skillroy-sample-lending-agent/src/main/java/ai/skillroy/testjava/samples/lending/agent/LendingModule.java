@@ -27,7 +27,9 @@ import ai.skillroy.testjava.agent.api.spi.DataSourceProvider;
 import ai.skillroy.testjava.agent.api.spi.DeviceAdapter;
 import ai.skillroy.testjava.agent.api.spi.DialogTextExtractor;
 import ai.skillroy.testjava.agent.api.spi.LocatorResolver;
+import ai.skillroy.testjava.agent.api.spi.CaptureMask;
 import ai.skillroy.testjava.agent.api.spi.MaskPolicy;
+import ai.skillroy.testjava.agent.api.spi.RegionResolver;
 import ai.skillroy.testjava.agent.api.spi.NameEnricher;
 import ai.skillroy.testjava.agent.api.spi.ReadinessSource;
 import ai.skillroy.testjava.agent.api.spi.RedactionKeys;
@@ -60,8 +62,11 @@ import java.util.Map;
  *   <li>a {@link ThreadPolicyProvider}: domain calls run on the daemon thread {@code skillroy-lending-worker}; the
  *       engine thread {@code LendingEngine} is forbidden;</li>
  *   <li>an {@link AppStateProvider} {@code lending} for {@code app.state};</li>
- *   <li>{@link NameEnricher}, {@link LocatorResolver} ({@code {action:"DUE"}}), {@link ActionFirer} and
- *       {@link DialogTextExtractor} for the desk's custom widgets ({@link LendingWidgets});</li>
+ *   <li>{@link NameEnricher}, {@link LocatorResolver} ({@code {action:"DUE"}}, with {@code describe}),
+ *       {@link ActionFirer} and {@link DialogTextExtractor} for the desk's custom widgets ({@link LendingWidgets});</li>
+ *   <li>a {@link RegionResolver} for the number pad's twelve keys ({@link LendingRegions}) and a
+ *       {@link CaptureMask} for the entry field and the number pad while a secret is expected
+ *       ({@link LendingCaptureMask}) (Phase 7);</li>
  *   <li>a {@link DataSourceProvider} {@code lending} and a {@link DeviceAdapter} {@code printer};</li>
  *   <li>a {@link MaskPolicy} that hides the {@code password} column of source {@code lending}
  *       ({@link PasswordMask});</li>
@@ -86,8 +91,12 @@ public final class LendingModule implements AgentModule {
 
     /** Module id; also the id of the domain pack and the primitive namespace. */
     public static final String ID = "lending";
-    /** Module version. */
-    public static final String VERSION = "0.1.0";
+    /**
+     * Module version: change it whenever the module's primitives or SPIs change (the pack's bump rule).
+     * {@code 0.2.0} (Phase 7): {@link LendingRegions}, {@link LendingCaptureMask} and {@code LendingWidgets.describe};
+     * the surface also grew since Phase 1 without a bump (the hooks catalogue's primitives and the waiver reads).
+     */
+    public static final String VERSION = "0.2.0";
 
     /** Capability: SQL through {@code data.query} on source {@code lending}. */
     static final String CAP_SQL = "lending.sql";
@@ -135,6 +144,8 @@ public final class LendingModule implements AgentModule {
         register(MaskPolicy.class, new PasswordMask());
         register(DeviceAdapter.class, new PrinterDevice(access));
         register(RedactionKeys.class, new LendingSecrets());
+        register(RegionResolver.class, new LendingRegions());
+        register(CaptureMask.class, new LendingCaptureMask());
         for (Primitive p : new LendingPrimitives(context, access, slot).all()) {
             context.primitives().register(p);
             primitiveNames.add(p.spec().name());

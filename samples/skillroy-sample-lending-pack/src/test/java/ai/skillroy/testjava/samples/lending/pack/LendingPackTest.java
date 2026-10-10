@@ -56,6 +56,21 @@ class LendingPackTest {
 
     private final LendingPack pack = new LendingPack();
 
+    /** Phase 7 (phase7-contracts.md 12.3): the keypad legend for a model that looks at the screen. */
+    @Test
+    void theScreenLegendNamesTheKeypadKeysLeftToRightTheEntryFieldTheNumberPadAndThePrompt() {
+        String legend = pack.screenLegend();
+        assertEquals(LendingPack.SCREEN_LEGEND, legend);
+        int at = -1;
+        for (String key : List.of("QTY", "CANCEL", "RETURN", "DUE", "DEPOSIT", "SIGN_OFF")) {
+            int i = legend.indexOf(key + " ");
+            assertTrue(i > at, key + " in order in: " + legend);
+            at = i;
+        }
+        assertTrue(legend.contains("entry field") && legend.contains("number pad") && legend.contains("prompt"));
+        assertFalse(legend.contains("\n"), "one paragraph");
+    }
+
     @Test
     void thePackIsFoundByServiceLoaderAndDeclaresTheLendingSyncPolicy() {
         List<DomainPack> packs = new ArrayList<>();
@@ -63,7 +78,7 @@ class LendingPackTest {
         assertEquals(1, packs.size());
         assertTrue(packs.get(0) instanceof LendingPack);
         assertEquals("lending", pack.id());
-        assertEquals("0.5.0", pack.version());
+        assertEquals("0.6.0", pack.version());
         assertEquals(new SyncPolicy("input.acked", List.of("input.requested", "prompt.waiting"),
                 List.of("prompt.waiting"), null, null), pack.syncPolicy());
         assertSame(PromptPolicy.FAIL, pack.promptPolicy());
@@ -265,7 +280,7 @@ class LendingPackTest {
                 """;
         Plan plan = PlanCompiler.compile(yaml.getBytes(StandardCharsets.UTF_8), "pack-check.yaml", pack);
         assertEquals("lending", plan.pack());
-        assertEquals("0.5.0", plan.packVersion());
+        assertEquals("0.6.0", plan.packVersion());
         List<Plan.Call> calls = plan.steps().stream().flatMap(s -> s.calls().stream()).toList();
         assertEquals(List.of("lending.input", "lending.input", "lending.input", "lending.input", "lending.input",
                 "sync.await", "lending.prompt.answer", "lending.input", "lending.input"),

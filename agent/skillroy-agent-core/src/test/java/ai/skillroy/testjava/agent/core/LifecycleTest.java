@@ -131,6 +131,14 @@ class LifecycleTest {
         Map<String, String> defaults = AgentRuntime.resolveOptions(null);
         assertEquals("0", defaults.get("port"));
         assertEquals("false", defaults.get("readOnly"));
+        assertEquals("false", defaults.get("robot"), "A65: the Robot path is off unless the operator says so");
+        Map<String, String> robotOption = new java.util.HashMap<String, String>();
+        robotOption.put("robot", "TRUE");
+        assertEquals("true", AgentRuntime.resolveOptions(robotOption).get("robot").toLowerCase(java.util.Locale.ROOT));
+        robotOption.put("robot", "yes");
+        IllegalArgumentException robot = assertThrows(IllegalArgumentException.class,
+                () -> AgentRuntime.resolveOptions(robotOption));
+        assertTrue(robot.getMessage().contains("robot"), robot.getMessage());
         assertEquals("120000", defaults.get("readyTimeoutMs"));
         assertEquals("10000", defaults.get("eventRing"));
         assertEquals(String.valueOf(64L << 20), defaults.get("eventRingChars"), "S43: 64 Mi characters");
