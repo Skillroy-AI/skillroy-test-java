@@ -2056,7 +2056,7 @@ public final class PlanExecutor {
         private void writeText(Path dir, String name, String text) {
             try {
                 Files.createDirectories(dir);
-                Files.write(dir.resolve(name), mask.apply(text).getBytes(StandardCharsets.UTF_8));
+                Files.write(dir.resolve(name), mask.apply(Images.elidedText(text)).getBytes(StandardCharsets.UTF_8));
             } catch (IOException e) {
                 log.write("evidence", RunLog.fields("file", name, "ok", false, "error", e.toString()));
             }
@@ -2088,7 +2088,9 @@ public final class PlanExecutor {
             }
             try {
                 Files.createDirectories(dir);
-                Files.write(dir.resolve(name), RunLog.pretty(mask.apply(value)).getBytes(StandardCharsets.UTF_8));
+                // P2-L6-F2: a failure file carries no image's bytes; the pixels go to the PNG files only.
+                Files.write(dir.resolve(name), RunLog.pretty(mask.apply(Images.elided(value)))
+                        .getBytes(StandardCharsets.UTF_8));
             } catch (IOException | JsonException e) {
                 log.write("evidence", RunLog.fields("file", name, "ok", false, "error", e.toString()));
             }

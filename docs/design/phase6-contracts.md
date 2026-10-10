@@ -1422,7 +1422,13 @@ As built (Phase 6, CP): a session has no `RunOptions`, so `SessionOptions` gains
 (default `AUTO`, the ten-argument constructor kept, `withHooks`); `ExecutorSession.open` installs under it, before the
 pre-flight and the web path, writes the `hooks` record into the journal's start record (`options.hooks`) and exposes it
 as `hooks()`; the MCP server keeps the switch when it fills in its session's output directory. `--hooks` with another
-value is a usage error (64) before the agent is contacted (D185). Merged with TL: in both records `hooks` is the
+value is a usage error (64) before the agent is contacted (D185). (Phase 6 security fix, pass 2, P2-L6-F1, P2-L6-F4,
+built 2026-10-09, SC) The MCP server keeps the switch **and hands it to every `skillroy_scenario_run`**
+(`RunOptions.withHooks(session.options().hooks())`): a client's run never installs, replaces or removes hooks against
+the person's switch, and on a `--hooks off` server installs nothing (P5 §9.3). **`author` accepts `--hooks` too** and
+hands it to the planner's server (`mcp … --hooks <mode>` in the planner's MCP configuration, `auto` when not given)
+and to its own dry-run bind and `--run`; so the option is accepted by `run`, `session`, `mcp` and
+`author`. Merged with TL: in both records `hooks` is the
 eleventh component and `observer` the twelfth; the ten-argument constructors give `AUTO` and `RunObserver.NONE`, every
 `with…` copy keeps both, and the MCP server's copy passes both.
 
@@ -3004,6 +3010,15 @@ with it, D212); the never-for-a-client rule and the start-time probe arguments a
 (`never`, `arguments`, `refusals`, `probes`), to which `PlanPolicy` delegates; a verb the session service withholds is
 listed by its `skillroy_catalogue` under `withheldVerbs` and not logged (the service has no log). D159: the text
 resource is `skillroy://mcp/<n>.png.txt`; images are served when `ServerOptions.inference().images()` is true.
+
+**As completed (Phase 6 security fix, pass 2, P2-L6-F2, P2-L6-F3, P2-L6-S1, built 2026-10-09, SC):** D159 is one rule
+on every route, not on the two PNG resources only: a capture's bytes leave the controller to a client or a model only
+under `images: true`, and then only as an image (the MCP server's blob behind a tool's resource link; a model request's
+image part, Phase 7); on every text route (a tool's result at any depth, a resource served as text, a run's or a
+session's file, a fact, an event, a call record, a triage request) they are elided to `<png: N bytes>` whatever
+`images` says (`…scenario.Images`, applied by `RunLog`, `StepJournal`, the executor's evidence files, `PromptMask` and
+the MCP server's `Masking`; P1 §8.5, P5 §6.2, §9.3, §9.4, §11.2). The decision is not changed: the text routes carried
+the bytes only through the gaps pass 2 found, and an image's base64 as text is no image to any reader (D-SC-1).
 
 ---
 

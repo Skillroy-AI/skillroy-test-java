@@ -82,6 +82,10 @@ final class ClaudeMapping {
 
     /** What a dated snapshot id adds to the id asked for: {@code -} and the eight digits of a date. */
     private static final Pattern SNAPSHOT_SUFFIX = Pattern.compile("-[0-9]{8}");
+    /** The longest provider identifier kept (a response id, a request id, a model id; P2-L5-F3). */
+    static final int ID_MAX = 200;
+    /** The longest provider word kept (a stop reason, a refusal category, an error type; P2-L5-F3). */
+    static final int WORD_MAX = 100;
 
     /**
      * The most parameters with a union type the tools of one request may hold and still go out strict. The provider
@@ -342,10 +346,18 @@ final class ClaudeMapping {
      * @param request the request it answers, or null when not known (a batch collected by another gateway)
      * @param requestedModel the model id asked for
      * @param batch true for a batch result (priced at the batch rate)
+     * @param secrets values that must never appear in a response (the key, the workspace id): every string of the
+     *     message (and every key) is scrubbed of them before anything is read from it (phase6 security fix, pass 2,
+     *     P2-L5-F3), and the provider's identifiers and free texts are bounded after the scrub ({@code id} and
+     *     {@code model} at {@value #ID_MAX} characters, {@code stop_reason} and {@code stop_details.category} at
+     *     {@value #WORD_MAX}, one line), so that whatever {@code ANTHROPIC_BASE_URL} names cannot write the key or an
+     *     unbounded text into a ledger, a recording, the journal's origin, triage's files or a span
      * @throws InferenceException {@code PROVIDER} when a structured answer is not JSON (with the billed usage)
      */
-    static ModelResponse response(Map<?, ?> json, ModelRequest request, String requestedModel, boolean batch,
-                                  Duration elapsed, PriceTable prices) throws InferenceException {
+    static ModelResponse response(Map<?, ?> raw, ModelRequest request, String requestedModel, boolean batch,
+                                  Duration elapsed, PriceTable prices, List<String> secrets)
+            throws InferenceException {
+        Map<?, ?> json = scrubbed(raw, secrets, 0) instanceof Map<?, ?> m ? m : Map.of();
         List<Content> parts = new ArrayList<>();
         if (json.get("content") instanceof List<?> blocks) {
             for (Object b : blocks) {
@@ -356,16 +368,16 @@ final class ClaudeMapping {
         }
         String stopText = json.get("stop_reason") instanceof String s ? s : null;
         StopReason stop = stop(stopText);
-        String model = json.get("model") instanceof String s ? s : requestedModel;
+        String model = json.get("model") instanceof String s ? bounded(s, ID_MAX) : requestedModel;
         List<String> notes = new ArrayList<>();
         if (stop == StopReason.REFUSAL) {
             Object details = json.get("stop_details");
             Object category = details instanceof Map<?, ?> d ? d.get("category") : null;
-            notes.add("refusal: " + (category instanceof String c ? c : "unknown"));
+            notes.add("refusal: " + (category instanceof String c ? bounded(c, WORD_MAX) : "unknown"));
         }
         if (stopText != null && !List.of("end_turn", "tool_use", "max_tokens", "refusal", "stop_sequence")
                 .contains(stopText)) {
-            notes.add("stop_reason " + stopText);
+            notes.add("stop_reason " + bounded(stopText, WORD_MAX));
         }
         if (requestedModel != null && model != null && !sameModel(requestedModel, model)) {
             notes.add("fallback: answered by " + model);
@@ -385,7 +397,8 @@ final class ClaudeMapping {
                 write5m = unsplit;
             }
         }
-        Usage usage = new Usage(PROVIDER, requestedModel, model, json.get("id") instanceof String id ? id : null,
+        Usage usage = new Usage(PROVIDER, requestedModel, model,
+                json.get("id") instanceof String id ? bounded(id, ID_MAX) : null,
                 count(u, null, "input_tokens"), count(u, null, "output_tokens"),
                 count(u, null, "cache_read_input_tokens"), write5m, write1h, batch, "0", elapsed,
                 notes.isEmpty() ? null : String.join("; ", notes));
@@ -490,6 +503,10 @@ final class ClaudeMapping {
         if (requestId == null && body.get("request_id") instanceof String rid) {
             requestId = rid;
         }
+        // Phase 6 security fix, pass 2, P2-L5-F3: the request id and the error type are the provider's (or whatever
+        // ANTHROPIC_BASE_URL names) as well: scrubbed, then bounded, like the message.
+        requestId = requestId == null ? null : bounded(scrub(requestId, secrets), ID_MAX);
+        type = type == null ? null : bounded(scrub(type, secrets), WORD_MAX);
         Kind kind;
         if (status == 401 || status == 403) {
             kind = Kind.AUTH;
@@ -508,7 +525,7 @@ final class ClaudeMapping {
             kind = Kind.PROVIDER;
         }
         // Phase 6 security fix S54: scrubbed before it is cut, so that a key the cut would split is still replaced.
-        String message = "HTTP " + status + (type == null ? "" : " " + scrub(type, secrets))
+        String message = "HTTP " + status + (type == null ? "" : " " + type)
                 + (providerMessage == null ? "" : ": " + bounded(scrub(providerMessage, secrets), 300));
         if (kind == Kind.AUTH && status == 400) {
             message += " (set workspaceId in inference.yaml or ANTHROPIC_WORKSPACE_ID)";
@@ -568,6 +585,34 @@ final class ClaudeMapping {
     static String bounded(String text, int max) {
         String oneLine = text.replaceAll("\\s+", " ").strip();
         return oneLine.length() > max ? oneLine.substring(0, max - 3) + "..." : oneLine;
+    }
+
+    /**
+     * The value with every string (a map's keys included) scrubbed of {@code secrets} ({@link #scrub}); a new
+     * structure for a map or a list. Deeper than 256 levels, {@code "<too deep>"}.
+     */
+    static Object scrubbed(Object value, List<String> secrets, int depth) {
+        if (depth > 256) {
+            return "<too deep>";
+        }
+        if (value instanceof String s) {
+            return scrub(s, secrets);
+        }
+        if (value instanceof Map<?, ?> map) {
+            Map<String, Object> out = new LinkedHashMap<>();
+            for (Map.Entry<?, ?> e : map.entrySet()) {
+                out.put(scrub(String.valueOf(e.getKey()), secrets), scrubbed(e.getValue(), secrets, depth + 1));
+            }
+            return out;
+        }
+        if (value instanceof List<?> list) {
+            List<Object> out = new ArrayList<>(list.size());
+            for (Object item : list) {
+                out.add(scrubbed(item, secrets, depth + 1));
+            }
+            return out;
+        }
+        return value;
     }
 
     /** {@code text} with every non-blank secret replaced by {@code <redacted>}. */

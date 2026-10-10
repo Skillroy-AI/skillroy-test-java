@@ -319,7 +319,7 @@ public final class ClaudeGateway implements InferenceGateway {
         long started = System.nanoTime();
         var message = call("the completion", timeout, options -> client.messages().create(params, options));
         return ClaudeMapping.response(ClaudeMapping.json(message), request, model, false,
-                Duration.ofNanos(System.nanoTime() - started), config.prices());
+                Duration.ofNanos(System.nanoTime() - started), config.prices(), secrets);
     }
 
     @Override
@@ -440,7 +440,7 @@ public final class ClaudeGateway implements InferenceGateway {
                 if (result.get("message") instanceof Map<?, ?> message) {
                     try {
                         return new BatchResult(index, ClaudeMapping.response(message, request, model, true,
-                                Duration.ZERO, config.prices()), null);
+                                Duration.ZERO, config.prices(), secrets), null);
                     } catch (InferenceException e) {
                         return new BatchResult(index, null, e);
                     }
@@ -453,9 +453,11 @@ public final class ClaudeGateway implements InferenceGateway {
                 Map<?, ?> inner = outer.get("error") instanceof Map<?, ?> m ? m : outer;
                 String errorType = String.valueOf(inner.get("type"));
                 String message = inner.get("message") instanceof String s ? s : errorType;
-                // S54: scrubbed before the cut, as the gateway's RuntimeException branch does.
+                // S54: scrubbed before the cut, as the gateway's RuntimeException branch does; the type bounded too
+                // (phase6 security fix, pass 2, P2-L5-F3).
                 return new BatchResult(index, null, new InferenceException(kindOf(errorType), ClaudeMapping.scrub(
-                        "batch request " + index + ": " + ClaudeMapping.scrub(errorType, secrets) + ": "
+                        "batch request " + index + ": " + ClaudeMapping.bounded(ClaudeMapping.scrub(errorType,
+                                secrets), ClaudeMapping.WORD_MAX) + ": "
                                 + ClaudeMapping.bounded(ClaudeMapping.scrub(message, secrets), 300), secrets)));
             }
             case "expired" -> {

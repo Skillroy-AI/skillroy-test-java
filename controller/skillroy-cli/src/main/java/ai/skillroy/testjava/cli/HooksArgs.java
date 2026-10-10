@@ -20,8 +20,9 @@ import ai.skillroy.testjava.scenario.hooks.HooksMode;
 
 /**
  * The run-level hooks switch on the command line (phase6-contracts.md 6.1, decision D127): {@code --hooks
- * auto|on|off} on {@code run}, {@code session} and {@code mcp}; read before the agent is contacted, so that a wrong
- * value is a usage error (64) before anything runs.
+ * auto|on|off} on {@code run}, {@code session}, {@code mcp} and {@code author} (which hands it to the planner's
+ * server, phase6 security fix, pass 2, P2-L6-F4); read before the agent is contacted, so that a wrong value is a
+ * usage error (64) before anything runs.
  */
 final class HooksArgs {
 

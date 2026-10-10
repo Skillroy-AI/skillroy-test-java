@@ -440,6 +440,15 @@ later, and written again as a one-hour entry with `ttl: 1h` and no beta header; 
 on every response. The Haiku rule was found by the orchestrator with one raw request and is built in the same
 change as the live profiles (D111).
 
+(Phase 6 security fix, pass 2, P2-L5-F3, built 2026-10-09, SC) What the provider returns is scrubbed of the known
+secrets (the key, the workspace id) before anything is read from it, not its error message only (S54): every string of
+a response (`model`, `id`, `stop_reason`, `stop_details.category`, text blocks, `tool_use` input, unknown blocks, map
+keys included) and an error's `request-id` header and `type`; then the identifiers are bounded at 200 characters
+(`id`, `model`, `request-id`) and the words at 100 (`stop_reason`, `stop_details.category`, the error `type`, in a
+call's error and a batch result's), one line, so that whatever `ANTHROPIC_BASE_URL` names cannot write the key or an
+unbounded text into a ledger, `inference.jsonl`, a recording, a session journal's origin, triage's files, a re-resolve
+report or a span.
+
 What the gateway never does: it never logs a prompt or a response body (the run writes `inference.jsonl`, §7.4,
 with metadata and masked structured answers only, and the prompt text itself only under `--log-prompts`); it never
 reads a key from anywhere but the environment; it never selects a model the settings do not name; it never sends an
@@ -885,6 +894,18 @@ descriptions' "credential: {realm: staff, key: code}" to "credential: <redacted>
 it already did in the planner's prompt (D103), which changed the requests' fingerprints. A pack author who wants the
 example kept writes it without a `key: value` shape after a secret word.
 
+(Phase 6 security fix, pass 2, P2-L5-F1, P2-L5-S1, built 2026-10-09, SC) A secret-named property loses `default`,
+`examples`, `example`, `const` and `enum` whole **in the property and in everything nested under it**: its
+`properties`, its `patternProperties` and `dependentSchemas` (whose keys are asked as well: a pattern `^password` names
+a secret property), its `items`, its branches, and a definition (`$defs`, `definitions`) that a local `$ref` under it
+names or whose own name looks secret (a fixed point over the local references; a definition shared with a non-secret
+property loses its data keywords for both). And a data keyword of a non-secret property is data, not a schema: its
+value goes through the by-key and by-value rules as a JSON-like value (`PromptMask.jsonLike`), and **a data value
+(`default`, `examples`, `example`, `enum`, `const`) that holds, at any depth, a key that looks secret is dropped
+whole** (`default: {staff: ann, password: …}`), never pinned to `<redacted>`, so the schema stays valid. The one rule
+serves every site of the paragraph above. The sample's schemas have none of these shapes, so no prompt and no
+recording of the sample changes.
+
 ### 6.2 `PromptMask` (`…inference.prompt`)
 
 ```java
@@ -914,6 +935,10 @@ Rules.
   The person's own request to a session is data too (`<person>`).
 - *Captures.* An `Image` part is personal data until Phase 7 says how a capture is masked (design §3.10); with `images:
   false` (the default) the mask refuses it with `IllegalStateException`, and no Phase 5 request builder creates one.
+  (Phase 6 security fix, pass 2, P2-L6-F2, P2-L6-F3, P2-L6-S1, built 2026-10-09, SC) A capture's bytes inside a text
+  or a value (a map's base64 `base64` entry, a PNG's base64 run) are elided to `<png: N bytes>` by `text` and
+  `jsonLike` whatever `images` says (§9.4's rule, `…scenario.Images`): an image reaches a model as an image part or
+  not at all.
 - *Bounded.* A text part is ~~cut at 100000 characters and a rows sample at 20 rows before masking~~ **masked, then**
   cut at 100000 characters (and a rows sample at 20 rows) with `[truncated]` appended, so that a runaway snapshot cannot
   carry a secret past the mask by size (Phase 6 security fix S53, A53, built 2026-10-09, SR; the build's margin of 1000
@@ -1224,6 +1249,11 @@ descriptor's, prefixed with the thread and timeout. Results are text content: th
 masked, cut at 25000 characters with `[truncated: N more]` (control-channel F19); a result that holds an image (a
 capture, a bitmap) is written to `<out>/mcp/<id>.png` and returned as a resource link (Phase 6 security fix S58, A57,
 built 2026-10-09, SR; D159: a link to the PNG only under `images: true`, else to a text resource naming the file, §9.4).
+(Phase 6 security fix, pass 2, P2-L6-F3, built 2026-10-09, SC) This holds for **any tool's result that holds an image,
+at any depth**, not a step's value only and not only to eight levels: a fact (`skillroy_facts`), an event's payload
+(`skillroy_events`), a resolution, a check's `actual`, an observed value, a step's `detail` and events, a run's summary
+(`ToolCalls.reply` links every image before the masks); an image the server cannot decode, and anything a link did not
+replace, has its bytes elided by the mask (§9.4), so no tool answers a capture's bytes as text.
 
 | Group | Tools | Offered |
 |---|---|---|
@@ -1301,6 +1331,14 @@ built by `skillroy mcp` from `budget.sessionUsd` and the session's ledger when a
 (`BudgetMeter.markExhausted`/`exhausted`); a `skillroy_resolve` without an actor that names a model is metered on it the
 same way. As built: the estimate and the settlement are `SessionMetering`'s (`…inference.budget`), which
 `SessionService.resolve` uses too.
+
+(Phase 6 security fix, pass 2, P2-L6-F1, built 2026-10-09, SC) `skillroy_scenario_run` runs under the server's
+`--hooks` switch (`RunOptions.withHooks(session.options().hooks())`, the switch the server's own session was opened
+with, P6 §6.1), never the run default `auto`: a client cannot install, replace or remove hooks through a run; a
+`--hooks off` server's runs install nothing and leave an edition already on the target alone (no `replace`, so no
+`hook.remove` of everything first); under `auto` or `on` a run finds the server's own install (`alreadyInstalled`).
+A client's run re-applies the server's switch: to change a target's hooks while a `--hooks auto|on` server runs
+(`skillroy hooks remove`, or `install` of another edition), restart the server, or start it with `--hooks off`.
 
 As built (2026-10-08, fix wave; `…mcp.PlanPolicy`, `DataQueryLists`, `StdioPipe`): a scenario
 is never stronger than the tools the same server offers one by one (D96). `skillroy_scenario_run` compiles the YAML
@@ -1390,6 +1428,19 @@ text resource (`skillroy://mcp/<n>.png.txt`, `text/plain`: "capture written to <
 inference.yaml images: true (a capture is personal data until masked, design 3.10)") names its path for the person to
 open, the tool's resource link names that text, and a run's `failure/*.png` is not listed. The planner's server
 (`--inference none`) never serves them. There is no `--serve-captures` flag.
+
+(Phase 6 security fix, pass 2, P2-L6-F2, P2-L6-F3, built 2026-10-09, SC; D159 kept as one rule, D-SC-1) **A capture's
+bytes leave the server only under `images: true`, and then only as the PNG blob behind a tool's resource link; on every
+text route they are elided, whatever `images` says**: a tool's result (§9.3), a resource served as text
+(`state/current`, `events/recent`, the session journal, a run's `run.jsonl` and `failure/*.json`), a fact, an event, a
+call record. The rule is `…scenario.Images` (an image's bytes: the string of a map's `base64` entry that is base64
+text, and in a text a base64 run that starts with a PNG's signature `iVBORw0KGgo` or the base64 string of a JSON member
+named `base64`; elided to `<png: N bytes>`, `<base64: N bytes>`, N the bytes it encodes, the map's other entries
+kept). It is applied where the files are written (`run.jsonl` by `RunLog.write`, every record type and the telemetry
+observer's copy; the session journal by `StepJournal.append`; the executor's `failure/` JSON and text files), once more
+by `Masking` on everything the server answers or serves as text (for files written before the fix), and by
+`PromptMask` on everything a model reads (§6.2). The pixels are kept only in the PNG files (`<out>/mcp/<n>.png`,
+`artifacts/capture.png`, `failure/capture.png`), which the person opens and which D159 gates.
 
 (Phase 6, built 2026-10-09, CP; P6 §4.2, §6.4) `skillroy://env/profile`'s matrix is the one read after the start's
 hook install (with the `hook.<id>` capabilities); a run the server started holds its `capabilities.json` beside its
@@ -1598,6 +1649,13 @@ a directory; 64 for usage (no directory, gateway `none`). As built (2026-10-08, 
 `exitCode()`); a run's outputs carry no step record with a verb, so the request names the failed step by its id with
 its `call` and `expect` records; the events come from `failure/events.json`; effort is `LOW`; the evidence travels in
 `<target-state>`, `<target-ui>` and `<target-event>` blocks.
+
+(Phase 6 security fix, pass 2, P2-L6-S1, P2-L5-F2, built 2026-10-09, SC) No image, **and no image's bytes inside a
+record**: the records triage keeps (`call`, `expect`, the failed slot's) have a capture's `base64` elided to
+`<png: N bytes>` (`…scenario.Images`, §9.4) before they are rendered, which covers a run log written before the run log
+elided images, and the request's mask elides any left (§6.2). In `triage.md` the answering models' ids and the
+summary-failure line, which quotes the provider's error text, are inline code, as the model's texts are (S50): those
+strings are the provider's, or whatever `ANTHROPIC_BASE_URL` names.
 
 As built (2026-10-08, fix wave): no row of the run's data reaches a triage request: every `rowSample` of the run's
 records (the statements of the `resolve` records of the slot that resolved last) and any other rows-shaped value (a

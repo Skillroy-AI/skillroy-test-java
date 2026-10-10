@@ -21,6 +21,7 @@ import ai.skillroy.testjava.inference.prompt.PromptMask;
 import ai.skillroy.testjava.protocol.Json;
 import ai.skillroy.testjava.protocol.JsonException;
 import ai.skillroy.testjava.protocol.sql.Rows;
+import ai.skillroy.testjava.scenario.Images;
 
 import java.util.function.Supplier;
 
@@ -33,6 +34,11 @@ import java.util.function.Supplier;
  *
  * <p>Static descriptions (the primitives' schemas, the scenario schema) take the secret values only: the key rule would
  * replace the schema of a parameter named {@code password}.
+ *
+ * <p>No capture's bytes pass as text (D159 as completed by the Phase 6 security fix, pass 2, P2-L6-F2, P2-L6-F3): every
+ * value and every text here, a tool's answer, a resource, a run's or a session's file served as text, has an image's
+ * {@code base64} elided to {@code <png: N bytes>} ({@link Images}), whatever {@code images} says; under
+ * {@code images: true} a capture reaches the client only as the PNG blob behind a tool's resource link.
  *
  * <p>Immutable; safe to share between threads.
  */
@@ -66,9 +72,9 @@ final class Masking {
         return prompt.jsonLike(plain(jsonLike));
     }
 
-    /** A static description: the secret values only. */
+    /** A static description: the secret values only (and no image's bytes, {@link Images}). */
     Object plain(Object jsonLike) {
-        Object v = secrets.apply(JsonForm.of(jsonLike));
+        Object v = secrets.apply(Images.elided(JsonForm.of(jsonLike)));
         SecretMask more = joinedMask();
         return more == null ? v : more.apply(v);
     }
@@ -78,7 +84,7 @@ final class Masking {
         if (text == null) {
             return null;
         }
-        String t = secrets.apply(text);
+        String t = secrets.apply(Images.elidedText(text));
         SecretMask more = joinedMask();
         return prompt.text(more == null ? t : more.apply(t));
     }

@@ -403,4 +403,75 @@ class TriageTest {
         assertThrows(NoSuchFileException.class, () -> Triage.run(tmp.resolve("nowhere"),
                 ScriptedGateway.sequence(List.of()), mask(), PriceTable.builtIn(), TriageOptions.defaults()));
     }
+
+    /** A 1 x 1 PNG, base64, as {@code swing.capture} answers it. */
+    static final String PNG_1X1 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9aw"
+            + "AAAABJRU5ErkJggg==";
+
+    /**
+     * Phase 6 security fix, pass 2, P2-L6-S1 (the sceptic's probe T, inverted): a failed step whose call returned a
+     * capture, in a run log written before the run log elided images, sends the call's shape and size to the model and
+     * never the capture's bytes; the bytes in a {@code fact}-like text field and in an expectation's actual are elided
+     * too (P5 §11.2: "no image, and no image's bytes inside a record").
+     */
+    @Test
+    void aFailedStepsCaptureReachesNoRequestAsText() throws Exception {
+        Path run = tmp.resolve("capture-run");
+        Files.createDirectories(run);
+        String log = String.join("\n",
+                "{\"type\":\"run-start\",\"t\":0,\"scenarioId\":\"cap\",\"pack\":\"lending\","
+                        + "\"packVersion\":\"0.5.0\"}",
+                "{\"type\":\"call\",\"t\":60,\"step\":\"s1\",\"index\":1,\"primitive\":\"swing.capture\","
+                        + "\"params\":{},\"ok\":true,\"value\":{\"format\":\"png\",\"width\":1,\"height\":1,"
+                        + "\"base64\":\"" + PNG_1X1 + "\"},\"events\":0,\"seq\":4,\"durationMs\":12,"
+                        + "\"thread\":\"EDT\"}",
+                "{\"type\":\"expect\",\"t\":70,\"step\":\"s1\",\"path\":\"app.state.mode\",\"matcher\":\"RETURNED\","
+                        + "\"result\":\"failed\",\"resolved\":true,\"actual\":\"data:image/png;base64," + PNG_1X1
+                        + "\",\"reason\":\"expected RETURNED\"}",
+                "{\"type\":\"run-end\",\"t\":90,\"status\":\"FAIL\",\"failureKind\":\"ASSERTION\","
+                        + "\"failedStepId\":\"s1\",\"message\":\"expectation failed\",\"skippedExpectations\":[],"
+                        + "\"durationMs\":90}") + "\n";
+        Files.writeString(run.resolve("run.jsonl"), log);
+        ScriptedGateway gateway = ScriptedGateway.sequence(List.of(label("SCENARIO_DEFECT", 0.5, "x")));
+        Triage.run(run, gateway, mask(), PriceTable.builtIn(), new TriageOptions(true, clock));
+        String content = user(gateway.requests().get(0));
+        assertFalse(content.contains("iVBORw0KGgo"), "no capture's bytes in the request:\n" + content);
+        assertTrue(content.contains("\"base64\": \"<png: 70 bytes>\""), "the capture's shape and size stay: "
+                + content);
+        assertTrue(content.contains("\"width\": 1"), content);
+        assertTrue(content.contains("data:image/png;base64,<png: 70 bytes>"), content);
+    }
+
+    /**
+     * Phase 6 security fix, pass 2, P2-L5-F2: the answering model ids and the summary-failure line (which quotes the
+     * provider's error text) are inline code in triage.md, so that a link or an image a provider (or whatever
+     * ANTHROPIC_BASE_URL names) put in them is inert.
+     */
+    @Test
+    void theProvidersModelIdsAndErrorTextAreRenderedAsCode() throws Exception {
+        Path run = copy("failed-run");
+        Map<String, Object> answer = new LinkedHashMap<>();
+        answer.put("label", "TIMING");
+        answer.put("confidence", 0.4);
+        answer.put("oneLine", "late");
+        ModelResponse labelled = ScriptedGateway.structured(answer, new Usage("scripted",
+                "claude-haiku-4-5", "claude-haiku-4-5 ![x](https://e.example/x)", "req-label", 2000, 60, 0, 0, 0,
+                false, "0.0023", Duration.ZERO, null));
+        java.util.concurrent.atomic.AtomicInteger calls = new java.util.concurrent.atomic.AtomicInteger();
+        ScriptedGateway gateway = ScriptedGateway.of(request -> {
+            if (calls.getAndIncrement() == 0) {
+                return labelled;
+            }
+            throw new InferenceException(InferenceException.Kind.PROVIDER, "bad [click](https://e.example/y)");
+        });
+        TriageResult result = Triage.run(run, gateway, mask(), PriceTable.builtIn(), new TriageOptions(false,
+                clock));
+        assertEquals(TriageResult.Outcome.FAILED, result.outcome());
+        String md = Files.readString(run.resolve("failure/triage.md"));
+        assertTrue(md.contains(" by `claude-haiku-4-5 ![x](https://e.example/x)`; model cost"), md);
+        assertTrue(md.contains("\n`the model provider could not be reached for the summary: PROVIDER (bad"
+                + " [click](https://e.example/y))`\n"), md);
+        String outsideCode = md.replaceAll("`[^`\n]*`", "");
+        assertFalse(outsideCode.contains("](https://e.example"), "no live link or image: " + md);
+    }
 }

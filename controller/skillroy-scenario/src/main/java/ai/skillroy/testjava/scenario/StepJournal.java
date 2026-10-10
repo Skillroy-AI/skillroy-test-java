@@ -151,13 +151,15 @@ public final class StepJournal {
     }
 
     /**
-     * Appends one record: masked, written as one line, and kept as the line reads back.
+     * Appends one record: an image's bytes elided ({@link Images}: a check's {@code actual} or an observed
+     * {@code value} that holds a capture keeps its shape, its {@code base64} written {@code "<png: N bytes>"}; phase6
+     * security fix, pass 2, P2-L6-F3), masked, written as one line, and kept as the line reads back.
      *
      * @return the entry as kept
      */
     synchronized Entry append(Entry entry, SecretMask mask) {
         Map<String, Object> json = entry.toJson();
-        Object masked = (mask == null ? SecretMask.NONE : mask).apply(RunLog.jsonForm(json, 0));
+        Object masked = (mask == null ? SecretMask.NONE : mask).apply(Images.elided(RunLog.jsonForm(json, 0)));
         String line = Json.write(masked);
         Entry kept = parse(Json.parseObject(line));
         entries.add(kept);

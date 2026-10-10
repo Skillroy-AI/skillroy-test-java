@@ -31,6 +31,7 @@ import ai.skillroy.testjava.inference.spi.ModelResponse;
 import ai.skillroy.testjava.inference.spi.Structured;
 import ai.skillroy.testjava.protocol.Json;
 import ai.skillroy.testjava.protocol.JsonException;
+import ai.skillroy.testjava.scenario.Images;
 import ai.skillroy.testjava.scenario.Schemas;
 import ai.skillroy.testjava.scenario.resolve.CodecException;
 import ai.skillroy.testjava.scenario.resolve.CostLedger;
@@ -367,7 +368,7 @@ public final class Triage {
         md.append("# Triage of ").append(scenarioId == null ? "a run" : scenarioId).append("\n\n");
         md.append("Run status ").append(status).append(failureKind == null ? "" : " (" + failureKind + ")")
                 .append(step == null ? "" : ", failed step " + step).append(". Triaged ").append(date)
-                .append(" by ").append(models.isEmpty() ? "no model" : String.join(", ", models))
+                .append(" by ").append(models.isEmpty() ? "no model" : modelIds(models))
                 .append("; model cost $").append(cost.toPlainString()).append(".\n\n");
         // Phase 6 security fix S50: a model's texts are rendered as code (inline or fenced), so that a link, an image
         // or a heading in them is inert in a rendered triage.md.
@@ -387,7 +388,8 @@ public final class Triage {
             }
         }
         if (failure != null) {
-            md.append("\n").append(failure).append(".\n");
+            // Phase 6 security fix, pass 2, P2-L5-F2: the line quotes the provider's error text, inert as code.
+            md.append("\n").append(code(failure)).append("\n");
         }
         md.append("\nA reader's aid: the run's own classification stands.\n");
         return md.toString();
@@ -400,6 +402,19 @@ public final class Triage {
 
     private static String oneLine(String text) {
         return text == null ? "" : text.replace('\n', ' ').replace('\r', ' ');
+    }
+
+    /**
+     * The answering models' ids, each as inline code (phase6 security fix, pass 2, P2-L5-F2): the ids are the
+     * provider's (or whatever {@code ANTHROPIC_BASE_URL} names), so a link or an image in one is inert, as in the
+     * re-resolve report.
+     */
+    private static String modelIds(List<String> models) {
+        List<String> ids = new ArrayList<>(models.size());
+        for (String model : models) {
+            ids.add(code(model));
+        }
+        return String.join(", ", ids);
     }
 
     /** A model's one-line text as inline code, a backtick in it replaced (S50). */
@@ -489,9 +504,11 @@ public final class Triage {
 
         private void take(Map<String, Object> read) {
             // No row of the run's data reaches the request (phase5-contracts.md 6.2, 11.2): a row sample carries no
-            // column names, so the by-column rule cannot be applied to it, and triage knows no allow-list.
+            // column names, so the by-column rule cannot be applied to it, and triage knows no allow-list. No image's
+            // bytes either (phase6 security fix, pass 2, P2-L6-S1): a capture in a kept record, as a run log written
+            // before the run log elided them holds, keeps its shape and its size only.
             @SuppressWarnings("unchecked")
-            Map<String, Object> record = (Map<String, Object>) withoutRows(read, 0);
+            Map<String, Object> record = (Map<String, Object>) Images.elided(withoutRows(read, 0));
             String type = String.valueOf(record.get("type"));
             switch (type) {
                 case "run-start" -> start = record;
