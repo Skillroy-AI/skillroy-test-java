@@ -17,9 +17,9 @@
 package ai.skillroy.testjava.scenario;
 
 /**
- * The verdict of a scenario run (and of each step). Four values rather than pass/fail because "a check could not be
- * made on this target" and "the run could not be carried out" must look different from both a pass and a failure of
- * the target application in CI.
+ * The verdict of a scenario run (and of each step). Five values rather than pass/fail because "a check could not be
+ * made on this target", "the run could not be carried out" and "the plan was not executed by design" must look
+ * different from both a pass and a failure of the target application in CI.
  */
 public enum Status {
     /** Every expectation held. */
@@ -37,5 +37,11 @@ public enum Status {
      * The scenario could not be run properly (PRECONDITION_FAILED, RESOLUTION_FAILED, ENVIRONMENT, AGENT_LOST,
      * TARGET_RESTARTED).
      */
-    ERROR
+    ERROR,
+    /**
+     * The plan was not executed (phase7-contracts.md 8.6, decision D328): its {@code inference} is {@code run} (a step
+     * needs a model while steps run) and the mode is {@code replay}. Decided right after {@code run-start}, before the
+     * agent is contacted; neither a failure nor a pass. A session never produces it.
+     */
+    SKIPPED
 }

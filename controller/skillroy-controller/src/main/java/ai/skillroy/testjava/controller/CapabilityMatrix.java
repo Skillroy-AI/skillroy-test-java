@@ -45,7 +45,15 @@ import java.util.TreeMap;
  */
 public final class CapabilityMatrix {
 
+    /** {@link #source(String)} of an entry the agent declared. */
+    public static final String SOURCE_AGENT = "agent";
+
+    /** The prefix of {@link #source(String)} for an entry a controller-side contributor added. */
+    public static final String SOURCE_CONTROLLER_PREFIX = "controller:";
+
     private final Map<String, Capability> byId;
+    /** The source of each contributed entry (phase7-contracts.md 8.5); an id not in it is the agent's. */
+    private final Map<String, String> sources;
 
     /**
      * @param capabilities capabilities keyed by id; null means none. The map key is authoritative and must equal
@@ -53,6 +61,15 @@ public final class CapabilityMatrix {
      * @throws IllegalArgumentException if a key differs from its capability's id
      */
     public CapabilityMatrix(Map<String, Capability> capabilities) {
+        this(sorted(capabilities), Map.of());
+    }
+
+    private CapabilityMatrix(TreeMap<String, Capability> sorted, Map<String, String> sources) {
+        this.byId = Collections.unmodifiableMap(sorted);
+        this.sources = Collections.unmodifiableMap(new TreeMap<>(sources));
+    }
+
+    private static TreeMap<String, Capability> sorted(Map<String, Capability> capabilities) {
         TreeMap<String, Capability> sorted = new TreeMap<>();
         if (capabilities != null) {
             for (Map.Entry<String, Capability> e : capabilities.entrySet()) {
@@ -64,7 +81,60 @@ public final class CapabilityMatrix {
                 sorted.put(e.getKey(), capability);
             }
         }
-        this.byId = Collections.unmodifiableMap(sorted);
+        return sorted;
+    }
+
+    /**
+     * This matrix with the capabilities a controller-side module contributes (phase7-contracts.md 8.5, decision
+     * D326), each remembered with {@code source} for {@link #source(String)}; the wire shape ({@link #toJson()},
+     * {@link #hash()}) carries no source. The caller decides conflicts first: an id this matrix already holds is
+     * refused here.
+     *
+     * @param contributed capabilities keyed by id; null means none
+     * @param source the source to remember, {@code controller:<contributor id>}
+     * @throws IllegalArgumentException if a key differs from its capability's id, an id is already in this matrix, or
+     *     the source is blank
+     */
+    public CapabilityMatrix with(Map<String, Capability> contributed, String source) {
+        if (source == null || source.isBlank()) {
+            throw new IllegalArgumentException("a contributed capability needs a source");
+        }
+        TreeMap<String, Capability> added = sorted(contributed);
+        TreeMap<String, Capability> merged = new TreeMap<>(byId);
+        Map<String, String> mergedSources = new TreeMap<>(sources);
+        for (Map.Entry<String, Capability> e : added.entrySet()) {
+            if (merged.containsKey(e.getKey())) {
+                throw new IllegalArgumentException("capability '" + e.getKey() + "' is already in the matrix (source "
+                        + source(e.getKey()) + "); " + source + " cannot add it");
+            }
+            merged.put(e.getKey(), e.getValue());
+            mergedSources.put(e.getKey(), source);
+        }
+        return new CapabilityMatrix(merged, mergedSources);
+    }
+
+    /**
+     * Where an entry came from (phase7-contracts.md 8.5): {@link #SOURCE_AGENT}, or the source it was added with by
+     * {@link #with} ({@code controller:<contributor id>}); null for an id the matrix does not hold.
+     */
+    public String source(String id) {
+        if (!byId.containsKey(id)) {
+            return null;
+        }
+        return sources.getOrDefault(id, SOURCE_AGENT);
+    }
+
+    /**
+     * The matrix as the agent declared it: this one without the entries {@link #with} added (phase7-contracts.md
+     * 8.5); itself when nothing was contributed.
+     */
+    public CapabilityMatrix agentOnly() {
+        if (sources.isEmpty()) {
+            return this;
+        }
+        TreeMap<String, Capability> agent = new TreeMap<>(byId);
+        agent.keySet().removeAll(sources.keySet());
+        return new CapabilityMatrix(agent, Map.of());
     }
 
     /**
