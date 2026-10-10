@@ -16,7 +16,9 @@
 
 package ai.skillroy.testjava.agent.api.spi;
 
+import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -32,4 +34,14 @@ public interface LocatorResolver {
 
     /** Components under {@code root} matching {@code value} for the strategy; empty if none, never null. */
     List<java.awt.Component> resolve(String strategy, String value, java.awt.Component root);
+
+    /**
+     * The strategy values that name this component in the resolver's own vocabulary (for example
+     * {@code {action: "DUE"}}), so that a hit-test can propose a domain locator first (design 3.7; phase7-contracts.md
+     * section 3.7, A64). Each entry is checked by the agent to match exactly this component before it is proposed.
+     * Empty by default, never null.
+     */
+    default Map<String, String> describe(java.awt.Component component) {
+        return Collections.emptyMap();
+    }
 }
