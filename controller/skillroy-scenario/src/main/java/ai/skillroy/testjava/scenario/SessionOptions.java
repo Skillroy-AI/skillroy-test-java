@@ -24,6 +24,9 @@ import ai.skillroy.testjava.scenario.web.WebSettings;
 import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
+import java.util.Collections;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.regex.Pattern;
 
 /**
@@ -57,7 +60,7 @@ import java.util.regex.Pattern;
  */
 public record SessionOptions(Path outputDir, Duration stepTimeout, Clock clock, BindOptions bind, boolean readOnly,
                              boolean recoverOnClose, WebSettings web, UiSettings ui, ClassLoader webPathLoader,
-                             String id, HooksMode hooks, RunObserver observer) {
+                             String id, HooksMode hooks, RunObserver observer, boolean robot, Set<String> host) {
 
     /** The step timeout when none is given. */
     public static final Duration DEFAULT_STEP_TIMEOUT = Duration.ofSeconds(10);
@@ -84,6 +87,19 @@ public record SessionOptions(Path outputDir, Duration stepTimeout, Clock clock, 
         }
         hooks = hooks == null ? HooksMode.AUTO : hooks;
         observer = observer == null ? RunObserver.NONE : observer;
+        host = host == null ? Set.of() : Collections.unmodifiableSet(new TreeSet<>(host));
+    }
+
+    /**
+     * Options without the robot opt-in and without host features (the Phase 6 shape).
+     *
+     * @throws IllegalArgumentException as the canonical constructor
+     */
+    public SessionOptions(Path outputDir, Duration stepTimeout, Clock clock, BindOptions bind, boolean readOnly,
+                          boolean recoverOnClose, WebSettings web, UiSettings ui, ClassLoader webPathLoader,
+                          String id, HooksMode hooks, RunObserver observer) {
+        this(outputDir, stepTimeout, clock, bind, readOnly, recoverOnClose, web, ui, webPathLoader, id, hooks,
+                observer, false, Set.of());
     }
 
     /**
@@ -95,79 +111,97 @@ public record SessionOptions(Path outputDir, Duration stepTimeout, Clock clock, 
                           boolean recoverOnClose, WebSettings web, UiSettings ui, ClassLoader webPathLoader,
                           String id) {
         this(outputDir, stepTimeout, clock, bind, readOnly, recoverOnClose, web, ui, webPathLoader, id,
-                HooksMode.AUTO, RunObserver.NONE);
+                HooksMode.AUTO, RunObserver.NONE, false, Set.of());
     }
 
     /** Options writing the journal into {@code outputDir}, with every other component's default. */
     public static SessionOptions defaults(Path outputDir) {
         return new SessionOptions(outputDir, null, null, null, false, false, null, null, null, null, HooksMode.AUTO,
-                RunObserver.NONE);
+                RunObserver.NONE, false, Set.of());
     }
 
     /** A copy with another step timeout (null: 10 s). */
     public SessionOptions withStepTimeout(Duration timeout) {
         return new SessionOptions(outputDir, timeout, clock, bind, readOnly, recoverOnClose, web, ui, webPathLoader,
-                id, hooks, observer);
+                id, hooks, observer, robot, host);
     }
 
     /** A copy with another clock. */
     public SessionOptions withClock(Clock newClock) {
         return new SessionOptions(outputDir, stepTimeout, newClock, bind, readOnly, recoverOnClose, web, ui,
-                webPathLoader, id, hooks, observer);
+                webPathLoader, id, hooks, observer, robot, host);
     }
 
     /** A copy with other bind options (put in {@code live} mode). */
     public SessionOptions withBind(BindOptions newBind) {
         return new SessionOptions(outputDir, stepTimeout, clock, newBind, readOnly, recoverOnClose, web, ui,
-                webPathLoader, id, hooks, observer);
+                webPathLoader, id, hooks, observer, robot, host);
     }
 
     /** A copy that is or is not read-only. */
     public SessionOptions withReadOnly(boolean on) {
         return new SessionOptions(outputDir, stepTimeout, clock, bind, on, recoverOnClose, web, ui, webPathLoader,
-                id, hooks, observer);
+                id, hooks, observer, robot, host);
     }
 
     /** A copy that does or does not recover when it closes after a mutating call. */
     public SessionOptions withRecoverOnClose(boolean on) {
         return new SessionOptions(outputDir, stepTimeout, clock, bind, readOnly, on, web, ui, webPathLoader, id, hooks,
-                observer);
+                observer, robot, host);
     }
 
     /** A copy with other web settings (null: the default, and no {@code web} key in an export). */
     public SessionOptions withWeb(WebSettings settings) {
         return new SessionOptions(outputDir, stepTimeout, clock, bind, readOnly, recoverOnClose, settings, ui,
-                webPathLoader, id, hooks, observer);
+                webPathLoader, id, hooks, observer, robot, host);
     }
 
     /** A copy with other UI settings (null: the default, and no {@code ui} key in an export). */
     public SessionOptions withUi(UiSettings settings) {
         return new SessionOptions(outputDir, stepTimeout, clock, bind, readOnly, recoverOnClose, web, settings,
-                webPathLoader, id, hooks, observer);
+                webPathLoader, id, hooks, observer, robot, host);
     }
 
     /** A copy that finds web paths through {@code loader}. */
     public SessionOptions withWebPathLoader(ClassLoader loader) {
         return new SessionOptions(outputDir, stepTimeout, clock, bind, readOnly, recoverOnClose, web, ui, loader,
-                id, hooks, observer);
+                id, hooks, observer, robot, host);
     }
 
     /** A copy with this session id (null: generated). */
     public SessionOptions withId(String newId) {
         return new SessionOptions(outputDir, stepTimeout, clock, bind, readOnly, recoverOnClose, web, ui,
-                webPathLoader, newId, hooks, observer);
+                webPathLoader, newId, hooks, observer, robot, host);
     }
 
     /** A copy with this hooks switch (null: {@link HooksMode#AUTO}); phase6-contracts.md 6.1. */
     public SessionOptions withHooks(HooksMode mode) {
         return new SessionOptions(outputDir, stepTimeout, clock, bind, readOnly, recoverOnClose, web, ui,
-                webPathLoader, id, mode, observer);
+                webPathLoader, id, mode, observer, robot, host);
     }
 
     /** A copy with this observer (null: {@link RunObserver#NONE}); the session never closes it. */
     public SessionOptions withObserver(RunObserver newObserver) {
         return new SessionOptions(outputDir, stepTimeout, clock, bind, readOnly, recoverOnClose, web, ui,
-                webPathLoader, id, hooks, newObserver);
+                webPathLoader, id, hooks, newObserver, robot, host);
+    }
+
+    /**
+     * A copy with the controller half of the Robot opt-in on or off (phase7-contracts.md 9.2, decision D332): set only
+     * from a person's flag ({@code --allow-robot}).
+     */
+    public SessionOptions withRobot(boolean on) {
+        return new SessionOptions(outputDir, stepTimeout, clock, bind, readOnly, recoverOnClose, web, ui,
+                webPathLoader, id, hooks, observer, on, host);
+    }
+
+    /**
+     * A copy with these host features (null: none), what the capability merge of {@link ExecutorSession#open} reads
+     * (phase7-contracts.md 8.5, decision D348).
+     */
+    public SessionOptions withHost(Set<String> features) {
+        return new SessionOptions(outputDir, stepTimeout, clock, bind, readOnly, recoverOnClose, web, ui,
+                webPathLoader, id, hooks, observer, robot, features);
     }
 
     /** The web settings that apply: {@link #web()}, or the default. */

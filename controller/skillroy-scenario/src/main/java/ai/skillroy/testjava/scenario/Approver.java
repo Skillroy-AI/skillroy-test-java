@@ -19,6 +19,7 @@ package ai.skillroy.testjava.scenario;
 import ai.skillroy.testjava.scenario.resolve.EnvFingerprint;
 import ai.skillroy.testjava.scenario.resolve.Resolution;
 
+import java.nio.file.Path;
 import java.util.List;
 
 /**
@@ -41,6 +42,35 @@ public interface Approver {
 
     /** The decision for this scenario's bind. */
     Decision review(ApprovalRequest request);
+
+    /**
+     * The decision for one image baseline candidate, asked at its {@code expectImage} step in {@code approve}
+     * (phase7-contracts.md 6.7, 8.7, decision D355), after the candidate was written to its file so that the person
+     * can look at it. The default delegates to {@link #review} with a request that names the scenario and the
+     * environment and holds no resolution (its fingerprint is null), so that {@link #APPROVE_ALL} approves and
+     * {@link #REJECT_ALL} rejects; the CLI's terminal approver overrides it to print the candidate's path and size and
+     * ask. An anchor is never approved here: it is recorded by a session.
+     */
+    default Decision reviewImage(ImageApproval request) {
+        return review(new ApprovalRequest(request.scenarioId(), request.envId(), null, List.of(), List.of(), null));
+    }
+
+    /**
+     * One image baseline candidate shown for approval (phase7-contracts.md 8.7).
+     *
+     * @param scenarioId the scenario
+     * @param envId the environment id
+     * @param label the baseline's label
+     * @param renderKey the render key the candidate was captured with
+     * @param candidate the candidate's PNG file under the run's {@code candidates/}, or null when the run has no output
+     *     directory
+     * @param width the candidate's width
+     * @param height the candidate's height
+     * @param existing the baseline the file holds for this label under another render key or this one, or null
+     */
+    record ImageApproval(String scenarioId, String envId, String label, String renderKey, Path candidate, int width,
+                         int height, BindingsFile.ImageEntry existing) {
+    }
 
     /**
      * What is shown for approval.

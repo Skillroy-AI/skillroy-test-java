@@ -343,6 +343,8 @@ public final class ScenarioTests {
             }
             case FAIL -> Assertions.fail(describe(result));
             case ERROR -> throw new ScenarioRunException(describe(result), result);
+            // phase7-contracts.md 8.6 (D328): not executed by design, whatever degradedAs says.
+            case SKIPPED -> Assumptions.abort(result.scenarioId() + " SKIPPED: " + result.message());
             default -> throw new IllegalStateException("unknown status " + result.status());
         }
     }

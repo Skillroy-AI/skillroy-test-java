@@ -18,6 +18,7 @@ package ai.skillroy.testjava.scenario;
 
 import ai.skillroy.testjava.protocol.Json;
 import ai.skillroy.testjava.protocol.JsonException;
+import ai.skillroy.testjava.scenario.image.ImageCompare;
 import ai.skillroy.testjava.scenario.resolve.Approval;
 import ai.skillroy.testjava.scenario.resolve.CredentialRef;
 import ai.skillroy.testjava.scenario.resolve.EnvFingerprint;
@@ -268,6 +269,116 @@ public record BindingsFile(int bindingsVersion, String scenarioId, String envId,
         json.put("outputTokens", usage.outputTokens());
         json.put("costUsd", usage.costUsd());
         return json;
+    }
+
+    /**
+     * One image baseline or anchor of the {@code images} section (phase7-contracts.md 8.7, decisions D329, D330, D350,
+     * D355), under its label and the render key it was made with: the masked raster's hash and size, the capture's
+     * masks, carets and focus (what a comparison blanks on the baseline's side), the derived file name, the rendering
+     * for the reviewer, the window's size and insets, and for an anchor its origin in the step's target's coordinate
+     * space. JSON: {@code {sha256, width, height, masks, carets, focus: {owner, ownerRect?, active}, file, rendering,
+     * window, anchor?}}.
+     *
+     * @param sha256 the masked raster's hash ({@code ImageCompare.rasterHash}), {@code sha256:<hex>}
+     * @param width the image's width
+     * @param height the image's height
+     * @param masks the rectangles the capture blanked (its {@code redacted}) and the step's own masks, image coordinates
+     * @param carets the capture's caret rectangles, image coordinates
+     * @param focus the capture's focus state
+     * @param file {@code <scenarioId>.images/<label>.<renderKey>.png}: informative; the reader derives the path and
+     *     refuses a mismatch
+     * @param rendering {@code swing.rendering}'s answer without {@code renderKey} (nested), for the reviewer only
+     * @param window {@code {size: {w, h}, insets: {top, left}}}, or null
+     * @param anchor an anchor's origin in the step's target's coordinate space; null for a baseline
+     */
+    public record ImageEntry(String sha256, int width, int height, List<ImageCompare.Rect> masks,
+                             List<ImageCompare.Rect> carets, Focus focus, String file, Map<String, Object> rendering,
+                             Map<String, Object> window, Anchor anchor) {
+
+        /** Copies and freezes. */
+        @SuppressWarnings("unchecked")
+        public ImageEntry {
+            Objects.requireNonNull(sha256, "sha256");
+            if (width <= 0 || height <= 0 || width > ImageCompare.MAX_SIDE || height > ImageCompare.MAX_SIDE) {
+                throw new IllegalArgumentException("an image entry is 1 to " + ImageCompare.MAX_SIDE
+                        + " pixels a side, found " + width + " x " + height);
+            }
+            masks = masks == null ? List.of() : List.copyOf(masks);
+            carets = carets == null ? List.of() : List.copyOf(carets);
+            focus = focus == null ? new Focus(null, null, false) : focus;
+            rendering = rendering == null ? Map.of() : (Map<String, Object>) Plan.freeze(rendering);
+            window = window == null ? null : (Map<String, Object>) Plan.freeze(window);
+        }
+
+        /** The file name an entry of this label and render key has: {@code <scenarioId>.images/<label>.<key>.png}. */
+        public static String fileName(String scenarioId, String label, String renderKey) {
+            return scenarioId + ".images/" + label + "." + renderKey + ".png";
+        }
+
+        /** This entry with another file name. */
+        public ImageEntry withFile(String newFile) {
+            return new ImageEntry(sha256, width, height, masks, carets, focus, newFile, rendering, window, anchor);
+        }
+
+        /** The file's shape, in the documented key order; a new map. */
+        public Map<String, Object> toJson() {
+            Map<String, Object> json = new LinkedHashMap<>();
+            json.put("sha256", sha256);
+            json.put("width", (long) width);
+            json.put("height", (long) height);
+            json.put("masks", masks.stream().map(ImageCompare.Rect::toJson).toList());
+            json.put("carets", carets.stream().map(ImageCompare.Rect::toJson).toList());
+            json.put("focus", focus.toJson());
+            json.put("file", file);
+            json.put("rendering", rendering);
+            if (window != null) {
+                json.put("window", window);
+            }
+            if (anchor != null) {
+                Map<String, Object> a = new LinkedHashMap<>();
+                a.put("x", (long) anchor.x());
+                a.put("y", (long) anchor.y());
+                json.put("anchor", a);
+            }
+            return json;
+        }
+    }
+
+    /**
+     * The focus state of a capture as an image entry records it (phase7-contracts.md 3.1, 8.7).
+     *
+     * @param owner the focus owner's locator ({@code focus.ownerLocator} of the capture), null when nothing had the
+     *     focus or no locator matched it alone
+     * @param ownerRect the focus owner's rectangle in image coordinates, or null
+     * @param active whether the captured window was active
+     */
+    public record Focus(Map<String, Object> owner, ImageCompare.Rect ownerRect, boolean active) {
+
+        /** Freezes the locator. */
+        @SuppressWarnings("unchecked")
+        public Focus {
+            owner = owner == null ? null : (Map<String, Object>) Plan.freeze(owner);
+        }
+
+        /** {@code {owner, ownerRect?, active}}; a new map. */
+        public Map<String, Object> toJson() {
+            Map<String, Object> json = new LinkedHashMap<>();
+            json.put("owner", owner);
+            if (ownerRect != null) {
+                json.put("ownerRect", ownerRect.toJson());
+            }
+            json.put("active", active);
+            return json;
+        }
+    }
+
+    /**
+     * An anchor's origin in the step's target's coordinate space (phase7-contracts.md 6.5, 8.7).
+     *
+     * @param x the left edge
+     * @param y the top edge
+     */
+    public record Anchor(int x, int y) {
     }
 
     /** Typed reading with errors that name the place. */

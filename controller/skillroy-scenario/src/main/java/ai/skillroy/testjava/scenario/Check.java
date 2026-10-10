@@ -19,13 +19,15 @@ package ai.skillroy.testjava.scenario;
 import java.util.Map;
 
 /**
- * An element of {@code verify} and of a step's {@code expect}: a fact {@link Expectation} (Phase 1) or a stored-row
- * {@link RowCheck} (phase2-contracts.md 7.4). In {@code plan.json} the element's keys decide which: {@code path} for
- * an expectation, {@code db} for a row check.
+ * An element of {@code verify} and of a step's {@code expect}: a fact {@link Expectation} (Phase 1), a stored-row
+ * {@link RowCheck} (phase2-contracts.md 7.4), an {@code aiExpect} step's {@link VisualCheck} or an {@code expectImage}
+ * step's {@link ImageCheck} (phase7-contracts.md 8.4; plan version 6). In {@code plan.json} the element's keys decide
+ * which: {@code path} for an expectation, {@code db} for a row check, {@code visual} and {@code image} for the two
+ * Phase 7 checks.
  *
  * <p>Implementations are immutable; safe to share between threads.
  */
-public sealed interface Check permits Expectation, RowCheck {
+public sealed interface Check permits Expectation, RowCheck, VisualCheck, ImageCheck {
 
     /** The {@code plan.json} shape; a new map on each call. */
     Map<String, Object> toJson();
