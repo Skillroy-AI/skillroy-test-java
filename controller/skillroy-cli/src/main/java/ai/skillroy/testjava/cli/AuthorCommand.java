@@ -35,6 +35,7 @@ import ai.skillroy.testjava.scenario.RunOptions;
 import ai.skillroy.testjava.scenario.RunResult;
 import ai.skillroy.testjava.scenario.ScenarioException;
 import ai.skillroy.testjava.scenario.Status;
+import ai.skillroy.testjava.scenario.hooks.HooksMode;
 import ai.skillroy.testjava.scenario.observe.RunObserver;
 import ai.skillroy.testjava.scenario.observe.RunObservers;
 import ai.skillroy.testjava.scenario.pack.DomainPack;
@@ -148,6 +149,7 @@ final class AuthorCommand implements Command {
                 OptionSpec.value(ID, "scenario-id", "the new scenario's id, [a-z0-9-]+ (required)"),
                 OptionSpec.value(OUT, "dir", "the scenarios directory the files go into (required)"),
                 Packs.OPTION_SPEC, BindArgs.ENV_OPTION, BindArgs.CREDENTIALS_OPTION, BindArgs.BINDINGS_OPTION,
+                HooksArgs.OPTION,
                 OptionSpec.value(MODEL, "opus|sonnet", "the planner's model class (default opus)"),
                 OptionSpec.value(MAX_TURNS, "n", "the planner's turn limit (default 40)"),
                 OptionSpec.value(MAX_REPAIRS, "n", "the most repair rounds (default 2)"),
@@ -186,6 +188,9 @@ final class AuthorCommand implements Command {
         Long maxRepairs = args.longValue(MAX_REPAIRS, 0, 10);
         BigDecimal budget = budget(args);
         Path claude = claudeCommand(args);
+        // Phase 6 security fix, pass 2, P2-L6-F4: the person's hooks switch, for the planner's server, the dry-run
+        // bind and --run alike (phase6-contracts.md 6.1); a wrong value is a usage error before the agent is contacted.
+        HooksMode hooks = HooksArgs.mode(args);
         BindArgs.Settings settings = BindArgs.parse(args, List.of(), BindMode.LIVE);
         RunObserver observer = RunObserver.NONE;
         ClassLoader previous = Thread.currentThread().getContextClassLoader();
@@ -279,7 +284,7 @@ final class AuthorCommand implements Command {
                 String resolveLine;
                 if (plan.needsBindings()) {
                     RunResult bound = new PlanExecutor(pack, target.client(), RunOptions.defaults().withBind(live)
-                            .withObserver(observer), packs.loader()).resolve(plan).result();
+                            .withObserver(observer).withHooks(hooks), packs.loader()).resolve(plan).result();
                     resolved = passed(bound);
                     resolveLine = resolved ? "check: its slots resolve on " + settings.envId() + " (live, nothing"
                             + " written)" : "check: the bind failed: " + bound.failureKind() + BindArgs.reason(
@@ -297,8 +302,8 @@ final class AuthorCommand implements Command {
                                 + " it offers as tools): " + String.join("; ", refusals);
                     } else {
                         RunResult run = new PlanExecutor(pack, target.client(), RunOptions.defaults().withBind(live)
-                                .withExpectationsOnMaskedValues(true).withObserver(observer), packs.loader())
-                                .run(plan);
+                                .withExpectationsOnMaskedValues(true).withObserver(observer).withHooks(hooks),
+                                packs.loader()).run(plan);
                         ran = passed(run);
                         runText = "check: run once live: " + RunCommand.describe(run, null);
                     }
@@ -533,7 +538,8 @@ final class AuthorCommand implements Command {
     /**
      * Writes the planner's MCP configuration (10.2 step 3) into a new owner-only temporary file: this CLI's launcher
      * with {@code mcp --mutating --inference none --client planner}, the server's {@code --out} under the planner's
-     * private working directory (S60), the connection options as given (paths made absolute, the discovery directory
+     * private working directory (S60), the person's {@code --hooks} switch ({@code auto} when not given; phase6
+     * security fix, pass 2, P2-L6-F4), the connection options as given (paths made absolute, the discovery directory
      * always named), the pack jars, the environment, the bindings root and the credentials file.
      *
      * @param serverOut the planner's server's {@code --out}; null leaves the server its own temporary directory
@@ -559,6 +565,8 @@ final class AuthorCommand implements Command {
             // S60: the server's journal, run evidence and captures die with the planner's working directory.
             serverArgs.addAll(List.of(McpCommand.OUT, serverOut.toAbsolutePath().toString()));
         }
+        // P2-L6-F4: the planner's server installs the pack's hooks under the person's switch, and so do its runs.
+        serverArgs.addAll(List.of(HooksArgs.HOOKS, HooksArgs.mode(args).label()));
         if (args.value(Connector.PORT) != null) {
             serverArgs.addAll(List.of(Connector.PORT, args.value(Connector.PORT), Connector.TOKEN_FILE,
                     args.path(Connector.TOKEN_FILE).toAbsolutePath().toString()));

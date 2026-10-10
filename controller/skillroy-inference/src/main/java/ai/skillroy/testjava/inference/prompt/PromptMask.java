@@ -21,6 +21,7 @@ import ai.skillroy.testjava.data.SecretMask;
 import ai.skillroy.testjava.inference.spi.Content;
 import ai.skillroy.testjava.protocol.SecretKeys;
 import ai.skillroy.testjava.protocol.sql.Rows;
+import ai.skillroy.testjava.scenario.Images;
 import ai.skillroy.testjava.scenario.resolve.SqlAllowList;
 
 import java.util.ArrayList;
@@ -50,7 +51,10 @@ import java.util.regex.Pattern;
  *       personal column's values become {@value #PERSONAL}; a source without an allow-list gives no row.</li>
  *   <li><b>By origin.</b> Text read from the target or written by a person enters a prompt only in a labelled block
  *       ({@link #block}), inside a user message; the system text declares such blocks to be data.</li>
- *   <li><b>Captures.</b> An image part is refused unless images are enabled (false until Phase 7).</li>
+ *   <li><b>Captures.</b> An image part is refused unless images are enabled (false until Phase 7); and a capture's
+ *       bytes inside a text or a value (a map's base64 {@code base64} entry, a PNG's base64 run) are elided to
+ *       {@code <png: N bytes>} by {@link Images} whatever the setting (phase6 security fix, pass 2, P2-L6-F2,
+ *       P2-L6-F3, P2-L6-S1): an image reaches a model, or an MCP client, as an image or not at all.</li>
  *   <li><b>Bounded.</b> A text is masked, then cut at {@value #MAX_TEXT} characters, and a row sample cut at
  *       {@value #MAX_ROWS} rows, with {@value #TRUNCATED} appended.</li>
  * </ul>
@@ -153,14 +157,14 @@ public final class PromptMask {
      * A text through the rules: every known secret value replaced and the value of every {@code key: value} or
      * {@code key=value} run whose key names a secret replaced, over the whole text, and then cut at {@link #MAX_TEXT}
      * characters with {@link #TRUNCATED} (phase6 security fix S53: masked, then cut, so that no part of a secret of
-     * any length that straddles the cut survives; the build's margin of 1000 characters past the cut is gone). Null
-     * stays null.
+     * any length that straddles the cut survives; the build's margin of 1000 characters past the cut is gone). An
+     * image's base64 in it is elided first ({@link Images#elidedText}, P2-L6-F2). Null stays null.
      */
     public String text(String text) {
         if (text == null) {
             return null;
         }
-        String masked = keyRule(secrets.apply(text));
+        String masked = keyRule(secrets.apply(Images.elidedText(text)));
         if (masked.length() > MAX_TEXT) {
             masked = masked.substring(0, MAX_TEXT) + TRUNCATED;
         }
@@ -169,6 +173,11 @@ public final class PromptMask {
 
     /** The schema keywords whose values are a schema's data rather than its structure. */
     private static final Set<String> SCHEMA_VALUES = Set.of("default", "examples", "example", "enum", "const");
+    /** The keywords whose value maps a property name (or a name pattern) to a subschema. */
+    private static final Set<String> NAMED_SCHEMAS = Set.of("properties", "patternProperties", "dependentSchemas");
+    /** The keywords whose value maps a definition's name to a subschema that a local {@code $ref} names. */
+    private static final Set<String> DEFINITIONS = Set.of("$defs", "definitions");
+    private static final int MAX_SCHEMA_DEPTH = 64;
 
     /**
      * A JSON Schema (a pack verb's argument schema, a query kind's, a projected tool's input schema) through the mask,
@@ -179,13 +188,30 @@ public final class PromptMask {
      * never replaced by a text); every text value goes through {@link #text} (the secret values, the key rule, the
      * bound); numbers, booleans and null stay. Deeper than 64 levels, {@code "<too deep>"}. A new value; the schema is
      * not modified.
+     *
+     * <p>Phase 6 security fix, pass 2 (P2-L5-F1, P2-L5-S1): the secrecy is inherited by everything nested under a
+     * secret-named property: its {@code properties}, {@code patternProperties} and {@code dependentSchemas} (whose
+     * keys are asked as well, a pattern {@code ^password} naming a secret property), its {@code items}, its branches,
+     * and a definition ({@code $defs}, {@code definitions}) that a local {@code $ref} under it names, or whose own
+     * name looks secret (a fixed point over the local references, so a definition referenced from a secret definition
+     * is secret too; a definition shared with a non-secret property loses its data keywords for both). A data keyword
+     * of a non-secret property is data, not a schema: it goes through {@link #jsonLike} (every text through
+     * {@link #text}, a secret number replaced), and is dropped whole when it holds, at any depth, a map key that looks
+     * secret ({@code default: {staff: ann, password: …}}), so that {@code enum} and {@code const} never pin a model to
+     * {@value #REDACTED} and the schema stays valid.
      */
     public Object schema(Object schema) {
-        return schema(schema, false, 0);
+        Set<String> secretDefinitions = new java.util.HashSet<>();
+        int before;
+        do {
+            before = secretDefinitions.size();
+            secretReferences(schema, false, 0, secretDefinitions);
+        } while (secretDefinitions.size() != before);
+        return schema(schema, false, 0, secretDefinitions);
     }
 
-    private Object schema(Object schema, boolean secretProperty, int depth) {
-        if (depth > 64) {
+    private Object schema(Object schema, boolean secretProperty, int depth, Set<String> secretDefinitions) {
+        if (depth > MAX_SCHEMA_DEPTH) {
             return "<too deep>";
         }
         if (schema instanceof String s) {
@@ -196,17 +222,23 @@ public final class PromptMask {
             for (Map.Entry<?, ?> e : map.entrySet()) {
                 String key = String.valueOf(e.getKey());
                 Object value = e.getValue();
-                if (key.equals("properties") && value instanceof Map<?, ?> properties) {
-                    Map<String, Object> named = new LinkedHashMap<>();
-                    for (Map.Entry<?, ?> property : properties.entrySet()) {
-                        String name = String.valueOf(property.getKey());
-                        named.put(name, schema(property.getValue(), secretKey(name), depth + 1));
+                if ((NAMED_SCHEMAS.contains(key) || DEFINITIONS.contains(key)) && value instanceof Map<?, ?> named) {
+                    boolean definitions = DEFINITIONS.contains(key);
+                    Map<String, Object> walked = new LinkedHashMap<>();
+                    for (Map.Entry<?, ?> entry : named.entrySet()) {
+                        String name = String.valueOf(entry.getKey());
+                        boolean secret = secretProperty || secretKey(name)
+                                || definitions && secretDefinitions.contains(name);
+                        walked.put(name, schema(entry.getValue(), secret, depth + 1, secretDefinitions));
                     }
-                    out.put(key, named);
-                } else if (secretProperty && SCHEMA_VALUES.contains(key)) {
-                    continue;
+                    out.put(key, walked);
+                } else if (SCHEMA_VALUES.contains(key)) {
+                    if (secretProperty || holdsSecretKey(value, 0)) {
+                        continue;
+                    }
+                    out.put(key, jsonLike(value));
                 } else {
-                    out.put(key, schema(value, secretProperty, depth + 1));
+                    out.put(key, schema(value, secretProperty, depth + 1, secretDefinitions));
                 }
             }
             return out;
@@ -214,11 +246,86 @@ public final class PromptMask {
         if (schema instanceof List<?> list) {
             List<Object> out = new ArrayList<>(list.size());
             for (Object item : list) {
-                out.add(schema(item, secretProperty, depth + 1));
+                out.add(schema(item, secretProperty, depth + 1, secretDefinitions));
             }
             return out;
         }
         return schema;
+    }
+
+    /**
+     * One pass of the fixed point of {@link #schema(Object)}: adds to {@code secretDefinitions} the definition named by
+     * every local {@code $ref} ({@code #/$defs/<name>}, {@code #/definitions/<name>}, the last segment) met under a
+     * secret-named property or inside a definition already known to be secret.
+     */
+    private void secretReferences(Object schema, boolean secret, int depth, Set<String> secretDefinitions) {
+        if (depth > MAX_SCHEMA_DEPTH) {
+            return;
+        }
+        if (schema instanceof Map<?, ?> map) {
+            for (Map.Entry<?, ?> e : map.entrySet()) {
+                String key = String.valueOf(e.getKey());
+                Object value = e.getValue();
+                if ((NAMED_SCHEMAS.contains(key) || DEFINITIONS.contains(key)) && value instanceof Map<?, ?> named) {
+                    boolean definitions = DEFINITIONS.contains(key);
+                    for (Map.Entry<?, ?> entry : named.entrySet()) {
+                        String name = String.valueOf(entry.getKey());
+                        secretReferences(entry.getValue(), secret || secretKey(name)
+                                || definitions && secretDefinitions.contains(name), depth + 1, secretDefinitions);
+                    }
+                } else if (key.equals("$ref") && value instanceof String ref) {
+                    String name = localDefinition(ref);
+                    if (name != null && (secret || secretKey(name))) {
+                        secretDefinitions.add(name);
+                    }
+                } else if (!SCHEMA_VALUES.contains(key)) {
+                    secretReferences(value, secret, depth + 1, secretDefinitions);
+                }
+            }
+        } else if (schema instanceof List<?> list) {
+            for (Object item : list) {
+                secretReferences(item, secret, depth + 1, secretDefinitions);
+            }
+        }
+    }
+
+    /**
+     * The definition a local {@code $ref} names: the segment after the last {@code $defs} or {@code definitions}
+     * segment ({@code #/$defs/a}, {@code #/definitions/a}, {@code #/$defs/a/properties/b} names {@code a}, a nested
+     * block's too), JSON-pointer escapes undone; null for another reference.
+     */
+    private static String localDefinition(String ref) {
+        int at = Math.max(ref.lastIndexOf("/$defs/"), ref.lastIndexOf("/definitions/"));
+        if (!ref.startsWith("#/") || at < 0) {
+            return null;
+        }
+        int start = ref.indexOf('/', at + 1) + 1;
+        int end = ref.indexOf('/', start);
+        String name = end < 0 ? ref.substring(start) : ref.substring(start, end);
+        return name.isEmpty() ? null : name.replace("~1", "/").replace("~0", "~");
+    }
+
+    /** True when the data value holds, at any depth, a map key that looks secret. */
+    private boolean holdsSecretKey(Object value, int depth) {
+        if (depth > MAX_SCHEMA_DEPTH) {
+            return true;
+        }
+        if (value instanceof Map<?, ?> map) {
+            for (Map.Entry<?, ?> e : map.entrySet()) {
+                if (secretKey(String.valueOf(e.getKey())) || holdsSecretKey(e.getValue(), depth + 1)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        if (value instanceof Collection<?> list) {
+            for (Object item : list) {
+                if (holdsSecretKey(item, depth + 1)) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     /**
@@ -313,11 +420,11 @@ public final class PromptMask {
     /**
      * A JSON-like value through the rules, recursively: a map entry whose key names a secret gets
      * {@value #REDACTED} (a null value stays null), every text goes through {@link #text}, a number whose text is a
-     * known secret is replaced, and a value nested deeper than 200 levels becomes {@code "<too deep>"}. Returns a new
-     * value; the argument is not changed.
+     * known secret is replaced, and a value nested deeper than 200 levels becomes {@code "<too deep>"}; an image's
+     * bytes are elided first ({@link Images#elided}, P2-L6-F3). Returns a new value; the argument is not changed.
      */
     public Object jsonLike(Object value) {
-        return jsonLike(value, 0);
+        return jsonLike(Images.elided(value), 0);
     }
 
     private Object jsonLike(Object value, int depth) {

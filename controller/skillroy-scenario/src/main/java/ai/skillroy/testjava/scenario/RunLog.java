@@ -51,7 +51,10 @@ import java.util.Set;
  * armed, touched, ms, otherAgents}}; {@code ok: false} and the error when refused) and {@code capabilities} (the
  * archived matrix: {@code {hash, ids, file}}). A {@code call} record of a {@code web.*} primitive carries
  * {@code path}. Every record passes through the run's {@link SecretMask} first
- * (amendment A25, phase2-contracts.md 11.4).
+ * (amendment A25, phase2-contracts.md 11.4), and carries no image's bytes: a capture's {@code base64} (a {@code call},
+ * {@code sync}, {@code cleanup} or {@code trace.mark} record's value, an abort's detail) is written as
+ * {@code "<png: N bytes>"} by {@link Images} (phase6 security fix, pass 2, P2-L6-F2; the pixels go to
+ * {@code artifacts/} and {@code failure/} PNG files only).
  *
  * <p>Telemetry (phase6-contracts.md 10.2; as built, Phase 6, TL): an observer set with {@link #observe} receives, as
  * {@code scenarioRecord}, every record of the types {@link #OBSERVED} names exactly as it is written (masked, in JSON
@@ -122,7 +125,8 @@ final class RunLog implements AutoCloseable {
      * run's secrets masked. The mask sees the record in the form the JSON codec writes it ({@link #jsonForm}), so
      * that a set, an array or a record a pack built (verifier evidence, call params) is masked like a list or a
      * text. A record the codec cannot write (NaN, nesting deeper than 200) keeps its field names only, since its
-     * values could not be masked.
+     * values could not be masked. An image's bytes are elided before the mask ({@link Images#elided}), in the line
+     * and in the observer's copy alike.
      */
     synchronized void write(String type, Map<String, ?> fields) {
         boolean observed = observer != RunObserver.NONE && OBSERVED.contains(type);
@@ -136,7 +140,7 @@ final class RunLog implements AutoCloseable {
         try {
             if (fields != null) {
                 @SuppressWarnings("unchecked")
-                Map<String, ?> masked = (Map<String, ?>) mask.apply(jsonForm(fields, 0));
+                Map<String, ?> masked = (Map<String, ?>) mask.apply(Images.elided(jsonForm(fields, 0)));
                 record.putAll(masked);
             }
             line = Json.write(record);

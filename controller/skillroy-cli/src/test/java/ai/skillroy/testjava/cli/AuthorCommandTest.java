@@ -444,4 +444,30 @@ class AuthorCommandTest {
                 claude.toString()).expectExit(Exit.USAGE);
         assertFalse(Files.exists(bin.resolve("count")), "the planner never ran");
     }
+
+    /**
+     * Phase 6 security fix, pass 2, P2-L6-F4: {@code author} takes the person's {@code --hooks} switch and hands it to
+     * the planner's server (and to its own bind and run); without it the server is told {@code auto}, the default; a
+     * wrong value is a usage error before the planner starts. Before the fix the option did not exist (64) and the
+     * planner's server always ran under {@code auto}.
+     */
+    @Test
+    void theHooksSwitchIsHandedToThePlannersServer() throws Exception {
+        answer(1, envelope(document("hooks-off"), false, "0.10"));
+        author("--brief", BRIEF, "--id", "hooks-off", "--out", out.toString(), "--claude-command", claude.toString(),
+                "--hooks", "off", "--run").expectExit(Exit.OK);
+        Map<?, ?> server = (Map<?, ?>) ((Map<?, ?>) Json.parseObject(Files.readString(bin.resolve("mcp-1.json")))
+                .get("mcpServers")).get("skillroy");
+        assertEquals("off", after((List<?>) server.get("args"), "--hooks"), String.valueOf(server.get("args")));
+
+        answer(2, envelope(document("hooks-default"), false, "0.10"));
+        author("--brief", BRIEF, "--id", "hooks-default", "--out", out.toString(), "--claude-command",
+                claude.toString()).expectExit(Exit.OK);
+        Map<?, ?> byDefault = (Map<?, ?>) ((Map<?, ?>) Json.parseObject(Files.readString(bin.resolve("mcp-2.json")))
+                .get("mcpServers")).get("skillroy");
+        assertEquals("auto", after((List<?>) byDefault.get("args"), "--hooks"));
+
+        assertTrue(author("--brief", BRIEF, "--id", "x", "--out", out.toString(), "--claude-command",
+                claude.toString(), "--hooks", "sometimes").expectExit(Exit.USAGE).err().contains("--hooks"));
+    }
 }

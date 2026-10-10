@@ -122,6 +122,8 @@ final class ToolCalls {
     private static final long READ_TIMEOUT_MS = 10_000L;
     private static final String CONFIRM = "confirm";
     private static final String META = "_meta";
+    /** Deeper than this an answer is not walked for images ({@link JsonForm} cuts at 100 levels before). */
+    private static final int MAX_IMAGE_DEPTH = 128;
     /** The reason of a refusal for want of budget (D74), as a slot's budget failure is reported. */
     static final String BUDGET = "BUDGET";
     /** The journal's {@code budget} scope of the session meter. */
@@ -261,20 +263,19 @@ final class ToolCalls {
         json.put("value", rows);
         json.put("statement", guarded.sql());
         json.put("injected", guarded.injected());
-        return reply(json, !outcome.succeeded(), List.of());
+        return reply(json, !outcome.succeeded(), List.of(), "data_query");
     }
 
     /**
-     * A step's answer: its outcome as JSON, the last call's value with any image written out and linked.
+     * A step's answer: its outcome as JSON, the last call's value (any image in it, its detail or its events written
+     * out and linked by {@link #reply}).
      *
      * @param what the primitive or verb, for the image's description
      */
     private Reply step(StepOutcome outcome, String what) {
         Map<String, Object> json = stepJson(outcome);
-        List<McpSchema.Content> links = new ArrayList<>();
-        Object value = outcome.lastResult() == null ? null : JsonForm.of(outcome.lastResult().value());
-        json.put("value", images(value, links, what + " (step " + outcome.stepId() + ")", 0));
-        return reply(json, !outcome.succeeded(), links);
+        json.put("value", outcome.lastResult() == null ? null : outcome.lastResult().value());
+        return reply(json, !outcome.succeeded(), List.of(), what + " (step " + outcome.stepId() + ")");
     }
 
     private static Map<String, Object> stepJson(StepOutcome outcome) {
@@ -311,12 +312,15 @@ final class ToolCalls {
     }
 
     /**
-     * The value with every image in it (a map with {@code format: png} and {@code base64}: a capture, a bitmap) written
-     * to {@code <out>/mcp/<n>.png} and replaced by a reference to its resource link, which is added to {@code links}.
+     * The value with every image in it (a map with {@code format: png} and {@code base64}: a capture, a bitmap), at any
+     * depth (phase6 security fix, pass 2, P2-L6-F3: every tool's answer, not a step's value only, and not only to depth
+     * 8), written to {@code <out>/mcp/<n>.png} and replaced by a reference to its resource link, which is added to
+     * {@code links} (the link names the PNG only under {@code images: true}, D159). An image that cannot be decoded is
+     * left to the mask, which elides its bytes ({@link Masking}).
      */
     private Object images(Object value, List<McpSchema.Content> links, String what, int depth) {
-        if (depth > 8) {
-            return value;
+        if (depth > MAX_IMAGE_DEPTH) {
+            return "<too deep>";
         }
         if (value instanceof Map<?, ?> map) {
             if ("png".equals(map.get("format")) && map.get("base64") instanceof String base64) {
@@ -484,7 +488,7 @@ final class ToolCalls {
         json.put("root", root);
         json.put("path", path);
         json.put("value", value);
-        return reply(json, false, List.of());
+        return reply(json, false, List.of(), "skillroy_facts");
     }
 
     /** {@code skillroy_events}: the events after a sequence number, or the recent ones. */
@@ -501,7 +505,7 @@ final class ToolCalls {
         Map<String, Object> json = new LinkedHashMap<>();
         json.put("events", out);
         json.put("count", (long) out.size());
-        return reply(json, false, List.of());
+        return reply(json, false, List.of(), "skillroy_events");
     }
 
     /** The last {@code max} events of the last {@value #EVENTS_MAX} on the bus, on {@code topics} (null: all). */
@@ -576,7 +580,7 @@ final class ToolCalls {
         json.put("kind", kind);
         json.put("reference", "$" + slot);
         json.put("resolution", lastResolution(slot));
-        return reply(json, false, List.of());
+        return reply(json, false, List.of(), "skillroy_resolve");
     }
 
     /** The journal's record of the slot's resolution, in the bindings file's shape (already masked). */
@@ -759,7 +763,9 @@ final class ToolCalls {
      * starts with a prefix), its evidence in {@code <out>/runs/<run id>/}; the run's summary. Metered on the server's
      * session meter (phase6 security fix S56, D157): one tier (b) estimate per slot whose strategy names a model is
      * reserved first ({@link #meter}; refused {@code BUDGET} with no model call when there is no room), the run executes
-     * under a cap of the session's room, and what it spent is settled and journaled afterwards.
+     * under a cap of the session's room, and what it spent is settled and journaled afterwards. The run installs the
+     * pack's hooks under the server's {@code --hooks} switch, the session's (phase6 security fix, pass 2, P2-L6-F1):
+     * {@code off} installs nothing, {@code auto} and {@code on} find the server's own install.
      */
     Reply run(Map<String, Object> args) throws AgentLostException, ToolError {
         String yaml = Arguments.text(args, "yaml", true);
@@ -799,8 +805,11 @@ final class ToolCalls {
         String runId = server.nextRunId();
         Path dir = server.outDir().resolve("runs").resolve(runId);
         BindOptions bind = session().options().bind().withMode(bindMode).withWriteBindings(false);
+        // Phase 6 security fix, pass 2, P2-L6-F1: the run's step 0b runs under the server's --hooks switch (the
+        // session's), never the run default AUTO, so that a client cannot install or replace hooks through a run.
         RunOptions options = RunOptions.defaults().withOutputDir(dir).withBind(bind).withClock(server.clock())
-                .withExpectationsOnMaskedValues(true).withObserver(session().observer());
+                .withExpectationsOnMaskedValues(true).withObserver(session().observer())
+                .withHooks(session().options().hooks());
         PlanExecutor executor = new PlanExecutor(pack(), server.agent(), options,
                 session().options().webPathLoader());
         PlanExecutor.Resolved ran;
@@ -844,7 +853,7 @@ final class ToolCalls {
                     + masking().text(result.message()));
         }
         boolean passed = result.status() == Status.PASS || result.status() == Status.DEGRADED;
-        return reply(json, !passed, List.of());
+        return reply(json, !passed, List.of(), "skillroy_scenario_run " + runId);
     }
 
     /**
@@ -871,7 +880,7 @@ final class ToolCalls {
         String request = Arguments.text(args, "request", true);
         SessionActor actor = server.actor();
         Object answer = actor.ask(request);
-        return reply(JsonForm.of(answer), false, List.of());
+        return reply(JsonForm.of(answer), false, List.of(), "skillroy_session_ask");
     }
 
     /** {@code skillroy_session_check}: an expectation evaluated now and journaled. */
@@ -886,7 +895,7 @@ final class ToolCalls {
         json.put("actual", outcome.actual());
         json.put("reason", outcome.reason());
         json.put("durationMs", outcome.duration().toMillis());
-        return reply(json, false, List.of());
+        return reply(json, false, List.of(), "skillroy_session_check");
     }
 
     /** {@code skillroy_session_observe}: a value read now and journaled as observed. */
@@ -902,7 +911,7 @@ final class ToolCalls {
         json.put("path", path);
         json.put("value", value);
         json.put("note", "journaled as observed: an export marks it for the reviewer to derive or confirm");
-        return reply(json, false, List.of());
+        return reply(json, false, List.of(), "skillroy_session_observe");
     }
 
     /** {@code skillroy_session_note}: a note in the journal. */
@@ -986,9 +995,22 @@ final class ToolCalls {
         Files.write(file, bytes, java.nio.file.StandardOpenOption.CREATE_NEW, java.nio.file.StandardOpenOption.WRITE);
     }
 
-    /** Masked pretty JSON, cut. */
+    /** Masked pretty JSON, cut; any image in it written out and linked ({@link #images}). */
     private Reply reply(Object value, boolean error, List<McpSchema.Content> extra) {
-        return new Reply(Masking.json(masking().value(value)), extra, error);
+        return reply(value, error, extra, "a tool's answer");
+    }
+
+    /**
+     * Masked pretty JSON, cut: every image in the value, at any depth, written to {@code <out>/mcp/<n>.png} and
+     * linked ({@link #images}; phase6 security fix, pass 2, P2-L6-F3), then the masks, which elide any image's bytes
+     * left.
+     *
+     * @param what the tool (and step) whose answer it is, for an image's description
+     */
+    private Reply reply(Object value, boolean error, List<McpSchema.Content> extra, String what) {
+        List<McpSchema.Content> links = new ArrayList<>(extra);
+        Object linked = images(JsonForm.of(value), links, what, 0);
+        return new Reply(Masking.json(masking().value(linked)), links, error);
     }
 
     /**
