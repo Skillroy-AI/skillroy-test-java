@@ -67,11 +67,14 @@ import java.util.stream.Stream;
  *
  * <p>The command: {@code claude -p --bare --output-format json --json-schema <schema> --mcp-config <file>
  * --strict-mcp-config --tools "" --allowedTools "mcp__skillroy__*" --permission-mode dontAsk --model <id>
- * --max-turns <n> --max-budget-usd <usd> "<prompt>"}, the schema given as its JSON text (the form spike BS13 ran)
- * without its {@code $schema} key, which the CLI refuses ({@link #cliSchema}), stdin closed, the working directory a
- * private temporary directory (deleted afterwards), stdout and stderr captured into files there and read once the
- * process ended, all within the request's deadline (then the process is destroyed). The environment is inherited
- * ({@code ANTHROPIC_API_KEY} when set).
+ * --max-turns <n> --max-budget-usd <usd>} ({@link #command}), the schema given as its JSON text (the form spike BS13
+ * ran) without its {@code $schema} key, which the CLI refuses ({@link #cliSchema}), the prompt on stdin (a file in the
+ * private directory: phase6 security fix, pass 2, P2-L7-F3, so that no text of the brief or the model is ever an
+ * argument), the working directory a private temporary directory (deleted afterwards), stdout and stderr captured into
+ * files there and read once the process ended, all within the request's deadline (then the process is destroyed). The
+ * environment is inherited ({@code ANTHROPIC_API_KEY} when set). A planner that is a batch file ({@code .cmd},
+ * {@code .bat}), which Windows starts through {@code cmd.exe}, is refused; on Windows the schema argument is quoted by
+ * the C runtime's rules ({@link #windowsQuoted}) and the command line bounded ({@link #WINDOWS_COMMAND_LINE_MAX}).
  *
  * <p>The envelope (BS13 F-10): success is exit code 0 with {@code is_error} false, never the {@code subtype}; a
  * non-zero exit, {@code is_error}, a non-empty {@code mcp_server_errors} or a missing {@code structured_output} fails
@@ -107,8 +110,21 @@ public final class Planner {
     public static final String PURPOSE = "plan";
     /** The tools the planner may use: the skillroy MCP server's, all of them. */
     public static final String ALLOWED_TOOLS = "mcp__skillroy__*";
-    /** The longest prompt or schema handed to the CLI as one argument (an argument's limit on Linux is 128 KiB). */
+    /**
+     * The longest schema handed to the CLI as one argument (an argument's limit on Linux is 128 KiB), and the longest
+     * prompt, which goes to the CLI on stdin since security fix P2-L7-F3 and keeps the bound.
+     */
     public static final int MAX_ARGUMENT = 120_000;
+    /**
+     * The session ids {@code --resume} carries (the CLI's are UUIDs): nothing a shell or {@code cmd.exe} reads as
+     * anything but text (security fix P2-L7-F3).
+     */
+    static final Pattern SESSION_ID = Pattern.compile("[A-Za-z0-9_-]{1,128}");
+    /** The longest command line Windows' {@code CreateProcess} accepts, in characters. */
+    static final int WINDOWS_COMMAND_LINE_MAX = 32_767;
+    /** What a repair round adds to the command line at most: {@code --resume} and a session id, with separators. */
+    private static final int RESUME_ROOM = 8 + 1 + 128 + 3;
+    private static final boolean WINDOWS = System.getProperty("os.name", "").startsWith("Windows");
 
     static final String INSTRUCTIONS = """
             You author one test scenario for an application under test, from the brief below, through the skillroy \
@@ -168,6 +184,15 @@ public final class Planner {
                     + schemaJson.length() + " characters, more than one command-line argument may hold");
         }
         String prompt = prompt(request);
+        if (WINDOWS) {
+            int length = windowsCommandLineLength(command(request.claudeCommand(), schemaJson, request.mcpConfig(),
+                    request.model(), request.maxTurns(), request.budgetUsd(), null, true));
+            if (length + RESUME_ROOM > WINDOWS_COMMAND_LINE_MAX) {
+                throw AuthoringException.usage("the planner's command line, with the scenario schema of pack "
+                        + request.pack().id() + ", is " + length + " characters, more than Windows' "
+                        + WINDOWS_COMMAND_LINE_MAX + " leave room for");
+            }
+        }
         long deadlineAt = request.clock().millis() + request.deadline().toMillis();
         Path work = request.workDirectory();
         boolean own = work == null;
@@ -221,6 +246,11 @@ public final class Planner {
         }
         if (r.claudeCommand() == null) {
             throw AuthoringException.usage("claude not found on PATH (--claude-command names it)");
+        }
+        if (isBatchFile(r.claudeCommand())) {
+            throw AuthoringException.usage("claude at " + r.claudeCommand() + " is a batch file, which Windows starts"
+                    + " through cmd.exe; the planner is never started through one: install the native claude.exe or"
+                    + " name it with --claude-command");
         }
         if (!Files.isRegularFile(r.claudeCommand()) || !Files.isExecutable(r.claudeCommand())) {
             throw AuthoringException.usage("claude not found: " + r.claudeCommand() + " is not an executable file");
@@ -306,10 +336,105 @@ public final class Planner {
         }
         String text = p.toString();
         if (text.length() > MAX_ARGUMENT) {
-            throw AuthoringException.usage("the planner's prompt is " + text.length() + " characters, more than one"
-                    + " command-line argument may hold; shorten the brief");
+            throw AuthoringException.usage("the planner's prompt is " + text.length() + " characters, more than the "
+                    + MAX_ARGUMENT + " a prompt may hold; shorten the brief");
         }
         return text;
+    }
+
+    /**
+     * True when {@code file} is a batch file by its name ({@code .cmd} or {@code .bat}, without regard to case), which
+     * Windows starts through {@code cmd.exe /c}: never the planner (security fix P2-L7-F3), on any platform.
+     */
+    public static boolean isBatchFile(Path file) {
+        Path name = file == null ? null : file.getFileName();
+        if (name == null) {
+            return false;
+        }
+        String lower = name.toString().toLowerCase(java.util.Locale.ROOT);
+        return lower.endsWith(".cmd") || lower.endsWith(".bat");
+    }
+
+    /**
+     * The command line of one invocation (10.2 item 4): the executable, the fixed flags, the schema, the configuration,
+     * the model, the turn limit and the budget, and for a repair {@code --resume <session>} (a session id of
+     * {@link #SESSION_ID}'s form, else an {@code IllegalArgumentException}). The prompt is never an argument: it goes
+     * on stdin (security fix P2-L7-F3), so that no text of the brief or of the model reaches a command line, and
+     * through it a shell or {@code cmd.exe}, on any platform. On Windows ({@code windows}) the schema is handed over
+     * already quoted by the C runtime's rules ({@link #windowsQuoted}): the JDK's default argument handling passes an
+     * argument that starts and ends with a quote on as it is, and the executable reads it back as the one argument it
+     * is, whatever the pack's and the target's texts in it hold. The budget is floored at 0.01, with two decimals.
+     */
+    static List<String> command(Path claude, String schemaJson, Path mcpConfig, String model, int maxTurns,
+                                BigDecimal budget, String resume, boolean windows) {
+        if (resume != null && !SESSION_ID.matcher(resume).matches()) {
+            throw new IllegalArgumentException("not a session id of the form " + SESSION_ID.pattern());
+        }
+        List<String> c = new ArrayList<>();
+        c.add(claude.toString());
+        c.add("-p");
+        if (resume != null) {
+            c.add("--resume");
+            c.add(resume);
+        }
+        c.add("--bare");
+        c.add("--output-format");
+        c.add("json");
+        c.add("--json-schema");
+        c.add(windows ? windowsQuoted(schemaJson) : schemaJson);
+        c.add("--mcp-config");
+        c.add(mcpConfig.toString());
+        c.add("--strict-mcp-config");
+        c.add("--tools");
+        c.add("");
+        c.add("--allowedTools");
+        c.add(ALLOWED_TOOLS);
+        c.add("--permission-mode");
+        c.add("dontAsk");
+        c.add("--model");
+        c.add(model);
+        c.add("--max-turns");
+        c.add(Integer.toString(maxTurns));
+        c.add("--max-budget-usd");
+        c.add(budget.setScale(2, RoundingMode.DOWN).max(new BigDecimal("0.01")).toPlainString());
+        return c;
+    }
+
+    /**
+     * {@code arg} quoted for a Windows command line as the Microsoft C runtime ({@code CommandLineToArgvW}) reads it
+     * back: within one pair of quotes, an inner quote as {@code \"}, a run of backslashes before a quote, or before
+     * the closing quote, doubled, every other character as it is (so {@code %}, {@code &}, {@code |}, {@code <},
+     * {@code >} and white space stay inside the argument).
+     */
+    static String windowsQuoted(String arg) {
+        StringBuilder b = new StringBuilder(arg.length() + 16).append('"');
+        int backslashes = 0;
+        for (int i = 0; i < arg.length(); i++) {
+            char ch = arg.charAt(i);
+            if (ch == '\\') {
+                backslashes++;
+                continue;
+            }
+            b.append("\\".repeat(ch == '"' ? 2 * backslashes + 1 : backslashes)).append(ch);
+            backslashes = 0;
+        }
+        return b.append("\\".repeat(2 * backslashes)).append('"').toString();
+    }
+
+    /**
+     * An upper bound of the length of the Windows command line the JDK builds from {@code command}: each argument with
+     * a separator and a pair of quotes, and a trailing run of backslashes doubled.
+     */
+    static int windowsCommandLineLength(List<String> command) {
+        long length = 0;
+        for (String arg : command) {
+            int trailing = 0;
+            while (trailing < arg.length() && arg.charAt(arg.length() - 1 - trailing) == '\\') {
+                trailing++;
+            }
+            length += arg.length() + trailing + 3;
+        }
+        return (int) Math.min(Integer.MAX_VALUE, length);
     }
 
     /**
@@ -411,7 +536,7 @@ public final class Planner {
         AuthoringResult author(String prompt, Map<String, Object> schema)
                 throws AuthoringException, InterruptedException {
             String version = version();
-            Map<String, Object> envelope = invoke(command(prompt, null), false);
+            Map<String, Object> envelope = invoke(command(null), prompt, false);
             int repairs = 0;
             while (true) {
                 @SuppressWarnings("unchecked")
@@ -452,8 +577,12 @@ public final class Planner {
                     throw failed("the planner's budget of $" + request.budgetUsd().toPlainString() + " is spent and"
                             + " its scenario still has problems: " + summary(problems));
                 }
+                if (sessionId == null || !SESSION_ID.matcher(sessionId).matches()) {
+                    throw failed("the planner's envelope carries no session id a repair round can resume (the form "
+                            + SESSION_ID.pattern() + "); its scenario has problems: " + summary(problems));
+                }
                 repairs++;
-                envelope = invoke(command(repairPrompt(problems), sessionId), true);
+                envelope = invoke(command(sessionId), repairPrompt(problems), true);
             }
         }
 
@@ -494,50 +623,24 @@ public final class Planner {
         }
 
         /**
-         * The arguments of one invocation (10.2 item 4); a repair adds {@code --resume <session>}. The first invocation
-         * is given the budget as {@code --max-budget-usd} and a repair what is left of it, at least 0.01: the CLI
-         * bounds an invocation's own spend by it, not the session's running total (two live probes, 2026-10-08: a
-         * resume given 0.001 made its call of 0.0014 and then stopped; one given 0.0045 with 0.0041 spent before
-         * succeeded).
+         * The arguments of one invocation ({@link Planner#command}); a repair adds {@code --resume <session>}. The first
+         * invocation is given the budget as {@code --max-budget-usd} and a repair what is left of it, at least 0.01:
+         * the CLI bounds an invocation's own spend by it, not the session's running total (two live probes,
+         * 2026-10-08: a resume given 0.001 made its call of 0.0014 and then stopped; one given 0.0045 with 0.0041 spent
+         * before succeeded). The prompt is not among them: {@link #invoke} hands it over on stdin.
          */
-        private List<String> command(String prompt, String resume) {
-            List<String> c = new ArrayList<>();
-            c.add(request.claudeCommand().toString());
-            c.add("-p");
-            if (resume != null) {
-                c.add("--resume");
-                c.add(resume);
-            }
-            c.add("--bare");
-            c.add("--output-format");
-            c.add("json");
-            c.add("--json-schema");
-            c.add(schemaJson);
-            c.add("--mcp-config");
-            c.add(request.mcpConfig().toString());
-            c.add("--strict-mcp-config");
-            c.add("--tools");
-            c.add("");
-            c.add("--allowedTools");
-            c.add(ALLOWED_TOOLS);
-            c.add("--permission-mode");
-            c.add("dontAsk");
-            c.add("--model");
-            c.add(request.model());
-            c.add("--max-turns");
-            c.add(Integer.toString(request.maxTurns()));
-            c.add("--max-budget-usd");
+        private List<String> command(String resume) {
             BigDecimal budget = resume == null ? request.budgetUsd() : remainingBudget();
-            c.add(budget.setScale(2, RoundingMode.DOWN).max(new BigDecimal("0.01")).toPlainString());
-            c.add(prompt);
-            return c;
+            return Planner.command(request.claudeCommand(), schemaJson, request.mcpConfig(), request.model(),
+                    request.maxTurns(), budget, resume, WINDOWS);
         }
 
         /** {@code claude --version}, bounded; null when it cannot be read. */
         private String version() throws InterruptedException {
             List<String> c = List.of(request.claudeCommand().toString(), "--version");
             try {
-                Output o = execute(c, Math.min(VERSION_TIMEOUT_MS, Math.max(1, deadlineAt - request.clock().millis())));
+                Output o = execute(c, Math.min(VERSION_TIMEOUT_MS, Math.max(1, deadlineAt - request.clock().millis())),
+                        null);
                 if (o == null || o.exit() != 0) {
                     return null;
                 }
@@ -550,12 +653,12 @@ public final class Planner {
         }
 
         /**
-         * One invocation: the process within the deadline, its envelope read and recorded.
+         * One invocation: the process within the deadline, {@code prompt} its stdin, its envelope read and recorded.
          *
          * @return the envelope of a successful invocation (exit 0, {@code is_error} false, no MCP server error, a
          *     scenario document)
          */
-        private Map<String, Object> invoke(List<String> command, boolean resume)
+        private Map<String, Object> invoke(List<String> command, String prompt, boolean resume)
                 throws AuthoringException, InterruptedException {
             long remaining = deadlineAt - request.clock().millis();
             if (remaining <= 0) {
@@ -563,7 +666,7 @@ public final class Planner {
             }
             Output o;
             try {
-                o = execute(command, remaining);
+                o = execute(command, remaining, prompt);
             } catch (IOException e) {
                 throw failed("the planner could not be started: " + e.getClass().getSimpleName());
             }
@@ -724,17 +827,26 @@ public final class Planner {
 
         /**
          * The process's output, or null when it did not end within {@code timeoutMs} (it is then destroyed with its
-         * descendants). Its stdout and stderr go to files in the private directory, each bounded on disk by what is
-         * read of it (32 MiB and 1 MiB): while the process runs, the files' sizes
+         * descendants). Its stdin is {@code prompt}, written as UTF-8 to a file in the private directory first (never
+         * an argument, P2-L7-F3; a file, so that no write can block on a planner that does not read), or closed when
+         * {@code prompt} is null. Its stdout and stderr go to files in the private directory, each bounded on disk by
+         * what is read of it (32 MiB and 1 MiB): while the process runs, the files' sizes
          * are looked at between bounded waits for its end, and a process whose output passes a bound is stopped
          * there; a file longer than its bound is cut to it, and the log says so (never what was cut).
          */
-        private Output execute(List<String> command, long timeoutMs) throws IOException, InterruptedException {
+        private Output execute(List<String> command, long timeoutMs, String prompt)
+                throws IOException, InterruptedException {
             int n = ++outputs;
             Path stdout = work.resolve("stdout-" + n + ".txt");
             Path stderr = work.resolve("stderr-" + n + ".txt");
             ProcessBuilder builder = new ProcessBuilder(command).directory(work.toFile())
                     .redirectOutput(stdout.toFile()).redirectError(stderr.toFile());
+            if (prompt != null) {
+                Path stdin = work.resolve("prompt-" + n + ".txt");
+                Files.writeString(stdin, prompt, StandardCharsets.UTF_8, StandardOpenOption.CREATE_NEW,
+                        StandardOpenOption.WRITE);
+                builder.redirectInput(stdin.toFile());
+            }
             Process process = builder.start();
             boolean overflowed = false;
             try {

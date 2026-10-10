@@ -42,8 +42,16 @@ import java.util.function.Consumer;
  * {@code maxRows + 1}, so that truncation is detected without reading further. Cells pass through
  * {@link ValueConverter}.
  *
- * <p>Afterwards, whatever happened: result set and statement are closed; if auto-commit is off the transaction (which
- * holds only this query) is rolled back; a connection that was writable before is set writable again. The connection
+ * <p>Every statement runs in a transaction this class ends itself (Phase 6 security fix, pass 2, P2-L3-F1 and
+ * P2-L3-S1): after {@code setReadOnly(true)}, a connection in auto-commit mode is switched to manual commit
+ * ({@code SQLFeatureNotSupportedException} leaves it as it was, any other failure aborts the call). A T-SQL batch can
+ * open a transaction the guard does not see ({@code SET IMPLICIT_TRANSACTIONS ON} leaves the JDBC flag on), which would
+ * otherwise stay open, with its locks, on the controller's kept connection or on a pooled connection the agent hands
+ * back.
+ *
+ * <p>Afterwards, whatever happened: result set and statement are closed; the transaction (which holds only this query)
+ * is rolled back, then auto-commit is switched back on where it was on (in that order: the JDBC rule commits an open
+ * transaction on a mode change); a connection that was writable before is set writable again. The connection
  * itself is <em>not</em> closed: it belongs to the caller (the agent closes it after every call, the controller keeps
  * it). Failures while closing or restoring go to {@code warn}, never thrown, so they cannot hide the query's own
  * outcome; the text names the exception class, SQL state and error code but never the driver's message (finding
@@ -121,8 +129,10 @@ public final class ReadOnlyJdbc {
             }
         } : warn;
         boolean restoreWritable = false;
+        boolean restoreAutoCommit = false;
         try {
             restoreWritable = makeReadOnly(c);
+            restoreAutoCommit = beginTransaction(c);
             PreparedStatement statement = null;
             ResultSet resultSet = null;
             try {
@@ -147,8 +157,26 @@ public final class ReadOnlyJdbc {
                 closeQuietly(statement, "statement", out);
             }
         } finally {
-            restore(c, restoreWritable, out);
+            restore(c, restoreAutoCommit, restoreWritable, out);
         }
+    }
+
+    /**
+     * Switches an auto-commit connection to manual commit, so that the statement runs in a transaction
+     * {@link #restore} ends (P2-L3-F1, P2-L3-S1); true when it did, and auto-commit is to be switched back on. A
+     * connection already in manual commit is left so (and rolled back afterwards, as before); a driver that does not
+     * support the switch leaves the connection as it was.
+     */
+    private static boolean beginTransaction(Connection connection) throws SQLException {
+        if (!connection.getAutoCommit()) {
+            return false;
+        }
+        try {
+            connection.setAutoCommit(false);
+        } catch (SQLFeatureNotSupportedException unsupported) {
+            return false;
+        }
+        return true;
     }
 
     /** Sets the connection read-only; true if it was writable before and should be set writable again. */
@@ -195,14 +223,25 @@ public final class ReadOnlyJdbc {
         return Rows.of(columns, rows, truncated);
     }
 
-    /** Ends the read transaction and restores the read-only flag; never throws. */
-    private static void restore(Connection connection, boolean restoreWritable, Consumer<String> warn) {
+    /**
+     * Ends the read transaction (rolled back), then switches auto-commit back on where {@link #beginTransaction}
+     * switched it off, then restores the read-only flag; never throws.
+     */
+    private static void restore(Connection connection, boolean restoreAutoCommit, boolean restoreWritable,
+                                Consumer<String> warn) {
         try {
-            if (!connection.getAutoCommit()) {
+            if (restoreAutoCommit || !connection.getAutoCommit()) {
                 connection.rollback();
             }
         } catch (SQLException | RuntimeException e) {
             warn(warn, "could not end the read transaction: " + describe(e));
+        }
+        if (restoreAutoCommit) {
+            try {
+                connection.setAutoCommit(true);
+            } catch (SQLException | RuntimeException e) {
+                warn(warn, "could not switch auto-commit back on: " + describe(e));
+            }
         }
         if (restoreWritable) {
             try {

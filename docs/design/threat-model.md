@@ -71,7 +71,10 @@ evidence) and, in Phase 6, may export spans to a telemetry backend.
 - **The file systems' own guarantees.** Owner-only means POSIX `0600`/`0700` where the file system has POSIX
   attributes, an ACL with one `ALLOW` for the owner where it has ACLs (Windows; built and unit-tested on built ACL
   values, **not verified on a Windows host**), and a refusal where it has neither (a credentials file is the one
-  exception, accepted with a warning, P2 §4). A directory another user owns, or that others may write to, is refused
+  exception, accepted with a warning, P2 §4). The kind is decided per volume, a FAT or exFAT volume is "neither"
+  whatever its views say (a credentials file there is refused too), and what the POSIX branch creates is read back
+  exactly (pass 2, P2-L7-F1, P1 §2.5); a volume mounted with ignore-ownership whose type keeps permissions is not
+  detected. A directory another user owns, or that others may write to, is refused
   by the agent and ignored by the controller (S8, S19, H3).
 
 ## 4. The token rule

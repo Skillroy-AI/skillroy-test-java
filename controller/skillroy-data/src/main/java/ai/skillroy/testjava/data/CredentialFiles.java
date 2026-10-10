@@ -16,6 +16,8 @@
 
 package ai.skillroy.testjava.data;
 
+import ai.skillroy.testjava.protocol.Volumes;
+
 import java.io.IOException;
 import java.nio.file.FileSystems;
 import java.nio.file.Files;
@@ -40,6 +42,11 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * the current user, the system account or the administrators group any right; <em>not verified on Windows</em>: the
  * judgement is unit-tested on built ACL values). Where it has neither, nothing can be checked: the file is accepted
  * and a warning is logged once per JVM.
+ *
+ * <p>Phase 6 security fix, pass 2, P2-L7-F1: the kind is the volume's ({@link Volumes#protection}), not the file
+ * system provider's, and a file on a FAT or exFAT volume ({@link Volumes#WITHOUT_PERMISSIONS}) is refused before the
+ * mode is looked at: such a volume reads back owner-only modes (macOS) while anybody with the volume reads the file.
+ * The warning branch stays for any other volume without either view (D138).
  *
  * <p>The file system is reached through {@link Access}, so that the ACL and no-permission branches can be tested on any
  * host. Stateless apart from the warn-once flag; safe from any thread.
@@ -73,17 +80,30 @@ final class CredentialFiles {
 
         /** The administrators group, or null where it cannot be resolved. */
         UserPrincipal administrators();
+
+        /** The type of the volume that holds the file, or null when unknown (P2-L7-F1). */
+        default String volumeType(Path file) {
+            return null;
+        }
     }
 
     /** The real file system. */
     static final Access REAL = new Access() {
         @Override
         public Kind kind(Path file) {
-            if (Files.getFileAttributeView(file, PosixFileAttributeView.class, LinkOption.NOFOLLOW_LINKS) != null) {
-                return Kind.POSIX;
-            }
-            return Files.getFileAttributeView(file, AclFileAttributeView.class, LinkOption.NOFOLLOW_LINKS) != null
-                    ? Kind.ACL : Kind.NONE;
+            // The volume decides (P2-L7-F1); the views must also be there for the reads below.
+            return switch (Volumes.protection(file)) {
+                case POSIX -> Files.getFileAttributeView(file, PosixFileAttributeView.class,
+                        LinkOption.NOFOLLOW_LINKS) != null ? Kind.POSIX : Kind.NONE;
+                case ACL -> Files.getFileAttributeView(file, AclFileAttributeView.class, LinkOption.NOFOLLOW_LINKS)
+                        != null ? Kind.ACL : Kind.NONE;
+                case NONE -> Kind.NONE;
+            };
+        }
+
+        @Override
+        public String volumeType(Path file) {
+            return Volumes.type(file);
         }
 
         @Override
@@ -124,6 +144,11 @@ final class CredentialFiles {
      */
     static String problem(Path file, Access access) {
         try {
+            String volume = access.volumeType(file);
+            if (Volumes.withoutPermissions(volume)) {
+                return "credentials file is on a volume of type " + volume + ", which keeps no permissions, so other"
+                        + " users may read it (move it to a volume with POSIX permissions or ACLs and make it owner-only)";
+            }
             switch (access.kind(file)) {
                 case POSIX -> {
                     Set<PosixFilePermission> permissions = access.posixPermissions(file);

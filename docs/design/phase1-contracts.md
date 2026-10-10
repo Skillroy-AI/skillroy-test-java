@@ -391,6 +391,27 @@ file system).** Three kinds of file system, by the same rules on both sides (the
   generated token, as for an untrusted directory (with a controller-supplied token it serves and writes nothing), and
   the controller ignores the directory.
 
+**(Phase 6 security fix, pass 2, P2-L7-F1, built 2026-10-09, SD) The kind is decided per volume, never per file
+system provider, and what the POSIX branch creates is read back exactly.** A provider's views are the same for every
+path (every local path reports POSIX on Linux and macOS, ACLs on Windows), so a FAT or exFAT volume used to take the
+POSIX (or the ACL) branch and the owner-only guarantee was silently absent: macOS mounts such a volume `noowners` and
+it reads back `rwx------` whatever was asked, and Linux's `vfat` reads back `755`/`644` and ignores `chmod`. Now both
+sides' `SecureFiles`, `CredentialFiles` and `JarCheck` ask the volume (`skillroy-protocol`'s `Volumes`): the
+`FileStore` of the path, or of its nearest existing ancestor, is POSIX when it supports the POSIX view, else ACL when
+it supports the ACL view (on Windows, a volume that keeps persistent ACLs), else neither; and a volume whose type is
+`msdos`, `vfat`, `fat`, `fat12`, `fat16`, `fat32`, `exfat` or `umsdos` (without regard to case: Windows reports
+`FAT32`, `exFAT`) is neither, whatever its views say. Where the store cannot be read, the provider's views decide, as
+before. A directory and a file the POSIX branch creates must read back exactly `rwx------` and `rw-------`
+(not following links); otherwise they are deleted and refused ("… reads back rwx------ where rw------- was asked …"),
+which also catches a mount the type list does not name. An existing directory keeps the rule above (owned by the
+current user, not writable by group or others). The refusals keep the wording "neither POSIX permissions nor ACLs"
+and name the volume's type. A credentials file on a volume of the listed types is refused rather than taking the
+neither branch's warning (P2 §4), which stays for any other volume without either view (D138); a Byteman jar there is
+"writable by others" (P6 §7.4). Limit: a volume mounted with ignore-ownership whose type keeps permissions (an APFS or
+HFS+ disk with "Ignore ownership on this volume") reads back what was asked and is not detected: the JDK does not
+expose mount options. Tested on built values everywhere, and on real FAT and exFAT disk images on macOS
+(`PermissionlessVolumeTest`, both sides; skipped where `hdiutil` is absent).
+
 On the controller, a discovery or token file must be owned by "me" on ACL file systems too (`ownedByCurrentUser`
 fails closed without a POSIX view).
 
@@ -1569,7 +1590,16 @@ returns `null` the JDBC form is used: `open()`, `Connection.setReadOnly(true)`, 
 `PreparedStatement`, `setQueryTimeout`, `setMaxRows(maxRows+1)` (a `SQLFeatureNotSupportedException` from any of the
 three is ignored). A provider that returns `null` from both is `CAPABILITY_UNAVAILABLE`. A JDBC connection obtained
 from `open()` is closed after every call; before that a manual-commit connection is rolled back and a connection
-that was writable is set writable again. `maxRows: 0` returns the columns only; a value above 200 is capped.
+that was writable is set writable again. **(Phase 6 security fix, pass 2, P2-L3-F1 and P2-L3-S1, built 2026-10-09,
+SD) Every statement runs in a transaction the read path ends itself**, on both channels (`ReadOnlyJdbc`): after
+`setReadOnly(true)`, a connection in auto-commit mode is switched to manual commit (`SQLFeatureNotSupportedException`
+leaves it as it was; any other failure aborts the call, as `setReadOnly`'s does); afterwards, whatever happened, the
+transaction is rolled back first, then auto-commit is switched back on where it was on (the JDBC rule commits an open
+transaction on a mode change, so the order matters), then the read-only flag is restored. So a T-SQL batch that opens
+a transaction the guard does not see (`SET IMPLICIT_TRANSACTIONS ON`, `SET ANSI_DEFAULTS ON`, with an isolation hint
+that holds range locks) cannot keep it open on the controller's kept connection, and a provider connection that goes
+back to a pool goes back without one. Before the fix only a manual-commit connection was rolled back, and those
+`SET`s leave the JDBC auto-commit flag on. `maxRows: 0` returns the columns only; a value above 200 is capped.
 Capability `data.query` is OK when at least one `DataSourceProvider` is registered at probe time; a provider
 registered later needs `agent.capabilities {reprobe:true}`.
 
@@ -1590,7 +1620,11 @@ boundary is the data source the provider hands out). A small tokenizer, never a 
    `PRINT`, `GOTO`, `USE`, `CHECKPOINT`, `RECEIVE`, `SEND`, `OPENROWSET`, `OPENQUERY`, `OPENDATASOURCE`, `HOLDLOCK`,
    `TABLOCK`, `TABLOCKX`, `XLOCK`, `UPDLOCK`, `PAGLOCK` are added to the list, and the sequences are matched on the
    same tokens in every reading; `SET` is not a forbidden word (MySQL's `CAST(x AS CHAR CHARACTER SET utf8mb4)` stays
-   admitted).
+   admitted). **(Phase 6 security fix, pass 2, P2-L3-F1, built 2026-10-09, SD)** The words `IMPLICIT_TRANSACTIONS` and
+   `ANSI_DEFAULTS` (the two T-SQL session settings that open a transaction the next statement does not end) are added
+   as the net behind the read path's own rollback (§6 above); the isolation words (`SERIALIZABLE`, `REPEATABLE`,
+   `REPEATABLEREAD`) are not, since without an open transaction a hint holds its locks for the statement only, and
+   PostgreSQL's `TABLESAMPLE … REPEATABLE (seed)` is a read.
    `TRUNCATE(` and `INSERT(` are the scalar functions and are allowed; an identifier that is one of these words
    must be quoted.
 

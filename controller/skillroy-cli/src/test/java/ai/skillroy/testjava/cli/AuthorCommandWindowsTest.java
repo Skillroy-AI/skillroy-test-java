@@ -85,6 +85,33 @@ class AuthorCommandWindowsTest {
         assertNull(AuthorCommand.findOnPath(Map.of("PATHEXT", ".EXE"), "Windows 11"), "no PATH, nothing");
     }
 
+    /**
+     * Security fix P2-L7-F3 (pass 2): a batch file is never the planner. npm's {@code claude.cmd} and its extensionless
+     * shim are passed over for a native {@code claude.exe} later on the {@code PATH} or another extension of the same
+     * directory; alone, the batch file is returned, so that the planner refuses it with the remedy.
+     */
+    @Test
+    void aBatchFileIsPassedOverAndReturnedOnlyWhenNothingElseIsFound() throws IOException {
+        Path npm = tmp.resolve("npm");
+        Path nativeDir = tmp.resolve("native");
+        file(npm, "claude", true);
+        Path cmd = file(npm, "claude.cmd", false);
+        Path exe = file(nativeDir, "claude.exe", false);
+        assertSame(exe, AuthorCommand.findOnPath(Map.of("PATH", npm + ";" + nativeDir, "PATHEXT",
+                ".COM;.EXE;.BAT;.CMD"), "Windows 11"), "the native build later on the PATH, not npm's batch file or"
+                + " its shim");
+        Path both = tmp.resolve("both");
+        file(both, "claude.cmd", false);
+        Path bothExe = file(both, "claude.exe", false);
+        assertSame(bothExe, AuthorCommand.findOnPath(Map.of("PATH", both.toString(), "PATHEXT", ".CMD;.EXE"),
+                "Windows 11"), "another extension of the same directory, whatever PATHEXT's order");
+        Path bat = file(tmp.resolve("bat"), "CLAUDE.BAT", false);
+        Path found = AuthorCommand.findOnPath(Map.of("PATH", npm + ";" + bat.getParent(), "PATHEXT", ".BAT;.CMD"),
+                "Windows 11");
+        assertSame(cmd, found, "alone, the first batch file is returned");
+        assertTrue(ai.skillroy.testjava.inference.planner.Planner.isBatchFile(found), "and the planner refuses it");
+    }
+
     @Test
     void elsewhereOnlyAnExecutableNamedExactlyClaudeCounts() throws IOException {
         Path dir = tmp.resolve("bin");

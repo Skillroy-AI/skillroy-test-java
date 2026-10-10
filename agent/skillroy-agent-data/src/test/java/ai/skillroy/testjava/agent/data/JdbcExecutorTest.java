@@ -115,7 +115,14 @@ class JdbcExecutorTest {
         assertTrue(spy.calls.contains("PreparedStatement.setMaxRows[11]"), spy.toString());
         assertTrue(spy.calls.contains("PreparedStatement.setObject[1, 300]"), spy.toString());
         assertTrue(spy.indexOf("Connection.setReadOnly[true]") < spy.indexOf("Connection.prepareStatement"));
-        assertFalse(spy.calls.contains("Connection.rollback"), "auto-commit connection: nothing to roll back");
+        // Security fix P2-L3-S1 (pass 2): the provider's connection may be pooled, so the statement's transaction is
+        // ended and auto-commit switched back on before the connection is closed (handed back).
+        int rollback = spy.indexOf("Connection.rollback");
+        int autoCommit = spy.indexOf("Connection.setAutoCommit[true]");
+        int close = spy.indexOf("Connection.close");
+        assertTrue(spy.indexOf("Connection.setAutoCommit[false]") < spy.indexOf("Connection.prepareStatement"),
+                spy.toString());
+        assertTrue(rollback >= 0 && rollback < autoCommit && autoCommit < close, spy.toString());
     }
 
     @Test

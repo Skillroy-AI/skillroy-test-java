@@ -2095,6 +2095,24 @@ the `LSS 25` comparison, rather than by `2>nul` on a comparison `cmd.exe` would 
 `LauncherIT`'s new test reads the `.bat` back from the directory and the zip (CRLF, equal to the source, not
 executable).
 
+(Phase 6 security fix, pass 2, P2-L7-F2, built 2026-10-09, SD; not run on a Windows host) **No command of the `.bat`
+or of `ci\run-on-windows.cmd` is taken from the current directory.** `cmd.exe` searches the current directory before
+`PATH` for a command named without a path unless the variable `NoDefaultCurrentDirectoryInExePath` exists (Microsoft,
+`NeedCurrentDirectoryForExePathW`), and `findstr` ran on every invocation, before any Java code, so a `findstr.exe`
+(or `.com`, `.bat`, `.cmd`) planted by another user in a shared directory the operator ran `skillroy` from ran with
+the operator's rights. So: the `.bat` sets `NoDefaultCurrentDirectoryInExePath=1` directly after `setlocal` (which
+confines it to the script and the commands it starts) and names its one external command by its full path,
+`%SystemRoot%\System32\findstr.exe`, in all five places of the table above (the version check, the digits test, the
+two `MODULES=` tests and the `--list-modules` filter); `java.exe` stays the `PATH` lookup `%%~$PATH:i`, which never
+searches the current directory, and is always called as `"%java%"`. `ci\run-on-windows.cmd` sets the same variable
+after its `setlocal`, so that `call mvn`, which must stay a `PATH` lookup, never finds an `mvn.cmd` in the checkout
+it changes into. `BatLauncherTest` splits every code line of both files into its commands (at `|`, `||`, `&&`, `&`
+outside quotes, the command of an `if`, the set and the body of a `for`) and asserts that each command word is a
+`cmd.exe` built-in, a label, `"%java%"` (the `.bat`), `call mvn` (the runner) or a full path under
+`%SystemRoot%\System32\` ending `.exe`, and that the variable is set before the first such command. Host item (§9.5):
+run `skillroy.bat` from a directory holding a decoy `findstr.cmd`, and the runner from a checkout holding a decoy
+`mvn.cmd`.
+
 ### 9.2 `skillroy author` on Windows (D137) (Linux-testable)
 
 - **`PATHEXT`.** `AuthorCommand.claudeCommand` accepts, besides a file named exactly `claude`, the names `claude` plus
@@ -2124,6 +2142,22 @@ before. `AuthorCommand.serverCommand(launcher, args)` writes the plain `cmd.exe 
 and the remedy, a launcher path or argument holding `"`, `%`, `^`, `&`, `|`, `<`, `>`, a space, a tab or a control
 character (the contract's list plus the two redirection characters and the other white space; D199).
 `AuthorCommandWindowsTest` (five tests) proves the lookup, the form and the refusals on Linux.
+
+(Phase 6 security fix, pass 2, P2-L7-F3, built 2026-10-09, SD; not run on a Windows host) **A batch file is never the
+planner.** The `cmd.exe /c` form above is the planner's *client* starting `skillroy.bat`; the planner itself is
+started by `Planner` through `ProcessBuilder`, and Windows starts a `.cmd` or `.bat` through an implicit `cmd.exe /c`
+with Java's quoting, which pairs no quote the way `cmd.exe` does. So: the prompt goes to the planner on stdin and no
+text of the brief or the model is an argument on any platform (P5 §10.2 item 4); `Planner` refuses a planner whose
+name ends with `.cmd` or `.bat` (exit 64, the remedy the native `claude.exe` or `--claude-command`);
+`findOnPath` keeps D198's order within a directory, but a directory whose candidate is a batch file is passed over for
+a later directory with another candidate (npm's `claude.cmd` before a native `claude.exe` later on the `PATH`), and the
+first batch file is returned only when no directory has anything else, so that the refusal names it; the schema
+argument is pre-quoted by the C runtime's rules on Windows and the command line bounded to 32767 characters (P5 §10.2
+item 4). `jdk.lang.Process.allowAmbiguousCommands=false` is **not** put on the launchers (D-SD-2 in the fix report:
+with nothing of the model's on the command line it guards nothing more here, and it would change how every process
+the CLI starts on Windows is quoted, unverified). Host items (§9.5): the planner through the native `claude.exe` with
+the prompt on stdin, a decoy verb whose problem carries `" & … & "` and `%VAR%`, and the refusal of npm's
+`claude.cmd`.
 
 ### 9.3 Every owner-only file through `SecureFiles` (D138) (Linux-testable for the POSIX branch; the ACL branch
 waits for the host)
@@ -2172,6 +2206,17 @@ three, each tested on the POSIX host and on a zip file system (`PlannerWorkDirec
 fails its `open` (`ENVIRONMENT`, the agent path under `auto`). `SecureFilesRulesTest` does not exist: the zip file
 system test is the new `SecureFilesTest`. `ItEnv.newDiscoveryDir` changed in both scenario modules (the lending
 desk's and the web host's).
+
+(Phase 6 security fix, pass 2, P2-L7-F1, built 2026-10-09, SD) "A file system with neither view" is now a **volume**
+with neither: the branch is decided by the `FileStore` of the path (or of its nearest existing ancestor), a FAT or
+exFAT volume (types `msdos`, `vfat`, `fat`, `fat12`, `fat16`, `fat32`, `exfat`, `umsdos`) is neither whatever it
+reports, and what the POSIX branch creates must read back exactly `rwx------` or `rw-------`, else it is deleted and
+refused (P1 §2.5 has the rule; the shared decision is `skillroy-protocol`'s `Volumes`). Before the fix the decision was
+the provider's, the same for every path, so the zip file system of the tests was the only place the refusal could be
+reached and every member accepted a FAT or exFAT volume. The `CredentialFiles` row above: a credentials file on a FAT
+or exFAT volume is refused; the "neither: accepted with a warning" branch stays for any other volume without either
+view (D138 unchanged). The host list of §9.5 keeps "a FAT or exFAT volume for the neither branch" (now the refusal on
+Windows).
 
 ### 9.4 Attach on Windows (D139) (documentation now; the behaviour waits for the host)
 

@@ -26,6 +26,9 @@ rem Environment:
 rem   JAVA_HOME           a JDK 25 or newer: the build, the controller and the Java 25 targets
 rem   SKILLROY_JDK8_HOME  a JDK 8: the Java 8 targets
 setlocal
+rem cmd.exe looks for a command named without a path in the current directory before the PATH unless this variable
+rem exists: with it, call mvn below never finds an mvn.cmd in the checkout it changes into (security fix P2-L7-F2).
+set "NoDefaultCurrentDirectoryInExePath=1"
 
 if not defined JAVA_HOME goto :missing
 if not defined SKILLROY_JDK8_HOME goto :missing

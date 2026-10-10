@@ -125,7 +125,8 @@ class ReadOnlyJdbcTest {
         assertTrue(spy.calls.contains("PreparedStatement.setObject[1, 300]"), spy.toString());
         assertTrue(spy.indexOf("Connection.setReadOnly[true]") < spy.indexOf("Connection.prepareStatement"));
         assertTrue(spy.calls.contains("Connection.setReadOnly[false]"), "a writable connection is restored");
-        assertFalse(spy.calls.contains("Connection.rollback"), "auto-commit connection: nothing to roll back");
+        assertTrue(spy.calls.contains("Connection.rollback"), "every statement's transaction is ended (P2-L3-F1)");
+        assertTrue(real.getAutoCommit(), "and auto-commit is on again");
         assertFalse(real.isClosed());
         assertFalse(real.isReadOnly());
         // The same connection serves the next statement.
@@ -229,7 +230,68 @@ class ReadOnlyJdbcTest {
         int rollback = spy.indexOf("Connection.rollback");
         int restore = spy.indexOf("Connection.setReadOnly[false]");
         assertTrue(rollback >= 0 && rollback < restore, spy.toString());
+        assertEquals(0, spy.count("Connection.setAutoCommit"), "a manual-commit connection keeps its mode: " + spy);
+        assertFalse(real.getAutoCommit());
         assertFalse(real.isClosed());
+        real.close();
+    }
+
+    /**
+     * Security fix P2-L3-F1 and P2-L3-S1 (pass 2): an auto-commit connection runs the statement in a transaction the
+     * read path ends itself, in this order: {@code setReadOnly(true)}, {@code setAutoCommit(false)}, the statement,
+     * {@code rollback}, {@code setAutoCommit(true)}, {@code setReadOnly(false)}. A T-SQL batch that opens a transaction
+     * the guard does not see ({@code SET IMPLICIT_TRANSACTIONS ON} leaves the JDBC flag on) so leaves none open on the
+     * controller's kept connection, nor on a provider's connection that goes back to a pool when the agent closes it.
+     */
+    @Test
+    void anAutoCommitConnectionRunsTheStatementInATransactionTheReadPathEnds() throws Exception {
+        Connection real = db.open();
+        assertTrue(real.getAutoCommit());
+        JdbcSpy spy = new JdbcSpy();
+        Rows rows = ReadOnlyJdbc.execute(spy.wrap(real), "SELECT code FROM person", NO_PARAMS, 200, 5, warn);
+        assertEquals(3, rows.rowCount());
+        int last = -1;
+        for (String call : Arrays.asList("Connection.setReadOnly[true]", "Connection.setAutoCommit[false]",
+                "PreparedStatement.executeQuery", "Connection.rollback", "Connection.setAutoCommit[true]",
+                "Connection.setReadOnly[false]")) {
+            int at = spy.indexOf(call);
+            assertTrue(at > last, call + " comes after the call before it: " + spy);
+            last = at;
+        }
+        assertTrue(real.getAutoCommit(), "auto-commit is on again");
+        assertFalse(real.isReadOnly(), "and the connection writable, as it was");
+        assertTrue(spy.statementsClosedConnectionKept(), spy.toString());
+        assertTrue(warnings.isEmpty(), warnings.toString());
+        real.close();
+    }
+
+    @Test
+    void anUnsupportedManualCommitLeavesTheConnectionAsItWas() throws Exception {
+        JdbcSpy spy = new JdbcSpy().fail("Connection.setAutoCommit", new SQLFeatureNotSupportedException("no"));
+        assertEquals(3, run(spy, "SELECT code FROM person").rowCount());
+        assertFalse(spy.calls.contains("Connection.rollback"), "nothing was begun, so nothing is ended: " + spy);
+        assertTrue(spy.calls.contains("Connection.setReadOnly[false]"), spy.toString());
+    }
+
+    @Test
+    void anyOtherManualCommitFailureAbortsBeforeTheStatement() throws Exception {
+        JdbcSpy spy = new JdbcSpy().fail("Connection.setAutoCommit", JdbcSpy.sqlException("no commit mode", "HY000"));
+        SQLException e = assertThrows(SQLException.class, () -> run(spy, "SELECT code FROM person"));
+        assertEquals("no commit mode", e.getMessage());
+        assertEquals(-1, spy.indexOf("Connection.prepareStatement"), spy.toString());
+        assertTrue(spy.calls.contains("Connection.setReadOnly[false]"), "the read-only flag is restored: " + spy);
+    }
+
+    @Test
+    void aFailedRollbackIsReportedAndAutoCommitStillSwitchedBackOn() throws Exception {
+        Connection real = db.open();
+        JdbcSpy spy = new JdbcSpy().fail("Connection.rollback", JdbcSpy.sqlException("rollback secret-text", "HY000"));
+        assertEquals(3, ReadOnlyJdbc.execute(spy.wrap(real), "SELECT code FROM person", NO_PARAMS, 200, 5, warn)
+                .rowCount());
+        assertTrue(warnings.toString().contains("could not end the read transaction"), warnings.toString());
+        assertFalse(warnings.toString().contains("secret-text"), warnings.toString());
+        assertTrue(spy.indexOf("Connection.rollback") < spy.indexOf("Connection.setAutoCommit[true]"), spy.toString());
+        assertTrue(real.getAutoCommit());
         real.close();
     }
 
