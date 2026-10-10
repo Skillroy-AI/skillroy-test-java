@@ -19,11 +19,13 @@ package ai.skillroy.testjava.samples.lending.scenarios;
 import ai.skillroy.testjava.protocol.Json;
 import ai.skillroy.testjava.samples.lending.pack.LendingPack;
 import ai.skillroy.testjava.scenario.Expectation;
+import ai.skillroy.testjava.scenario.ImageCheck;
 import ai.skillroy.testjava.scenario.Plan;
 import ai.skillroy.testjava.scenario.PlanCompiler;
 import ai.skillroy.testjava.scenario.ScenarioLoader;
 import ai.skillroy.testjava.scenario.RowCheck;
 import ai.skillroy.testjava.scenario.UiSettings;
+import ai.skillroy.testjava.scenario.VisualCheck;
 import ai.skillroy.testjava.scenario.pack.CaptureSpec;
 import ai.skillroy.testjava.scenario.pack.Sync;
 import ai.skillroy.testjava.scenario.resolve.CredentialSpec;
@@ -70,9 +72,11 @@ class PlansUpToDateTest {
     void everyCommittedPlanMatchesItsScenario() throws Exception {
         List<Path> scenarios = committedScenarios();
         assertEquals(List.of("basic-loan-ui.yaml", "basic-loan.yaml", "borrow-2-waive-1-slip.yaml",
-                "return-over-limit-needs-supervisor.yaml", "return-refunds-deposit.yaml",
-                "return-within-limit-observed.yaml", "supervisor-return-llm-sql.yaml"),
-                scenarios.stream().map(p -> p.getFileName().toString()).toList());
+                "keypad-image.yaml", "loan-table-visual-check.yaml", "return-over-limit-needs-supervisor.yaml",
+                "return-refunds-deposit.yaml", "return-within-limit-observed.yaml", "sign-on-by-number-pad.yaml",
+                "supervisor-return-llm-sql.yaml", "vision-live-only.yaml"),
+                scenarios.stream().map(p -> p.getFileName().toString()).toList(), "the Phase 7 scenarios with the"
+                + " earlier ones (phase7-contracts.md 12.4)");
         // skillroy author writes <out>/plan/<id>.plan.json; a scenario it wrote into scenarios/ has its plan moved here
         // with the others, so that a plan's default bindings root (D31: beside its directory) is bindings/.
         assertFalse(Files.exists(moduleDir().resolve("scenarios").resolve("plan")), "the committed plans are in plan/");
@@ -87,11 +91,29 @@ class PlansUpToDateTest {
                 stale.add(moduleDir().relativize(plan).toString());
             }
         }
+        // The committed session exports' plans (phase5-contracts.md 14.4, phase7-contracts.md 12.4) are their YAML's,
+        // regenerated with the others (plan version 6 changed them once, phase7-contracts.md 8.2).
+        Path exported = moduleDir().resolve("scenarios").resolve("exported");
+        try (Stream<Path> files = Files.list(exported)) {
+            for (Path yaml : files.filter(p -> p.getFileName().toString().endsWith(".yaml")).sorted().toList()) {
+                Path plan = exported.resolve("plan").resolve(ScenarioLoader.load(yaml).id() + ".plan.json");
+                if (update) {
+                    PlanCompiler.compileTo(yaml, new LendingPack(), plan);
+                }
+                if (!PlanCompiler.isUpToDate(yaml, plan, new LendingPack())) {
+                    stale.add(moduleDir().relativize(plan).toString());
+                }
+            }
+        }
         assertTrue(stale.isEmpty(), "out of date (regenerate with -Dskillroy.plans.update=true): " + stale);
         try (Stream<Path> plans = Files.list(moduleDir().resolve("plan"))) {
             assertEquals(scenarios.size(), plans.count(), "one plan per committed scenario, nothing else");
         }
     }
+
+    /** The seed-A scenarios (their staff number and fixtures are seed A's): they name the seed they run on. */
+    static final List<String> SEED_A = List.of("basic-loan", "basic-loan-ui", "sign-on-by-number-pad",
+            "loan-table-visual-check", "vision-live-only");
 
     /**
      * Every call is followed by an event wait or the UI settle, or is itself a wait: a {@code sync.await}, or the
@@ -103,10 +125,11 @@ class PlansUpToDateTest {
             Plan plan = Plan.read(planFor(yaml));
             assertEquals("lending", plan.pack());
             assertEquals(Plan.VERSION, plan.planVersion());
-            assertEquals(plan.scenarioId().equals(ScenarioD.ID) ? Plan.INFERENCE_BIND : "none", plan.inference(),
-                    "only scenario D's bind may need a model");
-            if (plan.scenarioId().startsWith("basic-loan")) {
-                assertEquals("A", plan.launchProperties().get("lending.seed"), "Phase 1 scenarios name their seed");
+            assertEquals(plan.scenarioId().equals(ScenarioD.ID) ? Plan.INFERENCE_BIND
+                    : plan.scenarioId().equals("vision-live-only") ? Plan.INFERENCE_RUN : "none", plan.inference(),
+                    "only scenario D's bind may need a model, and only vision-live-only's run (aiAct)");
+            if (SEED_A.contains(plan.scenarioId())) {
+                assertEquals("A", plan.launchProperties().get("lending.seed"), "seed-A scenarios name their seed");
             } else {
                 assertEquals(Map.of(), plan.launchProperties(), "scenario A runs on whichever seed it is given");
             }
@@ -117,8 +140,10 @@ class PlansUpToDateTest {
                     Plan.Call call = calls.get(i);
                     boolean settlesAnAwaitedUiCall = call.primitive().equals("swing.settle") && i > 0
                             && calls.get(i - 1).sync() == Sync.EVENT;
+                    // phase7-contracts.md 8.1: an expectImage's capture is a read, compared at once (sync NONE).
+                    boolean imageRead = call.primitive().equals("swing.capture") && step.verb().equals("expectImage");
                     boolean waitedOn = call.sync() != Sync.NONE || call.primitive().equals("sync.await")
-                            || settlesAnAwaitedUiCall;
+                            || settlesAnAwaitedUiCall || imageRead;
                     assertTrue(waitedOn, plan.scenarioId() + " " + step.id() + ": every call is followed by an "
                             + "event wait or the UI settle, or is itself a wait: " + call);
                 }
@@ -170,6 +195,52 @@ class PlansUpToDateTest {
         assertEquals(3, clicks);
         assertEquals(7, awaited, "every UI step that a wait directly followed now awaits the event itself");
         assertEquals(1, waitFors, "one explicit waitFor stays");
+    }
+
+    /**
+     * The four Phase 7 scenarios' plans as phase7-contracts.md 8.1, 8.2 and 12.4 shape them: the number pad's region
+     * steps compile to {@code swing.pointer} by locator and region (no pixel, no bindings); the visual check is a step
+     * with one {@link VisualCheck} guarded by {@code inference.vision} and no call; {@code aiAct} makes the plan's
+     * {@code inference} {@code run}; each {@code expectImage} is one redacted capture with its {@link ImageCheck}, the
+     * labels in {@code images}, so that the plan needs bindings.
+     */
+    @Test
+    void thePhase7ScenariosCompileToTheContractsShapes() throws Exception {
+        Plan pad = Plan.read(moduleDir().resolve("plan").resolve("sign-on-by-number-pad.plan.json"));
+        List<Plan.Call> pointers = pad.steps().stream().flatMap(st -> st.calls().stream())
+                .filter(c -> c.primitive().equals("swing.pointer")).toList();
+        assertEquals(List.of("key:1", "key:0", "key:0"), pointers.stream().map(c -> c.args().get("region")).toList());
+        for (Plan.Call pointer : pointers) {
+            assertEquals(Map.of("id", "numberPad"), pointer.args().get("by"));
+            assertEquals("CLICK", pointer.args().get("action"));
+            assertEquals(Sync.SETTLE, pointer.sync());
+            assertNull(pointer.guard(), "a region step stores no pixel and needs no anchor");
+        }
+        assertFalse(pad.needsBindings(), "a fixture credential slot and no image: no bindings file");
+
+        Plan visual = Plan.read(moduleDir().resolve("plan").resolve("loan-table-visual-check.plan.json"));
+        Plan.Step ask = visual.steps().stream().filter(st -> st.verb().equals("aiExpect")).findFirst().orElseThrow();
+        assertEquals(List.of(), ask.calls());
+        VisualCheck check = (VisualCheck) ask.expect().get(0);
+        assertEquals("inference.vision", check.capability());
+        assertEquals("YES", check.expect());
+        assertEquals("none", visual.inference(), "a visual check needs no model in a plan run: it is skipped there");
+        assertFalse(visual.needsBindings());
+
+        Plan live = Plan.read(moduleDir().resolve("plan").resolve("vision-live-only.plan.json"));
+        assertEquals(Plan.INFERENCE_RUN, live.inference());
+        assertFalse(live.needsBindings(), "it never binds in replay: no bindings file is committed");
+
+        Plan image = Plan.read(moduleDir().resolve("plan").resolve("keypad-image.plan.json"));
+        assertEquals(List.of("keypad", "keypad-frame"), image.images());
+        assertTrue(image.needsBindings());
+        Plan.Call keypad = image.steps().get(0).calls().get(0);
+        assertEquals("swing.capture", keypad.primitive());
+        assertEquals(Map.of("by", Map.of("id", "numberPad"), "redact", true), keypad.args());
+        ImageCheck frame = (ImageCheck) image.steps().get(1).expect().get(0);
+        assertEquals("keypad-frame", frame.label());
+        assertEquals(List.of(Map.of("by", Map.of("id", "entry"))), frame.masks(), "masked by locator");
+        assertEquals(0, frame.maxDiffPixels());
     }
 
     @Test
@@ -289,7 +360,7 @@ class PlansUpToDateTest {
     @Test
     void scenarioBsPlanHasTheWaiverModel() throws Exception {
         Plan plan = Plan.read(ScenarioB.plan());
-        assertEquals(5, plan.planVersion());
+        assertEquals(Plan.VERSION, plan.planVersion());
         assertEquals(LendingPack.VERSION, plan.packVersion());
         assertEquals(List.of("assistant/query", "rule/query", "item/query", "keys/query", "loan/capture",
                 "slip/capture"), plan.slots().stream().map(sl -> sl.name() + "/" + sl.kind()).toList());
@@ -348,7 +419,7 @@ class PlansUpToDateTest {
     void scenarioEsPlanGuardsItsHookExpectations() throws Exception {
         Plan plan = Plan.read(moduleDir().resolve("plan/return-within-limit-observed.plan.json"));
         assertEquals("return-within-limit-observed", plan.scenarioId());
-        assertEquals(5, plan.planVersion());
+        assertEquals(Plan.VERSION, plan.planVersion());
         assertEquals(LendingPack.VERSION, plan.packVersion());
         assertTrue(plan.requires().stream().noneMatch(r -> r.startsWith("hook.")), String.valueOf(plan.requires()));
         List<String> guarded = new ArrayList<>();
@@ -380,7 +451,7 @@ class PlansUpToDateTest {
         Plan plan = Plan.read(ScenarioD.plan());
         Plan a = Plan.read(ScenarioA.plan());
         assertEquals(ScenarioD.ID, plan.scenarioId());
-        assertEquals(5, plan.planVersion());
+        assertEquals(Plan.VERSION, plan.planVersion());
         assertEquals(LendingPack.VERSION, plan.packVersion());
         assertEquals(Plan.INFERENCE_BIND, plan.inference());
         assertEquals(List.of("llm-sql"), plan.slot(ScenarioD.MODEL_SLOT).query().strategy(), "the model only");
@@ -423,7 +494,7 @@ class PlansUpToDateTest {
     void scenarioCsPlanHasTheReturnModel() throws Exception {
         Plan plan = Plan.read(ScenarioC.plan());
         assertEquals(ScenarioC.ID, plan.scenarioId());
-        assertEquals(5, plan.planVersion());
+        assertEquals(Plan.VERSION, plan.planVersion());
         assertEquals(LendingPack.VERSION, plan.packVersion());
         assertEquals(Plan.INFERENCE_NONE, plan.inference(), "tier (a) only: no model binds it");
         assertEquals(List.of("item/query", "assistant/query", "lent/capture", "returned/capture"), plan.slots()

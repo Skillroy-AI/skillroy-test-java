@@ -75,6 +75,15 @@ import java.util.regex.Pattern;
  *   <li><b>The check.</b> The YAML is compiled with {@link PlanCompiler} against the pack and {@link Binder#check} is
  *       run with the exported bindings (a slot's credential fields stand in as the run would join them); a problem is
  *       an {@link ExportException}.</li>
+ *   <li><b>Vision-derived steps</b> (phase7-contracts.md 6.6, decisions D309, D355, D356). A step with provenance is
+ *       written as the verb step it was journaled as, with one comment on its line: {@code aiAct "<intent, cut at
+ *       80>" by <model>: <role> "<name>" (<class>)}; no capture hash, handle or mark (they differ between Java lines,
+ *       runs and agent starts), which go into the report's "Vision-derived steps: review the locator and the rung".
+ *       A step that acted through Robot, and a raw {@code swing.pointer} or {@code web.pointer} call, is left out
+ *       and listed under "Live-only". An anchored step's anchor (its provenance's {@code anchor}) becomes the
+ *       {@code images} entry of the export's bindings file under its render key, and its masked PNG, read from
+ *       {@code captures/<hash>.png} in {@link ExportOptions#captures()}, goes to {@link ExportResult#images()}; a
+ *       missing file is an {@link ExportException} naming the step.</li>
  * </ol>
  *
  * <p>One export; not thread-safe.
@@ -102,6 +111,16 @@ final class JournalExport {
     private final List<String> notes = new ArrayList<>();
     private final Map<String, Integer> origins = new TreeMap<>();
     private String cost;
+    /** The report's "Vision-derived steps" lines (phase7-contracts.md 6.6). */
+    private final List<String> visionDerived = new ArrayList<>();
+    /** The report's "Live-only" lines (phase7-contracts.md 6.6). */
+    private final List<String> liveOnly = new ArrayList<>();
+    /** The anchors of exported steps: label to its provenance's {@code anchor} and the step it came from. */
+    private final Map<String, Map<?, ?>> anchors = new TreeMap<>();
+    private final Map<String, String> anchorSteps = new TreeMap<>();
+
+    /** The longest intent an exported step's comment carries (phase7-contracts.md 6.6). */
+    static final int COMMENT_INTENT_MAX = 80;
 
     /** One scenario step: its verb and arguments, the session step it came from, a comment. */
     private record YamlStep(String verb, Object args, String sessionStep, String comment, List<Expect> expects) {
@@ -130,10 +149,14 @@ final class JournalExport {
         String yaml = yaml();
         Plan plan = compile(yaml);
         BindingsFile file = bindingsFile(plan);
+        Map<String, byte[]> images = new TreeMap<>();
+        if (file != null && !anchors.isEmpty()) {
+            file = file.withImages(anchorEntries(images));
+        }
         check(plan, file);
         ExportResult.Report report = new ExportResult.Report(options.scenarioId(), start.id(), plan.steps().size(),
-                plan.inference(), observed, notHeld, excluded, notes);
-        return new ExportResult(yaml, file, report);
+                plan.inference(), observed, notHeld, excluded, notes, visionDerived, liveOnly);
+        return new ExportResult(yaml, file, report, images);
     }
 
     // ------------------------------------------------------------------------------------------------ the walk
@@ -177,6 +200,11 @@ final class JournalExport {
                     if (passed && !options.includeReads() && isRead(s)) {
                         excluded.add(line + "; a read of " + s.calls().get(0).get("primitive") + " is an"
                                 + " observation, not a step (exported with includeReads)");
+                        continue;
+                    }
+                    String live = liveOnly(s);
+                    if (live != null) {
+                        liveOnly.add(line + "; " + live);
                         continue;
                     }
                     flushGroup();
@@ -230,6 +258,160 @@ final class JournalExport {
     }
 
     /**
+     * Why a step is live-only and not exported (phase7-contracts.md 6.5, 6.6, decision D307), or null: it acted through
+     * Robot (no CI target has it), or it is a raw {@code swing.pointer} or {@code web.pointer} call (a hover, a press
+     * by halves, a page pointer the recorder could not turn into a locator step).
+     */
+    private static String liveOnly(StepJournal.StepEntry s) {
+        if (s.provenance() != null && "ROBOT".equals(s.provenance().get("via"))) {
+            return "acted through Robot (V3): live-only, never exported as a step";
+        }
+        for (Map<String, Object> call : s.calls()) {
+            if (call.get("args") instanceof Map<?, ?> args && "ROBOT".equals(args.get("via"))) {
+                return "acted through Robot (via: ROBOT): live-only, never exported as a step";
+            }
+        }
+        if (s.verb() == null && s.calls().size() == 1) {
+            Object primitive = s.calls().get(0).get("primitive");
+            if ("swing.pointer".equals(primitive) || "web.pointer".equals(primitive)) {
+                return "a raw " + primitive + " call is live-only";
+            }
+        }
+        return null;
+    }
+
+    /**
+     * The comment of a step a vision tool chose (phase7-contracts.md 6.6, D356): {@code aiAct "<intent, cut at 80>"
+     * by <model>: <role> "<name>" (<class>)}; the journal already masked it. No hash, handle or mark.
+     */
+    private static String visionComment(StepJournal.StepEntry s) {
+        Map<String, Object> p = s.provenance();
+        String intent = p.get("intent") instanceof String text ? text : s.origin().intent();
+        intent = intent == null ? "" : Values.printableLine(intent);
+        if (intent.length() > COMMENT_INTENT_MAX) {
+            intent = intent.substring(0, COMMENT_INTENT_MAX);
+        }
+        intent = intent.replace("\"", "'");
+        String model = p.get("model") instanceof String m ? m : s.origin().by();
+        Map<?, ?> hit = p.get("hitTest") instanceof Map<?, ?> h ? h : Map.of();
+        StringBuilder comment = new StringBuilder("aiAct \"").append(intent).append("\" by ")
+                .append(model == null ? "(unnamed model)" : Values.printableLine(model)).append(':');
+        if (hit.get("role") != null) {
+            comment.append(' ').append(Values.printableLine(String.valueOf(hit.get("role"))));
+        }
+        if (hit.get("name") != null) {
+            comment.append(" \"").append(Values.printableLine(String.valueOf(hit.get("name"))).replace("\"", "'"))
+                    .append('"');
+        }
+        if (hit.get("className") != null) {
+            comment.append(" (").append(Values.printableLine(String.valueOf(hit.get("className")))).append(')');
+        }
+        return comment.toString();
+    }
+
+    /** The report line of a vision-derived step: the step, the capture's hash and file, the ref, the mark, the point. */
+    private static String visionLine(StepJournal.StepEntry s, YamlStep step) {
+        Map<String, Object> p = s.provenance();
+        StringBuilder line = new StringBuilder(s.stepId()).append(' ').append(step.verb()).append(' ')
+                .append(YamlText.flow(step.args()));
+        if (p.get("tier") != null) {
+            line.append("; tier ").append(p.get("tier"));
+        }
+        if (p.get("capture") instanceof Map<?, ?> capture) {
+            line.append("; capture ").append(capture.get("hash"));
+            if (capture.get("file") != null) {
+                line.append(" (").append(capture.get("file")).append(')');
+            }
+        }
+        if (p.get("hitTest") instanceof Map<?, ?> hit) {
+            if (hit.get("ref") != null) {
+                line.append("; hit-test ").append(hit.get("ref"));
+            }
+            if (hit.get("mark") != null) {
+                line.append(", mark ").append(hit.get("mark"));
+            }
+        }
+        if (p.get("point") instanceof Map<?, ?> point) {
+            line.append("; point (").append(point.get("x")).append(", ").append(point.get("y")).append(')');
+        }
+        if (p.get("anchor") instanceof Map<?, ?> anchor) {
+            line.append("; anchor ").append(anchor.get("label")).append(" ").append(anchor.get("sha256"));
+        }
+        return Values.printableLine(line.toString());
+    }
+
+    /** The {@code images} section of the export's bindings file from the anchors, their PNGs into {@code images}. */
+    private Map<String, Map<String, BindingsFile.ImageEntry>> anchorEntries(Map<String, byte[]> images)
+            throws ExportException {
+        Map<String, Map<String, BindingsFile.ImageEntry>> out = new TreeMap<>();
+        for (Map.Entry<String, Map<?, ?>> e : anchors.entrySet()) {
+            String label = e.getKey();
+            Map<?, ?> anchor = e.getValue();
+            String step = anchorSteps.get(label);
+            String key = anchor.get("renderKey") instanceof String k ? k : null;
+            String sha = anchor.get("sha256") instanceof String h ? h : null;
+            ai.skillroy.testjava.scenario.image.ImageCompare.Rect rect =
+                    ai.skillroy.testjava.scenario.image.ImageCompare.Rect.of(anchor.get("rect"));
+            if (key == null || !BindingsFile.RENDER_KEY.matcher(key).matches() || sha == null
+                    || !sha.matches("sha256:[0-9a-f]{64}") || rect == null) {
+                throw new ExportException(step, "the anchor " + label + " has no render key, hash or rectangle in the"
+                        + " journal");
+            }
+            if (options.captures() == null) {
+                throw new ExportException(step, "the anchor " + label + " needs its capture file, and the session kept"
+                        + " none (it ran without an output directory)");
+            }
+            java.nio.file.Path file = options.captures().resolve("captures").resolve(sha.substring(7) + ".png");
+            byte[] png;
+            java.awt.image.BufferedImage raster;
+            try {
+                if (!java.nio.file.Files.isRegularFile(file, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+                    throw new java.io.IOException("no file captures/" + file.getFileName());
+                }
+                png = java.nio.file.Files.readAllBytes(file);
+                raster = ai.skillroy.testjava.scenario.image.ImageCompare.decodePng(png);
+            } catch (java.io.IOException failure) {
+                throw new ExportException(step, "the anchor " + label + "'s capture file cannot be read: "
+                        + failure.getMessage(), failure);
+            }
+            if (!ai.skillroy.testjava.scenario.image.ImageCompare.rasterHash(raster).equals(sha)) {
+                throw new ExportException(step, "the anchor " + label + "'s capture file is not the recorded raster");
+            }
+            Map<?, ?> focusJson = anchor.get("focus") instanceof Map<?, ?> f ? f : Map.of();
+            Object owner = focusJson.containsKey("owner") ? focusJson.get("owner") : focusJson.get("ownerLocator");
+            @SuppressWarnings("unchecked")
+            BindingsFile.Focus focus = new BindingsFile.Focus(owner instanceof Map<?, ?> o ? (Map<String, Object>) o
+                    : null, ai.skillroy.testjava.scenario.image.ImageCompare.Rect.of(focusJson.get("ownerRect")),
+                    Boolean.TRUE.equals(focusJson.get("active")));
+            @SuppressWarnings("unchecked")
+            BindingsFile.ImageEntry entry = new BindingsFile.ImageEntry(sha, raster.getWidth(), raster.getHeight(),
+                    rects(anchor.get("masks")), rects(anchor.get("carets")), focus,
+                    BindingsFile.ImageEntry.fileName(options.scenarioId(), label, key),
+                    anchor.get("rendering") instanceof Map<?, ?> r ? (Map<String, Object>) r : Map.of(),
+                    anchor.get("window") instanceof Map<?, ?> w ? (Map<String, Object>) w : null,
+                    new BindingsFile.Anchor(rect.x(), rect.y()));
+            out.computeIfAbsent(label, k -> new TreeMap<>()).put(key, entry);
+            images.put(label, png);
+        }
+        return out;
+    }
+
+    private static List<ai.skillroy.testjava.scenario.image.ImageCompare.Rect> rects(Object value) {
+        List<ai.skillroy.testjava.scenario.image.ImageCompare.Rect> out = new ArrayList<>();
+        if (value instanceof List<?> list) {
+            for (Object item : list) {
+                Object rect = item instanceof Map<?, ?> m && m.containsKey("rect") ? m.get("rect") : item;
+                ai.skillroy.testjava.scenario.image.ImageCompare.Rect r =
+                        ai.skillroy.testjava.scenario.image.ImageCompare.Rect.of(rect);
+                if (r != null) {
+                    out.add(r);
+                }
+            }
+        }
+        return out;
+    }
+
+    /**
      * True for a raw call (no verb) of one primitive that changes nothing, by the {@code reads} of the journal's
      * {@code session-start}, and that captures no slot (a later step may refer to a capture).
      */
@@ -275,7 +457,16 @@ final class JournalExport {
                 throw new ExportException(s.stepId(), "an argument of " + s.verb() + " was masked in the journal (it"
                         + " held a secret); give it as a reference to the slot's credential field instead");
             }
-            return new YamlStep(s.verb(), Values.sortKeys(s.args()), s.stepId(), null, List.of());
+            YamlStep step = new YamlStep(s.verb(), Values.sortKeys(s.args()), s.stepId(),
+                    s.provenance() == null ? null : visionComment(s), List.of());
+            if (s.provenance() != null) {
+                visionDerived.add(visionLine(s, step));
+                if (s.provenance().get("anchor") instanceof Map<?, ?> anchor && anchor.get("label") instanceof String l) {
+                    anchors.put(l, anchor);
+                    anchorSteps.put(l, s.stepId());
+                }
+            }
+            return step;
         }
         if (s.calls().size() != 1) {
             throw new ExportException(s.stepId(), "a raw call step has " + s.calls().size() + " calls");

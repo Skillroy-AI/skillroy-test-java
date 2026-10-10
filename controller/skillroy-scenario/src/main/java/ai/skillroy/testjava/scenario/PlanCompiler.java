@@ -103,20 +103,27 @@ import java.util.TreeSet;
  * inference module, not by the pack's catalogue), and is a compile error naming the pack otherwise; the plan's
  * {@code inference} is {@code bind} when a slot names it ({@link Plan#inferenceOf}). The base verb {@code call} (P1
  * 8.3, unchanged) is reserved: a pack may not declare a verb of that name, since an exported session step relies on
- * it. Plans are written as version 5. A {@code _meta} key at any depth of a step's arguments (every verb but
+ * it. Plans were written as version 5 (version 6 since Phase 7). A {@code _meta} key at any depth of a step's arguments (every verb but
  * {@code expect}) or of a call a verb compiles to, cleanup calls and a session's raw call included, is a compile
  * error naming its path: a call's {@code _meta} is the executor's, built from the call's options (13.1, the fix wave).
+ *
+ * <p>Phase 7 (phase7-contracts.md 8.1, 8.2, decisions D310, D325): the four verbs {@code aiAct}, {@code aiExpect},
+ * {@code pointer} and {@code expectImage} are base verbs (still reserved for a pack). {@code aiAct} compiles to no call
+ * and makes the plan's {@code inference} {@code run}; with {@code tier: V3} it adds {@code swing.pointer.robot} to
+ * {@code requires} with a note. {@code aiExpect} compiles to a step with one {@link VisualCheck} and no call.
+ * {@code pointer} compiles to {@code swing.pointer}'s component form; {@code via: ROBOT} adds
+ * {@code swing.pointer.robot} to {@code requires} with a note, and {@code guard} puts a {@link Plan.Guard} on the call.
+ * {@code expectImage} compiles to one {@code swing.capture} call and one {@link ImageCheck}. The labels of every
+ * image check and guard are the plan's {@code images} (unique in the scenario). Plans are written as version 6.
  *
  * <p>Stateless; safe from any thread, provided the pack's step library is.
  */
 public final class PlanCompiler {
 
-    /** Verb names reserved for a later version (decision B16): no pack or base verb takes them. */
-    private static final Set<String> LATER_VERBS = Set.of("aiAct", "aiExpect", "pointer", "expectImage");
-
     /**
-     * Verb names a pack verb may not take: those reserved for a later version (decision B16) and the base verb
-     * {@code call} (phase5-contracts.md 13.1), which an exported session step relies on.
+     * Verb names a pack verb may not take: the four Phase 7 base verbs (reserved since decision B16, built in Phase 7,
+     * phase7-contracts.md 8.1) and the base verb {@code call} (phase5-contracts.md 13.1), which an exported session step
+     * relies on.
      */
     public static final Set<String> RESERVED_VERBS = Set.of("aiAct", "aiExpect", "pointer", "expectImage", "call");
 
@@ -417,6 +424,7 @@ public final class PlanCompiler {
             }
             checkReferences(slots, oracles, steps, verify, cleanup);
             webRequires(added);
+            visionRequires(steps, added);
             for (String id : added) {
                 if (!requires.contains(id)) {
                     requires.add(id);
@@ -425,8 +433,35 @@ public final class PlanCompiler {
             return new Plan(Plan.VERSION, scenario.id(), pack.id(), String.valueOf(pack.version()),
                     scenario.sourceHash(), new ArrayList<>(requires), slots, steps, verify, cleanup,
                     scenario.launchProperties(), scenario.artifacts(), scenario.onPrompt(), scenario.stepTimeoutMs(),
-                    scenario.ui(), Plan.inferenceOf(slots), oracles, graph, scenario.bindTimeoutMs(),
-                    scenario.web());
+                    scenario.ui(), Plan.inferenceOf(slots, steps), oracles, graph, scenario.bindTimeoutMs(),
+                    scenario.web(), Plan.imagesOf(steps));
+        }
+
+        /**
+         * phase7-contracts.md 8.1: a {@code pointer} call with {@code via: ROBOT} and an {@code aiAct} with
+         * {@code tier: V3} need {@code swing.pointer.robot}; the compiler adds it with a note (the executor refuses such
+         * a plan without the person's {@code --allow-robot} before it checks {@code requires}).
+         */
+        private void visionRequires(List<Plan.Step> steps, Set<String> added) {
+            boolean robot = false;
+            for (int i = 0; i < steps.size(); i++) {
+                Plan.Step step = steps.get(i);
+                for (Plan.Call call : step.calls()) {
+                    robot |= "swing.pointer".equals(call.primitive()) && "ROBOT".equals(call.args().get("via"));
+                }
+                if ("aiAct".equals(step.verb()) && scenario.steps().get(i).args() instanceof Map<?, ?> a
+                        && "V3".equals(a.get("tier"))) {
+                    robot = true;
+                }
+            }
+            if (robot) {
+                added.add("swing.pointer.robot");
+                if (!scenario.requires().contains("swing.pointer.robot")) {
+                    notes.add("a step acts through Robot (pointer via: ROBOT or aiAct tier: V3): the capability"
+                            + " swing.pointer.robot was added to requires; the run needs the agent option robot=true and"
+                            + " a person's --allow-robot");
+                }
+            }
         }
 
         /**
@@ -819,8 +854,8 @@ public final class PlanCompiler {
         private Plan.Step step(String id, int index, Scenario.Step step) throws ScenarioException {
             String verb = step.verb();
             int line = step.line();
-            if (LATER_VERBS.contains(verb)) {
-                throw error(line, "the verb '" + verb + "' is reserved for a later version");
+            if (BaseSteps.VISION_VERBS.contains(verb)) {
+                return visionStep(id, index, step);
             }
             if ("expect".equals(verb)) {
                 if (!(step.args() instanceof Map<?, ?> map) || map.isEmpty()) {
@@ -865,6 +900,88 @@ public final class PlanCompiler {
                     if (call.capture() != null) {
                         stepCaptures.add(capture(call.capture(), index, id, line));
                     }
+                }
+            }
+            for (Captured capture : stepCaptures) {
+                captured.put(capture.name(), capture);
+            }
+            cleanups.addAll(ctx.cleanups);
+            return new Plan.Step(id, verb, line, calls, List.of());
+        }
+
+        /** The labels of the scenario's image checks and guards so far: each label once (phase7-contracts.md 8.1). */
+        private final Set<String> imageLabels = new LinkedHashSet<>();
+
+        /** The four Phase 7 verbs (phase7-contracts.md 8.1). */
+        private Plan.Step visionStep(String id, int index, Scenario.Step step) throws ScenarioException {
+            String verb = step.verb();
+            int line = step.line();
+            Object args = normalise(step.args(), false, line);
+            String meta = metaPath(args, "");
+            if (meta != null) {
+                throw error(line, "verb '" + verb + "': " + noMeta(meta));
+            }
+            try {
+                switch (verb) {
+                    case "aiAct" -> {
+                        BaseSteps.aiAct(args);
+                        return new Plan.Step(id, verb, line, List.of(), List.of());
+                    }
+                    case "aiExpect" -> {
+                        Map<String, Object> a = BaseSteps.aiExpect(args);
+                        return new Plan.Step(id, verb, line, List.of(), List.of(new VisualCheck(
+                                (String) a.get("question"), (String) a.get("expect"))));
+                    }
+                    case "expectImage" -> {
+                        ImageCheck check = BaseSteps.expectImageCheck(args);
+                        label(check.label(), line);
+                        Plan.Step compiled = compiledBaseStep(id, index, verb, args, line);
+                        return new Plan.Step(id, verb, line, compiled.calls(), List.of(check));
+                    }
+                    default -> {
+                        String guard = BaseSteps.pointerGuard(args);
+                        Plan.Step compiled = compiledBaseStep(id, index, verb, args, line);
+                        if (guard == null) {
+                            return compiled;
+                        }
+                        label(guard, line);
+                        List<Plan.Call> calls = new ArrayList<>();
+                        for (Plan.Call call : compiled.calls()) {
+                            calls.add("swing.pointer".equals(call.primitive()) ? call.withGuard(new Plan.Guard(guard))
+                                    : call);
+                        }
+                        return new Plan.Step(id, verb, line, calls, List.of());
+                    }
+                }
+            } catch (ScenarioException e) {
+                throw e.locate(scenario.id(), line);
+            }
+        }
+
+        private void label(String label, int line) throws ScenarioException {
+            if (!imageLabels.add(label)) {
+                throw error(line, "the image label '" + label + "' is used twice; a label names one baseline or"
+                        + " anchor per scenario");
+            }
+        }
+
+        /** A base verb's calls compiled as {@link #step} compiles a step's calls (no captures, no cleanups). */
+        private Plan.Step compiledBaseStep(String id, int index, String verb, Object args, int line)
+                throws ScenarioException {
+            Context ctx = new Context(line);
+            List<PlannedCall> planned;
+            try {
+                planned = BaseSteps.INSTANCE.compile(verb, args, ctx);
+            } catch (RuntimeException e) {
+                throw new ScenarioException(scenario.id(), line, "verb '" + verb + "' failed to compile: " + e, e);
+            }
+            ctx.closed = true;
+            List<Plan.Call> calls = new ArrayList<>();
+            List<Captured> stepCaptures = new ArrayList<>();
+            for (PlannedCall call : planned) {
+                calls.add(toCall(call, ctx.handlers.contains(call), line, "verb '" + verb + "'"));
+                if (call.capture() != null) {
+                    stepCaptures.add(capture(call.capture(), index, id, line));
                 }
             }
             for (Captured capture : stepCaptures) {

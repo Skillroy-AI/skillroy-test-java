@@ -30,7 +30,9 @@ import ai.skillroy.testjava.inference.spi.InferenceGateway;
 import ai.skillroy.testjava.inference.spi.ModelClass;
 import ai.skillroy.testjava.inference.sql.AllowListCheck;
 import ai.skillroy.testjava.inference.sql.SqlGuard;
+import ai.skillroy.testjava.protocol.Capability;
 import ai.skillroy.testjava.protocol.CapabilityState;
+import ai.skillroy.testjava.scenario.CapabilityContributor;
 import ai.skillroy.testjava.scenario.pack.DomainPack;
 import ai.skillroy.testjava.scenario.resolve.ContributionException;
 import ai.skillroy.testjava.scenario.resolve.CostLedger;
@@ -63,15 +65,20 @@ import java.util.Map;
  * never sees one (the binder refuses a credential reference in a query's arguments), and applies the key rule.
  *
  * <p>An instance serves one bind; {@link #close()} releases the gateway lease and the guards' parser threads.
+ *
+ * <p>It is also the {@link CapabilityContributor} of {@code inference.gateway} and {@code inference.sql}
+ * (phase7-contracts.md 8.5, decisions D326, D354; landed by VC in step 1 as a shared file of this module): their
+ * states join the run's matrix through the merge, and {@code inference.vision} is no longer answered here (the vision
+ * module's contributor owns it alone; two contributors answering one id is a conflict the merge refuses).
  */
-public final class InferenceContributor implements ResolverContributor {
+public final class InferenceContributor implements ResolverContributor, CapabilityContributor {
 
     /** The capability of a configured gateway. */
     public static final String CAPABILITY_GATEWAY = "inference.gateway";
     /** The capability of tier (b) resolution. */
     public static final String CAPABILITY_SQL = "inference.sql";
-    /** Reserved for the vision loop of Phase 7: always {@code UNAVAILABLE} here. */
-    public static final String CAPABILITY_VISION = "inference.vision";
+    /** The contributor's id: the matrix remembers {@code controller:inference}. */
+    public static final String ID = "inference";
 
     private BindState state;
 
@@ -157,18 +164,40 @@ public final class InferenceContributor implements ResolverContributor {
         return new LlmSqlResolver<>(type, (ValueLoader) loader, state);
     }
 
+    @Override
+    public String id() {
+        return ID;
+    }
+
     /**
-     * {@code inference.gateway} and {@code inference.sql}: {@code OK} when the settings name a gateway, else
-     * {@code UNAVAILABLE} (whether the pack declares an allow-list is the bind's to find); {@code inference.vision}:
-     * {@code UNAVAILABLE} (reserved for Phase 7).
+     * phase7-contracts.md 8.5: {@code inference.gateway} {@code OK} (strategy: the gateway's name) when the settings
+     * name a gateway other than {@code none}, else {@code UNAVAILABLE("gateway none")}; {@code inference.sql} likewise,
+     * and {@code UNAVAILABLE("no allow-list")} when the pack declares no SQL allow-list. The merge forces both
+     * {@code UNAVAILABLE("replay")} in {@code replay}. A pure function of the context: no gateway is opened.
      */
     @Override
-    public Map<String, CapabilityState> capabilities(InferenceSettings settings) {
+    public Map<String, Capability> capabilities(CapabilityContext ctx) {
+        InferenceSettings settings = ctx.settings();
         boolean on = settings != null && settings.enabled();
-        Map<String, CapabilityState> out = new LinkedHashMap<>();
-        out.put(CAPABILITY_GATEWAY, on ? CapabilityState.OK : CapabilityState.UNAVAILABLE);
-        out.put(CAPABILITY_SQL, on ? CapabilityState.OK : CapabilityState.UNAVAILABLE);
-        out.put(CAPABILITY_VISION, CapabilityState.UNAVAILABLE);
+        Map<String, Capability> out = new LinkedHashMap<>();
+        out.put(CAPABILITY_GATEWAY, on ? new Capability(CAPABILITY_GATEWAY, CapabilityState.OK, null, settings.gateway())
+                : new Capability(CAPABILITY_GATEWAY, CapabilityState.UNAVAILABLE, "gateway none", null));
+        boolean allowList;
+        try {
+            List<SqlAllowList> lists = ctx.pack() == null ? List.of() : ctx.pack().sqlAllowLists();
+            allowList = lists != null && !lists.isEmpty();
+        } catch (RuntimeException e) {
+            allowList = false;
+        }
+        Capability sql;
+        if (!on) {
+            sql = new Capability(CAPABILITY_SQL, CapabilityState.UNAVAILABLE, "gateway none", null);
+        } else if (!allowList) {
+            sql = new Capability(CAPABILITY_SQL, CapabilityState.UNAVAILABLE, "no allow-list", null);
+        } else {
+            sql = new Capability(CAPABILITY_SQL, CapabilityState.OK, null, settings.gateway());
+        }
+        out.put(CAPABILITY_SQL, sql);
         return out;
     }
 

@@ -115,9 +115,41 @@ public final class BaseSteps implements StepLibrary {
     /** The shared instance. */
     public static final BaseSteps INSTANCE = new BaseSteps();
 
-    /** The base verbs in documentation order (the web verbs since Phase 4). */
+    /**
+     * The base verbs in documentation order (the web verbs since Phase 4, the four vision verbs since Phase 7,
+     * phase7-contracts.md 8.1, decision D310).
+     */
     public static final List<String> VERBS = List.of("call", "click", "type", "press", "dismiss", "waitFor",
-            "expect", "mark", "webClick", "webFill", "webDispatch", "webWaitFlag", "webResize", "webTap");
+            "expect", "mark", "webClick", "webFill", "webDispatch", "webWaitFlag", "webResize", "webTap", "aiAct",
+            "aiExpect", "pointer", "expectImage");
+
+    /** The four Phase 7 verbs (phase7-contracts.md 8.1). */
+    static final Set<String> VISION_VERBS = Set.of("aiAct", "aiExpect", "pointer", "expectImage");
+
+    /** {@code aiAct}'s arguments. */
+    static final List<String> AI_ACT_ARGS = List.of("intent", "tier", "model", "maxActions");
+
+    /** {@code aiExpect}'s arguments ({@code capability} is refused with its own message). */
+    static final List<String> AI_EXPECT_ARGS = List.of("question", "expect");
+
+    /** {@code pointer}'s arguments (phase7-contracts.md 8.1). */
+    static final List<String> POINTER_ARGS = List.of("target", "by", "region", "row", "at", "action", "to", "button",
+            "modifiers", "clickCount", "wheel", "steps", "via", "guard", "force", "await", "strict");
+
+    /** {@code expectImage}'s arguments (phase7-contracts.md 8.1). */
+    static final List<String> EXPECT_IMAGE_ARGS = List.of("label", "target", "by", "region", "clip", "mask",
+            "maxDiffPixels");
+
+    /** The actions of {@code pointer} ({@code swing.pointer}'s, phase7-contracts.md 3.3). */
+    static final List<String> POINTER_ACTIONS = List.of("CLICK", "DOUBLE_CLICK", "PRESS", "RELEASE", "MOVE", "DRAG",
+            "WHEEL");
+
+    /** A region id ({@code RegionResolver}, phase7-contracts.md 3.7). */
+    static final java.util.regex.Pattern REGION_ID = java.util.regex.Pattern.compile(
+            "[A-Za-z0-9][A-Za-z0-9:._-]{0,63}");
+
+    /** The largest {@code maxActions} of {@code aiAct}: the session's default (phase7-contracts.md 10). */
+    static final int MAX_AI_ACTIONS = 30;
 
     /** The base web verbs (phase4-contracts.md 7.1). */
     static final Set<String> WEB_VERBS = Set.of("webClick", "webFill", "webDispatch", "webWaitFlag", "webResize",
@@ -143,8 +175,11 @@ public final class BaseSteps implements StepLibrary {
      */
     static final long MAX_SETTLE_MS = 118_000L;
 
-    /** The base verbs whose calls the executor checks for {@code fired: false} (amendment A29). */
-    static final Set<String> UI_VERBS = Set.of("click", "type", "press");
+    /**
+     * The base verbs whose calls the executor checks for {@code fired: false} (amendment A29; {@code pointer} since
+     * Phase 7, phase7-contracts.md 8.1).
+     */
+    static final Set<String> UI_VERBS = Set.of("click", "type", "press", "pointer");
 
     private BaseSteps() {
     }
@@ -215,8 +250,309 @@ public final class BaseSteps implements StepLibrary {
             case "webWaitFlag" -> webWaitFlag(args, ctx);
             case "webResize" -> webResize(args, ctx);
             case "webTap" -> webTap(args, ctx);
+            case "aiAct" -> {
+                aiAct(args);
+                yield List.of();
+            }
+            case "aiExpect" -> {
+                aiExpect(args);
+                yield List.of();
+            }
+            case "pointer" -> pointer(args, ctx);
+            case "expectImage" -> List.of(expectImageCall(args));
             default -> throw new ScenarioException("unknown base verb '" + verb + "'; base verbs: " + VERBS);
         };
+    }
+
+    // ------------------------------------------------------------------------------------------------ vision verbs
+
+    /**
+     * {@code aiAct: {intent, tier?, model?, maxActions?}} (phase7-contracts.md 8.1): no call; the compiler makes the
+     * plan's {@code inference} {@code run}. Returns the arguments checked.
+     */
+    static Map<String, Object> aiAct(Object args) throws ScenarioException {
+        Map<String, Object> a = map("aiAct", args, AI_ACT_ARGS, false);
+        if (!(a.get("intent") instanceof String intent) || intent.isBlank()) {
+            throw new ScenarioException("aiAct: 'intent' must be a sentence saying what the model should do");
+        }
+        if (a.containsKey("tier") && !List.of("V1", "V2", "V3").contains(a.get("tier"))) {
+            throw new ScenarioException("aiAct: 'tier' must be V1, V2 or V3, found "
+                    + ScenarioLoader.describe(a.get("tier")));
+        }
+        if (a.containsKey("model") && !List.of("opus", "sonnet", "haiku").contains(a.get("model"))) {
+            throw new ScenarioException("aiAct: 'model' must be opus, sonnet or haiku, found "
+                    + ScenarioLoader.describe(a.get("model")));
+        }
+        if (a.containsKey("maxActions")) {
+            long max = integer("aiAct", "maxActions", a.get("maxActions"));
+            if (max < 1 || max > MAX_AI_ACTIONS) {
+                throw new ScenarioException("aiAct: 'maxActions' must be from 1 to " + MAX_AI_ACTIONS + ", found "
+                        + max);
+            }
+        }
+        return a;
+    }
+
+    /**
+     * {@code aiExpect: {question, expect?}} (phase7-contracts.md 8.1): no call; the compiler attaches a
+     * {@link VisualCheck} guarded by {@code inference.vision}, a guard no argument can change. Returns the arguments
+     * checked, {@code expect} defaulted to {@code YES}.
+     */
+    static Map<String, Object> aiExpect(Object args) throws ScenarioException {
+        if (args instanceof Map<?, ?> raw && raw.containsKey("capability")) {
+            throw new ScenarioException("aiExpect: 'capability' is not an argument: aiExpect is always guarded by "
+                    + VisualCheck.CAPABILITY);
+        }
+        Map<String, Object> a = map("aiExpect", args, AI_EXPECT_ARGS, false);
+        if (!(a.get("question") instanceof String question) || question.isBlank()) {
+            throw new ScenarioException("aiExpect: 'question' must be a statement about the screen");
+        }
+        Object expect = a.getOrDefault("expect", "YES");
+        if (!"YES".equals(expect) && !"NO".equals(expect)) {
+            throw new ScenarioException("aiExpect: 'expect' must be YES or NO, found " + ScenarioLoader.describe(expect));
+        }
+        a.put("expect", expect);
+        return a;
+    }
+
+    /**
+     * {@code pointer: {target|by, region?, row?, at?, action?, to?, button?, modifiers?, clickCount?, wheel?, steps?,
+     * via?, guard?, force?, await?, strict?}} -> {@code swing.pointer} in its component form (phase7-contracts.md 3.3,
+     * 8.1), SETTLE, or with {@code await} EVENT then {@code swing.settle}. {@code action} defaults to {@code CLICK} and
+     * is always sent; {@code guard} is not sent (the compiler puts it on the call); {@code strict} is checked and not
+     * sent (the primitive has no fall-back to restrict). {@code PRESS} or {@code RELEASE} with {@code via: ROBOT} is
+     * refused ("a Robot press is never left held", D343).
+     */
+    private static List<PlannedCall> pointer(Object args, CompileContext ctx) throws ScenarioException {
+        Map<String, Object> a = map("pointer", args, POINTER_ARGS, false);
+        requireOneTarget("pointer", a);
+        AwaitArg await = verbAwait("pointer", a);
+        a.remove("guard");
+        if (a.containsKey("strict") && !(a.remove("strict") instanceof Boolean)) {
+            throw new ScenarioException("pointer: 'strict' must be true or false");
+        }
+        if (a.containsKey("region")) {
+            if (!(a.get("region") instanceof String region) || !REGION_ID.matcher(region).matches()) {
+                throw new ScenarioException("pointer: 'region' must be a region id such as key:7 (a rectangle is not a"
+                        + " region; a region is resolved by the agent's RegionResolver)");
+            }
+        }
+        if (a.containsKey("row")) {
+            long row = integer("pointer", "row", a.get("row"));
+            if (row < 0) {
+                throw new ScenarioException("pointer: 'row' must be a model row index of 0 or more");
+            }
+            a.put("row", row);
+        }
+        if (a.containsKey("region") && a.containsKey("row")) {
+            throw new ScenarioException("pointer: give 'region' or 'row', not both");
+        }
+        String action = "CLICK";
+        if (a.containsKey("action")) {
+            if (!(a.get("action") instanceof String raw) || !POINTER_ACTIONS.contains(raw)) {
+                throw new ScenarioException("pointer: 'action' must be one of " + POINTER_ACTIONS + ", found "
+                        + ScenarioLoader.describe(a.get("action")));
+            }
+            action = raw;
+        }
+        a.put("action", action);
+        if (a.containsKey("at")) {
+            fractions("pointer", "at", a.get("at"));
+        }
+        if (a.containsKey("to")) {
+            if (!"DRAG".equals(action)) {
+                throw new ScenarioException("pointer: 'to' needs action DRAG");
+            }
+            fractions("pointer", "to", a.get("to"));
+        } else if ("DRAG".equals(action)) {
+            throw new ScenarioException("pointer: action DRAG needs 'to: {fx, fy}'");
+        }
+        if (a.containsKey("button") && !List.of("LEFT", "MIDDLE", "RIGHT").contains(a.get("button"))) {
+            throw new ScenarioException("pointer: 'button' must be LEFT, MIDDLE or RIGHT, found "
+                    + ScenarioLoader.describe(a.get("button")));
+        }
+        if (a.containsKey("modifiers")) {
+            if (!(a.get("modifiers") instanceof List<?> list) || !list.stream().allMatch(m ->
+                    List.of("SHIFT", "CTRL", "ALT", "META").contains(m))) {
+                throw new ScenarioException("pointer: 'modifiers' must be a list of SHIFT, CTRL, ALT and META");
+            }
+        }
+        if (a.containsKey("clickCount")) {
+            long count = integer("pointer", "clickCount", a.get("clickCount"));
+            if (count < 1 || count > 3) {
+                throw new ScenarioException("pointer: 'clickCount' must be 1, 2 or 3, found " + count);
+            }
+        }
+        if (a.containsKey("wheel")) {
+            if (!"WHEEL".equals(action)) {
+                throw new ScenarioException("pointer: 'wheel' needs action WHEEL");
+            }
+            Map<String, Object> wheel = map("pointer.wheel", a.get("wheel"), List.of("notches"), false);
+            long notches = integer("pointer.wheel", "notches", wheel.get("notches"));
+            if (notches == 0 || Math.abs(notches) > 50) {
+                throw new ScenarioException("pointer: 'wheel.notches' must be from -50 to 50 and not 0, found "
+                        + notches);
+            }
+        } else if ("WHEEL".equals(action)) {
+            throw new ScenarioException("pointer: action WHEEL needs 'wheel: {notches}'");
+        }
+        if (a.containsKey("steps")) {
+            if (!"DRAG".equals(action)) {
+                throw new ScenarioException("pointer: 'steps' needs action DRAG");
+            }
+            long steps = integer("pointer", "steps", a.get("steps"));
+            if (steps < 1 || steps > 50) {
+                throw new ScenarioException("pointer: 'steps' must be from 1 to 50, found " + steps);
+            }
+        }
+        if (a.containsKey("via")) {
+            if (!"ROUTED".equals(a.get("via")) && !"ROBOT".equals(a.get("via"))) {
+                throw new ScenarioException("pointer: 'via' must be ROUTED or ROBOT, found "
+                        + ScenarioLoader.describe(a.get("via")));
+            }
+            if ("ROBOT".equals(a.get("via")) && ("PRESS".equals(action) || "RELEASE".equals(action))) {
+                throw new ScenarioException("pointer: a Robot press is never left held: use CLICK or DRAG with via:"
+                        + " ROBOT, not " + action);
+            }
+        }
+        if (a.containsKey("force") && !(a.get("force") instanceof Boolean)) {
+            throw new ScenarioException("pointer: 'force' must be true or false");
+        }
+        return uiCalls("swing.pointer", a, await, ctx);
+    }
+
+    /** The label of a {@code pointer} step's {@code guard} argument, or null when it has none (checked). */
+    static String pointerGuard(Object args) throws ScenarioException {
+        if (!(args instanceof Map<?, ?> a) || a.get("guard") == null) {
+            return null;
+        }
+        if (!(a.get("guard") instanceof String label) || !ImageCheck.LABEL.matcher(label).matches()) {
+            throw new ScenarioException("pointer: 'guard' must be a label ([A-Za-z0-9][A-Za-z0-9._-]{0,63})");
+        }
+        return label;
+    }
+
+    /**
+     * {@code expectImage: {label, target|by?, region?|clip?, mask?, maxDiffPixels?}} -> one {@code swing.capture
+     * {target|by?, scope: REGION?, region?, redact: true}} call with sync NONE (phase7-contracts.md 8.1, 6.7): a
+     * {@code region} id or a {@code clip} rectangle captures {@code scope: REGION}; otherwise the scope is left to the
+     * agent's default ({@code WINDOW} for a window and for no target, {@code COMPONENT} for a component). The compiler
+     * attaches the step's {@link ImageCheck} ({@link #expectImageCheck}).
+     */
+    private static PlannedCall expectImageCall(Object args) throws ScenarioException {
+        Map<String, Object> a = expectImageArgs(args);
+        Map<String, Object> params = new LinkedHashMap<>();
+        if (a.containsKey("target")) {
+            params.put("target", a.get("target"));
+        }
+        if (a.containsKey("by")) {
+            params.put("by", a.get("by"));
+        }
+        if (a.containsKey("region")) {
+            params.put("scope", "REGION");
+            params.put("region", a.get("region"));
+        } else if (a.containsKey("clip")) {
+            params.put("scope", "REGION");
+            params.put("region", a.get("clip"));
+        }
+        params.put("redact", true);
+        return new PlannedCall("swing.capture", params, Sync.NONE, 0);
+    }
+
+    /** The {@link ImageCheck} of an {@code expectImage} step (its arguments checked as the call's). */
+    static ImageCheck expectImageCheck(Object args) throws ScenarioException {
+        Map<String, Object> a = expectImageArgs(args);
+        Object masks = a.getOrDefault("mask", List.of());
+        long max = a.containsKey("maxDiffPixels") ? integer("expectImage", "maxDiffPixels", a.get("maxDiffPixels"))
+                : 0;
+        try {
+            return new ImageCheck((String) a.get("label"), new ArrayList<>((List<?>) masks), (int) max);
+        } catch (IllegalArgumentException e) {
+            throw new ScenarioException("expectImage: " + e.getMessage());
+        }
+    }
+
+    private static Map<String, Object> expectImageArgs(Object args) throws ScenarioException {
+        Map<String, Object> a = map("expectImage", args, EXPECT_IMAGE_ARGS, false);
+        if (!(a.get("label") instanceof String label) || !ImageCheck.LABEL.matcher(label).matches()) {
+            throw new ScenarioException("expectImage: 'label' must match [A-Za-z0-9][A-Za-z0-9._-]{0,63}, found "
+                    + ScenarioLoader.describe(a.get("label")));
+        }
+        if (a.containsKey("target") && a.containsKey("by")) {
+            throw new ScenarioException("expectImage: give 'by' (a locator), 'target' (a ref) or neither (the default"
+                    + " window), not both");
+        }
+        if (a.containsKey("region") && a.containsKey("clip")) {
+            throw new ScenarioException("expectImage: give 'region' (an id) or 'clip' (a rectangle), not both");
+        }
+        if (a.containsKey("region") && (!(a.get("region") instanceof String region)
+                || !REGION_ID.matcher(region).matches())) {
+            throw new ScenarioException("expectImage: 'region' must be a region id such as key:7; a rectangle is"
+                    + " 'clip: {x, y, w, h}'");
+        }
+        if (a.containsKey("clip")) {
+            Map<String, Object> clip = map("expectImage.clip", a.get("clip"), List.of("x", "y", "w", "h"), false);
+            for (String key : List.of("x", "y", "w", "h")) {
+                long value = integer("expectImage.clip", key, clip.get(key));
+                if (("w".equals(key) || "h".equals(key)) && (value <= 0 || value > 4096)) {
+                    throw new ScenarioException("expectImage: 'clip." + key + "' must be from 1 to 4096");
+                }
+                if (("x".equals(key) || "y".equals(key)) && Math.abs(value) > 100_000) {
+                    throw new ScenarioException("expectImage: 'clip." + key + "' is out of range");
+                }
+                clip.put(key, value);
+            }
+            a.put("clip", clip);
+        }
+        if (a.containsKey("mask")) {
+            if (!(a.get("mask") instanceof List<?> masks)) {
+                throw new ScenarioException("expectImage: 'mask' must be a list of {by: <locator>} or {x, y, w, h}");
+            }
+            if (masks.size() > ImageMasks.MAX_MASKS) {
+                throw new ScenarioException("expectImage: at most " + ImageMasks.MAX_MASKS + " masks");
+            }
+            for (Object mask : masks) {
+                String problem = ImageMasks.problem(mask);
+                if (problem != null) {
+                    throw new ScenarioException("expectImage: " + problem);
+                }
+            }
+        }
+        if (a.containsKey("maxDiffPixels")) {
+            long max = integer("expectImage", "maxDiffPixels", a.get("maxDiffPixels"));
+            if (max < 0 || max > ImageCheck.MAX_DIFF_PIXELS) {
+                throw new ScenarioException("expectImage: 'maxDiffPixels' must be from 0 to "
+                        + ImageCheck.MAX_DIFF_PIXELS + ", found " + max);
+            }
+        }
+        return a;
+    }
+
+    /** {@code {fx, fy}}, each a number from 0 to 1. */
+    private static void fractions(String verb, String key, Object value) throws ScenarioException {
+        Map<String, Object> f = map(verb + "." + key, value, List.of("fx", "fy"), false);
+        for (String axis : List.of("fx", "fy")) {
+            if (!(f.get(axis) instanceof Number n) || n.doubleValue() < 0 || n.doubleValue() > 1
+                    || Double.isNaN(n.doubleValue())) {
+                throw new ScenarioException(verb + ": '" + key + "." + axis + "' must be a fraction from 0 to 1");
+            }
+        }
+    }
+
+    /** A whole number argument (a reference is not accepted here). */
+    private static long integer(String verb, String key, Object value) throws ScenarioException {
+        if (value instanceof Long l) {
+            return l;
+        }
+        if (value instanceof Integer i) {
+            return i;
+        }
+        if (value instanceof Number n && n.doubleValue() == Math.rint(n.doubleValue())
+                && Math.abs(n.doubleValue()) < 1e15) {
+            return n.longValue();
+        }
+        throw new ScenarioException(verb + ": '" + key + "' must be a whole number, found "
+                + ScenarioLoader.describe(value));
     }
 
     // ------------------------------------------------------------------------------------------------ web verbs

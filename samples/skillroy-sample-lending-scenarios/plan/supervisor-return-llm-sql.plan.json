@@ -1,5 +1,5 @@
 {
-  "planVersion": 5,
+  "planVersion": 6,
   "scenarioId": "supervisor-return-llm-sql",
   "pack": "lending",
   "packVersion": "0.5.0",

@@ -21,6 +21,7 @@ import ai.skillroy.testjava.controller.CallOptions;
 import ai.skillroy.testjava.controller.CapabilityMatrix;
 import ai.skillroy.testjava.inference.budget.InferenceLog;
 import ai.skillroy.testjava.inference.sql.LendingDatabase;
+import ai.skillroy.testjava.protocol.Capability;
 import ai.skillroy.testjava.protocol.CapabilityState;
 import ai.skillroy.testjava.protocol.Event;
 import ai.skillroy.testjava.protocol.PrimitiveDescriptor;
@@ -29,6 +30,7 @@ import ai.skillroy.testjava.scenario.BindOptions;
 import ai.skillroy.testjava.scenario.BindOutcome;
 import ai.skillroy.testjava.scenario.Binder;
 import ai.skillroy.testjava.scenario.BindingsFile;
+import ai.skillroy.testjava.scenario.CapabilityContributor;
 import ai.skillroy.testjava.scenario.Plan;
 import ai.skillroy.testjava.scenario.PlanCompiler;
 import ai.skillroy.testjava.scenario.resolve.Approval;
@@ -117,14 +119,42 @@ class InferenceContributorTest {
         }
     }
 
+    /**
+     * phase7-contracts.md 8.5 and 13.2 item 9 (D326, D354): the contributor is found as a {@code CapabilityContributor}
+     * too and answers {@code inference.gateway} and {@code inference.sql} with their reasons; it no longer answers
+     * {@code inference.vision} (the vision module's contributor owns it alone), and the deprecated
+     * {@code ResolverContributor.capabilities} answers nothing.
+     */
     @Test
+    @SuppressWarnings("deprecation")
     void itReportsItsCapabilities() {
+        List<Class<?>> found = new ArrayList<>();
+        for (CapabilityContributor contributor : CapabilityContributor.load(getClass().getClassLoader())) {
+            found.add(contributor.getClass());
+        }
+        assertTrue(found.contains(InferenceContributor.class), "found through ServiceLoader: " + found);
         InferenceContributor c = new InferenceContributor();
-        assertEquals(Map.of("inference.gateway", CapabilityState.OK, "inference.sql", CapabilityState.OK,
-                "inference.vision", CapabilityState.UNAVAILABLE), c.capabilities(settings("recorded", tmp, null)));
-        assertEquals(Map.of("inference.gateway", CapabilityState.UNAVAILABLE, "inference.sql",
-                CapabilityState.UNAVAILABLE, "inference.vision", CapabilityState.UNAVAILABLE),
-                c.capabilities(InferenceSettings.none()));
+        assertEquals("inference", c.id());
+        CapabilityMatrix agent = new CapabilityMatrix(Map.of());
+        Map<String, Capability> on = c.capabilities(new CapabilityContributor.CapabilityContext(settings("recorded",
+                tmp, null), BindMode.LIVE, agent, Set.of(), new DeskPack()));
+        assertEquals(List.of("inference.gateway", "inference.sql"), new ArrayList<>(on.keySet()),
+                "inference.vision is no longer answered here");
+        assertEquals(new Capability("inference.gateway", CapabilityState.OK, null, "recorded"),
+                on.get("inference.gateway"));
+        assertEquals(new Capability("inference.sql", CapabilityState.OK, null, "recorded"), on.get("inference.sql"));
+        Map<String, Capability> noList = c.capabilities(new CapabilityContributor.CapabilityContext(settings(
+                "recorded", tmp, null), BindMode.LIVE, agent, Set.of(), new DeskPack(Set.of(), false)));
+        assertEquals(new Capability("inference.sql", CapabilityState.UNAVAILABLE, "no allow-list", null),
+                noList.get("inference.sql"));
+        Map<String, Capability> off = c.capabilities(new CapabilityContributor.CapabilityContext(
+                InferenceSettings.none(), BindMode.LIVE, agent, Set.of(), new DeskPack()));
+        assertEquals(new Capability("inference.gateway", CapabilityState.UNAVAILABLE, "gateway none", null),
+                off.get("inference.gateway"));
+        assertEquals(new Capability("inference.sql", CapabilityState.UNAVAILABLE, "gateway none", null),
+                off.get("inference.sql"));
+        assertEquals(Map.of(), c.capabilities(settings("recorded", tmp, null)), "the deprecated method answers"
+                + " nothing");
     }
 
     @Test

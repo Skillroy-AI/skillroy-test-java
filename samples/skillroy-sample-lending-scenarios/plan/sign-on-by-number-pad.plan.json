@@ -1,0 +1,204 @@
+{
+  "planVersion": 6,
+  "scenarioId": "sign-on-by-number-pad",
+  "pack": "lending",
+  "packVersion": "0.5.0",
+  "sourceHash": "sha256:fc7cc438783c6eecf88b9351d201731315d032bd7713a8569f41d67f4a2f0772",
+  "inference": "none",
+  "requires": [
+    "swing.tree",
+    "swing.pointer.routed",
+    "lending.state"
+  ],
+  "slots": [
+    {
+      "name": "assistant",
+      "kind": "fixture",
+      "value": {
+        "code": "100"
+      },
+      "credential": {
+        "realm": "staff",
+        "key": "code"
+      }
+    }
+  ],
+  "oracles": [],
+  "resolutionGraph": [
+    "assistant"
+  ],
+  "steps": [
+    {
+      "id": "s1",
+      "verb": "pointer",
+      "source": {
+        "line": 14
+      },
+      "calls": [
+        {
+          "primitive": "swing.pointer",
+          "args": {
+            "action": "CLICK",
+            "by": {
+              "id": "numberPad"
+            },
+            "region": "key:1"
+          },
+          "sync": "SETTLE",
+          "timeoutMs": 30000
+        }
+      ],
+      "expect": []
+    },
+    {
+      "id": "s2",
+      "verb": "pointer",
+      "source": {
+        "line": 15
+      },
+      "calls": [
+        {
+          "primitive": "swing.pointer",
+          "args": {
+            "action": "CLICK",
+            "by": {
+              "id": "numberPad"
+            },
+            "region": "key:0"
+          },
+          "sync": "SETTLE",
+          "timeoutMs": 30000
+        }
+      ],
+      "expect": []
+    },
+    {
+      "id": "s3",
+      "verb": "pointer",
+      "source": {
+        "line": 16
+      },
+      "calls": [
+        {
+          "primitive": "swing.pointer",
+          "args": {
+            "action": "CLICK",
+            "by": {
+              "id": "numberPad"
+            },
+            "region": "key:0"
+          },
+          "sync": "SETTLE",
+          "timeoutMs": 30000
+        }
+      ],
+      "expect": []
+    },
+    {
+      "id": "s4",
+      "verb": "press",
+      "source": {
+        "line": 17
+      },
+      "calls": [
+        {
+          "primitive": "swing.key",
+          "args": {
+            "key": "ENTER",
+            "target": {
+              "id": "entry"
+            }
+          },
+          "sync": "EVENT",
+          "timeoutMs": 30000,
+          "await": {
+            "topics": "input.requested",
+            "match": {
+              "state": "PASSWORD"
+            },
+            "timeoutMs": 30000
+          }
+        },
+        {
+          "primitive": "swing.settle",
+          "args": {
+            "timeoutMs": 30000
+          },
+          "sync": "NONE",
+          "timeoutMs": 32000
+        }
+      ],
+      "expect": []
+    },
+    {
+      "id": "s5",
+      "verb": "type",
+      "source": {
+        "line": 18
+      },
+      "calls": [
+        {
+          "primitive": "swing.type",
+          "args": {
+            "by": {
+              "id": "entry"
+            },
+            "enter": true,
+            "text": "$assistant.password"
+          },
+          "sync": "EVENT",
+          "timeoutMs": 30000,
+          "await": {
+            "topics": "input.requested",
+            "match": {
+              "state": "IDLE"
+            },
+            "timeoutMs": 30000
+          }
+        },
+        {
+          "primitive": "swing.settle",
+          "args": {
+            "timeoutMs": 30000
+          },
+          "sync": "NONE",
+          "timeoutMs": 32000
+        }
+      ],
+      "expect": []
+    },
+    {
+      "id": "s6",
+      "verb": "expect",
+      "source": {
+        "line": 23
+      },
+      "calls": [],
+      "expect": [
+        {
+          "path": "state.name",
+          "matcher": {
+            "equals": "IDLE"
+          }
+        },
+        {
+          "path": "state.staff.code",
+          "matcher": {
+            "equals": "$assistant.code"
+          }
+        }
+      ]
+    }
+  ],
+  "verify": [],
+  "cleanup": [],
+  "launchProperties": {
+    "lending.seed": "A"
+  },
+  "artifacts": [],
+  "onPrompt": {
+    "unexpected": "fail"
+  },
+  "stepTimeoutMs": 30000,
+  "bindTimeoutMs": 60000
+}

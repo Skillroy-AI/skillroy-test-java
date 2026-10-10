@@ -17,6 +17,7 @@
 package ai.skillroy.testjava.scenario;
 
 import ai.skillroy.testjava.controller.AgentConnection;
+import ai.skillroy.testjava.controller.CapabilityMatrix;
 import ai.skillroy.testjava.controller.AgentLostException;
 import ai.skillroy.testjava.controller.AgentRpcException;
 import ai.skillroy.testjava.controller.CallOptions;
@@ -31,6 +32,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
 import java.util.function.LongSupplier;
+import java.util.function.Supplier;
 
 /**
  * The fact roots every pack has (contract section 8.3), consulted after the pack's own roots:
@@ -134,26 +136,53 @@ public final class BaseFacts {
                     Object value = agent.call("swing.dialogs", Map.of(), READ).value();
                     return value instanceof Map<?, ?> map ? map.get("dialogs") : value;
                 }),
-                provider("caps", agent -> {
-                    Object value = agent.call("agent.capabilities", Map.of(), READ).value();
-                    if (!(value instanceof Map<?, ?> map) || !(map.get("capabilities") instanceof Map<?, ?> caps)) {
-                        return value;
-                    }
-                    List<Object> list = new ArrayList<>();
-                    new TreeMap<>(caps).forEach((id, capability) -> {
-                        Map<String, Object> entry = new LinkedHashMap<>();
-                        entry.put("id", String.valueOf(id));
-                        if (capability instanceof Map<?, ?> fields) {
-                            fields.forEach((k, v) -> entry.put(String.valueOf(k), v));
-                        }
-                        list.add(entry);
-                    });
-                    return list;
-                }),
+                provider("caps", BaseFacts::agentCaps),
                 provider("devices", BaseFacts::devices),
                 web(AGENT_READS, Clock.systemUTC(), (ref, reason) -> {
                 }),
                 hooks(() -> 0L));
+    }
+
+    /**
+     * The root {@code caps} reading the host's merged matrix (phase7-contracts.md 8.5, decision D326; the
+     * {@link #hooks(LongSupplier)} precedent): {@code [{id, state, reason, strategy, source}]} sorted by id, where
+     * {@code source} is {@code agent} or {@code controller:<contributor id>}. While the supplier answers null (before
+     * the merge), the agent's {@code agent.capabilities} is read as by {@link #all()}'s root.
+     */
+    public static FactProvider caps(Supplier<CapabilityMatrix> matrix) {
+        return provider("caps", agent -> {
+            CapabilityMatrix merged = matrix == null ? null : matrix.get();
+            if (merged == null) {
+                return agentCaps(agent);
+            }
+            List<Object> list = new ArrayList<>();
+            merged.all().forEach((id, capability) -> {
+                Map<String, Object> entry = new LinkedHashMap<>();
+                entry.put("id", id);
+                entry.putAll(capability.toJson());
+                entry.put("source", merged.source(id));
+                list.add(entry);
+            });
+            return list;
+        });
+    }
+
+    /** {@code agent.capabilities} as {@code [{id, state, reason, strategy}]} sorted by id. */
+    private static Object agentCaps(AgentConnection agent) throws Exception {
+        Object value = agent.call("agent.capabilities", Map.of(), READ).value();
+        if (!(value instanceof Map<?, ?> map) || !(map.get("capabilities") instanceof Map<?, ?> caps)) {
+            return value;
+        }
+        List<Object> list = new ArrayList<>();
+        new TreeMap<>(caps).forEach((id, capability) -> {
+            Map<String, Object> entry = new LinkedHashMap<>();
+            entry.put("id", String.valueOf(id));
+            if (capability instanceof Map<?, ?> fields) {
+                fields.forEach((k, v) -> entry.put(String.valueOf(k), v));
+            }
+            list.add(entry);
+        });
+        return list;
     }
 
     /**

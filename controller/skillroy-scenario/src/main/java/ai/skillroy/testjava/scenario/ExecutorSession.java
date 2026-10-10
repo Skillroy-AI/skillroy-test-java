@@ -54,6 +54,7 @@ import ai.skillroy.testjava.scenario.resolve.EnvFingerprint;
 import ai.skillroy.testjava.scenario.resolve.Resolution;
 import ai.skillroy.testjava.scenario.web.WebRunContext;
 import ai.skillroy.testjava.scenario.web.WebSettings;
+import ai.skillroy.testjava.scenario.image.ImageSteps;
 
 import java.io.IOException;
 import java.math.BigDecimal;
@@ -154,6 +155,10 @@ public final class ExecutorSession implements AutoCloseable {
     private boolean stepObserved;
     /** The provenance the current step's acting call handed in (phase7-contracts.md 9.2), or null. */
     private Map<String, Object> provenance;
+    /** The ids the controller-side contributors added at open (phase7-contracts.md 8.5). */
+    private List<String> contributed = List.of();
+    /** The baselines of the current {@link #expectImage} step; {@link ImageSteps.Baselines#none()} otherwise. */
+    private ImageSteps.Baselines stepBaselines = ImageSteps.Baselines.none();
 
     private ExecutorSession(DomainPack pack, AgentConnection agent, SessionOptions options, String id, RunLog log,
                             WebRun web, CallRunner runner, StepJournal journal, EnvFingerprint fingerprint,
@@ -182,10 +187,12 @@ public final class ExecutorSession implements AutoCloseable {
         }
         boolean webRoot = false;
         boolean hooksRoot = false;
+        boolean capsRoot = false;
         for (FactProvider fact : packFacts == null ? List.<FactProvider>of() : packFacts) {
             facts.putIfAbsent(fact.root(), fact);
             webRoot |= "web".equals(fact.root());
             hooksRoot |= "hooks".equals(fact.root());
+            capsRoot |= "caps".equals(fact.root());
         }
         for (FactProvider fact : BaseFacts.all()) {
             facts.putIfAbsent(fact.root(), fact);
@@ -198,6 +205,10 @@ public final class ExecutorSession implements AutoCloseable {
             // phase6-contracts.md 6.3: a session's hook counts start at its own start mark, as a run's at its first step.
             long startSeq = runner.lastActionSeq;
             facts.put("hooks", BaseFacts.hooks(() -> startSeq));
+        }
+        if (!capsRoot) {
+            // phase7-contracts.md 8.5: the base root caps reads the session's merged matrix, with a source per entry.
+            facts.put("caps", BaseFacts.caps(() -> this.caps));
         }
     }
 
@@ -258,6 +269,17 @@ public final class ExecutorSession implements AutoCloseable {
             CapabilityMatrix after = agent.capabilities();
             caps = after == null ? new CapabilityMatrix(Map.of()) : after;
         }
+        // phase7-contracts.md 8.5 (D326, D348): the controller-side contributors' capabilities merged once, with the
+        // host's features (SessionOptions.host, set before open), so that capabilities.json is written once.
+        CapabilityMerge.Result merge;
+        try {
+            merge = CapabilityMerge.merge(caps, CapabilityMerge.load(effective.webPathLoader()).contributors(),
+                    new CapabilityContributor.CapabilityContext(effective.bind().inference(), BindMode.LIVE, caps,
+                            effective.host(), pack));
+        } catch (CapabilityMerge.Refused e) {
+            throw new SessionOpenException(FailureKind.ENVIRONMENT, mask.apply(e.getMessage()), null);
+        }
+        caps = merge.merged();
         archiveCapabilities(effective.outputDir(), caps, mask);
         Map<String, PrimitiveDescriptor> primitives = new TreeMap<>();
         List<PrimitiveDescriptor> schema = agent.schema();
@@ -306,6 +328,7 @@ public final class ExecutorSession implements AutoCloseable {
                     ? "read-only" : "acting"));
             ExecutorSession session = new ExecutorSession(pack, agent, effective, id, log, web, runner, journal,
                     fingerprint, caps, primitives, data);
+            session.contributed = merge.contributed();
             session.hooksRecord = mask(mask, hooks.record());
             session.start();
             ok = true;
@@ -446,6 +469,15 @@ public final class ExecutorSession implements AutoCloseable {
         if (hooksRecord != null) {
             sessionOptions.put("hooks", hooksRecord);
         }
+        if (options.robot()) {
+            sessionOptions.put("robot", true);
+        }
+        if (!options.host().isEmpty()) {
+            sessionOptions.put("host", new ArrayList<>(options.host()));
+        }
+        if (!contributed.isEmpty()) {
+            sessionOptions.put("contributed", contributed);
+        }
         Map<String, String> capabilityOf = new TreeMap<>();
         List<String> reads = new ArrayList<>();
         for (PrimitiveDescriptor descriptor : primitives.values()) {
@@ -539,6 +571,14 @@ public final class ExecutorSession implements AutoCloseable {
         this.provenance = provenance;
         String stepId = nextStepId();
         Object given = confirms(origin) ? args : withoutConfirmation(args);
+        if (!confirms(origin)) {
+            // phase7-contracts.md 9.2 (D342) rule 1: a step whose arguments as given name a credential join's secret
+            // field is refused for every origin but a person's, before anything is compiled.
+            String secret = secretReference(given);
+            if (secret != null) {
+                return refusedCredential(stepId, verb, given, origin, secret);
+            }
+        }
         Plan.Step step;
         try {
             Plan compiled = PlanCompiler.compile(scenarioOf(verb, given), pack);
@@ -643,6 +683,13 @@ public final class ExecutorSession implements AutoCloseable {
                 }
             }
         }
+        String gate = gate(step, origin);
+        if (gate != null) {
+            Map<String, Object> detail = RunLog.fields("refused", gate.startsWith("robot") ? "robot"
+                    : gate.startsWith("a capture") ? "glass" : "credential");
+            return finish(stepId, verb, givenArgs, step, callRecords, origin, 0, Status.ERROR, FailureKind.ENVIRONMENT,
+                    gate, detail, runner.lastSeenSeq, t0, null);
+        }
         long seqBefore = runner.lastSeenSeq;
         observeStepStart(stepId, verb, origin);
         runner.currentStep = stepId;
@@ -650,6 +697,7 @@ public final class ExecutorSession implements AutoCloseable {
         runner.stepEvents = new ArrayList<>();
         runner.lastResult = null;
         Map<String, Object> capturedBefore = new LinkedHashMap<>(runner.bindings.captured());
+        String imageSkipped = null;
         int executed = 0;
         int position = 0;
         Abort failure = null;
@@ -657,12 +705,18 @@ public final class ExecutorSession implements AutoCloseable {
             for (position = 0; position < step.calls().size(); position++) {
                 Plan.Call call = step.calls().get(position);
                 PrimitiveDescriptor descriptor = primitives.get(call.primitive());
+                if (call.guard() != null) {
+                    guard(stepId, call);
+                }
                 mutated |= descriptor == null || descriptor.mutating() || descriptor.destructive();
                 runner.execute(step, position, call, id + "/" + stepId + "/" + (position + 1), () -> false);
                 executed = position + 1;
+                if (confirms(origin)) {
+                    consumed(call);
+                }
             }
             if (!step.expect().isEmpty()) {
-                expectNow(step.expect(), stepId);
+                imageSkipped = expectNow(step.expect(), stepId);
             }
         } catch (Abort abort) {
             failure = abort;
@@ -681,6 +735,9 @@ public final class ExecutorSession implements AutoCloseable {
                     + e.getClass().getName(), RunLog.fields("exception", e.toString()));
         } finally {
             runner.currentStep = null;
+        }
+        if (failure == null && imageSkipped != null) {
+            runner.stepFidelity.add(imageSkipped);
         }
         Map<String, Object> captured = new LinkedHashMap<>();
         runner.bindings.captured().forEach((slot, value) -> {
@@ -808,10 +865,29 @@ public final class ExecutorSession implements AutoCloseable {
         return records;
     }
 
-    /** The expectations of an {@code expect} step, evaluated once: the first that does not hold fails the step. */
-    private void expectNow(List<Check> checks, String stepId) throws Abort, AgentLostException,
+    /**
+     * The expectations of an {@code expect} step, evaluated once: the first that does not hold fails the step. An
+     * {@link ImageCheck} is evaluated from the step's own capture result through the image steps (phase7-contracts.md
+     * 6.7); a {@link VisualCheck} is the scenario player's to evaluate, never the session's.
+     *
+     * @return the skipped line of an image check without a baseline in this live session, or null
+     */
+    private String expectNow(List<Check> checks, String stepId) throws Abort, AgentLostException,
             InterruptedException {
+        String skippedLine = null;
         for (Check check : checks) {
+            if (check instanceof ImageCheck image) {
+                Object capture = runner.lastResult == null ? null : runner.lastResult.value();
+                String line = ImageRuns.raise(stepId, ImageRuns.run(stepId, () -> imageSteps(stepBaselines)
+                        .check(stepId, image, capture)));
+                skippedLine = line != null ? line : skippedLine;
+                continue;
+            }
+            if (check instanceof VisualCheck visual) {
+                throw new Abort(Status.ERROR, FailureKind.ENVIRONMENT, stepId, "a visual check (" + visual.describe()
+                        + ") is evaluated by the scenario player, not by a session step", RunLog.fields("check",
+                        visual.describe()));
+            }
             if (!(check instanceof Expectation expectation)) {
                 throw new Abort(Status.ERROR, FailureKind.ENVIRONMENT, stepId, "a stored-row check ("
                         + check.describe() + ") is not evaluated in a session", RunLog.fields("check",
@@ -829,6 +905,7 @@ public final class ExecutorSession implements AutoCloseable {
                         expectation.matcher(), "actual", evaluation.actual(), "reason", evaluation.reason()));
             }
         }
+        return skippedLine;
     }
 
     // ------------------------------------------------------------------------------------------------ resolution
@@ -885,6 +962,7 @@ public final class ExecutorSession implements AutoCloseable {
         resolutions.remove(slot);
         resolutions.put(slot, resolution);
         joins.remove(slot);
+        inFlight.remove(slot);
         credentialRefs.remove(slot);
         if (resolution.credential() != null) {
             credentialRefs.put(slot, resolution.credential());
@@ -892,6 +970,8 @@ public final class ExecutorSession implements AutoCloseable {
                 joins.put(slot, secret);
                 mask = mask.plus(secret.values());
                 log.mask(mask);
+                // phase7-contracts.md 9.2 (D342): in flight until a person's step consumes it.
+                inFlight.add(slot);
             }
         }
         declaredSlots.remove(slot);
@@ -1388,11 +1468,273 @@ public final class ExecutorSession implements AutoCloseable {
      * @throws InterruptedException if the thread is interrupted
      */
     public StepOutcome expectImage(Plan.Step step, Origin origin) throws AgentLostException, InterruptedException {
+        return expectImage(step, origin, ImageSteps.Baselines.none());
+    }
+
+    /**
+     * {@link #expectImage(Plan.Step, Origin)} against the baselines and anchors of the scenario's bindings file (as
+     * VC built it, D-VC: the player reads the file it binds from and hands its entries in; without them a session
+     * holds none, so an {@code expectImage} is recorded and skipped, the session being {@code live}, and an anchored
+     * step is REBIND_NEEDED). The step is journaled with its verb and the arguments reconstructed from the compiled
+     * step ({@link #reconstructedArgs}).
+     *
+     * @param baselines the scenario's baselines ({@link #baselines(Path, String, String)}), or null for none
+     * @throws AgentLostException if the agent is gone (the step is journaled first)
+     * @throws InterruptedException if the thread is interrupted
+     */
+    public StepOutcome expectImage(Plan.Step step, Origin origin, ImageSteps.Baselines baselines)
+            throws AgentLostException, InterruptedException {
         Objects.requireNonNull(step, "step");
         Objects.requireNonNull(origin, "origin");
         requireOpen();
-        throw new UnsupportedOperationException("ExecutorSession.expectImage: Phase 7 VC body lands after the API"
-                + " commit");
+        String stepId = nextStepId();
+        Plan.Step renamed = new Plan.Step(stepId, step.verb(), 0, step.calls(), step.expect());
+        stepBaselines = baselines == null ? ImageSteps.Baselines.none() : baselines;
+        try {
+            return run(stepId, step.verb(), reconstructedArgs(step), renamed, origin);
+        } finally {
+            stepBaselines = ImageSteps.Baselines.none();
+        }
+    }
+
+    /**
+     * The baselines and anchors of a scenario's bindings file in this session's environment, read for
+     * {@link #expectImage(Plan.Step, Origin, ImageSteps.Baselines)}: the file's {@code images} section and the PNGs
+     * beside it, each derived from its label and render key inside {@code <bindingsRoot>/<envId>/}. No file gives no
+     * baselines.
+     *
+     * @throws IOException if the file exists and cannot be read
+     */
+    public static ImageSteps.Baselines baselines(Path bindingsRoot, String envId, String scenarioId)
+            throws IOException {
+        Objects.requireNonNull(bindingsRoot, "bindingsRoot");
+        Path file = BindingsFile.locate(bindingsRoot, envId, scenarioId);
+        BindingsFile read = null;
+        if (java.nio.file.Files.isRegularFile(file, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+            try {
+                read = BindingsFile.read(file);
+            } catch (BindingsFormatException e) {
+                throw new IOException(e.getMessage(), e);
+            }
+        }
+        return new ImageBaselines(scenarioId, BindingsFile.envDir(bindingsRoot, envId), read);
+    }
+
+    /**
+     * The verb arguments an {@code expectImage} or {@code pointer} step was compiled from, reconstructed from its
+     * compiled call and check, so that the journal and the export hold the step as written (as VC built it, D-VC).
+     */
+    static Map<String, Object> reconstructedArgs(Plan.Step step) {
+        Map<String, Object> args = new LinkedHashMap<>();
+        Plan.Call first = step.calls().isEmpty() ? null : step.calls().get(0);
+        if ("expectImage".equals(step.verb())) {
+            for (Check check : step.expect()) {
+                if (check instanceof ImageCheck image) {
+                    args.put("label", image.label());
+                }
+            }
+            if (first != null) {
+                if (first.args().containsKey("target")) {
+                    args.put("target", first.args().get("target"));
+                }
+                if (first.args().containsKey("by")) {
+                    args.put("by", first.args().get("by"));
+                }
+                Object region = first.args().get("region");
+                if (region instanceof String id) {
+                    args.put("region", id);
+                } else if (region instanceof Map<?, ?>) {
+                    args.put("clip", region);
+                }
+            }
+            for (Check check : step.expect()) {
+                if (check instanceof ImageCheck image) {
+                    if (!image.masks().isEmpty()) {
+                        args.put("mask", image.masks());
+                    }
+                    if (image.maxDiffPixels() != 0) {
+                        args.put("maxDiffPixels", (long) image.maxDiffPixels());
+                    }
+                }
+            }
+            return args;
+        }
+        for (Plan.Call call : step.calls()) {
+            if ("swing.pointer".equals(call.primitive())) {
+                args.putAll(call.args());
+                if (call.guard() != null) {
+                    args.put("guard", call.guard().label());
+                }
+            }
+        }
+        return args;
+    }
+
+    /** The image steps of the current step, over this session (live mode, its own output directory). */
+    private ImageSteps imageSteps(ImageSteps.Baselines baselines) {
+        return new ImageSteps(new ImageSteps.Host() {
+            @Override
+            public Object read(String primitive, Map<String, Object> args) throws AgentRpcException,
+                    AgentLostException, InterruptedException {
+                return ExecutorSession.this.read(primitive, args);
+            }
+
+            @Override
+            public void record(Map<String, Object> fields) {
+                log.write("image", fields);
+            }
+
+            @Override
+            public Path outputDir() {
+                return options.outputDir();
+            }
+
+            @Override
+            public BindMode mode() {
+                return BindMode.LIVE;
+            }
+
+            @Override
+            public String scenarioId() {
+                return id;
+            }
+
+            @Override
+            public String envId() {
+                return options.bind().envId();
+            }
+
+            @Override
+            public Approver approver() {
+                return options.bind().approver();
+            }
+        }, baselines);
+    }
+
+    /** An anchored pointer call's guard (phase7-contracts.md 6.7), in the session: REBIND_NEEDED unless it holds. */
+    private void guard(String stepId, Plan.Call call) throws Abort, AgentLostException, InterruptedException {
+        Object args;
+        try {
+            args = runner.bindings.substitute(call.args());
+        } catch (ResolutionException e) {
+            throw new Abort(Status.ERROR, FailureKind.RESOLUTION_FAILED, stepId, mask.apply(e.getMessage()),
+                    RunLog.fields("reason", e.reason(), "reference", e.reference()));
+        }
+        @SuppressWarnings("unchecked")
+        Map<String, Object> substituted = args instanceof Map<?, ?> m ? (Map<String, Object>) m : Map.of();
+        ImageRuns.raise(stepId, ImageRuns.run(stepId, () -> imageSteps(stepBaselines).guard(stepId, call.guard(),
+                substituted)));
+    }
+
+    // ------------------------------------------------------------------------------------------------ gates (P7 9.2)
+
+    /** The keys of {@code swing.key} that type nothing (phase7-contracts.md 9.2, as VC built it: D-VC). */
+    static final Set<String> NON_PRINTABLE_KEYS = Set.of("ENTER", "TAB", "ESCAPE", "BACK_SPACE", "DELETE", "UP", "DOWN",
+            "LEFT", "RIGHT", "HOME", "END", "PAGE_UP", "PAGE_DOWN", "INSERT", "SHIFT", "CONTROL", "ALT", "META",
+            "CAPS_LOCK", "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12", "F13", "F14",
+            "F15", "F16", "F17", "F18", "F19", "F20", "F21", "F22", "F23", "F24", "KP_UP", "KP_DOWN", "KP_LEFT",
+            "KP_RIGHT", "CONTEXT_MENU", "WINDOWS", "PAUSE", "PRINTSCREEN", "SCROLL_LOCK", "NUM_LOCK");
+
+    /** The refusal of a credential reference from an origin that is not a person's (D342). */
+    static final String CREDENTIAL_REFUSAL = "a credential is never used on a model's or a client's behalf; the person"
+            + " signs on first";
+
+    /** The refusal of typing while a credential is in flight (D342). */
+    static final String IN_FLIGHT_REFUSAL = "a credential is in flight; the person signs on first";
+
+    /** The refusal of a glass capture for an origin that is not a person's (D341). */
+    static final String GLASS_REFUSAL = "a capture of the glass is a person's evidence (swing.capture mode: ROBOT)";
+
+    /**
+     * Why the step's compiled calls may not be sent for this origin (phase7-contracts.md 9.2), or null: Robot without
+     * {@link SessionOptions#robot()}, a glass capture for an origin that is not a person's, and for such an origin a
+     * call that references a credential join's secret field or that types while a credential is in flight.
+     */
+    private String gate(Plan.Step step, Origin origin) {
+        boolean person = confirms(origin);
+        for (Plan.Call call : step.calls()) {
+            boolean robot = "ROBOT".equals(call.args().get("via")) || "ROBOT".equals(call.args().get("mode"));
+            if (robot && !options.robot()) {
+                return PlanExecutor.ROBOT_REFUSAL;
+            }
+            if (!person && "swing.capture".equals(call.primitive()) && "ROBOT".equals(call.args().get("mode"))) {
+                return GLASS_REFUSAL;
+            }
+        }
+        if (person) {
+            return null;
+        }
+        for (Plan.Call call : step.calls()) {
+            if (secretReference(call.args()) != null) {
+                return CREDENTIAL_REFUSAL;
+            }
+        }
+        if (!inFlight.isEmpty()) {
+            for (Plan.Call call : step.calls()) {
+                if (types(call)) {
+                    return IN_FLIGHT_REFUSAL;
+                }
+            }
+        }
+        return null;
+    }
+
+    /** Whether a call types: {@code swing.type}, or {@code swing.key} with a key that is not in the non-printable set. */
+    private static boolean types(Plan.Call call) {
+        if ("swing.type".equals(call.primitive())) {
+            return true;
+        }
+        if ("swing.key".equals(call.primitive())) {
+            Object key = call.args().get("key");
+            return !(key instanceof String name) || !NON_PRINTABLE_KEYS.contains(name.strip().toUpperCase(
+                    java.util.Locale.ROOT));
+        }
+        return false;
+    }
+
+    /** The first reference in the value that names a credential join's secret field, or null. */
+    private String secretReference(Object value) {
+        if (joins.isEmpty() || value == null) {
+            return null;
+        }
+        List<References.Ref> refs;
+        try {
+            refs = References.collect(value);
+        } catch (RuntimeException e) {
+            return null;
+        }
+        for (References.Ref ref : refs) {
+            Map<String, String> secret = joins.get(ref.slot());
+            if (secret != null && !ref.fields().isEmpty() && secret.containsKey(ref.fields().get(0))) {
+                return "$" + ref.slot() + "." + ref.fields().get(0);
+            }
+        }
+        return null;
+    }
+
+    /** A person's call that referenced a credential join's secret field consumed it (D342). */
+    private void consumed(Plan.Call call) {
+        if (inFlight.isEmpty()) {
+            return;
+        }
+        try {
+            for (References.Ref ref : References.collect(call.args())) {
+                Map<String, String> secret = joins.get(ref.slot());
+                if (secret != null && !ref.fields().isEmpty() && secret.containsKey(ref.fields().get(0))) {
+                    inFlight.remove(ref.slot());
+                }
+            }
+        } catch (RuntimeException e) {
+            // A call whose references cannot be collected consumed nothing.
+        }
+    }
+
+    /** A step refused under the credential rule (rule 1, before anything is compiled): journaled, nothing sent. */
+    private StepOutcome refusedCredential(String stepId, String verb, Object givenArgs, Origin origin, String ref) {
+        Plan.Step step = new Plan.Step(stepId, verb == null ? "call" : verb, 0, List.of(), List.of());
+        return finish(stepId, verb, givenArgs, step, List.of(), origin, 0, Status.ERROR, FailureKind.ENVIRONMENT,
+                CREDENTIAL_REFUSAL, RunLog.fields("refused", "credential"), runner.lastSeenSeq, clock.millis(),
+                null);
     }
 
     // ------------------------------------------------------------------------------------------------ journal
