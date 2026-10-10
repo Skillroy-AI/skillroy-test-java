@@ -642,7 +642,7 @@ started next is reported (§10.3).
 
 **The tap poller** (as built 2026-10-07). While at least one tap is installed, a daemon thread `skillroy-web-tap`
 wakes every 100 ms and hands one drain round to an agent worker (bounded at 5 s; a round that finds the pool busy is
-skipped). A round calls the library's `drain(900000)` in each tapped browser, at most eight times while it answers
+skipped). A round calls the library's `drain(500000)` in each tapped browser (`drain(900000)` before security pass 2, D268), at most eight times while it answers
 `more: true`, and publishes each event as `web.tap` followed by `web.ready {signal: TAP}`; events the page dropped
 (its buffer holds 1000) are logged. The thread ends when the last tap is removed, when the tapped browsers have left
 the index, or on uninstall. The agent's poller is the only consumer of the in-process buffer (one drainer per
@@ -954,7 +954,7 @@ built, the shared constants and helpers in `WebLib`: `MAX_URL_CHARS` (4096: `url
 `MAX_CHANNEL_CHARS` (6 x `MAX_JSON_CHARS` + 64 KiB: the raw text an adapter's channel may deliver for one answer, a
 1 MiB value escaped twice, as the wrapper's string and inside the channel's message, at most six characters per
 character when the channel escapes non-ASCII text; a `Page.captureScreenshot` answer is bounded by the viewport
-instead), `DRAIN_CHARS` (900000, the `maxChars` of every `drain()` on both paths), `cut(text, max)` (never inside a
+instead), `DRAIN_CHARS` (500000 since security pass 2, D268, 900000 before; the `maxChars` of every `drain()` on both paths), `cut(text, max)` (never inside a
 surrogate pair), `oversized(what, bound)` (the shared `INTERNAL_ERROR {reason: "oversized", bound}`), `cutDetail` (a
 `detail` whose JSON text exceeds `MAX_DETAIL_CHARS` becomes that text cut, as a string, with `truncated: true`, as
 the library keeps it) and `scriptMessage`/`scriptStack` (`errorLine` and the 8000 cut). On the agent:
