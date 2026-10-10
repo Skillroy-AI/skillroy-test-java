@@ -289,7 +289,7 @@ final class JournalExport {
         String intent = p.get("intent") instanceof String text ? text : s.origin().intent();
         intent = intent == null ? "" : Values.printableLine(intent);
         if (intent.length() > COMMENT_INTENT_MAX) {
-            intent = intent.substring(0, COMMENT_INTENT_MAX);
+            intent = intent.substring(0, COMMENT_INTENT_MAX).strip();
         }
         intent = intent.replace("\"", "'");
         String model = p.get("model") instanceof String m ? m : s.origin().by();

@@ -695,6 +695,10 @@ public final class PlanExecutor {
                 // phase6-contracts.md 10.3: with telemetry on, run-start names the trace (a trace id is not a secret).
                 start.put("traceId", traceId);
             }
+            if (options.robot()) {
+                // phase7-contracts.md 9.2: the person's half of the Robot opt-in is recorded in run-start.
+                start.put("robot", true);
+            }
             log.write("run-start", start);
             Abort failure = null;
             try {

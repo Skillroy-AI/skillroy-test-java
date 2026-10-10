@@ -705,7 +705,7 @@ public final class ExecutorSession implements AutoCloseable {
             for (position = 0; position < step.calls().size(); position++) {
                 Plan.Call call = step.calls().get(position);
                 PrimitiveDescriptor descriptor = primitives.get(call.primitive());
-                if (call.guard() != null) {
+                if (call.guard() != null && !recordedAnchor(call.guard())) {
                     guard(stepId, call);
                 }
                 mutated |= descriptor == null || descriptor.mutating() || descriptor.destructive();
@@ -1609,6 +1609,16 @@ public final class ExecutorSession implements AutoCloseable {
                 return options.bind().approver();
             }
         }, baselines);
+    }
+
+    /**
+     * Whether the acting call's provenance carries the anchor of this guard's label (phase7-contracts.md 6.5, as VC
+     * built it, D-VC): the recorder took the anchor with the guard's own call an instant before, so the step acts and
+     * the anchor goes to the export; the guard is compared from the next run on.
+     */
+    private boolean recordedAnchor(Plan.Guard guard) {
+        return provenance != null && provenance.get("anchor") instanceof Map<?, ?> anchor
+                && guard.label().equals(anchor.get("label"));
     }
 
     /** An anchored pointer call's guard (phase7-contracts.md 6.7), in the session: REBIND_NEEDED unless it holds. */

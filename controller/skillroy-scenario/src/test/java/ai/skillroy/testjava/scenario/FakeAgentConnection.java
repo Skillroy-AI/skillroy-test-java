@@ -382,6 +382,12 @@ final class FakeAgentConnection implements AgentConnection {
         return this;
     }
 
+    /** Adds a descriptor of a {@code script} primitive (phase4-contracts.md 4.2), neither mutating nor destructive. */
+    synchronized FakeAgentConnection describeScript(String name) {
+        schema.add(new PrimitiveDescriptor(name, null, null, null, null, 5000, null, false, false, true));
+        return this;
+    }
+
     /**
      * Makes {@code method} destructive: described as such, and refused with CONFIRM_REQUIRED unless the call is
      * confirmed ({@code _meta.confirm}, from the options or from a {@code _meta} among the params), as the agent's
