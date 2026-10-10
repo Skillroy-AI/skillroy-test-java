@@ -1,0 +1,2337 @@
+# Phase 7 contracts: the vision bolt-on and the vision loop of interactive sessions (the extended `swing.capture`, `swing.hitTest`, `swing.pointer` routed and through Robot, their `web.*` counterparts, `skillroy-vision` with the tiers V1-V3, the recorder, pixel-anchored replay, `expectImage`, the capability `inference.vision`, plans skipped in `replay`)
+
+**Status: specified 2026-10-10, revised the same day after the contract review (three lenses, each with a sceptic; the
+session notes' `contract-review/revision-log.md` says what each finding changed).** Written after the seven reader maps
+of 2026-10-10 (kept in the session notes, not in this repository; `map n §m` below) and after the four spikes of design
+§8 reported the same day: **BS9** passed with conditions (`../../spikes/BS9/RESULT.md`: Robot input on the WM-less Xvfb,
+with openbox and on a macOS desktop, Java 8 and Java 25 targets; `ROBOT` against `PAINT` capture; swing-driving F13
+settled), **BS10** passed with conditions (`../../spikes/BS10/RESULT.md`: routed in-JVM dispatch against Robot, 16
+cases), **BS11** passed with conditions (`../../spikes/BS11/RESULT.md`: `PAINT` determinism within and across
+environments, the tolerance study) and **BS12** passed, live (`../../spikes/BS12/RESULT.md`: grounding accuracy,
+latency, tokens and cost of V1 and V2 on Sonnet 5.5, Opus 5.5 and Haiku 5.5, USD 5.64). Every statement that rests on a
+spike cites it as `BS<n>` with the section of its result. The questions of §18 are answered provisionally by the
+orchestrator and recorded as decision **B29** (`../DECISIONS.md`); the build's and the reviews' decisions will be
+**B30**, the security delta review's sign-off **B31** (§15). Written in the manner of `phase5-contracts.md` and
+`phase6-contracts.md`: the contract is changed first, then the code, and the build marks every passage it builds or
+deviates from with an "As built" note under a two-letter implementer tag (§2.3). Section references `P1 §n` to `P6 §n`
+are to the six earlier contracts, `design §n` is the design overview `base-framework-design.md`, `vision §Fn/Rn/Cn/Riskn`
+is the research note `../research/vision-input.md`, `swing §Fn` is `../research/swing-driving.md`, `browser-spi §Fn` is
+`../research/embedded-browser-spi.md`. Decisions taken here are **D287 to D358** (§17; D341-D358 were added by the
+revision after the review); the build's decisions start at D359, numbered by the orchestrator at integration;
+amendments to the frozen Phase 1 contract are **A61 to A66** (§5), the next free number after P6's reservation (none of
+A61 onwards was used); gaps continue from **77** (gap 76, the capture defect BS9 found, is closed by this contract,
+§16.2); the security delta review's findings start at **S101** (§15); the plan version becomes **6** (§8.2), the
+bindings file version **2** (§8.7), the script library's version **2** (§4.6); the protocol stays **0.2** (D299).
+
+What Phase 7 is for, in one paragraph. Phases 1 to 6 built a framework in which every step addresses a component, a
+fact or a row, and a model is never in the CI loop. Phase 7 adds the one thing the design kept out of the base and
+reserved names for (B16, design §3.10): a model may look at the screen and act on it like a person, in interactive use
+and at authoring time, and what it does is recorded once into ordinary steps that replay with zero model calls. The
+agent gains three small additions on JDK 8 API: a capture that says where its pixels lie and what is in them, a read-only
+hit-test from a point to a component with its locators, and a pointer that acts at coordinates, routed through the
+window by AWT's own dispatcher or, behind a double opt-in, through `java.awt.Robot`; the web module gains the same two
+operations for an embedded page. The controller gains the optional module `skillroy-vision`: the loop in three tiers,
+the adapters for the Claude computer toolset and for a provider-neutral set of custom tools, the recorder that turns a
+pixel into a locator before anything is clicked, the export of such steps as ordinary scenario steps, pixel-anchored
+replay behind an exact image guard, and `expectImage`. Where a pixel cannot be mapped to a component the order is a
+pack's `RegionResolver`, then an image-anchored `pointer` step, then a plan that `replay` reports as **skipped**, which
+is neither a failure nor a pass. **What a model sees is always a redacted `PAINT` capture of the target's own windows**,
+in every tier: V3 means "the model sees `PAINT`, Robot acts" (D341), and a capture of the glass is a person's evidence
+only. **Nothing of Phase 7 changes the default path**: without the agent option `robot` no Robot is ever constructed,
+without `inference.yaml`'s `images: true` no pixel reaches a model, without the vision module on the class path every
+scenario of Phases 1 to 6 compiles and runs as before (plan version 6 is one regeneration of the committed plans), and
+`replay` still makes zero model calls, asserted.
+
+---
+
+## 1. Scope and non-goals
+
+Phase 7 delivers:
+
+- **the agent's Swing side** (Java 8, `skillroy-agent-swing`, §3): `swing.capture` extended additively (A61) with the
+  reserved parameters `scope`, `region`, `scale`, `redact`, `mode: ROBOT`, `annotateRefs` and the reserved result
+  fields `captureId`, `seq`, `space`, `origin`, `scale`, `windows`, `surfaces`, `marks`, plus what BS9, BS11 and BS12
+  showed is needed: the window painted from its root pane (BS9 RESULT "The capture comparison"; BS12 RESULT finding 1),
+  the caret rectangles and the focus state (BS11 RESULT conditions 1 and 2), the redacted rectangles, and a hash of the
+  decoded pixels (BS11 condition 4); `swing.hitTest` (read-only; A63); `swing.pointer` with `via: ROUTED` by default
+  and `via: ROBOT` behind the double opt-in (A63, A65); `swing.type` with an omitted target (A62); the read
+  `swing.rendering` (the rendering inputs a baseline is keyed by, §3.8; A63); the agent SPIs `RegionResolver`,
+  `CaptureMask`, `SurfaceSource` and the default method `LocatorResolver.describe` (A64); the five reserved capability
+  ids; the agent option `robot`;
+- **the web side** (§4): `web.hitTest` and `web.pointer` on the in-process path (JCEF verified in the image, JxBrowser
+  behind descriptor roles and marked unverified) and on the CDP path; `WebCapability.INPUT` with the SPI method
+  `WebBrowser.dispatchPointer` (A66); the web module as a `SurfaceSource` for the Swing capture; the script library's
+  `hit` function and its versioning rule;
+- **`controller/skillroy-vision`** (Java 25, optional, §6): the loop for V1 (the default: marks on a `PAINT` capture at
+  the window's own size, answered by mark; BS12 RESULT "Accuracy": 100 % on Sonnet 5.5 and Opus 5.5), V2 (the Claude
+  computer toolset, or the provider-neutral custom tools with `click_at`; BS12: 100 % through the toolset) and V3 (V2
+  acting through Robot, opt-in; the model still sees `PAINT`); the tool adapters; grounding and visual questions; the
+  recorder (hit-test before acting, act through the step that will be replayed, the stale-capture rule as BS12 found it
+  workable); the export of such steps as ordinary steps with provenance; the scenario player that runs a scenario with
+  `aiAct` and `aiExpect` steps over `ExecutorSession` in interactive use; the contributor of `inference.vision`;
+- **the gateway changes** (§7): provider-defined tool entries, `toolset_name`, image parts inside a tool result, the
+  automatic cache hint, `IMAGES` on the recorded and the scripted gateway, the `claude-haiku-5-5` price row, image
+  tokens in the budget estimate, the `effort.vision` key;
+- **the scenario side** (§8): the verbs `aiAct`, `aiExpect`, `pointer`, `expectImage`; the plan field `inference: run`
+  and plan version 6; the step locator `region` beside `by`; the checks `VisualCheck` and `ImageCheck`; controller-side
+  capabilities merged into the matrix through the SPI `CapabilityContributor`, `inference.vision` among them,
+  `UNAVAILABLE(reason="replay")` in `replay`; the fifth status `SKIPPED` for a plan `replay` does not execute; image
+  baselines and anchors in the bindings file (version 2) keyed by a rendering key, with masked PNGs beside it, and the
+  bind lifecycle they need; the exact image comparison in `skillroy-scenario`, so that an anchored step replays without
+  the vision module;
+- **interactive sessions** (§9): the `SessionTools` seam of the session service, through which the vision module adds
+  its tools to the one loop, meter and journal and acts only through the service's facade `SessionActions`; the
+  unjournaled read `ExecutorSession.read`; the provenance object on a journal step, handed in by the acting call; the
+  opt-ins `RunOptions.robot` and `SessionOptions.robot`; `SessionOptions.host`; the CLI options `--vision` and
+  `--allow-robot`, `session --play`; the MCP server's `--vision` and `--allow-robot`;
+- **budgets and the ledger** (§10): USD 1.00, 30 UI actions and 20 model turns per session (BS12 RESULT "Proposal");
+  the purpose `vision`; every vision call through the service's metered, ledgered call, so that the zero-LLM assertion
+  covers it;
+- **safety and data** (§11, and `threat-model.md` extended): captures for a model always redacted `PAINT` captures of
+  the target's own windows; pixels leaving only under `images: true`; screen text as untrusted input; no credential ever
+  a model's or a client's argument (D342); `confirm` and read-only mode unchanged; V3 behind the double opt-in, refusing
+  a point outside the target's windows and a point while the target JVM holds no focused window, and never leaving a
+  button pressed (D343, D344); captures the loop acted on kept masked under the output directory; the limitation
+  sentences the build writes into `SECURITY.md`;
+- **the sample** (§12): a one-component number pad on the lending desk with its `RegionResolver`, a capture mask for
+  the entry field and the number pad while a secret is expected, the keypad legend, and five Phase 7 scenarios, among
+  them the exported vision session that replays with zero model calls;
+- **tests and acceptance** (§13), **exit criteria** (§14: the four of design §8 row 7, made precise), and **the
+  security delta review** (§15, B31).
+
+**Non-goals.** Named so that their seams are respected, not built:
+
+| Not in Phase 7 | Seam reserved or rule stated here | Phase |
+|---|---|---|
+| A capture of the glass (`swing.capture {mode: ROBOT}`) for a model or an MCP client | never (D341): a `ROBOT` capture shows other processes' pixels and the desktop, which no mask can name; it is refused for every origin but a person's by `CallPolicy` and by `ExecutorSession`, the V3 `capture` tool has no mode, and design §3.10's V3 row ("a `ROBOT` screen capture") is amended to "a `PAINT` capture; Robot acts" (§16.1); a later glass check (a `ROBOT` raster compared with a root-pane `PAINT` of each window, which BS9 showed pixel-identical when nothing covers it) is the alternative the owner may ask for (§18 Q35) | later, if the owner wants it |
+| Robot key input (`swing.type` mode `ROBOT`, a Robot `swing.key`), gap 31's `ROBOT` type mode | not built (D345): V3's keyboard goes through the routed `swing.type {mode: SET}` by locator and `swing.key`, after the agent-side focus rule of §3.4; the mode value stays refused "not in this version"; the reason is BS9's key conditions (RESULT "What a `ROBOT` rung and the V3 tier need": keys land in the AWT focus owner if and only if the target JVM has a focused window, and on a WM-less display nothing restores the focus after a modal dialog closes) | later, if a target needs the OS's key path proven (§18 Q6) |
+| A Robot button held across calls (`PRESS`, `RELEASE` through Robot; the toolset's `left_mouse_down`, `left_mouse_up` in V3) | never (D343): a Robot press is always paired with its release inside one worker task, released in a `finally` before the pointer is restored; the halves are refused with the reason | none |
+| `swing.click {rung: ROBOT}` as a click | stays the sentinel it is (`UNAVAILABLE("opt-in rung, not implemented")`, P1 §6); a click at a component's centre through Robot is `swing.pointer {target, via: ROBOT}` (D291) | none |
+| `swing.events` (a key, mouse and focus tap; gap 31), `OPTION_VALUE` dismissal | unchanged; "did my input arrive" is answered by the pointer's `received` field and by the pack's events through the step protocol (D293) | later |
+| `Strategy.LLM_VISION` as a bind-time strategy, the query kind `UiTarget` | both stay reserved: the token is still refused "not in this version" by the loader, the compiler and the plan reader; plain recorded steps are the one shape (vision §R3's default, §Risk1; D316) | 7.x, if a target's locators legitimately differ between environments |
+| An `aiAct` or `aiExpect` step executed by `PlanExecutor` | a plan with `inference: run` is `SKIPPED` in `replay` and refused `ERROR / ENVIRONMENT` in every other mode by `PlanExecutor`; the vision module's `ScenarioPlayer` runs such a scenario over `ExecutorSession` (§6.8, D311); `PlanExecutor` skips every `VisualCheck` unconditionally, whatever the capability's state (D312, D354) | none planned |
+| A base web verb for pointer input (`webPointer`), `pointer` on a web surface | a pixel action on a web surface is recorded as `webClick` (by role and name) through `web.hitTest`'s locators, or kept live-only; a raw `call: {primitive: web.pointer}` remains possible (§6.5) | later, if a page needs a position-dependent step |
+| Perceptual image metrics, OCR, video, image comparison beyond what `expectImage` and the image guard need | the comparison is exact on decoded rasters after masks, with `maxDiffPixels` as the one explicit margin (BS11 RESULT "Tolerance study"; D314) | none (vision §R9) |
+| OS input tools outside the JVM (xdotool, `SendInput`), a window manager in the CI image, driving windows of other processes | never (vision §R9); the CI image stays WM-less (BS9 RESULT: routed input and `PAINT` capture need none) | none |
+| Robot as a default anywhere; V3 over the overlay without a person's flag | never (B12, design §3.10); the double opt-in of §3.4 | none |
+| Server-side tool-result clearing, client-side pruning of screenshots, mid-conversation `system` messages, `Effort` values beyond `HIGH` | not in the SPI; a session's history is append-only within a turn and the Phase 5 fold applies between turns (§7.4, D323) | later, if a long session shows the need |
+| The presentation of an in-application overlay (a drawn pointer, highlights) | the overlay stays a tenant layer's (design §5); `OverlayBridge` is unchanged (§9.5) | none |
+| HiDPI scale factors other than 1, Windows, Wayland, a locked session, macOS with the Accessibility permission granted | specified where the spikes reached (§3.4, §13.4); verified nowhere (BS9 RESULT "Not verified"; BS11 RESULT "Not verified") | when a host exists (`../TODO.md`, Walls) |
+| Vendor-specific embedded-browser code; JxBrowser input verified against the real library | behind descriptor roles, strategy "input unverified" (§4.5); the kit against the real library in a licence holder's repository | wall (gap 41) |
+| Hidden JCEF browsers in a vision loop | a hidden browser has no bitmap (gap 39), so the tiers never target one; `web.pointer` into one is allowed and recorded `visibleInSwing: false` (§4.3) | none |
+| A self-healing locator, a model call at replay time | never (C0, design §10) | none |
+
+Phase 7 adds **one controller-side module** (`skillroy-vision`), **no agent-side module** (the Robot implementation
+lives inside `skillroy-agent-swing`, D290), **no sample module** (the lending desk, its agent module, its pack and its
+scenarios grow), and **no third-party dependency** anywhere: the toolset's typed classes are in the audited SDK
+(`../licence-audit.md` §4 rows for `anthropic-java` 2.70.0; map 4 §1.9), image work on both sides is
+`java.awt.image` and `javax.imageio`, and the agent's additions are AWT and Java2D (vision §C5).
+
+---
+
+## 2. Module layout, dependencies, versions, build and distribution
+
+### 2.1 Decision
+
+| Module | Change in Phase 7 | Depends on |
+|---|---|---|
+| `agent/skillroy-protocol` | nothing on the wire types; the script library gains `hit` and version 2 (§4.6) | – |
+| `agent/skillroy-agent-api` | the SPIs `RegionResolver`, `CaptureMask`, `SurfaceSource` in `…agent.api.spi`; `LocatorResolver.describe` (default); in `…agent.api.spi.web` the value type `WebPointerEvent` and the default method `WebBrowser.dispatchPointer`; Javadoc of `WebCapability.INPUT` (A64, A66). The three Swing SPIs and `describe` land as VS's first commit, which VW rebases on; the two web SPI files are VW's | – |
+| `agent/skillroy-agent-core` | the option `robot` in `AgentRuntime.resolveOptions` (a boolean with the default `false`, validated like `readOnly`, reported by `agent.info.options`); the Swing module reads it from `ctx.options()`, never through `ctx.option(…)`'s live fallback (A65) | unchanged |
+| `agent/skillroy-agent-swing` | `swing.capture` extended, `swing.hitTest`, `swing.pointer`, `swing.rendering`, `swing.type`'s default target; the classes `HitTest`, `Pointer`, `RobotInput` behind the seam `RobotFactory`, `Marks` (geometry only), `Redaction`, `Rendering` beside `Capture`, `Clicks`, `Typing`; the capability ids of §3.9; the masked-text rule in `ComponentView` and `ComponentText` (§3.6) | `agent-api`, `protocol` |
+| `agent/skillroy-agent-web` | `web.hitTest`, `web.pointer`; `web.hittest` and `web.pointer` derived capabilities; the `SurfaceSource` registration; the `jcef` adapter's `dispatchPointer`; the `jxbrowser` descriptor roles under `for: "INPUT"` (§4) | unchanged |
+| `agent/skillroy-agent-dist` | the home unchanged; `HostSafetyIT` gains the no-Robot case of §13.2 item 11 (a full home, an AWT fixture, the display) | unchanged |
+| `controller/skillroy-controller` | `CapabilityMatrix.with(Map<String, Capability> contributed, String source)` and `source(id)` (`agent`, or `controller:<id>`), kept outside the wire shape; nothing else (§8.5) | unchanged |
+| `controller/skillroy-scenario` | `Status.SKIPPED`; plan version 6 with `inference: run`, the four verbs, `region`, `row`, `VisualCheck`, `ImageCheck`, `Plan.Call.guard`, `Plan.needsBindings()` over `images`; the SPI `CapabilityContributor` and the merge; `BaseFacts.caps(Supplier)`; `…scenario.image.ImageCompare`; bindings file version 2 (`images`) with `Approver.reviewImage` and the carry-forward rule; `REBIND_NEEDED` reason `IMAGE`; `RunOptions.robot`, `SessionOptions.robot` and `SessionOptions.host`; `ExecutorSession.read`, `capabilities()`, the four-argument `execute` forms, the origin-aware refusals of §9.2; the journal step's `provenance`; the export's comment, report lines, `images` section and `images()`; `DomainPack.screenLegend()`; `InferenceSettings.effort.vision` (VM's one file in this module) (§8, §9) | unchanged |
+| `controller/skillroy-inference` | the SPI changes of §7; `SessionTools`, `SessionActions`, `SessionToolContext`, `SessionExtensions` in `…inference.session`; the service's `visionCall`, its limits and the facade; `CallPolicy.arguments(primitive, args, robotAllowed)` with the refusals of §9.1 at every raw-tool path; `PromptMask.LABELS` gains `model-question`, `PromptMask.holdsSecret(text)`; the one-sentence change of `SessionService.vocabulary()` (§9.2), **VM's first commit, landed before VS regenerates the recordings** (§12.5); `InferenceContributor` implements `CapabilityContributor` and stops answering `inference.vision` (this one class and its test are landed by VC in step 1 as a shared file in VM's module, so that two `inference.` ids are contributed before VM lands, §13.2 item 9) (§7, §9.1) | unchanged |
+| **`controller/skillroy-vision`** (new; `ai.skillroy.testjava.vision`) | the loop, the tiers, the two tool adapters, grounding and visual questions, the recorder, the scenario player, the captures directory, the contributor of `inference.vision` (§6); its tests carry their own fake agent with PNG fixtures and take `ToyPack` and `FakeAgentConnection` from the `skillroy-scenario` test-jar | `skillroy-inference`, `skillroy-scenario`, `skillroy-controller`, `skillroy-protocol`; **optional at run time**: `skillroy-scenario`, `skillroy-inference`, `skillroy-junit` and `skillroy-mcp` do not depend on it; found through `ServiceLoader` (`SessionTools`, `CapabilityContributor`); the CLI depends on it and the CLI zip bundles it in `lib/` (as `skillroy-telemetry`, P6 §2.1); test scope: the scenario test-jar |
+| `controller/skillroy-mcp` | `--vision`, `--allow-robot` through `ServerOptions` (`vision`, `robot`); `ToolCalls.primitive` calls `CallPolicy.arguments`; the captures directory's resources; `source` in `skillroy_catalogue` (§9.4) | unchanged: the server loads the session tools through `ServiceLoader` from the pack loader and the CLI's class path, so it does not depend on `skillroy-vision` |
+| `controller/skillroy-junit` | `ScenarioTests.report` maps `SKIPPED` to `Assumptions.abort`; the property `skillroy.robot` with its warning line (§8.6, §9.3) | unchanged |
+| `controller/skillroy-cli` | `session --vision* --allow-robot --play`, `run --allow-robot`, `call --allow-robot` (`CallCommand` refuses `via: ROBOT` and `mode: ROBOT` in its raw arguments without it, §9.3), `mcp --vision --allow-robot`, `caps` with `source`, the `skipped` count (§9.3); `WebCommandsTest`'s stale "reserved" string (§4.4) | + `skillroy-vision` |
+| `controller/skillroy-cdp` | `web.hitTest` and `web.pointer` served (§4.7) | unchanged |
+| `samples/skillroy-sample-lending-app` | `NumberPad` (§12.1) | unchanged |
+| `samples/skillroy-sample-lending-agent` | `LendingRegions`, `LendingCaptureMask`, `LendingWidgets.describe`; module version `0.2.0` (§12.2) | unchanged |
+| `samples/skillroy-sample-lending-pack` | `screenLegend()`; `LendableItem.inductionRequired` (gap 49); pack version `0.6.0` (§12.3) | unchanged |
+| `samples/skillroy-sample-lending-scenarios` | the five scenarios of §12.4, their plans, bindings and baselines; the regenerated plans and bindings of the earlier scenarios (plan version 6); the regenerated session recordings (§12.5); the new checks of §13 | + `skillroy-vision` (test scope) |
+| `samples/skillroy-sample-web-host*` (profile `jcef`) | the pointer-event counter on the host's page and the kit page; kit items 15-18; `WebHostChecks` item 1 flipped and a new item over both paths (§4.9); its `plan/*.plan.json` regenerated for version 6 (VC's script, nothing else in that tree) | unchanged |
+
+Maven coordinates `ai.skillroy:skillroy-vision`, the reactor's version (B2). Root `pom.xml`: `controller/skillroy-vision`
+after `controller/skillroy-telemetry` in the module list. The dependency direction `skillroy-vision -> skillroy-inference
+-> skillroy-scenario` is the design's (§3.1, §3.10); nothing below `skillroy-vision` names a vision type.
+
+### 2.2 Versions
+
+Nothing new. The Anthropic Java SDK stays at 2.70.0 (P5 §2.2, D88): its non-beta `com.anthropic.models.messages`
+package carries the typed toolset classes (`ComputerToolset20260801`, `ComputerToolsetConfigs`,
+`ToolUseBlockParam.Builder.toolsetName`, `ToolResultBlockParam.Builder.toolsetName`, `contentOfBlocks` with
+`Content.Block.ofImage`, `ImageBlockParam.Builder.cacheControl`, `MessageCreateParams.Builder.cacheControl`,
+`MessageCountTokensParams.Builder.addTool(ComputerToolset20260801)`; map 4 §1.9, BS12 RESULT "How it was run"), so no
+raw JSON and no beta header is needed for the toolset. The JDK stays the controller's image library. Plan version 6,
+bindings file version 2, script library version 2, fingerprint format 1, recording format 1, protocol 0.2.
+
+### 2.3 Build conventions
+
+As P6 §2.3: Java 8 language and API with no third-party class in `agent/**` and the two Java 8 sample modules, Java 25
+in `controller/**` and the two Java 25 sample modules; the Apache-2.0 header on every new file (`ci/license-headers.sh`);
+no `mvn install`; every display test skips when headless and runs with `ci/run-in-linux.sh`; the lending vocabulary
+only. Four implementers build in parallel worktrees under the tags **VS** (the agent's Swing side, `agent-core`'s
+option, `agent-dist`'s test, the sample's desk, agent module and pack), **VW** (the web side, the CDP path, the web
+host), **VC** (the scenario, controller, JUnit and CLI side: `run`, `caps`, the glue) and **VM** (the gateway, the
+session seam, `skillroy-vision`, the hosts' session options, the MCP options, the sample's vision scenario); the work
+packages, the file ownership, the merge rules and the integration order are in the session notes' `contract-notes.md`.
+Each writes "As built" notes under its tag and never rewrites another's passage; the orchestrator merges by tag and
+numbers the decisions (`D-<tag>-<n>` in the reports) from D359 at integration, and assigns any further amendment id from
+A67 (never an implementer).
+
+### 2.4 Threads and bounds
+
+The agent's rules are unchanged (P1 §5, §6; design §3.7): every read is one bounded `EDT_SYNC` task with the call's
+remaining time, every action is posted and the call returns once it is queued, no wait lacks a deadline, nothing runs
+on a thread the application forbids, and the dispatcher's timeout (120 s cap) is the backstop. Phase 7's additions
+and their bounds:
+
+| Where | Bound |
+|---|---|
+| `swing.capture` | one EDT read for the paint, the masks, the carets, the marks' geometry and the window geometry; PNG encoding off the EDT; one raster per call, at most 4096 pixels a side after `scale`, and never larger than an eighth of the JVM's heap headroom (`maxMemory() - (totalMemory() - freeMemory())`, read before the allocation, so that a heap that may still grow towards `-Xmx` is not refused an ordinary capture; a larger one is `INVALID_PARAMS` naming the needed and the free megabytes); an `OutOfMemoryError` around the allocation or the paint is caught and answered `INTERNAL_ERROR`, never left on the EDT; a `SCREEN` composite of at most 32 windows; at most 200 marks; at most 64 redacted rectangles reported (more are blanked but counted in `redactedTruncated`); `focus.ownerLocator` is the first candidate of §3.2's order that matches exactly one component, found under the locator regex budget, never all six |
+| `swing.hitTest` | one EDT read; at most 6 locator candidates, each checked with the engine under the locator regex budget (P1 §6); covering windows: at most 32 |
+| `swing.pointer` ROUTED | one EDT read (the pre-check), then one `invokeLater` task per event, at most 100 events per call (a drag of at most 50 steps, a wheel of at most 50 notches), each task checking the call's `cancelled` flag and the modal state first (§3.3), then one bounded EDT read for the result; a press that opens a modal dialog is never awaited beyond that read's deadline |
+| `swing.pointer` ROBOT, `swing.capture` ROBOT | Robot on `WORKER`, never the EDT (`waitForIdle` throws there, vision §F6); the delivery probe waits at most 1000 ms for the native `MOUSE_MOVED` (BS9 RESULT "What a `ROBOT` rung and the V3 tier need"); a press and its release in one worker task with no wait between them, the release in a `finally` that runs on a timeout or an interruption too, before the pointer is restored (D343); the press observation at most the call's remaining time; a screen capture at most 4096 pixels a side |
+| `swing.rendering` | one EDT read; the probe render is a fixed 320 x 120 off-screen panel |
+| `CaptureMask`, `RegionResolver`, `SurfaceSource`, `LocatorResolver.describe` | called on the EDT inside the capture's, the snapshot's or the hit-test's read; must be fast and lock-free; a throwing implementation is logged once and ignored (as `NameEnricher` is, P1 §4), a throwing `CaptureMask` blanks the component |
+| `web.hitTest`, `web.pointer` | `WORKER`, 10 s; a pointer `CLICK` is move, press and release awaited in sequence under the call's budget; iframes descended to depth 3; a mutating call is never retried and never re-sent on the shared JCEF client (P4 §4.2, D62) |
+| The loop (controller) | one model call per iteration under `timeouts.callMs`; the budget reserved before the call (D74); the step protocol's waits (`sync.await`, `swing.settle`) with the step timeout; a model's `wait` is a settle, never a sleep (vision §R1; BS12 RESULT "Sessions": `wait` was answered by the settle 97 times); at most 30 UI actions and 20 model turns per session, enforced by the service (§10); the marks drawn on the controller's copy of the raster (Java 25 `java.awt.image`) |
+| Image comparison (controller) | decoded rasters of at most 4096 x 4096; the exact hash first, a pixel walk only on a mismatch, for the report |
+
+### 2.5 What a target JVM sees
+
+Unchanged in kind (P6 §2.5): the agent home's `lib/` and `modules/` jars hold project classes only; `optional/` holds
+the hooks and Byteman modules and is never scanned. Phase 7 adds no jar and no third-party class (D290: the Robot
+implementation is JDK API inside `skillroy-agent-swing`). What a target JVM may newly do, each behind a gate:
+construct a `java.awt.Robot` (only when the agent option `robot=true` is set and AWT is confirmed started by the
+application, A4; never at install, never at probe time before `checkAwt`; `RobotInput` is loaded lazily behind
+`RobotFactory`, so without the option the class is never loaded), move the real pointer (only under a `via: ROBOT` call
+that passed the double opt-in), dispatch window-sourced mouse events on the EDT (only under `swing.pointer`, posted,
+bounded). `HomeConstantPoolIT` and `DistributionContentIT` keep guarding the home.
+
+### 2.6 What the CLI distribution carries
+
+`lib/skillroy-vision.jar` beside `skillroy-telemetry.jar`; `THIRD-PARTY.txt` unchanged (no new dependency);
+`bin/skillroy` and `bin/skillroy.bat` unchanged; the help texts of `session`, `run`, `mcp` and `caps` gain the options
+of §9.3.
+
+---
+## 3. The agent's Swing side (`skillroy-agent-swing`, Java 8)
+
+Every primitive of this section is registered in `SwingPrimitives.all()` in name order, declared with
+`PrimitiveSpec.builder`, runs on `ThreadPolicy.CALLER` and hops to the EDT itself as the module's other primitives do
+(P1 §6; map 1 §1.2). Parameters are read through `JsonView`; an unknown parameter is ignored, as everywhere; a known
+one with a wrong value is `INVALID_PARAMS` with `data.param`. Coordinates are user-space pixels, as every `bounds` of
+`swing.snapshot` is; the three coordinate spaces are named in §3.1. Nothing here names a model.
+
+### 3.1 `swing.capture`, extended (A61; built since Phase 1, guarded since Phase 4)
+
+**Decision (D287, D288).** `swing.capture` keeps its name, its capability `swing.capture.paint`, its default mode and
+its four result fields, and gains the reserved parameters and result fields additively. Two things about the built
+behaviour change, both as amendment A61: **a window is painted from its root pane** (BS9 RESULT "The capture
+comparison": `XFramePeer.print` draws imitation Motif decorations, a 17-pixel title bar from y = 6 and frame lines, at
+fixed positions into every `printAll` of a frame on the X toolkit, which with the WM-less display's insets of 0 lie on
+the content; BS12 RESULT finding 1: the desk's prompt and status lines were half covered in every frame capture so far;
+a root-pane `PAINT` and a `ROBOT` capture are pixel-identical on Linux, 0 differing pixels in 23 of 24 comparisons;
+this closes gap 76 of `../TODO.md`), and **the capture is redacted by default** (`redact: true`; §3.6). What depended on
+the old pixels: nothing committed (no baseline existed before this phase), and nothing compares them; what shows them:
+the failure evidence `failure/capture.png`, the artifact `artifacts/capture.png`, the MCP server's `mcp/<n>.png` and the
+planner's envelope (P1 §8.5, P5 §9.4). From A61 on those show the content without the imitation decorations, with the
+image's size the root pane's (equal to the window's on the WM-less display; 1022 x 743 instead of 1024 x 768 under
+openbox, whose insets are 20, 1, 5, 1: BS10 RESULT "What was run", legs `wm-*`), and with a password field or a
+pack-named component blanked. P4 §2.5's part-by-part guard and the `skipped` field are unchanged.
+
+**Parameters.**
+
+| Parameter | Type | Default | Meaning |
+|---|---|---|---|
+| `target` | ref, or a locator object | the active window, else the topmost modal dialog, else the first showing window (`Windows.defaultWindow`, unchanged) | what to capture; a locator object is accepted beside a ref from Phase 7 on (`TargetSpec.parse(a, false)`), as `by` is |
+| `by` | locator object | – | the target by locator (instead of `target`) |
+| `mode` | `PAINT` (default), `ROBOT` | `PAINT` | `PAINT` is `printAll` into an image on the EDT, as built; `ROBOT` is `Robot.createScreenCapture` of the target's screen bounds on a worker, **a person's evidence only** (§3.4; capability `swing.capture.robot`; refused for every other origin, §9.1, §9.2) |
+| `scope` | `WINDOW` (default), `COMPONENT`, `SCREEN`, `REGION` | `WINDOW` when the target is a window, `COMPONENT` when it is not | what the image covers (below) |
+| `region` | `{x, y, w, h}` in the target's own coordinate space, or a string: a region id a `RegionResolver` resolves on the target (§3.7) | – | with `scope: REGION`: the rectangle to capture; refused with another scope (`INVALID_PARAMS`); a rectangle that lies outside the target is clipped, an empty intersection is `INVALID_PARAMS`; an unknown region id is `NOT_FOUND` with `data.region` |
+| `scale` | number, 0.25 to 4 | 1 | image pixels per user-space pixel: below 1 a downscale, above 1 a zoom (`Graphics2D.scale`, the one place device pixels enter); the 4096-pixel cap of each side and the heap bound of §2.4 still apply and lower the effective value, which the result reports |
+| `redact` | boolean | **true** | blank the components the built-in rule and the registered `CaptureMask`s name (§3.6); `false` is an explicit opt-out, which a model or an MCP client never gets to give (§9.1, §11) |
+| `annotateRefs` | boolean | false | answer `marks`: the geometry and the labels of the components a mark would stand on (below). **The agent draws nothing** (D346): the controller draws the marks on its own copy of the raster before an image goes to a model, so one paint, one raster, one `hash` of the content |
+
+**What each scope paints**, all in `PAINT` mode (for `ROBOT` see §3.4):
+
+- `WINDOW`: a `RootPaneContainer` (every `JFrame`, `JDialog`, `JWindow`) is painted from its root pane
+  (`getRootPane().printAll`), so the image is the root pane's size and holds no decoration, real or imitated; a plain
+  `java.awt.Window` or `Frame` without a root pane is painted as before (`printAll` of the window). `space: WINDOW`,
+  `window: <ref>`, `origin: {x, y}` = the root pane's location in the window's coordinate space (the insets; `{0, 0}`
+  on a display without a window manager and for a dialog without decorations).
+- `COMPONENT`: the component painted as before (`printAll`, its own size); when the component is a `RootPaneContainer`
+  the root pane is painted (as `WINDOW`). `space: WINDOW`, `window` = its window's ref, `origin` =
+  `ComponentView.windowOffset(component)`: the image's pixel (0, 0) lies at that point of the window's space, which is
+  the space of every non-window `bounds` in `swing.snapshot` (P1 §6).
+- `REGION`: the rectangle painted through a clipped and translated graphics of the target's paint (`Graphics2D.create(x,
+  y, w, h)`); for a `RootPaneContainer` target the root pane's paint, translated by `origin`, so that no imitation
+  decoration enters a region either; `space: WINDOW`, `origin` = the rectangle's origin in window space; with a region
+  id, the rectangle is `RegionResolver.rectOf(target, id)` and the result adds `region: {id, rect}`.
+- `SCREEN` (capability `swing.capture.screen`; the composite of vision §F11 and research R2): every showing window of
+  the JVM, each painted from its root pane at its content's screen position onto one canvas whose bounds are the union
+  of the windows' screen bounds (not the whole screen), in the module's stacking order from bottom to top: windows
+  neither active nor owned nor modal in creation order, then the active window, then owned windows above their owners,
+  then the modal dialogs as `Windows.topmostModal` ranks them, last on top. Decoration bands keep the canvas's
+  background. `space: SCREEN`, `origin` = the union's top-left in screen coordinates, `stackingAssumed: true` (AWT has
+  no public z-order, vision §F8; another process's windows are never in it). This is the capture the vision loop sends
+  (§6.2); BS12 composited the desk's frame and its prompt dialogs in this way (BS12 RESULT "How it was run").
+
+**The mapping rule**, stated once: an image pixel `(px, py)` lies at the point `(origin.x + px / scale, origin.y + py /
+scale)` of the result's `space`, which is the window named by `window` (`WINDOW` space) or the screen (`SCREEN` space).
+`swing.hitTest {space: {captureId}}` applies it (§3.2).
+
+**Result** (additive; `format`, `width`, `height`, `base64`, `skipped?` as built, `width` and `height` the image's own
+pixels after `scale` as before):
+
+| Field | Meaning |
+|---|---|
+| `captureId` | an opaque id unique per agent start (`"cap-<n>"`); the agent keeps the geometry (space, window, origin, scale, windows) of its last 32 captures for at most 10 minutes, so that a hit-test may name a capture instead of repeating its geometry; never the pixels |
+| `seq` | the event bus position read on the EDT in the same task as the paint (`ctx.events().lastSeq()` after `tap.sync()`, as `swing.snapshot` does) |
+| `mode`, `scope` | as used |
+| `space` | `WINDOW` or `SCREEN` |
+| `window` | the window's ref (`WINDOW`, `COMPONENT`, `REGION` scopes); absent for `SCREEN` |
+| `origin` | `{x, y}`, where pixel (0, 0) lies in `space` |
+| `scale` | the effective factor (the requested one, lowered by the 4096 cap and the heap bound) |
+| `windows` | `[{ref, rect}]`: every window in the image, `rect` in image coordinates (one entry for the three single-window scopes, several for `SCREEN`) |
+| `surfaces` | `[{kind: WEB \| HEAVYWEIGHT, rect, ref, browser?, redacted}]`: areas that are not Swing-painted, `rect` in image coordinates; `WEB` entries come from the registered `SurfaceSource`s (§3.7, the web module's index: `browser` is the browser's ref), `HEAVYWEIGHT` from the capture's own heavyweight walk (P4 §2.5) for components nobody claims; `redacted: true` when the surface's component is one a mask names or its rectangle intersects a `redacted` rectangle (the loop then never paints a page's pixels into it, §4.8); a part that threw is in `skipped` as before and in `surfaces` too (`skipped` is kept as built, D289) |
+| `marks` | with `annotateRefs`: `[{mark, ref, rect, label, role, row?, region?}]`: `mark` the number a drawn mark would carry (1 to n in reading order), `rect` the rectangle a mark stands on, in image coordinates (the component's, a table row's, a region's), `label` the text the marks list gives the model (role, name, text; nothing for a masked component, §3.6), `row` the model row index for a table row, `region` the region id for a `RegionResolver` region; the pixels are untouched |
+| `carets` | `[{ref, rect}]`: for every showing, focused `JTextComponent` in the image whose caret is visible, the caret's rectangle (`modelToView` of the dot, widened to the caret's width; a selection has no caret entry), in image coordinates, computed in the same EDT read; the host's caret is never hidden (BS11 RESULT condition 1 and "Proposal" 2) |
+| `focus` | `{owner: ref \| null, ownerLocator: <locator> \| null, ownerRect: {x, y, w, h} \| null, window: ref \| null, active: boolean}`: the focus owner, the first locator of §3.2's order that matches it alone (so that a baseline can record it across agent starts; bounded, §2.4), its rectangle in image coordinates (what a comparison blanks on a focus mismatch, §6.7), the focused window and whether the captured window (or, for `SCREEN`, the active window) is active (BS11 condition 2: under Aqua losing the focus repaints the focus ring, 9,625 pixels) |
+| `redacted` | `[{ref, rect, rule}]`: the rectangles blanked, `rule` `password-field` or `capture-mask` (§3.6); `redactedTruncated: true` when more than 64 were blanked |
+| `hash` | `sha256:<hex>` over the decoded raster the image in `base64` holds, the content: the width and the height as 4-byte big-endian integers, then every pixel's `getRGB` value (alpha included, `0xFF` for an opaque image) as a 4-byte big-endian integer, rows top to bottom (never the PNG bytes: the same raster encodes to different bytes on Java 8 and Java 25, BS11 RESULT condition 4); the controller's `ImageCompare.rasterHash` computes the same bytes and both modules' tests share one vector |
+| `stackingAssumed` | `SCREEN` only: true |
+| `region` | `REGION` with a region id: `{id, rect}` |
+
+**The marks rule** (`annotateRefs`): one mark per component that would take a click or a key, in reading order (top to
+bottom, left to right, by the component's image rectangle): every `AbstractButton`, `JTextComponent`, `JComboBox`,
+`JList`, `JTree`, `JSlider`, `JSpinner`, `JTabbedPane` tab, `JMenuItem`, every `JTableHeader` and every visible row of a
+`JTable` (one mark per row, `rect` the row's rectangle, `row` the model index), every custom component that has a
+registered `ActionFirer` accepting it or a `NameEnricher` name, every `JLabel` with text, and every region of a
+component a `RegionResolver` supports (one mark per region, `rect` the region's, `region` its id); **never a masked
+component** (§3.6: it is grey and carries no mark); at most 200 marks, the rest left out and `marksTruncated: true` set.
+The controller draws a mark (the vision module's `Marks`, §6.2) as a filled dark-blue box (RGB 31, 95, 168) with the
+number in white, 12-pixel sans, inside the rectangle at its top-left corner; the capture's `hash` is of the content and
+a comparison never sees a drawn mark (BS12 RESULT "Accuracy": marks gave 100 % on Sonnet 5.5 and Opus 5.5 where the text
+snapshot gave 96 %).
+
+**Errors.** As built, plus: `INVALID_PARAMS` for an unknown `mode`, `scope`, a `scale` outside 0.25-4, a `region` with
+another scope than `REGION`, a raster beyond the heap bound; `NOT_FOUND` for an unknown region id;
+`CAPABILITY_UNAVAILABLE` for `mode: ROBOT` without `swing.capture.robot` and for `scope: SCREEN` without
+`swing.capture.screen`, checked by the body as `swing.click` checks a rung's capability (P1 §6).
+
+**The pixels a model sees** (the rule the vision module follows, §6.2): `scope: SCREEN`, `mode: PAINT`, `redact: true`,
+at the window's own size (`scale: 1`; a 1024 x 768 capture is 1,039 tokens, BS12 RESULT "Cost and tokens"), scaled
+down only when the long edge exceeds 1920 pixels and never below 0.75 (BS12 RESULT "Failures": icons failed first at
+0.5), `annotateRefs: true` for V1 and false for V2 and V3. Never `mode: ROBOT` (D341).
+
+### 3.2 `swing.hitTest` (A63; read-only; capability `swing.hittest`)
+
+**Decision (D292).** A point to the component under it, with every candidate locator checked to match exactly that
+component, the point inside it, what AWT would deliver a mouse event to, the windows of the JVM that cover the point,
+and the modal blocker; one bounded EDT read; nothing is changed. Not mutating, so read-only mode serves it. It also
+describes a component named by ref or locator the same way (the point being the component's centre), which the recorder
+needs for the focus owner (§6.5).
+
+**Parameters.** Either a point or a target:
+
+| Parameter | Type | Meaning |
+|---|---|---|
+| `point` | `{x, y}` | the point, in `space` |
+| `space` | `{captureId: "cap-<n>"}`, `{window: ref}`, or the string `SCREEN` | the space `point` is in: a capture's image coordinates (the mapping rule of §3.1 applied by the agent; an id the agent no longer holds is `INVALID_PARAMS` with `data.captureId`), a window's own coordinates, or screen coordinates (`stackingAssumed: true`) |
+| `target` / `by` | ref, or a locator object | instead of a point: describe this component; `point` is then its centre in its window's space |
+
+**Result.**
+
+| Field | Meaning |
+|---|---|
+| `window`, `windowRect` | the window the point is in (for `SCREEN`: the topmost window of the JVM at the point by the stacking order of §3.1) and its screen bounds |
+| `covering` | `[{ref, rect, ranked}]`: every other showing window of the JVM whose screen bounds contain the point, with `ranked: true` when the module can place it above `window` with confidence (a modal dialog, a window owned by `window`, or the active window; vision §F8), else false (BS10 RESULT "What `swing.hitTest` must report") |
+| `deepest` | `Node` (the shape of `swing.snapshot`, with Phase 7's `masked` flag, §3.6): `SwingUtilities.getDeepestComponentAt`, what is drawn there |
+| `mouseTarget` | `Node` or null: what AWT's lightweight dispatcher would deliver a mouse event to, re-implemented with public API: the deepest visible component containing the point that has a mouse, mouse-motion or mouse-wheel listener, or is a `JComponent` with `getComponentPopupMenu() != null` or `getAutoscrolls()` (both call `enableEvents`, BS10 RESULT condition 3), searching siblings and then the container when a child does not qualify (vision §F7); `mouseTargetInferred: true` always, since the enabled-event-mask half of AWT's filter is not readable |
+| `wheelTarget` | `Node` or null: the nearest ancestor of `mouseTarget` (itself included) with a mouse-wheel listener (BS10 RESULT: the list's scroll pane) |
+| `target`, `targetKind` | the ref the rest of the result is about: `mouseTarget` when found (`MOUSE_TARGET`), else `deepest` (`DEEPEST`) |
+| `local`, `relative` | the point inside `target`: `{x, y}` in its own pixels and `{fx, fy}` as fractions of its bounds (0 to 1) |
+| `row` | for a `JTable` target the model row index under the point (`rowAtPoint`, then `convertRowIndexToModel`), for a `JList` the model index (`locationToIndex`), else absent; what a table-row mark and the recorder's `pointer {row}` use (§6.5) |
+| `locators` | candidates for `target` in authoring preference (design §3.7), each checked with `LocatorEngine.find` over every showing window to match exactly this component, at most 6: first every entry of every registered `LocatorResolver.describe(target)` (strategy to value; §3.7), then `{id}`, `{name, role}`, `{text, role}` (never for a masked component), `{class, index}`, `{path}` last; an empty list when nothing matches exactly one |
+| `fires` | true when a registered `ActionFirer.canFire(target)` accepts it (the recorder's "a custom component the pack can fire", §6.5) |
+| `region` | `{id, rect, resolver}` when a registered `RegionResolver` supports `target` and `regionAt(target, local)` answers; `resolver` the implementation's class name |
+| `surface` | `SWING`, `WEB`, `HEAVYWEIGHT` or `NONE`: `WEB` when a `SurfaceSource` claims `target` or an ancestor (with `browser`, the browser's ref, and `surfaceLocal: {x, y}`, the point in the claimed component's own pixels, for `web.hitTest {space: COMPONENT}`, §4.8), `HEAVYWEIGHT` for an unclaimed heavyweight, `NONE` when the point is in no component |
+| `enabled`, `listening` | `target.isEnabled()` (a disabled component receives a press and does nothing, BS10 RESULT case "disabled button"), and whether `mouseTarget` was found |
+| `masked` | true when `target` is a `JPasswordField` or a registered `CaptureMask` names it (§3.6): the recorder never types into, presses a key at, or clicks such a component (§6.5, §11) |
+| `blockedBy` | `{ref, title, inWindow?}` when a modal dialog, or an in-window dialog a `DialogLocator` reports, blocks `target` (`Windows.requireNotBlocked`'s rule, P1 §6 A8/A27) |
+| `stackingAssumed` | true for `SCREEN` space and for every `covering` entry with `ranked: false` |
+| `seq` | the bus position at the read |
+
+**Errors.** `NOT_FOUND` with `data.reason: "outside"` when the point lies in no showing window of the JVM (`SCREEN`) or
+outside the named window or capture; `INVALID_PARAMS` for a malformed point, an unknown space form or capture id;
+`STALE_HANDLE`, `NOT_FOUND`, `AMBIGUOUS` for the target form as for every locator (P1 §6).
+
+### 3.3 `swing.pointer` with `via: ROUTED` (A63; mutating; capability `swing.pointer.routed`)
+
+**Decision (D293, D294, D352).** A pointer action at coordinates, delivered as a `MouseEvent` whose source is the
+heavyweight window, in window coordinates, dispatched non-posted on the EDT from one `invokeLater` task per event, so
+that AWT's own `LightweightDispatcher` picks the target, tracks enter and exit and retargets (vision §F7). BS10 RESULT:
+this gave Robot's outcome in 14 of 16 cases on Java 8 and Java 25, WM-less and under openbox, arm64 and amd64, and the
+same 16 outcomes on macOS where Robot delivered nothing; the two cases that differ, differ by construction and are the
+two checks below. The built `DISPATCH` rung is unchanged and stays what it is (a click at a component's centre, blind to
+position, glass panes and hover; BS10 RESULT "Per case").
+
+**Addressing**, one of two forms:
+
+| Form | Parameters | Meaning |
+|---|---|---|
+| by point | `point: {x, y}`, `space` as in §3.2 (`{captureId}`, `{window: ref}`, `SCREEN`) | the point in that space; `to: {x, y}` for `DRAG`'s end |
+| by component | `target` or `by` (ref or locator), `region?` (a region id), `row?` (a table's model row or a list's model index), `at?: {fx, fy}` (fractions of the component's, the region's or the row's bounds; default `{0.5, 0.5}`), `to?: {fx, fy}` for `DRAG` | the agent resolves the component on the EDT, the region's rectangle through the `RegionResolver` (§3.7) or the row's through `getCellRect`/`getCellBounds` (`convertRowIndexToView` first), and the point from the fractions; this is the replay form of a recorded step (`pointer`, §8.1), so that no pixel is stored |
+
+**Action parameters.**
+
+| Parameter | Values | Default | Meaning |
+|---|---|---|---|
+| `action` | `MOVE`, `PRESS`, `RELEASE`, `CLICK`, `DOUBLE_CLICK`, `DRAG`, `WHEEL` | required | what to deliver (`PRESS` and `RELEASE` are routed only: `via: ROBOT` refuses them, §3.4) |
+| `button` | `LEFT`, `MIDDLE`, `RIGHT` | `LEFT` | the button (`BUTTON1`, `BUTTON2`, `BUTTON3`) |
+| `modifiers` | any of `SHIFT`, `CTRL`, `ALT`, `META` | none | extended modifier masks on every event |
+| `clickCount` | 1 to 3 | 1 (`DOUBLE_CLICK`: 2) | the click count of press, release and click |
+| `wheel` | `{notches: int}` | – | `WHEEL`: notches, positive towards the user (down); at most 50 |
+| `steps` | 1 to 50 | 6 | `DRAG`: the number of `MOUSE_DRAGGED` samples between press and release |
+| `via` | `ROUTED`, `ROBOT` | `ROUTED` | the path (§3.4 for `ROBOT`) |
+| `force` | boolean | false | act although a modal dialog blocks the window or a ranked window covers the point; a person's argument only (§9.1) |
+| `expectTarget` | ref | – | refuse (`INPUT_REJECTED`, `data.reason: "target changed"`, with the hit-test result) when the pre-check's `target` is not this component; for a raw call (the loop's live-only halves, an MCP client's call): a recorded step cannot carry a per-start ref (§6.4, D352) |
+
+**The routed sequence** (BS10 RESULT "What `swing.pointer` ROUTED must do"), each event its own `invokeLater` task so
+that the EDT runs what the previous event queued (a popup shown by a press) before the next:
+
+1. a pre-check in one bounded EDT read: the hit-test of §3.2 at the point (its result is in the pointer's result as
+   `hit`); `MODAL_OPEN` when `blockedBy` is set, unless `force` (AWT's modal filter stops posted events only; a
+   window-sourced event dispatched non-posted reaches a blocked window, BS10 RESULT condition 1, swing §F14);
+   `INPUT_REJECTED` with `data.reason: "covered"` and `data.covering` when a `covering` entry is `ranked: true`, unless
+   `force` (routing cannot see a window on top, BS10 RESULT condition 2); an unranked covering window is reported, not
+   refused; `expectTarget` checked;
+2. `MOUSE_MOVED` to the point first when the window's last routed position differs (it drives enter, exit, rollover and
+   tool tips through the lightweight dispatcher; the module keeps the last routed position per window, weakly);
+3. for `PRESS`, `CLICK`, `DOUBLE_CLICK`, `DRAG`: `MOUSE_PRESSED` with the button's down mask, the click count and
+   `popupTrigger` set on the press for button 3 on X11 and macOS; then for `RELEASE`, `CLICK`, `DOUBLE_CLICK`:
+   `MOUSE_RELEASED` with the remaining buttons' mask and, for button 3 on Windows, `popupTrigger` on the release; then
+   `MOUSE_CLICKED` with the same count, which `DRAG` never sends (the native release after a drag has click count 0 and
+   no click follows, BS10 RESULT "What the event logs show");
+4. `DRAG`: the press, `steps` `MOUSE_DRAGGED` events with the button's down mask along the straight line to `to`, the
+   release at `to` with click count 0;
+5. `WHEEL`: one `MouseWheelEvent` per notch, `wheelRotation` 1 or -1, `WHEEL_UNIT_SCROLL`, `scrollAmount` 3 (X11's
+   value; the Mac's native amount was not observed, BS10 RESULT);
+6. `MOVE`: the move alone;
+7. **every task checks two things before it dispatches** (D352): the call's `cancelled` flag, set when the call's
+   deadline passes (the built `Clicks` pattern: no event of a call that has failed is delivered later, as
+   `HostSafetyDisplayTest` asserts), and `Windows.blockingModal(window)` again (a press handler that shows an
+   application-modal dialog runs the dialog's secondary loop inside the press's own task, and that loop would pump the
+   remaining non-posted events into the now-blocked window); a task that finds either set does nothing, **with one
+   exception that cannot act**: a press already dispatched is balanced by one routed `MOUSE_DRAGGED` to the window
+   point (-1, -1), outside every component, which makes the lightweight dispatcher deliver `MOUSE_EXITED` to the
+   pressed component (`BasicButtonListener` disarms the model on exit; the desk's keys check `contains(point)` on the
+   release), then a `MOUSE_RELEASED` at that point with click count 0 and no `MOUSE_CLICKED`; Swing acts on the
+   release, not on the click, so a bare release would have fired the action late: this one fires no `ActionEvent` and
+   leaves no model pressed; the result says `balanced: true` (D352; the built `Clicks` has no press to balance);
+8. afterwards one bounded EDT read collects the result; an `AWTEventListener` registered for the call's duration (mouse
+   events, the window's own) records the component that received `MOUSE_PRESSED`.
+
+The real pointer is never moved (components that read `MouseInfo` see the person's pointer). A retargeted button-3 event
+carries AWT's `META` bit in its extended modifiers natively and routed alike (BS10 RESULT); a primitive or a pack that
+compares modifiers expects it.
+
+**Result.**
+
+| Field | Meaning |
+|---|---|
+| `via` | `ROUTED` |
+| `window` | the window the events were sourced from |
+| `hit` | the pre-check's `target`, `targetKind`, `deepest`, `enabled`, `masked`, `covering` (§3.2) |
+| `fired` | true when every event of the sequence was dispatched on the EDT within the call's budget; false otherwise, with `reason` (`EDT_BUSY`: the deadline passed, the remaining tasks are cancelled and nothing of this call acts later, a dispatched press being disarmed and released as step 7 says; `MODAL_OPENED`: a modal dialog opened mid-sequence, the remaining events were withheld and the press was balanced the same way into the now-blocked window, where the disarmed release fires nothing) |
+| `dispatched`, `balanced` | `{sent, of}`: how many events of the sequence were dispatched, of how many; `balanced: true` when a cancelled or withheld sequence's press was disarmed and released (step 7) |
+| `received` | the ref of the component that received `MOUSE_PRESSED`, or null when nothing did (the point lies in no listening component, or a disabled component's delegate took it: `received` is then that component and `hit.enabled` false); for `MOVE` and `WHEEL`: the component that received the move or the wheel |
+| `focusOwner`, `activated` | the focus owner after the sequence, and whether the window became the focused window because of it (BS9 K6: Swing's press handlers ask for the focus and the toolkit activates the window) |
+| `seq` | the bus position after the result read |
+
+"Fired" is honest in the same way the rungs are (P1 §6, "fired means delivered"): a routed press on the sample's
+`IconKey` in an unfocused window is received and dropped by its debounce (map 1 §5.4), so the recorder reads the
+application's events, not `fired`, for the consequence (design §2.5; §6.5). The executor's A29 rule applies to the
+`pointer` verb (`fired: false` fails the step).
+
+**Errors.** `MODAL_OPEN`, `INPUT_REJECTED` (reasons `covered`, `target changed`), `NOT_FOUND` (`outside`, an unknown
+region or row), `INVALID_PARAMS` (a malformed point, an unknown action or button, more than 50 steps or notches, `to`
+without `DRAG`, `region` or `row` with a point form), `STALE_HANDLE`/`AMBIGUOUS` for the component form,
+`CAPABILITY_UNAVAILABLE` for `swing.pointer.routed` (AWT not started, headless) and for `via: ROBOT` without
+`swing.pointer.robot`.
+
+### 3.4 `via: ROBOT` and `mode: ROBOT`: the V3 tier's agent half (A63, A65)
+
+**Decision (D290, D291, D341, D343, D344).** The Robot implementation lives inside `skillroy-agent-swing`
+(`RobotInput`, package-private, loaded lazily behind the seam `RobotFactory`), JDK API only, constructed on an agent
+worker after `checkAwt` has confirmed that the application started AWT (A4), one per `GraphicsDevice`, with
+`setAutoWaitForIdle(false)` and `setAutoDelay(0)`, never on the EDT; the alternative, an optional module behind a new
+agent-api SPI, is rejected in §17 (D290). It is reachable only behind a **double opt-in**:
+
+1. **the agent option `robot`** (`robot=true`; default false; P1 §2.4): the operator's consent on the host that the
+   agent may take the real pointer. Without it `swing.pointer.robot` and `swing.capture.robot` are set
+   `UNAVAILABLE("robot: not enabled (agent option robot=true)")` at install and never probed (as `swing.click.robot` is
+   today). With it, after `checkAwt`, both are declared with one probe (§3.9): `UNAVAILABLE("headless")` in a headless
+   JVM, `UNAVAILABLE("robot: <the AWTException's message>")` when `new Robot(device)` throws (no XTEST, vision §F6),
+   else `OK(strategy = "robot")`. The probe constructs the Robot and moves nothing.
+2. **the controller's opt-in** (§9.2): `RunOptions.robot` and `SessionOptions.robot`, set only by a person's flag on
+   the command (`--allow-robot` on `run`, `session`, `mcp` and on the raw `call` command, which bypasses `ExecutorSession` and
+   `CallPolicy` and therefore refuses `via: ROBOT` and `mode: ROBOT` in its arguments without the flag, §9.3; the JUnit
+   property `skillroy.robot`, which can sit in a committed build file, so the glue prints a one-line warning naming both
+   halves whenever it is true), never a
+   scenario key (D127's rule for `hooks`), never a tool argument a model chooses, never an MCP client's choice. Without
+   it the executor and the session refuse a call that carries `via: ROBOT` or `mode: ROBOT` before it is sent (`ERROR /
+   ENVIRONMENT`, "robot: not allowed; a person passes --allow-robot"), and a plan whose calls carry them is refused the
+   same way before step 1 and before the agent is asked anything (its `requires` also names `swing.pointer.robot`,
+   §8.1, which a CI target would fail next). With it, **a model or an MCP client still never chooses Robot**: `via:
+   ROBOT` is refused for every raw tool call and every client's plan (`CallPolicy.arguments`, §9.1), and only the
+   vision module's own V3 tools set it (D347); `mode: ROBOT` is refused for every origin but a person's by `CallPolicy`
+   and by `ExecutorSession` (D341).
+
+**The delivery probe** (BS9 RESULT "What a `ROBOT` rung and the V3 tier need": on this Mac, without the Accessibility
+permission, Robot was constructed without error and delivered nothing, pointer or key). Before the first `via: ROBOT`
+action after agent start, and again after any action whose press was not received, the pointer moves the real pointer
+to the target point and waits, bounded at 1000 ms, for the native `MOUSE_MOVED` to arrive at a component of the target
+window (an `AWTEventListener`); nothing arriving is `CAPABILITY_UNAVAILABLE(swing.pointer.robot, "robot: native input
+is not delivered (no event within 1000 ms)")`, and the capability is set `DEGRADED` with that reason until the next
+reprobe, so that the matrix shows it. A probe that passes is remembered while actions keep being received. **The probe runs before the action's pre-check**,
+never between it and the press: the focus and covering read of the pre-check is the last thing before `mousePress`, so
+that it is never a second old.
+
+**`swing.pointer {via: ROBOT}`.** The parameters of §3.3, with these differences:
+
+- `action` is `MOVE`, `CLICK`, `DOUBLE_CLICK`, `DRAG` or `WHEEL`; **`PRESS` and `RELEASE` are refused**
+  (`INVALID_PARAMS`, "a Robot press is never left held: use CLICK or DRAG"; D343). A press and its release run in one
+  worker task with no wait between them; a `finally` releases every button the call pressed before anything else, on a
+  timeout or an interruption too; **the pointer is never restored while a button is down**.
+- `requireFocus` (boolean, default **true**; D344): the pre-check's EDT read also requires that the target JVM holds a
+  focused window (`KeyboardFocusManager.getCurrentKeyboardFocusManager().getFocusedWindow() != null`), and the worker's
+  `mouseMove` and `mousePress` follow that read at once (a delivery probe, when one is due, runs before the pre-check,
+  never between the read and the press); a JVM without one is `INPUT_REJECTED` with `data.reason: "not focused"` and
+  nothing moves (BS9 README: the spike's own strict mode read the focus on the EDT before every press). The WM-less
+  `RobotChecks` of §13.2 pass `requireFocus: false` explicitly (BS9 K7: a WM-less frame may legitimately hold no focus).
+  The window of a few milliseconds between that read and the press is the residual A15 of `threat-model.md` records.
+- The point is converted to screen coordinates (the window's `getLocationOnScreen` for `WINDOW` space; the component's
+  for the component form); **a point outside every showing window of the target JVM is refused** (`NOT_FOUND`,
+  `data.reason: "outside"`), and a point that **any** covering window of the JVM covers, ranked or not, is refused
+  (`INPUT_REJECTED`, `covered`) unless `force`, since Robot presses whatever is really on top (BS9 RESULT case
+  "covered": the covering window got it); other processes' windows cannot be seen, which the result says
+  (`stackingAssumed: true`). No modal check: input into a blocked window is dropped by AWT as for a person (BS9 case
+  "modal"), and the result reports that nothing arrived.
+- On the worker: the pointer's location is saved (`MouseInfo`), `mouseMove` to the point, the native sequence
+  (`mousePress`/`mouseRelease` with the button masks, a drag as `steps` moves, `mouseWheel` per notch), the `finally`'s
+  release, then the pointer restored to the saved location; the result's `received` is the component that received
+  `MOUSE_PRESSED` (the `AWTEventListener` for the call's duration), and **nothing received within the call's deadline
+  is `fired: false, reason: "NOT_DELIVERED"`**, never a success that cannot be seen (BS9: macOS drops silently); a
+  `received` that is neither `hit.target` nor inside it is `fired: false, reason: "received elsewhere"`. `activated`
+  reports a window the press activated.
+
+**`swing.capture {mode: ROBOT}`** (capability `swing.capture.robot`; **a person's evidence**, D341): refused for every
+origin but `PERSON` by `ExecutorSession` and for every model's or client's raw call by `CallPolicy` (§9.1, §9.2), never
+offered by a vision tool, never written to the captures directory, never served over MCP, never an anchor or a baseline
+(vision §F11). For a person: `Robot.createScreenCapture` of the target window's screen bounds (`scope: WINDOW`,
+decorations included, `space: SCREEN`, `origin` = the window's screen location, `windows: [{ref, rect}]`), of a
+component's or a region's screen rectangle (`COMPONENT`, `REGION`), or of the union of the JVM's showing windows
+(`SCREEN`, the real stacking, so `stackingAssumed: false`); user-space size (on a Retina display the 2x capture scaled
+to user space, so text differs from a `PAINT` by antialiasing, BS9 RESULT leg `mac-j25`: 8,718 pixels); **every pixel
+outside the screen rectangles of the JVM's showing windows is blanked grey** (the desktop, the bands of a `SCREEN`
+union), and the result carries `glass: true` with the sentence "pixels inside a window's rectangle may belong to a
+window of another process that covers it"; `redact` applies by rectangle: the mask rectangles are read on the EDT
+before and after the grab and the union is blanked, and when the bus `seq` shows a `window.opened` or `window.closed`
+between the two reads the capture is taken once more, and a second attempt that again sees a window event is answered
+with `unstable: true`; `carets`, `focus`, `hash` as
+in §3.1; `marks` never (`annotateRefs` is refused with `ROBOT`, `INVALID_PARAMS`).
+
+**V3's keyboard** (D344, D345). Not through Robot in Phase 7 (§1). The loop reads, before every `type` or `key`, through
+`swing.edtState` (`focusOwner`) and the hit-test's `target` form, whether the target JVM holds a focused window and
+which component owns the focus:
+
+- (a) the JVM holds a focused window and the focus owner is the intended field: `swing.type {mode: SET}` by the field's
+  locator (which needs no OS focus), or `swing.key` at the focus owner;
+- (b) the JVM holds a focused window and another component owns the focus: one `swing.pointer {via: ROBOT, action:
+  CLICK}` into the field (safe: the JVM's windows are in front, BS9 K6, K8), then (a);
+- (c) the JVM holds no focused window: **the loop stops the turn** (`QUESTION`, "the target lost the focus; bring it to
+  the front and ask again", §9.1's `endTurn`); it never clicks to activate a window it cannot know to be uncovered
+  (BS9 README's strict mode refused exactly this; K6 on the Mac "not run"). On a display without a window manager
+  nothing restores a frame's focus after a modal dialog closes (BS9 K7; BS4); case (c) is then the normal case after a
+  dialog, and the person brings the window to the front.
+
+### 3.5 `swing.type` with an omitted target (A62)
+
+`TargetSpec.parse(a, false)`: without `target` and `by` the text goes to `Typing.defaultKeyTarget()`, the rule
+`swing.key` has (the focus owner, else the active window, else the topmost modal dialog, else the first showing window;
+a focus owner in a window a showing modal dialog blocks is replaced by that dialog's focus component; P1 §6). A
+`Window` so found becomes its root pane. `SET` on a target that is not a `JTextComponent` stays `INVALID_PARAMS`
+("mode SET needs a text component", as built); `DISPATCH` types into whatever has the focus. The modal check runs for
+an explicit target only, as for `swing.key`. Gap 60 is documented in the same passage of P1 §6: a dispatched `ENTER`
+submits the text field that most recently had the focus, so `enter: true` with `DISPATCH` and an omitted target may
+submit another field or none; `SET` is unaffected. The schema text of the primitive already says the target is
+optional (map 2 §2 row 7); A62 makes the body agree.
+
+### 3.6 Redaction: the built-in rule, the `CaptureMask` SPI and the masked-text rule (A61, A64)
+
+**Decision (D295, D296, D349).** Pixels are personal data until masked (design §3.10, vision §C6, P5 §6.2), and the base
+is restrictive by default (B19's rule): `swing.capture` blanks, in the same EDT read after `printAll` and before the
+image leaves the task, the rectangle of every component the built-in rule or a registered `CaptureMask` names, with the
+solid grey RGB 128, 128, 128, and reports them in `redacted`. The built-in rule: every `javax.swing.JPasswordField`
+(whatever its echo character). The SPI, in the family of `NameEnricher` and `MaskPolicy` and separate from `MaskPolicy`
+so that `MaskPolicy` stays row-shaped, AWT-free and callable on application threads (P6 §4.3):
+
+```java
+package ai.skillroy.testjava.agent.api.spi;
+/** Which components show a secret: a capture blanks their pixels before the image leaves the JVM, and every reader of
+ *  the tree (the snapshot, the hit-test, the marks, the dialog reader) withholds their text. Called on the EDT inside
+ *  the capture's, the snapshot's or the hit-test's read, for every component in the tree; must be fast, lock-free and
+ *  must not change the component. */
+public interface CaptureMask {
+    /** True to blank the component's whole rectangle and withhold its text. */
+    boolean masks(java.awt.Component component);
+    /** Rectangles inside the component to blank instead of the whole (a table's cells, a row's column); null or empty
+     *  means the whole rectangle when {@link #masks} is true, nothing when it is false. The text rule is unaffected. */
+    default java.util.List<java.awt.Rectangle> regions(java.awt.Component component) { return null; }
+}
+```
+
+Registered through `ctx.spi().register(CaptureMask.class, …)`, looked up per read with `spi().all`. A mask that throws
+is logged once per agent start and ignored for that component (the component is then **blanked and its text
+withheld**, the safe side). **One rule for pixels and text** (D349; the text walker withheld a text component's content
+for `JPasswordField` only, `ComponentText`): a component the built-in rule or a `CaptureMask` names has no `text` and no
+`value` in any output of the module (`swing.snapshot`, `swing.find`'s nodes, `swing.dialogs`' texts, `swing.hitTest`'s
+nodes, a mark's `label`), its `Node` carries `masked: true` (the role is unchanged: `Roles.ALL` is a closed set and a
+role change would alter every committed snapshot fixture), the hit-test proposes no `{text, role}` locator for it, and
+the marks rule skips it. The sample's `EntryField` masks itself only while a secret is expected, so its module's mask
+names it, and the number pad that feeds it, while `isMasked()` (§12.2). What blanking cannot hide: the layout and the
+text's width (R-a of map 7), stated in `SECURITY.md`'s limitations (§11). A `ROBOT` capture is blanked by the same
+components' screen rectangles after the capture (§3.4). The hit-test's `masked` field uses the same rule (§3.2).
+`redact: false` leaves everything in; who may say so is §9.1 and §11 (a person at the CLI; never a model, never an MCP
+client).
+
+### 3.7 `RegionResolver`, `SurfaceSource`, `LocatorResolver.describe` (A64)
+
+Three additions to `…agent.api.spi`, all called on the EDT, all fast and change nothing (the family's rule, P1 §4):
+
+```java
+/** A custom-painted component's stable regions: a point to a region id and back (vision R4 option 1). */
+public interface RegionResolver {
+    boolean supports(java.awt.Component component);
+    /** The region under a point of the component's own coordinates, or null. */
+    Region regionAt(java.awt.Component component, java.awt.Point point);
+    /** The rectangle of a region id in the component's own coordinates, or null when the id is unknown. */
+    java.awt.Rectangle rectOf(java.awt.Component component, String id);
+    /** Every region, for the marks of a capture; empty by default. */
+    default java.util.List<Region> regions(java.awt.Component component) { return java.util.Collections.emptyList(); }
+    final class Region { public final String id; public final java.awt.Rectangle rect;
+                         public Region(String id, java.awt.Rectangle rect) { … } /* equals, hashCode, toString */ }
+}
+/** Areas of the tree that are not Swing-painted, as another module knows them (the web module's browser index):
+ *  answered from what the module already holds, never by asking a browser; the list is a snapshot. */
+public interface SurfaceSource {
+    java.util.List<Surface> surfaces();
+    final class Surface { public final java.awt.Component component; public final String kind /* "WEB" */;
+                          public final String browserRef;
+                          public Surface(java.awt.Component component, String kind, String browserRef) { … } }
+}
+// LocatorResolver gains:
+/** The strategy values that name this component in the resolver's own vocabulary (for example {@code {action: "DUE"}}),
+ *  so that a hit-test can propose a domain locator first (design 3.7); empty by default. */
+default java.util.Map<String, String> describe(java.awt.Component component) { return java.util.Collections.emptyMap(); }
+```
+
+A region id is `[A-Za-z0-9][A-Za-z0-9:._-]{0,63}`; the agent refuses another (`INVALID_PARAMS`). The web module
+registers one `SurfaceSource` built from its browser index (§4.8); a pack may register another for a technology of its
+own. The resolver precedence when several `RegionResolver`s support a component: registration order, the first that
+answers. These three files land as VS's first commit (§2.1), so that VW's `SurfaceSource` registration builds against them; `WebPointerEvent` is VW's.
+
+### 3.8 `swing.rendering` (read; capability `swing.capture.paint`; A63)
+
+What a pixel baseline is keyed by (BS11 RESULT "Rendering inputs"; §8.7), read in one bounded EDT task, no change to
+the host:
+
+```
+swing.rendering {} -> { jdk: {vendor, version, specification},  // java.vendor, java.runtime.version, java.specification.version
+                        os: {name, version, arch},               // for the reviewer only; never in the key
+                        lookAndFeel,                             // UIManager.getLookAndFeel().getClass().getName()
+                        antialiasing: {desktopHints: [...],      // Toolkit.getDesktopProperty("awt.font.desktophints") as
+                                                                 // sorted "key=value" strings (the hints' map order is not
+                                                                 // stable), or []
+                                       property},                // the system property awt.useSystemAAFontSettings, or null
+                        screenScale,                             // GraphicsConfiguration.getDefaultTransform().getScaleX()
+                        probeHash,                               // sha256 of the raster of the probe render
+                        keyed: ["jdk.specification", "lookAndFeel", "antialiasing", "screenScale", "probeHash"],
+                        renderKey }                              // sha256 over the canonical JSON of the keyed fields, 16 hex digits
+```
+
+**The key hashes what renders** (D350): the Java specification version (the line: BS11 RESULT "Across environments"
+measured the line, 8 against 25, as a pixel change), the look and feel, the effective antialiasing, the screen scale
+and the probe render's hash. It does **not** hash the vendor, the runtime's full version, the OS name, version or
+architecture (BS11: the CPU architecture and a JDK 8 patch build, 1.8.0_504 against 1.8.0_492, left the raster
+identical; `os.version` inside a container is the Docker host's kernel release, which would turn every committed
+baseline stale with a host update) and no font names (`Font.getFamily()` of a logical font answers the logical name, so
+such a field would be four constants; the probe render, which paints text, is the font tripwire: installing a font
+package changed 3.3-4.7 % of the desk's pixels and changes the probe's). The probe render is a fixed 320 x 120
+off-screen `JPanel` with the application's look and feel: a plain and a bold label, a text field, a `JTableHeader` of
+two columns, a button, and an antialiased filled ellipse, painted with `printAll` into an RGB image (BS11 RESULT
+"Proposal" 4: the toy alone renders identically on Java 8 and Java 25 while the desk does not, so the probe has a table
+header and an antialiased shape). The window's size and insets are recorded per baseline, not here. `renderKey` is what
+the bindings file's `images` entries are keyed by (§8.7); the comparison, `approve` and the recorder read it (§6.7,
+§6.5), and a pack may read it in its `EnvFingerprinter` if it wants a rendering input fingerprinted (§8.8).
+
+### 3.9 Capabilities, the agent option, errors and events
+
+| Capability id | Set or declared | State | Guards |
+|---|---|---|---|
+| `swing.hittest` | joins `DISPLAY_CAPABILITIES` (`SwingModule`'s array): follows AWT's state as `swing.tree` does (`UNAVAILABLE("AWT not started…")`, `UNAVAILABLE("headless")`, `OK`) | – | `swing.hitTest` |
+| `swing.pointer.routed` | likewise | – | `swing.pointer` with `via: ROUTED` |
+| `swing.capture.screen` | likewise | – | `swing.capture {scope: SCREEN}` in `PAINT` mode (the composite; what the loop and `inference.vision` gate on, §8.5) |
+| `swing.pointer.robot` | without the option `robot`: `set` `UNAVAILABLE("robot: not enabled (agent option robot=true)")` at install; with it: declared after `checkAwt` with the Robot probe of §3.4 | `OK("robot")`, `UNAVAILABLE(reason)`, `DEGRADED("robot: native input is not delivered…")` after a failed delivery probe | `swing.pointer {via: ROBOT}` |
+| `swing.capture.robot` | the same probe | the same | `swing.capture {mode: ROBOT}` (a person's) |
+| `swing.click.robot` | unchanged: `UNAVAILABLE("opt-in rung, not implemented")` | – | the rung stays refused (D291) |
+
+The ids are lower-case as reserved (`swing.hittest`, like `web.hittest`; D298). Every new id enters the five committed
+goldens with the state its load mode gives it (the hooks leg's too), identical across load modes and Javas; the matrix
+hash of every leg changes once (`CapabilityGoldenTest`, `LoadModeChecks`, `AwtStartTest.DISPLAY_CAPS`,
+`SwingModuleHeadlessTest`; map 1 §1.13). The agent option **`robot`** (boolean, a default of `false` in
+`AgentRuntime.resolveOptions`, validated like `readOnly`, read by the Swing module from `ctx.options()`;
+`agent.info.options` reports it) joins P1 §2.4's table (A65). No new error code (`NOT_FOUND` outside, `INVALID_PARAMS`,
+`INPUT_REJECTED` with the reasons `covered`, `target changed` and `not focused`, `CAPABILITY_UNAVAILABLE`, `MODAL_OPEN`
+cover every case; D299) and no new topic: the pointer publishes nothing, and `swing.events` stays gap 31.
+
+---
+## 4. The web side (`skillroy-agent-web`, `skillroy-cdp`, the script library)
+
+The two reserved primitives and the reserved `WebCapability.INPUT` are built; `RAW_PROTOCOL` stays reserved without a
+method. Both paths answer byte-identical shapes for the same page state (D48). Coordinates are CSS pixels relative to
+the main frame's layout viewport, the space `web.resize`'s override defines while one is active (vision §F12; BS8:
+`Input.dispatchMouseEvent` at the button's centre incremented the page's counter, "trusted input works without a port").
+
+### 4.1 The SPI (`…agent.api.spi.web`; A66, the A37 precedent of a default method)
+
+```java
+/** One synthetic pointer event for a page, in CSS pixels of the main frame's viewport (Phase 7). Immutable. */
+public final class WebPointerEvent {
+    public enum Action { MOVE, PRESS, RELEASE, WHEEL }
+    public enum Button { NONE, LEFT, MIDDLE, RIGHT }
+    public enum Modifier { ALT, CTRL, META, SHIFT }
+    // builder: of(Action, int x, int y).button(Button).clickCount(int).modifiers(Set<Modifier>).delta(int dx, int dy).build()
+}
+// WebBrowser gains:
+/** Dispatches one pointer event into the page (WebCapability.INPUT); completes once the technology has handled it.
+ *  The default has no INPUT and completes exceptionally with UnsupportedOperationException. */
+default java.util.concurrent.CompletableFuture<Void> dispatchPointer(WebPointerEvent event) { … }
+```
+
+`WebCapability.INPUT`'s Javadoc becomes "synthetic pointer input into a page: `WebBrowser.dispatchPointer`"; the enum's
+order is frozen (`WebSpiShapeTest`). No key input in Phase 7 (`web.dom.fill` types; `Input.dispatchKeyEvent` and
+`Input.insertText` are the later keys of the same flag, browser-spi §F16). Rules as P4 §3: no vendor type in a
+signature, a future with the caller's bounded wait, never a wait on the EDT. These two files are VW's (§2.1); the three
+Swing SPIs of §3.7 are VS's and land first.
+
+### 4.2 `web.hitTest` (read; capability `web.hittest`; `WORKER`, 10 s; not `script`)
+
+| Parameter | Meaning |
+|---|---|
+| `browser`, `by`, `frame` | the browser selection of every `web.*` primitive (P4 §4.2; `frame` default the main frame) |
+| `point: {x, y}` | the point |
+| `space` | `VIEWPORT` (default; CSS pixels of the main frame's viewport) or `COMPONENT` (pixels of the browser's Swing component, `WebBrowser.component()`: the agent converts, §4.8) |
+
+Result: `{browser, frame, viewportPoint: {x, y}, element: {role, name, tag, id?, rect: {x, y, w, h}}, locators: [{role,
+name} | {selector}], unique: boolean, iframe?: {key, rect}, scaleAssumed?: boolean}`. The library function `hit(x, y)`
+(§4.6) does `document.elementFromPoint` (and `elementsFromPoint` through open shadow roots), takes the aria walker's role
+and name (`roleOf`, `nameOf`), the tag, the id and the client rectangle, and proposes locators in the order `{role, name}`
+then `{selector}` (an id selector, else a short unique path), each checked with the library's `find` to match exactly
+one element (`unique`). When the element is an `iframe`, the point is translated into the child frame and the
+function is evaluated there, to depth 3; the result's `frame` is the frame the element was found in and `iframe` the
+frame element's key and rectangle in the parent (W8 of map 6). `NOT_FOUND` with `data.reason: "outside"` when the point
+lies outside the viewport or hits nothing. The CDP path serves it on the `Place`'s frame through `frame.evaluate` with
+the library (the `web.dom.text` pattern), the agent path through `evaluate` with the same expression.
+
+### 4.3 `web.pointer` (mutating; capability `web.pointer`; `WORKER`, 10 s)
+
+| Parameter | Values | Default |
+|---|---|---|
+| `browser`, `by` | selection | – |
+| `action` | `MOVE`, `PRESS`, `RELEASE`, `CLICK`, `DOUBLE_CLICK`, `WHEEL` | required |
+| `point`, `space` | as §4.2 | – |
+| `button` | `LEFT`, `MIDDLE`, `RIGHT` | `LEFT` |
+| `modifiers` | `ALT`, `CTRL`, `META`, `SHIFT` | none |
+| `clickCount` | 1 to 3 | 1 (`DOUBLE_CLICK`: 2) |
+| `wheel` | `{dx, dy}` in CSS pixels | – |
+| `force` | boolean | false; a person's argument only (refused for a `MODEL` or `CLIENT` origin as on every input primitive, §9.1, D294) |
+
+`CLICK` is one primitive call: a move, a press and a release awaited in sequence under the call's budget (a loop that
+sent them as separate model actions would leave a page half-pressed for seconds, map 6 §7). Before acting the
+primitive reads `hit` at the point (§4.2's function, so the recorder can cross-check it); the result is `{via: PROTOCOL
+| VENDOR, viewportPoint, dispatched: [types], hit?: {role, name, tag, id?}}`, `via` mirroring `BitmapSource`
+(`PROTOCOL` on JCEF and the CDP path, `VENDOR` on JxBrowser). **The modal check** (W5): the web module checks, in one
+bounded EDT read, whether a showing `java.awt.Dialog` whose modality is not `MODELESS` and that is neither the browser
+component's window nor owned by it blocks that window (the same heuristic as the Swing module's, re-stated here because
+the two modules do not depend on each other), and answers `MODAL_OPEN` unless `force`; a browser without a component
+(view-less) is not blocked. A browser whose component is not showing is served (a protocol call, like `webDispatch` on
+the hidden card) and the result adds `visibleInSwing: false`; the tiers never target one (its bitmap is refused, gap
+39). A mutating call is never retried (P4 §4.2). The JCEF adapter sends `Input.dispatchMouseEvent {type: mouseMoved |
+mousePressed | mouseReleased | mouseWheel, x, y, button, clickCount, modifiers, deltaX?, deltaY?}` through
+`JcefBrowser.call` (never a `READS` method, D62); the CDP path sends the same method with the same parameters on the
+path's own session (`CdpAttach.send(sessionOnPw(page), …)`, D64's precedent; W6: Playwright's `page.mouse()` is not
+used, so that both paths send byte-identical parameters and no actionability semantics hide a difference).
+
+### 4.4 Capabilities
+
+`web.hittest` and `web.pointer` join `WebCapabilities.GENERIC`: derived in every cycle, `web.hittest` `OK(<adapters>)`
+when an open indexed browser has `EVALUATE`, `web.pointer` `OK(<adapters>)` when one has `INPUT`, else `UNAVAILABLE`
+with the `flag()` reasons (`no browser found`, `no indexed browser has INPUT`); the install default stays `UNAVAILABLE`
+with the reason `no embedded browser technology found` instead of `reserved for the vision bolt-on`. The three tests
+and the acceptance that pin the reserved text flip (`WebModuleInstallTest`, `WebCapabilitiesTest`, `CdpWebPathServesTest`,
+`WebHostChecks` item 1; map 6 §7); `WebCommandsTest` in the CLI (`:71`, `:110`) carries the same text in its fake's data,
+which goes stale but not red: a note for VC, which owns the CLI's tests. The goldens count the reason by presence, so
+they need no text change, but their `web.hittest` state becomes `OK` where a browser is indexed (the web host's goldens
+only; the lending desk has none).
+
+### 4.5 The adapters
+
+- **`jcef`**: `JcefBrowser.dispatchPointer` sends the protocol method of §4.3; `ALL` gains `INPUT` (any JCEF whose
+  DevTools channel exists carries it; nothing in the descriptor changes). Verified in the image (§13.2).
+- **`jxbrowser`**: descriptor roles under a new group `for: "INPUT"` in `jxbrowser.json` for `Browser.dispatch` and
+  the event builders (`MousePressed.newBuilder(Point)`, `MouseReleased`, `MouseMoved`, `MouseWheel`, `.button`,
+  `.clickCount`, `.build`), resolved per vendor loader; the flag is absent where they do not resolve; the handle's
+  override runs on the adapter's threads with a bound (the `resize` pattern); the strategy string says `input
+  unverified` (W2); `fake-jxbrowser.json` mirrors the roles and `FakeBrowser.dispatch` records the event instead of a
+  violation. Whether the vendor's `Point` is CSS or device pixels on a HiDPI view is not known (map 6 §9) and is a line
+  of the strategy string until a licence holder's run says.
+
+### 4.6 The script library: `hit`, version 2 (`skillroy-protocol`, `web-lib.js`, `WebLib`)
+
+`WebLib.FUNCTIONS` gains `hit`; `L.version` becomes `"2"`. **The versioning rule** (D300): a document whose slot
+(`Symbol.for("skillroy")`) already holds a library is never replaced (P4 §4.6 stands: a replacement would lose a tap's
+buffer), but a library whose `version` is lower than the caller's has the missing functions installed into the
+existing object (`hit` into a version-1 slot), one install per document, and the slot's `version` is raised; a call of
+a function the slot still lacks is `SCRIPT_ERROR` naming it. `WebLib.hash()` changes once and with it the `run.jsonl`
+record's library hash. Every library answer stays bounded by the guard (`boundedCallExpression`, `WebLib.Bounded`) and
+is cut again on the receiving side (S43): a hit's role, name, tag, id and rectangle are page-chosen data (threat model
+A3).
+
+### 4.7 The CDP path (`skillroy-cdp`)
+
+`CdpWebPath.SERVED` gains `web.hitTest` and `web.pointer`, `MUTATING` gains `web.pointer`; `web.hitTest` runs the
+library's `hit` on the `Place`'s frame, `web.pointer` sends `Input.dispatchMouseEvent` on the page's session (§4.3);
+`budgetMs` unchanged (10 s). The path takes viewport points only: `space: COMPONENT` is handed to the agent path
+(`UNSUPPORTED`, the agent fall-back of P4 §6.1), since the path has no component bounds (`AgentBrowser`, map 6 §5.3).
+`CdpWebPathServesTest`'s "not served" list loses the two names.
+
+### 4.8 Web surfaces in a Swing capture, and a Swing point in a page
+
+- **Surfaces** (W4 (a)): the web module registers a `SurfaceSource` (§3.7) answered from its browser index: one
+  `Surface(component, "WEB", browserRef)` per indexed browser whose `component()` is in a window, no vendor call. The
+  Swing capture emits `surfaces: [{kind: WEB, rect, ref, browser, redacted}]` with the component's rectangle in image
+  coordinates (for windowed JCEF the lightweight panel, which prints blank, BS8 F-E; for an off-screen canvas the
+  heavyweight, which the guard lists in `skipped` as well), `redacted: true` when a mask names the browser component or
+  a redacted rectangle intersects the surface (§3.1), and `HEAVYWEIGHT` for heavyweights nobody claims.
+- **A Swing point in a page** (W3, two steps on the agent, nothing cross-module): `swing.hitTest` answers `surface: WEB`,
+  `browser: <ref>` and `surfaceLocal: {x, y}` (the point in the browser component's own pixels); `web.hitTest {browser,
+  point: surfaceLocal, space: COMPONENT}` converts on the agent: with no viewport override and `innerWidth` equal to the
+  component's width, 1 CSS pixel = 1 component pixel; with a difference the factor is `innerWidth / component width`
+  (both known; `scaleAssumed: false`); while a `web.resize` override is active the conversion is refused
+  (`INVALID_PARAMS`, `data.reason: "viewport override"`, map 6 §5.6); on a HiDPI view the factor is computed the same
+  way and `scaleAssumed: true` says that CEF's device scale was not consulted (none of this runs at scale 1 in the image
+  anyway).
+- **The composite** (D349's rule applied to pages): the vision loop (§6.2) composites `web.bitmap` into each `WEB` surface of a
+  capture **whose `redacted` is false** before the image goes to a model (a windowed JCEF prints blank, an off-screen
+  one is a placeholder); a redacted surface stays grey and carries no mark. A page's pixels are therefore masked as a
+  whole component or not at all: there is no `CaptureMask` for a DOM element, and a pack whose page shows personal data
+  masks the browser component while it does (§11; a limitation sentence of `SECURITY.md`). The loop acts on a `WEB` hit
+  through `web.hitTest` and `webClick {role, name}` (recorded) or `web.pointer` (live-only).
+
+### 4.9 The web host, the kit and the acceptance (profile `jcef`)
+
+`front.html` and the kit's `main.html` gain a pointer-event counter (`pointerdown`, `mousedown`, `mouseup`, `click`,
+with `isTrusted`) on their button, so that the difference between `el.click()` and a pointer click is visible (gap 36).
+Kit items 15-18: a hit-test at the block's centre answers the block, its rectangle and a unique selector; a pointer
+`CLICK` on the counting element records the four events with `isTrusted: true`; a pointer into the hidden browser (what
+Chromium does with it is recorded, not asserted); no enumerable global after a hit-test (item 11's rule). `WebHostChecks`
+item 1 asserts `web.hittest` `OK` and `web.pointer` `OK` (JCEF has `INPUT`) in every launch, and a new item runs
+`web.hitTest` and `web.pointer` over both paths and compares the shapes (D48). Gap 36 closes with this section. The
+host's committed `plan/*.plan.json` are regenerated for plan version 6 by VC's script, which touches nothing else in
+that tree (§12.5).
+
+---
+
+## 5. Protocol amendments, capabilities and events
+
+**The wire stays 0.2** (D299): every change is an added primitive, an optional parameter, an optional result field, a
+capability id or an SPI method; `/schema` and `/capabilities` tell a controller what the agent has; `fromJson` of every
+answer type stays lenient; no new error code and no new topic. The additive changes to the frozen Phase 1 contract go
+through its amendment process as marked passages (P1 header; P6 §15.1) with these ids, written into P1 as "(Phase 7,
+specified 2026-10-10, not yet built; P7 §n)" when the build starts and corrected to "(Phase 7, built …; P7 §n)" after
+it; the build appends an index table "A34 onwards" to `phase1-contract-amendments.md` (id, change, where it lives: A34
+P2 §11.4, A35-A38 P4 §16, A39 P1 §6, A40-A60 P6 §12.2, A61-A66 here), since the design and this contract call that
+file the amendment process and it ends at A33 (D301, map 2 §1.4).
+
+| Id | Change | P1 passage | P7 |
+|---|---|---|---|
+| **A61** | `swing.capture`: the parameters `by`, `mode: ROBOT`, `scope`, `region`, `scale`, `redact` (default true), `annotateRefs`; the result fields `captureId`, `seq`, `mode`, `scope`, `space`, `window`, `origin`, `scale`, `windows`, `surfaces`, `marks` (geometry and labels; nothing drawn), `marksTruncated`, `carets`, `focus`, `redacted`, `redactedTruncated`, `hash`, `stackingAssumed`, `region`, and for a person's `ROBOT` capture `glass` and `unstable`; a window painted from its root pane (the built pixels on the X toolkit change: the imitation decorations go; gap 76 closed); the redaction default; the masked-text rule of §3.6 in every reader of the tree | §6 (the `swing.capture` row of the primitive table; the capture passage; the text walker's password sentence; P4 §2.5 is unchanged) | §3.1, §3.4, §3.6 |
+| **A62** | `swing.type` without `target` and `by` types at the focus owner by `swing.key`'s rule; gap 60 stated | §6 (the `swing.type` row; "Type modes") | §3.5 |
+| **A63** | the primitives `swing.hitTest`, `swing.pointer` and the read `swing.rendering`; the capability ids `swing.hittest`, `swing.pointer.routed`, `swing.pointer.robot`, `swing.capture.robot`, `swing.capture.screen`; "Modal blocking" covers the pointer (per event, §3.3); "Click rungs": the `ROBOT` sentence names `swing.pointer` | §5 (the catalogue), §6 (three rows; "Click rungs"; "Modal blocking"; "Capabilities") | §3.2-§3.4, §3.8, §3.9 |
+| **A64** | the SPIs `RegionResolver`, `CaptureMask`, `SurfaceSource`; `LocatorResolver.describe` | §4 (the SPI table) | §3.6, §3.7 |
+| **A65** | the agent option `robot` | §2.4 (the options table) | §3.4, §3.9 |
+| **A66** | `WebBrowser.dispatchPointer`, `WebPointerEvent`, `WebCapability.INPUT` built; `web.hitTest`, `web.pointer` as built; the library's version 2 and its install rule | P4 §3, §4.2, §4.4, §4.6, §5.2 (P4 is marked, as A37 was) | §4 |
+
+**Capabilities Phase 7 adds or changes**, for the goldens and `requires:`:
+
+| Id | Side | Phase 7 state |
+|---|---|---|
+| `swing.hittest`, `swing.pointer.routed`, `swing.capture.screen` | agent, Swing | follow AWT's state (`OK` on the desk in every load mode) |
+| `swing.pointer.robot`, `swing.capture.robot` | agent, Swing | `UNAVAILABLE("robot: not enabled (agent option robot=true)")` in every committed golden (the matrix legs do not set the option); probed only with it |
+| `swing.click.robot` | agent, Swing | unchanged sentinel |
+| `web.hittest`, `web.pointer` | agent, web | derived: `OK(jcef)` on the web host, `UNAVAILABLE("no embedded browser technology found")` on the lending desk |
+| `inference.gateway`, `inference.sql`, `inference.vision` | controller (§8.5) | merged into the run's matrix by the contributors (`inference.vision` by the vision module's contributor alone); never in a golden (the goldens are the agent's matrix) |
+
+No new event topic. The pointer and the hit-test publish nothing; the capture publishes nothing; the step protocol's
+consequence of a pointer action is the application's own events (design §2.5).
+
+---
+## 6. The controller: `skillroy-vision`
+
+### 6.1 Decision and shape (D302-D304, D353)
+
+`controller/skillroy-vision`, package `ai.skillroy.testjava.vision`, Java 25, Apache-2.0 headers, no third-party
+dependency. It holds the loop, the tiers, the two tool adapters, grounding and visual questions, the recorder, the
+scenario player, the captures directory and the contributor of `inference.vision`. It plugs into the session service through
+the `SessionTools` seam of §9.1 (one loop, one meter, one journal, one mask, one history: a second loop in this module
+is rejected, D302, for D79's reason against two implementations), into the matrix through `CapabilityContributor`
+(§8.5), and **acts only through the service's facade `SessionActions`** (D353): `execute(verb, args, provenance)` for
+the step that will be replayed, `execute(PlannedCall, provenance)` for a live-only raw call, `read` for a capture, a
+hit-test or `swing.rendering`, `complete` for a visual question, `capabilities()` for the merged matrix. The facade
+fixes the origin (`Origin.model` of the turn), runs `CallPolicy` on every call and meters and ledgers every model call;
+the module holds no `ExecutorSession`, no `AgentConnection` and no gateway. Types the build fixes:
+
+| Type | Role |
+|---|---|
+| `VisionTier { V1, V2, V3 }` | the tier of a session (§6.2) |
+| `VisionTools { TOOLSET, CUSTOM }` | the tool vocabulary of V2 and V3 (§6.3) |
+| `VisionOptions(VisionTier tier, ModelClass model, VisionTools tools, int maxActions, int maxTurns, boolean zoom)` | from the host's tool options `vision.tier`, `vision.model`, `vision.tools`, `vision.maxActions`, `vision.maxTurns`, `vision.zoom` (§9.1); defaults `V1`, `SONNET_CLASS`, `TOOLSET`, 30, 20, false; whether a capture is annotated follows the tier (V1 only, §3.1) and is no option |
+| `VisionSessionTools implements SessionTools` | the seam's implementation: tools, provider tools, instructions, `atTurnStart`, `act`, `afterBatch` |
+| `ToolAdapter` (sealed), `CustomToolAdapter`, `ComputerToolsetAdapter` | the two tool vocabularies (§6.3) |
+| `Marks` | draws the marks of a capture's `marks` geometry on the controller's copy of the raster (§3.1's style; D346) |
+| `Grounding` | capture, hit-test and the stale-capture rule (§6.4) |
+| `VisualQuestion` | one question on one capture with structured output (§6.4) |
+| `Recorder` | a model's action to the step that will be replayed (§6.5) |
+| `ScenarioPlayer` | runs a scenario with `aiAct`/`aiExpect` steps over a session (§6.8) |
+| `Captures` | the on-disk directory `captures/<sha256>.png` through `OutputFiles` (§9.6) |
+| `KeyNames` | X keysym names of the toolset (`Return`, `ctrl+s`, `alt+Tab`) to `KeyEvent.VK_` names and modifiers |
+| `VisionCapabilities implements CapabilityContributor` | `inference.vision` (§8.5) |
+
+The module's tests carry their own fake agent (`FakeVisionAgent`, canned captures from PNG fixtures with their geometry,
+canned hit-tests; the PNG fixtures are this module's) and take `ToyPack` and `FakeAgentConnection` from the
+`skillroy-scenario` test-jar (§2.1); the inference module's `FakeAgent` is not reachable and is not needed. The
+player's `ExecutorSession` and `SessionService` are opened by its host (`SessionCommand --play`, or the IT of §13.2
+item 8) and handed to it for the run; the module constructs neither (§6.8).
+
+### 6.2 The loop in interactive sessions: V1, V2, V3
+
+The loop is the session service's loop (P5 §12.4) with the vision tools added: the person's request (or the player's
+`aiAct` intent) is the turn, the model answers with tool calls, each is acted through the facade and journaled under
+`Origin.model(model, intent, requestId)`, the results go back in one `USER` message, and the turn ends with `done`,
+`ask_person`, the action limit, the budget, a tool's `endTurn` or a lost agent. What Phase 7 adds, per iteration:
+
+1. **Observe.** At the turn's start (`SessionTools.atTurnStart`, appended to the turn's first `USER` message) and
+   after every batch of actions (`SessionTools.afterBatch`, appended after the batch's results as its own blocks: the
+   image, and for V1 the marks list) the loop takes one capture: `swing.capture {scope: SCREEN, mode: PAINT, redact:
+   true, annotateRefs: <V1>}` through `actions.read`, at the size rule of §3.1, **in every tier** (never `mode: ROBOT`,
+   D341). It keeps the raster in memory with its `captureId`, `seq`, geometry and `hash` (written to the captures directory
+   as captured when a step's provenance first names it, §9.6); composites `web.bitmap` into each `WEB` surface whose `redacted` is false (§4.8);
+   and, for V1, draws the marks on its own copy (`Marks`, §3.1's style) before the image goes into the request, so that
+   `hash` names the content and the file holds no mark. V1 also reads `snapshotText` (the text snapshot of P5, which
+   BS12 RESULT finding 2 found to drop table rows and unnamed components: the marks list is what carries them) and gives
+   the model the marks list as text in a `<target-ui>` block: `mark 7: button DUE`, `mark 12: table row 3 "Garden spade
+   1 3.50"`. The capture is never attached to a tool result (`act` cannot know which call is the batch's last, and an
+   error result carries text only, BS12 RESULT "Sessions": a 400 otherwise); the toolset's own `screenshot` returns an
+   image result and the batch's `afterBatch` capture is then skipped as redundant (the loop compares `seq`). **Settle
+   before every capture**: the recorded step's own sync (`SETTLE`, or `EVENT` then settle) has run; a model's `wait` is
+   answered by `swing.settle` with a bound and never a sleep (BS12: 97 `wait` calls, none paused).
+2. **Model.** One `ModelRequest` through the service's loop (`SessionService.complete`, metered and ledgered; §10):
+   purpose `vision`, the class of `VisionOptions.model` (default `SONNET_CLASS`, `claude-sonnet-5-5`; BS12 RESULT: Opus
+   5.5 added no accuracy at twice the price; **the class `haiku`**, whatever id the settings map it to, is allowed for V1
+   only and refused for V2 and V3 at the session's start), effort `effort.vision` (default `low`; BS12: effort moved
+   neither accuracy nor output tokens), `maxTokens` 4096, `CacheHint.AUTO` (§7.4), the system parts (the service's
+   instructions, the tier's instructions from `SessionTools.instructions`, the pack's `screenLegend()` when it has one
+   (§12.3; BS12: the legend halved V2's actions), the vocabulary; the tool's instructions and the legend pass
+   `ctx.mask().text` as the vocabulary does), the tools of the tier (§6.3), the `providerTools` for V2/V3 with the
+   toolset; the meter reserved before, the ledger written after (§10).
+3. **Act.** Every tool call in order through `VisionSessionTools.act`: the adapter maps it to a grounding (§6.4) and the
+   recorder (§6.5) to a step, which `actions.execute(verb, args, provenance)` runs with the step protocol; the
+   `StepOutcome` masked and bounded is the tool result (text), an error result for a failed step. A batch stops at the
+   first failure; the skipped calls get `is_error: true` with "Not executed: an earlier action in this turn failed"
+   (vision §F1).
+4. **Tiers.** `V1`: marks on the capture, the tools `click_mark`, `type`, `key`, `wait`, `capture`; the model answers
+   with a mark, which the loop grounds by a hit-test at the mark's centre (§6.4), which the recorder turns into a
+   locator; the existing rungs act. `V2`: the toolset (or the custom tools with `click_at`); a pixel, hit-tested and
+   recorded. `V3`: `V2` acting through Robot: every click, drag and wheel runs as `pointer {…, via: ROBOT}` with
+   `requireFocus: true` (§3.4); **the model sees `PAINT` in V3 as in every tier** (D341); the keyboard goes the routed way
+   after the focus rule of §3.4, and when the target JVM holds no focused window the tool answers with `endTurn:
+   QUESTION` ("the target lost the focus; bring it to the front and ask again"); allowed only with `SessionOptions.robot`,
+   which the host validates against the tier **before it constructs the service** (a usage error at start, never a
+   silent downgrade; `applies` never sees that case).
+5. **Limits.** `maxActions` UI actions and `maxTurns` model turns per session (defaults 30 and 20; §10), **counted and
+   enforced by the service** while a tool applies (`Outcome.step` for actions; every model call, the loop's own and a
+   tool's `complete`, for turns), the service's `maxActionsPerTurn` (10) per turn, the session budget; at a limit the
+   service ends the turn `LIMIT` and closes the vision tools for the session (`tools()` lists none afterwards, the
+   model is told why), as the budget does.
+
+What the loop never does: run in `replay` (the tools are not loaded there: `SessionTools.applies` is false without a
+gateway, and a `replay` run has none); sleep; act around the facade; send a capture of the glass or an unredacted
+capture; offer a model a credential (D342: no secret slot reference resolves from a model's call, and no `type` runs
+while a secret is in flight, §6.5, §9.2); type into, press a key at or click a masked component (D358); let the model
+confirm anything (`confirm` is stripped from a `MODEL` origin, D158); offer `data_query`, `hook.*`, `rule.*`, `agent.*`
+or a destructive primitive (`CallPolicy`, unchanged); offer an acting tool under a read-only policy (§6.3).
+
+### 6.3 The tool adapters
+
+**The provider-neutral custom tools** (strict `ToolSpec`s through `ToolProjection.strict`, names `[a-z0-9_]`; B7's
+neutrality; the only form that can offer a click by ref):
+
+| Tool | Input | Maps to |
+|---|---|---|
+| `capture` | `{}` | a fresh `PAINT` capture (§6.2 step 1), annotated in V1 (the tier's rule, no argument); there is no mode (D341) |
+| `click_mark` | `{mark: integer, button?, count?}` | V1: a hit-test at the centre of the mark's rectangle in the capture's space (`swing.hitTest {point, space: {captureId}}`, which yields the component, a table's row or a region, §3.2); the recorder's locator path (§6.5) |
+| `click_ref` | `{ref: string, button?, count?}` | a ref from the text snapshot: `swing.hitTest {target: ref}` (its centre); the same path |
+| `click_at` | `{x: integer, y: integer, button?: left \| middle \| right, count?: 1 \| 2 \| 3}` | V2/V3: a pixel of the last capture; grounding, then the recorder |
+| `drag` | `{x1, y1, x2, y2}` | `pointer {action: DRAG}` with fractions of the hit component |
+| `scroll` | `{x, y, direction: up \| down \| left \| right, amount: integer}` | `pointer {action: WHEEL}` at the point (left/right as a horizontal wheel is not supported by `swing.pointer`: refused as text) |
+| `type` | `{text: string, enter?: boolean}` | `type {by: <focus owner's locator>, text, enter}` (§6.5); refused when the focus owner is masked, when the text names or contains a secret, or while a secret is in flight (D342, D358) |
+| `key` | `{key: string, modifiers?: [string]}` | `press {key, modifiers}` at the focus owner; refused when the focus owner is masked (D358) |
+| `wait` | `{}` | `swing.settle` with the step timeout; the result says settled or not |
+| `skillroy_look` | `{question: string}` | a visual question on the last capture (§6.4): a read, no step, journaled as a `note` with the verdict |
+
+V1 offers `capture`, `click_mark`, `type`, `key`, `wait` and the session's `skillroy_*`, `done`, `ask_person`; V2 with
+the custom adapter adds `click_at`, `drag`, `scroll`, `click_ref`. **Under a read-only policy, or one that offers no
+verbs** (`SessionPolicy.readOnly()`, `offersVerbs()`), the module offers `capture`, `wait` and `skillroy_look` only
+(and the toolset's `screenshot`, `zoom`, `wait`); the acting tools are listed as withheld in the instructions, so that
+the model is not left to find the read-only refusal one call at a time. The marks list and the text snapshot tell the
+model what a mark is; it is asked to answer with a mark wherever one exists (BS12: Haiku 5.5 wrote `click(x, y)` as
+text in 20 of 144 custom-tool calls and never with a mark tool beside an image, which is one reason Haiku is V1-only).
+
+**The Claude computer toolset** (`ComputerToolsetAdapter`; V2 and V3 by default, the custom adapter by the option
+`vision.tools: custom`): one `ProviderTool("claude", "computer_toolset_20260801", {configs: {zoom: {enabled:
+<vision.zoom>}}})` in the request's `providerTools` (§7.1); `zoom` off by default (never called in 828 toolset calls,
+411 tokens a request; BS12 RESULT "Sessions"). Member calls arrive as `ToolUse` parts named by the member with
+`toolsetName: "computer"`; every result echoes it (§7.2). The mapping (vision §R1):
+
+| Member | Action |
+|---|---|
+| `screenshot` | a capture (§6.2), returned as an image result |
+| `zoom {region}` | the rectangle, in the capture's space, is mapped through the capture's geometry to the topmost window of the JVM at the rectangle's centre (the stacking order of §3.1), clipped to that window, and captured as `swing.capture {target: <that window>, scope: REGION, region: <rect in the window's space>, scale: <fit the usual size>}`, an image result; a rectangle outside every window is refused as text; coordinates stay the full capture's (vision §F2) |
+| `left_click`, `right_click`, `middle_click`, `double_click`, `triple_click {coordinate?, text?}` | `click_at` with the button and count; without a coordinate the adapter's cursor position; `text` (modifier keys) to `modifiers` |
+| `left_click_drag {start_coordinate, coordinate}` | `drag` |
+| `mouse_move {coordinate}` | V2: `pointer {action: MOVE}` through the routed path (live-only; never recorded as a step, §6.5) and the adapter's cursor; V3: the adapter's cursor only (a Robot `MOVE` would move the person's pointer for nothing) |
+| `left_mouse_down`, `left_mouse_up` | V2: `pointer {action: PRESS \| RELEASE}` at the cursor through the routed path (live-only); **V3: answered as text "not supported in V3; use left_click_drag"** (D343: a Robot press is never left held; a `mouse_move` with a button held cannot arise) |
+| `scroll {scroll_direction, scroll_amount, coordinate?}` | `scroll` |
+| `type {text}` | `type` at the focus owner, with `type`'s refusals |
+| `key {text, repeat?}` | `press`, the name translated by `KeyNames` (X keysyms: `Return`, `Escape`, `Tab`, `BackSpace`, `Delete`, `Up`…, `F1`…, letters and digits; combinations `ctrl+s`, `alt+Tab`, `shift+Tab`), repeated `repeat` times (at most 100), with `key`'s refusal |
+| `hold_key`, `cursor_position` | `hold_key` is refused as text ("not supported"); `cursor_position` answered from the adapter's state |
+| `wait {duration}` | `wait` (the settle; the duration is ignored and said so in the result) |
+
+Coordinates are pixels of the capture the model last saw (vision §F2), which the adapter maps back through the
+capture's `captureId` in `swing.hitTest {space: {captureId}}`. An image in a toolset result must fit the model's
+limits unscaled (the size rule of §3.1 keeps it at or under 1920 pixels, below the high-resolution tier's 2576; vision
+§F2).
+
+### 6.4 Grounding, the stale-capture rule, visual questions
+
+**Grounding** of a pixel `(x, y)` of capture `C`: `swing.hitTest {point, space: {captureId: C}}` (§3.2) before anything
+acts; a V1 mark is grounded the same way at the centre of its `rect` (so a table-row mark yields the table **and its
+`row`**, a region mark the pad **and its `region`**; the target form of the hit-test is used for the focus owner and
+for `click_ref` only). **The stale-capture rule** (D305; design §3.10 step 1 as BS12 RESULT finding 4 refined it): when
+the events since `C.seq` hold a `window.opened` or `window.closed` (the set of windows changed; read through
+`eventsSince`), the loop takes a fresh capture `C'` and hit-tests the same point on `C'`; it acts only when `C'`'s
+`target` is the same ref (and, for a table, the same row) as `C`'s, else it answers the model with an error result "the
+screen changed since that capture" and attaches `C'`. **What closes the window between the hit-test and the act**: for
+the recorded step it is the verb's own exact-match locator (a `click` or `pointer` by a locator that no longer matches
+exactly one component fails `NOT_FOUND`/`AMBIGUOUS`; a locator that matches exactly one *other* component after a
+window change is the residual, gap 87 of §16.2); for the live-only raw `swing.pointer` calls (`mouse_move`, the V2
+button halves) and for an MCP client's call it is `expectTarget: <ref>` (§3.3), which no recorded step can carry
+(a ref is a per-start handle). A `surface: WEB` hit goes to `web.hitTest {space: COMPONENT}` (§4.8); `HEAVYWEIGHT` or
+`NONE` cannot be grounded and is answered as text to the model.
+
+**Visual questions** (`VisualQuestion`; vision §R5): one request through `actions.complete` (purpose `vision`, metered
+and ledgered, §10) with the capture as an `Image` part, the question in a provenance block, the pack's legend, and the
+structured output schema `{verdict: "YES" | "NO" | "UNSURE", evidence: [{mark?: integer, box?: [x0, y0, x1, y1]}],
+explanation: string}` (no numeric bounds in the schema, vision §F5); `UNSURE` is a result. The question's block says
+whose words they are: `<person>` for an `aiExpect` (the scenario author's) and **`<model-question>`** for the session
+tool `skillroy_look {question}` (the model's own text, which screen content may have steered; `PromptMask.LABELS` gains
+the label and it is declared data like the others, P5 §6.2). `skillroy_look` is a read with no step, journaled as a
+`note` with the verdict and the capture's hash, never a check that holds. The verdict is advisory: in a scenario it
+stands behind the guard `inference.vision` (§8.4), and it never turns a failing scenario green.
+
+### 6.5 The recorder: from a model's action to the step that will be replayed (D306-D308, D342, D357, D358)
+
+For one grounded action on `target` with hit-test result `H` (vision §R3; design §3.10 "Record once"):
+
+1. **Choose the locator**: the first of `H.locators` (domain strategy first, then `id`, `name`, `text`, `class`, `path`;
+   each already checked to match exactly one component, §3.2). A locator whose value is text the session's mask would
+   change (`by: {text: …}` equal to a joined credential) is never chosen (the export would refuse it, P5 §12.3).
+2. **Refuse what a model never does** (checked before any step is built):
+   - a target the hit-test reports **`masked`** (a password field, a component a `CaptureMask` names, §3.2): no `click`,
+     no `pointer`, no `type`, no `press` and no toolset `key` at it, with the text "the component takes a secret; ask the
+     person to sign on" (D358). The sample's mask names the number pad while the entry field is
+     masked (§12.2), so digits cannot be spelled into a secret by region clicks either;
+   - a `type` whose text names a secret slot reference (`$<slot>.<key>` where the session's credential joins hold
+     `key`), or **any step, a pack verb's included, whose compiled calls would reference a credential join's secret
+     field** (`ExecutorSession` refuses both for every origin but a person's before anything is journaled or sent, §9.2:
+     a model never signs on with a person's credential), or a `type` whose text contains a secret value the session's
+     mask knows (`ctx.mask().holdsSecret(text)`), or any `type`, printable `press` or raw `swing.type` **while the
+     session holds a secret in flight** (`actions.secretsInFlight()`, §9.2: a credential a person resolved in the
+     session and no person's step has consumed yet): "a credential is never used on a model's behalf; the person signs
+     on first" (D342). Sign-on is a person's or the player's `signOn` step before the loop (§6.8, §11).
+3. **Choose the step** (the roles are `Roles.ALL`'s, the closed set the agent reports: `window, dialog, panel, button,
+   toggle, checkbox, radio, textbox, password, label, combobox, list, table, tree, tab, menu, menuitem, scrollpane, text,
+   unknown`):
+   - a click on a component whose position does not matter: `H.target`'s role is `button`, `toggle`, `checkbox`,
+     `radio` or `menuitem`, or `H.fires` is true (a registered `ActionFirer` accepts it, §3.2), or the chosen locator is
+     a `describe` strategy → the base verb `click {by: <locator>, rung?}`: the session's `ui.clickRung` (ACTION unless the
+     session's `UiSettings` say COMPONENT, then with `fallback: ACTION` as `basic-loan-ui.yaml` does; map 7 Q5), `await`
+     none;
+   - a click where the position inside the component matters: the role is `textbox`, `text`, `table` (with `H.row`),
+     `list` (with `H.row`), `tree`, `combobox`, `scrollpane`, `tab` (which tab depends on the point), `menu`, `label`,
+     `panel`, `window`, `dialog` or `unknown` (every role of the set but the five above and `password`, which is always
+     masked), or `H.target`'s class is `javax.swing.JSlider`, `JSpinner` or `JScrollBar`, or `H.region` is set →
+     `pointer {by: <locator>, region?: <H.region.id>, row?: <H.row>, at: {fx, fy}}` (the point as fractions of the
+     component's, the row's or the region's bounds; no pixel stored); a `double_click`, `drag`, `scroll` likewise with
+     their action;
+   - a click on a component with no locator and no region, or on a `HEAVYWEIGHT` surface → `pointer {by: <the window's
+     locator>, at: {fx, fy}, guard: <label>}`: an **anchored** step (D357). The recorder takes the anchor **with the
+     guard's own call** through `actions.read`: `swing.capture {target: <the window>, scope: REGION, region: <the 64 x 64
+     rectangle around the point, clipped to the window>, redact: true}` (the root pane's paint, §3.1, so the anchor and
+     the guard's capture at replay are the same paint), writes the raster as `captures/<hash>.png` (§9.6), reads
+     `swing.rendering` once per session (cached; `renderKey`, the `rendering` object), takes the crop's `redacted`
+     rectangles, `carets` and `focus` from that capture's result and the window's size and insets, and keeps all of it
+     under the label `anchor-s<n>` for the provenance and the export (§6.6, §8.7);
+     the step replays only when the crop still matches (§6.7);
+   - `type` → `type {by: <the focus owner's locator>, text, enter?}` with the focus owner described through
+     `swing.hitTest {target: <focus owner ref>}` (§3.2); no focus owner → an error result "nothing has the focus; click
+     into a field first";
+   - `key` → `press {key, modifiers?}` (the focus owner, by `swing.key`'s rule);
+   - `wait`, `screenshot`, `zoom`, `cursor_position`, `skillroy_look` → no step; in V2 `mouse_move`, `left_mouse_down`
+     and `left_mouse_up` run as raw routed `swing.pointer` calls through `actions.execute(PlannedCall, null)`
+     (live-only, so the model can hover or drag by halves) and are journaled as raw steps the export leaves out; in V3
+     the two button halves are refused as text (D343) and `mouse_move` moves the adapter's cursor only;
+   - V3 → every click, drag and scroll runs as `pointer {…, via: ROBOT}` (the facade sets `via`, never the model, D347):
+     journaled with `via: ROBOT`, **listed as live-only in the export and never exported as a step** (its `requires`
+     would name `swing.pointer.robot`, which no CI target has).
+4. **Act through that step**: `actions.execute(verb, args, provenance)` (the facade passes `Origin.model(model, intent,
+   requestId)` and the provenance into `ExecutorSession.execute(verb, args, origin, provenance)`, §9.2), the verb's own
+   sync (`click`, `type`, `press`, `pointer` compile to `SETTLE`); the consequence observed while recording is the
+   consequence of the recorded step, so a difference between "clicked the pixel" and "fired the component" shows in
+   front of a person (design §3.10 step 3). A `web` hit → `webClick {browser?, role, name}` when `web.hitTest`'s `{role,
+   name}` locator is unique, else a raw `web.pointer` call (live-only).
+5. **The provenance** handed in with the act (§9.2): tier, via, the intent (masked, bounded), the model and request id,
+   the capture's hash, size, `seq`, `origin`, `windows` and file, the point, the hit-test's ref, name, class, locator,
+   fractions, region and row, the mark, and for an anchored step the `anchor` object (label, rectangle, hash, file,
+   `renderKey`, `rendering`, window, and the crop's `masks`, `carets` and `focus`, which the export's entry needs, §6.6).
+6. **Export** (§6.6).
+
+### 6.6 Export into ordinary steps (D309, D355, D356)
+
+A step with provenance exports as the verb step it was journaled as (P5 §12.3 rule 1 unchanged), followed on its line
+by one masked comment through `YamlStep.comment` (`JournalExport`'s private record): `# aiAct "<intent, cut at 80>" by
+<model>: <role> "<name>" (<class>)`. **The comment carries no capture hash, no handle and no mark number** (D356): the
+hash differs between the Java lines (BS11: the JDK line changes the desk's pixels) and between two runs on one Java (the
+caret's blink phase), and a handle is a per-start counter, so a committed export that carried them could never be
+compared byte for byte (§13.2 item 8). Those go into the report, which gains the section **"Vision-derived steps: review
+the locator and the rung"** with one line per such step (as D86's observed expectations: the step, the capture's hash
+and file, the hit-test's ref, the mark, the point). V3 steps, raw `swing.pointer`/`web.pointer` calls and the loop's
+reads are left out of the steps and listed under **"Live-only"** in the report with the reason. `requires` follows the
+exported calls' primitives as today (`click` by locator requires nothing new; `pointer` requires `swing.pointer.routed`).
+
+**Anchors.** The export writes the `images` section of an anchored step into its own `BindingsFile` (version 2, §8.7:
+the entry from the provenance's `anchor` object: `sha256`, `width`, `height`, `masks`, `carets`, `focus`, `rendering`,
+`window`, `anchor {x, y}`, keyed by the provenance's `renderKey`), and `ExportResult.images()` (`Map<String, byte[]>`,
+label to the masked PNG read from `captures/<hash>.png`) hands the pixels to the export's caller to place under
+`<scenarioId>.images/` beside the file; a `JournalExport` reads the file through `ExportOptions.captures` (the session's
+output directory; the journal read back from its file exports the same, P5 §12.3's rule). An anchored step whose
+capture file is absent (a session without `--out`) is an `ExportException` naming the step, listed in the report. The
+export's PNGs are reviewed like its YAML (threat model §3). The committed example is the sample's
+`exported/session-vision-loan.yaml` (§12.4), generated by §13.2 item 8 under `-Dskillroy.inference.fixtures.update=true`
+on one named leg (VM's report says which; the Java 25 arm64 leg by default), as `SessionExportTest` generates the Phase 5
+export; `HeadlessDesk` cannot produce it (it answers no `swing.*` method).
+
+### 6.7 Pixel-anchored replay, the image guard, `expectImage` and the comparison (D313-D315, D357)
+
+**The comparison** lives in `skillroy-scenario` (`…scenario.image.ImageCompare`), not in the vision module, because
+`replay` must run an anchored step and an `expectImage` without the module (D313; design §3.10 placed "image comparison"
+in `skillroy-vision`, which this contract amends: the module keeps grounding, marks and visual questions, the base
+keeps the deterministic compare). It compares decoded ARGB rasters **exactly** (BS11 RESULT "Tolerance study": within
+one rendering key the measured noise is zero and no tolerance separates environment noise from a one-character change,
+28 to 50 pixels): both images must have the same size; the masks (the baseline's mask rectangles, the union of the
+baseline's recorded `carets` and the current capture's `carets`, and, when the baseline's recorded `focus.owner`
+locator and the current capture's `focus.ownerLocator` differ, both focus owners' rectangles (the entry's
+`focus.ownerRect` and the capture's `focus.ownerRect`, image coordinates), said so in the result) are blanked on both
+sides; the raster hashes (`ImageCompare.rasterHash`, the byte layout of §3.1, one test vector shared with
+the agent's tests) are compared; equal hashes hold; otherwise the differing pixels are counted, and the check holds only
+when the count is at most `maxDiffPixels` (default 0, the one explicit margin). The result `{equal, differing,
+maxChannelDelta, box, maskedPixels, focusMasked}` goes into the run log and the detail; on a mismatch both PNGs go to
+`failure/image-<label>-expected.png` and `…-actual.png`, and a diff image `…-diff.png` (red above 32 in a channel,
+orange below, grey equal), bytes never in a text route.
+
+**One code path for both hosts** (`…scenario.image.ImageSteps`, package-level): the capture call, the lookup of the
+label's entry by the current `renderKey` (`swing.rendering` read once per run, cached, a read allowed after the start
+mark), the compare, the files and the run-log record. `PlanExecutor` runs it for an `ImageCheck` **with the step's own
+capture call result handed to the check** (checks today read facts and rows; this one reads the step's call), and for a
+guarded `pointer` call before the pointer call; `ExecutorSession` exposes it to the player as `expectImage(Plan.Step
+step, Origin origin)` and runs a guarded `pointer` step through it too; the session's `expectNow` is unchanged (it still
+evaluates `Expectation`s only).
+
+**An anchored `pointer` step** (`Plan.Call.guard {label}`, §8.2): before the pointer call the executor reads the entry
+of the current `renderKey` for the label (`anchor {x, y}`, `width`, `height`), takes `swing.capture {target: <the step's
+window>, scope: REGION, region: <that rectangle in the window's space>, redact: true}` (the root pane's paint, as the
+recorder did) and compares it with the entry; a match lets the pointer call run; a mismatch, or no entry for this
+rendering, is `REBIND_NEEDED` with reason `IMAGE` **in every mode, `approve` included** (an anchor is recorded by a
+session and never approved at a step: without an entry for the current key the guard's rectangle is unknown, so the
+person re-records the step through `session --play`, whose export writes the new key's entry beside the old ones) (the
+detail: `label`, both hashes, the counts, the files; the
+"recorded answer no longer fits" semantics of P2 §10, never a verdict on the application). Compared before the start
+mark? No: the capture is a read sent to the target, which D30/Q11 allows only after the start mark; an anchored step's
+guard therefore runs at its step.
+
+**`expectImage`** (§8.1): the step's one call is `swing.capture {target|by?, scope: WINDOW | COMPONENT | REGION,
+region?, redact: true}` (`clip` → `scope: REGION` with the rectangle, `region: <id>` → `scope: REGION` with the id) and
+its one check an `ImageCheck(label, masks, maxDiffPixels)` compared with the baseline of the current `renderKey`: a
+mismatch is `FAIL / ASSERTION` (the step's detail as above); no baseline for this rendering is `REBIND_NEEDED(IMAGE)`
+in `replay`; in `approve` the capture is the candidate baseline: **the person sees the capture's file** (the CLI prints
+its path and size, writing it under `candidates/` in the run's output directory first) and approves it through
+`Approver.reviewImage(ImageApproval)` (whose default delegates to the approver's `review`, so `--yes`'s `APPROVE_ALL`
+approves and a terminal-less `REJECT_ALL` rejects, the step then `REBIND_NEEDED(IMAGE, "candidate not approved")`; the
+CLI's terminal approver asks; §8.7), and the bindings file is rewritten after the steps with the new entry; in `live` a missing baseline is recorded and the check is skipped with the
+reason "no baseline for rendering <key>" (the run at best `DEGRADED`), so that a first live run can be followed by
+`approve`.
+
+### 6.8 The scenario player (D311)
+
+`ScenarioPlayer` runs a committed scenario whose plan is `inference: run` (it has `aiAct` steps) or that has `aiExpect`
+steps, over one `ExecutorSession` in `live` mode and one `SessionService` with the vision tools, **both opened by its
+host** (`SessionCommand --play`, or the IT of §13.2 item 8) with `SessionOptions.host = {"vision-session",
+"vision-tier:<tier>"}` and the person's `robot` flag and handed to the player for the run (the module constructs
+neither, §6.1): it compiles the scenario, binds its slots through
+`ExecutorSession.resolve` (the session's live engine), then for every step in order: a deterministic step (`signOn`,
+`click`, `pointer`, …) through `execute(verb, args, Origin.person(by))` with the plan's own expectations evaluated
+through `check` after it, an `expectImage` or an anchored `pointer` through the session's `expectImage` route (§6.7);
+an `aiAct {intent}` as one vision turn (§6.2) under `Origin.model`, ended by the model's `done` (the step passes), by
+`ask_person` (the player stops and asks the person at the terminal; in a non-interactive run the step fails `ASSERTION`
+"the model asked a question"), or by a limit, the budget or a tool's `endTurn` (the step fails `ENVIRONMENT`); an
+`aiExpect {question, expect}` as one visual question (§6.4) through `SessionService.visionCall` (metered, ledgered,
+§10) whose `YES`/`NO` against `expect` holds or fails `ASSERTION`, and whose `UNSURE` skips the check with the reason
+(the run at best `DEGRADED`; D317). The guard admits the check because the session's merged matrix
+(`ExecutorSession.capabilities()`) has `inference.vision OK` through its host feature (§8.5). **A step's `tier`,
+`model` and `maxActions` narrow the session's `VisionOptions` and never widen them**: a step cannot raise `maxActions`
+above the session's, pick a model class the session refuses, or ask for `V3` without `--allow-robot` on the `--play`
+command (refused at compile of the scenario's run, a usage error). Sign-on comes first: the scenario's `signOn` step
+runs under the person's origin before the first `aiAct`, so no credential is in flight when the loop starts (D342).
+The player ends with the session's export offered as the scenario's deterministic form (the `aiAct` steps replaced by
+what the model did, the `aiExpect` steps dropped and listed in the report, the anchors in the export's bindings file and
+PNGs), which is how an authored live-only scenario becomes a CI one. Reachable as `skillroy session --play
+<scenario.yaml> [--vision …] [--export <id>]` (§9.3) and as a Java API; never from `PlanExecutor`, never over MCP (a
+client authors through the planner, P5 §10, whose server has no gateway).
+
+---
+## 7. The gateway changes (`skillroy-inference`, the SPI of P5 §3)
+
+All additive, so that the committed recordings keep their fingerprints (P5 §4.2 "Determinism"): a new field enters the
+fingerprint only when it is non-null or non-empty; every older constructor is kept.
+
+### 7.1 Provider-defined tool entries (D318)
+
+```java
+/** A tool entry a provider defines and the gateway passes through unread (the Claude computer toolset); another
+ *  provider's gateway refuses it (INVALID_REQUEST). Mirrors Content.Opaque. */
+public record ProviderTool(String provider, String type, Map<String, Object> raw) { … }   // raw copied, JSON-like
+// ModelRequest gains the eleventh component List<ProviderTool> providerTools (the ten-argument constructor keeps it
+// empty); Builder.providerTool(ProviderTool); fingerprintJson adds "providerTools" when non-empty.
+// GatewayCapability gains PROVIDER_TOOLS: ClaudeGateway declares it; RecordedGateway declares it; ScriptedGateway too.
+```
+
+`ClaudeMapping.params` adds, for each `ProviderTool` of provider `claude` and type `computer_toolset_20260801`, an
+`addTool(ComputerToolset20260801)` built from `raw.configs` (per member `enabled`, `deferLoading`); another type of
+provider `claude` is passed as a raw tool union through the SDK's JSON mapper; another provider's entry is
+`INVALID_REQUEST`. `tool_choice: auto` stays (a forced choice is a 400 on the 5.5 models). The fallback header
+(`fallbacks: true`, P5 §4.1) is sent as today; whether it coexists with a toolset entry is the first live check's job
+(§13.3; map 4 T9), and the gateway drops the header for a request with a provider tool only if that check says it must
+(an "As built" note then records it).
+
+### 7.2 `toolset_name` and image parts in a tool result (D319, D320)
+
+`Content.ToolUse(id, name, input, toolsetName)` and `Content.ToolResult(toolUseId, content, error, toolsetName)` gain a
+nullable fourth component (the three-argument constructors keep it null; `Prompts.part` writes `toolsetName` only when
+non-null, so existing fingerprints stand). `ClaudeMapping.part` reads `toolset_name` from a `tool_use` block instead of
+dropping it; `block` sets `toolsetName` on both param builders ("a result that omits it is rejected", map 4 §3 item 9).
+`ToolResult.content` may be a `List<Content>` of `Text` and `Image` parts beside a text or a JSON-like value: the
+compact constructor keeps such a list as parts (every element `Text` or `Image`, else `IllegalArgumentException`), and
+**an error result with an image is refused at construction** ("an error result carries text only", BS12 RESULT
+"Sessions": a 400 otherwise). `ClaudeMapping.block` renders a parts list with `contentOfBlocks` (`Block.ofText`,
+`Block.ofImage`), an image only while `images` is on (`UNSUPPORTED` otherwise, as for a message's image part);
+`Prompts.part` renders nested parts (an image by its hash); `PromptMask.part` masks the nested texts and passes an
+image under `withImages(true)`.
+
+### 7.3 `IMAGES` on the recorded and the scripted gateway, the price row, the `vision` purpose and effort (D321, D322)
+
+`RecordedGateway.capabilities()` declares `IMAGES` and `PROVIDER_TOOLS` (a recording is keyed by a fingerprint that
+hashes the image, so it can answer; the mask still never writes bytes); **`ScriptedGateway` declares `IMAGES` too**
+(the CI route of §12.4 runs the vision loop on it, and the loop checks the gateway's capabilities before it sends an
+image); `Recording.json`/`read` round-trip the new fields; every opener that may see an image passes
+`mask.withImages(settings.images())` (the session hosts of §9 do; the contributor and the job already do). `PriceTable`
+gains `claude-haiku-5-5` at USD 0.10 / 0.50 per million tokens, cache read 0.01, with the note that the prompt-size tier
+above 100K tokens (0.50 / 2.50) is not modelled; the Haiku **class** default stays `claude-haiku-4-5` (D84 stands): the
+V1-only rule of §6.2 is stated on the class `haiku`, whatever id the settings map it to, and the `inference-live`
+profile gains a settings file (`src/test/resources/inference/inference-live.yaml`, which VM adds: `InferenceLiveIT`
+builds its settings in code today and the profile sets a system property only) that maps `models.haiku` to
+`claude-haiku-5-5`; `VisionLiveIT` reads it for §13.3 item (4). `CostLedger.Entry.purpose` gains the value `vision`;
+`InferenceSettings.DEFAULT_EFFORT` gains `vision: low` and the reader accepts the key (P5 §4.4's effort list grows by
+one; no other new key: `images` stays the one switch, still file-only). `Effort` keeps `LOW`, `MEDIUM`, `HIGH`.
+
+### 7.4 The automatic cache hint (D323)
+
+`CacheHint.AUTO`: the request's system prefix keeps its explicit breakpoint and the Claude mapping adds the top-level
+`cache_control {type: ephemeral}` the provider advances to the last cacheable block (the vendor's robust combination
+for agent loops; map 4 Q4). The loop uses it; the other purposes keep `SHORT`. Within a turn the history is append-only
+(no client-side pruning of screenshots: it invalidates later thinking blocks on the 5.5 models, vision §F4); between
+turns the Phase 5 fold applies (P5 §12.4); a 400 the fold provokes on an account under the vendor's history rule is
+recorded as a finding of §13.3 and ends the turn `QUESTION` with the provider's text, never a retry.
+
+### 7.5 Image tokens in the budget estimate (D324)
+
+`SessionService.estimate`'s fallback (when `countTokens` is not available or failed) adds `ceil(w / 28) * ceil(h / 28)`
+per `Image` part of the request, the size read from the PNG's IHDR (`Prompts.imageSize(bytes)`; a JPEG's SOF likewise);
+BS12 RESULT "Cost and tokens": a 1024 x 768 capture counts 1,039 tokens on all three models (the formula gives 1,036).
+The primary path (`countTokens`) already counts them.
+
+---
+
+## 8. The scenario side (`skillroy-scenario`, `skillroy-controller`, `skillroy-junit`, `skillroy-cli`)
+
+### 8.1 The four verbs (D310)
+
+`BaseSteps.VERBS` grows to eighteen: `call, click, type, press, dismiss, waitFor, expect, mark, webClick, webFill,
+webDispatch, webWaitFlag, webResize, webTap, aiAct, aiExpect, pointer, expectImage`; the four leave
+`PlanCompiler.LATER_VERBS` (deleted) and stay in `RESERVED_VERBS` (a pack may not take them; P2 §1). `UI_VERBS` gains
+`pointer` (`fired: false` fails the step, A29). The planner's schema (`ScenarioSchema.baseVerbs`) lists them; the
+committed-schema tests regenerate once.
+
+| Verb | Arguments (the allow-list of `BaseSteps.map`) | Compiles to | Notes |
+|---|---|---|---|
+| `aiAct` | `intent` (string, required), `tier?` (`V1 \| V2 \| V3`), `model?` (`opus \| sonnet \| haiku`), `maxActions?` (1-30) | **no call**; the plan's `inference` becomes `run` (§8.2) | in `replay` the plan is `SKIPPED` (§8.6); in every other mode `PlanExecutor` refuses it `ERROR / ENVIRONMENT` ("inference: run: run it with skillroy session --play"); the `ScenarioPlayer` runs it (§6.8), where the step's values narrow the session's and never widen them. `tier: V3` adds `swing.pointer.robot` to `requires` with a compiler note |
+| `aiExpect` | `question` (string, required), `expect?` (`YES` (default) \| `NO`) | a step with one `VisualCheck(question, expect, "inference.vision")` and no call (§8.4) | the guard is fixed: a `capability` argument is refused ("aiExpect is always guarded by inference.vision"); skipped unconditionally under `PlanExecutor` (D354), so the best outcome there is `DEGRADED` (B14) and the run is never red for it; evaluated by the player only |
+| `pointer` | exactly one of `target` (a ref, as `click` takes one) / `by` (a locator); `region?` (a region id); `row?` (a table's model row or a list's model index); `at?: {fx, fy}` (default centre); `action?` (`CLICK` default, `DOUBLE_CLICK`, `PRESS`, `RELEASE`, `MOVE`, `DRAG`, `WHEEL`); `to?: {fx, fy}`; `button?`; `modifiers?`; `clickCount?`; `wheel?: {notches}`; `steps?`; `via?` (`ROUTED` default, `ROBOT`); `guard?` (a label); `force?`; `await?`; `strict?` | `swing.pointer` with the component form of §3.3, `SETTLE`, or with `await` `EVENT` then `swing.settle` as `uiCalls` does; `via: ROBOT` adds `swing.pointer.robot` to `requires` (a compiler note) and the executor refuses the plan without `RunOptions.robot` **before `checkRequires`** (§9.2: a person's flag is checked before the target is asked, so a CI run without the flag shows "robot: not allowed; a person passes --allow-robot" and never `PRECONDITION_FAILED`; with the flag and without the agent option `checkRequires` ends `PRECONDITION_FAILED` naming `swing.pointer.robot`); `PRESS` or `RELEASE` with `via: ROBOT` is a compile error ("a Robot press is never left held", D343); `expectTarget` is no argument (a ref cannot be committed, §6.4) | a deterministic coordinate step; `guard` makes it anchored (§6.7): the call carries `guard: {label}` (§8.2) and the plan's `images` list names the label; `fired: false` fails the step |
+| `expectImage` | `label` (string `[A-Za-z0-9][A-Za-z0-9._-]{0,63}`, required, unique in the scenario); exactly one of `target` / `by`, or neither (the default window); `region?` (a region id) or `clip?: {x, y, w, h}` (not both); `mask?: [ {by: <locator>} \| {x, y, w, h} ]`; `maxDiffPixels?` (0, default, to 10000) | one `swing.capture {target|by, scope, region, redact: true}` call (sync `NONE`) and one `ImageCheck(label, masks, maxDiffPixels)` (§8.4), the check evaluated from that call's result | compared with the baseline of the current `renderKey` (§6.7, §8.7); the plan's `images` list names the label |
+
+`region` is a string everywhere in the DSL (a region id, resolved by the agent's `RegionResolver`); a rectangle in the
+DSL is `clip` or a `mask` entry (D297: on the wire `swing.capture`'s reserved `region` takes a rectangle or an id, §3.1;
+the one word with two homes, stated here once). `region` and `row` are accepted on `pointer` only, `region` on
+`expectImage` too (`click`'s rungs address a component, not a point; a region click is a `pointer`).
+
+### 8.2 `plan.json` version 6 (D325)
+
+`Plan.VERSION = 6`; the reader accepts 1 to 6 and refuses version-6 content below 6 ("'images' needs a version 6
+plan", "inference 'run' needs a version 6 plan", a `visual` or `image` check likewise, a call's `guard` likewise, the
+verbs `aiAct`, `aiExpect`, `pointer`, `expectImage` likewise). New top-level key `images: [<label>…]` (sorted; the labels
+of every `expectImage` and of every anchored `pointer`; absent when empty, as `web` is). **`Plan.Call` gains the optional
+component `guard`** (`Plan.Guard(String label)`, written as `"guard": {"label": "…"}` on the `swing.pointer` call; null
+otherwise, so no older plan changes): the executor takes the guard capture itself with the rectangle from the bindings
+entry of the current render key (§6.7). **`Plan.needsBindings()` is true when `images` is non-empty** as well as for an
+oracle or a query slot, so that a plan with a baseline alone reads, checks and writes its bindings file (§8.7).
+`inference` is derived by `Plan.inferenceOf(slots, steps)`: `run` when any step's verb is `aiAct`, else `bind` when a
+query slot's strategy names a model token, else `none`; the reader's consistency check uses the two-argument form;
+`INFERENCE_RUN` becomes public. `Check`'s JSON gains two shapes (§8.4). One regeneration of every committed plan
+(`planVersion`) and bindings file (`planHash`) in both sample scenario modules (`PlansUpToDateTest`,
+`BranchPlansUpToDateTest`, `BindingsUpToDateTest`; the web host's `plan/*.plan.json` is VC's one touch in that tree), as
+D81 did. `resolveHash` is unchanged in content, so no bindings file changes its `resolveHash`.
+
+### 8.3 `region` beside `by`
+
+Stated in §8.1: a sibling argument of `by`/`target` on `pointer` and `expectImage`, passed to the primitive as `region`
+(a string), resolved by the agent (`NOT_FOUND` with `data.region` when the component has no such region or no
+`RegionResolver` supports it, which the executor maps to `FAIL / ASSERTION` as every `NOT_FOUND` of a step call).
+P1 §6's locator grammar is unchanged (no new key inside `by`).
+
+### 8.4 Two new checks: `VisualCheck`, `ImageCheck`
+
+`sealed interface Check permits Expectation, RowCheck, VisualCheck, ImageCheck`:
+
+| Check | Record | `plan.json` | Evaluated |
+|---|---|---|---|
+| `VisualCheck` | `(String question, String expect, String capability)`, `capability` always `inference.vision` | `{visual: {question, expect}, capability: "inference.vision"}` | by the `ScenarioPlayer` (§6.8) when the merged matrix has `inference.vision OK`; **under `PlanExecutor` skipped unconditionally** ("no visual evaluator in this host", D354): the capability's state is only the reason text printed (`… capability inference.vision is UNAVAILABLE (replay)` in `replay`, `… (no vision session)` elsewhere), and a contributor that answered `OK` in a `live` run changes nothing |
+| `ImageCheck` | `(String label, List<Object> masks, int maxDiffPixels)`; the masks as written (`{by}` locators resolved at the step through `swing.find`, rectangles as given) | `{image: {label, masks, maxDiffPixels}}` | by `PlanExecutor` and the player alike through `ImageSteps` and `ImageCompare` (§6.7), **from the step's own capture call result**, against the baseline of the current `renderKey`; the `expect`-style retry does not apply (one capture, one compare) |
+
+The run log gains the record `image {step, label, renderKey, result: held | failed | missing | skipped, differing?,
+maxChannelDelta?, expected?, actual?, files?}`; the detail of a failed check carries the same fields; bytes never.
+
+### 8.5 Controller-side capabilities in the matrix: `CapabilityContributor` (D326, D327, D348, D354)
+
+```java
+package ai.skillroy.testjava.scenario;
+/** A controller-side module's capabilities, merged into the run's matrix beside the agent's (design 2.4, 3.10): found
+ *  through ServiceLoader on the pack class loader; a pure function of its context; never a model call. */
+public interface CapabilityContributor {
+    String id();                                           // "inference", "vision"
+    Map<String, Capability> capabilities(CapabilityContext ctx);
+    record CapabilityContext(InferenceSettings settings, BindMode mode, CapabilityMatrix agent, Set<String> host,
+                             DomainPack pack) {}
+}
+```
+
+Rules: every contributed id starts with `inference.` (another is `ERROR / ENVIRONMENT` naming the contributor); an
+agent that declares an id with that prefix is refused the same way (the prefix is the controller's, P2 §3.3; today
+nothing enforces it agent-side); a contributed id that an agent also declares, **or that two contributors answer**, is a
+conflict, refused likewise naming both; in `replay` every contributed id's state is forced to
+**`UNAVAILABLE(reason="replay")`** whatever the contributor answered (the reserved behaviour, design §3.10); the merged
+matrix is what `requires` is checked against, what guards read, what `capabilities.json` archives, what the base fact
+root `caps` reads (**`BaseFacts.caps(Supplier<CapabilityMatrix>)`**, the `hooks(LongSupplier)` precedent: the executor and
+the session pass their merged matrix, with a `source` per entry) and what `skillroy caps` and `skillroy_catalogue` show
+(with a `source` per entry: `agent` or `controller:<contributor id>`; `capabilities.json` keeps the wire shape of
+`/capabilities` and carries no `source`, which the matrix remembers controller-side, `CapabilityMatrix.with(contributed,
+source)`); the `capabilities` record of `run.jsonl` gains `agentHash` (**`CapabilityMatrix.hash()` of the agent's matrix
+read after step 0b**, what the "one matrix per target" check compares, D130 kept; the goldens are compared normalised as
+today, never by hash) and `contributed: [ids]`. **The merge happens once per host**: in `PlanExecutor.checkRequires`
+after step 0b and before `requires` (`host` empty); in `ExecutorSession.open` after the matrix is read, with `host` =
+**`SessionOptions.host`** (D348: a `Set<String>`, the fourteenth component, default empty, `withHost`), which the
+player's host, `SessionCommand` and `McpCommand` set to `{"vision-session", "vision-tier:<v1|v2|v3>"}` **before `open`**
+when the vision tools will apply (the conditions mirror `SessionTools.applies` without the agent half: the module is present, the tier is not
+`off`, the gateway is not `none`, `images: true`, and `v3` only with the robot flag); and in the MCP server's start for
+`skillroy_catalogue` (the same `host`). **`ExecutorSession.capabilities()`** (public) answers the merged matrix: the
+player's guard reads it, `SessionTools.applies` reads it through the facade, and `capabilities.json` is written once.
+
+| Contributor | Ids | States |
+|---|---|---|
+| `InferenceContributor` (moves its `ResolverContributor.capabilities`, which becomes a deprecated no-op default; **stops answering `inference.vision`**, which `InferenceContributorTest` pins today and the vision module's contributor owns alone; VC lands this class's `implements CapabilityContributor` and its test in step 1 as a shared file in VM's module, so that the two ids are contributed before VM lands, §13.2 item 9) | `inference.gateway`, `inference.sql` | `OK` when the settings name a gateway other than `none`, else `UNAVAILABLE("gateway none")`; `inference.sql` also `UNAVAILABLE("no allow-list")` when `ctx.pack()` declares none |
+| `VisionCapabilities` (`skillroy-vision`) | `inference.vision` | `OK(strategy = "v1" \| "v2" \| "v3", the tier read from the host's `vision-tier:` feature)` when `host` holds `vision-session`, the settings name a gateway other than `none` and `images: true`, and the agent's **`swing.capture.screen`** is `OK` (the loop's capture is the `SCREEN` composite, which implies `paint`); else `UNAVAILABLE` with the first failing reason: `"replay"`, `"no vision session"`, `"gateway none"`, `"images: false"`, `"swing.capture.screen is <state>"`; absent from the matrix when the module is not on the class path |
+
+So `requires: [inference.vision]` ends `PRECONDITION_FAILED` with the reason in every `PlanExecutor` run and a guard
+on it reads "`UNAVAILABLE (replay)`" in CI (today both read "missing", map 5 §1.7).
+
+### 8.6 The fifth status: `SKIPPED` (D328)
+
+`Status { PASS, DEGRADED, FAIL, ERROR, SKIPPED }`. A run is `SKIPPED` when its plan's `inference` is `run` and the
+mode is `replay`: decided after the plan is read and before anything is sent to the target (right after `run-start`,
+before `checkRequires`; `requireBindingsRoot` does nothing in `replay`, so no bindings file is needed for such a plan
+and `vision-live-only` has none committed, §12.4; the agent is not contacted), `failureKind` null, `message` = "not
+executed: the plan needs a model while steps run (inference: run)", `steps` empty, `run.jsonl` holding `run-start`, one
+`skipped {reason}` record, the `ledger {count: 0}` record every run writes (the zero-model-call evidence) and `run-end`
+(`status: SKIPPED`). JUnit: `<skipped message="SKIPPED: …"/>` whatever
+`degradedAs` says (`JunitXmlReporter.outcome` gains the case); the glue `Assumptions.abort(message)`
+(`ScenarioTests.report` gains the case; its `default` throw stays for any later value); the CLI counts "N skipped" in
+its summary line, `--json`'s summary gains `skipped`, and the exit code is `OK` for a skipped run (a skipped plan is not
+a failure of the build); `RunResult.status()` and `StepOutcome.status` reuse the enum (a session never produces
+`SKIPPED`). A plan compiled before version 6 can never be `run`, so no older plan changes its outcome. `FailureKind` is
+unchanged (design §3.5: no new kind).
+
+### 8.7 Baselines and anchors: the bindings file, version 2 (D329, D330, D350, D355)
+
+Image baselines (`expectImage`) and anchors (`pointer … guard`) are bindings: a recorded answer the environment
+gives, reviewed and committed beside the scenario, never in the plan (environment data), never masked after the fact
+(they hold masked pixels only). **They are reviewed code in the threat model's sense (its §3)**: a baseline shows the
+application's data as rendered, masked per component only (the password rule and the pack's `CaptureMask`), so the
+author masks with `expectImage`'s `mask` what must not be committed, and a reviewer looks at the PNG as at the YAML. The
+bindings file grows to **version 2** (`BindingsFile.VERSION = 2`; the reader accepts 1 and 2; a file without images is
+still written as version 1, so nothing committed changes until an image enters it):
+
+```json
+"images": {
+  "<label>": {
+    "<renderKey>": { "sha256": "…", "width": 420, "height": 110,
+                     "masks": [{"x":0,"y":0,"w":10,"h":10}],
+                     "carets": [{"x":12,"y":40,"w":1,"h":24}],
+                     "focus": { "owner": {"id": "entry"}, "active": true },
+                     "file": "<scenarioId>.images/<label>.<renderKey>.png",
+                     "rendering": { "jdk": {"vendor": "…", "version": "…", "specification": "25"},
+                                    "os": {"name": "Linux", "version": "…", "arch": "aarch64"},
+                                    "lookAndFeel": "…", "antialiasing": {"desktopHints": [], "property": null},
+                                    "screenScale": 1.0, "probeHash": "sha256:…" },
+                     "window": { "size": {"w": 1024, "h": 768}, "insets": {"top": 0, "left": 0} },
+                     "anchor": { "x": 412, "y": 288 } }
+  }
+}
+```
+
+`carets` and `focus` are the capture's own (`carets` as rectangles in the image's coordinates; `focus.owner` the focus
+owner's locator from the capture's `focus.ownerLocator`, null when nothing had the focus, since a ref cannot be compared
+across agent starts; `active` whether the captured window was active), which the comparison needs on the baseline's
+side (§6.7; BS11 RESULT "Proposal" 3). `rendering` is `swing.rendering`'s answer without `renderKey`, nested as §3.8
+gives it, for the reviewer only. `anchor` (anchors only) is the crop's origin in the step's target's coordinate space, so
+that the guard captures the same rectangle at replay; a baseline has none. **`file` is informative**: the reader derives
+the path from the label and the render key, requires it to resolve inside `<bindingsRoot>/<envId>/` without following a
+link, and refuses a mismatch with `ERROR / ENVIRONMENT` (a hand-edited or planted file never names a path to open). The
+PNG is written beside the file under `<bindingsRoot>/<envId>/<scenarioId>.images/`, through `OutputFiles`, with the
+masks and the carets of its capture already blanked (so the committed pixels show nothing a mask hides). **The render
+key** (D330, D350) is `swing.rendering`'s `renderKey` (§3.8): a baseline is bound to the rendering that made it, not to
+the environment's fingerprint. The fingerprint and `EnvFingerprint.VERSION` are unchanged, and no bindings file of a
+scenario without images changes when a font package or a JDK update changes pixels (the trap of vision §Risk3 and map 5
+Q6: a fingerprint that carried the rendering inputs would split every environment into one per target Java, since the
+JDK line changes 0.30 % of the desk's pixels, BS11 RESULT "Across environments"). A comparison first reads the target's
+`swing.rendering` (once per run, cached; a read, allowed after the start mark), then looks the label's entry up by
+`renderKey`: a missing entry is `REBIND_NEEDED(IMAGE, "no baseline <label> for rendering <key>")` in `replay`; a
+present one is compared exactly (§6.7). `REBIND_NEEDED`'s reasons (P2 §10) gain `IMAGE`.
+
+**The bind lifecycle** (D355), because a baseline is taken at its step, after the start mark, while the binder asks and
+writes at bind time:
+
+- `Plan.needsBindings()` is true for a plan whose `images` is non-empty (§8.2), so `Binder.start` reads the file,
+  `Binder.check` verifies **in `replay`** that every label of the plan's `images` has at least one entry (any key) and
+  reports the keys present (in `approve` and `live` the entries come at the step, so the check reports and refuses
+  nothing there), and `requireBindingsRoot` applies to `approve`;
+- a baseline is approved **at its step**: `Approver` gains `default Decision reviewImage(ImageApproval request)`
+  (`ImageApproval(scenarioId, envId, label, renderKey, Path candidate, int width, int height, ImageEntry existing)`);
+  the default delegates to `review(…)` over an `ApprovalRequest` built from the image, so the lambda constants keep
+  their stance (`APPROVE_ALL` under `--yes` approves, `REJECT_ALL` without a terminal rejects, and a rejected candidate
+  leaves the step `REBIND_NEEDED(IMAGE, "candidate not approved")`), and the CLI's terminal approver overrides it to
+  print the candidate's path and size and ask; **an anchor is never approved**: it is recorded by a session (§6.5), and
+  an anchored step without an entry for the current render key is `REBIND_NEEDED(IMAGE)` in every mode (§6.7);
+- **after the steps**, `approve` rewrites the bindings file with the new entries beside the old ones (one baseline per
+  rendering the project runs in, Playwright's practice) through the binder's `write` and `requireNoCredential`;
+- `Binder.finish` and the re-resolve job carry an existing file's `images` section forward unchanged (a slot approval or
+  a re-resolve never drops a baseline); `Binder.file(env)` takes the section from the file it read;
+- the export writes the `images` section of its anchors into its own `BindingsFile` (§6.6) and `ExportResult.images()`
+  (`Map<String, byte[]>`, label to masked PNG) hands the pixels to the caller to place beside it.
+
+### 8.8 The fingerprint and `swing.rendering`
+
+Unchanged in content (format 1; the pack's `<pack>.*` components, the protocol major, the format): the rendering
+inputs are read by `swing.rendering` and keyed per baseline (§8.7), not fingerprinted (D330). A pack that wants a
+rendering input in its fingerprint anyway may read `swing.rendering` in its `EnvFingerprinter` (a read-only
+primitive, allowed there).
+
+### 8.9 Reserved, still: `Strategy.LLM_VISION`, `UiTarget`
+
+The token `llm-vision` is parsed and refused "not in this version" by the loader, the compiler and the plan reader, as
+today; `UiTarget` is not built; `Approval`'s "tier (b) or (c)" wording stands for a later phase (D316, §1).
+
+---
+## 9. Interactive sessions
+
+### 9.1 The `SessionTools` seam of the session service and the facade `SessionActions` (D302, D347, D353)
+
+```java
+package ai.skillroy.testjava.inference.session;
+/** Tools a controller-side module adds to an interactive session's model (Phase 7: the vision module). Found through
+ *  ServiceLoader; one instance per session; called on the session's thread; reaches the session, the agent and the
+ *  model only through the facade in its context, never through an ExecutorSession or a gateway of its own. */
+public interface SessionTools extends AutoCloseable {
+    static List<SessionTools> load(ClassLoader loader) { … }           // ServiceLoader on the pack loader (Contributors.load's shape)
+    String id();                                                       // "vision"
+    boolean applies(SessionToolContext ctx);                           // false: the module stays silent in this session
+    List<ToolSpec> tools(SessionToolContext ctx);                      // custom strict tools, projected through ctx.mask()
+    List<ProviderTool> providerTools(SessionToolContext ctx);          // provider entries (the toolset), may be empty
+    String instructions(SessionToolContext ctx);                       // extra system text; null for none; masked by the service
+    boolean handles(String toolName);                                  // the names act() answers (custom and toolset members)
+    List<Content> atTurnStart(SessionToolContext ctx)
+            throws AgentLostException, InterruptedException;           // parts appended to the turn's first USER message
+    Outcome act(Content.ToolUse use, SessionToolContext ctx)
+            throws AgentLostException, InterruptedException;           // one tool call; the step it ran, if any
+    List<Content> afterBatch(SessionToolContext ctx)
+            throws AgentLostException, InterruptedException;           // parts after the batch's results (a fresh capture)
+    @Override default void close() {}
+    enum EndTurn { NONE, QUESTION, LIMIT }
+    record Outcome(Content.ToolResult result, StepOutcome step, EndTurn endTurn, String reason) {}
+    record SessionToolContext(SessionActions actions, SessionPolicy policy, PromptMask mask, InferenceSettings settings,
+                              Map<String, String> options, boolean robotAllowed, Clock clock) {}
+}
+/** The service's facade: the one way a tool reaches the session. The origin of every call is the turn's Origin.model;
+ *  CallPolicy runs on every call; every model call is metered on the session's meter and written to the ledger. */
+public interface SessionActions {
+    StepOutcome execute(String verb, Object args, Map<String, Object> provenance)
+            throws AgentLostException, InterruptedException;           // the step that will be replayed (§9.2)
+    StepOutcome execute(PlannedCall call, Map<String, Object> provenance)
+            throws AgentLostException, InterruptedException;           // a live-only raw call
+    Object read(String primitive, Map<String, Object> args)
+            throws AgentRpcException, AgentLostException, InterruptedException;   // a capture, a hit-test, swing.rendering
+    ModelResponse complete(ModelRequest request)
+            throws BudgetException, InferenceException, InterruptedException;      // SessionService.visionCall (§10)
+    CapabilityMatrix capabilities();                                   // the session's merged matrix (§8.5)
+    String snapshotText(int maxChars) throws AgentLostException, InterruptedException;
+    List<Event> eventsSince(long seq, String topics, int max);
+    boolean secretsInFlight();                                         // §9.2, D342
+}
+public record SessionExtensions(List<SessionTools> tools, Map<String, String> options) { public static SessionExtensions none() … }
+```
+
+`SessionService` gains the eighth constructor parameter `SessionExtensions` (the seven-argument one passes `none()`)
+and the public method **`visionCall(ModelRequest)`** (purpose forced to `vision`, the estimate of §7.5, the `SESSION`
+meter reserved before, the `LedgerWriter` after, a failed call recorded too, D102), which the facade's `complete` and the
+player's `aiExpect` use. At construction it asks each tool `applies(ctx)` and keeps those that do; `tools()` lists their
+tools after the projection's and before `done`/`ask_person`; the request carries their `providerTools`, their
+`instructions` as system text after the service's own (**both through `ctx.mask().text` before they enter the request**,
+as the vocabulary is, S49), and `CacheHint.AUTO` when any tool applies; the turn's first `USER` message carries every
+tool's `atTurnStart` parts; `act()` consults `handles(name)` before "there is no tool"; a tool's `Outcome.step` counts
+against `maxActionsPerTurn` when non-null; an `Outcome.endTurn` other than `NONE` ends the turn with the reason as the
+model's last result text (`QUESTION` as `ask_person` does, `LIMIT` as the action limit does); after the batch's results
+the service appends every tool's `afterBatch` parts to the same `USER` message; **the service counts and enforces
+`vision.maxActions` and `vision.maxTurns`** (§10) and at a limit ends the turn `LIMIT` and closes the vision tools for the
+rest of the session (`tools()` lists none afterwards, the model is told why); the service closes the tools with itself.
+
+**`CallPolicy` on every route** (D347, D353; D244's method: one list, every route). `CallPolicy.arguments(String
+primitive, Map<String, ?> args, boolean robotAllowed)` (the two-argument form delegates with `false`; `refusals(…)` takes
+the flag too) refuses, for a `MODEL` or `CLIENT` origin: `redact: false` on `swing.capture` ("a capture is redacted for
+a client"); `force` on `swing.pointer`, `swing.click`, `swing.type`, `swing.key` and `web.pointer` ("acting past a modal
+dialog or a covering window is a person's choice"); **`mode: ROBOT` on `swing.capture` whatever the flag** ("a capture
+of the glass is a person's evidence"); and `via: ROBOT` on `swing.pointer` unless `robotAllowed` ("robot input is a
+person's opt-in"). Who calls it, and with which flag:
+
+| Route | Call | Flag |
+|---|---|---|
+| a model's verb call in a session | `SessionService.act` through `refusals` (as today) | `false` |
+| a model's raw primitive call in a session (`allowBasePrimitives`) | **`SessionService.act`'s primitive branch** (new: it refuses, never strips; a tool error naming the primitive and the argument, never a value; nothing journaled, nothing sent) | `false` |
+| an MCP client's raw tool | **`ToolCalls.primitive`** (new; the same refusal before `execute`) | `false` |
+| an MCP client's plan (`skillroy_scenario_run`), a planner's scenario | `PlanPolicy.refusals(plan)` / `PlanPolicy.arguments` (a plan with `pointer {via: ROBOT}` or `force: true` is a person's run, as one with `confirm` is today), **and the credential rule's plan form** (D342, §9.2): a step whose arguments as written (a base verb's or a raw `call`'s, not a pack verb's own compiled references) name a field of a slot the plan declares with `credential:`, unless the slot's own `fixture` value provides that field, is refused naming the step and the slot, never a value, and nothing runs | `false` |
+| a `SessionTools`' step or raw call | **the facade `SessionActions.execute`**, before `ExecutorSession.execute`, with the turn's `Origin.model`; a refusal is the tool result's error | the host's `robotAllowed`: **the one route on which `via: ROBOT` passes**, for the vision module's V3 steps (§6.5); `mode: ROBOT` never |
+
+So `robotAllowed` lets the vision module's own V3 tools set `via` and nothing else: a model's or a client's `via: ROBOT`
+is refused on every route whatever the flags, and a glass capture is refused for them everywhere. A reviewed pack verb
+whose compiled call carries `force: true` or `redact: false` is refused for a model or a client in the same way (such a
+verb is a person's). `ExecutorSession` keeps its own origin-free gate (no `via: ROBOT` or `mode: ROBOT` without
+`SessionOptions.robot`) and adds the person-only gate on `mode: ROBOT` in `execute` (§9.2), so that the rules hold even on
+a route that forgot `CallPolicy`. The facade's `read` refuses, before `ExecutorSession.read`, everything `CallPolicy.never`
+names, `data.query`, a script primitive, `agent.*`, `hook.*`/`rule.*` beyond the three reads (`hook.health`,
+`hook.events`, `rule.list`), every mutating or destructive primitive, and a `swing.capture` with `mode: ROBOT` or
+`redact: false`; `ExecutorSession.read` holds the same list locally (§9.2: `read` has no origin, so a person's glass or
+unredacted capture is an `execute` under a `PERSON` origin or the CLI's `call`, never a `read`), one rule for later
+callers.
+
+The hosts load the tools with `SessionTools.load(ClassLoader)` (`ServiceLoader`, the pack loader) and pass the options
+from their flags: `vision.tier` (`v1 | v2 | v3 | off`), `vision.model`, `vision.tools` (`toolset | custom`),
+`vision.zoom`, `vision.maxActions`, `vision.maxTurns`. `applies` is false when `vision.tier` is `off`, when the
+settings' gateway is `none` or `images` is false (the host reports why in its start-up line), or when the agent's
+`swing.capture.screen` is not `OK` (`ctx.actions().capabilities()`); **`v3` without the robot flag is a usage error of
+the host before it constructs the service** (never a silent downgrade, which a false `applies` would be). The default
+tier when the flag is absent: `v1` when the module is present, the gateway named and `images: true`; `off` otherwise.
+The host sets `SessionOptions.host` from the same conditions before it opens the session (§8.5). Under a read-only
+policy, or one that offers no verbs, the module offers reads only (§6.3); a step a tool ran anyway meets
+`ExecutorSession`'s read-only refusal.
+
+### 9.2 `ExecutorSession`: `read`, the four-argument `execute`, the credential rule, the opt-ins, `host` (D308, D331, D332, D341, D342, D348, D351)
+
+- **`public Object read(String primitive, Map<String, Object> args) throws AgentRpcException, AgentLostException,
+  InterruptedException`**: one bounded read (`READ_TIMEOUT_MS`, 10 s, or the primitive's own timeout when longer,
+  capped at 120 s) of a primitive the catalogue lists as not mutating and not `script` and that is not on the session's
+  own exclusion list (`data.query`, `agent.*`, `hook.*`/`rule.*` beyond the three reads, anything destructive, and a
+  `swing.capture` with `mode: ROBOT` or `redact: false`, since `read` has no origin; `IllegalArgumentException`); **masked** (every text value through the session's secret mask, **except an image
+  result's `base64` entry**, the `Images` shape rule: its pixels the agent redacted, its `hash` the loop verifies, and
+  the entry never reaches a text route; a mask applied to the base64 would corrupt the image where a short secret
+  happens to occur in it, B19's lowered `masking.minLengthInText`); **not journaled** (as `snapshotText`, `eventsSince`
+  and `fact` are not): the loop's captures and hit-tests are observations whose hashes the acted step's provenance
+  records; **the agent's error is thrown**, not swallowed: `AgentRpcException` with the code, the message and `data`
+  (the loop needs `NOT_FOUND` with `reason: outside` and `INVALID_PARAMS` for an expired `captureId`), `AgentLostException`
+  when the agent is lost (the private `read` of today answers null on an error; the public one does not). The MCP server
+  and the CLI keep their own routes for a client's reads.
+- **`public StepOutcome execute(String verb, Object args, Origin origin, Map<String, Object> provenance)`** and
+  **`execute(PlannedCall call, Origin origin, Map<String, Object> provenance)`** (D351): the three-argument forms pass
+  null; the private `run` both forms share writes the provenance (masked, `intent` cut at 500 characters) into the
+  step's `StepEntry` when it is non-null, so that the journal holds it on the step's own line (the journal is
+  append-only and `finish` writes the entry inside `execute`; nothing can be added to it afterwards). What a tool passed
+  in is what the journal holds; `SessionTools.Outcome` carries no provenance of its own.
+- **`StepJournal.StepEntry`** gains the eighth component `Map<String, Object> provenance` (null for a step no vision
+  tool chose; the seven-argument constructor keeps it null; `toJson` writes `provenance` only when present; `fromJson`
+  reads it back, so the read-back equality test covers it). The keys, all optional but `tier`: `tier` (`V1 | V2 |
+  V3`), `via` (`ROUTED | ROBOT`), `intent` (masked, at most 500 characters), `model`, `requestId`, `capture {hash,
+  width, height, seq, space, origin, windows, file?}`, `point {x, y}` (image coordinates), `hitTest {ref, name?,
+  className?, role?, locator, relative {fx, fy}, region?, row?, mark?}`, `anchor {label, rect, sha256, file, renderKey,
+  rendering, window}` (an anchored step, §6.5), `verdict {verdict, explanation}` (for a visual question's note). No
+  bytes (the appender elides them anyway), no secret beyond what `origin.intent` already carries. The model id and the
+  request id stay in `origin` as well (one source, D80); **cost stays in the ledger**, found by `requestId`
+  (`cost-ledger.jsonl`, `inference.jsonl`; P5 §12.3 as built); design §3.4's "(intent, model, request id, tokens,
+  cost)" is amended to say so (D331).
+- **The credential rule** (D342): the mechanisms, the first two in `ExecutorSession` and the plan form in `PlanPolicy`,
+  so that every route meets them:
+  1. both `execute` forms refuse, **for every origin but `PERSON`**, a step whose arguments as given name a secret field
+     of a credential join (`$<slot>.<key>` where `joins.get(slot)` holds `key`), **and a step whose compiled calls would
+     reference such a field** (a pack verb given a credential-joined slot: `signOn {staff: $assistant}` from a model or a
+     client), the first before anything is compiled, the second on the compiled calls, both before anything is journaled
+     or sent (`ERROR / ENVIRONMENT` in the read-only refusal's shape: "a credential is never used on a model's or a
+     client's behalf; the person signs on first"); a person's verb joins the password inside the verb as today (D94), so
+     a model never signs on with a person's credential and no dead end follows (only a person's step consumes a secret,
+     and the person is at hand); the session's vocabulary (`SessionService.vocabulary()`, VM's first commit, §12.5) stops
+     telling the model that a `$reference` names a resolved slot's secret field (it names the non-secret fields only).
+     **The plan form of the same rule**: `PlanPolicy.refusals(plan)` refuses, for a client's scenario
+     (`skillroy_scenario_run` under the mutating server, the planner's server), a step whose arguments as written (a base
+     verb's or a raw `call`'s, not a pack verb's own compiled references) name a field of a slot the plan declares with
+     `credential:`, unless the slot's own `fixture` value provides that field; the refusal names the step and the slot,
+     never a value, and nothing runs (§9.1, §9.4): such a run goes through `PlanExecutor` with the operator's
+     credentials and meets none of the session-side mechanisms, and a `swing_capture` read would otherwise carry what the
+     step typed as pixels;
+  2. **`secretsInFlight()`**: true from the moment a credential join resolves a secret into the session's bindings (a
+     person's `resolve` of a credential slot) until a step of a `PERSON` origin has consumed every such reference (its
+     compiled calls referenced the slot's secret field); while it is true, `execute` refuses, for every origin but
+     `PERSON`, every `type`, every printable `press` and every raw `swing.type`/`swing.key` ("a credential is in flight;
+     the person signs on first"), and the facade and the recorder refuse the same before the call is built (§6.5);
+  3. a `type` whose text contains a secret value the session's mask knows (`PromptMask.holdsSecret(text)`) is refused by
+     the facade and the recorder (§6.5).
+  Sign-on in a vision session therefore runs through the `signOn` verb's credential join **by the person** (the REPL
+  step before `ask`, under `Origin.person`) **or by the player** (the scenario's `signOn` step before the first `aiAct`,
+  §6.8), never on a model's or a client's call; §11 rule 6 and the threat model's §5 state it.
+- **`SessionOptions.robot`** and **`RunOptions.robot`** (boolean, default false; the thirteenth component of each
+  record, after `observer`; the older constructors and `withRobot(boolean)` keep every caller): the controller half of
+  the double opt-in (§3.4), set by a person's flag only; journaled in `session-start.options` (beside the host's
+  `vision.*` tool options and `host`) and recorded in `run-start`. The private `run` both `execute` forms share refuses a
+  call with `via: ROBOT` or `mode: ROBOT` before it is sent when the option is false (`ERROR / ENVIRONMENT`, the
+  read-only refusal's shape), **and refuses `mode: ROBOT` for every origin but `PERSON` whatever the option** (D341);
+  `PlanExecutor` refuses a plan with such calls before `checkRequires` (§8.1).
+- **`SessionOptions.host`** (`Set<String>`, default empty; the fourteenth component, `withHost`; D348): the features the
+  host declares to the capability merge of `open` (§8.5), `"vision-session"` among them; journaled in
+  `session-start.options`. **`public CapabilityMatrix capabilities()`** answers the merged matrix after `open`.
+
+### 9.3 The CLI (`skillroy session`, `run`, `mcp`, `caps`)
+
+| Command | Addition |
+|---|---|
+| `session` | `--vision v1 \| v2 \| v3 \| off` (the tier; default as §9.1), `--vision-model opus \| sonnet \| haiku`, `--vision-tools toolset \| custom`, `--allow-robot` (sets `SessionOptions.robot`; required for `--vision v3`, else a usage error before the session opens), `--play <scenario.yaml>` (the `ScenarioPlayer`, §6.8; with `--export <id>` the result is written as `export` does, PNGs beside; without `--play` the REPL as today); the command `ask` is the one interactive form (no separate `act`, D333); `SessionOptions.host` set from the flags and the module's presence (§8.5); the start-up line names the vision tier and why it is off when it is |
+| `run` | `--allow-robot` (sets `RunOptions.robot`); in `--mode approve` the image approvals of §8.7 (the candidate's path and size printed, `--yes` approves); the summary line counts `skipped`; `--json` gains `skipped` and, per result, `skipped: true` with the reason |
+| `call` | `--allow-robot` beside `--confirm` (VC): the raw command sends its arguments to the agent through the client with no `ExecutorSession` and no `CallPolicy`, so without the flag `CallCommand` refuses `via: ROBOT` and `mode: ROBOT` in the arguments before anything is sent; with it the person's typed argument is the second half of the opt-in (§3.4, §11) |
+| `mcp` | `--vision v1 \| v2 \| v3` (the tier of `skillroy_session_ask`'s actor; default `off` unless given), `--allow-robot` (`ServerOptions.robot`; required for `v3`; enables V3 inside `skillroy_session_ask` and nothing else, §9.4); the help says captures reach the client only under `images: true` (unchanged, D159) |
+| `caps` | a `source` column (`agent`, `controller:inference`, `controller:vision`) and the merged matrix when a pack and settings are given (`--pack`, `--inference`), the agent's alone otherwise |
+| JUnit glue | the property `skillroy.robot` (`true` sets `RunOptions.robot`; the glue prints one warning line naming both halves of the opt-in whenever it is true, since a property can sit in a committed build file); `SKIPPED` as `Assumptions.abort` (§8.6) |
+
+Exit codes unchanged (`Exit`); a skipped run is `OK`.
+
+### 9.4 The MCP server
+
+`ServerOptions` gains `vision` (`Map<String, String>` tool options) and `robot` (boolean); the actor factory of
+`skillroy_session_ask` opens the session with `SessionOptions.host` from `--vision` (§8.5) and the service with
+`SessionExtensions` from `SessionTools.load(loader)` and the options; **`--allow-robot` enables V3 inside
+`skillroy_session_ask` and nothing else**: a client's raw `swing_pointer {via: ROBOT}` and `swing_capture {mode:
+ROBOT}` are refused whatever the flag (D347, D341). **`ToolCalls.primitive` calls `CallPolicy.arguments(primitive, args,
+false)`** and refuses, never strips, `redact: false`, `force`, `via: ROBOT` and `mode: ROBOT` (a tool error naming the
+primitive and the argument, before `execute`). The raw tool names follow the server's snake-case rule:
+`swing_hit_test`, `swing_rendering` and `web_hit_test` are reads (offered under the default read-only server, as
+`swing_capture` is), `swing_pointer` and `web_pointer` are mutating (under `--mutating`); `ToolListTest`'s pinned lists
+come from a fake catalogue and do not change. `skillroy_catalogue` shows the merged matrix with `source`; the captures
+directory's files are listed as resources `skillroy://captures/<sha256>.png` only under `images: true` (else nothing
+is listed: the journal names the file, D159), and a `ROBOT` capture is never among them; `PlanPolicy` admits `pointer`
+and `expectImage` steps in a client's plan (their primitives are offered under `--mutating`; `via: ROBOT` and `force`
+refused as a client's) and refuses `aiAct`/`aiExpect` ("run through skillroy session --play"). **`PlanPolicy.refusals`
+also applies the credential rule's plan form** (§9.2): a client's scenario whose base verb or raw `call` names a
+credential slot's field that the slot's `fixture` does not provide is refused before `PlanExecutor` runs anything
+(`skillroy_scenario_run` runs with the operator's credentials, and the client's next `swing_capture` would otherwise
+carry what such a step typed as pixels under `images: true`).
+
+### 9.5 The overlay
+
+`OverlayBridge` is unchanged: `assist.requested` carries the person's request, `ask` is the one entry, the tier is the
+host's option, the answer goes back through the pack's `assistAnswerPrimitive`; V3 over the overlay needs the host's
+`--allow-robot` like any other session.
+
+### 9.6 Captures on disk
+
+Every capture the loop acted on (the one a recorded step's provenance names) and every anchor crop (§6.5) is written
+once as `captures/<sha256 hex>.png` under the session's output directory through `OutputFiles` (exclusive create; a
+second write of the same hash is skipped): **the raster as captured**, redacted by the agent and without marks (the
+controller draws marks on its own copy, D346), named by its own `hash`, so that the file is the pixels the model's view
+was made from; the provenance's `capture.file` and `anchor.file` name it; a session without an output directory keeps
+nothing (and cannot export an anchored step, §6.6). A `ROBOT` capture is never written here (D341). Served over MCP
+under `images: true` only (§9.4); listed in P2 §11.4's rule as "masked pixels, never a text route". The directory holds
+one screenshot of every acted-on screen and takes the process umask: on a shared host run the session under `umask 077`
+or without an output directory (`SECURITY.md`, S37's advice; threat model A13). The anchors an export writes go beside
+the bindings file, not here (§8.7).
+
+---
+
+## 10. Budgets and the cost ledger
+
+| Limit | Value | Where |
+|---|---|---|
+| per session | USD 1.00 (`budget.sessionUsd`, unchanged; BS12 RESULT "Proposal": a 30-turn session extrapolates to about USD 0.30 on Sonnet 5.5, 0.5 to 0.7 on Opus 5.5, so the action limit binds first) | the one `SESSION` meter of the host (D157), reserved before every vision call (D74) with the estimate of §7.5 |
+| UI actions per session | 30 (`vision.maxActions`) | **the service**, counting every `Outcome.step` a tool's `act` ran while a tool applies (reads do not count) |
+| model turns per session | 20 (`vision.maxTurns`) | **the service**, counting every model call made while a tool applies (its own loop calls and a tool's `complete`); at a limit it ends the turn `LIMIT`, closes the vision tools for the session and tells the model why |
+| actions per turn | 10 (`SessionPolicy.maxActionsPerTurn`, unchanged) | the service |
+| per scenario (the player) | the scenario budget applies to the player's binds (tier (b)); its `aiAct` turns and `aiExpect` questions are session calls on the session meter | `BudgetMeter` scopes unchanged |
+
+Every vision call is a `ModelRequest` with purpose `vision` through **`SessionService.visionCall`** (the facade's
+`complete` and the player's `aiExpect` alike; the module never opens a gateway): the entry's `purpose` `vision`,
+`strategy` null, `slot` null, `details` the masked `inference.jsonl` record with the image parts as hashes; so
+`replay`'s ledger check (D19) and the JUnit stream's `skillroy: zero model calls` cover the bolt-on by construction; a
+failed call is a ledger entry too (D102). The `modelCall` span of the telemetry observer is built from the entry as
+today and carries no image, prompt or intent (P6 §10.2).
+
+---
+## 11. Safety and data
+
+The rules, each with where it is enforced; `threat-model.md` carries the judgement (its §2, §3, §5, §6, §7 and §8 are
+extended with this phase, D334):
+
+1. **Pixels are personal data until masked, and what leaves the JVM for a model is a redacted `PAINT` capture of the
+   target's own windows.** `swing.capture` redacts by default (§3.6); the vision module never passes `redact: false`; a
+   model or an MCP client cannot (`CallPolicy.arguments` on every route, §9.1); a person at the CLI may (`call
+   swing.capture {redact: false}`), and that capture reaches no model. **A capture of the glass (`mode: ROBOT`) is a
+   person's evidence only** (D341): refused for every other origin by `CallPolicy` and by `ExecutorSession`, never a
+   vision tool's, never written to `captures/`, never served over MCP, and even a person's blanks every pixel outside
+   the JVM's windows and says `glass: true`. **Pixels carry no value mask**: what the application renders in a component
+   no mask names reaches a model as rendered, so a pack's `CaptureMask` must name every component that can show a
+   secret, and a page's pixels are masked as a whole browser component or not at all (§4.8). What masking cannot hide:
+   the layout and a value's width (R-a of map 7).
+2. **Pixels leave the controller only as an image and only under `images: true`** (D159, D244 unchanged): an `Image`
+   part to the model, a PNG resource to an MCP client; on every text route the bytes are elided (`Images`); the
+   captures directory, the failure files and the baselines are files on disk through `OutputFiles`, never a text route.
+3. **Screen content is untrusted input** (threat model §5; vision §R7, §Risk7). The tools a vision session offers are
+   the target's own primitives through the pack's verbs and the module's custom tools, each acted through the service's
+   facade under `CallPolicy` with the turn's `Origin.model` (§9.1); a model's or a client's raw primitive call meets the
+   same `CallPolicy.arguments` at its host (`SessionService.act`, `ToolCalls.primitive`, `PlanPolicy`); nothing a model
+   produces reaches `data.query` (the facade's `read` and `ExecutorSession.read` refuse it), `hook.*`, `rule.*`,
+   `agent.*` or a module upload; a verdict (`aiExpect`, `skillroy_look`) is advisory and never turns a failing
+   scenario green (§6.4); a locator taken from screen text that the mask would change is never recorded (§6.5); the
+   marks list and the hit-test's names enter a prompt only inside `<target-ui>` blocks, the model's own question inside
+   `<model-question>`, and the pack's legend in the system parts masked like the vocabulary (P5 §6.2).
+4. **Read-only mode and `confirm` stand.** `swing.pointer` and `web.pointer` are mutating (refused `READ_ONLY` by the
+   dispatcher and by the session's pre-check); `swing.hitTest`, `web.hitTest`, `swing.capture` (every mode) and
+   `swing.rendering` are reads; nothing new is `destructive` (a `confirm` per pointer action would make a person confirm
+   every click; the Robot gate is the double opt-in instead, D294); a `MODEL` or `CLIENT` origin still confirms nothing
+   (D158); under a read-only policy the vision module offers reads only (§6.3).
+5. **V3 is a person's choice twice over** (§3.4): the agent option `robot` on the host and `--allow-robot` on the
+   command (`run`, `session`, `mcp`, and the raw `call`, which refuses `via: ROBOT` and `mode: ROBOT` in its arguments
+   without it, §9.3); never a tool argument, never a scenario key, never an MCP client's `_meta`, **and never a per-call choice of
+   a model or a client even with both flags** (`via: ROBOT` passes on the facade's route for the module's V3 steps and
+   nowhere else, D347). Both halves can sit in committed files (the agent option in a launcher, `skillroy.robot` in a
+   build file), so the JUnit glue warns whenever the property is true and `SECURITY.md` says not to commit it. A point
+   outside every window of the target JVM is refused, **any** covering window of the JVM refuses the point, the target
+   JVM must hold a focused window at the press (`requireFocus`, default true), a press is always paired with its release
+   before the pointer moves back (D343), the delivery probe and `NOT_DELIVERED` make a silent drop visible (BS9: macOS),
+   Robot never runs on the EDT, and the loop stops the turn when the JVM loses the focus instead of clicking to win it
+   back (D344).
+6. **No credential to a model, and no input into a masked component** (D342, D358). No secret slot reference resolves
+   from a model's or a client's call, and no verb of theirs uses a credential-joined slot (`ExecutorSession` refuses
+   `$<slot>.<secret>` and a step whose compiled calls would reference one for every origin but a person's before anything
+   is journaled or sent; `PlanPolicy` refuses a client scenario's base verb or raw `call` that names a credential slot's
+   field its `fixture` does not provide, §9.2); no `type`, printable `press` or raw `swing.type` runs for them while a credential is in
+   flight (`secretsInFlight`); a `type` whose text holds a known secret value is refused; sign-on runs through the
+   `signOn` verb's credential join by the person or the player before the loop (§9.2, §6.8). The recorder refuses a
+   `click`, `pointer`, `type`, `press` or toolset `key` at a component the hit-test reports `masked` (§3.2, §6.5) with the
+   text "the component takes a secret; ask the person to sign on"; a pack's mask names what
+   feeds a secret field too (the sample's number pad while the entry field is masked, §12.2).
+7. **Captures the loop acted on are kept masked** under the session's output directory, referenced by hash (§9.6; a
+   screenshot per acted-on screen, under the process umask); a baseline or an anchor holds masked pixels only and is
+   reviewed code (§8.7; `approve` and the export write one only after the person saw the file, `--yes` aside); the
+   journal, `run.jsonl` and the export hold hashes and file names, never bytes; a `ROBOT` capture is kept nowhere.
+8. **Routed input respects what AWT would** (BS10 RESULT conditions 1 and 2): the modal check before the first event and
+   before every further event of the sequence (a dialog the sequence itself opens stops it, D352), the covering-window
+   check, and a call that failed delivers nothing later (the `cancelled` flag); a person may pass `force` (never a
+   model or a client: `force` on `swing.pointer`, `swing.click`, `swing.type`, `swing.key` and `web.pointer` joins
+   `CallPolicy.arguments`' refusals for a `MODEL` or `CLIENT` origin, D294).
+9. **No model call in `replay`**, asserted (C0): the vision tools are never loaded there, `inference.vision` is
+   `UNAVAILABLE("replay")`, a `run` plan is `SKIPPED` before the agent is contacted, and the ledger check covers every
+   vision call of every other mode (every one goes through `visionCall`, §10).
+10. **Budgets** bound every vision call before it is made (§10).
+
+**The limitation sentences the build writes into `SECURITY.md`'s "Known limitations"** (§15's L2 and L8 check that
+they are there; the threat model's §8 carries the same facts):
+
+- (a) redaction blanks a component's rectangle after it was painted: the layout and a value's width stay visible; and
+  pixels carry no value mask: a component no mask names reaches a model as rendered, so a pack's `CaptureMask` must name
+  every component that can show a secret;
+- (b) a page's pixels are masked as a whole browser component or not at all;
+- (c) V3 presses whatever is at the screen point when the desktop changed in the milliseconds between the agent's focus
+  read and the press, and a covering window of another process cannot be seen; the first press that is not received
+  degrades the capability, so the damage is bounded to about one stray click per focus loss;
+- (d) a person's `ROBOT` capture shows the glass inside the target's window rectangles (another process's window that
+  covers the target is in it); it never goes to a model or a client;
+- (e) committed baselines and anchors are screenshots of the application's data as rendered, masked per component: the
+  author masks what must not be committed;
+- (f) `captures/` holds a screenshot of every acted-on screen under the session's output directory and takes the process
+  umask;
+- (g) the V3 tier is verified on the Linux image's display only; macOS with the Accessibility permission, Windows,
+  Wayland, a locked session and HiDPI are not (§13.4);
+- (h) the double opt-in can be committed (the agent option in a launcher configuration, `skillroy.robot` in a build
+  file); do not commit it.
+
+---
+## 12. The sample
+
+### 12.1 The desk (`skillroy-sample-lending-app`, Java 8)
+
+A **number pad** (`NumberPad extends JComponent`, component name `numberPad`, `AccessibleRole.PANEL`, 3 columns by 4
+rows of 48 x 40 keys: `7 8 9 / 4 5 6 / 1 2 3 / . 0 CLEAR`, custom-painted with `drawString`, one component with twelve
+regions, region ids `key:0` to `key:9`, `key:.`, `key:clear`), placed in the bottom panel's `EAST` beside the keypad. A
+press and release inside a key appends the digit (or the point) to the entry field's document through the field's own
+`Document` (so `EntryField`'s mask filter applies) or clears it; it never posts to the engine itself (the entry field's
+Enter does). It is the desk's one component with several meanings per component, the case `RegionResolver` exists for
+(vision §R4 "keys of an on-screen keypad"; map 7 §1.9: nothing else on the desk has regions). The frame's other
+components are unchanged in kind; the bottom panel grows to the pad's height (about 160 px beside the 64 px keypad
+row), so the loan table above it shrinks and the snapshot bounds of the earlier components change, which nothing
+committed depends on (the session recordings are made on `HeadlessDesk`, which has no Swing tree, §12.5).
+`LendingUiDisplayTest` gains a test that a press on `key:7` appends `7`.
+
+### 12.2 The agent module (`skillroy-sample-lending-agent`, Java 8; version `0.2.0`)
+
+- `LendingRegions implements RegionResolver`: `supports` a `NumberPad`; `regionAt` the key under the point;
+  `rectOf` the key's rectangle; `regions` all twelve (so a capture with marks shows one mark per key).
+- `LendingCaptureMask implements CaptureMask`: `masks` an `EntryField` while `isMasked()` (the `PASSWORD` state and the
+  supervisor password sub-step, the two places where the frame sets the flag; the field paints asterisks, but the rule
+  is the policy's, not the paint's)
+  **and the `NumberPad` while the entry field is masked** (D358: the pad feeds the field, so its keys draw grey, carry
+  no mark and take no model's click while a secret is expected); nothing else.
+- `LendingWidgets.describe`: `{action: <actionId>}` for an `IconKey`, so that the hit-test's first locator is the
+  domain one; `{name: <label>}` for a `PromptButton`.
+- Registered in `LendingModule.install` beside the eleven SPIs of today (thirteen); `LendingModule.VERSION` becomes
+  `0.2.0` with the pack's bump rule in its Javadoc ("change it whenever the module's primitives or SPIs change"; it has
+  not changed since Phase 1 although its surface grew, map 7 T8).
+
+### 12.3 The pack (`skillroy-sample-lending-pack`; version `0.6.0`)
+
+`DomainPack` gains `default String screenLegend() { return null; }` (**VC's one default method in `skillroy-scenario`**,
+landing in step 1 with the verbs, §2.1): a short plain-text legend of the application's icon-only or custom-painted
+controls for a model that looks at the screen (BS12 RESULT "Sessions": the legend brought V2 from 10.3 to 4.5 actions).
+The lending pack (VS) returns one paragraph in the lending vocabulary: the keypad's six keys left to right with their
+meanings (`QTY` the quantity key, `CANCEL`, `RETURN` the return-mode key, `DUE` computes the deposit due, `DEPOSIT`
+records the loan, `SIGN_OFF`), the entry field, the number pad, the prompt dialog's buttons. It is masked like the
+vocabulary (S49) and enters the system parts, never a `<target-ui>` block (§6.2). `LendingPack.VERSION` becomes `0.6.0`
+(the surface grew); every committed plan's `packVersion` changes with it in the same regeneration as the plan version.
+The same pack change takes gap 49: the `LendableItem` query gains the argument `inductionRequired` (as `ItemsTriggering`
+has), so that a scenario can ask for an item that needs no induction; the committed scenarios are unchanged by it.
+
+### 12.4 The Phase 7 scenarios (`skillroy-sample-lending-scenarios/scenarios/`)
+
+| Scenario | What it shows | Replay outcome |
+|---|---|---|
+| `exported/session-vision-loan.yaml` (+ `plan/`, and bindings as the Phase 5 export has them, for the session's query-resolved item slot; compared by §13.2 item 8) | the exit criterion: a V1 vision session on the real desk (seed A) with the **scripted** gateway (`ScriptedAnswers.visionScript()`: answers by position that name marks by their labels, so that pixel differences between targets do not matter), run by `VisionSessionScript`, which opens its session with constructed `InferenceSettings` (gateway `recorded`, `images: true`) beside the `ScriptedGateway` (which declares `IMAGES`) and `SessionOptions.host = {"vision-session"}`, recorded into ordinary steps (`signOn` by the person's step first, then the model's `click {by: {action: DUE}}`, `type {by: {id: entry}, text, enter}` (the hit-test's first built-in candidate, §3.2: `id` is the component's name), `click {by: {action: DEPOSIT}}` and the person's `expect`), exported with the vision comments (no hash, handle or mark in them, D356) and the report's "Vision-derived steps", compared byte for byte with the committed copies in the image on both Javas (§13.2 item 8, which also generates them, on the Java 25 arm64 leg), and replayed with zero model calls | `PASS` |
+| `sign-on-by-number-pad.yaml` (`launchProperties: {lending.seed: A}`, the shape of `basic-loan-ui.yaml`: staff 100 is a seed-A number, `SampleCredentials`) | `pointer {by: {id: numberPad}, region: "key:1"}` three times (`1`, `0`, `0`), `press ENTER` on the entry field, the password through the person's `type` with the credential reference (the committed shape of `basic-loan-ui.yaml`), `expect state IDLE`: region-addressed steps, deterministic, no pixel stored; a fixture credential slot and no query slot, so no bindings file (`Plan.needsBindings()` is false) | `PASS` on the seed-A target |
+| `loan-table-visual-check.yaml` (`launchProperties: {lending.seed: A}` and the fixture slots, as `basic-loan`) | `basic-loan`'s steps, then `aiExpect: {question: "the loan table shows two lines for the scanned item"}`; no bindings file | `DEGRADED` on the seed-A target (the guard `inference.vision` is `UNAVAILABLE (replay)`; the exit criterion 3), `PASS` when the player runs it live |
+| `vision-live-only.yaml` (tag `live`) | `signOn`, then `aiAct: {intent: "lend one plain item to the walk-in borrower and settle the deposit"}`, `expect state IDLE` | `SKIPPED` (`inference: run`; the exit criterion 2); run by `skillroy session --play` live; **no committed bindings file** (it never binds in `replay`) |
+| `keypad-image.yaml` | `expectImage: {label: keypad, by: {id: numberPad}}` on the signed-off desk (the number pad is static and identical on both seeds), with baselines for the render keys the image runs, **one per Java line** (the Java 8 and the Java 25 target; the amd64 leg shares them: neither the architecture nor the vendor is keyed, and BS11 found the rasters identical across both), under `bindings/seed-a/keypad-image.images/` and `bindings/seed-b/…` (the one Phase 7 scenario with a bindings file, per seed, for its `images`); a second `expectImage: {label: keypad-frame, mask: [{by: {id: entry}}]}` captures the frame (no `by`; the entry field spans the bottom panel's `NORTH` and lies outside the number pad) with the entry field masked by locator, which exercises the locator form of `mask` | `PASS` on both targets and on the amd64 leg; a third render key (a desktop) is `REBIND_NEEDED(IMAGE)` by design |
+
+Nothing in them names a person or an item. `keypad-image` runs on both seeds; `sign-on-by-number-pad`,
+`loan-table-visual-check` and `vision-live-only` are seed-A scenarios (their staff number and fixtures are seed A's),
+run from the seed-A target as `basic-loan` and `basic-loan-ui` are today; only `keypad-image` has a bindings file.
+
+### 12.5 Regenerated committed artifacts
+
+One regeneration, by the build, of: every plan (`planVersion` 6, `packVersion` 0.6.0) and bindings file (`planHash`)
+of both scenario modules (in the web host's module the `plan/*.plan.json` only); the capability goldens of the five
+load modes (the three new `OK` Swing ids, the two `UNAVAILABLE` Robot ids); the committed session recordings under
+`src/test/resources/inference/`, **because the pack version stands in every session's system text ("The pack: lending
+0.6.0"), gap 49's argument changes the vocabulary and so does D342's `$reference` sentence (§9.2)**, not because of the
+desk's tree (the recordings are made on
+`HeadlessDesk`, which answers `swing.snapshot` with `METHOD_NOT_FOUND`, so the number pad changes none of them;
+scenario D's live recordings hold neither and stay valid), regenerated on the scripted stand-in route
+(`-Dskillroy.inference.fixtures.update=true`, `SessionExportTest`, no key) **by VS together with its pack bump, after
+VM's first commit landed the one-sentence vocabulary change of §9.2** (the sentence is a system part of every recorded
+request and so in every recording's fingerprint; VM's first commit is that sentence and its `SessionServiceTest` pin
+alone, before VS), so that the recordings are regenerated exactly once in the phase and no integration step is red for
+it; the scenario JSON schema committed copy; `exported/session-basic-loan.*` (the pack
+version in its head comment; the same VS run).
+
+---
+
+## 13. Tests and acceptance
+
+### 13.1 Without a display (unit and module tests; the normal build; no key)
+
+| # | Module | What is proven |
+|---|---|---|
+| 1 | `agent-swing` | `Capture` on headless fakes (`CaptureGuardTest`'s style, lightweight `JComponent` fakes; the `WINDOW` and `SCREEN` scopes, `covering` and the modal rules need real windows and run in the display tests `SwingDisplayTest` and `ModalBlockingDisplayTest`, while the headless tests cover the geometry arithmetic through a package-private window-list seam `Windows.Source` the tests replace): the mapping rule of §3.1 for every scope, `scale` and the 4096 cap, the heap bound with a fake free-heap figure (`INVALID_PARAMS` naming both figures) and an `OutOfMemoryError` answered `INTERNAL_ERROR`, the marks geometry and counts (`region`, `row`, reading order, 200) with the pixels untouched (the hash equals an unannotated paint's), the redaction fill and `redacted`, a `CaptureMask` on a fake `JTextField` (grey pixels, no `text` in the snapshot or the hit-test's nodes, `masked: true`, no mark, no `{text, role}` candidate), the carets' rectangles and `focus.ownerLocator`, `hash` over the raster against the one test vector shared with `ImageCompareTest`; `HitTest`'s locator candidates and uniqueness check on a fake tree through `LocatorEngine`, `row`, `fires`; `Pointer`'s event sequence per action (the events a fake window records: masks, counts, popup trigger per `os.name`, the drag's release count 0 and no click, the wheel's rotation and amount), the `cancelled` flag (a task after the deadline dispatches nothing; a dispatched press is disarmed by a drag to (-1, -1) and released there, `balanced: true`, and the fake button's `ActionListener` counts no event), the per-event modal re-read (`MODAL_OPENED`, `dispatched n of m`), `expectTarget`; `RobotInput` behind the `RobotFactory` seam with a fake that delivers or drops (the delivery probe ordered before the pre-check, `NOT_DELIVERED`, `received elsewhere`, `PRESS` and `RELEASE` refused, a timeout between press and release still releases before the pointer is restored, `requireFocus` against a fake focus state, any covering window refuses, a `ROBOT` capture's masks read before and after the grab, `unstable`, `glass` with the outside pixels blanked); `Rendering`'s key over fixed inputs (the keyed set only: a changed vendor, full version or OS leaves it); `SwingModuleHeadlessTest`: the primitive list (fourteen), every new id's install state with and without the option `robot`, the Robot ids never probed without it; `AwtStartTest.DISPLAY_CAPS` with the three new ids; two pins of `SwingDisplayTest` change with A61: `:422` (`mode: ROBOT` becomes `CAPABILITY_UNAVAILABLE(swing.capture.robot)`) and `:408-409` (a window capture is the root pane's size, 640 x 480 only where the insets are 0) |
+| 2 | `agent-api` | the three SPIs' default methods; `WebPointerEvent`'s builder and bounds; `WebBrowser.dispatchPointer`'s default refusal; `WebSpiShapeTest` (no vendor type; the enum's order) |
+| 3 | `agent-web` | `web.hitTest` and `web.pointer` through `Harness`, `ScriptedAdapter`, `ScriptedBrowser` with a `Responder` for `hit`: the `COMPONENT` conversion and its refusal under an override, the modal check on a fake dialog (a display test where a real dialog is needed), `MOVE`/`PRESS`/`RELEASE` for `CLICK`, read-only mode refusing the pointer and serving the hit-test; `WebCapabilitiesTest`: the two ids derived; the fake JCEF's `Input.dispatchMouseEvent` recorded by `FakeDocument` (`JcefRawChannelFakeTest`, `JcefAdapterFakeTest`); the JxBrowser fake with and without the `INPUT` roles; the `SurfaceSource` from the index; `WebLibTest`: `hit` in `FUNCTIONS`, version 2, the install-into-an-older-slot rule's text |
+| 4 | `protocol` | nothing new on the wire (`ProtocolConstantsTest` pins 0.2); `WebLib`'s hash changes once |
+| 5 | `skillroy-scenario` | the four verbs compile (`BaseStepsTest`, `PlanCompilerTest`): `aiAct` → `inference: run`, `aiExpect` → `VisualCheck` with the fixed guard (a `capability` argument refused), `pointer` → `swing.pointer`'s component form with `SETTLE`/`EVENT`, `row`, `via: ROBOT` → `requires`, `PRESS` with `via: ROBOT` a compile error, `guard` → `Plan.Call.guard` and the `images` key, `expectImage` → one capture call and an `ImageCheck`, `region` and `clip` rules; plan version 6 reader and writer (`Phase7CompileTest`: a version-5 plan with `run`, `images` or `guard` refused; version 6 accepted; `inferenceOf(slots, steps)`; `needsBindings()` true for images alone); `Status.SKIPPED` in `PlanExecutorTest` (a `run` plan in `replay`: no agent call, `run.jsonl`'s four records (`run-start`, `skipped`, `ledger {count: 0}`, `run-end`), `RunResult`), refused in `live`; the robot plan refused `ERROR / ENVIRONMENT` before `checkRequires` without `RunOptions.robot`; `CapabilityContributor` merge (`FakeContributor`): `replay` forces `UNAVAILABLE("replay")`, an agent `inference.` id refused, two contributors answering one id refused naming both, `capabilities.json` merged once, `agentHash` the agent's hash, `SessionOptions.host` seen by the merge in `open` and `ExecutorSession.capabilities()` answering it, `BaseFacts.caps` reading the merged supplier, a `FakeContributor` answering `inference.vision OK` in `live` with the `VisualCheck` still skipped; `ImageCompareTest`: equal, one pixel, masks, the carets union, the focus mask, `maxDiffPixels`, the diff image, the raster hash vector; `ImageSteps` in `PlanExecutorTest` with `FakeAgentConnection`'s canned capture results: an `expectImage` held, failed (three files), missing (`REBIND_NEEDED(IMAGE, "no baseline <label> for rendering <key>")` in `replay`, recorded and skipped in `live`), an anchored `pointer` with a matching anchor running the pointer call, a mismatching one `REBIND_NEEDED(IMAGE)` with the three files, no entry for the key likewise in every mode, `approve` included; `BindingsFileTest`: version 2 read and write, version 1 kept without images, the `images` round trip with `carets`, `focus` (`owner`, `ownerRect`, `active`) and the nested `rendering`, the derived path (a `file` that does not match, or resolves through a link or outside the directory, refused); `BinderTest`: `needsBindings` with images, `reviewImage` asked at the step (the default delegating to `review`: `APPROVE_ALL` approves, `REJECT_ALL` leaves `REBIND_NEEDED(IMAGE)`) and the file rewritten after the steps, the label check in `replay` only, `finish` and the re-resolve carrying `images` forward; `ExecutorSessionTest`: `read` unjournaled, throwing the agent's error as `AgentRpcException`, never masking an image's `base64`, refusing `data.query`, a script and a mutating primitive; `SessionOptions.robot` refusing `via: ROBOT` and `mode: ROBOT`; `mode: ROBOT` refused for `MODEL` and `CLIENT` with the flag set; for `MODEL` and `CLIENT` a verb and a raw call naming `$assistant.password` refused with nothing sent, a `type` refused while a secret is in flight and accepted after the person's `signOn` consumed it, a model's `signOn {staff: $assistant}` refused whatever the flag; the four-argument `execute` writing the provenance on the step and its read-back equality (`StepJournalTest`); `JournalExportTest`: the comment without hash, handle or mark, the report's two sections, V3 steps left out, the `images` section in the export's bindings file and `images()`, an absent anchor file an `ExportException` naming the step; `JunitXmlReporterTest`: `SKIPPED` whatever `degradedAs`; `ScenarioSchemaTest`: the verbs |
+| 6 | `skillroy-junit`, `skillroy-cli` (VC's half) | `ScenarioTestsTest`: `SKIPPED` aborts, the `skillroy.robot` warning line; `RunCommand`'s `skipped` count and exit 0, `--allow-robot`, the image approval prompt and `--yes` in `approve`; `caps` with `source` on `CliTestPack`; `WebCommandsTest`'s stale "reserved" string updated (the `session` and `mcp` options are item 8's) |
+| 7 | `skillroy-inference` | `ClaudeGatewayTest` with `FakeAnthropic`: a `ProviderTool` becomes the toolset entry with `configs`, another provider's is `INVALID_REQUEST`, `toolset_name` sent on tool use and tool result and read back from a `tool_use` block, a parts-list result as `contentOfBlocks`, an image result refused while images are off, an error result with an image refused at construction, `CacheHint.AUTO`'s top-level `cache_control`; `ModelRequestTest`: fingerprints unchanged for a request without the new fields, changed by a provider tool; `RecordedGatewayTest`: `IMAGES` declared, a recording with an image part and a toolset request round-tripped; `ScriptedGatewayTest`: `IMAGES` and `PROVIDER_TOOLS` declared; `PriceTableTest`: the Haiku 5.5 row and note; `BudgetAndLedgerTest`: purpose `vision`; `SessionServiceTest` with a `FakeSessionTools`: tools listed, `atTurnStart` parts in the turn's first message, `act` consulted, `afterBatch` appended, provider tools and instructions in the request and masked, `endTurn` `QUESTION` and `LIMIT` ending the turn, `vision.maxActions` and `vision.maxTurns` enforced and the tools closed, `visionCall` one ledger entry with purpose `vision` on the session meter; **the raw primitive branch**: `swing_pointer {via: ROBOT}` with and without `robotAllowed`, `{force: true}` on `swing_click`, `swing_type`, `swing_key` and `swing_pointer`, `swing_capture {redact: false}` and `{mode: ROBOT}`, each a tool error with nothing reaching the fake agent and nothing journaled; **the facade**: a `FakeSessionTools` trying `read("data.query", …)`, an `execute` with `confirm: true`, a step with `via: ROBOT` under `robotAllowed` (passes) and without (refused), a read with `mode: ROBOT` (refused); a read-only policy with the tools' lists; `InferenceContributorTest`: `inference.vision` no longer answered; `SessionServiceTest`: a session without an applying tool builds the same system text as before but for the vocabulary sentence of §9.2 (so the recordings are regenerated once, §12.5); `estimate` with an image part |
+| 8 | `skillroy-vision` (and VM's CLI and MCP options) | the loop on `FakeVisionAgent` (canned captures from the module's PNG fixtures with their geometry, canned hit-tests) and `ScriptedGateway`: a V1 turn (a mark grounded by a hit-test at its centre: a button → `click` by locator, a table row → `pointer {row}`, a region mark → `pointer {region}`; the provenance; the export's comment), a V2 turn through the custom tools and through the toolset (the member mapping of §6.3, `KeyNames`, `zoom` across two windows mapped to the topmost one), the stale-capture rule (a `window.opened` event between capture and act: a fresh capture and the same-component check), the refusals (a masked focus owner for `type` and `key`, a masked target for `click` and `pointer`, a `type` naming `$assistant.password`, a `type` while a secret is in flight, a `type` holding a known secret value, a `signOn {staff: $assistant}` from the model), Haiku refused for V2, the V3 rules (`via: ROBOT` set by the facade with `requireFocus: true`, a canned `focus.window` null giving no Robot call and `endTurn: QUESTION`, `left_mouse_down` answered as text, no mode on `capture`), the marks drawn on the controller's copy (the captures file equals the fixture), a redacted `WEB` surface staying grey after the composite, the capture always after the batch and skipped after the model's own `screenshot`, the toolset's skipped calls after a failure, the limits (30, 20) through the service; `VisualQuestion`'s schema, `UNSURE`, the `<model-question>` block; `VisionCapabilities`' states (gated on `swing.capture.screen`); `ScenarioPlayer` on the toy pack with a scripted model (`aiAct` done, `ask_person` in a non-interactive run, `aiExpect` YES/NO/UNSURE through `visionCall`, a step's `tier: V3` without the flag refused, `signOn` before the first `aiAct`, an `expectImage` through the session's route); `Captures`: one file per hash, the raster as captured; the CLI's `SessionCommand` (`--vision*`, `--allow-robot`, `v3` without it a usage error, `host` set, `--play` on `CliTestPack` with a scripted gateway) and `McpCommand` (`--vision`, `--allow-robot`) parsing; `ToolCalls` (MCP): raw `swing_capture {redact: false}` and `{mode: ROBOT}`, `swing_pointer {via: ROBOT}` with `--allow-robot` set, `swing_type` with a `$assistant.password` argument, each refused with nothing sent; `skillroy_scenario_run` with a client scenario whose `type` names `$staff.password` refused by `PlanPolicy` with nothing run, and one whose `signOn {staff: $staff}` passes (a pack verb's own join) |
+| 9 | the sample | `LendingUiDisplayTest` is a display test; headless: `LendingModuleTest`'s registration list (thirteen SPIs), `LendingRegionsTest` on an unshown `NumberPad` (regions need no display), `LendingCaptureMaskTest` (the entry field, and the number pad while the entry field is masked), `LendingPackTest` (`screenLegend`, version 0.6.0), `PlansUpToDateTest`, `BindingsUpToDateTest` (its expected list gains `keypad-image`'s file per seed, the one Phase 7 scenario with bindings; `sign-on-by-number-pad`, `loan-table-visual-check` and `vision-live-only` have none, and the vision export's files are compared by §13.2 item 8 as the Phase 5 export's are; the `.images/` directories are walked separately and every PNG must be named by an entry of its bindings file and match that entry's `sha256`), `ScenarioSchemaCommittedTest`, `CapabilityGoldenTest`'s fixtures, `SecretScan` over every new file (the baselines' PNGs included: bytes, so the scan checks their names and that no `credentials.yaml` value appears in any text file) |
+
+### 13.2 End to end (the Linux image; `ci/run-in-linux.sh … -Dskillroy.headless=false`; Java 8 and Java 25 targets; no key)
+
+Where each item lives: items 1-6 in a new `VisionSwingChecks` (VS, every load mode; registered in `LendingEndToEndIT`
+by VS), item 7's `keypad-image` in `ResolutionChecks` (VC; the per-seed class, where the earlier scenarios replay) and its three seed-A scenarios in `LoadModeChecks` (VC; the seed-A target, where `basic-loan` and `basic-loan-ui` run today), item 8 in
+`InferenceChecks` (VM; registered in `InferenceEndToEndIT`), item 9 in `LoadModeChecks` (VC), item 10 in the web host's
+checks (VW), item 11 in the host-safety tests (VS).
+
+1. **Capture.** `swing.capture {}` of the desk's frame: `width` and `height` the root pane's, no imitation decorations
+   (the top 24 rows of the image hold the prompt line's background, not a title bar; compared with a `swing.capture
+   {target: <root pane ref>}` of today's form: identical rasters), `space: WINDOW`, `origin {0, 0}` (WM-less), `seq`,
+   `hash` equal across two captures of the unfocused desk (BS11); `scope: COMPONENT` of the loan table with its
+   `origin` equal to the node's `bounds`; `scope: SCREEN` with the prompt dialog open: two `windows` entries, the
+   dialog's root pane on top, `stackingAssumed: true`; `annotateRefs: true`: `marks` holds one entry per keypad key
+   with its `NameEnricher` name, per number-pad region (`region`), per table row (`row`) and the header, and the pixels
+   are untouched (`hash` equal to an unannotated capture's, both taken on the unfocused desk, since the caret's blink
+   phase would differ otherwise, BS11); in the `PASSWORD` state the entry field **and the number
+   pad** are in `redacted` (`capture-mask`), their pixels grey, the entry field's text absent from the snapshot and the
+   hit-test's node, no mark on either; with `redact: false` (a person's call) the asterisks; `carets` lists the focused
+   entry field's caret and `focus.ownerLocator` is `{id: entry}`.
+2. **Hit-test.** The centre of every keypad key in `WINDOW` and in `{captureId}` space: `target` the key, `locators`
+   starting with `{action: <id>}`, `relative {0.5, 0.5}`, `fires: true`; a table row: `target` the table, `row` the
+   model index; the number pad's `key:7`: `region {id: "key:7"}`; the prompt dialog open: the frame's `DUE` key reports
+   `blockedBy` the dialog and `covering` with `ranked: true` for the dialog where it overlaps; `target: <ref>` form for
+   the entry field; `masked: true` for it in the `PASSWORD` state.
+3. **Routed pointer.** `swing.pointer {by: {action: DUE}, action: CLICK}` from the signed-on desk fires the key
+   (`received` the key, `fired: true`, `dispatched 4 of 4`, the desk's `input.requested` event follows: the event, not
+   `fired`, is the evidence, since the desk's `IconKey` debounces, §3.3; BS10 verified the mechanism on the toy, no
+   spike ran a routed press on the desk); a `pointer` on `key:1`, `key:0`, `key:0` of the number pad (`by: {id:
+   numberPad}, region`) types `100` into the entry field; `MODAL_OPEN` for a pointer into the frame while the prompt
+   dialog is open, `force: true` delivers (BS10 RESULT case "modal"); the `MODAL_OPENED` case runs in
+   `ModalBlockingDisplayTest` on a fixture whose `mousePressed` shows a modal dialog (the desk has no such press: its keys
+   only arm on the press and prompts open through the engine's `invokeLater` after the debounced action): `fired: false,
+   reason: MODAL_OPENED, balanced: true`, the press disarmed and released into the blocked window, no `ActionEvent`; `expectTarget` with
+   another ref is `INPUT_REJECTED`; `DRAG` on the loan table selects rows; `WHEEL` on the slip panel scrolls it.
+4. **`swing.type` without a target** types into the focus owner (the entry field) in `SET` mode; `DISPATCH` with
+   `enter` documents gap 60's behaviour in the check's name.
+5. **`swing.rendering`** answers every field, `renderKey` stable across two calls, different between the Java 8 and
+   the Java 25 leg (the specification version; BS11: the JDK line changes pixels) and equal between the arm64 and the
+   amd64 leg of one Java (neither the architecture nor the vendor is keyed; BS11 found their rasters identical).
+6. **Robot** (`RobotChecks`, run once per Java with the agent option `robot=true` on a target started for it, a
+   `LendingTarget.Mode` beside the hooks leg, WM-less; every call passes `requireFocus: false` explicitly, since a WM-less
+   frame may hold no focus, BS9 K7): `swing.pointer.robot` `OK("robot")`; `swing.pointer {by: {action: DUE}, via:
+   ROBOT}` fires the key with `received` set (BS9 RESULT, the table's row "Sample: keypad keys": 3 of 3);
+   `requireFocus: true` (the default) is `INPUT_REJECTED("not focused")` while the frame holds no focus and passes after
+   a routed click gave it the focus; a point outside every window `NOT_FOUND`; `PRESS` refused; a person's
+   `swing.capture {mode: ROBOT}` of the frame equals the root-pane `PAINT` raster inside the root pane (BS9: 0 differing
+   pixels, the caret aside), carries `glass: true` and holds grey outside the frame; the controller's opt-in refusal
+   comes first: a `pointer {via: ROBOT}` plan without `RunOptions.robot` is `ERROR / ENVIRONMENT` before the agent is
+   asked, and with the flag on a target without the option `PRECONDITION_FAILED` naming `swing.pointer.robot`; without
+   the option the ids are `UNAVAILABLE("robot: not enabled…")` in every other leg (the goldens).
+7. **Scenarios** (both Javas): on the seed-A target (`LoadModeChecks`): `sign-on-by-number-pad` `PASS`;
+   `loan-table-visual-check` `DEGRADED` with the skipped line naming `inference.vision` (its state reads `missing` until
+   VM's contributor is on the class path and `UNAVAILABLE (replay)` after; the final matrix asserts the latter);
+   `vision-live-only` `SKIPPED` with no agent call recorded; none of the three has a bindings file; on both seeds
+   (`ResolutionChecks`): `keypad-image` `PASS` on both Javas and on the amd64 leg with the committed baselines (one key
+   per Java line, per seed), and a deliberately changed baseline
+   `FAIL / ASSERTION` with the three files under `failure/` (the missing-key case is §13.1 item 5's); every earlier
+   scenario `PASS` unchanged with the regenerated plans (A to E, `basic-loan-ui`, scenario C's replay, the branch
+   edition).
+8. **The vision session** (`InferenceChecks`, seed A, both Javas): `VisionSessionScript` with the scripted gateway on
+   the real desk (§12.4's settings and host feature): the person's `signOn` step, then the V1 turn records the three
+   model steps; the export equals the committed `exported/session-vision-loan.*` byte for byte (the YAML, the plan and,
+   as the Phase 5 export has it, the bindings file apart from the channel; nothing in them is target-dependent, D356), the journal read back exports the same,
+   the replay of the committed plan passes with zero model calls and an empty ledger (the exit criterion 1 in CI); this
+   item generates the committed copies under `-Dskillroy.inference.fixtures.update=true` on the Java 25 arm64 leg (VM's
+   report names the leg); the player runs `vision-live-only.yaml` with the scripted model to `PASS` and
+   `loan-table-visual-check.yaml`'s `aiExpect` with a scripted `YES`.
+9. **Capabilities** (`LoadModeChecks`). The goldens of the five load modes equal the matrices after `target.ready`
+   (the new ids; the normalised comparison as today); the run's `capabilities` record has `agentHash` equal to
+   `CapabilityMatrix.hash()` of the agent's matrix read after step 0b and `contributed` the ids the class path contributes (`inference.gateway` and `inference.sql` from VC's step 1,
+   `inference.vision` once VM's module is on the class path) with `UNAVAILABLE (replay)` in `capabilities.json`.
+10. **The web host** (profile `jcef`, both rendering modes on Java 25, off screen on Java 8): kit items 15-18;
+    `WebHostChecks` item 1 (`web.hittest`, `web.pointer` `OK(jcef)`) and the new item: `web.hitTest` at the button's
+    centre on both paths answers the button with a unique selector; `web.pointer {action: CLICK}` on both paths
+    increments the page's pointer counter with `isTrusted: true`; `swing.capture` of the host's window lists the browser
+    as a `WEB` surface with its ref and `redacted: false`; `swing.hitTest` at a point in the browser answers `surface:
+    WEB` with `surfaceLocal`, and `web.hitTest {space: COMPONENT}` with that point answers the element under it.
+11. **Host safety** (`HostSafetyDisplayTest`, `HostSafetyIT`): a blocked EDT makes `swing.capture`, `swing.hitTest`
+    and `swing.pointer` time out cleanly and nothing runs late, **including an EDT blocked from inside the
+    `MOUSE_PRESSED` handler of the sequence's own press**: the call returns `fired: false, EDT_BUSY, dispatched 1 of 4, balanced: true`,
+    the disarming drag and the release are the only events delivered afterwards, the fixture's `ActionListener` (and on
+    the desk the key's application event) counts nothing, and no click arrives; no listener the pointer adds
+    survives the call; `HostSafetyIT` gains a case with the full home (`modules/` on), an AWT application fixture and
+    the display (so it runs in the image): the `-verbose:class` scan shows no `java.awt.Robot` loaded without the option
+    `robot` (the scan sees loading, not initialisation, which is why `RobotInput` is loaded lazily behind `RobotFactory`
+    and nothing else in the module names `Robot` in a signature), and, with it, loaded only after `checkAwt` confirmed AWT (the capability probe constructs the Robot, §3.4), never at
+    install and never in a headless JVM.
+
+### 13.3 Live (profile `inference-live`; needs `ANTHROPIC_API_KEY`; skipped without it; never in CI)
+
+`VisionLiveIT` in the sample scenarios module, on the desk in the image, budget USD 1.00 per session and USD 3.00 for
+the class: (1) a V1 session on Sonnet 5.5 at `low` lends one item and settles the deposit (`done`, the desk's facts
+agree, at most 6 UI actions, at most USD 0.10; BS12: 4-5 actions, USD 0.03); (2) a V2 session through the toolset with
+the pack's legend (at most 8 actions, USD 0.10; BS12: 4.5 with the legend); (3) one toolset request with `fallbacks:
+true` (the header coexists, or the finding of §7.1 is recorded); (4) a V1 session on the class `haiku`, mapped to
+`claude-haiku-5-5` by the settings file VM adds for the profile (§7.3) (done, USD 0.01); (5) a `skillroy_look` question and an
+`aiExpect` through the player (YES on a true statement, NO on a false one); (6) the export of (1) replays with zero
+model calls. Every file written is checked against the key's value before writing (common rule 6). The results are
+recorded in `../TODO.md` under "Phase 7, the live items" with the spend.
+
+### 13.4 Not verified in this phase, and why
+
+Windows (no host: the popup trigger on the release, UIPI, session 0), Wayland and XWayland, a locked session, macOS
+with the Accessibility permission granted (not changed, by rule; BS9), HiDPI (the image is scale 1; `scaleAssumed` and
+the Retina difference of BS9 are recorded), heavyweight popups, native drag and drop, JxBrowser input (the wall, gap
+41), windowed JCEF on Java 8 (gap 44), a long session (BS12's longest task was 14 actions), the fold under the vendor's
+history rule (§7.4), V3 on a person's desktop with another process's window covering the target (the residual of §11
+(c); BS9's strict mode refused to run the case). The amd64 image runs the vision session and the scenarios as every leg
+does; `keypad-image`'s committed keys are expected to hold there (BS11), and a key that differs there is a finding for
+the orchestrator, settled by an `approve` on that leg, not a failure of the matrix. Each is a line of §15's "not
+verified" list and of `threat-model.md` §8.
+
+---
+
+## 14. Exit criteria
+
+The roadmap's row 7 (design §8), item by item:
+
+| Criterion | Met by | This phase |
+|---|---|---|
+| a vision-driven session on the sample is recorded into ordinary steps that replay with zero model calls | §13.2 item 8 in the image with the scripted gateway on both Javas (the committed `exported/session-vision-loan.*`, which carries nothing target-dependent, D356), and once live (§13.3 items 1 and 6) | **can be met** in CI (the scripted form), and live once |
+| a plan compiled with `inference: run` is reported as skipped in `replay` | `vision-live-only.yaml`: `Status.SKIPPED`, JUnit `<skipped>`, exit 0, no agent call (§8.6, §13.2 item 7) | **can be met** |
+| a guarded visual expectation yields `DEGRADED` in `replay` | `loan-table-visual-check.yaml`: `inference.vision` `UNAVAILABLE (replay)` in the merged matrix, the check skipped, the run `DEGRADED` (§8.5, §13.2 item 7) | **can be met** |
+| V3 runs only with its explicit opt-in | §13.2 item 6: `swing.pointer.robot` `UNAVAILABLE` without the agent option in every golden; with it, a `via: ROBOT` call is refused by the executor and the session without `--allow-robot`; with both it fires on the WM-less display (BS9); §13.1 items 7 and 8: never a per-call choice of a model or a client even with both flags, and never a glass capture for one | **can be met** on Linux; the person's-desktop half (macOS, Windows) is specified (§3.4) and not verified |
+| *(added)* the pixels a model sees are redacted `PAINT` captures of the target's own windows, no credential reaches a model, and every vision call is in the ledger | §13.2 items 1 and 8, §13.1 items 5, 7 and 8 | **can be met** |
+| *(added)* `web.hitTest` and `web.pointer` on both paths against real JCEF | §13.2 item 10 | **can be met** under the profile `jcef` |
+| *(added)* an `expectImage` baseline holds on the target it was made on and is `REBIND_NEEDED` elsewhere | §13.2 item 7 (`keypad-image`) for the hold on every leg; §13.1 item 5's `PlanExecutorTest` case for the missing key | **can be met** |
+| *(added)* the security delta review is signed off | §15 (B31) | **the owner's** |
+
+---
+## 15. The security delta review (B31)
+
+**Decision (D338).** B28 covers the tree as of `af29e59`. Phase 7 opens a new boundary (pixels leave the JVM, screen
+content steers a model, Robot acts outside the application) and is reviewed as `docs/release-checklist.md` item 2 asks:
+a **delta review** over everything Phase 7 changed since `af29e59`, run after the build and the code review, in the
+method of P6 §12.3 (D147): the eight lenses L1-L8, each with one reviewer and one sceptic who tries to break the
+reviewer's claims, the four-level scale and the counting rule of P6 §12.4 and `threat-model.md` §4 (a finding that
+needs the token counts when the token's user is a model or an MCP client; the operator's environment is
+"operator-only"); findings numbered **S101** onwards; every finding of medium or above **fixed** (contract first, a test
+that fails on the old code, then the code), nothing of medium or above accepted as a known risk; a low may be accepted
+in writing with a release note as P6 §12.5 allows; the record (`record.json` in the 2026-10-02 shape, `dispositions.md`)
+in the session notes; the summary in `../TODO.md`; **the owner's signature is B31**, and the orchestrator does not sign.
+What each lens looks at in this phase:
+
+| Lens | Phase 7 surface |
+|---|---|
+| L1 controller correctness and bounds | the merge of contributed capabilities and `SessionOptions.host`, `SKIPPED`'s decision point, the image comparison's bounds and files, the bindings file's `images` and its derived paths, the bind lifecycle's second write, plan version 6's reader (`guard`), the export's comment and `images` section |
+| L2 host safety (the agent against the host) | `swing.pointer`'s posted sequence with its per-event checks and the `cancelled` flag, the listener's removal, the Robot's construction, worker thread, paired press and release, pointer restore and delivery probe, `requireFocus`, the capture's redaction, masks and heap bound on the EDT, the SPIs' call rule, the covering and modal checks, A4 (no Robot before AWT), bounds of §2.4; §11's `SECURITY.md` sentences (c), (d), (g) and (h) present |
+| L3 the data channels | nothing new (no new SQL path); `data.query` never reachable from the facade's `read` or `ExecutorSession.read` |
+| L4 the web boundary (the page as an adversary) | `hit`'s page-chosen answers bounded on the receiving side, `web.pointer`'s parameters, the library's version rule (an older slot a page controls), the CDP path's new sends, `SurfaceSource` from the index only, the composite into non-redacted surfaces only |
+| L5 the model boundary (what leaves to the provider) | redaction before the image leaves, never a glass capture (D341), pixels without a value mask (§11 rule 1), `images: true` as the one gate, the mask on every text route with images (`Prompts.part` hashes; `base64` never masked, never a text route), recordings with images, the legend, a tool's instructions and the marks list masked, `<model-question>`, the key never in a request, the fallback header with a toolset |
+| L6 the model as an actor (MCP, session, planner, overlay) | the tool vocabulary of V1-V3, `CallPolicy.arguments` on every route including the raw primitive paths (`redact: false`, `force` on five primitives, `via: ROBOT`, `mode: ROBOT`; `robotAllowed` on the facade's route only), the credential rule (the reference refusal, `secretsInFlight`, the value check), the recorder's refusals (masked target, screen-text locator), the stale rule and `expectTarget`'s scope, V3's double opt-in and `requireFocus`, the budget and the service-enforced limits, `confirm` still a person's; `--vision`/`--allow-robot` as the person's flags (on the raw `call` too, where the person's argument is the second half), the captures resources under `images: true` only, `PlanPolicy` on `pointer`/`expectImage`/`aiAct`/`aiExpect` and on a credential slot's field in a client's scenario (the credential rule's plan form), `skillroy_catalogue`'s `source`, a read-only policy's tool list |
+| L7 Windows and file-system trust | the new writers and directories through `OutputFiles` and `SecureFiles`: `captures/` and `candidates/` under the session's or the run's output directory, `<scenarioId>.images/` in the source tree beside the bindings file (written by `approve` and the export's caller), `failure/image-*.png`, the MCP server's capture resources; a bindings-side `.images/` directory in a working copy another user prepared; `file` derived and resolved inside the bindings directory without links; the ACL branch unverified (threat model §8) |
+| L8 evidence at rest | `captures/<hash>.png` (masked, as captured, never a `ROBOT` capture), baselines and anchors beside bindings (masked, reviewed code), `failure/image-*.png`, the journal's provenance (no bytes, bounded intent, the anchor object), `run.jsonl`'s `image` and `skipped` records, `OutputFiles` for every writer; §11's `SECURITY.md` sentences (a), (b), (e) and (f) present |
+
+The delta review's "not verified" list (§13.4) joins `threat-model.md` §8, `README.md` and `SECURITY.md` by the
+build's documentation package; the release checklist's item 6 repeats it.
+
+---
+## 16. Changes to the earlier contracts and the design overview
+
+### 16.1 Marks into the earlier contracts and the overview
+
+Written into the files named when the build starts, marked "(Phase 7, specified 2026-10-10, not yet built; P7 §n)" and
+"(Phase 7, built …; P7 §n)" once built; the P1 passages carry their A-numbers (§5). Each package writes its notes under
+its tag and never rewrites another's passage; the orchestrator merges by tag.
+
+| Contract and section | Change |
+|---|---|
+| P1 §2.4 options | `robot` (A65), a default of `false` in `AgentRuntime.resolveOptions` |
+| P1 §3 `skillroy-protocol` | the version stays 0.2 (D299); the script library's `hit` and version 2 (A66) |
+| P1 §4 `skillroy-agent-api` | the SPI table gains `RegionResolver`, `CaptureMask`, `SurfaceSource`; `LocatorResolver.describe`; the web SPI's `WebPointerEvent` and `WebBrowser.dispatchPointer` (A64, A66) |
+| P1 §5 catalogue and dispatch | `swing.hitTest`, `swing.pointer`, `swing.rendering` in the catalogue (A63); no new gate |
+| P1 §6 swing primitives | the `swing.capture` row and passage (A61), the text walker's sentence "Password fields never …" extended to every component a `CaptureMask` names (A61, §3.6), the `swing.type` row and "Type modes" with gap 60 (A62), the rows `swing.hitTest`, `swing.pointer` and `swing.rendering`, "Click rungs"' `ROBOT` sentence, "Modal blocking" covering the pointer per event, "Capabilities" with the five ids (A63) |
+| P1 §8.1 scenario YAML | the keys unchanged; `region`, `row`, `clip`, `guard`, `via`, `at` as verb arguments (§8.1) |
+| P1 §8.3 base verbs | `aiAct`, `aiExpect`, `pointer`, `expectImage`; `UI_VERBS` with `pointer` |
+| P1 §8.4 expectations | `VisualCheck` (skipped unconditionally under the executor), `ImageCheck` (from the step's capture result); the `image` record |
+| P1 §8.5 run sequence and outputs | `SKIPPED` right after `run-start`; the robot refusal before `checkRequires`; the records `skipped`, `image`; `capabilities` with `agentHash` and `contributed`; the files `failure/image-*.png`, `candidates/image-*.png` (approve), `captures/`; the second write of the bindings file after the steps in `approve` |
+| P1 §8.6 CLI and JUnit | `--allow-robot`, `--vision*`, `session --play`, `caps`' `source`, the `skipped` count, `--yes` for image approvals; `skillroy.robot` with its warning; `SKIPPED` as skipped |
+| P1 §9 the sample | the number pad, `LendingRegions`, `LendingCaptureMask` (the field and the pad), `describe`, module 0.2.0 |
+| P1 §10 acceptance | the checks of §13.2 items 1-6, 9 and 11 |
+| P2 §3.1 strategies | `llm-vision` still refused (D316) |
+| P2 §3.3 the `inference.` prefix | enforced against the agent's matrix too; one contributor per id (§8.5) |
+| P2 §8.2 `plan.json` | version 6: `inference: run`, `images`, `Plan.Call.guard`, the two check shapes, `inferenceOf(slots, steps)`, `needsBindings()` over `images`; the version rule applied once more |
+| P2 §9 bindings file | version 2: `images` keyed by render key with `carets`, `focus`, the nested `rendering`, `file` informative and derived; the PNGs beside; the bind lifecycle (`Approver.reviewImage` at the step, the rewrite after the steps, `images` carried forward); the export's own `images` section and `ExportResult.images()` |
+| P2 §10 `REBIND_NEEDED` | reason `IMAGE` |
+| P2 §11.3 records | `skipped`, `image`, `capabilities.agentHash` |
+| P2 §11.4 never written | an unredacted capture's bytes to a model or a client; a glass capture to a model or a client at all; a capture's bytes on any text route (unchanged); baselines and the captures directory hold masked pixels only |
+| P2 §13 the sample pack | version 0.6.0, `screenLegend()`, gap 49's `inductionRequired` argument (§16.2) |
+| P4 §1 non-goals | `INPUT` and the two primitives built (A66) |
+| P4 §3 the SPI | `dispatchPointer`, `WebPointerEvent`, `INPUT`'s Javadoc |
+| P4 §4.2, §4.4, §4.5, §4.6, §5.2 | the two primitives, the two capabilities derived, the adapters' input, the library's version 2 and `hit`, the CDP path's served set |
+| P4 §7.1 verbs | no new web verb (§1) |
+| P4 §12.2 acceptance | `WebHostChecks` item 1 flipped, the new item, kit items 15-18 |
+| P5 §3.2 types | `ProviderTool`, `ModelRequest.providerTools`, `PROVIDER_TOOLS`, `toolsetName`, image parts in a tool result, `CacheHint.AUTO` |
+| P5 §4.1 Claude gateway | the toolset mapping, `toolset_name`, `contentOfBlocks`, the top-level cache marker |
+| P5 §4.2 recorded gateway | `IMAGES` and `PROVIDER_TOOLS` declared by the recorded and the scripted gateway; recordings with the new fields |
+| P5 §4.4 settings | `effort.vision`; `images` "Phase 7 turns it on" becomes "the one switch for pixels"; the live profile's `models.haiku` mapping |
+| P5 §6.2 masking | an image part passes under `images: true`, redacted by the agent before (§3.6), its `base64` never masked and never a text route; the legend and a tool's instructions masked like the vocabulary; the label `<model-question>`; the vocabulary names no secret field of a slot |
+| P5 §7.2, §7.3, §7.4 | the Haiku 5.5 row; purpose `vision`; the estimate with images |
+| P5 §9.2, §9.3, §9.4 MCP | `--vision`, `--allow-robot` (for `skillroy_session_ask` only), `ServerOptions.vision/robot`, `SessionOptions.host`; the captures resources (never a `ROBOT` capture); `PlanPolicy` on the four verbs; `ToolCalls.primitive` under `CallPolicy.arguments` (refuses, never strips); the raw tool names `swing_hit_test`, `swing_rendering`, `web_hit_test`, `swing_pointer`, `web_pointer` |
+| P5 §12.2 `ExecutorSession` | `read` (throws, `base64` exempt, the exclusion list); the four-argument `execute` forms; `capabilities()`; `SessionOptions.robot` and `host`; the robot gates (origin-free for the flag, person-only for `mode: ROBOT`); the credential rule (the `$slot.secret` refusal for every origin but a person's, `secretsInFlight`) |
+| P5 §12.3 journal and export | `provenance` on `step`, handed in by the acting call; the comment without hash, handle or mark; the report's two sections; the `images` section of an export's bindings file; cost stays in the ledger (and design §3.4's wording follows) |
+| P5 §12.4 session service | `SessionTools`, `SessionActions`, `SessionExtensions`, the eighth constructor parameter, `visionCall`, `atTurnStart`, `afterBatch`, `endTurn`, the vision limits enforced by the service, `CacheHint.AUTO`, the raw primitive branch under `CallPolicy.arguments`, a tool's instructions masked |
+| P5 §13.1, §13.2, §13.4, §13.5 | the verbs and `region`; plan version 6; the CLI options; `SKIPPED` in JUnit |
+| P5 §14.1, §14.4 | the pack's version and legend; the vision session's export beside the Phase 5 one |
+| P5 §15.3 live | `VisionLiveIT` (§13.3) |
+| P6 §6.4 archived matrix | the merged matrix, `agentHash` (D130 kept on the agent's), `host` |
+| P6 §10.2, §10.4 observer | no new attribute; `modelCall` spans with purpose `vision` carry no image |
+| P6 §12 security | the delta review (§15, B31) |
+| P6 §15.2 gaps | 31, 36, 49, 60 and 76 as §16.2 says |
+| design §1.1 stack | the Vision row: built, `skillroy-vision` and the three agent additions |
+| design §2.1 modules | `skillroy-agent-swing`'s row: hit-test, pointer, Robot behind the option; `skillroy-agent-web`: input |
+| design §2.4 catalogue | the reserved rows become the built signatures; `swing.rendering` |
+| design §2.6 SPI table | `RegionResolver` built; `CaptureMask`, `SurfaceSource`, `LocatorResolver.describe`; `MaskPolicy`'s row loses "a component-level method is reserved" (it is `CaptureMask`) |
+| design §3.1 modules | `skillroy-vision` built; image comparison in `skillroy-scenario` (D313) |
+| design §3.2 DSL | the four verbs, `region`; the reserved paragraph becomes the built one |
+| design §3.4 record and replay | the journal's provenance "(intent, model, request id; the cost in the ledger by request id)" |
+| design §3.5 failure taxonomy | `SKIPPED` as the fifth status, no new kind |
+| design §3.7 capture | root-pane painting, redaction, the Robot rung's facts (BS9) |
+| design §3.8 | `INPUT` built |
+| design §3.10 | status "built" per section; **the tier table's V3 row (design line 643: "a `ROBOT` screen capture") becomes "a `PAINT` capture of the target's windows; the pointer through Robot" (D341)**; "image comparison" in the base (D313); **the two sentences D314 and D330 overturn: "Where a pixel cannot be mapped" item 2 (line 668: "a `PAINT` crop … and a tolerance. The fingerprint of such a scenario includes what changes rendering") and the visual-assertions table (line 676: "with a mask and a tolerance, and the rendering inputs are part of the fingerprint") read "exact after masks, `maxDiffPixels` 0 (D314); keyed by the render key, the fingerprint unchanged (D330)"**; the loop's rules as BS12 measured them |
+| design §5 | the vision loop in the session service through `SessionTools` and its facade |
+| design §6 CI | `SKIPPED`; `inference.vision UNAVAILABLE (replay)` |
+| design §7 layout | `controller/skillroy-vision/` built |
+| design §8 roadmap | row 7's status; BS9-BS12 passed; **the BS11 summary (line 953: "baselines bound to a fingerprint of rendering inputs") reads "baselines keyed by a render key" (D330)** |
+| design §9 risks | **the recorded-vs-replayed row (line 986: "rendering inputs in the fingerprint, so the failure is one `REBIND_NEEDED` per scenario") reads "baselines keyed by the render key; `REBIND_NEEDED(IMAGE)` per baseline"**; the prompt-injection row gains the mechanisms built (the credential rule, the masked-target rule, `CallPolicy` on every route); a new row for the root-pane finding |
+| design §11 | B29, B30, B31 |
+| `threat-model.md` | §2, §3, §5, §6, §7, §8 (D334; written now, extended by the build) |
+| `phase1-contract-amendments.md` | the "A34 onwards" index (D301) |
+
+### 16.2 Open SPI and DSL gaps: what Phase 7 takes
+
+| # | Gap | In Phase 7 |
+|---|---|---|
+| 31 | `ROBOT` type mode, `OPTION_VALUE` dismissal, `swing.events` | not taken: Robot keys stay out (§1, D345, §18 Q6; gap 77 below), `swing.events` is not needed (`received` and the pack's events answer "did my input arrive", D293); `OPTION_VALUE` unchanged |
+| 34 | the `PAINT` guard | unchanged; `skipped` kept beside `surfaces` (D289) |
+| 36 | `web.dom.click` is a DOM click | **closed**: `web.pointer` and `INPUT` (§4) |
+| 37, 39, 44 | `web.resize` and the component's bounds; a hidden JCEF browser has no bitmap; windowed JCEF on Java 8 | unchanged; stated where they touch the vision loop (§1, §4.3) |
+| 49 | `LendableItem` cannot say "an item that needs no induction" | **taken**: the pack changes anyway (0.6.0): `inductionRequired` argument on `LendableItem`, as `ItemsTriggering` has |
+| 55 | `RpcResult.startedAt` | not taken (no protocol round is opened: 0.2 stays) |
+| 60 | `swing.type` DISPATCH + `enter` acts on the last-focused field | **documented** in A62's passage; the fix stays later |
+| 76 | `swing.capture` in `PAINT` mode, given a frame on Linux, includes imitation window decorations (BS9) | **closed**: A61 paints a window from its root pane (§3.1, D288); `REGION` and `COMPONENT` of a `RootPaneContainer` likewise |
+
+New, numbered **77-87**: **(77)** Robot key input (a V3 keyboard through the OS) is not built; V3 types through the
+routed primitives after a focus check, and stops the turn when the target JVM holds no focused window (§3.4, D345).
+**(78)** HiDPI: the Swing side reports user-space pixels and the web side computes an empirical factor with
+`scaleAssumed`; nothing runs at another scale than 1 here (BS9 leg `mac-j25`: a `ROBOT` capture on a Retina display
+differs from a `PAINT` by antialiasing). **(79)** `swing.hitTest`'s mouse target is inferred with public API plus two
+rules (`componentPopupMenu`, `autoscrolls`); a component that calls `enableEvents` otherwise is invisible to it (BS10
+condition 3); `swing.pointer`'s `received` reports the real one. **(80)** The covering-window rule of the routed path
+ranks only a modal dialog, an owned window and the active window; two unrelated frames of the JVM are reported, not
+ranked (§3.2, §3.3); the Robot path refuses every covering window instead (§3.4), and a window of another process is
+invisible to both. **(81)** `web.pointer` has no key input (`Input.dispatchKeyEvent`, `Input.insertText`), the later
+keys of `INPUT`. **(82)** The toolset's `hold_key`, a horizontal `scroll`, and in V3 `left_mouse_down`/`left_mouse_up`
+are refused as text (§6.3). **(83)** A baseline exists per rendering the project runs in; a new JDK line or font set
+needs an `approve` run per environment to add its key (§8.7). **(84)** Redaction blanks a component's rectangle after
+it was painted: the layout and a value's width stay visible, and pixels carry no value mask, so a component no mask
+names reaches a model as rendered (§3.6, §11). **(85)** The session's fold and the vendor's history rule on the 5.5
+models are not exercised live beyond one turn (§7.4). **(86)** `web.pointer` into a hidden JCEF browser is served but
+what Chromium does with it is recorded, not asserted (§4.9). **(87)** The window between the recorder's hit-test and
+the recorded step's act is closed by the stale-capture check and the verb's exact-match locator, not atomically: a
+locator that matches exactly one *other* component after a window change acts on it (§6.4); `expectTarget` closes it
+for the live-only raw calls only.
+
+---
+## 17. Decisions taken in this contract (D287-D358)
+
+D287-D340 were taken with the contract on 2026-10-10; D341-D358 were added by the revision after the contract review
+the same day (the session notes' `contract-review/revision-log.md` names the finding behind each, and the rows of
+D287-D340 whose text the revision changed: D294, D302, D304, D305, D306, D308, D309, D312, D326, D327, D329, D330,
+D331, D332, D334, D337, D338, D339, D340; the last round after the recheck changed D332, D337, D339, D342, D348, D352,
+D355 and D357 once more, `revision-log.md` "Last round"). The build's decisions start at D359, numbered by the orchestrator at integration in the
+order the packages land.
+
+| # | Decision | Alternatives rejected | Reason |
+|---|---|---|---|
+| D287 | `swing.capture` is extended additively: name, capability `swing.capture.paint`, default mode and the four built fields unchanged; the reserved parameters and result fields added; `target` also takes a locator object and `by` is accepted (§3.1) | a second primitive (`swing.capture2`); a wire-type sub-package for the result | the reserved names exist for exactly this; the result stays a plain map every consumer reads by key (`writePng` reads `base64` only, `Images` keys on `format` and `base64`); nothing needs typed parsing beyond `JsonView` |
+| D288 | A window is painted from its root pane (and so are a `REGION` and a `COMPONENT` of a `RootPaneContainer`) and the capture is redacted by default, both as amendment A61, although the built pixels change; gap 76 closes (§3.1, §3.6) | keep the frame painting and add `scope: CONTENT`; `redact` default false with the vision module always passing true | BS9 and BS12 found imitation decorations drawn over the content in every frame capture on the CI display: the built pixels were wrong, not a baseline anyone holds; nothing committed compares them; B19's rule makes the base restrictive by default, and a default of false would leave a person's evidence images and the MCP's unmasked while a model's are not |
+| D289 | `skipped` stays as built; `surfaces` lists heavyweights and web surfaces beside it, each with `redacted` | fold `skipped` into `surfaces` | P4 §2.5 is built and tested; the overlap is one sentence; the controller never reads `skipped` |
+| D290 | The Robot implementation lives inside `skillroy-agent-swing` (`RobotInput`, lazily behind `RobotFactory`), JDK API only, constructed on a worker after `checkAwt`, behind the agent option `robot` (§3.4) | an optional module `optional/skillroy-agent-robot.jar` behind a new agent-api SPI, named by `optionalModules` | `java.awt.Robot` is JDK API, so B4's rule is untouched; A4 is enforced in one place (`SwingModule.checkAwt`); the option is the host's gate exactly as `optionalModules` would be; an optional module costs an SPI, a second module, a second golden state per leg and a loader boundary for about two hundred lines; vision §R9 permits either |
+| D291 | `swing.click {rung: ROBOT}` stays the sentinel; a Robot click on a component is `swing.pointer {target, via: ROBOT}` (§3.4) | map the rung to a pointer click at the centre | a third way to click by ref, with the rungs' `fired` semantics it cannot keep (a Robot click is observed, not posted); the pointer's component form is the same call with an honest result |
+| D292 | `swing.hitTest`'s shape: a point in a capture's, a window's or the screen's space, or a component by ref; `deepest` and the inferred `mouseTarget` with the two public rules, `wheelTarget`, `covering` with `ranked`, up to six verified locators, `row`, `fires`, `region`, `surface`, `enabled`, `listening`, `masked`, `blockedBy` (§3.2) | the research's smaller shape; AWT's package-private target search by reflection | BS10 RESULT "What `swing.hitTest` must report": the glass pane, the disabled button, the covering window, the wheel target and the `setComponentPopupMenu` case each needed a field; the recorder needs `row` and `fires` (a table-row mark and a custom component the pack can fire are undecidable without them); reflection into `Container` would break the no-`sun.*`/no-internals rule and vary by JDK |
+| D293 | `swing.pointer` ROUTED: window-sourced events dispatched non-posted from one `invokeLater` task per event in BS10's native sequence; the result reports `received`, `dispatched`, `focusOwner`, `activated`; no `swing.events` tap (§3.3) | the built `DISPATCH` rung with a point; posting the events to the system queue; building `swing.events` | BS10: `DISPATCH` is position-blind, bypasses glass panes and sends no enter or move; posted events would be filtered by the modal loop and retargeted; one `AWTEventListener` for the call's duration answers "what received the press" without a general tap |
+| D294 | Two checks before a routed action: `MODAL_OPEN` for a blocked window and `INPUT_REJECTED(covered)` for a ranked covering window, both skipped by `force`, which a model or a client never gets to give **on any input primitive** (`swing.pointer`, `swing.click`, `swing.type`, `swing.key`, `web.pointer`); nothing new is `destructive` (§3.3, §9.1) | always refuse any covering window on the routed path; never refuse; a `confirm` per pointer action; `force` refused on the pointer alone | BS10 conditions 1 and 2 by construction; AWT's z-order is a guess outside the ranked cases (vision §F8), so refusing on a guess would refuse rightly placed clicks that routing delivers to the chosen window anyway (the Robot path, which presses the real top, refuses every covering window, D344); a per-click `confirm` would make a person confirm every action of a session and so train them to confirm anything; the judgement that acting past a modal dialog is a person's choice holds for every primitive that takes `force`, so one list on every route (D244) |
+| D295 | `redact` defaults to true everywhere; the built-in rule blanks every `JPasswordField`; the fill is solid grey; `redacted` reports the rectangles (§3.6) | default false; the component's background as fill | B19 (the base restrictive by default); the grey is deterministic for baselines and visibly a mask; a background fill would make the mask invisible and leak whether the field was empty |
+| D296 | `CaptureMask` is a separate SPI with `masks(Component)` and `regions(Component)`, not a default method on `MaskPolicy` (§3.6) | `MaskPolicy.masksPixels(Component)` | `MaskPolicy` is row-shaped, AWT-free and called on application threads for hooks and Byteman (P6 §4.3); an AWT type in its signature would load AWT where no AWT is wanted and tie two unrelated call rules together; the research's "component-level method on the masking policy" is honoured in the family, not the interface |
+| D297 | `region` keeps both reserved meanings: on the wire `swing.capture.region` takes a rectangle or a region id; in the DSL `region` is always an id and a rectangle is `clip` (or a `mask` entry) (§3.1, §8.1) | rename the wire parameter `clip`; forbid the id form on the wire | the name is reserved for the capture rectangle and the step locator alike (map 2 §8); one wire parameter with two typed forms is the module's existing pattern (`name`: a string or `{contains}`), and the DSL stays unambiguous |
+| D298 | The capability ids stay lower-case as reserved (`swing.hittest` beside the primitive `swing.hitTest`) (§3.9) | camel-case ids | `web.hittest` is in five committed goldens and the web host's acceptance; two conventions already coexist (`web.initScript`); the reservation is the written one |
+| D299 | The protocol stays 0.2; no new error code, no new topic (§5) | `0.3` as a marker; a `COVERED` or `NOT_DELIVERED` code | every change is additive and discoverable through `/schema` and `/capabilities`; `INPUT_REJECTED` with a reason and a `fired: false` result carry the new outcomes; a code is a wire change for a consumer that reads by name |
+| D300 | The script library's version becomes 2; an older slot gets the missing functions installed, is never replaced (§4.6) | replace an older library; make `hit` self-contained | replacing loses a tap's buffer (P4 §4.6's reason stands); a self-contained `hit` would duplicate the aria walker's role and name rules in a second copy that drifts |
+| D301 | The build appends an "A34 onwards" index to `phase1-contract-amendments.md` (§5) | leave the file at A33 | the design and this contract call the file the amendment process; a reader who follows the pointer finds the sequence's second half nowhere |
+| D302 | The vision module plugs into the session service through the `SessionTools` seam (`ServiceLoader`) and acts only through the service's facade `SessionActions`: one loop, one meter, one journal, one mask, one history, one policy (§9.1) | a second loop in `skillroy-vision` over `ExecutorSession`; vision verbs run by the executor only; a context that hands the tool the raw `ExecutorSession` | D79's reason against two implementations of one protocol; the CLI and MCP hosts would need a second actor; the executor cannot host a model loop without becoming the session service; a tool holding the raw session could pick its origin and bypass `CallPolicy` (D353) |
+| D303 | `skillroy-vision` is optional at run time (`ServiceLoader` from the pack loader and the CLI's class path), bundled in the CLI zip, depended on by the CLI and the sample's scenario tests only (§2.1) | a required module of `skillroy-scenario` | `replay` must run anchored steps and `expectImage` without a model module (D313); the base's required set stays what it was |
+| D304 | The tiers' defaults: V1 with marks, Sonnet 5.5 (`SONNET_CLASS`), effort `low`, captures at the window's own size (down only above 1920 pixels, never below 0.75), the toolset for V2/V3 with `zoom` off, the class `haiku` (whatever id it maps to) for V1 only (§3.1, §6.2, §6.3) | V2 by default; Opus by default; effort `medium`; Haiku everywhere; zoom on | BS12 RESULT: V1 marks 100 % and the cheapest form that answers with a ref; Opus added no accuracy at twice the price; effort moved nothing on single-element questions; Haiku wrote calls as text with a pixel tool and failed both V2 sessions; zoom was never called and costs 411 tokens a request; icons failed first at half size; the rule is on the class because the class default (`claude-haiku-4-5`, D84) is a settings matter |
+| D305 | The stale-capture rule: a changed window set since the capture's `seq` triggers a fresh capture and a same-component (and same-row) check at the same point before acting; the recorded step's act is then guarded by the verb's exact-match locator, and `expectTarget` closes the remaining window for the live-only raw calls and an MCP client's call (§3.3, §6.4; gap 87) | the design's strict rule (refuse and recapture); no rule; `expectTarget` on the recorded step | BS12 RESULT finding 4: the strict rule refused a click after a dialog-closing click in the same batch; the refined rule let 16 such clicks through and refused none; a recorded step cannot carry a per-start ref, so the atomic form is the raw calls' alone and the residual is named |
+| D306 | The recorder's locator and step choice: the first verified locator (domain strategy first); `click` by locator where position does not matter (the roles `button`, `toggle`, `checkbox`, `radio`, `menuitem`, a `fires` target or a `describe` locator), `pointer` by locator with fractions, a row or a region where it does (the other roles of `Roles.ALL`, the class rule for `JSlider`/`JSpinner`/`JScrollBar`), an anchored `pointer` on the window where no locator exists; `type` at the focus owner's locator; the session's `ui.clickRung` (§6.5) | always `pointer` at fractions; always `click`; new roles `slider`, `spinner`, `scrollbar` in `Roles.ALL` | design §3.7's authoring preference and §3.10 step 2; a `pointer` on a button records a position that does not matter and would break on a resize; a `click` on a table row loses the row; the UI scenario's rung convention (map 7 Q5); the role set is closed and a new role would change every committed snapshot fixture, so the rule is written in its words |
+| D307 | Every recorded action runs through the step that will be replayed, under `Origin.model`; V3 actions and raw pointer halves are journaled and listed live-only, never exported as steps (§6.5, §6.6) | export V3 steps with `requires: swing.pointer.robot` | design §3.10 step 3; no CI target has Robot, and an exported step that can only fail there is noise; a person who wants it writes `pointer {via: ROBOT}` by hand and runs it with `--allow-robot` |
+| D308 | The loop's captures, hit-tests and `swing.rendering` are unjournaled reads through the new `ExecutorSession.read` (masked except an image's `base64`, bounded, non-mutating only, with a local exclusion list, throwing the agent's error); their hashes live in the acted step's provenance (§9.2) | journal every capture and hit-test as raw read steps; a `read` that swallows errors and masks whole values | `snapshotText`, `eventsSince` and `fact` are already unjournaled observations; two or three read steps per action would swamp the journal and the export's report; the provenance keeps the evidence; the loop needs the agent's error codes to answer the model, and a mask over base64 would corrupt the image under a lowered `minLengthInText` |
+| D309 | The export writes an ordinary verb step plus one masked comment (role, name, class, model; no hash, handle or mark) and a report section for every vision-derived step (§6.6) | a `provenance:` key in the YAML; no comment; the hash in the comment | the loader is strict and has no such key; D86's observed-expectation comment is the precedent a reviewer knows; the hash and the handle vary by Java line, by caret phase and by call order, so the committed export must not carry them (D356) |
+| D310 | The four verbs' shapes of §8.1: `aiAct` compiles to no call and makes the plan `run`; `aiExpect` to a `VisualCheck` with a fixed guard; `pointer` to `swing.pointer`'s component form (`guard` on the call); `expectImage` to one capture call and an `ImageCheck` evaluated from it | `aiAct` as a `call` of a controller primitive; `aiExpect` with an overridable `capability` | a plan holds no model call by rule (B6); an overridable guard would let a scenario drop the one guard that keeps a verdict advisory (vision §R5) |
+| D311 | `aiAct` and `aiExpect` steps run only in the vision module's `ScenarioPlayer` over a session; `PlanExecutor` skips a `run` plan in `replay` and refuses it in every other mode (§6.8) | a `ServiceLoader` seam in `PlanExecutor` for model steps | the executor would host a gateway, a meter, a ledger writer and a history: a second session service inside the run; the player is the session service with a script, one way in (B15) |
+| D312 | `inference.vision` is `OK` only in a vision session (the player, or a service with the vision tools, through the host feature `vision-session`); under `PlanExecutor` it is `UNAVAILABLE` in every mode with the reason, and a `VisualCheck` is skipped there unconditionally (D354) (§8.5) | `OK` under `PlanExecutor` in `live` with an evaluator seam | an evaluator in the executor needs a gateway there (D311's reason); the capability then says exactly what it means: a vision loop is attached to this run |
+| D313 | The exact image comparison and the shared step code path live in `skillroy-scenario` (`…scenario.image.ImageCompare`, `ImageSteps`); design §3.10's placement in `skillroy-vision` is amended (§6.7) | in `skillroy-vision` | `replay` runs anchored steps and `expectImage` in CI without the vision module (C0, D303) |
+| D314 | The comparison is exact on decoded rasters after masks (the baseline's masks, both captures' carets, the focus owner's rectangle on a focus mismatch, the baseline's side recorded in its entry); `maxDiffPixels` defaults to 0 and is the one explicit margin; the hash is of the raster with a pinned byte layout, never the PNG (§3.1, §6.7) | a per-channel tolerance with a pixel budget by default | BS11 RESULT "Tolerance study": within one rendering the noise is zero, and no tolerance separates cross-environment noise (1,128 to 68,479 pixels) from a one-character change (28 to 50 pixels); the caret is as large as a real change and must be masked, not tolerated; identical rasters encode to different PNG bytes on Java 8 and 25; two modules compute the hash, so its bytes are pinned and one vector shared |
+| D315 | An anchor mismatch is `REBIND_NEEDED(IMAGE)` with both images; an `expectImage` mismatch is `FAIL / ASSERTION`; a missing baseline is `REBIND_NEEDED` in `replay`, approved at the step in `approve`, skipped in `live` (§6.7) | one outcome for both | an anchor is a recorded answer about where to click (P2 §10's semantics); a baseline is an expectation about the application |
+| D316 | `Strategy.LLM_VISION` and `UiTarget` stay reserved (§8.9) | build the binding-shaped recording | vision §Risk1: a vanished control would read as a binding problem; the binder runs before sign-on and cannot verify a UI target of a later screen (map 5 trap 5) |
+| D317 | An `aiExpect` verdict `UNSURE` skips the check with the reason (the run at best `DEGRADED`); `NO` against `expect: YES` fails (§6.8) | `UNSURE` fails; `UNSURE` holds | vision §R5: `UNSURE` is a result, not an error; a verdict never turns a failing scenario green and should not turn a passing one red on an unsure answer; a `NO` is the model's statement and a person looks at a live failure |
+| D318 | Provider-defined tool entries travel as `ModelRequest.providerTools` (`ProviderTool(provider, type, raw)`), fingerprinted when non-empty, declared by `GatewayCapability.PROVIDER_TOOLS` (§7.1) | widen `tools` to a sealed `ToolEntry`; the entry in `metadata` | every caller of `tools` stays untouched; `metadata` is outside the fingerprint, so a recording of a toolset request would answer a custom-tool request |
+| D319 | `toolsetName` is a nullable fourth component of `ToolUse` and `ToolResult`, in the fingerprint when set (§7.2) | a wrapper record per toolset call; reading it from `input` | the provider requires it on every result and puts it beside the block, not inside the input |
+| D320 | `ToolResult.content` may be a list of `Text` and `Image` parts; an error result with an image is refused at construction (§7.2) | a sixth `Content` variant; an `images` component | the sealed set and `Prompts.part` already render nested parts naturally; BS12: the provider rejects an image in an error result with a 400 |
+| D321 | The recorded and the scripted gateway declare `IMAGES` and `PROVIDER_TOOLS`; the price table gains `claude-haiku-5-5` (0.10 / 0.50 / 0.01, the >100K tier noted); the Haiku class default stays `claude-haiku-4-5`, the live profile's settings file maps it to 5.5 (§7.3) | keep `IMAGES` off the recorded and scripted gateways; move the class default | a recording keyed by a fingerprint that hashes the image can answer; the loop checks the gateway's capabilities before it sends an image, and the CI route of §12.4 runs on the scripted gateway; D84 stands and the loop never needs the Haiku class for the toolset |
+| D322 | The ledger purpose `vision`; `effort.vision` with default `low`; no other new settings key (§7.3) | reuse `effort.session`; a `vision:` block | one call's purpose is its own line in the ledger and the report; BS12 measured `low`; the module's switches are the host's options, not the settings file's |
+| D323 | `CacheHint.AUTO` adds the top-level `cache_control` the provider advances; the history is append-only within a turn, folded between turns (§7.4) | a breakpoint the loop moves on the latest tool result; no tail caching | the vendor's robust combination for agent loops; four slots of bookkeeping in the loop for the same effect; without it a 20-action session costs about four times as much (vision §F3) |
+| D324 | Image tokens enter the estimate's fallback as `ceil(w/28) * ceil(h/28)` per image (§7.5) | leave the fallback | BS12: 1,039 tokens per 1024 x 768 capture; the meter would under-reserve by that per call wherever `countTokens` fails |
+| D325 | Plan version 6: `inference: run`, the `images` key, `Plan.Call.guard`, the two check shapes, the verbs and their arguments; `inferenceOf(slots, steps)`; `needsBindings()` over `images`; one regeneration of every committed plan and bindings file (§8.2) | a version-5 plan with `run`; the guard's region in the plan | P2 §8.2's version rule: a new enumerated value and new keys; the reader's consistency check must see the steps; the guard's rectangle is environment data and lives in the bindings entry, so the plan names the label only |
+| D326 | `CapabilityContributor` (`ServiceLoader`; `Map<String, Capability>`; a `CapabilityContext` with the settings, the mode, the agent's matrix, the host features and the pack): the merge once per host, in the executor after step 0b, in `ExecutorSession.open` (reading `SessionOptions.host`, D348) and the MCP server; `replay` forces `UNAVAILABLE("replay")`; the `inference.` prefix refused agent-side; one contributor per id; `BaseFacts.caps(Supplier)`; `agentHash` (the agent's matrix after step 0b) and `contributed` in the `capabilities` record (§8.5) | widen `ResolverContributor.capabilities` to `Capability`; hard-code `inference.vision` in the executor; keep "missing"; a re-merge after the service is built | the method today carries states only and is instantiated never in `replay` (D72); the design's "guard or require a model without a new mechanism" needs this one small mechanism; `agentHash` keeps the "one matrix per target" check on the agent's matrix (D130) while the goldens stay normalised; the fact root reads the agent directly today, so the supplier is the seam; a context without the pack cannot answer the allow-list reason |
+| D327 | `inference.vision` states: `OK(strategy = tier)` when the host declares `vision-session`, the gateway is not `none`, `images: true` and `swing.capture.screen` is `OK`; else `UNAVAILABLE` with the first failing reason; contributed by the vision module alone (§8.5) | `OK` whenever the module is present; gate on `swing.capture.paint`; `InferenceContributor` keeps answering the id | the capability says a vision loop can act in this run, which needs all four; the loop's capture is the `SCREEN` composite; two contributors answering one id is a conflict the merge refuses |
+| D328 | `Status.SKIPPED`, decided right after `run-start` before the agent is contacted, JUnit `<skipped>` whatever `degradedAs` says, `Assumptions.abort`, the CLI's `skipped` count and exit 0 (§8.6) | `DEGRADED` with a skipped line; `ERROR / PRECONDITION_FAILED`; a `skippedAs` option | `DEGRADED` means every evaluated expectation held, which is false when nothing ran, and `--degraded-as failure` would redden a designed skip; an `ERROR` is an environment failure it is not; B16's "neither a failure nor a pass" needs its own word |
+| D329 | Baselines and anchors live in the bindings file (version 2, `images`, with the capture's `carets`, `focus` and nested `rendering`, `file` informative and derived) with masked PNGs beside it under `<scenarioId>.images/`, reviewed code in the threat model's sense; the bind lifecycle of D355 makes the binder read, approve and write them (§8.7) | a separate `baselines/` tree with a manifest; anchors inline in the plan; `file` as a path to open | they are recorded answers reviewed per environment, which is what a bindings file is; a plan holds no environment data; the reader of version 1 is kept and a file without images stays version 1; a stored path a planted file could point anywhere is L7's subject |
+| D330 | A baseline is keyed by the target's `renderKey` (`swing.rendering`, the keyed set of D350), not by the environment's fingerprint, which is unchanged (§3.8, §8.7) | the fingerprint carries the rendering inputs for scenarios with images | BS11: the JDK line changes 0.30 % of the desk's pixels, so a fingerprint with rendering inputs splits every environment into one per target Java and every such scenario's bindings file per leg; a key per baseline keeps one bindings file per environment, holds one PNG per rendering (Playwright's practice), and leaves every other scenario's bindings untouched by a font or JDK change (vision §Risk3) |
+| D331 | The journal step's optional `provenance` object with the keys of §9.2, handed in by the acting call (D351); cost stays in the ledger by `requestId`; design §3.4's "tokens, cost" wording is amended (§9.2) | tokens and cost copied into the journal; provenance in `Origin.note` | P5 §12.3 as built and D80: one source per fact; the ledger entry is found by the request id; `note` is text |
+| D332 | `SessionOptions.robot` and `RunOptions.robot` as the controller half of the double opt-in, set by a person's flag only (`--allow-robot` on `run`, `session`, `mcp` and the raw `call`, which otherwise refuses `via: ROBOT` and `mode: ROBOT` in its arguments since it bypasses `ExecutorSession`), enforced by `ExecutorSession` before a call is sent (origin-free for the flag; `mode: ROBOT` a person's whatever the flag, D341) and by `PlanExecutor` before `checkRequires` (§9.2, §9.3) | the capability gate alone; a per-step argument; `requires` first; `call` left outside the opt-in | the agent option is the host's consent, not the session's; a flag a model can set is not a person's choice (threat model §5); a person's flag is checked before the target is asked, so a CI run shows the flag's message and not a capability's |
+| D333 | The CLI keeps `ask` as the one interactive form; the tier is the session's option; `--play` runs a scenario (§9.3) | a separate `act <intent>` command and `skillroy_session_act` | one entry per host (B15); a second command would duplicate `ask` with a flag |
+| D334 | `threat-model.md` is extended now (§2 a row and two cells, §3 the baselines, §5 a paragraph, §6 four rows, §7 a line, §8 lines) and completed by the build and the delta review (§11, §15) | wait for the review | the review cites the model (P6 §12.3); the judgement comes first |
+| D335 | `web.pointer`'s actions are `MOVE`, `PRESS`, `RELEASE`, `CLICK`, `DOUBLE_CLICK`, `WHEEL`, no key input; `CLICK` is one call; an AWT-only modal check; a hidden browser served; the CDP path sends raw `Input.dispatchMouseEvent` on its own session and takes viewport points only (§4.3, §4.7) | `CLICK` only; key input under `INPUT`; Playwright's `page.mouse()`; no modal check | BS8 proved the three events; `web.dom.fill` types; `page.mouse()` hides actionability semantics and differs from the agent's parameters (D48); a page under a modal dialog is one no person can reach |
+| D336 | JxBrowser input behind descriptor roles under `for: "INPUT"`, strategy "input unverified"; the web module is a `SurfaceSource` from its index; a Swing point becomes a viewport point in two agent calls (§4.5, §4.8) | JCEF only; a controller-side join of refs; one step through a cross-module SPI | the mechanics are testable against the fake and a licence holder's run settles the library (the existing wall); the index knows the browser a blank panel belongs to and the controller does not; the two-step form needs nothing cross-module beyond the one SPI |
+| D337 | The sample: a number pad on the desk, `LendingRegions`, `LendingCaptureMask` (the field and the pad while masked), `describe`, the keypad legend, module 0.2.0, pack 0.6.0 with gap 49's argument, five scenarios (three of them seed-A scenarios without a bindings file, `keypad-image` on both seeds with one), one regeneration of plans, bindings, goldens and session recordings, the recordings by VS with its pack bump after VM's first commit (D342's vocabulary sentence) landed (§12) | a shelf map; a toy outside the desk; leave the desk and skip `RegionResolver` on the sample | the research's own example and the one component with several meanings the desk lacks; a toy would not meet "on the sample"; the recordings change because the pack version stands in every session's system text and gap 49 changes the vocabulary (not because of the desk's tree: `HeadlessDesk` has none), which the scripted stand-in route regenerates without a key; D342's vocabulary sentence is in every recording's fingerprint too, so VM lands it first and the recordings are regenerated exactly once; staff 100 and `basic-loan`'s fixtures exist in seed A only, and a fixture credential slot needs no bindings file |
+| D338 | The security delta review's scope, lenses (L7 Windows and file-system trust, as P6 §12.3 has it), numbering from S101, the no-acceptance rule for medium and above, the owner's signature as B31 (§15) | a full review of the tree; no review; L7 as "the client" | the release checklist's item 2 asks for a delta; B28 covers the rest; a new boundary needs the lenses that see it, and the new writers in the source tree are exactly L7's subject |
+| D339 | The hosts' options: `session --vision/--vision-model/--vision-tools/--allow-robot/--play`, `run --allow-robot`, `call --allow-robot`, `mcp --vision/--allow-robot`, `caps` with `source`, the JUnit property `skillroy.robot` with its warning (§9.3, §9.4) | settings-file keys for the tier; a scenario key for Robot; `call` without a flag | a run-level switch is an option, never a scenario key (D127); the tier is a session's choice, not an installation's; a property can be committed, so the glue says so; the raw `call` bypasses `ExecutorSession` and `CallPolicy`, so its own flag is the person's second half there |
+| D340 | The CI image stays WM-less; the Robot checks run WM-less with the agent option on a target started for them (a `LendingTarget.Mode`), passing `requireFocus: false`; no openbox image joins the matrix (§13.2) | an openbox leg | BS9: Robot pointer input lands WM-less and routed input needs no window manager; keys through Robot are not built (D345); a WM-less frame may hold no focus (BS9 K7), so the checks say so explicitly; the derived image's recipe stays under `spikes/BS9/docker/` for a later keyboard tier |
+| D341 | **A capture of the glass is a person's evidence only.** `swing.capture {mode: ROBOT}` is refused for every origin but `PERSON` by `ExecutorSession` and for every model's or client's call by `CallPolicy.arguments` whatever the flags; the V3 `capture` tool has no mode and the loop observes through a redacted `PAINT` composite in every tier ("the model sees `PAINT`, Robot acts"); a person's `ROBOT` capture blanks every pixel outside the JVM's windows' screen rectangles, says `glass: true`, is never written to `captures/` and never served over MCP; design §3.10's V3 row is amended (§3.4, §6.2, §9.1, §11, §16.1) | the V3 tool `capture {mode: ROBOT}` "to look at the glass"; a glass check in the agent (a `ROBOT` raster compared with a root-pane `PAINT` of each window, the differing regions blanked) | a `ROBOT` capture holds other processes' pixels and the desktop (the bands of a `SCREEN` union, a covering window), which no mask can name, so under V3 and `images: true` a model would have received what §11 rule 1 promises it never sees; BS9 showed a root-pane `PAINT` pixel-identical to the glass when nothing covers the target, so the model loses nothing it may see; the glass check is more code than Phase 7 needs and BS12 never ran V3 (§18 Q35) |
+| D342 | **No credential is ever a model's or a client's argument.** `ExecutorSession.execute` (both forms) refuses, for every origin but `PERSON`, a step whose arguments name a secret field of a credential join (`$<slot>.<key>`) and a step whose compiled calls would reference one (a pack verb given a credential-joined slot), before anything is journaled or sent; `PlanPolicy.refusals` refuses a client scenario's base verb or raw `call` that names a credential slot's field its `fixture` does not provide (`skillroy_scenario_run`, the planner's server); `secretsInFlight()` is true from a credential's join until a person's step consumed it and, while it is, every `type`, printable `press` and raw `swing.type`/`swing.key` of a `MODEL` or `CLIENT` origin is refused; a `type` whose text holds a known secret value is refused by the facade and the recorder; sign-on runs through `signOn` by the person or the player before the loop; the vocabulary names no secret field (§6.5, §6.8, §9.2, §11) | the recorder's masked-field rule alone; a per-type `confirm`; the mask on the way out only | a model's `type {text: "$assistant.password"}` into an unmasked field (the desk's entry field outside the `PASSWORD` state) would render the credential, and the next capture would carry it to the provider as pixels, which no value mask can reach; the session's vocabulary told the model the reference form; screen text can steer it (vision §Risk7), and it works in the default tier; the mechanisms at the executor, the facade, the recorder and `PlanPolicy` keep every route (the session's verb and raw tool, an MCP client's raw tool and scenario run, the planner) under one rule (D244): a client's scenario run goes through `PlanExecutor` with the operator's credentials and met none of the session-side mechanisms, so the plan form closes it; a model's `signOn` with a person's credential is refused rather than allowed to consume the in-flight flag, since only a person's step clears it and the person is at hand; a pack verb's own join in a client's committed scenario stays what Phase 5 allowed (the reviewed verb puts the credential where the pack's author said) |
+| D343 | **A Robot press is always paired with its release.** `swing.pointer {via: ROBOT}` refuses `PRESS` and `RELEASE` (`INVALID_PARAMS`, "a Robot press is never left held: use CLICK or DRAG"); a press and its release run in one worker task with no wait between them; a `finally` releases every button the call pressed before anything else, on a timeout or an interruption too; the pointer is never restored while a button is down; the toolset's `left_mouse_down`/`left_mouse_up` are answered as text in V3 and `pointer {action: PRESS}` with `via: ROBOT` is a compile error (§3.4, §6.3, §8.1) | the halves through Robot with the release on the next call or at the turn's end; the pointer not restored at all | a held Robot press followed by the pointer restore is an OS-level drag from inside the target to wherever the person left the pointer, across whatever windows lie between, left held across the model's next request and beyond a turn that ends at a limit; the web side already made `CLICK` one call for the same reason (§4.3); a cut-short `DRAG` or `CLICK` must release too, which only a `finally` guarantees |
+| D344 | **V3 acts only on a focused target, checked at the press.** `swing.pointer {via: ROBOT}` gains `requireFocus` (default **true**): the pre-check's EDT read requires the target JVM to hold a focused window and the worker moves at once, else `INPUT_REJECTED("not focused")` and nothing moves; every covering window of the JVM refuses the point (ranked or not); a `received` outside `hit.target` is `fired: false, "received elsewhere"`; the WM-less `RobotChecks` pass `false` explicitly; the V3 loop stops the turn (`endTurn: QUESTION`) when the JVM holds no focused window and never clicks to activate a window it cannot know to be uncovered; a Robot click into a field is allowed only while the JVM holds the focused window and another component owns the focus (§3.4) | the check from the last capture on the controller (one model call old); `requireFocus` default false with the loop passing true; a Robot click to re-activate the window after a dialog | a model call is 1-2 s and up to 12 s (BS12), in which the person switches windows or a notification appears, and Robot presses whatever is on top; BS9's own strict mode read the focus on the EDT before every press and refused to click an inactive application (K6 on the Mac "not run"); the executor's `run --allow-robot` path needs the rule as much as the loop, so the default is the safe one; Robot goes to the real top, so an unranked covering window is a wrong press there, not a reported guess as on the routed path; the residual window of milliseconds is A15's and `SECURITY.md`'s |
+| D345 | Robot key input is not built in Phase 7: V3's keyboard is the routed `swing.type {mode: SET}` by locator and `swing.key`, after the focus rule of D344; `swing.type {mode: ROBOT}` stays refused "not in this version"; gap 77 (§1, §3.4, §16.2) | `swing.type {mode: ROBOT}` and `swing.key {via: ROBOT}` with X-keysym translation and the re-activation after a dialog | BS9's key conditions: keys land in the AWT focus owner if and only if the target JVM has a focused window, and on a WM-less display nothing restores a frame's focus after a modal dialog closes; the routed `SET` needs no OS focus and types what the recorded step will type; the OS key path is a later tier if a target needs it proven (§18 Q6) |
+| D346 | **The agent never draws marks.** `annotateRefs` answers the `marks` geometry and labels (with `region` and `row`); the controller's `Marks` draws the boxes on its own copy of the raster before the image goes into the request; `unmarkedHash` is dropped; `captures/<hash>.png` is the raster as captured and `hash` names the content (§3.1, §6.2, §9.6) | the agent returns both rasters (`base64` and `markedBase64`); the agent draws and the controller keeps the hash only | under V1 the controller held only the marked raster, so it could not write the unmarked file the provenance named, and a second paint may differ by a caret blink; one paint, one raster on the wire and one hash is the smaller form, and nothing of the model's view needs agent pixels |
+| D347 | **Robot is never a per-call choice of a model or a client.** `CallPolicy.arguments(primitive, args, robotAllowed)` refuses `via: ROBOT` for a `MODEL` or `CLIENT` origin on every route but the facade's, where `robotAllowed` (the host's flag) lets the vision module's own V3 steps set it; `mode: ROBOT` is refused on every route whatever the flag; `--allow-robot` on `mcp` enables V3 inside `skillroy_session_ask` and nothing else; the raw primitive paths (`SessionService.act`'s primitive branch, `ToolCalls.primitive`) call `arguments` and refuse, never strip (§9.1, §9.4) | `via: ROBOT` and `mode: ROBOT` allowed for a model or a client "when `robotAllowed`"; stripping the keys as `confirm` is stripped | under `mcp --allow-robot` a client would otherwise hold Robot input and glass captures with its own choice of point and moment, which the threat model's §6 row says can never happen; the four new refusals had no call site on either host's raw-primitive path, so built as first written they would not have held; stripping would silently downgrade a `via: ROBOT` call to a `ROUTED` one that reports `via: ROUTED` |
+| D348 | **The host feature reaches the merge through `SessionOptions.host`** (`Set<String>`, the fourteenth component, `withHost`), set before `open` by the player's host, `SessionCommand` and `McpCommand` under the conditions that mirror `applies`, carrying `vision-tier:<v1|v2|v3>` beside `vision-session` so that `VisionCapabilities` can answer the tier as the strategy; `ExecutorSession.capabilities()` answers the merged matrix; `capabilities.json` is written once (§8.5, §9.2) | `ExecutorSession.remergeCapabilities(host)` after the service kept its tools; the feature set by the service | the service is constructed on an already open session and `open` reads, merges and archives the matrix, so at the one merge point the feature was always empty and `inference.vision` read `UNAVAILABLE("no vision session")` in every session; a re-merge would rewrite `capabilities.json` and journal a second matrix for one run |
+| D349 | **One rule for pixels and text.** A component the built-in rule or a `CaptureMask` names has no `text` and no `value` in any output of the Swing module (the snapshot, `swing.find`, the dialogs' texts, the hit-test's nodes, a mark's label), carries `masked: true`, gets no `{text, role}` candidate and no mark; the role is unchanged (§3.6) | pixels masked, text unchanged (the built text walker); the role changed to `password` | the text walker withheld content for `JPasswordField` only, so a pack-masked `JTextField`'s secret would have reached a model as text beside its grey pixels (the snapshot, the marks list, the hit-test's nodes, an exported `{text, role}` locator); a pack author who writes a `CaptureMask` expects the content hidden; `Roles.ALL` is closed and a role change would alter every committed snapshot fixture |
+| D350 | **The render key hashes what renders**: `java.specification.version`, the look and feel, the effective antialiasing (`desktopHints` as sorted `key=value` strings), the screen scale and the probe render's hash; not the vendor, the full runtime version, the OS name, version or architecture, and no font names; the probe render has a table header and an antialiased shape; `rendering` keeps the rest for the reviewer, nested (§3.8, §8.7) | the vendor, the full version, the OS and the architecture in the key; `fonts` from `Font.getFamily()`; the hints' text as `toString()` | BS11: the architecture and a JDK 8 patch build (1.8.0_504 against 1.8.0_492) changed no pixel while the JDK line did, so a key with them would turn `keypad-image` `REBIND_NEEDED` on the amd64 leg against identical rasters, and `os.version` inside a container is the Docker host's kernel release, which would turn every committed baseline stale with a host update; the amd64 leg's JDK 8 is another vendor's build with identical pixels; `Font.getFamily()` of a logical font answers the logical name (four constants), and the probe, which paints text, is the font tripwire (BS11: a font package changed 3.3-4.7 % of the desk's pixels); `RenderingHints.Key` hashes by identity, so the map's text order can change between starts |
+| D351 | **Provenance is handed in by the acting call**: `ExecutorSession.execute(verb, args, origin, provenance)` and `execute(PlannedCall, origin, provenance)`; the three-argument forms pass null; the private `run` writes it into the step's `StepEntry`; `SessionTools.Outcome` carries no provenance (§9.2) | the service writing the provenance onto the journal step after `act` returned; `Outcome.provenance` kept as informational | both `execute` forms end in a private `finish` that appends the `StepEntry` to an append-only journal before they return, so nothing can be written onto the entry afterwards; the provenance is known before the act, and VC lands the signature first (the seam crosses two parallel packages) |
+| D352 | **Every event task of a routed sequence checks before it dispatches**: the call's `cancelled` flag (set when the deadline passes; nothing of a failed call runs later, the built `Clicks` pattern) and `Windows.blockingModal` again (`MODAL_OPENED`); a dispatched press is balanced by a disarming `MOUSE_DRAGGED` to the window point (-1, -1) and a release there, which fires no `ActionEvent` (every Swing button model disarms on `MOUSE_EXITED` and the desk's keys check `contains` on the release); the result reports `dispatched: n of m` and `balanced` (§3.3) | "the events may still run later"; the modal check as a one-time pre-check; a bare balancing release; no balance at all (a model left pressed) | a release or a drag that runs after the call reported failure acts on a changed screen (a model that saw the failure may already have retried: a double action), and the built rule ("no click was delivered after its call had failed", `HostSafetyDisplayTest`) and §13.2 item 11 forbid it; a press handler that shows an application-modal dialog runs the dialog's secondary loop inside the press's own task, and that loop would pump the remaining non-posted events into the now-blocked window, which AWT would drop for a person (BS10 condition 1); Swing acts on the release, not on `MOUSE_CLICKED` (`BasicButtonListener.mouseReleased` fires while armed, the desk's `IconKey` and `PromptButton` act on a release inside their bounds), so a bare balancing release would have delivered the very late action, and a press left pressed would hold the button model until the person's next click |
+| D353 | **The seam's context is a facade, and the service enforces what the seam relies on**: `SessionToolContext` carries `SessionActions` (no `ExecutorSession`), which fixes the origin, runs `CallPolicy.refusals` with the host's `robotAllowed`, refuses `read` of anything `never` names and `data.query`, and meters and ledgers `complete` through `SessionService.visionCall` (reachable by the player too); `atTurnStart` and `Outcome.endTurn (QUESTION | LIMIT)`; the service counts `vision.maxActions`/`maxTurns`, ends the turn `LIMIT` and closes the tools; a tool's instructions and provider tools pass the mask; a read-only or verb-less policy gets reads only (§6.3, §9.1, §10) | the raw `ExecutorSession` in the context with `CallPolicy` left to the tool; a gateway opened by the module; `act` told which call is the batch's last; a false `applies` for `v3` without the flag | a tool holding the raw session could pick any origin and bypass `CallPolicy` and `never` (`data.query` is neither mutating nor script); a module that opened its own gateway would bypass the one session meter (D157) and the ledger the zero-LLM assertion reads, and the seam gave a tool no way to end a turn or to make the nested call `skillroy_look` and the player's `aiExpect` need; the service builds the batch's results after the per-call loop, so a tool cannot know the last call and the capture always goes after the batch; a false `applies` is the silent downgrade the same sentence forbade, so the host validates `v3` first |
+| D354 | **`PlanExecutor` skips every `VisualCheck` unconditionally** ("no visual evaluator in this host"), the capability's state being only the reason text; a contributed id that two contributors answer is `ERROR / ENVIRONMENT` naming both; `InferenceContributor` stops answering `inference.vision`; `CapabilityContext` carries the pack (§8.4, §8.5) | the skip as a consequence of the capability's state; two contributors tolerated | a `CapabilityContributor` loaded from a pack jar could answer `inference.vision: OK` in `live` and the executor would then meet a check it cannot evaluate with no stated outcome; `InferenceContributor` already answers the id today (`InferenceContributorTest` pins it), so without the rule two contributors would answer it once the module is present; the allow-list reason needs the pack |
+| D355 | **The bind lifecycle learns images**: `Plan.needsBindings()` is true for a plan with `images`; a baseline is approved at its step through `Approver.reviewImage(ImageApproval)` (a default method delegating to `review`, so the lambda constants keep their stance; the CLI's terminal approver asks with the candidate's path and size) and the bindings file is rewritten after the steps through the binder's `write` and `requireNoCredential`; an anchor is never approved (recorded by a session; `REBIND_NEEDED(IMAGE)` in every mode without an entry for the key); `Binder.check`'s label check runs in `replay` only; `Binder.finish` and the re-resolve carry an existing `images` section forward; the export writes its anchors' `images` into its own `BindingsFile` and hands the PNGs out (§6.6, §8.7) | one batched image approval at the run's end; the approval at bind time; `ExportResult.images()` as the only carrier of an anchor | `needsBindings()` was true for an oracle or a query slot only, so `keypad-image`'s committed entries would never have been read, checked or written; `Approver.review` is called once in `Binder.finish`, at bind time before the start mark, while a baseline is captured at its step after it; `Binder.file(env)` rebuilds the file from the engine's resolutions and every slot approval or re-resolve would have dropped the `images`; a version-2 entry needs the render key, the masks, the window and the anchor origin, which bytes alone cannot carry; a batched approval at the end would approve pixels the person did not see at the step |
+| D356 | **The exported comment carries no hash, handle or mark**; the report does; `captures/<hash>.png` is the raster as captured, named by its content hash; the committed vision export is generated by §13.2 item 8 on one named leg (§6.6, §9.6, §12.4) | the hash and the handle in the comment; the comparison modulo comments; the export generated by `SessionExportTest` | the capture's hash differs between the Java lines (BS11: the JDK line changes the desk's pixels) and between two runs on one Java (the caret's blink phase), and a handle is a per-start counter, so exit criterion 1's byte-for-byte comparison on both Javas could not have held; `HeadlessDesk` answers no `swing.*` method and cannot produce a capture |
+| D357 | **An anchored step is `Plan.Call.guard {label}`**, the anchor taken at record time with the guard's own call (`swing.capture {scope: REGION}` of the window's root pane through `read`), written as `captures/<hash>.png`, `swing.rendering` read once per session, the window's size and insets kept, all in the provenance's `anchor` object with the crop's `masks`, `carets` and `focus`; the executor takes the guard's rectangle from the bindings entry of the current render key (§6.5, §6.7, §8.2) | the crop cut from the `SCREEN` composite at export time; the guard as a separate `swing.capture` call and check compiled into the plan with the rectangle | the controller never holds the composite's unmarked pixels in the form a crop needs, a crop of a frame's `SCREEN` paint may differ from a root-pane `REGION` paint, and the entry's render key, rendering, window and origin were in no provenance; `Plan.Call` had nothing that marked a call as guarded and the guard's rectangle is environment data that must stay out of the plan |
+| D358 | **The recorder refuses a masked target for every input**: no `click`, `pointer`, `type`, `press` or toolset `key` at a component the hit-test reports `masked`; the threat model's sentence is scoped to the vision module's tools; the sample's `LendingCaptureMask` names the number pad while the entry field is masked (§6.5, §11, §12.2) | the `type` refusal alone; an agent-side rule for every typing primitive | the `key` tool spelled a secret digit by digit (`1`, `0`, `0`, `Return`) past a rule that covered `type` only, and region clicks on the sample's own number pad typed it through the pad; a model with `allowBasePrimitives`, an MCP client under `--mutating` and a pack verb never pass through the recorder, so the threat model's "never typed into on a model's behalf" is scoped to what the mechanism covers, with the credential rule (D342) and `CallPolicy` on the raw paths beside it |
+
+---
+
+## 18. Questions for the owner: answered provisionally 2026-10-10 (B29)
+
+Answered by the orchestrator in the manner of P5 §17 and P6 §17, so that the build can start; written into the sections
+named; the column "A veto means" records the form a veto takes. Items that rest on knowledge only the owner has are
+marked **(owner's knowledge)**. Q35-Q39 were added by the revision after the contract review; the answers of Q2, Q6,
+Q11, Q14, Q16, Q20, Q22, Q32 and Q34 changed with it; the last round after the recheck changed Q2, Q36 and Q39 once
+more.
+
+| # | Question | Answer (provisional 2026-10-10) | Written into | A veto means |
+|---|---|---|---|---|
+| Q1 | **Where the Robot code lives.** Inside `skillroy-agent-swing` (JDK API, lazily on a worker, behind the option), or an optional agent module behind a new SPI? | Inside the Swing module (D290) | §2.1, §3.4 | `B29 Q1 veto`: `optional/skillroy-agent-robot.jar` behind a `RobotInput` SPI in `agent-api`, named by `optionalModules`; a sixth golden state per leg |
+| Q2 | **The double opt-in for V3.** An agent option (`robot=true`, the host's consent) **and** a person's controller flag (`--allow-robot`, per run, session or raw `call`), both required, and never a per-call choice of a model or a client even with both? | Yes (D290, D332, D347) | §3.4, §9.1, §9.2 | `B29 Q2 veto option`: the agent option alone; `B29 Q2 veto flag`: the controller flag alone (the agent then exposes Robot to any token holder); `B29 Q2 veto percall`: a model or a client may pass `via: ROBOT` when both flags are set |
+| Q3 | **`redact` defaults to true**, so failure evidence, artifacts and MCP images are redacted too (a password field, a pack-named component)? | Yes (D288, D295) | §3.1, §3.6 | `B29 Q3 veto`: default false; the vision module always passes true; evidence images unmasked as today |
+| Q4 | **The capture mask's shape.** A separate `CaptureMask` SPI, keeping `MaskPolicy` AWT-free, and one rule for pixels and text? | Yes (D296, D349) | §3.6 | `B29 Q4 veto`: a default method `MaskPolicy.masksPixels(Component)`; `B29 Q4 veto text`: pixels only, the text walker unchanged |
+| Q5 | **Root-pane painting as an amendment to the built `PAINT`**: the pixels of every frame capture on Linux change (the imitation decorations go; the image is the content's size)? | Yes (D288) | §3.1 | `B29 Q5 veto`: the frame stays as built and `scope: CONTENT` is added for the root pane; the vision module uses `CONTENT` |
+| Q6 | **Robot keys.** Not built: V3 types through the routed primitives after a focus check and stops the turn when the target JVM holds no focused window; BS9's key conditions are the reason. Right for Phase 7? | Yes (D345, D344) | §1, §3.4, §16.2 gap 77 | `B29 Q6 veto`: `swing.type {mode: ROBOT}` and `swing.key {via: ROBOT}` under `swing.pointer.robot`, with the focus check, the re-activation after a dialog and X-keysym translation in the agent |
+| Q7 | **`swing.click {rung: ROBOT}`** stays the sentinel? | Yes (D291) | §3.4, §3.9 | `B29 Q7 veto`: the rung maps to `swing.pointer {target, via: ROBOT}` |
+| Q8 | **`region`'s two homes**: on the wire a rectangle or an id, in the DSL always an id with `clip` for a rectangle? | Yes (D297) | §3.1, §8.1 | `B29 Q8 veto`: the wire parameter is renamed `clip` for the rectangle and `region` takes an id only |
+| Q9 | **Lower-case capability ids** (`swing.hittest`) kept as reserved? | Yes (D298) | §3.9 | `B29 Q9 veto`: camel case, with `web.hittest` renamed in five goldens and the web host's acceptance |
+| Q10 | **`LocatorResolver.describe`** as the reverse direction for domain locators? | Yes (A64) | §3.7 | `B29 Q10 veto`: no reverse method; the hit-test proposes built-in strategies only |
+| Q11 | **The covering-window rule**: on the routed path refuse for a ranked window (modal, owned, active) and report otherwise; on the Robot path refuse for every covering window; `force` for a person only? | Yes (D294, D344) | §3.2, §3.3, §3.4 | `B29 Q11 veto refuse`: refuse for every covering window on both paths; `B29 Q11 veto report`: never refuse, always report, on both |
+| Q12 | **`Status.SKIPPED`** as the fifth status for a `run` plan in `replay`? | Yes (D328) | §8.6 | `B29 Q12 veto degraded`: `DEGRADED` with a skipped line; `B29 Q12 veto error`: `ERROR / PRECONDITION_FAILED` |
+| Q13 | **Who runs `aiAct` and `aiExpect`**: only the vision module's player over a session, never `PlanExecutor` (which skips or refuses a `run` plan)? | Yes (D311) | §6.8, §8.1 | `B29 Q13 veto`: a `ServiceLoader` step seam in `PlanExecutor` for model steps in `live` |
+| Q14 | **`inference.vision` is `OK` only in a vision session**, and a visual check under `PlanExecutor` is skipped unconditionally? | Yes (D312, D327, D354) | §8.4, §8.5 | `B29 Q14 veto`: `OK` under `PlanExecutor` in `live` with an evaluator seam (Q13's veto implied) |
+| Q15 | **Controller-side capabilities merged into the matrix** through `CapabilityContributor`, `UNAVAILABLE("replay")` in replay, `agentHash` kept for the goldens, the host feature through `SessionOptions.host`? | Yes (D326, D348) | §8.5, §9.2 | `B29 Q15 veto`: keep the agent-only matrix; `inference.*` guards stay on the "missing" path and the design's §3.10 sentence is withdrawn |
+| Q16 | **Baselines keyed by a rendering key** in the bindings file (version 2), the fingerprint unchanged, the key hashing the Java line, the look and feel, antialiasing, the screen scale and a probe render (not the OS, the full version, the architecture or font names)? | Yes (D329, D330, D350) | §8.7, §3.8 | `B29 Q16 veto`: the fingerprint carries `skillroy.render.*` for a plan with images (one bindings file per target Java for such scenarios); the `images` section stays; `B29 Q16 veto vendor`: the vendor and the full version join the key (the amd64 leg then needs its own baselines) |
+| Q17 | **Exact comparison** with `maxDiffPixels` 0 by default? | Yes (D314) | §6.7 | `B29 Q17 veto <n>`: a default margin of n pixels |
+| Q18 | **The image comparison in `skillroy-scenario`**, not in `skillroy-vision`? | Yes (D313) | §6.7 | `B29 Q18 veto`: in `skillroy-vision`, which CI then needs for anchored steps and `expectImage` |
+| Q19 | **The `SessionTools` seam** (one loop, the service's facade) rather than a second loop in the vision module? | Yes (D302, D353) | §9.1 | `B29 Q19 veto`: a second loop with its own actor in the CLI and the MCP server |
+| Q20 | **Provenance** as an optional object on the journal step, handed in by the acting call, cost staying in the ledger by request id? | Yes (D331, D351) | §9.2 | `B29 Q20 veto`: tokens and cost copied into the step record (P5 §12.3 amended) |
+| Q21 | **The gateway's additive changes**: `providerTools` + `PROVIDER_TOOLS`, `toolsetName` on both parts, image parts in a tool result (text-only when `error`), `CacheHint.AUTO`, `IMAGES` on the recorded and the scripted gateway, the Haiku 5.5 row with the class default unchanged, `effort.vision` `low`? | Yes (D318-D324) | §7 | `B29 Q21 veto <item>`: naming the item (`providerTools`, `toolsetName`, `imageResult`, `auto`, `recordedImages`, `haiku`, `effort`) and the alternative of §17's row |
+| Q22 | **The defaults and limits**: V1 with marks, Sonnet 5.5 at `low`, the class `haiku` for V1 only, the toolset for V2/V3 with `zoom` off, captures unscaled up to 1920 and never below 0.75, USD 1.00 / 30 actions / 20 turns per session enforced by the service? | Yes (D304, D353, §10) | §6.2, §6.3, §10 | `B29 Q22 veto <item>`: the item and its value |
+| Q23 | **`LLM_VISION` and `UiTarget`** stay reserved? | Yes (D316) | §8.9 | `B29 Q23 veto`: the binding-shaped recording with a step-time verifier is built |
+| Q24 | **Plan version 6** with one regeneration of every committed plan and bindings file, and the session recordings regenerated on the scripted route (the pack version in their system text)? | Yes (D325, D337) | §8.2, §12.5 | `B29 Q24 veto`: no regeneration; then no pack bump (Q25's veto) and the vision export alone |
+| Q25 | **The sample's number pad** on the desk (with the mask on the field and the pad, the legend, module 0.2.0, pack 0.6.0, gap 49's argument)? | Yes (D337, D358) | §12 | `B29 Q25 veto shelf`: a shelf map instead; `B29 Q25 veto toy`: a region component in tests only (the sample then shows V1/V2 without regions) |
+| Q26 | **`aiExpect`'s `UNSURE`** skips the check (`DEGRADED` at best); `NO` fails? | Yes (D317) | §6.8 | `B29 Q26 veto`: `UNSURE` fails |
+| Q27 | **JxBrowser input** behind descriptor roles, unverified, with the kit against the fake **(owner's knowledge: is a licence holder's run near?)** | Yes (D336) | §4.5 | `B29 Q27 veto`: JCEF only; the `jxbrowser` adapter never reports `INPUT` until verified |
+| Q28 | **`web.pointer` honours a blocking modal dialog** (an AWT-only check in the web module)? | Yes (D335) | §4.3 | `B29 Q28 veto`: no check |
+| Q29 | **The protocol stays 0.2**? | Yes (D299) | §5 | `B29 Q29 veto`: `0.3` (`ProtocolConstantsTest` and the discovery file's `protocol` change) |
+| Q30 | **The security delta review** (eight lenses with sceptics over the diff since `af29e59`, S101 onwards, nothing medium or above accepted, the owner signs B31)? | Yes (D338) | §15 | `B29 Q30 veto full`: a full review of the tree; `B29 Q30 veto none`: no review before the next release (against the checklist) |
+| Q31 | **No separate `act` command**: `ask` with `--vision` is the interactive form; `--play` runs a scenario? | Yes (D333, D339) | §9.3 | `B29 Q31 veto`: `act <intent>` and `skillroy_session_act` beside `ask` |
+| Q32 | **The loop's reads unjournaled** through `ExecutorSession.read` (which throws the agent's error and never masks an image's `base64`), their hashes in the provenance? | Yes (D308) | §9.2 | `B29 Q32 veto`: every capture and hit-test a raw read step in the journal, left out of the export by `reads` |
+| Q33 | **The CI image stays WM-less**; Robot checks run WM-less with the option (and `requireFocus: false`); no openbox leg? | Yes (D340) | §13.2 | `B29 Q33 veto`: an openbox leg from `spikes/BS9/docker/` in the matrix |
+| Q34 | **V3 on a person's desktop acts only while the target holds the focus**, checked by the agent at the press (`requireFocus`, default true), and the loop stops the turn when the target loses it instead of clicking to win it back; V1 and V2 never move the pointer. Right default? **(owner's knowledge: how the overlay sessions will be run)** | Yes (D344) | §3.4, §11 | `B29 Q34 veto`: V3 keeps acting after a focus loss (the loop passes `requireFocus: false`), reporting `NOT_DELIVERED` per action |
+| Q35 | **A capture of the glass never reaches a model or a client**: V3 observes through a redacted `PAINT` composite ("the model sees `PAINT`, Robot acts"), and `swing.capture {mode: ROBOT}` is a person's evidence with everything outside the JVM's windows blanked? | Yes (D341) | §3.4, §6.2, §9.1, §11, §16.1 | `B29 Q35 veto`: a glass check built in the agent (a `ROBOT` raster compared with a root-pane `PAINT` of each window, the differing regions blanked, `covered: [rects]` reported) and `capture {mode: ROBOT}` offered to the model in V3 |
+| Q36 | **No credential is ever used on a model's or a client's behalf**: a `$slot.secret` reference and a verb given a credential-joined slot refused for every origin but a person's, no `type` while a credential is in flight, a `type` holding a known secret value refused, a client scenario's base verb that names a credential field refused by `PlanPolicy`, sign-on by the person or the player before the loop? | Yes (D342) | §6.5, §9.1, §9.2, §9.4, §11 | `B29 Q36 veto`: the reference refusal for raw calls only, the recorder allowed to pass a secret reference into a masked field (the pixel path then rests on the pack's mask alone); `B29 Q36 veto verb`: a model or a client may run a pack verb with a credential-joined slot (a model's `signOn`), the verb's own join consuming the in-flight flag |
+| Q37 | **A Robot press is always paired with its release**: `PRESS`/`RELEASE` refused through Robot, the toolset's `left_mouse_down`/`left_mouse_up` answered as text in V3, the release in a `finally` before the pointer is restored? | Yes (D343) | §3.4, §6.3 | `B29 Q37 veto`: the halves allowed through Robot with the release on the next call or at the turn's end (the pointer not restored while a button is down) |
+| Q38 | **The controller draws the marks** on its own copy; the agent returns geometry only, one raster and one hash? | Yes (D346) | §3.1, §6.2, §9.6 | `B29 Q38 veto`: the agent draws and returns both rasters (`base64` and `markedBase64`), the 4096-pixel cap bounding each |
+| Q39 | **Image baselines are approved at their step** (`Approver.reviewImage`, the candidate shown first, `--yes` approving) and the bindings file is rewritten after the steps, `images` carried forward on every rebind; anchors never approved but re-recorded by a session? | Yes (D355) | §6.7, §8.7 | `B29 Q39 veto batch`: one batched image approval at the run's end; `B29 Q39 veto bind`: baselines approved at bind time from the previous run's candidates |
