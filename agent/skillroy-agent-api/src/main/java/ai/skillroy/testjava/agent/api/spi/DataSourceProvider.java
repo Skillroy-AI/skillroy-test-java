@@ -42,7 +42,10 @@ public interface DataSourceProvider {
 
     /**
      * The JDBC form: a connection the agent sets read-only, uses for one query and then closes. Null (the default)
-     * means this provider does not offer the JDBC form.
+     * means this provider does not offer the JDBC form. The connection may come from a pool (the application's own,
+     * for example): the agent runs the query in a transaction it rolls back itself, and switches auto-commit and the
+     * read-only flag back to what they were, before it closes the connection (phase1-contracts.md 6; Phase 6 security
+     * fix, pass 2, P2-L3-S1).
      */
     default java.sql.Connection open() throws java.sql.SQLException {
         return null;

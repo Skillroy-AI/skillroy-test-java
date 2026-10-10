@@ -62,7 +62,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * phase5-contracts.md 15.1 item 11: the planner's post-processing with a substitute {@code claude} (a shell script the
  * test writes, which records the arguments of each invocation, its working directory and its stdin, and prints the
- * envelope the test put beside it): the arguments, the YAML with its comment head, the plan, the authoring record, a
+ * envelope the test put beside it): the arguments and the prompt on stdin (never an argument, security fix
+ * P2-L7-F3), the YAML with its comment head, the plan, the authoring record, a
  * repair round through {@code --resume}, the repair limit, {@code is_error}, {@code mcp_server_errors}, a failed
  * {@code --resume} that prints plain text, an argument the CLI refuses (reported with the last line of its stderr; the
  * schema goes without its {@code $schema} key), a missing executable, the deadline (the whole process tree killed, one
@@ -198,6 +199,11 @@ class PlannerTest {
         return out;
     }
 
+    /** What the substitute read on stdin in invocation {@code n}: the prompt (P2-L7-F3). */
+    private String stdin(int n) throws Exception {
+        return Files.readString(bin.resolve("stdin-" + n), StandardCharsets.UTF_8);
+    }
+
     private static String after(List<String> args, String flag) {
         int i = args.indexOf(flag);
         return i < 0 || i + 1 >= args.size() ? null : args.get(i + 1);
@@ -240,12 +246,13 @@ class PlannerTest {
         assertTrue(given.containsKey("$defs"), "the definitions stay, and the $refs into them");
         generated.remove("$schema");
         assertEquals(Json.write(generated), after(args, "--json-schema"), "nothing else changes");
-        String prompt = args.get(args.size() - 1);
+        assertEquals("2.00", args.get(args.size() - 1), "the budget ends the command line: the prompt is no argument"
+                + " (P2-L7-F3)");
+        String prompt = stdin(1);
         assertTrue(prompt.contains("<brief>\n" + BRIEF + "\n</brief>"), prompt);
         assertTrue(prompt.contains("- ItemByCategory"), "the catalogue summary");
         assertTrue(prompt.contains("- signOn: {"), "the verbs with their schemas");
         assertTrue(prompt.contains("never the low-level primitives"));
-        assertTrue(Files.readString(bin.resolve("stdin-1")).isEmpty(), "stdin closed");
         Path cwd = Path.of(Files.readString(bin.resolve("cwd-1")).strip());
         assertTrue(cwd.getFileName().toString().startsWith("skillroy-author-"), "a private working directory");
         assertFalse(Files.exists(cwd), "deleted afterwards");
@@ -326,8 +333,7 @@ class PlannerTest {
         assertEquals(1, result.repairs());
         List<String> repair = args(2);
         assertEquals("sess-41", after(repair, "--resume"), "the planner's session resumed");
-        assertTrue(repair.get(repair.size() - 1).contains("reference each other"), "the problems are the prompt: "
-                + repair.get(repair.size() - 1));
+        assertTrue(stdin(2).contains("reference each other"), "the problems are the prompt, on stdin: " + stdin(2));
         assertEquals("1.70", after(repair, "--max-budget-usd"), "what is left of the budget after the first 0.30");
         assertEquals(2, result.ledger().size());
         assertEquals(0, new BigDecimal("0.30").compareTo(new BigDecimal(result.ledger().get(0).costUsd())),
@@ -446,13 +452,87 @@ class PlannerTest {
         answer(2, envelope(document("desk-schema"), false, "0.05"));
         AuthoringResult result = Planner.author(request("desk-schema", 2, Duration.ofSeconds(30)));
         assertEquals(1, result.repairs());
-        assertTrue(args(2).get(args(2).size() - 1).contains("colour"), "the validator's problem with its path");
+        assertTrue(stdin(2).contains("colour"), "the validator's problem with its path");
         // A running total that fell (0.20, then 0.05) is no negative cost: the repair counts 0, and its entry says so.
         CostLedger.Entry repair = result.ledger().get(1);
         assertEquals("0", repair.costUsd());
         assertEquals("the session's running total fell from 0.2 to 0.05 USD; this invocation is counted at 0",
                 repair.details().get("note"));
         assertEquals(0, new BigDecimal("0.20").compareTo(result.costUsd()), result.costUsd().toPlainString());
+    }
+
+    /**
+     * Security fix P2-L7-F3 (pass 2): a model's text that a problem echoes into a repair prompt, with the quote, the
+     * ampersands and the {@code %VAR%} that {@code cmd.exe} would act on, reaches the planner on stdin and never on its
+     * command line; neither does the brief. The command line ends with the budget.
+     */
+    @Test
+    void noTextOfTheBriefOrOfTheModelIsEverAnArgument() throws Exception {
+        String hostile = "x\" & calc.exe & \"%ANTHROPIC_API_KEY%";
+        Map<String, Object> wrong = document("desk-argv");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> item = (Map<String, Object>) ((Map<String, Object>) wrong.get("resolve")).get("item");
+        item.put("query", hostile);
+        answer(1, envelope(wrong, false, "0.20"));
+        answer(2, envelope(document("desk-argv"), false, "0.25"));
+        AuthoringResult result = Planner.author(request("desk-argv", 2, Duration.ofSeconds(30)));
+        assertEquals(1, result.repairs());
+        String first = stdin(1);
+        String repair = stdin(2);
+        assertTrue(first.contains("<brief>\n" + BRIEF + "\n</brief>"), "the prompt is the planner's stdin: " + first);
+        assertTrue(repair.startsWith("The scenario document you returned has problems."), repair);
+        assertTrue(repair.contains(hostile), "the model's text reaches the repair prompt, on stdin: " + repair);
+        for (int n = 1; n <= 2; n++) {
+            List<String> args = args(n);
+            assertEquals("--max-budget-usd", args.get(args.size() - 2), "the command line ends with the budget: "
+                    + args);
+            for (String arg : args) {
+                for (String text : List.of(BRIEF, "<brief>", "calc.exe", "%ANTHROPIC_API_KEY%",
+                        "The scenario document you returned")) {
+                    assertFalse(arg.contains(text), "invocation " + n + " has '" + text + "' in an argument: " + arg);
+                }
+            }
+        }
+    }
+
+    /**
+     * Security fix P2-L7-F3: a planner that is a batch file ({@code .cmd} or {@code .bat}, any case), which Windows
+     * starts through {@code cmd.exe}, is refused with the remedy before anything starts, on every platform.
+     */
+    @Test
+    void aBatchFilePlannerIsRefusedBeforeAnythingStarts() throws Exception {
+        for (String name : List.of("claude.cmd", "CLAUDE.BAT", "claude.Cmd")) {
+            Path batch = bin.resolve(name);
+            Files.writeString(batch, SCRIPT);
+            Files.setPosixFilePermissions(batch, PosixFilePermissions.fromString("rwx------"));
+            answer(1, envelope(document("desk-batch"), false, "0.01"));
+            AuthoringException e = assertThrows(AuthoringException.class, () -> Planner.author(new PlannerRequest(
+                    BRIEF, "desk-batch", out, pack, List.of(), mcp, "claude-opus-5-5", 40, 2, new BigDecimal("2.00"),
+                    false, batch, Duration.ofSeconds(30), clock)));
+            assertEquals(64, e.exitCode(), name);
+            assertTrue(e.getMessage().contains("is a batch file") && e.getMessage().contains("claude.exe")
+                    && e.getMessage().contains("--claude-command"), e.getMessage());
+            assertFalse(Files.exists(bin.resolve("count")), name + ": nothing was started");
+            Files.delete(batch);
+        }
+    }
+
+    /**
+     * Security fix P2-L7-F3: {@code --resume} carries only a session id of the CLI's form; an envelope whose session id
+     * holds anything else ends the run before a repair round starts.
+     */
+    @Test
+    void aSessionIdOfAnotherFormIsNeverResumed() throws Exception {
+        Map<String, Object> first = envelope(document("desk-sess", CYCLE), false, "0.30");
+        first.put("session_id", "sess-41\" & calc.exe & \"");
+        answer(1, first);
+        answer(2, envelope(document("desk-sess"), false, "0.40"));
+        AuthoringException e = assertThrows(AuthoringException.class, () -> Planner.author(request("desk-sess", 2,
+                Duration.ofSeconds(30))));
+        assertEquals(1, e.exitCode());
+        assertTrue(e.getMessage().contains("no session id a repair round can resume"), e.getMessage());
+        assertFalse(e.getMessage().contains("calc.exe"), "the id is not repeated: " + e.getMessage());
+        assertFalse(Files.exists(bin.resolve("args-2")), "no repair round was started");
     }
 
     @Test
@@ -704,8 +784,7 @@ class PlannerTest {
         answer(1, envelope(document("desk-mask"), false, "0.01"));
         Planner.author(new PlannerRequest(brief, "desk-mask", out, secretive, List.of(), mcp, "claude-opus-5-5", 40, 2,
                 new BigDecimal("2.00"), false, claude, Duration.ofSeconds(30), clock));
-        List<String> args = args(1);
-        String prompt = args.get(args.size() - 1);
+        String prompt = stdin(1);
         assertTrue(prompt.contains("\"password\":{"), "the property's name stays: " + prompt);
         for (String hidden : List.of("Vocab-Tok-311", "Vocab-Default-4021", "Vocab-Example-5507",
                 "Vocab-Enum-6613")) {

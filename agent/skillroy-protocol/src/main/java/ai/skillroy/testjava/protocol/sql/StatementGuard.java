@@ -62,7 +62,11 @@ import java.util.Set;
  *       {@code THROW}, {@code PRINT}, {@code GOTO}, {@code USE}, {@code CHECKPOINT}, {@code RECEIVE}, {@code SEND},
  *       {@code OPENROWSET}, {@code OPENQUERY}, {@code OPENDATASOURCE}, {@code HOLDLOCK}, {@code TABLOCK},
  *       {@code TABLOCKX}, {@code XLOCK}, {@code UPDLOCK}, {@code PAGLOCK}); {@code SET} is not one of them, since
- *       MySQL's {@code CAST(x AS CHAR CHARACTER SET utf8mb4)} must stay admitted.</li>
+ *       MySQL's {@code CAST(x AS CHAR CHARACTER SET utf8mb4)} must stay admitted. Security fix P2-L3-F1 (pass 2)
+ *       adds {@code IMPLICIT_TRANSACTIONS} and {@code ANSI_DEFAULTS}, the two T-SQL session settings that open a
+ *       transaction the next statement does not end, as the net behind {@link ReadOnlyJdbc}'s own rollback; the
+ *       isolation words stay admitted (a hint holds its locks only as long as that transaction, and PostgreSQL's
+ *       {@code TABLESAMPLE ... REPEATABLE (seed)} is a read).</li>
  *   <li>The locking reads {@code FOR SHARE}, {@code FOR KEY SHARE} and {@code LOCK IN SHARE MODE} are rejected as
  *       word sequences ({@link #FORBIDDEN_SEQUENCES}): consecutive words with only whitespace and comments between
  *       them, in every reading (S36).</li>
@@ -92,7 +96,9 @@ public final class StatementGuard {
             // Security fix S36: T-SQL transaction, control-of-flow and lock-hint words (a batch needs no ';').
             "BEGIN", "COMMIT", "ROLLBACK", "SAVE", "DECLARE", "WAITFOR", "RAISERROR", "THROW", "PRINT", "GOTO", "USE",
             "CHECKPOINT", "RECEIVE", "SEND", "OPENROWSET", "OPENQUERY", "OPENDATASOURCE", "HOLDLOCK", "TABLOCK",
-            "TABLOCKX", "XLOCK", "UPDLOCK", "PAGLOCK")));
+            "TABLOCKX", "XLOCK", "UPDLOCK", "PAGLOCK",
+            // Security fix P2-L3-F1 (pass 2): the T-SQL settings that open a transaction the next statement keeps.
+            "IMPLICIT_TRANSACTIONS", "ANSI_DEFAULTS")));
 
     /**
      * Locking reads rejected as sequences of whole words (security fix S36): consecutive words outside literals,

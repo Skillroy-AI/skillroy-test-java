@@ -459,7 +459,17 @@ class CredentialsTest {
 
     private static CredentialFiles.Access fake(CredentialFiles.Kind kind, UserPrincipal owner, List<AclEntry> acl,
                                                UserPrincipal me) {
+        return fake(kind, owner, acl, me, null);
+    }
+
+    private static CredentialFiles.Access fake(CredentialFiles.Kind kind, UserPrincipal owner, List<AclEntry> acl,
+                                               UserPrincipal me, String volumeType) {
         return new CredentialFiles.Access() {
+            @Override
+            public String volumeType(Path file) {
+                return volumeType;
+            }
+
             @Override
             public CredentialFiles.Kind kind(Path file) {
                 return kind;
@@ -530,6 +540,28 @@ class CredentialsTest {
         assertTrue(Credentials.load(file, fake(CredentialFiles.Kind.NONE, null, null, null)).has("staff", "100"));
         assertTrue(CredentialFiles.warned());
         assertTrue(Credentials.load(file, fake(CredentialFiles.Kind.NONE, null, null, null)).has("staff", "200"));
+    }
+
+    /**
+     * Security fix P2-L7-F1 (pass 2): a credentials file on a FAT or exFAT volume, which keeps no permissions whatever
+     * its mode bits read, is refused before its mode is looked at; the neither branch's warning stays for any other
+     * volume without either view (D138).
+     */
+    @Test
+    void aFileOnAFatOrExfatVolumeIsRefused(@TempDir Path dir) throws Exception {
+        Path file = write(dir, "credentials.yaml", FULL);
+        for (String type : List.of("msdos", "exfat", "FAT32", "vfat", "exFAT")) {
+            CredentialFiles.resetWarning();
+            CredentialsException refused = assertThrows(CredentialsException.class, () -> Credentials.load(file,
+                    fake(CredentialFiles.Kind.POSIX, ME, null, ME, type)));
+            assertTrue(refused.getMessage().contains("credentials file is on a volume of type " + type + ", which"
+                    + " keeps no permissions"), refused.getMessage());
+            assertFalse(CredentialFiles.warned(), "refused, not accepted with the warning");
+        }
+        CredentialFiles.resetWarning();
+        assertTrue(Credentials.load(file, fake(CredentialFiles.Kind.NONE, null, null, null, "zipfs"))
+                .has("staff", "100"), "another volume without either view: accepted");
+        assertTrue(CredentialFiles.warned(), "with the warning");
     }
 
     @Test

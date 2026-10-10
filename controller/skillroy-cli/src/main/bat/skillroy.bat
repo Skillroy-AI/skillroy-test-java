@@ -29,6 +29,10 @@ rem
 rem The Windows twin of bin/skillroy, line for line (phase6-contracts.md 9.1, D137). Not yet verified on a Windows
 rem host: the text is checked by BatLauncherTest, the run waits for the host (9.5).
 setlocal
+rem cmd.exe looks for a command named without a path in the current directory before the PATH unless this variable
+rem exists; setlocal keeps it to this script and what it starts. With it, and findstr named by its full path, no
+rem command of this script is taken from the directory it was started in (security fix P2-L7-F2).
+set "NoDefaultCurrentDirectoryInExePath=1"
 
 rem The installation directory is the parent of this script's directory. cmd.exe cannot follow a symbolic link to a
 rem script, so a linked skillroy.bat is unsupported: call the one in the installation's bin directory.
@@ -55,11 +59,11 @@ rem A runtime older than Java 25 cannot load the CLI's classes: say so plainly w
 rem is the text before the first dot (1.8.0_x gives 1, as in the shell launcher); a non-numeric major is let through.
 if not exist "%release%" goto :version_ok
 set "version="
-for /f "tokens=2 delims==" %%v in ('findstr /b /c:"JAVA_VERSION=" "%release%"') do set "version=%%~v"
+for /f "tokens=2 delims==" %%v in ('%SystemRoot%\System32\findstr.exe /b /c:"JAVA_VERSION=" "%release%"') do set "version=%%~v"
 if not defined version goto :version_ok
 set "major="
 for /f "delims=." %%m in ("%version%") do set "major=%%m"
-echo %major%| findstr /r /x "[0-9][0-9]*" >nul 2>nul || goto :version_ok
+echo %major%| %SystemRoot%\System32\findstr.exe /r /x "[0-9][0-9]*" >nul 2>nul || goto :version_ok
 if %major% LSS 25 goto :too_old
 goto :version_ok
 :too_old
@@ -73,11 +77,11 @@ if /i "%~1"=="attach" goto :attach_check
 goto :run
 :attach_check
 if not exist "%release%" goto :attach_list
-findstr /b /c:"MODULES=" "%release%" >nul 2>nul || goto :attach_list
-findstr /r /c:"^MODULES=.*[\" ]jdk\.attach[\" ]" "%release%" >nul 2>nul && set "modules=--add-modules jdk.attach"
+%SystemRoot%\System32\findstr.exe /b /c:"MODULES=" "%release%" >nul 2>nul || goto :attach_list
+%SystemRoot%\System32\findstr.exe /r /c:"^MODULES=.*[\" ]jdk\.attach[\" ]" "%release%" >nul 2>nul && set "modules=--add-modules jdk.attach"
 goto :run
 :attach_list
-"%java%" --list-modules 2>nul | findstr /b /c:"jdk.attach@" >nul 2>nul && set "modules=--add-modules jdk.attach"
+"%java%" --list-modules 2>nul | %SystemRoot%\System32\findstr.exe /b /c:"jdk.attach@" >nul 2>nul && set "modules=--add-modules jdk.attach"
 
 :run
 rem skillroy.launcher names this script to the CLI, which writes it into the MCP configuration of 'skillroy author'

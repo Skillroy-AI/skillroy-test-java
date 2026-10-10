@@ -83,7 +83,8 @@ import java.util.function.UnaryOperator;
  *
  * <p>Windows (phase6-contracts.md 9.2, D137; Phase 6, built 2026-10-09, BW, not verified on a Windows host): on the
  * {@code PATH} the planner's executable is also {@code claude} plus any extension of {@code PATHEXT}
- * ({@link #findOnPath}); a launcher that is a {@code .bat} or {@code .cmd} ({@code bin\skillroy.bat}) is written into
+ * ({@link #findOnPath}), a batch file passed over for a later candidate and refused by the planner when it is the only
+ * one (security fix P2-L7-F3); a launcher that is a {@code .bat} or {@code .cmd} ({@code bin\skillroy.bat}) is written into
  * the configuration as {@code cmd.exe /c <launcher> mcp ...}, since Node-based clients refuse to spawn a batch file
  * without a shell, and a launcher path or argument that {@code cmd.exe} would split or expand is refused
  * ({@link #serverCommand}). The configuration file is written owner-only through {@link SecureFiles} (9.3).
@@ -460,6 +461,12 @@ final class AuthorCommand implements Command {
      * that Windows cannot start, so the extensions come first). The environment is a parameter so that the lookup is
      * tested on any platform (phase6-contracts.md 9.2).
      *
+     * <p>Phase 6 security fix, pass 2, P2-L7-F3: on Windows a batch file ({@code .cmd}, {@code .bat}) is passed over,
+     * and with it the extensionless {@code claude} of its directory (npm's shim twin), for another candidate of the
+     * same directory or a later one, since the planner never starts a batch file ({@link Planner#isBatchFile}); the
+     * first batch file is returned only when nothing else is found, so that the planner's refusal names it with the
+     * remedy.
+     *
      * @return the absolute path, or null when none is found
      */
     static Path findOnPath(Map<String, String> env, String osName) {
@@ -485,14 +492,26 @@ final class AuthorCommand implements Command {
         }
         names.add("claude");
         String separator = windows ? ";" : File.pathSeparator;
+        Path batch = null;
         for (String dir : path.split(java.util.regex.Pattern.quote(separator))) {
             if (dir.isBlank()) {
                 continue;
             }
+            boolean batchHere = false;
             for (String name : names) {
                 try {
                     Path candidate = Path.of(dir.strip(), name);
                     if (Files.isRegularFile(candidate) && (windows || Files.isExecutable(candidate))) {
+                        if (windows && Planner.isBatchFile(candidate)) {
+                            // Never the planner (P2-L7-F3): another extension here, or a later directory.
+                            batch = batch == null ? candidate.toAbsolutePath() : batch;
+                            batchHere = true;
+                            continue;
+                        }
+                        if (batchHere && name.equals("claude")) {
+                            // npm's extensionless shell shim beside the batch file: Windows cannot start it either.
+                            continue;
+                        }
                         return candidate.toAbsolutePath();
                     }
                 } catch (RuntimeException e) {
@@ -500,7 +519,7 @@ final class AuthorCommand implements Command {
                 }
             }
         }
-        return null;
+        return batch;
     }
 
     /** An environment variable; on Windows its name is compared without regard to case ({@code Path}, {@code PATH}). */

@@ -1531,6 +1531,28 @@ it in CI. What it produces is a YAML file and a plan for a person to review; the
    CLI's configuration directory, outside the base's control, and a `--resume` needs them; a release note says so, and
    relocating them with `CLAUDE_CONFIG_DIR` is not built, B26 Q22), stdin closed,
    stdout read in full under a deadline of `timeouts.plannerMs` (default 15 min), stderr to the command's log, masked.
+   **(Phase 6 security fix, pass 2, P2-L7-F3, built 2026-10-09, SD) No text of the brief, of the model or of a
+   repair is ever an argument.** The prompt, the first invocation's and each repair's, is written as UTF-8 to
+   `prompt-<n>.txt` in the private working directory and is the CLI's **standard input** (`claude -p` reads its prompt
+   from stdin when no prompt argument is given); the command line ends with `--max-budget-usd <usd>`, and only
+   `claude --version` keeps a closed stdin. The arguments are then the executable, the fixed flags, the schema (the
+   pack's and the target's catalogue texts, never the brief's or the model's), the configuration's path, the model id
+   of the inference settings, two numbers and, for a repair, `--resume <session_id>`, where the session id must match
+   `[A-Za-z0-9_-]{1,128}` (the CLI's are UUIDs) or the repair is refused (exit 1) and nothing is started. A planner
+   whose file name ends with `.cmd` or `.bat` (case-insensitive) is refused before anything starts, on every platform
+   (exit 64, naming the remedy: the native `claude.exe`, or `--claude-command`): Windows starts a batch file through
+   `cmd.exe /c`, which expands `%…%` anywhere on the line and splits at `&`, `|`, `<` and `>` outside the quotes it
+   pairs, and the schema, the one argument that must hold quotes, cannot pass through it intact. On Windows the schema
+   argument is handed to `ProcessBuilder` already quoted by the C runtime's rules (`"…"` around it, an inner `"` as
+   `\"`, a run of backslashes before a quote doubled), which the JDK's default argument handling passes on as it is,
+   so that the executable reads it back as one argument whatever the pack's or the target's texts in it hold, and the
+   whole command line must fit Windows' 32767 characters (with room for a `--resume`), else the command is refused
+   (exit 64) before anything starts. Before the fix the prompt was the last argument; on Windows, where npm's
+   `claude.cmd` was found first (D198), a model's quote, `&` or `%VAR%` that a problem echoed into a repair prompt
+   reached `cmd.exe` (code execution in the controller's account, and the model key expanded into the prompt).
+   `PlannerTest` reads the substitute's arguments and stdin; `PlannerCommandLineTest` builds the Windows command line
+   as the JDK does and parses it back by the C runtime's rules (not run on a Windows host: §15.3 and P6 §9.5 keep the
+   live and host checks).
 5. **The result**: the JSON envelope's `structured_output` (the scenario; optional in the envelope), `total_cost_usd`,
    `session_id`, `num_turns`, `is_error`, `mcp_server_errors` (optional). Success is exit code 0 with `is_error: false`,
    never the envelope's `subtype` (it reads `success` on failures too, BS13 F-10); a non-zero exit, `is_error`, a

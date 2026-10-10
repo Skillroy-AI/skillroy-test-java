@@ -17,6 +17,7 @@
 package ai.skillroy.testjava.agent.core;
 
 import ai.skillroy.testjava.agent.api.AgentLog;
+import ai.skillroy.testjava.protocol.Volumes;
 
 import java.io.File;
 import java.io.IOException;
@@ -74,6 +75,12 @@ import java.util.regex.Pattern;
  *   <li>Neither (for example FAT): nothing can be restricted or checked, so nothing is written; a generated token
  *       then stops the start, as for an untrusted directory.</li>
  * </ul>
+ *
+ * <p>Phase 6 security fix, pass 2, P2-L7-F1: the kind of what is written is the <em>volume's</em>
+ * ({@link Volumes#protection}), never the file system provider's, so a FAT or exFAT volume is "neither" on every
+ * platform; and what the POSIX branch creates is read back and must be exactly {@code rwx------} (a directory) or
+ * {@code rw-------} (a file), else it is deleted and refused. Owners are still compared by the provider's view
+ * ({@link #ownerKind}), so that the default-directory rule stays the controller's.
  *
  * <p>The default discovery directory ({@link #defaultDiscoveryDir()}, findings S8/S19) follows one deterministic rule
  * that the controller's {@code Discovery.defaultDir()} applies identically, so that both name the same directory
@@ -177,7 +184,7 @@ final class SecureFiles {
     static boolean occupiedByAnotherUser(Path dir) {
         try {
             UserPrincipal owner = Files.getOwner(dir, LinkOption.NOFOLLOW_LINKS);
-            if (protection(dir) == Protection.POSIX) {
+            if (ownerKind(dir) == Protection.POSIX) {
                 return !isMine(dir, owner, LinkOption.NOFOLLOW_LINKS);
             }
             UserPrincipal me = NamedUser.PRINCIPAL;
@@ -245,6 +252,7 @@ final class SecureFiles {
             case POSIX:
                 Files.createFile(file, PosixFilePermissions.asFileAttribute(OWNER_RW));
                 Files.setPosixFilePermissions(file, OWNER_RW);
+                readBack(file, OWNER_RW, "write");
                 return;
             case ACL:
                 UserPrincipal me = fileOwner();
@@ -265,7 +273,7 @@ final class SecureFiles {
                 return;
             default:
                 throw new IOException("cannot write " + file + " owner-only: its file system has neither POSIX "
-                        + "permissions nor ACLs");
+                        + "permissions nor ACLs" + Volumes.note(file));
         }
     }
 
@@ -281,11 +289,25 @@ final class SecureFiles {
         Protection protection = protection(abs);
         if (protection == Protection.NONE) {
             throw new IOException("directory " + abs + " cannot be used: its file system has neither POSIX "
-                    + "permissions nor ACLs, so nothing written there can be restricted to the current user");
+                    + "permissions nor ACLs" + Volumes.note(abs) + ", so nothing written there can be restricted to the"
+                    + " current user");
         }
         if (!Files.isDirectory(abs)) {
             if (protection == Protection.POSIX) {
-                Files.createDirectories(abs, PosixFilePermissions.asFileAttribute(OWNER_RWX));
+                Path parent = abs.getParent();
+                if (parent != null) {
+                    Files.createDirectories(parent, PosixFilePermissions.asFileAttribute(OWNER_RWX));
+                }
+                boolean created = false;
+                try {
+                    Files.createDirectory(abs, PosixFilePermissions.asFileAttribute(OWNER_RWX));
+                    created = true;
+                } catch (java.nio.file.FileAlreadyExistsException raced) {
+                    // Created concurrently (by the controller or another agent); checked below.
+                }
+                if (created) {
+                    readBack(abs, OWNER_RWX, "create");
+                }
             } else {
                 createAclDirectories(abs);
             }
@@ -441,10 +463,63 @@ final class SecureFiles {
         };
     }
 
-    /** The protection available for files in {@code path}'s file system. */
+    /**
+     * The protection available for files in {@code path}'s volume: {@link Volumes#protection}, decided by the volume
+     * (its {@code FileStore}) and never by the file system provider, whose views are the same for every path (security
+     * fix P2-L7-F1).
+     */
     static Protection protection(Path path) {
+        switch (Volumes.protection(path)) {
+            case POSIX:
+                return Protection.POSIX;
+            case ACL:
+                return Protection.ACL;
+            default:
+                return Protection.NONE;
+        }
+    }
+
+    /**
+     * The kind of owner view {@code path}'s file system provider offers (POSIX, else ACL, else neither): how owners are
+     * compared ({@link #isMine}, {@link #occupiedByAnotherUser}), as the controller compares them; not what may be
+     * written there ({@link #protection}).
+     */
+    static Protection ownerKind(Path path) {
         Set<String> views = path.getFileSystem().supportedFileAttributeViews();
         return views.contains("posix") ? Protection.POSIX : views.contains("acl") ? Protection.ACL : Protection.NONE;
+    }
+
+    /**
+     * The POSIX read-back of security fix P2-L7-F1: {@code created} (just created here) must read back exactly
+     * {@code expected}, not following links; otherwise it is deleted and refused, since its file system does not keep
+     * the permissions it was given (a FAT or exFAT volume reads back {@code rwx------} on macOS, {@code rwxr-xr-x} on
+     * Linux, where {@code chmod} succeeds and changes nothing).
+     */
+    private static void readBack(Path created, Set<PosixFilePermission> expected, String what) throws IOException {
+        Set<PosixFilePermission> actual;
+        try {
+            actual = Files.readAttributes(created, PosixFileAttributes.class, LinkOption.NOFOLLOW_LINKS)
+                    .permissions();
+        } catch (IOException | RuntimeException e) {
+            Files.deleteIfExists(created);
+            throw new IOException("cannot " + what + " " + created + " owner-only: its permissions cannot be read back ("
+                    + e.getClass().getName() + "); it was deleted");
+        }
+        String problem = readBackProblem(expected, actual);
+        if (problem != null) {
+            Files.deleteIfExists(created);
+            throw new IOException("cannot " + what + " " + created + " owner-only: " + problem + Volumes.note(created)
+                    + "; it was deleted (use a directory on a file system that keeps permissions)");
+        }
+    }
+
+    /** Why permissions read back as {@code actual} are not the {@code expected} ones just set, or null. */
+    static String readBackProblem(Set<PosixFilePermission> expected, Set<PosixFilePermission> actual) {
+        if (actual != null && actual.equals(expected)) {
+            return null;
+        }
+        return "it reads back " + (actual == null ? "nothing" : PosixFilePermissions.toString(actual)) + " where "
+                + PosixFilePermissions.toString(expected) + " was asked, so its file system does not keep permissions";
     }
 
     /**
@@ -453,7 +528,7 @@ final class SecureFiles {
      * file this process has just created.
      */
     private static boolean isMine(Path path, UserPrincipal owner, LinkOption... options) {
-        if (protection(path) == Protection.ACL) {
+        if (ownerKind(path) == Protection.ACL) {
             UserPrincipal me = fileOwner();
             return me != null && me.equals(owner);
         }

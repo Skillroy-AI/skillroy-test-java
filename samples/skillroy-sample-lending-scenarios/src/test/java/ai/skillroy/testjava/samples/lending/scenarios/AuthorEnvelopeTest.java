@@ -86,7 +86,7 @@ class AuthorEnvelopeTest {
             n=$((n+1))
             echo "$n" > "$dir/count"
             for a in "$@"; do printf '%s\\0' "$a"; done > "$dir/args-$n"
-            cat > /dev/null
+            cat > "$dir/stdin-$n"
             if [ -f "$dir/envelope-$n.json" ]; then cat "$dir/envelope-$n.json"; exit 0; fi
             echo "no envelope for invocation $n" >&2
             exit 1
@@ -165,8 +165,11 @@ class AuthorEnvelopeTest {
         assertEquals(withoutSchemaKey(ScenarioSchema.generate(Runs.PACK, catalogue)),
                 withoutSchemaKey(Json.parseObject(after(first, "--json-schema"))),
                 "the scenario schema over the planner's server's catalogue");
-        String prompt = first.get(first.size() - 1);
+        assertEquals("--max-budget-usd", first.get(first.size() - 2), "the budget ends the command line: the prompt is"
+                + " the planner's stdin (security fix P2-L7-F3)");
+        String prompt = Files.readString(bin.resolve("stdin-1"), StandardCharsets.UTF_8);
         assertTrue(prompt.contains("<brief>\n" + ScenarioC.BRIEF + "\n</brief>"), prompt);
+        assertTrue(first.stream().noneMatch(a -> a.contains(ScenarioC.BRIEF)), "no argument holds the brief");
         for (int n = 2; n <= envelopes.size(); n++) {
             assertEquals(sessionId, after(args(bin, n), "--resume"), "repair " + (n - 1) + " resumes the session");
         }

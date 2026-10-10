@@ -288,6 +288,41 @@ class StatementGuardTest {
         assertNull(rejectionReason(sql), sql);
     }
 
+    /**
+     * Security fix P2-L3-F1 (pass 2): the two T-SQL session settings that open a transaction the next statement does not
+     * end are rejected in every reading, as the net behind the read path's own rollback; {@code SET} and the isolation
+     * words stay admitted (MySQL's character-set cast, PostgreSQL's {@code TABLESAMPLE ... REPEATABLE}), since a hint
+     * holds its locks only as long as the transaction the read path ends.
+     */
+    @ParameterizedTest
+    @ValueSource(strings = {
+        "SELECT 1 SET IMPLICIT_TRANSACTIONS ON SELECT id FROM items WITH (SERIALIZABLE)",
+        "SELECT 1 SET IMPLICIT_TRANSACTIONS ON SELECT COUNT(*) FROM items WITH (SERIALIZABLE)",
+        "SELECT 1 SET TRANSACTION ISOLATION LEVEL SERIALIZABLE SET IMPLICIT_TRANSACTIONS ON SELECT id FROM items",
+        "SELECT 1 set implicit_transactions on SELECT id FROM items WITH (REPEATABLEREAD)",
+        "SELECT 1 SET ANSI_DEFAULTS ON SET TRANSACTION ISOLATION LEVEL SNAPSHOT SELECT COUNT(*) FROM items",
+        "SELECT 1 SET ANSI_DEFAULTS ON SELECT COUNT(*) FROM items WITH (SERIALIZABLE)",
+    })
+    void rejectsTheSettingsThatOpenATransaction(String sql) {
+        String reason = rejectionReason(sql);
+        assertNotNull(reason, "accepted: " + sql);
+        String upper = reason.toUpperCase(java.util.Locale.ROOT);
+        assertTrue(upper.contains("'IMPLICIT_TRANSACTIONS'") || upper.contains("'ANSI_DEFAULTS'"), reason);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+        "SELECT CAST(x AS CHAR CHARACTER SET utf8mb4) FROM t",
+        "SELECT CONVERT(x USING utf8mb4), CAST(y AS CHAR CHARSET latin1) FROM t",
+        "SELECT id FROM items WITH (SERIALIZABLE)",
+        "SELECT id FROM items TABLESAMPLE BERNOULLI (10) REPEATABLE (42)",
+        "SELECT 'SET IMPLICIT_TRANSACTIONS ON' AS note FROM t",
+        "SELECT \"ansi_defaults\" FROM t",
+    })
+    void admitsSetAndTheIsolationWords(String sql) {
+        assertNull(rejectionReason(sql), sql);
+    }
+
     @Test
     void rejectsNull() {
         assertEquals("empty statement", rejectionReason(null));

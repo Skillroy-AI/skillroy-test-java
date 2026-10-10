@@ -16,6 +16,8 @@
 
 package ai.skillroy.testjava.agent.byteman;
 
+import ai.skillroy.testjava.protocol.Volumes;
+
 import java.io.IOException;
 import java.nio.file.FileSystems;
 import java.nio.file.Files;
@@ -51,8 +53,9 @@ import java.util.jar.Manifest;
  * file this process creates) or the system account, the administrators group or the installer service, each resolved
  * as a principal and never matched by a bare name, and no ALLOW entry gives anyone else a right to write, delete or
  * change the ACL or owner (fix wave, L2-F6; not verified on a Windows host: the judgement is tested on built ACL
- * values). A file system with neither view cannot be checked and is refused. Reads only; never loads a class from the
- * jar.
+ * values). A file system with neither view cannot be checked and is refused; the view is the volume's
+ * ({@link Volumes#protection}), so a jar or directory on a FAT or exFAT volume, which anybody with the volume may write,
+ * is "writable by others" (Phase 6 security fix, pass 2, P2-L7-F1). Reads only; never loads a class from the jar.
  */
 final class JarCheck {
 
@@ -120,6 +123,9 @@ final class JarCheck {
     /** True when someone but the owner may write to {@code path} (a real path), or that cannot be told. */
     static boolean writableByOthers(Path path) {
         try {
+            if (Volumes.protection(path) == Volumes.Protection.NONE) {
+                return true;
+            }
             PosixFileAttributeView posix = Files.getFileAttributeView(path, PosixFileAttributeView.class,
                     LinkOption.NOFOLLOW_LINKS);
             if (posix != null) {
