@@ -109,4 +109,25 @@ public interface SessionActions {
 
     /** Whether a credential is in flight in the session (phase7-contracts.md 9.2, D342). */
     boolean secretsInFlight();
+
+    /**
+     * The session's output directory, where the vision module keeps {@code captures/} (phase7-contracts.md 9.6), or
+     * null for a session without one (it keeps nothing). As built (Phase 7, VM): the contract's facade had no way to
+     * reach it.
+     */
+    java.nio.file.Path outputDir();
+
+    /**
+     * The pack's screen legend through the session's mask, or null (phase7-contracts.md 6.4, 12.3: a visual
+     * question carries it). As built (Phase 7, VM): the contract's context had no way to reach the pack.
+     */
+    String screenLegend();
+
+    /**
+     * A note in the session's journal under the turn's origin (phase7-contracts.md 6.4: {@code skillroy_look}'s
+     * verdict and the capture's hash), masked by the journal. As built (Phase 7, VM).
+     *
+     * @throws IllegalArgumentException outside a tool call
+     */
+    void note(String text);
 }

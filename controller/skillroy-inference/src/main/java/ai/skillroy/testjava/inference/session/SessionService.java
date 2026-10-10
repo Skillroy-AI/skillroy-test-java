@@ -1515,6 +1515,27 @@ public final class SessionService implements AutoCloseable {
         public boolean secretsInFlight() {
             return session.secretsInFlight();
         }
+
+        @Override
+        public java.nio.file.Path outputDir() {
+            return session.options().outputDir();
+        }
+
+        @Override
+        public String screenLegend() {
+            String legend;
+            try {
+                legend = pack.screenLegend();
+            } catch (RuntimeException e) {
+                legend = null;
+            }
+            return legend == null || legend.isBlank() ? null : mask.text(legend.strip());
+        }
+
+        @Override
+        public void note(String text) {
+            session.note(text == null ? "" : text, origin("a note"));
+        }
     }
 
     // ------------------------------------------------------------------------------------------------ history

@@ -77,6 +77,7 @@
     <module>controller/skillroy-cli</module>
     <module>controller/skillroy-cdp</module>
     <module>controller/skillroy-telemetry</module>
+    <module>controller/skillroy-vision</module>
     <module>samples/skillroy-sample-lending-app</module>
     <module>samples/skillroy-sample-lending-agent</module>
     <module>samples/skillroy-sample-lending-pack</module>
