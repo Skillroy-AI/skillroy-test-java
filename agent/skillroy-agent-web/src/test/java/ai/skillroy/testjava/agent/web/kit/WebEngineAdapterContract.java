@@ -27,6 +27,7 @@ import ai.skillroy.testjava.agent.api.spi.web.WebEventListener;
 import ai.skillroy.testjava.agent.api.spi.web.WebFrame;
 import ai.skillroy.testjava.agent.api.spi.web.WebFrameGoneException;
 import ai.skillroy.testjava.agent.api.spi.web.WebInitScript;
+import ai.skillroy.testjava.agent.api.spi.web.WebPointerEvent;
 import ai.skillroy.testjava.agent.api.spi.web.WebScriptException;
 import ai.skillroy.testjava.agent.api.spi.web.WebSubscription;
 import ai.skillroy.testjava.agent.web.reflect.EventBudget;
@@ -36,6 +37,7 @@ import ai.skillroy.testjava.protocol.web.WebLib;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestReporter;
 
 import java.awt.Dimension;
 import java.awt.image.BufferedImage;
@@ -720,6 +722,138 @@ public abstract class WebEngineAdapterContract {
         } finally {
             subscription.cancel();
         }
+    }
+
+    // ------------------------------------------------------------------------------------------------ item 15
+
+    /**
+     * Item 15 (phase7-contracts.md section 4.9): the script library's {@code hit} at the centre of the main page's
+     * block answers the block (a {@code div}), its client rectangle, and a {@code selector} locator that the library
+     * checked to match exactly it ({@code unique}).
+     */
+    @Test
+    void item15AHitTestAtTheBlocksCentreAnswersTheBlockItsRectangleAndAUniqueSelector() throws Exception {
+        WebBrowser b = browser(WebAdapterFixture.Which.VISIBLE);
+        assumeTrue(b.capabilities().contains(WebCapability.EVALUATE), "the adapter has no EVALUATE");
+        load(b, KitPages.main());
+        List<?> rect = (List<?>) Json.parse(eval(b, KitScripts.BLOCK_RECT));
+        long x = number(rect.get(0)) + number(rect.get(2)) / 2;
+        long y = number(rect.get(1)) + number(rect.get(3)) / 2;
+        WebLib.Bounded answer = WebLib.Bounded.of(Json.parse(eval(b, WebLib.boundedCallExpression("hit",
+                Long.valueOf(x), Long.valueOf(y)))));
+        assertEquals(WebLib.Bounded.Kind.VALUE, answer.kind(), String.valueOf(answer.message()));
+        Map<?, ?> hit = (Map<?, ?>) answer.value();
+        Map<?, ?> element = (Map<?, ?>) hit.get("element");
+        assertEquals("div", element.get("tag"), String.valueOf(hit));
+        Map<String, Object> expected = new LinkedHashMap<String, Object>();
+        expected.put("x", Long.valueOf(number(rect.get(0))));
+        expected.put("y", Long.valueOf(number(rect.get(1))));
+        expected.put("w", Long.valueOf(number(rect.get(2))));
+        expected.put("h", Long.valueOf(number(rect.get(3))));
+        assertEquals(expected, element.get("rect"), "the block's client rectangle");
+        assertEquals(Boolean.TRUE, hit.get("unique"), String.valueOf(hit));
+        boolean selector = false;
+        for (Object l : (List<?>) hit.get("locators")) {
+            selector |= ((Map<?, ?>) l).get("selector") instanceof String;
+        }
+        assertTrue(selector, "a unique selector among " + hit.get("locators"));
+        assertNull(hit.get("child"), "a block is no frame element");
+    }
+
+    // ------------------------------------------------------------------------------------------------ item 16
+
+    /**
+     * Item 16 (phase7-contracts.md sections 4.1 and 4.9), for an adapter with {@code INPUT}: a move, a press and a
+     * release at the centre of the counting button, each through {@code dispatchPointer} and awaited within the bound,
+     * make the page record {@code pointerdown}, {@code mousedown}, {@code mouseup} and {@code click}, each with
+     * {@code isTrusted: true}: a pointer click, not a DOM click (gap 36).
+     */
+    @Test
+    void item16APointerClickOnTheCountingElementRecordsFourTrustedEvents() throws Exception {
+        WebBrowser b = browser(WebAdapterFixture.Which.VISIBLE);
+        assumeTrue(b.capabilities().contains(WebCapability.INPUT), "the adapter has no INPUT");
+        load(b, KitPages.main());
+        List<?> rect = (List<?>) Json.parse(eval(b, KitScripts.COUNT_RECT));
+        int x = (int) (number(rect.get(0)) + number(rect.get(2)) / 2);
+        int y = (int) (number(rect.get(1)) + number(rect.get(3)) / 2);
+        for (WebPointerEvent.Action action : new WebPointerEvent.Action[] {WebPointerEvent.Action.MOVE,
+                WebPointerEvent.Action.PRESS, WebPointerEvent.Action.RELEASE}) {
+            b.dispatchPointer(WebPointerEvent.of(action, x, y).build()).get(BOUND_MS, TimeUnit.MILLISECONDS);
+        }
+        pollUntil(b, KitScripts.POINTER_EVENTS, "pointerdown:true,mousedown:true,mouseup:true,click:true");
+    }
+
+    // ------------------------------------------------------------------------------------------------ item 17
+
+    /**
+     * Item 17 (phase7-contracts.md section 4.9, gap 86), for an adapter with {@code INPUT}: a pointer click into the
+     * hidden browser, at the counting button's centre where the page answers it. What the technology does with it is recorded (a report entry {@code item17} and a line on the
+     * standard output), not asserted; the kit asserts only that no answer is waited for beyond the bound (an event not
+     * answered in time is abandoned and the rest are not sent).
+     */
+    @Test
+    void item17APointerIntoTheHiddenBrowserIsRecorded(TestReporter reporter) throws Exception {
+        WebBrowser b = browser(WebAdapterFixture.Which.HIDDEN);
+        assumeTrue(b.capabilities().contains(WebCapability.INPUT), "the adapter has no INPUT");
+        load(b, KitPages.main());
+        int x = 40;
+        int y = 120;
+        try {
+            List<?> rect = (List<?>) Json.parse(eval(b, KitScripts.COUNT_RECT));
+            x = (int) (number(rect.get(0)) + number(rect.get(2)) / 2);
+            y = (int) (number(rect.get(1)) + number(rect.get(3)) / 2);
+        } catch (Exception e) {
+            // the page of a hidden browser may not answer: the point stays a fixed one
+        }
+        StringBuilder record = new StringBuilder("at ").append(x).append(',').append(y).append(": ");
+        int start = record.length();
+        for (WebPointerEvent.Action action : new WebPointerEvent.Action[] {WebPointerEvent.Action.MOVE,
+                WebPointerEvent.Action.PRESS, WebPointerEvent.Action.RELEASE}) {
+            CompletableFuture<Void> f = b.dispatchPointer(WebPointerEvent.of(action, x, y).build());
+            long started = System.nanoTime();
+            String outcome;
+            try {
+                f.get(BOUND_MS, TimeUnit.MILLISECONDS);
+                outcome = "answered";
+            } catch (ExecutionException e) {
+                outcome = "failed: " + e.getCause();
+            } catch (java.util.concurrent.TimeoutException e) {
+                f.cancel(false);
+                outcome = "not answered within " + BOUND_MS + " ms";
+            }
+            record.append(record.length() == start ? "" : "; ").append(action).append(' ').append(outcome).append(" (")
+                    .append(TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started)).append(" ms)");
+            if (!"answered".equals(outcome)) {
+                break;
+            }
+        }
+        String events;
+        try {
+            events = eval(b, KitScripts.POINTER_EVENTS);
+        } catch (Exception e) {
+            events = "not readable: " + e;
+        }
+        record.append("; the button recorded ").append(events);
+        reporter.publishEntry("item17", record.toString());
+        System.out.println("kit item 17 (" + getClass().getSimpleName() + "): " + record);
+    }
+
+    // ------------------------------------------------------------------------------------------------ item 18
+
+    /** Item 18 (phase7-contracts.md section 4.9; item 11's rule): no enumerable global is left after a hit-test. */
+    @Test
+    void item18NoEnumerableGlobalIsLeftAfterAHitTest() throws Exception {
+        WebBrowser b = browser(WebAdapterFixture.Which.VISIBLE);
+        assumeTrue(b.capabilities().contains(WebCapability.EVALUATE), "the adapter has no EVALUATE");
+        load(b, KitPages.main());
+        Object before = Json.parse(eval(b, KitScripts.WINDOW_KEYS));
+        eval(b, WebLib.boundedCallExpression("hit", Long.valueOf(10), Long.valueOf(10)));
+        eval(b, WebLib.callExpression("hit", Long.valueOf(30), Long.valueOf(100)));
+        assertEquals(before, Json.parse(eval(b, KitScripts.WINDOW_KEYS)), "Object.keys(window) unchanged");
+    }
+
+    private static long number(Object v) {
+        return ((Number) v).longValue();
     }
 
     // ------------------------------------------------------------------------------------------------ helpers

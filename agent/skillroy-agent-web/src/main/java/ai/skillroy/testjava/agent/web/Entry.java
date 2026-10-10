@@ -28,7 +28,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * One browser of the index: its ref (minted by the agent's {@code HandleRegistry} from the vendor object, kind
  * {@code browser}, so it is stable for the life of the vendor object), the adapter that found it, the latest handle
  * the adapter returned for it (equal to the earlier ones), and what the module keeps about it: the seed's tag, the
- * component's ref and whether it showed at the last look, the last CDP target id read successfully, the load events
+ * component (and its ref) and whether it showed at the last look, whether this module's viewport override is in place,
+ * the last CDP target id read successfully, the load events
  * (for the read retry of phase4-contracts.md section 4.2 and for {@code web.waitFlag}), and its event subscription.
  *
  * <p>Thread-safe: fields are volatile or atomic; the load watch synchronises on itself.
@@ -43,7 +44,18 @@ final class Entry {
     private volatile WebBrowser browser;
     volatile String tag;
     volatile String componentRef;
+    /**
+     * The component the adapter reported at the last rebuild (a {@code java.awt.Component}, typed {@code Object} so
+     * that the index names no AWT class), or null: what the module's {@code SurfaceSource} answers from without asking
+     * the browser (phase7-contracts.md section 4.8).
+     */
+    volatile Object component;
     volatile boolean showing;
+    /**
+     * True while a viewport override this module set with {@code web.resize} is in place: a component point is then
+     * not converted (phase7-contracts.md section 4.8, {@code "viewport override"}).
+     */
+    volatile boolean overridden;
     /**
      * The last CDP target id read successfully. A page target's id does not change while the browser lives; a later
      * read that times out (a frozen renderer cannot answer {@code Page.getFrameTree}) reports this one, which the CDP

@@ -732,6 +732,17 @@ order is frozen (`WebSpiShapeTest`). No key input in Phase 7 (`web.dom.fill` typ
 signature, a future with the caller's bounded wait, never a wait on the EDT. These two files are VW's (§2.1); the three
 Swing SPIs of §3.7 are VS's and land first.
 
+**As built (Phase 7, VW, 2026-10-10):** as specified, with the bounds the sketch left open (D-VW-16): `x` and `y` lie
+in `0..16384` (`WebPointerEvent.MAX_COORDINATE`, the largest viewport `web.resize` accepts), `clickCount` in `0..3`,
+each wheel delta in `-16384..16384`; the defaults are `LEFT` and a click count of 1 for `PRESS` and `RELEASE`, `NONE`
+and 0 for `MOVE` and `WHEEL`; `build()` refuses a press or a release with `NONE` or a click count of 0 and a delta on
+anything but `WHEEL` (`IllegalStateException`); a `MOVE` may carry a held button. The enums are nested
+(`WebPointerEvent.Action`, `.Button`, `.Modifier`) in the order above, which `WebSpiShapeTest` pins; the class keeps
+three public constants, which that test's value-type rule now allows (static fields final, instance fields private and
+final). The default `dispatchPointer` completes exceptionally with `UnsupportedOperationException("the adapter has no
+INPUT: …")` and calls nothing of the browser; the built-in adapters answer a null event with
+`IllegalArgumentException`.
+
 ### 4.2 `web.hitTest` (read; capability `web.hittest`; `WORKER`, 10 s; not `script`)
 
 | Parameter | Meaning |
@@ -750,6 +761,27 @@ function is evaluated there, to depth 3; the result's `frame` is the frame the e
 frame element's key and rectangle in the parent (W8 of map 6). `NOT_FOUND` with `data.reason: "outside"` when the point
 lies outside the viewport or hits nothing. The CDP path serves it on the `Place`'s frame through `frame.evaluate` with
 the library (the `web.dom.text` pattern), the agent path through `evaluate` with the same expression.
+
+**As built (Phase 7, VW, 2026-10-10):** the shape is as specified; what the sketch left open (D-VW-5, D-VW-7, D-VW-8):
+**The descent** is the caller's, not the library's (a `data:` iframe is another origin, whose document the library
+cannot reach): for a frame element `hit` also answers `child: {x, y, name, url}`, the point inside the element's border
+and padding, and both paths find the child frame by one rule over the same `Page.getFrameTree` (`WebInput.childFrame`:
+among the frame's children the one with the element's name when exactly one has it, else the one with its URL when
+exactly one has it, else the only child) and evaluate `hit` there, at most three times; a child that answers `NOT_FOUND`
+or a script error (the point on the frame's border or padding, a frame that went) leaves the frame element as the
+answer. **Every rectangle** (`element.rect`, `iframe.rect`) is in the viewport of the frame the call started in, §4's
+one coordinate space (for a frame of the main frame that is "in the parent"); `iframe` is the innermost frame element.
+**`frame`**, when given, is the frame the call starts in and `point` is then in that frame's viewport; the result's
+`frame` is the frame the element was found in, omitted for a browser without frame keys (no `FRAMES`). **The locators**
+are those the library's `find` answers with exactly this element: `{role, name}` first (never for a `generic`, `none`
+or `presentation` role, an empty name or one over 1000 characters), then `{selector}` (an id selector when the id is a
+plain identifier and unique, else the shortest path of `tag.class:nth-of-type(n)` steps up from the element, at most
+eight, anchored at an ancestor's unique id when one is met); `unique` is true when there is at least one. Names and ids
+are cut at 1000 in the page and again on the receiving side, role and tag at 64, a selector at 4096 (`WebInput.hit`,
+both paths, S43); rectangles are whole CSS pixels, a fractional point is rounded. A point outside the viewport is
+`NOT_FOUND {reason: "outside", x, y}`, message "the point x,y lies outside the viewport or hits no element"
+(`WebLib.errorOf`). A component point needs `EVALUATE` (the page's `innerWidth`); a browser without a component is
+`INVALID_PARAMS` with `data.reason: "no component"`, a component without a width `"no component size"`.
 
 ### 4.3 `web.pointer` (mutating; capability `web.pointer`; `WORKER`, 10 s)
 
@@ -780,6 +812,30 @@ mousePressed | mouseReleased | mouseWheel, x, y, button, clickCount, modifiers, 
 path's own session (`CdpAttach.send(sessionOnPw(page), …)`, D64's precedent; W6: Playwright's `page.mouse()` is not
 used, so that both paths send byte-identical parameters and no actionability semantics hide a difference).
 
+**As built (Phase 7, VW, 2026-10-10):** both paths read the parameters, plan the events, build the protocol's parameters
+and shape both results with one class of the protocol module, `ai.skillroy.testjava.protocol.web.WebInput` (D-VW-6), so
+that a wrong parameter is the same `INVALID_PARAMS` (`data.param`) on either path and the parameters are byte-identical:
+`{type, x, y, button, clickCount, modifiers}`, plus `deltaX, deltaY` for `mouseWheel` (modifier bits ALT 1, CTRL 2, META
+4, SHIFT 8; buttons `none`, `left`, `middle`, `right`). **The plan** (D-VW-3): every action starts with a `mouseMoved`
+to the point (hover and pointer-enter run first, as a person's pointer arrives before it acts); then `PRESS` sends one
+`mousePressed`, `RELEASE` one `mouseReleased`, `CLICK` with click count `n` the pairs `mousePressed`/`mouseReleased`
+with click counts 1 to `n` (what Chromium needs to raise `dblclick`), `DOUBLE_CLICK` the same with `n` 2 by default,
+`WHEEL` one `mouseWheel`; `dispatched` lists the types sent. **The `hit` read** before acting: a point outside the
+viewport is `NOT_FOUND` and nothing is sent; a hit that cannot be read (a busy page, no `EVALUATE`) is left out of the
+result and the action goes on (on the agent it takes at most half the budget and 5 s). **After a failure that follows a
+press** one `mouseReleased` of that button is sent (at most 1 s, its outcome not awaited further), so that no button
+stays held in the page, and the call answers the failure (D-VW-4). **The modal check** applies the Swing module's
+heuristic as that module states it (D-VW-11; "neither the browser component's window nor owned by it" above is read as:
+the dialog is not the browser's window and the browser's window is not owned by the dialog): when several dialogs block
+the window, the active one, else the last created; `MODAL_OPEN` carries `data {dialog, title, browser}`. It runs in the
+module's own bounded EDT read of the component (`SeedWalk.state`, at most 2 s), which also gives `visibleInSwing`. **On
+the CDP path** (D-VW-1), which cannot see AWT, the path reads the agent's `web.browsers` once more before every pointer
+call; a browser the agent reports blocked (the entry's new optional `blockedBy: {dialog, title}`, written by the same
+check, P4 §4.2) is handed to the agent (`UNSUPPORTED`, a `web.fallback` record), which answers `MODAL_OPEN` itself,
+unless `force`; so no pointer of a model or a client acts past a modal dialog on either path. `via` is the browser's
+`bitmapSource()` on the agent (`PROTOCOL` for JCEF, `VENDOR` for JxBrowser and the SPI's default) and `PROTOCOL` on the
+CDP path. A browser that is not showing, or has no component, is served with `visibleInSwing: false`.
+
 ### 4.4 Capabilities
 
 `web.hittest` and `web.pointer` join `WebCapabilities.GENERIC`: derived in every cycle, `web.hittest` `OK(<adapters>)`
@@ -791,6 +847,12 @@ and the acceptance that pin the reserved text flip (`WebModuleInstallTest`, `Web
 which goes stale but not red: a note for VC, which owns the CLI's tests. The goldens count the reason by presence, so
 they need no text change, but their `web.hittest` state becomes `OK` where a browser is indexed (the web host's goldens
 only; the lending desk has none).
+
+**As built (Phase 7, VW, 2026-10-10):** as specified: both ids are in `WebCapabilities.GENERIC`, set
+`UNAVAILABLE("no embedded browser technology found")` at install and declared with a probe at readiness like the other
+generic ids, `web.hittest` from `EVALUATE`, `web.pointer` from `INPUT` (an index rebuild outside a cycle may improve
+them, as it may the others); the reserved text is gone from the module. The web host has no committed capability
+goldens (only the lending scenarios module has goldens), so nothing was regenerated there (D-VW-15).
 
 ### 4.5 The adapters
 
@@ -804,6 +866,21 @@ only; the lending desk has none).
   violation. Whether the vendor's `Point` is CSS or device pixels on a HiDPI view is not known (map 6 §9) and is a line
   of the strategy string until a licence holder's run says.
 
+**As built (Phase 7, VW, 2026-10-10):** `jcef`: `dispatchPointer` sends `Input.dispatchMouseEvent` through the handle's
+channel (the raw channel where its roles resolve, else the shared client), never one of the handle's reads, so it is
+never sent again on the shared client; `ALL` gains `INPUT`; a browser without a native browser yet has no `INPUT` (it
+has no flags at all). `jxbrowser` (D-VW-10): the group `for: "INPUT"` holds `browser.dispatch` (arity 1), `point.of`
+(`com.teamdev.jxbrowser.ui.Point.of(int, int)`), the buttons `button.primary`, `button.middle`, `button.secondary`
+(static fields of `com.teamdev.jxbrowser.ui.MouseButton`), and per event class of `com.teamdev.jxbrowser.ui.event`
+(`MousePressed`, `MouseReleased`, `MouseMoved`, `MouseWheel`) its `newBuilder(Point)` and its builder's `button`,
+`clickCount`, `deltaX`, `deltaY` (by arity, so that the vendor's numeric types need not be known) and `build`; every
+name is unverified against the vendor's library, as the strategy says: `", input unverified (HiDPI: CSS or device pixels
+unknown)"` is appended to the probe's strategy when the group resolves (`JxBrowserAdapter.INPUT_UNVERIFIED`). The event
+is built and dispatched on the adapter's threads, the caller bounding the wait; modifier keys are not mapped, so an
+event that names one is refused (`UnsupportedOperationException`, `CAPABILITY_UNAVAILABLE`). The fake mirrors the
+roles with `FakePoint`, `FakeMouseButton` and `FakeMouse{Pressed,Released,Moved,Wheel}` (each with its builder);
+`FakeBrowser.dispatch` hands the event to the fake page; `fake-jxbrowser-noinput.json` is a line without the roles.
+
 ### 4.6 The script library: `hit`, version 2 (`skillroy-protocol`, `web-lib.js`, `WebLib`)
 
 `WebLib.FUNCTIONS` gains `hit`; `L.version` becomes `"2"`. **The versioning rule** (D300): a document whose slot
@@ -815,6 +892,17 @@ record's library hash. Every library answer stays bounded by the guard (`bounded
 is cut again on the receiving side (S43): a hit's role, name, tag, id and rectangle are page-chosen data (threat model
 A3).
 
+**As built (Phase 7, VW, 2026-10-10):** `WebLib.VERSION` is `"2"` and `FUNCTIONS` holds `hit`. The install rule as built
+(D-VW-2): a slot that already holds a library is never replaced; the text checks the functions version 2 added
+(`ADDED_IN_2 = ["hit"]`) and leaves at once (`"present"`) when the slot has them; otherwise, after defining everything,
+it installs each missing function into the slot's object (non-enumerable, non-writable, non-configurable) and raises the
+slot's `version` where it can (`"upgraded"`). A version-1 slot's `version` was exposed non-configurable, so it stays
+`"1"` and the functions it now has mark the upgrade; from version 2 on, `version` is configurable, so that a later
+library can raise it. A slot that refuses the definition (a page froze it, or put something else there) is left as it
+is, and a call of the missing function then fails as a script error whose message names it (Chromium's "… .hit is not
+a function"). The library's text gains no division and no regular-expression literal (`WebLibTest`'s lexer). `hit`
+answers `{element, locators, unique, child?}` (§4.2's note); the receiving side's reading is `WebInput.hit`.
+
 ### 4.7 The CDP path (`skillroy-cdp`)
 
 `CdpWebPath.SERVED` gains `web.hitTest` and `web.pointer`, `MUTATING` gains `web.pointer`; `web.hitTest` runs the
@@ -822,6 +910,12 @@ library's `hit` on the `Place`'s frame, `web.pointer` sends `Input.dispatchMouse
 `budgetMs` unchanged (10 s). The path takes viewport points only: `space: COMPONENT` is handed to the agent path
 (`UNSUPPORTED`, the agent fall-back of P4 §6.1), since the path has no component bounds (`AgentBrowser`, map 6 §5.3).
 `CdpWebPathServesTest`'s "not served" list loses the two names.
+
+**As built (Phase 7, VW, 2026-10-10):** as specified, with §4.2's descent (the child frame found in the page's
+`Page.getFrameTree` by `WebInput.childFrame` and mapped to its Playwright frame as a `frame` key is) and §4.3's notes:
+the pointer reads the agent's `web.browsers` once more and hands a browser the agent reports blocked by a modal dialog
+to the agent (D-VW-1); `visibleInSwing` comes from that read; a component point, a secret parameter or a read-only
+target hands the call to the agent before anything reached the page.
 
 ### 4.8 Web surfaces in a Swing capture, and a Swing point in a page
 
@@ -846,6 +940,16 @@ library's `hit` on the `Place`'s frame, `web.pointer` sends `Input.dispatchMouse
   masks the browser component while it does (§11; a limitation sentence of `SECURITY.md`). The loop acts on a `WEB` hit
   through `web.hitTest` and `webClick {role, name}` (recorded) or `web.pointer` (live-only).
 
+**As built (Phase 7, VW, 2026-10-10):** the module registers its `SurfaceSource` (`WebSurfaces`) at install through
+`SpiRegistry` and withdraws it at uninstall; it answers from the index alone: the component each entry's adapter
+reported at the last rebuild (kept in the entry, typed `Object`), one `Surface(component, "WEB", ref)` per entry whose
+component lies in a window (its parents walked on the calling EDT), a browser the module saw close left out; no browser
+or adapter is asked (D-VW-12). The class that walks the parents is loaded at the first call, so that install still
+requests no AWT class (`WebModuleInstallTest`). The conversion of a component point uses the component's width from
+the module's own bounded EDT read and the page's `innerWidth`; the override that refuses it is the one this module's
+`web.resize` set (an override the CDP path set on its own session is not seen by the agent, and the CDP path refuses a
+component point anyway). `scaleAssumed` is `true` when the component's screen transform is not 1, else `false`.
+
 ### 4.9 The web host, the kit and the acceptance (profile `jcef`)
 
 `front.html` and the kit's `main.html` gain a pointer-event counter (`pointerdown`, `mousedown`, `mouseup`, `click`,
@@ -857,6 +961,20 @@ item 1 asserts `web.hittest` `OK` and `web.pointer` `OK` (JCEF has `INPUT`) in e
 `web.hitTest` and `web.pointer` over both paths and compares the shapes (D48). Gap 36 closes with this section. The
 host's committed `plan/*.plan.json` are regenerated for plan version 6 by VC's script, which touches nothing else in
 that tree (§12.5).
+
+**As built (Phase 7, VW, 2026-10-10):** the counter is on the host pages' Borrow button (all three pages share one
+script, so all three have it): `webhostPointer()` answers the `type:isTrusted` entries recorded so far; the kit page
+gains a counting button `#count` whose script records the same into its `data-events` attribute (no global). Kit
+items 15-18 are `WebEngineAdapterContract.item15…` to `item18…`: item 15 calls `hit` through
+`WebLib.boundedCallExpression` at the centre of the block read from the page; item 16 dispatches `MOVE`, `PRESS` and
+`RELEASE` through the adapter and polls the counter (bounded); item 17 publishes its record as a report entry `item17`
+and prints it, asserting only that no event is waited for beyond the bound (the rest are not sent after one that is not
+answered); item 18 is item 11's check around two `hit` calls. `WebHostChecks` gains
+`item10HitTestAndPointerOnBothPathsAnswerTheSameShapes` (the agent's answers, and with a port the CDP path's, opened in
+the check, compared for equality) and `item10TheSwingCaptureListsTheBrowserAndASwingPointReachesThePage` (the Swing
+half; it needs VS's `swing.capture` surfaces and `swing.hitTest` and skips while the matrix has no `swing.hittest`).
+The fakes serve `hit` and the counter over a fixed layout of the kit page (`FakeDocument.BLOCK_RECT`,
+`COUNT_RECT`).
 
 ---
 
@@ -1934,6 +2052,20 @@ version in its head comment; the same VS run).
 | 8 | `skillroy-vision` (and VM's CLI and MCP options) | the loop on `FakeVisionAgent` (canned captures from the module's PNG fixtures with their geometry, canned hit-tests) and `ScriptedGateway`: a V1 turn (a mark grounded by a hit-test at its centre: a button → `click` by locator, a table row → `pointer {row}`, a region mark → `pointer {region}`; the provenance; the export's comment), a V2 turn through the custom tools and through the toolset (the member mapping of §6.3, `KeyNames`, `zoom` across two windows mapped to the topmost one), the stale-capture rule (a `window.opened` event between capture and act: a fresh capture and the same-component check), the refusals (a masked focus owner for `type` and `key`, a masked target for `click` and `pointer`, a `type` naming `$assistant.password`, a `type` while a secret is in flight, a `type` holding a known secret value, a `signOn {staff: $assistant}` from the model), Haiku refused for V2, the V3 rules (`via: ROBOT` set by the facade with `requireFocus: true`, a canned `focus.window` null giving no Robot call and `endTurn: QUESTION`, `left_mouse_down` answered as text, no mode on `capture`), the marks drawn on the controller's copy (the captures file equals the fixture), a redacted `WEB` surface staying grey after the composite, the capture always after the batch and skipped after the model's own `screenshot`, the toolset's skipped calls after a failure, the limits (30, 20) through the service; `VisualQuestion`'s schema, `UNSURE`, the `<model-question>` block; `VisionCapabilities`' states (gated on `swing.capture.screen`); `ScenarioPlayer` on the toy pack with a scripted model (`aiAct` done, `ask_person` in a non-interactive run, `aiExpect` YES/NO/UNSURE through `visionCall`, a step's `tier: V3` without the flag refused, `signOn` before the first `aiAct`, an `expectImage` through the session's route); `Captures`: one file per hash, the raster as captured; the CLI's `SessionCommand` (`--vision*`, `--allow-robot`, `v3` without it a usage error, `host` set, `--play` on `CliTestPack` with a scripted gateway) and `McpCommand` (`--vision`, `--allow-robot`) parsing; `ToolCalls` (MCP): raw `swing_capture {redact: false}` and `{mode: ROBOT}`, `swing_pointer {via: ROBOT}` with `--allow-robot` set, `swing_type` with a `$assistant.password` argument, each refused with nothing sent; `skillroy_scenario_run` with a client scenario whose `type` names `$staff.password` refused by `PlanPolicy` with nothing run, and one whose `signOn {staff: $staff}` passes (a pack verb's own join) |
 | 9 | the sample | `LendingUiDisplayTest` is a display test; headless: `LendingModuleTest`'s registration list (thirteen SPIs), `LendingRegionsTest` on an unshown `NumberPad` (regions need no display), `LendingCaptureMaskTest` (the entry field, and the number pad while the entry field is masked), `LendingPackTest` (`screenLegend`, version 0.6.0), `PlansUpToDateTest`, `BindingsUpToDateTest` (its expected list gains `keypad-image`'s file per seed, the one Phase 7 scenario with bindings; `sign-on-by-number-pad`, `loan-table-visual-check` and `vision-live-only` have none, and the vision export's files are compared by §13.2 item 8 as the Phase 5 export's are; the `.images/` directories are walked separately and every PNG must be named by an entry of its bindings file and match that entry's `sha256`), `ScenarioSchemaCommittedTest`, `CapabilityGoldenTest`'s fixtures, `SecretScan` over every new file (the baselines' PNGs included: bytes, so the scan checks their names and that no `credentials.yaml` value appears in any text file) |
 
+**As built (Phase 7, VW, 2026-10-10), items 2 (the web part), 3 and 4:** item 2 is `WebPointerEventTest`,
+`WebBrowserDefaultsTest` (the default refusal) and `WebSpiShapeTest` (members, the frozen enum orders, the defaults);
+item 3 is `PointingTest` (the two primitives through `Harness` over the fake page's layout of the kit page and a
+scripted descent; the conversion and its refusals; the modal check on a fake dialog; the plan; the balancing release;
+read-only mode; the `SurfaceSource`), `ComponentStateDisplayTest` (the module's modal check and component read against
+a real `JDialog`; a display test), `WebCapabilitiesTest` (the two ids derived), `JcefAdapterFakeTest` and
+`JcefRawChannelFakeTest` (`Input.dispatchMouseEvent` recorded by `FakeDocument`, on the shared client and on the raw
+channel), `JxBrowserAdapterFakeTest` (with the `INPUT` roles, and `fake-jxbrowser-noinput.json` without them), the kit's
+items 15-18 against the four fakes, `WebModuleInstallTest` (fifteen primitives, the install states, no AWT class
+requested with the `SurfaceSource` registered); item 4 is `WebLibTest` (`hit` in `FUNCTIONS`, version 2, the install
+rule's text, the `outside` message) and `WebInputTest` (the shared parameters, plan, protocol parameters, bounds,
+child-frame rule and shapes); the CDP side is `CdpWebPathServesTest` and `CdpWebPathCallTest` (both primitives, the
+descent through the frame tree, the hand-over of a blocked browser, the balancing release, read-only mode).
+
 ### 13.2 End to end (the Linux image; `ci/run-in-linux.sh … -Dskillroy.headless=false`; Java 8 and Java 25 targets; no key)
 
 Where each item lives: items 1-6 in a new `VisionSwingChecks` (VS, every load mode; registered in `LendingEndToEndIT`
@@ -2011,6 +2143,10 @@ checks (VW), item 11 in the host-safety tests (VS).
     increments the page's pointer counter with `isTrusted: true`; `swing.capture` of the host's window lists the browser
     as a `WEB` surface with its ref and `redacted: false`; `swing.hitTest` at a point in the browser answers `surface:
     WEB` with `surfaceLocal`, and `web.hitTest {space: COMPONENT}` with that point answers the element under it.
+    **As built (Phase 7, VW, 2026-10-10):** `WebHostChecks.item10HitTestAndPointerOnBothPathsAnswerTheSameShapes` and
+    `item10TheSwingCaptureListsTheBrowserAndASwingPointReachesThePage` (the second skips until the Swing side's
+    `swing.hittest` is in the matrix); the kit's items run in `JcefKitWindowedDisplayTest` and
+    `JcefKitOffScreenDisplayTest`.
 11. **Host safety** (`HostSafetyDisplayTest`, `HostSafetyIT`): a blocked EDT makes `swing.capture`, `swing.hitTest`
     and `swing.pointer` time out cleanly and nothing runs late, **including an EDT blocked from inside the
     `MOUSE_PRESSED` handler of the sequence's own press**: the call returns `fired: false, EDT_BUSY, dispatched 1 of 4, balanced: true`,

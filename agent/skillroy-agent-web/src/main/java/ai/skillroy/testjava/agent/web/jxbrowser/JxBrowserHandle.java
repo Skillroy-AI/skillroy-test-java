@@ -25,6 +25,7 @@ import ai.skillroy.testjava.agent.api.spi.web.WebEventListener;
 import ai.skillroy.testjava.agent.api.spi.web.WebFrame;
 import ai.skillroy.testjava.agent.api.spi.web.WebFrameGoneException;
 import ai.skillroy.testjava.agent.api.spi.web.WebInitScript;
+import ai.skillroy.testjava.agent.api.spi.web.WebPointerEvent;
 import ai.skillroy.testjava.agent.api.spi.web.WebRendering;
 import ai.skillroy.testjava.agent.api.spi.web.WebScriptException;
 import ai.skillroy.testjava.agent.api.spi.web.WebSubscription;
@@ -159,6 +160,9 @@ final class JxBrowserHandle implements WebBrowser {
         }
         if (api.complete("CDP_TARGET_ID")) {
             caps.add(WebCapability.CDP_TARGET_ID);
+        }
+        if (api.complete("INPUT")) {
+            caps.add(WebCapability.INPUT);
         }
         this.fixed = Collections.unmodifiableSet(caps);
     }
@@ -1415,6 +1419,72 @@ final class JxBrowserHandle implements WebBrowser {
             }
         }, out);
         return out;
+    }
+
+    /**
+     * The SPI's pointer input (A66, phase7-contracts.md section 4.5), on the descriptor's {@code INPUT} roles and
+     * unverified against the vendor's library (a licence holder's run settles it, gap 41): the event is built with the
+     * vendor's builders ({@code MousePressed.newBuilder(Point.of(x, y)).button(..).clickCount(..).build()} and its
+     * {@code MouseReleased}, {@code MouseMoved} and {@code MouseWheel} counterparts) and handed to
+     * {@code Browser.dispatch}, on the adapter's threads (the {@code resize} pattern: the caller bounds the wait).
+     * Whether the vendor's {@code Point} is in CSS or device pixels on a HiDPI view is not known. Modifier keys are not
+     * mapped: an event that names one is refused with {@link UnsupportedOperationException}.
+     */
+    @Override
+    public CompletableFuture<Void> dispatchPointer(final WebPointerEvent event) {
+        if (event == null) {
+            return failed(new IllegalArgumentException("a pointer event is required"));
+        }
+        CompletableFuture<Void> refused = refuseKnown(WebCapability.INPUT);
+        if (refused != null) {
+            return refused;
+        }
+        if (!event.modifiers().isEmpty()) {
+            return failed(new UnsupportedOperationException("adapter jxbrowser maps no modifier keys for pointer input"
+                    + " (input unverified)"));
+        }
+        CompletableFuture<Void> out = tracked(new CompletableFuture<Void>());
+        submit(new Callable<Void>() {
+            @Override
+            public Void call() throws Exception {
+                api.invoke("browser.dispatch", browser, vendorEvent(event));
+                return null;
+            }
+        }, out);
+        return out;
+    }
+
+    /** The vendor's event for an SPI event, through the descriptor's builders. */
+    private Object vendorEvent(WebPointerEvent e) throws ReflectiveException {
+        Object point = api.invoke("point.of", null, Integer.valueOf(e.x()), Integer.valueOf(e.y()));
+        switch (e.action()) {
+            case PRESS:
+                return pressOrRelease("mousePressed", point, e);
+            case RELEASE:
+                return pressOrRelease("mouseReleased", point, e);
+            case WHEEL: {
+                Object b = api.invoke("mouseWheel.newBuilder", null, point);
+                b = fluent(api.invoke("mouseWheel.deltaX", b, Integer.valueOf(e.deltaX())), b);
+                b = fluent(api.invoke("mouseWheel.deltaY", b, Integer.valueOf(e.deltaY())), b);
+                return api.invoke("mouseWheel.build", b);
+            }
+            default:
+                return api.invoke("mouseMoved.build", api.invoke("mouseMoved.newBuilder", null, point));
+        }
+    }
+
+    private Object pressOrRelease(String kind, Object point, WebPointerEvent e) throws ReflectiveException {
+        Object b = api.invoke(kind + ".newBuilder", null, point);
+        String button = e.button() == WebPointerEvent.Button.MIDDLE ? "button.middle"
+                : e.button() == WebPointerEvent.Button.RIGHT ? "button.secondary" : "button.primary";
+        b = fluent(api.invoke(kind + ".button", b, api.read(button, null)), b);
+        b = fluent(api.invoke(kind + ".clickCount", b, Integer.valueOf(e.clickCount())), b);
+        return api.invoke(kind + ".build", b);
+    }
+
+    /** A builder method's answer, or the builder itself when it answers nothing. */
+    private static Object fluent(Object answer, Object builder) {
+        return answer != null ? answer : builder;
     }
 
     /** {@code VENDOR}: the bitmap is the product's own {@code Browser.bitmap()} (A37). */

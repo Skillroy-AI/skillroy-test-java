@@ -16,6 +16,9 @@
 
 package ai.skillroy.testjava.agent.web.fake.cef;
 
+import ai.skillroy.testjava.agent.api.spi.web.WebPointerEvent;
+import ai.skillroy.testjava.protocol.Json;
+import java.util.EnumSet;
 import ai.skillroy.testjava.agent.api.ProbeResult;
 import ai.skillroy.testjava.agent.api.spi.web.CdpEndpoint;
 import ai.skillroy.testjava.agent.api.spi.web.WebBrowser;
@@ -296,6 +299,41 @@ class JcefAdapterFakeTest {
                 String.valueOf(refused.getCause()));
         assertEquals(before, b.evaluations(), "a refused evaluation is not sent again by the adapter");
         assertEquals("42", eval(h, KitScripts.NUMBER), "the next call goes to a new client");
+    }
+
+    /**
+     * Phase 7 (4.3, 4.5): a browser whose channel exists has INPUT; a pointer event is one
+     * {@code Input.dispatchMouseEvent} on the shared client with the parameters both paths send, recorded by the fake
+     * page, and never sent again (it is no read of the handle's own); a click on the counting button records the four
+     * trusted events; a null event and a closed browser are refused.
+     */
+    @Test
+    void aPointerEventIsOneInputDispatchMouseEventCallRecordedByThePage() throws Exception {
+        FakeCefBrowserBase b = shown(client, true);
+        b.loadHtml(ai.skillroy.testjava.agent.web.kit.KitPages.main()).get(10, TimeUnit.SECONDS);
+        adapter.probe(HOST);
+        WebBrowser h = handleOf(adapter.browsers(Collections.emptyList()), b);
+        assertTrue(h.capabilities().contains(WebCapability.INPUT), String.valueOf(h.capabilities()));
+        h.dispatchPointer(WebPointerEvent.of(WebPointerEvent.Action.WHEEL, 30, 40).delta(-5, 120)
+                .modifiers(EnumSet.of(WebPointerEvent.Modifier.SHIFT)).build()).get(10, TimeUnit.SECONDS);
+        assertEquals(1, b.inputs());
+        assertEquals("{\"type\":\"mouseWheel\",\"x\":30,\"y\":40,\"button\":\"none\",\"clickCount\":0,"
+                + "\"modifiers\":8,\"deltaX\":-5,\"deltaY\":120}", Json.write(b.document().pointerEvents().get(0)));
+        for (WebPointerEvent.Action a : new WebPointerEvent.Action[] {WebPointerEvent.Action.MOVE,
+                WebPointerEvent.Action.PRESS, WebPointerEvent.Action.RELEASE}) {
+            h.dispatchPointer(WebPointerEvent.of(a, 72, 216).build()).get(10, TimeUnit.SECONDS);
+        }
+        assertEquals(4, b.inputs(), "one call per event, none sent again");
+        assertEquals("\"pointerdown:true,mousedown:true,mouseup:true,click:true\"",
+                eval(h, KitScripts.POINTER_EVENTS));
+        Throwable nothing = assertThrows(ExecutionException.class, () -> h.dispatchPointer(null)
+                .get(10, TimeUnit.SECONDS)).getCause();
+        assertTrue(nothing instanceof IllegalArgumentException, String.valueOf(nothing));
+        b.close(true);
+        Throwable closed = assertThrows(ExecutionException.class, () -> h.dispatchPointer(WebPointerEvent.of(
+                WebPointerEvent.Action.MOVE, 1, 1).build()).get(10, TimeUnit.SECONDS)).getCause();
+        assertTrue(closed instanceof IllegalStateException, String.valueOf(closed));
+        assertEquals(4, b.inputs());
     }
 
     @Test

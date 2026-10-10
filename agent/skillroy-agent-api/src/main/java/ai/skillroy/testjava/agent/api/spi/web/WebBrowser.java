@@ -216,4 +216,27 @@ public interface WebBrowser {
     default BitmapSource bitmapSource() {
         return BitmapSource.VENDOR;
     }
+
+    /**
+     * Dispatches one synthetic pointer event into the page ({@link WebCapability#INPUT}) and completes once the
+     * technology has handled it (on the protocol path: once {@code Input.dispatchMouseEvent} was answered). The event's
+     * point is in CSS pixels of the main frame's layout viewport. Fails as the class comment says: without
+     * {@link WebCapability#INPUT} the future completes exceptionally with {@link UnsupportedOperationException}; a
+     * closed browser with {@link IllegalStateException}; a null event with {@link IllegalArgumentException}. The
+     * caller bounds the wait; an adapter never waits on the EDT, never retries a dispatch, and never sends one again on
+     * a shared channel (a pointer event is mutating). Amendment A66 (phase7-contracts.md section 4.1): a default
+     * method, so an adapter built before it links and runs unchanged.
+     *
+     * <p><b>The default</b> has no {@link WebCapability#INPUT}: it completes exceptionally with
+     * {@link UnsupportedOperationException} and touches nothing.
+     *
+     * @param event the event to dispatch
+     * @return completes once the technology has handled the event
+     */
+    default CompletableFuture<Void> dispatchPointer(WebPointerEvent event) {
+        CompletableFuture<Void> refused = new CompletableFuture<Void>();
+        refused.completeExceptionally(new UnsupportedOperationException("the adapter has no INPUT: synthetic pointer"
+                + " input into a page is not supported"));
+        return refused;
+    }
 }

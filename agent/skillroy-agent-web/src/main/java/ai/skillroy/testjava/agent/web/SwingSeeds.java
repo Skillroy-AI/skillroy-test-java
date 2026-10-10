@@ -38,7 +38,10 @@ import java.util.concurrent.ExecutionException;
  * cannot see): every component of every displayable window, read in one {@link ThreadPolicy#EDT_SYNC} call through
  * the agent's thread broker, bounded by the caller's budget and by {@link #MAX_COMPONENTS}. Nothing is asked of AWT
  * unless an event-dispatch thread already runs ({@link AwtThreads}); this class is the only one of the module that
- * names AWT classes for the tree, and it is loaded only when an index rebuild needs it.
+ * names AWT classes for the tree (with {@link WebSurfaces}, which runs inside the Swing module's own EDT read), and it
+ * is loaded only when an index rebuild or an input primitive needs it. It also reads one browser component's state for
+ * {@code web.hitTest} and {@code web.pointer} (Phase 7): showing, size, screen scale, the modal dialog that blocks its
+ * window.
  *
  * <p>Thread-safe; call from an agent worker, never from the EDT.
  */
@@ -103,6 +106,19 @@ final class SwingSeeds implements SeedWalk {
                     out.put(c, Boolean.valueOf(c instanceof Component && ((Component) c).isShowing()));
                 }
                 return out;
+            }
+        });
+    }
+
+    @Override
+    public ComponentState state(final Object component, long budgetMs) throws Exception {
+        if (!(component instanceof Component) || !AwtThreads.eventQueueAlive()) {
+            return ComponentState.UNKNOWN;
+        }
+        return read(budgetMs, new Callable<ComponentState>() {
+            @Override
+            public ComponentState call() {
+                return ComponentReads.stateOf(component);
             }
         });
     }

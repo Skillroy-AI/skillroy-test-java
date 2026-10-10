@@ -66,10 +66,12 @@ class WebCapabilitiesTest {
             assertCap(h, "web.resize", CapabilityState.OK, null, "scripted");
             assertCap(h, "web.bitmap", CapabilityState.OK, null, "scripted");
             assertCap(h, "web.cdp", CapabilityState.OK, null, "127.0.0.1:9222");
-            assertCap(h, "web.hittest", CapabilityState.UNAVAILABLE, "reserved for the vision bolt-on", null);
-            assertCap(h, "web.pointer", CapabilityState.UNAVAILABLE, "reserved for the vision bolt-on", null);
+            // Phase 7 (4.4): derived like the others, web.hittest from EVALUATE, web.pointer from INPUT.
+            assertCap(h, "web.hittest", CapabilityState.OK, null, "scripted");
+            assertCap(h, "web.pointer", CapabilityState.UNAVAILABLE, "no indexed browser has INPUT", null);
             assertTrue(h.ctx.capabilities.declared("web.evaluate"), "declared with a probe, for reprobe");
-            assertFalse(h.ctx.capabilities.declared("web.hittest"), "reserved capabilities are only set");
+            assertTrue(h.ctx.capabilities.declared("web.hittest"), "the two Phase 7 ids are declared as well");
+            assertTrue(h.ctx.capabilities.declared("web.pointer"));
         }
     }
 
@@ -87,6 +89,28 @@ class WebCapabilitiesTest {
             assertCap(h, "web.resize", CapabilityState.UNAVAILABLE, "no indexed browser has RESIZE", null);
             assertCap(h, "web.bitmap", CapabilityState.UNAVAILABLE, "no indexed browser has BITMAP", null);
             assertCap(h, "web.cdp", CapabilityState.UNAVAILABLE, "no remote-debugging endpoint configured", null);
+            assertCap(h, "web.hittest", CapabilityState.OK, null, "scripted");
+            assertCap(h, "web.pointer", CapabilityState.UNAVAILABLE, "no indexed browser has INPUT", null);
+        }
+    }
+
+    /** Phase 7 (4.4): {@code web.pointer} is OK where an open indexed browser has INPUT, naming the adapters. */
+    @Test
+    void theTwoPhase7CapabilitiesFollowEvaluateAndInput() throws Exception {
+        ScriptedAdapter a = new ScriptedAdapter("scripted");
+        ScriptedBrowser b = a.add(new ScriptedBrowser("scripted"));
+        b.capabilities = EnumSet.of(WebCapability.INPUT);
+        ScriptedAdapter other = new ScriptedAdapter("other");
+        ScriptedBrowser c = other.add(new ScriptedBrowser("other"));
+        c.capabilities = EnumSet.of(WebCapability.EVALUATE, WebCapability.INPUT);
+        try (Harness h = new Harness(a, other).install().ready()) {
+            assertCap(h, "web.hittest", CapabilityState.OK, null, "other");
+            assertCap(h, "web.pointer", CapabilityState.OK, null, "scripted,other");
+            c.closed = true;
+            b.capabilities = EnumSet.noneOf(WebCapability.class);
+            h.reprobe();
+            assertCap(h, "web.hittest", CapabilityState.UNAVAILABLE, "no indexed browser has EVALUATE", null);
+            assertCap(h, "web.pointer", CapabilityState.UNAVAILABLE, "no indexed browser has INPUT", null);
         }
     }
 
@@ -96,6 +120,8 @@ class WebCapabilitiesTest {
         try (Harness h = new Harness(present).install().ready()) {
             assertCap(h, "web.browsers", CapabilityState.OK, null, null);
             assertCap(h, "web.evaluate", CapabilityState.UNAVAILABLE, "no browser found", null);
+            assertCap(h, "web.hittest", CapabilityState.UNAVAILABLE, "no browser found", null);
+            assertCap(h, "web.pointer", CapabilityState.UNAVAILABLE, "no browser found", null);
         }
         ScriptedAdapter old = new ScriptedAdapter("old");
         old.probe = ProbeResult.unavailable("JCEF older than 2024-01: no in-process result channel");

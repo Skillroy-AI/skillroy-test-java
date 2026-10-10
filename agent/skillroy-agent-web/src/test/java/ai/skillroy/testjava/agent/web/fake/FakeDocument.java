@@ -194,4 +194,72 @@ public final class FakeDocument {
     public synchronized void pageGlobal(String name, Object value) {
         globals.put(name, value);
     }
+
+    // ------------------------------------------------------------------------------------------------ Phase 7
+
+    /** The fake's layout of the kit's coloured block ({@code class="block"}): {@code [x, y, w, h]}. */
+    public static final long[] BLOCK_RECT = {24, 80, 120, 60};
+    /** The fake's layout of the kit's counting button ({@code id="count"}): {@code [x, y, w, h]}. */
+    public static final long[] COUNT_RECT = {24, 200, 96, 32};
+
+    /** Every pointer event the page received ({@code Input.dispatchMouseEvent}'s parameters or a vendor's event). */
+    final List<Map<String, Object>> pointerEvents = new ArrayList<Map<String, Object>>();
+    /** What the counting button recorded ({@code type:isTrusted}), as the kit page's script records it. */
+    final List<String> buttonEvents = new ArrayList<String>();
+    private boolean pressedOnButton;
+
+    /** True when the page declares the kit's block. */
+    boolean hasBlock() {
+        return html.contains("class=\"block\"");
+    }
+
+    /** True when the page declares the kit's counting button. */
+    boolean hasCountButton() {
+        return html.contains("id=\"count\"");
+    }
+
+    /**
+     * The page receives one pointer event (the fake's input, phase7-contracts.md section 4.3): it is recorded; a
+     * press and a release on the counting button record the four trusted events the kit page's script records.
+     */
+    public synchronized void pointer(String type, long x, long y, String button, long clickCount, long modifiers,
+                                     long deltaX, long deltaY) {
+        Map<String, Object> event = new LinkedHashMap<String, Object>();
+        event.put("type", type);
+        event.put("x", Long.valueOf(x));
+        event.put("y", Long.valueOf(y));
+        event.put("button", button);
+        event.put("clickCount", Long.valueOf(clickCount));
+        event.put("modifiers", Long.valueOf(modifiers));
+        if ("mouseWheel".equals(type)) {
+            event.put("deltaX", Long.valueOf(deltaX));
+            event.put("deltaY", Long.valueOf(deltaY));
+        }
+        pointerEvents.add(event);
+        boolean onButton = hasCountButton() && inside(COUNT_RECT, x, y);
+        if ("mousePressed".equals(type)) {
+            pressedOnButton = onButton;
+            if (onButton) {
+                buttonEvents.add("pointerdown:true");
+                buttonEvents.add("mousedown:true");
+            }
+        } else if ("mouseReleased".equals(type)) {
+            if (onButton) {
+                buttonEvents.add("mouseup:true");
+                if (pressedOnButton) {
+                    buttonEvents.add("click:true");
+                }
+            }
+            pressedOnButton = false;
+        }
+    }
+
+    /** The pointer events the page received (for tests); a copy. */
+    public synchronized List<Map<String, Object>> pointerEvents() {
+        return new ArrayList<Map<String, Object>>(pointerEvents);
+    }
+
+    static boolean inside(long[] rect, long x, long y) {
+        return x >= rect[0] && y >= rect[1] && x < rect[0] + rect[2] && y < rect[1] + rect[3];
+    }
 }

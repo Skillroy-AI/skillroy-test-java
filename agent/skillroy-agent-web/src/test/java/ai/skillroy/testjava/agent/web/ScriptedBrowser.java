@@ -23,6 +23,7 @@ import ai.skillroy.testjava.agent.api.spi.web.WebEvent;
 import ai.skillroy.testjava.agent.api.spi.web.WebEventListener;
 import ai.skillroy.testjava.agent.api.spi.web.WebFrame;
 import ai.skillroy.testjava.agent.api.spi.web.WebInitScript;
+import ai.skillroy.testjava.agent.api.spi.web.WebPointerEvent;
 import ai.skillroy.testjava.agent.api.spi.web.WebRendering;
 import ai.skillroy.testjava.agent.api.spi.web.WebScriptException;
 import ai.skillroy.testjava.agent.api.spi.web.WebSubscription;
@@ -49,7 +50,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  * A {@link WebBrowser} a test scripts: capabilities, URL, component, rendering, viewport, frames, closure; evaluation
  * goes through the fakes' table-driven evaluator over a {@link FakeDocument} (so the script library's calls give the
  * library's shapes) unless the test installs a {@link Responder}. It records every evaluation, init script,
- * subscription, resize and reload; {@link #fire} delivers an event to the subscribers.
+ * subscription, resize, reload and pointer event (Phase 7); {@link #fire} delivers an event to the subscribers.
  */
 class ScriptedBrowser implements WebBrowser {
 
@@ -297,6 +298,36 @@ class ScriptedBrowser implements WebBrowser {
             return failed(new UnsupportedOperationException("no BITMAP"));
         }
         return CompletableFuture.completedFuture(image);
+    }
+
+    /** The pointer events dispatched (Phase 7), in order. */
+    final List<WebPointerEvent> pointerEvents = new CopyOnWriteArrayList<WebPointerEvent>();
+    /** The index of the dispatched event that fails (with an {@code IllegalStateException}); -1 for none. */
+    volatile int failDispatchAt = -1;
+
+    /**
+     * Records the event and hands it to the fake page ({@code FakeDocument.pointer}); needs {@code INPUT}. The event
+     * at {@link #failDispatchAt} fails instead (and is still recorded).
+     */
+    @Override
+    public CompletableFuture<Void> dispatchPointer(WebPointerEvent event) {
+        if (closed) {
+            return failed(new IllegalStateException("the browser has closed"));
+        }
+        if (!capabilities.contains(WebCapability.INPUT)) {
+            return failed(new UnsupportedOperationException("no INPUT"));
+        }
+        int index = pointerEvents.size();
+        pointerEvents.add(event);
+        if (index == failDispatchAt) {
+            return failed(new IllegalStateException("the page did not take the event"));
+        }
+        String type = event.action() == WebPointerEvent.Action.PRESS ? "mousePressed"
+                : event.action() == WebPointerEvent.Action.RELEASE ? "mouseReleased"
+                : event.action() == WebPointerEvent.Action.WHEEL ? "mouseWheel" : "mouseMoved";
+        document.pointer(type, event.x(), event.y(), event.button().name().toLowerCase(java.util.Locale.ROOT),
+                event.clickCount(), 0, event.deltaX(), event.deltaY());
+        return CompletableFuture.completedFuture(null);
     }
 
     @Override

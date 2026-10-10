@@ -16,6 +16,7 @@
 
 package ai.skillroy.testjava.samples.webhost.scenarios;
 
+import ai.skillroy.testjava.cdp.CdpWebPath;
 import ai.skillroy.testjava.controller.AgentClient;
 import ai.skillroy.testjava.controller.AgentLostException;
 import ai.skillroy.testjava.controller.AgentRpcException;
@@ -34,6 +35,7 @@ import ai.skillroy.testjava.scenario.BindOptions;
 import ai.skillroy.testjava.scenario.FailureKind;
 import ai.skillroy.testjava.scenario.Plan;
 import ai.skillroy.testjava.scenario.Status;
+import ai.skillroy.testjava.scenario.web.WebSettings;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.MethodOrderer;
@@ -75,7 +77,8 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 /**
  * The checks of phase4-contracts.md 12.2 against one launch of the web host: items 1 to 5, 7 and 8, and the
  * assembled launcher's checks in the one launch per target Java that runs them (item 6 is {@link CdpAttachSoakIT};
- * item 9, the kit, runs in the web host module). A subclass names the load mode, the rendering and whether the host
+ * item 9, the kit, runs in the web host module); and item 10 of phase7-contracts.md 13.2 ({@code web.hitTest} and
+ * {@code web.pointer} on both paths, the browser as a {@code WEB} surface of the Swing capture). A subclass names the load mode, the rendering and whether the host
  * has a remote-debugging port. Windowed rendering on a Java 8 target is skipped (spike BS8 saw no native browser
  * created there). Every wait is an event, a settle or a bounded poll of a socket or a file; nothing sleeps.
  */
@@ -163,9 +166,10 @@ abstract class WebHostChecks {
             assertEquals(CapabilityState.UNAVAILABLE, cdp.state(), String.valueOf(cdp));
             assertEquals("no remote-debugging endpoint configured", cdp.reason());
         }
+        // Phase 7 (phase7-contracts.md 4.4, 4.9): derived, OK where an indexed browser has EVALUATE and INPUT.
         for (String id : List.of("web.hittest", "web.pointer")) {
-            assertEquals(CapabilityState.UNAVAILABLE, caps.get(id).state(), id);
-            assertEquals("reserved for the vision bolt-on", caps.get(id).reason(), id);
+            assertEquals(CapabilityState.OK, caps.get(id).state(), id + ": " + caps.get(id));
+            assertEquals("jcef", caps.get(id).strategy(), id);
         }
     }
 
@@ -499,8 +503,127 @@ abstract class WebHostChecks {
      * naming the {@code skillroy-cdp} jar (with Playwright's) and the pack jar exits 0 and its {@code --json} shows
      * {@code path: cdp}; without the CDP jars the same command exits 0 with {@code path: agent}.
      */
+    // ------------------------------------------------------------------------------------------- item 10 (Phase 7)
+
+    /** The Borrow button's centre in the front page's viewport, {x, y} in whole CSS pixels. */
+    Map<String, Object> borrowCentre() throws Exception {
+        Map<String, Object> params = new LinkedHashMap<>();
+        params.put("by", Map.of("tag", "front"));
+        params.put("expression", "(function () { var r = document.getElementById('borrow').getBoundingClientRect();"
+                + " return {x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2)}; })()");
+        return Json.parseObject(String.valueOf(value(client().call("web.evaluate", params, CALL)).get("json")));
+    }
+
+    /** The front page's pointer-event counter ({@code webhostPointer()}): "type:isTrusted" entries. */
+    List<String> pointerLog() throws Exception {
+        Map<String, Object> params = new LinkedHashMap<>();
+        params.put("by", Map.of("tag", "front"));
+        params.put("expression", "webhostPointer()");
+        String log = (String) Json.parse(String.valueOf(value(client().call("web.evaluate", params, CALL))
+                .get("json")));
+        return log.isEmpty() ? List.of() : List.of(log.split(","));
+    }
+
+    /**
+     * Item 10 of phase7-contracts.md 13.2 (P4 12.2's new item): {@code web.hitTest} at the Borrow button's centre answers
+     * the button with a unique selector, and {@code web.pointer {action: CLICK}} there makes the page count a trusted
+     * {@code pointerdown}, {@code mousedown}, {@code mouseup} and {@code click}, on the agent's path; with a port the same
+     * two calls on the CDP path answer the same values (D48) and the page counts four more trusted events.
+     */
     @Test
     @Order(7)
+    void item10HitTestAndPointerOnBothPathsAnswerTheSameShapes() throws Exception {
+        Map<String, Object> front = Map.of("tag", "front");
+        Map<String, Object> point = borrowCentre();
+        Map<String, Object> hitParams = Map.of("by", front, "point", point);
+        Map<String, Object> agentHit = value(client().call("web.hitTest", hitParams, CALL));
+        Map<?, ?> element = (Map<?, ?>) agentHit.get("element");
+        assertEquals("button", element.get("tag"), String.valueOf(agentHit));
+        assertEquals("Borrow", element.get("name"), String.valueOf(agentHit));
+        assertEquals("borrow", element.get("id"));
+        assertEquals(Boolean.TRUE, agentHit.get("unique"));
+        List<?> locators = (List<?>) agentHit.get("locators");
+        assertTrue(locators.contains(Map.of("role", "button", "name", "Borrow")), String.valueOf(locators));
+        assertTrue(locators.contains(Map.of("selector", "#borrow")), String.valueOf(locators));
+        assertEquals(point, agentHit.get("viewportPoint"));
+
+        int before = pointerLog().size();
+        Map<String, Object> clickParams = Map.of("by", front, "action", "CLICK", "point", point);
+        Map<String, Object> agentClick = value(client().call("web.pointer", clickParams, CALL));
+        assertEquals("PROTOCOL", agentClick.get("via"));
+        assertEquals(List.of("mouseMoved", "mousePressed", "mouseReleased"), agentClick.get("dispatched"));
+        assertEquals(Map.of("role", "button", "name", "Borrow", "tag", "button", "id", "borrow"),
+                agentClick.get("hit"));
+        List<String> trusted = List.of("pointerdown:true", "mousedown:true", "mouseup:true", "click:true");
+        assertEquals(trusted, pointerLog().subList(before, before + 4), "a pointer click, not a DOM click");
+        ItEnv.timing("java=" + java + " launch=" + target.label + " item10 agent hit=" + element.get("rect"));
+
+        if (withPort()) {
+            CdpWebPath path = new CdpWebPath();
+            try {
+                assertEquals(null, path.open(client(), WebSettings.DEFAULT, null), "the CDP path opens");
+                assertEquals(agentHit, path.call("web.hitTest", hitParams, CallOptions.defaults()).value(),
+                        "D48: the hit-test answers the same value on both paths");
+                int beforeCdp = pointerLog().size();
+                assertEquals(agentClick, path.call("web.pointer", clickParams, CallOptions.defaults()).value(),
+                        "D48: the pointer answers the same value on both paths");
+                assertEquals(trusted, pointerLog().subList(beforeCdp, beforeCdp + 4), "the CDP path's click");
+            } finally {
+                path.close();
+            }
+        }
+    }
+
+    /**
+     * Item 10's Swing half (phase7-contracts.md 4.8, 13.2 item 10; needs the Swing side's extended capture and
+     * {@code swing.hitTest}, package VS): {@code swing.capture} of the host's window lists the front browser as a
+     * {@code WEB} surface with its ref and {@code redacted: false}; {@code swing.hitTest} at the Borrow button's point
+     * in the window answers {@code surface: WEB} with {@code surfaceLocal}, and {@code web.hitTest {space: COMPONENT}}
+     * with that point answers the button.
+     */
+    @Test
+    @Order(8)
+    void item10TheSwingCaptureListsTheBrowserAndASwingPointReachesThePage() throws Exception {
+        assumeTrue(client().capabilities().get("swing.hittest") != null, "needs swing.hitTest (package VS)");
+        String frontRef = null;
+        for (Map<String, Object> b : browsers(client())) {
+            if ("front".equals(b.get("tag"))) {
+                frontRef = String.valueOf(b.get("ref"));
+            }
+        }
+        assertNotNull(frontRef);
+        Map<String, Object> capture = value(client().call("swing.capture", Map.of(), CALL));
+        Map<?, ?> surface = null;
+        for (Object o : (List<?>) capture.get("surfaces")) {
+            Map<?, ?> m = (Map<?, ?>) o;
+            if ("WEB".equals(m.get("kind")) && frontRef.equals(m.get("browser"))) {
+                surface = m;
+            }
+        }
+        assertNotNull(surface, "the front browser is a WEB surface: " + capture.get("surfaces"));
+        assertEquals(Boolean.FALSE, surface.get("redacted"));
+        Map<?, ?> rect = (Map<?, ?>) surface.get("rect");
+        Map<?, ?> origin = (Map<?, ?>) capture.get("origin");
+        Map<String, Object> centre = borrowCentre();
+        long wx = number(origin.get("x")) + number(rect.get("x")) + number(centre.get("x"));
+        long wy = number(origin.get("y")) + number(rect.get("y")) + number(centre.get("y"));
+        Map<String, Object> hit = value(client().call("swing.hitTest", Map.of("point", Map.of("x", wx, "y", wy),
+                "space", Map.of("window", capture.get("window"))), CALL));
+        assertEquals("WEB", hit.get("surface"), String.valueOf(hit));
+        assertEquals(frontRef, hit.get("browser"));
+        Object local = hit.get("surfaceLocal");
+        Map<String, Object> webHit = value(client().call("web.hitTest", Map.of("browser", frontRef, "point", local,
+                "space", "COMPONENT"), CALL));
+        assertEquals("button", ((Map<?, ?>) webHit.get("element")).get("tag"), String.valueOf(webHit));
+        assertEquals(Boolean.FALSE, webHit.get("scaleAssumed"), "the image's scale is 1");
+    }
+
+    private static long number(Object v) {
+        return ((Number) v).longValue();
+    }
+
+    @Test
+    @Order(9)
     void theAssembledLauncherRunsW1OverCdpAndWithoutIt() throws Exception {
         assumeTrue(runsTheLauncherChecks(), "the launcher checks run once per target Java");
         Path launcher = ItEnv.launcher();
@@ -555,7 +678,7 @@ abstract class WebHostChecks {
      * page counts its own two {@code webhost.*} listeners again and no wrapper ({@code dispatchWrapped: false}).
      */
     @Test
-    @Order(8)
+    @Order(10)
     void item8ASecondAttachAfterDisableFindsTheBrowsersAndNoListenerOfTheOldAgent() throws Exception {
         Map<String, Object> front = Map.of("tag", "front");
         assertEquals(Map.of("listeners", 2L, "dispatchWrapped", false), diagnostics(client(), front),

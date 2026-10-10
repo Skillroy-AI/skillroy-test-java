@@ -58,7 +58,9 @@ import java.util.regex.Pattern;
  *   <li>the library functions the fakes serve: {@code stringify}, {@code tap}, {@code drain}, {@code dispatch},
  *       {@code domText} (body or {@code #id}), {@code aria} (the title as a heading and the body's text),
  *       {@code domClick} and {@code domFill} on {@code #id} selectors present in the HTML, {@code defer},
- *       {@code collect}.</li>
+ *       {@code collect}, and {@code hit} (Phase 7) over the fake's layout of the kit page ({@link
+ * FakeDocument#BLOCK_RECT},       {@link FakeDocument#COUNT_RECT}, else the body); the kit's {@code BLOCK_RECT}, {@code
+ * COUNT_RECT} and       {@code POINTER_EVENTS}.</li>
  * </ul>
  * Anything else throws a {@link Thrown} "ReferenceError: the fake cannot evaluate ...", so that a test shows at once
  * what it sent. Values are Java objects: null, {@link #UNDEFINED}, Boolean, Long, Double, String, List, Map,
@@ -421,6 +423,22 @@ public final class FakeScript {
             }
             return Long.valueOf(24);
         }
+        if (KitScripts.BLOCK_RECT.equals(e) && doc.hasBlock()) {
+            return longs(FakeDocument.BLOCK_RECT);
+        }
+        if (KitScripts.COUNT_RECT.equals(e) && doc.hasCountButton()) {
+            return longs(FakeDocument.COUNT_RECT);
+        }
+        if (KitScripts.POINTER_EVENTS.equals(e) && doc.hasCountButton()) {
+            if (doc.buttonEvents.isEmpty()) {
+                return null;
+            }
+            StringBuilder sb = new StringBuilder();
+            for (String r : doc.buttonEvents) {
+                sb.append(sb.length() == 0 ? "" : ",").append(r);
+            }
+            return sb.toString();
+        }
         if (KitScripts.DOCUMENT_MARK_NOW.equals(e)) {
             return doc.hidden.containsKey("__kitMark") ? "string" : "undefined";
         }
@@ -633,6 +651,9 @@ public final class FakeScript {
             }
             return out;
         }
+        if ("hit".equals(fn)) {
+            return hit(doc, args);
+        }
         if ("defer".equals(fn)) {
             return defer(doc, a0);
         }
@@ -640,6 +661,85 @@ public final class FakeScript {
             return collect(doc, String.valueOf(a0));
         }
         throw new Thrown("TypeError: the fake library has no " + fn, null);
+    }
+
+    /**
+     * The library's {@code hit(x, y)} over the fake's layout (Phase 7): the counting button and the block where the
+     * page declares them, else the body; NOT_FOUND {reason: "outside"} outside the viewport.
+     */
+    private static Object hit(FakeDocument doc, List<?> args) {
+        if (args.size() < 2 || !(args.get(0) instanceof Number) || !(args.get(1) instanceof Number)) {
+            Map<String, Object> out = new LinkedHashMap<String, Object>();
+            out.put(WebLib.ERROR_KEY, "INVALID_PARAMS");
+            out.put("data", Json.parseObject("{\"reason\":\"x and y must be numbers\"}"));
+            return out;
+        }
+        long x = ((Number) args.get(0)).longValue();
+        long y = ((Number) args.get(1)).longValue();
+        int[] size = doc.host.innerSize();
+        if (x < 0 || y < 0 || x >= size[0] || y >= size[1]) {
+            Map<String, Object> data = new LinkedHashMap<String, Object>();
+            data.put("reason", "outside");
+            data.put("x", Long.valueOf(x));
+            data.put("y", Long.valueOf(y));
+            Map<String, Object> out = new LinkedHashMap<String, Object>();
+            out.put(WebLib.ERROR_KEY, "NOT_FOUND");
+            out.put("data", data);
+            return out;
+        }
+        Map<String, Object> element = new LinkedHashMap<String, Object>();
+        List<Object> locators = new ArrayList<Object>();
+        if (doc.hasCountButton() && FakeDocument.inside(FakeDocument.COUNT_RECT, x, y)) {
+            element.put("role", "button");
+            element.put("name", "Count");
+            element.put("tag", "button");
+            element.put("id", "count");
+            element.put("rect", rect(FakeDocument.COUNT_RECT));
+            locators.add(locator("role", "button", "name", "Count"));
+            locators.add(locator("selector", "#count"));
+        } else if (doc.hasBlock() && FakeDocument.inside(FakeDocument.BLOCK_RECT, x, y)) {
+            element.put("role", "generic");
+            element.put("name", "");
+            element.put("tag", "div");
+            element.put("rect", rect(FakeDocument.BLOCK_RECT));
+            locators.add(locator("selector", "div.block"));
+        } else {
+            element.put("role", "generic");
+            element.put("name", "");
+            element.put("tag", "body");
+            element.put("rect", rect(new long[] {0, 0, size[0], size[1]}));
+            locators.add(locator("selector", "body"));
+        }
+        Map<String, Object> out = new LinkedHashMap<String, Object>();
+        out.put("element", element);
+        out.put("locators", locators);
+        out.put("unique", Boolean.TRUE);
+        return out;
+    }
+
+    private static List<Object> longs(long[] values) {
+        List<Object> out = new ArrayList<Object>();
+        for (long v : values) {
+            out.add(Long.valueOf(v));
+        }
+        return out;
+    }
+
+    private static Map<String, Object> rect(long[] r) {
+        Map<String, Object> m = new LinkedHashMap<String, Object>();
+        m.put("x", Long.valueOf(r[0]));
+        m.put("y", Long.valueOf(r[1]));
+        m.put("w", Long.valueOf(r[2]));
+        m.put("h", Long.valueOf(r[3]));
+        return m;
+    }
+
+    private static Map<String, Object> locator(String... kv) {
+        Map<String, Object> m = new LinkedHashMap<String, Object>();
+        for (int i = 0; i + 1 < kv.length; i += 2) {
+            m.put(kv[i], kv[i + 1]);
+        }
+        return m;
     }
 
     private static String elementText(FakeDocument doc, String selector) {

@@ -52,7 +52,9 @@ class WebSpiShapeTest {
             WebEval.class, WebEval.Builder.class, WebFrame.class, WebEvent.class, WebEvent.Kind.class,
             WebEventListener.class, WebSubscription.class, WebInitScript.class, WebInitScript.Timing.class,
             WebCapability.class, WebRendering.class, BitmapSource.class, CdpEndpoint.class, WebScriptException.class,
-            WebFrameGoneException.class, BrowserRegistryAdapter.class, BrowserSeed.class);
+            WebFrameGoneException.class, BrowserRegistryAdapter.class, BrowserSeed.class, WebPointerEvent.class,
+            WebPointerEvent.Builder.class, WebPointerEvent.Action.class, WebPointerEvent.Button.class,
+            WebPointerEvent.Modifier.class);
 
     @Test
     void everyCapabilityIsPresentByName() {
@@ -80,6 +82,14 @@ class WebSpiShapeTest {
         for (String name : names) {
             assertEquals(name, BitmapSource.valueOf(name).name());
         }
+    }
+
+    /** Phase 7 (A66): the pointer event's enums, in their frozen order. */
+    @Test
+    void everyPointerActionButtonAndModifierIsPresentByName() {
+        assertEquals(Arrays.asList("MOVE", "PRESS", "RELEASE", "WHEEL"), names(WebPointerEvent.Action.values()));
+        assertEquals(Arrays.asList("NONE", "LEFT", "MIDDLE", "RIGHT"), names(WebPointerEvent.Button.values()));
+        assertEquals(Arrays.asList("ALT", "CTRL", "META", "SHIFT"), names(WebPointerEvent.Modifier.values()));
     }
 
     @Test
@@ -122,16 +132,17 @@ class WebSpiShapeTest {
                 FUTURE + "<java.awt.image.BufferedImage> bitmap()",
                 FUTURE + "<java.lang.String> cdpTargetId()",
                 FUTURE + "<java.lang.Void> reload(boolean)",
-                WEB + "BitmapSource bitmapSource()");
+                WEB + "BitmapSource bitmapSource()",
+                FUTURE + "<java.lang.Void> dispatchPointer(" + WEB + "WebPointerEvent)");
     }
 
     /**
-     * A37: the methods added to {@code WebBrowser} after Phase 4 are default methods, so that an adapter built against
-     * the Phase 4 SPI links and runs unchanged; every other method stays abstract.
+     * A37 and A66: the methods added to {@code WebBrowser} after Phase 4 are default methods, so that an adapter built
+     * against the Phase 4 SPI links and runs unchanged; every other method stays abstract.
      */
     @Test
     void theMethodsAddedAfterPhase4AreDefaultMethods() throws Exception {
-        List<String> added = Arrays.asList("reload", "bitmapSource");
+        List<String> added = Arrays.asList("reload", "bitmapSource", "dispatchPointer");
         for (Method method : WebBrowser.class.getDeclaredMethods()) {
             if (method.isSynthetic() || !Modifier.isPublic(method.getModifiers())) {
                 continue;
@@ -140,6 +151,7 @@ class WebSpiShapeTest {
         }
         assertTrue(WebBrowser.class.getMethod("reload", boolean.class).isDefault());
         assertTrue(WebBrowser.class.getMethod("bitmapSource").isDefault());
+        assertTrue(WebBrowser.class.getMethod("dispatchPointer", WebPointerEvent.class).isDefault());
     }
 
     @Test
@@ -202,18 +214,40 @@ class WebSpiShapeTest {
                 "java.lang.Object object()",
                 "java.lang.String tag()",
                 "boolean equals(java.lang.Object)", "int hashCode()", "java.lang.String toString()");
+        assertMembers(WebPointerEvent.class,
+                "static " + WEB + "WebPointerEvent$Builder of(" + WEB + "WebPointerEvent$Action, int, int)",
+                WEB + "WebPointerEvent$Action action()",
+                "int x()",
+                "int y()",
+                WEB + "WebPointerEvent$Button button()",
+                "int clickCount()",
+                "java.util.Set<" + WEB + "WebPointerEvent$Modifier> modifiers()",
+                "int deltaX()",
+                "int deltaY()",
+                "boolean equals(java.lang.Object)", "int hashCode()", "java.lang.String toString()");
+        assertMembers(WebPointerEvent.Builder.class,
+                WEB + "WebPointerEvent$Builder button(" + WEB + "WebPointerEvent$Button)",
+                WEB + "WebPointerEvent$Builder clickCount(int)",
+                WEB + "WebPointerEvent$Builder modifiers(java.util.Set<" + WEB + "WebPointerEvent$Modifier>)",
+                WEB + "WebPointerEvent$Builder delta(int, int)",
+                WEB + "WebPointerEvent build()");
     }
 
     @Test
     void theValueTypesAreFinalWithPrivateFinalFields() {
         for (Class<?> type : Arrays.<Class<?>>asList(WebEval.class, WebFrame.class, WebEvent.class, CdpEndpoint.class,
-                BrowserSeed.class, WebScriptException.class, WebFrameGoneException.class)) {
+                BrowserSeed.class, WebScriptException.class, WebFrameGoneException.class, WebPointerEvent.class)) {
             assertTrue(Modifier.isFinal(type.getModifiers()), type.getName() + " is final");
             for (Field field : type.getDeclaredFields()) {
                 if (field.isSynthetic()) {
                     continue;
                 }
                 int modifiers = field.getModifiers();
+                if (Modifier.isStatic(modifiers)) {
+                    // a constant (WebPointerEvent's bounds): final, whatever its visibility
+                    assertTrue(Modifier.isFinal(modifiers), type.getSimpleName() + "." + field.getName() + " is final");
+                    continue;
+                }
                 assertTrue(Modifier.isPrivate(modifiers) && Modifier.isFinal(modifiers),
                         type.getSimpleName() + "." + field.getName() + " is private and final");
             }

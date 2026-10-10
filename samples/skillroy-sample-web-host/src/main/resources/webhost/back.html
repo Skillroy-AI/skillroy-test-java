@@ -86,6 +86,17 @@ iframe{width:420px;height:64px;background:#fff}
     }
     setTimeout(stall, 0);
   }
+  // The pointer-event counter (Phase 7): every pointerdown, mousedown, mouseup and click the Borrow button receives,
+  // with its isTrusted, so that a pointer click (four trusted events) is told apart from a DOM click (one untrusted).
+  var pointerLog = [];
+  ['pointerdown', 'mousedown', 'mouseup', 'click'].forEach(function (type) {
+    document.getElementById('borrow').addEventListener(type, function (e) {
+      pointerLog.push(type + ':' + e.isTrusted);
+    });
+  });
+  win.webhostPointer = function () {
+    return pointerLog.join(',');
+  };
   item.addEventListener('input', logItem);
   item.addEventListener('change', logItem);
   document.getElementById('loan').addEventListener('submit', function (e) {

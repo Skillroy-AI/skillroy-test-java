@@ -70,6 +70,10 @@ final class FakeWorld {
         volatile Map<String, Object> metrics;
         /** Every {@code Emulation.*} call on a CDP session of the page: {method, params, the session}. */
         final List<Object[]> emulation = new CopyOnWriteArrayList<>();
+        /** Every {@code Input.dispatchMouseEvent} on a CDP session of the page (Phase 7): its parameters as sent. */
+        final List<String> mouse = new CopyOnWriteArrayList<>();
+        /** The index of the mouse event the page fails (a protocol error), or -1. */
+        volatile int failMouseAt = -1;
         final List<int[]> resized = new CopyOnWriteArrayList<>();
         volatile byte[] png;
         final List<Page.ScreenshotOptions> screenshots = new CopyOnWriteArrayList<>();
@@ -321,6 +325,15 @@ final class FakeWorld {
                 case "Emulation.clearDeviceMetricsOverride" -> {
                     p.emulation.add(new Object[] {method, params, self[0]});
                     p.metrics = null;
+                    yield Map.of();
+                }
+                case "Input.dispatchMouseEvent" -> {
+                    int index = p.mouse.size();
+                    p.mouse.add(a[1] == null ? "{}" : a[1].toString());
+                    if (index == p.failMouseAt) {
+                        throw new com.microsoft.playwright.PlaywrightException("Protocol error (Input.dispatchMouseEvent)"
+                                + ": the page did not take the event");
+                    }
                     yield Map.of();
                 }
                 default -> throw new UnsupportedOperationException("no fake protocol answer for " + method);

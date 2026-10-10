@@ -25,6 +25,7 @@ import ai.skillroy.testjava.agent.api.spi.web.WebEventListener;
 import ai.skillroy.testjava.agent.api.spi.web.WebFrame;
 import ai.skillroy.testjava.agent.api.spi.web.WebFrameGoneException;
 import ai.skillroy.testjava.agent.api.spi.web.WebInitScript;
+import ai.skillroy.testjava.agent.api.spi.web.WebPointerEvent;
 import ai.skillroy.testjava.agent.api.spi.web.WebRendering;
 import ai.skillroy.testjava.agent.api.spi.web.WebScriptException;
 import ai.skillroy.testjava.agent.api.spi.web.WebSubscription;
@@ -35,6 +36,7 @@ import ai.skillroy.testjava.agent.web.reflect.ResolvedApi;
 import ai.skillroy.testjava.protocol.Json;
 import ai.skillroy.testjava.protocol.RpcError;
 import ai.skillroy.testjava.protocol.RpcException;
+import ai.skillroy.testjava.protocol.web.WebInput;
 import ai.skillroy.testjava.protocol.web.WebLib;
 
 import java.awt.Component;
@@ -72,7 +74,8 @@ import javax.imageio.ImageIO;
  * {@code contextId} for a sub-frame, from {@code Runtime.executionContextCreated}), {@code Page.getFrameTree},
  * {@code Page.*} and {@code Runtime.consoleAPICalled}/{@code exceptionThrown} events,
  * {@code Page.addScriptToEvaluateOnNewDocument}, {@code Emulation.setDeviceMetricsOverride},
- * {@code Page.captureScreenshot}; the CDP target id is the main frame's id (BS8), cached once read or seen.
+ * {@code Page.captureScreenshot}, {@code Input.dispatchMouseEvent} (Phase 7); the CDP target id is the main frame's id
+ * (BS8), cached once read or seen.
  *
  * <p><b>The channel.</b> When the descriptor's {@code raw} roles resolve (JCEF's package-private
  * {@code CefBrowser_N.executeDevToolsMethod}, {@code addDevToolsMessageObserver} and {@code CefRegistration}), the
@@ -141,10 +144,11 @@ final class JcefBrowser implements WebBrowser {
      */
     static final int CONSOLE_TEXT_CHARS = 1 << 16;
 
+    /** Every flag of a browser whose DevTools channel exists; {@code INPUT} since Phase 7 (phase7-contracts.md 4.5). */
     private static final Set<WebCapability> ALL = Collections.unmodifiableSet(EnumSet.of(WebCapability.EVALUATE,
             WebCapability.AWAIT_PROMISE, WebCapability.FRAMES, WebCapability.EVENTS_LOAD, WebCapability.EVENTS_CONSOLE,
             WebCapability.INIT_SCRIPT_DOCUMENT_START, WebCapability.RESIZE, WebCapability.BITMAP,
-            WebCapability.CDP_TARGET_ID));
+            WebCapability.CDP_TARGET_ID, WebCapability.INPUT));
     private static final Set<WebCapability> NONE = Collections.unmodifiableSet(EnumSet.noneOf(WebCapability.class));
     /** The protocol methods of the handle's own reads: the only calls sent once more after a refusal. */
     private static final Set<String> READS = Collections.unmodifiableSet(new java.util.HashSet<String>(
@@ -2098,6 +2102,55 @@ final class JcefBrowser implements WebBrowser {
     @Override
     public BitmapSource bitmapSource() {
         return BitmapSource.PROTOCOL;
+    }
+
+    /**
+     * The SPI's pointer input (A66, phase7-contracts.md sections 4.3 and 4.5): {@code Input.dispatchMouseEvent} with
+     * the parameters both web paths send ({@link WebInput#mouseEvent}), through {@link #call} on the handle's channel,
+     * as a mutating call: never one of the handle's reads, so it is never sent again on the shared client (D62).
+     * Completes once Chromium answered it.
+     */
+    @Override
+    public CompletableFuture<Void> dispatchPointer(WebPointerEvent event) {
+        if (event == null) {
+            return failed(new IllegalArgumentException("a pointer event is required"));
+        }
+        CompletableFuture<Void> refused = refuse(WebCapability.INPUT);
+        if (refused != null) {
+            return refused;
+        }
+        return call(WebInput.MOUSE_EVENT, mouseEvent(event)).thenApply(
+                new java.util.function.Function<Map<String, Object>, Void>() {
+                    @Override
+                    public Void apply(Map<String, Object> ignored) {
+                        return null;
+                    }
+                });
+    }
+
+    /** The protocol parameters of one SPI event. */
+    static Map<String, Object> mouseEvent(WebPointerEvent e) {
+        String type;
+        switch (e.action()) {
+            case PRESS:
+                type = WebInput.PRESSED;
+                break;
+            case RELEASE:
+                type = WebInput.RELEASED;
+                break;
+            case WHEEL:
+                type = WebInput.WHEEL;
+                break;
+            default:
+                type = WebInput.MOVED;
+                break;
+        }
+        List<String> modifiers = new ArrayList<String>();
+        for (WebPointerEvent.Modifier m : e.modifiers()) {
+            modifiers.add(m.name());
+        }
+        return WebInput.mouseEvent(type, e.x(), e.y(), e.button().name().toLowerCase(java.util.Locale.ROOT),
+                e.clickCount(), WebInput.modifierBits(modifiers), e.deltaX(), e.deltaY());
     }
 
     // ------------------------------------------------------------------------------------------------ detach

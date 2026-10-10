@@ -183,6 +183,37 @@ class WebLibTest {
         }
     }
 
+    /**
+     * Version 2 (phase7-contracts.md 4.6, D300): the library's version is {@link WebLib#VERSION}, it exposes
+     * {@code hit}, and the install rule for a slot that already holds a library is in the text: the slot is never
+     * replaced (the one definition of the window's slot comes after the upgrade's return), a slot that lacks a function
+     * of version 2 gets it installed with a non-enumerable, non-writable definition, and the version is raised with a
+     * configurable definition (the version a later library raises in turn), where the slot lets it.
+     */
+    @Test
+    void versionTwoAddsHitAndInstallsItIntoAnOlderSlotWithoutReplacingIt() {
+        assertEquals("2", WebLib.VERSION);
+        assertTrue(WebLib.FUNCTIONS.contains("hit"));
+        String code = code(WebLib.source(), true);
+        assertTrue(code.contains("var VERSION = \"" + WebLib.VERSION + "\";"), "the library's version");
+        assertTrue(code.contains("var ADDED_IN_2 = [\"hit\"];"), "the functions version 2 added");
+        int present = code.indexOf("if (slot && missingIn(slot).length === 0) {");
+        assertTrue(present >= 0 && present < code.indexOf("function err("), "a complete slot is left at once");
+        assertTrue(code.contains("return \"present\";"));
+        int upgrade = code.indexOf("if (slot) {\n    return upgrade(slot);\n  }");
+        int define = code.indexOf("Object.defineProperty(window, KEY, ");
+        assertTrue(upgrade > 0 && upgrade < define, "an older slot is upgraded before the slot would be defined");
+        assertTrue(code.contains("Object.defineProperty(target, names[i], {value: mine[names[i]], enumerable: false,"
+                + " writable: false,\n          configurable: false});"), "the missing function, installed once");
+        assertTrue(code.contains("Object.defineProperty(target, \"version\", {value: VERSION, enumerable: false,"
+                + " writable: false,\n        configurable: true});"), "the version raised where it can be");
+        assertTrue(code.contains("return \"upgraded\";"));
+        assertTrue(code.contains("expose(\"version\", VERSION, true);"), "this version's own version can be raised");
+        assertTrue(WebLib.installExpression().contains("function hit("));
+        assertTrue(WebLib.callExpression("hit", Integer.valueOf(10), Integer.valueOf(20)).endsWith(
+                LIB + ".hit(10,20);})()"));
+    }
+
     /** The limits the Java constants document are the ones the library applies. */
     @Test
     void constantsAreTheLibrarysLimits() {
@@ -482,6 +513,14 @@ class WebLibTest {
         Map<String, Object> badSelector = error("INVALID_PARAMS", "reason", "invalid selector");
         data(badSelector).put("message", "'[' is not a valid selector");
         assertEquals("invalid selector: '[' is not a valid selector", WebLib.errorOf(badSelector).message());
+
+        Map<String, Object> outside = error("NOT_FOUND", "reason", "outside");
+        data(outside).put("x", Integer.valueOf(-3));
+        data(outside).put("y", Integer.valueOf(40));
+        RpcError away = WebLib.errorOf(outside);
+        assertEquals(ErrorCodes.NOT_FOUND, away.code());
+        assertEquals("the point -3,40 lies outside the viewport or hits no element", away.message());
+        assertEquals("outside", away.data().get("reason"), "hit's NOT_FOUND (Phase 7, 4.2)");
 
         RpcError other = WebLib.errorOf(error("SOMETHING_NEW", "x", "y"));
         assertEquals(ErrorCodes.INTERNAL_ERROR, other.code());

@@ -1018,6 +1018,12 @@ public interface MaskPolicy { Object mask(String sourceId, String column, Object
 // technology, which turns seeds into WebBrowser handles, and the technology-neutral BrowserRegistryAdapter,
 // Collection<BrowserSeed> seeds(), for browsers the Swing-tree scan cannot see; a domain module registers either
 // with AgentContext.spi() during install)
+
+// (Phase 7, A66, built 2026-10-10, VW; P7 §4.1) package …agent.api.spi.web adds the value type WebPointerEvent (one
+// pointer event in CSS pixels of the main frame's viewport: MOVE, PRESS, RELEASE, WHEEL; button, click count,
+// modifiers, wheel deltas) and the default method WebBrowser.dispatchPointer(WebPointerEvent), which
+// WebCapability.INPUT names (the default has no INPUT: UnsupportedOperationException); the web module registers a
+// SurfaceSource (A64, VS's interface) answered from its browser index (P7 §4.8)
 ```
 
 **S34 host code on agent threads (1.x, built 2026-10-02).** Agent threads are daemon threads in the agent's thread

@@ -71,7 +71,7 @@ Phase 4 delivers:
 
 | Not in Phase 4 | Seam reserved here | Phase |
 |---|---|---|
-| Synthetic pointer or key input into a page (`INPUT`), the vision counterparts `web.hitTest`, `web.pointer` | the `WebCapability` names `INPUT` and `RAW_PROTOCOL` exist without methods (B9, B16); the primitive names are reserved in the design catalogue | 7 |
+| Synthetic pointer or key input into a page (`INPUT`), the vision counterparts `web.hitTest`, `web.pointer` | the `WebCapability` names `INPUT` and `RAW_PROTOCOL` exist without methods (B9, B16); the primitive names are reserved in the design catalogue; (Phase 7, built 2026-10-10, VW; P7 §4, A66) built: `WebBrowser.dispatchPointer` with `WebPointerEvent`, `INPUT` reported by the `jcef` adapter (and by `jxbrowser` where its descriptor's `INPUT` roles resolve), `web.hitTest` and `web.pointer` on both paths; key input stays later | 7 |
 | A raw protocol passthrough (`web.protocol.send`) | `RAW_PROTOCOL`, reserved; an adapter-specific extension, never part of the common contract (browser-spi "What stays outside the SPI") | later, if ever |
 | Navigation from a scenario (`web.navigate`) | none: scenarios drive the application, which drives its web views (design §3.8). `web.reload` exists for frozen-target recovery only (§4.2) | none |
 | Injecting a remote-debugging port into a target | none: the port is a launch-time precondition the base never sets (design §3.8; browser-spi §C0, §C6) | none |
@@ -336,6 +336,9 @@ public interface WebBrowser {
     /** (4.x, A37, built 2026-10-08) Where bitmap() comes from, which web.bitmap reports as its source; informational,
      *  never null. The default is VENDOR; the built-in jcef adapter answers PROTOCOL. */
     default BitmapSource bitmapSource() { return BitmapSource.VENDOR; }
+    // (Phase 7, A66, built 2026-10-10, VW; P7 §4.1) INPUT; the default has none and fails with
+    // UnsupportedOperationException
+    default CompletableFuture<Void> dispatchPointer(WebPointerEvent event) { … }
 }
 
 public final class WebEval {                 // immutable value; builder
@@ -370,7 +373,8 @@ public interface WebInitScript extends WebSubscription {
     Timing timing();  enum Timing { DOCUMENT_START, DOCUMENT_LOADED }
 }
 public enum WebCapability { EVALUATE, AWAIT_PROMISE, FRAMES, EVENTS_LOAD, EVENTS_CONSOLE, INIT_SCRIPT_DOCUMENT_START,
-                            RESIZE, BITMAP, CDP_TARGET_ID, INPUT /* reserved */, RAW_PROTOCOL /* reserved */ }
+                            RESIZE, BITMAP, CDP_TARGET_ID, INPUT /* dispatchPointer (Phase 7, A66) */,
+                            RAW_PROTOCOL /* reserved */ }
 public enum WebRendering { WINDOWED, OFFSCREEN_LIGHTWEIGHT, OFFSCREEN_HEAVYWEIGHT, UNKNOWN }
 public enum BitmapSource { PROTOCOL /* a DevTools-protocol screenshot */,          // (4.x, A37, built 2026-10-08)
                            VENDOR /* the technology's own bitmap, or anything else: the default */ }
@@ -474,6 +478,13 @@ kit follow these rules):
   adapter knows, never null: `PROTOCOL` for a DevTools-protocol screenshot, `VENDOR` (the default) for the
   technology's own bitmap or anything else.
 
+(Phase 7, built 2026-10-10, VW; P7 §4.1, A66) The SPI gains the immutable value type `WebPointerEvent` (one pointer
+event in CSS pixels of the main frame's viewport: `of(Action, x, y)` with `Action` `MOVE`, `PRESS`, `RELEASE`, `WHEEL`;
+`.button(Button)` `NONE`, `LEFT`, `MIDDLE`, `RIGHT`; `.clickCount(int)` 0 to 3; `.modifiers(Set<Modifier>)` `ALT`,
+`CTRL`, `META`, `SHIFT`; `.delta(dx, dy)` for a wheel; coordinates 0 to 16384) and the default method
+`WebBrowser.dispatchPointer(WebPointerEvent)`, which `WebCapability.INPUT` names; an adapter built before it links and
+runs unchanged (the A37 precedent). `RAW_PROTOCOL` stays reserved.
+
 ---
 
 ## 4. `skillroy-agent-web` (module id `web`)
@@ -485,7 +496,10 @@ browser technology found")` and registers nothing with the host. It touches no A
 (P1 §4: `install` runs before the application's `main` in `JAVAAGENT` mode). The two built-in adapters are
 constructed but not probed. (As built 2026-10-07: the thirteen primitives of §4.2; `web.hittest` and `web.pointer`
 are `UNAVAILABLE("reserved for the vision bolt-on")` from the start; install starts no thread, and a test with a
-recording class loader checks that it loads no AWT or vendor class.)
+recording class loader checks that it loads no AWT or vendor class.) (Phase 7, built 2026-10-10, VW; P7 §4.4, §4.8:
+fifteen primitives; `web.hittest` and `web.pointer` start `UNAVAILABLE("no embedded browser technology found")` like
+the others and are derived in every cycle; install also registers the module's `SurfaceSource`, the index's browsers as
+`WEB` surfaces of the Swing capture, and still requests no AWT class.)
 
 `onTargetReady` runs the probes: each built-in adapter and each `WebEngineAdapter` registered through `SpiRegistry`
 is asked `probe(hostClassLoader)`; an adapter whose probe is `UNAVAILABLE` is kept out of the index until a later
@@ -581,6 +595,13 @@ browser that has closed, is `STALE_HANDLE`; a ref of something other than a brow
 | `web.bitmap` | browser selection, `maxWidth?: int (4096)` | `{format: "png", width, height, base64, source: "PROTOCOL"\|"VENDOR"}`; scaled down keeping the aspect ratio above `maxWidth`. As built the scaling is a box filter in plain Java, one row of pixels at a time and without `Graphics2D`, so it starts no toolkit, AppKit or Java2D thread (review 2026-10-07: the first build's `Graphics2D` scaling started them in a target without a user interface); `source` is `PROTOCOL` for the built-in JCEF adapter and `VENDOR` for JxBrowser and for a third-party adapter (D67; 4.x, A37, built 2026-10-08: the handle's `bitmapSource()`, §3, whose default is `VENDOR`; `VENDOR` also when an adapter's own answer is null or throws) | `WORKER`, 20000, `web.bitmap`; not mutating |
 | `web.reload` (mutating) | browser selection, `ignoreCache?: bool (false)` | `{reloaded: true}`: `CefBrowser.reload()` / `Navigation.reload()` through the adapter (as built through the module-internal `BrowserExtras` of the built-in adapters; a third-party browser is reloaded with `location.reload()` through `evaluate`, D67; 4.x, A37, built 2026-10-08: through the SPI's `WebBrowser.reload(ignoreCache)` for every browser, §3, which the built-in adapters override with their technology's reload and whose default, for an adapter that does not, is that same `location.reload()` through `evaluate`; the call answers once the reload was requested, and a failure maps as every adapter failure does, below the table). Exists for frozen-target recovery (§5.3) and for a pack's own recover; no base verb emits it | `WORKER`, 10000, `web.browsers` |
 | `web.cdp.status` | – | `{endpoints:[{host, port, engineLabel, adapter}], browsers:[{ref, cdpTargetId?}]}`: the configured endpoints the adapters report (JCEF: from the private `settings_` of `CefApp`, else from `<cache dir>/DevToolsActivePort` when the cache path is known, else none; JxBrowser: `engine().options().remoteDebuggingPort()`); nothing is probed over the network by the agent. As built the `DevToolsActivePort` file counts only when it is not older than the JVM's start, less 2 s for coarse file times (an older file is a previous run's; review 2026-10-07, D65), and `browsers` carries the kept target ids | `WORKER`, 5000, `web.browsers`; not mutating |
+| `web.hitTest` (Phase 7, built 2026-10-10, VW; P7 §4.2, built 2026-10-10, VW) | browser selection, `frame?` (the frame the call starts in), `point: {x, y}`, `space?: VIEWPORT \| COMPONENT` (`VIEWPORT`) | `{browser, frame?, viewportPoint: {x, y}, element: {role, name, tag, id?, rect: {x, y, w, h}}, locators: [{role, name} \| {selector}], unique, iframe?: {key, rect}, scaleAssumed?}`: the library's `hit` (§4.6), descending into a frame element's child frame (at most three); a point outside the viewport is `NOT_FOUND {reason: "outside"}`; a component point is converted by the factor `innerWidth / component width` and refused (`INVALID_PARAMS`, `reason: "viewport override"`) while this module's override is in place | `WORKER`, 10000, `web.hittest`; not mutating |
+| `web.pointer` (mutating; (Phase 7, built 2026-10-10, VW; P7 §4.3, built 2026-10-10, VW) | browser selection, `action: MOVE \| PRESS \| RELEASE \| CLICK \| DOUBLE_CLICK \| WHEEL`, `point`, `space?`, `button?` (`LEFT`), `modifiers?`, `clickCount?` (1 to 3), `wheel?: {dx, dy}`, `force?` | `{via: PROTOCOL \| VENDOR, viewportPoint, dispatched: [types], hit?: {role, name, tag, id?}, visibleInSwing?: false}`: a `mouseMoved` to the point, then the action's events (`CLICK`: press and release pairs, click counts 1 to n), each through `WebBrowser.dispatchPointer` (`Input.dispatchMouseEvent` on JCEF) and awaited in turn, never retried; `MODAL_OPEN` (`data {dialog, title, browser}`) while a modal dialog blocks the browser's window, unless `force` | `WORKER`, 10000, `web.pointer` |
+
+(Phase 7, built 2026-10-10, VW; P7 §4.3) `web.browsers` adds `blockedBy: {dialog, title}` to the entry of an open
+browser whose window a modal dialog blocks (the check of `web.pointer`, one bounded EDT read per browser with a
+component, while the call has time); the entry is unchanged otherwise. The CDP path reads it to hand a blocked browser's
+`web.pointer` to the agent.
 
 Every `web.*` call runs on `WORKER`; the adapter's futures are awaited with the call's remaining budget less 100 ms; a
 timed-out future is abandoned (`cancel(false)`), never retried on another thread (browser-spi §C1), and the call answers
@@ -718,7 +739,7 @@ the kit's item 14 (§10.1), which runs against real JCEF in the image. D266, D26
 | `web.resize` | at least one indexed browser has `RESIZE` | `UNAVAILABLE` |
 | `web.bitmap` | at least one indexed browser has `BITMAP` | `UNAVAILABLE` |
 | `web.cdp` | at least one endpoint is configured (the agent's view; the controller decides whether it answers, §6.1); as built strategy `host:port` of the first endpoint | `UNAVAILABLE("no remote-debugging endpoint configured")` |
-| `web.hittest`, `web.pointer` | never (reserved, B16) | `UNAVAILABLE("reserved for the vision bolt-on")` |
+| `web.hittest`, `web.pointer` | never (reserved, B16); (Phase 7, built 2026-10-10, VW; P7 §4.4) at least one open indexed browser has `EVALUATE` (`web.hittest`) or `INPUT` (`web.pointer`); strategy the adapters | `UNAVAILABLE("reserved for the vision bolt-on")` until Phase 7; since then as `web.evaluate` ("no browser found", "no indexed browser has INPUT", or the adapters' reason) |
 
 Capabilities are probed after `onTargetReady` and on reprobe, as every other module's (P1 §5); the per-browser
 flags above are evaluated at probe time over the index of that moment. (As built 2026-10-07: one computation, a
@@ -819,6 +840,11 @@ everything by reflection through the host's loader:
   the channel, as the rules above describe, and D62's re-send applies to it alone. No answer has been lost in any run
   since. The fake JCEF covers both channels (§10.2).
 
+- *Input* (Phase 7, built 2026-10-10, VW; P7 §4.5, A66): `dispatchPointer` sends `Input.dispatchMouseEvent {type, x, y,
+  button, clickCount, modifiers, deltaX?, deltaY?}` (the parameters of `WebInput.mouseEvent`, which the CDP path sends
+  as well) through the handle's channel, a mutating call, never sent again; `INPUT` is among the flags of every browser
+  whose channel exists.
+
 **`jxbrowser`** (`…agent.web.jxbrowser.JxBrowserAdapter`), on the public members that lines 7, 8 and 9 share
 (browser-spi §F21, §R3), resolved per vendor class loader from the descriptor `jxbrowser.json` (§4.7):
 
@@ -860,7 +886,11 @@ everything by reflection through the host's loader:
   threads, and where those roles do not resolve the SPI's default, `location.reload()` through the page, where the
   handle refused with `UnsupportedOperationException` before; `bitmapSource()` = `VENDOR`.)
 - *Rules.* `licenseKey()` is never read; no `set(...)` callback by default; `dispatch(...)` (input) is not used
-  (reserved `INPUT`); no DOM API of the vendor is used (browser-spi §F22). (As built: the descriptor has no
+  (reserved `INPUT`); no DOM API of the vendor is used (browser-spi §F22). (Phase 7, built 2026-10-10, VW; P7 §4.5:
+  `dispatch(...)` is used for `dispatchPointer` through the descriptor's roles under `for: "INPUT"` (`Point.of`, the
+  `MouseButton` constants, the builders of `MousePressed`, `MouseReleased`, `MouseMoved`, `MouseWheel`), unverified
+  against the vendor's library, the strategy then ending in ", input unverified (HiDPI: CSS or device pixels unknown)";
+  modifier keys are not mapped and are refused.) (As built: the descriptor has no
   `licenseKey` role at all. Three member names could not be confirmed without the product: `getChromeVersion`
   (alternative `CHROME_VERSION_MAJOR`), `FrameLoadFailed.error` (alternative `errorCode`) and `Browser.set`, matched by
   its parameter count; a licence holder verifies them, the `../TODO.md` wall "A JxBrowser licence".)
@@ -872,6 +902,10 @@ One JavaScript source, `web-lib.js`, installed on first use through `evaluate` (
 expression `WebLib` builds installs the library when it is absent, so either path may evaluate any of them in any
 document; the slot is non-enumerable and non-writable but configurable; a library already present, of any version, is
 kept, never replaced, so that a tap keeps its state; all state lives in the library's closure; `L.version` is "1".)
+(Phase 7, built 2026-10-10, VW; P7 §4.6, D300) `L.version` is "2" and the library gains `hit(x, y)`; a slot that holds
+an older library is still never replaced, but the functions it lacks are installed into it, once per document, and its
+version is raised where it can be (a version-1 slot's `version` is not configurable and stays "1"); the install text
+then yields "upgraded". `WebLib.hash()` changed once with it.
 
 The functions as built (each a non-writable property of the library object `L`; the specified table listed
 `click`, `fill`, `text` and `dispatch` on elements, a `drain()` without arguments and a library function `wrap`):
@@ -886,6 +920,7 @@ The functions as built (each a non-writable property of the library object `L`; 
 | `tap(patterns, target)` | `{installed}`: replaces the tap on `window` (default) or `document`; `tap([])` removes it | `web.tap` |
 | `drain(maxChars?)` | `{events: [{name, detail?, truncated?}], dropped}`, removing what it returns from the buffer; with `maxChars`, events up to about that much JSON (at least one) and `more: true` when some remain | the tap pollers of both paths |
 | `defer(value)`, `collect(id)` | an id; then the settled state (pending, fulfilled with the wrapper's text, or rejected with `message` and `stack`); at most 100 pending per document | `awaitPromise` over a string-only channel (JxBrowser, §4.5) |
+| `hit(x, y)` (Phase 7, built 2026-10-10, VW; P7 §4.2, version 2) | `{element: {role, name, tag, id?, rect}, locators, unique, child?}` for the element drawn at the point (`elementFromPoint`, through open shadow roots), or `NOT_FOUND {reason: "outside", x, y}` | `web.hitTest` and `web.pointer` on both paths |
 
 A failure the caller can act on is returned as an error object, `{__error: "NOT_FOUND" | "AMBIGUOUS" | "INVALID_PARAMS",
 data}` (the data of §4.2; further `INVALID_PARAMS` reasons name bad arguments, such as `invalid selector`, `invalid
@@ -1183,6 +1218,8 @@ in the image.
 `skillroy-cdp` registers `…cdp.CdpWebPath` through `META-INF/services/ai.skillroy.testjava.scenario.web.WebPath`.
 It serves every `web.*` primitive of §4.2 except `web.cdp.status`, `web.reload` and `web.browsers` (those are always
 the agent's: enumeration and endpoints are facts of the target), with the same parameters and result shapes:
+(Phase 7, built 2026-10-10, VW; P7 §4.7: `SERVED` gains `web.hitTest` and `web.pointer`, `MUTATING` `web.pointer`;
+viewport points only, a component point is `UNSUPPORTED`)
 
 | Primitive | Playwright implementation |
 |---|---|
@@ -1192,6 +1229,8 @@ the agent's: enumeration and endpoints are facts of the target), with the same p
 | `web.waitFlag` | `frame.waitForFunction(<the expression in a page-side guard>, null, new WaitForFunctionOptions().setPollingInterval(pollMs).setTimeout(…))` on the selected frame, the timeout being `timeoutMs` or the budget, at most what is left less 250 ms (as built; the specification wrote `page.waitForFunction(expression, …)`); `polls` is `1 + ms / pollMs` (Playwright does not count them); a throwing expression was `SCRIPT_ERROR` until A35; a flag that turns ready appends `web.ready {signal: FLAG}` to the path's events. (4.x, A35, built 2026-10-08: the page-side guard is the agent's, `WebLib.flagExpression` of §4.6, in a wrapper (`Scripts.flagWait`) that returns the guard's object when the flag is ready or the expression did not compile, both of which end the wait, and `false` otherwise, so that Playwright polls on through a poll that threw; a `compileError` is `SCRIPT_ERROR` at once with `data {browser, message, stack: ""}`; after a wait that timed out, the path makes one more poll, the last, with the guard itself through `waitForFunction` (its first evaluation ends the call; `evaluate` has no bound of its own), bounded by 1000 ms and by what is left of the call less 100 ms: its `error` is the result's `lastError`, a `ready: true` makes the flag ready after all, and a last poll that does not answer in time, or fails otherwise, leaves `lastError` out (a page that closed is `STALE_HANDLE`); one operation is outstanding at a time, D63; a blank expression is `INVALID_PARAMS`; §16.1) |
 | `web.resize` | `Emulation.setDeviceMetricsOverride {width, height, deviceScaleFactor: 0, mobile: false}` on the path's own `CDPSession` of the page, the in-process adapter's protocol call; `clear: true` sends `Emulation.clearDeviceMetricsOverride` on that same session and reads the size back (`viewport` omitted when unreadable); `close()` removes every override the path left in place (as built 2026-10-07 after the review, D64: the specified `page.setViewportSize(width, height)` cannot be removed, so `clear: true` pinned the original size, Chromium ignores a removal sent on another session, and an override outlives the session and the connection that set it) |
 | `web.bitmap` | `page.screenshot()` (`source: "PROTOCOL"`); as built scaled above `maxWidth` from the PNG itself, without a `Graphics2D` |
+| `web.hitTest` (Phase 7, built 2026-10-10, VW; P7 §4.7) | the library's `hit` on the `Place`'s frame, descending as the agent does through the page's `Page.getFrameTree` |
+| `web.pointer` (Phase 7, built 2026-10-10, VW; P7 §4.7) | `Input.dispatchMouseEvent` with the agent's parameters on the path's own `CDPSession` of the page (Playwright's `page.mouse()` is not used); before it the agent's `web.browsers` is read again and a browser it reports blocked by a modal dialog is handed to the agent (`UNSUPPORTED`), unless `force` |
 
 Browser selection by `browser: <ref>` is mapped through `web.browsers` of the agent (`cdpTargetId` per ref) to a
 Playwright page; `by: {url|title}` is matched on the pages' own `url()`/`title()`; a ref without a target id (the
@@ -1498,7 +1537,8 @@ A `text` of `webFill` that comes from a joined credential field carries `_meta.s
 `type` does. `role` values are the ARIA role names (`button`, `textbox`, `link`, `checkbox`, `combobox`, `heading`,
 `cell`, …); `name` matching follows the library's accessible-name computation, exact by default, `{regex}` for a
 pattern, case-insensitive with `{regex, ignoreCase: true}`. The verbs are base verbs in the sense of P1 §8.1: a pack
-may override them.
+may override them. (Phase 7, built 2026-10-10, VW; P7 §4.1: no web verb is added; a pixel action on a page is recorded
+as `webClick` through `web.hitTest`'s locators, or kept live-only as a raw `web.pointer` call.)
 
 As built (2026-10-07): `frame` is accepted on `webClick`, `webFill`, `webDispatch` and `webWaitFlag` only; the
 further arguments (`expectVisible`, `index` with a `selector`, `pollMs`, `target` on `webTap`) map one to one onto the
@@ -1799,7 +1839,8 @@ their fake recorded (rule violations), so that a violation is charged to the tes
 `RecordingClassLoader` and `ClassInitialisations`; the items are the test methods `item01…` to `item11…`, item 10 as
 two tests; 4.x, A37, built 2026-10-08: to `item12…`, thirteen tests; Phase 6 security fix, pass 2, built 2026-10-09,
 SB: to `item14…`, fifteen tests, and the optional hook `budgetsConsole()`, false by default, true in the built-in
-adapters' fixtures.) Its tests, one per rule and operation
+adapters' fixtures; Phase 7, built 2026-10-10, VW: to `item18…`, nineteen tests; `main.html` gains a counting button.)
+Its tests, one per rule and operation
 (browser-spi "Testing in public CI" item 1):
 
 1. `probe` against a host that did not load the gate class is `UNAVAILABLE` and loads nothing (checked with a
@@ -1855,7 +1896,17 @@ adapters' fixtures.) Its tests, one per rule and operation
     the message at most 2000);
 14. (P2-L4-S1) for an adapter whose fixture says `budgetsConsole()`: a page that logs 24 strings of 1 Mi characters at
     once stops the browser's console capture: the subscriber gets `EventBudget.STOPPED_TEXT` once as a `warning`,
-    fewer than 24 of the page's messages, and no console event after it.
+    fewer than 24 of the page's messages, and no console event after it;
+15. (Phase 7, built 2026-10-10, VW; P7 §4.9) the library's `hit` at the centre of the main page's block answers the
+    block (a `div`), its client rectangle and a unique `selector` locator;
+16. (Phase 7, built 2026-10-10, VW; P7 §4.9) for an adapter with `INPUT`: a move, a press and a release through
+    `dispatchPointer` at the centre of the main page's counting button make it record `pointerdown`, `mousedown`,
+    `mouseup` and `click`, each with `isTrusted: true`;
+17. (Phase 7, built 2026-10-10, VW; P7 §4.9) for an adapter with `INPUT`: a pointer click into the hidden browser; what
+    the technology does is recorded (a report entry `item17`), not asserted, and no event is waited for beyond the
+    bound;
+18. (Phase 7, built 2026-10-10, VW; P7 §4.9) no enumerable global is left on `window` after a hit-test (item 11's
+    rule).
 
 ### 10.2 The neutral fake (`skillroy-agent-web` tests, package `…agent.web.fake`)
 
@@ -2089,7 +2140,8 @@ cannot pick one for the test to read back without a cache directory, browser-spi
 1. **Capabilities.** `web.adapter.jcef` is `OK` with strategy `jcef 152`; `web.adapter.jxbrowser` is `UNAVAILABLE`
    ("not present"); `web.browsers`, `web.evaluate`, `web.events`, `web.initScript` (`DOCUMENT_START`), `web.resize`,
    `web.bitmap` are `OK`; `web.cdp` is `OK` with the port and `UNAVAILABLE` without; `web.hittest` and `web.pointer`
-   are `UNAVAILABLE` (reserved).
+   are `UNAVAILABLE` (reserved). (Phase 7, built 2026-10-10, VW; P7 §4.9: `web.hittest` and `web.pointer` are `OK` with
+   strategy `jcef`.)
 2. **Enumeration.** `web.browsers` lists three browsers: `front` (visibleInSwing true, component ref of the card's
    component), `back` (false; found by the Swing-tree scan **and** as a seed, one ref), `detached` (false, no component;
    seed only; off-screen mode) with their URLs, titles, frames (the `data:`-URL iframe named `terms`; the specification
@@ -2159,6 +2211,12 @@ failure evidence included, holds it.
    back to the application's own).
 9. **The contract kit against JCEF** (§10.3) is green in process, in the web host's own test JVM, under the profile
    (not part of the child-process matrix, but of the same Linux run).
+10. (Phase 7, built 2026-10-10, VW; P7 §4.9, §13.2 item 10) **Hit-test and pointer.** `web.hitTest` at the Borrow
+    button's centre answers the button with a unique selector, and `web.pointer {action: CLICK}` there makes the page's
+    counter record four trusted events, on the agent's path and, with the port, on the CDP path with equal values (D48);
+    `swing.capture` of the host's window lists the front browser as a `WEB` surface with `redacted: false`,
+    `swing.hitTest` at the button's point answers `surface: WEB` with `surfaceLocal`, and `web.hitTest {space:
+    COMPONENT}` with it answers the button.
 
 Once per target Java, through the assembled CLI launcher with `--pack` naming the `skillroy-cdp` jar and the web host
 pack jar: `skillroy run --mode replay` of W1 against the launch with the port exits 0 and its `--json` shows
@@ -2230,7 +2288,8 @@ Numbers are those of `../TODO.md`, "Open SPI and DSL gaps".
 New, recorded for the gaps table: **a `PAINT` capture must guard embedded-browser components** (BS8: `printAll` throws
 for a JOGL canvas; as built 2026-10-07 the guard is in place, P1 §6, §14.1); **a browser with no view and no seed is
 invisible** (JxBrowser; browser-spi §F23); **`web.dom.click` is a DOM click, not a pointer click** (`INPUT`, Phase
-7); **`web.resize` cannot change a windowed JCEF browser's Swing bounds** (`applied: COMPONENT` is reserved).
+7; closed by `web.pointer`, Phase 7, built 2026-10-10, VW; P7 §4, gap 36); **`web.resize` cannot change a windowed JCEF
+browser's Swing bounds** (`applied: COMPONENT` is reserved).
 
 Recorded during the build (2026-10-07), for the gaps table: **the SPI has no reload and no bitmap source** (the
 built-in adapters use the module-internal `BrowserExtras`, D67; an SPI default method is a later amendment; closed by

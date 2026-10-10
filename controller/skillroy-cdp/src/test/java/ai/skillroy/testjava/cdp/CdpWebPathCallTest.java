@@ -279,6 +279,12 @@ class CdpWebPathCallTest {
         front.engine = a -> FakeWorld.ok(Map.of("text", "read", "truncated", false));
         assertEquals(Map.of("text", "read", "truncated", false), call("web.dom.text", map()).value(),
                 "the reads are served in read-only mode (D51)");
+        assertEquals("the target is in read-only mode: the agent answers web.pointer",
+                unsupported("web.pointer", map("action", "CLICK", "point", map("x", 1, "y", 1)), null),
+                "Phase 7: the pointer is mutating");
+        front.engine = a -> FakeWorld.ok(hitValue("button", rect(1, 2, 30, 20), null));
+        assertEquals("button", ((Map<?, ?>) ((Map<?, ?>) call("web.hitTest", map("point", map("x", 1, "y", 1)))
+                .value()).get("element")).get("tag"), "and the hit-test a read");
     }
 
     /**
@@ -312,6 +318,118 @@ class CdpWebPathCallTest {
         back.closed = true;
         assertEquals("no CDP page has the target id T2 of browser b-back",
                 unsupported("web.dom.text", map("browser", "b-back"), null));
+    }
+
+    // ---------------------------------------------------------------- Phase 7: web.hitTest and web.pointer
+
+    private static Map<String, Object> hitValue(String tag, Map<String, Object> rect, Object child) {
+        Map<String, Object> element = map("role", "button", "name", "Go", "tag", tag, "rect", rect);
+        Map<String, Object> v = map("element", element, "locators", List.of(map("selector", "#go")), "unique", true);
+        if (child != null) {
+            v.put("child", child);
+        }
+        return v;
+    }
+
+    private static Map<String, Object> rect(long x, long y, long w, long h) {
+        return map("x", x, "y", y, "w", w, "h", h);
+    }
+
+    @Test
+    void hitTestRunsTheSharedLibraryAndAnswersTheAgentsShape() throws Exception {
+        front.engine = a -> FakeWorld.ok(hitValue("button", rect(1, 2, 30, 20), null));
+        RpcResult r = call("web.hitTest", map("point", map("x", 10, "y", 12)));
+        assertEquals(Scripts.call("hit", 10L, 12L), front.evaluated.get(0), "the bounded library call, as the agent's");
+        assertEquals(map("browser", "b-front", "frame", "T1", "viewportPoint", map("x", 10L, "y", 12L), "element",
+                map("role", "button", "name", "Go", "tag", "button", "rect", rect(1, 2, 30, 20)), "locators",
+                List.of(map("selector", "#go")), "unique", true), r.value());
+        front.engine = a -> FakeWorld.ok(map("__error", "NOT_FOUND", "data", map("reason", "outside", "x", 900,
+                "y", 1)));
+        AgentRpcException outside = rpcError("web.hitTest", map("point", map("x", 900, "y", 1)));
+        assertEquals(ErrorCodes.NOT_FOUND, outside.error().code());
+        assertEquals("outside", outside.error().data().get("reason"));
+        assertEquals("b-front", outside.error().data().get("browser"));
+        assertEquals(ErrorCodes.INVALID_PARAMS, rpcError("web.hitTest", map("point", "10,12")).error().code());
+        assertEquals("point", rpcError("web.hitTest", map()).error().data().get("param"));
+        assertEquals(CdpWebPath.COMPONENT_POINT, unsupported("web.hitTest", map("point", map("x", 1, "y", 1), "space",
+                "COMPONENT"), null), "a component point is the agent's");
+    }
+
+    @Test
+    void hitTestDescendsIntoTheChildFrameTheFrameTreeNames() throws Exception {
+        front.frameTree = map("frameTree", map("frame", map("id", "T1", "url", front.url), "childFrames",
+                List.of(map("frame", map("id", "F2", "parentId", "T1", "url", "data:text/html,child", "name",
+                        "kid")))));
+        front.child("data:text/html,child", "kid", a -> FakeWorld.ok(hitValue("span", rect(5, 6, 7, 8), null)));
+        front.engine = a -> FakeWorld.ok(hitValue("iframe", rect(100, 200, 300, 150), map("x", 15, "y", 25,
+                "name", "kid", "url", "data:text/html,child")));
+        Map<?, ?> v = (Map<?, ?>) call("web.hitTest", map("point", map("x", 120, "y", 230))).value();
+        assertEquals("F2", v.get("frame"));
+        assertEquals(map("key", "F2", "rect", rect(100, 200, 300, 150)), v.get("iframe"));
+        assertEquals(rect(110, 211, 7, 8), ((Map<?, ?>) v.get("element")).get("rect"), "moved by (105, 205)");
+        assertTrue(front.evaluated.contains("child:" + Scripts.call("hit", 15L, 25L)), String.valueOf(front.evaluated));
+    }
+
+    @Test
+    void pointerSendsThePlanOnThePagesOwnSessionWithTheSharedParameters() throws Exception {
+        front.engine = a -> FakeWorld.ok(hitValue("button", rect(1, 2, 30, 20), null));
+        RpcResult r = call("web.pointer", map("action", "CLICK", "point", map("x", 10, "y", 12), "modifiers",
+                List.of("CTRL")));
+        assertEquals(map("via", "PROTOCOL", "viewportPoint", map("x", 10L, "y", 12L), "dispatched",
+                List.of("mouseMoved", "mousePressed", "mouseReleased"), "hit", map("role", "button", "name", "Go",
+                        "tag", "button")), r.value());
+        assertEquals(List.of(
+                "{\"type\":\"mouseMoved\",\"x\":10,\"y\":12,\"button\":\"none\",\"clickCount\":0,\"modifiers\":2}",
+                "{\"type\":\"mousePressed\",\"x\":10,\"y\":12,\"button\":\"left\",\"clickCount\":1,\"modifiers\":2}",
+                "{\"type\":\"mouseReleased\",\"x\":10,\"y\":12,\"button\":\"left\",\"clickCount\":1,\"modifiers\":2}"),
+                front.mouse.stream().map(t -> Json.write(Json.parseObject(t))).toList(),
+                "byte-identical to what the agent's jcef adapter sends");
+        assertTrue(back.mouse.isEmpty());
+        assertFalse(((Map<?, ?>) r.value()).containsKey("visibleInSwing"));
+        back.engine = front.engine;
+        Map<?, ?> hidden = (Map<?, ?>) call("web.pointer", map("browser", "b-back", "action", "MOVE", "point",
+                map("x", 1, "y", 1))).value();
+        assertEquals(false, hidden.get("visibleInSwing"), "the agent reports the back browser not showing");
+    }
+
+    @Test
+    void aBlockedBrowsersPointerIsTheAgentsAndAPointOutsideSendsNothing() throws Exception {
+        front.engine = a -> FakeWorld.ok(hitValue("button", rect(1, 2, 30, 20), null));
+        Map<String, Object> blocked = FakeAgent.browser("b-front", "T1", "front", true, "data:text/html,front");
+        blocked.put("blockedBy", map("dialog", "c-9", "title", "Confirm loan"));
+        agent.value("web.browsers", Map.of("browsers", List.of(blocked)));
+        String why = unsupported("web.pointer", map("action", "CLICK", "point", map("x", 10, "y", 12)), null);
+        assertTrue(why.contains("modal dialog"), why);
+        assertTrue(front.mouse.isEmpty(), "nothing sent: the agent answers MODAL_OPEN");
+        call("web.pointer", map("action", "CLICK", "point", map("x", 10, "y", 12), "force", true));
+        assertEquals(3, front.mouse.size(), "a person's force acts past it");
+        front.mouse.clear();
+        front.engine = a -> FakeWorld.ok(map("__error", "NOT_FOUND", "data", map("reason", "outside", "x", 900,
+                "y", 1)));
+        assertEquals(ErrorCodes.NOT_FOUND, rpcError("web.pointer", map("action", "CLICK", "point", map("x", 900,
+                "y", 1), "force", true)).error().code());
+        assertTrue(front.mouse.isEmpty());
+    }
+
+    @Test
+    void aFailedEventAfterThePressIsFollowedByOneRelease() throws Exception {
+        front.engine = a -> FakeWorld.ok(hitValue("button", rect(1, 2, 30, 20), null));
+        front.failMouseAt = 2;
+        AgentRpcException e = rpcError("web.pointer", map("action", "CLICK", "point", map("x", 10, "y", 12)));
+        assertEquals(ErrorCodes.INTERNAL_ERROR, e.error().code(), e.getMessage());
+        assertEquals(4, front.mouse.size(), "move, press, the failed release, the balancing release");
+        assertTrue(front.mouse.get(3).contains("mouseReleased"), front.mouse.get(3));
+    }
+
+    @Test
+    void pointerParametersReadOnlyModeAndComponentPointsAreHandled() throws Exception {
+        assertEquals("action", rpcError("web.pointer", map("point", map("x", 1, "y", 1))).error().data()
+                .get("param"));
+        assertEquals("wheel", rpcError("web.pointer", map("action", "WHEEL", "point", map("x", 1, "y", 1)))
+                .error().data().get("param"));
+        assertEquals(CdpWebPath.COMPONENT_POINT, unsupported("web.pointer", map("action", "MOVE", "point",
+                map("x", 1, "y", 1), "space", "COMPONENT"), null));
+        assertTrue(front.mouse.isEmpty());
     }
 
     @Test

@@ -49,14 +49,15 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
 /**
- * The thirteen {@code web.*} primitives of phase4-contracts.md section 4.2, written once against the embedded-browser
- * SPI. Every one runs on {@link ThreadPolicy#WORKER}; the six reads ({@code web.browsers}, {@code web.ariaSnapshot},
- * {@code web.dom.text}, {@code web.waitFlag}, {@code web.bitmap}, {@code web.cdp.status}) are not mutating and are
- * served in read-only mode (D51), except {@code web.waitFlag}, which with {@code web.evaluate} carries the
- * {@code script} flag (it evaluates the caller's expression) and is refused in read-only mode by the dispatcher
- * (phase6-contracts.md 12.9, D156); the others are mutating. Browser selection follows {@link Selection}; every adapter
- * future is awaited with the call's remaining budget less 100 ms ({@link Await}); a read is retried once after a load
- * event, a mutating call never. The script library's functions are called through
+ * The thirteen {@code web.*} primitives of phase4-contracts.md section 4.2 and the two of phase7-contracts.md sections
+ * 4.2 and 4.3 ({@code web.hitTest}, a read, and {@code web.pointer}, mutating; their bodies are {@link Pointing}'s),
+ * written once against the embedded-browser SPI. Every one runs on {@link ThreadPolicy#WORKER}; the six reads ({@code
+ * web.browsers}, {@code web.ariaSnapshot}, {@code web.dom.text}, {@code web.waitFlag}, {@code web.bitmap}, {@code
+ * web.cdp.status}) are not mutating and are served in read-only mode (D51), except {@code web.waitFlag}, which with
+ * {@code web.evaluate} carries the {@code script} flag (it evaluates the caller's expression) and is refused in
+ * read-only mode by the dispatcher (phase6-contracts.md 12.9, D156); the others are mutating. Browser selection follows
+ * {@link Selection}; every adapter future is awaited with the call's remaining budget less 100 ms ({@link Await}); a
+ * read is retried once after a load event, a mutating call never. The script library's functions are called through
  * {@link WebLib#callExpression} with the argument objects of the library's specification, and an error object it
  * returns ({@code __error}) answers the RPC error of that code with its data (plus {@code data.browser}).
  *
@@ -95,9 +96,11 @@ final class WebPrimitives {
     private final Taps taps;
     private final Secrets secrets;
     private final WebCapabilities capabilities;
+    private final Pointing pointing;
+    private final SeedWalk walk;
 
     WebPrimitives(AgentContext ctx, BrowserIndex index, Selection selection, EventBridge bridge, Taps taps,
-                  Secrets secrets, WebCapabilities capabilities) {
+                  Secrets secrets, WebCapabilities capabilities, SeedWalk walk) {
         this.ctx = ctx;
         this.index = index;
         this.selection = selection;
@@ -105,6 +108,8 @@ final class WebPrimitives {
         this.taps = taps;
         this.secrets = secrets;
         this.capabilities = capabilities;
+        this.walk = walk;
+        this.pointing = new Pointing(ctx, walk, secrets, this);
     }
 
     /** Every primitive of the module, in name order. Touches no AWT and no vendor class. */
@@ -141,7 +146,8 @@ final class WebPrimitives {
                 .description("The embedded browsers the agent can reach: rebuilds the index (seeds from registered "
                         + "BrowserRegistryAdapters and the Swing tree, then every present adapter) and lists each "
                         + "with its ref, adapter, URL, title, component ref, rendering, viewport, capabilities, CDP "
-                        + "target id, tag and frames. Not mutating.")
+                        + "target id, tag, frames and, while a modal dialog blocks its window, blockedBy. Not "
+                        + "mutating.")
                 .param("includeClosed", "boolean", false, "also list browsers that have closed (default false)")
                 .thread(ThreadPolicy.WORKER).timeoutMs(10000).capability(WebCapabilities.BROWSERS).build(),
                 new Primitives.Body() {
@@ -223,6 +229,41 @@ final class WebPrimitives {
                     @Override
                     public Object invoke(Invocation inv) {
                         return evaluate(inv);
+                    }
+                }));
+        list.add(Primitives.of(selecting(PrimitiveSpec.builder("web.hitTest")
+                .description("The element under a point of the page (phase7-contracts.md 4.2): role, accessible name, "
+                        + "tag, id and client rectangle, and the locators ({role, name}, then {selector}) that match "
+                        + "exactly that element; descends into iframes (depth 3). Not mutating."), true)
+                .param("point", "object", true, "{x, y}: CSS pixels of the viewport, or of the browser's component "
+                        + "with space: COMPONENT")
+                .param("space", "string", false, "VIEWPORT (default) or COMPONENT (the agent converts)")
+                .thread(ThreadPolicy.WORKER).timeoutMs(10000).capability(WebCapabilities.HITTEST).build(),
+                new Primitives.Body() {
+                    @Override
+                    public Object invoke(Invocation inv) {
+                        return pointing.hitTest(inv);
+                    }
+                }));
+        list.add(Primitives.of(selecting(PrimitiveSpec.builder("web.pointer")
+                .description("Synthetic pointer input at a point of the page (phase7-contracts.md 4.3): MOVE, PRESS, "
+                        + "RELEASE, CLICK (a move, a press and a release in one call), DOUBLE_CLICK, WHEEL. Refused "
+                        + "with MODAL_OPEN while a modal dialog blocks the browser's window, unless force (a person's "
+                        + "argument). Mutating."), false)
+                .param("action", "string", true, "MOVE | PRESS | RELEASE | CLICK | DOUBLE_CLICK | WHEEL")
+                .param("point", "object", true, "{x, y}: CSS pixels of the viewport, or of the browser's component "
+                        + "with space: COMPONENT")
+                .param("space", "string", false, "VIEWPORT (default) or COMPONENT")
+                .param("button", "string", false, "LEFT (default) | MIDDLE | RIGHT")
+                .param("modifiers", "array", false, "any of ALT, CTRL, META, SHIFT")
+                .param("clickCount", "integer", false, "1..3 (default 1; DOUBLE_CLICK 2)")
+                .param("wheel", "object", false, "WHEEL: {dx, dy} in CSS pixels")
+                .param("force", "boolean", false, "act although a modal dialog blocks the window (default false)")
+                .thread(ThreadPolicy.WORKER).timeoutMs(10000).capability(WebCapabilities.POINTER).mutating().build(),
+                new Primitives.Body() {
+                    @Override
+                    public Object invoke(Invocation inv) {
+                        return pointing.pointer(inv);
                     }
                 }));
         list.add(Primitives.of(selecting(PrimitiveSpec.builder("web.reload")
@@ -321,11 +362,44 @@ final class WebPrimitives {
         Map<Entry, String> ids = awaitTargetIds(targets, remaining(readDeadline));
         List<Object> out = new ArrayList<Object>();
         for (Entry e : listed) {
-            out.add(describe(e, titles.get(e), ids.get(e), remaining(deadline) > PER_BROWSER_READ_MS / 2));
+            Map<String, Object> m = describe(e, titles.get(e), ids.get(e),
+                    remaining(deadline) > PER_BROWSER_READ_MS / 2);
+            Map<String, Object> blocked = blockedBy(e, deadline);
+            if (blocked != null) {
+                m.put("blockedBy", blocked);
+            }
+            out.add(m);
         }
         Map<String, Object> result = new LinkedHashMap<String, Object>();
         result.put("browsers", out);
         return result;
+    }
+
+    /**
+     * {@code {dialog, title}} of the modal dialog that blocks the window of an open browser's component, or null (Phase
+     * 7: {@code web.pointer}'s modal check, which the CDP path reads here to hand a blocked browser's pointer to the
+     * agent; phase7-contracts.md section 4.3). One bounded EDT read per open browser that has a component, while the
+     * call has time for it; a read that fails reports nothing.
+     */
+    private Map<String, Object> blockedBy(Entry e, long deadline) {
+        Object component = e.component;
+        long left = remaining(deadline);
+        if (component == null || Selection.isClosed(e.browser()) || left <= PER_BROWSER_READ_MS / 2) {
+            return null;
+        }
+        ComponentState state;
+        try {
+            state = walk.state(component, Math.min(Pointing.STATE_MS, left - PER_BROWSER_READ_MS / 4));
+        } catch (Exception ex) {
+            return null;
+        }
+        if (state == null || state.blocker == null) {
+            return null;
+        }
+        Map<String, Object> m = new LinkedHashMap<String, Object>();
+        m.put("dialog", ctx.handles().handleFor(state.blocker, "component"));
+        m.put("title", WebLib.cut(state.blockerTitle, WebLib.MAX_URL_CHARS));
+        return m;
     }
 
     private Map<String, Object> describe(Entry e, String title, String targetId, boolean withFrames) {
@@ -641,11 +715,18 @@ final class WebPrimitives {
      */
     private Object library(Invocation inv, final Entry e, String primitive, boolean read, String function,
                            Object... args) {
-        final String frame = inv.args().str("frame");
+        return libraryIn(e, inv.args().str("frame"), Await.budget(inv), primitive, read, function, args);
+    }
+
+    /**
+     * {@link #library} in a given frame (null: the main frame) with a given budget: what {@code web.hitTest} needs to
+     * descend into a child frame (phase7-contracts.md section 4.2).
+     */
+    Object libraryIn(final Entry e, final String frame, final long budget, String primitive, boolean read,
+                     String function, Object... args) {
         // P2-L4-F2: the call goes through the guard that bounds the answer in the page, so that a page that replaced
         // the library chooses the value but never the size of what crosses the channel into this JVM.
         final String expression = WebLib.boundedCallExpression(function, args);
-        final long budget = Await.budget(inv);
         Await.Attempt<String> attempt = new Await.Attempt<String>() {
             @Override
             public CompletableFuture<String> start() {
@@ -837,9 +918,11 @@ final class WebPrimitives {
         long budget = Await.budget(inv);
         if (clear) {
             Await.get(b.clearResize(), budget, e, "web.resize", WebCapabilities.RESIZE);
+            e.overridden = false;
         } else {
             require(e, WebCapability.RESIZE, "web.resize", WebCapabilities.RESIZE);
             Await.get(b.resize((int) width, (int) height), budget, e, "web.resize", WebCapabilities.RESIZE);
+            e.overridden = true;
         }
         Map<String, Object> out = new LinkedHashMap<String, Object>();
         out.put("applied", "OVERRIDE");
@@ -913,7 +996,7 @@ final class WebPrimitives {
     // ------------------------------------------------------------------------------------------------ helpers
 
     /** The browser the call names; the selection may rebuild the index within at most its own bound. */
-    private Entry select(Invocation inv) {
+    Entry select(Invocation inv) {
         long budget = Math.min(Await.budget(inv), BrowserIndex.BUDGET_MS + Selection.TITLE_MS);
         Entry e = selection.select(inv.args(), budget);
         if (Selection.isClosed(e.browser())) {
@@ -924,14 +1007,14 @@ final class WebPrimitives {
     }
 
     /** CAPABILITY_UNAVAILABLE when the selected browser lacks the flag the primitive needs. */
-    private static void require(Entry e, WebCapability flag, String primitive, String capability) {
+    static void require(Entry e, WebCapability flag, String primitive, String capability) {
         if (!has(e.browser(), flag)) {
             throw Errors.unavailable(primitive, capability, "browser " + e.ref + " (adapter " + e.adapter.id()
                     + ") has no " + flag.name(), e.ref);
         }
     }
 
-    private static boolean has(WebBrowser b, WebCapability flag) {
+    static boolean has(WebBrowser b, WebCapability flag) {
         try {
             return b.capabilities().contains(flag);
         } catch (RuntimeException e) {

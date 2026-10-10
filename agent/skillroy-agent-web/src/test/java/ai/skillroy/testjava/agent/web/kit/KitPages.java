@@ -26,7 +26,8 @@ import java.nio.charset.StandardCharsets;
 /**
  * The kit's own pages (phase4-contracts.md section 10.1), resources of the kit next to this class: {@code main.html}
  * (a title, a heading, a coloured block, a console line, an inline script that records whether the init script ran
- * before it, and an {@code iframe} whose {@code src} is a {@code data:} URL of {@code inner.html}; never
+ * before it, a counting button that records the pointer events it receives with their {@code isTrusted} (Phase 7,
+ * kit item 16), and an {@code iframe} whose {@code src} is a {@code data:} URL of {@code inner.html}; never
  * {@code srcdoc}, which BS8 showed does not load in the image) and {@code second.html} (no frame). A fixture loads
  * the HTML text however its technology does it, for example as a {@code data:} URL ({@link #dataUrl}).
  */

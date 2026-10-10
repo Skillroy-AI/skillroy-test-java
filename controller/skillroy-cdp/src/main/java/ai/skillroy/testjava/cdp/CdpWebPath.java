@@ -25,6 +25,7 @@ import ai.skillroy.testjava.protocol.ErrorCodes;
 import ai.skillroy.testjava.protocol.Event;
 import ai.skillroy.testjava.protocol.RpcResult;
 import ai.skillroy.testjava.protocol.text.TextBounds;
+import ai.skillroy.testjava.protocol.web.WebInput;
 import ai.skillroy.testjava.protocol.web.WebLib;
 import ai.skillroy.testjava.scenario.web.FrozenTargetPolicy;
 import ai.skillroy.testjava.scenario.web.WebPath;
@@ -75,8 +76,12 @@ import java.util.stream.Stream;
  * The CDP implementation of the web verbs (phase4-contracts.md sections 5.2, 5.3 and 6.1), registered as the
  * {@code ServiceLoader} service {@code ai.skillroy.testjava.scenario.web.WebPath} with the id {@value #ID}. It serves
  * every {@code web.*} primitive of section 4.2 except {@code web.cdp.status}, {@code web.reload} and {@code
- * web.browsers} (facts of the target, always the agent's), with the agent path's parameters and result shapes: the
- * page work is the shared script library ({@link WebLib}) evaluated through Playwright.
+ * web.browsers} (facts of the target, always the agent's), and since Phase 7 {@code web.hitTest} and
+ * {@code web.pointer} (phase7-contracts.md section 4.7; viewport points only, a component point is the agent's), with
+ * the agent path's
+ * parameters and result shapes: the page work is the shared script library ({@link WebLib}) evaluated through
+ * Playwright, the pointer's events raw {@code Input.dispatchMouseEvent} calls on the path's own session
+ * ({@link WebInput}).
  *
  * <h2>Opening</h2>
  * {@link #open} takes the endpoint from the agent ({@code web.cdp.status}: the first of {@code endpoints}; none is
@@ -170,11 +175,12 @@ public final class CdpWebPath implements WebPath {
 
     /** The primitives this path serves. */
     static final Set<String> SERVED = Set.of("web.evaluate", "web.ariaSnapshot", "web.dom.text", "web.dom.click",
-            "web.dom.fill", "web.dispatchEvent", "web.tap", "web.waitFlag", "web.resize", "web.bitmap");
+            "web.dom.fill", "web.dispatchEvent", "web.tap", "web.waitFlag", "web.resize", "web.bitmap", "web.hitTest",
+            "web.pointer");
 
-    /** The mutating ones among them (D51). */
+    /** The mutating ones among them (D51; {@code web.pointer} since Phase 7). */
     static final Set<String> MUTATING = Set.of("web.evaluate", "web.dom.click", "web.dom.fill",
-            "web.dispatchEvent", "web.tap", "web.resize");
+            "web.dispatchEvent", "web.tap", "web.resize", "web.pointer");
 
     /**
      * The ones that evaluate a caller's expression in the page (phase6-contracts.md 12.9, D156; security fix S42):
@@ -186,6 +192,10 @@ public final class CdpWebPath implements WebPath {
     /** The reason {@code open} gives for the policy {@code CLOSE}. */
     public static final String CLOSE_REFUSED = "frozenTargets: close is refused in Phase 4 (D52): closing a browser the"
             + " application owns can break it";
+
+    /** Why a component point is handed to the agent (phase7-contracts.md 4.7). */
+    static final String COMPONENT_POINT = "a component point is converted by the agent: the CDP path has no component"
+            + " bounds";
 
     /** The reason {@code open} gives when the agent knows no endpoint. */
     public static final String NO_ENDPOINT = "no remote-debugging endpoint configured";
@@ -875,6 +885,10 @@ public final class CdpWebPath implements WebPath {
                 return waitFlag(s, primitive, p, budgetMs, deadline, frameKey, correlationId);
             case "web.resize":
                 return resize(s, primitive, p, budgetMs, deadline);
+            case "web.hitTest":
+                return hitTest(s, primitive, p, budgetMs, deadline, frameKey);
+            case "web.pointer":
+                return pointer(s, primitive, p, budgetMs, deadline);
             case "web.bitmap": {
                 long maxWidth = Params.integer(primitive, p, "maxWidth", 4096, 1, Integer.MAX_VALUE);
                 return () -> {
@@ -1082,6 +1096,206 @@ public final class CdpWebPath implements WebPath {
                 return Shapes.resizeValue(width, height);
             });
         };
+    }
+
+    // ---------------------------------------------------------------- hit-test and pointer (Phase 7)
+
+    /**
+     * {@code web.hitTest} (phase7-contracts.md sections 4.2 and 4.7): the library's {@code hit} on the place's frame,
+     * descending into a frame element's child frame as the agent does ({@link WebInput#childFrame} over the page's
+     * {@code Page.getFrameTree}, at most {@link WebInput#MAX_FRAME_DEPTH} times), every rectangle in the viewport of
+     * the frame the call started in, the shape of {@link WebInput#hitResult}. A component point is the agent's (the
+     * path has no component bounds): {@code UNSUPPORTED} before anything reached the page.
+     */
+    private Callable<Object> hitTest(Session s, String primitive, Map<String, Object> p, long budgetMs, long deadline,
+                                     Object frameKey) throws AgentRpcException, WebPathException {
+        WebInput.Target target;
+        try {
+            target = WebInput.target(p);
+        } catch (WebInput.Invalid e) {
+            throw Params.invalid(primitive, e.param(), e.getMessage());
+        }
+        if (target.component()) {
+            throw WebPathException.unsupported(COMPONENT_POINT);
+        }
+        return () -> {
+            Selection sel = select(s, p, deadline);
+            return onPw(s, primitive, sel, budgetMs, deadline, () -> {
+                Place at = place(s, sel, frameKey);
+                String ref = refOf(s, at);
+                List<WebInput.Frame> frames = frameList(s, at.page());
+                String foundIn = frameKey instanceof String key ? key : frames.isEmpty() ? null : frames.get(0).key();
+                WebInput.Hit hit = hitIn(primitive, at.frame(), target.x(), target.y(), ref);
+                int px = target.x();
+                int py = target.y();
+                int offX = 0;
+                int offY = 0;
+                String iframeKey = null;
+                Map<String, Object> iframeRect = null;
+                for (int depth = 0; hit.child() != null && depth < WebInput.MAX_FRAME_DEPTH; depth++) {
+                    WebInput.Child child = hit.child();
+                    String childKey = WebInput.childFrame(frames, foundIn, child);
+                    if (childKey == null) {
+                        break;
+                    }
+                    WebInput.Hit inner;
+                    try {
+                        inner = hitIn(primitive, frame(s, at.page(), childKey), child.x(), child.y(), ref);
+                    } catch (WebPathException e) {
+                        break;
+                    } catch (AgentRpcException e) {
+                        int code = e.error().code();
+                        if (code == ErrorCodes.NOT_FOUND || code == ErrorCodes.SCRIPT_ERROR) {
+                            break;
+                        }
+                        throw e;
+                    }
+                    iframeKey = childKey;
+                    @SuppressWarnings("unchecked")
+                    Map<String, Object> r = (Map<String, Object>) hit.translated(offX, offY).element().get("rect");
+                    iframeRect = r;
+                    offX += px - child.x();
+                    offY += py - child.y();
+                    px = child.x();
+                    py = child.y();
+                    foundIn = childKey;
+                    hit = inner;
+                }
+                return WebInput.hitResult(ref, foundIn, target.x(), target.y(), offX == 0 && offY == 0 ? hit
+                        : hit.translated(offX, offY), iframeKey, iframeRect, null);
+            });
+        };
+    }
+
+    /**
+     * {@code web.pointer} (phase7-contracts.md sections 4.3 and 4.7): the agent's {@code web.browsers} read once more
+     * for the browser's modal state and visibility (a browser the agent reports blocked by a modal dialog is handed to
+     * the agent, which answers {@code MODAL_OPEN}, unless {@code force}); the library's {@code hit} at the point (a
+     * point outside the viewport is {@code NOT_FOUND} and nothing is sent); then the events of {@link WebInput#plan},
+     * each an {@code Input.dispatchMouseEvent} with {@link WebInput#mouseEvent}'s parameters on the path's own session
+     * of the page (D64's precedent; Playwright's {@code page.mouse()} is not used, D335), awaited in turn and never
+     * sent again; after a failure that follows a press, one release of that button. A component point is the agent's.
+     */
+    private Callable<Object> pointer(Session s, String primitive, Map<String, Object> p, long budgetMs, long deadline)
+            throws AgentRpcException, WebPathException {
+        WebInput.Pointer ptr;
+        try {
+            ptr = WebInput.pointer(p);
+        } catch (WebInput.Invalid e) {
+            throw Params.invalid(primitive, e.param(), e.getMessage());
+        }
+        if (ptr.target().component()) {
+            throw WebPathException.unsupported(COMPONENT_POINT);
+        }
+        int x = ptr.target().x();
+        int y = ptr.target().y();
+        return () -> {
+            Selection sel = select(s, p, deadline);
+            return onPw(s, primitive, sel, budgetMs, deadline, () -> {
+                Place at = place(s, sel, null);
+                refreshBrowsers(s, deadline);
+                String ref = refOf(s, at);
+                AgentBrowser browser = ref == null ? null : s.byRef.get(ref);
+                if (browser != null && browser.blocked() && !ptr.force()) {
+                    throw WebPathException.unsupported("a modal dialog blocks the window of browser " + ref
+                            + ": the agent answers web.pointer");
+                }
+                Map<String, Object> hit = null;
+                try {
+                    hit = hitIn(primitive, at.page().mainFrame(), x, y, ref).summary();
+                } catch (AgentRpcException e) {
+                    int code = e.error().code();
+                    if (code == ErrorCodes.NOT_FOUND || code == ErrorCodes.STALE_HANDLE) {
+                        throw e;
+                    }
+                } catch (PlaywrightException e) {
+                    if (targetClosed(e)) {
+                        throw e;
+                    }
+                }
+                if (x < 0 || y < 0) {
+                    throw Shapes.error(primitive, ErrorCodes.NOT_FOUND, "the point " + x + "," + y + " lies outside"
+                            + " the viewport or hits no element", Shapes.data("reason", "outside", "x", (long) x, "y",
+                            (long) y, "browser", ref));
+                }
+                CDPSession session = s.attach.sessionOnPw(at.page());
+                List<String> dispatched = new ArrayList<>();
+                WebInput.Step held = null;
+                try {
+                    for (WebInput.Step step : WebInput.plan(ptr)) {
+                        CdpAttach.send(session, WebInput.MOUSE_EVENT, WebInput.mouseEvent(step, x, y, ptr));
+                        dispatched.add(step.type());
+                        if (WebInput.PRESSED.equals(step.type())) {
+                            held = step;
+                        } else if (WebInput.RELEASED.equals(step.type())) {
+                            held = null;
+                        }
+                    }
+                } catch (RuntimeException e) {
+                    if (held != null) {
+                        try {
+                            CdpAttach.send(session, WebInput.MOUSE_EVENT, WebInput.mouseEvent(WebInput.RELEASED, x, y,
+                                    held.button(), Math.max(1, held.clickCount()), ptr.modifierBits(), 0, 0));
+                        } catch (RuntimeException ignored) {
+                            // the failure is what the call answers
+                        }
+                    }
+                    throw e;
+                }
+                return WebInput.pointerResult("PROTOCOL", x, y, dispatched, hit, browser == null
+                        || browser.visibleInSwing());
+            });
+        };
+    }
+
+    /** The library's {@code hit} in a frame, read and bounded as the agent reads it; call on the Playwright thread. */
+    private static WebInput.Hit hitIn(String primitive, Frame frame, int x, int y, String ref)
+            throws AgentRpcException {
+        String script = Scripts.call("hit", (long) x, (long) y);
+        Object raw;
+        try {
+            raw = frame.evaluate(script);
+        } catch (PlaywrightException e) {
+            if (!contextDestroyed(e)) {
+                throw e;
+            }
+            raw = frame.evaluate(script);
+        }
+        Object value = Shapes.library(primitive, raw, ref);
+        try {
+            return WebInput.hit(value);
+        } catch (WebInput.Malformed m) {
+            throw Shapes.error(primitive, ErrorCodes.INTERNAL_ERROR, m.getMessage() + " (browser " + ref + "; a page"
+                    + " may replace the script library)", Shapes.data("browser", ref));
+        }
+    }
+
+    /**
+     * The page's frames from {@code Page.getFrameTree} (key, parent, name, URL), main first; call only on the
+     * Playwright thread.
+     */
+    private static List<WebInput.Frame> frameList(Session s, Page page) {
+        Map<String, Object> tree = CdpAttach.send(s.attach.sessionOnPw(page), "Page.getFrameTree");
+        List<WebInput.Frame> out = new ArrayList<>();
+        if (tree.get("frameTree") instanceof Map<?, ?> root) {
+            collectFrames(root, null, out);
+        }
+        return out;
+    }
+
+    private static void collectFrames(Map<?, ?> node, String parent, List<WebInput.Frame> out) {
+        if (!(node.get("frame") instanceof Map<?, ?> f) || !(f.get("id") instanceof String id) || id.isEmpty()) {
+            return;
+        }
+        out.add(new WebInput.Frame(id, parent, f.get("name") instanceof String n ? n : "",
+                f.get("url") instanceof String u ? u : ""));
+        if (node.get("childFrames") instanceof List<?> children) {
+            for (Object child : children) {
+                if (child instanceof Map<?, ?> c) {
+                    collectFrames(c, id, out);
+                }
+            }
+        }
     }
 
     /** The parameters of {@code Emulation.setDeviceMetricsOverride} for {@code web.resize}, as the agent sends them. */

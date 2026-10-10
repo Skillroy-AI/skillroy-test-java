@@ -22,9 +22,9 @@ import java.util.Map;
 
 /**
  * What the browser index needs from the Swing tree (phase4-contracts.md section 4.1, step 2): the components that
- * can show a browser, and whether given components are showing. The production walk is {@link SwingSeeds}; tests
- * replace it with a fake walk. Typed with {@code Object} so that the index never names an AWT class (the module loads
- * none until AWT runs).
+ * can show a browser, and whether given components are showing; and what the input primitives need of one component
+ * (Phase 7). The production walk is {@link SwingSeeds}; tests replace it with a fake walk. Typed with {@code Object} so
+ * that the index never names an AWT class (the module loads none until AWT runs).
  *
  * <p>Implementations are thread-safe, called on agent workers, bounded by the given budget.
  */
@@ -46,4 +46,14 @@ interface SeedWalk {
      * @throws Exception when the bounded EDT read fails or times out
      */
     Map<Object, Boolean> showing(Collection<?> components, long budgetMs) throws Exception;
+
+    /**
+     * What {@code web.hitTest} and {@code web.pointer} need of a browser's component, in one bounded EDT read
+     * (phase7-contracts.md sections 4.3 and 4.8): whether it is showing, its size, its screen's scale and the modal
+     * dialog that blocks its window. An object that is not a component, and any object when no event-dispatch thread
+     * runs, is {@link ComponentState#UNKNOWN}.
+     *
+     * @throws Exception when the bounded EDT read fails or times out
+     */
+    ComponentState state(Object component, long budgetMs) throws Exception;
 }

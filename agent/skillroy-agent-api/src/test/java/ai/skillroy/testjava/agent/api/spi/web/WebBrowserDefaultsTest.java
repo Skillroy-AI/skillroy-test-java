@@ -43,7 +43,7 @@ import static org.junit.jupiter.api.Assertions.fail;
  * implements only the abstract methods, as an adapter built against the Phase 4 SPI does: {@code reload} evaluates
  * {@code location.reload()} in the main frame ({@code location.reload(true)} with {@code ignoreCache}), completes when
  * that evaluation answers, fails with its failure (also when {@code evaluate} throws), and cancelling it cancels the
- * evaluation; {@code bitmapSource()} is {@code VENDOR}.
+ * evaluation; {@code bitmapSource()} is {@code VENDOR}; {@code dispatchPointer} (A66) refuses without INPUT.
  */
 class WebBrowserDefaultsTest {
 
@@ -118,11 +118,29 @@ class WebBrowserDefaultsTest {
         assertSame(BitmapSource.VENDOR, new PlainBrowser().bitmapSource());
     }
 
+    /**
+     * A66 (phase7-contracts.md section 4.1): the default {@code dispatchPointer} has no INPUT; it fails with
+     * {@code UnsupportedOperationException} at once and touches nothing (no evaluation, also for a null event).
+     */
+    @Test
+    void theDefaultDispatchPointerRefusesWithoutTouchingTheBrowser() throws Exception {
+        PlainBrowser b = new PlainBrowser();
+        CompletableFuture<Void> f = b.dispatchPointer(WebPointerEvent.of(WebPointerEvent.Action.MOVE, 1, 2).build());
+        assertTrue(f.isDone(), "at once");
+        Throwable cause = cause(f);
+        assertTrue(cause instanceof UnsupportedOperationException, String.valueOf(cause));
+        assertTrue(cause.getMessage().contains("INPUT"), cause.getMessage());
+        assertTrue(cause(b.dispatchPointer(null)) instanceof UnsupportedOperationException);
+        assertTrue(b.evaluations.isEmpty(), "nothing was sent to the page");
+    }
+
     @Test
     void theDefaultsNeedNothingButTheAbstractMethods() {
-        // PlainBrowser declares neither method: an adapter built before A37 gets both defaults.
+        // PlainBrowser declares none of them: an adapter built before A37 and A66 gets every default.
         assertThrows(NoSuchMethodException.class, () -> PlainBrowser.class.getDeclaredMethod("reload", boolean.class));
         assertThrows(NoSuchMethodException.class, () -> PlainBrowser.class.getDeclaredMethod("bitmapSource"));
+        assertThrows(NoSuchMethodException.class, () -> PlainBrowser.class.getDeclaredMethod("dispatchPointer",
+                WebPointerEvent.class));
     }
 
     private static Throwable cause(CompletableFuture<?> f) throws Exception {

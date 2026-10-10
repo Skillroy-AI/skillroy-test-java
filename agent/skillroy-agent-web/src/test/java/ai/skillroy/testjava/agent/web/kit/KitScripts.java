@@ -86,6 +86,23 @@ public final class KitScripts {
     public static final String CONSOLE_FLOOD = "(function () { var s = new Array(1048577).join('x'); "
             + "for (var i = 0; i < 24; i++) { console.log(s); } return 24; })()";
 
+    /**
+     * Items 15 and 16 (Phase 7): the client rectangle {@code [x, y, w, h]} in whole CSS pixels of the main page's
+     * coloured block.
+     */
+    public static final String BLOCK_RECT = "(function () { var r = document.querySelector('.block')"
+            + ".getBoundingClientRect(); return [Math.round(r.left), Math.round(r.top), Math.round(r.width), "
+            + "Math.round(r.height)]; })()";
+    /** Item 16: the same of the main page's counting button. */
+    public static final String COUNT_RECT = "(function () { var r = document.getElementById('count')"
+            + ".getBoundingClientRect(); return [Math.round(r.left), Math.round(r.top), Math.round(r.width), "
+            + "Math.round(r.height)]; })()";
+    /**
+     * Item 16: what the counting button recorded, {@code "pointerdown:true,mousedown:true,mouseup:true,click:true"}
+     * after one trusted pointer click (each event's type and {@code isTrusted}); null before any.
+     */
+    public static final String POINTER_EVENTS = "document.getElementById('count').getAttribute('data-events')";
+
     private KitScripts() {
     }
 

@@ -100,7 +100,12 @@ class WebHostPagesTest {
             "console.log('webhost ' + page + ' item: ' + logged);", "win.webhostDiagnostics = function",
             "type.indexOf('webhost.') === 0", "Object.prototype.hasOwnProperty.call(win, 'dispatchEvent')",
             "'borrowed ' + detail.item + ' x ' + detail.qty", "qty.valueAsNumber", "e.preventDefault();",
-            "win.dispatchEvent(new CustomEvent(name, {detail: detail}));"}) {
+            "win.dispatchEvent(new CustomEvent(name, {detail: detail}));",
+            // Phase 7 (phase7-contracts.md 4.9): the pointer-event counter on the Borrow button.
+            "['pointerdown', 'mousedown', 'mouseup', 'click'].forEach(function (type) {",
+            "document.getElementById('borrow').addEventListener(type, function (e) {",
+            "pointerLog.push(type + ':' + e.isTrusted);", "win.webhostPointer = function () {",
+            "return pointerLog.join(',');"}) {
             assertTrue(front.contains(wiring), "the script contains " + wiring);
         }
     }
