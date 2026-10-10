@@ -17,6 +17,7 @@
 package ai.skillroy.testjava.inference.session;
 
 import ai.skillroy.testjava.controller.AgentLostException;
+import ai.skillroy.testjava.controller.AgentRpcException;
 import ai.skillroy.testjava.inference.budget.BudgetCaps;
 import ai.skillroy.testjava.inference.budget.BudgetException;
 import ai.skillroy.testjava.inference.budget.BudgetMeter;
@@ -35,6 +36,7 @@ import ai.skillroy.testjava.inference.spi.Message;
 import ai.skillroy.testjava.inference.spi.ModelClass;
 import ai.skillroy.testjava.inference.spi.ModelRequest;
 import ai.skillroy.testjava.inference.spi.ModelResponse;
+import ai.skillroy.testjava.inference.spi.Prompts;
 import ai.skillroy.testjava.inference.spi.ToolSpec;
 import ai.skillroy.testjava.inference.spi.Usage;
 import ai.skillroy.testjava.inference.tools.CallPolicy;
@@ -180,7 +182,36 @@ public final class SessionService implements AutoCloseable {
     private final InferenceSettings settings;
     private final Effort sessionEffort;
     private final Effort summaryEffort;
-    private final List<ToolSpec> tools;
+    /** The effort of a call made while a tool set applies (phase7-contracts.md 7.3: {@code effort.vision}, low). */
+    private final Effort visionEffort;
+    /** The tools offered: the projection's, then the applying tool sets', then {@code done} and {@code ask_person}. */
+    private List<ToolSpec> tools;
+    /** The projection's tools without {@code done} and {@code ask_person}. */
+    private final List<ToolSpec> baseTools;
+    /** The projection's {@code done} and {@code ask_person}, offered last. */
+    private final List<ToolSpec> finishTools;
+    /** The tool sets that apply in this session (phase7-contracts.md 9.1); emptied when a vision limit closes them. */
+    private final List<SessionTools> applied = new ArrayList<>();
+    /** Tool name to the applying tool set that answers it. */
+    private final Map<String, SessionTools> toolOwners = new LinkedHashMap<>();
+    private final SessionExtensions extensions;
+    private final Facade facade = new Facade();
+    private final SessionTools.SessionToolContext toolContext;
+    /** {@code vision.maxActions} (30) and {@code vision.maxTurns} (20), counted while a tool set applies (10). */
+    private final int maxVisionActions;
+    private final int maxVisionTurns;
+    private int visionActions;
+    private int visionTurns;
+    /** True once a tool set applied in this session (its limits keep counting the player's visual questions). */
+    private final boolean toolsApplied;
+    /** Why the tool sets were closed (a vision limit), or null while they apply or never did. */
+    private String toolsClosed;
+    /** A limit the facade met during the current tool call, or null. */
+    private String limitHit;
+    /** The turn's origin of the tool call being acted, or null outside one (the facade acts only within one). */
+    private Origin acting;
+    /** The current turn's usages, or null outside a turn. */
+    private List<Usage> turnUsages;
     private final Map<String, String> verbTools = new TreeMap<>();
     /**
      * Tool name to {verb, why} for every verb the policy would offer but whose calls, compiled with probe arguments,
@@ -190,7 +221,7 @@ public final class SessionService implements AutoCloseable {
     /** What the session's projection never offers ({@code ToolProjection.Policy.session}): the script primitives. */
     private final java.util.Set<String> excluded;
     private final Map<String, PrimitiveDescriptor> primitiveTools = new TreeMap<>();
-    private final List<Content> system;
+    private List<Content> system;
     private final List<Turn> turns = new ArrayList<>();
     /** The turns kept in full with their messages, oldest first. */
     private final List<Kept> history = new ArrayList<>();
@@ -211,6 +242,21 @@ public final class SessionService implements AutoCloseable {
      */
     public SessionService(ExecutorSession session, InferenceGateway gateway, SessionPolicy policy, BudgetMeter meter,
                           LedgerWriter ledger, PriceTable prices, Clock clock) {
+        this(session, gateway, policy, meter, ledger, prices, clock, SessionExtensions.none());
+    }
+
+    /**
+     * A service with the tool sets a host loaded (phase7-contracts.md 9.1, D302, D353): each is asked
+     * {@link SessionTools#applies} here and kept when it does (the others are closed); the service owns them and closes
+     * them with itself.
+     *
+     * @param extensions the host's tool sets and tool options; null is {@link SessionExtensions#none()}
+     * @throws IllegalArgumentException as the seven-argument constructor, or for a {@code vision.maxActions} or
+     *     {@code vision.maxTurns} that is not a whole number from 1 to 1000, or an {@code effort.vision} that is not
+     *     low, medium or high
+     */
+    public SessionService(ExecutorSession session, InferenceGateway gateway, SessionPolicy policy, BudgetMeter meter,
+                          LedgerWriter ledger, PriceTable prices, Clock clock, SessionExtensions extensions) {
         this.session = Objects.requireNonNull(session, "session");
         this.gateway = Objects.requireNonNull(gateway, "gateway");
         this.policy = Objects.requireNonNull(policy, "policy");
@@ -225,8 +271,13 @@ public final class SessionService implements AutoCloseable {
         this.settings = bound == null ? InferenceSettings.none() : bound;
         this.sessionEffort = effort(settings, "session", Effort.MEDIUM);
         this.summaryEffort = effort(settings, "summary", Effort.LOW);
+        this.visionEffort = effort(settings, PURPOSE_VISION, Effort.LOW);
+        this.extensions = extensions == null ? SessionExtensions.none() : extensions;
+        this.maxVisionActions = limit(this.extensions.options(), OPTION_MAX_ACTIONS, DEFAULT_MAX_ACTIONS);
+        this.maxVisionTurns = limit(this.extensions.options(), OPTION_MAX_TURNS, DEFAULT_MAX_TURNS);
+        // phase7-contracts.md 7.3: an image part passes the session's mask only under images: true.
         this.mask = PromptMask.of(session.options().bind().credentials().mask(), safe(pack::sqlAllowLists),
-                safe(pack::rowMasks));
+                safe(pack::rowMasks)).withImages(settings.images());
         meter.identify(session.id());
         List<PrimitiveDescriptor> primitives = new ArrayList<>(session.primitives().values());
         this.excluded = ToolProjection.Policy.session(policy.offersVerbs(), policy.offersBasePrimitives()).excluded();
@@ -245,6 +296,17 @@ public final class SessionService implements AutoCloseable {
                 offered.add(tool);
             }
         }
+        List<ToolSpec> base = new ArrayList<>();
+        List<ToolSpec> finish = new ArrayList<>();
+        for (ToolSpec tool : offered) {
+            if (tool.name().equals(WorkflowTools.DONE.name()) || tool.name().equals(WorkflowTools.ASK_PERSON.name())) {
+                finish.add(tool);
+            } else {
+                base.add(tool);
+            }
+        }
+        this.baseTools = List.copyOf(base);
+        this.finishTools = List.copyOf(finish);
         this.tools = List.copyOf(offered);
         for (PrimitiveDescriptor d : primitives) {
             String name;
@@ -259,7 +321,142 @@ public final class SessionService implements AutoCloseable {
                 }
             }
         }
-        this.system = List.of(Content.Text.of(INSTRUCTIONS + limits()), Content.Text.cached(vocabulary()));
+        this.toolContext = new SessionTools.SessionToolContext(facade, policy, mask, settings,
+                this.extensions.options(), session.options().robot(), this.clock);
+        for (SessionTools candidate : this.extensions.tools()) {
+            boolean applies;
+            try {
+                applies = candidate.applies(toolContext);
+            } catch (RuntimeException e) {
+                applies = false;
+            }
+            if (applies) {
+                applied.add(candidate);
+            } else {
+                closeQuietly(candidate);
+            }
+        }
+        this.toolsApplied = !applied.isEmpty();
+        this.tools = composeTools();
+        this.system = composeSystem();
+    }
+
+    /** The tool options' keys of the vision limits, and their defaults (phase7-contracts.md 10). */
+    public static final String OPTION_MAX_ACTIONS = "vision.maxActions";
+    /** See {@link #OPTION_MAX_ACTIONS}. */
+    public static final String OPTION_MAX_TURNS = "vision.maxTurns";
+    /** UI actions per session while a tool set applies. */
+    public static final int DEFAULT_MAX_ACTIONS = 30;
+    /** Model turns (calls) per session while a tool set applies. */
+    public static final int DEFAULT_MAX_TURNS = 20;
+    /** The purpose of a call made while a tool set applies, and of {@link #visionCall} (phase7-contracts.md 10). */
+    public static final String PURPOSE_VISION = CostLedger.Entry.PURPOSE_VISION;
+
+    private static int limit(Map<String, String> options, String key, int fallback) {
+        String text = options.get(key);
+        if (text == null || text.isBlank()) {
+            return fallback;
+        }
+        try {
+            int value = Integer.parseInt(text.strip());
+            if (value >= 1 && value <= 1000) {
+                return value;
+            }
+        } catch (NumberFormatException e) {
+            // reported below
+        }
+        throw new IllegalArgumentException(key + " must be a whole number from 1 to 1000");
+    }
+
+    /**
+     * The tools offered: the projection's (without {@code done} and {@code ask_person}), then every applying tool
+     * set's own (through the mask; a name that is taken already is left out), then {@code done} and
+     * {@code ask_person} (phase7-contracts.md 9.1).
+     */
+    private List<ToolSpec> composeTools() {
+        List<ToolSpec> out = new ArrayList<>(baseTools);
+        toolOwners.clear();
+        java.util.Set<String> names = new java.util.HashSet<>();
+        for (ToolSpec t : baseTools) {
+            names.add(t.name());
+        }
+        names.add(WorkflowTools.DONE.name());
+        names.add(WorkflowTools.ASK_PERSON.name());
+        for (SessionTools set : applied) {
+            List<ToolSpec> own;
+            try {
+                own = set.tools(toolContext);
+            } catch (RuntimeException e) {
+                own = List.of();
+            }
+            for (ToolSpec t : own == null ? List.<ToolSpec>of() : own) {
+                if (names.add(t.name())) {
+                    out.add(ToolProjection.masked(t, mask));
+                    toolOwners.put(t.name(), set);
+                }
+            }
+        }
+        out.addAll(finishTools);
+        return List.copyOf(out);
+    }
+
+    /**
+     * The system parts: the service's instructions and limits; while a tool set applies, each one's instructions and
+     * then the pack's screen legend (phase7-contracts.md 6.2, 12.3), each through the mask; the vocabulary last, with
+     * the cache breakpoint. Without a tool set exactly the Phase 5 parts (but for the reference sentence of 9.2).
+     */
+    private List<Content> composeSystem() {
+        List<Content> parts = new ArrayList<>();
+        parts.add(Content.Text.of(INSTRUCTIONS + limits()));
+        if (!applied.isEmpty()) {
+            for (SessionTools set : applied) {
+                String text;
+                try {
+                    text = set.instructions(toolContext);
+                } catch (RuntimeException e) {
+                    text = null;
+                }
+                if (text != null && !text.isBlank()) {
+                    parts.add(Content.Text.of(mask.text(text)));
+                }
+            }
+            String legend;
+            try {
+                legend = pack.screenLegend();
+            } catch (RuntimeException e) {
+                legend = null;
+            }
+            if (legend != null && !legend.isBlank()) {
+                parts.add(Content.Text.of(mask.text(LEGEND_HEADING + legend.strip())));
+            }
+        }
+        parts.add(Content.Text.cached(vocabulary()));
+        return List.copyOf(parts);
+    }
+
+    /** What the pack's screen legend is introduced with in the system parts (phase7-contracts.md 12.3). */
+    static final String LEGEND_HEADING = "The application's screen legend (the pack's description of its controls):\n";
+
+    private static void closeQuietly(SessionTools set) {
+        try {
+            set.close();
+        } catch (RuntimeException | LinkageError e) {
+            // A tool set that cannot close holds nothing the session needs.
+        }
+    }
+
+    /** The ids of the tool sets that apply in this session now (a host's start-up line reports them). */
+    public synchronized List<String> toolSets() {
+        List<String> ids = new ArrayList<>();
+        for (SessionTools set : applied) {
+            ids.add(set.id());
+        }
+        return List.copyOf(ids);
+    }
+
+    /** Why the tool sets were closed (a vision limit), or null while they apply or when none ever did. */
+    public synchronized String toolSetsClosed() {
+        return toolsClosed;
     }
 
     private static <T> List<T> safe(java.util.function.Supplier<List<T>> list) {
@@ -325,11 +522,23 @@ public final class SessionService implements AutoCloseable {
         turn.add(Message.user(Content.Text.of(mask.block("person", text))));
         Turn.Outcome outcome;
         String answer;
+        turnUsages = usages;
         try {
             fold(usages);
+            if (!applied.isEmpty()) {
+                // phase7-contracts.md 9.1: every applying tool set's atTurnStart parts in the turn's first message.
+                List<Content> first = new ArrayList<>(turn.get(0).parts());
+                for (SessionTools set : List.copyOf(applied)) {
+                    first.addAll(toolParts(set.atTurnStart(toolContext)));
+                }
+                turn.set(0, new Message(Message.Role.USER, first));
+            }
             Loop loop = loop(turn, actions, usages);
             outcome = loop.outcome;
             answer = loop.answer;
+        } catch (ToolPartsException e) {
+            outcome = Turn.Outcome.QUESTION;
+            answer = e.getMessage();
         } catch (BudgetException e) {
             meter.markExhausted();
             outcome = Turn.Outcome.BUDGET;
@@ -338,9 +547,32 @@ public final class SessionService implements AutoCloseable {
         } catch (AgentLostException e) {
             outcome = Turn.Outcome.LOST;
             answer = "The agent was lost: " + mask.text(String.valueOf(e.getMessage()));
+        } finally {
+            turnUsages = null;
+            acting = null;
         }
         recordBudget(usages);
         return finish(new Turn(index, text, actions, answer, outcome, total(usages), elapsed(t0)), turn);
+    }
+
+    /** A tool set's parts that cannot go into a request (an image while images are off): the turn ends. */
+    private static final class ToolPartsException extends RuntimeException {
+        ToolPartsException(String message) {
+            super(message, null, false, false);
+        }
+    }
+
+    /** A tool set's parts through the session's mask; an image while images are off ends the turn. */
+    private List<Content> toolParts(List<Content> parts) {
+        if (parts == null || parts.isEmpty()) {
+            return List.of();
+        }
+        try {
+            return mask.parts(parts);
+        } catch (IllegalStateException e) {
+            throw new ToolPartsException("A tool set offered an image while images are off (inference.yaml images:"
+                    + " false); nothing was sent. Ask again without it.");
+        }
     }
 
     /**
@@ -432,10 +664,37 @@ public final class SessionService implements AutoCloseable {
         }
     }
 
-    /** Ends the service; closes nothing of the session. Idempotent. */
+    /** Ends the service and closes its tool sets; closes nothing of the session. Idempotent. */
     @Override
     public synchronized void close() {
         closed = true;
+        for (SessionTools set : applied) {
+            closeQuietly(set);
+        }
+        applied.clear();
+    }
+
+    /**
+     * Closes the tool sets for the rest of the session at a vision limit (phase7-contracts.md 9.1, 10): {@link #tools()}
+     * lists none of theirs afterwards and the system text tells the model why.
+     */
+    private void closeTools(String reason) {
+        if (applied.isEmpty()) {
+            return;
+        }
+        for (SessionTools set : applied) {
+            closeQuietly(set);
+        }
+        applied.clear();
+        toolsClosed = reason;
+        tools = composeTools();
+        system = composeSystem();
+    }
+
+    /** The reason a vision limit gives. */
+    private String limitReason(String what, int limit) {
+        return "The session's limit of " + limit + " " + what + " for the vision tools was reached; they are closed for"
+                + " the rest of this session. Act through the session yourself, or export it.";
     }
 
     // ------------------------------------------------------------------------------------------------ the loop
@@ -449,9 +708,16 @@ public final class SessionService implements AutoCloseable {
 
     private Loop loop(List<Message> turn, List<Turn.Action> actions, List<Usage> usages)
             throws BudgetException, AgentLostException, InterruptedException {
+        // What counts against maxActionsPerTurn: every action but a tool set's read (phase7-contracts.md 9.1).
+        int counted = 0;
         while (true) {
-            if (actions.size() >= policy.maxActionsPerTurn()) {
+            if (counted >= policy.maxActionsPerTurn()) {
                 return new Loop(Turn.Outcome.LIMIT, limitAnswer(actions));
+            }
+            if (!applied.isEmpty() && visionTurns >= maxVisionTurns) {
+                String reason = limitReason("model turns", maxVisionTurns);
+                closeTools(reason);
+                return new Loop(Turn.Outcome.LIMIT, reason);
             }
             ModelResponse response;
             try {
@@ -497,9 +763,9 @@ public final class SessionService implements AutoCloseable {
                     end = new Loop(Turn.Outcome.QUESTION, mask.text(text(use.input().get("question"))));
                     continue;
                 }
-                if (actions.size() >= policy.maxActionsPerTurn()) {
+                if (counted >= policy.maxActionsPerTurn()) {
                     results.add(new Content.ToolResult(use.id(), "not run: the action limit of "
-                            + policy.maxActionsPerTurn() + " actions per turn was reached", true));
+                            + policy.maxActionsPerTurn() + " actions per turn was reached", true, use.toolsetName()));
                     end = new Loop(Turn.Outcome.LIMIT, limitAnswer(actions));
                     continue;
                 }
@@ -508,10 +774,34 @@ public final class SessionService implements AutoCloseable {
                 intent.setLength(0);
                 Result result = act(use, origin);
                 actions.add(new Turn.Action(use.name(), maskedInput(use.input()), result.step, result.text));
-                results.add(new Content.ToolResult(use.id(), result.text, result.error));
+                if (result.part != null) {
+                    results.add(result.part);
+                } else {
+                    results.add(new Content.ToolResult(use.id(), result.text, result.error, use.toolsetName()));
+                }
+                if (!result.toolRead) {
+                    counted++;
+                }
                 if (result.lost != null) {
                     turn.add(new Message(Message.Role.USER, results));
                     throw result.lost;
+                }
+                if (limitHit != null) {
+                    // phase7-contracts.md 9.1, 10: a vision limit ends the turn and closes the tool sets.
+                    String reason = limitHit;
+                    limitHit = null;
+                    closeTools(reason);
+                    end = new Loop(Turn.Outcome.LIMIT, reason);
+                } else if (result.endTurn != null && result.endTurn != SessionTools.EndTurn.NONE) {
+                    String reason = mask.text(result.endReason == null ? "" : result.endReason);
+                    end = new Loop(result.endTurn == SessionTools.EndTurn.QUESTION ? Turn.Outcome.QUESTION
+                            : Turn.Outcome.LIMIT, reason);
+                }
+            }
+            if (end == null && !applied.isEmpty()) {
+                // phase7-contracts.md 9.1: every applying tool set's afterBatch parts after the batch's results.
+                for (SessionTools set : List.copyOf(applied)) {
+                    results.addAll(toolParts(set.afterBatch(toolContext)));
                 }
             }
             turn.add(new Message(Message.Role.USER, results));
@@ -558,10 +848,95 @@ public final class SessionService implements AutoCloseable {
     /** One model call of the turn: the estimate reserved, the call, its record. */
     private ModelResponse call(List<Message> messages, List<Usage> usages)
             throws BudgetException, InferenceException, InterruptedException {
-        ModelRequest request = ModelRequest.builder(PURPOSE, ModelClass.SONNET_CLASS).effort(sessionEffort)
-                .maxTokens(MAX_TOKENS).cache(CacheHint.SHORT).system(system.get(0)).system(system.get(1))
-                .messages(messages).tools(tools).metadata(META_SESSION, session.id()).build();
-        return complete(request, usages, model(ModelClass.SONNET_CLASS));
+        if (applied.isEmpty()) {
+            ModelRequest.Builder request = ModelRequest.builder(PURPOSE, ModelClass.SONNET_CLASS).effort(sessionEffort)
+                    .maxTokens(MAX_TOKENS).cache(CacheHint.SHORT);
+            system.forEach(request::system);
+            return complete(request.messages(messages).tools(tools).metadata(META_SESSION, session.id()).build(),
+                    usages, model(ModelClass.SONNET_CLASS));
+        }
+        // phase7-contracts.md 6.2, 9.1: while a tool set applies, purpose vision, the tool set's model class,
+        // effort.vision, the automatic cache hint and the tool sets' provider tools; one of the session's vision turns.
+        ModelClass modelClass = ModelClass.SONNET_CLASS;
+        try {
+            modelClass = applied.get(0).modelClass(toolContext);
+        } catch (RuntimeException e) {
+            // the default class
+        }
+        ModelRequest.Builder request = ModelRequest.builder(PURPOSE_VISION, modelClass == null
+                ? ModelClass.SONNET_CLASS : modelClass).effort(visionEffort).maxTokens(MAX_TOKENS).cache(CacheHint.AUTO);
+        system.forEach(request::system);
+        for (SessionTools set : applied) {
+            try {
+                request.providerTools(set.providerTools(toolContext));
+            } catch (RuntimeException e) {
+                // a tool set that cannot list its provider tools offers none
+            }
+        }
+        ModelRequest built = request.messages(messages).tools(tools).metadata(META_SESSION, session.id()).build();
+        visionTurns++;
+        return complete(built, usages, model(built.modelClass()));
+    }
+
+    /**
+     * One model call of a tool set or the scenario player (phase7-contracts.md 9.1, 10; decision D353): the purpose
+     * forced to {@code vision}, the request's parts through the session's mask, the estimate of 7.5 reserved on the
+     * session meter before, the {@link LedgerWriter} after (a failed call recorded too, D102). While a tool set applies
+     * in the session (or once one did) it is one of the session's {@code vision.maxTurns} model turns; at that limit
+     * it is refused ({@code UNSUPPORTED}, nothing sent) and the tool sets are closed at the end of the tool call. What
+     * the facade's {@code complete} and the player's {@code aiExpect} use; the module never opens a gateway.
+     *
+     * @throws BudgetException when the session meter has no room for the call
+     * @throws InferenceException when the gateway fails, or at the vision turn limit
+     * @throws InterruptedException if the thread is interrupted
+     * @throws IllegalStateException after {@link #close()}
+     */
+    public synchronized ModelResponse visionCall(ModelRequest request)
+            throws BudgetException, InferenceException, InterruptedException {
+        Objects.requireNonNull(request, "request");
+        if (closed) {
+            throw new IllegalStateException("the session service is closed");
+        }
+        if (toolsApplied) {
+            if (toolsClosed != null || visionTurns >= maxVisionTurns) {
+                String reason = toolsClosed != null ? toolsClosed : limitReason("model turns", maxVisionTurns);
+                if (acting != null) {
+                    limitHit = reason;
+                }
+                throw new InferenceException(InferenceException.Kind.UNSUPPORTED, reason);
+            }
+            visionTurns++;
+        }
+        List<Message> messages = new ArrayList<>();
+        for (Message m : request.messages()) {
+            messages.add(new Message(m.role(), maskedParts(m.parts())));
+        }
+        Map<String, String> metadata = new LinkedHashMap<>(request.metadata());
+        metadata.put(META_SESSION, session.id());
+        ModelRequest vision = new ModelRequest(PURPOSE_VISION, request.modelClass(), request.effort(),
+                request.maxTokens(), request.cache(), maskedParts(request.system()), messages, request.tools(),
+                request.outputSchema(), metadata, request.providerTools());
+        List<Usage> usages = turnUsages != null ? turnUsages : new ArrayList<>();
+        try {
+            return complete(vision, usages, model(vision.modelClass()));
+        } catch (BudgetException e) {
+            meter.markExhausted();
+            throw e;
+        } finally {
+            if (turnUsages == null) {
+                recordBudget(usages);
+            }
+        }
+    }
+
+    /** Parts through the session's mask; an image while images are off is {@code UNSUPPORTED}. */
+    private List<Content> maskedParts(List<Content> parts) throws InferenceException {
+        try {
+            return mask.parts(parts);
+        } catch (IllegalStateException e) {
+            throw new InferenceException(InferenceException.Kind.UNSUPPORTED, "an image part is not sent while images"
+                    + " are off (inference.yaml images: false)");
+        }
     }
 
     /** The model id the settings give a class (the gateway's mapping), for the estimate before a call. */
@@ -619,7 +994,10 @@ public final class SessionService implements AutoCloseable {
         return response;
     }
 
-    /** The estimate of a call (7.2): the gateway's token count, else text length / 4, plus its maximum answer. */
+    /**
+     * The estimate of a call (7.2): the gateway's token count, else text length / 4 plus each image's tokens
+     * (phase7-contracts.md 7.5), plus its maximum answer.
+     */
     private BigDecimal estimate(ModelRequest request, String model) {
         long input = -1;
         if (gateway.capabilities().contains(GatewayCapability.TOKEN_COUNT)) {
@@ -631,27 +1009,53 @@ public final class SessionService implements AutoCloseable {
         }
         if (input < 0) {
             long chars = 0;
+            long images = 0;
             for (Content part : request.system()) {
                 chars += part instanceof Content.Text t ? t.text().length() : 0;
             }
             for (Message m : request.messages()) {
                 for (Content part : m.parts()) {
-                    chars += part instanceof Content.Text t ? t.text().length()
-                            : part instanceof Content.ToolResult r ? String.valueOf(r.content()).length() : 0;
+                    if (part instanceof Content.Text t) {
+                        chars += t.text().length();
+                    } else if (part instanceof Content.Image i) {
+                        images += Prompts.imageTokens(i.bytes());
+                    } else if (part instanceof Content.ToolResult r && r.parts() != null) {
+                        for (Content nested : r.parts()) {
+                            if (nested instanceof Content.Text t) {
+                                chars += t.text().length();
+                            } else if (nested instanceof Content.Image i) {
+                                images += Prompts.imageTokens(i.bytes());
+                            }
+                        }
+                    } else if (part instanceof Content.ToolResult r) {
+                        chars += String.valueOf(r.content()).length();
+                    }
                 }
             }
             for (ToolSpec tool : request.tools()) {
                 chars += tool.description().length() + Json.write(tool.inputSchema()).length();
             }
-            input = chars / 4;
+            for (ai.skillroy.testjava.inference.spi.ProviderTool tool : request.providerTools()) {
+                chars += Json.write(tool.raw()).length();
+            }
+            // phase7-contracts.md 7.5 (D324): ceil(w / 28) * ceil(h / 28) tokens per image, read from its header.
+            input = chars / 4 + images;
         }
         return prices.estimate(model, input, request.maxTokens(), false);
     }
 
     // ------------------------------------------------------------------------------------------------ actions
 
-    /** What one action gave the model. */
-    private record Result(String text, boolean error, StepOutcome step, AgentLostException lost) {
+    /**
+     * What one action gave the model: a text result, or (a tool set's call) the tool's own result part; whether it was
+     * a tool set's read (which does not count against {@code maxActionsPerTurn}); how the turn goes on.
+     */
+    private record Result(String text, boolean error, StepOutcome step, AgentLostException lost, Content.ToolResult part,
+                          boolean toolRead, SessionTools.EndTurn endTurn, String endReason) {
+
+        Result(String text, boolean error, StepOutcome step, AgentLostException lost) {
+            this(text, error, step, lost, null, false, null, null);
+        }
 
         static Result ok(String text) {
             return new Result(text, false, null, null);
@@ -731,8 +1135,26 @@ public final class SessionService implements AutoCloseable {
             }
             PrimitiveDescriptor primitive = primitiveTools.get(name);
             if (primitive != null) {
+                // phase7-contracts.md 9.1 (D347): CallPolicy's arguments on the raw primitive route too, refused, never
+                // stripped; nothing journaled, nothing sent.
+                String why = CallPolicy.arguments(primitive.name(), in, false);
+                if (why != null) {
+                    return Result.error(mask.text("tool " + name + " is refused, nothing ran: " + why));
+                }
                 long timeout = Math.max(PRIMITIVE_TIMEOUT_FLOOR_MS, primitive.timeoutMs());
                 return step(session.execute(new PlannedCall(primitive.name(), in, Sync.NONE, timeout), origin));
+            }
+            SessionTools owner = toolOwners.get(name);
+            if (owner == null) {
+                for (SessionTools set : applied) {
+                    if (set.handles(name)) {
+                        owner = set;
+                        break;
+                    }
+                }
+            }
+            if (owner != null && applied.contains(owner)) {
+                return toolAct(owner, use, origin);
             }
             return Result.error("there is no tool " + name + " in this session");
         } catch (AgentLostException e) {
@@ -740,6 +1162,56 @@ public final class SessionService implements AutoCloseable {
         } catch (IllegalArgumentException | IllegalStateException e) {
             return Result.error(mask.text(String.valueOf(e.getMessage())));
         }
+    }
+
+    /**
+     * A tool set's call (phase7-contracts.md 9.1): acted with the turn's origin fixed for the facade; the tool's result
+     * through the mask; its step, if any, counted.
+     */
+    private Result toolAct(SessionTools owner, Content.ToolUse use, Origin origin) throws InterruptedException {
+        acting = origin;
+        SessionTools.Outcome outcome;
+        try {
+            outcome = owner.act(use, toolContext);
+        } catch (AgentLostException e) {
+            return new Result("the agent was lost", true, null, e, null, false, null, null);
+        } catch (RuntimeException e) {
+            return new Result(mask.text("the tool " + use.name() + " failed: " + e.getClass().getSimpleName()
+                    + (e.getMessage() == null ? "" : ": " + e.getMessage())), true, null, null, null, true, null,
+                    null);
+        } finally {
+            acting = null;
+        }
+        Content.ToolResult given = outcome.result();
+        Content.ToolResult part;
+        try {
+            part = (Content.ToolResult) mask.part(new Content.ToolResult(use.id(), given.content(), given.error(),
+                    given.toolsetName() != null ? given.toolsetName() : use.toolsetName()));
+        } catch (IllegalStateException e) {
+            part = new Content.ToolResult(use.id(), "the result held an image while images are off; nothing was sent",
+                    true, use.toolsetName());
+        }
+        AgentLostException lost = null;
+        String text = resultText(part);
+        return new Result(text, part.error(), outcome.step(), lost, part, outcome.step() == null, outcome.endTurn(),
+                outcome.reason());
+    }
+
+    /** A result's text as a turn's action records it: the text, or a parts list's texts with its images named. */
+    private static String resultText(Content.ToolResult result) {
+        List<Content> parts = result.parts();
+        if (parts == null) {
+            return result.content() instanceof String s ? s : Json.write(result.content() == null ? Map.of()
+                    : result.content());
+        }
+        StringBuilder out = new StringBuilder();
+        for (Content p : parts) {
+            if (out.length() > 0) {
+                out.append('\n');
+            }
+            out.append(p instanceof Content.Text t ? t.text() : "[image " + ((Content.Image) p).sha256() + "]");
+        }
+        return out.toString();
     }
 
     private Result resolveTool(Map<String, Object> in, Origin origin) throws AgentLostException, InterruptedException {
@@ -880,6 +1352,171 @@ public final class SessionService implements AutoCloseable {
         return out;
     }
 
+    // ------------------------------------------------------------------------------------------------ the facade
+
+    /** The keys of {@code swing.key} that do not print a character (phase7-contracts.md 9.2: a printable press). */
+    private static final java.util.Set<String> NON_PRINTING_KEYS = java.util.Set.of("ENTER", "TAB", "ESCAPE", "ESC",
+            "BACK_SPACE", "BACKSPACE", "DELETE", "INSERT", "UP", "DOWN", "LEFT", "RIGHT", "HOME", "END", "PAGE_UP",
+            "PAGE_DOWN", "SHIFT", "CONTROL", "CTRL", "ALT", "ALT_GRAPH", "META", "WINDOWS", "CONTEXT_MENU",
+            "CAPS_LOCK", "NUM_LOCK", "SCROLL_LOCK", "PAUSE", "PRINTSCREEN", "CANCEL", "CLEAR", "KP_UP", "KP_DOWN",
+            "KP_LEFT", "KP_RIGHT");
+
+    /** True when a {@code press} or {@code swing.key} of this key prints a character (no F-key, arrow or modifier). */
+    static boolean printingKey(Object key, Object modifiers) {
+        if (!(key instanceof String k) || k.isBlank()) {
+            return false;
+        }
+        String name = k.strip().toUpperCase(java.util.Locale.ROOT);
+        if (name.startsWith("VK_")) {
+            name = name.substring(3);
+        }
+        if (NON_PRINTING_KEYS.contains(name) || name.matches("F[0-9]{1,2}")) {
+            return false;
+        }
+        if (modifiers instanceof List<?> mods) {
+            for (Object m : mods) {
+                String mod = String.valueOf(m).toUpperCase(java.util.Locale.ROOT);
+                if (mod.contains("CTRL") || mod.contains("CONTROL") || mod.contains("ALT") || mod.contains("META")) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    /**
+     * The facade of phase7-contracts.md 9.1 (D353): the one way a tool set reaches the session. Every call runs within
+     * a tool call of the current turn ({@link #acting}), with its origin; {@code CallPolicy} with the host's robot flag
+     * on every call; the credential rule's facade half; the vision action limit; every model call through
+     * {@link #visionCall}.
+     */
+    private final class Facade implements SessionActions {
+
+        private Origin origin(String what) {
+            if (acting == null) {
+                throw new IllegalArgumentException(what + " is refused: the facade acts only within a tool call of a"
+                        + " turn");
+            }
+            return acting;
+        }
+
+        @Override
+        public StepOutcome execute(String verb, Object args, Map<String, Object> provenance)
+                throws AgentLostException, InterruptedException {
+            Objects.requireNonNull(verb, "verb");
+            Origin origin = origin("verb " + verb);
+            Map<?, ?> given = args instanceof Map<?, ?> m ? m : Map.of();
+            if (session.secretsInFlight() && ("type".equals(verb) || "press".equals(verb)
+                    && printingKey(given.get("key"), given.get("modifiers")))) {
+                throw new IllegalArgumentException("verb " + verb + " is refused, nothing ran: a credential is in"
+                        + " flight; the person signs on first");
+            }
+            if ("type".equals(verb) && given.get("text") instanceof String typed && mask.holdsSecret(typed)) {
+                throw new IllegalArgumentException("verb type is refused, nothing ran: a credential is never used on a"
+                        + " model's behalf; the person signs on first");
+            }
+            ExecutorSession.Compiled compiled = session.compile(verb, args, origin);
+            if (compiled.refusal() == null) {
+                List<String> refusals = CallPolicy.refusals(session.primitives(), judged(compiled.calls()),
+                        judged(compiled.cleanup()), excluded, toolContext.robotAllowed());
+                if (!refusals.isEmpty()) {
+                    throw new IllegalArgumentException(mask.text("verb " + verb + " is refused with these arguments,"
+                            + " nothing ran: " + String.join("; ", refusals)));
+                }
+            }
+            countAction("verb " + verb);
+            return session.execute(verb, args, origin, provenance);
+        }
+
+        @Override
+        public StepOutcome execute(PlannedCall call, Map<String, Object> provenance)
+                throws AgentLostException, InterruptedException {
+            Objects.requireNonNull(call, "call");
+            Origin origin = origin(call.primitive());
+            String why = CallPolicy.never(session.primitives().get(call.primitive()), call.primitive(), excluded);
+            if (why == null) {
+                why = CallPolicy.arguments(call.primitive(), call.args(), toolContext.robotAllowed());
+            }
+            if (why == null && ("swing.type".equals(call.primitive()) || "swing.key".equals(call.primitive()))) {
+                if (session.secretsInFlight()) {
+                    why = "a credential is in flight; the person signs on first";
+                } else if (call.args().get("text") instanceof String typed && mask.holdsSecret(typed)) {
+                    why = "a credential is never used on a model's behalf; the person signs on first";
+                }
+            }
+            if (why != null) {
+                throw new IllegalArgumentException(mask.text(call.primitive() + " is refused, nothing ran: " + why));
+            }
+            countAction(call.primitive());
+            return session.execute(call, origin, provenance);
+        }
+
+        /** One UI action against {@code vision.maxActions}; at the limit the call is refused and the turn ends. */
+        private void countAction(String what) {
+            if (visionActions >= maxVisionActions) {
+                limitHit = limitReason("UI actions", maxVisionActions);
+                throw new IllegalArgumentException(what + " is refused, nothing ran: " + limitHit);
+            }
+            visionActions++;
+        }
+
+        @Override
+        public Object read(String primitive, Map<String, Object> args)
+                throws AgentRpcException, AgentLostException, InterruptedException {
+            Objects.requireNonNull(primitive, "primitive");
+            Map<String, Object> params = args == null ? Map.of() : args;
+            PrimitiveDescriptor d = session.primitives().get(primitive);
+            String why = CallPolicy.never(d, primitive, excluded);
+            if (why == null && d == null) {
+                why = primitive + " is not in the target's catalogue";
+            }
+            if (why == null && (d.mutating() || d.destructive())) {
+                why = primitive + " changes the target: a read serves no mutating or destructive primitive";
+            }
+            if (why == null && (d.script() || ToolProjection.DATA_QUERY.equals(primitive))) {
+                why = primitive + " is not served by a read";
+            }
+            if (why == null && "swing.capture".equals(primitive)) {
+                Object mode = params.get("mode");
+                if (mode != null && "ROBOT".equalsIgnoreCase(String.valueOf(mode).strip())) {
+                    why = "swing.capture {mode: ROBOT} is a person's evidence: never a read";
+                } else if (params.containsKey("redact") && !Boolean.TRUE.equals(params.get("redact"))) {
+                    why = "swing.capture {redact: false} is a person's call: never a read";
+                }
+            }
+            if (why != null) {
+                throw new IllegalArgumentException("read " + primitive + " is refused, nothing sent: " + why);
+            }
+            return session.read(primitive, params);
+        }
+
+        @Override
+        public ModelResponse complete(ModelRequest request)
+                throws BudgetException, InferenceException, InterruptedException {
+            return visionCall(request);
+        }
+
+        @Override
+        public ai.skillroy.testjava.controller.CapabilityMatrix capabilities() {
+            return session.capabilities();
+        }
+
+        @Override
+        public String snapshotText(int maxChars) throws AgentLostException, InterruptedException {
+            return session.snapshotText(maxChars);
+        }
+
+        @Override
+        public List<Event> eventsSince(long seq, String topics, int max) {
+            return session.eventsSince(seq, topics, max);
+        }
+
+        @Override
+        public boolean secretsInFlight() {
+            return session.secretsInFlight();
+        }
+    }
+
     // ------------------------------------------------------------------------------------------------ history
 
     /** Folds the turns beyond {@code maxHistoryTurns} into the summary, with one {@code summary} call. */
@@ -988,6 +1625,10 @@ public final class SessionService implements AutoCloseable {
             names.add(tool.name());
         }
         text.append("The tools: ").append(String.join(", ", names)).append(".\n");
+        if (toolsClosed != null) {
+            // phase7-contracts.md 9.1, 10: the model is told why the tool sets' tools are gone.
+            text.append(mask.text(toolsClosed)).append('\n');
+        }
         return text.toString();
     }
 

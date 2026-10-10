@@ -317,6 +317,124 @@ class ClaudeGatewayTest {
         assertEquals("image/png", at(fake.last().json(), "messages", 0, "content", 1, "source", "media_type"));
     }
 
+    // ------------------------------------------------------------------------------------------------ Phase 7
+
+    /** A tiny PNG's bytes stand-in (the gateway sends them as base64; nothing decodes them here). */
+    private static final byte[] PIXELS = {(byte) 0x89, 'P', 'N', 'G', 1, 2, 3};
+
+    /**
+     * phase7-contracts.md 7.1 (D318), 13.1 item 7: a provider tool of provider {@code claude} becomes the computer
+     * toolset entry with its {@code configs} beside the request's own tools, tool choice {@code auto}; the gateway
+     * declares {@code PROVIDER_TOOLS}; another provider's entry is {@code INVALID_REQUEST} with nothing sent; the token
+     * count's body carries the entry too.
+     */
+    @Test
+    void aProviderToolBecomesTheToolsetEntryWithItsConfigs() throws Exception {
+        ModelRequest r = request().tool(new ToolSpec("capture", "a fresh capture", Map.of("type", "object",
+                        "properties", Map.of(), "required", List.of(), "additionalProperties", false), true, false))
+                .providerTool(ai.skillroy.testjava.inference.spi.ProviderTool.computerToolset(false)).build();
+        try (ClaudeGateway g = gateway()) {
+            assertTrue(g.capabilities().contains(GatewayCapability.PROVIDER_TOOLS));
+            g.complete(r);
+            Map<String, Object> body = fake.last().json();
+            List<Map<String, Object>> tools = at(body, "tools");
+            assertEquals(2, tools.size(), "the request's tool and the toolset: " + tools);
+            assertEquals("capture", at(body, "tools", 0, "name"));
+            assertEquals("computer_toolset_20260801", at(body, "tools", 1, "type"));
+            assertEquals(Map.of("enabled", false), at(body, "tools", 1, "configs", "zoom"), "zoom off by default");
+            assertEquals(Map.of("type", "auto"), body.get("tool_choice"));
+            assertEquals("default", body.get("fallbacks"), "the fallback header as today (7.1)");
+
+            fake.answer(Answer.json("{\"input_tokens\":5000}"));
+            assertEquals(5000, g.countTokens(r));
+            assertEquals("computer_toolset_20260801", at(fake.last().json(), "tools", 1, "type"),
+                    "the token count's body carries the toolset");
+
+            int before = fake.seen().size();
+            ModelRequest other = request().providerTool(new ai.skillroy.testjava.inference.spi.ProviderTool(
+                    "another", "browser_20260801", Map.of())).build();
+            assertEquals(Kind.INVALID_REQUEST, assertThrows(InferenceException.class, () -> g.complete(other))
+                    .kind());
+            assertEquals(before, fake.seen().size(), "nothing was sent");
+        }
+        ModelRequest toolsetOnly = ModelRequest.builder("vision", ModelClass.SONNET_CLASS).message(Message.user("go"))
+                .providerTool(ai.skillroy.testjava.inference.spi.ProviderTool.computerToolset(true)).build();
+        try (ClaudeGateway g = gateway()) {
+            g.complete(toolsetOnly);
+        }
+        assertEquals(Map.of("type", "auto"), fake.last().json().get("tool_choice"), "a toolset alone has tools too");
+        assertEquals(Map.of("enabled", true), at(fake.last().json(), "tools", 0, "configs", "zoom"));
+    }
+
+    /**
+     * phase7-contracts.md 7.2 (D319, D320), 13.1 item 7: {@code toolset_name} is read back from a {@code tool_use}
+     * block and sent on the echoed tool use and on the tool result; a parts-list result goes out as content blocks,
+     * the image as base64 while images are on and refused ({@code UNSUPPORTED}, nothing sent) while they are off.
+     */
+    @Test
+    void theToolsetNameTravelsBothWaysAndAPartsResultIsContentBlocks() throws Exception {
+        fake.answer(Answer.json(FakeAnthropic.message("tool_use", "[{\"type\":\"tool_use\",\"id\":\"toolu_3\","
+                + "\"name\":\"left_click\",\"input\":{\"coordinate\":[412,288]},\"toolset_name\":\"computer\"}]",
+                "{}")));
+        Content.ToolUse use;
+        try (ClaudeGateway g = gateway(false, true, 10_000, null)) {
+            ModelResponse response = g.complete(request().build());
+            use = response.toolUses().get(0);
+            assertEquals("computer", use.toolsetName(), "read back from the block");
+            assertEquals("left_click", use.name());
+            Content.ToolResult result = new Content.ToolResult("toolu_3", List.of(Content.Text.of("clicked"),
+                    new Content.Image("image/png", PIXELS, null)), false, "computer");
+            g.complete(request().message(Message.assistant(List.of(use))).message(Message.user(result)).build());
+        }
+        Map<String, Object> body = fake.last().json();
+        assertEquals("computer", at(body, "messages", 1, "content", 0, "toolset_name"), "on the echoed tool use");
+        assertEquals("computer", at(body, "messages", 2, "content", 0, "toolset_name"), "on the tool result");
+        assertEquals("text", at(body, "messages", 2, "content", 0, "content", 0, "type"));
+        assertEquals("clicked", at(body, "messages", 2, "content", 0, "content", 0, "text"));
+        assertEquals("image", at(body, "messages", 2, "content", 0, "content", 1, "type"));
+        assertEquals(Base64.getEncoder().encodeToString(PIXELS), at(body, "messages", 2, "content", 0, "content", 1,
+                "source", "data"));
+        assertFalse(at(body, "messages", 0, "content", 0) instanceof Map<?, ?> m && m.containsKey("toolset_name"),
+                "a plain part carries none");
+
+        Content.ToolResult imageResult = new Content.ToolResult("toolu_3", List.of(new Content.Image("image/png",
+                PIXELS, null)), false, "computer");
+        try (ClaudeGateway off = gateway(false, false, 10_000, null)) {
+            int before = fake.seen().size();
+            assertEquals(Kind.UNSUPPORTED, assertThrows(InferenceException.class, () -> off.complete(request()
+                    .message(Message.assistant(List.of(use))).message(Message.user(imageResult)).build())).kind());
+            assertEquals(before, fake.seen().size(), "nothing was sent");
+        }
+    }
+
+    /** phase7-contracts.md 7.2 (D320): an error result carries text only, refused at construction with an image. */
+    @Test
+    void anErrorResultWithAnImageIsRefusedAtConstruction() {
+        assertThrows(IllegalArgumentException.class, () -> new Content.ToolResult("t", List.of(Content.Text.of("x"),
+                new Content.Image("image/png", PIXELS, null)), true, "computer"));
+        assertThrows(IllegalArgumentException.class, () -> new Content.ToolResult("t", List.of(Content.Text.of("x"),
+                new Content.ToolUse("u", "n", Map.of())), false));
+        Content.ToolResult text = new Content.ToolResult("t", List.of(Content.Text.of("x")), true, "computer");
+        assertEquals(List.of(Content.Text.of("x")), text.parts(), "an error result with text parts is fine");
+        assertNull(new Content.ToolResult("t", List.of("a", "b"), false).parts(), "a JSON list is not a parts list");
+    }
+
+    /**
+     * phase7-contracts.md 7.4 (D323): {@code CacheHint.AUTO} keeps the system breakpoint at the default time to live
+     * and adds the request's top-level {@code cache_control}; {@code SHORT} has no top-level marker.
+     */
+    @Test
+    void theAutomaticCacheHintAddsTheTopLevelMarker() throws Exception {
+        try (ClaudeGateway g = gateway()) {
+            g.complete(request().cache(CacheHint.AUTO).build());
+            Map<String, Object> body = fake.last().json();
+            assertEquals(Map.of("type", "ephemeral"), body.get("cache_control"), "the top-level marker");
+            assertEquals(Map.of("type", "ephemeral"), at(body, "system", 0, "cache_control"), "the breakpoint stays");
+            g.complete(request().build());
+            assertFalse(fake.last().json().containsKey("cache_control"), "SHORT: no top-level marker");
+        }
+    }
+
     // ------------------------------------------------------------------------------------------------ responses
 
     @Test

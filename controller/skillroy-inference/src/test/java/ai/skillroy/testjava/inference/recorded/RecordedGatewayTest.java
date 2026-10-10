@@ -22,6 +22,7 @@ import ai.skillroy.testjava.inference.scripted.ScriptedGateway;
 import ai.skillroy.testjava.inference.spi.BatchHandle;
 import ai.skillroy.testjava.inference.spi.BatchResult;
 import ai.skillroy.testjava.inference.spi.BatchStatus;
+import ai.skillroy.testjava.inference.spi.CacheHint;
 import ai.skillroy.testjava.inference.spi.Content;
 import ai.skillroy.testjava.inference.spi.GatewayCapability;
 import ai.skillroy.testjava.inference.spi.InferenceException;
@@ -29,6 +30,7 @@ import ai.skillroy.testjava.inference.spi.Message;
 import ai.skillroy.testjava.inference.spi.ModelClass;
 import ai.skillroy.testjava.inference.spi.ModelRequest;
 import ai.skillroy.testjava.inference.spi.ModelResponse;
+import ai.skillroy.testjava.inference.spi.ProviderTool;
 import ai.skillroy.testjava.inference.spi.Usage;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -105,13 +107,57 @@ class RecordedGatewayTest {
             assertEquals("claude-sonnet-5-5", u.model());
             assertEquals(Duration.ZERO, u.elapsed());
             assertEquals(170, replay.countTokens(r), "the recorded input tokens, cache included");
-            assertFalse(replay.capabilities().contains(GatewayCapability.IMAGES));
+            // phase7-contracts.md 7.3 (D321): a recording is keyed by a fingerprint that hashes an image.
+            assertTrue(replay.capabilities().contains(GatewayCapability.IMAGES));
+            assertTrue(replay.capabilities().contains(GatewayCapability.PROVIDER_TOOLS));
             assertTrue(replay.capabilities().contains(GatewayCapability.BATCH));
             ModelRequest budgetChanged = ModelRequest.builder("resolve", ModelClass.SONNET_CLASS)
                     .system(Content.Text.cached("the catalogue")).message(Message.user("which item?"))
                     .outputSchema(SCHEMA).maxTokens(17).metadata("slot", "other").build();
             assertEquals(answered.structured(), replay.complete(budgetChanged).structured(),
                     "maxTokens and labels are outside the fingerprint");
+        }
+    }
+
+    /**
+     * phase7-contracts.md 7.3 and 13.1 item 7: a toolset request with an image in a tool result is recorded and
+     * replayed: the file holds the provider tools, the toolset names and the image by its hash (never its bytes), the
+     * answer's toolset call comes back with its toolset name, and a request whose image differs finds no recording.
+     */
+    @Test
+    void aToolsetRequestWithAnImageIsRecordedAndReplayed() throws Exception {
+        byte[] pixels = {(byte) 0x89, 'P', 'N', 'G', 7, 7, 7, 7};
+        ModelRequest r = ModelRequest.builder("vision", ModelClass.SONNET_CLASS).cache(CacheHint.AUTO)
+                .message(Message.user("lend one item"))
+                .message(Message.assistant(List.of(new Content.ToolUse("t1", "screenshot", Map.of(), "computer"))))
+                .message(Message.user(new Content.ToolResult("t1", List.of(new Content.Image("image/png", pixels,
+                        null)), false, "computer")))
+                .providerTool(ProviderTool.computerToolset(false)).build();
+        ModelResponse answer = new ModelResponse(List.of(new Content.ToolUse("t2", "left_click",
+                Map.of("coordinate", List.of(412L, 288L)), "computer")), ModelResponse.StopReason.TOOL_USE, usage(),
+                null);
+        try (RecordingGateway rec = recording(ScriptedGateway.answering(q -> answer), false)) {
+            rec.complete(r);
+        }
+        Path file = Recording.file(dir, r.fingerprint());
+        String text = Files.readString(file);
+        assertTrue(text.contains("\"providerTools\""), text);
+        assertTrue(text.contains("computer_toolset_20260801"), text);
+        assertTrue(java.util.regex.Pattern.compile("\"toolsetName\"\\s*:\\s*\"computer\"").matcher(text).find(), text);
+        assertTrue(text.contains(new Content.Image("image/png", pixels, null).sha256()), "the image by its hash");
+        assertFalse(text.contains(java.util.Base64.getEncoder().encodeToString(pixels)), "never the bytes");
+        try (RecordedGateway replay = new RecordedGateway(dir)) {
+            Content.ToolUse back = replay.complete(r).toolUses().get(0);
+            assertEquals("computer", back.toolsetName());
+            assertEquals("left_click", back.name());
+            ModelRequest otherImage = ModelRequest.builder("vision", ModelClass.SONNET_CLASS)
+                    .message(Message.user("lend one item"))
+                    .message(Message.assistant(List.of(new Content.ToolUse("t1", "screenshot", Map.of(), "computer"))))
+                    .message(Message.user(new Content.ToolResult("t1", List.of(new Content.Image("image/png",
+                            new byte[] {(byte) 0x89, 'P', 'N', 'G', 8}, null)), false, "computer")))
+                    .providerTool(ProviderTool.computerToolset(false)).build();
+            assertEquals(InferenceException.Kind.NO_RECORDING, assertThrows(InferenceException.class,
+                    () -> replay.complete(otherImage)).kind());
         }
     }
 

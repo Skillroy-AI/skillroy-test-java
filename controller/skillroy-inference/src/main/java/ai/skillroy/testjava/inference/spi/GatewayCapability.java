@@ -32,5 +32,10 @@ public enum GatewayCapability {
     /** {@link Content.Image} parts may be sent. */
     IMAGES,
     /** {@link InferenceGateway#countTokens} answers the provider's count. */
-    TOKEN_COUNT
+    TOKEN_COUNT,
+    /**
+     * {@link ModelRequest#providerTools()} entries of this gateway's provider are passed through (phase7-contracts.md
+     * 7.1, D318: the Claude computer toolset); a gateway without it is not sent a request that holds one.
+     */
+    PROVIDER_TOOLS
 }

@@ -49,7 +49,8 @@ public final class CostLedger {
      * @param outputTokens tokens received
      * @param costUsd the cost as a decimal string
      * @param purpose what the call was for: {@code resolve}, {@code triage}, {@code session}, {@code plan},
-     *     {@code summary}
+     *     {@code summary}, and (phase7-contracts.md 7.3, 10, D322) {@code vision}: a call of the vision loop or a visual
+     *     question, made through the session service's metered call
      * @param cacheReadTokens input tokens read from the provider's cache
      * @param cacheWriteTokens input tokens written to the provider's cache
      * @param batch true when the call was part of a batch (priced at the batch rate)
@@ -65,6 +66,8 @@ public final class CostLedger {
 
         /** The purpose of an entry built with the Phase 2 constructor. */
         public static final String PURPOSE_RESOLVE = "resolve";
+        /** The purpose of a vision call (phase7-contracts.md 7.3, 10, D322; added by VM with VC's agreement). */
+        public static final String PURPOSE_VISION = "vision";
 
         /** Copies the details. */
         public Entry {

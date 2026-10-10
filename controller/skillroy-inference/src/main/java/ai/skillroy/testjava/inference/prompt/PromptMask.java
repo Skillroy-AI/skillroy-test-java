@@ -73,13 +73,18 @@ public final class PromptMask {
     public static final String PERSONAL = "<personal>";
     /** What a secret becomes. */
     public static final String REDACTED = SecretKeys.REDACTED;
-    /** The labels of {@link #block}: text from the target, and a person's own words. */
-    public static final Set<String> LABELS = Set.of("target-ui", "target-event", "target-state", "person");
+    /**
+     * The labels of {@link #block}: text from the target, a person's own words, and (phase7-contracts.md 6.4) a
+     * model's own question to a visual check ({@code model-question}: the model's text, which screen content may have
+     * steered, declared data like the others).
+     */
+    public static final Set<String> LABELS = Set.of("target-ui", "target-event", "target-state", "person",
+            "model-question");
 
     private static final int MAX_DEPTH = 200;
     /** A secret may straddle the cut: the text is masked this far past it before being cut. */
-    private static final Pattern LABEL_TAG = Pattern.compile("<(/?)(target-ui|target-event|target-state|person)\\b",
-            Pattern.CASE_INSENSITIVE);
+    private static final Pattern LABEL_TAG = Pattern.compile(
+            "<(/?)(target-ui|target-event|target-state|person|model-question)\\b", Pattern.CASE_INSENSITIVE);
 
     private final SecretMask secrets;
     private final List<SqlAllowList> allow;
@@ -552,8 +557,14 @@ public final class PromptMask {
     public Content part(Content part) {
         return switch (part) {
             case Content.Text t -> new Content.Text(text(t.text()), t.cacheBreakpoint());
-            case Content.ToolUse u -> new Content.ToolUse(u.id(), u.name(), (Map<String, Object>) jsonLike(u.input()));
-            case Content.ToolResult r -> new Content.ToolResult(r.toolUseId(), jsonLike(r.content()), r.error());
+            case Content.ToolUse u -> new Content.ToolUse(u.id(), u.name(), (Map<String, Object>) jsonLike(u.input()),
+                    u.toolsetName());
+            case Content.ToolResult r -> {
+                // phase7-contracts.md 7.2: a parts list's texts through the rules, its images under withImages(true).
+                List<Content> nested = r.parts();
+                yield new Content.ToolResult(r.toolUseId(), nested == null ? jsonLike(r.content()) : parts(nested),
+                        r.error(), r.toolsetName());
+            }
             case Content.Opaque o -> o;
             case Content.Image i -> {
                 if (!images) {
@@ -566,8 +577,22 @@ public final class PromptMask {
     }
 
     /**
+     * True when the text holds a secret value this mask knows (phase7-contracts.md 9.2 rule 3, D342): the text as it
+     * stands, or stripped of surrounding white space, would be changed by the by-value rule (a secret equal to the
+     * whole text, a secret of {@code masking.minLengthInText} or more characters inside it, a shorter one in double
+     * quotes). What the vision module's {@code type} and the facade refuse before a model's text is typed. The key rule
+     * is not consulted (a {@code key=value} text is not a known secret); never names the value.
+     */
+    public boolean holdsSecret(String text) {
+        if (text == null || text.isEmpty() || secrets.isEmpty()) {
+            return false;
+        }
+        return !text.equals(secrets.apply(text)) || !text.strip().equals(secrets.apply(text.strip()));
+    }
+
+    /**
      * Text from the target or from a person, wrapped in its labelled block ({@code <target-ui>} … {@code </target-ui>},
-     * {@code <target-event>}, {@code <target-state>}, {@code <person>}) after the rules; a label tag inside the text is
+     * {@code <target-event>}, {@code <target-state>}, {@code <person>}, {@code <model-question>}) after the rules; a label tag inside the text is
      * neutralised ({@code <} becomes {@code &lt;}) so that the text cannot close its block or open another.
      *
      * @throws IllegalArgumentException for a label not in {@link #LABELS}

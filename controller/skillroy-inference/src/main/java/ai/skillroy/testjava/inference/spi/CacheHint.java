@@ -27,5 +27,12 @@ public enum CacheHint {
     /** The provider's default time to live (five minutes for Claude). */
     SHORT,
     /** The longest the provider offers (one hour for Claude); what a batch round uses. */
-    LONG
+    LONG,
+    /**
+     * The agent loop's hint (phase7-contracts.md 7.4, D323): the system prefix keeps its explicit breakpoint (at the
+     * default time to live) and the request also carries the provider's automatic marker, which the provider advances
+     * to the last cacheable block, so that a growing conversation reads its earlier turns from the cache. What the
+     * vision loop uses; every other purpose keeps {@link #SHORT}.
+     */
+    AUTO
 }

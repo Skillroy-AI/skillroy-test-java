@@ -88,8 +88,8 @@ class InferenceSettingsTest {
         assertNull(none.workspaceId());
         assertEquals(Map.of("opus", "claude-opus-5-5", "sonnet", "claude-sonnet-5-5", "haiku", "claude-haiku-4-5"),
                 none.models());
-        assertEquals(Map.of("resolve", "low", "triage", "low", "session", "medium", "summary", "low"),
-                none.effort());
+        assertEquals(Map.of("resolve", "low", "triage", "low", "session", "medium", "summary", "low", "vision",
+                "low"), none.effort(), "phase7-contracts.md 7.3 (D322): effort.vision defaults to low");
         assertEquals(Map.of("scenario", "0.50", "session", "1.00"), none.budgets(), "the job budget has no default");
         assertEquals(Map.of("confidence", "0.6"), none.thresholds(), "phase5-contracts.md 5.4 (D113): 0.6");
         assertNull(none.prices());
@@ -122,6 +122,19 @@ class InferenceSettingsTest {
                 null, withNull, null, true, false, null, false, null));
     }
 
+    /** phase7-contracts.md 7.3 (D322): effort.vision is a key of the file, over its default low. */
+    @Test
+    void theVisionEffortIsReadFromTheFile() throws Exception {
+        file("""
+                version: 1
+                gateway: none
+                effort: {vision: high}
+                """);
+        InferenceSettings s = load(BindMode.LIVE);
+        assertEquals("high", s.effort().get("vision"));
+        assertEquals("medium", s.effort().get("session"), "the others keep their defaults");
+    }
+
     @Test
     void theFileIsReadAndItsPathsResolvedAgainstItsDirectory() throws Exception {
         Path file = file("""
@@ -147,7 +160,8 @@ class InferenceSettingsTest {
         assertEquals("wrkspc_01ABC", s.workspaceId());
         assertEquals(Map.of("opus", "claude-opus-5-5", "sonnet", "claude-sonnet-x", "haiku", "claude-haiku-4-5"),
                 s.models(), "a key overrides its default and keeps the others");
-        assertEquals(Map.of("resolve", "high", "triage", "low", "session", "low", "summary", "low"), s.effort());
+        assertEquals(Map.of("resolve", "high", "triage", "low", "session", "low", "summary", "low", "vision", "low"),
+                s.effort());
         assertEquals(Map.of("scenario", "0.25", "session", "0.75", "job", "2"), s.budgets());
         assertEquals(List.of("confidence", "rows", "strict", "note"), List.copyOf(s.thresholds().keySet()),
                 "the default's key keeps its place, the file's follow in file order; a null value sets nothing");

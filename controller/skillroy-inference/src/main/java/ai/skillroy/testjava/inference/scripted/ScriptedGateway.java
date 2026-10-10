@@ -28,6 +28,7 @@ import ai.skillroy.testjava.inference.spi.Message;
 import ai.skillroy.testjava.inference.spi.ModelRequest;
 import ai.skillroy.testjava.inference.spi.ModelResponse;
 import ai.skillroy.testjava.inference.spi.ModelResponse.StopReason;
+import ai.skillroy.testjava.inference.spi.Prompts;
 import ai.skillroy.testjava.inference.spi.Structured;
 import ai.skillroy.testjava.inference.spi.Usage;
 import ai.skillroy.testjava.protocol.Json;
@@ -156,7 +157,8 @@ public final class ScriptedGateway implements InferenceGateway {
 
     @Override
     public Set<GatewayCapability> capabilities() {
-        return Set.copyOf(EnumSet.complementOf(EnumSet.of(GatewayCapability.IMAGES)));
+        // phase7-contracts.md 7.3 (D321): IMAGES and PROVIDER_TOOLS as well, so that the vision loop's CI route runs on it.
+        return Set.copyOf(EnumSet.allOf(GatewayCapability.class));
     }
 
     @Override
@@ -218,19 +220,21 @@ public final class ScriptedGateway implements InferenceGateway {
         return batch;
     }
 
-    /** Text length / 4 over every text part. */
+    /** Text length / 4 over every text part, plus each image's tokens (phase7-contracts.md 7.5). */
     @Override
     public long countTokens(ModelRequest request) {
         long chars = 0;
+        long images = 0;
         for (Content c : request.system()) {
             chars += c instanceof Content.Text t ? t.text().length() : 0;
         }
         for (Message m : request.messages()) {
             for (Content c : m.parts()) {
                 chars += c instanceof Content.Text t ? t.text().length() : 0;
+                images += c instanceof Content.Image i ? Prompts.imageTokens(i.bytes()) : 0;
             }
         }
-        return chars / 4;
+        return chars / 4 + images;
     }
 
     @Override

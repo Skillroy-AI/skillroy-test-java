@@ -70,8 +70,8 @@ class BudgetAndLedgerTest {
     @Test
     void theBuiltInTableHasTheContractsRates() {
         PriceTable t = PriceTable.builtIn();
-        assertEquals(List.of("claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-4-5", "claude-sonnet-5",
-                "claude-opus-4-8", "claude-opus-5"), t.models());
+        assertEquals(List.of("claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-4-5", "claude-haiku-5-5",
+                "claude-sonnet-5", "claude-opus-4-8", "claude-opus-5"), t.models());
         PriceTable.Price sonnet = t.price("claude-sonnet-5-5");
         assertEquals(new BigDecimal("2.00"), sonnet.inputPerMTok());
         assertEquals(new BigDecimal("10.00"), sonnet.outputPerMTok());
@@ -90,6 +90,56 @@ class BudgetAndLedgerTest {
         assertEquals(new BigDecimal("2"), opus5.cacheWrite1hFactor());
         assertEquals(new BigDecimal("0.5"), opus5.batchFactor());
         assertNull(t.note("claude-opus-5"), "priced as itself, not as an unknown model");
+    }
+
+    /**
+     * phase7-contracts.md 7.3 and 13.1 item 7 (D321): the Haiku 5.5 row (0.10 / 0.50, cache read 0.01) and its note:
+     * a call above 100K input tokens is priced below the provider's prompt-size tier, which the table does not model.
+     */
+    @Test
+    void theHaiku55RowAndItsTierNote() {
+        PriceTable.Price haiku = PriceTable.builtIn().price("claude-haiku-5-5");
+        assertEquals(new BigDecimal("0.10"), haiku.inputPerMTok());
+        assertEquals(new BigDecimal("0.50"), haiku.outputPerMTok());
+        assertEquals(new BigDecimal("0.01"), haiku.cacheReadPerMTok());
+        assertEquals(new BigDecimal("1.25"), haiku.cacheWrite5mFactor());
+        assertNull(PriceTable.builtIn().note("claude-haiku-5-5"), "a known model");
+        assertEquals("claude-haiku-4-5", ai.skillroy.testjava.scenario.resolve.InferenceSettings.DEFAULT_MODELS
+                .get("haiku"), "the class default stays (D84)");
+        assertNull(PriceTable.tierNote("claude-haiku-5-5", 100_000));
+        assertTrue(PriceTable.tierNote("claude-haiku-5-5", 100_001).contains("not modelled"));
+        assertTrue(PriceTable.tierNote("claude-haiku-5-5-20261001", 200_000).contains("100000-token prompt tier"));
+        assertNull(PriceTable.tierNote("claude-sonnet-5-5", 500_000), "only Haiku 5.5 has the tier here");
+        // 1000 x 0.10 + 200 x 0.50 = 200 per million.
+        assertEquals(new BigDecimal("0.000200"), PriceTable.builtIn().cost(usage("claude-haiku-5-5", 1000, 200, 0, 0,
+                0, false, "0")));
+    }
+
+    /**
+     * phase7-contracts.md 7.3, 10 and 13.1 item 7 (D322): a vision call's entry carries the purpose {@code vision},
+     * its strategy and slot null, and is recorded and settled like any call.
+     */
+    @Test
+    void aVisionCallIsAnEntryOfPurposeVision() throws Exception {
+        CostLedger ledger = new CostLedger();
+        BudgetMeter meter = new BudgetMeter(BudgetMeter.Scope.SESSION, "sess", new BigDecimal("1"), ledger);
+        LedgerWriter writer = new LedgerWriter(ledger, meter, InferenceLog.inMemory(), PromptMask.keysOnly(), true,
+                Clock.fixed(Instant.parse("2026-10-10T10:00:00Z"), ZoneOffset.UTC));
+        ModelRequest vision = ModelRequest.builder(CostLedger.Entry.PURPOSE_VISION, ModelClass.SONNET_CLASS)
+                .message(Message.user(Content.Text.of("look"), new Content.Image("image/png", new byte[] {1, 2, 3},
+                        null))).build();
+        Usage u = usage("claude-sonnet-5-5", 1100, 40, 0, 0, 0, false, "0.0026");
+        meter.reserve(new BigDecimal("0.01"));
+        writer.record(vision, new ModelResponse(List.of(Content.Text.of("ok")), ModelResponse.StopReason.END_TURN, u,
+                null), "sess", null, null);
+        CostLedger.Entry entry = ledger.entries().get(0);
+        assertEquals("vision", entry.purpose());
+        assertNull(entry.strategy());
+        assertNull(entry.slot());
+        assertEquals(new BigDecimal("0.0026"), meter.spent());
+        String details = Json.write(entry.details());
+        assertTrue(details.contains("sha256:"), "the image by its hash in the logged prompt: " + details);
+        assertFalse(details.contains("AQID"), "never the bytes");
     }
 
     @Test

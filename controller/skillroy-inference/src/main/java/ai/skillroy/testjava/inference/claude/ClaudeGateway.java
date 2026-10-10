@@ -299,7 +299,8 @@ public final class ClaudeGateway implements InferenceGateway {
     @Override
     public Set<GatewayCapability> capabilities() {
         Set<GatewayCapability> caps = EnumSet.of(GatewayCapability.STRUCTURED_OUTPUT, GatewayCapability.TOOLS,
-                GatewayCapability.CACHING, GatewayCapability.BATCH, GatewayCapability.TOKEN_COUNT);
+                GatewayCapability.CACHING, GatewayCapability.BATCH, GatewayCapability.TOKEN_COUNT,
+                GatewayCapability.PROVIDER_TOOLS);
         if (config.images()) {
             caps.add(GatewayCapability.IMAGES);
         }

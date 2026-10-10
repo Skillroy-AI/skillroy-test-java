@@ -126,6 +126,69 @@ class ModelRequestTest {
         assertNotEquals(f, base(false).outputSchema(other).build().fingerprint(), "the output schema");
     }
 
+    /**
+     * phase7-contracts.md 7 and 13.1 item 7 (D318, D319): the new fields enter the fingerprint only when they are set,
+     * so a request without them is fingerprinted over the same JSON as before (no {@code providerTools} key, no
+     * {@code toolsetName} on a tool call or a result); a provider tool, its configs, a toolset name and an image inside
+     * a tool result each change it, the image by its hash.
+     */
+    @Test
+    void theNewFieldsEnterTheFingerprintOnlyWhenSet() {
+        ModelRequest plain = base(false).build();
+        assertEquals(List.of("modelClass", "effort", "system", "messages", "tools", "outputSchema"),
+                List.copyOf(Prompts.fingerprintJson(plain).keySet()), "the Phase 5 keys, nothing more");
+        assertEquals(plain.fingerprint(), new ModelRequest(plain.purpose(), plain.modelClass(), plain.effort(),
+                plain.maxTokens(), plain.cache(), plain.system(), plain.messages(), plain.tools(), plain.outputSchema(),
+                plain.metadata()).fingerprint(), "the ten-argument constructor keeps the provider tools empty");
+        assertEquals(Prompts.part(new Content.ToolUse("t1", "n", Map.of("a", 1L))), Prompts.part(new Content.ToolUse(
+                "t1", "n", Map.of("a", 1L), null)));
+        assertFalse(Prompts.part(new Content.ToolUse("t1", "n", Map.of())).containsKey("toolsetName"));
+        assertFalse(Prompts.part(new Content.ToolResult("t1", "ok", false)).containsKey("toolsetName"));
+
+        ModelRequest toolset = base(false).providerTool(ProviderTool.computerToolset(false)).build();
+        assertNotEquals(plain.fingerprint(), toolset.fingerprint(), "a provider tool");
+        assertNotEquals(toolset.fingerprint(), base(false).providerTool(ProviderTool.computerToolset(true)).build()
+                .fingerprint(), "its configs");
+        assertEquals(toolset.fingerprint(), base(true).providerTool(ProviderTool.computerToolset(false)).build()
+                .fingerprint(), "stable across map order");
+        assertEquals(toolset.providerTools(), toolset.withCache(CacheHint.AUTO).providerTools());
+        assertEquals(toolset.providerTools(), toolset.withMessages(toolset.messages()).providerTools());
+
+        ModelRequest.Builder echoed = ModelRequest.builder("vision", ModelClass.SONNET_CLASS).message(Message.user("go"));
+        String withoutName = echoed.message(Message.assistant(List.of(new Content.ToolUse("t1", "left_click",
+                Map.of())))).build().fingerprint();
+        String withName = ModelRequest.builder("vision", ModelClass.SONNET_CLASS).message(Message.user("go"))
+                .message(Message.assistant(List.of(new Content.ToolUse("t1", "left_click", Map.of(), "computer"))))
+                .build().fingerprint();
+        assertNotEquals(withoutName, withName, "a toolset name");
+
+        Content.ToolResult one = new Content.ToolResult("t1", List.of(new Content.Image("image/png",
+                new byte[] {1, 2, 3}, null)), false, "computer");
+        Content.ToolResult other = new Content.ToolResult("t1", List.of(new Content.Image("image/png",
+                new byte[] {1, 2, 4}, null)), false, "computer");
+        ModelRequest r1 = ModelRequest.builder("vision", ModelClass.SONNET_CLASS).message(Message.user(one)).build();
+        ModelRequest r2 = ModelRequest.builder("vision", ModelClass.SONNET_CLASS).message(Message.user(other)).build();
+        assertNotEquals(r1.fingerprint(), r2.fingerprint(), "an image inside a result, by its hash");
+        assertFalse(Prompts.canonical(Prompts.fingerprintJson(r1)).contains("AQID"), "never the bytes");
+    }
+
+    /** phase7-contracts.md 7.5 (D324): an image's size from its PNG header, and its tokens. */
+    @Test
+    void anImagesSizeAndTokensComeFromItsHeader() {
+        byte[] png = new byte[33];
+        System.arraycopy(new byte[] {(byte) 0x89, 'P', 'N', 'G', 13, 10, 26, 10, 0, 0, 0, 13, 'I', 'H', 'D', 'R'}, 0,
+                png, 0, 16);
+        png[18] = 0x04; // width 1024
+        png[22] = 0x03; // height 768
+        assertEquals(List.of(1024, 768), List.of(Prompts.imageSize(png)[0], Prompts.imageSize(png)[1]));
+        assertEquals(37L * 28L, Prompts.imageTokens(png), "ceil(1024 / 28) * ceil(768 / 28) = 37 * 28 = 1036");
+        assertNull(Prompts.imageSize(new byte[] {1, 2, 3}));
+        assertEquals(0L, Prompts.imageTokens(new byte[] {1, 2, 3}));
+        byte[] jpeg = {(byte) 0xFF, (byte) 0xD8, (byte) 0xFF, (byte) 0xE0, 0, 4, 0, 0, (byte) 0xFF, (byte) 0xC0, 0, 11,
+                8, 0, 100, 0, (byte) 200, 3, 0, 0, 0};
+        assertEquals(List.of(200, 100), List.of(Prompts.imageSize(jpeg)[0], Prompts.imageSize(jpeg)[1]));
+    }
+
     @Test
     void anImageEntersByItsHashAndAnOpaquePartNotAtAll() {
         ModelRequest.Builder plain = ModelRequest.builder("session", ModelClass.SONNET_CLASS)

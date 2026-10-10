@@ -94,10 +94,13 @@ public record Recording(String fingerprint, String purpose, ModelResponse respon
         json.put("recordedAt", recordedAt.toString());
         Map<String, Object> req = new LinkedHashMap<>();
         req.put("effort", request.effort().name());
-        req.put("system", Prompts.parts(mask.parts(request.system()), false));
+        // phase7-contracts.md 7.3: an image is written by its hash (Prompts.part never writes the bytes), so the file's
+        // mask lets it through; a request with an image reached the gateway only under images: true.
+        PromptMask parts = mask.withImages(true);
+        req.put("system", Prompts.parts(parts.parts(request.system()), false));
         List<Object> messages = new ArrayList<>();
         for (Message m : request.messages()) {
-            messages.add(Prompts.message(new Message(m.role(), mask.parts(m.parts())), false));
+            messages.add(Prompts.message(new Message(m.role(), parts.parts(m.parts())), false));
         }
         req.put("messages", messages);
         List<Object> tools = new ArrayList<>();
@@ -107,9 +110,18 @@ public record Recording(String fingerprint, String purpose, ModelResponse respon
         }
         req.put("tools", tools);
         req.put("outputSchema", request.outputSchema());
+        if (!request.providerTools().isEmpty()) {
+            // phase7-contracts.md 7.3: the provider tools as the fingerprint holds them, only when there are any, so that
+            // no earlier recording's bytes change.
+            List<Object> provided = new ArrayList<>();
+            for (ai.skillroy.testjava.inference.spi.ProviderTool t : request.providerTools()) {
+                provided.add(mask.jsonLike(Prompts.providerTool(t)));
+            }
+            req.put("providerTools", provided);
+        }
         json.put("request", req);
         Map<String, Object> res = new LinkedHashMap<>();
-        res.put("parts", Prompts.parts(mask.parts(response.parts()), true));
+        res.put("parts", Prompts.parts(parts.parts(response.parts()), true));
         res.put("stop", response.stop().name());
         res.put("structured", mask.jsonLike(response.structured()));
         res.put("usage", response.usage().toJson());

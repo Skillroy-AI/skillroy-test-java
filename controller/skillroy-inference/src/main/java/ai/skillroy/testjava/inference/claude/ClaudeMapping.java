@@ -28,6 +28,7 @@ import ai.skillroy.testjava.inference.spi.ModelClass;
 import ai.skillroy.testjava.inference.spi.ModelRequest;
 import ai.skillroy.testjava.inference.spi.ModelResponse;
 import ai.skillroy.testjava.inference.spi.ModelResponse.StopReason;
+import ai.skillroy.testjava.inference.spi.ProviderTool;
 import ai.skillroy.testjava.inference.spi.ToolSpec;
 import ai.skillroy.testjava.inference.spi.Usage;
 import ai.skillroy.testjava.protocol.Json;
@@ -37,6 +38,8 @@ import com.anthropic.core.ObjectMappers;
 import com.anthropic.errors.AnthropicServiceException;
 import com.anthropic.models.messages.Base64ImageSource;
 import com.anthropic.models.messages.CacheControlEphemeral;
+import com.anthropic.models.messages.ComputerToolset20260801;
+import com.anthropic.models.messages.ComputerToolsetConfigs;
 import com.anthropic.models.messages.ContentBlockParam;
 import com.anthropic.models.messages.ImageBlockParam;
 import com.anthropic.models.messages.JsonOutputFormat;
@@ -47,6 +50,7 @@ import com.anthropic.models.messages.TextBlockParam;
 import com.anthropic.models.messages.Tool;
 import com.anthropic.models.messages.ToolChoiceAuto;
 import com.anthropic.models.messages.ToolResultBlockParam;
+import com.anthropic.models.messages.ToolUnion;
 import com.anthropic.models.messages.ToolUseBlockParam;
 import com.fasterxml.jackson.databind.json.JsonMapper;
 
@@ -68,6 +72,13 @@ import java.util.regex.Pattern;
  * tolerantly from its JSON form (every block the SDK knows or not: text and tool use as parts, everything else as an
  * {@link Content.Opaque} part; the stop category as a string; the cache writes split by time to live), never through
  * {@code validate()} or a visitor.
+ *
+ * <p>Phase 7 (phase7-contracts.md 7.1, 7.2, 7.4): a {@link ProviderTool} of provider {@code claude} and type
+ * {@code computer_toolset_20260801} goes out as the SDK's typed {@link ComputerToolset20260801} with its
+ * {@code configs}, another type of provider {@code claude} as a raw tool union through the SDK's own mapper, and another
+ * provider's entry is {@code INVALID_REQUEST}; a tool call's and a tool result's {@code toolset_name} travel both ways;
+ * a tool result's parts list goes out as content blocks (an image only while images are on); {@link CacheHint#AUTO}
+ * adds the request's top-level {@code cache_control} beside the system breakpoint.
  *
  * <p>Stateless; safe from any thread.
  */
@@ -148,13 +159,52 @@ final class ClaudeMapping {
             for (ToolSpec tool : request.tools()) {
                 b.addTool(tool(tool, strictAllowed));
             }
+        }
+        for (ProviderTool tool : request.providerTools()) {
+            b.addTool(providerTool(tool));
+        }
+        if (!request.tools().isEmpty() || !request.providerTools().isEmpty()) {
+            // A forced choice is a 400 on the 5.5 models (phase7-contracts.md 7.1): auto stays.
             b.toolChoice(ToolChoiceAuto.builder().build());
+        }
+        if (request.cache() == CacheHint.AUTO) {
+            // 7.4 (D323): the provider advances this marker to the last cacheable block of the request.
+            b.cacheControl(CacheControlEphemeral.builder().build());
         }
         if (fallbacks) {
             b.putAdditionalHeader("anthropic-beta", FALLBACK_BETA);
             b.putAdditionalBodyProperty("fallbacks", JsonValue.from("default"));
         }
         return b.build();
+    }
+
+    /**
+     * A provider tool as the SDK's tool union (phase7-contracts.md 7.1): the computer toolset of 2026-08-01 typed, with
+     * its {@code configs} read by the SDK's own mapper (each member's {@code enabled} and {@code defer_loading});
+     * another type of provider {@code claude} as a raw union of its {@code type} and its other fields.
+     *
+     * @throws InferenceException {@code INVALID_REQUEST} for another provider's entry, or one the SDK cannot read
+     */
+    static ToolUnion providerTool(ProviderTool tool) throws InferenceException {
+        if (!PROVIDER.equals(tool.provider())) {
+            throw new InferenceException(Kind.INVALID_REQUEST, "a provider tool of provider " + tool.provider()
+                    + " cannot be sent to " + PROVIDER);
+        }
+        try {
+            if (ProviderTool.COMPUTER_TOOLSET.equals(tool.type())) {
+                ComputerToolset20260801.Builder toolset = ComputerToolset20260801.builder();
+                if (tool.raw().get("configs") instanceof Map<?, ?> configs) {
+                    toolset.configs(MAPPER.convertValue(configs, ComputerToolsetConfigs.class));
+                }
+                return ToolUnion.ofComputerToolset20260801(toolset.build());
+            }
+            Map<String, Object> raw = new LinkedHashMap<>(tool.raw());
+            raw.put("type", tool.type());
+            return MAPPER.convertValue(raw, ToolUnion.class);
+        } catch (IllegalArgumentException e) {
+            throw new InferenceException(Kind.INVALID_REQUEST, "the provider tool " + tool.type() + " cannot be read ("
+                    + e.getClass().getSimpleName() + ")");
+        }
     }
 
     /** The request body as JSON-like data (what the batch and count-tokens bodies are derived from). */
@@ -178,6 +228,7 @@ final class ClaudeMapping {
             Content.Text t = (Content.Text) request.system().get(i);
             TextBlockParam.Builder text = TextBlockParam.builder().text(t.text());
             if (i == breakpoint && request.cache() != CacheHint.NONE) {
+                // LONG: an hour; SHORT and AUTO: the default (AUTO adds the top-level marker in params).
                 CacheControlEphemeral.Builder cache = CacheControlEphemeral.builder();
                 if (request.cache() == CacheHint.LONG) {
                     cache.ttl(CacheControlEphemeral.Ttl.TTL_1H);
@@ -192,27 +243,40 @@ final class ClaudeMapping {
     private static ContentBlockParam block(Content part, boolean images) throws InferenceException {
         return switch (part) {
             case Content.Text t -> ContentBlockParam.ofText(TextBlockParam.builder().text(t.text()).build());
-            case Content.Image i -> {
-                if (!images) {
-                    throw new InferenceException(Kind.UNSUPPORTED, "an image part is not sent while images are off"
-                            + " (inference.yaml images: false)");
-                }
-                yield ContentBlockParam.ofImage(ImageBlockParam.builder().source(Base64ImageSource.builder()
-                        .data(Base64.getEncoder().encodeToString(i.bytes()))
-                        .mediaType("image/png".equals(i.mediaType()) ? Base64ImageSource.MediaType.IMAGE_PNG
-                                : Base64ImageSource.MediaType.IMAGE_JPEG).build()).build());
-            }
+            case Content.Image i -> ContentBlockParam.ofImage(image(i, images));
             case Content.ToolUse u -> {
                 ToolUseBlockParam.Input.Builder input = ToolUseBlockParam.Input.builder();
                 u.input().forEach((k, v) -> input.putAdditionalProperty(k, JsonValue.from(v)));
-                yield ContentBlockParam.ofToolUse(ToolUseBlockParam.builder().id(u.id()).name(u.name())
-                        .input(input.build()).build());
+                ToolUseBlockParam.Builder use = ToolUseBlockParam.builder().id(u.id()).name(u.name())
+                        .input(input.build());
+                if (u.toolsetName() != null) {
+                    use.toolsetName(u.toolsetName());
+                }
+                yield ContentBlockParam.ofToolUse(use.build());
             }
-            case Content.ToolResult r -> ContentBlockParam.ofToolResult(ToolResultBlockParam.builder()
-                    .toolUseId(r.toolUseId())
-                    .content(r.content() instanceof String s ? s : Json.write(r.content() == null ? Map.of()
-                            : r.content()))
-                    .isError(r.error()).build());
+            case Content.ToolResult r -> {
+                ToolResultBlockParam.Builder result = ToolResultBlockParam.builder().toolUseId(r.toolUseId())
+                        .isError(r.error());
+                List<Content> nested = r.parts();
+                if (nested != null) {
+                    // 7.2 (D320): a parts list as content blocks; an image only while images are on.
+                    List<ToolResultBlockParam.Content.Block> blocks = new ArrayList<>();
+                    for (Content p : nested) {
+                        blocks.add(p instanceof Content.Image i ? ToolResultBlockParam.Content.Block.ofImage(
+                                image(i, images)) : ToolResultBlockParam.Content.Block.ofText(
+                                TextBlockParam.builder().text(((Content.Text) p).text()).build()));
+                    }
+                    result.contentOfBlocks(blocks);
+                } else {
+                    result.content(r.content() instanceof String s ? s : Json.write(r.content() == null ? Map.of()
+                            : r.content()));
+                }
+                if (r.toolsetName() != null) {
+                    // The provider rejects a toolset member's result without its toolset name (7.2).
+                    result.toolsetName(r.toolsetName());
+                }
+                yield ContentBlockParam.ofToolResult(result.build());
+            }
             case Content.Opaque o -> {
                 if (!PROVIDER.equals(o.provider())) {
                     throw new InferenceException(Kind.INVALID_REQUEST, "an opaque part of provider " + o.provider()
@@ -221,6 +285,18 @@ final class ClaudeMapping {
                 yield MAPPER.convertValue(o.raw(), ContentBlockParam.class);
             }
         };
+    }
+
+    /** An image as the SDK's block, base64; {@code UNSUPPORTED} while images are off. */
+    private static ImageBlockParam image(Content.Image i, boolean images) throws InferenceException {
+        if (!images) {
+            throw new InferenceException(Kind.UNSUPPORTED, "an image part is not sent while images are off"
+                    + " (inference.yaml images: false)");
+        }
+        return ImageBlockParam.builder().source(Base64ImageSource.builder()
+                .data(Base64.getEncoder().encodeToString(i.bytes()))
+                .mediaType("image/png".equals(i.mediaType()) ? Base64ImageSource.MediaType.IMAGE_PNG
+                        : Base64ImageSource.MediaType.IMAGE_JPEG).build()).build();
     }
 
     private static OutputConfig.Effort effort(Effort effort) {
@@ -397,6 +473,11 @@ final class ClaudeMapping {
                 write5m = unsplit;
             }
         }
+        long inputSeen = count(u, null, "input_tokens") + count(u, null, "cache_read_input_tokens") + write5m + write1h;
+        String tierNote = PriceTable.tierNote(model, inputSeen);
+        if (tierNote != null) {
+            notes.add(tierNote);
+        }
         Usage usage = new Usage(PROVIDER, requestedModel, model,
                 json.get("id") instanceof String id ? bounded(id, ID_MAX) : null,
                 count(u, null, "input_tokens"), count(u, null, "output_tokens"),
@@ -438,7 +519,10 @@ final class ClaudeMapping {
             @SuppressWarnings("unchecked")
             Map<String, Object> input = block.get("input") instanceof Map<?, ?> in ? (Map<String, Object>) in
                     : Map.of();
-            return new Content.ToolUse(id, n, input);
+            // 7.2 (D319): a toolset member's call names its toolset; kept, bounded like a provider word.
+            String toolset = block.get("toolset_name") instanceof String ts && !ts.isBlank() ? bounded(ts, WORD_MAX)
+                    : null;
+            return new Content.ToolUse(id, n, input, toolset);
         }
         String t = type instanceof String s && s.matches("[A-Za-z0-9_.-]{1,64}") ? s : "unknown";
         return new Content.Opaque(PROVIDER, t, block);

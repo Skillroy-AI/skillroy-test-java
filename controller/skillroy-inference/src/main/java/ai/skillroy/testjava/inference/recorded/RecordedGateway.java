@@ -48,7 +48,9 @@ import java.util.concurrent.atomic.AtomicLong;
  * {@code NO_RECORDING} with the fingerprint, the purpose and the routes that record one ({@link #RECORD_HINT}: the
  * profile {@code inference-record} or {@code record: true}), so that a changed prompt is seen, never guessed. Batches
  * are served the same way, request by request, with {@code batch: true} in the usage. {@link #countTokens} answers the
- * recorded input tokens, or -1. Capabilities: all but images.
+ * recorded input tokens, or -1. Capabilities: every one (phase7-contracts.md 7.3, D321: {@code IMAGES} and
+ * {@code PROVIDER_TOOLS} too, since a recording is keyed by a fingerprint that hashes the image and the provider tools,
+ * so it can answer such a request; the mask still never writes an image's bytes).
  *
  * <p>Thread-safe; owns no thread.
  */
@@ -91,7 +93,7 @@ public final class RecordedGateway implements InferenceGateway {
 
     @Override
     public Set<GatewayCapability> capabilities() {
-        return Set.copyOf(EnumSet.complementOf(EnumSet.of(GatewayCapability.IMAGES)));
+        return Set.copyOf(EnumSet.allOf(GatewayCapability.class));
     }
 
     @Override

@@ -62,6 +62,11 @@ import java.util.regex.Pattern;
  */
 public final class PriceTable {
 
+    /** Haiku 5.5's model id (phase7-contracts.md 7.3); the Haiku class's default stays {@code claude-haiku-4-5}. */
+    public static final String HAIKU_5_5 = "claude-haiku-5-5";
+    /** The input tokens above which {@value #HAIKU_5_5} is priced at a higher tier this table does not model. */
+    public static final long HAIKU_5_5_TIER_TOKENS = 100_000L;
+
     /** The model whose price an unknown model is charged at: the Opus class's default. */
     public static final String UNKNOWN_MODEL_PRICE = "claude-opus-5-5";
 
@@ -115,6 +120,9 @@ public final class PriceTable {
         table.put("claude-opus-5-5", Price.of("claude-opus-5-5", "4.00", "20.00", "0.20"));
         table.put("claude-sonnet-5-5", Price.of("claude-sonnet-5-5", "2.00", "10.00", "0.20"));
         table.put("claude-haiku-4-5", Price.of("claude-haiku-4-5", "1.00", "5.00", "0.10"));
+        // phase7-contracts.md 7.3 (D321): Haiku 5.5, below its prompt-size tier (above 100K input tokens the provider
+        // charges 0.50 / 2.50, which this table does not model: tierNote says so on such a call).
+        table.put(HAIKU_5_5, Price.of(HAIKU_5_5, "0.10", "0.50", "0.01"));
         // The fallback targets: Sonnet 5.5's documented one (BS13 F-7) and the two the models endpoint names for
         // Opus 5.5 (BS13 live, 2026-10-08).
         table.put("claude-sonnet-5", Price.of("claude-sonnet-5", "2.00", "10.00", "0.20"));
@@ -130,8 +138,10 @@ public final class PriceTable {
     }
 
     /**
-     * This version's table (phase5-contracts.md 7.2): {@code claude-opus-5-5}, {@code claude-sonnet-5-5} and
-     * {@code claude-haiku-4-5}, and the fallback targets {@code claude-sonnet-5} (Sonnet 5.5's),
+     * This version's table (phase5-contracts.md 7.2): {@code claude-opus-5-5}, {@code claude-sonnet-5-5},
+     * {@code claude-haiku-4-5} and (phase7-contracts.md 7.3) {@code claude-haiku-5-5} at 0.10 / 0.50, cache read 0.01
+     * (its prompt-size tier above 100K input tokens, 0.50 / 2.50, is not modelled: {@link #tierNote}), and the fallback
+     * targets {@code claude-sonnet-5} (Sonnet 5.5's),
      * {@code claude-opus-4-8} and {@code claude-opus-5} (Opus 5.5's), each with the factors 1.25 and 2 of the cache
      * writes and 0.5 of a batch.
      */
@@ -318,6 +328,21 @@ public final class PriceTable {
     /** {@code "priced as claude-opus-5-5 (unknown model x)"} for a model the table does not know, else null. */
     public String note(String model) {
         return knows(model) ? null : "priced as " + UNKNOWN_MODEL_PRICE + " (unknown model " + model + ")";
+    }
+
+    /**
+     * The note a call of {@value #HAIKU_5_5} (or a dated snapshot of it) with more than {@value #HAIKU_5_5_TIER_TOKENS}
+     * input tokens (cache reads and writes included) carries: the table prices it below the provider's prompt-size
+     * tier, so its cost is under-counted (phase7-contracts.md 7.3); null for any other call.
+     */
+    public static String tierNote(String model, long inputTokens) {
+        if (model == null || inputTokens <= HAIKU_5_5_TIER_TOKENS) {
+            return null;
+        }
+        Matcher dated = DATED_ID.matcher(model);
+        String id = dated.matches() ? dated.group(1) : model;
+        return HAIKU_5_5.equals(id) ? "priced below the " + HAIKU_5_5_TIER_TOKENS + "-token prompt tier of "
+                + HAIKU_5_5 + " (0.50 / 2.50 above it is not modelled)" : null;
     }
 
     private Price effective(String model) {

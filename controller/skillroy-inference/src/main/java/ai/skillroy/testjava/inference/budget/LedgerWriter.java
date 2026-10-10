@@ -233,10 +233,13 @@ public final class LedgerWriter {
     }
 
     private void prompts(Map<String, Object> record, ModelRequest request) {
-        record.put("system", Prompts.parts(mask.parts(request.system()), false));
+        // phase7-contracts.md 10: an image part is recorded by its hash (Prompts.part never writes the bytes), so the
+        // record's mask lets it through whatever the writer's mask says about sending one.
+        PromptMask recording = mask.withImages(true);
+        record.put("system", Prompts.parts(recording.parts(request.system()), false));
         List<Object> messages = new ArrayList<>();
         for (Message m : request.messages()) {
-            messages.add(Prompts.message(new Message(m.role(), mask.parts(m.parts())), false));
+            messages.add(Prompts.message(new Message(m.role(), recording.parts(m.parts())), false));
         }
         record.put("messages", messages);
     }

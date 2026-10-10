@@ -44,10 +44,13 @@ import java.util.Objects;
  * @param tools the tools offered; may be empty
  * @param outputSchema the answer's JSON Schema, or null
  * @param metadata labels for the ledger and recordings; never prompt text
+ * @param providerTools provider-defined tool entries the gateway passes through unread (phase7-contracts.md 7.1,
+ *     D318); may be empty; in the fingerprint only when non-empty
  */
 public record ModelRequest(String purpose, ModelClass modelClass, Effort effort, int maxTokens, CacheHint cache,
                            List<Content> system, List<Message> messages, List<ToolSpec> tools,
-                           Map<String, Object> outputSchema, Map<String, String> metadata) {
+                           Map<String, Object> outputSchema, Map<String, String> metadata,
+                           List<ProviderTool> providerTools) {
 
     /** The metadata key of the scenario id. */
     public static final String META_SCENARIO = "scenarioId";
@@ -75,6 +78,7 @@ public record ModelRequest(String purpose, ModelClass modelClass, Effort effort,
         system = copy(system, "system part");
         messages = copy(messages, "message");
         tools = copy(tools, "tool");
+        providerTools = copy(providerTools, "provider tool");
         if (messages.isEmpty()) {
             throw new IllegalArgumentException("a model request has at least one message");
         }
@@ -100,6 +104,13 @@ public record ModelRequest(String purpose, ModelClass modelClass, Effort effort,
         metadata = Collections.unmodifiableMap(meta);
     }
 
+    /** The Phase 5 shape: no provider tool. */
+    public ModelRequest(String purpose, ModelClass modelClass, Effort effort, int maxTokens, CacheHint cache,
+                        List<Content> system, List<Message> messages, List<ToolSpec> tools,
+                        Map<String, Object> outputSchema, Map<String, String> metadata) {
+        this(purpose, modelClass, effort, maxTokens, cache, system, messages, tools, outputSchema, metadata, List.of());
+    }
+
     /**
      * A builder with the defaults {@link Effort#MEDIUM}, 4096 tokens, {@link CacheHint#SHORT}, no system part, no
      * tools and no schema.
@@ -122,13 +133,13 @@ public record ModelRequest(String purpose, ModelClass modelClass, Effort effort,
     /** This request with another cache hint (what a batch round sets). */
     public ModelRequest withCache(CacheHint hint) {
         return new ModelRequest(purpose, modelClass, effort, maxTokens, hint, system, messages, tools, outputSchema,
-                metadata);
+                metadata, providerTools);
     }
 
     /** This request with these messages (a conversation that goes on). */
     public ModelRequest withMessages(List<Message> newMessages) {
         return new ModelRequest(purpose, modelClass, effort, maxTokens, cache, system, newMessages, tools,
-                outputSchema, metadata);
+                outputSchema, metadata, providerTools);
     }
 
     private static <E> List<E> copy(List<E> list, String what) {
@@ -154,6 +165,7 @@ public record ModelRequest(String purpose, ModelClass modelClass, Effort effort,
         private final List<Content> system = new ArrayList<>();
         private final List<Message> messages = new ArrayList<>();
         private final List<ToolSpec> tools = new ArrayList<>();
+        private final List<ProviderTool> providerTools = new ArrayList<>();
         private Map<String, Object> outputSchema;
         private final Map<String, String> metadata = new LinkedHashMap<>();
 
@@ -207,6 +219,18 @@ public record ModelRequest(String purpose, ModelClass modelClass, Effort effort,
             return this;
         }
 
+        /** Appends a provider-defined tool entry (phase7-contracts.md 7.1). */
+        public Builder providerTool(ProviderTool tool) {
+            providerTools.add(tool);
+            return this;
+        }
+
+        /** Appends provider-defined tool entries. */
+        public Builder providerTools(List<ProviderTool> more) {
+            providerTools.addAll(more);
+            return this;
+        }
+
         /** The answer's JSON Schema; null for free text. */
         public Builder outputSchema(Map<String, Object> schema) {
             this.outputSchema = schema;
@@ -226,7 +250,7 @@ public record ModelRequest(String purpose, ModelClass modelClass, Effort effort,
         /** @throws IllegalArgumentException as the record's constructor */
         public ModelRequest build() {
             return new ModelRequest(purpose, modelClass, effort, maxTokens, cache, system, messages, tools,
-                    outputSchema, metadata);
+                    outputSchema, metadata, providerTools);
         }
     }
 }

@@ -56,7 +56,7 @@ import java.util.regex.Pattern;
  * record: false
  * workspaceId: null               # the workspace an organisation-level key needs; an account id, not a secret
  * models: {opus: claude-opus-5-5, sonnet: claude-sonnet-5-5, haiku: claude-haiku-4-5}
- * effort: {resolve: low, triage: low, session: medium, summary: low}
+ * effort: {resolve: low, triage: low, session: medium, summary: low, vision: low}
  * budget: {scenarioUsd: "0.50", jobUsd: null, sessionUsd: "1.00"}
  * thresholds: {confidence: "0.6"} # by name, scalar values kept as text (phase5-contracts.md 5.4, D113)
  * prices: null                    # a price table file, relative to the file; null: the built-in table
@@ -86,7 +86,8 @@ import java.util.regex.Pattern;
  * @param models model ids by class: {@value #MODEL_OPUS}, {@value #MODEL_SONNET}, {@value #MODEL_HAIKU}; null is the
  *     defaults
  * @param effort {@code low}, {@code medium} or {@code high} by purpose: {@code resolve}, {@code triage},
- *     {@code session}, {@code summary}; null is the defaults
+ *     {@code session}, {@code summary}, {@code vision} (phase7-contracts.md 7.3, D322: the vision loop's calls and its
+ *     visual questions; default {@code low}, BS12); null is the defaults
  * @param budgets limits in US dollars as plain decimal strings by scope: {@value #BUDGET_SCENARIO},
  *     {@value #BUDGET_JOB} (only when set), {@value #BUDGET_SESSION}; null is the defaults
  * @param thresholds the gates of a model's answer by name ({@code confidence}, default {@code "0.6"},
@@ -173,7 +174,7 @@ public record InferenceSettings(String gateway, Path recordings, boolean record,
             "claude-sonnet-5-5", MODEL_HAIKU, "claude-haiku-4-5");
     /** The default effort by purpose. */
     public static final Map<String, String> DEFAULT_EFFORT = ordered("resolve", "low", "triage", "low", "session",
-            "medium", "summary", "low");
+            "medium", "summary", "low", "vision", "low");
     /** The default budgets: per scenario 0.50 (B6), per session 1.00 (B15); per job none (B6). */
     public static final Map<String, String> DEFAULT_BUDGETS = ordered(BUDGET_SCENARIO, "0.50", BUDGET_SESSION,
             "1.00");

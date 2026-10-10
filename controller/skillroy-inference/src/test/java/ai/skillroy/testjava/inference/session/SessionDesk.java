@@ -150,6 +150,14 @@ final class SessionDesk implements DomainPack {
         return "0.0.2-test";
     }
 
+    /** The screen legend a test sets (phase7-contracts.md 12.3); null by default, as {@code DomainPack}'s. */
+    String legend;
+
+    @Override
+    public String screenLegend() {
+        return legend;
+    }
+
     @Override
     public StepLibrary steps() {
         return new StepLibrary() {

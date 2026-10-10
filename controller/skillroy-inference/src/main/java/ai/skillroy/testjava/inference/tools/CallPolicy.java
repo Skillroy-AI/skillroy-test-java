@@ -35,7 +35,10 @@ import java.util.TreeSet;
  * ({@link ToolProjection#HOOK_READS}), {@code data.query} (read through the guarded {@code data_query} only), or what
  * the host's policy excludes ({@code web.evaluate} and {@code web.waitFlag} unless a person opted in, and then also any
  * primitive whose descriptor carries the {@code script} flag, D156); and a call
- * whose arguments carry {@code confirm} or {@code _meta}. Every reason names the primitive, never a value.
+ * whose arguments carry {@code confirm} or {@code _meta}, and (Phase 7, phase7-contracts.md 9.1) {@code redact: false}
+ * or {@code mode: ROBOT} on a capture, {@code force} on the five acting primitives, or {@code via: ROBOT} on a pointer
+ * except on the session facade's route under the host's robot flag. Every reason names the primitive, never a value.
+ * Phase 7 adds the routes that call it: the session's raw primitive branch, the MCP server's raw tools and the facade.
  *
  * <p>Stateless; safe from any thread.
  */
@@ -46,6 +49,15 @@ public final class CallPolicy {
     private static final String AGENT_NAMESPACE = "agent.";
     private static final String HOOK_NAMESPACE = "hook.";
     private static final String RULE_NAMESPACE = "rule.";
+    private static final String CAPTURE = "swing.capture";
+    private static final String POINTER = "swing.pointer";
+    private static final String REDACT = "redact";
+    private static final String MODE = "mode";
+    private static final String FORCE = "force";
+    private static final String VIA = "via";
+    /** The primitives whose {@code force} is a person's argument only (phase7-contracts.md 9.1, D294). */
+    public static final Set<String> FORCE_PRIMITIVES = Set.of("swing.pointer", "swing.click", "swing.type", "swing.key",
+            "web.pointer");
 
     private CallPolicy() {
     }
@@ -97,8 +109,25 @@ public final class CallPolicy {
                 + " opts in when starting the server, skillroy mcp --allow-evaluate)";
     }
 
-    /** Why a call's arguments may not be sent for a client or a model ({@code confirm}, {@code _meta}), or null. */
+    /** {@link #arguments(String, Map, boolean)} without the host's robot flag. */
     public static String arguments(String primitive, Map<String, ?> args) {
+        return arguments(primitive, args, false);
+    }
+
+    /**
+     * Why a call's arguments may not be sent for a client or a model, or null (phase5-contracts.md 9.3; Phase 7,
+     * phase7-contracts.md 9.1, D294, D341, D347): {@code confirm} or {@code _meta}; {@code redact} other than
+     * {@code true} on {@code swing.capture} ("a capture is redacted for a client"); {@code mode: ROBOT} on
+     * {@code swing.capture} whatever the flag ("a capture of the glass is a person's evidence"); {@code force} other
+     * than {@code false} on {@code swing.pointer}, {@code swing.click}, {@code swing.type}, {@code swing.key} or
+     * {@code web.pointer} ("acting past a modal dialog or a covering window is a person's choice"); and {@code via:
+     * ROBOT} on {@code swing.pointer} unless {@code robotAllowed} ("robot input is a person's opt-in"). Refused, never
+     * stripped; the reason names the primitive and the argument, never a value.
+     *
+     * @param robotAllowed the host's robot flag, true only on the session facade's route, where the vision module's
+     *     own V3 steps set {@code via} (D347); every other route passes false
+     */
+    public static String arguments(String primitive, Map<String, ?> args, boolean robotAllowed) {
         if (args == null) {
             return null;
         }
@@ -109,7 +138,27 @@ public final class CallPolicy {
         if (args.containsKey(META)) {
             return "the arguments of " + primitive + " carry '_meta', which only the executor builds";
         }
+        if (CAPTURE.equals(primitive)) {
+            if (args.containsKey(REDACT) && !Boolean.TRUE.equals(args.get(REDACT))) {
+                return "the arguments of " + primitive + " carry 'redact: false': a capture is redacted for a client";
+            }
+            if (robot(args.get(MODE))) {
+                return "the arguments of " + primitive + " carry 'mode: ROBOT': a capture of the glass is a person's"
+                        + " evidence";
+            }
+        }
+        if (FORCE_PRIMITIVES.contains(primitive) && args.containsKey(FORCE) && !Boolean.FALSE.equals(args.get(FORCE))) {
+            return "the arguments of " + primitive + " carry 'force': acting past a modal dialog or a covering window"
+                    + " is a person's choice";
+        }
+        if (POINTER.equals(primitive) && robot(args.get(VIA)) && !robotAllowed) {
+            return "the arguments of " + primitive + " carry 'via: ROBOT': robot input is a person's opt-in";
+        }
         return null;
+    }
+
+    private static boolean robot(Object value) {
+        return value != null && "ROBOT".equalsIgnoreCase(String.valueOf(value).strip());
     }
 
     /**
@@ -123,9 +172,18 @@ public final class CallPolicy {
      */
     public static List<String> refusals(Map<String, PrimitiveDescriptor> catalogue, List<Call> calls,
                                         List<Call> cleanup, Set<String> excluded) {
+        return refusals(catalogue, calls, cleanup, excluded, false);
+    }
+
+    /**
+     * {@link #refusals(Map, List, List, Set)} with the host's robot flag ({@link #arguments(String, Map, boolean)}):
+     * true only on the session facade's route (phase7-contracts.md 9.1, D347).
+     */
+    public static List<String> refusals(Map<String, PrimitiveDescriptor> catalogue, List<Call> calls,
+                                        List<Call> cleanup, Set<String> excluded, boolean robotAllowed) {
         List<String> out = new ArrayList<>();
         for (Call call : calls) {
-            String why = why(catalogue, call, excluded);
+            String why = why(catalogue, call, excluded, robotAllowed);
             if (why != null) {
                 out.add(why);
             }
@@ -133,7 +191,7 @@ public final class CallPolicy {
         int n = 0;
         for (Call call : cleanup) {
             n++;
-            String why = why(catalogue, call, excluded);
+            String why = why(catalogue, call, excluded, robotAllowed);
             if (why != null) {
                 out.add("cleanup call " + n + ": " + why);
             }
@@ -141,9 +199,10 @@ public final class CallPolicy {
         return out;
     }
 
-    private static String why(Map<String, PrimitiveDescriptor> catalogue, Call call, Set<String> excluded) {
+    private static String why(Map<String, PrimitiveDescriptor> catalogue, Call call, Set<String> excluded,
+                              boolean robotAllowed) {
         String why = never(catalogue.get(call.primitive()), call.primitive(), excluded);
-        return why != null ? why : arguments(call.primitive(), call.args());
+        return why != null ? why : arguments(call.primitive(), call.args(), robotAllowed);
     }
 
     /**

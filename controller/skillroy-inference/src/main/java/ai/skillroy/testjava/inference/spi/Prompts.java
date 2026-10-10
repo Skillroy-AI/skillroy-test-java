@@ -64,7 +64,9 @@ public final class Prompts {
      * The JSON-like form of a part as a fingerprint and a recording hold it: {@code {type: text, text}},
      * {@code {type: image, mediaType, sha256, caption}} (never the bytes), {@code {type: tool_use, id, name, input}},
      * {@code {type: tool_result, toolUseId, content, error}}, {@code {type: opaque, provider, blockType, raw}}. A text's
-     * cache breakpoint is not part of it (a cache concern, like {@link CacheHint}).
+     * cache breakpoint is not part of it (a cache concern, like {@link CacheHint}). Phase 7 (phase7-contracts.md 7.2):
+     * a tool call's and a tool result's {@code toolsetName} is written only when it is set, and a result's parts list as
+     * the list of its parts' forms (an image by its hash), so that no earlier fingerprint changes.
      */
     public static Map<String, Object> part(Content part) {
         Map<String, Object> json = new LinkedHashMap<>();
@@ -84,12 +86,19 @@ public final class Prompts {
                 json.put("id", u.id());
                 json.put("name", u.name());
                 json.put("input", u.input());
+                if (u.toolsetName() != null) {
+                    json.put("toolsetName", u.toolsetName());
+                }
             }
             case Content.ToolResult r -> {
                 json.put("type", "tool_result");
                 json.put("toolUseId", r.toolUseId());
-                json.put("content", r.content());
+                List<Content> nested = r.parts();
+                json.put("content", nested == null ? r.content() : parts(nested, true));
                 json.put("error", r.error());
+                if (r.toolsetName() != null) {
+                    json.put("toolsetName", r.toolsetName());
+                }
             }
             case Content.Opaque o -> {
                 json.put("type", "opaque");
@@ -112,14 +121,18 @@ public final class Prompts {
         return out;
     }
 
-    /** A part read back from {@link #part}; an image cannot be (its bytes are not kept). */
+    /**
+     * A part read back from {@link #part}; an image cannot be (its bytes are not kept), so a result's parts list is
+     * read back as the list of its parts' forms.
+     */
     public static Content partFromJson(Map<?, ?> json) {
         Object type = json.get("type");
         return switch (String.valueOf(type)) {
             case "text" -> Content.Text.of(string(json, "text"));
-            case "tool_use" -> new Content.ToolUse(string(json, "id"), string(json, "name"), map(json.get("input")));
+            case "tool_use" -> new Content.ToolUse(string(json, "id"), string(json, "name"), map(json.get("input")),
+                    optionalString(json, "toolsetName"));
             case "tool_result" -> new Content.ToolResult(string(json, "toolUseId"), json.get("content"),
-                    Boolean.TRUE.equals(json.get("error")));
+                    Boolean.TRUE.equals(json.get("error")), optionalString(json, "toolsetName"));
             case "opaque" -> new Content.Opaque(string(json, "provider"), string(json, "blockType"), json.get("raw"));
             default -> throw new IllegalArgumentException("a part of type " + type + " cannot be read back");
         };
@@ -145,8 +158,77 @@ public final class Prompts {
     }
 
     /**
+     * A provider tool's JSON-like form as a fingerprint and a recording hold it: {@code {provider, type, raw}}
+     * (phase7-contracts.md 7.1).
+     */
+    public static Map<String, Object> providerTool(ProviderTool tool) {
+        Map<String, Object> json = new LinkedHashMap<>();
+        json.put("provider", tool.provider());
+        json.put("type", tool.type());
+        json.put("raw", tool.raw());
+        return json;
+    }
+
+    /**
+     * The width and the height in pixels of a PNG (its {@code IHDR}) or a JPEG (its first start-of-frame marker), or
+     * null when the bytes are neither or are cut short (phase7-contracts.md 7.5: what the budget estimate's image tokens
+     * are counted from). Reads at most the first 64 KiB of a JPEG.
+     */
+    public static int[] imageSize(byte[] bytes) {
+        if (bytes == null) {
+            return null;
+        }
+        if (bytes.length >= 24 && (bytes[0] & 0xFF) == 0x89 && bytes[1] == 'P' && bytes[2] == 'N' && bytes[3] == 'G'
+                && bytes[12] == 'I' && bytes[13] == 'H' && bytes[14] == 'D' && bytes[15] == 'R') {
+            int w = int32(bytes, 16);
+            int h = int32(bytes, 20);
+            return w > 0 && h > 0 ? new int[] {w, h} : null;
+        }
+        if (bytes.length >= 4 && (bytes[0] & 0xFF) == 0xFF && (bytes[1] & 0xFF) == 0xD8) {
+            int i = 2;
+            int limit = Math.min(bytes.length, 65_536);
+            while (i + 9 < limit) {
+                if ((bytes[i] & 0xFF) != 0xFF) {
+                    return null;
+                }
+                int marker = bytes[i + 1] & 0xFF;
+                int length = ((bytes[i + 2] & 0xFF) << 8) | (bytes[i + 3] & 0xFF);
+                boolean startOfFrame = marker >= 0xC0 && marker <= 0xCF && marker != 0xC4 && marker != 0xC8
+                        && marker != 0xCC;
+                if (startOfFrame) {
+                    int h = ((bytes[i + 5] & 0xFF) << 8) | (bytes[i + 6] & 0xFF);
+                    int w = ((bytes[i + 7] & 0xFF) << 8) | (bytes[i + 8] & 0xFF);
+                    return w > 0 && h > 0 ? new int[] {w, h} : null;
+                }
+                if (length < 2) {
+                    return null;
+                }
+                i += 2 + length;
+            }
+        }
+        return null;
+    }
+
+    private static int int32(byte[] b, int at) {
+        return ((b[at] & 0xFF) << 24) | ((b[at + 1] & 0xFF) << 16) | ((b[at + 2] & 0xFF) << 8) | (b[at + 3] & 0xFF);
+    }
+
+    /**
+     * The tokens the provider counts for an image of this size: {@code ceil(w / 28) * ceil(h / 28)}
+     * (phase7-contracts.md 7.5, D324; BS12: a 1024 x 768 capture counts 1,039, the formula gives 1,036); 0 for an image
+     * whose size cannot be read.
+     */
+    public static long imageTokens(byte[] bytes) {
+        int[] size = imageSize(bytes);
+        if (size == null) {
+            return 0;
+        }
+        return (long) Math.ceil(size[0] / 28.0) * (long) Math.ceil(size[1] / 28.0);
+    }
+
+    /**
      * What a fingerprint is taken over: {@code {modelClass, effort, system, messages, tools, outputSchema}}, opaque
-     * parts left out.
+     * parts left out, and {@code providerTools} when the request has any (phase7-contracts.md 7.1, D318).
      */
     public static Map<String, Object> fingerprintJson(ModelRequest request) {
         Map<String, Object> json = new LinkedHashMap<>();
@@ -164,7 +246,18 @@ public final class Prompts {
         }
         json.put("tools", tools);
         json.put("outputSchema", request.outputSchema());
+        if (!request.providerTools().isEmpty()) {
+            List<Object> provided = new ArrayList<>();
+            for (ProviderTool t : request.providerTools()) {
+                provided.add(providerTool(t));
+            }
+            json.put("providerTools", provided);
+        }
         return json;
+    }
+
+    private static String optionalString(Map<?, ?> json, String key) {
+        return json.get(key) instanceof String s ? s : null;
     }
 
     private static String string(Map<?, ?> json, String key) {
