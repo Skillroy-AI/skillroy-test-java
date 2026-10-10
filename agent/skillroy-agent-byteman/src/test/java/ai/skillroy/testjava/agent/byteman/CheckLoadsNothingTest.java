@@ -39,7 +39,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * {@code rule.check} and {@code rule.list} on a fresh agent load nothing (phase6-contracts.md 7.3, 7.6): no
  * {@code org.jboss.byteman} class is defined, nothing of the sys jar is loaded, Byteman's {@code loaded} property is
  * not set, and the answer says the type check was skipped. A confirmed {@code rule.submit} that the class bound refuses
- * loads nothing either: the bound runs before the load (fix wave, L2-F5). A test class of its own (a fresh JVM): the
+ * loads nothing either: the bound runs before the load (fix wave, L2-F5), and so does one whose class or interface is
+ * the JDK's (Phase 6 security fix, pass 2, P2-L2-F1). A test class of its own (a fresh JVM): the
  * Byteman jar is on the test class path, so anything that touched it would show.
  */
 class CheckLoadsNothingTest {
@@ -88,6 +89,16 @@ class CheckLoadsNothingTest {
         assertEquals(ErrorCodes.RULE_REJECTED, bound.error().code());
         assertTrue(String.valueOf(bound.error().data().get("errors")).contains("rule would retransform 2 classes"),
                 String.valueOf(bound.error().data()));
+        // Phase 6 security fix, pass 2, P2-L2-F1: a confirmed rule on a JDK class or interface outside the lint's
+        // prefixes, loaded or not, is refused by name before anything is loaded (before the fix it loaded Byteman and
+        // installed: every later load of the class threw NoClassDefFoundError into the host).
+        for (String target : new String[] {"CLASS org.xml.sax.helpers.LocatorImpl", "INTERFACE org.xml.sax.ErrorHandler"}) {
+            RpcException jdk = ctx.fails("rule.submit", args("rule", RuleLintTest.rule("jdk", "setPublicId",
+                    "fired($0)").replace("CLASS " + RuleLintTest.TOY, target)));
+            assertEquals(ErrorCodes.RULE_REJECTED, jdk.error().code(), target);
+            assertTrue(String.valueOf(jdk.error().data().get("errors")).contains("class is the JDK's"),
+                    String.valueOf(jdk.error().data()));
+        }
         assertFalse(ctx.log.all().contains("byteman: appended"), ctx.log.all());
         assertEquals(new ArrayList<String>(), loaded(inst, "org.jboss.byteman."), "no Byteman class is defined");
         assertEquals(new ArrayList<String>(), loaded(inst, "ai.skillroy.testjava.agent.byteman.sys."),

@@ -170,6 +170,20 @@ final class FakeAgentContext implements AgentContext {
         return key != null && SecretKeys.looksSecret(key);
     }
 
+    /** Every text the module handed to {@link #redactText}, in order. */
+    final List<String> redacting = new java.util.concurrent.CopyOnWriteArrayList<String>();
+
+    /** The core's two rules in small: a secret {@code key=value} pair's value, and the password of URL user-info. */
+    @Override
+    public String redactText(String text) {
+        if (text == null) {
+            return null;
+        }
+        redacting.add(text);
+        return text.replaceAll("(?i)(password|token|secret)=[^\\s;,&]*", "$1=" + SecretKeys.REDACTED)
+                .replaceAll("(://[^/?#\\s:@]*:)[^/?#\\s]*@", "$1" + SecretKeys.REDACTED + "@");
+    }
+
     /** Calls a primitive with the capability gate of the dispatcher (UNAVAILABLE → CAPABILITY_UNAVAILABLE). */
     Object call(String primitive, Map<String, Object> args) throws Exception {
         Primitive p = primitives.find(primitive);

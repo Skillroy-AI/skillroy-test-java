@@ -37,6 +37,13 @@ import java.util.concurrent.atomic.AtomicReference;
  * (the module loader is closed after {@code uninstall}, and a recorder left registered must keep working). The ahead
  * recorder also holds the module's disarmed handler strongly while a rule is left behind ({@link #keep}), so that the
  * helper's weak slot cannot free while the rule exists.
+ *
+ * <p>Bounded (Phase 6 security fix, pass 2, P2-L2-F5): at most {@code maxEntries} records ({@code hooks.maxClasses}),
+ * and no copy of a class file above {@code maxBytes} ({@code hooks.maxClassBytes}); a definition beyond either bound
+ * is counted (its events), not copied, and the name is marked {@linkplain #beyondBound beyond the bound}, so that the
+ * byte check answers {@code DEGRADED("not recorded: beyond the recorder's bound")}. A name the module stops watching
+ * ({@link #unwatch}, at {@code rule.unload} when no other rule names it) loses its records, and later definitions of it
+ * are not recorded.
  */
 final class ByteRecorder implements ClassFileTransformer {
 
@@ -46,24 +53,37 @@ final class ByteRecorder implements ClassFileTransformer {
         volatile byte[] last;
         volatile int events;
         volatile int foreign;
+        /** A definition above the byte bound was seen: its bytes were not kept. */
+        volatile boolean oversize;
     }
 
     private final String role;
     private final AtomicReference<Thread> own;
+    private final int maxEntries;
+    private final long maxBytes;
     private final Set<String> watched = Collections.newSetFromMap(new ConcurrentHashMap<String, Boolean>());
     private final Map<String, Entry> entries = new ConcurrentHashMap<String, Entry>();
+    /** The watched names (internal) one of whose definitions found the recorder full: a subset of {@link #watched}. */
+    private final Set<String> unrecorded = Collections.newSetFromMap(new ConcurrentHashMap<String, Boolean>());
     /** Holds the disarmed handler strongly while a rule of the module is left installed. */
     final AtomicReference<Object> keep = new AtomicReference<Object>();
 
     /**
      * @param own the thread on which the module is submitting or removing rules (null otherwise)
+     * @param maxEntries the most records kept ({@code hooks.maxClasses})
+     * @param maxBytes the largest class file copied ({@code hooks.maxClassBytes})
      */
-    ByteRecorder(String role, AtomicReference<Thread> own) {
+    ByteRecorder(String role, AtomicReference<Thread> own, int maxEntries, long maxBytes) {
         this.role = role;
         this.own = own;
+        this.maxEntries = maxEntries;
+        this.maxBytes = maxBytes;
         Entry warm = new Entry();
         warm.events = 0;
+        warm.oversize = false;
         key("warm", null);
+        unrecorded.remove("warm");
+        unwatch("warm");
     }
 
     /** Starts recording a class by its binary name (any loader). */
@@ -71,8 +91,36 @@ final class ByteRecorder implements ClassFileTransformer {
         watched.add(binaryName.replace('.', '/'));
     }
 
+    /** Stops recording a class by its binary name and drops its records, in every loader (P2-L2-F5). */
+    void unwatch(String binaryName) {
+        String internal = binaryName.replace('.', '/');
+        watched.remove(internal);
+        unrecorded.remove(internal);
+        String prefix = internal + "@";
+        for (String key : entries.keySet()) {
+            if (key.startsWith(prefix)) {
+                entries.remove(key);
+            }
+        }
+    }
+
     boolean watches(String binaryName) {
         return watched.contains(binaryName.replace('.', '/'));
+    }
+
+    /** True when a definition of the name, or one of its records, was beyond the recorder's bounds. */
+    boolean beyondBound(String binaryName, ClassLoader loader) {
+        String internal = binaryName.replace('.', '/');
+        if (unrecorded.contains(internal)) {
+            return true;
+        }
+        Entry e = entries.get(key(internal, loader));
+        return e != null && e.oversize;
+    }
+
+    /** The number of records kept (for the tests). */
+    int size() {
+        return entries.size();
     }
 
     /** The record of {@code binaryName} in {@code loader}, or null. */
@@ -90,15 +138,25 @@ final class ByteRecorder implements ClassFileTransformer {
             String key = key(className, loader);
             Entry e = entries.get(key);
             if (e == null) {
+                if (entries.size() >= maxEntries) {
+                    unrecorded.add(className);
+                    return null;
+                }
                 Entry fresh = new Entry();
                 Entry raced = ((ConcurrentHashMap<String, Entry>) entries).putIfAbsent(key, fresh);
                 e = raced == null ? fresh : raced;
             }
-            byte[] copy = classfileBuffer.clone();
-            if (e.first == null) {
-                e.first = copy;
+            if (classfileBuffer.length > maxBytes) {
+                e.oversize = true;
+                e.first = null;
+                e.last = null;
+            } else if (!e.oversize) {
+                byte[] copy = classfileBuffer.clone();
+                if (e.first == null) {
+                    e.first = copy;
+                }
+                e.last = copy;
             }
-            e.last = copy;
             e.events++;
             if (classBeingRedefined != null && own.get() != Thread.currentThread()) {
                 e.foreign++;

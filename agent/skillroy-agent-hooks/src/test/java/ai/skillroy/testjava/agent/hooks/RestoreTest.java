@@ -18,6 +18,7 @@
 package ai.skillroy.testjava.agent.hooks;
 
 import ai.skillroy.testjava.fixture.hooks.DepositRule;
+import ai.skillroy.testjava.fixture.hooks.LateFeeRule;
 import ai.skillroy.testjava.protocol.CapabilityState;
 import ai.skillroy.testjava.protocol.ErrorCodes;
 import ai.skillroy.testjava.protocol.hook.HookMode;
@@ -28,6 +29,8 @@ import org.junit.jupiter.api.Test;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.lang.instrument.ClassDefinition;
+import java.lang.instrument.ClassFileTransformer;
+import java.security.ProtectionDomain;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -140,6 +143,61 @@ class RestoreTest {
         assertTrue(Harness.slotHeld());
         assertEquals("OK", removeAll().get("verified"));
         assertFalse(Harness.slotHeld());
+    }
+
+    /**
+     * Phase 6 security fix, pass 2, P2-L2-F4: the engine's own transform events are counted where they happen. One
+     * hook of each of two classes is removed, so both are retransformed in one batch, which throws at the first class
+     * (another agent hands the JVM a malformed class file for it): the JVM never hands the second class to a
+     * transformer, so no event of the engine's is counted for it, and a later foreign retransformation of it is one
+     * foreign event, which the final restore reports. Both removed hooks are residues (the classes kept their bytes).
+     * Before the fix every class of the batch got one "own" event, so the foreign retransformation was hidden and the
+     * final restore said OK, and both removed hooks were answered OK.
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    void aBatchThatThrowsCountsNoEngineEventForAClassTheJvmNeverTransformed() throws Exception {
+        LateFeeRule fees = new LateFeeRule();
+        rule.depositFor("T0");
+        harness.install("desk", spec("fee.band", HookMode.OBSERVE, LateFeeRule.class, "band"),
+                spec("fee.computed", HookMode.OBSERVE, LateFeeRule.class, "feeFor"),
+                spec("deposit.computed", HookMode.OBSERVE, DepositRule.class, "depositFor"),
+                spec("deposit.waived", HookMode.OBSERVE, DepositRule.class, "waives"));
+        Ledger.Entry b = harness.engine().ledger.find(DepositRule.class.getName().replace('.', '/'),
+                DepositRule.class);
+        assertEquals(b.events.get(), b.own.get(), "after the install every event of the class was the engine's");
+        ClassFileTransformer broken = new ClassFileTransformer() {
+            @Override
+            public byte[] transform(ClassLoader l, String name, Class<?> redefined, ProtectionDomain pd, byte[] bytes) {
+                return redefined == LateFeeRule.class ? new byte[] {1, 2, 3} : null;
+            }
+        };
+        Harness.inst().addTransformer(broken, true);
+        Map<String, Object> removed;
+        try {
+            removed = harness.ctx.map("hook.remove", map("ids", Arrays.asList("fee.computed", "deposit.waived")));
+        } finally {
+            Harness.inst().removeTransformer(broken);
+        }
+        for (Object s : (List<Object>) removed.get("hooks")) {
+            assertEquals("UNAVAILABLE", ((Map<String, Object>) s).get("state"), String.valueOf(removed));
+            assertTrue(String.valueOf(((Map<String, Object>) s).get("reason")).startsWith(
+                    HookEngineImpl.RESIDUE_AFTER_REMOVE + ": "), String.valueOf(s));
+        }
+        assertEquals(b.events.get(), b.own.get(), "no event of the failed batch is counted for the class after the"
+                + " failing one: the JVM never transformed it");
+        Harness.inst().retransformClasses(DepositRule.class);
+        assertEquals(1, b.foreignEvents(), "another agent's retransformation is one foreign event");
+        Map<String, Object> all = harness.ctx.map("hook.remove", map());
+        Map<String, Object> deposit = null;
+        for (Object line : (List<Object>) all.get("restored")) {
+            if (DepositRule.class.getName().equals(((Map<String, Object>) line).get("class"))) {
+                deposit = (Map<String, Object>) line;
+            }
+        }
+        assertEquals("DEGRADED", deposit.get("verified"), String.valueOf(all));
+        assertEquals("foreign redefinition observed: 1 events", deposit.get("reason"));
+        assertEquals(0, fees.feeFor(0));
     }
 
     @Test

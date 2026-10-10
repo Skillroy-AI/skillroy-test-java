@@ -86,6 +86,41 @@ class ClassBoundTest {
         assertTrue(bound.check(rule("CLASS " + DESK)).ok());
     }
 
+    /**
+     * Phase 6 security fix, pass 2, P2-L2-F1: a rule naming a JDK class or interface outside the lint's prefixes is
+     * refused by name whether or not the target has loaded it (the loader rule sees loaded classes only, and Byteman
+     * would inject into the JDK class at its first load, which the bootstrap loader cannot link), on the {@code CLASS},
+     * {@code ^} and {@code INTERFACE} paths alike, even when an application implementor is loaded; a name in a jar of
+     * the agent's own loaders is refused likewise; a rule on an application class the target has not loaded yet is
+     * still accepted (7.3's "type check skipped: class not loaded").
+     */
+    @Test
+    void aJdkNameIsRefusedByNameAndAnUnloadedApplicationNameIsAccepted() throws Exception {
+        ClassBound bound = new ClassBound(jvm(true, DepositDesk.class, BranchDesk.class), Settings.defaults(), none());
+        for (String line : Arrays.asList("CLASS org.xml.sax.helpers.LocatorImpl", "CLASS ^org.xml.sax.helpers.DefaultHandler",
+                "INTERFACE org.xml.sax.ErrorHandler", "CLASS org.w3c.dom.Node", "CLASS org.ietf.jgss.GSSName")) {
+            ClassBound.Result r = bound.check(rule(line));
+            assertFalse(r.ok(), line);
+            String name = line.substring(line.indexOf(' ') + 1).replace("^", "");
+            assertEquals(Collections.singletonList(name + ": class is the JDK's"), r.errors, line);
+            assertTrue(r.matched.isEmpty(), "refused before anything is matched");
+        }
+        assertNull(bound.nameProblem("ai.skillroy.testjava.fixture.byteman.NotLoadedYet"),
+                "an application class the target has not loaded is not the JDK's");
+        assertTrue(bound.check(rule("CLASS ai.skillroy.testjava.fixture.byteman.NotLoadedYet")).ok());
+        assertTrue(bound.check(rule("CLASS " + DESK)).ok(), "the application's loaded class");
+
+        URL classes = DepositDesk.class.getProtectionDomain().getCodeSource().getLocation();
+        Set<ClassLoader> chain = none();
+        try (URLClassLoader agents = new URLClassLoader(new URL[] {classes}, null)) {
+            chain.add(agents);
+            ClassBound own = new ClassBound(jvm(true), Settings.defaults(), chain);
+            assertEquals("class is the agent's own", own.nameProblem("ai.skillroy.testjava.fixture.byteman.AgentLoaded"),
+                    "a class file in a jar of the agent's own loaders");
+            assertNull(own.nameProblem("ai.skillroy.testjava.fixture.byteman.NotLoadedYet"));
+        }
+    }
+
     @Test
     void tooManyClassesAreRefused() {
         Settings one = new Settings(null, 1, 262144L, 2000, 8000L, 16384);

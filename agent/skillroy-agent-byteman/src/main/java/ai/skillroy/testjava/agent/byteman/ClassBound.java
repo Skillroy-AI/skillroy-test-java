@@ -19,6 +19,7 @@ package ai.skillroy.testjava.agent.byteman;
 import java.io.IOException;
 import java.io.InputStream;
 import java.lang.reflect.Method;
+import java.net.URLClassLoader;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
@@ -35,6 +36,16 @@ import java.util.Set;
  * {@code hooks.maxMethods}, a class that is not modifiable, and any class defined by the bootstrap, platform or
  * extension loader or by a loader of the agent (the loader rule of 3.3 item 2). Every retransformation is a
  * stop-the-world pause, and a rule is bounded as a hook is. The walk never loads a class.
+ *
+ * <p>The loader rule judges loaded classes only, and Byteman injects into every class of the name its transformer sees
+ * later, in any loader. So, before the count, the rule's {@code CLASS} or {@code INTERFACE} name is looked up <b>by
+ * name</b> (Phase 6 security fix, pass 2, P2-L2-F1): as a class file through the JDK's loaders (the platform loader on
+ * Java 9 and later, the extension loader on Java 8; each delegates to the bootstrap loader, and a resource lookup
+ * defines nothing) and through the agent's own loaders (their own jars only). A name either finds is refused: a JDK
+ * class the target loads after the submit would get Byteman's trigger code, which the bootstrap loader cannot link
+ * (every load of it then throws {@code NoClassDefFoundError} into the host, and on Java 25 the class cannot be
+ * restored), and a JDK class can only extend or implement JDK types, so the {@code ^} and {@code INTERFACE} paths are
+ * closed with it. A rule on an application class the target has not loaded yet stays accepted.
  */
 final class ClassBound {
 
@@ -108,6 +119,11 @@ final class ClassBound {
         List<Class<?>> matched = new ArrayList<Class<?>>();
         List<String> errors = new ArrayList<String>();
         String target = rule.className();
+        String named = nameProblem(target);
+        if (named != null) {
+            errors.add(target + ": " + named);
+            return new Result(matched, errors);
+        }
         for (Class<?> c : jvm.loadedClasses()) {
             if (c == null || c.isArray() || c.isPrimitive()) {
                 continue;
@@ -136,6 +152,38 @@ final class ClassBound {
             }
         }
         return new Result(matched, errors);
+    }
+
+    /**
+     * Why a rule may not name {@code className} whether or not a class of it is loaded (P2-L2-F1), or null: its class
+     * file is found by the JDK's loaders ("class is the JDK's") or in a jar of the agent's own loaders ("class is the
+     * agent's own"). Loads nothing and defines nothing: resource lookups only.
+     */
+    String nameProblem(String className) {
+        if (className == null) {
+            return null;
+        }
+        String resource = className.replace('.', '/') + ".class";
+        for (ClassLoader l : jdkLoaders) {
+            try {
+                if (l.getResource(resource) != null) {
+                    return "class is the JDK's";
+                }
+            } catch (RuntimeException e) {
+                return "class is the JDK's (its class file cannot be looked up: " + e.getClass().getName() + ")";
+            }
+        }
+        for (ClassLoader l : agentLoaders) {
+            try {
+                if (l instanceof URLClassLoader && ((URLClassLoader) l).findResource(resource) != null) {
+                    return "class is the agent's own";
+                }
+            } catch (RuntimeException e) {
+                return "class is the agent's own (its class file cannot be looked up: " + e.getClass().getName()
+                        + ")";
+            }
+        }
+        return null;
     }
 
     /** Why {@code c} may not be retransformed, or null. */

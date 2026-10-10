@@ -182,7 +182,9 @@ final class FakeHookContext implements AgentContext {
             return null;
         }
         redacting.add(text);
-        return text.replaceAll("(?i)(password|token|secret)=[^\\s;,&]*", "$1=" + SecretKeys.REDACTED);
+        // The core's two rules in small: a secret key=value pair's value, and the password of URL user-info.
+        return text.replaceAll("(?i)(password|token|secret)=[^\\s;,&]*", "$1=" + SecretKeys.REDACTED)
+                .replaceAll("(://[^/?#\\s:@]*:)[^/?#\\s]*@", "$1" + SecretKeys.REDACTED + "@");
     }
 
     /** The target becomes ready: every declared capability is probed, and later declarations at once. */

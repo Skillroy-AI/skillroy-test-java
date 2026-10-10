@@ -74,6 +74,8 @@ final class HookEngineImpl implements HookEngine {
     static final int MAX_SPECS = 64;
     /** The health reason of a hook refused at install whose advice a class kept (its restore left it FAILED). */
     static final String RESIDUE_AFTER_REFUSAL = "residue after a refused install";
+    /** The health reason of a removed hook a class may still carry ({@code FAILED} restore, or the partial path). */
+    static final String RESIDUE_AFTER_REMOVE = "residue after remove";
 
     private final AgentContext ctx;
     private final Instrumentation inst;
@@ -99,6 +101,11 @@ final class HookEngineImpl implements HookEngine {
     /** Why the spy jar was refused at the last append attempt, or null. */
     private volatile String spyJarRefusal;
     private volatile boolean detached;
+    /**
+     * Set by a detach that could not take the engine's lock within its budget (Phase 6 security fix, pass 2,
+     * P2-L2-F6): the install or remove that held it reports the classes left behind again when it ends.
+     */
+    private volatile boolean detachGaveUp;
 
     HookEngineImpl(AgentContext ctx, HookOptions options) {
         this.ctx = ctx;
@@ -306,10 +313,21 @@ final class HookEngineImpl implements HookEngine {
                     throw new RpcException(ErrorCodes.HOOK_CONFLICT, reason, data("reason", reason, "installed",
                             current.toJson()));
                 }
-                removeLocked(Collections.<String>emptyList(), Long.MAX_VALUE, false, false);
+                // Phase 6 security fix, pass 2, P2-L2-F3: the implicit remove's restore and verdict travel in the
+                // answer, so that a FAILED class (a reference to Spy left) is not answered as a plain success.
+                String[] verdict = {"OK"};
+                Map<String, Object> removed = removeLocked(Collections.<String>emptyList(), Long.MAX_VALUE, false,
+                        false, verdict);
+                Map<String, Object> replaced = new LinkedHashMap<String, Object>();
+                replaced.put("restored", removed.get("restored"));
+                replaced.put("verified", verdict[0]);
+                Map<String, Object> result = installLocked(specs, catalogueId, catalogueHash, info);
+                result.put("replaced", replaced);
+                return result;
             }
             return installLocked(specs, catalogueId, catalogueHash, info);
         } finally {
+            reportIfDetachGaveUp();
             lock.unlock();
         }
     }
@@ -450,13 +468,24 @@ final class HookEngineImpl implements HookEngine {
                 }
             }
         }
-        // (6) the transformer, the registry and the retransformation, for the specs still passing
+        // (6) the transformer, the registry and the retransformation, for the specs still passing; none once a detach
+        // has begun (Phase 6 security fix, pass 2, P2-L2-F6: a detach that waits for this call, or gave up waiting,
+        // must not find classes advised after it started)
+        if (detached) {
+            releaseIfEmpty();
+            throw new RpcException(ErrorCodes.CAPABILITY_UNAVAILABLE, "the hooks module is uninstalling",
+                    data("capability", HooksModule.ENGINE));
+        }
         List<Object> touched = new ArrayList<Object>();
         List<HookEntry> installed = passing(outcomes) ? retransformAndDecide(outcomes, touched)
                 : new ArrayList<HookEntry>();
-        // (7) the capabilities, the catalogue and the event
+        // (7) the capabilities, the catalogue and the event; not for a module whose detach began meanwhile (its
+        // capabilities were withdrawn by the core's rollback, and its handler is disarmed)
+        boolean detaching = detached;
         for (HookEntry hook : installed) {
-            declare(hook);
+            if (!detaching) {
+                declare(hook);
+            }
         }
         Catalogue installedCatalogue = null;
         if (!installed.isEmpty()) {
@@ -477,7 +506,9 @@ final class HookEngineImpl implements HookEngine {
         }
         event.put("hooks", ids);
         event.put("touched", Long.valueOf(touched.size()));
-        ctx.events().publish(Topics.HOOKS_INSTALLED, HooksModule.SOURCE, event);
+        if (!detaching) {
+            ctx.events().publish(Topics.HOOKS_INSTALLED, HooksModule.SOURCE, event);
+        }
         // Section 3.5 step 5 at the end of an install as well (L2-F7): an install that left no class carrying an
         // advice (every spec refused at step 5 or 6, each refused hook's classes restored and verified) gives back
         // the slot and the transformers; a class whose restore failed keeps its entry and so the slot (D117).
@@ -723,6 +754,7 @@ final class HookEngineImpl implements HookEngine {
                 }
             }, options.maxClassBytes, MAX_BATCH_CLASSES)) {
                 long t0 = System.nanoTime();
+                transformers.own.set(Thread.currentThread());
                 try {
                     inst.retransformClasses(batch.toArray(new Class<?>[0]));
                 } catch (Throwable t) {
@@ -731,11 +763,12 @@ final class HookEngineImpl implements HookEngine {
                         round.errors.put(key, t.getClass().getName() + ": " + t.getMessage());
                         round.kept.add(key);
                     }
+                } finally {
+                    transformers.own.set(null);
                 }
                 long ms = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - t0);
                 for (Class<?> c : batch) {
                     Ledger.Entry e = byClass.get(c);
-                    e.own++;
                     if (touched != null) {
                         Map<String, Object> line = new LinkedHashMap<String, Object>();
                         line.put("class", c.getName());
@@ -893,18 +926,21 @@ final class HookEngineImpl implements HookEngine {
         requireInstrumentation();
         lock.lock();
         try {
-            return removeLocked(ids == null ? Collections.<String>emptyList() : ids, Long.MAX_VALUE, true, false);
+            return removeLocked(ids == null ? Collections.<String>emptyList() : ids, Long.MAX_VALUE, true, false,
+                    new String[] {"OK"});
         } finally {
+            reportIfDetachGaveUp();
             lock.unlock();
         }
     }
 
     /**
      * Steps 1 to 5 of section 3.5 for the named hooks (all for an empty list), restoring until the deadline
-     * ({@link System#nanoTime}); a class not restored by then stays in the ledger.
+     * ({@link System#nanoTime}); a class not restored by then stays in the ledger. {@code verdict[0]} receives the
+     * overall outcome of the restored classes ({@code OK}, {@code DEGRADED} or {@code FAILED}).
      */
     private Map<String, Object> removeLocked(List<String> ids, long deadline, boolean throwOnFailure,
-                                             boolean classByClass) {
+                                             boolean classByClass, String[] verdict) {
         List<String> targets = new ArrayList<String>(ids.isEmpty() ? new ArrayList<String>(hooks.keySet()) : ids);
         List<Object> statuses = new ArrayList<Object>();
         Set<HookEntry> removing = new LinkedHashSet<HookEntry>();
@@ -944,8 +980,30 @@ final class HookEngineImpl implements HookEngine {
                 partial.add(entry);
             }
         }
+        // A class that keeps other hooks is retransformed once without the removed ones. When that does not go
+        // through (its batch threw, so the JVM kept its bytes and the removed hook's advice with them; or the hook
+        // transformer failed on it), the removed hooks with a site there are residues (Phase 6 security fix, pass 2,
+        // P2-L2-S1, P2-L2-F4): a new site of the id, on any loader's copy, would answer the advice left behind.
+        Map<Ledger.Entry, String> kept = new IdentityHashMap<Ledger.Entry, String>();
         if (!partial.isEmpty() && transformers != null) {
-            retransform(partial, null, "remove (other hooks stay)");
+            Transformers.Round round = retransform(partial, null, "remove (other hooks stay)");
+            for (Ledger.Entry entry : partial) {
+                if (entry.type.get() == null) {
+                    continue;
+                }
+                String key = Transformers.Round.key(entry.name, entry.loader.get());
+                String error = round.errors.get(key);
+                if (error == null && !round.transformed.contains(key)) {
+                    error = entry.error != null ? entry.error : "the class was not retransformed";
+                }
+                if (round.kept.contains(key)) {
+                    kept.put(entry, error == null ? "its retransformation threw" : error);
+                } else if (error != null) {
+                    // The JVM installed bytes the hook transformer did not advise: the hooks that stay lost theirs.
+                    entry.error = error;
+                    kept.put(entry, error);
+                }
+            }
         }
         // 2. restore and verification, one retransformation, the recorder of the restore registered last; in the
         // batches of section 3.2 for hook.remove, class by class for the detach (whose budget is checked between)
@@ -955,9 +1013,10 @@ final class HookEngineImpl implements HookEngine {
         Map<Ledger.Entry, String> verdicts = new IdentityHashMap<Ledger.Entry, String>();
         restore(restore, deadline, classByClass, restored, failures, verdicts, overall);
         // 4. statuses, capabilities, the event
-        removed(removing, restore, verdicts, statuses);
+        removed(removing, restore, verdicts, kept, statuses);
         Map<String, Object> event = new LinkedHashMap<String, Object>();
         String overallVerdict = overall[0];
+        verdict[0] = overallVerdict;
         List<Object> removedIds = new ArrayList<Object>();
         for (HookEntry hook : removing) {
             removedIds.add(hook.id);
@@ -1031,15 +1090,19 @@ final class HookEngineImpl implements HookEngine {
             String failure = null;
             long t0 = System.nanoTime();
             inst.addTransformer(after, true);
+            Transformers mine = transformers;
+            if (mine != null) {
+                mine.own.set(Thread.currentThread());
+            }
             try {
                 inst.retransformClasses(batch.toArray(new Class<?>[0]));
             } catch (Throwable t) {
                 failure = "restore failed: " + t.getClass().getName() + ": " + t.getMessage();
             } finally {
-                inst.removeTransformer(after);
-                for (Class<?> type : batch) {
-                    byClass.get(type).own++;
+                if (mine != null) {
+                    mine.own.set(null);
                 }
+                inst.removeTransformer(after);
             }
             log.info("hooks: restore retransformed " + Transformers.describe(batch) + " in "
                     + TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - t0) + " ms");
@@ -1049,12 +1112,22 @@ final class HookEngineImpl implements HookEngine {
         }
     }
 
-    /** Step 4 of section 3.5 for the hooks removed: their statuses, their capabilities withdrawn, the residues. */
+    /**
+     * Step 4 of section 3.5 for the hooks removed: their statuses, their capabilities withdrawn, the residues. A hook
+     * with a site in a class of {@code kept} (the retransformation without it did not go through) is a residue as a
+     * {@code FAILED} restore makes one (Phase 6 security fix, pass 2, P2-L2-S1).
+     */
     private void removed(Set<HookEntry> removing, List<Ledger.Entry> restore, Map<Ledger.Entry, String> verdicts,
-                         List<Object> statuses) {
+                         Map<Ledger.Entry, String> kept, List<Object> statuses) {
         for (HookEntry hook : removing) {
             String worst = "OK";
             String why = null;
+            String left = null;
+            for (Ledger.Entry entry : hook.classes) {
+                if (left == null && kept.containsKey(entry)) {
+                    left = entry.name + " (" + entry.loaderId + "): " + kept.get(entry);
+                }
+            }
             for (Ledger.Entry entry : hook.classes) {
                 String v = verdicts.get(entry);
                 if (v == null && restore.contains(entry)) {
@@ -1077,10 +1150,18 @@ final class HookEngineImpl implements HookEngine {
             }
             HookStatus status;
             if ("FAILED".equals(worst)) {
-                hook.error = "residue after remove";
+                hook.error = RESIDUE_AFTER_REMOVE;
                 residue.put(hook.id, hook);
-                status = new HookStatus(hook.id, CapabilityState.UNAVAILABLE, "residue after remove", null,
+                status = new HookStatus(hook.id, CapabilityState.UNAVAILABLE, RESIDUE_AFTER_REMOVE, null,
                         hook.spec.capabilityId());
+            } else if (left != null) {
+                hook.error = RESIDUE_AFTER_REMOVE + ": the retransformation without it failed: " + left
+                        + " (hook.remove {} retries it)";
+                residue.put(hook.id, hook);
+                status = new HookStatus(hook.id, CapabilityState.UNAVAILABLE, wire(hook.error), null,
+                        hook.spec.capabilityId());
+                log.warn("hooks: " + hook.id + " was removed from the registry, but " + wire(left) + "; the class"
+                        + " may still carry its inert advice, and the id is refused until hook.remove {} restores it");
             } else {
                 status = new HookStatus(hook.id, "OK".equals(worst) ? CapabilityState.OK : CapabilityState.DEGRADED,
                         "OK".equals(worst) ? "removed" : "removed; restored with a difference", Probes.STRATEGY,
@@ -1319,6 +1400,11 @@ final class HookEngineImpl implements HookEngine {
         try {
             if (!locked) {
                 log.warn("hooks: an install or remove still runs; the detach leaves every hooked class disarmed");
+                // Phase 6 security fix, pass 2, P2-L2-F6: the classes known now (a lock-free snapshot, which may
+                // over-report a class the running call then takes out: the safe direction), each at WARN with the
+                // remedy, and D177's count; the running call reports again when it ends.
+                detachGaveUp = true;
+                reportLeftBehind(ledger.entries());
                 return;
             }
             for (AutoCloseable declaration : declarations.values()) {
@@ -1327,27 +1413,53 @@ final class HookEngineImpl implements HookEngine {
             declarations.clear();
             if (inst != null && transformers != null) {
                 try {
-                    removeLocked(Collections.<String>emptyList(), deadline, false, true);
+                    removeLocked(Collections.<String>emptyList(), deadline, false, true, new String[] {"OK"});
                 } catch (Throwable t) {
                     log.warn("hooks: the restore at detach failed", t);
                 }
             }
-            List<Ledger.Entry> left = ledger.entries();
-            if (!left.isEmpty()) {
-                System.setProperty(ADVICE_LEFT_PROPERTY, String.valueOf(left.size()));
-                for (Ledger.Entry entry : left) {
-                    log.warn("hooks: " + entry.name + " (" + entry.loaderId + ") still carries a disarmed advice after"
-                            + " the detach budget of " + options.detachBudgetMs + " ms: it is inert, the Spy slot"
-                            + " stays held until the JVM exits, and a re-attached agent cannot hook; restart the"
-                            + " target to drop it");
-                }
-            }
+            reportLeftBehind(ledger.entries());
         } finally {
             if (locked) {
                 lock.unlock();
             }
             core.dropThreadState();
         }
+    }
+
+    /**
+     * Section 3.5's report of the classes a detach leaves carrying a disarmed advice: each at WARN by name with the
+     * remedy, and their number in {@link #ADVICE_LEFT_PROPERTY} (D177) for a later agent's probe.
+     */
+    private void reportLeftBehind(List<Ledger.Entry> left) {
+        if (left.isEmpty()) {
+            return;
+        }
+        System.setProperty(ADVICE_LEFT_PROPERTY, String.valueOf(left.size()));
+        for (Ledger.Entry entry : left) {
+            log.warn("hooks: " + entry.name + " (" + entry.loaderId + ") still carries a disarmed advice after"
+                    + " the detach budget of " + options.detachBudgetMs + " ms: it is inert, the Spy slot"
+                    + " stays held until the JVM exits, and a re-attached agent cannot hook; restart the"
+                    + " target to drop it");
+        }
+    }
+
+    /**
+     * At the end of an install or remove that held the lock past a detach's budget (P2-L2-F6): the classes left now,
+     * reported again, so that the WARN lines and the count reflect what the call finished with.
+     */
+    private void reportIfDetachGaveUp() {
+        if (!detachGaveUp) {
+            return;
+        }
+        List<Ledger.Entry> left = ledger.entries();
+        if (left.isEmpty()) {
+            // The call took every class out after all (and released the slot): the detach's snapshot over-reported.
+            System.clearProperty(ADVICE_LEFT_PROPERTY);
+            log.info("hooks: the call the detach could not wait for left no class carrying an advice");
+            return;
+        }
+        reportLeftBehind(left);
     }
 
     // ------------------------------------------------------------------------------------------------------ helpers

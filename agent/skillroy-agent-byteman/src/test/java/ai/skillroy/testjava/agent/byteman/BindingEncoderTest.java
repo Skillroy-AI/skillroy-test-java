@@ -117,6 +117,30 @@ class BindingEncoderTest {
         assertEquals(Loud.class.getName(), ((Map<?, ?>) b.get("12")).get("class"));
     }
 
+    /**
+     * Phase 6 security fix, pass 2, P2-L2-F7: a bound string, top-level, inside a list and inside a map (its key too),
+     * passes the core's {@code redactText} after its cut, so that a secret {@code key=value} pair's value and the
+     * password of URL user-info are hidden before the mask policies; before the fix they reached {@code rule.fired}.
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    void aBoundStringPassesTheAgentsTextRedaction() {
+        BindingEncoder e = new BindingEncoder(ctx, 16384);
+        Map<String, Object> options = new java.util.LinkedHashMap<String, Object>();
+        options.put("url", "jdbc:x://desk:pw-inner@h/db");
+        options.put("note password=k3y", "kept");
+        Map<String, Object> b = bindings(e, "url=jdbc:x://desk:pw-outer@h/db;password=hunter2 mode=desk",
+                Arrays.asList("token=abc123", "plain"), options);
+        String text = String.valueOf(b);
+        for (String secret : Arrays.asList("hunter2", "pw-outer", "abc123", "pw-inner", "k3y")) {
+            assertFalse(text.contains(secret), secret + " left the agent: " + text);
+        }
+        assertEquals("url=jdbc:x://desk:<redacted>@h/db;password=<redacted> mode=desk", b.get("0"));
+        assertEquals(Arrays.asList("token=<redacted>", "plain"), b.get("1"));
+        assertEquals("jdbc:x://desk:<redacted>@h/db", ((Map<String, Object>) b.get("2")).get("url"));
+        assertTrue(ctx.redacting.contains("plain"), "every bound string went through the core's rule");
+    }
+
     @Test
     void containersAreReadOneLevelDeepAndCut() {
         BindingEncoder e = new BindingEncoder(ctx, 16384);

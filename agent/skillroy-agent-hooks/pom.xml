@@ -242,6 +242,28 @@
             </configuration>
           </execution>
           <execution>
+            <id>fresh-jvm-detach-lock</id>
+            <goals>
+              <goal>test</goal>
+            </goals>
+            <configuration>
+              <includes>
+                <include>**/DetachLockFreshJvmTest.java</include>
+              </includes>
+            </configuration>
+          </execution>
+          <execution>
+            <id>fresh-jvm-replace-residue</id>
+            <goals>
+              <goal>test</goal>
+            </goals>
+            <configuration>
+              <includes>
+                <include>**/ReplaceResidueFreshJvmTest.java</include>
+              </includes>
+            </configuration>
+          </execution>
+          <execution>
             <id>fresh-jvm-nexus-measure</id>
             <goals>
               <goal>test</goal>

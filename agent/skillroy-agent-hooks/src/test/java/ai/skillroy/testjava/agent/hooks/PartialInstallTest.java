@@ -209,6 +209,71 @@ class PartialInstallTest {
         assertEquals(before[0], Harness.counters()[0]);
     }
 
+    /**
+     * Phase 6 security fix, pass 2, P2-L2-S1 (and P2-L2-F4's first half): {@code hook.remove} of one of two hooks on
+     * the system class, whose retransformation without it throws (another agent breaks the class from then on), keeps
+     * the class's bytes and so the removed hook's advice. The removed hook is then a residue: answered
+     * {@code UNAVAILABLE} with the reason, {@code ERROR} in health, and its id refused by a later install, also one
+     * pinned to another loader's copy, so that a confirmed {@code STUB} of the id can never reach the class the
+     * operator did not target. Before the fix the hook was answered {@code OK "removed"}, the install pinned to the copy
+     * passed, and the stub answered {@code waived} from the system class too (the sceptic's probe).
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    void aRemoveWhosePartialRetransformationThrowsLeavesAResidueWhoseIdIsRefused() throws Exception {
+        LateFeeRule own = new LateFeeRule();
+        Object other = copyAndHarness();
+        Method copyBand = other.getClass().getMethod("band", int.class);
+        harness.ctx.map("hook.install", map("specs", Harness.json(band("fee.band", HookMode.STUB, "system"),
+                Harness.spec("fee.computed", HookMode.OBSERVE, LateFeeRule.class.getName(), "feeFor", "(I)I",
+                        "system", null, null, false)), "catalogue", map("id", "fees", "hash", "sha256:h1")));
+        foreign = breaking(null, 1);
+        Harness.inst().addTransformer(foreign, true);
+
+        Map<String, Object> removed = harness.ctx.map("hook.remove", map("ids", java.util.Arrays.asList("fee.band")));
+        Map<String, Object> band = status(removed, 0);
+        assertEquals("UNAVAILABLE", band.get("state"), String.valueOf(removed));
+        String reason = String.valueOf(band.get("reason"));
+        assertTrue(reason.startsWith(HookEngineImpl.RESIDUE_AFTER_REMOVE + ": the retransformation without it failed: "
+                + LateFeeRule.class.getName() + " (system): java.lang.ClassFormatError"), reason);
+        assertTrue(reason.endsWith("(hook.remove {} retries it)"), reason);
+        assertTrue(((List<Object>) removed.get("restored")).isEmpty(), "the class keeps another hook");
+        long[] before = Harness.counters();
+        assertEquals("late", own.band(9));
+        assertTrue(Harness.counters()[0] > before[0], "the class kept its bytes: the removed hook's advice is there,"
+                + " inert");
+        Map<String, Object> health = (Map<String, Object>) ((Map<String, Object>) harness.ctx.map("hook.health",
+                map()).get("hooks")).get("fee.band");
+        assertEquals("ERROR", health.get("state"), String.valueOf(health));
+        assertTrue(String.valueOf(health.get("reason")).startsWith(HookEngineImpl.RESIDUE_AFTER_REMOVE + ": "),
+                String.valueOf(health));
+
+        String copyId = Integer.toHexString(System.identityHashCode(loader));
+        Map<String, Object> again = harness.ctx.map("hook.install", map("specs", Harness.json(band("fee.band",
+                HookMode.STUB, copyId)), "catalogue", map("id", "fees", "hash", "sha256:h2"), "replace", true));
+        assertEquals("UNAVAILABLE", status(again, 0).get("state"), String.valueOf(again));
+        assertTrue(String.valueOf(status(again, 0).get("reason")).startsWith("a residue of hook fee.band is left"),
+                String.valueOf(again));
+        assertEquals("FAILED", ((Map<String, Object>) again.get("replaced")).get("verified"),
+                "the replace's remove of fee.computed could not restore the class (P2-L2-F3): " + again);
+        assertEquals(ai.skillroy.testjava.protocol.ErrorCodes.INVALID_PARAMS, harness.ctx.error("hook.stub",
+                map("id", "fee.band", "value", "waived"), map("confirm", true)).error().code(),
+                "no hook of the id is installed, so nothing can be armed");
+        assertEquals("late", own.band(9), "the class the operator did not target keeps its own answer");
+        assertEquals("grace", copyBand.invoke(other, 3));
+
+        Harness.inst().removeTransformer(foreign);
+        foreign = null;
+        harness.ctx.map("hook.remove", map());
+        assertTrue(harness.engine().ledger.isEmpty());
+        assertTrue(((Map<String, Object>) harness.ctx.map("hook.health", map()).get("hooks")).isEmpty(),
+                "the residues are gone once their class is restored");
+        assertFalse(Harness.slotHeld());
+        before = Harness.counters();
+        assertEquals("late", own.band(9));
+        assertEquals(before[0], Harness.counters()[0], "restored: the system class calls Spy no more");
+    }
+
     @Test
     void aFailedRetransformsReasonGoesThroughTheRedactionAndAnInstallOfNothingReleasesTheSlot() throws Exception {
         new SlipFormat().header("drill");

@@ -17,6 +17,7 @@
 package ai.skillroy.testjava.agent.bootstrap;
 
 import java.io.IOException;
+import java.nio.file.FileStore;
 import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
@@ -37,6 +38,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.EnumSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 import java.util.TreeSet;
 
@@ -51,8 +53,10 @@ import java.util.TreeSet;
  * process uid is known (by name otherwise) and the group and other bits are judged; where it has ACLs (Windows; not
  * verified on a Windows host: the judgement is unit-tested on built ACL values) "me" is the owner of a file this
  * process has just created and no ALLOW entry may give anyone else a write right (any right, for a file with a
- * token); a file system with neither cannot be checked and is refused. Reads attributes only; the caller reads the
- * file.
+ * token); a file system with neither cannot be checked and is refused. Which of the three applies is decided by the
+ * file's volume, not by the file system provider ({@link Volume}, the rule of P2-L7-F1; Phase 6 security fix, pass 2,
+ * SE): an options file on a FAT or exFAT volume, which anybody with the volume may have written whatever its mode bits
+ * read, is refused. Reads attributes only; the caller reads the file.
  *
  * <p>Stateless apart from the lazily resolved current user; safe from any thread. Runs before any agent class is
  * loaded and only when an options file is named.
@@ -89,9 +93,20 @@ final class OptionsFileCheck {
             if (!Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)) {
                 return "it is not a regular file";
             }
-            PosixFileAttributeView posix = Files.getFileAttributeView(file, PosixFileAttributeView.class,
-                    LinkOption.NOFOLLOW_LINKS);
-            if (posix != null) {
+            // Phase 6 security fix, pass 2 (SE; P2-L7-F1's rule): the volume decides which view is judged, never the
+            // file system provider, whose views are the same for every path (a FAT or exFAT volume reports POSIX on
+            // macOS and Linux and reads back rwx------ whatever was asked).
+            Volume.Kind kind = Volume.kind(file);
+            if (kind == Volume.Kind.NONE) {
+                return "its file system has neither POSIX permissions nor ACLs" + Volume.note(file)
+                        + ", so who may change it cannot be told";
+            }
+            if (kind == Volume.Kind.POSIX) {
+                PosixFileAttributeView posix = Files.getFileAttributeView(file, PosixFileAttributeView.class,
+                        LinkOption.NOFOLLOW_LINKS);
+                if (posix == null) {
+                    return "its POSIX attributes cannot be read";
+                }
                 PosixFileAttributes attributes = posix.readAttributes();
                 Object uid = null;
                 try {
@@ -256,6 +271,80 @@ final class OptionsFileCheck {
                     }
                 }
             }
+        }
+    }
+
+    /**
+     * What the volume of a file lets a process restrict (phase1-contracts.md 2.5, the rule of P2-L7-F1; Phase 6
+     * security fix, pass 2, SE): a private copy of {@code ai.skillroy.testjava.protocol.Volumes}, because the
+     * bootstrap depends on nothing, not even the protocol module. The {@link FileStore} of the path (or of its nearest
+     * existing ancestor) is POSIX when it supports the POSIX view, else ACL when it supports the ACL view, else
+     * neither; a volume whose type is one of {@link #WITHOUT_PERMISSIONS} is neither whatever its views say; where the
+     * store cannot be read, the provider's views decide. The list must stay equal to the protocol's
+     * ({@code OptionsFileVolumeTest} holds the two equal).
+     */
+    static final class Volume {
+
+        /** How a volume lets a process restrict access to what it holds. */
+        enum Kind { POSIX, ACL, NONE }
+
+        /** FAT and exFAT, as Linux, macOS and Windows name them, compared without regard to case. */
+        static final Set<String> WITHOUT_PERMISSIONS = Collections.unmodifiableSet(new TreeSet<String>(
+                java.util.Arrays.asList("msdos", "vfat", "fat", "fat12", "fat16", "fat32", "exfat", "umsdos")));
+
+        private Volume() {
+        }
+
+        /** The kind of the volume that holds {@code path} (its nearest existing ancestor's). */
+        static Kind kind(Path path) {
+            Path probe = path.toAbsolutePath();
+            FileStore store = store(probe);
+            if (store == null) {
+                Set<String> views = probe.getFileSystem().supportedFileAttributeViews();
+                return kind(null, views.contains("posix"), views.contains("acl"));
+            }
+            return kind(type(store), store.supportsFileAttributeView(PosixFileAttributeView.class),
+                    store.supportsFileAttributeView(AclFileAttributeView.class));
+        }
+
+        /** The pure rule: a type of {@link #WITHOUT_PERMISSIONS} is neither; else POSIX, else ACL, else neither. */
+        static Kind kind(String type, boolean posix, boolean acl) {
+            if (withoutPermissions(type)) {
+                return Kind.NONE;
+            }
+            return posix ? Kind.POSIX : acl ? Kind.ACL : Kind.NONE;
+        }
+
+        static boolean withoutPermissions(String type) {
+            return type != null && WITHOUT_PERMISSIONS.contains(type.trim().toLowerCase(Locale.ROOT));
+        }
+
+        /** {@code " (its volume is <type>, which keeps no permissions)"} for a listed type, else empty. */
+        static String note(Path path) {
+            FileStore store = store(path.toAbsolutePath());
+            String type = store == null ? null : type(store);
+            return withoutPermissions(type) ? " (its volume is " + type + ", which keeps no permissions)" : "";
+        }
+
+        private static String type(FileStore store) {
+            try {
+                return store.type();
+            } catch (RuntimeException e) {
+                return null;
+            }
+        }
+
+        private static FileStore store(Path absolute) {
+            for (Path p = absolute; p != null; p = p.getParent()) {
+                try {
+                    if (Files.exists(p)) {
+                        return Files.getFileStore(p);
+                    }
+                } catch (IOException | RuntimeException e) {
+                    return null;
+                }
+            }
+            return null;
         }
     }
 
