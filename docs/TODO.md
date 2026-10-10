@@ -112,7 +112,7 @@ views, SC the model boundary and the model as an actor, SD Windows and SQL Serve
 outputs). The 65 decisions of these fixers are D222-D286 and join B27. Every finding of medium or above of both passes is
 fixed; eight lows are proposed for the owner's acceptance, each with a release note in `SECURITY.md` (B28). The native
 reactor was green after every landing. The native reactor on `main` at `4f9962f` and the Linux matrix of the final tree
-(arm64 twice, amd64 once): [final matrix]. **Still to do:** the owner's word on B26, B27 and B28 and the push; the Windows
+(arm64 twice, amd64 once): green on every leg: native 4692 tests, 0 failures, 0 errors, 493 skipped; arm64 rounds 2 and 3 and amd64 round 1 (the FORK launch mechanism under emulation), each with the whole reactor on Java 25 targets 4853/0/0/105, on Java 8 targets 4853/0/0/132 and the agent side on a Java 8 test JVM 1668/0/0/26 (reports read: hooks 70 and Byteman 43 tests on `java.version` 1.8.0_*); `-fae`, so no leg stopped early (the table "Phase 6 final matrix" below). **Still to do:** the owner's word on B26, B27 and B28 and the push; the Windows
 host; the live check of the planner's stdin route (P5 section 15.3) with the key; Phase 7. The tables that follow are those of
 Phases 1 to 5.
 
@@ -1667,8 +1667,22 @@ waits for the focus and a new test pins the lost Enter (FD, D234, D235): **5 fai
 image, one fresh JVM per run, Java 8 and Java 25, warm and fresh containers). The same property of `swing.type` DISPATCH with
 `enter` is gap 60.
 
+**Phase 6 final matrix** (2026-10-09/10, on `4f9962f`, every fix merged; the commits after it change documents and two
+comment lines only; `-fae`; counts read from the reports, the Java 8 test-JVM leg's reports checked for `java.version`
+1.8.0_*):
+
+| Run | Whole reactor, Java 25 targets | Same, Java 8 targets | Agent side on a Java 8 test JVM |
+|---|---|---|---|
+| native (headless, JDK 26) | 4692 / 0 / 0 / 493 | – | – |
+| arm64 round 1 (on `822dc58`, before the review) | 4675 / 0 / 0 / 97 | 4675 / 1 / 0 / 97, then re-run with `-fae` 4675 / 0 / 0 / 124 (the typed-keys flake, fixed by FD) | 1347 / 0 / 1 / 8 (`OptionalModulesIT` on Java 8, fixed by FA) |
+| arm64 round 2 | 4853 / 0 / 0 / 105 (939 s) | 4853 / 0 / 0 / 132 (855 s) | 1668 / 0 / 0 / 26 (243 s) |
+| arm64 round 3 | 4853 / 0 / 0 / 105 (910 s) | 4853 / 0 / 0 / 132 (873 s) | 1668 / 0 / 0 / 26 (238 s) |
+| amd64 round 1 (emulated, FORK) | 4853 / 0 / 0 / 105 (1423 s) | 4853 / 0 / 0 / 132 (1256 s) | 1668 / 0 / 0 / 26 (356 s) |
+
+The scenario E capability-hash failure seen once by fixer SD did not recur in the final rounds.
+
 **Status of the checklist.** The security review item: pass 1 and pass 2 run, every medium and high fixed; the sign-off is B28,
-the owner's. The code review item is ticked below; the matrix lines carry `[final matrix]`.
+the owner's. The code review item and the matrix item are ticked below.
 
 **Checklist.**
 
@@ -1707,11 +1721,12 @@ the owner's. The code review item is ticked below; the matrix lines carry `[fina
   disabled, and on a JDK 25 target loaded through `JAVAAGENT` (**met** in the same legs, E being the designed exception:
   `PASS` with hooks, `DEGRADED` without); on Windows the agent loads through `JAVAAGENT` as the logged-on user (**cannot
   be met without the Windows host**, contract §14); the repeated security review is signed off (**the owner's**, B28). Not
-  ticked: two criteria wait (the Windows host and the owner's signature); the Linux matrix of the final tree: [final matrix]
+  ticked: two criteria wait (the Windows host and the owner's signature); the Linux matrix of the final tree is green (the next item)
 - [x] The Phase 6 code review (three lenses, a sceptic each) on the integrated tree and its fix wave (tags `FA`-`FD`):
   done 2026-10-09 ("Phase 6 code review (2026-10-09)" above; D222-D243)
-- [ ] The Linux matrix of the final tree (arm64 twice, amd64 once; Java 8 and Java 25 targets; the agent side on a
-  Java 8 test JVM, the matrix command's `-pl` list now seventeen modules, see "Environment notes"): [final matrix]
+- [x] The Linux matrix of the final tree (arm64 twice, amd64 once; Java 8 and Java 25 targets; the agent side on a
+  Java 8 test JVM, the matrix command's `-pl` list now seventeen modules, see "Environment notes"): green on every leg,
+  2026-10-09/10, on `4f9962f` (the table "Phase 6 final matrix" below)
 - [x] `SECURITY.md` and `docs/release-checklist.md` (D148, §12.8): written 2026-10-09 (`edbc325`: no package had written
   them); the release notes of the lows proposed for acceptance (pass 1's five, pass 2's three) are in `SECURITY.md`
   "Known limitations", marked provisional until the owner's sign-off (B28)

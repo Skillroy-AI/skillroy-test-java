@@ -3,7 +3,8 @@
 **Status: specified 2026-10-09, revised the same day after the contract review; built the same day by six packages
 (TL, HK, CP, BW and the two security-fix packages of FX, FX-2 and FX-1, in the order they landed); the build was
 reviewed by three lenses with a sceptic each and fixed (fix waves FA-FD); the repeat security review's two passes were
-run and their findings fixed (fix rounds SA-SF), all on 2026-10-09. B26 and B27 are provisional; B28, the sign-off of the
+run and their findings fixed (fix rounds SA-SF), all on 2026-10-09; the final tree verified in the Linux matrix (arm64
+twice, amd64 once, every leg green; `../TODO.md`, "Phase 6 final matrix"). B26 and B27 are provisional; B28, the sign-off of the
 repeat security review, is the owner's.** The questions of §17
 are answered by the orchestrator and recorded as decision **B26** (`../DECISIONS.md`, provisional); the 62 decisions the
 build took without the owner are D160-D221 in §16 and, with the 65 decisions of the code review's fix wave and of pass 2's
