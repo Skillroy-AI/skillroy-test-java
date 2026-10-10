@@ -244,6 +244,49 @@ class SessionServiceTest {
         }
     }
 
+    /** The vocabulary's sentence on {@code $reference}s before Phase 7 (D342 replaced it). */
+    private static final String PHASE6_REFERENCE_SENTENCE = "Its verbs, each a tool, with the JSON Schema of their"
+            + " arguments (a $reference such as $item.code names a resolved slot's field):";
+
+    /** The system text of {@link #theSystemTextIsPhase6sButForTheReferenceSentence} as Phase 6 built it. */
+    private static final String PHASE6_SYSTEM_TEXT = SessionService.INSTRUCTIONS
+            + "Limits: at most 10 actions per turn; a read returns at most 20000 characters.\n"
+            + "\n---\n"
+            + "The pack: lending 0.0.2-test.\n"
+            + "Its verbs, each a tool, with the JSON Schema of their arguments (a $reference such as $item.code names"
+            + " a resolved slot's field):\n"
+            + "- lend (tool lending_lend): {\"properties\":{\"item\":{\"type\":\"string\"},\"qty\":{\"type\":"
+            + "\"integer\"}},\"required\":[\"item\"],\"type\":\"object\"}\n"
+            + "- signOn (tool lending_sign_on): {\"properties\":{\"staff\":{\"type\":\"string\"}},\"required\":"
+            + "[\"staff\"],\"type\":\"object\"}\n"
+            + "- takeBack (tool lending_take_back): free-form arguments\n"
+            + "The tools: skillroy_snapshot, skillroy_facts, skillroy_events, skillroy_catalogue, skillroy_resolve,"
+            + " skillroy_check, skillroy_observe, skillroy_note, lending_lend, lending_sign_on, lending_take_back,"
+            + " done, ask_person.\n"
+            + "\n---\n";
+
+    /**
+     * phase7-contracts.md 9.2 and 13.1 item 7 (D342): the session's vocabulary stops telling the model that a
+     * {@code $reference} names a resolved slot's secret field; it names the non-secret fields only. A session builds the
+     * same system text as before but for that one sentence (so that the committed session recordings, whose
+     * fingerprints hold the text, are regenerated once in the phase, 12.5).
+     */
+    @Test
+    void theSystemTextIsPhase6sButForTheReferenceSentence() throws Exception {
+        ScriptedGateway gateway = ScriptedGateway.sequence(List.of(done("r1", "nothing to do")));
+        service(gateway, SessionPolicy.acting(), "1.00").ask("anything");
+        StringBuilder all = new StringBuilder();
+        for (Content part : gateway.requests().get(0).system()) {
+            all.append(((Content.Text) part).text()).append("\n---\n");
+        }
+        String text = all.toString();
+        assertTrue(text.contains(SessionService.REFERENCE_SENTENCE), text);
+        assertTrue(SessionService.REFERENCE_SENTENCE.contains("non-secret field"));
+        assertFalse(text.contains("names a resolved slot's field"), "the Phase 6 sentence is gone: " + text);
+        assertEquals(PHASE6_SYSTEM_TEXT, text.replace(SessionService.REFERENCE_SENTENCE, PHASE6_REFERENCE_SENTENCE),
+                "the same system text but for the one sentence");
+    }
+
     // ------------------------------------------------------------------------------------------------ the loop
 
     @Test
