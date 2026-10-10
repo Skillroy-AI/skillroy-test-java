@@ -32,6 +32,7 @@ import java.io.File;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -354,13 +355,35 @@ class LifecycleTest {
         agent = null;
     }
 
+    /**
+     * Phase 6 security fix, pass 2, P2-L1-F4: a supplied token is the key of every MAC and the agent's 401 is not
+     * rate-limited, so one shorter than 16 characters fails the start, before a thread or a port exists, without
+     * echoing the value; an absent or empty token is generated.
+     */
+    @Test
+    void aSuppliedTokenShorterThanSixteenCharactersFailsTheStart() {
+        Map<String, String> options = new HashMap<String, String>();
+        options.put("discoveryDir", tmp.toString());
+        options.put("token", "fifteen-chars-x");
+        IllegalArgumentException shortToken = assertThrows(IllegalArgumentException.class,
+                () -> AgentRuntime.resolveOptions(options));
+        assertEquals("option token must be at least 16 characters; omit it to let the agent generate one",
+                shortToken.getMessage());
+        assertThrows(IllegalArgumentException.class, () -> AgentRuntime.start(options, null, null, "EMBEDDED", null));
+        options.put("token", "sixteen-chars-xy");
+        assertEquals("sixteen-chars-xy", AgentRuntime.resolveOptions(options).get("token"));
+        options.put("token", "");
+        assertEquals("", AgentRuntime.resolveOptions(options).get("token"), "empty: the agent generates one");
+    }
+
     @Test
     @SuppressWarnings("unchecked")
     void aSuppliedTokenAndNonceAreUsedAndTheirFileIsNotOwned() throws Exception {
         File tokenFile = tmp.resolve("given.token").toFile();
-        Files.write(tokenFile.toPath(), "supplied-token".getBytes(AgentHarness.UTF8));
-        agent = AgentHarness.start(tmp, "token", "supplied-token", "nonce", "n-0", "tokenFile", tokenFile.getPath());
-        assertEquals("supplied-token", agent.token);
+        Files.write(tokenFile.toPath(), "supplied-token-0123456789".getBytes(AgentHarness.UTF8));
+        agent = AgentHarness.start(tmp, "token", "supplied-token-0123456789", "nonce", "n-0", "tokenFile",
+                tokenFile.getPath());
+        assertEquals("supplied-token-0123456789", agent.token);
         assertEquals("n-0", agent.get("/ping").json().get("agentNonce"));
         Map<String, Object> options = (Map<String, Object>) agent.valueMap("agent.info", null).get("options");
         assertFalse(options.containsKey("token"));

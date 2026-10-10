@@ -141,6 +141,26 @@ class PermissionlessVolumeTest {
         }
     }
 
+    /**
+     * The ancestor rule of P2-L1-F3 takes the per-volume decision of P2-L7-F1 too (merged with both pass 2 fixes): a
+     * directory whose parent is on a FAT or exFAT volume, which reads {@code rwx------} on macOS and so passed the
+     * POSIX test of an ancestor, is refused because anybody with the volume may rename the parent's entries.
+     */
+    @Test
+    void anAncestorOnAFatOrExfatVolumeIsRefused() throws IOException {
+        for (Path volume : volumes()) {
+            String type = Files.getFileStore(volume).type();
+            Path sub = Files.createDirectory(volume.resolve("ancestor-" + SecureFiles.randomHex(4)));
+            try {
+                String reason = SecureFiles.untrustedAncestorReason(sub);
+                assertEquals("the directory " + volume + " above it is on a volume with neither POSIX permissions nor"
+                        + " ACLs (its volume is " + type + ", which keeps no permissions)", reason);
+            } finally {
+                Files.deleteIfExists(sub);
+            }
+        }
+    }
+
     /** The POSIX read-back's rule on built values: exactly what was asked, or a refusal that says what was read. */
     @Test
     void theReadBackIsExact() {

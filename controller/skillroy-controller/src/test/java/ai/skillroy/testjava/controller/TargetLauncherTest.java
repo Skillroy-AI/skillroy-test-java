@@ -315,6 +315,12 @@ class TargetLauncherTest {
         AgentHome home = Fixtures.get().home;
         assertThrows(IllegalArgumentException.class, () -> TargetLauncher.java(Path.of("java")).mainClass("x.Main")
                 .discoveryDir(dir).javaAgent(home, Map.of("token", "two words")).start());
+        // P2-L1-F4: a supplied token shorter than 16 characters is refused before anything is written or started.
+        IllegalArgumentException shortToken = assertThrows(IllegalArgumentException.class,
+                () -> TargetLauncher.java(Path.of("java")).mainClass("x.Main").discoveryDir(dir)
+                        .javaAgent(home, Map.of("token", "fifteen-chars-x")).start());
+        assertTrue(shortToken.getMessage().contains("16 to 1024") && !shortToken.getMessage().contains("fifteen"),
+                shortToken.getMessage());
         assertEquals(List.of(), optionFiles(dir));
     }
 

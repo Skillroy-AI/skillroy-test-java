@@ -16,30 +16,17 @@
 
 package ai.skillroy.testjava.agent.byteman;
 
-import ai.skillroy.testjava.protocol.Volumes;
+import ai.skillroy.testjava.agent.api.instrument.JarTrust;
 
 import java.io.IOException;
-import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.attribute.AclEntry;
-import java.nio.file.attribute.AclEntryPermission;
-import java.nio.file.attribute.AclEntryType;
-import java.nio.file.attribute.AclFileAttributeView;
-import java.nio.file.attribute.PosixFileAttributeView;
-import java.nio.file.attribute.PosixFileAttributes;
-import java.nio.file.attribute.PosixFilePermission;
 import java.nio.file.attribute.UserPrincipal;
-import java.nio.file.attribute.UserPrincipalLookupService;
-import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Collections;
-import java.util.EnumSet;
 import java.util.List;
-import java.util.Set;
-import java.util.TreeSet;
 import java.util.jar.JarFile;
 import java.util.jar.Manifest;
 
@@ -53,18 +40,15 @@ import java.util.jar.Manifest;
  * file this process creates) or the system account, the administrators group or the installer service, each resolved
  * as a principal and never matched by a bare name, and no ALLOW entry gives anyone else a right to write, delete or
  * change the ACL or owner (fix wave, L2-F6; not verified on a Windows host: the judgement is tested on built ACL
- * values). A file system with neither view cannot be checked and is refused; the view is the volume's
- * ({@link Volumes#protection}), so a jar or directory on a FAT or exFAT volume, which anybody with the volume may write,
- * is "writable by others" (Phase 6 security fix, pass 2, P2-L7-F1). Reads only; never loads a class from the jar.
+ * values). A file system with neither view cannot be checked and is refused; the view is the volume's, so a jar or
+ * directory on a FAT or exFAT volume, which anybody with the volume may write, is "writable by others" (Phase 6
+ * security fix, pass 2, P2-L7-F1). Reads only; never loads a class from the jar. The ownership, ACL and volume
+ * judgement is the shared {@link JarTrust} rule of every jar the agent loads from an operator's path (Phase 6 security
+ * fix, pass 2, P2-L1-F5).
  */
 final class JarCheck {
 
     static final String MAIN = "org.jboss.byteman.agent.Main";
-
-    private static final Set<AclEntryPermission> WRITE_RIGHTS = EnumSet.of(AclEntryPermission.WRITE_DATA,
-            AclEntryPermission.APPEND_DATA, AclEntryPermission.DELETE, AclEntryPermission.DELETE_CHILD,
-            AclEntryPermission.WRITE_ACL, AclEntryPermission.WRITE_OWNER, AclEntryPermission.WRITE_ATTRIBUTES,
-            AclEntryPermission.WRITE_NAMED_ATTRS);
 
     private JarCheck() {
     }
@@ -120,132 +104,18 @@ final class JarCheck {
         return new Result(null, jar);
     }
 
-    /** True when someone but the owner may write to {@code path} (a real path), or that cannot be told. */
+    /**
+     * True when someone but the owner may write to {@code path} (a real path), or that cannot be told: the shared rule
+     * of every jar the agent loads from an operator's path ({@link JarTrust#writableByOthers}, Phase 6 security fix,
+     * pass 2, P2-L1-F5; the judgement moved there, together with the per-volume refusal of P2-L7-F1).
+     */
     static boolean writableByOthers(Path path) {
-        try {
-            if (Volumes.protection(path) == Volumes.Protection.NONE) {
-                return true;
-            }
-            PosixFileAttributeView posix = Files.getFileAttributeView(path, PosixFileAttributeView.class,
-                    LinkOption.NOFOLLOW_LINKS);
-            if (posix != null) {
-                PosixFileAttributes a = posix.readAttributes();
-                Set<PosixFilePermission> p = a.permissions();
-                if (p.contains(PosixFilePermission.GROUP_WRITE) || p.contains(PosixFilePermission.OTHERS_WRITE)) {
-                    return true;
-                }
-                String owner = a.owner().getName();
-                return !(owner.equals(System.getProperty("user.name")) || owner.equals("root") || isMine(path));
-            }
-            AclFileAttributeView acl = Files.getFileAttributeView(path, AclFileAttributeView.class,
-                    LinkOption.NOFOLLOW_LINKS);
-            if (acl == null) {
-                return true;
-            }
-            return aclProblem(acl.getOwner(), acl.getAcl(), Me.PRINCIPAL, BuiltIns.ALL) != null;
-        } catch (IOException | RuntimeException e) {
-            return true;
-        }
+        return JarTrust.writableByOthers(path);
     }
 
-    /**
-     * The pure ACL judgement (the shape of the agent core's {@code SecureFiles.aclProblem}, with the owners a Byteman
-     * jar may have): why an object with this owner and ACL must not be trusted, or null. The owner must be {@code me}
-     * or one of {@code builtIns}; no ALLOW entry may give a principal other than those a write right. A built-in that
-     * could not be resolved is not in {@code builtIns}, so a principal is never exempt by its name alone.
-     */
+    /** The pure ACL judgement: {@link JarTrust#aclProblem} (moved there by P2-L1-F5, unchanged). */
     static String aclProblem(UserPrincipal owner, List<AclEntry> acl, UserPrincipal me,
                              Collection<UserPrincipal> builtIns) {
-        if (me == null) {
-            return "the current user cannot be determined";
-        }
-        if (owner == null || !(owner.equals(me) || builtIns.contains(owner))) {
-            return "it is owned by " + (owner == null ? "nobody known" : owner.getName())
-                    + ", not by the current user or an administrator";
-        }
-        if (acl == null) {
-            return "its ACL cannot be read";
-        }
-        for (AclEntry entry : acl) {
-            UserPrincipal who = entry.principal();
-            if (entry.type() != AclEntryType.ALLOW || me.equals(who) || builtIns.contains(who)) {
-                continue;
-            }
-            Set<String> granted = new TreeSet<String>();
-            for (AclEntryPermission right : entry.permissions()) {
-                if (WRITE_RIGHTS.contains(right)) {
-                    granted.add(right.name());
-                }
-            }
-            if (!granted.isEmpty()) {
-                StringBuilder joined = new StringBuilder();
-                for (String name : granted) {
-                    joined.append(joined.length() == 0 ? "" : ", ").append(name);
-                }
-                return "its ACL allows " + who.getName() + " " + joined;
-            }
-        }
-        return null;
-    }
-
-    /** The owner of {@code path} is the owner of a file this process creates (uid comparison without a name). */
-    private static boolean isMine(Path path) {
-        UserPrincipal me = Me.PRINCIPAL;
-        try {
-            return me != null && me.equals(Files.getOwner(path, LinkOption.NOFOLLOW_LINKS));
-        } catch (IOException | RuntimeException e) {
-            return false;
-        }
-    }
-
-    /** "Me": the owner of a file this process has just created; null if unknown. Resolved on first use only. */
-    private static final class Me {
-        static final UserPrincipal PRINCIPAL = ownerOfNewFile();
-
-        private Me() {
-        }
-
-        private static UserPrincipal ownerOfNewFile() {
-            Path probe = null;
-            try {
-                probe = Files.createTempFile("skillroy-byteman-owner-", ".tmp");
-                return Files.getOwner(probe, LinkOption.NOFOLLOW_LINKS);
-            } catch (IOException | RuntimeException e) {
-                return null;
-            } finally {
-                if (probe != null) {
-                    try {
-                        Files.deleteIfExists(probe);
-                    } catch (IOException | RuntimeException ignored) {
-                        // an empty probe file in the temporary directory is harmless
-                    }
-                }
-            }
-        }
-    }
-
-    /** The system account, the administrators group and the installer service, resolved once; those that resolve. */
-    private static final class BuiltIns {
-        static final List<UserPrincipal> ALL = resolve();
-
-        private BuiltIns() {
-        }
-
-        private static List<UserPrincipal> resolve() {
-            List<UserPrincipal> out = new ArrayList<UserPrincipal>();
-            add(out, "SYSTEM", false);
-            add(out, "Administrators", true);
-            add(out, "NT SERVICE\\TrustedInstaller", false);
-            return Collections.unmodifiableList(out);
-        }
-
-        private static void add(List<UserPrincipal> out, String name, boolean group) {
-            try {
-                UserPrincipalLookupService lookup = FileSystems.getDefault().getUserPrincipalLookupService();
-                out.add(group ? lookup.lookupPrincipalByGroupName(name) : lookup.lookupPrincipalByName(name));
-            } catch (IOException | RuntimeException e) {
-                // not resolvable here (a POSIX host, or no such principal): not exempt
-            }
-        }
+        return JarTrust.aclProblem(owner, acl, me, builtIns);
     }
 }

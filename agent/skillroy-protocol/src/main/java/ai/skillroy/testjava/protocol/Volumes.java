@@ -31,14 +31,15 @@ import java.util.Set;
 
 /**
  * What a volume lets a process restrict, decided per volume (phase1-contracts.md 2.5; Phase 6 security fix, pass 2,
- * P2-L7-F1): the one decision both sides' {@code SecureFiles}, the controller's {@code CredentialFiles} and the Byteman
- * module's {@code JarCheck} share. A file system <em>provider</em> reports the same views for every path (every local
- * path is POSIX on Linux and macOS, ACL on Windows), so it cannot tell a FAT or exFAT volume from any other; the
+ * P2-L7-F1): the one decision both sides' {@code SecureFiles}, the controller's {@code CredentialFiles} and the agent
+ * API's jar rule {@code JarTrust} (the {@code modules} paths, a named spy jar, and {@code byteman.jar}, whose
+ * {@code JarCheck} delegates to it) share. A file system <em>provider</em> reports the same views for every path (every
+ * local path is POSIX on Linux and macOS, ACL on Windows), so it cannot tell a FAT or exFAT volume from any other; the
  * {@link FileStore} of the path, or of its nearest existing ancestor, can: POSIX when it supports the POSIX view, else
  * ACL when it supports the ACL view (on Windows, a volume that keeps persistent ACLs), else neither, and a volume whose
  * type is one of {@link #WITHOUT_PERMISSIONS} is neither whatever its views say (macOS mounts FAT and exFAT
- * {@code noowners} and reports the POSIX view for exFAT; Linux's {@code vfat} reports it too). Where the store cannot be
- * read, the provider's views decide, as they did before.
+ * {@code noowners} and reports the POSIX view for exFAT; Linux's {@code vfat} reports it too). Where the store cannot
+ * be read, the provider's views decide, as they did before.
  *
  * <p>Stateless; safe from any thread. Java 8, JDK only (it runs in the target JVM too).
  */

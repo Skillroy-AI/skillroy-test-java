@@ -144,6 +144,49 @@ class HookSupportTest {
         }
     }
 
+    /**
+     * Phase 6 security fix, pass 2, P2-L1-F5: a jar the {@code modules} option names outside the home is code
+     * execution in the target, so one that another user could have replaced (its directory writable by group or
+     * others) is a FAILED record and never loaded; the same jar in an owner-only directory loads. The home's own
+     * {@code modules/} and {@code optional/} jars are trusted as the home is.
+     */
+    @Test
+    void aModulesPathOthersMayWriteIsAFailedRecordAndNotLoaded() throws Exception {
+        org.junit.jupiter.api.Assumptions.assumeTrue(java.nio.file.FileSystems.getDefault()
+                .supportedFileAttributeViews().contains("posix"), "POSIX permissions");
+        File shared = tmp.resolve("shared").toFile();
+        assertTrue(shared.mkdirs());
+        File extra = new File(shared, "extra.jar");
+        TestJars.moduleJar(extra, JarModuleTwo.class.getName());
+        java.nio.file.Files.setPosixFilePermissions(shared.toPath(),
+                java.nio.file.attribute.PosixFilePermissions.fromString("rwx------"));
+        Map<String, String> options = new HashMap<String, String>();
+        options.put("modules", extra.getPath());
+        assertEquals("INSTALLED-able", loadable(options, new JarModuleTwo().id()), "an owner-only directory");
+
+        java.nio.file.Files.setPosixFilePermissions(shared.toPath(),
+                java.nio.file.attribute.PosixFilePermissions.fromString("rwxrwxrwx"));
+        assertEquals("FAILED: module jar is writable by others: " + extra.getPath(),
+                loadable(options, extra.getPath()));
+    }
+
+    /** "INSTALLED-able" when discovery created the module of that id, else "FAILED: <message>" of its record. */
+    private String loadable(Map<String, String> options, String id) throws Exception {
+        ModuleLoader loader = new ModuleLoader(new RingLog());
+        try {
+            for (ModuleLoader.Record record : loader.discover(options, HookSupportTest.class.getClassLoader())) {
+                if (record.id.equals(id)) {
+                    return record.module != null ? "INSTALLED-able" : record.state + ": " + record.message;
+                }
+            }
+            return "absent";
+        } finally {
+            for (ModuleClassLoader l : loader.loaders()) {
+                l.close();
+            }
+        }
+    }
+
     private Map<String, ModuleLoader.Record> discover(File home, String optionalModules) throws Exception {
         Map<String, String> options = new HashMap<String, String>();
         options.put("home", home.getPath());

@@ -28,7 +28,12 @@ import java.nio.file.FileSystem;
 import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.AclEntry;
+import java.nio.file.attribute.AclEntryFlag;
+import java.nio.file.attribute.AclEntryPermission;
+import java.nio.file.attribute.AclEntryType;
 import java.nio.file.attribute.PosixFilePermissions;
+import java.nio.file.attribute.UserPrincipal;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -134,6 +139,109 @@ class SecureFilesTest {
         Path fresh = SecureFiles.ensureOwnerOnlyDirectory(tmp.resolve("a/b"), "the planner's work directory");
         assertEquals("rwx------", permissions(fresh));
         assertEquals("rwx------", permissions(fresh.getParent()), "missing parents are created owner-only too");
+    }
+
+    /**
+     * Phase 6 security fix, pass 2, P2-L1-F3: a directory that passes its own check is still refused when a directory
+     * above it lets others rename entries (group- or other-writable without the sticky bit), because another user could
+     * then move it away and put a directory of their own with planted files under its name; the ancestors of a link's
+     * real path count too. With the sticky bit (as {@code /tmp} has) the parent is fine.
+     */
+    @Test
+    void aDirectoryBelowAParentOthersMayWriteToWithoutTheStickyBitIsRefused() throws IOException {
+        assumeTrue(posix(), "no POSIX permissions on this file system: the check is skipped here");
+        Path checkout = Files.createDirectory(tmp.resolve("checkout"));
+        Path discovery = SecureFiles.ensureOwnerOnlyDirectory(checkout.resolve("build").resolve("skillroy"));
+        Files.setPosixFilePermissions(checkout, PosixFilePermissions.fromString("rwxrwxrwx"));
+        assertNull(SecureFiles.untrustedDirectoryReason(discovery), "the directory itself is fine");
+        IOException refused = assertThrows(IOException.class, () -> SecureFiles.ensureOwnerOnlyDirectory(discovery));
+        assertTrue(refused.getMessage().contains("the directory " + checkout.toAbsolutePath().normalize()
+                + " above it is writable by group or others without the sticky bit (rwxrwxrwx)"), refused.getMessage());
+        assertTrue(refused.getMessage().contains("discoveryDir"), refused.getMessage());
+        assertThrows(IOException.class, () -> SecureFiles.writeOptionsFile(discovery,
+                Map.of("token", "0123456789abcdef0123456789abcdef")));
+        try (Stream<Path> entries = Files.list(discovery)) {
+            assertEquals(List.of(), entries.toList(), "no options file was written");
+        }
+
+        Files.setAttribute(checkout, "unix:mode", 01777);
+        assertEquals(discovery, SecureFiles.ensureOwnerOnlyDirectory(discovery), "a sticky parent, as /tmp");
+
+        Path elsewhere = Files.createDirectory(tmp.resolve("elsewhere"));
+        Path real = SecureFiles.ensureOwnerOnlyDirectory(elsewhere.resolve("run"));
+        Files.setPosixFilePermissions(elsewhere, PosixFilePermissions.fromString("rwxrwxr-x"));
+        Path link = Files.createSymbolicLink(tmp.resolve("run-link"), real);
+        IOException viaLink = assertThrows(IOException.class, () -> SecureFiles.ensureOwnerOnlyDirectory(link));
+        assertTrue(viaLink.getMessage().contains(elsewhere.toRealPath() + " above it is writable"),
+                viaLink.getMessage());
+    }
+
+    /** P2-L1-F3: the ancestor judgement on ACL file systems, on built values (not verified on a Windows host). */
+    @Test
+    void anAncestorsAclMayLetOthersAddEntriesButNotReplaceThem() {
+        UserPrincipal me = () -> "me";
+        UserPrincipal system = () -> "SYSTEM";
+        UserPrincipal admins = () -> "Administrators";
+        UserPrincipal users = () -> "Authenticated Users";
+        assertNull(SecureFiles.ancestorAclProblem(List.of(allow(me, AclEntryPermission.values()),
+                allow(system, AclEntryPermission.values()), allow(admins, AclEntryPermission.values())), me, system,
+                admins));
+        assertNull(SecureFiles.ancestorAclProblem(List.of(allow(users, AclEntryPermission.APPEND_DATA,
+                AclEntryPermission.READ_DATA, AclEntryPermission.EXECUTE)), me, system, admins),
+                "a drive root: everyone may add a folder, nobody may replace one");
+        AclEntry inheritOnly = AclEntry.newBuilder().setType(AclEntryType.ALLOW).setPrincipal(users)
+                .setPermissions(AclEntryPermission.DELETE, AclEntryPermission.WRITE_DATA)
+                .setFlags(AclEntryFlag.INHERIT_ONLY, AclEntryFlag.DIRECTORY_INHERIT).build();
+        assertNull(SecureFiles.ancestorAclProblem(List.of(inheritOnly), me, system, admins),
+                "an entry only children inherit does not apply to the directory");
+        for (AclEntryPermission right : SecureFiles.ANCESTOR_REPLACE_RIGHTS) {
+            String problem = SecureFiles.ancestorAclProblem(List.of(allow(users, right)), me, system, admins);
+            assertEquals("has an ACL that allows Authenticated Users " + right.name(), problem);
+        }
+        AclEntry deny = AclEntry.newBuilder().setType(AclEntryType.DENY).setPrincipal(users)
+                .setPermissions(AclEntryPermission.DELETE_CHILD).build();
+        assertNull(SecureFiles.ancestorAclProblem(List.of(deny), me, system, admins));
+        assertEquals("has an ACL that cannot be read", SecureFiles.ancestorAclProblem(null, me, system, admins));
+    }
+
+    private static AclEntry allow(UserPrincipal who, AclEntryPermission... rights) {
+        return AclEntry.newBuilder().setType(AclEntryType.ALLOW).setPrincipal(who).setPermissions(rights).build();
+    }
+
+    /**
+     * P2-L1-F3: the file is created and written through one channel that never follows a link; an entry already at
+     * the path, a link included, is never followed, written or replaced.
+     */
+    @Test
+    void anOwnerOnlyFileIsNeverWrittenThroughALink() throws IOException {
+        Path target = tmp.resolve("someone-elses.txt");
+        Path link = Files.createSymbolicLink(tmp.resolve("options.properties"), target);
+        assertThrows(FileAlreadyExistsException.class,
+                () -> SecureFiles.writeOwnerOnly(link, "token=secret".getBytes(StandardCharsets.UTF_8)));
+        assertFalse(Files.exists(target), "nothing was written where the link points");
+        Path file = tmp.resolve("written.properties");
+        byte[] content = new byte[300_000];
+        java.util.Arrays.fill(content, (byte) 'x');
+        SecureFiles.writeOwnerOnly(file, content);
+        assertEquals(content.length, Files.size(file), "the whole content through the one channel");
+        if (posix()) {
+            assertEquals("rw-------", permissions(file));
+        }
+    }
+
+    /**
+     * Phase 6 security fix, pass 2, P2-L1-F4: a token is 16 to 1024 characters of the token alphabet, so a short
+     * supplied token is refused by the launcher, the attach and the client alike; the generated one is 64 hex digits.
+     */
+    @Test
+    void aTokenHasAtLeastSixteenCharacters() {
+        assertFalse(SecureFiles.isValidToken("fifteen-chars-x"));
+        assertTrue(SecureFiles.isValidToken("sixteen-chars-xy"));
+        assertFalse(SecureFiles.isValidToken("x".repeat(1025)));
+        assertFalse(SecureFiles.isValidToken("sixteen chars xy"), "the alphabet is unchanged");
+        assertTrue(SecureFiles.isValidToken(SecureFiles.newToken()));
+        assertEquals(64, SecureFiles.newToken().length());
+        assertEquals(16, SecureFiles.MIN_TOKEN_LENGTH);
     }
 
     @Test

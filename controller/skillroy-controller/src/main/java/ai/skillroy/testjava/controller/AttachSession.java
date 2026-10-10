@@ -172,8 +172,8 @@ public final class AttachSession {
         boolean tokenGiven = options.containsKey("token");
         String token = options.computeIfAbsent("token", k -> SecureFiles.newToken());
         if (!SecureFiles.isValidToken(token)) {
-            throw new AttachFailedException("the token option is not a usable token (allowed: letters, digits and "
-                    + "._~+/=-)");
+            throw new AttachFailedException("the token option is not a usable token (16 to 1024 letters, digits and "
+                    + "._~+/=-; omit it to let the controller generate one)");
         }
         String nonce = options.computeIfAbsent("nonce", k -> SecureFiles.newNonce());
         options.put("enabled", "true");

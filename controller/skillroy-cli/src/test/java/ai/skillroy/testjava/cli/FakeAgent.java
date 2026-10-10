@@ -376,7 +376,7 @@ final class FakeAgent implements AutoCloseable {
         try {
             Map<String, String> rawParams = rawQuery(rawQuery);
             String replyNonce = rejectAll ? null : authenticate(path, pathAndQuery, method, bodyBytes, authorizations,
-                    rawParams);
+                    exchange.getRequestHeaders().get(Auth.HEADER_BODY_SHA256), rawParams);
             if (replyNonce == null) {
                 unauthorized(exchange);
                 return;
@@ -413,13 +413,15 @@ final class FakeAgent implements AutoCloseable {
 
     /**
      * Checks the request's authentication as the agent does, on the head and the body hash: the hello form with the
-     * raw {@code nonce} query value on {@code /ping}, the request form bound to this session everywhere else.
+     * raw {@code nonce} query value on {@code /ping}, the request form bound to this session everywhere else, a body's
+     * hash declared once in {@code X-Skillroy-Body-Sha256} and equal to the body's (P2-L1-F1; may be absent without a
+     * body).
      *
      * @return the nonce the reply MAC is bound to (the client nonce on {@code /ping}, else the request nonce), or
      *     null when the request is not authenticated
      */
     private String authenticate(String path, String pathAndQuery, String method, byte[] body,
-                                List<String> authorizations, Map<String, String> rawParams) {
+                                List<String> authorizations, List<String> bodyHashes, Map<String, String> rawParams) {
         Auth.Credentials credentials;
         try {
             credentials = Auth.parseAuthorization(Auth.onlyValue(authorizations));
@@ -430,8 +432,10 @@ final class FakeAgent implements AutoCloseable {
             String clientNonce = rawParams.get(Auth.PING_NONCE_PARAM);
             return credentials.isHello() && Auth.verifyHello(token, clientNonce, credentials) ? clientNonce : null;
         }
-        return !credentials.isHello() && Auth.verifyRequest(token, sessionId, credentials, method, pathAndQuery,
-                Auth.sha256hex(body)) ? credentials.nonce() : null;
+        String bodyHash = Auth.sha256hex(body);
+        boolean declared = bodyHashes == null ? body.length == 0 : bodyHash.equals(Auth.onlyValue(bodyHashes));
+        return declared && !credentials.isHello() && Auth.verifyRequest(token, sessionId, credentials, method,
+                pathAndQuery, bodyHash) ? credentials.nonce() : null;
     }
 
     /** The constant 401 of the agent: no MAC, the scheme to use, and the connection closed. */

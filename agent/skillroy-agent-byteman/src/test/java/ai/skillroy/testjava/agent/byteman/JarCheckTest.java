@@ -19,12 +19,10 @@ package ai.skillroy.testjava.agent.byteman;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-import java.io.File;
 import java.io.FileOutputStream;
 import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.nio.file.attribute.AclEntry;
 import java.nio.file.attribute.AclEntryPermission;
 import java.nio.file.attribute.AclEntryType;
@@ -34,7 +32,6 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.EnumSet;
 import java.util.List;
-import java.util.concurrent.TimeUnit;
 import java.util.jar.Attributes;
 import java.util.jar.JarOutputStream;
 import java.util.jar.Manifest;
@@ -127,40 +124,6 @@ class JarCheckTest {
         Files.setPosixFilePermissions(shared, PosixFilePermissions.fromString("rwxr-xr-x"));
         assertNull(JarCheck.problem(link.toString()));
         assertEquals(jar.toRealPath(), JarCheck.check(link.toString()).path, "the jar appended is the real file");
-    }
-
-    /**
-     * Security fix P2-L7-F1 (pass 2): a jar on a FAT volume, which anybody with the volume may write whatever its mode
-     * bits read (macOS mounts it {@code noowners}: {@code rwx------}, owned by every user), is "writable by others".
-     * A real FAT disk image, attached with {@code hdiutil}; skipped where it is absent.
-     */
-    @Test
-    void aJarOnAFatVolumeIsWritableByOthers() throws Exception {
-        Path hdiutil = Paths.get("/usr/bin/hdiutil");
-        assumeTrue(System.getProperty("os.name", "").startsWith("Mac") && Files.isExecutable(hdiutil),
-                "needs hdiutil (macOS)");
-        Path image = tmp.resolve("SKFAT.dmg");
-        Path mount = Files.createDirectories(tmp.resolve("skfat"));
-        assumeTrue(run(hdiutil.toString(), "create", "-quiet", "-size", "4m", "-fs", "MS-DOS", "-volname", "SKFAT",
-                "-layout", "NONE", image.toString()), "the FAT image could not be created");
-        assumeTrue(run(hdiutil.toString(), "attach", "-quiet", "-nobrowse", "-mountpoint", mount.toString(),
-                image.toString()), "the FAT image could not be attached");
-        try {
-            Path jar = jarWithManifest(mount.resolve("byteman"), JarCheck.MAIN);
-            assertEquals("byteman.jar is writable by others: " + jar, JarCheck.problem(jar.toString()));
-        } finally {
-            run(hdiutil.toString(), "detach", "-quiet", "-force", mount.toString());
-        }
-    }
-
-    private static boolean run(String... command) throws Exception {
-        Process p = new ProcessBuilder(command).redirectErrorStream(true).redirectOutput(new File("/dev/null"))
-                .start();
-        if (!p.waitFor(60, TimeUnit.SECONDS)) {
-            p.destroyForcibly();
-            return false;
-        }
-        return p.exitValue() == 0;
     }
 
     @Test

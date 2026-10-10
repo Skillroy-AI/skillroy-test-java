@@ -40,15 +40,21 @@ final class HookOptions {
     static final String SPY_JAR_NAME = "skillroy-agent-spy.jar";
 
     final String spyJar;
+    /**
+     * True when {@code hooks.spyJar} named the jar (an operator's path), false for the home's own: a named jar must
+     * pass the shared jar rule before the append (P2-L1-F5), the home's is trusted as the home is.
+     */
+    final boolean spyJarNamed;
     final long maxClassBytes;
     final int maxMethods;
     final int maxClasses;
     final long detachBudgetMs;
     final int captureMaxBytes;
 
-    private HookOptions(String spyJar, long maxClassBytes, int maxMethods, int maxClasses, long detachBudgetMs,
-                        int captureMaxBytes) {
+    private HookOptions(String spyJar, boolean spyJarNamed, long maxClassBytes, int maxMethods, int maxClasses,
+                        long detachBudgetMs, int captureMaxBytes) {
         this.spyJar = spyJar;
+        this.spyJarNamed = spyJarNamed;
         this.maxClassBytes = maxClassBytes;
         this.maxMethods = maxMethods;
         this.maxClasses = maxClasses;
@@ -63,13 +69,14 @@ final class HookOptions {
      */
     static HookOptions read(AgentContext ctx) {
         String spyJar = ctx.option(SPY_JAR);
-        if (spyJar == null || spyJar.trim().isEmpty()) {
+        boolean named = spyJar != null && !spyJar.trim().isEmpty();
+        if (!named) {
             String home = ctx.options().get("home");
             spyJar = home == null || home.trim().isEmpty() ? null : new File(home.trim(), SPY_JAR_NAME).getPath();
         } else {
             spyJar = spyJar.trim();
         }
-        return new HookOptions(spyJar,
+        return new HookOptions(spyJar, named,
                 number(ctx, MAX_CLASS_BYTES, 262144L, 1024L, 16L * 1024 * 1024),
                 (int) number(ctx, MAX_METHODS, 2000L, 1L, 65535L),
                 (int) number(ctx, MAX_CLASSES, 64L, 1L, 1024L),

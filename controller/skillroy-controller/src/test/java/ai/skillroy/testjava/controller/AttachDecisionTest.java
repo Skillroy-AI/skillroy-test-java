@@ -45,7 +45,7 @@ class AttachDecisionTest {
     private static final String ERROR = "skillroy.agent.error";
 
     private static final String OUR_NONCE = "0123456789abcdef0123456789abcdef";
-    private static final String OUR_TOKEN = "our-token";
+    private static final String OUR_TOKEN = "our-token-0123456789";
 
     @TempDir
     Path dir;
@@ -168,11 +168,11 @@ class AttachDecisionTest {
 
     @Test
     void aReattachUsesTheTokenFromTheRunningAgentsTokenFile() throws Exception {
-        Path tokenFile = tokenFile("skillroy-" + PID + "-1790000000000.token", "  their-token \n");
+        Path tokenFile = tokenFile("skillroy-" + PID + "-1790000000000.token", "  their-token-0123456789 \n");
         AttachSession.Published existing = new AttachSession.Published("5001", "their-nonce", tokenFile.toString(),
                 "JAVAAGENT", false);
-        assertEquals("their-token", AttachSession.tokenFor(PID, existing, OUR_TOKEN, false, dir));
-        assertEquals("their-token", AttachSession.tokenFor(PID, existing, OUR_TOKEN, true, dir),
+        assertEquals("their-token-0123456789", AttachSession.tokenFor(PID, existing, OUR_TOKEN, false, dir));
+        assertEquals("their-token-0123456789", AttachSession.tokenFor(PID, existing, OUR_TOKEN, true, dir),
                 "the running agent's file wins over a token the caller passed");
     }
 
@@ -206,8 +206,8 @@ class AttachDecisionTest {
     void aReattachTokenFileOutsideTheDirectoryOrOtherwiseNamedIsRefused() throws Exception {
         Path elsewhere = Files.createDirectories(dir.resolve("elsewhere"));
         Path outside = elsewhere.resolve("skillroy-" + PID + "-1.token");
-        FakeAgent.writeOwnerOnly(outside, "outside-token");
-        Path otherPid = tokenFile("skillroy-" + (PID + 1) + "-1.token", "other-pid-token");
+        FakeAgent.writeOwnerOnly(outside, "outside-token-0123456789");
+        Path otherPid = tokenFile("skillroy-" + (PID + 1) + "-1.token", "other-pid-token-0123456789");
         Path otherName = tokenFile("vault-token", "vault-token-value");
         for (Path file : java.util.List.of(outside, otherPid, otherName)) {
             AttachSession.Published existing = new AttachSession.Published("5001", "n", file.toString(), null, false);
@@ -218,7 +218,7 @@ class AttachDecisionTest {
             assertEquals(OUR_TOKEN, AttachSession.tokenFor(PID, existing, OUR_TOKEN, true, dir),
                     "with the token option the caller's token is used instead");
         }
-        assertEquals("outside-token", AttachSession.tokenFor(PID, new AttachSession.Published("5001", "n",
+        assertEquals("outside-token-0123456789", AttachSession.tokenFor(PID, new AttachSession.Published("5001", "n",
                 outside.toString(), null, false), OUR_TOKEN, false, elsewhere), "inside its own directory it is read");
     }
 

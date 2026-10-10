@@ -109,6 +109,8 @@ final class RawHttp {
         if (body != null) {
             head.append("Content-Type: application/json\r\n");
             head.append("Content-Length: ").append(body.length).append("\r\n");
+            // P2-L1-F1: the body hash the request MAC covers travels in the head.
+            head.append(Auth.HEADER_BODY_SHA256).append(": ").append(Auth.sha256hex(body)).append("\r\n");
         }
         head.append("Connection: close\r\n\r\n");
         try (Socket socket = new Socket()) {

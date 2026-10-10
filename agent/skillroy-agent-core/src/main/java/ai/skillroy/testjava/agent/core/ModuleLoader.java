@@ -18,6 +18,7 @@ package ai.skillroy.testjava.agent.core;
 
 import ai.skillroy.testjava.agent.api.AgentLog;
 import ai.skillroy.testjava.agent.api.AgentModule;
+import ai.skillroy.testjava.agent.api.instrument.JarTrust;
 
 import java.io.BufferedReader;
 import java.io.File;
@@ -164,6 +165,13 @@ final class ModuleLoader {
                 if (!jar.exists()) {
                     log.warn("module path does not exist: " + jar);
                     failedRecord(jar.getPath(), "module path does not exist: " + jar, byId);
+                    continue;
+                }
+                // Phase 6 security fix, pass 2, P2-L1-F5: a module jar is code execution in the target, so a path the
+                // operator names outside the home must be writable by nobody but its owner (the shared jar rule).
+                if (JarTrust.WRITABLE_BY_OTHERS.equals(JarTrust.problem(jar.toPath()))) {
+                    log.warn("module jar is writable by others, not loaded: " + jar);
+                    failedRecord(jar.getPath(), "module jar is writable by others: " + jar, byId);
                     continue;
                 }
                 fromJar(jar, agentLoader, byId);

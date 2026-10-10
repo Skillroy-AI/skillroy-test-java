@@ -20,7 +20,6 @@ import ai.skillroy.testjava.protocol.Volumes;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.io.OutputStream;
 import java.nio.ByteBuffer;
 import java.nio.channels.SeekableByteChannel;
 import java.nio.charset.StandardCharsets;
@@ -50,6 +49,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.EnumSet;
 import java.util.HexFormat;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
@@ -96,8 +96,15 @@ import java.util.regex.Pattern;
  */
 public final class SecureFiles {
 
-    /** Characters a token may contain (the agent's token file format). */
-    private static final Pattern TOKEN_CHARS = Pattern.compile("[A-Za-z0-9._~+/=-]{1,1024}");
+    /**
+     * The shortest token accepted (Phase 6 security fix, pass 2, P2-L1-F4): a supplied token is the key of every MAC,
+     * the agent's 401 is not rate-limited, and a port squatter receives a hello MAC, so a short token is a guessable
+     * credential. A floor, not an entropy check: a generated token is 64 hex characters.
+     */
+    static final int MIN_TOKEN_LENGTH = 16;
+
+    /** Characters a token may contain (the agent's token file format), and its length: 16 to 1024. */
+    private static final Pattern TOKEN_CHARS = Pattern.compile("[A-Za-z0-9._~+/=-]{" + MIN_TOKEN_LENGTH + ",1024}");
 
     /** Upper bound for a token file; a larger file is not a token file. */
     private static final int MAX_TOKEN_FILE_BYTES = 4096;
@@ -137,7 +144,10 @@ public final class SecureFiles {
         return randomHex(16);
     }
 
-    /** True when {@code token} has the token file format (it is a MAC key and never sent). */
+    /**
+     * True when {@code token} has the token file format (it is a MAC key and never sent): 16 to 1024 characters of
+     * {@code [A-Za-z0-9._~+/=-]} (the floor since P2-L1-F4).
+     */
     static boolean isValidToken(String token) {
         return token != null && TOKEN_CHARS.matcher(token).matches();
     }
@@ -418,7 +428,133 @@ public final class SecureFiles {
                     + " (it must be a directory of the current user that only its owner can write to, e.g. mode 700;"
                     + " fix it or " + remedy + ")");
         }
+        String ancestor = untrustedAncestorReason(absolute);
+        if (ancestor != null) {
+            throw new IOException("the " + role + " " + absolute + " cannot be used: " + ancestor
+                    + ", so another user could put a directory of their own in its place (every directory above it "
+                    + "must be writable by its owner only, or carry the sticky bit as /tmp does; " + remedy + ")");
+        }
         return absolute;
+    }
+
+    /**
+     * ACL rights on a directory above a trusted one that let a principal remove or rename an entry of it (and so put
+     * its own in the entry's place), remove or rename the directory itself, or take it over. Adding an entry alone
+     * ({@code APPEND_DATA}, {@code WRITE_DATA}: what a drive root grants every user) replaces nothing.
+     */
+    static final Set<AclEntryPermission> ANCESTOR_REPLACE_RIGHTS = Collections.unmodifiableSet(EnumSet.of(
+            AclEntryPermission.DELETE_CHILD, AclEntryPermission.DELETE, AclEntryPermission.WRITE_ACL,
+            AclEntryPermission.WRITE_OWNER));
+
+    /**
+     * Why a directory above {@code dir} lets another user replace {@code dir} or one of its ancestors, or null (Phase 6
+     * security fix, pass 2, P2-L1-F3): the trust check of {@link #untrustedDirectoryReason(Path)} judges the
+     * directory, but whoever may rename entries of a directory above it can move it away and put a directory of their
+     * own, with planted files, under the same name. Judged: every directory in which a name of the path is looked up,
+     * that is every ancestor of the path as given (links followed) and every ancestor of its real path. On POSIX file
+     * systems an ancestor writable by group or others is refused unless it has the sticky bit (as {@code /tmp} does:
+     * then only an entry's owner may rename it); an ancestor whose mode cannot be read is not judged. On ACL file
+     * systems (not verified on a Windows host: {@link #ancestorAclProblem} is unit-tested on built values) an ancestor
+     * is refused when an ALLOW entry that applies to it gives a principal other than "me", the system account or the
+     * administrators group one of {@link #ANCESTOR_REPLACE_RIGHTS}. The kind is the ancestor's volume's, as everywhere
+     * in this class (P2-L7-F1), and an ancestor on a volume with neither is refused. The owner of an ancestor is not
+     * judged (root or an administrator owns most of them, and in a container the mounted ones show another uid).
+     *
+     * @param dir an absolute, normalised directory that passed {@link #untrustedDirectoryReason(Path)}
+     */
+    static String untrustedAncestorReason(Path dir) {
+        Set<Path> ancestors = new LinkedHashSet<>();
+        for (Path p = dir.getParent(); p != null; p = p.getParent()) {
+            ancestors.add(p);
+        }
+        try {
+            for (Path p = dir.toRealPath().getParent(); p != null; p = p.getParent()) {
+                ancestors.add(p);
+            }
+        } catch (IOException | RuntimeException e) {
+            return "its real path cannot be read (" + e.getClass().getSimpleName() + ")";
+        }
+        for (Path ancestor : ancestors) {
+            String problem = ancestorProblem(ancestor);
+            if (problem != null) {
+                return "the directory " + ancestor + " above it " + problem;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * {@link #untrustedAncestorReason} for one ancestor (links followed), or null. The branch is the ancestor's
+     * volume's ({@link #protection}, P2-L7-F1), as for the directory itself: an ancestor on a volume that keeps no
+     * permissions (a FAT or exFAT volume above a mount point) lets anybody with the volume rename its entries and is
+     * refused.
+     */
+    private static String ancestorProblem(Path ancestor) {
+        try {
+            Protection protection = protection(ancestor);
+            if (protection == Protection.NONE) {
+                return "is on a volume with neither POSIX permissions nor ACLs" + Volumes.note(ancestor);
+            }
+            if (protection == Protection.POSIX) {
+                Set<PosixFilePermission> permissions = Files.readAttributes(ancestor, PosixFileAttributes.class)
+                        .permissions();
+                if (!permissions.contains(PosixFilePermission.GROUP_WRITE)
+                        && !permissions.contains(PosixFilePermission.OTHERS_WRITE)) {
+                    return null;
+                }
+                Object mode;
+                try {
+                    mode = Files.getAttribute(ancestor, "unix:mode");
+                } catch (IOException | RuntimeException noUnixView) {
+                    return null;
+                }
+                return mode instanceof Integer bits && (bits & STICKY) == 0
+                        ? "is writable by group or others without the sticky bit ("
+                        + PosixFilePermissions.toString(permissions) + ")" : null;
+            }
+            AclFileAttributeView acl = Files.getFileAttributeView(ancestor, AclFileAttributeView.class);
+            if (acl == null) {
+                return null;
+            }
+            return ancestorAclProblem(acl.getAcl(), CurrentUser.fileOwner(), BuiltIns.SYSTEM,
+                    BuiltIns.ADMINISTRATORS);
+        } catch (IOException | RuntimeException e) {
+            return "cannot be read (" + e.getClass().getSimpleName() + ")";
+        }
+    }
+
+    /** The sticky bit of {@code unix:mode}. */
+    private static final int STICKY = 01000;
+
+    /**
+     * The pure ACL judgement of an ancestor (P2-L1-F3): why its ACL lets someone other than {@code me},
+     * {@code system} or {@code administrators} replace an entry of it or the directory itself, or null. Entries that
+     * only children inherit ({@code INHERIT_ONLY}) do not apply to the directory and are skipped; DENY entries are not
+     * credited.
+     */
+    static String ancestorAclProblem(List<AclEntry> acl, UserPrincipal me, UserPrincipal system,
+                                     UserPrincipal administrators) {
+        if (acl == null) {
+            return "has an ACL that cannot be read";
+        }
+        for (AclEntry entry : acl) {
+            if (entry.type() != AclEntryType.ALLOW || entry.flags().contains(AclEntryFlag.INHERIT_ONLY)) {
+                continue;
+            }
+            UserPrincipal who = entry.principal();
+            if (who.equals(me) || who.equals(system) || who.equals(administrators)) {
+                continue;
+            }
+            Set<AclEntryPermission> granted = EnumSet.noneOf(AclEntryPermission.class);
+            granted.addAll(entry.permissions());
+            granted.retainAll(ANCESTOR_REPLACE_RIGHTS);
+            if (!granted.isEmpty()) {
+                Set<String> names = new TreeSet<>();
+                granted.forEach(p -> names.add(p.name()));
+                return "has an ACL that allows " + who.getName() + " " + String.join(", ", names);
+            }
+        }
+        return null;
     }
 
     /**
@@ -549,15 +685,27 @@ public final class SecureFiles {
 
     /**
      * Creates {@code file} (it must not exist) owner-only and writes {@code content}. With ACLs the ACL is read back
-     * after creation and the file deleted and refused if anybody but "me" and the built-in principals has access.
+     * after creation and the file deleted and refused if anybody but "me" and the built-in principals has access; with
+     * POSIX permissions they must read back exactly {@code rw-------}, else the file is deleted and refused (P2-L7-F1).
+     * Either read-back happens before a byte is written.
+     *
+     * <p>Phase 6 security fix, pass 2, P2-L1-F3: the file is created and written through <em>one</em> channel
+     * ({@code CREATE_NEW}, not following links, with the owner-only attribute), so the content always goes into the
+     * file this call created. Until then it was created and then opened again by path, following links, and whoever
+     * could replace the new file by a link between the two opens received the content: the agent's token.
      *
      * @throws IOException also when the file system can restrict nothing
      */
     public static void writeOwnerOnly(Path file, byte[] content) throws IOException {
+        Set<OpenOption> create = Set.of(StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE,
+                LinkOption.NOFOLLOW_LINKS);
         switch (protection(file.toAbsolutePath().getParent())) {
             case POSIX -> {
-                Files.createFile(file, PosixFilePermissions.asFileAttribute(OWNER_FILE));
-                readBack(file, OWNER_FILE, "write");
+                try (SeekableByteChannel channel = Files.newByteChannel(file, create,
+                        PosixFilePermissions.asFileAttribute(OWNER_FILE))) {
+                    readBack(file, OWNER_FILE, "write");
+                    writeAll(channel, content);
+                }
             }
             case ACL -> {
                 UserPrincipal me = CurrentUser.fileOwner();
@@ -565,15 +713,19 @@ public final class SecureFiles {
                     throw new IOException("cannot write " + file + " owner-only: the current user cannot be "
                             + "determined");
                 }
-                Files.createFile(file, aclAttribute(ownerOnlyAcl(me, false)));
-                AclFileAttributeView view = Files.getFileAttributeView(file, AclFileAttributeView.class,
-                        LinkOption.NOFOLLOW_LINKS);
-                String problem = view == null ? "its ACL cannot be read"
-                        : aclProblem(view.getOwner(), view.getAcl(), me, BuiltIns.SYSTEM, BuiltIns.ADMINISTRATORS,
-                        ANY_RIGHT);
-                if (problem != null) {
-                    deleteQuietly(file);
-                    throw new IOException("cannot write " + file + " owner-only: " + problem);
+                try (SeekableByteChannel channel = Files.newByteChannel(file, create,
+                        aclAttribute(ownerOnlyAcl(me, false)))) {
+                    AclFileAttributeView view = Files.getFileAttributeView(file, AclFileAttributeView.class,
+                            LinkOption.NOFOLLOW_LINKS);
+                    String problem = view == null ? "its ACL cannot be read"
+                            : aclProblem(view.getOwner(), view.getAcl(), me, BuiltIns.SYSTEM,
+                            BuiltIns.ADMINISTRATORS, ANY_RIGHT);
+                    if (problem != null) {
+                        channel.close();
+                        deleteQuietly(file);
+                        throw new IOException("cannot write " + file + " owner-only: " + problem);
+                    }
+                    writeAll(channel, content);
                 }
             }
             default -> throw new IOException("cannot write " + file + " owner-only: its file system has neither "
@@ -581,9 +733,12 @@ public final class SecureFiles {
                     + " written there can be restricted to the current user (use a directory on a file system that has"
                     + " one of them)");
         }
-        try (OutputStream out = Files.newOutputStream(file, StandardOpenOption.WRITE,
-                StandardOpenOption.TRUNCATE_EXISTING)) {
-            out.write(content);
+    }
+
+    private static void writeAll(SeekableByteChannel channel, byte[] content) throws IOException {
+        ByteBuffer buffer = ByteBuffer.wrap(content);
+        while (buffer.hasRemaining()) {
+            channel.write(buffer);
         }
     }
 

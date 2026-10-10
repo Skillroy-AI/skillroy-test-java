@@ -42,7 +42,7 @@ public final class NoAttachProbe {
         TargetLauncher.java(Path.of("java")).mainClass("x.Main").classPath(List.of());
         new CapabilityMatrix(Map.of());
         try {
-            AgentClient.connect(new Endpoint("127.0.0.1", 1, "token", null, 0, 0, null));
+            AgentClient.connect(new Endpoint("127.0.0.1", 1, "token-0123456789ab", null, 0, 0, null));
             fail("connected to port 1");
         } catch (AgentLostException expected) {
             // The client class loaded and mapped the refused connection.

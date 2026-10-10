@@ -226,6 +226,12 @@ class ConnectionTest {
         CliHarness.Outcome outcome = info("--port", port, "--token-file", notAToken.toString())
                 .expectExit(Exit.USAGE).never("secret value");
         assertTrue(outcome.err().contains("does not hold a token"), outcome.err());
+        // P2-L1-F4: a token shorter than 16 characters is not a token.
+        Path tooShort = Files.writeString(tmp.resolve("short.token"), "fifteen-chars-x\n");
+        CliHarness.Outcome shortToken = info("--port", port, "--token-file", tooShort.toString())
+                .expectExit(Exit.USAGE).never("fifteen-chars-x");
+        assertTrue(shortToken.err().contains("does not hold a token (16 to 1024"), shortToken.err());
+        assertTrue(agent.requests.isEmpty(), "nothing was sent");
     }
 
     @Test

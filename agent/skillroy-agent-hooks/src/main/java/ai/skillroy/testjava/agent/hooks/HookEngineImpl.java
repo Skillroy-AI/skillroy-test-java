@@ -408,7 +408,7 @@ final class HookEngineImpl implements HookEngine {
         // (3) the append, once per JVM, after the content check
         if (boot == null) {
             File jar = spyJar();
-            String refusal = SpyBoot.checkJar(jar);
+            String refusal = SpyBoot.checkJar(jar, options.spyJarNamed);
             if (refusal != null) {
                 spyJarRefusal = refusal;
                 throw unavailable(refusal);

@@ -59,7 +59,10 @@ evidence) and, in Phase 6, may export spans to a telemetry backend.
 - **The operator's environment.** The shell's environment variables (the model key, a telemetry header's variable,
   `PATH`, `JAVA_HOME`), the home directory, the agent home with its jars, the pack jars given on the command line,
   the Byteman jar the agent option `byteman.jar` names (P6 §7.4: an absolute path in a directory no other user may
-  write to, never an environment variable) and the credentials file are the operator's own and are trusted as given:
+  write to, never an environment variable), **the module jars the `modules` option names and a spy jar `hooks.spyJar`
+  names, under the same rule** (Phase 6 security fix, pass 2, P2-L1-F5: one predicate, `JarTrust`, P6 §3.6; a jar
+  another user could have replaced is refused, not loaded) and the credentials file are the operator's own and are
+  trusted as given:
   the framework reads the model key from the environment only, never from a file, an option or a command line
   (P5 §2.3), reads a telemetry header's value from a variable the settings **name** and never from the key's variable
   (P6 §10.3), and executes the `claude` found on `PATH`. What the framework does with them is bounded (nothing of them
@@ -72,10 +75,15 @@ evidence) and, in Phase 6, may export spans to a telemetry backend.
   attributes, an ACL with one `ALLOW` for the owner where it has ACLs (Windows; built and unit-tested on built ACL
   values, **not verified on a Windows host**), and a refusal where it has neither (a credentials file is the one
   exception, accepted with a warning, P2 §4). The kind is decided per volume, a FAT or exFAT volume is "neither"
-  whatever its views say (a credentials file there is refused too), and what the POSIX branch creates is read back
-  exactly (pass 2, P2-L7-F1, P1 §2.5); a volume mounted with ignore-ownership whose type keeps permissions is not
-  detected. A directory another user owns, or that others may write to, is refused
-  by the agent and ignored by the controller (S8, S19, H3).
+  whatever its views say (a credentials file there is refused too, and a module, spy or Byteman jar there is
+  "writable by others", `JarTrust`), and what the POSIX branch creates is read back exactly (pass 2, P2-L7-F1, P1
+  §2.5); a volume mounted with ignore-ownership whose type keeps permissions is not detected. A directory another user
+  owns, or that others may write to, is refused by the agent and ignored by the controller (S8, S19, H3). **The path to
+  it counts too** (Phase 6 security fix, pass 2, P2-L1-F3): the controller refuses to write into a directory with a
+  directory above it that others may rename entries of (group- or other-writable without the sticky bit; on ACL file
+  systems a delete or take-over right; on a volume with neither, always), and the agent reads an options file only
+  when it is a regular file of the current user that nobody else may write (nor, when it holds a token, read), so a
+  directory or file another user put in place of the operator's is refused rather than trusted (P1 §2.4, §2.5, §7).
 
 ## 4. The token rule
 
@@ -120,7 +128,7 @@ on its way to disk.
 
 | Boundary | Mechanism | Where specified |
 |---|---|---|
-| controller ↔ agent (the control channel) | loopback only; HMAC of every request and reply with the token as key; a fresh nonce per request; bounds that apply before authentication (head size, deadlines, connection count, body budget); `Host`/`Origin` checks; the client's terminal *lost* state | P1 §5, §7 (H1, H2, H3) |
+| controller ↔ agent (the control channel) | loopback only; HMAC of every request and reply with the token as key; a fresh nonce per request; the request MAC verified on the head alone, over the body hash the head declares, so that no body is read for a request without the key (Phase 6 security fix, pass 2, P2-L1-F1); bounds that apply before authentication (head size, deadlines, connection count, body budget); `Host`/`Origin` checks; the client's terminal *lost* state | P1 §5, §7 (H1, H2, H3) |
 | the discovery directory and every owner-only file | per-user directory with a deterministic fall-back; owner-only files; refusal of a directory another user owns or others may write to; stale files removed; the token read only inside the directory under its default name | P1 §2.5, §7; P6 §9.3 |
 | the agent against the host application | an isolated child-first loader for everything but the bootstrap jar and, in hooks mode, `Spy`; daemon `skillroy-*` threads; bounded waits; actions posted to the EDT, reads bounded; never AWT before the application; **a thread the application forbids is never used, and an advice body only publishes to the bus on the thread it fired on**; redaction of secret-looking keys; the enable flag and the production marker; read-only mode and `confirm` | P1 §2.2, §5; design §2.2; P6 §3.4, §4.3 |
 | the bootstrap path (hooks mode) | one class, `Spy`, with a set-once, weakly held, identity-released handler slot that is **never free while any class carries an advice** (a detach that ran out of budget keeps its disarmed handler installed, and a later agent is refused); advice bodies that call nothing else and never throw; a visibility probe before any install; the jar's content checked before the one append; the `Nexus` measure so that Byte Buddy injects nothing else | P6 §3.1-§3.3, §3.5 (D116, D117) |

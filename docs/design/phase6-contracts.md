@@ -611,7 +611,14 @@ the advice's path, which reads the volatile slot only).
   the jar held would be bootstrap-defined code for the JVM's life); and refuses it as well when any class entry is not a `--release 8` class file (major 52) or references, in its
   constant pool, a class outside `java/` (`ClassFileRefs` of §3.6: the jar's code must reach nothing but the JDK);
   there is **no hash comparison** (the reactor has no checksum step, and the jar is the operator's, `threat-model.md`
-  §3); then `inst.appendToBootstrapClassLoaderSearch(new JarFile(spyJar))`, `Class.forName(…, true, null)` and
+  §3). **Phase 6 security fix, pass 2, P2-L1-F5 (built 2026-10-09, SA):** a jar that `hooks.spyJar` **names** (an
+  operator's path; the home's own `<home>/skillroy-agent-spy.jar` is trusted as the home is) must first pass the
+  shared jar rule of §3.6 (`JarTrust`, the rule `byteman.jar` has had since §7.4: the real jar, its real directory
+  and, for a symbolic link, the link's directory writable by nobody but their owner, who is the current user or the
+  administrator), else `UNAVAILABLE("spy jar is writable by others: <path>")`; the content check alone bounds the
+  jar's shape, not its behaviour, and the check and the append open the path twice, a window the directory rule
+  closes against other users. (`SpyBoot.checkJar(jar, named)`; the engine passes `HookOptions.spyJarNamed`, one line of
+  `HookEngineImpl`.) Then `inst.appendToBootstrapClassLoaderSearch(new JarFile(spyJar))`, `Class.forName(…, true, null)` and
   the version check; the append is logged at INFO with the jar's path and size, once per JVM (on Java 25 it costs the
   one CDS line of §2.5, BS3 RESULT §9 fact 8, which is why it is never repeated for a `Spy` the bootstrap loader
   already knows); (4) `Spy.install(handler)` with the engine's one handler (D117), whose class is **loaded only now**:
@@ -992,6 +999,22 @@ a sixty-line constant-pool reader that refuses a malformed file with `IllegalArg
 String residueClassPrefix)`), and `RetransformBatches.of(List<Class<?>>, long maxBytes, int maxClasses)`. The package
 is API of the agent only in the sense that modules may use it; the controller never sees it.
 
+**Phase 6 security fix, pass 2, P2-L1-F5 (built 2026-10-09, SA): `JarTrust`**, the one provenance rule of every jar
+the agent loads into the target from a path the operator names **outside the home**: each `modules` path (P1 §2.4,
+the core's `ModuleLoader`; a refused one is a `FAILED` record "module jar is writable by others: <path>" and is not
+loaded), `hooks.spyJar` (§3.2 step 3) and `byteman.jar` (§7.4 step 1, whose `JarCheck` now delegates its ownership
+and ACL judgement here, unchanged). `JarTrust.problem(Path)` answers null, `NOT_A_FILE` or `WRITABLE_BY_OTHERS`: the
+real jar and its real directory, and for a symbolic link also the directory holding the link, must not be writable by
+group or others and must be owned by the current user (by name, or as the owner of a file the process creates) or
+root (POSIX); on ACL file systems the owner is the current user, the system account, the administrators group or the
+installer service, resolved as principals, and no ALLOW entry gives anyone else a write right (`aclProblem`, tested
+on built values; not verified on a Windows host); a file system with neither view is refused, and the view is the
+volume's (`Volumes`, P1 §2.5; P2-L7-F1, carried into `JarTrust` when the two pass 2 fixes were merged), so a jar or
+directory on a FAT or exFAT volume is "writable by others" for all three. The directories above are not judged (the
+path is the operator's). The home's own jars (`lib/`, `modules/`, `optional/`, the home's spy jar) stay trusted as the
+home is (`threat-model.md` §3). The core uses the package for this one class (D153 named the hooks and Byteman
+modules; recorded as D-SA-3 in the fix report).
+
 **As built (Phase 6, HK, 2026-10-09):** `ClassFileRefs.classReferences` returns the names in internal form
 (`java/lang/String`, the form the JVMS calls binary names in internal form), in constant-pool order without
 duplicates, an array class entry as its element class (`[Ljava/lang/String;` as `java/lang/String`) and an array of a
@@ -1028,7 +1051,7 @@ record naming the key, §3.2):
 | Key | Default | Meaning |
 |---|---|---|
 | `optionalModules` | – | file stems of jars under `<home>/optional/` to load as module jars, comma-separated (D114, §2.1). Read by the core |
-| `hooks.spyJar` | `<home>/skillroy-agent-spy.jar` | the jar appended to the bootstrap search path at the first install, after the content check of §3.2 step 3 |
+| `hooks.spyJar` | `<home>/skillroy-agent-spy.jar` | the jar appended to the bootstrap search path at the first install, after the content check of §3.2 step 3; a jar this option names must also pass the shared jar rule (`JarTrust`, §3.6; Phase 6 security fix, pass 2, P2-L1-F5, built 2026-10-09, SA) |
 | `hooks.maxClassBytes` | `262144` | a class whose class file (as the JVM hands it to the transformer) is larger is never retransformed (design §2.6: "very large classes are never retransformed; BS3 sets the size limit"). BS3 RESULT §4, §9 fact 18: at 273 KiB and 3,000 methods the install took 53-59 ms on Java 8 and 31-37 ms on Java 25 and stopped the world for about 11 ms on Java 8, below one 60 Hz frame; at 916 KiB the Java 8 stop is 26 ms, at 1.8 MiB 51 ms. For scale, the desk's largest class is 35 KB. Also the byte bound of one batch (§3.2). At most 16 MiB |
 | `hooks.maxMethods` | `2000` | the second bound of the same limit: Byte Buddy's cost follows the method count rather than the bytes (1.8 MiB of code in 30 methods: 82-88 ms on Java 8; in 20,000 methods: 346-410 ms; fact 18); a class declaring more methods is never retransformed. At most 65535 |
 | `hooks.maxClasses` | `64` | the most classes one engine may hold in its ledger; the 65th spec is `UNAVAILABLE("ledger full")`; also the bound of the classes one Byteman rule may retransform (§7.3) |
@@ -1852,6 +1875,11 @@ the rule (finding L2-F5):
    each resolved as a principal and never matched by a bare name, and no ALLOW entry may give anyone else a write
    right (finding L2-F6; the judgement `JarCheck.aclProblem` is tested on built ACL values, and the branch is not
    verified on a Windows host). The POSIX rule is unchanged (owned by the current user or root).
+   (Phase 6 security fix, pass 2, P2-L1-F5, built 2026-10-09, SA.) The ownership and ACL judgement moved, unchanged,
+   to the shared `JarTrust` of §3.6, which now also judges the `modules` paths and a named `hooks.spyJar`, and with
+   it the per-volume refusal of P2-L7-F1 (a jar or directory on a FAT or exFAT volume is "writable by others");
+   `JarCheck.writableByOthers` and `JarCheck.aclProblem` delegate to it, and `JarCheck`'s own steps (the manifest,
+   the real path appended) are unchanged.
 2. **Reuse.** If `RuleManager` is loadable from the system loader and holds a parked `Retransformer` (an earlier agent
    instance of this JVM loaded Byteman in process, unloaded its rules and parked it at its `uninstall`), the module
    takes it (reflectively, §7.3): no append, no `premain`, `rule.engine` `OK(strategy "in-process, reused")`; a parked
@@ -2304,6 +2332,21 @@ reached and every member accepted a FAT or exFAT volume. The `CredentialFiles` r
 or exFAT volume is refused; the "neither: accepted with a warning" branch stays for any other volume without either
 view (D138 unchanged). The host list of §9.5 keeps "a FAT or exFAT volume for the neither branch" (now the refusal on
 Windows).
+
+(Phase 6 security fix, pass 2, P2-L1-F3, built 2026-10-09, SA.) Two of the five members changed, their signatures
+not: `writeOwnerOnly` creates the file and writes it through one channel (`CREATE_NEW`, `NOFOLLOW_LINKS`, the
+owner-only attribute; on ACL file systems the ACL is read back before any byte is written), so the content cannot be
+redirected through a link swapped in after the creation; and both `ensureOwnerOnlyDirectory` overloads also refuse a
+directory with a directory above it that lets others replace entries (group- or other-writable without the sticky bit;
+on ACL file systems a delete or take-over right that applies to it), naming that ancestor (P1 §2.5, "the directories
+above it"). `createOwnerOnlyTempDirectory` and `untrustedDirectoryReason` are unchanged. Tests: `SecureFilesTest`
+(`aDirectoryBelowAParentOthersMayWriteToWithoutTheStickyBitIsRefused`,
+`anAncestorsAclMayLetOthersAddEntriesButNotReplaceThem`, `anOwnerOnlyFileIsNeverWrittenThroughALink`).
+With P2-L7-F1 (the two fixes merged): on POSIX volumes `writeOwnerOnly` reads the new file's permissions back
+(exactly `rw-------`, not following links) while that one channel is open and before a byte is written, as the ACL
+branch reads its ACL back, and the ancestor rule takes each ancestor's kind from its volume as well, so an ancestor on a FAT or exFAT volume (above a
+mount point) is refused: anybody with the volume may rename its entries (`PermissionlessVolumeTest`
+`anAncestorOnAFatOrExfatVolumeIsRefused`).
 
 ### 9.4 Attach on Windows (D139) (documentation now; the behaviour waits for the host)
 

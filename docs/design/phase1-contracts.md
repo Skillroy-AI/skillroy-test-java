@@ -301,15 +301,15 @@ intact; from 1025 the load is refused with an `IOException` on the attaching sid
 | Key | Default | Meaning |
 |---|---|---|
 | `enabled` | `false` | must be `true` or the agent does nothing. JAVAAGENT: only the system property `skillroy.agent.enabled` or the environment variable `SKILLROY_AGENT_ENABLED`; neither the agent argument string nor the options file it names can enable it (both may reach, through `JAVA_TOOL_OPTIONS`, JVMs that never asked for the agent). EMBEDDED: also `enabled=true` in the `Properties` passed to `EmbeddedAgent.start`. ATTACH: also `enabled=true` in the attach argument string or in the options file, because attaching is itself a deliberate act by a same-user process |
-| `t` / `config` | – | options file; in controller-initiated loads it also carries `token` and `nonce` |
-| `token` | generated | the secret an agent and its controller share; if absent the agent generates 32 random bytes (hex) and writes them to `tokenFile`. A token supplied without `tokenFile` is written to the default token file and deleted on close; a supplied `token` + `tokenFile` pair is left untouched. **H2 (1.x, built 2026-10-02):** it is the key of the request and reply MACs and never travels (§5 "Authentication") |
+| `t` / `config` | – | options file; in controller-initiated loads it also carries `token` and `nonce`. **Phase 6 security fix, pass 2, P2-L1-F3 (built 2026-10-09, SA):** read only when, looked at without following links, it is a regular file (not a symbolic link) owned by the current user (by uid where the process uid is known, else by name; root, the system account and the administrators group are accepted too) that nobody else may write to (POSIX: no group or other write bit; ACL: no ALLOW entry giving anyone else a write right), and, when it holds a `token`, that nobody else may read either (POSIX: no group or other bit at all; ACL: no right for anyone else), as the controller always writes it; a file system with neither view is refused. It is opened without following links, the check runs after the read and requires the same file (file key) as before it, and nothing in the file is used before the check passed. A refusal starts nothing and is the one `[skillroy]` line and `skillroy.agent.error`: "options file <path> is refused: <rule> (…)". An operator's own options file without a token (a domain layer's `requireProductionMarker`, for example) may stay readable by others |
+| `token` | generated | the secret an agent and its controller share; if absent the agent generates 32 random bytes (hex) and writes them to `tokenFile`. A token supplied without `tokenFile` is written to the default token file and deleted on close; a supplied `token` + `tokenFile` pair is left untouched. **H2 (1.x, built 2026-10-02):** it is the key of the request and reply MACs and never travels (§5 "Authentication"). **Phase 6 security fix, pass 2, P2-L1-F4 (built 2026-10-09, SA):** a supplied token has at least 16 characters: the agent refuses a shorter one at start, before a thread or a port exists ("option token must be at least 16 characters; omit it to let the agent generate one", the value never echoed), and the controller's token format (`SecureFiles.isValidToken`: `TargetLauncher`, `AttachSession`, `AgentClient.connect`, the confined token reader) and the CLI's `--token-file` reader (`Connector`) are 16 to 1024 characters of `[A-Za-z0-9._~+/=-]`. A floor, not an entropy check (a generated token is 64 hex characters); see "Token reuse" below |
 | `tokenFile` | `<discoveryDir>/skillroy-<pid>-<startMs>.token` | written with owner-only permissions on a file system with POSIX attributes. **S7/S15 (1.x, built 2026-10-02; not verified on Windows):** owner-only through an ACL where the file system has ACLs, and refused where it has neither, see §2.5. **S6/S28 (1.x, built 2026-10-02):** discovery reads a token file only inside the discovery directory it is reading and only under the default name (§7), so an agent given a `tokenFile` elsewhere is reached with `--port` and `--token-file` |
 | `nonce` | generated | echoed by `/ping`; lets the controller prove it reached the agent it loaded |
 | `port` | `0` | loopback port; `0` = ephemeral |
 | `home` | directory of the bootstrap jar | agent home |
-| `modules` | – | extra module jar paths, comma-separated, in addition to `home/modules/*.jar` |
+| `modules` | – | extra module jar paths, comma-separated, in addition to `home/modules/*.jar`. **Phase 6 security fix, pass 2, P2-L1-F5 (built 2026-10-09, SA):** a module jar is code execution in the target, so each path must pass the shared jar rule (P6 §3.6 `JarTrust`: the jar, its directory and a link's directory writable by nobody but their owner, the current user or the administrator); one that does not is a `FAILED` record "module jar is writable by others: <path>" and is not loaded (S14: never fatal) |
 | `optionalModules` | – | **(Phase 6, built 2026-10-09, HK; P6 §2.1, D114.)** file stems of jars under `<home>/optional/` to load as module jars, comma-separated (`skillroy-agent-hooks`); loaded between `<home>/modules/*.jar` and the `modules` paths. A stem that is not a plain file name, names no jar, or is given without a home, and a jar without a service file, is a `FAILED` record (S14). The `;` of the argument string still separates options: `optionalModules=skillroy-agent-hooks;discoveryDir=…` |
-| `hooks.spyJar` | `<home>/skillroy-agent-spy.jar` | **(Phase 6, built 2026-10-09, HK; P6 §3.7.)** the jar the hooks module appends to the bootstrap search path at its first install, after the content check of P6 §3.2 step 3; read live (A20) |
+| `hooks.spyJar` | `<home>/skillroy-agent-spy.jar` | **(Phase 6, built 2026-10-09, HK; P6 §3.7.)** the jar the hooks module appends to the bootstrap search path at its first install, after the content check of P6 §3.2 step 3; read live (A20). A jar this option names must also pass the shared jar rule, else `UNAVAILABLE("spy jar is writable by others: <path>")` (Phase 6 security fix, pass 2, P2-L1-F5, built 2026-10-09, SA; P6 §3.6) |
 | `hooks.maxClassBytes` | `262144` | **(Phase 6, HK; P6 §3.7.)** a class whose class file is larger is never retransformed; also the byte bound of one retransformation batch; 1024 to 16 MiB |
 | `hooks.maxMethods` | `2000` | **(Phase 6, HK; P6 §3.7.)** a class declaring more methods and constructors is never retransformed; 1 to 65535 |
 | `hooks.maxClasses` | `64` | **(Phase 6, HK; P6 §3.7.)** the most classes the hooks' ledger holds; 1 to 1024 |
@@ -335,7 +335,12 @@ is withdrawn, because H1 replaced that server (§5).
 `token` + `tokenFile` pair) used to be a credential a listener on a freed port could capture. **H2 (1.x, built
 2026-10-02)** removes that exposure: the token never travels, and nothing captured from one agent instance is valid
 against the next, because every start has a new session id (proven end to end: a request signed for a disabled
-agent's session is 401 on the agent that replaces it, §10 check 16).
+agent's session is 401 on the agent that replaces it, §10 check 16). That analysis assumes a token of the generated
+strength: with a weak supplied token, the hello MAC a squatter on a freed port receives is an offline dictionary
+oracle over it, and the agent's 401, which is not rate-limited, an online one. **Phase 6 security fix, pass 2,
+P2-L1-F4 (built 2026-10-09, SA):** both sides therefore refuse a supplied token shorter than 16 characters (the
+`token` row above); an operator who supplies one should still generate it (`openssl rand -hex 32`, for example), since
+the floor bounds the length, not the randomness.
 
 ### 2.5 Discovery
 
@@ -373,6 +378,28 @@ check before it reads a discovery directory and before it writes an options file
 remain: the agent compares owners by uid where it can and the controller by principal name, and a controller that
 cannot determine its own user skips the owner part.
 
+**Phase 6 security fix, pass 2, P2-L1-F3 (built 2026-10-09, SA): the directories above it.** The check above judges the
+directory, not the path to it: whoever may rename entries of a directory above it can move the operator's directory
+away and put one of their own, with a planted options file, under the same name (a discovery directory named in a
+shared checkout, `./build/skillroy`, is the case; the defaults sit under a sticky `/tmp` or the user's home). When the
+controller creates or uses a directory to write into (`SecureFiles.ensureOwnerOnlyDirectory`, both overloads, and so
+`writeOptionsFile` for `TargetLauncher` and `AttachSession`), it therefore also refuses one with a directory above it
+that lets others replace entries: every ancestor of the path as given (links followed) and every ancestor of its real
+path is judged; on POSIX file systems an ancestor writable by group or others is refused unless it has the sticky bit
+(read from `unix:mode`; an ancestor whose mode cannot be read is not judged); on ACL file systems an ancestor is
+refused when an ALLOW entry that applies to it (not `INHERIT_ONLY`) gives a principal other than "me", the system
+account or the administrators group `DELETE_CHILD`, `DELETE`, `WRITE_ACL` or `WRITE_OWNER` (adding entries alone, as
+a drive root lets every user do, replaces nothing; not verified on a Windows host, the judgement
+`SecureFiles.ancestorAclProblem` is unit-tested on built values). The owner of an ancestor is not judged (root or an
+administrator owns most of them, and in the test container the mounted ones show another uid). The refusal names the
+ancestor: "the discovery directory <dir> cannot be used: the directory <ancestor> above it is writable by group or
+others without the sticky bit (rwxrwxrwx), so another user could put a directory of their own in its place (…)".
+The reading side (`Discovery`, `untrustedDirectoryReason`) is unchanged, and so is the agent's own directory check:
+the agent judges the options file itself instead (§2.4 `t` / `config`). With P2-L7-F1 below (the two pass 2 fixes
+merged), an ancestor's kind is its volume's too, and an ancestor on a volume with neither (a FAT or exFAT volume above
+a mount point) is refused: "… the directory <ancestor> above it is on a volume with neither POSIX permissions nor ACLs
+(its volume is msdos, which keeps no permissions), so …".
+
 **S7/S15 file systems without POSIX attributes (1.x, built 2026-10-02; not verified on Windows: no Windows host was
 available, the ACL judgement is a pure function unit-tested on built ACL values, and the refusal is tested on a zip
 file system).** Three kinds of file system, by the same rules on both sides (the agent's and the controller's
@@ -396,7 +423,8 @@ system provider, and what the POSIX branch creates is read back exactly.** A pro
 path (every local path reports POSIX on Linux and macOS, ACLs on Windows), so a FAT or exFAT volume used to take the
 POSIX (or the ACL) branch and the owner-only guarantee was silently absent: macOS mounts such a volume `noowners` and
 it reads back `rwx------` whatever was asked, and Linux's `vfat` reads back `755`/`644` and ignores `chmod`. Now both
-sides' `SecureFiles`, `CredentialFiles` and `JarCheck` ask the volume (`skillroy-protocol`'s `Volumes`): the
+sides' `SecureFiles`, `CredentialFiles` and the shared jar rule `JarTrust` (P6 §3.6, to which the Byteman module's
+`JarCheck` delegates) ask the volume (`skillroy-protocol`'s `Volumes`): the
 `FileStore` of the path, or of its nearest existing ancestor, is POSIX when it supports the POSIX view, else ACL when
 it supports the ACL view (on Windows, a volume that keeps persistent ACLs), else neither; and a volume whose type is
 `msdos`, `vfat`, `fat`, `fat12`, `fat16`, `fat32`, `exfat` or `umsdos` (without regard to case: Windows reports
@@ -406,8 +434,8 @@ before. A directory and a file the POSIX branch creates must read back exactly `
 which also catches a mount the type list does not name. An existing directory keeps the rule above (owned by the
 current user, not writable by group or others). The refusals keep the wording "neither POSIX permissions nor ACLs"
 and name the volume's type. A credentials file on a volume of the listed types is refused rather than taking the
-neither branch's warning (P2 §4), which stays for any other volume without either view (D138); a Byteman jar there is
-"writable by others" (P6 §7.4). Limit: a volume mounted with ignore-ownership whose type keeps permissions (an APFS or
+neither branch's warning (P2 §4), which stays for any other volume without either view (D138); a module jar, a named
+spy jar and a Byteman jar there are "writable by others" (P6 §3.6, §7.4). Limit: a volume mounted with ignore-ownership whose type keeps permissions (an APFS or
 HFS+ disk with "Ignore ownership on this volume") reads back what was asked and is not detected: the JDK does not
 expose mount options. Tested on built values everywhere, and on real FAT and exFAT disk images on macOS
 (`PermissionlessVolumeTest`, both sides; skipped where `hdiutil` is absent).
@@ -518,6 +546,11 @@ public final class Auth {
     public static final String HEADER_SESSION = "X-Skillroy-Session"; // reply header: the agent's session id (the
                                                                       // specification had a request header
                                                                       // X-Skillroy-Body-Sha256 instead; see §5)
+    public static final String HEADER_BODY_SHA256 = "X-Skillroy-Body-Sha256";
+                                                                      // request header: sha256hex of the body, which
+                                                                      // the request MAC covers; required on a request
+                                                                      // with a body (Phase 6 security fix, pass 2,
+                                                                      // P2-L1-F1, built 2026-10-09, SA; see §5)
     public static final String PING_NONCE_PARAM = "nonce";            // the query parameter of GET /ping
     public static final int MIN_NONCE_LENGTH = 16, MAX_NONCE_LENGTH = 64, SESSION_ID_LENGTH = 32,
                             HEX_DIGEST_LENGTH = 64;
@@ -1131,8 +1164,11 @@ reflection into `sun.*`.
   empty, longer than 18 digits or not a decimal number: 400 and close. `Expect: 100-continue` is ignored.
 - *Order of checks.* On the head alone, before any body byte is read: the `Authorization` header (401 unless it
   parses in the right form for the path, see "Authentication"); `Transfer-Encoding` (501); `Content-Length` (400);
-  a `/ping` with a body (401); a `Content-Length` above 8 MB (413, the body is not read). Then the body is read, and
-  the MAC is verified over it (401). Only then: the `Host` header, which must equal `127.0.0.1:<port>` or
+  a `/ping` with a body (401); a `Content-Length` above 8 MB (413, the body is not read); **the body hash and the MAC
+  (401): a request with a body must declare its hash in `X-Skillroy-Body-Sha256`, and the MAC is verified over the
+  declared hash on the head alone (Phase 6 security fix, pass 2, P2-L1-F1, built 2026-10-09, SA).** Then the body of
+  a verified request is read, and its SHA-256 must equal the declared hash (401). (Until P2-L1-F1: "Then the body is
+  read, and the MAC is verified over it (401).") Only then: the `Host` header, which must equal `127.0.0.1:<port>` or
   `localhost:<port>` ignoring case (403); **no** `Origin` header (403); the path (404; compared as sent, not
   percent-decoded, so `/p%69ng` is 404); the method (405, with an `Allow` header); and a `POST /rpc` without
   `Content-Length` (411).
@@ -1141,7 +1177,16 @@ reflection into `sun.*`.
   then doubling), never sized by the declared length. **Pre-authentication body budget:** because the request MAC
   covers the body, a request is authenticated only once its body is in, so a client without the key can make the
   agent buffer bodies; all connections that have not authenticated yet share one budget of 16 MB (twice the body
-  cap), and a body that would exceed it is answered 503 with `Retry-After: 1` and close.
+  cap), and a body that would exceed it is answered 503 with `Retry-After: 1` and close. **Phase 6 security fix,
+  pass 2, P2-L1-F1 (built 2026-10-09, SA):** a process without the key could hold the whole budget with two stalled
+  bodies (6 MB of a declared 8 MB each, renewed by reconnecting), and every `POST /rpc` the controller sent as the
+  first request of a new connection (concurrent calls, the first call after the client's 30 s keep-alive, the one
+  retry) was then answered 503, which fails the call: not the delay the "Bounded pool" record below names. Built
+  since: the MAC is verified on the head alone over the hash declared in `X-Skillroy-Body-Sha256` (§5
+  "Authentication"), so a body is read only for a request that holds the key, and a client without it gets the
+  constant 401 before any body byte is buffered. The budget stays, as defence in depth: it now bounds what a holder
+  of the key, or of a request head captured within this session (which needs privileges outside the threat model),
+  can make the agent buffer on connections that have not authenticated yet.
 - *Keep-alive* for HTTP/1.1 requests without `Connection: close`, on a connection whose last request was
   authenticated and passed the `Host` and `Origin` checks; the body of such a request was read completely, since the
   MAC needed it. The connection may then stay idle for `httpIdleTimeoutMs` (default 120 s) waiting for the first byte
@@ -1206,6 +1251,19 @@ constant-time.
   `X-Skillroy-Body-Sha256`, so that the MAC could be verified on the head alone; built without it, so that the wire
   format carries one authenticator, and the budget bounds what a client without the key can make the agent buffer.
   The header remains the way to close that gap fully should it matter.)
+  **Phase 6 security fix, pass 2, P2-L1-F1 (built 2026-10-09, SA): it mattered (the budget's 503 failed the
+  controller's calls, "Body" above), and the header is now the behaviour.** Every request with a body carries
+  `X-Skillroy-Body-Sha256: <sha256hex(body)>` (`Auth.HEADER_BODY_SHA256`), exactly once; the request MAC's
+  `bodyHash` is that value, and the MAC is verified **on the head alone**, before any body byte is read. A request
+  with a body and without the header, with the header twice, or with a value that is not 64 lower-case hex
+  characters, and a MAC that does not verify over the declared hash, get the constant 401 before the body is read.
+  Only a verified request has its body read (under the deadline and the budget above); the SHA-256 of exactly the
+  bytes read must then equal the declared hash, else the same constant 401 (the head held the key, the body is not
+  the one it was signed for). A request without a body may omit the header (the hash is then `EMPTY_BODY_SHA256`) or
+  send `EMPTY_BODY_SHA256`; any other value is 401. `/ping` does not use it. Nothing in the body is parsed, logged or
+  acted on before both checks passed, and the connection counts as not authenticated until then. The MAC's inputs
+  are unchanged, so `Auth.requestMac` and every reply MAC are as before; the protocol version stays `0.2` (nothing was
+  released on it; recorded as D-SA-1 in the fix report).
 - *Header syntax.* `Auth.parseAuthorization` is stricter than RFC 7235: the scheme name `Skillroy-HMAC` exactly
   (case-sensitive), exactly one space, then `name=value` parameters separated by a comma and optional spaces or tabs
   after it; no quotes, no whitespace around `=` or before a comma, no trailing comma or whitespace, parameter names
@@ -1226,7 +1284,8 @@ constant-time.
   connection.
 - *Replies without a MAC.* The constant 401, and every refusal sent before the request could be authenticated: 400
   for a malformed head or `Content-Length`, 413, 431, 501, and the 503 of the body budget. A client treats these by
-  their status and uses nothing of their body (§7).
+  their status and uses nothing of their body (§7). (Since P2-L1-F1 the budget's 503 answers only a request whose head
+  verified, on a connection that has not authenticated yet; it stays unsigned, as before.)
 - *Refusal.* A request with a missing, repeated or malformed `Authorization` header, another scheme (the former
   `Bearer` included, in any case), the wrong form for the path, or a wrong MAC gets one constant 401:
   `WWW-Authenticate: Skillroy-HMAC`, no MAC, no session header, `Connection: close`, nothing that depends on the key,
@@ -1242,7 +1301,9 @@ serves the new socket next (so no race with the pool); only when every open conn
 one closed unserved. Both cases are counted and logged at most once every 10 s. A controller therefore normally
 gets in while a process without the key occupies places. What remains: such a process can hold places for the 5 s
 head deadline each and come back, which delays the control channel and costs the host nothing beyond the bound
-above. At most 8 `/events` streams are open at a time (for a small pool: at most half of `httpThreads`, at least
+above. (The body budget's 503 was a second residual, a failed call rather than a delay, for a controller request on
+a new connection; closed by verifying the MAC on the head, P2-L1-F1, "Body" above. Phase 6 security fix, pass 2,
+built 2026-10-09, SA.) At most 8 `/events` streams are open at a time (for a small pool: at most half of `httpThreads`, at least
 one); a further one gets HTTP 503 with `Retry-After: 1`. A local process without the token therefore cannot make
 the target JVM create threads without limit. `/rpc` dispatch runs on the connection's thread; `CALLER` primitives
 run on a second pool (`skillroy-http-call-N`), which only authenticated requests reach, so that their timeout can be
@@ -1797,13 +1858,17 @@ so); it authenticates every request and verifies every reply with `Auth` (§3), 
   id from the reply body and could therefore verify only a 200; built with the header, so that every `/ping` reply is
   verified before its body is parsed.)
 - Every other request carries a fresh `reqNonce` and `Authorization: Skillroy-HMAC nonce=<r>, mac=<request MAC>`
-  over the exact body bytes sent; the client verifies the reply MAC before it parses the body. Before a verified ping
+  over the exact body bytes sent; a `POST` also carries their hash in `X-Skillroy-Body-Sha256` (Phase 6 security fix,
+  pass 2, P2-L1-F1, built 2026-10-09, SA: the agent verifies the MAC on the head and reads the body only then, §5);
+  the client verifies the reply MAC before it parses the body. Before a verified ping
   no such request can be signed ("no verified session yet (ping first)"). For an event stream the request MAC covers
   `GET`, the path with its query and an empty body; the client verifies the MAC of the 200 head over an empty body
   before it reads the first frame, on every reconnect, and a non-200 reply over its body (capped at 64 KiB).
 - *Unsigned refusals.* A reply with status 400, 413, 431, 501 or 503 and no `X-Skillroy-Mac` is one the agent sent
   before it could authenticate the request (§5): a call fails with `AgentLostException` **without** latching, and
-  nothing of its body is used (an impostor gains nothing, and a transient 503 does not end the client). The event
+  nothing of its body is used (an impostor gains nothing, and a transient 503 does not end the client; since
+  P2-L1-F1 a process without the token can no longer cause the budget's 503, §5 "Body", so it is transient indeed:
+  nothing retries it, as before). The event
   stream treats such a reply as a failed attempt under its reconnect policy (capped back-off until the stream is
   closed or the client is lost), not as an impostor. A wrong MAC, or an unsigned reply with any other status (a 200
   included), latches the client lost ("the peer on port N is not the agent (or does not hold this token)").
@@ -1824,7 +1889,9 @@ so); it authenticates every request and verifies every reply with `Auth` (§3), 
   `skillroy call`: a plain HTTP client with a bearer token no longer works (401).
 - *Test fakes.* Everything that stands in for an agent or builds raw requests in tests (`FakeAgent` in the
   controller and CLI tests, the Java 8 fixture agent, the core's and the dist's test harnesses, the sample's raw
-  socket client) uses `Auth` too; the in-process `MiniAgent` of the JUnit glue speaks no HTTP. Tests prove: a peer
+  socket client) uses `Auth` too, and those that send a body send `X-Skillroy-Body-Sha256` (the controller's and the
+  CLI's `FakeAgent` require it as the agent does; P2-L1-F1); the in-process `MiniAgent` of the JUnit glue speaks no
+  HTTP. Tests prove: a peer
   without the key is rejected, sees only one hello MAC, and that MAC replayed as `/rpc` gets 401; a captured request
   replayed against a restarted agent (new session id) is 401; the former `Bearer` header is 401; unsigned or wrongly
   signed replies latch; a timeout does not.
@@ -1911,7 +1978,12 @@ show is recorded in `../TODO.md`.
   by `skillroy.agent.tokenFile`; the `/ping` handshake verifies both. A fresh load must publish the nonce this
   session generated.
 - *Options file.* Written owner-only into the discovery directory (created owner-only if missing; an existing one
-  must pass the trust check of §2.5) and deleted when the attach ends, however it ends. `TargetLauncher` writes its
+  must pass the trust check of §2.5, and since P2-L1-F3 the directories above it must not let others replace it,
+  §2.5) and deleted when the attach ends, however it ends. **Phase 6 security fix, pass 2, P2-L1-F3 (built
+  2026-10-09, SA):** `SecureFiles.writeOwnerOnly` creates the file and writes it through one channel (`CREATE_NEW`,
+  `NOFOLLOW_LINKS`, the owner-only POSIX attribute or ACL, the ACL read back before any byte is written), so the token
+  goes into the file it created; it used to create the file and open it again by path, following links, and a link
+  swapped in between received the token. The agent reads the file only after its own check (§2.4 `t` / `config`). `TargetLauncher` writes its
   options file the same way and `LaunchedTarget.close()` deletes it. **S5 (1.x, built 2026-10-02):** the launch
   credential is short-lived: `LaunchedTarget.awaitAgent` deletes the options file as soon as a verified `/ping` with
   the launch nonce has shown that the agent read it, and `close()` remains the fall-back. A JVM of the same launch
@@ -2562,7 +2634,9 @@ Every command takes `--json` and `--help`. Connection (all commands except `jvms
 agent in the discovery directory); `--discovery-dir <dir>` overrides the per-user default, whose help text names the
 `<user.home>/.skillroy/run` fall-back (the CLI always passes an explicit directory, so the controller's candidate
 merging happens only when none is given). The token is never printed. The help and the messages say "token", not
-"bearer token"; a token file that does not parse "does not hold a token".
+"bearer token"; a token file that does not parse "does not hold a token" (since P2-L1-F4, Phase 6 security fix, pass
+2, built 2026-10-09, SA: also one shorter than 16 characters, "does not hold a token (16 to 1024 letters, digits and
+._~+/=-)", §2.4 `token`).
 
 Built for the CLI **(1.x, built 2026-10-02)**:
 

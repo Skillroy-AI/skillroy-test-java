@@ -204,6 +204,10 @@ class AttachSessionTest {
         assertTrue(assertThrows(AttachFailedException.class,
                 () -> AttachSession.attach(process.pid(), home, options("token", "two words")))
                 .getMessage().contains("usable token"));
+        // P2-L1-F4: a supplied token shorter than 16 characters is refused before anything is written.
+        assertTrue(assertThrows(AttachFailedException.class,
+                () -> AttachSession.attach(process.pid(), home, options("token", "fifteen-chars-x")))
+                .getMessage().contains("16 to 1024"));
         assertEquals(0, optionFilesLeft());
     }
 

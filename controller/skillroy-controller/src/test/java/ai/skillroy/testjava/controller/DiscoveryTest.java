@@ -143,8 +143,10 @@ class DiscoveryTest {
     void theTokenIsReadTrimmedAndValidated() throws Exception {
         agent.writeDiscovery(dir);
         Path tokenFile = dir.resolve("skillroy-" + PID + "-" + START + ".token");
-        Files.writeString(tokenFile, "  abc123  \n");
-        assertEquals("abc123", Discovery.list(dir).get(0).token());
+        Files.writeString(tokenFile, "  abc123-0123456789  \n");
+        assertEquals("abc123-0123456789", Discovery.list(dir).get(0).token());
+        Files.writeString(tokenFile, "fifteen-chars-x");
+        assertNull(Discovery.list(dir).get(0).token(), "shorter than 16 characters (P2-L1-F4)");
         Files.writeString(tokenFile, "two words");
         assertNull(Discovery.list(dir).get(0).token());
         Files.delete(tokenFile);
