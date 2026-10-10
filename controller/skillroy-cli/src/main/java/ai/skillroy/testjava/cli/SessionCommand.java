@@ -17,6 +17,7 @@
 package ai.skillroy.testjava.cli;
 
 import ai.skillroy.testjava.controller.AgentLostException;
+import ai.skillroy.testjava.controller.OutputFiles;
 import ai.skillroy.testjava.data.Credentials;
 import ai.skillroy.testjava.data.CredentialsException;
 import ai.skillroy.testjava.data.SecretMask;
@@ -674,8 +675,8 @@ final class SessionCommand implements Command {
                     : BindingsFile.locate(exportDir.resolve("bindings"), envId, scenarioId);
             try {
                 Plan plan = PlanCompiler.compile(yaml, scenarioId + ".yaml", pack);
-                Files.createDirectories(exportDir);
-                Files.write(yamlFile, yaml);
+                // P2-L8-F3: every exported file is created exclusively, never through what is in its place.
+                OutputFiles.write(yamlFile, yaml);
                 plan.write(planFile);
                 if (bindingsFile != null) {
                     result.bindings().write(bindingsFile);

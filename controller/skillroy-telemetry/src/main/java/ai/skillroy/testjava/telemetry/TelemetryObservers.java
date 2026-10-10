@@ -86,7 +86,20 @@ final class TelemetryObservers {
      */
     static RunObserver otlp(TelemetrySettings settings, UnaryOperator<String> environment, PrintStream err)
             throws SettingsException {
+        return otlp(settings, environment, err, null);
+    }
+
+    /**
+     * {@link #otlp(TelemetrySettings, UnaryOperator, PrintStream)} trusting {@code trustedCertificatesPem} as well:
+     * the tests' TLS stub (a self-signed certificate) only, since a header needs an {@code https://} endpoint
+     * (P2-L8-F2). Production passes null and the JDK's default trust store holds; nothing exposes this as a setting
+     * (§10.3: no trust-store option).
+     */
+    static RunObserver otlp(TelemetrySettings settings, UnaryOperator<String> environment, PrintStream err,
+                            byte[] trustedCertificatesPem) throws SettingsException {
         TelemetrySettings.checkEndpoint(settings.endpoint(), "the telemetry endpoint");
+        // P2-L8-F2: the provider checks the header rule again, as it checks the endpoint rule.
+        TelemetrySettings.checkHeaders(settings.endpoint(), settings.headerVariables(), "the telemetry endpoint");
         FailureReporting.configureLogging();
         OtlpHttpSpanExporterBuilder builder = OtlpHttpSpanExporter.builder()
                 .setEndpoint(settings.tracesUrl())
@@ -101,6 +114,9 @@ final class TelemetryObservers {
                         + " header names is not set");
             }
             builder.addHeader(header.getKey(), value);
+        }
+        if (trustedCertificatesPem != null) {
+            builder.setTrustedCertificates(trustedCertificatesPem);
         }
         ExecutorService sender = Executors.newCachedThreadPool(daemon());
         builder.setExecutorService(sender);

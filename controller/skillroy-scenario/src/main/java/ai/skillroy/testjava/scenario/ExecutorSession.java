@@ -21,6 +21,7 @@ import ai.skillroy.testjava.controller.AgentLostException;
 import ai.skillroy.testjava.controller.AgentRpcException;
 import ai.skillroy.testjava.controller.CallOptions;
 import ai.skillroy.testjava.controller.CapabilityMatrix;
+import ai.skillroy.testjava.controller.OutputFiles;
 import ai.skillroy.testjava.data.DataChannel;
 import ai.skillroy.testjava.data.DataChannels;
 import ai.skillroy.testjava.data.SecretMask;
@@ -57,7 +58,6 @@ import ai.skillroy.testjava.scenario.web.WebSettings;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -228,6 +228,15 @@ public final class ExecutorSession implements AutoCloseable {
         Clock clock = effective.clock();
         String id = effective.id() != null ? effective.id() : "session-" + Long.toString(clock.millis(), 36);
         SecretMask mask = effective.bind().credentials().mask();
+        if (effective.outputDir() != null) {
+            // Phase 6 security fix, pass 2, P2-L8-F3, P2-L8-S1: a directory another user owns or may write to is
+            // refused before the agent is asked anything; the journal and the matrix are created exclusively in it.
+            try {
+                OutputFiles.directory(effective.outputDir());
+            } catch (IOException e) {
+                throw new SessionOpenException(FailureKind.ENVIRONMENT, e.getMessage(), null);
+            }
+        }
         CapabilityMatrix caps = agent.capabilities();
         if (caps == null) {
             caps = new CapabilityMatrix(Map.of());
@@ -316,9 +325,8 @@ public final class ExecutorSession implements AutoCloseable {
             return;
         }
         try {
-            Files.createDirectories(dir);
-            Files.write(dir.resolve(PlanExecutor.CAPABILITIES_FILE), (Json.writePretty(mask.apply(caps.toJson()))
-                    + "\n").getBytes(StandardCharsets.UTF_8));
+            OutputFiles.writeString(dir.resolve(PlanExecutor.CAPABILITIES_FILE), Json.writePretty(mask.apply(
+                    caps.toJson())) + "\n");
         } catch (IOException | RuntimeException e) {
             // Best effort: the session opens all the same.
         }
@@ -634,8 +642,9 @@ public final class ExecutorSession implements AutoCloseable {
                     null);
             throw e;
         } catch (RuntimeException | StackOverflowError | LinkageError e) {
-            failure = new Abort(Status.ERROR, FailureKind.ENVIRONMENT, stepId, "internal error: " + e,
-                    RunLog.fields("exception", e.toString()));
+            // P2-L8-F4: the message names the class only; the detail keeps the exception's text.
+            failure = new Abort(Status.ERROR, FailureKind.ENVIRONMENT, stepId, "internal error: "
+                    + e.getClass().getName(), RunLog.fields("exception", e.toString()));
         } finally {
             runner.currentStep = null;
         }

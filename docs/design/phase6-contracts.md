@@ -2550,6 +2550,18 @@ from an **allow-list** of identifiers, enumerations, counts, durations, hashes a
 **never** call parameters or values, event payloads, snapshot text, resolved values, SQL, rows, prompts, credentials,
 the workspace id or a path under a user's home (the `P2 §11.4` list gains "a span attribute", §15.1).
 
+(Phase 6 security fix, pass 2, P2-L8-F4, built 2026-10-09, SF) **The masked one-line messages carry no path.** The run's
+messages name a file or a directory when the failure does: a connect failure named the discovery directory
+(`${java.io.tmpdir}/skillroy-<user>`, whose name holds the user's name, or `<user.home>/.skillroy/run`), and the
+executor's catch-all named the exception's text (a missing file's path). Now `skillroy.message` (the `environment`
+event's included) and `skillroy.step.message` lose every absolute path before any other rule (`<path>` in its place:
+a token starting with `~/`, a drive letter, or a separator followed by two segments; `TelemetryAttributes.withoutPaths`);
+`run` gives the observer the connect failure with the discovery directory named by its role ("no live agent in the
+discovery directory …"; stderr and the JUnit report, which stay on the host, keep the path); and an internal error's
+message names the exception's class only (`internal error: <class>`, in a run, a step and a session step), its text
+staying in the result's `detail.exception`, which no span carries. **Egress for a header is HTTPS only** (P2-L8-F2,
+§10.3).
+
 ### 10.2 The SPI (`ai.skillroy.testjava.scenario.observe`)
 
 ```java
@@ -2654,12 +2666,12 @@ trace continues into the run.
 |---|---|---|---|---|
 | the switch | `--telemetry none\|otlp\|file` | `skillroy.telemetry` | `exporter:` | `none`: nothing is created, no SDK class loads, no thread starts (the CLI consults `ServiceLoader<RunObserverProvider>` only for another value, and the provider class references no OpenTelemetry type until `create`) |
 | where | `--telemetry-endpoint <url>` | `skillroy.telemetry.endpoint` | `endpoint:` | `http://127.0.0.1:4318` (the OTLP/HTTP port); **`http://` is accepted only when the URL's host is a literal IP address for which `InetAddress.isLoopbackAddress()` holds (`127.0.0.0/8`, `::1`, `[::1]`) or the literal `localhost`**; anything else must be `https://`, verified against the JDK's default trust store; the module exposes **no** trust-store, client-certificate or "insecure" setting and never changes the `HttpClient`'s TLS defaults; a violation is a settings error |
-| headers | – | – | `headers: { <Name>: env:<VARIABLE> }` | none; the value of each header is read from the named environment variable at `create` and **never** written, logged or printed; a variable that is not set is a settings error naming the variable, never a value; a header given as a literal (not `env:`) is refused ("a header value is read from an environment variable"); **a variable the inference settings read is refused** ("a telemetry header may not carry the model key"): `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_CUSTOM_HEADERS`, `ANTHROPIC_WORKSPACE_ID` and any variable `inference.yaml` names |
+| headers | – | – | `headers: { <Name>: env:<VARIABLE> }` | none; the value of each header is read from the named environment variable at `create` and **never** written, logged or printed; a variable that is not set is a settings error naming the variable, never a value; a header given as a literal (not `env:`) is refused ("a header value is read from an environment variable"); **a variable the inference settings read is refused** ("a telemetry header may not carry the model key"): `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_CUSTOM_HEADERS`, `ANTHROPIC_WORKSPACE_ID` and any variable `inference.yaml` names. **Phase 6 security fix, pass 2, P2-L8-F2 (built 2026-10-09, SF): a header needs an `https://` endpoint**; with an `http://` one, the default included, it is a settings error (below) |
 | the file exporter's directory | `--out` (the CLI uses `<out>/telemetry/`) | `skillroy.telemetry.out` | `out:` | required for `file`; a path under the run's own output |
 | service name and version | – | `skillroy.telemetry.serviceName` | `serviceName:` | `skillroy`; the version is `TelemetrySettings.serviceVersion`, which the CLI fills with its own version (`Main.version()`, private to the CLI, which the telemetry module cannot reference) and the JUnit glue with `skillroy-junit`'s `Implementation-Version`, `(development build)` when absent; `RunStart.cliVersion` carries the same value into `skillroy.cli.version` |
 | attribute set | `--telemetry-attributes standard\|minimal` | `skillroy.telemetry.attributes` | `attributes:` | `standard` (§10.4); `minimal` treats **every attribute name of `TelemetryAttributes` by exactly one of four lists** (fix wave FC, §10.4): it **drops** `MINIMAL_DROPS`: `skillroy.message`, `skillroy.step.message`, the `environment` event's message, `skillroy.pack`, `skillroy.suite`, `skillroy.bindings.file`, `skillroy.slot`; it **replaces** `MINIMAL_REPLACED` by a class of the value: `skillroy.primitive` by its namespace (a pack primitive becomes `pack`, `swing.*` stays), `gen_ai.tool.name` by `verb`, `primitive` or `workflow`, `skillroy.step.verb` for a pack verb by `verb`, the `expect` event's path by its root, `skillroy.topic` by itself for a topic of `Topics`, by `hook` for a `hook.*` topic and by `pack` for any other; it **keeps** `MINIMAL_KEPT` as written: enumerations, counts, durations, sequence numbers, flags, hashes, the versions of the CLI, the target's Java and the agent, model names, request ids and costs, and the run's, the session's and the connections' own ids; and it **hashes** `MINIMAL_HASHED`, every other text, as the `sha256:` of the whole value (of each element of a list): `test.case.name`, `skillroy.failed_step`, `skillroy.correlation_id`, `skillroy.pack.version`, `skillroy.env.id`, `skillroy.agent.thread`, `skillroy.secret_params`, `skillroy.id`, `skillroy.ids`, `skillroy.armed`, `skillroy.names`, `skillroy.table`, `skillroy.source`, `skillroy.resolver`, `skillroy.verifiers`, `skillroy.fn`, `skillroy.oracle`, `skillroy.contributors`; a text attribute in none of the lists is hashed. The `resolve <slot>`, `oracle <name>` and `capture` event names become `resolve`, `oracle`, `capture`, and the span names become `scenario`, `step`, `call`, `chat`, `tools/call` with the id hashed into `skillroy.id.hash`. The §10.6 unit tests assert that the four lists partition every name of `TelemetryAttributes`, that every attribute of a `minimal` run is kept, replaced or hashed as its list says, and that no identifier of the run's scenarios, steps, pack, overlay, hooks, resolvers, verifiers, oracles, tables, sources, topics or threads is in clear |
 | timeout | – | `skillroy.telemetry.timeoutMs` | `timeoutMs:` | `10000`: the exporter's per-batch timeout and the bound of `flush`/`close` |
-| the file | `--telemetry-file <path>` | `skillroy.telemetry.file` | – | `telemetry.yaml` beside the credentials file (the `inference.yaml` lookup), else none; `version: 1`, strict, no secret |
+| the file | `--telemetry-file <path>` | `skillroy.telemetry.file` | – | `telemetry.yaml` beside the credentials file (the `inference.yaml` lookup), else none; `version: 1`, strict, no secret. **Phase 6 security fix, pass 2, P2-L8-F1 (built 2026-10-09, SF): read only when nobody but the current user could have written it** (the owner rule below), else a settings error naming the file and the rule |
 
 Precedence options > properties > file > defaults, as `InferenceSettings`. A settings error is a usage error (exit
 64) found before the agent is contacted. `replay` runs may export (telemetry is not a model call; the zero-call
@@ -2687,6 +2699,36 @@ planner's own `skillroy mcp` child is started without telemetry. The JUnit glue'
 JVM shutdown hook (`skillroy-telemetry-exit`) that closes every stream's observer, each bounded by its timeout. The
 summary line goes to stdout with the human summary, to stderr with `--json` and for `mcp` (whose stdout is the
 protocol); `--json`'s `telemetry` is null with telemetry off. `Main.version()` is package-private (it was private).
+
+(Phase 6 security fix, pass 2, P2-L8-F1, P2-L8-F2, P2-L8-S2, built 2026-10-09, SF.) **The owner rule for the file.**
+`telemetry.yaml`, named (`--telemetry-file`, `skillroy.telemetry.file`) or found beside the credentials file (or in
+`<bindings>/<env>/` without one), is read only when nobody but the current user could have written it
+(`SettingsFiles.read` in `skillroy-data`; the same rule for `inference.yaml`, P5 §4.4): looked at without following
+links it is a regular file, or a symbolic link the current user (or root) owns, whose file is then judged; on POSIX
+the file is owned by the current user or root, others may not write to it, and its group may not either unless the
+group carries the owner's name (the user-private group a `umask 002` distribution gives every user; macOS's shared
+`staff` is not one); on ACL file systems the owner is the current user (the owner of a file this process creates), the
+system account or the administrators group and no ALLOW entry gives anybody else a write, append, delete or
+ACL/owner/attribute right (others may read: the file holds no secret; not verified on a Windows host); a volume with
+neither, or a FAT or exFAT volume, is refused. The file is judged before and after it is read and must be the same file
+(its file key, where the file system has one). Any entry of that name beside the credentials is judged, a link or a
+dangling link included, and a refusal is a settings error (exit 64) naming the file and the rule, never a silent skip,
+so that a planted file stops the command and the operator learns of it. Until then the lookup asked
+`Files.isRegularFile` alone, and a file alone could turn export on and name the environment variables whose values
+became request headers: another OS user who could create a file in the credentials or bindings environment directory
+received those values (any variable but `ANTHROPIC_*`) on a loopback port or an `https://` host of theirs. The rule is
+the file's, not the directory's (decision D-SF-1 of the fix): a directory rule would also refuse the group-writable
+checkout every user-private-group umask makes, and a planted or replaced file already fails the owner rule.
+**Headers need `https://`** (D141 amended, D-SF-2): a header with an `http://` endpoint is a settings error ("a
+telemetry header needs an https:// endpoint (the default endpoint http://127.0.0.1:4318 is not one; name your
+collector's endpoint); over http:// it would reach whatever holds that port in clear (a loopback collector without
+TLS takes no header)"), found by `TelemetrySettings.load` and again by the provider at `create`; the message names
+neither the header nor its value. Over loopback `http://` a header reached whatever held the port in clear (another
+user who bound it while the collector was down, or on a host without a collector), and since the default endpoint is
+`http://`, an operator who gave a backend's token and forgot the endpoint sent it there. A loopback collector that
+needs a token terminates TLS on loopback. **The planner's child exports nothing** (D168): `author` starts its
+planner's `skillroy mcp` with `--telemetry none` beside `--inference none`; an option wins over the file, so a
+`telemetry.yaml` beside the credentials no longer turns export on in the child.
 
 ### 10.4 `skillroy-telemetry`: spans, attributes, status, masking (D142)
 
@@ -2796,6 +2838,13 @@ agent-side spans.
 root, attribute values as JSON strings, numbers, booleans or arrays; a double as text), appending, one line per span,
 flushed per batch of one; the values are the allow-list's, masked before they became attributes.
 
+(Phase 6 security fix, pass 2, P2-L8-F3, built 2026-10-09, SF.) `spans.jsonl` is appended to only when it is a regular
+file of the current user, opened without following links; a symbolic link (a dangling one included) or another user's
+file in its place is refused and no observer is created (a settings error naming the directory); an absent file is
+created exclusively; its directory follows P2 §11.3's rule (the current user's, not writable by others without the
+sticky bit). A file `out:` names is still where the settings file puts it, and the settings file is now the current
+user's (§10.3). Until then the exporter appended with the JDK's defaults, through a link planted in its place.
+
 ### 10.6 Tests
 
 Unit (`skillroy-telemetry`, with `opentelemetry-sdk-testing`'s `InMemorySpanExporter` behind the same observer code
@@ -2838,6 +2887,22 @@ exporter, `--json`, `run-start` and the JUnit line; the usage errors; a child JV
 and file scanned for its value). `skillroy-mcp`: `McpTelemetryTest`; `skillroy-inference`: `SessionTelemetryTest`.
 The scenarios module: `TelemetryStreamTest` (headless: the JUnit stream in a child JVM on the headless desk, scenario
 C in `replay`, the root span written by the exit hook) and `TelemetryEndToEndIT` (§13.2 item 9, in the image).
+
+(Phase 6 security fix, pass 2, P2-L8-F1 to F4, P2-L8-S1, P2-L8-S2, built 2026-10-09, SF.) A header now needs
+`https://`, so the two tests that see a header arrive use a loopback **TLS** stub (`TlsStub`: a certificate for
+`127.0.0.1` made by the JDK's `keytool` into the test's directory, nothing downloaded or committed): in process,
+`OtlpTransportTest` trusts it through a package-private seam of the provider (`TelemetryObservers.otlp(…, pem)`,
+`setTrustedCertificates`; no setting exposes it), and `TelemetryCommandTest`'s child JVM through the standard
+`javax.net.ssl.trustStore` properties (the CLI keeps no trust-store option). Added:
+`OtlpTransportTest.aHeaderIsNeverSentOverHttp`; `TelemetrySettingsTest.aHeaderNeedsAnHttpsEndpoint` and
+`aSettingsFileOthersMayHaveWrittenIsRefusedNamingTheFile`;
+`InferenceSettingsTest.aSettingsFileOthersMayWriteToIsRefusedNamingTheFile`; `SettingsFilesTest` (`skillroy-data`);
+`TelemetryObserverTest.theRunsMessagesCarryNoPath` and `aLinkInPlaceOfTheSpansFileIsRefusedAndItsTargetLeftAlone`;
+`OutputFilesTest` (`skillroy-controller`); three `PlanExecutorTest` cases (a planted link and a dangling `web-*` link
+in a writable output directory; a link and a world-writable file in one whose entries the run cannot remove; a
+directory others may write to); `InferenceOptionsTest.aSessionsLedgerFilesAreNeverWrittenThroughALink`;
+`RunCommandTest`'s `--out` refusal; `TelemetryCommandTest`'s two new usage errors; and `AuthorCommandTest`'s
+`--telemetry none`. Each that runs against the code before the fix failed there.
 
 ---
 

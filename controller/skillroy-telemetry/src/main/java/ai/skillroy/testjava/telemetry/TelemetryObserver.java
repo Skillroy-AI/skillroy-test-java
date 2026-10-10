@@ -1041,7 +1041,9 @@ final class TelemetryObserver implements RunObserver, ExportStatus {
             if (value == null) {
                 return this;
             }
-            return raw(key, minimal ? TelemetryAttributes.minimal(key, value) : value);
+            // P2-L8-F4: the run's messages lose every absolute path before any other rule.
+            String v = TelemetryAttributes.PATH_FREE.contains(key) ? TelemetryAttributes.withoutPaths(value) : value;
+            return raw(key, minimal ? TelemetryAttributes.minimal(key, v) : v);
         }
 
         Attrs raw(String key, String value) {

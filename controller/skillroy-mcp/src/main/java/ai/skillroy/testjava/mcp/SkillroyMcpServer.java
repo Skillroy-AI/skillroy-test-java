@@ -21,6 +21,7 @@ import ai.skillroy.testjava.controller.AgentLostException;
 import ai.skillroy.testjava.controller.AgentRpcException;
 import ai.skillroy.testjava.controller.CallOptions;
 import ai.skillroy.testjava.controller.CapabilityMatrix;
+import ai.skillroy.testjava.controller.OutputFiles;
 import ai.skillroy.testjava.controller.SecureFiles;
 import ai.skillroy.testjava.data.DataChannels;
 import ai.skillroy.testjava.data.DataException;
@@ -487,10 +488,11 @@ public final class SkillroyMcpServer implements AutoCloseable {
                 dir = temporaryOutputDirectory(Path.of(System.getProperty("java.io.tmpdir")));
                 log.info("no output directory given: writing into " + dir);
             }
-            Files.createDirectories(dir);
+            // Phase 6 security fix, pass 2, P2-L8-F3, P2-L8-S1: a directory of the current user only.
+            OutputFiles.directory(dir);
         } catch (IOException | RuntimeException e) {
             throw new SessionOpenException(FailureKind.ENVIRONMENT, "the output directory " + dir + " cannot be"
-                    + " created: " + e, null);
+                    + " used: " + e.getMessage(), null);
         }
         return dir.toAbsolutePath().normalize();
     }
@@ -520,8 +522,8 @@ public final class SkillroyMcpServer implements AutoCloseable {
             capabilities = matrix == null ? new CapabilityMatrix(Map.of()) : matrix;
         }
         try {
-            Files.write(outDir.resolve("capabilities.json"), (Json.writePretty(masking.plain(capabilities.toJson()))
-                    + "\n").getBytes(StandardCharsets.UTF_8));
+            OutputFiles.writeString(outDir.resolve("capabilities.json"), Json.writePretty(masking.plain(
+                    capabilities.toJson())) + "\n");
         } catch (IOException | RuntimeException e) {
             log.info("capabilities.json cannot be written: " + e.getClass().getSimpleName());
         }
@@ -1146,8 +1148,7 @@ public final class SkillroyMcpServer implements AutoCloseable {
         int n = images.incrementAndGet();
         Path file = outDir.resolve("mcp").resolve(n + ".png");
         try {
-            Files.createDirectories(file.getParent());
-            Files.write(file, png);
+            OutputFiles.write(file, png);
         } catch (IOException e) {
             log.info("the image of " + what + " cannot be written: " + e);
             return null;

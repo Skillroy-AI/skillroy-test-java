@@ -16,9 +16,9 @@
 
 package ai.skillroy.testjava.scenario;
 
+import ai.skillroy.testjava.controller.OutputFiles;
+
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -92,11 +92,8 @@ public final class JunitXmlReporter {
      */
     public void write(Path file, String suiteName, List<RunResult> results, String environmentFailure)
             throws IOException {
-        Path parent = file.toAbsolutePath().getParent();
-        if (parent != null) {
-            Files.createDirectories(parent);
-        }
-        Files.write(file, render(suiteName, results, environmentFailure).getBytes(StandardCharsets.UTF_8));
+        // Phase 6 security fix, pass 2, P2-L8-F3: created exclusively, never through what is in its place.
+        OutputFiles.writeString(file, render(suiteName, results, environmentFailure));
     }
 
     /** The XML text; see {@link #write}. */

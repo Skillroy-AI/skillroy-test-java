@@ -16,6 +16,7 @@
 
 package ai.skillroy.testjava.scenario;
 
+import ai.skillroy.testjava.controller.OutputFiles;
 import ai.skillroy.testjava.data.SecretMask;
 import ai.skillroy.testjava.protocol.Json;
 import ai.skillroy.testjava.scenario.resolve.BindMode;
@@ -25,8 +26,6 @@ import ai.skillroy.testjava.scenario.resolve.Resolution;
 import ai.skillroy.testjava.scenario.resolve.VerifierResult;
 
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -433,13 +432,13 @@ public final class Bindings {
         return json;
     }
 
-    /** Writes {@link #toJson(Plan)} pretty-printed as UTF-8, creating parent directories (unmasked). */
+    /**
+     * Writes {@link #toJson(Plan)} pretty-printed as UTF-8, creating parent directories (unmasked); created exclusively
+     * in a directory of the current user, never through what is in its place (Phase 6 security fix, pass 2,
+     * P2-L8-F3).
+     */
     public void write(Path file, Plan plan) throws IOException {
-        Path parent = file.toAbsolutePath().getParent();
-        if (parent != null) {
-            Files.createDirectories(parent);
-        }
-        Files.write(file, Json.writePretty(toJson(plan)).getBytes(StandardCharsets.UTF_8));
+        OutputFiles.writeString(file, Json.writePretty(toJson(plan)));
     }
 
     @Override

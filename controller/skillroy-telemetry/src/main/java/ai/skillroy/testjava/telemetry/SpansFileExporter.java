@@ -17,6 +17,7 @@
 
 package ai.skillroy.testjava.telemetry;
 
+import ai.skillroy.testjava.controller.OutputFiles;
 import ai.skillroy.testjava.protocol.Json;
 import io.opentelemetry.api.common.AttributeKey;
 import io.opentelemetry.api.common.Attributes;
@@ -27,10 +28,7 @@ import io.opentelemetry.sdk.trace.export.SpanExporter;
 
 import java.io.BufferedWriter;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashMap;
@@ -58,14 +56,15 @@ final class SpansFileExporter implements SpanExporter {
     private BufferedWriter out;
 
     /**
-     * Opens {@code <dir>/spans.jsonl}, appending (one invocation's spans after another's in the same directory).
+     * Opens {@code <dir>/spans.jsonl}, appending (one invocation's spans after another's in the same directory). Phase
+     * 6 security fix, pass 2, P2-L8-F3: the directory must be the current user's, an existing file a regular file of
+     * the current user (a symbolic link is refused, never followed), and an absent one is created exclusively
+     * ({@link OutputFiles#appendWriter}).
      *
-     * @throws IOException if the directory or the file cannot be created
+     * @throws IOException if the directory or the file cannot be created, or either is refused
      */
     SpansFileExporter(Path dir) throws IOException {
-        Files.createDirectories(dir);
-        this.out = Files.newBufferedWriter(dir.resolve(FILE), StandardCharsets.UTF_8, StandardOpenOption.CREATE,
-                StandardOpenOption.APPEND);
+        this.out = OutputFiles.appendWriter(dir.resolve(FILE));
     }
 
     @Override

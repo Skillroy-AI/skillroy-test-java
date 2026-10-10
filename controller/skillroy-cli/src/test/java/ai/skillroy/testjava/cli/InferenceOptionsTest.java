@@ -251,4 +251,33 @@ class InferenceOptionsTest {
         assertEquals("sha256:f", record.get("fingerprint"));
         assertEquals("0.0032", record.get("costUsd"));
     }
+
+    /**
+     * Phase 6 security fix, pass 2, P2-L8-F3: a session's ledger files are created exclusively and its
+     * {@code inference.jsonl} is appended to only when it is the current user's regular file, so a link planted in the
+     * session's output directory is replaced (the ledger) or refused (the appended file), and the file it names is
+     * left as it was. Against the old writers the ledger truncated the link's target and the records were appended to
+     * it.
+     */
+    @Test
+    void aSessionsLedgerFilesAreNeverWrittenThroughALink() throws Exception {
+        Path victim = Files.writeString(tmp.resolve("victim.txt"), "operator's own\n");
+        Path session = Files.createDirectories(tmp.resolve("run-output").resolve("session-x"));
+        Files.createSymbolicLink(session.resolve("cost-ledger.jsonl"), victim);
+        List<CostLedger.Entry> entries = List.of(new CostLedger.Entry("s", null, null, "recorded",
+                "claude-haiku-4-5", "r2", 10, 1, "0.0100", "session", 0, 0, false, null));
+        InferenceArgs.writeLedger(session, entries, SecretMask.NONE);
+        assertFalse(Files.isSymbolicLink(session.resolve("cost-ledger.jsonl")));
+        assertTrue(Files.readString(session.resolve("cost-ledger.jsonl")).contains("\"r2\""));
+        assertEquals("operator's own\n", Files.readString(victim));
+
+        CostLedger ledger = new CostLedger();
+        ai.skillroy.testjava.inference.budget.InferenceLog.forLedger(ledger).append(Map.of("type", "chat",
+                "requestId", "r1"));
+        Files.createSymbolicLink(session.resolve(SessionServices.INFERENCE_FILE), victim);
+        java.io.IOException refused = org.junit.jupiter.api.Assertions.assertThrows(java.io.IOException.class,
+                () -> InferenceArgs.appendInferenceRecords(session, ledger, SecretMask.NONE));
+        assertTrue(refused.getMessage().contains("symbolic link"), refused.getMessage());
+        assertEquals("operator's own\n", Files.readString(victim));
+    }
 }

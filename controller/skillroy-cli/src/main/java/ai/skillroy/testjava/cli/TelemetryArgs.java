@@ -128,6 +128,23 @@ final class TelemetryArgs {
     }
 
     /**
+     * A connect failure's message as the root span's {@code environment} event carries it (Phase 6 security fix, pass
+     * 2, P2-L8-F4): the discovery directory named by its role, since its path holds the user's name and may lie under
+     * the home directory (§10.1); the observer removes any other absolute path ({@code TelemetryAttributes}).
+     */
+    static String environment(String message, ParsedArgs args, Cli cli) {
+        if (message == null) {
+            return null;
+        }
+        try {
+            String dir = Connector.discoveryDir(args, cli).toString();
+            return dir.isEmpty() ? message : message.replace(dir, "the discovery directory");
+        } catch (UsageException | RuntimeException e) {
+            return message;
+        }
+    }
+
+    /**
      * The root span's facts: the command and its settings, and the target's from the connection and one bounded
      * {@code agent.info} (best effort; nothing of it with telemetry off).
      *

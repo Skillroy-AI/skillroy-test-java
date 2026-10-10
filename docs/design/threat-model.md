@@ -84,6 +84,13 @@ evidence) and, in Phase 6, may export spans to a telemetry backend.
   systems a delete or take-over right; on a volume with neither, always), and the agent reads an options file only
   when it is a regular file of the current user that nobody else may write (nor, when it holds a token, read), so a
   directory or file another user put in place of the operator's is refused rather than trusted (P1 §2.4, §2.5, §7).
+  **The operator's settings files and run output count too** (Phase 6 security fix, pass 2, P2-L8-F1, P2-L8-F3,
+  P2-L8-S1): `telemetry.yaml` and `inference.yaml`, which the controller reads implicitly beside the credentials file,
+  are trusted only when nobody but the current user could have written them (P6 §10.3, P5 §4.4); a planted one is a
+  settings error, not a silent skip. A directory a run writes its output into must be the current user's and not
+  writable by others without the sticky bit, and every output file is created exclusively, never through a link or a
+  file already in its place (P2 §11.3), so `umask 077` keeps what a run writes from other users even in a directory
+  another user prepared.
 
 ## 4. The token rule
 
@@ -138,7 +145,7 @@ on its way to disk.
 | embedded web views | the base connects only to a debug port the application configured and checks the endpoint's ownership before reading its body; the attach dials the browser WebSocket at that port's own authority, never a host or socket an answer names (a peer holding the port can still redirect the driver's WebSocket handshake, §8); every library call is bounded in the page by a guard of the caller's own text, and the page's data is bounded and parsed again on the receiving side of both paths, never trusted; a page's console output is budgeted per browser on the technology's own thread (past the budget the adapter stops console capture until a new document); traces in an owner-only directory, never with a secret in flight; script primitives carry the `script` flag, which read-only mode refuses on both paths and the MCP policy gates | P4 §4-§6, §8.3; P6 D156; P4 §4.3, §4.6, §5.1 (pass 2, P2-L4-S1, F1, F2) |
 | controller ↔ model | the key from the environment only, never written; masks before every prompt (**a secret-named property's secrecy inherited by everything nested under it and by a definition it references; a capture's bytes never as text**; security pass 2, SC); recordings for CI; budgets; the SQL guard on the statement as it will run; **what the provider returns scrubbed of the key and bounded before it is read** (pass 2, SC); a model's output acted on only through the gates above | P5 §2.3, §4-§7 |
 | controller ↔ MCP client | read-only by default, mutating by flag, destructive never; **`hook.*` and `rule.*` primitives never offered, except the reads `hook.health`, `hook.events` and `rule.list`**; the server acts under a `CLIENT` origin that never confirms, and `confirm` and `_meta` are never taken from a client; a pack verb's compiled calls checked at call time against the server's policy; one session budget over every model call made for a client; **a client's scenario run under the server's hooks switch**; results cut and masked; a capture's bytes only under the inference settings' `images: true`, **as an image only, never as text on any route** (security pass 2, SC) | P5 §9 (D76, D96-D98); P6 §4.2, §6.1, D157-D159 |
-| controller ↔ telemetry backend | off by default; explicit settings, no autoconfiguration from the environment; loopback-http or https only; headers from named variables, never written and never the model key's variable; attributes from an allow-list, masked and bounded; never parameters, values, payloads, prompts or credentials | P6 §10 |
+| controller ↔ telemetry backend | off by default; explicit settings, no autoconfiguration from the environment; loopback-http or https only, **a header over https only** (pass 2, P2-L8-F2); **the settings file the current user's** (pass 2, P2-L8-F1); headers from named variables, never written and never the model key's variable; attributes from an allow-list, masked and bounded, **the messages without paths** (pass 2, P2-L8-F4); never parameters, values, payloads, prompts or credentials | P6 §10 |
 | the pack ↔ the base | a pack is reviewed code (§3); the base bounds what a pack's code receives (masked rows, bounded reads) and what it may declare (allow-lists checked against the database, D100) | P2 §6, P5 §5.2 |
 
 ## 7. Out of scope

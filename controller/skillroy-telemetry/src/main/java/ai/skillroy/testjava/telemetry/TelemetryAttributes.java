@@ -26,6 +26,7 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 /**
  * The attribute allow-list of the exported spans (phase6-contracts.md 10.4, decision D142): every attribute, event
@@ -426,6 +427,30 @@ public final class TelemetryAttributes {
      */
     static String spanName(String kind, String id, boolean minimal) {
         return minimal && MINIMAL_SPAN_NAMES.contains(kind) || id == null || id.isEmpty() ? kind : kind + " " + id;
+    }
+
+    /**
+     * The free-text attributes that carry no path (Phase 6 security fix, pass 2, P2-L8-F4): {@link #MESSAGE} (the
+     * {@code environment} event's included) and {@link #STEP_MESSAGE}, a run's masked messages, which name a file or a
+     * directory when the failure does (a connect failure names the discovery directory, whose name holds the user's
+     * name and which may lie under the home directory; an internal error names a missing file).
+     */
+    static final Set<String> PATH_FREE = Set.of(MESSAGE, STEP_MESSAGE);
+
+    /**
+     * An absolute path: one starting with {@code ~/} or a drive letter, or a separator followed by at least two
+     * segments ({@code /tmp/skillroy-x}, {@code \\server\share\x}); not one inside a word ({@code TCP/IP},
+     * {@code 3/4}, {@code text/plain}).
+     */
+    private static final Pattern ABSOLUTE_PATH = Pattern.compile("(?<![\\p{Alnum}._~$-])(?:~[/\\\\]|[A-Za-z]:[/\\\\]"
+            + "|[/\\\\]{1,2}[^\\s/\\\\'\"()\\[\\]{}<>,;:|`]+[/\\\\])[^\\s'\"()\\[\\]{}<>,;:|`]*");
+
+    /**
+     * {@code text} with every absolute path replaced by {@code <path>} (P2-L8-F4, §10.1: an attribute never
+     * holds a path under a user's home; the whole path goes, since a directory's name can hold the user's name).
+     */
+    static String withoutPaths(String text) {
+        return text == null ? null : ABSOLUTE_PATH.matcher(text).replaceAll("<path>");
     }
 
     /** One printable line, cut at {@value #MAX_VALUE_LENGTH} characters. */

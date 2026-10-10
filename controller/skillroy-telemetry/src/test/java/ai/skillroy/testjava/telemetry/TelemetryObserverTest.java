@@ -72,8 +72,15 @@ class TelemetryObserverTest {
     private TelemetryObserver observer(boolean minimal) {
         TelemetrySettings settings = new TelemetrySettings("file", null, null, null, "test-version",
                 minimal ? "minimal" : "standard", null, 2_000L, null);
-        // The in-memory exporter forgets its spans when it is shut down: the observer's close must not reach it.
-        SpanExporter keeping = new SpanExporter() {
+        TelemetryObserver observer = TelemetryObservers.withExporter(settings, keeping());
+        observer.runStarted(new RunStart("run", "nightly", "approve", "seed-a", "test-version",
+                new RunStart.Target(4242L, "1.8.0_504", "JAVAAGENT", "0.1.0", "1.0", "0123456789abcdef"), null));
+        return observer;
+    }
+
+    /** The in-memory exporter forgets its spans when it is shut down: the observer's close must not reach it. */
+    private SpanExporter keeping() {
+        return new SpanExporter() {
             @Override
             public CompletableResultCode export(Collection<SpanData> spans) {
                 return exporter.export(spans);
@@ -89,10 +96,6 @@ class TelemetryObserverTest {
                 return CompletableResultCode.ofSuccess();
             }
         };
-        TelemetryObserver observer = TelemetryObservers.withExporter(settings, keeping);
-        observer.runStarted(new RunStart("run", "nightly", "approve", "seed-a", "test-version",
-                new RunStart.Target(4242L, "1.8.0_504", "JAVAAGENT", "0.1.0", "1.0", "0123456789abcdef"), null));
-        return observer;
     }
 
     private List<SpanData> spans() {
@@ -722,5 +725,53 @@ class TelemetryObserverTest {
                 .get("name"), "the root ends last, at close");
         assertEquals("telemetry: file " + dir.resolve("telemetry") + ", trace " + traceId + ", 0 batches dropped",
                 ExportStatus.summaryLine(observer, traceId));
+    }
+
+    /**
+     * Phase 6 security fix, pass 2, P2-L8-F4 (§10.1: no attribute holds a path under a user's home): a connect failure
+     * names the discovery directory, a path under the home or one whose name holds the user's name; the
+     * {@code environment} event, {@code skillroy.message} and {@code skillroy.step.message} carry no absolute path. Words
+     * with a slash inside stay. Against the old observer the event held both paths.
+     */
+    @Test
+    void theRunsMessagesCarryNoPath() {
+        TelemetrySettings settings = new TelemetrySettings("file", null, null, null, "test-version", null, null,
+                2_000L, null);
+        TelemetryObserver observer = TelemetryObservers.withExporter(settings, keeping());
+        observer.runStarted(new RunStart("run", null, "replay", "seed-a", "test-version", null,
+                "no live agent in /home/x/.skillroy/run (it is writable by group or others); the default"
+                        + " /tmp/skillroy-x was taken, C:\\Users\\x\\run and ~/.skillroy/run too"));
+        observer.close();
+        SpanData root = one(spans(), "skillroy run");
+        String message = root.getEvents().get(0).getAttributes().get(AttributeKey.stringKey(
+                TelemetryAttributes.MESSAGE));
+        assertEquals("no live agent in <path> (it is writable by group or others); the default <path> was taken,"
+                + " <path> and <path> too", message);
+        for (String needle : List.of("/home/x", "skillroy-x", "Users", ".skillroy")) {
+            assertFalse(message.contains(needle), needle + " in " + message);
+        }
+        assertEquals("TCP/IP and 3/4 of text/plain, a / b", TelemetryAttributes.withoutPaths(
+                "TCP/IP and 3/4 of text/plain, a / b"));
+        assertEquals("internal error: <path>: no such file", TelemetryAttributes.withoutPaths(
+                "internal error: /var/folders/ab/T/x.json: no such file"));
+    }
+
+    /**
+     * Phase 6 security fix, pass 2, P2-L8-F3: {@code spans.jsonl} is appended to only when it is a regular file of the
+     * current user; a link planted in its place is refused and the file it names is left as it was. Against the old
+     * exporter the spans were appended to the link's target.
+     */
+    @Test
+    void aLinkInPlaceOfTheSpansFileIsRefusedAndItsTargetLeftAlone() throws Exception {
+        java.nio.file.Path victim = java.nio.file.Files.writeString(dir.resolve("victim.txt"), "operator's own\n");
+        java.nio.file.Path telemetry = java.nio.file.Files.createDirectories(dir.resolve("telemetry"));
+        java.nio.file.Files.createSymbolicLink(telemetry.resolve("spans.jsonl"), victim);
+        TelemetrySettings settings = new TelemetrySettings("file", null, null, null, "9.9.9", null, telemetry,
+                2000L, null);
+        ai.skillroy.testjava.scenario.resolve.SettingsException e = org.junit.jupiter.api.Assertions.assertThrows(
+                ai.skillroy.testjava.scenario.resolve.SettingsException.class,
+                () -> TelemetryObservers.file(settings, System.err));
+        assertTrue(e.getMessage().contains("cannot be written"), e.getMessage());
+        assertEquals("operator's own\n", java.nio.file.Files.readString(victim));
     }
 }

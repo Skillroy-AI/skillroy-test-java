@@ -187,7 +187,10 @@ JUnit glue's output directories, are created with whatever permissions the proce
 of a shared host may read what a run leaves behind (values the mask did not know, captures of the screen). On a
 shared host run the controller under `umask 077` (for example `(umask 077; skillroy run … --out /tmp/run)`). The CDP
 trace directory is owner-only regardless. Owner-only output directories by default are not built (an accepted low
-finding of the repeat security review).
+finding of the repeat security review). A run refuses an output directory another user owns or others may write to
+without the sticky bit, and creates every output file exclusively, never writing through a file or symbolic link
+already in its place (Phase 6 security fix, pass 2, P2-L8-F3, P2-L8-S1, SF): give `--out` a directory you own, not a
+path directly under `/tmp`.
 
 `skillroy call` is the way to call a primitive by hand: every request and reply is HMAC-signed with the token,
 which never travels, so plain `curl` with a bearer token no longer works (the agent answers 401).
@@ -271,7 +274,9 @@ own format `skillroy-spans/1` (a CI artifact without a collector). `--telemetry 
 a literal loopback address or `localhost`, any other host needs `https://` (the JDK's default trust store; there is
 no insecure setting). Nothing is read from `OTEL_*` variables. A backend's token goes into `telemetry.yaml` (beside the
 credentials file, or `--telemetry-file`) as the name of an environment variable, never as a value, and never one of
-the model key's (`ANTHROPIC_*`):
+the model key's (`ANTHROPIC_*`); a header is sent to an `https://` endpoint only, so a loopback collector without TLS
+takes none, and the file is read only when no other user could have written it (your own, not writable by others or
+a shared group; Phase 6 security fix, pass 2, P2-L8-F1, P2-L8-F2, SF):
 
 ```yaml
 version: 1

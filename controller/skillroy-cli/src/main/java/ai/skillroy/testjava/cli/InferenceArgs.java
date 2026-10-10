@@ -16,6 +16,7 @@
 
 package ai.skillroy.testjava.cli;
 
+import ai.skillroy.testjava.controller.OutputFiles;
 import ai.skillroy.testjava.data.SecretMask;
 import ai.skillroy.testjava.inference.budget.InferenceLog;
 import ai.skillroy.testjava.protocol.Json;
@@ -27,9 +28,7 @@ import ai.skillroy.testjava.scenario.resolve.SettingsException;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -214,8 +213,8 @@ final class InferenceArgs {
         for (CostLedger.Entry e : entries) {
             text.append(Json.write(mask.apply(e.toJson()))).append('\n');
         }
-        Files.createDirectories(dir);
-        Files.writeString(dir.resolve("cost-ledger.jsonl"), text.toString(), StandardCharsets.UTF_8);
+        // Phase 6 security fix, pass 2, P2-L8-F3: created exclusively, never through what is in its place.
+        OutputFiles.writeString(dir.resolve("cost-ledger.jsonl"), text.toString());
     }
 
     /**
@@ -236,9 +235,9 @@ final class InferenceArgs {
         for (Map<String, Object> record : records) {
             text.append(Json.write(mask.apply((Object) record))).append('\n');
         }
-        Files.createDirectories(dir);
-        Files.writeString(dir.resolve(SessionServices.INFERENCE_FILE), text.toString(), StandardCharsets.UTF_8,
-                StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+        // P2-L8-F3: appended only to a regular file of the current user, never through a link.
+        OutputFiles.append(dir.resolve(SessionServices.INFERENCE_FILE), text.toString()
+                .getBytes(StandardCharsets.UTF_8));
         return records.size();
     }
 

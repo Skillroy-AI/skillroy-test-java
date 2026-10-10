@@ -16,17 +16,18 @@
 
 package ai.skillroy.testjava.scenario.observe;
 
+import ai.skillroy.testjava.data.SettingsFiles;
 import ai.skillroy.testjava.data.yaml.StrictYaml;
 import ai.skillroy.testjava.data.yaml.YamlException;
 import ai.skillroy.testjava.scenario.resolve.SettingsException;
 
 import java.io.IOException;
-import java.io.InputStream;
 import java.net.InetAddress;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -72,6 +73,11 @@ import java.util.regex.Pattern;
  * the model key"; as built, Phase 6, TL: the whole prefix, the four the contract names and the gateway's base URL
  * among them); {@code file} needs {@code out}; the attribute set is {@code standard} or {@code minimal}; the timeout is
  * 1 to 120000 ms.
+ *
+ * <p>Phase 6 security fix, pass 2: the file, named or found, is read only when nobody but the current user could have
+ * written it ({@code SettingsFiles}, P2-L8-F1), and any entry of its name beside the credentials is judged (a planted
+ * file or link is a settings error, never skipped); a header needs an {@code https://} endpoint, the default
+ * {@code http://} one included ({@link #checkHeaders}, P2-L8-F2).
  *
  * <p>As built (Phase 6, TL): the reader lives here rather than in {@code skillroy-telemetry}, so that the JUnit glue,
  * which does not depend on that module, reads the file and the properties alike, and so that the CLI decides "none"
@@ -274,7 +280,9 @@ public record TelemetrySettings(String exporter, String endpoint, Map<String, St
             }
         } else if (credentialsDir != null) {
             Path beside = credentialsDir.resolve(FILE_NAME);
-            if (Files.isRegularFile(beside)) {
+            // P2-L8-F1: any entry of that name is read under the owner rule, so that a planted file or link is
+            // refused, never silently followed or skipped.
+            if (Files.exists(beside, LinkOption.NOFOLLOW_LINKS) && !Files.isDirectory(beside)) {
                 file = beside;
             }
         }
@@ -330,7 +338,9 @@ public record TelemetrySettings(String exporter, String endpoint, Map<String, St
         }
         String endpoint = b.endpoint == null ? DEFAULT_ENDPOINT : b.endpoint;
         if (EXPORTER_OTLP.equals(exporter)) {
-            checkEndpoint(endpoint, b.endpointWhere == null ? "the default endpoint" : b.endpointWhere);
+            String where = b.endpointWhere == null ? "the default endpoint" : b.endpointWhere;
+            checkEndpoint(endpoint, where);
+            checkHeaders(endpoint, b.headers, where);
             for (Map.Entry<String, String> header : b.headers.entrySet()) {
                 if (environment.apply(header.getValue()) == null) {
                     throw new SettingsException("the environment variable " + header.getValue() + " that a"
@@ -376,6 +386,38 @@ public record TelemetrySettings(String exporter, String endpoint, Map<String, St
         if (scheme.equals("http") && !isLoopback(host)) {
             throw new SettingsException(where + ": an http:// telemetry endpoint must be a literal loopback address"
                     + " (127.0.0.0/8, [::1]) or localhost; use https:// for any other host");
+        }
+    }
+
+    /**
+     * The header rule (Phase 6 security fix, pass 2, P2-L8-F2): a header is sent only to an {@code https://}
+     * endpoint. Over {@code http://}, which the endpoint rule allows on loopback only, a header would reach whatever
+     * holds that port in clear (another user who bound it while the collector was down, or on a host that runs none),
+     * and the default endpoint is such a one, so an operator who gives a backend's token and forgets the endpoint
+     * would send it there. A loopback collector without TLS takes no header.
+     *
+     * @param where the option, property or file line the endpoint came from, or "the default endpoint"
+     * @throws SettingsException when a header is given with an {@code http://} endpoint; the message names the rule,
+     *     never a header's name or value
+     */
+    public static void checkHeaders(String endpoint, Map<String, String> headers, String where)
+            throws SettingsException {
+        if (headers == null || headers.isEmpty()) {
+            return;
+        }
+        String scheme;
+        try {
+            URI uri = new URI(endpoint);
+            scheme = uri.getScheme() == null ? "" : uri.getScheme().toLowerCase(Locale.ROOT);
+        } catch (URISyntaxException e) {
+            scheme = "";
+        }
+        if (!scheme.equals("https")) {
+            throw new SettingsException(where + ": a telemetry header needs an https:// endpoint"
+                    + (where.equals("the default endpoint") ? " (the default endpoint " + DEFAULT_ENDPOINT
+                    + " is not one; name your collector's endpoint)" : "")
+                    + "; over http:// it would reach whatever holds that port in clear (a loopback collector"
+                    + " without TLS takes no header)");
         }
     }
 
@@ -443,8 +485,14 @@ public record TelemetrySettings(String exporter, String endpoint, Map<String, St
 
         void read(Builder b) throws SettingsException {
             byte[] bytes;
-            try (InputStream in = Files.newInputStream(file)) {
-                bytes = in.readNBytes(MAX_FILE_BYTES + 1);
+            try {
+                // Phase 6 security fix, pass 2, P2-L8-F1: read only a file nobody but the current user could have
+                // written (SettingsFiles), since the file alone changes what the command sends and where.
+                bytes = SettingsFiles.read(file, MAX_FILE_BYTES);
+            } catch (SettingsFiles.RefusedException e) {
+                throw new SettingsException("telemetry settings file " + name + " cannot be used: " + e.getMessage()
+                        + " (a settings file must be a regular file of the current user that nobody else may write"
+                        + " to, e.g. chmod go-w; fix it or remove it)");
             } catch (IOException e) {
                 throw new SettingsException("telemetry settings file " + name + " cannot be read ("
                         + e.getClass().getName() + ")");

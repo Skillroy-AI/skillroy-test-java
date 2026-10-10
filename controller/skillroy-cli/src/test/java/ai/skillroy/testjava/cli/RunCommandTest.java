@@ -343,6 +343,18 @@ class RunCommandTest {
         Path notADir = Files.writeString(tmp.resolve("out-file"), "x");
         assertTrue(run(file("pass.yaml"), "--out", notADir.toString()).expectExit(Exit.USAGE).err()
                 .contains("is not a directory"));
+        if (java.nio.file.FileSystems.getDefault().supportedFileAttributeViews().contains("posix")) {
+            // Phase 6 security fix, pass 2, P2-L8-F3, P2-L8-S1: an output directory others may write to (as one
+            // another user created first under /tmp is) is a usage error; nothing is written into it.
+            Path shared = Files.createDirectories(tmp.resolve("shared-out"));
+            Files.setPosixFilePermissions(shared, java.nio.file.attribute.PosixFilePermissions.fromString(
+                    "rwxrwxrwx"));
+            assertTrue(run(file("pass.yaml"), "--out", shared.toString()).expectExit(Exit.USAGE).err()
+                    .contains("--out " + shared + " cannot be used: others may write to it without the sticky bit"));
+            try (java.util.stream.Stream<Path> entries = Files.list(shared)) {
+                assertEquals(0L, entries.count());
+            }
+        }
         assertTrue(run().expectExit(Exit.USAGE).err().contains("missing argument"));
         assertTrue(agent.requests.isEmpty(), "the agent must not be contacted");
     }

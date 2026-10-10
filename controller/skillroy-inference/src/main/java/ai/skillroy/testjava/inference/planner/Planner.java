@@ -16,6 +16,7 @@
 
 package ai.skillroy.testjava.inference.planner;
 
+import ai.skillroy.testjava.controller.OutputFiles;
 import ai.skillroy.testjava.controller.SecureFiles;
 import ai.skillroy.testjava.inference.prompt.PromptMask;
 import ai.skillroy.testjava.protocol.Json;
@@ -944,12 +945,13 @@ public final class Planner {
             Plan plan;
             Path envelope;
             try {
-                Files.createDirectories(out);
+                // Phase 6 security fix, pass 2, P2-L8-F3: a directory of the current user; the scenario created
+                // exclusively as before, the plan and the records through OutputFiles (never through a link).
+                OutputFiles.directory(out);
                 Files.writeString(yamlFile, yaml, StandardCharsets.UTF_8, StandardOpenOption.CREATE_NEW,
                         StandardOpenOption.WRITE);
                 plan = PlanCompiler.compileTo(yamlFile, request.pack(), planFile);
-                Files.writeString(authoring, Json.writePretty(authoringRecord(repairs, version)),
-                        StandardCharsets.UTF_8);
+                OutputFiles.writeString(authoring, Json.writePretty(authoringRecord(repairs, version)));
                 envelope = writeEnvelopes();
             } catch (FileAlreadyExistsException e) {
                 throw new AuthoringException(AuthoringException.EXIT_USAGE, "scenario " + id + " appeared in " + out
@@ -982,8 +984,7 @@ public final class Planner {
                 masked.add(maskedEnvelope(mask, envelope, 1));
             }
             Path file = request.outDir().resolve(request.scenarioId() + ENVELOPE_SUFFIX);
-            Files.createDirectories(request.outDir());
-            Files.writeString(file, Json.writePretty(masked), StandardCharsets.UTF_8);
+            OutputFiles.writeString(file, Json.writePretty(masked));
             return file;
         }
 
@@ -1051,7 +1052,7 @@ public final class Planner {
             checks.put("ran", ran);
         }
         json.put("checks", checks);
-        Files.writeString(authoring, Json.writePretty(json), StandardCharsets.UTF_8);
+        OutputFiles.writeString(authoring, Json.writePretty(json));
     }
 
     /** What a list of ledger entries cost. */

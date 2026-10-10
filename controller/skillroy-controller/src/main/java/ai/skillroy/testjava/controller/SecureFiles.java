@@ -779,6 +779,21 @@ public final class SecureFiles {
         return CurrentUser.PRINCIPAL;
     }
 
+    /** "Me" for the ACL rule: the owner of a file this process has just created, or null (P2-L8-F3's OutputFiles). */
+    static UserPrincipal fileOwner() {
+        return CurrentUser.fileOwner();
+    }
+
+    /** The system account, or null where it cannot be resolved. */
+    static UserPrincipal systemAccount() {
+        return BuiltIns.SYSTEM;
+    }
+
+    /** The administrators group, or null where it cannot be resolved. */
+    static UserPrincipal administrators() {
+        return BuiltIns.ADMINISTRATORS;
+    }
+
     /** True when {@code owner} is {@code me}; true as well when {@code me} could not be determined (null). */
     static boolean isUser(UserPrincipal owner, UserPrincipal me) {
         if (me == null) {

@@ -17,6 +17,7 @@
 package ai.skillroy.testjava.cli;
 
 import ai.skillroy.testjava.controller.Discovery;
+import ai.skillroy.testjava.controller.OutputFiles;
 import ai.skillroy.testjava.data.Credentials;
 import ai.skillroy.testjava.data.CredentialsException;
 import ai.skillroy.testjava.data.SecretMask;
@@ -44,8 +45,8 @@ import ai.skillroy.testjava.scenario.resolve.InferenceSettings;
 
 import java.io.IOException;
 import java.io.PrintStream;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -177,6 +178,15 @@ final class RunCommand implements Command {
         if (out != null && Files.exists(out) && !Files.isDirectory(out)) {
             throw new UsageException(OUT + " " + out + " is not a directory");
         }
+        if (out != null && Files.exists(out, LinkOption.NOFOLLOW_LINKS)) {
+            // Phase 6 security fix, pass 2, P2-L8-F3, P2-L8-S1: an output directory another user owns or may write to
+            // is a usage error before anything runs (each scenario's directory is checked again by the executor).
+            String problem = OutputFiles.directoryProblem(out);
+            if (problem != null) {
+                throw new UsageException(OUT + " " + out + " cannot be used: " + problem + " (give a directory of"
+                        + " the current user that others may not write to)");
+            }
+        }
         Path junit = args.path(JUNIT);
         String suite = args.value(SUITE) == null ? DEFAULT_SUITE : args.value(SUITE);
         RunOptions.DegradedAs degradedAs = degradedAs(args.value(DEGRADED_AS));
@@ -258,8 +268,11 @@ final class RunCommand implements Command {
             try {
                 target = Connector.connect(args, cli);
             } catch (CliException e) {
+                // P2-L8-F4: the observer's copy names the discovery directory by its role; stderr and the JUnit
+                // report, which stay on the host, keep the path.
                 TelemetryArgs.started(observer, TelemetryArgs.runStart(observer, "run", suite,
-                        bindSettings.mode().label(), bindSettings.envId(), null, mask.apply(e.getMessage())));
+                        bindSettings.mode().label(), bindSettings.envId(), null,
+                        TelemetryArgs.environment(mask.apply(e.getMessage()), args, cli)));
                 writeJunit(reporter, junit, suite, List.of(), e.getMessage(), cli, UnaryOperator.identity());
                 throw e;
             }
@@ -425,12 +438,8 @@ final class RunCommand implements Command {
             return;
         }
         try {
-            Path parent = file.toAbsolutePath().getParent();
-            if (parent != null) {
-                Files.createDirectories(parent);
-            }
-            Files.writeString(file, reporter.render(suite, results, environmentFailure, scrub),
-                    StandardCharsets.UTF_8);
+            // Phase 6 security fix, pass 2, P2-L8-F3: created exclusively, never through what is in its place.
+            OutputFiles.writeString(file, reporter.render(suite, results, environmentFailure, scrub));
         } catch (IOException e) {
             throw new CliException(Exit.FAILED, "cannot write the JUnit report " + file + ": " + e, e);
         }

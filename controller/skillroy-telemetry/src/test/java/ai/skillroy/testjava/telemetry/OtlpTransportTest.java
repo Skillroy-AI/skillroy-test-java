@@ -22,6 +22,7 @@ import ai.skillroy.testjava.scenario.TelemetryFixture;
 import ai.skillroy.testjava.scenario.observe.RunObserver;
 import ai.skillroy.testjava.scenario.observe.RunStart;
 import ai.skillroy.testjava.scenario.observe.TelemetrySettings;
+import ai.skillroy.testjava.scenario.observe.TlsStub;
 import ai.skillroy.testjava.scenario.resolve.BindMode;
 import ai.skillroy.testjava.scenario.resolve.SettingsException;
 import com.sun.net.httpserver.HttpServer;
@@ -51,7 +52,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * whose value came from the environment variable the settings name, and nothing else of the environment is read; an
  * endpoint that refuses connections neither fails nor slows the run beyond the timeout and is reported once, with
  * the dropped count for the summary. The content is asserted through the in-memory exporter elsewhere, not by
- * decoding protobuf (no protobuf library enters the build).
+ * decoding protobuf (no protobuf library enters the build). Phase 6 security fix, pass 2, P2-L8-F2: a header goes to
+ * an {@code https://} endpoint only, so the header's stub is a TLS one ({@link TlsStub}, trusted through the provider's
+ * test seam), and a header with an {@code http://} endpoint is refused by the settings and again by the provider.
  */
 class OtlpTransportTest {
 
@@ -87,21 +90,44 @@ class OtlpTransportTest {
         return server.getAddress().getPort();
     }
 
-    private TelemetrySettings settings(int port) throws Exception {
+    private TelemetrySettings settings(String endpoint) throws Exception {
         Path file = dir.resolve("telemetry.yaml");
-        java.nio.file.Files.writeString(file, "version: 1\nexporter: otlp\nendpoint: http://127.0.0.1:" + port
+        java.nio.file.Files.writeString(file, "version: 1\nexporter: otlp\nendpoint: " + endpoint
                 + "\nheaders: {Authorization: env:SKILLROY_TEST_OTLP_TOKEN}\ntimeoutMs: 2000\n");
         return TelemetrySettings.load(dir, Map.of(), "test", key -> null,
                 name -> name.equals("SKILLROY_TEST_OTLP_TOKEN") ? TOKEN : null);
     }
 
+    /** The TLS stub with the plain stub's handler. */
+    private TlsStub tlsStub() throws Exception {
+        return TlsStub.start(dir.resolve("tls"), exchange -> {
+            byte[] body = exchange.getRequestBody().readAllBytes();
+            requests.add(Map.of("method", exchange.getRequestMethod(), "path", exchange.getRequestURI().getPath(),
+                    "contentType", String.valueOf(exchange.getRequestHeaders().getFirst("Content-Type")),
+                    "authorization", String.valueOf(exchange.getRequestHeaders().getFirst("Authorization")),
+                    "bytes", String.valueOf(body.length)));
+            exchange.getResponseHeaders().add("Content-Type", "application/x-protobuf");
+            exchange.sendResponseHeaders(200, 0);
+            exchange.close();
+        });
+    }
+
     @Test
     void aFlushDeliversTheBatchWithTheHeaderFromTheEnvironment() throws Exception {
-        int port = stub();
+        TlsStub tls = tlsStub();
+        try {
+            delivers(tls);
+        } finally {
+            tls.close();
+        }
+    }
+
+    private void delivers(TlsStub tls) throws Exception {
+        int port = tls.port();
         ByteArrayOutputStream err = new ByteArrayOutputStream();
-        RunObserver observer = TelemetryObservers.otlp(settings(port),
+        RunObserver observer = TelemetryObservers.otlp(settings(tls.endpoint()),
                 name -> name.equals("SKILLROY_TEST_OTLP_TOKEN") ? TOKEN : null, new PrintStream(err, true,
-                        StandardCharsets.UTF_8));
+                        StandardCharsets.UTF_8), tls.certificatePem());
         observer.runStarted(new RunStart("run", null, "replay", "seed-a", "test", null, null));
         RunResult result = new TelemetryFixture(dir).run(TelemetryFixture.FAILING_YAML, BindMode.REPLAY, observer);
         assertEquals(Status.FAIL, result.status());
@@ -151,9 +177,33 @@ class OtlpTransportTest {
                 + (dropped == 1 ? "" : "es") + " dropped"));
     }
 
+    /**
+     * P2-L8-F2: a header over a loopback {@code http://} endpoint would reach whatever holds the port in clear: the
+     * settings refuse it, the default endpoint (which is one) included, and the provider refuses it again. Against the
+     * old rule both loads succeeded and the stub received the token.
+     */
+    @Test
+    void aHeaderIsNeverSentOverHttp() throws Exception {
+        int port = stub();
+        SettingsException named = assertThrows(SettingsException.class, () -> settings("http://127.0.0.1:" + port));
+        assertTrue(named.getMessage().contains("a telemetry header needs an https:// endpoint"), named.getMessage());
+        java.nio.file.Files.writeString(dir.resolve("telemetry.yaml"), "version: 1\nexporter: otlp\nheaders:"
+                + " {Authorization: env:SKILLROY_TEST_OTLP_TOKEN}\n");
+        SettingsException byDefault = assertThrows(SettingsException.class, () -> TelemetrySettings.load(dir,
+                Map.of(), "test", key -> null, name -> TOKEN));
+        assertTrue(byDefault.getMessage().contains("the default endpoint http://127.0.0.1:4318 is not one"),
+                byDefault.getMessage());
+        assertFalse(named.getMessage().contains(TOKEN) || byDefault.getMessage().contains(TOKEN));
+        TelemetrySettings built = new TelemetrySettings("otlp", "http://127.0.0.1:" + port,
+                Map.of("Authorization", "SKILLROY_TEST_OTLP_TOKEN"), null, "test", null, null, 1000L, null);
+        assertThrows(SettingsException.class, () -> TelemetryObservers.otlp(built, name -> TOKEN, System.err),
+                "the provider checks the header rule again");
+        assertEquals(List.of(), requests, "nothing reached the plain stub");
+    }
+
     @Test
     void aMissingHeaderVariableIsRefusedNamingTheVariableOnly() throws Exception {
-        TelemetrySettings settings = new TelemetrySettings("otlp", "http://127.0.0.1:4318",
+        TelemetrySettings settings = new TelemetrySettings("otlp", "https://127.0.0.1:4318",
                 Map.of("Authorization", "SKILLROY_TEST_UNSET"), null, "test", null, null, 1000L, null);
         SettingsException e = assertThrows(SettingsException.class, () -> TelemetryObservers.otlp(settings,
                 name -> null, System.err));

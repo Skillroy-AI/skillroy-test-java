@@ -16,14 +16,13 @@
 
 package ai.skillroy.testjava.inference.budget;
 
+import ai.skillroy.testjava.controller.OutputFiles;
 import ai.skillroy.testjava.protocol.Json;
 import ai.skillroy.testjava.scenario.resolve.CostLedger;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -99,10 +98,8 @@ public interface InferenceLog {
             for (Map<String, Object> record : records()) {
                 text.append(Json.write(record)).append('\n');
             }
-            if (file.getParent() != null) {
-                Files.createDirectories(file.getParent());
-            }
-            Files.write(file, text.toString().getBytes(StandardCharsets.UTF_8));
+            // Phase 6 security fix, pass 2, P2-L8-F3: created exclusively, never through what is in its place.
+            OutputFiles.writeString(file, text.toString());
         }
     }
 
@@ -119,11 +116,8 @@ public interface InferenceLog {
         @Override
         public synchronized void append(Map<String, Object> record) {
             try {
-                if (file.getParent() != null) {
-                    Files.createDirectories(file.getParent());
-                }
-                Files.write(file, (Json.write(record) + "\n").getBytes(StandardCharsets.UTF_8),
-                        StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+                // P2-L8-F3: appended only to a regular file of the current user, never through a link.
+                OutputFiles.append(file, (Json.write(record) + "\n").getBytes(StandardCharsets.UTF_8));
             } catch (IOException e) {
                 failed = true;
             }
