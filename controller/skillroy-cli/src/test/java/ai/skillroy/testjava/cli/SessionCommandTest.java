@@ -413,4 +413,39 @@ class SessionCommandTest {
         assertTrue(noKey.err().contains("the model key is not set (ANTHROPIC_API_KEY)"), noKey.err());
         assertTrue(agent.requests.isEmpty(), "no call before a usage error");
     }
+
+    /**
+     * Phase 7 security fix, S148 (phase7-contracts.md 9.3, 9.6): a session started without {@code --out} writes its
+     * journal, ledgers and captures into a new owner-only directory under the system's temporary directory, prints its
+     * path at the start and at the end, and leaves nothing under {@code ./run-output/}; the old code wrote into
+     * {@code ./run-output/<session id>/} with the process umask.
+     */
+    @Test
+    void aSessionWithoutOutWritesIntoAnOwnerOnlyTemporaryDirectory() throws Exception {
+        Path script = script("do poke {}\nquit\n");
+        String id = "no-out-" + System.nanoTime();
+        Path parent = Files.createDirectories(tmp.resolve("system-tmp"));
+        String previous = System.getProperty("java.io.tmpdir");
+        System.setProperty("java.io.tmpdir", parent.toString());
+        CliHarness.Outcome outcome;
+        try {
+            outcome = cli("session", "--script", script.toString(), "--id", id).expectExit(Exit.OK);
+        } finally {
+            System.setProperty("java.io.tmpdir", previous);
+        }
+        assertFalse(Files.exists(Path.of("run-output", id)), "nothing under ./run-output");
+        List<Path> made;
+        try (java.util.stream.Stream<Path> entries = Files.list(parent)) {
+            made = entries.toList();
+        }
+        assertEquals(1, made.size(), String.valueOf(made));
+        Path dir = made.get(0);
+        assertTrue(dir.getFileName().toString().startsWith("skillroy-session-"), dir.toString());
+        assertTrue(outcome.err().contains("no --out given: writing into " + dir), outcome.err());
+        assertTrue(outcome.err().contains("the session's files are in " + dir), outcome.err());
+        assertTrue(Files.isRegularFile(dir.resolve("journal.jsonl")), "the journal is there");
+        if (Files.getFileStore(dir).supportsFileAttributeView("posix")) {
+            assertEquals("rwx------", PosixFilePermissions.toString(Files.getPosixFilePermissions(dir)));
+        }
+    }
 }

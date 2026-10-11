@@ -104,6 +104,10 @@ public record BindingsFile(int bindingsVersion, String scenarioId, String envId,
     /**
      * Copies the maps (order kept; the images sorted by label and key). The version is 1 for a file without images and
      * {@link #VERSION} for one with them, whatever was given.
+     *
+     * @throws IllegalArgumentException if an image label or render key is not one the reader accepts, or two labels
+     *     differ only in case (Phase 7 security fix, S147, S118: a file that cannot be read back is never written, and
+     *     a label names a file)
      */
     public BindingsFile {
         Objects.requireNonNull(scenarioId, "scenarioId");
@@ -115,9 +119,22 @@ public record BindingsFile(int bindingsVersion, String scenarioId, String envId,
         if (images != null) {
             images.forEach((label, byKey) -> {
                 if (byKey != null && !byKey.isEmpty()) {
+                    String problem = labelProblem(label);
+                    for (String key : byKey.keySet()) {
+                        if (problem == null && (key == null || !RENDER_KEY.matcher(key).matches())) {
+                            problem = "the render key of images." + label + " must match [A-Za-z0-9]{8,64}";
+                        }
+                    }
+                    if (problem != null) {
+                        throw new IllegalArgumentException(problem);
+                    }
                     sorted.put(label, Collections.unmodifiableMap(new java.util.TreeMap<>(byKey)));
                 }
             });
+            String twin = caseTwin(sorted.keySet());
+            if (twin != null) {
+                throw new IllegalArgumentException(twin);
+            }
         }
         images = Collections.unmodifiableMap(sorted);
         bindingsVersion = images.isEmpty() ? VERSION_WITHOUT_IMAGES : VERSION;
@@ -129,6 +146,66 @@ public record BindingsFile(int bindingsVersion, String scenarioId, String envId,
                         Map<String, Resolution> resolutions, Map<String, OracleValue> oracles) {
         this(bindingsVersion, scenarioId, envId, pack, packVersion, planHash, resolveHash, env, resolutions, oracles,
                 Map.of());
+    }
+
+    /** Why {@code label} is not an image label the reader accepts, or null when it is one. */
+    static String labelProblem(String label) {
+        return label != null && ImageCheck.LABEL.matcher(label).matches() ? null
+                : "images: '" + label + "' is not a label";
+    }
+
+    /**
+     * The message for two labels of {@code labels} that differ only in case, or null when there are none (Phase 7
+     * security fix, S118: a label names a file, and on a case-insensitive volume such two share one).
+     */
+    static String caseTwin(java.util.Collection<String> labels) {
+        Map<String, String> folded = new java.util.HashMap<>();
+        for (String label : labels) {
+            String other = folded.put(label.toLowerCase(java.util.Locale.ROOT), label);
+            if (other != null && !other.equals(label)) {
+                return "images: '" + label + "' differs from '" + other + "' only in case; a label names a file";
+            }
+        }
+        return null;
+    }
+
+    /**
+     * The PNG of a baseline or an anchor: {@code <envDir>/<scenarioId>.images/<label>.<renderKey>.png}, derived from
+     * the label and the render key, inside {@code envDir}, with no symbolic link from {@code envDir} down
+     * ({@code envDir} itself included), whether or not the file exists yet. The one rule of the reader of a PNG and of
+     * every writer of one (the binder's approve, the export's caller) (Phase 7 security fix, S140; phase7-contracts.md
+     * 8.7).
+     *
+     * @throws IOException if the label or the key is malformed, the path leaves {@code envDir}, or a link is on the way
+     */
+    public static Path imageFile(Path envDir, String scenarioId, String label, String renderKey) throws IOException {
+        if (labelProblem(label) != null || renderKey == null || !RENDER_KEY.matcher(renderKey).matches()) {
+            throw new IOException("not a label and render key: " + label + ", " + renderKey);
+        }
+        Path file = envDir.resolve(ImageEntry.fileName(scenarioId, label, renderKey));
+        requireNoLink(envDir, file);
+        return file;
+    }
+
+    /**
+     * Refuses a {@code target} outside {@code envDir} or one reached through a symbolic link at {@code envDir} or below
+     * it (existing entries only; Phase 7 security fix, S140). The message names the link: {@code envDir} by its path,
+     * an entry below it relative to {@code envDir}.
+     *
+     * @throws IOException naming the link or the escape
+     */
+    static void requireNoLink(Path envDir, Path target) throws IOException {
+        Path base = envDir.toAbsolutePath().normalize();
+        Path path = target.toAbsolutePath().normalize();
+        if (!path.startsWith(base)) {
+            throw new IOException(target + " lies outside the bindings directory " + base);
+        }
+        for (Path p = path; p != null && p.startsWith(base); p = p.getParent()) {
+            if (Files.isSymbolicLink(p)) {
+                throw new IOException((p.equals(base) ? "the bindings directory " + base : base.relativize(p))
+                        + " is a link: a bindings file, a baseline or an anchor is never read or written through one");
+            }
+        }
     }
 
     /** This file with another {@code images} section (null: none). */
@@ -216,6 +293,9 @@ public record BindingsFile(int bindingsVersion, String scenarioId, String envId,
 
     static void writeText(Path file, String text) throws IOException {
         Path dir = file.toAbsolutePath().getParent();
+        // Phase 7 security fix, S140 (phase7-contracts.md 8.7): the environment's directory is written under the
+        // reader's rule, never through a link in its place.
+        requireNoLink(dir, dir);
         Files.createDirectories(dir);
         Path tmp = Files.createTempFile(dir, "." + file.getFileName(), ".tmp");
         try {
@@ -500,6 +580,10 @@ public record BindingsFile(int bindingsVersion, String scenarioId, String envId,
             }
             Map<String, Map<String, ImageEntry>> images = new LinkedHashMap<>();
             if (json.containsKey("images")) {
+                String twin = caseTwin(object(json, "images", "the file").keySet());
+                if (twin != null) {
+                    throw new BindingsFormatException(twin);
+                }
                 for (Map.Entry<String, Object> e : object(json, "images", "the file").entrySet()) {
                     String label = e.getKey();
                     if (!ImageCheck.LABEL.matcher(label).matches()) {

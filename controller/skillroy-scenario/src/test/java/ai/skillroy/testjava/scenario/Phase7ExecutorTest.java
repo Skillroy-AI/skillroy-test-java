@@ -527,8 +527,10 @@ class Phase7ExecutorTest {
         RunResult rejected = run(plan, approve.withBind(approve.bind().withApprover(Approver.REJECT_ALL)));
         assertEquals(FailureKind.REBIND_NEEDED, rejected.failureKind(), rejected.message());
         assertTrue(rejected.message().contains("candidate not approved"), rejected.message());
-        BindingsFile file = BindingsFile.read(BindingsFile.locate(tmp.resolve("bindings"), "seed-a", "t"));
-        assertEquals(Map.of(), file.images(), "nothing approved, nothing written");
+        // Phase 7 security fix, S115: an images-only plan writes nothing at bind time, and nothing after the steps
+        // without an approved baseline (the old code wrote the file at bind time with no approver asked).
+        assertFalse(Files.exists(BindingsFile.locate(tmp.resolve("bindings"), "seed-a", "t")),
+                "nothing approved, nothing written, no file created");
         RunResult approved = run(plan, options(BindMode.APPROVE, tmp.resolve("yes")));
         assertEquals(Status.PASS, approved.status(), "APPROVE_ALL approves through the default reviewImage");
     }
@@ -592,5 +594,147 @@ class Phase7ExecutorTest {
         RunResult planted = run(plan, options(BindMode.REPLAY, null));
         assertEquals(FailureKind.ENVIRONMENT, planted.failureKind(), planted.message());
         assertTrue(planted.message().contains("names the file '../../elsewhere.png'"), planted.message());
+    }
+
+    // ------------------------------------------------------------------------------------ the security fix round
+
+    private static BufferedImage black() {
+        return image(0x000000, -1, -1);
+    }
+
+    /** A capture with no focus owner (a WM-less desk, or a session run from a terminal). */
+    private static Map<String, Object> unfocused(BufferedImage image) throws Exception {
+        Map<String, Object> capture = capture(image, List.of());
+        capture.put("focus", Map.of("active", false));
+        return capture;
+    }
+
+    /**
+     * Phase 7 security fix, S103 (phase7-contracts.md 6.7): a focus owner whose rectangle covers the compared raster no
+     * longer blanks it. The baseline is approved while the compared component itself holds the focus (its rectangle
+     * the whole 8 x 6 raster); at replay the focus is nowhere, or elsewhere, and every pixel differs: the comparison
+     * fails, the record names the rectangle compared instead of blanked, and the message says so. The old code blanked
+     * the whole raster on both sides and passed (focusMasked, 48 masked pixels).
+     */
+    @Test
+    void aFocusOwnerThatCoversTheComparedRasterIsComparedNotMasked() throws Exception {
+        Plan plan = plan("steps:\n  - expectImage: { label: pad }\n");
+        Map<String, Object> whole = Map.of("id", "pad");
+        capture = capture(image(0xFFFFFF, -1, -1), whole, new ImageCompare.Rect(0, 0, 8, 6));
+        assertEquals(Status.PASS, run(plan, options(BindMode.APPROVE, tmp.resolve("approve"))).status());
+
+        capture = unfocused(black());
+        Path nowhere = tmp.resolve("nowhere");
+        RunResult failed = run(plan, options(BindMode.REPLAY, nowhere));
+        assertEquals(Status.FAIL, failed.status(), failed.message());
+        assertEquals(FailureKind.ASSERTION, failed.failureKind());
+        assertEquals(48L, failed.detail().get("differing"));
+        assertTrue(failed.message().endsWith("48 pixels differ (at most 0); the focus owner changed ({\"id\":\"pad\"}"
+                + " to nothing) and covers 100 % of the compared raster; it was compared, not masked"),
+                failed.message());
+        Map<String, Object> record = imageRecord(nowhere);
+        assertEquals(Boolean.FALSE, record.get("focusMasked"));
+        assertEquals(0L, record.get("focusMaskedPixels"));
+        assertEquals(List.of(Map.of("side", "recorded", "owner", whole, "rect", Map.of("x", 0L, "y", 0L, "w", 8L, "h",
+                6L), "pixels", 48L)), record.get("focusMaskSkipped"));
+
+        capture = capture(black(), Map.of("id", "amount"), new ImageCompare.Rect(6, 4, 2, 2));
+        Path elsewhere = tmp.resolve("elsewhere");
+        RunResult other = run(plan, options(BindMode.REPLAY, elsewhere));
+        assertEquals(Status.FAIL, other.status(), other.message());
+        assertEquals(44L, other.detail().get("differing"), "the small owner's four pixels blanked, the rest compared");
+        assertEquals(4L, imageRecord(elsewhere).get("focusMaskedPixels"));
+    }
+
+    /**
+     * Phase 7 security fix, S103: the current focus owner's rectangle covering the raster is compared too (the
+     * reviewer's path); the recorded owner's small rectangle is still blanked.
+     */
+    @Test
+    void aCurrentFocusOwnerThatCoversTheRasterIsComparedNotMasked() throws Exception {
+        Plan plan = plan("steps:\n  - expectImage: { label: pad }\n");
+        capture = capture(image(0xFFFFFF, -1, -1), Map.of("id", "entry"), new ImageCompare.Rect(0, 0, 2, 2));
+        assertEquals(Status.PASS, run(plan, options(BindMode.APPROVE, tmp.resolve("approve"))).status());
+        capture = capture(black(), Map.of("id", "panel"), new ImageCompare.Rect(0, 0, 8, 6));
+        Path dir = tmp.resolve("covering");
+        RunResult failed = run(plan, options(BindMode.REPLAY, dir));
+        assertEquals(Status.FAIL, failed.status(), failed.message());
+        assertEquals(44L, failed.detail().get("differing"));
+        assertTrue(failed.message().contains("covers 100 % of the compared raster; it was compared, not masked"),
+                failed.message());
+        assertEquals("current", ((Map<?, ?>) ((List<?>) imageRecord(dir).get("focusMaskSkipped")).get(0))
+                .get("side"));
+    }
+
+    /**
+     * Phase 7 security fix, S103, the anchored twin: an anchor recorded with the focus on the anchored component (its
+     * rectangle the whole crop) no longer lets its pointer call run over a crop that differs everywhere; the guard is
+     * REBIND_NEEDED and nothing is pressed (the old code ran the pointer call at its recorded point).
+     */
+    @Test
+    void anAnchorWhoseFocusOwnerCoversItsCropGuardsItsPointerCall() throws Exception {
+        Plan plan = plan("steps:\n  - pointer: { by: { name: frame }, at: { fx: 0.5, fy: 0.5 }, guard: anchor-s1 }\n");
+        Path file = BindingsFile.locate(tmp.resolve("bindings"), "seed-a", "t");
+        BufferedImage anchor = image(0x336699, -1, -1);
+        BindingsFile.ImageEntry entry = new BindingsFile.ImageEntry(ImageCompare.rasterHash(anchor), 8, 6, List.of(),
+                List.of(), new BindingsFile.Focus(Map.of("name", "frame"), new ImageCompare.Rect(0, 0, 8, 6), true),
+                "t.images/anchor-s1." + KEY + ".png", Map.of(), null, new BindingsFile.Anchor(100, 40));
+        RunOptions live = options(BindMode.LIVE, tmp.resolve("first"));
+        run(plan, live.withBind(live.bind().withWriteBindings(true)));
+        BindingsFile read = BindingsFile.read(file);
+        Files.createDirectories(file.getParent().resolve("t.images"));
+        Files.write(file.getParent().resolve(entry.file()), ImageCompare.encodePng(anchor));
+        Files.writeString(file, read.withImages(Map.of("anchor-s1", Map.of(KEY, entry))).toJsonText());
+        int before = agent.callsTo("swing.pointer").size();
+
+        capture = unfocused(black());
+        RunResult guarded = run(plan, options(BindMode.REPLAY, tmp.resolve("guarded")));
+        assertEquals(FailureKind.REBIND_NEEDED, guarded.failureKind(), guarded.message());
+        assertTrue(guarded.message().contains("it was compared, not masked"), guarded.message());
+        assertEquals(before, agent.callsTo("swing.pointer").size(), "the pointer call was not sent");
+    }
+
+    /**
+     * Phase 7 security fix, S145 (phase7-contracts.md 6.7): the mismatch's two PNGs are written as compared, the step's
+     * mask blanked on both sides, as the baseline and the diff are; the old code wrote the actual capture as rendered
+     * (the masked rectangle's pixels in run output).
+     */
+    @Test
+    void theMismatchFilesHoldTheComparedRastersWithTheStepsMaskBlanked() throws Exception {
+        Plan plan = plan("steps:\n  - expectImage: { label: pad, mask: [ { x: 0, y: 0, w: 3, h: 3 } ] }\n");
+        assertEquals(Status.PASS, run(plan, options(BindMode.APPROVE, tmp.resolve("approve"))).status());
+        capture = capture(withPixels(1, 1, 5, 4), List.of());
+        Path dir = tmp.resolve("failed");
+        RunResult failed = run(plan, options(BindMode.REPLAY, dir));
+        assertEquals(Status.FAIL, failed.status(), failed.message());
+        assertEquals(1L, failed.detail().get("differing"), "the pixel under the mask is not compared");
+        BufferedImage actual = ImageCompare.decodePng(Files.readAllBytes(dir.resolve("failure/image-pad-actual.png")));
+        assertEquals(ImageCompare.MASK_RGB, actual.getRGB(1, 1), "the step's mask is blanked in the actual file");
+        assertEquals(0xFF000000, actual.getRGB(5, 4), "outside it the pixel as captured");
+        BufferedImage expected = ImageCompare.decodePng(Files.readAllBytes(dir.resolve(
+                "failure/image-pad-expected.png")));
+        assertEquals(ImageCompare.MASK_RGB, expected.getRGB(2, 2));
+    }
+
+    /**
+     * Phase 7 security fix, S146, the controller's half (phase7-contracts.md 8.7): a capture whose focus owner's locator
+     * is a {@code {text}} candidate (an older agent's answer: a nameless text field's content) never puts that text into
+     * the approved entry or the bindings file; the owner is recorded by what is left ({@code {role}}), and a replay with
+     * another owner still blanks both owners' rectangles. The old code wrote the field's content into the file.
+     */
+    @Test
+    void aFocusOwnerLocatorHoldingTextNeverEntersTheBindingsFile() throws Exception {
+        Plan plan = plan("steps:\n  - expectImage: { label: pad }\n");
+        capture = capture(withPixels(), Map.of("text", "Jane Doe", "role", "textbox"), new ImageCompare.Rect(0, 0, 2,
+                2));
+        assertEquals(Status.PASS, run(plan, options(BindMode.APPROVE, tmp.resolve("approve"))).status());
+        Path file = BindingsFile.locate(tmp.resolve("bindings"), "seed-a", "t");
+        String text = Files.readString(file);
+        assertFalse(text.contains("Jane Doe"), text);
+        assertEquals(Map.of("role", "textbox"), BindingsFile.read(file).images().get("pad").get(KEY).focus().owner());
+        capture = capture(withPixels(1, 1, 6, 4), Map.of("id", "amount"), new ImageCompare.Rect(5, 3, 2, 2));
+        Path dir = tmp.resolve("other-owner");
+        assertEquals(Status.PASS, run(plan, options(BindMode.REPLAY, dir)).status(), "both rectangles blanked");
+        assertEquals(Boolean.TRUE, imageRecord(dir).get("focusMasked"));
     }
 }

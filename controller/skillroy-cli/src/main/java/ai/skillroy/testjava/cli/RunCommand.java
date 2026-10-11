@@ -420,7 +420,13 @@ final class RunCommand implements Command {
     /**
      * The terminal approver with the image approval of phase7-contracts.md 8.7 (D355): a baseline candidate's path
      * and size are printed, then the person answers y or n; end of input is n. The bind-time review is the given one.
+     * A candidate that was not written (a run without {@code --out}) is rejected without asking (Phase 7 security fix,
+     * S117; phase7-contracts.md 6.7, 9.3): the person sees the file before approving it, and only {@code --yes}
+     * approves unseen.
      */
+    /** Why the terminal approver rejects a candidate it cannot show (Phase 7 security fix, S117). */
+    static final String NO_CANDIDATE = "no candidate file to review: run with --out";
+
     static Approver imageApprover(Approver bindings, Cli cli) {
         return new Approver() {
             @Override
@@ -439,6 +445,9 @@ final class RunCommand implements Command {
                     cli.out().println("  another rendering's baseline: " + request.existing().file());
                 }
                 cli.out().flush();
+                if (request.candidate() == null) {
+                    return new Decision(false, null, NO_CANDIDATE);
+                }
                 String answer = cli.terminal().readLine("approve the baseline " + request.label() + "? [y/N] ");
                 boolean yes = answer != null && List.of("y", "yes").contains(answer.strip().toLowerCase(Locale.ROOT));
                 return new Decision(yes, null, yes ? null : answer == null ? "end of input" : "answered no");

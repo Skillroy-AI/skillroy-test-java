@@ -154,6 +154,7 @@ final class JournalExport {
         Map<String, byte[]> images = new TreeMap<>();
         if (file != null && !anchors.isEmpty()) {
             file = file.withImages(anchorEntries(images));
+            requireNoMaskedImage(file);
         }
         check(plan, file);
         ExportResult.Report report = new ExportResult.Report(options.scenarioId(), start.id(), plan.steps().size(),
@@ -355,6 +356,26 @@ final class JournalExport {
         return Values.printableLine(line.toString());
     }
 
+    /**
+     * Phase 7 security fix, S146 (phase7-contracts.md 6.6, P2 11.4): the {@code <redacted>} check of the bindings file
+     * covers its {@code images} section too, so an anchor's entry (its {@code focus.owner}, its {@code window}) that
+     * the journal masked refuses the export instead of entering the file as {@code <redacted>}.
+     */
+    private void requireNoMaskedImage(BindingsFile file) throws ExportException {
+        for (Map.Entry<String, Map<String, BindingsFile.ImageEntry>> e : file.images().entrySet()) {
+            for (BindingsFile.ImageEntry entry : e.getValue().values()) {
+                if (ai.skillroy.testjava.protocol.Json.writePretty(entry.toJson()).contains(SecretKeys.REDACTED)) {
+                    throw new ExportException(anchorSteps.get(e.getKey()), "the anchor " + e.getKey() + "'s entry was"
+                            + " masked in the journal: it holds a secret, and a bindings file never holds one");
+                }
+            }
+        }
+        if (file.toJsonText().contains(SecretKeys.REDACTED)) {
+            throw new ExportException(null, "a recorded value was masked in the journal: it equals a secret, and a"
+                    + " bindings file never holds one");
+        }
+    }
+
     /** The {@code images} section of the export's bindings file from the anchors, their PNGs into {@code images}. */
     private Map<String, Map<String, BindingsFile.ImageEntry>> anchorEntries(Map<String, byte[]> images)
             throws ExportException {
@@ -394,9 +415,10 @@ final class JournalExport {
             }
             Map<?, ?> focusJson = anchor.get("focus") instanceof Map<?, ?> f ? f : Map.of();
             Object owner = focusJson.containsKey("owner") ? focusJson.get("owner") : focusJson.get("ownerLocator");
-            @SuppressWarnings("unchecked")
-            BindingsFile.Focus focus = new BindingsFile.Focus(owner instanceof Map<?, ?> o ? (Map<String, Object>) o
-                    : null, ai.skillroy.testjava.scenario.image.ImageCompare.Rect.of(focusJson.get("ownerRect")),
+            // Phase 7 security fix, S146 (phase7-contracts.md 8.7): a {text} locator never becomes the entry's owner.
+            BindingsFile.Focus focus = new BindingsFile.Focus(owner instanceof Map<?, ?> o
+                    ? ai.skillroy.testjava.scenario.image.ImageSteps.ownerWithoutText(o) : null,
+                    ai.skillroy.testjava.scenario.image.ImageCompare.Rect.of(focusJson.get("ownerRect")),
                     Boolean.TRUE.equals(focusJson.get("active")));
             @SuppressWarnings("unchecked")
             BindingsFile.ImageEntry entry = new BindingsFile.ImageEntry(sha, raster.getWidth(), raster.getHeight(),
@@ -407,6 +429,12 @@ final class JournalExport {
                     new BindingsFile.Anchor(rect.x(), rect.y()));
             out.computeIfAbsent(label, k -> new TreeMap<>()).put(key, entry);
             images.put(label, png);
+            // Phase 7 security fix, S120 (phase7-contracts.md 6.6, 6.7): the export writes its own bindings file, with
+            // the renderings this session recorded only; the report names each entry the person merges into the
+            // committed file beside its other renderings' entries.
+            notes.add("to merge: images." + label + "." + key + " (" + entry.file() + ") into the committed bindings"
+                    + " file beside its other renderings' entries; the export's bindings file holds this session's"
+                    + " renderings only");
         }
         return out;
     }
@@ -476,8 +504,13 @@ final class JournalExport {
                     s.provenance() == null ? null : visionComment(s), List.of());
             if (s.provenance() != null) {
                 visionDerived.add(visionLine(s, step));
-                if (s.provenance().get("anchor") instanceof Map<?, ?> anchor
-                        && anchor.get("label") instanceof String l) {
+                if (s.provenance().get("anchor") instanceof Map<?, ?> anchor && anchor.get("label") != null) {
+                    // Phase 7 security fix, S147 (phase7-contracts.md 6.6): the label names the PNG's file, so a label
+                    // the bindings file's reader would refuse is refused here, before any path is built from it.
+                    if (!(anchor.get("label") instanceof String l) || !ImageCheck.LABEL.matcher(l).matches()) {
+                        throw new ExportException(s.stepId(), "the anchor label of step " + s.stepId() + " is not a"
+                                + " label ([A-Za-z0-9][A-Za-z0-9._-]{0,63})");
+                    }
                     anchors.put(l, anchor);
                     anchorSteps.put(l, s.stepId());
                 }

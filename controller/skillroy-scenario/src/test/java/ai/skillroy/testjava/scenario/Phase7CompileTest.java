@@ -246,4 +246,66 @@ class Phase7CompileTest {
         assertInstanceOf(Check.class, new ImageCheck("a", List.of(), 0));
         assertNull(new ImageCheck("a", List.of(), 0).capability(), "an image check is unguarded");
     }
+
+    // ------------------------------------------------------------------------------------ the security fix round
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> json(Plan plan) {
+        return (Map<String, Object>) ai.skillroy.testjava.protocol.Json.parseObject(plan.toJsonText());
+    }
+
+    private static String readerRefusal(Map<String, Object> json) {
+        return assertThrows(ScenarioException.class, () -> Plan.parse(ai.skillroy.testjava.protocol.Json.writePretty(
+                json))).getMessage();
+    }
+
+    /**
+     * Phase 7 security fix, S118 (phase7-contracts.md 8.1, 8.2): image labels are unique ignoring case, since a label
+     * names a file and two labels equal ignoring case share one on a case-insensitive volume; the compiler and the plan
+     * reader refuse them (the old code compiled {@code Pad} and {@code pad} and read them back).
+     */
+    @Test
+    void imageLabelsAreUniqueIgnoringCase() throws Exception {
+        String twin = refusal("  - expectImage: { label: Pad }\n  - expectImage: { label: pad }\n");
+        assertTrue(twin.contains("the image label 'pad' differs from 'Pad' only in case; a label names a file"), twin);
+        assertTrue(refusal("  - expectImage: { label: Pad }\n  - pointer: { by: { name: f }, guard: PAD }\n")
+                .contains("only in case"), "a guard's label counts alike");
+        String text = compile("  - expectImage: { label: Pad }\n  - expectImage: { label: pax }\n").toJsonText()
+                .replace("\"pax\"", "\"pad\"");
+        String read = assertThrows(ScenarioException.class, () -> Plan.parse(text)).getMessage();
+        assertTrue(read.contains("differs from another label only in case"), read);
+    }
+
+    /**
+     * Phase 7 security fix, S119 (phase7-contracts.md 8.2): the plan reader is as strict as the compiler for two
+     * Phase 7 constructs: a guard on a cleanup call (sent without its guard, so never evaluated) and more than 64 masks
+     * on an image check are refused; the {@code ImageCheck} constructor bounds the masks on every construction path.
+     * The old reader accepted both.
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    void theReaderRefusesACleanupGuardAndTooManyMasks() throws Exception {
+        Map<String, Object> guarded = json(compile("  - pointer: { by: { name: frame }, guard: anchor-s1 }\n"));
+        Object call = ((List<Map<String, Object>>) ((List<Map<String, Object>>) guarded.get("steps")).get(0)
+                .get("calls")).get(0);
+        guarded.put("cleanup", List.of(call));
+        assertTrue(readerRefusal(guarded).contains("cleanup: a guard is allowed on a step's swing.pointer only"),
+                readerRefusal(guarded));
+
+        Map<String, Object> masked = json(compile("  - expectImage: { label: pad }\n"));
+        Map<String, Object> image = (Map<String, Object>) ((Map<String, Object>) ((List<Object>) ((List<Map<String,
+                Object>>) masked.get("steps")).get(0).get("expect")).get(0)).get("image");
+        List<Object> masks = new java.util.ArrayList<>();
+        for (int i = 0; i < 64; i++) {
+            masks.add(Map.of("x", 0L, "y", 0L, "w", 1L, "h", 1L));
+        }
+        image.put("masks", masks);
+        Plan.parse(ai.skillroy.testjava.protocol.Json.writePretty(masked));
+        masks.add(Map.of("x", 0L, "y", 0L, "w", 1L, "h", 1L));
+        image.put("masks", masks);
+        assertTrue(readerRefusal(masked).contains("at most 64 masks, found 65"), readerRefusal(masked));
+        IllegalArgumentException bound = assertThrows(IllegalArgumentException.class, () -> new ImageCheck("pad",
+                masks, 0));
+        assertTrue(bound.getMessage().contains("at most 64 masks"), bound.getMessage());
+    }
 }

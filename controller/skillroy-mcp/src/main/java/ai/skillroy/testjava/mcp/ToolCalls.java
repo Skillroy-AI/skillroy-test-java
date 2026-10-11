@@ -787,6 +787,14 @@ final class ToolCalls {
             case "approve" -> BindMode.APPROVE;
             default -> throw new ToolError("skillroy_scenario_run: mode is live or approve, found '" + mode + "'");
         };
+        if (bindMode == BindMode.APPROVE && session().options().bind().approver()
+                == ai.skillroy.testjava.scenario.Approver.REJECT_ALL) {
+            // Phase 7 security fix, S115 (phase5-contracts.md 9.3, phase7-contracts.md 9.4): without an approver
+            // nothing can be approved, so approve could only spend the budget and touch the operator's bindings root;
+            // with live never writing, a client's run writes nothing there in either mode.
+            throw new ToolError("skillroy_scenario_run: mode approve is refused: this server has no approver (a"
+                    + " person approves bindings and baselines); run approve at the CLI");
+        }
         Plan plan;
         Scenario scenario;
         try {

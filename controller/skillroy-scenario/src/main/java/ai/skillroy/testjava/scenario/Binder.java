@@ -414,6 +414,131 @@ public final class Binder {
         return updated;
     }
 
+    /**
+     * True when the plan's bindings hold images only: no query slot and no oracle (phase7-contracts.md 8.7, D362), so
+     * {@code approve} has nothing to ask at bind time.
+     */
+    static boolean imagesOnly(Plan plan) {
+        for (Plan.Slot slot : plan.slots()) {
+            if ("query".equals(slot.kind())) {
+                return false;
+            }
+        }
+        return plan.oracles().isEmpty();
+    }
+
+    /**
+     * {@code approve}'s write for a plan whose bindings hold images only (Phase 7 security fix, S115;
+     * phase7-contracts.md 8.7, D362 as amended): nothing was asked or written at bind time, and after the steps
+     * <ul>
+     *   <li>with a baseline a person approved at its step, the file is written with it beside the old entries, as the
+     *     second write of D355 does; when an existing file would also change for another reason (its environment,
+     *     plan hash, resolve hash, pack, resolutions or oracles), that change is written only when the approver
+     *     approves it (one {@link Approver#review} with no resolution and no oracle, the difference against the
+     *     existing file shown); refused, the approved baselines go into the existing file as it is and the run ends
+     *     RESOLUTION_FAILED / NOT_APPROVED;</li>
+     *   <li>without one, after steps that did not fail (or a bind alone, {@code skillroy resolve}), a file that is
+     *     absent or would change is written only when the approver approves it, refused it is NOT_APPROVED and
+     *     nothing is written; after a failed step nothing is written.</li>
+     * </ul>
+     * So {@code REJECT_ALL} (an MCP client's server, a terminal-less run) writes nothing, {@code --yes} refreshes the
+     * file of an environment that changed while its baselines still hold, and the terminal approver asks once at the
+     * end. The text passes {@link #requireNoCredential}; an identical file is left untouched.
+     *
+     * @param bound the file the bind built and did not write: the plan's header with the existing file's images
+     * @param baselines this run's baselines with the approvals made at their steps
+     * @param stepsFailed whether the run already failed (a step, or a check after the steps)
+     * @return the file written, or null when nothing was written
+     * @throws BindException ENVIRONMENT when the existing file cannot be used or a file cannot be written, or a value
+     *     equals a credential; RESOLUTION_FAILED / NOT_APPROVED when the approver refused a change
+     */
+    static Path writeImagesOnly(Plan plan, BindOptions options, BindingsFile bound, ImageBaselines baselines,
+                                boolean stepsFailed) throws BindException {
+        Path root = options.bindingsRoot();
+        if (root == null) {
+            throw new BindException(FailureKind.ENVIRONMENT, null, null, "writing the bindings file needs a bindings"
+                    + " root", null);
+        }
+        String relative = options.envId() + "/" + plan.scenarioId() + BindingsFile.SUFFIX;
+        Path target = BindingsFile.locate(root, options.envId(), plan.scenarioId());
+        BindingsFile existing = null;
+        String existingText = null;
+        if (Files.exists(target)) {
+            String why;
+            try {
+                existingText = Files.readString(target, StandardCharsets.UTF_8);
+                existing = BindingsFile.parse(existingText);
+                why = existing.scenarioId().equals(plan.scenarioId()) && existing.envId().equals(options.envId())
+                        ? null : "it was made for scenario " + existing.scenarioId() + " in environment "
+                        + existing.envId();
+            } catch (IOException | BindingsFormatException e) {
+                why = "cannot be read: " + e.getMessage();
+            }
+            if (why != null) {
+                throw new BindException(FailureKind.ENVIRONMENT, null, null, "the bindings file " + relative + " "
+                        + why + "; approve never replaces a bindings file it cannot read", RunLog.fields(
+                        "bindingsFile", relative));
+            }
+        }
+        boolean approvals = baselines != null && baselines.hasApprovals();
+        Map<String, Map<String, BindingsFile.ImageEntry>> merged = baselines == null ? bound.images()
+                : baselines.merged();
+        BindingsFile candidate = bound.withImages(merged);
+        String candidateText = candidate.toJsonText();
+        boolean otherChange = existing != null && !existing.withImages(merged).toJsonText().equals(candidateText);
+        if (!approvals) {
+            if (stepsFailed || candidateText.equals(existingText)) {
+                return null;
+            }
+            otherChange = true;
+        }
+        if (otherChange) {
+            Approver.ApprovalRequest request = new Approver.ApprovalRequest(plan.scenarioId(), options.envId(),
+                    bound.env(), List.of(), List.of(), existing == null ? null : existing.diff(candidate), List.of());
+            Approver.Decision decision;
+            try {
+                decision = options.approver().review(request);
+            } catch (RuntimeException e) {
+                throw new BindException(FailureKind.ENVIRONMENT, null, null, "the approver failed: " + e, null);
+            }
+            if (decision == null || !decision.approved()) {
+                String reason = decision == null ? "the approver gave no decision" : decision.reason();
+                if (approvals) {
+                    writeImagesFile(plan, options, existing.withImages(merged), baselines, target, existingText,
+                            relative);
+                }
+                throw new BindException(FailureKind.RESOLUTION_FAILED, "NOT_APPROVED", null, "the bindings file "
+                        + relative + " was not " + (existing == null ? "written" : "rewritten for this run's"
+                        + " environment and plan") + ": not approved" + (reason == null ? "" : " (" + reason + ")")
+                        + (approvals ? "; the baselines approved at their steps were written into it as it was" : ""),
+                        RunLog.fields("bindingsFile", relative, "message", reason));
+            }
+        }
+        return writeImagesFile(plan, options, candidate, approvals ? baselines : null, target, existingText,
+                relative);
+    }
+
+    /** Writes the PNGs approved in this run (when given) and then the file, unless its text is already there. */
+    private static Path writeImagesFile(Plan plan, BindOptions options, BindingsFile file, ImageBaselines baselines,
+                                        Path target, String existingText, String relative) throws BindException {
+        String text = file.toJsonText();
+        requireNoCredential(plan, options, text);
+        try {
+            if (baselines != null) {
+                baselines.writeApprovedPngs();
+            }
+            if (text.equals(existingText)) {
+                return null;
+            }
+            BindingsFile.writeText(target, text);
+            return target;
+        } catch (IOException e) {
+            throw new BindException(FailureKind.ENVIRONMENT, null, null, "the bindings file " + relative
+                    + " or a baseline beside it could not be written: " + e.getMessage(),
+                    RunLog.fields("bindingsFile", relative));
+        }
+    }
+
     /** The plan's fixture slots and their values as written, for A25's key rule. */
     private static Map<String, Object> fixtureValues(Plan plan) {
         Map<String, Object> out = new LinkedHashMap<>();
@@ -451,6 +576,8 @@ public final class Binder {
         /** approve's reuse (P5 7.1): the existing bindings file, read once on first need; null when none is usable. */
         private BindingsFile existing;
         private boolean existingRead;
+        /** Why a file at the derived path is not usable (S116), or null. */
+        private String existingProblem;
 
         Run(Plan plan, ResolutionEngine engine, AgentConnection agent, CapabilityMatrix caps, BindOptions options,
             BindListener listener, boolean mayPark) {
@@ -889,22 +1016,47 @@ public final class Binder {
                     slot.credential(), why) != null;
         }
 
-        /** The existing bindings file of this scenario and environment, read once; null when absent or unusable. */
-        BindingsFile existing() {
+        /**
+         * The existing bindings file of this scenario and environment, read once; null when absent. A file at the
+         * derived path that cannot be read, or that names another scenario or environment, is not absent (Phase 7
+         * security fix, S116; phase7-contracts.md 8.7, P2 8.3 approve step 8): a bind that would write the file
+         * ({@code approve}, {@code live} or {@code re-resolve} with {@code writeBindings}), or whose plan has images
+         * (their baselines come from the file), ends ERROR / ENVIRONMENT naming the file and the reason, as
+         * {@code replay} refuses it, instead of rewriting it without its images; any other bind reads nothing from it.
+         *
+         * @throws BindException ENVIRONMENT when the file is unusable and the bind writes it or reads its images
+         */
+        BindingsFile existing() throws BindException {
             if (!existingRead) {
                 existingRead = true;
                 Path root = options.bindingsRoot();
                 Path path = root == null ? null : BindingsFile.locate(root, options.envId(), plan.scenarioId());
-                if (path != null && Files.isRegularFile(path)) {
+                if (path != null && Files.exists(path)) {
+                    String why;
                     try {
                         BindingsFile file = BindingsFile.read(path);
                         if (file.scenarioId().equals(plan.scenarioId()) && file.envId().equals(options.envId())) {
                             existing = file;
+                            why = null;
+                        } else {
+                            why = "it was made for scenario " + file.scenarioId() + " in environment "
+                                    + file.envId() + " (copied to the wrong place?)";
                         }
                     } catch (IOException | BindingsFormatException e) {
-                        existing = null;
+                        why = "cannot be read: " + e.getMessage();
+                    }
+                    if (why != null) {
+                        existingProblem = why;
                     }
                 }
+            }
+            boolean writes = options.mode() == BindMode.APPROVE || options.writeBindings();
+            if (existingProblem != null && (writes || !plan.images().isEmpty())) {
+                String relative = options.envId() + "/" + plan.scenarioId() + BindingsFile.SUFFIX;
+                throw new BindException(FailureKind.ENVIRONMENT, null, null, "the bindings file " + relative + " "
+                        + existingProblem + "; " + options.mode().label() + " never replaces a bindings file it"
+                        + " cannot read (its baselines and anchors would be dropped): repair or remove it first",
+                        RunLog.fields("bindingsFile", relative, "mode", options.mode().label()));
             }
             return existing;
         }
@@ -934,7 +1086,13 @@ public final class Binder {
             Path written = null;
             if (options.mode() == BindMode.APPROVE) {
                 file = approve(file, env);
-                written = write(file);
+                if (!nothingToApprove()) {
+                    written = write(file);
+                }
+                // Phase 7 security fix, S115 (phase7-contracts.md 8.7, D362 as amended): a plan whose bindings hold
+                // images only asks nothing and writes nothing at bind time; after the steps the executor writes the
+                // file with the baselines a person approved, and any other change only when the approver approves it
+                // (Binder.writeImagesOnly).
             } else if (options.mode() == BindMode.RE_RESOLVE) {
                 String by = options.approvedBy() != null ? options.approvedBy() : options.mode().label();
                 file = approved(file, new Approval(Approval.State.APPROVED, by));
@@ -953,7 +1111,7 @@ public final class Binder {
          * The file of a {@code live} bind (and the starting point of the others): a tier (a) slot {@code NOT_REQUIRED}
          * by {@code approvedBy} or the mode's name; a value a model found {@code REQUIRED}, by nobody (P5 7.1).
          */
-        private BindingsFile file(EnvFingerprint env) {
+        private BindingsFile file(EnvFingerprint env) throws BindException {
             String by = options.approvedBy() != null ? options.approvedBy() : options.mode().label();
             Map<String, Resolution> resolutions = new LinkedHashMap<>();
             for (Resolution r : engine.resolutions().values()) {
@@ -989,7 +1147,7 @@ public final class Binder {
          * baselines are approved at their steps ({@link Approver#reviewImage}).
          */
         private BindingsFile approve(BindingsFile file, EnvFingerprint env) throws BindException {
-            if (engine.resolutions().isEmpty() && engine.oracleValues().isEmpty()) {
+            if (nothingToApprove()) {
                 return file;
             }
             BindingsDiff diff = null;
@@ -1025,6 +1183,11 @@ public final class Binder {
             String by = options.approvedBy() != null ? options.approvedBy()
                     : decision.by() != null ? decision.by() : options.mode().label();
             return approved(file, new Approval(Approval.State.APPROVED, by));
+        }
+
+        /** No resolution and no oracle: the plan's bindings hold images only (phase7-contracts.md 8.7, D362). */
+        private boolean nothingToApprove() {
+            return engine.resolutions().isEmpty() && engine.oracleValues().isEmpty();
         }
 
         /** 8.3 approve step 8. */

@@ -36,6 +36,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -217,5 +218,75 @@ class Phase7CommandsTest {
         Map<?, ?> gateway = (Map<?, ?>) ((Map<?, ?>) json.get("capabilities")).get("inference.sql");
         assertEquals(CapabilityState.UNAVAILABLE.name(), gateway.get("state"));
         assertEquals("controller:inference", gateway.get("source"));
+    }
+
+    // ------------------------------------------------------------------------------------ the security fix round
+
+    /**
+     * Phase 7 security fix, S117 (phase7-contracts.md 6.7, 9.3): {@code run --mode approve} without {@code --out} has
+     * no candidate file to show, so the terminal approver rejects the baseline without asking, whatever the person
+     * would type: the step is REBIND_NEEDED with the reason and nothing is written. The old code asked about a file
+     * that did not exist and wrote the baseline on yes.
+     */
+    @Test
+    void approveWithoutOutRejectsACandidateThePersonCannotSee() throws Exception {
+        String base64 = png(6, 4);
+        agent.handlers.put("swing.rendering", p -> Map.of("renderKey", "0123456789abcdef"));
+        agent.handlers.put("swing.capture", p -> Map.of("format", "png", "width", 6L, "height", 4L, "base64", base64,
+                "origin", Map.of("x", 0L, "y", 0L), "scale", 1.0));
+        Path bindings = tmp.resolve("bindings");
+        List<String> prompts = new ArrayList<>();
+        Terminal yes = new Terminal() {
+            @Override
+            public boolean interactive() {
+                return true;
+            }
+
+            @Override
+            public String readLine(String prompt) {
+                prompts.add(prompt);
+                return "y";
+            }
+        };
+        CliHarness.Outcome rejected = cli(yes, "run", scenarios.resolve("image.yaml").toString(), "--mode", "approve",
+                "--bindings", bindings.toString()).expectExit(Exit.FAILED);
+        assertEquals(List.of(), prompts, "not asked");
+        assertTrue(rejected.out().contains("REBIND_NEEDED") && rejected.out().contains("candidate not approved (no"
+                + " candidate file to review: run with --out)"), rejected.out());
+        assertFalse(Files.exists(bindings.resolve("default/an-image.bindings.json")), "nothing written");
+        assertFalse(Files.exists(bindings.resolve("default/an-image.images")), "no baseline written");
+    }
+
+    /**
+     * Phase 7 security fix, S140 (phase7-contracts.md 8.7): the export's anchors are written under the bindings
+     * directory's rule, so a symbolic link at {@code <id>.images} (or at the environment's directory) is refused, naming
+     * it, and nothing is written where it points; the old code followed it.
+     */
+    @Test
+    void theExportsImagesRefuseALinkInTheBindingsDirectory() throws Exception {
+        Path envDir = Files.createDirectories(tmp.resolve("export/bindings/default"));
+        Path elsewhere = Files.createDirectories(tmp.resolve("elsewhere"));
+        try {
+            Files.createSymbolicLink(envDir.resolve("an-image.images"), elsewhere);
+        } catch (UnsupportedOperationException | IOException e) {
+            return;
+        }
+        String key = "0123456789abcdef";
+        ai.skillroy.testjava.scenario.BindingsFile.ImageEntry entry = new ai.skillroy.testjava.scenario.BindingsFile
+                .ImageEntry("sha256:" + "0".repeat(64), 6, 4, List.of(), List.of(), null,
+                ai.skillroy.testjava.scenario.BindingsFile.ImageEntry.fileName("an-image", "anchor-s1", key), Map.of(),
+                null, new ai.skillroy.testjava.scenario.BindingsFile.Anchor(1, 2));
+        ai.skillroy.testjava.scenario.BindingsFile file = new ai.skillroy.testjava.scenario.BindingsFile(2,
+                "an-image", "default", "clitest", "1.0.0", null, "sha256:r", new ai.skillroy.testjava.scenario.resolve
+                .EnvFingerprint(1, "sha256:e", Map.of()), Map.of(), Map.of(), Map.of("anchor-s1", Map.of(key, entry)));
+        ai.skillroy.testjava.scenario.ExportResult result = new ai.skillroy.testjava.scenario.ExportResult("x: 1\n",
+                file, new ai.skillroy.testjava.scenario.ExportResult.Report("an-image", "s", 1, "none", List.of(),
+                List.of(), List.of(), List.of()), Map.of("anchor-s1", new byte[] {1, 2, 3}));
+        IOException refused = assertThrows(IOException.class, () -> SessionCommand.writeImages(result,
+                envDir.resolve("an-image.bindings.json"), "an-image"));
+        assertTrue(refused.getMessage().startsWith("an-image.images is a link"), refused.getMessage());
+        try (java.util.stream.Stream<Path> entries = Files.list(elsewhere)) {
+            assertEquals(List.of(), entries.toList(), "nothing was written where the link points");
+        }
     }
 }

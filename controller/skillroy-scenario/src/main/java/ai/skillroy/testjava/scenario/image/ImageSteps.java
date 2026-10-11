@@ -192,6 +192,23 @@ public final class ImageSteps {
         return rendering;
     }
 
+    /**
+     * A focus owner's locator as an image entry records it: without its {@code text} key (Phase 7 security fix, S146:
+     * phase7-contracts.md 8.7, P2 11.4). A {@code {text}} candidate is the component's content (a text field's value),
+     * which never enters an entry, a bindings file or a comparison; an older agent may still answer one. What remains
+     * identifies the owner as far as it can ({@code {role}}); a locator of nothing else is null. Used for an approved
+     * baseline's capture, a comparison's current capture and an exported anchor alike.
+     */
+    public static Map<String, Object> ownerWithoutText(Map<?, ?> locator) {
+        Map<String, Object> copy = new LinkedHashMap<>();
+        locator.forEach((k, v) -> {
+            if (!"text".equals(k)) {
+                copy.put(String.valueOf(k), v);
+            }
+        });
+        return copy.isEmpty() ? null : copy;
+    }
+
     /** What a render key looks like: it names a file, so nothing else is accepted. */
     public static final java.util.regex.Pattern RENDER_KEY = java.util.regex.Pattern.compile("[A-Za-z0-9]{8,64}");
 
@@ -364,7 +381,10 @@ public final class ImageSteps {
             try {
                 OutputFiles.write(file, png);
             } catch (IOException e) {
-                file = null;
+                // Phase 7 security fix, S117 (phase7-contracts.md 6.7): a person never approves a candidate that was
+                // not written for them to see; the failed write ends the step instead of asking about no file.
+                return environment(stepId, label, key, "the candidate baseline cannot be written to "
+                        + dir.resolve("candidates") + ": " + e.getMessage());
             }
         }
         List<ImageCompare.Rect> masks = new ArrayList<>(current.redacted);
@@ -423,18 +443,16 @@ public final class ImageSteps {
         masks.addAll(stepMasks);
         masks.addAll(entry.carets());
         masks.addAll(current.carets);
-        boolean focusMasked = !java.util.Objects.equals(entry.focus().owner(), current.focus.owner());
-        if (focusMasked) {
-            if (entry.focus().ownerRect() != null) {
-                masks.add(entry.focus().ownerRect());
-            }
-            if (current.focus.ownerRect() != null) {
-                masks.add(current.focus.ownerRect());
-            }
-        }
-        ImageCompare.Result result = ImageCompare.compare(expected, current.image, masks, maxDiffPixels, focusMasked);
+        FocusMask focus = FocusMask.of(entry.focus(), current.focus, expected.getWidth(), expected.getHeight());
+        masks.addAll(focus.blanked);
+        ImageCompare.Result result = ImageCompare.compare(expected, current.image, masks, maxDiffPixels,
+                focus.masked());
         Map<String, Object> detail = record(stepId, label, key, result.holds() ? "held" : "failed");
         detail.putAll(result.toJson());
+        detail.put("focusMaskedPixels", focus.blankedPixels);
+        if (!focus.skipped.isEmpty()) {
+            detail.put("focusMaskSkipped", focus.skippedJson());
+        }
         if (guard) {
             detail.put("guard", true);
         }
@@ -451,6 +469,9 @@ public final class ImageSteps {
                 + " differ (at most " + maxDiffPixels + ")" : "the size differs (" + expected.getWidth() + " x "
                 + expected.getHeight() + " expected, " + current.image.getWidth() + " x " + current.image.getHeight()
                 + " captured)";
+        if (!focus.skipped.isEmpty()) {
+            what += "; " + focus.sentence();
+        }
         if (guard) {
             return rebind(detail, "the anchor " + label + " no longer matches for rendering " + key + ": " + what);
         }
@@ -458,7 +479,11 @@ public final class ImageSteps {
                 + ": " + what, detail);
     }
 
-    /** The three files of a mismatch under {@code failure/}; the names written, relative to the output directory. */
+    /**
+     * The three files of a mismatch under {@code failure/}; the names written, relative to the output directory. Both
+     * PNGs are written as compared, the comparison's masks blanked on both sides (Phase 7 security fix, S145): the
+     * rectangle a step's {@code mask} hides never reaches run output, as it never reaches the baseline.
+     */
     private List<String> evidence(String label, BufferedImage expected, BufferedImage actual,
                                   List<ImageCompare.Rect> masks, boolean sameSize) {
         Path dir = host.outputDir();
@@ -468,8 +493,10 @@ public final class ImageSteps {
         }
         Path failure = dir.resolve("failure");
         try {
-            write(failure, FILE_PREFIX + label + "-expected.png", ImageCompare.encodePng(expected), names);
-            write(failure, FILE_PREFIX + label + "-actual.png", ImageCompare.encodePng(actual), names);
+            write(failure, FILE_PREFIX + label + "-expected.png", ImageCompare.encodePng(ImageCompare.masked(expected,
+                    masks)), names);
+            write(failure, FILE_PREFIX + label + "-actual.png", ImageCompare.encodePng(ImageCompare.masked(actual,
+                    masks)), names);
             if (sameSize) {
                 write(failure, FILE_PREFIX + label + "-diff.png", ImageCompare.encodePng(ImageCompare.diff(expected,
                         actual, masks)), names);
@@ -559,7 +586,7 @@ public final class ImageSteps {
             ImageCompare.Rect ownerRect = null;
             boolean active = false;
             if (map.get("focus") instanceof Map<?, ?> focus) {
-                owner = focus.get("ownerLocator") instanceof Map<?, ?> locator ? (Map<String, Object>) locator : null;
+                owner = focus.get("ownerLocator") instanceof Map<?, ?> locator ? ownerWithoutText(locator) : null;
                 ownerRect = ImageCompare.Rect.of(focus.get("ownerRect"));
                 active = Boolean.TRUE.equals(focus.get("active"));
             }
@@ -613,6 +640,123 @@ public final class ImageSteps {
                 }
             }
             return out;
+        }
+    }
+
+    /**
+     * The focus rule of a comparison with its bound (phase7-contracts.md 6.7; Phase 7 security fix, S103): when the
+     * recorded and the current focus owners differ, their rectangles are blanked on both sides only as far as they
+     * cover at most a quarter of the compared raster together. A rectangle that alone covers more is not blanked, and
+     * when the rest still covers more together, none is: those are compared, so a focus owner that covers the compared
+     * region can no longer blank it, and a component that draws no focus indication still holds.
+     */
+    static final class FocusMask {
+
+        /** The share of the compared raster the focus owners' rectangles may blank together: a quarter. */
+        static final int BOUND_DIVISOR = 4;
+
+        final boolean ownersDiffer;
+        final List<ImageCompare.Rect> blanked;
+        final long blankedPixels;
+        /** The rectangles compared instead of blanked: the side, the owner, the rectangle, the pixels it covers. */
+        final List<Map<String, Object>> skipped;
+        private final long skippedPixels;
+        private final long area;
+        private final Map<String, Object> recordedOwner;
+        private final Map<String, Object> currentOwner;
+
+        private FocusMask(boolean ownersDiffer, List<ImageCompare.Rect> blanked, long blankedPixels,
+                          List<Map<String, Object>> skipped, long skippedPixels, long area,
+                          Map<String, Object> recordedOwner, Map<String, Object> currentOwner) {
+            this.ownersDiffer = ownersDiffer;
+            this.blanked = blanked;
+            this.blankedPixels = blankedPixels;
+            this.skipped = skipped;
+            this.skippedPixels = skippedPixels;
+            this.area = area;
+            this.recordedOwner = recordedOwner;
+            this.currentOwner = currentOwner;
+        }
+
+        /**
+         * @param recorded the entry's focus
+         * @param current the capture's focus
+         * @param w the compared raster's width (the baseline's)
+         * @param h the compared raster's height
+         */
+        static FocusMask of(BindingsFile.Focus recorded, BindingsFile.Focus current, int w, int h) {
+            boolean differ = !Objects.equals(recorded.owner(), current.owner());
+            long area = (long) w * h;
+            if (!differ) {
+                return new FocusMask(false, List.of(), 0, List.of(), 0, area, recorded.owner(), current.owner());
+            }
+            long bound = area / BOUND_DIVISOR;
+            List<String> sides = new ArrayList<>();
+            List<ImageCompare.Rect> rects = new ArrayList<>();
+            List<Map<String, Object>> owners = new ArrayList<>();
+            if (recorded.ownerRect() != null) {
+                sides.add("recorded");
+                rects.add(recorded.ownerRect());
+                owners.add(recorded.owner());
+            }
+            if (current.ownerRect() != null) {
+                sides.add("current");
+                rects.add(current.ownerRect());
+                owners.add(current.owner());
+            }
+            List<Integer> kept = new ArrayList<>();
+            List<Integer> dropped = new ArrayList<>();
+            for (int i = 0; i < rects.size(); i++) {
+                (pixels(List.of(rects.get(i)), w, h) <= bound ? kept : dropped).add(i);
+            }
+            List<ImageCompare.Rect> keptRects = new ArrayList<>();
+            kept.forEach(i -> keptRects.add(rects.get(i)));
+            if (pixels(keptRects, w, h) > bound) {
+                dropped.addAll(kept);
+                kept.clear();
+                keptRects.clear();
+            }
+            List<Map<String, Object>> skipped = new ArrayList<>();
+            List<ImageCompare.Rect> droppedRects = new ArrayList<>();
+            for (int i : new java.util.TreeSet<>(dropped)) {
+                Map<String, Object> s = new LinkedHashMap<>();
+                s.put("side", sides.get(i));
+                s.put("owner", owners.get(i));
+                s.put("rect", rects.get(i).toJson());
+                s.put("pixels", pixels(List.of(rects.get(i)), w, h));
+                skipped.add(s);
+                droppedRects.add(rects.get(i));
+            }
+            return new FocusMask(true, List.copyOf(keptRects), pixels(keptRects, w, h), skipped,
+                    pixels(droppedRects, w, h), area, recorded.owner(), current.owner());
+        }
+
+        /** {@code focusMasked}: the owners differ and their rectangles were blanked (or there were none to blank). */
+        boolean masked() {
+            return ownersDiffer && skipped.isEmpty();
+        }
+
+        /** The skipped rectangles for the record and the detail; new maps. */
+        List<Object> skippedJson() {
+            List<Object> out = new ArrayList<>();
+            skipped.forEach(s -> out.add(new LinkedHashMap<>(s)));
+            return out;
+        }
+
+        /** The step message's clause for a comparison whose focus mask was skipped. */
+        String sentence() {
+            long percent = area == 0 ? 0 : Math.round(100.0 * skippedPixels / area);
+            return "the focus owner changed (" + describe(recordedOwner) + " to " + describe(currentOwner)
+                    + ") and covers " + percent + " % of the compared raster; it was compared, not masked";
+        }
+
+        private static String describe(Map<String, Object> owner) {
+            return owner == null ? "nothing" : ai.skillroy.testjava.protocol.Json.write(owner);
+        }
+
+        /** The pixels of a {@code w} x {@code h} raster the rectangles cover, overlaps counted once. */
+        private static long pixels(List<ImageCompare.Rect> rects, int w, int h) {
+            return ImageCompare.coverage(ImageCompare.clip(rects, w, h), w, h);
         }
     }
 

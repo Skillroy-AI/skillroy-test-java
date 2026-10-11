@@ -182,4 +182,91 @@ class Phase7ExportTest {
             assertEquals("s1", absent.stepId(), "the step is named");
         }
     }
+
+    // ------------------------------------------------------------------------------------ the security fix round
+
+    /** An anchored step recorded with {@code anchor} changed by {@code change}, exported with its capture file. */
+    private ExportResult exportAnchored(java.util.function.Consumer<Map<String, Object>> change) throws Exception {
+        return exportAnchored(change, "pointer", Map.of("by", Map.of("name", "frame"), "guard", "anchor-s1"));
+    }
+
+    private ExportResult exportAnchored(java.util.function.Consumer<Map<String, Object>> change, String verb,
+                                        Map<String, Object> args) throws Exception {
+        BufferedImage crop = Phase7ExecutorTest.image(0x445566, 2, 2);
+        String sha = ImageCompare.rasterHash(crop);
+        Path out = dir.resolve("session");
+        Files.createDirectories(out.resolve("captures"));
+        Files.write(out.resolve("captures").resolve(sha.substring(7) + ".png"), ImageCompare.encodePng(crop));
+        Map<String, Object> anchor = new LinkedHashMap<>();
+        anchor.put("label", "anchor-s1");
+        anchor.put("rect", Map.of("x", 380L, "y", 256L, "w", 8L, "h", 6L));
+        anchor.put("sha256", sha);
+        anchor.put("renderKey", KEY);
+        anchor.put("focus", Map.of("ownerLocator", Map.of("id", "entry"), "active", true));
+        change.accept(anchor);
+        Map<String, Object> provenance = provenance("ROUTED");
+        provenance.put("anchor", anchor);
+        try (ExecutorSession session = fx.open()) {
+            assertEquals(Status.PASS, session.execute(verb, args, MODEL, provenance).status());
+            return session.journal().export(ExportOptions.of("anchored").withCaptures(out));
+        }
+    }
+
+    /**
+     * Phase 7 security fix, S120 (phase7-contracts.md 6.6, 6.7): the export writes its own bindings file with this
+     * session's renderings only, and its report names each anchor entry the person merges into the committed file
+     * beside the other renderings' entries.
+     */
+    @Test
+    void theReportNamesEachAnchorEntryToMerge() throws Exception {
+        ExportResult result = exportAnchored(anchor -> { });
+        String line = "to merge: images.anchor-s1." + KEY + " (anchored.images/anchor-s1." + KEY + ".png) into the"
+                + " committed bindings file beside its other renderings' entries; the export's bindings file holds"
+                + " this session's renderings only";
+        assertTrue(result.report().notes().contains(line), String.valueOf(result.report().notes()));
+        assertTrue(result.report().text().contains(line), result.report().text());
+    }
+
+    /**
+     * Phase 7 security fix, S146, the export's half (phase7-contracts.md 6.6, P2 11.4): the bindings file's
+     * {@code <redacted>} check covers its {@code images} section, so an anchor's entry the journal masked (here its
+     * focus owner's locator) refuses the export, naming the step, instead of entering the file. The old code ran the
+     * check before the images were added and wrote the entry.
+     */
+    @Test
+    void anAnchorEntryTheJournalMaskedRefusesTheExport() throws Exception {
+        ExportException masked = assertThrows(ExportException.class, () -> exportAnchored(anchor -> anchor.put("focus",
+                Map.of("ownerLocator", Map.of("role", "textbox", "name", ai.skillroy.testjava.protocol.SecretKeys
+                        .REDACTED), "active", true))));
+        assertEquals("s1", masked.stepId());
+        assertTrue(masked.getMessage().contains("the anchor anchor-s1's entry was masked in the journal"),
+                masked.getMessage());
+    }
+
+    /**
+     * Phase 7 security fix, S147 (phase7-contracts.md 6.6): an anchor label that is not a label (one with a path
+     * separator, which a pack's own session tool can write into a step's provenance) is an ExportException naming the
+     * step, before any path is built from it; the old code exported it, and its caller wrote the PNG at a path two
+     * directories up.
+     */
+    @Test
+    void anAnchorLabelThatIsNotALabelRefusesTheExport() throws Exception {
+        ExportException refused = assertThrows(ExportException.class, () -> exportAnchored(anchor -> anchor.put(
+                "label", "../../x"), "click", Map.of("by", Map.of("action", "DUE"))));
+        assertEquals("s1", refused.stepId());
+        assertTrue(refused.getMessage().contains("is not a label"), refused.getMessage());
+    }
+
+    /**
+     * Phase 7 security fix, S146 (phase7-contracts.md 8.7): an anchor whose recorded focus owner is a {@code {text}}
+     * locator (an older agent's answer: a nameless text field's content) is exported with the owner it identifies
+     * without the text; the field's content never enters the export's bindings file.
+     */
+    @Test
+    void anAnchorsTextOwnerLocatorNeverEntersTheExportsBindingsFile() throws Exception {
+        ExportResult result = exportAnchored(anchor -> anchor.put("focus", Map.of("ownerLocator", Map.of("role",
+                "textbox", "text", "Jane Doe"), "active", true)));
+        assertEquals(Map.of("role", "textbox"), result.bindings().images().get("anchor-s1").get(KEY).focus().owner());
+        assertFalse(result.bindings().toJsonText().contains("Jane Doe"), result.bindings().toJsonText());
+    }
 }
