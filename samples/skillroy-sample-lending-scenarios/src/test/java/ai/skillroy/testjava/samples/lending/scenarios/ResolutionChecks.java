@@ -920,7 +920,10 @@ abstract class ResolutionChecks {
      * phase6-contracts.md 13.2 item 4: scenario E replays with its committed plan and bindings, PASS with its three
      * guarded expectations evaluated in the hooks leg ({@code hooks} record: installed or already installed), DEGRADED
      * with the three skipped and naming {@code hook.limit.applied} in every other leg; and every replay of this target
-     * archived its matrix ({@code capabilities.json}), the same hash for all of them.
+     * archived its matrix ({@code capabilities.json}), the same hash for all of them, and the same {@code agentHash}
+     * (phase7-contracts.md 8.5). A failure names the entries that differ. In the hooks leg the first replay installs
+     * the catalogue, so this is also where a {@code hook.<id>} still pending at the matrix read would show (the
+     * matrix-hash flake, fixed agent-side in Phase 7, FX).
      */
     @Test
     @Order(16)
@@ -948,12 +951,19 @@ abstract class ResolutionChecks {
         }
         assertTrue(ledger.isEmpty(), "no model call in this target's runs");
         Set<String> hashes = new LinkedHashSet<>();
+        Set<Object> agentHashes = new LinkedHashSet<>();
+        List<Path> dirs = new ArrayList<>();
         for (Path dir : List.of(replayDir, replayDirB, replayDirC, replayDirE)) {
             if (dir != null) {
                 hashes.add(Runs.assertHooksRecord(dir, hooks));
+                agentHashes.add(Runs.capabilitiesRecord(dir).get("agentHash"));
+                dirs.add(dir);
             }
         }
-        assertEquals(1, hashes.size(), "one matrix for every run of this target: " + hashes);
+        assertEquals(1, hashes.size(), "one matrix for every run of this target: " + hashes
+                + (hashes.size() == 1 ? "" : "; " + Runs.matrixDifferences(dirs)));
+        assertEquals(1, agentHashes.size(), "one agent matrix (agentHash, phase7-contracts.md 8.5) for every run of"
+                + " this target: " + agentHashes);
         assertSignedOffAndQuiet(-1);
     }
 

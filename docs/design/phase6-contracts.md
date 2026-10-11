@@ -1348,6 +1348,20 @@ without the base learning the pack's vocabulary (design §1.3: hook-dependent ex
 capabilities). The ids `hook.engine`, `hook.probe`, `hook.install`, `hook.stub`, `hook.remove`, `hook.health` and
 `hook.events` are reserved and refused as hook ids (`INVALID_PARAMS`).
 
+**As built (Phase 7, FX, 2026-10-11): a `hook.<id>` holds its state when `hook.install` answers** (D-FX-1). The core
+probes a capability declared after the target is ready later, on an agent worker the declaration posts to, and until
+that probe has run the entry reads `UNAVAILABLE("not probed yet: the target is not ready")` (P1 §5: the pending case);
+`hook.install` declares its `hook.<id>` after the target is ready. The engine therefore also **sets each `hook.<id>` at
+once to its probe's first answer** (the health of the table above, computed on the install's thread under the engine's
+lock, right after the declaration and only while no detach has begun); the declared probe stays for
+`agent.capabilities {reprobe}`, and the worker's later run answers the same. `hook.install`'s answer (and the SPI's
+`install`'s return) thus comes after every declared `hook.<id>` holds a state of this table, so the matrix read of §5.3
+step 6, `ExecutorSession.open`'s, the MCP server's and `skillroy hooks install`'s never see the pending state. Before
+this, a read that overtook the posted probes archived the installing run's matrix with some `hook.<id>` pending: a
+hash of its own for the first run of a target, which failed the "one matrix per target" check of §13.2 item 4 (once
+in Phase 6, once in the Phase 7 matrix; reproduced under CPU load, the pending ids the only difference), and a guard on
+a hook in that first run would have read it not `OK`.
+
 ---
 
 ## 5. The hook catalogue: format, the pack side and the controller side
@@ -1466,9 +1480,9 @@ bind), because `requires:` may name `hook.<id>` capabilities that exist only aft
    reference to `Spy` in a restored class, §4.2): "hook.install failed: HOOK_VERIFY_FAILED: the remove of the installed
    version (replace: true) left a reference to Spy in a restored class; `skillroy hooks status`, then `skillroy hooks
    remove`", the detail `{primitive, error: {code, message}, restored}`, the record `ok: false` with `replaced: true`.
-6. The matrix is read again (it now holds `hook.<id>`), archived (§6.4), and `checkRequires` runs on it. The executor
-   then records the agent's `lastSeq` when the first step begins, `stepsSinceSeq`, which the `hooks` fact root reads
-   from (§6.3).
+6. The matrix is read again (it now holds `hook.<id>`, each in its health state: §4.6's as-built note of Phase 7, FX),
+   archived (§6.4), and `checkRequires` runs on it. The executor then records the agent's `lastSeq` when the first
+   step begins, `stepsSinceSeq`, which the `hooks` fact root reads from (§6.3).
 
 Hooks **stay installed** after the run (D129): the next run of any scenario of the same pack finds them
 (`alreadyInstalled`), which is what makes a suite of thirty scenarios cost one retransform per class; they go when a

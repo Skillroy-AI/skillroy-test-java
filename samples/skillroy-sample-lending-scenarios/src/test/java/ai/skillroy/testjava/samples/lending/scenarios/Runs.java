@@ -20,6 +20,7 @@ import ai.skillroy.testjava.controller.AgentConnection;
 import ai.skillroy.testjava.controller.CapabilityMatrix;
 import ai.skillroy.testjava.data.Credentials;
 import ai.skillroy.testjava.data.CredentialsException;
+import ai.skillroy.testjava.protocol.Capability;
 import ai.skillroy.testjava.protocol.Json;
 import ai.skillroy.testjava.samples.lending.pack.LendingPack;
 import ai.skillroy.testjava.samples.lending.scenarios.SampleCredentials.Env;
@@ -40,6 +41,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeSet;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -209,6 +211,46 @@ final class Runs {
         assertEquals(hooksLeg, CapabilityMatrix.fromJson(Json.parseObject(Files.readString(file)))
                 .isOk("hook.engine"), "hook.engine in the archived matrix");
         return hash;
+    }
+
+    /** The {@code capabilities} record of a run's {@code run.jsonl} (phase6-contracts.md 6.4, P7 8.5). */
+    static Map<String, Object> capabilitiesRecord(Path dir) throws IOException {
+        return runLog(dir).stream().filter(r -> "capabilities".equals(r.get("type"))).findFirst()
+                .orElseThrow(() -> new AssertionError("no capabilities record in " + dir));
+    }
+
+    /**
+     * For a failed "one matrix per target" check: every id whose entry differs between the runs' archived matrices,
+     * with each run's entry ({@code <run directory>=<state>(<reason>)/<strategy>}), so that a failing leg says what
+     * moved even when its run directories are overwritten by the next leg (fix of the matrix-hash flake, Phase 7, FX).
+     */
+    static String matrixDifferences(List<Path> dirs) throws IOException {
+        Map<String, Map<String, Capability>> byRun = new LinkedHashMap<>();
+        TreeSet<String> ids = new TreeSet<>();
+        for (Path dir : dirs) {
+            Map<String, Capability> all = CapabilityMatrix.fromJson(Json.parseObject(Files.readString(
+                    dir.resolve("capabilities.json")))).all();
+            byRun.put(dir.getFileName().toString(), all);
+            ids.addAll(all.keySet());
+        }
+        List<String> lines = new ArrayList<>();
+        for (String id : ids) {
+            if (byRun.values().stream().map(all -> all.get(id)).distinct().count() == 1) {
+                continue;
+            }
+            StringBuilder line = new StringBuilder(id).append(':');
+            byRun.forEach((run, all) -> line.append(' ').append(run).append('=').append(describe(all.get(id))));
+            lines.add(line.toString());
+        }
+        return lines.isEmpty() ? "no entry differs" : "differing entries: " + String.join("; ", lines);
+    }
+
+    private static String describe(Capability capability) {
+        if (capability == null) {
+            return "absent";
+        }
+        return capability.state() + (capability.reason() == null ? "" : "(" + capability.reason() + ")")
+                + (capability.strategy() == null ? "" : "/" + capability.strategy());
     }
 
     /** The successful {@code call} records of a run's {@code run.jsonl} for one primitive, in order. */

@@ -443,13 +443,20 @@ final class FakeHookContext implements AgentContext {
         }
     }
 
-    /** The capability registry with the core's declare/set/probe semantics. */
+    /**
+     * The capability registry with the core's declare/set/probe semantics. A declaration made once the target is ready
+     * is probed at once, or, with {@link #deferLateProbes}, as the core does it: by a task posted to an agent worker,
+     * which runs later ({@link #runDeferred}); the entry reads pending until then.
+     */
     static final class Caps implements CapabilityRegistry {
         static final String PENDING = "not probed yet: the target is not ready";
         private final Map<String, Capability> map = new TreeMap<String, Capability>();
         private final Map<String, Probe> probes = new LinkedHashMap<String, Probe>();
         private final Map<String, Boolean> pending = new HashMap<String, Boolean>();
+        private final List<String> deferred = new ArrayList<String>();
         volatile boolean ready;
+        /** True: a late declaration's probe waits for {@link #runDeferred}, as the core's posted worker task. */
+        volatile boolean deferLateProbes;
         private volatile FakeHookContext owner;
 
         @Override
@@ -460,7 +467,13 @@ final class FakeHookContext implements AgentContext {
                 map.put(id, new Capability(id, CapabilityState.UNAVAILABLE, PENDING, null));
             }
             if (ready && owner != null) {
-                probeOne(id, owner);
+                if (deferLateProbes) {
+                    synchronized (this) {
+                        deferred.add(id);
+                    }
+                } else {
+                    probeOne(id, owner);
+                }
             }
             return new AutoCloseable() {
                 @Override
@@ -507,6 +520,18 @@ final class FakeHookContext implements AgentContext {
             reprobe(ctx);
         }
 
+        /** Runs the probes {@link #deferLateProbes} held back, in the order of their declarations (the worker). */
+        void runDeferred(FakeHookContext ctx) {
+            List<String> ids;
+            synchronized (this) {
+                ids = new ArrayList<String>(deferred);
+                deferred.clear();
+            }
+            for (String id : ids) {
+                probeOne(id, ctx);
+            }
+        }
+
         /** {@code agent.capabilities {reprobe: true}}. */
         void reprobe(FakeHookContext ctx) {
             List<String> ids;
@@ -545,6 +570,7 @@ final class FakeHookContext implements AgentContext {
             map.clear();
             probes.clear();
             pending.clear();
+            deferred.clear();
         }
     }
 

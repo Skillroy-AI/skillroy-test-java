@@ -22,6 +22,7 @@ import ai.skillroy.testjava.fixture.hooks.Capturing;
 import ai.skillroy.testjava.fixture.hooks.ChildFirstLoader;
 import ai.skillroy.testjava.fixture.hooks.DepositRule;
 import ai.skillroy.testjava.fixture.hooks.Returns;
+import ai.skillroy.testjava.protocol.Capability;
 import ai.skillroy.testjava.protocol.CapabilityState;
 import ai.skillroy.testjava.protocol.ErrorCodes;
 import ai.skillroy.testjava.protocol.Event;
@@ -198,6 +199,31 @@ class InstallTest {
         assertTrue(harness.engine().ledger.isEmpty());
         assertEquals(null, ((Map<?, ?>) result.get("catalogue")).get("installedAt"), "no catalogue recorded");
         assertTrue(harness.ctx.events.topic(Topics.HOOKS_INSTALLED).size() <= 1);
+    }
+
+    /**
+     * phase6-contracts.md 4.6, as built in Phase 7 (FX, D-FX-1): {@code hook.install} answers after every declared
+     * {@code hook.<id>} holds its health state, also while the core has not yet run the probe it posted to a worker
+     * for the late declaration; the read that follows the answer (a run's step 0b) never sees "not probed yet". The
+     * worker's probe, when it runs, answers the same. Fails without the first answer set at declaration.
+     */
+    @Test
+    void theAnswerComesAfterEveryDeclaredHookHoldsItsHealthState() throws Exception {
+        harness = new Harness();
+        harness.ctx.capabilities.deferLateProbes = true;
+        Map<String, Object> result = harness.install("toys", spec("deposit.computed", HookMode.OBSERVE,
+                DepositRule.class, "depositFor"), spec("deposit.waived", HookMode.OBSERVE, DepositRule.class,
+                "waives"));
+        for (String id : Arrays.asList("hook.deposit.computed", "hook.deposit.waived")) {
+            Capability declared = harness.ctx.capabilities.get(id);
+            assertEquals(new Capability(id, CapabilityState.OK, null, "advice"), declared, result + " / " + declared);
+            assertFalse(harness.ctx.capabilities.isPending(id), id);
+        }
+        harness.ctx.capabilities.runDeferred(harness.ctx);
+        for (String id : Arrays.asList("hook.deposit.computed", "hook.deposit.waived")) {
+            assertEquals(new Capability(id, CapabilityState.OK, null, "advice"), harness.ctx.capabilities.get(id),
+                    "the worker's probe answers the same");
+        }
     }
 
     @Test
