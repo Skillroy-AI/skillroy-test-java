@@ -20,6 +20,7 @@ import ai.skillroy.testjava.agent.api.AgentContext;
 import ai.skillroy.testjava.agent.api.AgentModule;
 import ai.skillroy.testjava.agent.api.Primitive;
 import ai.skillroy.testjava.agent.api.ThreadPolicy;
+import ai.skillroy.testjava.agent.api.spi.SurfaceSource;
 import ai.skillroy.testjava.agent.api.spi.web.WebEngineAdapter;
 import ai.skillroy.testjava.agent.web.jcef.JcefAdapter;
 import ai.skillroy.testjava.agent.web.jxbrowser.JxBrowserAdapter;
@@ -46,7 +47,9 @@ import java.util.concurrent.atomic.AtomicLong;
  *
  * <p><b>Inert until needed.</b> {@link #install} registers the primitives and sets every capability
  * UNAVAILABLE("no embedded browser technology found"); it constructs the two built-in adapters without probing them,
- * touches no AWT and no vendor class, registers nothing with the host and starts no thread. A target without an
+ * registers the module's {@code SurfaceSource} (phase7-contracts.md 4.8: the browsers of the index as {@code WEB}
+ * surfaces of the Swing capture, answered from the index), touches no AWT and no vendor class, registers nothing with
+ * the host and starts no thread. A target without an
  * embedded browser therefore sees little of the module: {@link #onTargetReady} probes the adapters (answering "not
  * present" without loading a class), finds no adapter present and reads nothing else (no EDT read, no thread); later
  * {@code window.opened} events cost it one short task on an agent worker each (coalesced) that finds no adapter to
@@ -104,6 +107,8 @@ public final class WebModule implements AgentModule {
     private Taps taps;
     private WebCapabilities capabilities;
     private AutoCloseable windowSubscription;
+    /** The registration of the module's {@link SurfaceSource} (phase7-contracts.md 4.8), withdrawn at uninstall. */
+    private AutoCloseable surfaceRegistration;
     /**
      * When the re-probe worker that is queued or running was queued, or began its current round ({@link Pace#nanoTime},
      * never 0), or 0 when there is none.
@@ -191,10 +196,16 @@ public final class WebModule implements AgentModule {
         });
         capabilities.installDefaults();
         Selection selection = new Selection(context, index, walk);
-        WebPrimitives primitives = new WebPrimitives(context, index, selection, bridge, taps, secrets, capabilities);
+        WebPrimitives primitives = new WebPrimitives(context, index, selection, bridge, taps, secrets, capabilities,
+                walk);
         for (Primitive p : primitives.all()) {
             context.primitives().register(p);
             registered.add(p.spec().name());
+        }
+        try {
+            surfaceRegistration = context.spi().register(SurfaceSource.class, new WebSurfaces(index));
+        } catch (RuntimeException e) {
+            context.log().warn("web: the browser surfaces could not be registered for the Swing capture: " + e);
         }
         context.log().info("web: installed " + registered.size() + " primitives; adapters "
                 + adapterIds(builtIns) + " constructed, not probed");
@@ -381,6 +392,8 @@ public final class WebModule implements AgentModule {
         }
         closeQuietly(windowSubscription);
         windowSubscription = null;
+        closeQuietly(surfaceRegistration);
+        surfaceRegistration = null;
         // First what could start new work against the adapters: a re-probe or a rebuild in flight would otherwise
         // subscribe a browser of an adapter detached below (and so revive it).
         try {

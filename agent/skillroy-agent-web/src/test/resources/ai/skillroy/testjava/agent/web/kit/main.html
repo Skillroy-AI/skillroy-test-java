@@ -21,6 +21,7 @@
 <style>
 html, body { margin: 0; padding: 0; background: rgb(32, 96, 160); color: rgb(250, 250, 250); font: 16px sans-serif; }
 .block { width: 120px; height: 60px; margin: 24px; background: rgb(240, 200, 40); }
+#count { margin: 0 24px; width: 96px; height: 32px; }
 </style>
 <script>
 document.documentElement.setAttribute('data-init-at-parse', typeof window.__kitInit);
@@ -31,6 +32,19 @@ console.log('kit-console-marker');
 <h1>Kit main</h1>
 <div class="block"></div>
 <p id="status">ready</p>
+<button id="count" type="button">Count</button>
 <iframe name="inner" src="{{INNER}}" width="200" height="100"></iframe>
+<script>
+(function () {
+  var button = document.getElementById('count');
+  var seen = [];
+  ['pointerdown', 'mousedown', 'mouseup', 'click'].forEach(function (type) {
+    button.addEventListener(type, function (e) {
+      seen.push(type + ':' + e.isTrusted);
+      button.setAttribute('data-events', seen.join(','));
+    });
+  });
+})();
+</script>
 </body>
 </html>

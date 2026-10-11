@@ -26,7 +26,7 @@ import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 
-/** A fake Swing walk: the components a test lists, showing as the test says; counts the reads. */
+/** A fake Swing walk: the components a test lists, showing as the test says, their states; counts the reads. */
 final class FakeWalk implements SeedWalk {
 
     final List<Object> components = new CopyOnWriteArrayList<Object>();
@@ -43,6 +43,31 @@ final class FakeWalk implements SeedWalk {
             throw failure;
         }
         return new ArrayList<Object>(components);
+    }
+
+    /** The states {@link #state} answers, by component (identity); a component not listed is 800 x 600, unblocked. */
+    final Map<Object, ComponentState> states = Collections.synchronizedMap(new IdentityHashMap<Object,
+            ComponentState>());
+    final AtomicInteger stateReads = new AtomicInteger();
+
+    /** A component's state as a test sets it. */
+    void state(Object component, int width, int height, double scale, Object blocker, String title) {
+        states.put(component, new ComponentState(showing.contains(component), width, height, scale, blocker, title));
+    }
+
+    @Override
+    public ComponentState state(Object component, long budgetMs) {
+        stateReads.incrementAndGet();
+        if (failure != null) {
+            throw failure;
+        }
+        ComponentState s = states.get(component);
+        if (s != null) {
+            return new ComponentState(showing.contains(component), s.width, s.height, s.scale, s.blocker,
+                    s.blockerTitle);
+        }
+        return component == null ? ComponentState.UNKNOWN : new ComponentState(showing.contains(component), 800, 600,
+                1.0, null, null);
     }
 
     @Override

@@ -16,10 +16,11 @@
 
 /**
  * The agent module {@code web} (phase4-contracts.md section 4): {@link ai.skillroy.testjava.agent.web.WebModule}, the
- * thirteen {@code web.*} primitives written once against the embedded-browser SPI
- * ({@code ai.skillroy.testjava.agent.api.spi.web}), the browser index, the {@code web.*} events, the page-event tap
- * and the capability cycle. The built-in adapters live in the sub-packages {@code jcef} and {@code jxbrowser}, the
- * descriptor-driven reflection plumbing in {@code reflect}. Java 8; no vendor artifact in any scope; no AWT class is
+ * fifteen {@code web.*} primitives (thirteen of Phase 4, {@code web.hitTest} and {@code web.pointer} of Phase 7)
+ * written once against the embedded-browser SPI ({@code ai.skillroy.testjava.agent.api.spi.web}), the browser index,
+ * the {@code web.*} events, the page-event tap, the capability cycle and the module's {@code SurfaceSource}. The
+ * built-in adapters live in the sub-packages {@code jcef} and {@code jxbrowser}, the descriptor-driven reflection
+ * plumbing in {@code reflect}. Java 8; no vendor artifact in any scope; no AWT class is
  * touched at install.
  */
 package ai.skillroy.testjava.agent.web;

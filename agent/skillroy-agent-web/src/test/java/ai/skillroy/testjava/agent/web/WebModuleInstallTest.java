@@ -51,9 +51,9 @@ class WebModuleInstallTest {
 
     private static final List<String> NAMES = Arrays.asList("web.ariaSnapshot", "web.bitmap", "web.browsers",
             "web.cdp.status", "web.dispatchEvent", "web.dom.click", "web.dom.fill", "web.dom.text", "web.evaluate",
-            "web.reload", "web.resize", "web.tap", "web.waitFlag");
+            "web.hitTest", "web.pointer", "web.reload", "web.resize", "web.tap", "web.waitFlag");
     private static final Set<String> MUTATING = new HashSet<String>(Arrays.asList("web.evaluate", "web.dom.click",
-            "web.dom.fill", "web.dispatchEvent", "web.tap", "web.resize", "web.reload"));
+            "web.dom.fill", "web.dispatchEvent", "web.tap", "web.resize", "web.reload", "web.pointer"));
     /** phase6-contracts.md 12.9, D156 (security fix S42): the primitives that evaluate a caller's expression. */
     private static final Set<String> SCRIPT = new HashSet<String>(Arrays.asList("web.evaluate", "web.waitFlag"));
 
@@ -78,11 +78,10 @@ class WebModuleInstallTest {
             module.install(ctx);
             Map<String, String> expected = new LinkedHashMap<String, String>();
             for (String id : new String[] {"web.adapter.jcef", "web.adapter.jxbrowser", "web.browsers",
-                    "web.evaluate", "web.events", "web.initScript", "web.resize", "web.bitmap", "web.cdp"}) {
+                    "web.evaluate", "web.events", "web.initScript", "web.resize", "web.bitmap", "web.cdp",
+                    "web.hittest", "web.pointer"}) {
                 expected.put(id, "no embedded browser technology found");
             }
-            expected.put("web.hittest", "reserved for the vision bolt-on");
-            expected.put("web.pointer", "reserved for the vision bolt-on");
             for (Map.Entry<String, String> e : expected.entrySet()) {
                 Capability c = ctx.capabilities.get(e.getKey());
                 assertEquals(CapabilityState.UNAVAILABLE, c.state(), e.getKey());
@@ -96,7 +95,7 @@ class WebModuleInstallTest {
     }
 
     @Test
-    void theThirteenPrimitivesHaveTheContractsThreadTimeoutCapabilityAndFlags() throws Exception {
+    void theFifteenPrimitivesHaveTheContractsThreadTimeoutCapabilityAndFlags() throws Exception {
         FakeAgentContext ctx = new FakeAgentContext();
         WebModule module = new WebModule();
         try {
@@ -113,7 +112,7 @@ class WebModuleInstallTest {
                         ? 5000 : 10000;
                 assertEquals(timeout, spec.timeoutMs(), spec.name());
             }
-            assertEquals(NAMES, names, "the thirteen primitives of the contract's table, in name order");
+            assertEquals(NAMES, names, "the thirteen primitives of the P4 table and the two of P7, in name order");
             Map<String, String> caps = new LinkedHashMap<String, String>();
             for (PrimitiveSpec spec : ctx.primitives.list()) {
                 caps.put(spec.name(), spec.capabilityId());
@@ -124,6 +123,8 @@ class WebModuleInstallTest {
             assertEquals("web.events", caps.get("web.tap"));
             assertEquals("web.resize", caps.get("web.resize"));
             assertEquals("web.bitmap", caps.get("web.bitmap"));
+            assertEquals("web.hittest", caps.get("web.hitTest"));
+            assertEquals("web.pointer", caps.get("web.pointer"));
             for (String n : new String[] {"web.evaluate", "web.ariaSnapshot", "web.dom.text", "web.dom.click",
                     "web.dom.fill", "web.dispatchEvent", "web.waitFlag"}) {
                 assertEquals("web.evaluate", caps.get(n), n);
@@ -145,7 +146,9 @@ class WebModuleInstallTest {
         AgentModule module = (AgentModule) rec.loadClass(WebModule.class.getName()).getConstructor().newInstance();
         try {
             module.install(ctx);
-            assertEquals(13, ctx.primitives.list().size());
+            assertEquals(15, ctx.primitives.list().size());
+            assertEquals(1, ctx.spi.all(ai.skillroy.testjava.agent.api.spi.SurfaceSource.class).size(),
+                    "the SurfaceSource is registered at install (Phase 7, 4.8)");
             List<String> forbidden = new ArrayList<String>();
             for (String name : rec.requested()) {
                 if (name.startsWith("java.awt.") || name.startsWith("javax.swing.") || name.startsWith("sun.awt.")
@@ -181,7 +184,8 @@ class WebModuleInstallTest {
                 assertEquals("no embedded browser technology found", ctx.capabilities.get(id).reason(), id);
             }
             assertEquals("no remote-debugging endpoint configured", ctx.capabilities.get("web.cdp").reason());
-            assertEquals("reserved for the vision bolt-on", ctx.capabilities.get("web.hittest").reason());
+            assertEquals("no embedded browser technology found", ctx.capabilities.get("web.hittest").reason());
+            assertEquals("no embedded browser technology found", ctx.capabilities.get("web.pointer").reason());
             assertEquals(0, ctx.threads.edtCalls.get(), "no EDT call in a target without a browser");
             assertEquals(new ArrayList<String>(), started(threadsBefore), "no thread of the module");
         } finally {

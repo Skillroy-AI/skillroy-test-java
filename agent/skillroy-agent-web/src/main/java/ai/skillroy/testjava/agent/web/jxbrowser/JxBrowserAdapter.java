@@ -58,8 +58,9 @@ import java.util.regex.Pattern;
  * lines share (browser-spi F21), named by the descriptor {@value #DESCRIPTOR} and resolved per vendor class loader
  * (a seed from another loader than the host's is resolved in its own). No vendor artifact is a dependency; no vendor
  * type appears in a signature; {@code EngineOptions.licenseKey()} is never read; no {@code Browser.set(...)} callback
- * is taken unless the agent option {@code web.jxbrowser.chainInjectJs=true} asks for it; {@code dispatch(...)} is not
- * used (input is the reserved {@code INPUT}).
+ * is taken unless the agent option {@code web.jxbrowser.chainInjectJs=true} asks for it; {@code dispatch(...)} is used
+ * for pointer input only, through the descriptor's {@code INPUT} roles, unverified against the vendor's library
+ * (Phase 7; the strategy then ends in {@link #INPUT_UNVERIFIED}).
  *
  * <p><b>Probe.</b> The gate class {@code com.teamdev.jxbrowser.engine.Engine} must already be loaded by the host
  * ({@link LoadedClasses}, asked without loading it; a gate the host has not loaded counts as absent and nothing is
@@ -88,6 +89,12 @@ public final class JxBrowserAdapter implements WebEngineAdapter {
 
     /** The adapter id. */
     public static final String ID = "jxbrowser";
+    /**
+     * Appended to the strategy when the descriptor's {@code INPUT} roles resolve (phase7-contracts.md section 4.5, W2):
+     * the pointer input is built from the descriptor and unverified against the vendor's library, and whether its
+     * {@code Point} is in CSS or device pixels on a HiDPI view is not known.
+     */
+    public static final String INPUT_UNVERIFIED = ", input unverified (HiDPI: CSS or device pixels unknown)";
     /** The descriptor resource. */
     public static final String DESCRIPTOR = "ai/skillroy/testjava/agent/web/jxbrowser.json";
     static final String NOT_PRESENT = "not present";
@@ -236,7 +243,7 @@ public final class JxBrowserAdapter implements WebEngineAdapter {
         }
         hostApi = r;
         threads.contextLoader(hostLoader);
-        return ProbeResult.ok(strategy(d, r));
+        return ProbeResult.ok(strategy(d, r) + (r.complete("INPUT") ? INPUT_UNVERIFIED : ""));
     }
 
     private String strategy(Descriptor d, ResolvedApi r) {

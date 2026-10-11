@@ -19,7 +19,8 @@ package ai.skillroy.testjava.agent.api.spi.web;
 /**
  * The optional operations of a {@link WebBrowser} handle, as {@link WebBrowser#capabilities()} reports them. A missing
  * flag is a missing capability, not an error: the primitive that needs it answers {@code CAPABILITY_UNAVAILABLE} with
- * the reason. {@link #INPUT} and {@link #RAW_PROTOCOL} are reserved: no method uses them and no adapter reports them.
+ * the reason. {@link #RAW_PROTOCOL} is reserved: no method uses it and no adapter reports it. The order of the
+ * constants is frozen (the adapter contract kit and the SPI shape test rely on it).
  */
 public enum WebCapability {
 
@@ -60,8 +61,9 @@ public enum WebCapability {
     CDP_TARGET_ID,
 
     /**
-     * Reserved for synthetic pointer and key input into a page (Phase 7, the vision bolt-on). No method uses it and no
-     * adapter reports it; the DOM primitives click with {@code el.click()} instead.
+     * Synthetic pointer input into a page: {@link WebBrowser#dispatchPointer} ({@code web.pointer}; phase7-contracts.md
+     * section 4.1, amendment A66). Key input ({@code Input.dispatchKeyEvent}, {@code Input.insertText}) is a later use
+     * of the same flag; the DOM primitives still click with {@code el.click()}.
      */
     INPUT,
 

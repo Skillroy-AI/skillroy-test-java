@@ -39,10 +39,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /** What the CDP path serves (phase4-contracts.md section 5.2) and how the executor finds it (D49). */
 class CdpWebPathServesTest {
 
-    /** Every primitive of phase4-contracts.md section 4.2. */
+    /** Every primitive of phase4-contracts.md section 4.2, and the two of phase7-contracts.md 4.2 and 4.3. */
     private static final List<String> WEB_PRIMITIVES = List.of("web.browsers", "web.evaluate", "web.ariaSnapshot",
             "web.dom.text", "web.dom.click", "web.dom.fill", "web.dispatchEvent", "web.tap", "web.waitFlag",
-            "web.resize", "web.bitmap", "web.reload", "web.cdp.status");
+            "web.resize", "web.bitmap", "web.reload", "web.cdp.status", "web.hitTest", "web.pointer");
 
     @Test
     void servesEveryWebPrimitiveButTheAgentsOwnFacts() {
@@ -51,17 +51,17 @@ class CdpWebPathServesTest {
         for (String primitive : WEB_PRIMITIVES) {
             assertEquals(!agentOnly.contains(primitive), path.serves(primitive), primitive);
         }
-        for (String other : Arrays.asList("swing.click", "web.navigate", "web.hitTest", "web.pointer", "web.close",
-                "web.protocol.send", "", null)) {
+        for (String other : Arrays.asList("swing.click", "web.navigate", "web.close", "web.protocol.send",
+                "swing.pointer", "swing.hitTest", "", null)) {
             assertFalse(path.serves(other), String.valueOf(other));
         }
         assertEquals("cdp", path.id());
     }
 
     @Test
-    void theMutatingPrimitivesAreThoseOfD51() {
+    void theMutatingPrimitivesAreThoseOfD51AndThePointer() {
         assertEquals(Set.of("web.evaluate", "web.dom.click", "web.dom.fill", "web.dispatchEvent", "web.tap",
-                "web.resize"), CdpWebPath.MUTATING);
+                "web.resize", "web.pointer"), CdpWebPath.MUTATING);
         assertTrue(CdpWebPath.SERVED.containsAll(CdpWebPath.MUTATING));
     }
 

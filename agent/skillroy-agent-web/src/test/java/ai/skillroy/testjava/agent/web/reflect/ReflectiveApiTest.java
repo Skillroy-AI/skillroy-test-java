@@ -220,7 +220,8 @@ class ReflectiveApiTest {
                 assertFalse("licenseKey".equals(r.method()), "no role reads a licence key");
                 assertFalse("getInstance".equals(r.method()), "no role creates the technology");
                 assertFalse("newInstance".equals(r.method()));
-                assertFalse("dispatch".equals(r.method()), "input stays reserved");
+                // Phase 7 (A66): input is built, through the jxbrowser descriptor's INPUT group only.
+                assertTrue(!"dispatch".equals(r.method()) || "INPUT".equals(r.group()), role + ": input is INPUT's");
                 assertFalse("close".equals(r.method()), "nothing of the application is closed");
             }
         }

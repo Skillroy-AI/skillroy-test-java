@@ -87,7 +87,25 @@ import java.util.Set;
  *     {@code {tag, type, id?, typed}} and {@code {text, truncated}}.</li>
  *   <li>{@code defer(value)} and {@code collect(id)}: see {@link #deferExpression} and {@link #collectExpression}.
  *     </li>
+ *   <li>{@code hit(x, y)} (version 2, phase7-contracts.md section 4.2): the element drawn at a point of the document's
+ *     viewport ({@code document.elementFromPoint}, then through open shadow roots), {@code {element: {role, name,
+ *     tag, id?, rect: {x, y, w, h}}, locators: [{role, name} | {selector}], unique, child?}}: the aria walker's role
+ *     and name (each name and id cut at 1000), the client rectangle in whole CSS pixels, and the locators that the
+ *     library's {@code find} answers with exactly this element, {@code {role, name}} first (never for a generic or
+ *     presentational role or an empty name), then {@code {selector}} (an id selector, else the shortest path of
+ *     {@code tag.class:nth-of-type(n)} steps up from the element, at most 8, anchored at an ancestor's unique id when
+ *     one is met); {@code unique} is true when there is at least one. For a frame element {@code child: {x, y, name,
+ *     url}} is the point inside the frame's border and padding, by which the caller evaluates {@code hit} in the
+ *     child frame (the caller descends; the library never reaches into another document). A point
+ *     outside the viewport, or one that hits nothing, is {@code NOT_FOUND {reason: "outside", x, y}}.</li>
  * </ul>
+ *
+ * <p><b>Versions</b> (D300): the library's {@code version} is {@value #VERSION}. A document whose slot already holds a
+ * library is never given a new one (a replacement would lose a tap's buffer); one whose library is older has the
+ * functions it lacks ({@code hit} for version 1) installed into it, once per document, and its version raised where it
+ * can be (a version-1 slot's {@code version} is not configurable and stays "1"; the functions mark the upgrade). The
+ * install text then evaluates to {@code "upgraded"}; a call of a function the slot still lacks (a page that froze its
+ * slot) fails as a {@code SCRIPT_ERROR} whose message names the function.
  *
  * <p>Stateless apart from the cached source and hash; safe to call from any thread.
  */
@@ -108,7 +126,10 @@ public final class WebLib {
     /** The library's functions, the names {@link #callExpression} accepts. */
     public static final Set<String> FUNCTIONS = Collections.unmodifiableSet(new LinkedHashSet<String>(Arrays.asList(
             "stringify", "aria", "find", "click", "fill", "text", "domClick", "domFill", "domText", "dispatch", "tap",
-            "drain", "defer", "collect")));
+            "drain", "defer", "collect", "hit")));
+
+    /** The library's {@code version} (phase7-contracts.md section 4.6: 2 since Phase 7, which added {@code hit}). */
+    public static final String VERSION = "2";
 
     /** {@code stringify} cuts its inner JSON text at this many UTF-16 code units (1 MiB). */
     public static final int MAX_JSON_CHARS = 1 << 20;
@@ -249,9 +270,10 @@ public final class WebLib {
     }
 
     /**
-     * An expression that installs the library when it is absent and evaluates to {@code "installed"} or
-     * {@code "present"}. Idempotent: evaluating it again changes nothing, an armed tap included. The source is one
-     * function expression invoked in place, so the parenthesised text is an expression wherever it is embedded.
+     * An expression that installs the library when it is absent and evaluates to {@code "installed"}, {@code "present"}
+     * or, for an older library in the slot, {@code "upgraded"} (see the class comment). Idempotent: evaluating it again
+     * changes nothing, an armed tap included. The source is one function expression invoked in place, so the
+     * parenthesised text is an expression wherever it is embedded.
      */
     public static String installExpression() {
         return "(" + source() + "\n)";
@@ -673,6 +695,10 @@ public final class WebLib {
     }
 
     private static String notFoundMessage(Map<String, Object> data) {
+        if ("outside".equals(data.get("reason"))) {
+            return "the point " + Json.write(data.get("x")) + "," + Json.write(data.get("y")) + " lies outside the"
+                    + " viewport or hits no element";
+        }
         StringBuilder sb = new StringBuilder("no element matches");
         if (data.containsKey("selector")) {
             sb.append(" the selector ").append(Json.write(data.get("selector")));

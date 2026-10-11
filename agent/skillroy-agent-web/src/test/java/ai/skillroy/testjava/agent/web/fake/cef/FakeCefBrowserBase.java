@@ -92,6 +92,8 @@ abstract class FakeCefBrowserBase implements FakeCefBrowser {
     private final FakeDevToolsClient rawSession;
     private final AtomicInteger evaluations = new AtomicInteger();
     private final AtomicInteger scriptAdditions = new AtomicInteger();
+    /** The {@code Input.dispatchMouseEvent} calls received (Phase 7). */
+    private final AtomicInteger inputs = new AtomicInteger();
     private final AtomicInteger scriptRemovals = new AtomicInteger();
     private final AtomicInteger runtimeEnables = new AtomicInteger();
     private final AtomicInteger runtimeDisables = new AtomicInteger();
@@ -461,6 +463,11 @@ abstract class FakeCefBrowserBase implements FakeCefBrowser {
         return scriptAdditions.get();
     }
 
+    /** How many {@code Input.dispatchMouseEvent} calls the browser received (Phase 7; for tests). */
+    public int inputs() {
+        return inputs.get();
+    }
+
     /** How many {@code Runtime.enable} calls the page has carried out (P2-L4-S1). */
     public int runtimeEnables() {
         return runtimeEnables.get();
@@ -578,9 +585,22 @@ abstract class FakeCefBrowserBase implements FakeCefBrowser {
         } else if ("Page.reload".equals(method)) {
             reload();
             FakeDevToolsClient.complete(out, result);
+        } else if ("Input.dispatchMouseEvent".equals(method)) {
+            inputs.incrementAndGet();
+            FakeDocument d = document;
+            if (d != null) {
+                d.pointer(String.valueOf(params.get("type")), number(params.get("x")), number(params.get("y")),
+                        String.valueOf(params.get("button")), number(params.get("clickCount")),
+                        number(params.get("modifiers")), number(params.get("deltaX")), number(params.get("deltaY")));
+            }
+            FakeDevToolsClient.complete(out, result);
         } else {
             FakeDevToolsClient.fail(out, "'" + method + "' wasn't found");
         }
+    }
+
+    private static long number(Object v) {
+        return v instanceof Number ? ((Number) v).longValue() : 0;
     }
 
     private void evaluate(final FakeDevToolsClient c, Map<String, Object> params,

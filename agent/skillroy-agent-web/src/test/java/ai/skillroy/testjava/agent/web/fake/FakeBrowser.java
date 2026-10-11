@@ -34,8 +34,8 @@ import java.util.concurrent.TimeUnit;
  * The neutral fake of the vendor's browser, with the F21 member shapes the {@code jxbrowser} adapter uses:
  * {@code url()}, {@code title()}, {@code isClosed()}, {@code engine()}, {@code mainFrame()}, {@code frames()},
  * {@code navigation()}, {@code on(Class, Observer)}, {@code size()}, {@code resize(int, int)}, {@code bitmap()},
- * {@code devTools()}, {@code set(Class, callback)}, {@code get(Class)}, {@code remove(Class)}, and a
- * {@code dispatch(Object)} that records a violation (input is reserved). The application's own actions are
+ * {@code devTools()}, {@code set(Class, callback)}, {@code get(Class)}, {@code remove(Class)}, and
+ * {@code dispatch(Object)}, which hands an input event to the page (Phase 7). The application's own actions are
  * {@link #loadHtml}, {@link #close} and {@link #fire}.
  *
  * <p>A load replaces the document: the main frame stays, the child frames are new (the old ones are closed); a
@@ -59,6 +59,7 @@ public final class FakeBrowser {
     private final List<Object[]> observers = new CopyOnWriteArrayList<Object[]>();
     private final Map<Class<?>, Object> callbacks = Collections.synchronizedMap(new LinkedHashMap<Class<?>, Object>());
     private final List<String> setCalls = Collections.synchronizedList(new ArrayList<String>());
+    private final List<Object> dispatched = new CopyOnWriteArrayList<Object>();
     private volatile boolean closed;
     private volatile int width = 800;
     private volatile int height = 600;
@@ -229,10 +230,42 @@ public final class FakeBrowser {
         }
     }
 
-    /** Input is reserved ({@code INPUT}): an adapter never dispatches. */
+    /**
+     * The vendor's input (Phase 7, {@code INPUT}): the page receives the event (a {@link FakeMouseMoved},
+     * {@link FakeMousePressed}, {@link FakeMouseReleased} or {@link FakeMouseWheel}); every event is also kept in
+     * {@link #dispatched()}. Anything else is refused as the vendor would refuse a wrong type.
+     */
     public void dispatch(Object event) {
-        engine.violations.add("dispatch(...) was used");
-        throw new AssertionError("an adapter dispatched input");
+        engine.violations.blockingCall("Browser.dispatch()");
+        dispatched.add(event);
+        FakeDocument d = document;
+        if (event instanceof FakeMouseMoved) {
+            FakePoint p = ((FakeMouseMoved) event).location;
+            pointer(d, "mouseMoved", p, "none", 0, 0, 0);
+        } else if (event instanceof FakeMousePressed) {
+            FakeMousePressed e = (FakeMousePressed) event;
+            pointer(d, "mousePressed", e.location, e.button.protocolName(), e.clickCount, 0, 0);
+        } else if (event instanceof FakeMouseReleased) {
+            FakeMouseReleased e = (FakeMouseReleased) event;
+            pointer(d, "mouseReleased", e.location, e.button.protocolName(), e.clickCount, 0, 0);
+        } else if (event instanceof FakeMouseWheel) {
+            FakeMouseWheel e = (FakeMouseWheel) event;
+            pointer(d, "mouseWheel", e.location, "none", 0, Math.round(e.deltaX), Math.round(e.deltaY));
+        } else {
+            throw new IllegalArgumentException("not an input event: " + event);
+        }
+    }
+
+    private static void pointer(FakeDocument d, String type, FakePoint p, String button, int clickCount, long dx,
+                                long dy) {
+        if (d != null) {
+            d.pointer(type, p.x, p.y, button, clickCount, 0, dx, dy);
+        }
+    }
+
+    /** The input events dispatched so far (for tests). */
+    public List<Object> dispatched() {
+        return new ArrayList<Object>(dispatched);
     }
 
     // ------------------------------------------------------------------------------------------------ the app

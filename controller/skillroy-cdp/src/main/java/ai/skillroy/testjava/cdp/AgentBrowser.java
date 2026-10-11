@@ -23,7 +23,7 @@ import java.util.Map;
 
 /**
  * One entry of the agent's {@code web.browsers} value (phase4-contracts.md section 4.2), as far as the CDP path needs
- * it: the ref, the selection keys and the CDP target id.
+ * it: the ref, the selection keys, the CDP target id and (Phase 7) whether a modal dialog blocks the browser.
  *
  * @param ref the browser's ref
  * @param nativeId the technology's own id as text, or null
@@ -33,9 +33,17 @@ import java.util.Map;
  * @param visibleInSwing whether its component is showing
  * @param cdpTargetId the CDP target id, or null when the agent does not know it
  * @param tag the pack's tag of the browser, or null
+ * @param blocked whether the agent reported a modal dialog blocking the browser's window ({@code blockedBy}, Phase 7:
+ *     the CDP path then hands {@code web.pointer} to the agent, which answers {@code MODAL_OPEN})
  */
 record AgentBrowser(String ref, String nativeId, String url, String title, boolean closed, boolean visibleInSwing,
-                    String cdpTargetId, String tag) {
+                    String cdpTargetId, String tag, boolean blocked) {
+
+    /** An entry the agent reported no modal dialog for. */
+    AgentBrowser(String ref, String nativeId, String url, String title, boolean closed, boolean visibleInSwing,
+                 String cdpTargetId, String tag) {
+        this(ref, nativeId, url, title, closed, visibleInSwing, cdpTargetId, tag, false);
+    }
 
     /** The entries of a {@code web.browsers} value ({@code {browsers: [...]}}); entries without a ref are skipped. */
     static List<AgentBrowser> parse(Object value) {
@@ -49,7 +57,8 @@ record AgentBrowser(String ref, String nativeId, String url, String title, boole
             }
             out.add(new AgentBrowser(ref, text(b.get("nativeId")), b.get("url") == null ? "" : String.valueOf(
                     b.get("url")), text(b.get("title")), Boolean.TRUE.equals(b.get("closed")),
-                    Boolean.TRUE.equals(b.get("visibleInSwing")), text(b.get("cdpTargetId")), text(b.get("tag"))));
+                    Boolean.TRUE.equals(b.get("visibleInSwing")), text(b.get("cdpTargetId")), text(b.get("tag")),
+                    b.get("blockedBy") != null));
         }
         return Collections.unmodifiableList(out);
     }

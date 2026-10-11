@@ -255,6 +255,121 @@
       "method": "proceed",
       "static": true,
       "for": "chain"
+    },
+    "browser.dispatch": {
+      "class": "ai.skillroy.testjava.agent.web.fake.FakeBrowser",
+      "method": "dispatch",
+      "arity": 1,
+      "for": "INPUT"
+    },
+    "point.of": {
+      "class": "ai.skillroy.testjava.agent.web.fake.FakePoint",
+      "method": "of",
+      "params": ["int", "int"],
+      "static": true,
+      "for": "INPUT"
+    },
+    "button.primary": {
+      "class": "ai.skillroy.testjava.agent.web.fake.FakeMouseButton",
+      "field": "PRIMARY",
+      "static": true,
+      "for": "INPUT"
+    },
+    "button.middle": {
+      "class": "ai.skillroy.testjava.agent.web.fake.FakeMouseButton",
+      "field": "MIDDLE",
+      "static": true,
+      "for": "INPUT"
+    },
+    "button.secondary": {
+      "class": "ai.skillroy.testjava.agent.web.fake.FakeMouseButton",
+      "field": "SECONDARY",
+      "static": true,
+      "for": "INPUT"
+    },
+    "mousePressed.newBuilder": {
+      "class": "ai.skillroy.testjava.agent.web.fake.FakeMousePressed",
+      "method": "newBuilder",
+      "params": ["ai.skillroy.testjava.agent.web.fake.FakePoint"],
+      "static": true,
+      "for": "INPUT"
+    },
+    "mousePressed.button": {
+      "class": "ai.skillroy.testjava.agent.web.fake.FakeMousePressed$Builder",
+      "method": "button",
+      "arity": 1,
+      "for": "INPUT"
+    },
+    "mousePressed.clickCount": {
+      "class": "ai.skillroy.testjava.agent.web.fake.FakeMousePressed$Builder",
+      "method": "clickCount",
+      "arity": 1,
+      "for": "INPUT"
+    },
+    "mousePressed.build": {
+      "class": "ai.skillroy.testjava.agent.web.fake.FakeMousePressed$Builder",
+      "method": "build",
+      "for": "INPUT"
+    },
+    "mouseReleased.newBuilder": {
+      "class": "ai.skillroy.testjava.agent.web.fake.FakeMouseReleased",
+      "method": "newBuilder",
+      "params": ["ai.skillroy.testjava.agent.web.fake.FakePoint"],
+      "static": true,
+      "for": "INPUT"
+    },
+    "mouseReleased.button": {
+      "class": "ai.skillroy.testjava.agent.web.fake.FakeMouseReleased$Builder",
+      "method": "button",
+      "arity": 1,
+      "for": "INPUT"
+    },
+    "mouseReleased.clickCount": {
+      "class": "ai.skillroy.testjava.agent.web.fake.FakeMouseReleased$Builder",
+      "method": "clickCount",
+      "arity": 1,
+      "for": "INPUT"
+    },
+    "mouseReleased.build": {
+      "class": "ai.skillroy.testjava.agent.web.fake.FakeMouseReleased$Builder",
+      "method": "build",
+      "for": "INPUT"
+    },
+    "mouseMoved.newBuilder": {
+      "class": "ai.skillroy.testjava.agent.web.fake.FakeMouseMoved",
+      "method": "newBuilder",
+      "params": ["ai.skillroy.testjava.agent.web.fake.FakePoint"],
+      "static": true,
+      "for": "INPUT"
+    },
+    "mouseMoved.build": {
+      "class": "ai.skillroy.testjava.agent.web.fake.FakeMouseMoved$Builder",
+      "method": "build",
+      "for": "INPUT"
+    },
+    "mouseWheel.newBuilder": {
+      "class": "ai.skillroy.testjava.agent.web.fake.FakeMouseWheel",
+      "method": "newBuilder",
+      "params": ["ai.skillroy.testjava.agent.web.fake.FakePoint"],
+      "static": true,
+      "for": "INPUT"
+    },
+    "mouseWheel.deltaX": {
+      "class": "ai.skillroy.testjava.agent.web.fake.FakeMouseWheel$Builder",
+      "method": "deltaX",
+      "arity": 1,
+      "for": "INPUT"
+    },
+    "mouseWheel.deltaY": {
+      "class": "ai.skillroy.testjava.agent.web.fake.FakeMouseWheel$Builder",
+      "method": "deltaY",
+      "arity": 1,
+      "for": "INPUT"
+    },
+    "mouseWheel.build": {
+      "class": "ai.skillroy.testjava.agent.web.fake.FakeMouseWheel$Builder",
+      "method": "build",
+      "for": "INPUT"
     }
   }
 }

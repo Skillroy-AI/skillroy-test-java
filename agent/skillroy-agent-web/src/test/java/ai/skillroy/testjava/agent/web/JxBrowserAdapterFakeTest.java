@@ -16,6 +16,12 @@
 
 package ai.skillroy.testjava.agent.web;
 
+import ai.skillroy.testjava.agent.api.spi.web.WebPointerEvent;
+import ai.skillroy.testjava.agent.web.fake.FakeMouseMoved;
+import ai.skillroy.testjava.agent.web.fake.FakeMousePressed;
+import ai.skillroy.testjava.agent.web.fake.FakeMouseReleased;
+import ai.skillroy.testjava.agent.web.fake.FakeMouseWheel;
+import java.util.EnumSet;
 import ai.skillroy.testjava.agent.api.ProbeResult;
 import ai.skillroy.testjava.agent.api.spi.web.BitmapSource;
 import ai.skillroy.testjava.agent.api.spi.web.CdpEndpoint;
@@ -175,7 +181,8 @@ class JxBrowserAdapterFakeTest {
             JxBrowserAdapter adapter = new JxBrowserAdapter(FakeJxFixture.DESCRIPTOR, null,
                     JxBrowserAdapter.NO_OPTIONS);
             try {
-                assertEquals(ProbeResult.ok("jxbrowser (fake)"), adapter.probe(HOST));
+                assertEquals(ProbeResult.ok("jxbrowser (fake)" + JxBrowserAdapter.INPUT_UNVERIFIED),
+                        adapter.probe(HOST), "the INPUT roles resolve, so the strategy says input is unverified (4.5)");
                 assertTrue(adapter.browsers(Collections.emptyList()).isEmpty(), "seeds only");
                 assertEquals(ProbeResult.degraded("no seed: an engine without a view in a window is invisible"),
                         adapter.enumerationState());
@@ -444,6 +451,70 @@ class JxBrowserAdapterFakeTest {
                         .get("json"));
                 assertNotNull(h.cap("web.evaluate"));
             }
+        } finally {
+            engine.shutdown();
+        }
+    }
+
+    /**
+     * Phase 7 (4.5): with the descriptor's INPUT roles the handle has INPUT and builds the vendor's events
+     * ({@code MousePressed.newBuilder(Point.of(x, y)).button(..).clickCount(..).build()} and the others), handed to
+     * {@code Browser.dispatch} off the EDT; modifier keys are refused (not mapped); a line without the roles has no
+     * INPUT, so {@code web.pointer} is unavailable for it.
+     */
+    @Test
+    void theInputRolesBuildTheVendorsEventsAndALineWithoutThemHasNoInput() throws Exception {
+        FakeEngine engine = FakeEngine.newInstance(null, Paths.get("input"), FakeRenderingMode.OFF_SCREEN);
+        try {
+            FakeBrowser b = browser(engine);
+            b.loadAndWait(ai.skillroy.testjava.agent.web.kit.KitPages.main());
+            JxBrowserAdapter adapter = new JxBrowserAdapter(FakeJxFixture.DESCRIPTOR, null,
+                    JxBrowserAdapter.NO_OPTIONS);
+            try {
+                assertEquals(CapabilityState.OK, adapter.probe(HOST).state());
+                WebBrowser h = adapter.browsers(Collections.singletonList(b)).get(0);
+                assertTrue(h.capabilities().contains(WebCapability.INPUT), String.valueOf(h.capabilities()));
+                for (WebPointerEvent.Action a : new WebPointerEvent.Action[] {WebPointerEvent.Action.MOVE,
+                        WebPointerEvent.Action.PRESS, WebPointerEvent.Action.RELEASE}) {
+                    h.dispatchPointer(WebPointerEvent.of(a, 72, 216).build()).get(10, TimeUnit.SECONDS);
+                }
+                h.dispatchPointer(WebPointerEvent.of(WebPointerEvent.Action.PRESS, 3, 4)
+                        .button(WebPointerEvent.Button.RIGHT).clickCount(2).build()).get(10, TimeUnit.SECONDS);
+                h.dispatchPointer(WebPointerEvent.of(WebPointerEvent.Action.WHEEL, 3, 4).delta(0, 120).build())
+                        .get(10, TimeUnit.SECONDS);
+                List<Object> sent = b.dispatched();
+                assertEquals(5, sent.size());
+                assertTrue(sent.get(0) instanceof FakeMouseMoved && sent.get(1) instanceof FakeMousePressed
+                        && sent.get(2) instanceof FakeMouseReleased && sent.get(4) instanceof FakeMouseWheel,
+                        String.valueOf(sent));
+                List<Map<String, Object>> page = b.document().pointerEvents();
+                assertEquals("right", page.get(3).get("button"));
+                assertEquals(Long.valueOf(2), page.get(3).get("clickCount"));
+                assertEquals(Long.valueOf(120), page.get(4).get("deltaY"), "an int widened to the vendor's float");
+                assertEquals("\"pointerdown:true,mousedown:true,mouseup:true,click:true\"",
+                        eval(h, KitScripts.POINTER_EVENTS));
+                Throwable modifiers = assertThrows(ExecutionException.class, () -> h.dispatchPointer(WebPointerEvent
+                        .of(WebPointerEvent.Action.MOVE, 1, 1).modifiers(EnumSet.of(WebPointerEvent.Modifier.ALT))
+                        .build()).get(10, TimeUnit.SECONDS)).getCause();
+                assertTrue(modifiers instanceof UnsupportedOperationException, String.valueOf(modifiers));
+                assertEquals(5, b.dispatched().size(), "nothing dispatched for a refused event");
+            } finally {
+                adapter.detach();
+            }
+            JxBrowserAdapter without = new JxBrowserAdapter(
+                    "ai/skillroy/testjava/agent/web/fake/fake-jxbrowser-noinput.json", null,
+                    JxBrowserAdapter.NO_OPTIONS);
+            try {
+                assertEquals(ProbeResult.ok("jxbrowser (fake)"), without.probe(HOST), "no INPUT, no note");
+                WebBrowser h = without.browsers(Collections.singletonList(b)).get(0);
+                assertFalse(h.capabilities().contains(WebCapability.INPUT));
+                Throwable refused = assertThrows(ExecutionException.class, () -> h.dispatchPointer(WebPointerEvent
+                        .of(WebPointerEvent.Action.MOVE, 1, 1).build()).get(10, TimeUnit.SECONDS)).getCause();
+                assertTrue(refused instanceof UnsupportedOperationException, String.valueOf(refused));
+            } finally {
+                without.detach();
+            }
+            assertEquals(Collections.emptyList(), engine.violations(), "no vendor call on the EDT");
         } finally {
             engine.shutdown();
         }

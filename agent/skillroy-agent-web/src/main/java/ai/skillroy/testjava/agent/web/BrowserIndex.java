@@ -270,6 +270,7 @@ final class BrowserIndex {
                 e.tag = tag;
             }
             e.componentRef = c == null ? null : ctx.handles().handleFor(c, "component");
+            e.component = c;
             if (c != null) {
                 components.add(c);
             }

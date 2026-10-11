@@ -42,8 +42,8 @@ import java.util.regex.Pattern;
  * The module's capabilities (phase4-contracts.md section 4.4) and the probe cycle behind them.
  *
  * <p><b>Install.</b> Every capability is set UNAVAILABLE({@value #NO_TECHNOLOGY}) ({@code web.adapter.jcef},
- * {@code web.adapter.jxbrowser} and the generic ones), except {@code web.hittest} and {@code web.pointer}, which are
- * always UNAVAILABLE({@value #RESERVED}); nothing is probed and no AWT or vendor class is touched.
+ * {@code web.adapter.jxbrowser} and the generic ones, {@code web.hittest} and {@code web.pointer} among them since
+ * Phase 7); nothing is probed and no AWT or vendor class is touched.
  *
  * <p><b>The cycle.</b> One computation serves every capability: each adapter (the two built-in ones first, then every
  * {@code WebEngineAdapter} registered through {@code SpiRegistry}, in registration order; an id that is not lower-case
@@ -55,11 +55,12 @@ import java.util.regex.Pattern;
  *       adapters that found a browser (of every present adapter when none found one), never worse than DEGRADED
  *       (a present adapter's UNAVAILABLE enumeration counts as DEGRADED with its reason, so that {@code web.browsers}
  *       itself stays callable);</li>
- *   <li>{@code web.evaluate}, {@code web.events}, {@code web.resize}, {@code web.bitmap}: OK (strategy: the adapters
- *       that provide it) when at least one open indexed browser has {@code EVALUATE}, {@code EVENTS_LOAD},
- *       {@code RESIZE}, {@code BITMAP}; else UNAVAILABLE with {@value #NO_BROWSER} or "no indexed browser has
- *       &lt;FLAG&gt;" when adapters are present, and with the first informative adapter reason (one that is not
- *       "not present" or "not loaded") or {@value #NO_TECHNOLOGY} when none is;</li>
+ *   <li>{@code web.evaluate}, {@code web.events}, {@code web.resize}, {@code web.bitmap}, {@code web.hittest},
+ *       {@code web.pointer}: OK (strategy: the adapters that provide it) when at least one open indexed browser has
+ *       {@code EVALUATE}, {@code EVENTS_LOAD}, {@code RESIZE}, {@code BITMAP}, {@code EVALUATE}, {@code INPUT}; else
+ *       UNAVAILABLE with {@value #NO_BROWSER} or "no indexed browser has &lt;FLAG&gt;" when adapters are present, and
+ *       with the first informative adapter reason (one that is not "not present" or "not loaded") or
+ *       {@value #NO_TECHNOLOGY} when none is (phase7-contracts.md section 4.4 for the last two);</li>
  *   <li>{@code web.initScript}: OK with strategy {@code DOCUMENT_START} when a browser has
  *       {@code INIT_SCRIPT_DOCUMENT_START}, DEGRADED({@value #AFTER_LOAD}) when browsers can only take scripts late,
  *       else as above;</li>
@@ -98,10 +99,13 @@ final class WebCapabilities {
 
     /** The capabilities every cycle computes besides {@code web.adapter.<id>}. */
     static final List<String> GENERIC = Collections.unmodifiableList(Arrays.asList(
-            BROWSERS, EVALUATE, EVENTS, INIT_SCRIPT, RESIZE, BITMAP, CDP));
+            BROWSERS, EVALUATE, EVENTS, INIT_SCRIPT, RESIZE, BITMAP, CDP, HITTEST, POINTER));
+
+    /** The per-browser capabilities an index rebuild outside a cycle may improve. */
+    private static final List<String> PER_BROWSER = Collections.unmodifiableList(Arrays.asList(
+            EVALUATE, EVENTS, INIT_SCRIPT, RESIZE, BITMAP, HITTEST, POINTER));
 
     static final String NO_TECHNOLOGY = "no embedded browser technology found";
-    static final String RESERVED = "reserved for the vision bolt-on";
     static final String NO_ENDPOINT = "no remote-debugging endpoint configured";
     static final String AFTER_LOAD = "after document load";
     static final String NO_BROWSER = "no browser found";
@@ -140,8 +144,6 @@ final class WebCapabilities {
         for (String id : GENERIC) {
             ctx.capabilities().set(id, CapabilityState.UNAVAILABLE, NO_TECHNOLOGY, null);
         }
-        ctx.capabilities().set(HITTEST, CapabilityState.UNAVAILABLE, RESERVED, null);
-        ctx.capabilities().set(POINTER, CapabilityState.UNAVAILABLE, RESERVED, null);
     }
 
     /** The built-in adapters, then the registered ones with a valid, unused id. */
@@ -395,7 +397,7 @@ final class WebCapabilities {
             }
             Map<String, ProbeResult> derived = derive(c.adapterProbes, present, s, false);
             set(BROWSERS, derived.get(BROWSERS));
-            for (String id : Arrays.asList(EVALUATE, EVENTS, INIT_SCRIPT, RESIZE, BITMAP)) {
+            for (String id : PER_BROWSER) {
                 ProbeResult now = derived.get(id);
                 Capability before = ctx.capabilities().get(id);
                 if (before != null && better(now.state(), before.state())) {
@@ -414,7 +416,7 @@ final class WebCapabilities {
         String absent = absentReason(probes);
         if (present.isEmpty()) {
             out.put(BROWSERS, ProbeResult.unavailable(NO_TECHNOLOGY));
-            for (String id : Arrays.asList(EVALUATE, EVENTS, INIT_SCRIPT, RESIZE, BITMAP)) {
+            for (String id : PER_BROWSER) {
                 out.put(id, ProbeResult.unavailable(absent));
             }
             if (withEndpoints) {
@@ -431,6 +433,8 @@ final class WebCapabilities {
         if (withEndpoints) {
             out.put(CDP, endpoints(present, s));
         }
+        out.put(HITTEST, flag(s, WebCapability.EVALUATE));
+        out.put(POINTER, flag(s, WebCapability.INPUT));
         return out;
     }
 

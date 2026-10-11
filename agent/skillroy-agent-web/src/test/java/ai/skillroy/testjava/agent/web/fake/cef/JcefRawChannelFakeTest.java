@@ -18,9 +18,11 @@ package ai.skillroy.testjava.agent.web.fake.cef;
 
 import ai.skillroy.testjava.agent.api.spi.web.WebBrowser;
 import ai.skillroy.testjava.agent.api.spi.web.WebEval;
+import ai.skillroy.testjava.agent.api.spi.web.WebPointerEvent;
 import ai.skillroy.testjava.agent.web.jcef.JcefAdapter;
 import ai.skillroy.testjava.agent.web.kit.KitScripts;
 import ai.skillroy.testjava.protocol.CapabilityState;
+import ai.skillroy.testjava.protocol.Json;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -146,6 +148,19 @@ class JcefRawChannelFakeTest {
         fx.visible.freeze(false);
     }
 
+    /** Phase 7 (4.5): a pointer event goes through the raw channel, never through the shared client. */
+    @Test
+    void aPointerEventGoesThroughTheRawChannel() throws Exception {
+        int clientCalls = FakeDevToolsClient.executed();
+        WebBrowser b = browser(fx.visible);
+        b.dispatchPointer(WebPointerEvent.of(WebPointerEvent.Action.PRESS, 5, 6).button(WebPointerEvent.Button.RIGHT)
+                .clickCount(2).build()).get(5, TimeUnit.SECONDS);
+        assertEquals(1, fx.visible.inputs());
+        assertEquals("{\"type\":\"mousePressed\",\"x\":5,\"y\":6,\"button\":\"right\",\"clickCount\":2,"
+                + "\"modifiers\":0}", Json.write(fx.visible.document().pointerEvents().get(0)));
+        assertEquals(clientCalls, FakeDevToolsClient.executed(), "nothing went through the shared client");
+    }
+
     @Test
     void aBrowserWithoutANativeBrowserHasNoRegistrationUntilItIsCreated() throws Exception {
         FakeCefBrowserBase later = (FakeCefBrowserBase) fx.client.createBrowser("about:blank", true);
@@ -153,6 +168,8 @@ class JcefRawChannelFakeTest {
         assertTrue(b.capabilities().isEmpty(), "no native browser, no capabilities");
         Throwable refused = failure(b.evaluate(WebEval.of("6 * 7").timeoutMs(5000).build()));
         assertTrue(refused instanceof UnsupportedOperationException, String.valueOf(refused));
+        Throwable noInput = failure(b.dispatchPointer(WebPointerEvent.of(WebPointerEvent.Action.MOVE, 1, 1).build()));
+        assertTrue(noInput instanceof UnsupportedOperationException, "no native browser, no INPUT: " + noInput);
         assertEquals(0, later.observerCount());
         later.show(320, 240);
         b = browser(later);

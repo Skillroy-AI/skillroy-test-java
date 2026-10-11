@@ -14,17 +14,21 @@
  * limitations under the License.
  */
 /*
- * The script library of the web verbs (phase4-contracts.md sections 4.2, 4.3 and 4.6). Both web paths evaluate this
- * one text, the agent through the embedded browser's own channel and the CDP path through Playwright, so that a verb
- * returns the same shape on either path for the same page; WebLib.hash() names the version in run.jsonl.
+ * The script library of the web verbs (phase4-contracts.md sections 4.2, 4.3 and 4.6; phase7-contracts.md section 4.6).
+ * Both web paths evaluate this one text, the agent through the embedded browser's own channel and the CDP path through
+ * Playwright, so that a verb returns the same shape on either path for the same page; WebLib.hash() names the version
+ * in run.jsonl.
  *
  * Evaluating the text installs the library under window[Symbol.for("skillroy")] (non-enumerable, non-writable) and
- * yields "installed"; when the slot is taken it changes nothing, not even an armed tap, and yields "present".
- * Nothing else is added to the window: the tap, its buffer and deferred results live in this closure. The library
- * is per document; a frame has its own.
+ * yields "installed"; when the slot already holds this version or a later one it changes nothing, not even an armed
+ * tap, and yields "present". A slot that holds an older library is never replaced (a replacement would lose a tap's
+ * buffer): the functions it lacks are installed into it, once per document, its version is raised where it can be,
+ * and the text yields "upgraded" (D300). Nothing else is added to the window: the tap, its buffer and deferred results
+ * live in this closure. The library is per document; a frame has its own.
  *
  * Functions of the library object (WebLib's Javadoc gives every shape): stringify, aria, find, click, fill, text,
- * domClick, domFill, domText, dispatch, tap, drain, defer, collect; and the string L.version. A failure the caller
+ * domClick, domFill, domText, dispatch, tap, drain, defer, collect, hit (version 2); and the string L.version. A
+ * failure the caller
  * can act on is returned, never thrown, as {__error: "NOT_FOUND" | "AMBIGUOUS" | "INVALID_PARAMS", data: {...}};
  * the Java side of both paths maps it to the RPC error of that name. What is thrown comes from the page.
  *
@@ -37,11 +41,14 @@
   "use strict";
 
   var KEY = Symbol.for("skillroy");
-  if (window[KEY]) {
+  var VERSION = "2";
+  // The functions version 2 added (D300): a slot that holds a version-1 library gets them installed into it.
+  var ADDED_IN_2 = ["hit"];
+  var slot = window[KEY];
+  if (slot && missingIn(slot).length === 0) {
     return "present";
   }
 
-  var VERSION = "1";
   var MAX_JSON = 1048576;         // stringify: the inner JSON text is cut here (1 MiB in UTF-16 code units)
   var MAX_DETAIL = 65536;         // tap: the JSON text of an event's detail is cut here (64 KiB)
   var MAX_EVENTS = 1000;          // tap: events buffered between drains; the oldest is dropped and counted
@@ -50,6 +57,9 @@
   var DEFAULT_MAX_NODES = 2000;   // aria
   var VISITS_PER_NODE = 100;      // aria: elements visited per node allowed, so that pruning stays bounded
   var DEFAULT_MAX_CHARS = 10000;  // text, domText
+  var MAX_HIT_TEXT = 1000;        // hit: an element's name and id are cut here (the receiving side cuts again)
+  var MAX_SELECTOR_STEPS = 8;     // hit: the steps of a selector path, from the element up
+  var MAX_FRAME_URL = 4096;       // hit: a frame element's URL longer than this is not reported
 
   // Captured at install, so that a page that later replaces them does not change the library's results.
   var jsonStringify = JSON.stringify;
@@ -61,6 +71,7 @@
   var INVISIBLE = new RegExp("[\\u200b\\u00ad]", "g");
   var GLOB_SPECIAL = new RegExp("[.+?^${}()|[\\]\\\\]", "g");
   var STAR = new RegExp("\\*", "g");
+  var PLAIN_IDENT = new RegExp("^[A-Za-z_][A-Za-z0-9_-]*$");
   var BREAK = {};                 // aria: the boundary of a block-level box in a list of child items
 
   function setOf(names) {
@@ -117,6 +128,24 @@
       "datetime-local", "month", "time", "week", "color", "range"]);
 
   // ---- small helpers ----
+
+  // The names of ADDED_IN_2 that the slot's library lacks; a slot whose members cannot even be read lacks none (it is
+  // left as it is).
+  function missingIn(target) {
+    var out = [];
+    for (var i = 0; i < ADDED_IN_2.length; i++) {
+      var present;
+      try {
+        present = typeof target[ADDED_IN_2[i]] === "function";
+      } catch (e) {
+        present = true;
+      }
+      if (!present) {
+        out.push(ADDED_IN_2[i]);
+      }
+    }
+    return out;
+  }
 
   function err(code, data) {
     return {__error: code, data: data};
@@ -1673,6 +1702,171 @@
     return result;
   }
 
+  // ---- hit(x, y): the element under a point of the viewport (version 2; phase7-contracts.md section 4.2) ----
+
+  // The element drawn at the point, through open shadow roots.
+  function deepElementAt(doc, x, y) {
+    var el = doc.elementFromPoint(x, y);
+    for (var depth = 0; el && el.shadowRoot && depth < 32; depth++) {
+      var inner = el.shadowRoot.elementFromPoint(x, y);
+      if (!inner || inner === el) {
+        break;
+      }
+      el = inner;
+    }
+    return el;
+  }
+
+  // The element's client rectangle in whole CSS pixels.
+  function rectOf(el) {
+    var r = el.getBoundingClientRect();
+    return {x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height)};
+  }
+
+  function bounded(text) {
+    var s = String(text);
+    return s.length > MAX_HIT_TEXT ? cut(s, MAX_HIT_TEXT) : s;
+  }
+
+  // The library's find answers exactly this element for the locator.
+  function only(el, selectorOrRole, name) {
+    try {
+      return find(selectorOrRole, name, null) === el;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function idSelector(el) {
+    return typeof el.id === "string" && PLAIN_IDENT.test(el.id) ? "#" + el.id : null;
+  }
+
+  function firstClass(el) {
+    var list = el.classList;
+    for (var i = 0; list && i < list.length; i++) {
+      if (PLAIN_IDENT.test(list[i])) {
+        return list[i];
+      }
+    }
+    return null;
+  }
+
+  // One step of a selector path: the tag, its first plain class, and its position among its siblings of that tag.
+  function stepOf(el, nth) {
+    var cls = firstClass(el);
+    var step = el.localName + (cls === null ? "" : "." + cls);
+    if (nth) {
+      var index = 1;
+      for (var sib = el.previousElementSibling; sib; sib = sib.previousElementSibling) {
+        if (sib.localName === el.localName) {
+          index++;
+        }
+      }
+      step += ":nth-of-type(" + index + ")";
+    }
+    return step;
+  }
+
+  // An id selector, else the shortest path of steps up from the element (anchored at an ancestor's unique id when
+  // one is met) that the library's find answers with exactly this element; null when none is found within
+  // MAX_SELECTOR_STEPS.
+  function selectorOf(el) {
+    var id = idSelector(el);
+    if (id !== null && only(el, id, null)) {
+      return id;
+    }
+    var parts = [];
+    for (var node = el; node && node.nodeType === 1 && parts.length < MAX_SELECTOR_STEPS; node = node.parentElement) {
+      if (node !== el) {
+        var anchor = idSelector(node);
+        if (anchor !== null && only(node, anchor, null)) {
+          var anchored = [anchor].concat(parts).join(" > ");
+          return only(el, anchored, null) ? anchored : null;
+        }
+      }
+      if (!PLAIN_IDENT.test(node.localName)) {
+        return null;
+      }
+      var plain = [stepOf(node, false)].concat(parts).join(" > ");
+      if (only(el, plain, null)) {
+        return plain;
+      }
+      parts.unshift(stepOf(node, true));
+      if (only(el, parts.join(" > "), null)) {
+        return parts.join(" > ");
+      }
+    }
+    return null;
+  }
+
+  // The locators that name exactly this element: {role, name} (not for a generic or presentational role, nor an empty
+  // or overlong name), then {selector}.
+  function locatorsOf(el, role, name) {
+    var out = [];
+    if (role && !PRUNED[role] && name !== "" && name.length <= MAX_HIT_TEXT && only(el, role, name)) {
+      out.push({role: role, name: name});
+    }
+    var selector = selectorOf(el);
+    if (selector !== null) {
+      out.push({selector: selector});
+    }
+    return out;
+  }
+
+  // For a frame element: the point in the child document's viewport (inside the element's border and padding), and
+  // the element's name and URL, by which the caller finds the child frame.
+  function childOf(frame, x, y) {
+    var r = frame.getBoundingClientRect();
+    var left = r.left;
+    var top = r.top;
+    try {
+      var cs = viewOf(frame).getComputedStyle(frame);
+      left += (parseFloat(cs.borderLeftWidth) || 0) + (parseFloat(cs.paddingLeft) || 0);
+      top += (parseFloat(cs.borderTopWidth) || 0) + (parseFloat(cs.paddingTop) || 0);
+    } catch (e) {
+      // the border box then
+    }
+    var url = "";
+    try {
+      url = String(frame.src || "");
+    } catch (e) {
+      url = "";
+    }
+    return {x: Math.round(x - left), y: Math.round(y - top), name: bounded(frame.name || ""),
+      url: url.length > MAX_FRAME_URL ? "" : url};
+  }
+
+  // {element: {role, name, tag, id?, rect: {x, y, w, h}}, locators: [{role, name} | {selector}], unique, child?}, or
+  // NOT_FOUND {reason: "outside", x, y} when the point lies outside the viewport or hits no element. child is set for
+  // a frame element: the caller evaluates hit there with child's point.
+  function hit(x, y) {
+    if (typeof x !== "number" || typeof y !== "number" || x !== x || y !== y) {
+      return err("INVALID_PARAMS", {reason: "x and y must be numbers"});
+    }
+    var view = document.defaultView || window;
+    if (x < 0 || y < 0 || x >= view.innerWidth || y >= view.innerHeight) {
+      return err("NOT_FOUND", {reason: "outside", x: x, y: y});
+    }
+    var el = deepElementAt(document, x, y);
+    if (!isElement(el)) {
+      return err("NOT_FOUND", {reason: "outside", x: x, y: y});
+    }
+    var ctx = newContext(document);
+    var role = roleOf(el, ctx);
+    var name = collapse(nameOf(el, role, ctx));
+    var element = {role: role, name: bounded(name), tag: el.localName};
+    if (el.id) {
+      element.id = bounded(el.id);
+    }
+    element.rect = rectOf(el);
+    var locators = locatorsOf(el, role, name);
+    var out = {element: element, locators: locators, unique: locators.length > 0};
+    if (el.localName === "iframe" || el.localName === "frame") {
+      out.child = childOf(el, x, y);
+    }
+    return out;
+  }
+
   // ---- defer and collect: awaiting a promise over a channel that cannot (section 4.5, the jxbrowser adapter) ----
 
   var deferred = Object.create(null);
@@ -1720,13 +1914,42 @@
 
   // ---- install ----
 
-  var L = {};
-
-  function expose(name, value) {
-    Object.defineProperty(L, name, {value: value, enumerable: false, writable: false, configurable: false});
+  // An older library in the slot (D300): the functions it lacks are installed into it, once, and its version is raised
+  // where it can be (a version-1 slot's version is not configurable, so it stays "1" and the functions it now has mark
+  // the upgrade). A slot that refuses them (a page froze it, or put something else there) is left as it is: a call of a
+  // function it lacks then fails as a script error that names the function.
+  function upgrade(target) {
+    var names = missingIn(target);
+    var mine = {hit: hit};
+    for (var i = 0; i < names.length; i++) {
+      try {
+        Object.defineProperty(target, names[i], {value: mine[names[i]], enumerable: false, writable: false,
+          configurable: false});
+      } catch (e) {
+        return "present";
+      }
+    }
+    try {
+      Object.defineProperty(target, "version", {value: VERSION, enumerable: false, writable: false,
+        configurable: true});
+    } catch (e) {
+      // version 1 made it non-configurable: the version stays, the functions mark the upgrade
+    }
+    return "upgraded";
   }
 
-  expose("version", VERSION);
+  if (slot) {
+    return upgrade(slot);
+  }
+
+  var L = {};
+
+  // The version is configurable, so that a later library can raise it when it installs what it adds (D300).
+  function expose(name, value, raisable) {
+    Object.defineProperty(L, name, {value: value, enumerable: false, writable: false, configurable: raisable === true});
+  }
+
+  expose("version", VERSION, true);
   expose("stringify", stringify);
   expose("aria", aria);
   expose("find", find);
@@ -1741,6 +1964,7 @@
   expose("drain", drain);
   expose("defer", defer);
   expose("collect", collect);
+  expose("hit", hit);
   Object.defineProperty(window, KEY, {value: L, enumerable: false, writable: false, configurable: true});
   return "installed";
 })()
