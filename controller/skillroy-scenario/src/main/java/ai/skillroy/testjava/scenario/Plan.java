@@ -686,9 +686,55 @@ public record Plan(int planVersion, String scenarioId, String pack, String packV
         return false;
     }
 
-    /** Whether one call carries {@code via: ROBOT} (a pointer) or {@code mode: ROBOT} (a capture). */
+    /** Whether one call carries {@code via: ROBOT} (a pointer) or {@code mode: ROBOT} (a capture), in any spelling. */
     static boolean robot(Call call) {
-        return "ROBOT".equals(call.args().get("via")) || "ROBOT".equals(call.args().get("mode"));
+        return robotValue(call.args().get("via")) || robotValue(call.args().get("mode"));
+    }
+
+    /**
+     * Whether an argument's value names Robot ({@code via} of {@code swing.pointer}, {@code mode} of
+     * {@code swing.capture}) as the agent would read it: the controller's one definition for every gate of the double
+     * opt-in and of the person-only glass rule (phase7-contracts.md 3.4, 9.2; the Phase 7 review's fix wave, FB,
+     * L1-F1 = L2-F3). The agent reads both arguments as {@code value.trim().toUpperCase(Locale.ROOT)}, so a gate
+     * comparing the exact {@code "ROBOT"} let {@code robot}, {@code " Robot"} or {@code ROBOT} behind a control
+     * character through to an agent that acts on them. This predicate accepts a superset of the agent's spellings:
+     * both ends are stripped of every character {@link String#trim()} strips (code points up to U+0020, the control
+     * characters included) and of every whitespace character {@link String#strip()} strips, and the rest is compared
+     * with {@code ROBOT} ignoring case, or upper-cased under {@link Locale#ROOT} as the agent does.
+     *
+     * @param value the argument's value as the call carries it; null (absent) is not Robot
+     * @return true when the agent would read the value as {@code ROBOT}, or a looser spelling of it
+     */
+    public static boolean robotValue(Object value) {
+        if (value == null) {
+            return false;
+        }
+        String text = String.valueOf(value);
+        int from = 0;
+        int to = text.length();
+        while (from < to && blankEnd(text.charAt(from))) {
+            from++;
+        }
+        while (to > from && blankEnd(text.charAt(to - 1))) {
+            to--;
+        }
+        String core = text.substring(from, to);
+        return ROBOT.equalsIgnoreCase(core) || ROBOT.equals(core.toUpperCase(Locale.ROOT));
+    }
+
+    /**
+     * Whether a capture's arguments ask for an unredacted image: {@code redact} present and anything but the boolean
+     * {@code true} (the agent coerces the strings {@code "true"}/{@code "false"}, so a string {@code "false"} is one;
+     * the facade's and {@code CallPolicy}'s rule, fix wave FB).
+     */
+    public static boolean unredacted(Map<?, ?> args) {
+        return args != null && args.containsKey("redact") && !Boolean.TRUE.equals(args.get("redact"));
+    }
+
+    private static final String ROBOT = "ROBOT";
+
+    private static boolean blankEnd(char c) {
+        return c <= ' ' || Character.isWhitespace(c);
     }
 
     /** The slot with this name, or null. */

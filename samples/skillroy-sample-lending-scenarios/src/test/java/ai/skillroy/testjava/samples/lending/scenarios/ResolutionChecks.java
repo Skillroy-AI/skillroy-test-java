@@ -538,7 +538,10 @@ abstract class ResolutionChecks {
      *
      * <p>{@code -Dskillroy.bindings.update=true} is VC's script for step 2b: before the replay, {@code approve} with
      * every candidate approved writes this seed's committed bindings file and the PNG of the target's render key
-     * beside the entries already there (one run per Java line adds that line's key), whatever the marker says.
+     * beside the entries already there (one run per Java line adds that line's key), whatever the marker says. The
+     * approve first brings the desk to the front with the entry field focused ({@link #activateDesk}, not part of the
+     * run), so that the entries' {@code focus} and {@code carets} record that known state rather than whatever focus
+     * the WM-less display left (the fix wave of the Phase 7 review, FB, L3-F9).
      */
     @Test
     @Order(19)
@@ -546,6 +549,7 @@ abstract class ResolutionChecks {
         boolean update = Boolean.getBoolean("skillroy.bindings.update");
         Plan plan = Runs.committed("keypad-image");
         if (update) {
+            activateDesk();
             Runs.Outcome approved = Runs.run(client(), plan, runDir("keypad-image-approve"), bind(BindMode.APPROVE)
                     .withApprover(Approver.APPROVE_ALL));
             assertEquals(Status.PASS, approved.result().status(), approved.describe());
@@ -597,6 +601,17 @@ abstract class ResolutionChecks {
         }
         assertEquals(1L, failed.result().detail().get("differing"), "one pixel differs");
         assertSignedOffAndQuiet(-1);
+    }
+
+    /**
+     * Brings the desk's frame to the front with the entry field focused ({@code swing.click} on the COMPONENT rung with
+     * {@code activateWindow}, as {@code VisionSwingChecks} and {@code VisionSessionScript} do): a WM-less display gives
+     * the focus to no window by itself, so a capture's {@code focus} would otherwise depend on what ran before.
+     */
+    void activateDesk() throws Exception {
+        Map<String, Object> click = LoadModeChecks.value(client().call("swing.click", Map.of("by", Map.of("id",
+                "entry"), "rung", "COMPONENT", "activateWindow", true, "focusTimeoutMs", 20_000L), CALL));
+        assertEquals(Boolean.TRUE, click.get("fired"), "the desk was brought to the front: " + click);
     }
 
     // ------------------------------------------------------------------ scenario B (phase3-contracts.md 11.2)

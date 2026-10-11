@@ -124,10 +124,25 @@
             "h": 505
           }
         ],
-        "carets": [],
+        "carets": [
+          {
+            "x": 12,
+            "y": 562,
+            "w": 5,
+            "h": 24
+          }
+        ],
         "focus": {
-          "owner": null,
-          "active": false
+          "owner": {
+            "id": "entry"
+          },
+          "ownerRect": {
+            "x": 12,
+            "y": 560,
+            "w": 1000,
+            "h": 28
+          },
+          "active": true
         },
         "file": "keypad-image.images/keypad-frame.6ccffcf8f0c8db46.png",
         "rendering": {

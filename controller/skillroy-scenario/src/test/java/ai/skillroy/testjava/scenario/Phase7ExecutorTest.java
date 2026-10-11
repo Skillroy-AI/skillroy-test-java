@@ -257,6 +257,54 @@ class Phase7ExecutorTest {
         assertEquals(Boolean.TRUE, log(out).get(0).get("robot"), "the person's flag is recorded in run-start");
     }
 
+    /**
+     * The fix wave of the Phase 7 review (FB, L1-F1 = L2-F3): a raw {@code call:} step's {@code via} or {@code mode}
+     * reaches the agent as written, and the agent reads it trimmed and upper-cased, so the plan's gate reads it the
+     * same way: {@code via: robot}, {@code via: " Robot"} and a glass capture's {@code mode: robot} are refused before
+     * the agent is asked without {@code RunOptions.robot}, and the pointer's plan names {@code swing.pointer.robot}.
+     */
+    @Test
+    void aRawCallSpellingRobotInAnyCaseIsRefusedBeforeTheAgentIsAsked() throws Exception {
+        for (String args : List.of("{ action: CLICK, point: { x: 1, y: 1 }, via: robot }",
+                "{ action: CLICK, point: { x: 1, y: 1 }, via: \" Robot\" }")) {
+            Plan plan = plan("steps:\n  - call: { primitive: swing.pointer, args: " + args + " }\n");
+            assertTrue(plan.requires().contains("swing.pointer.robot"), args + ": " + plan.requires());
+            RunResult refused = run(plan, options(BindMode.LIVE, null));
+            assertEquals(Status.ERROR, refused.status(), args);
+            assertEquals(FailureKind.ENVIRONMENT, refused.failureKind(), args);
+            assertEquals("robot: not allowed; a person passes --allow-robot", refused.message(), args);
+        }
+        RunResult glass = run(plan("steps:\n  - call: { primitive: swing.capture, args: { mode: robot } }\n"),
+                options(BindMode.LIVE, null));
+        assertEquals(FailureKind.ENVIRONMENT, glass.failureKind(), glass.message());
+        assertEquals("robot: not allowed; a person passes --allow-robot", glass.message());
+        assertEquals(0, agent.capabilityReads, "before checkRequires: the agent was asked nothing");
+        assertTrue(agent.callsTo("swing.pointer").isEmpty() && agent.callsTo("swing.capture").isEmpty(),
+                "nothing was sent");
+    }
+
+    /**
+     * The fix wave of the Phase 7 review (FB, D-FB-2): the gates read {@code via} and {@code mode} as written, so a
+     * reference that resolves to ROBOT is refused at the call, before it is sent, even with {@code RunOptions.robot}.
+     */
+    @Test
+    void aReferenceThatResolvesToRobotIsRefusedAtTheCall() throws Exception {
+        Plan plan = plan("resolve:\n  r: { fixture: { v: robot } }\nsteps:\n  - call: { primitive: swing.pointer,"
+                + " args: { action: CLICK, point: { x: 1, y: 1 }, via: $r.v } }\n");
+        assertFalse(plan.usesRobot(), "as written, the plan names no Robot");
+        for (RunOptions options : List.of(options(BindMode.LIVE, null), options(BindMode.LIVE, null).withRobot(true))) {
+            RunResult refused = run(plan, options);
+            assertEquals(Status.ERROR, refused.status(), refused.message());
+            assertEquals(FailureKind.ENVIRONMENT, refused.failureKind());
+            assertEquals(CallRunner.ROBOT_REFERENCE_REFUSAL, refused.message());
+        }
+        assertTrue(agent.callsTo("swing.pointer").isEmpty(), "nothing was sent");
+        Plan routed = plan("resolve:\n  r: { fixture: { v: ROUTED } }\nsteps:\n  - call: { primitive: swing.pointer,"
+                + " args: { action: CLICK, point: { x: 1, y: 1 }, via: $r.v } }\n");
+        assertEquals(Status.PASS, run(routed, options(BindMode.LIVE, null)).status(), "any other value is sent");
+        assertEquals(1, agent.callsTo("swing.pointer").size());
+    }
+
     // ------------------------------------------------------------------------------------------------ the merge
 
     @Test
@@ -381,6 +429,95 @@ class Phase7ExecutorTest {
         assertEquals(Status.DEGRADED, live.status(), live.message());
         assertTrue(live.skippedExpectations().get(0).contains("no baseline for rendering fedcba9876543210"),
                 String.valueOf(live.skippedExpectations()));
+    }
+
+    /** A canned capture whose focus owner is {@code ownerLocator} with the window rectangle {@code ownerRect}. */
+    static Map<String, Object> capture(BufferedImage image, Map<String, Object> ownerLocator,
+                                       ImageCompare.Rect ownerRect) throws Exception {
+        Map<String, Object> capture = capture(image, List.of());
+        Map<String, Object> focus = new LinkedHashMap<>();
+        focus.put("owner", "h5");
+        focus.put("ownerLocator", ownerLocator);
+        if (ownerRect != null) {
+            focus.put("ownerRect", ownerRect.toJson());
+        }
+        focus.put("active", true);
+        capture.put("focus", focus);
+        return capture;
+    }
+
+    /** The {@code image} record of a run's {@code run.jsonl}. */
+    private static Map<String, Object> imageRecord(Path dir) throws Exception {
+        return log(dir).stream().filter(r -> "image".equals(r.get("type"))).findFirst().orElseThrow();
+    }
+
+    private static BufferedImage withPixels(int... xy) {
+        BufferedImage image = image(0xFFFFFF, -1, -1);
+        for (int i = 0; i < xy.length; i += 2) {
+            image.setRGB(xy[i], xy[i + 1], 0x000000);
+        }
+        return image;
+    }
+
+    /**
+     * phase7-contracts.md 6.7 (the focus rule; the Phase 7 review's fix wave, FB, L3-F3): when the baseline's recorded
+     * {@code focus.owner} and the capture's {@code focus.ownerLocator} differ, both owners' rectangles are blanked on
+     * both sides and the record says {@code focusMasked: true}; a difference outside them still fails; equal owners
+     * blank nothing; an owner without a rectangle contributes none (the other side's is still blanked).
+     */
+    @Test
+    void differingFocusOwnersBlankBothOwnersRectanglesOnBothSides() throws Exception {
+        Plan plan = plan("steps:\n  - expectImage: { label: pad }\n");
+        Map<String, Object> ownerA = Map.of("id", "entry");
+        Map<String, Object> ownerB = Map.of("id", "amount");
+        ImageCompare.Rect rectA = new ImageCompare.Rect(0, 0, 2, 2);
+        ImageCompare.Rect rectB = new ImageCompare.Rect(5, 3, 2, 2);
+        capture = capture(withPixels(), ownerA, rectA);
+        assertEquals(Status.PASS, run(plan, options(BindMode.APPROVE, tmp.resolve("approve"))).status());
+        BindingsFile.ImageEntry entry = BindingsFile.read(BindingsFile.locate(tmp.resolve("bindings"), "seed-a", "t"))
+                .images().get("pad").get(KEY);
+        assertEquals(new BindingsFile.Focus(ownerA, rectA, true), entry.focus(), "approved with owner A");
+
+        capture = capture(withPixels(1, 1, 6, 4), ownerB, rectB);
+        Path differ = tmp.resolve("differ");
+        RunResult held = run(plan, options(BindMode.REPLAY, differ));
+        assertEquals(Status.PASS, held.status(), "a difference inside each owner's rectangle holds: " + held.message());
+        assertEquals(Boolean.TRUE, imageRecord(differ).get("focusMasked"));
+        assertEquals(8L, imageRecord(differ).get("maskedPixels"), "A's four pixels and B's four");
+
+        capture = capture(withPixels(1, 1, 6, 4, 3, 0), ownerB, rectB);
+        Path outside = tmp.resolve("outside");
+        RunResult failed = run(plan, options(BindMode.REPLAY, outside));
+        assertEquals(Status.FAIL, failed.status(), failed.message());
+        assertEquals(FailureKind.ASSERTION, failed.failureKind());
+        assertEquals(1L, failed.detail().get("differing"), "only the pixel outside both rectangles");
+        assertEquals(Boolean.TRUE, imageRecord(outside).get("focusMasked"));
+
+        capture = capture(withPixels(1, 1), ownerA, rectA);
+        Path same = tmp.resolve("same");
+        RunResult sameOwner = run(plan, options(BindMode.REPLAY, same));
+        assertEquals(Status.FAIL, sameOwner.status(), "equal owners blank nothing: " + sameOwner.message());
+        assertEquals(Boolean.FALSE, imageRecord(same).get("focusMasked"));
+        assertEquals(0L, imageRecord(same).get("maskedPixels"));
+
+        capture = capture(withPixels(1, 1), ownerB, null);
+        Path noRect = tmp.resolve("no-rect");
+        RunResult baselineSide = run(plan, options(BindMode.REPLAY, noRect));
+        assertEquals(Status.PASS, baselineSide.status(), "the baseline owner's rectangle alone: "
+                + baselineSide.message());
+        assertEquals(Boolean.TRUE, imageRecord(noRect).get("focusMasked"));
+        assertEquals(4L, imageRecord(noRect).get("maskedPixels"));
+        capture = capture(withPixels(6, 4), ownerB, null);
+        assertEquals(Status.FAIL, run(plan, options(BindMode.REPLAY, tmp.resolve("no-rect-b"))).status(),
+                "an owner without a rectangle blanks nothing of its own");
+
+        Map<String, Object> unfocused = capture(withPixels(1, 1), List.of());
+        unfocused.put("focus", Map.of("active", false));
+        capture = unfocused;
+        Path none = tmp.resolve("none");
+        assertEquals(Status.PASS, run(plan, options(BindMode.REPLAY, none)).status(),
+                "no focus owner now (a WM-less desk): the baseline owner's rectangle is blanked");
+        assertEquals(Boolean.TRUE, imageRecord(none).get("focusMasked"));
     }
 
     @Test

@@ -79,6 +79,11 @@ final class CallRunner {
      * (phase5-contracts.md 12.2, the fix wave), so a parameter of this name is dropped before a call is sent.
      */
     static final String META = "_meta";
+    /** The arguments that name Robot ({@code via} of a pointer, {@code mode} of a capture). */
+    private static final List<String> ROBOT_ARGUMENTS = List.of("via", "mode");
+    /** The refusal of a reference that resolves to ROBOT in {@code via} or {@code mode} (D-FB-2). */
+    static final String ROBOT_REFERENCE_REFUSAL = "robot: via and mode take a literal value; a reference that resolves"
+            + " to ROBOT is refused";
 
     final AgentConnection agent;
     final RunLog log;
@@ -253,6 +258,15 @@ final class CallRunner {
             throw new Abort(Status.ERROR, FailureKind.RESOLUTION_FAILED, stepId, e.getMessage(),
                     RunLog.fields("reason", e.reason(), "reference", e.reference(), "primitive",
                             call.primitive()));
+        }
+        // phase7-contracts.md 9.1, the fix wave's note (FB, D-FB-2): every Robot gate reads the call's arguments as
+        // written, before this substitution, so via and mode take a literal value; a reference that resolves to ROBOT
+        // in any spelling would pass them all, and is refused here, on every route, before anything is sent.
+        for (String key : ROBOT_ARGUMENTS) {
+            if (Plan.robotValue(params.get(key)) && !Plan.robotValue(call.args().get(key))) {
+                throw new Abort(Status.ERROR, FailureKind.ENVIRONMENT, stepId, ROBOT_REFERENCE_REFUSAL,
+                        RunLog.fields("refused", "robot", "argument", key, "primitive", call.primitive()));
+            }
         }
         // For every caller (plan steps, cleanup calls, sessions and so the MCP server): a plan read from its file or a
         // pack's call may hold a _meta parameter, which a connection that merged it could take as a confirmation.

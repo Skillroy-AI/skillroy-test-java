@@ -1494,10 +1494,10 @@ public final class ExecutorSession implements AutoCloseable {
             return primitive + " is not served by a read";
         }
         if ("swing.capture".equals(primitive)) {
-            if ("ROBOT".equals(args.get("mode"))) {
+            if (Plan.robotValue(args.get("mode"))) {
                 return "swing.capture {mode: ROBOT} is a person's evidence: never a read";
             }
-            if (Boolean.FALSE.equals(args.get("redact"))) {
+            if (Plan.unredacted(args)) {
                 return "swing.capture {redact: false} is a person's call: never a read";
             }
         }
@@ -1757,11 +1757,10 @@ public final class ExecutorSession implements AutoCloseable {
     private String gate(Plan.Step step, Origin origin) {
         boolean person = confirms(origin);
         for (Plan.Call call : step.calls()) {
-            boolean robot = "ROBOT".equals(call.args().get("via")) || "ROBOT".equals(call.args().get("mode"));
-            if (robot && !options.robot()) {
+            if (Plan.robot(call) && !options.robot()) {
                 return PlanExecutor.ROBOT_REFUSAL;
             }
-            if (!person && "swing.capture".equals(call.primitive()) && "ROBOT".equals(call.args().get("mode"))) {
+            if (!person && "swing.capture".equals(call.primitive()) && Plan.robotValue(call.args().get("mode"))) {
                 return GLASS_REFUSAL;
             }
         }

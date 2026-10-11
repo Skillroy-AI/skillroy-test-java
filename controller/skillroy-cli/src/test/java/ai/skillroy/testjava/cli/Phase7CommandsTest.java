@@ -184,6 +184,25 @@ class Phase7CommandsTest {
         assertEquals(1, agent.rpcRequests("swing.pointer").size(), "with the person's flag it is sent");
     }
 
+    /**
+     * The fix wave of the Phase 7 review (FB, L1-F1 = L2-F3): the agent reads {@code via} and {@code mode} trimmed
+     * and in any case, so {@code call} refuses every such spelling without {@code --allow-robot}, nothing sent.
+     */
+    @Test
+    void callRefusesRobotInAnySpellingWithoutTheFlag() {
+        agent.handlers.put("swing.pointer", p -> Map.of("via", "ROBOT", "fired", true));
+        agent.handlers.put("swing.capture", p -> Map.of("format", "png", "base64", ""));
+        for (String via : List.of("robot", " Robot", "\\u0001ROBOT")) {
+            CliHarness.Outcome refused = cli("call", "swing.pointer", "{\"by\":{\"name\":\"OK\"},\"via\":\"" + via
+                    + "\"}").expectExit(Exit.USAGE);
+            assertTrue(refused.err().contains("via: ROBOT acts through java.awt.Robot"), via + ": " + refused.err());
+        }
+        CliHarness.Outcome mode = cli("call", "swing.capture", "{\"mode\":\"robot \"}").expectExit(Exit.USAGE);
+        assertTrue(mode.err().contains("mode: ROBOT"), mode.err());
+        assertTrue(agent.rpcRequests("swing.pointer").isEmpty() && agent.rpcRequests("swing.capture").isEmpty(),
+                "nothing was sent");
+    }
+
     @Test
     void capsShowsTheSourceOfEveryRowAndTheMergedMatrixWithSettings() throws Exception {
         String table = cli("caps").expectExit(Exit.OK).out();

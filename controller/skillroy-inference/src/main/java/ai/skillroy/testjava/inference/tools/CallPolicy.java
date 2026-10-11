@@ -17,6 +17,7 @@
 package ai.skillroy.testjava.inference.tools;
 
 import ai.skillroy.testjava.protocol.PrimitiveDescriptor;
+import ai.skillroy.testjava.scenario.Plan;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -157,8 +158,9 @@ public final class CallPolicy {
         return null;
     }
 
+    /** {@code ROBOT} in any spelling the agent reads as it: the scenario module's one definition (fix wave FB). */
     private static boolean robot(Object value) {
-        return value != null && "ROBOT".equalsIgnoreCase(String.valueOf(value).strip());
+        return Plan.robotValue(value);
     }
 
     /**
