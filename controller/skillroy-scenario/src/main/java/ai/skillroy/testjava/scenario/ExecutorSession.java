@@ -1671,7 +1671,7 @@ public final class ExecutorSession implements AutoCloseable {
         BindingsFile read = null;
         if (java.nio.file.Files.isRegularFile(file, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
             try {
-                read = BindingsFile.read(file);
+                read = BindingsFile.read(bindingsRoot, envId, scenarioId);
             } catch (BindingsFormatException e) {
                 throw new IOException(e.getMessage(), e);
             }

@@ -2214,6 +2214,12 @@ and every writer of a baseline's or an anchor's PNG (the binder's approve, the e
 `<bindingsRoot>/<envId>/`, no symbolic link from that directory down, the directory itself included; the message names
 the link (the directory by its path, an entry below it relative to it). So approve never writes where replay refuses
 to read. A link above `<envId>` is P2 §11.3's documented non-coverage, unchanged.
+**(Phase 7 follow-up, gap 99, built 2026-10-11.) The JSON reader follows the same rule.**
+`BindingsFile.read(bindingsRoot, envId, scenarioId)` walks with `requireNoLink` (the message naming the link) and opens
+the file without following one; it is what the binder (replay's read, a writing bind's read of the existing file,
+approve's diff), the session's baselines and the executor's caller-supplied file read. A link at the file's position,
+dangling or not, is a file that cannot be read: replay ends `UNREADABLE` and a writing bind refuses as for S116 rather
+than replacing the link. `BindingsFile.read(Path)` stays for a file a person names (`diff-bindings`).
 
 **(Phase 7 security fix, S146, built 2026-10-11, SJ, the controller's half.) A `{text}` locator is never recorded as
 the owner: target text never enters the file.** `ImageSteps` drops a `text` key from the capture's

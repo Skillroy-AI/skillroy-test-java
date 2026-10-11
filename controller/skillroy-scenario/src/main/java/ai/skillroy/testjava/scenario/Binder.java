@@ -40,6 +40,7 @@ import ai.skillroy.testjava.scenario.resolve.VerifierResult;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -704,7 +705,7 @@ public final class Binder {
             }
             BindingsFile file;
             try {
-                file = BindingsFile.read(BindingsFile.locate(root, options.envId(), plan.scenarioId()));
+                file = BindingsFile.read(root, options.envId(), plan.scenarioId());
             } catch (IOException | BindingsFormatException e) {
                 fingerprintEvent(env, null);
                 throw unreadable(relative, "cannot be read: " + e.getMessage());
@@ -1031,10 +1032,11 @@ public final class Binder {
                 existingRead = true;
                 Path root = options.bindingsRoot();
                 Path path = root == null ? null : BindingsFile.locate(root, options.envId(), plan.scenarioId());
-                if (path != null && Files.exists(path)) {
+                // Gap 99: a link at the file's position, even a dangling one, is a file that cannot be read.
+                if (path != null && Files.exists(path, LinkOption.NOFOLLOW_LINKS)) {
                     String why;
                     try {
-                        BindingsFile file = BindingsFile.read(path);
+                        BindingsFile file = BindingsFile.read(root, options.envId(), plan.scenarioId());
                         if (file.scenarioId().equals(plan.scenarioId()) && file.envId().equals(options.envId())) {
                             existing = file;
                             why = null;
@@ -1156,7 +1158,7 @@ public final class Binder {
                 Path existing = BindingsFile.locate(root, options.envId(), plan.scenarioId());
                 if (Files.isRegularFile(existing)) {
                     try {
-                        diff = BindingsFile.read(existing).diff(file);
+                        diff = BindingsFile.read(root, options.envId(), plan.scenarioId()).diff(file);
                     } catch (IOException | BindingsFormatException e) {
                         diff = null;
                     }

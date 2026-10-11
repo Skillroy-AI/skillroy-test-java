@@ -1683,7 +1683,8 @@ public record BindingsDiff(List<Change> changes) {
 `pointer`'s anchor) per render key one entry `{sha256, width, height, masks, carets, focus: {owner, ownerRect?, active},
 file, rendering, window?, anchor?}`, the masked PNG beside the file under `<scenarioId>.images/<label>.<renderKey>.png`;
 `file` is informative and derived (a mismatch is ERROR / ENVIRONMENT; a PNG is read from the derived path only, never
-through a link); a file without images is still written as version 1. The lifecycle: `replay` checks that every label of
+through a link, nor, since gap 99 on 2026-10-11, is the bindings file itself, P7 §8.7); a file without images is still
+written as version 1. The lifecycle: `replay` checks that every label of
 the plan's `images` has an entry; a baseline is approved at its step (`Approver.reviewImage`, whose default delegates to
 `review`); `approve` writes the file a second time after the steps; every writing bind carries the existing `images`
 forward; the export writes its anchors' entries into its own file and hands the PNGs out (`ExportResult.images()`).

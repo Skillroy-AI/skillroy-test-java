@@ -1513,7 +1513,8 @@ public final class PlanExecutor {
             }
             Path file = BindingsFile.locate(bind.bindingsRoot(), bind.envId(), plan.scenarioId());
             try {
-                return Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS) ? BindingsFile.read(file) : null;
+                return Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)
+                        ? BindingsFile.read(bind.bindingsRoot(), bind.envId(), plan.scenarioId()) : null;
             } catch (IOException | BindingsFormatException e) {
                 return null;
             }

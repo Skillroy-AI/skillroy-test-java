@@ -345,6 +345,49 @@ class Phase7BindingsTest {
     }
 
     /**
+     * Gap 99 (the rule of S140 for the JSON reader): the bindings file of a scenario is read under the link rule of the
+     * baselines' reader. A link at the file's position (to a good file elsewhere) and a linked environment directory are
+     * refused, naming the link; a writing bind and a live run with images end ERROR / ENVIRONMENT over the link and leave
+     * its target unchanged; the reader of a file a person names ({@code diff-bindings}) still reads it.
+     */
+    @Test
+    void theBindingsFileIsNeverReadThroughALink() throws Exception {
+        ToyPack pack = imagePack();
+        Plan plan = compile(pack, "steps:\n  - expectImage: { label: pad }\n");
+        assertEquals(Status.PASS, run(pack, plan, BindMode.APPROVE, Approver.APPROVE_ALL, "first").status());
+        Path root = tmp.resolve("bindings");
+        Path file = BindingsFile.locate(root, "seed-a", "t");
+        Path elsewhere = Files.createDirectories(tmp.resolve("elsewhere"));
+        Path target = Files.move(file, elsewhere.resolve("t.bindings.json"));
+        String good = Files.readString(target);
+        try {
+            Files.createSymbolicLink(file, target);
+        } catch (UnsupportedOperationException | IOException e) {
+            return;
+        }
+        IOException atFile = assertThrows(IOException.class, () -> BindingsFile.read(root, "seed-a", "t"));
+        assertTrue(atFile.getMessage().startsWith("t.bindings.json is a link"), atFile.getMessage());
+        assertEquals("t", BindingsFile.read(file).scenarioId(), "a file a person names is read as named");
+        for (BindMode mode : List.of(BindMode.APPROVE, BindMode.LIVE)) {
+            RunResult result = run(pack, plan, mode, Approver.APPROVE_ALL, "linked-" + mode.label());
+            assertEquals(Status.ERROR, result.status(), mode.label() + ": " + result.message());
+            assertEquals(FailureKind.ENVIRONMENT, result.failureKind(), result.message());
+            assertTrue(result.message().contains("is a link"), result.message());
+            assertEquals(good, Files.readString(target), mode.label() + ": the link's target is unchanged");
+            assertTrue(Files.isSymbolicLink(file), mode.label() + ": the link is left as it was");
+        }
+
+        Files.delete(file);
+        Path envDir = BindingsFile.envDir(root, "seed-a");
+        Path moved = Files.move(envDir, tmp.resolve("seed-a-real"));
+        Files.copy(target, moved.resolve("t.bindings.json"));
+        Files.createSymbolicLink(envDir, moved);
+        IOException atDir = assertThrows(IOException.class, () -> BindingsFile.read(root, "seed-a", "t"));
+        assertTrue(atDir.getMessage().startsWith("the bindings directory "), atDir.getMessage());
+        assertTrue(atDir.getMessage().contains("is a link"), atDir.getMessage());
+    }
+
+    /**
      * Phase 7 security fix, S118, S147 (phase7-contracts.md 8.1, 8.2, 6.6): the bindings file's reader refuses two
      * labels that differ only in case (a label names a file), and its constructor refuses what its reader would, a
      * label with a separator among it, so that a file that cannot be read back is never written.

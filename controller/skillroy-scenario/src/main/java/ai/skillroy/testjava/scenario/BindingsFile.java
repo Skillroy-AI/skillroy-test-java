@@ -29,9 +29,12 @@ import ai.skillroy.testjava.scenario.resolve.Strategy;
 import ai.skillroy.testjava.scenario.resolve.VerifierResult;
 
 import java.io.IOException;
+import java.io.InputStream;
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
@@ -232,6 +235,27 @@ public record BindingsFile(int bindingsVersion, String scenarioId, String envId,
      */
     public static BindingsFile read(Path file) throws IOException, BindingsFormatException {
         return parse(Files.readString(file, StandardCharsets.UTF_8));
+    }
+
+    /**
+     * Reads and checks the bindings file of a scenario in an environment under the reader's link rule (gap 99, the
+     * rule S140 gave the writers): inside {@code <bindingsRoot>/<envId>/}, no symbolic link from that directory down,
+     * the file itself included ({@link #requireNoLink}, the message naming the link), and the file opened without
+     * following one. What the binder, the session and the executor read; {@link #read(Path)} stays for a file a person
+     * names ({@code diff-bindings}).
+     *
+     * @throws IOException if the file cannot be read, is a link or lies under one
+     * @throws BindingsFormatException if it is not a bindings file of a known version
+     */
+    public static BindingsFile read(Path bindingsRoot, String envId, String scenarioId)
+            throws IOException, BindingsFormatException {
+        Path file = locate(bindingsRoot, envId, scenarioId);
+        requireNoLink(envDir(bindingsRoot, envId), file);
+        byte[] bytes;
+        try (InputStream in = Files.newInputStream(file, LinkOption.NOFOLLOW_LINKS)) {
+            bytes = in.readAllBytes();
+        }
+        return parse(StandardCharsets.UTF_8.newDecoder().decode(ByteBuffer.wrap(bytes)).toString());
     }
 
     /**
