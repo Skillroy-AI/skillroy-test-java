@@ -2,7 +2,7 @@
   "planVersion": 6,
   "scenarioId": "keypad-image",
   "pack": "lending",
-  "packVersion": "0.5.0",
+  "packVersion": "0.6.0",
   "sourceHash": "sha256:62260af74756c9b031f80fbc0904a92439cf59009beabdaa37fc53639a207b63",
   "inference": "none",
   "requires": [

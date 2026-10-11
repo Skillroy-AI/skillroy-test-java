@@ -2,7 +2,7 @@
   "planVersion": 6,
   "scenarioId": "supervisor-return-llm-sql",
   "pack": "lending",
-  "packVersion": "0.5.0",
+  "packVersion": "0.6.0",
   "sourceHash": "sha256:ff627989ad82b1c7a67a25cc2bbd4dbccdb2a76b3551a9a1f431ea87a6dfe037",
   "inference": "bind",
   "requires": [
