@@ -1376,6 +1376,17 @@ DSL is `clip` or a `mask` entry (D297: on the wire `swing.capture`'s reserved `r
 the one word with two homes, stated here once). `region` and `row` are accepted on `pointer` only, `region` on
 `expectImage` too (`click`'s rungs address a component, not a point; a region click is a `pointer`).
 
+**As built (Phase 7, VC):** `BaseSteps` holds the four verbs with the allow-lists of this table (`VISION_VERBS`,
+`POINTER_ACTIONS`, `REGION_ID`); `PlanCompiler.visionStep` compiles them (the compiler, not `BaseSteps`, attaches the
+`VisualCheck` and the `ImageCheck`, since a `StepLibrary` returns calls only). Three choices the table left open
+(D-VC-5, D-VC-6): `expectImage` without `region` or `clip` writes no `scope` and lets the agent's default answer
+(`WINDOW` for a window and for no target, `COMPONENT` for a component; the compiler cannot tell which a locator names);
+`pointer` always writes `action` (default `CLICK`: the primitive requires it) and checks `strict` as a boolean without
+sending it (the primitive has no fall-back to restrict); an `await` capture on `pointer` declares its slot as `uiCalls`
+does. One label per baseline or anchor in a scenario: an `expectImage` label and a `guard` label share one namespace
+("used twice"). The scenario schema's `baseVerbs` lists the four (`ScenarioSchemaTest`); no committed schema copy exists
+to regenerate.
+
 ### 8.2 `plan.json` version 6 (D325)
 
 `Plan.VERSION = 6`; the reader accepts 1 to 6 and refuses version-6 content below 6 ("'images' needs a version 6
@@ -1392,6 +1403,18 @@ query slot's strategy names a model token, else `none`; the reader's consistency
 (`planVersion`) and bindings file (`planHash`) in both sample scenario modules (`PlansUpToDateTest`,
 `BranchPlansUpToDateTest`, `BindingsUpToDateTest`; the web host's `plan/*.plan.json` is VC's one touch in that tree), as
 D81 did. `resolveHash` is unchanged in content, so no bindings file changes its `resolveHash`.
+
+**As built (Phase 7, VC):** `Plan.VERSION` 6, the record's twenty-first component `images` (sorted; the older
+constructors keep it empty), `Plan.Guard` and `Plan.Call.guard` (the eighth component; refused on any primitive but
+`swing.pointer`, at construction and in the reader), `Plan.inferenceOf(slots, steps)`, `Plan.imagesOf(steps)` (what the
+reader requires `images` to equal), `Plan.usesRobot()` (the steps' and the cleanup's calls) and `INFERENCE_RUN` public;
+`images` is written after `web` and before `bindTimeoutMs`. The reader names each version-6 item it refuses below 6
+(`'images'`, `inference 'run'`, a call's `guard`, the `visual` and `image` checks, the verb). VC's step-1 script
+regenerated every committed plan: `-Dskillroy.plans.update=true` in `PlansUpToDateTest` (it now regenerates
+`scenarios/exported/plan/` from `scenarios/exported/*.yaml` too), `BranchPlansUpToDateTest` and the web host's
+`PlansUpToDateTest` (profile `jcef`), then `-Dskillroy.bindings.rehash=true` in `BindingsUpToDateTest`, which rewrites the
+`planHash` of every committed bindings file (the standard ones, the branch variant's, the session export's) from its
+YAML's compiled plan and nothing else (D-VC-15); step 2b reruns both after the pack's bump.
 
 ### 8.3 `region` beside `by`
 
@@ -1411,6 +1434,15 @@ P1 §6's locator grammar is unchanged (no new key inside `by`).
 
 The run log gains the record `image {step, label, renderKey, result: held | failed | missing | skipped, differing?,
 maxChannelDelta?, expected?, actual?, files?}`; the detail of a failed check carries the same fields; bytes never.
+
+**As built (Phase 7, VC):** `VisualCheck` and `ImageCheck` in `…scenario`; `ImageCheck.LABEL` is the label pattern
+(also `Plan.Guard`'s); a mask entry is checked by `ImageMasks` (at most 64 per step). Under `PlanExecutor` a visual check's
+skipped line reads `<step>: aiExpect "<question>" <expect> [capability inference.vision] skipped: no visual evaluator in
+this host; capability inference.vision is <state>`, its `expect` record `{visual, capability, result: skipped, state,
+reason}`. The `image` record's `result` adds `approved` and `rejected` (an `approve` candidate) to the four values, and a
+guard's record carries `guard: true` (D-VC-7). A `{by}` mask is resolved through `swing.find` at the step: the match's
+`bounds` (window space) mapped through the capture's `origin` and `scale`; a locator that matches no single component
+fails the step `FAIL / ASSERTION` (D-VC-17).
 
 ### 8.5 Controller-side capabilities in the matrix: `CapabilityContributor` (D326, D327, D348, D354)
 
@@ -1455,6 +1487,17 @@ player's guard reads it, `SessionTools.applies` reads it through the facade, and
 So `requires: [inference.vision]` ends `PRECONDITION_FAILED` with the reason in every `PlanExecutor` run and a guard
 on it reads "`UNAVAILABLE (replay)`" in CI (today both read "missing", map 5 §1.7).
 
+**As built (Phase 7, VC):** `CapabilityContributor` with the nested `CapabilityContext` and a static `load(ClassLoader)`;
+the merge is `…scenario.CapabilityMerge` (public, so that the MCP server's start uses the same rules: `load`, `merge`,
+`Refused`, `Result{merged, agent, contributed}`, `PREFIX`, `REPLAY_REASON`). A contributor that throws is refused naming
+it, as one that answers an id without the prefix is (D-VC-9). `PlanExecutor` finds the contributors through its web path
+loader (the pack loader; the context class loader without one) and `ExecutorSession` through
+`SessionOptions.webPathLoader`, the same loader the hosts already set for the packs. `CapabilityMatrix.with(contributed,
+source)`, `source(id)` and `agentOnly()` (D-VC-22). The `capabilities` record of `run.jsonl` is `{hash, ids, file,
+agentHash, contributed}` (`hash` and the file the merged matrix's); the session journals `contributed` in
+`session-start.options` when it is not empty. `InferenceContributor` implements both SPIs (one `META-INF/services` entry
+each); `inference.gateway` and `inference.sql` are `OK` with the gateway's name as the strategy.
+
 ### 8.6 The fifth status: `SKIPPED` (D328)
 
 `Status { PASS, DEGRADED, FAIL, ERROR, SKIPPED }`. A run is `SKIPPED` when its plan's `inference` is `run` and the
@@ -1470,6 +1513,13 @@ its summary line, `--json`'s summary gains `skipped`, and the exit code is `OK` 
 a failure of the build); `RunResult.status()` and `StepOutcome.status` reuse the enum (a session never produces
 `SKIPPED`). A plan compiled before version 6 can never be `run`, so no older plan changes its outcome. `FailureKind` is
 unchanged (design §3.5: no new kind).
+
+**As built (Phase 7, VC):** the decision point is right after `run-start`: a `run` plan in `replay` writes `skipped
+{reason}`, then the `ledger` and `run-end` records; in every other mode it is refused `ERROR / ENVIRONMENT` there too,
+before the agent is contacted. `run-start` records `robot: true` when `RunOptions.robot` is set. `JunitXmlReporter`
+writes `<skipped message="SKIPPED: <message>"/>`, `ScenarioTests.report` aborts with `<id> SKIPPED: <message>`. The CLI's
+`--json` result carries `skippedReason` (the result's `skipped` list is P3 9's skipped cross-checks and keeps its
+meaning; D-VC-8); the summary line ends `…, N errors, N skipped`.
 
 ### 8.7 Baselines and anchors: the bindings file, version 2 (D329, D330, D350, D355)
 
@@ -1538,6 +1588,20 @@ writes at bind time:
   a re-resolve never drops a baseline); `Binder.file(env)` takes the section from the file it read;
 - the export writes the `images` section of its anchors into its own `BindingsFile` (§6.6) and `ExportResult.images()`
   (`Map<String, byte[]>`, label to masked PNG) hands the pixels to the caller to place beside it.
+
+**As built (Phase 7, VC):** `BindingsFile` gains the eleventh component `images` (label to render key to
+`BindingsFile.ImageEntry`; `Focus`, `Anchor` beside it); `VERSION` 2, `VERSION_WITHOUT_IMAGES` 1, and the constructor
+writes 1 for a file without images whatever version it is given. A render key in a file is `[A-Za-z0-9]{8,64}` (it names
+a file; D-VC-10). The entry's `window` is optional; an approved baseline records `{size}` from the capture's one window
+rectangle and `{insets}` from a `WINDOW` capture's origin (D-VC-23). The derived-path rule: the binder refuses an entry
+whose `file` is not `<scenarioId>.images/<label>.<renderKey>.png` (`ERROR / ENVIRONMENT`, in `replay`), and
+`ImageBaselines` reads a PNG from the derived path only, inside `<bindingsRoot>/<envId>/`, never through a link, at most
+64 MB, and only when it decodes to the entry's `sha256`. The lifecycle: `Binder.approve` asks nothing at bind time for a
+plan whose bindings hold images only (no resolution, no oracle: its baselines are approved at their steps; D-VC-4);
+`Binder.file(env)` takes the existing file's `images` (a live write, `approve`, a re-resolve); the second write is
+`Binder.writeApprovedImages` after the steps, run also when a later step failed, since each baseline was approved by a
+person at its step (D-VC-21). `ImageSteps.Outcome` has a fifth kind, `ERROR` (an unusable capture or baseline file, a
+target that cannot answer `swing.rendering`: `ERROR / ENVIRONMENT`; D-VC-18).
 
 ### 8.8 The fingerprint and `swing.rendering`
 
@@ -1724,6 +1788,22 @@ policy, or one that offers no verbs, the module offers reads only (§6.3); a ste
   host declares to the capability merge of `open` (§8.5), `"vision-session"` among them; journaled in
   `session-start.options`. **`public CapabilityMatrix capabilities()`** answers the merged matrix after `open`.
 
+**As built (Phase 7, VC):** the `read` exclusion list also refuses a primitive the catalogue does not list and a
+`script` primitive; the timeout is 10 s or the descriptor's own, at most 120 s. The credential rule: `inFlight` is set by
+any `resolve` that joins a secret, whatever its origin, and a person's step consumes a slot when one of its compiled
+calls references the slot's secret field; while a credential is in flight a non-person's step is refused when one of
+its compiled calls is `swing.type`, or `swing.key` with a key outside a fixed set of keys that type nothing (`ENTER`,
+`TAB`, `ESCAPE`, the arrows, `F1`-`F24` and the like: deny by default), which covers a pack verb that types (D-VC-11). The
+refusals' detail is `{refused: robot | glass | credential}`, never a value. `expectImage(Plan.Step, Origin)` has an
+overload with `ImageSteps.Baselines` and the static `ExecutorSession.baselines(bindingsRoot, envId, scenarioId)`: a
+session holds no bindings file, so the two-argument form records and skips an `expectImage` (the session is `live`;
+the skipped line is in the outcome's `degradedFidelity`, the session having no skipped-expectations list) and answers
+an anchored step `REBIND_NEEDED`; the scenario player hands in the scenario's baselines (D-VC-1, D-VC-19). The step is
+journaled with its verb and the arguments reconstructed from the compiled step (D-VC-2). A guarded `pointer` executed
+with a provenance whose `anchor` carries the guard's label is not compared: the recorder took that anchor with the
+guard's own call an instant before, and the comparison starts with the export's replay (D-VC-3). `session-start.options`
+holds `robot` only when true, `host` only when not empty (D-VC-16).
+
 ### 9.3 The CLI (`skillroy session`, `run`, `mcp`, `caps`)
 
 | Command | Addition |
@@ -1736,6 +1816,17 @@ policy, or one that offers no verbs, the module offers reads only (§6.3); a ste
 | JUnit glue | the property `skillroy.robot` (`true` sets `RunOptions.robot`; the glue prints one warning line naming both halves of the opt-in whenever it is true, since a property can sit in a committed build file); `SKIPPED` as `Assumptions.abort` (§8.6) |
 
 Exit codes unchanged (`Exit`); a skipped run is `OK`.
+
+**As built (Phase 7, VC):** `run --allow-robot`; the terminal approver of `approve` is wrapped by
+`RunCommand.imageApprover`, which prints `image baseline <label> of <scenario> in <env> for rendering <key>: <w> x <h>
+pixels`, the candidate's path (or that the run has no `--out`), another rendering's baseline when there is one, and asks
+`approve the baseline <label>? [y/N]`. `call --allow-robot`: without it `via: ROBOT` or `mode: ROBOT` at the arguments'
+top level is a usage error (exit 64) before anything is sent. `caps` takes `--pack` and the gateway options; with either it
+merges the contributors of the packs' loader in mode `live` without host features (`inference.vision` then answers `no
+vision session`), and both the table (`SOURCE`) and `--json` carry the source (D-VC-14). The JUnit glue reads
+`skillroy.robot` (`true`, `false` or unset; another value is the `environment` failure) and prints its warning once per
+stream whenever the effective options allow Robot; a scenario with an `expectImage` or an anchored `pointer` counts as
+needing bindings.
 
 ### 9.4 The MCP server
 
@@ -1939,6 +2030,8 @@ meaning; a query that names it reads `LENDABLE_ITEM_BY_INDUCTION_SQL` (one more 
 desk's `inductionRequired`, while a query without it reads exactly the old `LENDABLE_ITEM_SQL`, so the committed
 bindings' evidence is unchanged; the two-argument constructor stays (D-VS-12).
 
+**As built (Phase 7, VC):** `DomainPack.screenLegend()` (default null) and `DelegatingDomainPack` forwarding it, in step 1.
+
 ### 12.4 The Phase 7 scenarios (`skillroy-sample-lending-scenarios/scenarios/`)
 
 | Scenario | What it shows | Replay outcome |
@@ -1952,6 +2045,16 @@ bindings' evidence is unchanged; the two-argument constructor stays (D-VS-12).
 Nothing in them names a person or an item. `keypad-image` runs on both seeds; `sign-on-by-number-pad`,
 `loan-table-visual-check` and `vision-live-only` are seed-A scenarios (their staff number and fixtures are seed A's),
 run from the seed-A target as `basic-loan` and `basic-loan-ui` are today; only `keypad-image` has a bindings file.
+
+**As built (Phase 7, VC):** the four YAML files and their plans are committed in step 1, `keypad-image`'s plan included (it
+compiles without VS); only its bindings files, baselines and replay wait behind the test-side marker `Phase7Pending`
+(`NEEDS_BASELINES`), and `sign-on-by-number-pad`'s run behind `NEEDS_DESK` (D-VC-12). `sign-on-by-number-pad` ends with
+`signOff: {}` and `verify: state.name SIGNED_OFF`, so that it leaves the desk signed off as every committed scenario does.
+`loan-table-visual-check`'s question reads "the loan table shows one line for the scanned item, with a quantity of 2"
+and stands after the scans, before `DUE` (D-VC-13): two scans of one item are one line of quantity 2 on the desk, and
+after the deposit the loan is posted, so "two lines … " after `basic-loan`'s last step would be false for a live player;
+the rest of `basic-loan`'s steps follow it. `vision-live-only` and `loan-table-visual-check` carry `launchProperties:
+{lending.seed: A}` with `basic-loan`'s fixtures; none of the three seed-A scenarios has a bindings file.
 
 ### 12.5 Regenerated committed artifacts
 
@@ -1987,6 +2090,15 @@ version in its head comment; the same VS run).
 | 7 | `skillroy-inference` | `ClaudeGatewayTest` with `FakeAnthropic`: a `ProviderTool` becomes the toolset entry with `configs`, another provider's is `INVALID_REQUEST`, `toolset_name` sent on tool use and tool result and read back from a `tool_use` block, a parts-list result as `contentOfBlocks`, an image result refused while images are off, an error result with an image refused at construction, `CacheHint.AUTO`'s top-level `cache_control`; `ModelRequestTest`: fingerprints unchanged for a request without the new fields, changed by a provider tool; `RecordedGatewayTest`: `IMAGES` declared, a recording with an image part and a toolset request round-tripped; `ScriptedGatewayTest`: `IMAGES` and `PROVIDER_TOOLS` declared; `PriceTableTest`: the Haiku 5.5 row and note; `BudgetAndLedgerTest`: purpose `vision`; `SessionServiceTest` with a `FakeSessionTools`: tools listed, `atTurnStart` parts in the turn's first message, `act` consulted, `afterBatch` appended, provider tools and instructions in the request and masked, `endTurn` `QUESTION` and `LIMIT` ending the turn, `vision.maxActions` and `vision.maxTurns` enforced and the tools closed, `visionCall` one ledger entry with purpose `vision` on the session meter; **the raw primitive branch**: `swing_pointer {via: ROBOT}` with and without `robotAllowed`, `{force: true}` on `swing_click`, `swing_type`, `swing_key` and `swing_pointer`, `swing_capture {redact: false}` and `{mode: ROBOT}`, each a tool error with nothing reaching the fake agent and nothing journaled; **the facade**: a `FakeSessionTools` trying `read("data.query", …)`, an `execute` with `confirm: true`, a step with `via: ROBOT` under `robotAllowed` (passes) and without (refused), a read with `mode: ROBOT` (refused); a read-only policy with the tools' lists; `InferenceContributorTest`: `inference.vision` no longer answered; `SessionServiceTest`: a session without an applying tool builds the same system text as before but for the vocabulary sentence of §9.2 (so the recordings are regenerated once, §12.5); `estimate` with an image part |
 | 8 | `skillroy-vision` (and VM's CLI and MCP options) | the loop on `FakeVisionAgent` (canned captures from the module's PNG fixtures with their geometry, canned hit-tests) and `ScriptedGateway`: a V1 turn (a mark grounded by a hit-test at its centre: a button → `click` by locator, a table row → `pointer {row}`, a region mark → `pointer {region}`; the provenance; the export's comment), a V2 turn through the custom tools and through the toolset (the member mapping of §6.3, `KeyNames`, `zoom` across two windows mapped to the topmost one), the stale-capture rule (a `window.opened` event between capture and act: a fresh capture and the same-component check), the refusals (a masked focus owner for `type` and `key`, a masked target for `click` and `pointer`, a `type` naming `$assistant.password`, a `type` while a secret is in flight, a `type` holding a known secret value, a `signOn {staff: $assistant}` from the model), Haiku refused for V2, the V3 rules (`via: ROBOT` set by the facade with `requireFocus: true`, a canned `focus.window` null giving no Robot call and `endTurn: QUESTION`, `left_mouse_down` answered as text, no mode on `capture`), the marks drawn on the controller's copy (the captures file equals the fixture), a redacted `WEB` surface staying grey after the composite, the capture always after the batch and skipped after the model's own `screenshot`, the toolset's skipped calls after a failure, the limits (30, 20) through the service; `VisualQuestion`'s schema, `UNSURE`, the `<model-question>` block; `VisionCapabilities`' states (gated on `swing.capture.screen`); `ScenarioPlayer` on the toy pack with a scripted model (`aiAct` done, `ask_person` in a non-interactive run, `aiExpect` YES/NO/UNSURE through `visionCall`, a step's `tier: V3` without the flag refused, `signOn` before the first `aiAct`, an `expectImage` through the session's route); `Captures`: one file per hash, the raster as captured; the CLI's `SessionCommand` (`--vision*`, `--allow-robot`, `v3` without it a usage error, `host` set, `--play` on `CliTestPack` with a scripted gateway) and `McpCommand` (`--vision`, `--allow-robot`) parsing; `ToolCalls` (MCP): raw `swing_capture {redact: false}` and `{mode: ROBOT}`, `swing_pointer {via: ROBOT}` with `--allow-robot` set, `swing_type` with a `$assistant.password` argument, each refused with nothing sent; `skillroy_scenario_run` with a client scenario whose `type` names `$staff.password` refused by `PlanPolicy` with nothing run, and one whose `signOn {staff: $staff}` passes (a pack verb's own join) |
 | 9 | the sample | `LendingUiDisplayTest` is a display test; headless: `LendingModuleTest`'s registration list (thirteen SPIs), `LendingRegionsTest` on an unshown `NumberPad` (regions need no display), `LendingCaptureMaskTest` (the entry field, and the number pad while the entry field is masked), `LendingPackTest` (`screenLegend`, version 0.6.0), `PlansUpToDateTest`, `BindingsUpToDateTest` (its expected list gains `keypad-image`'s file per seed, the one Phase 7 scenario with bindings; `sign-on-by-number-pad`, `loan-table-visual-check` and `vision-live-only` have none, and the vision export's files are compared by §13.2 item 8 as the Phase 5 export's are; the `.images/` directories are walked separately and every PNG must be named by an entry of its bindings file and match that entry's `sha256`), `ScenarioSchemaCommittedTest`, `CapabilityGoldenTest`'s fixtures, `SecretScan` over every new file (the baselines' PNGs included: bytes, so the scan checks their names and that no `credentials.yaml` value appears in any text file) |
+
+**As built (Phase 7, VC):** item 5 is `Phase7CompileTest`, `Phase7ExecutorTest`, `Phase7SessionTest`, `Phase7ExportTest`,
+`Phase7BindingsTest`, `ImageCompareTest` (`…scenario.image`; the shared vector: the 3 x 2 raster `0xFF000000 0xFFFFFFFF
+0xFF808080 / 0xFFFF0000 0xFF00FF00 0xFF0000FF` hashes to
+`sha256:74cb35da6463af3998f014bf275125c00dd69f294b8e29bc3cfe032f48b36eec`), the extended `JunitXmlReporterTest`,
+`ScenarioSchemaTest`, `CapabilityMatrixTest` and `InferenceContributorTest`; the contributors of the executor and
+session tests are found through a class loader built in the test (a `META-INF/services` file in a temporary directory),
+so that no test-scope registration changes every other run. Item 6 is `ScenarioTestsTest`'s two tests and the CLI's
+`Phase7CommandsTest` (`WebCommandsTest`'s reason updated).
 
 ### 13.2 End to end (the Linux image; `ci/run-in-linux.sh … -Dskillroy.headless=false`; Java 8 and Java 25 targets; no key)
 
@@ -2075,6 +2187,15 @@ checks (VW), item 11 in the host-safety tests (VS).
     `robot` (the scan sees loading, not initialisation, which is why `RobotInput` is loaded lazily behind `RobotFactory`
     and nothing else in the module names `Robot` in a signature), and, with it, loaded only after `checkAwt` confirmed AWT (the capability probe constructs the Robot, §3.4), never at
     install and never in a headless JVM.
+
+**As built (Phase 7, VC):** item 7's seed-A part and item 9 are `LoadModeChecks.thePhase7SeedAScenariosRunAsDesigned`
+(`@Order(155)`) and `theCapabilitiesRecordCarriesTheAgentsHashAndTheContributedIds` (`@Order(156)`), in every load mode;
+the expected reason and contributed ids follow whether the vision module's contributor is on the class path
+(`LoadModeChecks.visionContributor()`), so that they tighten by themselves when VM lands. The glue over the committed
+directory (`junitGlueRunsTheCommittedScenarios`) runs the two new runnable scenarios (DEGRADED and SKIPPED, both aborted)
+and leaves out what `Phase7Pending` holds back. `keypad-image` is `ResolutionChecks.keypadImageHoldsAgainstItsBaselinesAnd
+AChangedOneFails` (`@Order(19)`, both seeds; the changed baseline is a copy of the bindings root with one pixel of the
+`keypad` PNG flipped and its entry's `sha256` following it), assumed away until step 2b.
 
 ### 13.3 Live (profile `inference-live`; needs `ANTHROPIC_API_KEY`; skipped without it; never in CI)
 

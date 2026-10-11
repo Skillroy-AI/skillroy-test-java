@@ -23,6 +23,7 @@ import ai.skillroy.testjava.scenario.resolve.BindMode;
 import ai.skillroy.testjava.scenario.resolve.InferenceSettings;
 
 import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -40,6 +41,15 @@ import java.util.TreeSet;
  * features), in {@code ExecutorSession.open} (with {@link SessionOptions#host()}) and in the MCP server's start.
  */
 public interface CapabilityContributor {
+
+    /**
+     * The contributors {@code ServiceLoader} finds through {@code loader} (null: the thread's context class loader),
+     * in {@code ServiceLoader} order; a provider that cannot be loaded is skipped (as {@code Contributors.load} skips a
+     * resolver contributor). At most 100 providers are looked at.
+     */
+    static List<CapabilityContributor> load(ClassLoader loader) {
+        return CapabilityMerge.load(loader).contributors();
+    }
 
     /** The contributor's id ({@code "inference"}, {@code "vision"}): the matrix remembers {@code controller:<id>}. */
     String id();

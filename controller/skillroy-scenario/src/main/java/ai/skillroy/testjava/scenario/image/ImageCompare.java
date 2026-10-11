@@ -97,7 +97,8 @@ public final class ImageCompare {
             if (!(value instanceof Map<?, ?> map) || !(map.get("x") instanceof Number x)
                     || !(map.get("y") instanceof Number y) || !(map.get("w") instanceof Number w)
                     || !(map.get("h") instanceof Number h) || w.longValue() < 0 || h.longValue() < 0
-                    || Math.abs(x.longValue()) > Integer.MAX_VALUE / 2 || Math.abs(y.longValue()) > Integer.MAX_VALUE / 2
+                    || Math.abs(x.longValue()) > Integer.MAX_VALUE / 2
+                    || Math.abs(y.longValue()) > Integer.MAX_VALUE / 2
                     || w.longValue() > Integer.MAX_VALUE / 2 || h.longValue() > Integer.MAX_VALUE / 2) {
                 return null;
             }

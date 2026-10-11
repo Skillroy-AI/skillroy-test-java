@@ -393,6 +393,28 @@ public final class ScenarioSchema {
                 "clear", Schemas.type("boolean"), "browser", ref("browser"), "await", ref("await")), List.of()));
         verbs.put("webTap", object(props("patterns", ref("topics"), "target", Schemas.type("string"), "browser",
                 ref("browser")), List.of("patterns")));
+        // phase7-contracts.md 8.1 (D310): the four vision verbs, as BaseSteps accepts them.
+        verbs.put("aiAct", object(props("intent", Schemas.type("string"), "tier", enumOf(List.of("V1", "V2", "V3")),
+                "model", enumOf(List.of("opus", "sonnet", "haiku")), "maxActions", Schemas.type("integer")),
+                List.of("intent")));
+        verbs.put("aiExpect", object(props("question", Schemas.type("string"), "expect", enumOf(List.of("YES", "NO"))),
+                List.of("question")));
+        Map<String, Object> fractions = object(props("fx", Schemas.type("number"), "fy", Schemas.type("number")),
+                List.of("fx", "fy"));
+        Map<String, Object> rect = object(props("x", Schemas.type("integer"), "y", Schemas.type("integer"), "w",
+                Schemas.type("integer"), "h", Schemas.type("integer")), List.of("x", "y", "w", "h"));
+        verbs.put("pointer", object(props("target", Schemas.type("string"), "by", Schemas.type("object"), "region",
+                Schemas.type("string"), "row", Schemas.type("integer"), "at", fractions, "action",
+                enumOf(new ArrayList<>(BaseSteps.POINTER_ACTIONS)), "to", fractions, "button",
+                enumOf(List.of("LEFT", "MIDDLE", "RIGHT")), "modifiers", array(enumOf(List.of("SHIFT", "CTRL", "ALT",
+                        "META"))), "clickCount", Schemas.type("integer"), "wheel", object(props("notches",
+                        Schemas.type("integer")), List.of("notches")), "steps", Schemas.type("integer"), "via",
+                enumOf(List.of("ROUTED", "ROBOT")), "guard", pattern("^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"), "force",
+                Schemas.type("boolean"), "await", ref("await"), "strict", Schemas.type("boolean")), List.of()));
+        verbs.put("expectImage", object(props("label", pattern("^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"), "target",
+                Schemas.type("string"), "by", Schemas.type("object"), "region", Schemas.type("string"), "clip", rect,
+                "mask", array(Schemas.anyOf(object(props("by", Schemas.type("object")), List.of("by")), rect)),
+                "maxDiffPixels", Schemas.type("integer")), List.of("label")));
         return verbs;
     }
 

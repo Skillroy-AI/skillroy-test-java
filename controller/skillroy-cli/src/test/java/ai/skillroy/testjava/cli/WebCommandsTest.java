@@ -68,7 +68,7 @@ class WebCommandsTest {
         put("web.adapter.jcef", CapabilityState.OK, null, "jcef 152");
         put("web.adapter.jxbrowser", CapabilityState.UNAVAILABLE, "not present", null);
         put("web.cdp", CapabilityState.UNAVAILABLE, "no remote-debugging endpoint configured", null);
-        put("web.hittest", CapabilityState.UNAVAILABLE, "reserved for the vision bolt-on", null);
+        put("web.hittest", CapabilityState.UNAVAILABLE, "no embedded browser technology found", null);
         agent.handlers.put("web.dom.fill", p -> Map.of("matched", 1L, "typed", 6L));
         agent.handlers.put("web.dom.click", p -> Map.of("matched", 1L, "fidelity", "DOM"));
         agent.handlers.put("web.dispatchEvent", p -> Map.of("dispatched", true));
@@ -99,7 +99,7 @@ class WebCommandsTest {
             assertTrue(table.contains(line), line + " in\n" + table);
         }
         assertTrue(table.lines().anyMatch(l -> l.startsWith("web.adapter.jcef") && l.contains("OK")
-                && l.endsWith("jcef 152")), table);
+                && l.contains("jcef 152") && l.endsWith("agent")), table);
         assertTrue(table.lines().anyMatch(l -> l.startsWith("web.cdp") && l.contains("UNAVAILABLE")
                 && l.contains("no remote-debugging endpoint configured")), table);
         Map<String, Object> json = Json.parseObject(cli("caps", "--json").expectExit(Exit.OK).out());
@@ -107,7 +107,10 @@ class WebCommandsTest {
         Map<String, Object> capabilities = (Map<String, Object>) json.get("capabilities");
         assertEquals("jcef 152", ((Map<?, ?>) capabilities.get("web.adapter.jcef")).get("strategy"));
         assertEquals("UNAVAILABLE", ((Map<?, ?>) capabilities.get("web.cdp")).get("state"));
-        assertEquals("reserved for the vision bolt-on", ((Map<?, ?>) capabilities.get("web.hittest")).get("reason"));
+        // phase7-contracts.md 4.4: the install default's reason since Phase 7 (the fake carries what the agent says).
+        assertEquals("no embedded browser technology found", ((Map<?, ?>) capabilities.get("web.hittest"))
+                .get("reason"));
+        assertEquals("agent", ((Map<?, ?>) capabilities.get("web.hittest")).get("source"), "phase7-contracts.md 8.5");
     }
 
     @Test

@@ -2162,6 +2162,10 @@ any depth of a step's arguments (every verb but `expect`) is a compile error ("a
 _meta").
 No top-level key is added: `inference` is a plan field the compiler writes (P5 §13.2), not a YAML key.
 
+*(Phase 7, built 2026-10-10, VC; P7 §8.1, §8.3.)* The keys are unchanged; the step arguments `region` (a region id),
+`row`, `clip`, `guard`, `via` and `at` belong to the Phase 7 verbs `pointer` and `expectImage`, never to `by`: P1 §6's
+locator grammar gains nothing.
+
 ### 8.2 Plan
 
 `PlanCompiler.compile(Path yaml, DomainPack pack)` is deterministic: the same YAML and pack version produce a
@@ -2213,6 +2217,9 @@ refuses a version 2 plan whose `inference` is not `none` and a `bindTimeoutMs` a
 pack's ack topic is not awaited). A pack verb chooses the sync of each call it emits. `EVENT` exists because an
 application's acknowledgement can mean only "consumed", not "accepted", and some primitives publish no
 acknowledgement at all: such a verb uses `EVENT` with the pack's ready topics instead of `READY`.
+
+*(Phase 7, built 2026-10-10, VC; P7 §8.2.)* `plan.json` is version 6 (`images`, a `swing.pointer` call's `guard`, the
+`visual` and `image` checks, `inference: run`); the reader accepts 1 to 6.
 
 ### 8.3 Domain pack SPI (package `ai.skillroy.testjava.scenario.pack`, discovered by `ServiceLoader<DomainPack>`)
 
@@ -2379,6 +2386,11 @@ describes the run's steps only (a session counts from its own start mark). `METH
 `CAPABILITY_UNAVAILABLE` or `NOT_READY` from `hook.health` (or `hook.events`) give an empty list. A pack root named
 `hooks` hides it. `DomainPack` gains `hooks()` and `settings()` (P2 §6.1).
 
+*(Phase 7, built 2026-10-10, VC; P7 §8.1, §12.3.)* The base verbs are eighteen: `aiAct`, `aiExpect`, `pointer` and
+`expectImage` join them and stay reserved for a pack; `UI_VERBS` gains `pointer` (`fired: false` fails the step, A29).
+`DomainPack.screenLegend()` (default null) is the pack's legend of its icon-only controls for a model that looks at the
+screen; `DelegatingDomainPack` forwards it.
+
 ### 8.4 Expectations
 
 Path grammar: `root(.field | [n] | [field=value] | [field~regex])*`; `last` and `first` are accepted as list
@@ -2435,6 +2447,11 @@ public static final String REFERENCE = "REFERENCE";  public boolean hasReason();
 
 `Plan.verify` and `Plan.Step.expect` become `List<Check>`; every Phase 1 constructor stays, so Phase 1 callers
 and tests compile unchanged.
+
+*(Phase 7, built 2026-10-10, VC; P7 §8.4.)* A step's checks may also be a `VisualCheck` (an `aiExpect`, always guarded
+by `inference.vision`, skipped unconditionally by the executor, so DEGRADED at best) and an `ImageCheck` (an
+`expectImage`, evaluated from the step's own capture result, exactly after masks, against the baseline of the target's
+render key; no retry). The run log gains the record `image`.
 
 ### 8.5 Executor, results, reports
 
@@ -2639,6 +2656,16 @@ after `run-end`. A throwing observer is logged once and replaced by `NONE` for t
 changes a verdict. With telemetry on, the CLI's `--telemetry file` writes `<out>/telemetry/spans.jsonl` beside the
 scenario directories, and `JunitXmlReporter.withTraceId` ends the report with `<system-out>traceId=<hex></system-out>`.
 
+*(Phase 7, built 2026-10-10, VC; P7 §8.5-§8.7.)* `Status.SKIPPED` is decided right after `run-start` for a plan with
+`inference: run` in `replay` (records `skipped`, `ledger {count: 0}`, `run-end`; the agent is not contacted); in every
+other mode such a plan is ERROR / ENVIRONMENT there. A plan with `via: ROBOT` or `mode: ROBOT` calls is ERROR /
+ENVIRONMENT before `checkRequires` without `RunOptions.robot` (recorded in `run-start` when set). After step 0b the
+controller-side contributors' capabilities are merged into the matrix (`CapabilityMerge`; `UNAVAILABLE (replay)` in
+`replay`), which `requires`, guards, `capabilities.json` and the fact root `caps` read; the `capabilities` record gains
+`agentHash` and `contributed`. An anchored `pointer` call's guard is compared before it is sent; failure files
+`failure/image-<label>-expected.png`, `-actual.png`, `-diff.png`; in `approve` a baseline candidate is written to
+`candidates/image-<label>.png`, approved at its step, and the bindings file is written a second time after the steps.
+
 ### 8.6 `skillroy-junit` and `skillroy-cli`
 
 `skillroy-junit`: `ScenarioTests.dynamicTests(ScenarioSource source, Supplier<AgentConnection> connection)` (also
@@ -2725,6 +2752,13 @@ overload without `RunOptions` reads `skillroy.telemetry`, `skillroy.telemetry.en
 `skillroy.telemetry.attributes`, `skillroy.telemetry.out`, `skillroy.telemetry.serviceName`,
 `skillroy.telemetry.timeoutMs` and `skillroy.telemetry.file`, finds the provider through `ServiceLoader` and closes
 it at JVM exit; an unusable setting is the `environment` test.
+
+*(Phase 7, built 2026-10-10, VC; P7 §8.6, §9.3.)* JUnit: a SKIPPED run is aborted whatever `degradedAs` says (the XML
+report writes `<skipped message="SKIPPED: …"/>`); the property `skillroy.robot` sets `RunOptions.robot` and the glue
+prints one warning line naming both halves of the opt-in. CLI: `run --allow-robot`, the summary's `skipped` count (exit 0
+for a skipped run), `--json`'s `skipped` count and per result `skippedReason`, the image approval prompt in `approve`
+(`--yes` approves); `call --allow-robot` (without it `via: ROBOT` and `mode: ROBOT` are refused before anything is sent);
+`caps` with a `SOURCE` column and, with `--pack` or `--inference`, the merged matrix.
 
 ---
 

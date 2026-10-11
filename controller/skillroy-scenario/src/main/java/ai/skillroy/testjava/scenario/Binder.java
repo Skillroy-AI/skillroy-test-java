@@ -381,6 +381,39 @@ public final class Binder {
         }
     }
 
+    /**
+     * The second write of {@code approve} (phase7-contracts.md 8.7, decision D355): after the steps, the bindings file
+     * the bind wrote (or read) is written again with the baselines a person approved at their steps beside the old
+     * entries, their PNGs first under {@code <scenarioId>.images/}; the text passes {@link #requireNoCredential} as the
+     * bind's write does.
+     *
+     * @param file the file the bind wrote or carried forward
+     * @param baselines this run's baselines with its approvals
+     * @return the file written
+     * @throws BindException ENVIRONMENT when the file or a PNG cannot be written, or a value equals a credential
+     */
+    static BindingsFile writeApprovedImages(Plan plan, BindOptions options, BindingsFile file,
+                                            ImageBaselines baselines) throws BindException {
+        Path root = options.bindingsRoot();
+        if (root == null) {
+            throw new BindException(FailureKind.ENVIRONMENT, null, null, "writing a baseline needs a bindings root",
+                    null);
+        }
+        BindingsFile updated = file.withImages(baselines.merged());
+        String text = updated.toJsonText();
+        requireNoCredential(plan, options, text);
+        String relative = options.envId() + "/" + plan.scenarioId() + BindingsFile.SUFFIX;
+        try {
+            baselines.writeApprovedPngs();
+            BindingsFile.writeText(BindingsFile.locate(root, options.envId(), plan.scenarioId()), text);
+        } catch (IOException e) {
+            throw new BindException(FailureKind.ENVIRONMENT, null, null, "the bindings file " + relative
+                    + " or a baseline beside it could not be written: " + e.getClass().getSimpleName(),
+                    RunLog.fields("bindingsFile", relative));
+        }
+        return updated;
+    }
+
     /** The plan's fixture slots and their values as written, for A25's key rule. */
     private static Map<String, Object> fixtureValues(Plan plan) {
         Map<String, Object> out = new LinkedHashMap<>();
@@ -551,6 +584,7 @@ public final class Binder {
             }
             fingerprintEvent(env, file.env().hash());
             checkFile(file, relative);
+            checkImages(file, relative, true);
             if (!file.resolveHash().equals(plan.resolveHash())) {
                 Map<String, Object> d = new LinkedHashMap<>(where);
                 d.put("expected", plan.resolveHash());
@@ -693,6 +727,46 @@ public final class Binder {
         }
 
         /**
+         * phase7-contracts.md 8.7 (D355): every entry's {@code file} is the derived name (a mismatch is ERROR /
+         * ENVIRONMENT: a planted or hand-edited file never names a path to open) and, in {@code replay}, every label of
+         * the plan's {@code images} has at least one entry (any render key; REBIND_NEEDED reason {@code IMAGE}
+         * otherwise); an {@code images} event reports the keys present.
+         */
+        private void checkImages(BindingsFile file, String relative, boolean requireLabels) throws BindException {
+            for (Map.Entry<String, Map<String, BindingsFile.ImageEntry>> e : file.images().entrySet()) {
+                for (Map.Entry<String, BindingsFile.ImageEntry> k : e.getValue().entrySet()) {
+                    String derived = BindingsFile.ImageEntry.fileName(plan.scenarioId(), e.getKey(), k.getKey());
+                    if (!derived.equals(k.getValue().file())) {
+                        throw new BindException(FailureKind.ENVIRONMENT, null, null, "the bindings file " + relative
+                                + ": images." + e.getKey() + "." + k.getKey() + " names the file '"
+                                + k.getValue().file() + "', not " + derived + " (edited by hand?)",
+                                RunLog.fields("bindingsFile", relative, "label", e.getKey(), "renderKey", k.getKey()));
+                    }
+                }
+            }
+            if (plan.images().isEmpty()) {
+                return;
+            }
+            Map<String, Object> keys = new LinkedHashMap<>();
+            for (String label : plan.images()) {
+                Map<String, BindingsFile.ImageEntry> byKey = file.images().get(label);
+                keys.put(label, byKey == null ? List.of() : new ArrayList<>(byKey.keySet()));
+            }
+            listener.event("images", RunLog.fields("bindingsFile", relative, "keys", keys));
+            if (!requireLabels) {
+                return;
+            }
+            for (String label : plan.images()) {
+                if (!file.images().containsKey(label)) {
+                    throw new BindException(FailureKind.REBIND_NEEDED, "IMAGE", null, "the bindings file " + relative
+                            + " has no baseline or anchor '" + label + "' for any rendering; approve the scenario (a"
+                            + " baseline) or re-record the step (an anchor)", RunLog.fields("bindingsFile", relative,
+                            "label", label));
+                }
+            }
+        }
+
+        /**
          * After the {@code resolveHash} comparison (8.3 step 4): a plan whose slot asks another query kind changed
          * its resolve section, which is PLAN_CHANGED; a kind that differs although the hash matches can only be a
          * hand edit of the file.
@@ -816,7 +890,7 @@ public final class Binder {
         }
 
         /** The existing bindings file of this scenario and environment, read once; null when absent or unusable. */
-        private BindingsFile existing() {
+        BindingsFile existing() {
             if (!existingRead) {
                 existingRead = true;
                 Path root = options.bindingsRoot();
@@ -889,8 +963,11 @@ public final class Binder {
                 resolutions.put(r.slot(), withApproval);
                 engine.replaceResolution(withApproval);
             }
+            // phase7-contracts.md 8.7 (D355): a slot approval or a re-resolve never drops a baseline or an anchor.
+            BindingsFile old = existing();
             return new BindingsFile(BindingsFile.VERSION, plan.scenarioId(), options.envId(), plan.pack(),
-                    plan.packVersion(), plan.hash(), plan.resolveHash(), env, resolutions, engine.oracleValues());
+                    plan.packVersion(), plan.hash(), plan.resolveHash(), env, resolutions, engine.oracleValues(),
+                    old == null ? Map.of() : old.images());
         }
 
         /** The file with every resolution under {@code approval}, kept in the engine too. */
@@ -902,11 +979,19 @@ public final class Binder {
                 engine.replaceResolution(approved);
             }
             return new BindingsFile(file.bindingsVersion(), file.scenarioId(), file.envId(), file.pack(),
-                    file.packVersion(), file.planHash(), file.resolveHash(), file.env(), resolutions, file.oracles());
+                    file.packVersion(), file.planHash(), file.resolveHash(), file.env(), resolutions, file.oracles(),
+                    file.images());
         }
 
-        /** 8.3 approve step 7: the approver is asked once; its time is outside the budget. */
+        /**
+         * 8.3 approve step 7: the approver is asked once; its time is outside the budget. A plan whose bindings hold
+         * only images (no query slot, no oracle; phase7-contracts.md 8.7) has nothing to approve at bind time: its
+         * baselines are approved at their steps ({@link Approver#reviewImage}).
+         */
         private BindingsFile approve(BindingsFile file, EnvFingerprint env) throws BindException {
+            if (engine.resolutions().isEmpty() && engine.oracleValues().isEmpty()) {
+                return file;
+            }
             BindingsDiff diff = null;
             Path root = options.bindingsRoot();
             if (root != null) {

@@ -464,6 +464,9 @@ class ExecutorSessionTest {
         SessionFixture.resolveItemAndAssistant(session, PERSON);
         session.execute("signOn", Map.of("staff", "$assistant"), PERSON);
         session.execute(PlannedCall.of("toy.input", Map.of("source", "Entry", "value", "$assistant.password"),
+                Sync.READY), PERSON);
+        // phase7-contracts.md 9.2 (D342): a model never names a secret field; its non-secret fields stay usable.
+        session.execute(PlannedCall.of("toy.input", Map.of("source", "Entry", "value", "$assistant.code"),
                 Sync.READY), MODEL);
         session.check("state.name", "LOAN", PERSON);
         session.observe("loan.total", PERSON);
@@ -471,8 +474,8 @@ class ExecutorSessionTest {
         session.budget("SESSION", new BigDecimal("0.0100"), new BigDecimal("1.00"), false);
         session.close();
         session.close();
-        assertEquals(List.of("session-start", "resolve", "resolve", "step", "step", "check", "observe", "note",
-                "budget", "session-end"), journalTypes(), "closing twice writes one end");
+        assertEquals(List.of("session-start", "resolve", "resolve", "step", "step", "step", "check", "observe",
+                "note", "budget", "session-end"), journalTypes(), "closing twice writes one end");
         String text = journalText();
         assertFalse(text.contains(TestCredentials.PW_100), text);
         List<StepJournal.Entry> read = StepJournal.read(dir.resolve(StepJournal.FILE), fx.pack).entries();
@@ -487,9 +490,11 @@ class ExecutorSessionTest {
         assertNull(raw.verb());
         assertEquals(Map.of("source", "Entry", "value", "$assistant.password"), raw.args(), "as given");
         assertEquals("<redacted>", ((Map<?, ?>) raw.calls().get(0).get("args")).get("value"), "as sent, masked");
-        assertEquals(Origin.Kind.MODEL, raw.origin().kind());
-        assertEquals("a-model", raw.origin().by());
-        assertNotNull(raw.snapshotHash(), "a model's passed step records the snapshot it left");
+        StepJournal.StepEntry model = (StepJournal.StepEntry) read.get(5);
+        assertEquals(Origin.Kind.MODEL, model.origin().kind());
+        assertEquals("a-model", model.origin().by());
+        assertNotNull(model.snapshotHash(), "a model's passed step records the snapshot it left");
+        assertNull(raw.snapshotHash(), "a person's does not");
         assertNull(((StepJournal.StepEntry) read.get(3)).snapshotHash(), "a person's does not");
         StepJournal.ResolveEntry assistant = (StepJournal.ResolveEntry) read.get(2);
         assertEquals(Map.of("limitBelow", "$item.deposit"), assistant.args(), "the arguments as given");
@@ -497,7 +502,7 @@ class ExecutorSessionTest {
         assertEquals(Map.of("code", "100", "limit", "2.00"), assistant.toResolution().value());
         StepJournal.SessionEnd end = (StepJournal.SessionEnd) read.get(read.size() - 1);
         assertEquals("closed", end.reason());
-        assertEquals(2, end.steps());
+        assertEquals(3, end.steps());
         assertEquals("0", end.cost(), "no model call");
         assertThrows(IllegalStateException.class, () -> session.note("late", PERSON));
     }

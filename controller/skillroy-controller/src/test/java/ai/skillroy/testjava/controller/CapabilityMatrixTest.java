@@ -143,4 +143,29 @@ class CapabilityMatrixTest {
         assertFalse(otherReason.hash().equals(sameIds.hash()), "a reason changes it");
         assertEquals(new CapabilityMatrix(null).hash(), new CapabilityMatrix(Map.of()).hash());
     }
+
+    /**
+     * phase7-contracts.md 8.5 (D326): contributed entries join the matrix with their source; the wire shape and the
+     * hash carry none; an id already present is refused; {@code agentOnly} gives the agent's matrix back.
+     */
+    @Test
+    void contributedEntriesRememberTheirSourceOutsideTheWireShape() {
+        CapabilityMatrix agent = matrix(new Capability("swing.tree", CapabilityState.OK, null, null));
+        CapabilityMatrix merged = agent.with(Map.of("inference.vision", new Capability("inference.vision",
+                CapabilityState.UNAVAILABLE, "replay", null)), "controller:vision");
+        assertEquals("agent", merged.source("swing.tree"));
+        assertEquals("controller:vision", merged.source("inference.vision"));
+        assertNull(merged.source("nothing"));
+        assertEquals(2, merged.all().size());
+        assertFalse(merged.toJson().toString().contains("controller:"), "no source on the wire");
+        assertEquals(agent, merged.agentOnly());
+        assertEquals(agent.hash(), merged.agentOnly().hash());
+        assertEquals(matrix(new Capability("swing.tree", CapabilityState.OK, null, null), new Capability(
+                "inference.vision", CapabilityState.UNAVAILABLE, "replay", null)).hash(), merged.hash(),
+                "the hash is the wire shape's");
+        assertThrows(IllegalArgumentException.class, () -> merged.with(Map.of("swing.tree", new Capability(
+                "swing.tree", CapabilityState.OK, null, null)), "controller:x"), "an id already present");
+        assertThrows(IllegalArgumentException.class, () -> agent.with(Map.of(), " "), "a source is needed");
+        assertTrue(agent.agentOnly() == agent);
+    }
 }

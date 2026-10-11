@@ -102,7 +102,7 @@ class RunCommandTest {
         assertTrue(stdout.contains("\n  evidence: " + out.resolve("wrong-count")), stdout);
         assertTrue(stdout.contains("\nERROR     needs-fancy  ("), stdout);
         assertTrue(stdout.contains("\n  PRECONDITION_FAILED: "), stdout);
-        assertTrue(stdout.endsWith("4 scenarios: 1 passed, 1 degraded, 1 failed, 1 errors\nmodel calls: 0\n"
+        assertTrue(stdout.endsWith("4 scenarios: 1 passed, 1 degraded, 1 failed, 1 errors, 0 skipped\nmodel calls: 0\n"
                         + "model cost: $0 (budget $0.50)\n"),
                 "Phase 2 (12.1): the summary ends with the model calls, and Phase 5 (13.4) with their cost: "
                         + stdout);
