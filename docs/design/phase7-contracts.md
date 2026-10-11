@@ -3433,12 +3433,12 @@ worker probe has run (`CoreCapabilityRegistry.LATE_REASON`, the `not probed yet`
 are unchanged, and the synchronous first probe and an agent-api `declare(id, probe, initial)` stay rejected (D449). **(93)** Replay
 refuses an unapproved value for a model's strategy only (D72): the export's `REQUIRED` mark on a model's or a client's
 tier (a) binding (D468) is the reviewer's mark and no replay gate; refusing `NOT_APPROVED` for a recorded `REQUIRED`
-whatever the strategy is one line in `Binder`, the owner's call (SH). **(94)** Closed 2026-10-11 (a follow-up after Phase 7): the recorder reads a `type`'s text with
+whatever the strategy is one line in `Binder`, the owner's call (SH). *Closed 2026-10-11: the owner's answer is not to refuse (B33).* **(94)** Closed 2026-10-11 (a follow-up after Phase 7): the recorder reads a `type`'s text with
 `References.references` and asks the facade's `namesSecret` (§6.5, §9.1), and the vocabulary's sentence names the
 whole-slot rule (§9.2 rule 1); the five Phase 5 session recordings regenerated key-free. **(95)** S111's agent half and the composite's clip ran against fakes:
 a web-host check with a mask on the front browser's panel, and one desktop with a real JCEF frame and a `JOptionPane`, would
 close them (SI). **(96)** A modal check in `web.dom.click` and `web.dom.fill` for MODEL and CLIENT origins, the broader
-alternative of S109, a P4 amendment; the recorder's path is closed by D472 (SI, optional). **(97)** Two residuals of the
+alternative of S109, a P4 amendment; the recorder's path is closed by D472 (SI, optional). *Closed 2026-10-11: the owner's answer is not to refuse (B33).* **(97)** Two residuals of the
 model's pixel: an in-window change between a V2 or V3 capture and the act (a glass-pane dialog that opens no window) is
 outside the stale rule's trigger, and an application's own Paste item or context-menu command is an ordinary click that no
 chord rule can see; mask it (SI). **(98)** A window of the target JVM on another virtual desktop or workspace is invisible

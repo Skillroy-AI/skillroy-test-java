@@ -32,7 +32,8 @@ Tick each item in the release's own record (the release note or its pull request
    siblings green).
 8. **Versions**: the release version in every POM, in every `version()` of the agent modules and in `agentVersion`;
    no `-SNAPSHOT` left.
-9. **Coordinates**: the domain behind the `ai.skillroy` groupId is under the project's control (B2).
+9. **Coordinates**: the domain behind the `ai.skillroy` groupId is under the project's control (B2; confirmed by the owner on
+   2026-10-11, B33).
 10. **The DCO trail**: every commit since the last release carries a `Signed-off-by` line. (First release: the three Phase 6
     merge commits without one, `ee020ad`, `6a342e7` and `f33488f`, were accepted by the owner on 2026-10-11.)
 11. **The release note** names every accepted or deferred low finding with its release-note text (the eight of B28
