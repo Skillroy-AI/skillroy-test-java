@@ -398,6 +398,12 @@ dialog over a window that is not modal (or ranked higher among modal dialogs by 
 window, and never when `window` is owned by `other`. A `{text, role}` candidate is proposed for a text of at most 100
 characters on one line. The capture geometry a `captureId` names is kept by `RecentCaptures`, the window held weakly.
 
+**Fix wave (Phase 7 review, FC, 2026-10-10):** the target form also answers **`targetNode`**, the named component's own
+`Node` (additive; the point form answers none), so that a reader of the target form (the recorder, for `click_ref` and
+the focus owner, §6.5) takes the component's role, class and name from the component itself and not from what is drawn
+at its centre (a label inside a composite button; review finding L1-F5, D-FC-4). `deepest` and `mouseTarget` keep their
+meaning: what lies at the centre.
+
 ### 3.3 `swing.pointer` with `via: ROUTED` (A63; mutating; capability `swing.pointer.routed`)
 
 **Decision (D293, D294, D352).** A pointer action at coordinates, delivered as a `MouseEvent` whose source is the
@@ -1237,6 +1243,12 @@ on), `wait` and `cursor_position`. A toolset click's `text` (modifier keys) maps
 rectangle to the topmost window at its centre in the capture's `windows` order, assuming no insets (the WM-less image),
 at a scale that fits 1024 pixels on the long edge (at most 4).
 
+**Fix wave (Phase 7 review, FC, 2026-10-10):** `wait` settles for the session's step timeout, as the table says, and
+no longer for a fixed 5 s (L1-F6): the facade gains the default method `SessionActions.stepTimeout()`, which the service
+answers from `SessionOptions.stepTimeout` (§9.1); the settle's `timeoutMs` is that value, at least 1 s and at most 110 s
+(below `ExecutorSession.read`'s 120 s bound for one read, §9.2, so that the settle's own answer ends a slow wait), and
+the result names it ("did not settle within 30 s").
+
 ### 6.4 Grounding, the stale-capture rule, visual questions
 
 **Grounding** of a pixel `(x, y)` of capture `C`: `swing.hitTest {point, space: {captureId: C}}` (§3.2) before anything
@@ -1352,6 +1364,21 @@ space), `sha256`, `width`, `height`, `file`, `renderKey`, `rendering` (without `
 handle; the single showing browser is the agent's default). In V3 a focus loss reported by the agent (`not focused`)
 ends the turn `QUESTION` as the focus rule does.
 
+**Fix wave (Phase 7 review, FC, 2026-10-10):** (a) Step 2's masked refusal comes **first, for every surface** (L2-F2):
+a hit whose `masked` is true is refused before the `WEB` branch, and a `WEB` hit whose surface the capture reports
+`redacted` (§3.1, §4.8) is refused the same, with the same text; so a page a pack masked is never hit-tested
+(`web.hitTest` is not read) and none of its text (the element's role and name) enters a step's arguments, the journal,
+the export or a tool result. (b) An anchored `DRAG` records `to` as its end point's fractions of the window, mapped as
+`at` is (`(origin + to / scale) - window`), not `at` again (L1-F3). (c) The anchor's `window.insets` are the root pane's
+position in the window: a `WINDOW` capture's `origin` (§3.1), read once per window per session through `actions.read`
+(`scope: WINDOW`, `scale: 0.25`, `redact: true`; the pixels are not used), `{0, 0}` when that read fails (the insets are
+the reviewer's information; the guard does not depend on them, §6.7). The build subtracted the window's position from
+the composite's `windows[].rect`, which is the window's own bounds, so its insets were zero by construction (L1-F4).
+(d) The node whose `role`, `class` and `name` choose between `click` and `pointer` and fill the provenance's `hitTest`
+and the export's comment is, for a target-form hit (`click_ref`, the focus owner), the hit-test's `targetNode` (§3.2);
+from an agent without it, the `mouseTarget` or the `deepest` node that is the target itself, else the `mouseTarget`,
+else the `deepest`; the point form keeps its rule (the `mouseTarget`, else the `deepest`) (L1-F5, D-FC-4).
+
 ### 6.6 Export into ordinary steps (D309, D355, D356)
 
 A step with provenance exports as the verb step it was journaled as (P5 §12.3 rule 1 unchanged), followed on its line
@@ -1460,6 +1487,21 @@ step's limit); a step's tier that would change to or from V1 changes the tool vo
 and is a usage error like a widening one (D424). A fixture slot is bound through `ExecutorSession.fixture(slot, value,
 credential, origin)` as the person (§9.2's note, D425); a host may pass its own `FixtureBinder`. An `aiExpect`'s capture is a `swing.capture {scope: SCREEN, mode: PAINT, redact: true,
 annotateRefs: <V1>}` through `ExecutorSession.read` with the marks drawn, its verdict journaled as a note. The player hands every `expectImage` and anchored `pointer` the scenario's baselines, `ExecutorSession.baselines(root, env, scenarioId)` read once per play, when its host gave a bindings root and an environment (`withBaselines`; D359); without them a session holds none (an `expectImage` is recorded and skipped, an anchored step `REBIND_NEEDED`).
+
+**Fix wave (Phase 7 review, FC, 2026-10-10):** **`verify` is evaluated** (L1-F2, D-FC-1). After the last step the
+player evaluates the plan's `verify` in file order through `ExecutorSession.check(path, matcher, Origin.person)`: one
+read each, as the session's `expect` steps take it (the last step's own sync has run), each journaled as a `check`, so
+that the session's export carries the post-conditions as expectations after the last step; when one does not hold the
+play is `FAIL / ASSERTION` with the first that did not, after all were evaluated; a guarded expectation whose
+capability the session's merged matrix does not have `OK`, and a stored-row (`db`) check, which a session does not
+evaluate, are skipped with the reason (the play at best `DEGRADED`). The block is reported as one step `verify` after the
+scenario's steps; a play that failed at a step does not reach it. Without this a played scenario was `PASS` whatever its
+post-conditions said, where a plan run of the same file checks them (P2's run order). **The dropped `aiExpect` steps
+are listed** (L1-S1): `ScenarioPlayer.Result` carries one line per `aiExpect` step of the scenario (its line, its
+question masked and cut at 200 characters, its expectation, and its status in the play or "not reached"), and
+`Result.annotate(ExportResult)` adds them to the export's report under "Live-only" (a visual question needs a model;
+no new report section), which `session --play --export` applies. A step whose outcome is `DEGRADED` without a message
+(an `expectImage` without a baseline) reports its skipped line as its message.
 
 ---
 ## 7. The gateway changes (`skillroy-inference`, the SPI of P5 §3)
@@ -1930,6 +1972,25 @@ id and toolset name. `maxActionsPerTurn` counts every action but a tool set's re
 `SessionService` gains `toolSets()` and `toolSetsClosed()` for the hosts' start-up line, and `PURPOSE_VISION`,
 `OPTION_MAX_ACTIONS`/`OPTION_MAX_TURNS` (1 to 1000) with their defaults.
 
+**Fix wave (Phase 7 review, FC, 2026-10-10):** (a) **The turn names the slots bound in the session** (the live run's
+finding LV-1, D-FC-2). The turn's first `USER` message carries, after the `<person>` block and before the tool sets'
+`atTurnStart` parts, one `<target-state>` block listing the slots bound in the session when at least one is (nothing
+otherwise, so that a session without bindings sends the message it sent before): a heading that says a slot's
+`$reference` may be written in a tool's arguments, a text to type included, where its value belongs, and that a
+credential's secret is never the model's; then one line per slot in binding order (the last `resolve` or `fixture`
+record of each in the session's journal, at most 40): its `$reference`, its query kind (`query LendableItem`) or
+`fixture`, whether it is a credential, and its fields as references (`$item.code`: the keys of the journaled public
+value without a key the mask's key rule calls secret, at most 30 a slot). **Never a value, never a secret and never a
+secret field's name** (D342: the journal holds the public value only, the join's secret fields never), and the block
+passes the session's mask as every labelled block does. Without it a model had no way to tell that `$item` in a
+person's request names a slot the person bound before the turn (it learnt a reference only from its own
+`skillroy_resolve` result), and the live run's models read it as an unfilled placeholder and asked. Every session gets
+the block (the CLI's `ask`, the MCP server's `skillroy_session_ask`, the overlay, the player's `aiAct` turns); the Phase
+5 session's five scripted stand-in recordings, whose person resolved the assistant before asking, changed fingerprint
+and were regenerated on the key-free fixture route (`-Dskillroy.inference.fixtures.update=true`, `SessionExportTest`).
+(b) `SessionActions` gains the default method `stepTimeout()`, which the facade answers from `SessionOptions.stepTimeout`
+(for `wait`, §6.3; L1-F6).
+
 ### 9.2 `ExecutorSession`: `read`, the four-argument `execute`, the credential rule, the opt-ins, `host` (D308, D331, D332, D341, D342, D348, D351)
 
 - **`public Object read(String primitive, Map<String, Object> args) throws AgentRpcException, AgentLostException,
@@ -1990,6 +2051,8 @@ id and toolset name. `maxActionsPerTurn` counts every action but a tool set's re
   Sign-on in a vision session therefore runs through the `signOn` verb's credential join **by the person** (the REPL
   step before `ask`, under `Origin.person`) **or by the player** (the scenario's `signOn` step before the first `aiAct`,
   §6.8), never on a model's or a client's call; §11 rule 6 and the threat model's §5 state it.
+  **Fix wave (Phase 7 review, FC, 2026-10-10):** the turn's list of the slots bound in the session (§9.1, LV-1) follows
+  the vocabulary's rule: it names a slot's non-secret fields only, never a value, a secret or a secret field's name.
 - **`SessionOptions.robot`** and **`RunOptions.robot`** (boolean, default false; the thirteenth component of each
   record, after `observer`; the older constructors and `withRobot(boolean)` keep every caller): the controller half of
   the double opt-in (§3.4), set by a person's flag only; journaled in `session-start.options` (beside the host's

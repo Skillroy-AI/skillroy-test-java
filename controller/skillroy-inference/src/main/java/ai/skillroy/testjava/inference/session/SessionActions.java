@@ -118,6 +118,16 @@ public interface SessionActions {
     java.nio.file.Path outputDir();
 
     /**
+     * The session's step timeout ({@code SessionOptions.stepTimeout}): what the vision module's {@code wait} settles
+     * for (phase7-contracts.md 6.3). Fix wave (Phase 7 review, FC): the facade had no way to reach it, and the tool
+     * settled for a fixed 5 s. The default, for a facade that does not know it, is
+     * {@code SessionOptions.DEFAULT_STEP_TIMEOUT}.
+     */
+    default java.time.Duration stepTimeout() {
+        return ai.skillroy.testjava.scenario.SessionOptions.DEFAULT_STEP_TIMEOUT;
+    }
+
+    /**
      * The pack's screen legend through the session's mask, or null (phase7-contracts.md 6.4, 12.3: a visual
      * question carries it). As built (Phase 7, VM): the contract's context had no way to reach the pack.
      */

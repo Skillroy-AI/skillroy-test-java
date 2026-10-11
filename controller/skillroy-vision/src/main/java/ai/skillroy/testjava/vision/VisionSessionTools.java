@@ -312,10 +312,12 @@ public final class VisionSessionTools implements SessionTools {
             case ToolAdapter.Type t -> recorded(use, recorder.type(t.text(), t.enter()));
             case ToolAdapter.Key k -> recorded(use, recorder.key(k.key(), k.modifiers(), k.repeat()));
             case ToolAdapter.Wait w -> {
+                long timeout = waitTimeoutMs(ctx);
                 Map<String, Object> settled = Grounding.map(ctx.actions().read("swing.settle", Map.of("timeoutMs",
-                        5000L)));
+                        timeout)));
                 String text = Boolean.TRUE.equals(settled.get("settled")) ? "the application is quiet"
-                        : "the application did not settle within 5 s";
+                        : "the application did not settle within " + (timeout % 1000 == 0 ? String.valueOf(
+                        timeout / 1000) : String.valueOf(timeout / 1000.0)) + " s";
                 yield Outcome.of(new Content.ToolResult(use.id(), w.note() == null ? text : text + "; " + w.note(),
                         false, use.toolsetName()));
             }
@@ -344,6 +346,22 @@ public final class VisionSessionTools implements SessionTools {
                     use.toolsetName()));
             case ToolAdapter.Refused r -> error(use, r.text());
         };
+    }
+
+    /**
+     * The longest a {@code wait} settles: below {@code ExecutorSession.read}'s bound of 120 s for one read (9.2), so
+     * that the settle's own answer, not the read's deadline, ends a slow wait.
+     */
+    static final long WAIT_MAX_MS = 110_000L;
+
+    /**
+     * What a {@code wait} settles for (6.3; fix wave FC, L1-F6): the session's step timeout, at least 1 s and at most
+     * {@link #WAIT_MAX_MS}.
+     */
+    static long waitTimeoutMs(SessionToolContext ctx) {
+        java.time.Duration step = ctx.actions().stepTimeout();
+        long ms = step == null ? 0 : step.toMillis();
+        return Math.max(1000L, Math.min(WAIT_MAX_MS, ms));
     }
 
     /** A grounded pointer action on the last capture, with the stale-capture rule (6.4). */

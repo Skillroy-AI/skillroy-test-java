@@ -1,5 +1,5 @@
 {
-  "fingerprint": "68ebee772b1fa12a28aba99220b5d915a442dfadf8e8928fd75b6edebb35bd91",
+  "fingerprint": "7ae46dfc3437e19579909e489494dcab9993bb70c87b0219e8891e4e2f47bed0",
   "model": "scripted-model",
   "modelClass": "SONNET_CLASS",
   "purpose": "session",
@@ -11,6 +11,10 @@
         "parts": [
           {
             "text": "<person>\nLend one plain item to the walk-in borrower and settle the deposit.\n</person>",
+            "type": "text"
+          },
+          {
+            "text": "<target-state>\nSlots bound in this session before this request. Write a slot's $reference in a tool's arguments, a text to type included, where its value belongs: the session puts the value in its place. The fields are the slot's non-secret fields; a credential's secret is never yours to use (the person signs on).\n- $assistant: query StaffWithPermission, a credential (the person signs on with it; its secret is not listed); fields $assistant.code, $assistant.limits, $assistant.permissions\n</target-state>",
             "type": "text"
           }
         ],
@@ -50,6 +54,93 @@
             "content": "<target-state>\n{\n  \"slot\": \"item\",\n  \"kind\": \"LendableItem\",\n  \"value\": {\n    \"barcode\": \"5000000000048\",\n    \"code\": \"HND-001\",\n    \"deposit\": \"1.10\",\n    \"title\": \"Claw hammer\"\n  },\n  \"strategy\": \"CANONICAL_SQL\",\n  \"resolver\": \"lending.sql.LendableItem\",\n  \"reference\": \"$item\"\n}\n\n</target-state>",
             "error": false,
             "toolUseId": "toolu_scripted_1",
+            "type": "tool_result"
+          }
+        ],
+        "role": "USER"
+      },
+      {
+        "parts": [
+          {
+            "text": "Scan the item.",
+            "type": "text"
+          },
+          {
+            "id": "toolu_scripted_2",
+            "input": {
+              "barcode": null,
+              "item": "$item",
+              "times": null
+            },
+            "name": "lending_scan",
+            "type": "tool_use"
+          }
+        ],
+        "role": "ASSISTANT"
+      },
+      {
+        "parts": [
+          {
+            "content": "<target-state>\n{\n  \"stepId\": \"s2\",\n  \"verb\": \"scan\",\n  \"status\": \"PASS\",\n  \"executed\": 1,\n  \"events\": [],\n  \"snapshotHash\": \"sha256:04828d486e062946916b7ae0b26b7b13a34763e54bb261ee0383e11786ae5b13\"\n}\n\n</target-state>",
+            "error": false,
+            "toolUseId": "toolu_scripted_2",
+            "type": "tool_result"
+          }
+        ],
+        "role": "USER"
+      },
+      {
+        "parts": [
+          {
+            "text": "Ask for the deposit due.",
+            "type": "text"
+          },
+          {
+            "id": "toolu_scripted_3",
+            "input": {
+              "action": "DUE",
+              "value": null
+            },
+            "name": "lending_key",
+            "type": "tool_use"
+          }
+        ],
+        "role": "ASSISTANT"
+      },
+      {
+        "parts": [
+          {
+            "content": "<target-state>\n{\n  \"stepId\": \"s3\",\n  \"verb\": \"key\",\n  \"status\": \"PASS\",\n  \"executed\": 1,\n  \"events\": [],\n  \"snapshotHash\": \"sha256:aeaa638bcbb66cada3a75a8c84745c35931058d2008538c143effdb8af6e50fc\"\n}\n\n</target-state>",
+            "error": false,
+            "toolUseId": "toolu_scripted_3",
+            "type": "tool_result"
+          }
+        ],
+        "role": "USER"
+      },
+      {
+        "parts": [
+          {
+            "text": "Take exactly the deposit due.",
+            "type": "text"
+          },
+          {
+            "id": "toolu_scripted_4",
+            "input": {
+              "amount": null
+            },
+            "name": "lending_deposit",
+            "type": "tool_use"
+          }
+        ],
+        "role": "ASSISTANT"
+      },
+      {
+        "parts": [
+          {
+            "content": "<target-state>\n{\n  \"stepId\": \"s4\",\n  \"verb\": \"deposit\",\n  \"status\": \"PASS\",\n  \"executed\": 1,\n  \"events\": [],\n  \"snapshotHash\": \"sha256:8f28a6e2cf118e209fcee7fefc6e01f52503fc41113380e98c049fdae43bfeb7\"\n}\n\n</target-state>",
+            "error": false,
+            "toolUseId": "toolu_scripted_4",
             "type": "tool_result"
           }
         ],
@@ -700,17 +791,15 @@
   "response": {
     "parts": [
       {
-        "text": "Scan the item.",
+        "text": "The loan is recorded.",
         "type": "text"
       },
       {
-        "id": "toolu_scripted_2",
+        "id": "toolu_scripted_5",
         "input": {
-          "barcode": null,
-          "item": "$item",
-          "times": null
+          "answer": "One plain item, the cheapest counted one with a deposit between 1.00 and 2.00, is lent to the walk-in borrower and its deposit is settled; the desk waits for the next loan."
         },
-        "name": "lending_scan",
+        "name": "done",
         "type": "tool_use"
       }
     ],
@@ -723,12 +812,12 @@
       "cacheWrite5mTokens": 0,
       "costUsd": "0",
       "elapsedMs": 0,
-      "inputTokens": 5097,
+      "inputTokens": 5425,
       "model": "scripted-model",
       "note": null,
-      "outputTokens": 25,
+      "outputTokens": 60,
       "provider": "scripted",
-      "requestId": "scripted-5097-25",
+      "requestId": "scripted-5425-60",
       "requestedModel": "scripted-model"
     }
   },

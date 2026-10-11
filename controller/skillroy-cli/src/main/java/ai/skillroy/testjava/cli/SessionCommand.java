@@ -410,7 +410,8 @@ final class SessionCommand implements Command {
         boolean passed = result.status() == ai.skillroy.testjava.scenario.Status.PASS
                 || result.status() == ai.skillroy.testjava.scenario.Status.DEGRADED;
         if (exportId != null) {
-            repl.exportPlayed(exportId);
+            // Fix wave FC (L1-S1): the report lists the aiExpect steps the export drops.
+            repl.exportPlayed(exportId, result::annotate);
         }
         return passed && !repl.lastExportFailed ? Exit.OK : Exit.FAILED;
     }
@@ -513,11 +514,15 @@ final class SessionCommand implements Command {
             }
         }
 
-        /** {@code --play --export <id>}: the session exported as the {@code export} command does, printed. */
-        void exportPlayed(String scenarioId) throws InterruptedException {
+        /**
+         * {@code --play --export <id>}: the session exported as the {@code export} command does, printed, its report
+         * extended by the player ({@code ScenarioPlayer.Result.annotate}: the {@code aiExpect} steps it dropped).
+         */
+        void exportPlayed(String scenarioId, java.util.function.UnaryOperator<ExportResult> annotate)
+                throws InterruptedException {
             Result result;
             try {
-                result = export(scenarioId);
+                result = export(scenarioId, annotate);
             } catch (Usage e) {
                 result = error("export", e.getMessage());
             }
@@ -550,7 +555,7 @@ final class SessionCommand implements Command {
                 case "facts" -> facts(rest);
                 case "events" -> events(rest);
                 case "note" -> note(rest);
-                case "export" -> export(rest);
+                case "export" -> export(rest, java.util.function.UnaryOperator.identity());
                 default -> throw new Usage("unknown command '" + word + "'; commands: " + String.join(", ",
                         COMMANDS));
             };
@@ -772,7 +777,7 @@ final class SessionCommand implements Command {
             return new Result(result, "noted", false);
         }
 
-        private Result export(String rest) throws Usage {
+        private Result export(String rest, java.util.function.UnaryOperator<ExportResult> annotate) throws Usage {
             List<String> words = words(rest);
             if (words.isEmpty() || words.get(0).startsWith("--")) {
                 throw new Usage("export needs a scenario id: export <scenarioId> [--approved-by <label>] [--out"
@@ -809,7 +814,7 @@ final class SessionCommand implements Command {
             lastExportFailed = true;
             ExportResult result;
             try {
-                result = session.journal().export(options);
+                result = annotate.apply(session.journal().export(options));
             } catch (ExportException e) {
                 return error("export", "the session cannot be exported: " + e.getMessage());
             }

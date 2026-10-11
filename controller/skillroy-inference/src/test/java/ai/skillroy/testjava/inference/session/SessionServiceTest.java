@@ -765,6 +765,55 @@ class SessionServiceTest {
         }
     }
 
+    /**
+     * Fix wave LV-1 (phase7-contracts.md 9.1, 9.2; D342): when slots are bound in the session before a turn (a person's
+     * resolve, a person's fixture with a credential), the turn's first message names them after the person's block, in
+     * a target-state block: each slot's reference, its query kind or fixture, whether it is a credential, and its
+     * non-secret fields as references; never a value, never a secret, never a secret field's name. Without a bound slot
+     * the person's block is alone (the Phase 5 shape, so that no recording of such a session changes).
+     */
+    @Test
+    void theTurnNamesTheSlotsBoundInTheSessionButNeverAValueOrASecret() throws Exception {
+        Map<String, Object> doc = new java.util.LinkedHashMap<>();
+        doc.put("version", 1L);
+        doc.put("credentials", Map.of("staff", Map.of("S01", Map.of("password", CREDENTIAL))));
+        ai.skillroy.testjava.data.Credentials credentials = ai.skillroy.testjava.data.Credentials.of(doc, "test");
+        Origin person = Origin.person("tester");
+        try (ExecutorSession bound = ExecutorSession.open(pack, SessionDesk.agent(), SessionOptions.defaults(
+                tmp.resolve("bound")).withClock(clock).withBind(BindOptions.defaults().withEnvId("test-env")
+                .withLedger(ledger).withCredentials(credentials)).withId("sess-bound"))) {
+            ScriptedGateway before = ScriptedGateway.sequence(List.of(done("r1", "nothing bound yet")));
+            BudgetMeter meter = BudgetMeter.of(BudgetMeter.Scope.SESSION, null, "1.00", ledger);
+            new SessionService(bound, before, SessionPolicy.acting(), meter, new LedgerWriter(ledger, meter, log,
+                    PromptMask.keysOnly(), false, clock), PriceTable.builtIn(), clock).ask("anything");
+            assertEquals(1, before.requests().get(0).messages().get(0).parts().size(),
+                    "no slot bound: the person's block alone");
+
+            bound.resolve("item", "PlainItem", Map.of("category", "GARDEN"), List.of(), List.of(), null, person);
+            bound.fixture("staff", Map.of("code", "S01"), new ai.skillroy.testjava.scenario.resolve.CredentialSpec(
+                    "staff", "code"), person);
+            ScriptedGateway after = ScriptedGateway.sequence(List.of(done("r2", "lent")));
+            new SessionService(bound, after, SessionPolicy.acting(), meter, new LedgerWriter(ledger, meter, log,
+                    PromptMask.keysOnly(), false, clock), PriceTable.builtIn(), clock)
+                    .ask("lend $item to the walk-in borrower");
+            List<Content> opening = after.requests().get(0).messages().get(0).parts();
+            assertEquals(2, opening.size(), String.valueOf(opening));
+            assertEquals("<person>\nlend $item to the walk-in borrower\n</person>",
+                    ((Content.Text) opening.get(0)).text());
+            String slots = ((Content.Text) opening.get(1)).text();
+            assertTrue(slots.startsWith("<target-state>\n") && slots.endsWith("\n</target-state>"), slots);
+            for (String named : List.of("$item", "PlainItem", "$item.code", "$item.title", "$staff", "fixture",
+                    "credential", "$staff.code")) {
+                assertTrue(slots.contains(named), named + " in " + slots);
+            }
+            assertFalse(slots.contains(CREDENTIAL), "no secret: " + slots);
+            assertFalse(slots.contains("password"), "no secret field's name: " + slots);
+            assertFalse(slots.contains("GAR-02") || slots.contains("Lawn aerator") || slots.contains("S01"),
+                    "no value: " + slots);
+            assertFalse(everything(after.requests().get(0)).contains(CREDENTIAL));
+        }
+    }
+
     @Test
     void aClosedServiceRefusesATurnAndClosesNothingOfTheSession() throws Exception {
         SessionService service = service(ScriptedGateway.sequence(List.of()), SessionPolicy.acting(), "1.00");

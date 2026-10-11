@@ -173,23 +173,31 @@ class VisionCommandsTest {
                 new ModelResponse(List.of(new Content.ToolUse("t1", "clitest_poke", Map.of())),
                         ModelResponse.StopReason.TOOL_USE, ScriptedGateway.usage(900, 20, "0"), null),
                 new ModelResponse(List.of(new Content.ToolUse("t2", "done", Map.of("answer", "poked"))),
-                        ModelResponse.StopReason.TOOL_USE, ScriptedGateway.usage(900, 20, "0"), null)));
+                        ModelResponse.StopReason.TOOL_USE, ScriptedGateway.usage(900, 20, "0"), null),
+                ScriptedGateway.structured(Map.of("verdict", "YES", "evidence", List.of(), "explanation",
+                        "the counter shows one poke"), ScriptedGateway.usage(900, 20, "0"))));
         Path played = Files.writeString(tmp.resolve("poke-once.yaml"), "scenario: poke-once\npack: clitest\n"
-                + "steps:\n  - aiAct: { intent: \"poke the counter once\" }\n");
+                + "steps:\n  - aiAct: { intent: \"poke the counter once\" }\n"
+                + "  - aiExpect: { question: \"the counter shows one poke\" }\n");
         Path out = tmp.resolve("play-out");
         try (Gateways.Served served = Gateways.serve(settings, model)) {
             CliHarness.Outcome outcome = cli("session", "--play", played.toString(), "--export", "poked",
                     "--inference-file", file.toString(), "--out", out.toString()).expectExit(Exit.OK);
             assertTrue(outcome.out().contains("vision v1 ("), outcome.out());
             assertTrue(outcome.out().contains("step 1 aiAct: PASS"), outcome.out());
+            assertTrue(outcome.out().contains("step 2 aiExpect: PASS"), outcome.out());
             assertTrue(outcome.out().contains("poke-once: PASS"), outcome.out());
+            // Fix wave FC (L1-S1): the export's report lists the visual check it dropped.
+            assertTrue(outcome.out().contains("Live-only") && outcome.out().contains("line 5: aiExpect \"the"
+                    + " counter shows one poke\""), outcome.out());
             assertEquals(1, agent.counter.get(), "the model poked once");
-            assertEquals(2, model.requests().size());
+            assertEquals(3, model.requests().size());
             assertEquals("vision", model.requests().get(0).purpose());
         }
         Path yaml = out.resolve("poked.yaml");
         assertTrue(Files.isRegularFile(yaml), "the export's YAML");
         assertTrue(Files.readString(yaml).contains("poke"), Files.readString(yaml));
+        assertFalse(Files.readString(yaml).contains("aiExpect"), "the visual check is dropped from the export");
         assertTrue(Files.isRegularFile(out.resolve("plan").resolve("poked.plan.json")));
         assertFalse(Files.exists(out.resolve("captures").resolve(hash.substring(7) + ".png")),
                 "a verb's act keeps no capture: only one a recorded vision step acted on (9.6)");

@@ -27,11 +27,16 @@ import ai.skillroy.testjava.inference.spi.InferenceException;
 import ai.skillroy.testjava.protocol.Capability;
 import ai.skillroy.testjava.protocol.CapabilityState;
 import ai.skillroy.testjava.scenario.BindException;
+import ai.skillroy.testjava.scenario.Check;
+import ai.skillroy.testjava.scenario.CheckOutcome;
 import ai.skillroy.testjava.scenario.ExecutorSession;
+import ai.skillroy.testjava.scenario.Expectation;
+import ai.skillroy.testjava.scenario.ExportResult;
 import ai.skillroy.testjava.scenario.FailureKind;
 import ai.skillroy.testjava.scenario.Origin;
 import ai.skillroy.testjava.scenario.Plan;
 import ai.skillroy.testjava.scenario.PlanCompiler;
+import ai.skillroy.testjava.scenario.RowCheck;
 import ai.skillroy.testjava.scenario.Scenario;
 import ai.skillroy.testjava.scenario.ScenarioException;
 import ai.skillroy.testjava.scenario.ScenarioLoader;
@@ -62,7 +67,12 @@ import java.util.Objects;
  * {@code YES}/{@code NO} against {@code expect} holds or fails {@code ASSERTION} and whose {@code UNSURE} skips it (the
  * run at best {@code DEGRADED}, D317), behind the guard {@code inference.vision}. A step's {@code tier}, {@code model}
  * and {@code maxActions} narrow the session's options and never widen them; {@code tier: V3} without the person's flag
- * is a usage error before anything runs. Never from {@code PlanExecutor}, never over MCP.
+ * is a usage error before anything runs. After the last step the scenario's {@code verify} is evaluated in file order
+ * through {@link ExecutorSession#check} as the person (one read each, journaled; a check that does not hold fails the
+ * play {@code ASSERTION}; a guarded expectation whose capability is not {@code OK} and a stored-row check, which a
+ * session does not evaluate, are skipped with the reason), reported as one step {@code verify} (fix wave FC, L1-F2);
+ * {@link Result#annotate} lists the {@code aiExpect} steps the played session's export drops (L1-S1). Never from
+ * {@code PlanExecutor}, never over MCP.
  *
  * <p>Single-threaded: the host's thread.
  */
@@ -92,14 +102,51 @@ public final class ScenarioPlayer {
     public record StepResult(int index, String verb, Status status, FailureKind failureKind, String message) {
     }
 
-    /** The run's outcome: the status (PASS, DEGRADED, FAIL or ERROR), the steps, the message of the first failure. */
-    public record Result(String scenarioId, Status status, List<StepResult> steps, String message) {
+    /**
+     * The run's outcome: the status (PASS, DEGRADED, FAIL or ERROR), the steps (the scenario's in order, then its
+     * {@code verify} block as one step {@code verify} when it has one and every step passed), the message of the first
+     * failure, and one line per {@code aiExpect} step of the scenario, which the played session's export drops
+     * (phase7-contracts.md 6.8; fix wave FC, L1-S1).
+     */
+    public record Result(String scenarioId, Status status, List<StepResult> steps, String message,
+                         List<String> dropped) {
 
-        /** Copies the steps. */
+        /** Copies the lists. */
         public Result {
             steps = List.copyOf(steps);
+            dropped = dropped == null ? List.of() : List.copyOf(dropped);
+        }
+
+        /** A result that drops nothing. */
+        public Result(String scenarioId, Status status, List<StepResult> steps, String message) {
+            this(scenarioId, status, steps, message, List.of());
+        }
+
+        /**
+         * The played session's export with the {@code aiExpect} steps it dropped listed under "Live-only" in its report
+         * (phase7-contracts.md 6.8: "the {@code aiExpect} steps dropped and listed in the report"; a visual question
+         * has no deterministic form). The scenario's {@code verify} needs no line: the player journaled its checks, so
+         * the export already carries them as expectations after the last step.
+         *
+         * @param export the session's export ({@code ExecutorSession.journal().export(…)})
+         * @return the export, its report extended; the same export when nothing was dropped
+         */
+        public ExportResult annotate(ExportResult export) {
+            Objects.requireNonNull(export, "export");
+            if (dropped.isEmpty()) {
+                return export;
+            }
+            ExportResult.Report r = export.report();
+            List<String> liveOnly = new ArrayList<>(r.liveOnly());
+            liveOnly.addAll(dropped);
+            ExportResult.Report report = new ExportResult.Report(r.scenarioId(), r.sessionId(), r.steps(),
+                    r.inference(), r.observed(), r.notHeld(), r.excluded(), r.notes(), r.visionDerived(), liveOnly);
+            return new ExportResult(export.yaml(), export.bindings(), report, export.images());
         }
     }
+
+    /** The longest question a dropped {@code aiExpect}'s line quotes. */
+    private static final int QUESTION_MAX = 200;
 
     private final ExecutorSession session;
     private final SessionService service;
@@ -192,9 +239,10 @@ public final class ScenarioPlayer {
                 bind(slot);
             }
         } catch (BindException e) {
-            return new Result(scenario.id(), Status.ERROR, results, "slot '" + e.slot() + "': " + e.getMessage());
+            return new Result(scenario.id(), Status.ERROR, results, "slot '" + e.slot() + "': " + e.getMessage(),
+                    dropped(scenario, results));
         } catch (IllegalArgumentException e) {
-            return new Result(scenario.id(), Status.ERROR, results, e.getMessage());
+            return new Result(scenario.id(), Status.ERROR, results, e.getMessage(), dropped(scenario, results));
         }
         boolean degraded = false;
         int index = 0;
@@ -214,10 +262,90 @@ public final class ScenarioPlayer {
                 degraded = true;
             } else if (r.status() != Status.PASS) {
                 return new Result(scenario.id(), r.status(), results, "step " + index + " (" + step.verb() + "): "
-                        + r.message());
+                        + r.message(), dropped(scenario, results));
             }
         }
-        return new Result(scenario.id(), degraded ? Status.DEGRADED : Status.PASS, results, null);
+        if (!plan.verify().isEmpty()) {
+            // Fix wave FC (L1-F2): the post-conditions are part of what PASS means, as P2's run order evaluates them.
+            StepResult verify = verify(++index, plan);
+            results.add(verify);
+            if (verify.status() == Status.DEGRADED) {
+                degraded = true;
+            } else if (verify.status() != Status.PASS) {
+                return new Result(scenario.id(), verify.status(), results, "verify: " + verify.message(),
+                        dropped(scenario, results));
+            }
+        }
+        return new Result(scenario.id(), degraded ? Status.DEGRADED : Status.PASS, results, null,
+                dropped(scenario, results));
+    }
+
+    /**
+     * The scenario's {@code verify}, evaluated after the last step in file order (fix wave FC, L1-F2): each expectation
+     * through {@link ExecutorSession#check} as the person, one read as the session's {@code expect} steps take, journaled
+     * (so that the export carries it as an expectation after the last step); the first that does not hold fails the
+     * block {@code FAIL / ASSERTION} after every check was evaluated. A guarded expectation whose capability the
+     * session's matrix does not have {@code OK}, and a stored-row ({@code db}) check, which a session does not
+     * evaluate, are skipped with the reason (the block {@code DEGRADED} at best).
+     */
+    private StepResult verify(int index, Plan plan) throws AgentLostException, InterruptedException {
+        List<String> skipped = new ArrayList<>();
+        String failure = null;
+        int failed = 0;
+        for (Check check : plan.verify()) {
+            if (check instanceof Expectation e) {
+                if (e.capability() != null && !session.capabilities().isOk(e.capability())) {
+                    Capability c = session.capabilities().get(e.capability());
+                    skipped.add(mask.text(e.describe()) + " skipped: capability " + e.capability() + " is "
+                            + (c == null ? "missing" : c.state().name()));
+                    continue;
+                }
+                CheckOutcome o = session.check(e.path(), e.matcher(), person);
+                if (!o.held()) {
+                    failed++;
+                    if (failure == null) {
+                        failure = mask.text(e.describe()) + ": " + o.reason();
+                    }
+                }
+            } else {
+                skipped.add(mask.text(check.describe()) + " skipped: " + (check instanceof RowCheck
+                        ? "a stored-row check is not evaluated in a session" : "the player does not evaluate it"));
+            }
+        }
+        if (failure != null) {
+            return new StepResult(index, "verify", Status.FAIL, FailureKind.ASSERTION, "expectation failed: "
+                    + failure + (failed > 1 ? " (" + failed + " of " + plan.verify().size() + " checks did not hold)"
+                    : ""));
+        }
+        return skipped.isEmpty() ? new StepResult(index, "verify", Status.PASS, null, null)
+                : new StepResult(index, "verify", Status.DEGRADED, null, String.join("; ", skipped));
+    }
+
+    /**
+     * One line per {@code aiExpect} step of the scenario, for the export's report (L1-S1): its line, its question
+     * (masked, bounded), its expectation, and how it went in this play (or that the play did not reach it).
+     */
+    private List<String> dropped(Scenario scenario, List<StepResult> results) {
+        List<String> out = new ArrayList<>();
+        int index = 0;
+        for (Scenario.Step step : scenario.steps()) {
+            index++;
+            if (!"aiExpect".equals(step.verb())) {
+                continue;
+            }
+            Map<?, ?> a = step.args() instanceof Map<?, ?> m ? m : Map.of();
+            String question = mask.text(a.get("question") instanceof String q ? q.strip() : "");
+            if (question.length() > QUESTION_MAX) {
+                question = question.substring(0, QUESTION_MAX) + "...";
+            }
+            String expect = a.get("expect") instanceof String e ? e.strip().toUpperCase(java.util.Locale.ROOT)
+                    : "YES";
+            StepResult r = index <= results.size() ? results.get(index - 1) : null;
+            out.add("line " + step.line() + ": aiExpect \"" + question + "\" (expect " + expect + "): a visual"
+                    + " question needs a model, so it has no deterministic form and is dropped"
+                    + (r == null ? " (not reached in this play)" : " (" + r.status() + " in this play)"));
+        }
+        return out;
     }
 
     /** The session's options narrowed by an {@code aiAct} step (a usage error when the step would widen them). */
@@ -254,7 +382,13 @@ public final class ScenarioPlayer {
     private StepResult deterministic(int index, Scenario.Step step) throws AgentLostException,
             InterruptedException {
         StepOutcome o = session.execute(step.verb(), step.args(), person);
-        return new StepResult(index, step.verb(), o.status(), o.failureKind(), o.message());
+        return new StepResult(index, step.verb(), o.status(), o.failureKind(), message(o));
+    }
+
+    /** A step's message; a degraded step without one says why from its degraded fidelity (a skipped check). */
+    private static String message(StepOutcome o) {
+        return o.message() != null || o.degradedFidelity().isEmpty() ? o.message()
+                : String.join("; ", o.degradedFidelity());
     }
 
     private static boolean guarded(Plan.Step step) {
@@ -276,7 +410,7 @@ public final class ScenarioPlayer {
                     + " form");
         }
         StepOutcome o = session.expectImage(compiled, person, baselines);
-        return new StepResult(index, step.verb(), o.status(), o.failureKind(), o.message());
+        return new StepResult(index, step.verb(), o.status(), o.failureKind(), message(o));
     }
 
     private StepResult aiAct(int index, Scenario.Step step) throws AgentLostException, InterruptedException {

@@ -189,6 +189,10 @@ final class HitTest {
         m.put("wheelTarget", wheel == null ? null : view.node(wheel));
         m.put("target", target == null ? null : view.ref(target));
         m.put("targetKind", hit.targetKind);
+        if (given != null) {
+            // The target form's own node (fix wave FC, L1-F5): deepest and mouseTarget are what lies at its centre.
+            m.put("targetNode", view.node(given));
+        }
         String surface = "NONE";
         if (target != null) {
             hit.local = SwingUtilities.convertPoint(window, p, target);
