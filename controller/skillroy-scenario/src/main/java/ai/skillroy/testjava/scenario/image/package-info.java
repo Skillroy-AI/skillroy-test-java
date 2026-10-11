@@ -19,6 +19,7 @@
  * {@link ai.skillroy.testjava.scenario.image.ImageCompare} compares decoded rasters exactly after masks,
  * {@link ai.skillroy.testjava.scenario.image.ImageSteps} runs an {@code expectImage} check and an anchored
  * {@code pointer} step's guard for {@code PlanExecutor} and {@code ExecutorSession} alike. Here, not in the vision
- * module, because {@code replay} runs both without it. JDK image API only ({@code java.awt.image}, {@code javax.imageio}).
+ * module, because {@code replay} runs both without it. JDK image API only ({@code java.awt.image},
+ * {@code javax.imageio}).
  */
 package ai.skillroy.testjava.scenario.image;

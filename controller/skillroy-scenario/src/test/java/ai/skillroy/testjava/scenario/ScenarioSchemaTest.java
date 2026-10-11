@@ -279,4 +279,22 @@ class ScenarioSchemaTest {
             return inner.resolution();
         }
     }
+
+    /** phase7-contracts.md 8.1: the planner's schema lists the four verbs with the arguments BaseSteps accepts. */
+    @Test
+    void theSchemaListsTheFourVisionVerbs() throws Exception {
+        assertEquals(List.of(), problems("""
+                scenario: t
+                steps:
+                  - aiAct: { intent: "lend one item", tier: V1, model: sonnet, maxActions: 5 }
+                  - aiExpect: { question: "the table shows a line", expect: NO }
+                  - pointer: { by: { id: numberPad }, region: "key:7", at: { fx: 0.5, fy: 0.5 }, action: CLICK }
+                  - expectImage: { label: pad, by: { id: numberPad }, mask: [ { by: { id: entry } },
+                                   { x: 1, y: 2, w: 3, h: 4 } ], maxDiffPixels: 0 }
+                """));
+        assertFalse(problems("scenario: t\nsteps:\n  - aiAct: { intent: x, tier: V9 }\n").isEmpty());
+        assertFalse(problems("scenario: t\nsteps:\n  - expectImage: { by: { id: x } }\n").isEmpty(),
+                "label required");
+        assertFalse(problems("scenario: t\nsteps:\n  - pointer: { by: { id: x }, via: MAGIC }\n").isEmpty());
+    }
 }

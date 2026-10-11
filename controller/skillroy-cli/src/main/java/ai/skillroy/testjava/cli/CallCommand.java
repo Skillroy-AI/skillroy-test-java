@@ -33,20 +33,31 @@ import java.util.Map;
 /**
  * {@code skillroy call <method> [json]}: one primitive call, for exploring a target and for scripts that need a
  * single action without writing a scenario.
+ *
+ * <p>Phase 7 (phase7-contracts.md 3.4, 9.3, 11 rule 5, decision D332): the raw call sends its arguments through the
+ * client with no {@code ExecutorSession} and no {@code CallPolicy}, so the person's half of the Robot opt-in is a flag
+ * here too: without {@code --allow-robot} a {@code via: ROBOT} or {@code mode: ROBOT} in the arguments is a usage error
+ * before anything is sent; with it the person's typed argument is the second half (the target's agent option
+ * {@code robot=true} is the first).
  */
 final class CallCommand implements Command {
 
     private static final String CONFIRM = "--confirm";
     private static final String TIMEOUT = "--timeout";
+    private static final String ALLOW_ROBOT = "--allow-robot";
 
     private static final CommandSpec SPEC = new CommandSpec("call", "call one primitive and print its result",
             "<method> [<json-params>]", """
             Calls one primitive over JSON-RPC and prints its result value as indented JSON. <json-params> is a JSON
             object such as '{"by":{"name":"OK"}}', or @<file> to read it from a file, or - to read it from standard
             input; without it the call has no params. A JSON-RPC error is printed on stderr and gives exit code 1.
-            Destructive primitives (agent.disable) are refused by the agent unless --confirm is given.""",
+            Destructive primitives (agent.disable) are refused by the agent unless --confirm is given.
+            Arguments that act through java.awt.Robot (via: ROBOT, mode: ROBOT) are refused before anything is sent
+            unless --allow-robot is given; the target's agent option robot=true is the other half of that opt-in.""",
             Connector.withConnection(
                     OptionSpec.flag(CONFIRM, "allow a destructive primitive"),
+                    OptionSpec.flag(ALLOW_ROBOT, "allow via: ROBOT and mode: ROBOT in the arguments (the\n"
+                            + "person's half of the Robot opt-in)"),
                     OptionSpec.value(TIMEOUT, "duration", "how long the agent may take (10s, 500ms, 2m; the agent\n"
                             + "caps it at 120 s); default: the primitive's own timeout"),
                     OptionSpec.flag("--json", "print the whole result {value, events, seq, durationMs, thread}\n"
@@ -65,6 +76,11 @@ final class CallCommand implements Command {
             throw new UsageException("<method> must not be empty");
         }
         Map<String, Object> params = params(args.positionals().size() > 1 ? args.positionals().get(1) : null, cli);
+        String robot = robotArgument(params);
+        if (robot != null && !args.flag(ALLOW_ROBOT)) {
+            throw new UsageException(robot + " acts through java.awt.Robot: a person passes " + ALLOW_ROBOT
+                    + " to send it (and the target needs the agent option robot=true); nothing was sent");
+        }
         CallOptions options = CallOptions.defaults().withConfirm(args.flag(CONFIRM))
                 .withTimeoutMs(args.durationMs(TIMEOUT));
         boolean json = args.flag("--json");
@@ -85,6 +101,20 @@ final class CallCommand implements Command {
             cli.out().print(target.scrub(Json.writePretty(json ? result.toJson() : result.value())));
             return Exit.OK;
         }
+    }
+
+    /**
+     * {@code via: ROBOT} or {@code mode: ROBOT} when the arguments carry one at the top level (where
+     * {@code swing.pointer} and {@code swing.capture} read them), else null.
+     */
+    static String robotArgument(Map<String, Object> params) {
+        if ("ROBOT".equals(params.get("via"))) {
+            return "via: ROBOT";
+        }
+        if ("ROBOT".equals(params.get("mode"))) {
+            return "mode: ROBOT";
+        }
+        return null;
     }
 
     /**

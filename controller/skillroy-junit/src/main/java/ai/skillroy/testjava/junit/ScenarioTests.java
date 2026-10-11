@@ -111,6 +111,14 @@ import java.util.stream.Stream;
  * variable, no provider on the class path) is the failing {@code environment} test and no scenario runs. The
  * overloads with {@code RunOptions} use {@code options.observer()} as given.
  *
+ * <p>Phase 7 (phase7-contracts.md 8.6, 9.3, decisions D328, D332, D339): a run that was not executed by design
+ * ({@code Status.SKIPPED}: a plan with {@code inference: run} in {@code replay}) is aborted with its message, whatever
+ * {@code degradedAs} says. The overload without {@code RunOptions} reads {@code skillroy.robot}: {@code true} sets
+ * {@code RunOptions.robot}, the controller half of the double opt-in for Robot input (the other half is the target's
+ * agent option {@code robot=true}); since a property can sit in a committed build file, the glue prints one warning
+ * line naming both halves whenever the effective options allow Robot. A scenario with an {@code expectImage} or an
+ * anchored {@code pointer} needs bindings (its baselines and anchors are in the bindings file).
+ *
  * <p>The connection is obtained lazily inside each test and is never closed here: the caller owns it. Tests run on
  * JUnit's thread; scenarios against one target must not run concurrently.
  */
@@ -133,6 +141,34 @@ public final class ScenarioTests {
         } catch (IllegalArgumentException e) {
             throw new IllegalArgumentException(HOOKS_PROPERTY + ": " + e.getMessage(), e);
         }
+    }
+
+    /** The system property of the controller half of the Robot opt-in (phase7-contracts.md 9.3): {@code true}. */
+    public static final String ROBOT_PROPERTY = "skillroy.robot";
+
+    /** The warning the glue prints whenever Robot is allowed (phase7-contracts.md 9.3, 11 rule 5). */
+    static final String ROBOT_WARNING = "skillroy: warning: Robot input is allowed for these scenarios ("
+            + ROBOT_PROPERTY + "=true, the controller half of the opt-in); with the target's agent option robot=true"
+            + " (the other half) a step may move the real pointer. Do not commit either.";
+
+    /** Where the glue's warnings go; tests replace it. */
+    static java.io.PrintStream warnings = System.err;
+
+    /**
+     * The Robot opt-in {@value #ROBOT_PROPERTY} names: true for {@code true}, false when it is not set or
+     * {@code false}.
+     *
+     * @throws IllegalArgumentException for any other value
+     */
+    static boolean robotFromSystemProperties() {
+        String value = System.getProperty(ROBOT_PROPERTY);
+        if (value == null || value.isBlank() || "false".equalsIgnoreCase(value.strip())) {
+            return false;
+        }
+        if ("true".equalsIgnoreCase(value.strip())) {
+            return true;
+        }
+        throw new IllegalArgumentException(ROBOT_PROPERTY + " must be true or false, found \"" + value + "\"");
     }
 
     /** The name of the test that fails when the credentials cannot be loaded. */
@@ -176,7 +212,7 @@ public final class ScenarioTests {
         if (effective == null) {
             try {
                 effective = RunOptions.defaults().withBind(BindOptions.fromSystemProperties(defaultBindingsRoot(
-                        source))).withHooks(hooksFromSystemProperties());
+                        source))).withHooks(hooksFromSystemProperties()).withRobot(robotFromSystemProperties());
                 effective = effective.withObserver(streamObserver(effective.bind(), source));
             } catch (CredentialsException | IllegalArgumentException | SettingsException e) {
                 // Checked once, before any scenario contacts the agent (12.2): no scenario runs.
@@ -200,6 +236,9 @@ public final class ScenarioTests {
         }
         ClassLoader loader = Thread.currentThread().getContextClassLoader();
         RunOptions chosen = effective;
+        if (chosen.robot()) {
+            warnings.println(ROBOT_WARNING);
+        }
         boolean needsBindings = entries.stream().anyMatch(ScenarioTests::needsBindings);
         BindOptions bind = chosen.bind();
         if (needsBindings && bind.bindingsRoot() == null && (bind.mode() == BindMode.APPROVE
@@ -297,7 +336,10 @@ public final class ScenarioTests {
         try {
             Scenario scenario = ScenarioLoader.load(entry.content(), entry.name());
             return !scenario.oracles().isEmpty()
-                    || scenario.slots().stream().anyMatch(slot -> "query".equals(slot.kind()));
+                    || scenario.slots().stream().anyMatch(slot -> "query".equals(slot.kind()))
+                    || scenario.steps().stream().anyMatch(step -> "expectImage".equals(step.verb())
+                    || "pointer".equals(step.verb()) && step.args() instanceof Map<?, ?> args
+                    && args.get("guard") != null);
         } catch (ScenarioException e) {
             return false;
         }

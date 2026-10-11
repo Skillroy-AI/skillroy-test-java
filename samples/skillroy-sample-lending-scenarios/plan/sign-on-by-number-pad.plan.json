@@ -1,0 +1,229 @@
+{
+  "planVersion": 6,
+  "scenarioId": "sign-on-by-number-pad",
+  "pack": "lending",
+  "packVersion": "0.5.0",
+  "sourceHash": "sha256:f0c4975707c67a10bd44aa8b6d75e77e6b1e5cf2da9ee181a9d0d2fdd06b0f4f",
+  "inference": "none",
+  "requires": [
+    "swing.tree",
+    "swing.pointer.routed",
+    "lending.state"
+  ],
+  "slots": [
+    {
+      "name": "assistant",
+      "kind": "fixture",
+      "value": {
+        "code": "100"
+      },
+      "credential": {
+        "realm": "staff",
+        "key": "code"
+      }
+    }
+  ],
+  "oracles": [],
+  "resolutionGraph": [
+    "assistant"
+  ],
+  "steps": [
+    {
+      "id": "s1",
+      "verb": "pointer",
+      "source": {
+        "line": 15
+      },
+      "calls": [
+        {
+          "primitive": "swing.pointer",
+          "args": {
+            "action": "CLICK",
+            "by": {
+              "id": "numberPad"
+            },
+            "region": "key:1"
+          },
+          "sync": "SETTLE",
+          "timeoutMs": 30000
+        }
+      ],
+      "expect": []
+    },
+    {
+      "id": "s2",
+      "verb": "pointer",
+      "source": {
+        "line": 16
+      },
+      "calls": [
+        {
+          "primitive": "swing.pointer",
+          "args": {
+            "action": "CLICK",
+            "by": {
+              "id": "numberPad"
+            },
+            "region": "key:0"
+          },
+          "sync": "SETTLE",
+          "timeoutMs": 30000
+        }
+      ],
+      "expect": []
+    },
+    {
+      "id": "s3",
+      "verb": "pointer",
+      "source": {
+        "line": 17
+      },
+      "calls": [
+        {
+          "primitive": "swing.pointer",
+          "args": {
+            "action": "CLICK",
+            "by": {
+              "id": "numberPad"
+            },
+            "region": "key:0"
+          },
+          "sync": "SETTLE",
+          "timeoutMs": 30000
+        }
+      ],
+      "expect": []
+    },
+    {
+      "id": "s4",
+      "verb": "press",
+      "source": {
+        "line": 18
+      },
+      "calls": [
+        {
+          "primitive": "swing.key",
+          "args": {
+            "key": "ENTER",
+            "target": {
+              "id": "entry"
+            }
+          },
+          "sync": "EVENT",
+          "timeoutMs": 30000,
+          "await": {
+            "topics": "input.requested",
+            "match": {
+              "state": "PASSWORD"
+            },
+            "timeoutMs": 30000
+          }
+        },
+        {
+          "primitive": "swing.settle",
+          "args": {
+            "timeoutMs": 30000
+          },
+          "sync": "NONE",
+          "timeoutMs": 32000
+        }
+      ],
+      "expect": []
+    },
+    {
+      "id": "s5",
+      "verb": "type",
+      "source": {
+        "line": 19
+      },
+      "calls": [
+        {
+          "primitive": "swing.type",
+          "args": {
+            "by": {
+              "id": "entry"
+            },
+            "enter": true,
+            "text": "$assistant.password"
+          },
+          "sync": "EVENT",
+          "timeoutMs": 30000,
+          "await": {
+            "topics": "input.requested",
+            "match": {
+              "state": "IDLE"
+            },
+            "timeoutMs": 30000
+          }
+        },
+        {
+          "primitive": "swing.settle",
+          "args": {
+            "timeoutMs": 30000
+          },
+          "sync": "NONE",
+          "timeoutMs": 32000
+        }
+      ],
+      "expect": []
+    },
+    {
+      "id": "s6",
+      "verb": "expect",
+      "source": {
+        "line": 24
+      },
+      "calls": [],
+      "expect": [
+        {
+          "path": "state.name",
+          "matcher": {
+            "equals": "IDLE"
+          }
+        },
+        {
+          "path": "state.staff.code",
+          "matcher": {
+            "equals": "$assistant.code"
+          }
+        }
+      ]
+    },
+    {
+      "id": "s7",
+      "verb": "signOff",
+      "source": {
+        "line": 25
+      },
+      "calls": [
+        {
+          "primitive": "lending.input",
+          "args": {
+            "source": "Key.SIGN_OFF"
+          },
+          "sync": "READY",
+          "timeoutMs": 30000
+        }
+      ],
+      "expect": []
+    }
+  ],
+  "verify": [
+    {
+      "path": "state.name",
+      "matcher": {
+        "equals": "SIGNED_OFF"
+      }
+    }
+  ],
+  "cleanup": [],
+  "launchProperties": {
+    "lending.seed": "A"
+  },
+  "artifacts": [],
+  "onPrompt": {
+    "unexpected": "fail"
+  },
+  "stepTimeoutMs": 30000,
+  "bindTimeoutMs": 60000
+}

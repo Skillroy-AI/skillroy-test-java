@@ -1,0 +1,91 @@
+{
+  "planVersion": 6,
+  "scenarioId": "keypad-image",
+  "pack": "lending",
+  "packVersion": "0.5.0",
+  "sourceHash": "sha256:62260af74756c9b031f80fbc0904a92439cf59009beabdaa37fc53639a207b63",
+  "inference": "none",
+  "requires": [
+    "swing.capture.paint",
+    "swing.tree"
+  ],
+  "slots": [],
+  "oracles": [],
+  "resolutionGraph": [],
+  "steps": [
+    {
+      "id": "s1",
+      "verb": "expectImage",
+      "source": {
+        "line": 11
+      },
+      "calls": [
+        {
+          "primitive": "swing.capture",
+          "args": {
+            "by": {
+              "id": "numberPad"
+            },
+            "redact": true
+          },
+          "sync": "NONE",
+          "timeoutMs": 30000
+        }
+      ],
+      "expect": [
+        {
+          "image": {
+            "label": "keypad",
+            "masks": [],
+            "maxDiffPixels": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "s2",
+      "verb": "expectImage",
+      "source": {
+        "line": 12
+      },
+      "calls": [
+        {
+          "primitive": "swing.capture",
+          "args": {
+            "redact": true
+          },
+          "sync": "NONE",
+          "timeoutMs": 30000
+        }
+      ],
+      "expect": [
+        {
+          "image": {
+            "label": "keypad-frame",
+            "masks": [
+              {
+                "by": {
+                  "id": "entry"
+                }
+              }
+            ],
+            "maxDiffPixels": 0
+          }
+        }
+      ]
+    }
+  ],
+  "verify": [],
+  "cleanup": [],
+  "launchProperties": {},
+  "artifacts": [],
+  "onPrompt": {
+    "unexpected": "fail"
+  },
+  "stepTimeoutMs": 30000,
+  "images": [
+    "keypad",
+    "keypad-frame"
+  ],
+  "bindTimeoutMs": 60000
+}

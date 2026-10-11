@@ -46,7 +46,8 @@ import java.util.Objects;
  * <p>Records, each starting with {@code type}: {@code session-start {id, pack, packVersion, envId, env: {fingerprint,
  * components}, readOnly, options, startedAt, primitives}}, {@code step {stepId, origin, verb?, args?, calls:
  * [{primitive, args, sync, timeoutMs, await?, capture?}], outcome: {status, kind?, message?, detail?, executed,
- * seqBefore, seqAfter, durationMs, degradedFidelity}, snapshotHash?, provenance?}} (provenance: phase7-contracts.md 9.2), {@code resolve {slot, kind, args, strategy,
+ * seqBefore, seqAfter, durationMs, degradedFidelity}, snapshotHash?, provenance?}} (provenance: phase7-contracts.md
+ * 9.2), {@code resolve {slot, kind, args, strategy,
  * verify, credential?, resolution}}, {@code oracle {name, fn, args, inputsHash, value}}, {@code check {path, matcher,
  * actual, held, reason}}, {@code observe {path, value}}, {@code note {origin, text}}, {@code budget {scope, spentUsd,
  * limitUsd, exhausted}}, {@code session-end {reason, steps, cost}}. A step's {@code args} are as given (references in
