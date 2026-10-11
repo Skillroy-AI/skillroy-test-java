@@ -1892,7 +1892,7 @@ OWNER entry (it becomes the creator's own entry; a server edition's drive root p
 entry is not credited, a built-in that cannot be resolved is not exempt, and the message carries the remedy (`icacls
 <dir> /inheritance:r /grant:r "%USERNAME%":(OI)(CI)F`). A folder under `C:\` inherits Modify for Authenticated Users
 and is therefore refused. Unit-tested on built ACL values; not verified on a Windows host. A directory junction is
-still taken for a directory (S142, proposed for the owner's acceptance).
+still taken for a directory (S142, accepted by the owner, B31, 2026-10-11).
 
 **(Phase 7 security fix, S143, built 2026-10-11, SJ: `ImageCompare`.) No pixel data passes through
 `java.io.tmpdir`:** the controller encodes and decodes PNG through ImageIO's memory-cached streams

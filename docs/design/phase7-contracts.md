@@ -8,10 +8,11 @@ the code review (three lenses with a sceptic each: 30 distinct findings, 2 high,
 FC, marked "Fix wave (Phase 7 review, <TAG>, 2026-10-10)", and a race in the hooks engine that the matrix found by FX
 (marked "As built (Phase 7, FX, 2026-10-11)" in P6 §4.6). **Security-reviewed (delta) and fixed 2026-10-10/11:** the delta
 review of §15 (eight lenses with a sceptic each: 48 standing findings S101-S148, 2 high, 13 medium, 33 low) was fixed by SG,
-SH, SI and SJ, marked "(Phase 7 security fix, S<nnn>, built 2026-10-11, <TAG>)"; S142 and S144 are proposed for the owner's
-acceptance. The build's decisions are D359-D430, those of the fix wave, the race fix and the security fixes D431-D486 (§17);
-the answers of §18 (**B29**) and all these decisions (**B30**) are still **provisional**, and the delta review's sign-off
-(**B31**) is the owner's. Written after the seven reader maps
+SH, SI and SJ, marked "(Phase 7 security fix, S<nnn>, built 2026-10-11, <TAG>)"; S142 and S144 are accepted by the owner
+(B31, 2026-10-11). The build's decisions are D359-D430, those of the fix wave, the race fix and the security fixes D431-D486
+(§17); built on the then provisional B29 and B30, **the answers of §18 (B29) and all these decisions (B30) were confirmed by
+the owner on 2026-10-11, every row and every decision, no veto, and the delta review was signed off by the owner the same
+day (B31)**. Written after the seven reader maps
 of 2026-10-10 (kept in the session notes, not in this repository; `map n §m` below) and after the four spikes of design
 §8 reported the same day: **BS9** passed with conditions (`../../spikes/BS9/RESULT.md`: Robot input on the WM-less Xvfb,
 with openbox and on a macOS desktop, Java 8 and Java 25 targets; `ROBOT` against `PAINT` capture; swing-driving F13
@@ -19,9 +20,10 @@ settled), **BS10** passed with conditions (`../../spikes/BS10/RESULT.md`: routed
 cases), **BS11** passed with conditions (`../../spikes/BS11/RESULT.md`: `PAINT` determinism within and across
 environments, the tolerance study) and **BS12** passed, live (`../../spikes/BS12/RESULT.md`: grounding accuracy,
 latency, tokens and cost of V1 and V2 on Sonnet 5.5, Opus 5.5 and Haiku 5.5, USD 5.64). Every statement that rests on a
-spike cites it as `BS<n>` with the section of its result. The questions of §18 are answered provisionally by the
-orchestrator and recorded as decision **B29** (`../DECISIONS.md`); the build's and the reviews' decisions are
-**B30**, the security delta review's sign-off is **B31** (§15), the owner's. Written in the manner of `phase5-contracts.md` and
+spike cites it as `BS<n>` with the section of its result. The questions of §18 were answered by the orchestrator on
+2026-10-10 and recorded as decision **B29** (`../DECISIONS.md`), confirmed by the owner on 2026-10-11; the build's and the
+reviews' decisions are **B30**, confirmed by the owner the same day; the security delta review's sign-off is **B31** (§15),
+given by the owner on 2026-10-11. Written in the manner of `phase5-contracts.md` and
 `phase6-contracts.md`: the contract is changed first, then the code, and the build marks every passage it builds or
 deviates from with an "As built" note under a two-letter implementer tag (§2.3). Section references `P1 §n` to `P6 §n`
 are to the six earlier contracts, `design §n` is the design overview `base-framework-design.md`, `vision §Fn/Rn/Cn/Riskn`
@@ -2807,7 +2809,7 @@ fails, so the damage is about one stray click per successful action in between (
 "the first press that is not received degrades the capability" is withdrawn); (f) also: without `--out` the session writes
 into a new owner-only temporary directory (S148), not nothing; and two sentences more: (i) a model or a client can no longer
 paste, copy or cut through the person's clipboard or the X11 selection (rule 11, S110), and an application's own Paste
-control is an ordinary click, to be masked; (j) S142 and S144 are limitations proposed for the owner's acceptance (B31).
+control is an ordinary click, to be masked; (j) S142 and S144 are limitations accepted by the owner (B31, 2026-10-11).
 
 ---
 ## 12. The sample
@@ -3236,7 +3238,7 @@ The roadmap's row 7 (design §8), item by item:
 | *(added)* the pixels a model sees are redacted `PAINT` captures of the target's own windows, no credential reaches a model, and every vision call is in the ledger | §13.2 items 1 and 8, §13.1 items 5, 7 and 8 | **can be met** |
 | *(added)* `web.hitTest` and `web.pointer` on both paths against real JCEF | §13.2 item 10 | **can be met** under the profile `jcef` |
 | *(added)* an `expectImage` baseline holds on the target it was made on and is `REBIND_NEEDED` elsewhere | §13.2 item 7 (`keypad-image`) for the hold on every leg; §13.1 item 5's `PlanExecutorTest` case for the missing key | **can be met** |
-| *(added)* the security delta review is signed off | §15 (B31) | run and fixed 2026-10-10/11 (S101-S148; S142 and S144 proposed for acceptance); **the owner's** signature is B31 and is open |
+| *(added)* the security delta review is signed off | §15 (B31) | **met** (2026-10-11): run and fixed 2026-10-10/11 (S101-S148; S142 and S144 accepted by the owner), signed off by the owner, B31 |
 
 ---
 ## 15. The security delta review (B31)
@@ -3250,7 +3252,8 @@ needs the token counts when the token's user is a model or an MCP client; the op
 "operator-only"); findings numbered **S101** onwards; every finding of medium or above **fixed** (contract first, a test
 that fails on the old code, then the code), nothing of medium or above accepted as a known risk; a low may be accepted
 in writing with a release note as P6 §12.5 allows; the record (`record.json` in the 2026-10-02 shape, `dispositions.md`)
-in the session notes; the summary in `../TODO.md`; **the owner's signature is B31**, and the orchestrator does not sign.
+in the session notes; the summary in `../TODO.md`; **the owner's signature is B31**, and the orchestrator does not sign (the
+owner signed on 2026-10-11).
 What each lens looks at in this phase:
 
 | Lens | Phase 7 surface |
@@ -3282,10 +3285,10 @@ baselines, the bindings files and the run output), and landed on `main` as SG `5
 `056a007` and SG's follow-up for S108 `c94aade`. **Every finding of medium or above and 31 of the 33 lows are fixed**
 (contract first, marked "(Phase 7 security fix, S<nnn>, built 2026-10-11, <TAG>)", a test that fails on the old code);
 S142 (a Windows directory junction taken for an ordinary directory) and S144 (the Windows ACL inheritance of the pixel
-files) are proposed for the owner's acceptance with the release notes of `../../SECURITY.md` (P6 §12.5). The 37 decisions of
+files) are accepted by the owner (B31, 2026-10-11) with the release notes of `../../SECURITY.md` (P6 §12.5). The 37 decisions of
 the four packages are D450-D486 (§17). The clipboard route of S110 predates Phase 7 for the planner, whose server is always
-`mcp --mutating` and has offered `swing_key` with modifiers since Phase 5; B28 did not see it. The sign-off, B31, is the
-owner's (`../DECISIONS.md`).
+`mcp --mutating` and has offered `swing_key` with modifiers since Phase 5; B28 did not see it. The owner signed the review
+off on 2026-10-11 (B31 in `../DECISIONS.md`), with S142 and S144 accepted as proposed.
 
 ---
 ## 16. Changes to the earlier contracts and the design overview
@@ -3442,7 +3445,8 @@ D287-D340 whose text the revision changed: D294, D302, D304, D305, D306, D308, D
 D331, D332, D334, D337, D338, D339, D340; the last round after the recheck changed D332, D337, D339, D342, D348, D352,
 D355 and D357 once more, `revision-log.md` "Last round"). The build's decisions, D359-D430, follow the table below, in a
 table of their own, and the decisions of the code review's fix wave, the race fix and the security fixes, D431-D486, in a
-third.
+third. The owner confirmed all of them on 2026-10-11 without a veto: D287-D358 as the answers of §18 (B29), D359-D486 as
+B30.
 
 | # | Decision | Alternatives rejected | Reason |
 |---|---|---|---|
@@ -3527,8 +3531,8 @@ orchestrator numbered them at integration on 2026-10-10, in the order VC, VS, VW
 D359-D382, VS D383-D403, VW D404-D419, VM D420-D430**; every "As built" note of this contract and every Javadoc or code
 comment that cited a decision by its tag now cites the number, and the last column keeps the tag and the package's own
 number for the reader of the reports. D401-D403 are VS's three decisions of the regeneration step 2b. The section in
-parentheses after each decision says where it is built. Together they are decision **B30** (`../DECISIONS.md`, provisional, as
-B29 was while the build ran on it); the decisions of the code review's fix wave and of the security delta review's fixes
+parentheses after each decision says where it is built. Together they are decision **B30** (`../DECISIONS.md`, provisional while the build
+ran on them, as B29 was, and confirmed by the owner on 2026-10-11); the decisions of the code review's fix wave and of the security delta review's fixes
 (§15) are D431-D486, in the table after this one, and join B30. No decision of B1-B28 or of B29 is reversed by any of
 them. Where a decision differs from the contract's own sentence, the passage carries an "As built" note: D371 (the visual check's question,
 §12.4), D383 and D384 (§3.6, §3.1), D403 (§12.4), D404 (a field added to P4 §4.2's `web.browsers`) and D420-D421 (the
@@ -3621,7 +3625,7 @@ closing documentation pass of 2026-10-11, in the order FA, FB, FC, FX, SG, SH, S
 alphabetical order of the tags, not the order they landed on `main`, which was FA, FC, FB, FX, SG, SH, SJ, SI): **FA
 D431-D439, FB D440-D442, FC D443-D448, FX D449, SG D450-D462, SH D463-D469, SI D470-D480, SJ D481-D486**. Every
 `D-<tag>-<n>` of this contract, of P6 §4.6 and of the code's comments now cites the number, and the last column keeps the tag,
-the package's own number and the review's finding. They join decision **B30** (`../DECISIONS.md`, provisional). No decision of
+the package's own number and the review's finding. They join decision **B30** (`../DECISIONS.md`, confirmed by the owner on 2026-10-11). No decision of
 B1-B29 or of D287-D430 is reversed by any of them. Several amend or widen an earlier row, and that row carries a mark: D452
 and D454 widen D349 and D383 (the masked-text rule withholds a masked label's name and the text under a region), D463, D467
 and D468 widen D342 (the credential rule), D464, D465, D466 and D469 amend D427 (the plan form), D468 amends D425 (a
@@ -3688,15 +3692,18 @@ person's slot is not rebound), D482 amends D362 (no bind-time write), and D470 a
 
 ---
 
-## 18. Questions for the owner: answered provisionally 2026-10-10 (B29)
+## 18. Questions for the owner: answered provisionally 2026-10-10, confirmed 2026-10-11 (B29)
 
-Answered by the orchestrator in the manner of P5 §17 and P6 §17, so that the build can start; written into the sections
-named; the column "A veto means" records the form a veto takes. Items that rest on knowledge only the owner has are
-marked **(owner's knowledge)**. Q35-Q39 were added by the revision after the contract review; the answers of Q2, Q6,
+Answered by the orchestrator on 2026-10-10 in the manner of P5 §17 and P6 §17, so that the build can start; written into
+the sections named; **confirmed by the owner on 2026-10-11**, every row (`B29 ok`, no veto), the three that rested on the
+owner's knowledge or taste among them (Q25 the sample's number pad, Q27 the JxBrowser input behind descriptor roles, which
+stays unverified, and Q34 V3 on a person's desktop acting only while the target holds the focus). The column "A veto means"
+records the form a veto would have taken. Items that rest on knowledge only the owner has were marked
+**(owner's knowledge)**. Q35-Q39 were added by the revision after the contract review; the answers of Q2, Q6,
 Q11, Q14, Q16, Q20, Q22, Q32 and Q34 changed with it; the last round after the recheck changed Q2, Q36 and Q39 once
 more.
 
-| # | Question | Answer (provisional 2026-10-10) | Written into | A veto means |
+| # | Question | Answer (provisional 2026-10-10, confirmed 2026-10-11) | Written into | A veto means |
 |---|---|---|---|---|
 | Q1 | **Where the Robot code lives.** Inside `skillroy-agent-swing` (JDK API, lazily on a worker, behind the option), or an optional agent module behind a new SPI? | Inside the Swing module (D290) | §2.1, §3.4 | `B29 Q1 veto`: `optional/skillroy-agent-robot.jar` behind a `RobotInput` SPI in `agent-api`, named by `optionalModules`; a sixth golden state per leg |
 | Q2 | **The double opt-in for V3.** An agent option (`robot=true`, the host's consent) **and** a person's controller flag (`--allow-robot`, per run, session or raw `call`), both required, and never a per-call choice of a model or a client even with both? | Yes (D290, D332, D347) | §3.4, §9.1, §9.2 | `B29 Q2 veto option`: the agent option alone; `B29 Q2 veto flag`: the controller flag alone (the agent then exposes Robot to any token holder); `B29 Q2 veto percall`: a model or a client may pass `via: ROBOT` when both flags are set |

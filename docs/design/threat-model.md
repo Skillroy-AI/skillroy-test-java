@@ -6,7 +6,7 @@ there) and by `SECURITY.md`; **extended 2026-10-10 for Phase 7** (`phase7-contra
 rows and lines marked "(Phase 7)" below, written with the contract and completed by its build and its security delta
 review, B31; revised the same day after the contract review: the §3 bullet, the §5 paragraph, the §6 rows, the §7
 line and the §8 lines; **completed 2026-10-11 by the delta review's fixes** (findings S101-S148, `phase7-contracts.md` §15,
-marked "Phase 7 security fix" below): the delta review is run and fixed and its sign-off, B31, is the owner's and open). It says who the adversaries are, where the
+marked "Phase 7 security fix" below): the delta review was run and fixed and signed off by the owner on 2026-10-11, B31). It says who the adversaries are, where the
 trust boundaries run, what the framework trusts on purpose, and what is out of scope, so that a reviewer's "who can
 reach it" and a release reader's "what does this protect me from" rest on one text. Where this document and a
 contract disagree, the contract has the detail and this document the judgement; change this one first when the
@@ -263,7 +263,7 @@ client (P7 §3.4, §9.1).
   (S111); the paste of S110 and the middle click on an X11 desktop are stated from the JDK's and Blink's behaviour, with the
   refusal tested at every gate; the Windows ACL judgement of the run-output directory (S141) is built and unit-tested on ACL
   values, not verified on a Windows host (a directory under `C:\` on a shared host is refused), and S142's directory junction
-  and S144's inheritance of the pixel files are limits proposed for the owner's acceptance (B31; `SECURITY.md`).
+  and S144's inheritance of the pixel files are limits accepted by the owner (B31, 2026-10-11; `SECURITY.md`).
 - (Phase 7) HiDPI: every spike ran at scale 1; the Swing side reports user-space pixels and the web side an empirical
   factor flagged `scaleAssumed` (P7 §4.8, gap 78).
 - (Phase 7) JxBrowser pointer input (`WebCapability.INPUT` behind descriptor roles, strategy "input unverified") against

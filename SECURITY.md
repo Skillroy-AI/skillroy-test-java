@@ -138,7 +138,7 @@ Read these before you run the agent on a shared host.
 - **The Robot tier is verified on the Linux image's display only** (P7 §11 (g), §13.4). macOS with the Accessibility
   permission granted (without it Robot delivers nothing, silently, and the delivery probe says so), Windows, Wayland, a locked
   session and a scale other than 1 are not verified, nor is a person's desktop with another process's window over the target.
-- **A directory junction in a run's output tree** (S142; provisional until the owner's sign-off, B31). On Windows a directory
+- **A directory junction in a run's output tree** (S142; accepted by the owner, B31, 2026-10-11). On Windows a directory
   junction (`mklink /J`, which needs no privilege) in place of a run's `failure/`, `captures/` or `candidates/` directory, of
   the per-scenario output directory, or of a bindings environment's `<id>.images/` directory is taken for an ordinary
   directory and judged by its target's owner: the run then writes its PNG files into, and deletes files of its own names
@@ -147,7 +147,7 @@ Read these before you run the agent on a shared host.
   operator owns it. Nothing is read back through the junction except a baseline whose hash is still checked. Give `--out`
   and the working copy a directory under your profile whose ACL others cannot write (`icacls <dir> /inheritance:r /grant:r
   "%USERNAME%":(OI)(CI)F`). Not verified on a Windows host.
-- **Windows run output inherits its parent's access list** (S144; provisional until the owner's sign-off, B31). On Windows,
+- **Windows run output inherits its parent's access list** (S144; accepted by the owner, B31, 2026-10-11). On Windows,
   run output, a session's `captures/` (a screenshot of every screen the model acted on), `candidates/`,
   `failure/image-*.png` and an uncommitted `<id>.images/` directory inherit the access list of the directory they are
   created in; the `umask 077` remedy of the POSIX hosts has no counterpart there, and a folder under `C:\` gives every local
@@ -183,7 +183,7 @@ tier, built 2026-10-10) opened new boundaries (pixels leave the JVM, screen cont
 application) and was code-reviewed and security-reviewed on 2026-10-10/11: a delta review over everything it changed since the
 signed record (`docs/design/phase7-contracts.md` §15; eight lenses with a sceptic each; findings S101-S148: 48 confirmed, 2 high,
 13 medium, 33 low). Every finding of medium or above and 31 of the 33 lows are fixed; the two others, S142 and S144, are
-proposed for the owner's acceptance with the release notes above, marked provisional. **The owner's sign-off of the delta
-review (B31 in `docs/DECISIONS.md`) is open**: until it is given, Phase 7's boundary is reviewed and fixed, not signed off, and
-the limitations above are the build's own statement of what masking and the Robot tier cannot do. The clipboard route (S110)
-was found by this review in code that predates Phase 7 (the planner's mutating server) and is fixed for every route.
+accepted by the owner with the release notes above. The owner signed the delta review off on 2026-10-11 (B31 in
+`docs/DECISIONS.md`), so Phase 7's boundary is reviewed, fixed and signed off; the limitations above are the build's own
+statement of what masking and the Robot tier cannot do. The clipboard route (S110) was found by this review in code that
+predates Phase 7 (the planner's mutating server) and is fixed for every route.
