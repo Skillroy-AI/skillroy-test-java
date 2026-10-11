@@ -3709,6 +3709,10 @@ after 57.
 | 33 | Third-party isolation when the host ships an older copy of the same library | closed (built 2026-10-09, HK): §2.1's relocation and BS3 RESULT §9 fact 10; `ShadedContentIT` and `HomeConstantPoolIT` keep it closed |
 | 49 | `LendableItem` cannot say "an item that needs no induction" | not taken (D193): the build had no room and nothing depends on it; it waits for the next pack change (§6.3) |
 
+(Phase 7, built 2026-10-10; P7 §16.2.) Phase 7 took gap 49 (closed: the `inductionRequired` argument of `LendableItem` came with
+pack 0.6.0, D394), closed gap 36 (`web.pointer`) and gap 76 (the capture painted from the root pane), documented gap 60 in
+A62's passage (the fix stays later) and left gap 31 where it was; it numbered 77-87, and its build 88-90 (`../TODO.md`).
+
 New, for the gaps table, numbered **50-57**: **(50)** a target behind a strict-delegation loader cannot be hooked
 (BS3 RESULT §9 facts 6 and 7; the `java.*` placement of `Spy` would serve it and is rejected, D116); **(51)** another
 bytecode agent's change registered before the first retransformation, or dropped before it, is invisible to the

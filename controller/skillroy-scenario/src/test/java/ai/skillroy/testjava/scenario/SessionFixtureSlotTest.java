@@ -32,7 +32,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * phase7-contracts.md 9.2 (D-VM-6): {@link ExecutorSession#fixture} binds a fixture slot as a plan binds one. A
+ * phase7-contracts.md 9.2 (D425): {@link ExecutorSession#fixture} binds a fixture slot as a plan binds one. A
  * credential fixture is a person's only: for a model or a client it is refused with nothing joined or journaled; for a
  * person the secret is joined and in flight until the person's {@code signOn} consumes it, the {@code fixture} record
  * holds the value as given and never the secret. A fixture without a credential binds for any origin, its references

@@ -472,7 +472,7 @@ class VisionLiveIT {
      * Item 5: (a) a read-only V1 turn ({@link SessionPolicy#readOnlyPolicy()}: the module offers {@code capture},
      * {@code wait} and {@code skillroy_look} only) asked to use {@code skillroy_look}: {@code DONE}, the tool was
      * called, nothing acted; (b) the player on the committed {@value #VISUAL_CHECK}, its fixture slots bound through the
-     * session as the person (D-VM-6): its {@code aiExpect} on a true statement answers {@code YES} and the run passes;
+     * session as the person (D425): its {@code aiExpect} on a true statement answers {@code YES} and the run passes;
      * (c) the same scenario with the question {@value #FALSE_STATEMENT} and {@code expect: NO}: the verdict is
      * {@code NO} and the run passes. Bound: USD 0.10.
      */

@@ -526,7 +526,7 @@ abstract class InferenceChecks {
     /**
      * phase7-contracts.md 13.2 item 8, the player half (seed A, once per Java): the scenario player plays the two
      * committed vision scenarios on this desk with a scripted model, their fixture slots bound through the session as
-     * the person (D-VM-6). {@code vision-live-only.yaml}: the person's {@code signOn}, then the {@code aiAct} (the
+     * the person (D425). {@code vision-live-only.yaml}: the person's {@code signOn}, then the {@code aiAct} (the
      * model resolves a plain item, scans it, clicks the {@code DUE} key's mark, takes the deposit due, {@code done})
      * and the {@code expect} that the desk is {@code IDLE}: {@code PASS}, five vision calls.
      * {@code loan-table-visual-check.yaml}: the deterministic steps and the {@code aiExpect} answered {@code YES}:

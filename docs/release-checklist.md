@@ -20,7 +20,9 @@ Tick each item in the release's own record (the release note or its pull request
    what the home carries (the optional hooks module's relocated Byte Buddy, B26 Q1).
 6. **The "not verified" list is current** in `README.md`'s status paragraph, `SECURITY.md` and
    `design/threat-model.md` §8 (the Windows items, the `jxbrowser` adapter against the real product, the live-only
-   paths). The `.bat` launcher is marked unverified or verified accordingly.
+   paths, and the Phase 7 items of `design/phase7-contracts.md` §13.4: Robot input off the Linux image's display, any
+   display scale other than 1, JxBrowser pointer input, the vision loop beyond the spikes' short sessions). The `.bat`
+   launcher is marked unverified or verified accordingly.
 7. **The committed artefacts are up to date**: plans, bindings, capability goldens, recordings and the scenario schema
    (`PlansUpToDateTest`, `BindingsUpToDateTest`, `CapabilityGoldenTest`, `ScenarioSchemaCommittedTest` and their
    siblings green).

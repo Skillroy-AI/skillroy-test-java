@@ -50,7 +50,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * phase7-contracts.md 13.1 item 8, the recorded steps against the session's real bodies (VC's verbs, image route and
  * credential rule): a table-row mark recorded as {@code pointer {row}} and a region mark as {@code pointer {region}};
  * a point on a component without a locator recorded as an anchored {@code pointer} with its guard, which acts (the
- * recorder's own anchor, D-VC-3) and whose export carries the {@code images} entry and the anchor's PNG; V3 acting
+ * recorder's own anchor, D361) and whose export carries the {@code images} entry and the anchor's PNG; V3 acting
  * through Robot with the focus rule left on; and, through the session, a model's {@code type} refused while a person's
  * credential is in flight, a model's {@code signOn} refused whatever the state, and typing given back after the
  * person's sign-on.

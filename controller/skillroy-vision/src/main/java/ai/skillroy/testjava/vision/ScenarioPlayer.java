@@ -70,7 +70,7 @@ public final class ScenarioPlayer {
 
     /**
      * Binds a fixture slot into the session; by default {@link ExecutorSession#fixture} as the person
-     * (phase7-contracts.md 9.2, D-VM-6).
+     * (phase7-contracts.md 9.2, D425).
      */
     @FunctionalInterface
     public interface FixtureBinder {

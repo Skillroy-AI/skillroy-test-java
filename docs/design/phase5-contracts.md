@@ -1137,6 +1137,10 @@ parts) and the response `parts`. A refusal's category is in `note`. The file is 
 and answered, bounded to what the mask allows; P2 §11.4's "never written" list gains "a prompt that was not masked, a
 model key, a response to a request that named a secret".
 
+(Phase 7, built 2026-10-10; P7 §10.) A call of the new purpose `vision` has the same record, made by
+`SessionService.visionCall`; an image part is in it as a hash and never as bytes, and its ledger entry's `details` is this
+masked record.
+
 As built (2026-10-08, fix wave; D102): a failed call has its record too. `LedgerWriter.recordFailure` records every
 failure as a `CostLedger.Entry` whose details are its record (`error` the kind, `note` the masked message, `stop`
 null): with the usage the provider billed when the failure carries it, else with zero usage, cost `"0"`, the
@@ -2106,6 +2110,10 @@ sentence names a non-secret field of a resolved slot only (D342).
   module") is replaced by a compile-time check against the pack ("pack lending declares no SQL allow-list: llm-sql
   cannot be served"). `llm-reason` and `llm-vision` stay rejected with "not in this version". A slot that lists
   `llm-sql` alone is allowed (the model is the only resolver asked).
+
+(Phase 7, built 2026-10-10; P7 §8.1, §8.2.) The base verbs `aiAct`, `aiExpect`, `pointer` and `expectImage` join the closed
+set, a step may address a `region` beside `by`, and the compiled plan is version 6 (§13.2's mark); `llm-vision` stays
+rejected (D316).
 - **The base verb `call`** exists since Phase 1 (P1 §8.3, `BaseSteps`: `call: {primitive, args?, sync? (default NONE),
   await? (with its capture inside)}`, unknown keys being errors, compiles to one `PlannedCall` verbatim; corrected
   2026-10-08: the first draft of this contract wrongly introduced it as new, and the fix wave took out a `timeoutMs?`
@@ -2237,6 +2245,10 @@ why it is off. `skillroy mcp` gains `--vision v1 | v2 | v3` (default off) and `-
 `llm-sql` slots work when `skillroy-inference` is on the class path and `skillroy.inference` names a gateway (the
 properties of §4.4); `skillroy.mode=re-resolve` is the single failing `environment` test with the message of §8.1. The
 trailing `skillroy: zero model calls` test is unchanged.
+
+(Phase 7, built 2026-10-10; P7 §8.6, §9.3.) A result of status `SKIPPED` (a plan compiled with `inference: run` in `replay`)
+is reported as skipped (`Assumptions.abort`, JUnit `<skipped>`); the property `skillroy.robot` is read, and one warning
+line names both halves of the Robot opt-in whenever it is true (P7 §11 (h)).
 
 ---
 

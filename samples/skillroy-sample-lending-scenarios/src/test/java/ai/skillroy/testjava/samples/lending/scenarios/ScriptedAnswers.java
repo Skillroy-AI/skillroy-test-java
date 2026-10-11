@@ -319,7 +319,7 @@ final class ScriptedAnswers {
             }
         }
         if (marks != null) {
-            // The agent's label is "role 'name': text" (D-VS-8): a control named the word wins over a label whose text
+            // The agent's label is "role 'name': text" (D390): a control named the word wins over a label whose text
             // merely holds it (the prompt line "Scan or enter item, or DUE" comes first in reading order).
             String quoted = "'" + word + "'";
             java.util.regex.Matcher m = MARK_LINE.matcher(marks);

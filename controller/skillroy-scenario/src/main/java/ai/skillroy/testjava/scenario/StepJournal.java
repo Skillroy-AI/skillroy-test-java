@@ -441,7 +441,7 @@ public final class StepJournal {
     }
 
     /**
-     * {@code fixture}: a fixture slot the session bound (phase7-contracts.md 9.2, D-VM-6; the scenario player binds a
+     * {@code fixture}: a fixture slot the session bound (phase7-contracts.md 9.2, D425; the scenario player binds a
      * scenario's fixture slots this way).
      *
      * @param slot the slot name

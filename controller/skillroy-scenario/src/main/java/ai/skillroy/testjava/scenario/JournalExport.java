@@ -180,7 +180,7 @@ final class JournalExport {
                     bound.put("$" + r.slot(), value);
                 }
                 case StepJournal.FixtureEntry f -> {
-                    // phase7-contracts.md 9.2 (D-VM-6): a fixture the person bound is written back as one.
+                    // phase7-contracts.md 9.2 (D425): a fixture the person bound is written back as one.
                     if (slots.containsKey(f.slot())) {
                         notes.add("slot " + f.slot() + " was bound more than once; the last binding is exported");
                     }
@@ -970,7 +970,7 @@ final class JournalExport {
                 credentials.put(r.slot(), r.credential());
             }
         }
-        // phase7-contracts.md 9.2 (D-VM-6): the fixtures the journal bound, their references substituted as a bind
+        // phase7-contracts.md 9.2 (D425): the fixtures the journal bound, their references substituted as a bind
         // substitutes them (the value as journaled when one does not resolve: the compile reports it).
         for (StepJournal.Entry e : slots.values()) {
             if (!(e instanceof StepJournal.FixtureEntry f)) {

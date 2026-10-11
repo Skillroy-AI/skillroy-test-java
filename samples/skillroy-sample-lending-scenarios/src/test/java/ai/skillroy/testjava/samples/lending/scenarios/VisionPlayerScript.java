@@ -48,7 +48,7 @@ import java.util.Set;
  * A committed vision scenario played by the scenario player on the real desk (phase7-contracts.md 6.8, 13.2 item 8):
  * one session on seed A with the settings of {@link VisionSessionScript#settings()} (images on), the host features
  * {@code vision-session} and {@code vision-tier:v1}, the person's origin {@link VisionSessionScript#PERSON}, the
- * session's own fixture binding (D-VM-6), and a session service with the vision tools (V1) over the gateway given.
+ * session's own fixture binding (D425), and a session service with the vision tools (V1) over the gateway given.
  * The session recovers the desk when it closes, as the CLI's does.
  *
  * <p>Single-threaded test code.

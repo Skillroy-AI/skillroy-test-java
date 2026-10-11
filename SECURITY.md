@@ -24,7 +24,8 @@ The threat model, [`docs/design/threat-model.md`](docs/design/threat-model.md), 
 against: another OS user on the host, a same-user process without the agent's token, a page inside an embedded web
 view, the target application's content, the model, an MCP client, the planner's command-line tool and what is on
 `PATH`, a remote party, a telemetry backend's operator, other code in the target JVM, a reader of what a run leaves
-behind, and the model provider (its actors A1-A9 and A12-A14). A path from any of them to code execution, to a
+behind, the model provider, and, since Phase 7, whatever else is on the desktop where the Robot tier runs (its actors
+A1-A9 and A12-A15). A path from any of them to code execution, to a
 credential, the model key, a prompt or a personal value, to a confirmation no person typed, or to a wrong test
 verdict from hostile input is in scope.
 
@@ -84,12 +85,44 @@ Read these before you run the agent on a shared host.
   grant only yourself (`icacls <dir> /inheritance:r /grant:r "%USERNAME%":(OI)(CI)F`), and point `java.io.tmpdir`
   (`SKILLROY_JAVA_OPTS=-Djava.io.tmpdir=<dir>` and the test JVMs' `-Djava.io.tmpdir`), `discoveryDir` and the credentials file
   at it. Not verified on a Windows host (security pass 2, P2-L7-F4) (accepted by the owner, B28, 2026-10-10).
+- **Redaction hides a rectangle, not a value** (Phase 7, built 2026-10-10; P7 §11 (a)). A capture blanks the rectangle of a
+  component after it was painted, so the layout and a value's width stay visible; and pixels carry no value mask: a
+  component no mask names reaches a model as rendered. A pack's `CaptureMask` must name every component that can show a
+  secret, and any control that feeds a secret field as well (the sample's number pad is masked while its entry field is).
+- **A page's pixels are masked as a whole or not at all** (P7 §11 (b)). There is no mask for a DOM element: a pack whose
+  page shows personal data masks the whole browser component (with a `CaptureMask`) while it does.
+- **With vision on, pixels leave for the model provider** (P7 §11, rule 2). With `--vision` and the inference settings'
+  `images: true`, redacted captures of the target's own windows go to the provider with every vision call; `images: false`
+  (the default) or `--vision off` keeps every pixel at home. A capture of the glass (`mode: ROBOT`) never goes to a model or
+  a client.
+- **The Robot tier presses where the pointer lands** (P7 §11 (c), (d)). V3 presses whatever is at the screen point when the
+  desktop changed in the milliseconds between the agent's focus read and the press, and a covering window of another
+  process cannot be seen; the first press that is not received degrades the capability, so the damage is bounded to about
+  one stray click per focus loss. A person's `ROBOT` capture shows the glass inside the target's window rectangles, so a
+  window of another process that covers the target is in it; it never goes to a model or a client.
+- **Committed baselines and anchors are screenshots** (P7 §11 (e)). `<scenarioId>.images/` beside a bindings file holds the
+  application's data as rendered, masked per component only: mask with `expectImage`'s `mask` what must not be committed, and
+  review the PNGs as you review the YAML.
+- **`captures/` holds a screenshot of every acted-on screen** (P7 §11 (f)). Under the session's output directory, the raster
+  as the agent captured it (redacted, never a glass capture), with the process umask: run a vision session on a shared host
+  under `umask 077`, or without an output directory, which keeps nothing and cannot export an anchored step.
+- **The Robot opt-in can be committed** (P7 §11 (h)). The agent option `robot=true` in a launcher configuration and
+  `skillroy.robot=true` in a build file are halves of the opt-in (the other is `--allow-robot` on the command): do not commit
+  either. The JUnit glue prints a warning whenever the property is true.
+- **The Robot tier is verified on the Linux image's display only** (P7 §11 (g), §13.4). macOS with the Accessibility
+  permission granted (without it Robot delivers nothing, silently, and the delivery probe says so), Windows, Wayland, a locked
+  session and a scale other than 1 are not verified, nor is a person's desktop with another process's window over the target.
 - **Not verified on Windows.** No Windows host has run this code: the access-control branches that make the token,
   credential and discovery files owner-only, the `.bat` launcher, the planner's `cmd.exe /c` form, `JAVAAGENT` as the
-  logged-on user and the input rungs. Until the project says otherwise, treat Windows as unverified.
-- **Not verified elsewhere.** The `jxbrowser` adapter against the real product; the paths that need a live model key;
-  a hook detach that ran out of its time budget on a real application (a Byteman rule left installed by such a detach
-  keeps running until the target restarts). The full list is §8 of the threat model.
+  logged-on user, the input rungs and the Robot tier (UIPI, session 0, the popup trigger on the release). Until the project
+  says otherwise, treat Windows as unverified.
+- **Not verified elsewhere.** The `jxbrowser` adapter against the real library, its pointer input included (the roles are
+  named from the public API); the paths that need a live model key, among them the vision loop beyond the short sessions of
+  the spikes (the Phase 7 live class has not been run); a hook detach that ran out of its time budget on a real application
+  (a Byteman rule left installed by such a detach keeps running until the target restarts). Phase 7 adds heavyweight popups
+  and native drag and drop under the pointer primitives, windowed JCEF on a Java 8 target, a long vision session and the
+  session's fold under the provider's history rule, and the committed image baselines on the amd64 image (a key that differs
+  there is settled by an `approve` run on that leg). The full list is §8 of the threat model.
 
 ## Reviews
 
@@ -97,4 +130,8 @@ The design was reviewed for security on 2026-10-02 (findings S1-S34, all fixed).
 2026-10-09 (findings S35-S62 and S63-S100: 66 findings, 2 high, 18 medium, 46 low; every finding of medium or above is fixed;
 eight lows are accepted by the owner in the limitations above; `docs/TODO.md`, "Security review (repeat, pass 1)" and
 "(repeat, pass 2)"). The owner signed the repeat review off on 2026-10-10 (B28 in `docs/DECISIONS.md`). No outside reader
-has read the record yet; one is recommended, not a gate (B26 Q12).
+has read the record yet; one is recommended, not a gate (B26 Q12). Phase 7 (the vision bolt-on, pointer input and the Robot
+tier, built 2026-10-10) opens new boundaries (pixels leave the JVM, screen content steers a model, Robot acts outside the
+application) and has not been security-reviewed yet: its delta review (`docs/design/phase7-contracts.md` §15, findings from
+S101, the owner's sign-off B31) is still to do, and the limitations above are the build's own statement of what masking and
+the Robot tier cannot do.

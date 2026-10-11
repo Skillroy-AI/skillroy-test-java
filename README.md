@@ -21,16 +21,18 @@ binding modes without a model (Phase 2) and, since Phase 5 (2026-10-08), a model
 and a person's approval for the SQL that finds a binding, the interactive session service with its journal and export,
 batch re-resolution, an MCP server and a planner; CI and `replay` still never call a model, and nothing in the build
 needs a model key (every test of the AI layer runs against a recorded or scripted gateway). Vision-driven input, where
-a model looks at the screen and the framework turns what it decides into recorded, replayable steps, is a bolt-on whose
-contract is specified (Phase 7, 2026-10-10; [docs/design/phase7-contracts.md](docs/design/phase7-contracts.md)) and whose
-build is running; it is not built yet.
+a model looks at the screen and the framework turns what it decides into recorded, replayable steps, is a bolt-on built
+on 2026-10-10 (Phase 7; [docs/design/phase7-contracts.md](docs/design/phase7-contracts.md)): the optional controller module
+`skillroy-vision` runs the look-and-act loop inside an interactive session, off by default, and what it did is exported as
+ordinary steps that replay with zero model calls. Its answers (B29) and the build's decisions (B30) are provisional, and
+its code review and security delta review are still to come.
 
 **Status (2026-10-10):** Phase 1, Phase 1.x, Phase 2 and Phase 3 are built and verified, Phase 4 is built, reviewed
-and fixed, and **Phase 5** (the AI layer) is built, reviewed, fixed and closed live (2026-10-08; its answers B23 and the decisions of its build and review, B24, confirmed by the owner the same day; the live items ran the same afternoon with the owner's model key: the live profiles, live recordings for the sample's tier (b) scenario, a sample scenario authored by the planner and reviewed, and the nightly job's cache figures; the live session's three decisions, B25, confirmed by the owner on 2026-10-09). **Phase 6** (hooks, Byteman, Windows, OpenTelemetry export, hardening) is built, reviewed and fixed (2026-10-09, in six packages, then a code review of three lenses and its fix wave, and the repeat security review's two passes with their fix rounds; spikes BS3 and BS14 passed with conditions; the contract's answers are B26, the 127 decisions of the build, the review's fixes and the security fixes are B27; both were provisional while the build ran on them and were confirmed by the owner on 2026-10-10): the hook engine and the in-process Byteman module as optional pieces of the agent home, a JDK 25 target through `JAVAAGENT`, the Windows path built where Linux can test it and not verified on a Windows host, OpenTelemetry export from the controller (off by default), the tenant-pack overlay proven on a second variant of the sample desk, and the repeat security review (S35-S100: 66 findings, two high, 18 medium, 46 low; everything of medium or above is fixed; eight lows are accepted by the owner, each with a release note in [SECURITY.md](SECURITY.md)). The owner signed the review off on 2026-10-10 (B28); no outside reader has read its record (recommended, not a gate), and nothing is released or published. **Not verified:** everything on Windows (the access-control branches of every owner-only file, the `.bat` launcher, the planner started on a Windows host, `JAVAAGENT` as the logged-on user, the input rungs), where no host has run this code; the `jxbrowser` adapter against the real product; the paths that need a live model key (the planner's stdin route was checked offline only); a hook detach that ran out of its time budget on a real application; and the rest of [`docs/design/threat-model.md`](docs/design/threat-model.md) section 8. Phase 1 is the thin vertical slice: the agent (core, Swing and
+and fixed, and **Phase 5** (the AI layer) is built, reviewed, fixed and closed live (2026-10-08; its answers B23 and the decisions of its build and review, B24, confirmed by the owner the same day; the live items ran the same afternoon with the owner's model key: the live profiles, live recordings for the sample's tier (b) scenario, a sample scenario authored by the planner and reviewed, and the nightly job's cache figures; the live session's three decisions, B25, confirmed by the owner on 2026-10-09). **Phase 6** (hooks, Byteman, Windows, OpenTelemetry export, hardening) is built, reviewed and fixed (2026-10-09, in six packages, then a code review of three lenses and its fix wave, and the repeat security review's two passes with their fix rounds; spikes BS3 and BS14 passed with conditions; the contract's answers are B26, the 127 decisions of the build, the review's fixes and the security fixes are B27; both were provisional while the build ran on them and were confirmed by the owner on 2026-10-10): the hook engine and the in-process Byteman module as optional pieces of the agent home, a JDK 25 target through `JAVAAGENT`, the Windows path built where Linux can test it and not verified on a Windows host, OpenTelemetry export from the controller (off by default), the tenant-pack overlay proven on a second variant of the sample desk, and the repeat security review (S35-S100: 66 findings, two high, 18 medium, 46 low; everything of medium or above is fixed; eight lows are accepted by the owner, each with a release note in [SECURITY.md](SECURITY.md)). The owner signed the review off on 2026-10-10 (B28); no outside reader has read its record (recommended, not a gate), and nothing is released or published. **Phase 7** (the vision bolt-on and the vision loop of interactive sessions) is **built** (2026-10-10, the day its contract was specified and reviewed after the spikes BS9-BS12, in four worktree packages merged into `main`; the contract's answers are B29 and the 72 decisions of the build are B30, both provisional until the owner answers): the extended `swing.capture` (redacted by default, painting a window from its root pane), `swing.hitTest` and `swing.pointer` (routed through the window, or through `java.awt.Robot` behind a double opt-in), their `web.*` counterparts for an embedded page, the optional module `skillroy-vision` with the tiers V1 to V3, pixel-anchored replay behind an exact image guard, `expectImage`, the verbs `aiAct` and `aiExpect`, plans that `replay` reports as skipped, and the sample's number pad; its code review, its Linux matrix on the final tree, its live acceptance and its security delta review (B31) are still to do. **Not verified:** everything on Windows (the access-control branches of every owner-only file, the `.bat` launcher, the planner started on a Windows host, `JAVAAGENT` as the logged-on user, the input rungs), where no host has run this code; the `jxbrowser` adapter against the real product; the paths that need a live model key (the planner's stdin route was checked offline only); a hook detach that ran out of its time budget on a real application; and, from Phase 7, Robot input on macOS with the Accessibility permission granted, on Windows, under Wayland and in a locked session, any display scale other than 1, the JxBrowser pointer input against the real library, the vision loop against a live model beyond the short sessions of the spikes (the live class has not been run), and the committed image baselines on the amd64 image; and the rest of [`docs/design/threat-model.md`](docs/design/threat-model.md) section 8. Phase 1 is the thin vertical slice: the agent (core, Swing and
 data modules), the controller, the scenario compiler and executor, JUnit glue, a CLI, and a bundled sample application,
 the lending desk of a tool library, with its agent module, domain pack and scenarios. Its gates are a Java 8 target and
 a Java 25 target, in every load mode; the numbers (tests, configurations, runtimes) are kept in
-[docs/TODO.md](docs/TODO.md). B1 to B28 are answered or confirmed by the owner (B26 and B27 confirmed and B28, the security review's sign-off, given on 2026-10-10; [docs/DECISIONS.md](docs/DECISIONS.md)), and B29, the Phase 7 contract's thirty-nine answers, is provisional until the owner answers; the
+[docs/TODO.md](docs/TODO.md). B1 to B28 are answered or confirmed by the owner (B26 and B27 confirmed and B28, the security review's sign-off, given on 2026-10-10; [docs/DECISIONS.md](docs/DECISIONS.md)), and B29, the Phase 7 contract's thirty-nine answers, and B30, the 72 decisions of its build, are provisional until the owner answers; the
 initial commit was made on 2026-10-06, and the repository is not yet pushed or published. **Phase 1.x**
 added a set of contract amendments and the hardening that followed from a security review of the control channel: an
 agent-owned HTTP listener, keyed request and reply authentication instead of a bearer token on the wire, and the
@@ -49,9 +51,9 @@ process, through one SPI with reflective JCEF and JxBrowser adapters, and each s
 second sample target, a small JCEF web host behind the Maven profile `jcef`, runs one committed scenario over both
 paths, and an adapter contract kit runs against real JCEF in the Linux test image. Phase 5 (2026-10-08) added the model layer and Phase 6
 (2026-10-09) the bytecode hooks, Byteman, the Windows path and OpenTelemetry export, as described above. **Phase 7** (the vision bolt-on and
-the vision loop of interactive sessions) is specified and reviewed (2026-10-10, after the spikes BS9-BS12 of the same day; its
-answers are B29, provisional) and its build is running. Not yet built: vision-driven input (Phase 7, its build
-is running) and the fluent Java API.
+the vision loop of interactive sessions) was specified and reviewed on 2026-10-10 (after the spikes BS9-BS12 of the same day; its
+answers are B29) and built the same day (its decisions are B30); both are provisional, and the code review and the security
+delta review follow. Not yet built: the fluent Java API.
 
 ## Where to look
 
@@ -65,7 +67,7 @@ is running) and the fluent Java API.
 | Phase 4 contract (embedded web views: `skillroy-cdp`, the web SPI, `skillroy-agent-web` with the `jcef` and `jxbrowser` adapters, the adapter contract kit, the web host sample), as built | [docs/design/phase4-contracts.md](docs/design/phase4-contracts.md) |
 | Phase 5 contract (the AI layer: the `InferenceGateway` SPI with its Claude, recorded and scripted implementations, model-written SQL behind `SqlGuard`, approval and budgets, batch re-resolution, `skillroy-mcp`, the planner, triage, the interactive profile), specified and built 2026-10-08 (its answers B23 and the build's and review's decisions B24 confirmed by the owner the same day; the live items closed the same afternoon, their decisions B25 confirmed by the owner on 2026-10-09), with an "As built" note under every section the build changed | [docs/design/phase5-contracts.md](docs/design/phase5-contracts.md) |
 | Phase 6 contract (hooks: `skillroy-agent-spy` and `skillroy-agent-hooks` on shaded Byte Buddy, the hook catalogue and the `hook.*` primitives; Byteman in process; a JDK 25 target through `JAVAAGENT`; the Windows path; OpenTelemetry export; the tenant-pack overlay and the sample's branch edition; the repeat security review), built, reviewed and fixed 2026-10-09, the repeat security review run and fixed (B26 and B27 confirmed, B28 signed off, 2026-10-10); the threat model | [docs/design/phase6-contracts.md](docs/design/phase6-contracts.md), [docs/design/threat-model.md](docs/design/threat-model.md) |
-| Phase 7 contract (the vision bolt-on and the vision loop of interactive sessions: `swing.hitTest`, `swing.pointer` routed and through Robot behind a double opt-in, the extended `swing.capture`, their `web.*` counterparts, the optional `skillroy-vision` with the tiers V1-V3, the recorder, pixel-anchored replay, `expectImage`, plans skipped in `replay`), specified and reviewed 2026-10-10 after the spikes BS9-BS12 (its answers B29 are provisional); the build is running in four packages and nothing is built yet | [docs/design/phase7-contracts.md](docs/design/phase7-contracts.md), [docs/design/threat-model.md](docs/design/threat-model.md) |
+| Phase 7 contract (the vision bolt-on and the vision loop of interactive sessions: `swing.hitTest`, `swing.pointer` routed and through Robot behind a double opt-in, the extended `swing.capture`, their `web.*` counterparts, the optional `skillroy-vision` with the tiers V1-V3, the recorder, pixel-anchored replay, `expectImage`, plans skipped in `replay`), specified and reviewed 2026-10-10 after the spikes BS9-BS12 and built the same day in four packages, with an "As built" note under every section the build changed (its answers B29 and the build's decisions B30 are provisional; the code review and the security delta review are to come) | [docs/design/phase7-contracts.md](docs/design/phase7-contracts.md), [docs/design/threat-model.md](docs/design/threat-model.md) |
 | Spike BS8 (JCEF in the Linux test image), run 2026-10-06; spike BS5 (Playwright over CDP), met by the Phase 4 acceptance, with the manual procedure against a stock Chromium | [spikes/BS8/RESULT.md](spikes/BS8/RESULT.md), [spikes/BS5/README.md](spikes/BS5/README.md) |
 | Spike BS3 (Byte Buddy retransformation, inline Advice, a bootstrap `Spy`, restore on detach), run 2026-10-09, passed with conditions | [spikes/BS3/RESULT.md](spikes/BS3/RESULT.md) |
 | Spike BS14 (Byteman loaded in process through the agent's `Instrumentation`, no listener), run 2026-10-09, passed with conditions | [spikes/BS14/RESULT.md](spikes/BS14/RESULT.md) |
@@ -88,7 +90,8 @@ agent/        Java 8, runs inside the target JVM, no third-party classes outside
 controller/   Java 25: attach and client, data channels and credentials (controller/skillroy-data), scenario
               compiler, resolution and executor, JUnit glue, CLI; controller/skillroy-cdp is the optional CDP path
               (Playwright), which no other module depends on; controller/skillroy-telemetry the OpenTelemetry export
-              (Phase 6), which the CLI bundles and nothing else depends on
+              (Phase 6), which the CLI bundles and nothing else depends on; controller/skillroy-vision is the optional
+              vision loop (Phase 7), found by the session service through ServiceLoader and bundled in the CLI
 samples/      the sample lending desk: the issue desk of a tool library, a small Swing application with an engine
               thread, custom widgets, modal prompts and an embedded database; plus its agent module, domain pack
               and scenarios (skillroy-sample-lending-app, -agent, -pack, -scenarios); and, behind the Maven profile
@@ -225,6 +228,35 @@ or what it logs, so set them only on purpose: `PLAYWRIGHT_NODEJS_PATH` and the s
 traffic: the expressions the path evaluates and the texts it types that are not secret (a call naming secret
 parameters is served by the agent, never through the driver). A minimal driver environment is not built (an accepted
 low finding of the repeat security review).
+
+## Vision and pointer input
+
+(Phase 7, built 2026-10-10; [phase7-contracts.md](docs/design/phase7-contracts.md); the contract's answers B29 and the
+build's decisions B30 are provisional.) The vision loop and the Robot tier are off by default, and CI's `replay` makes no model call, asserted.
+
+- **The primitives.** `swing.capture` redacts by default (a password field and every component a pack's `CaptureMask` names
+  are blanked, and their text is withheld from every reader of the tree) and paints a window from its root pane;
+  `swing.hitTest` maps a point to a component and the locators that name it; `swing.pointer` acts at coordinates, routed
+  through the window by AWT's own dispatcher, so that the component under the point receives the event; `web.hitTest` and
+  `web.pointer` do the same in an embedded page.
+- **The loop.** `skillroy session --vision v1` (marks on a capture, answered by mark; `v2` adds coordinates through the
+  computer toolset or provider-neutral custom tools) lets a model look at the target's own windows and act in an interactive
+  session; the action is recorded as the step that will be replayed, and `export` writes ordinary steps with their
+  provenance. It needs a model gateway and the inference settings' `images: true`, the one switch that lets pixels leave for
+  the model provider; the start-up line says why vision is off when it is. A session is bounded to USD 1.00, 30 UI actions
+  and 20 model turns. Where a pixel cannot be mapped to a component a pack's `RegionResolver` comes first, then an
+  image-anchored `pointer` step behind an exact image guard, then a plan compiled with `inference: run` that `replay`
+  reports as skipped (JUnit `<skipped>`, exit 0).
+- **The verbs.** `aiAct` and `aiExpect` (live only; `skillroy session --play <scenario.yaml>` runs a scenario that has them),
+  `pointer` and `expectImage` (an exact comparison with a masked baseline kept beside the bindings file, approved at its step
+  by a person; a rendering the project has no baseline for is `REBIND_NEEDED`).
+- **The Robot tier.** `--vision v3` acts through `java.awt.Robot` and needs both halves of an opt-in, the agent option
+  `robot=true` and `--allow-robot` on the command; a model or an MCP client can never choose it per call, and the model still
+  sees a redacted `PAINT` capture, never the glass. Do not commit either half (the JUnit glue warns whenever
+  `skillroy.robot` is true). It is verified on the Linux image's display only.
+- **What masking cannot do.** A mask blanks a component's rectangle, so the layout and a value's width stay visible, and
+  pixels carry no value mask: name every component that can show a secret. The limitations are listed in
+  [SECURITY.md](SECURITY.md).
 
 ## Windows (not verified on a Windows host)
 

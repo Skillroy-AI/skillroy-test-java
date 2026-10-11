@@ -753,6 +753,10 @@ pre-check refuses raw text over 80 characters before it is even trimmed): the ac
 are converted directly, never through their text. That bounds the cost of a hostile digit string (a 1 MB one is
 refused in well under a second).
 
+(Phase 7, built 2026-10-10; P7 §5, §4.6.) The protocol stays 0.2 (D299): no wire shape of this section changes. The web
+package gains `WebInput`, the parameter, plan and result shapes that the agent's and the CDP path's `web.pointer` and
+`web.hitTest` share (D409), and the script library `web-lib.js` its version 2 with `hit` (A66).
+
 ---
 
 ## 4. `skillroy-agent-api` (package `ai.skillroy.testjava.agent.api`, SPIs in `…agent.api.spi`)

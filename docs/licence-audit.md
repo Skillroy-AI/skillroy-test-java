@@ -5,8 +5,10 @@ metadata of the root POM, later on 2026-10-06 for the test image's Chromium run-
 and the artifacts spike BS8 used (section 8), and on 2026-10-07 for Phase 4 (sections 1 to 5, 8 and 9; later that
 day the agent home's seventh jar was inspected and the web host scenarios module's scopes read from its POM), and on
 2026-10-09 for Phase 6 (each package updated the sections for its dependencies; the documents pass brought section 1
-and the table of section 3 to the agent home as built, eleven jars). Version
-audited: 0.1.0-SNAPSHOT, all 30 reactor modules since Phase 6 (27 in a build without the Maven profile `jcef`; the 3
+and the table of section 3 to the agent home as built, eleven jars), and on 2026-10-10 for Phase 7 (a new controller module,
+`skillroy-vision`, and no new dependency: the module counts of section 2, its row in the table of section 3, the CLI
+distribution's ninth project jar in section 4). Version
+audited: 0.1.0-SNAPSHOT, all 31 reactor modules since Phase 7 (28 in a build without the Maven profile `jcef`; the 3
 web host samples are built only with `-Pjcef`); the spike projects under `spikes/` are not reactor modules and
 distribute nothing.
 Intended licence of the project: Apache-2.0.
@@ -78,7 +80,7 @@ status text and in sections 3 and 4.
 
 ## 2. Scope and conventions
 
-Modules audited (31 since Phase 6, 2026-10-09; 24 since Phase 5; 22 before): the root POM `skillroy-test-java-parent`; the agent side `skillroy-protocol`,
+Modules audited (32 since Phase 7, 2026-10-10; 31 since Phase 6, 2026-10-09; 24 since Phase 5; 22 before): the root POM `skillroy-test-java-parent`; the agent side `skillroy-protocol`,
 `skillroy-agent-api`, `skillroy-agent-bootstrap`, `skillroy-agent-core`, `skillroy-agent-swing`,
 `skillroy-agent-data`, `skillroy-agent-web` (new in Phase 4), `skillroy-agent-spy`, `skillroy-agent-bytebuddy`,
 `skillroy-agent-hooks`, `skillroy-agent-byteman-sys` and `skillroy-agent-byteman` (new in Phase 6), `skillroy-agent-dist`;
@@ -290,6 +292,15 @@ Obligations when redistributed: the Apache-2.0 text at the top level (`LICENSE`)
 distribution: `opentelemetry-sdk-testing` 1.66.0 (126,849 bytes) and `opentelemetry-sdk` 1.66.0 (13,008 bytes),
 Apache-2.0, in `skillroy-telemetry`'s tests.
 
+**Since Phase 7 (built 2026-10-10, VM; phase7-contracts.md 2.1, 2.6, D303)** `lib/` also holds the project's `skillroy-vision`
+jar and nothing else: `lib/` then holds 56 jars (the zip one entry more), nine project jars (`DistributionNoticesIT.PROJECT_MODULES`
+gains `vision`) and the same 47 third-party jars. The module adds no dependency: image work on the controller is the JDK's
+`java.awt.image` and `javax.imageio`, the model access is `skillroy-inference`'s (the Anthropic SDK 2.70.0 audited in Phase 5,
+whose typed classes already carry the computer toolset), and the module is found through `ServiceLoader`
+(`SessionTools`, `CapabilityContributor`) only when it is on the class path. Nothing of it is in the agent home: the agent's Phase 7
+additions (the hit-test, the pointer, the Robot path, the extended capture) are AWT and Java2D in the existing
+`skillroy-agent-swing` and `skillroy-agent-web` jars, and `java.awt.Robot` is constructed behind the agent option `robot` only.
+
 The 36 jars of Phase 5, their licences and what the evidence is (the sizes are those of the jars in the local Maven
 cache on 2026-10-08):
 
@@ -366,6 +377,7 @@ Other places third-party code could be redistributed, and the result:
 | The Phase 4 jars (2026-10-07: `skillroy-agent-web` and its `test-jar`, `skillroy-cdp`, `skillroy-sample-web-host`, `skillroy-sample-web-host-agent`, `skillroy-sample-web-host-scenarios`) | none: 155 and 213, 37, 21, 5 and 5 classes, nothing shaded. Besides `ai/skillroy/` they hold only the manifest, `META-INF/maven`, `META-INF/services` files, the project's own `META-INF/LICENSE` and `META-INF/NOTICE` and, in the host jar, its three own pages `webhost/*.html`; the agent module's descriptors and properties file (section 3) and the `test-jar`'s fake descriptors and kit pages are under `ai/skillroy/`. The `test-jar` (the adapter contract kit) holds no vendor class either: its fakes live under the project's own package. `skillroy-cdp` refers to Playwright types and one gson type but does not contain them |
 | The Phase 5 jars (2026-10-08: `skillroy-inference`, `skillroy-mcp`) | none: 142 and 22 classes, nothing shaded; besides `ai/skillroy/` they hold only the manifest, `META-INF/maven`, `META-INF/services` (the `ResolverContributor` registration of the inference module) and the project's own `META-INF/LICENSE` and `META-INF/NOTICE`. They refer to the Anthropic SDK, JSqlParser and the MCP SDK types but do not contain them |
 | The Phase 6 telemetry jars (2026-10-09, TL: `skillroy-telemetry`, `skillroy-scenario`'s `test-jar`) | none: 14 and 167 classes, nothing shaded; besides `ai/skillroy/` the telemetry jar holds only the manifest, `META-INF/maven`, its `META-INF/services` registration of the two `RunObserverProvider`s and the project's own `META-INF/LICENSE` and `META-INF/NOTICE`; the `test-jar` (not distributed) holds the scenario tests' fixtures, their `META-INF/services` files and two toy scenario files. The telemetry jar refers to the OpenTelemetry types but does not contain them |
+| The Phase 7 vision jar (2026-10-10, VM: `skillroy-vision`) | none: 53 classes, nothing shaded (counted with `unzip -l` on the jar of the package's worktree, 2026-10-10); besides `ai/skillroy/testjava/vision/` the jar holds only the manifest, `META-INF/maven`, the two `META-INF/services` registrations (`SessionTools` and `CapabilityContributor`) and the project's own `META-INF/LICENSE` and `META-INF/NOTICE`. It refers to the types of `skillroy-inference` and `skillroy-scenario`, but does not contain them |
 | Published POMs | They name third-party dependencies but do not contain them |
 | Sample application, sample agent module | HSQLDB is not bundled; it is a separate dependency |
 | Test fixtures and resources in the source tree | No vendored third-party files, fonts, images, native libraries or jars were found in the tree (the seven stand-in model recordings and the spike corpora under `spikes/BS6` are the project's own text) |

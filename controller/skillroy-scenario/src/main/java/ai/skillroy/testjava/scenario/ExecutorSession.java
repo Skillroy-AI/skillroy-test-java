@@ -997,7 +997,7 @@ public final class ExecutorSession implements AutoCloseable {
             + " or a client's behalf";
 
     /**
-     * Binds a fixture slot into the session as a plan's fixture is bound (phase7-contracts.md 9.2, D-VM-6): the value's
+     * Binds a fixture slot into the session as a plan's fixture is bound (phase7-contracts.md 9.2, D425): the value's
      * {@code $references} to earlier slots are substituted with public values; the slot is declared {@code fixture},
      * so that a later verb compiles against it (a {@code signOn} sees its credential); its strategy is
      * {@code FIXTURE}, with no resolution and no bindings-file entry. With a credential, the entry's id is the value's
@@ -1567,7 +1567,7 @@ public final class ExecutorSession implements AutoCloseable {
 
     /**
      * {@link #expectImage(Plan.Step, Origin)} against the baselines and anchors of the scenario's bindings file (as
-     * VC built it, D-VC: the player reads the file it binds from and hands its entries in; without them a session
+     * VC built it, D359: the player reads the file it binds from and hands its entries in; without them a session
      * holds none, so an {@code expectImage} is recorded and skipped, the session being {@code live}, and an anchored
      * step is REBIND_NEEDED). The step is journaled with its verb and the arguments reconstructed from the compiled
      * step ({@link #reconstructedArgs}).
@@ -1616,7 +1616,7 @@ public final class ExecutorSession implements AutoCloseable {
 
     /**
      * The verb arguments an {@code expectImage} or {@code pointer} step was compiled from, reconstructed from its
-     * compiled call and check, so that the journal and the export hold the step as written (as VC built it, D-VC).
+     * compiled call and check, so that the journal and the export hold the step as written (as VC built it, D360).
      */
     static Map<String, Object> reconstructedArgs(Plan.Step step) {
         Map<String, Object> args = new LinkedHashMap<>();
@@ -1707,7 +1707,7 @@ public final class ExecutorSession implements AutoCloseable {
 
     /**
      * Whether the acting call's provenance carries the anchor of this guard's label (phase7-contracts.md 6.5, as VC
-     * built it, D-VC): the recorder took the anchor with the guard's own call an instant before, so the step acts and
+     * built it, D361): the recorder took the anchor with the guard's own call an instant before, so the step acts and
      * the anchor goes to the export; the guard is compared from the next run on.
      */
     private boolean recordedAnchor(Plan.Guard guard) {
@@ -1732,7 +1732,7 @@ public final class ExecutorSession implements AutoCloseable {
 
     // ------------------------------------------------------------------------------------------------ gates (P7 9.2)
 
-    /** The keys of {@code swing.key} that type nothing (phase7-contracts.md 9.2, as VC built it: D-VC). */
+    /** The keys of {@code swing.key} that type nothing (phase7-contracts.md 9.2, as VC built it: D369). */
     static final Set<String> NON_PRINTABLE_KEYS = Set.of("ENTER", "TAB", "ESCAPE", "BACK_SPACE", "DELETE", "UP", "DOWN",
             "LEFT", "RIGHT", "HOME", "END", "PAGE_UP", "PAGE_DOWN", "INSERT", "SHIFT", "CONTROL", "ALT", "META",
             "CAPS_LOCK", "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12", "F13", "F14",

@@ -1,7 +1,11 @@
 # Phase 7 contracts: the vision bolt-on and the vision loop of interactive sessions (the extended `swing.capture`, `swing.hitTest`, `swing.pointer` routed and through Robot, their `web.*` counterparts, `skillroy-vision` with the tiers V1-V3, the recorder, pixel-anchored replay, `expectImage`, the capability `inference.vision`, plans skipped in `replay`)
 
 **Status: specified 2026-10-10, revised the same day after the contract review (three lenses, each with a sceptic; the
-session notes' `contract-review/revision-log.md` says what each finding changed).** Written after the seven reader maps
+session notes' `contract-review/revision-log.md` says what each finding changed), and built the same day** in four
+packages (VS, VW, VC and VM) integrated in the order VC, VM's step 1b, VS with the regeneration step 2b, VW, VM; every
+section a package built or deviated from carries an "As built (Phase 7, <TAG>)" note, the build's decisions are D359-D430
+(§17), and the answers of §18 are still **provisional** (B29). The code review and the security delta review (§15) are
+still to come. Written after the seven reader maps
 of 2026-10-10 (kept in the session notes, not in this repository; `map n §m` below) and after the four spikes of design
 §8 reported the same day: **BS9** passed with conditions (`../../spikes/BS9/RESULT.md`: Robot input on the WM-less Xvfb,
 with openbox and on a macOS desktop, Java 8 and Java 25 targets; `ROBOT` against `PAINT` capture; swing-driving F13
@@ -17,7 +21,8 @@ deviates from with an "As built" note under a two-letter implementer tag (§2.3)
 are to the six earlier contracts, `design §n` is the design overview `base-framework-design.md`, `vision §Fn/Rn/Cn/Riskn`
 is the research note `../research/vision-input.md`, `swing §Fn` is `../research/swing-driving.md`, `browser-spi §Fn` is
 `../research/embedded-browser-spi.md`. Decisions taken here are **D287 to D358** (§17; D341-D358 were added by the
-revision after the review); the build's decisions start at D359, numbered by the orchestrator at integration;
+revision after the review); the build's decisions are D359-D430 (§17, numbered by the orchestrator at integration; they
+are B30);
 amendments to the frozen Phase 1 contract are **A61 to A66** (§5), the next free number after P6's reservation (none of
 A61 onwards was used); gaps continue from **77** (gap 76, the capture defect BS9 found, is closed by this contract,
 §16.2); the security delta review's findings start at **S101** (§15); the plan version becomes **6** (§8.2), the
@@ -180,8 +185,8 @@ host), **VC** (the scenario, controller, JUnit and CLI side: `run`, `caps`, the 
 session seam, `skillroy-vision`, the hosts' session options, the MCP options, the sample's vision scenario); the work
 packages, the file ownership, the merge rules and the integration order are in the session notes' `contract-notes.md`.
 Each writes "As built" notes under its tag and never rewrites another's passage; the orchestrator merges by tag and
-numbers the decisions (`D-<tag>-<n>` in the reports) from D359 at integration, and assigns any further amendment id from
-A67 (never an implementer).
+numbers the decisions (a tag and a number in each report) from D359 at integration (done on 2026-10-10: D359-D430, §17),
+and assigns any further amendment id from A67 (never an implementer).
 
 ### 2.4 Threads and bounds
 
@@ -331,17 +336,17 @@ down only when the long edge exceeds 1920 pixels and never below 0.75 (BS12 RESU
 0.5), `annotateRefs: true` for V1 and false for V2 and V3. Never `mode: ROBOT` (D341).
 
 **As built (Phase 7, VS).** (a) The 4096 cap lowers the effective `scale`; the heap bound refuses
-(`INVALID_PARAMS` with `data.neededMb` and `data.freeMb`) rather than lowering it, as §2.4 and §13.1 item 1 say (D-VS-2).
+(`INVALID_PARAMS` with `data.neededMb` and `data.freeMb`) rather than lowering it, as §2.4 and §13.1 item 1 say (D384).
 (b) The root pane replaces the painted component for a `RootPaneContainer` that is a **window** (`JFrame`, `JDialog`,
 `JWindow`); a `JInternalFrame`, also a `RootPaneContainer`, keeps its own (real, Swing-painted) title bar in a
-`COMPONENT` capture (D-VS-3). (c) A lightweight paint root (a root pane) has the heavyweights below it printed on top at
+`COMPONENT` capture (D385). (c) A lightweight paint root (a root pane) has the heavyweights below it printed on top at
 their place, since a Swing container's printing does not reach them. (d) The `SCREEN` canvas outside the windows'
-content (decoration bands, gaps between windows) is RGB 64, 64, 64, distinct from the mask grey (D-VS-9); a mark whose
+content (decoration bands, gaps between windows) is RGB 64, 64, 64, distinct from the mask grey (D391); a mark whose
 centre a window higher in the stack covers is left out. (e) Marks: the children of a `JComboBox` and a `JScrollBar`
 (their arrow buttons) carry none, a `JTabbedPane` carries one per tab, a region resolver's regions replace the
-component's own mark, and a label reads `role 'name': text`, one line, at most 120 characters (D-VS-8). (f) `carets` are
+component's own mark, and a label reads `role 'name': text`, one line, at most 120 characters (D390). (f) `carets` are
 reported for every focused text component without a selection whatever the caret's blink phase, masked or not (the
-rectangle a comparison blanks), widened by 2 pixels either side of `Caret.width` (D-VS-7). (g) For a target in no window
+rectangle a comparison blanks), widened by 2 pixels either side of `Caret.width` (D389). (g) For a target in no window
 (the headless tests' trees) `origin` is relative to the topmost ancestor and `window` is absent.
 
 ### 3.2 `swing.hitTest` (A63; read-only; capability `swing.hittest`)
@@ -388,7 +393,7 @@ outside the named window or capture; `INVALID_PARAMS` for a malformed point, an 
 
 **As built (Phase 7, VS).** The target form answers the named component as `target` with `targetKind: "TARGET"`
 (`deepest` and `mouseTarget` at its centre are reported beside it), so that the recorder's description of the focus
-owner is about that component (D-VS-6). `ranked` places `other` above `window` when `other` is owned by `window`, a modal
+owner is about that component (D388). `ranked` places `other` above `window` when `other` is owned by `window`, a modal
 dialog over a window that is not modal (or ranked higher among modal dialogs by the stacking order), or the active
 window, and never when `window` is owned by `other`. A `{text, role}` candidate is proposed for a text of at most 100
 characters on one line. The capture geometry a `captureId` names is kept by `RecentCaptures`, the window held weakly.
@@ -488,12 +493,12 @@ without `DRAG`, `region` or `row` with a point form), `STALE_HANDLE`/`AMBIGUOUS`
 `swing.pointer.robot`.
 
 **As built (Phase 7, VS).** (a) `DOUBLE_CLICK` is two press-release-click triples with click counts 1 and 2, BS10's
-native sequence; `CLICK` with `clickCount: n` is one triple of count n (D-VS-4). (b) `dispatched.sent` counts the events
+native sequence; `CLICK` with `clickCount: n` is one triple of count n (D386). (b) `dispatched.sent` counts the events
 whose dispatch **returned**: a press whose handler blocks the EDT or runs a modal dialog's loop is not counted
 (§13.2 item 11's "dispatched 1 of 4"); on an `EDT_BUSY` result `balanced: true` is a promise, kept by the first task the
-EDT runs after the cancellation, since the call cannot wait for a blocked EDT (D-VS-5). (c) The call's
+EDT runs after the cancellation, since the call cannot wait for a blocked EDT (D387). (c) The call's
 `AWTEventListener` recognises its own events, retargeted ones included, by a `when` unique to the call; the window
-itself counts as `received` only when it listens (D-VS-18). (d) The per-event modal re-read is skipped under `force`.
+itself counts as `received` only when it listens (D400). (d) The per-event modal re-read is skipped under `force`.
 
 ### 3.4 `via: ROBOT` and `mode: ROBOT`: the V3 tier's agent half (A63, A65)
 
@@ -596,10 +601,10 @@ interfaces `RobotPort` and `RobotFactory`; `RobotFactory.DEFAULT` loads `RobotIn
 logic. (b) The capability probe runs on an agent worker posted from `checkAwt`; in a headless JVM both ids are set
 `UNAVAILABLE("headless")` there and then. (c) The delivery probe moves the pointer one pixel aside first when it already
 sits on the point (a move to where it is produces no native event) and also accepts the `MOUSE_ENTERED` it causes;
-it restores the pointer when it fails (D-VS-11). (d) The press observation waits at most 3 s within the call's
-remaining time (D-VS-10). (e) A glass capture ignores `scale` (user-space size, `scale: 1` reported), refuses a screen
+it restores the pointer when it fails (D393). (d) The press observation waits at most 3 s within the call's
+remaining time (D392). (e) A glass capture ignores `scale` (user-space size, `scale: 1` reported), refuses a screen
 rectangle over 4096 pixels a side, carries the limitation sentence as `glassNote`, and reports `surfaces` beside
-`windows` (D-VS-14).
+`windows` (D396).
 
 ### 3.5 `swing.type` with an omitted target (A62)
 
@@ -653,7 +658,7 @@ client).
 
 **As built (Phase 7, VS).** A component that lies **inside** a masked component is treated as masked too: no text, no
 value, `masked: true`, no mark, `masked` in the hit-test (its pixels lie inside the blanked rectangle, and a pack that
-masks a container expects its content hidden); the safe side (D-VS-1). A mask's `regions` blank those rectangles whether
+masks a container expects its content hidden); the safe side (D383). A mask's `regions` blank those rectangles whether
 or not `masks` is true, as the Javadoc says; the text rule follows `masks` alone. The rule lives in `Redaction` and is
 memoised per call in `ComponentView.masked`.
 
@@ -777,7 +782,7 @@ order is frozen (`WebSpiShapeTest`). No key input in Phase 7 (`web.dom.fill` typ
 signature, a future with the caller's bounded wait, never a wait on the EDT. These two files are VW's (§2.1); the three
 Swing SPIs of §3.7 are VS's and land first.
 
-**As built (Phase 7, VW, 2026-10-10):** as specified, with the bounds the sketch left open (D-VW-16): `x` and `y` lie
+**As built (Phase 7, VW, 2026-10-10):** as specified, with the bounds the sketch left open (D419): `x` and `y` lie
 in `0..16384` (`WebPointerEvent.MAX_COORDINATE`, the largest viewport `web.resize` accepts), `clickCount` in `0..3`,
 each wheel delta in `-16384..16384`; the defaults are `LEFT` and a click count of 1 for `PRESS` and `RELEASE`, `NONE`
 and 0 for `MOVE` and `WHEEL`; `build()` refuses a press or a release with `NONE` or a click count of 0 and a delta on
@@ -807,7 +812,7 @@ frame element's key and rectangle in the parent (W8 of map 6). `NOT_FOUND` with 
 lies outside the viewport or hits nothing. The CDP path serves it on the `Place`'s frame through `frame.evaluate` with
 the library (the `web.dom.text` pattern), the agent path through `evaluate` with the same expression.
 
-**As built (Phase 7, VW, 2026-10-10):** the shape is as specified; what the sketch left open (D-VW-5, D-VW-7, D-VW-8):
+**As built (Phase 7, VW, 2026-10-10):** the shape is as specified; what the sketch left open (D408, D410, D411):
 **The descent** is the caller's, not the library's (a `data:` iframe is another origin, whose document the library
 cannot reach): for a frame element `hit` also answers `child: {x, y, name, url}`, the point inside the element's border
 and padding, and both paths find the child frame by one rule over the same `Page.getFrameTree` (`WebInput.childFrame`:
@@ -858,10 +863,10 @@ path's own session (`CdpAttach.send(sessionOnPw(page), …)`, D64's precedent; W
 used, so that both paths send byte-identical parameters and no actionability semantics hide a difference).
 
 **As built (Phase 7, VW, 2026-10-10):** both paths read the parameters, plan the events, build the protocol's parameters
-and shape both results with one class of the protocol module, `ai.skillroy.testjava.protocol.web.WebInput` (D-VW-6), so
+and shape both results with one class of the protocol module, `ai.skillroy.testjava.protocol.web.WebInput` (D409), so
 that a wrong parameter is the same `INVALID_PARAMS` (`data.param`) on either path and the parameters are byte-identical:
 `{type, x, y, button, clickCount, modifiers}`, plus `deltaX, deltaY` for `mouseWheel` (modifier bits ALT 1, CTRL 2, META
-4, SHIFT 8; buttons `none`, `left`, `middle`, `right`). **The plan** (D-VW-3): every action starts with a `mouseMoved`
+4, SHIFT 8; buttons `none`, `left`, `middle`, `right`). **The plan** (D406): every action starts with a `mouseMoved`
 to the point (hover and pointer-enter run first, as a person's pointer arrives before it acts); then `PRESS` sends one
 `mousePressed`, `RELEASE` one `mouseReleased`, `CLICK` with click count `n` the pairs `mousePressed`/`mouseReleased`
 with click counts 1 to `n` (what Chromium needs to raise `dblclick`), `DOUBLE_CLICK` the same with `n` 2 by default,
@@ -869,12 +874,12 @@ with click counts 1 to `n` (what Chromium needs to raise `dblclick`), `DOUBLE_CL
 viewport is `NOT_FOUND` and nothing is sent; a hit that cannot be read (a busy page, no `EVALUATE`) is left out of the
 result and the action goes on (on the agent it takes at most half the budget and 5 s). **After a failure that follows a
 press** one `mouseReleased` of that button is sent (at most 1 s, its outcome not awaited further), so that no button
-stays held in the page, and the call answers the failure (D-VW-4). **The modal check** applies the Swing module's
-heuristic as that module states it (D-VW-11; "neither the browser component's window nor owned by it" above is read as:
+stays held in the page, and the call answers the failure (D407). **The modal check** applies the Swing module's
+heuristic as that module states it (D414; "neither the browser component's window nor owned by it" above is read as:
 the dialog is not the browser's window and the browser's window is not owned by the dialog): when several dialogs block
 the window, the active one, else the last created; `MODAL_OPEN` carries `data {dialog, title, browser}`. It runs in the
 module's own bounded EDT read of the component (`SeedWalk.state`, at most 2 s), which also gives `visibleInSwing`. **On
-the CDP path** (D-VW-1), which cannot see AWT, the path reads the agent's `web.browsers` once more before every pointer
+the CDP path** (D404), which cannot see AWT, the path reads the agent's `web.browsers` once more before every pointer
 call; a browser the agent reports blocked (the entry's new optional `blockedBy: {dialog, title}`, written by the same
 check, P4 §4.2) is handed to the agent (`UNSUPPORTED`, a `web.fallback` record), which answers `MODAL_OPEN` itself,
 unless `force`; so no pointer of a model or a client acts past a modal dialog on either path. `via` is the browser's
@@ -897,7 +902,7 @@ only; the lending desk has none).
 `UNAVAILABLE("no embedded browser technology found")` at install and declared with a probe at readiness like the other
 generic ids, `web.hittest` from `EVALUATE`, `web.pointer` from `INPUT` (an index rebuild outside a cycle may improve
 them, as it may the others); the reserved text is gone from the module. The web host has no committed capability
-goldens (only the lending scenarios module has goldens), so nothing was regenerated there (D-VW-15).
+goldens (only the lending scenarios module has goldens), so nothing was regenerated there (D418).
 
 ### 4.5 The adapters
 
@@ -914,7 +919,7 @@ goldens (only the lending scenarios module has goldens), so nothing was regenera
 **As built (Phase 7, VW, 2026-10-10):** `jcef`: `dispatchPointer` sends `Input.dispatchMouseEvent` through the handle's
 channel (the raw channel where its roles resolve, else the shared client), never one of the handle's reads, so it is
 never sent again on the shared client; `ALL` gains `INPUT`; a browser without a native browser yet has no `INPUT` (it
-has no flags at all). `jxbrowser` (D-VW-10): the group `for: "INPUT"` holds `browser.dispatch` (arity 1), `point.of`
+has no flags at all). `jxbrowser` (D413): the group `for: "INPUT"` holds `browser.dispatch` (arity 1), `point.of`
 (`com.teamdev.jxbrowser.ui.Point.of(int, int)`), the buttons `button.primary`, `button.middle`, `button.secondary`
 (static fields of `com.teamdev.jxbrowser.ui.MouseButton`), and per event class of `com.teamdev.jxbrowser.ui.event`
 (`MousePressed`, `MouseReleased`, `MouseMoved`, `MouseWheel`) its `newBuilder(Point)` and its builder's `button`,
@@ -938,7 +943,7 @@ is cut again on the receiving side (S43): a hit's role, name, tag, id and rectan
 A3).
 
 **As built (Phase 7, VW, 2026-10-10):** `WebLib.VERSION` is `"2"` and `FUNCTIONS` holds `hit`. The install rule as built
-(D-VW-2): a slot that already holds a library is never replaced; the text checks the functions version 2 added
+(D405): a slot that already holds a library is never replaced; the text checks the functions version 2 added
 (`ADDED_IN_2 = ["hit"]`) and leaves at once (`"present"`) when the slot has them; otherwise, after defining everything,
 it installs each missing function into the slot's object (non-enumerable, non-writable, non-configurable) and raises the
 slot's `version` where it can (`"upgraded"`). A version-1 slot's `version` was exposed non-configurable, so it stays
@@ -959,7 +964,7 @@ library's `hit` on the `Place`'s frame, `web.pointer` sends `Input.dispatchMouse
 **As built (Phase 7, VW, 2026-10-10):** as specified, with §4.2's descent (the child frame found in the page's
 `Page.getFrameTree` by `WebInput.childFrame` and mapped to its Playwright frame as a `frame` key is) and §4.3's notes:
 the pointer reads the agent's `web.browsers` once more and hands a browser the agent reports blocked by a modal dialog
-to the agent (D-VW-1); `visibleInSwing` comes from that read; a component point, a secret parameter or a read-only
+to the agent (D404); `visibleInSwing` comes from that read; a component point, a secret parameter or a read-only
 target hands the call to the agent before anything reached the page.
 
 ### 4.8 Web surfaces in a Swing capture, and a Swing point in a page
@@ -989,7 +994,7 @@ target hands the call to the agent before anything reached the page.
 `SpiRegistry` and withdraws it at uninstall; it answers from the index alone: the component each entry's adapter
 reported at the last rebuild (kept in the entry, typed `Object`), one `Surface(component, "WEB", ref)` per entry whose
 component lies in a window (its parents walked on the calling EDT), a browser the module saw close left out; no browser
-or adapter is asked (D-VW-12). The class that walks the parents is loaded at the first call, so that install still
+or adapter is asked (D415). The class that walks the parents is loaded at the first call, so that install still
 requests no AWT class (`WebModuleInstallTest`). The conversion of a component point uses the component's width from
 the module's own bounded EDT read and the page's `innerWidth`; the override that refuses it is the one this module's
 `web.resize` set (an override the CDP path set on its own session is not seen by the agent, and the CDP path refuses a
@@ -1100,7 +1105,7 @@ as the agent sent it and its geometry, `captureId`, `seq`, `hash`, `windows`, `s
 `carets`, `focus`), and `VisionOptions.narrow` for the player. The facade the contract fixed could not reach three things
 the module needs, so `SessionActions` gains `outputDir()` (where `captures/` goes, §9.6), `screenLegend()` (the pack's
 legend through the session's mask, for a visual question, §6.4) and `note(text)` (`skillroy_look`'s journal note under
-the turn's origin): D-VM-1. The module's tests reach the scenario test-jar's package-private fixtures through a public
+the turn's origin): D420. The module's tests reach the scenario test-jar's package-private fixtures through a public
 bridge in the scenario package (`VisionBridge`, test scope only), as `skillroy-telemetry`'s `TelemetryFixture` does;
 `FakeVisionAgent` keeps components in window coordinates and hit-tests in screen coordinates through each capture's
 own origin, so that a dialog that grows the composite makes the same image point name another component.
@@ -1165,11 +1170,11 @@ or a destructive primitive (`CallPolicy`, unchanged); offer an acting tool under
 
 **As built (Phase 7, VM, 2026-10-10):** while a tool set applies, the service's own loop call is purpose `vision`, the
 class of the first applying tool set's `modelClass(ctx)` (a default method `SessionTools` gains: the contract's
-interface had no way to name it; D-VM-2), effort `effort.vision`, `CacheHint.AUTO`, with the tool sets' provider tools;
+interface had no way to name it; D421), effort `effort.vision`, `CacheHint.AUTO`, with the tool sets' provider tools;
 the pack's legend is a system part the service adds after the tool sets' instructions (the context carries no pack).
 V1's capture is followed by the marks list alone in its `<target-ui>` block (with the image's size); the text snapshot
 is not repeated there, since the model has `skillroy_snapshot` and BS12 found the marks list to carry what the snapshot
-drops (D-VM-3). A capture in a model's view is the agent's PNG unchanged unless marks are drawn or a page composited
+drops (D422). A capture in a model's view is the agent's PNG unchanged unless marks are drawn or a page composited
 (the re-encoding is `javax.imageio`'s). `afterBatch` is skipped when the batch's last view was the model's own capture
 and no event arrived since, and when the turn ended in the batch.
 
@@ -1262,7 +1267,7 @@ stands behind the guard `inference.vision` (§8.4), and it never turns a failing
 **As built (Phase 7, VM, 2026-10-10):** the stale-capture rule reads `eventsSince(C.seq, "window.opened,window.closed",
 1)` through the facade; the fresh capture keeps the tier's annotation; "the same target" is the same `target` ref and
 the same `row`. A hit-test of a `NONE` surface is answered as text, a `HEAVYWEIGHT` one is recorded as an anchored step
-(§6.5's rule wins over this section's sentence for `HEAVYWEIGHT`; D-VM-4). A visual question is one request of
+(§6.5's rule wins over this section's sentence for `HEAVYWEIGHT`; D423). A visual question is one request of
 `maxTokens` 1024 with the schema strict (`mark` and `box` nullable), the question in its labelled block and the legend as
 a system part; an answer with no structured verdict is `UNSURE` with the stop reason.
 
@@ -1452,9 +1457,9 @@ client authors through the planner, P5 §10, whose server has no gateway).
 **As built (Phase 7, VM, 2026-10-10):** the player takes the host's `VisionSessionTools` instance (or null) so that a
 step can narrow the model class, the tier between V2 and V3 and `maxActions` (a narrowed turn ends `LIMIT` at the
 step's limit); a step's tier that would change to or from V1 changes the tool vocabulary the service fixed at its start
-and is a usage error like a widening one (D-VM-5). A fixture slot is bound through `ExecutorSession.fixture(slot, value,
-credential, origin)` as the person (§9.2's note, D-VM-6); a host may pass its own `FixtureBinder`. An `aiExpect`'s capture is a `swing.capture {scope: SCREEN, mode: PAINT, redact: true,
-annotateRefs: <V1>}` through `ExecutorSession.read` with the marks drawn, its verdict journaled as a note. The player hands every `expectImage` and anchored `pointer` the scenario's baselines, `ExecutorSession.baselines(root, env, scenarioId)` read once per play, when its host gave a bindings root and an environment (`withBaselines`; D-VC-1); without them a session holds none (an `expectImage` is recorded and skipped, an anchored step `REBIND_NEEDED`).
+and is a usage error like a widening one (D424). A fixture slot is bound through `ExecutorSession.fixture(slot, value,
+credential, origin)` as the person (§9.2's note, D425); a host may pass its own `FixtureBinder`. An `aiExpect`'s capture is a `swing.capture {scope: SCREEN, mode: PAINT, redact: true,
+annotateRefs: <V1>}` through `ExecutorSession.read` with the marks drawn, its verdict journaled as a note. The player hands every `expectImage` and anchored `pointer` the scenario's baselines, `ExecutorSession.baselines(root, env, scenarioId)` read once per play, when its host gave a bindings root and an environment (`withBaselines`; D359); without them a session holds none (an `expectImage` is recorded and skipped, an anchored step `REBIND_NEEDED`).
 
 ---
 ## 7. The gateway changes (`skillroy-inference`, the SPI of P5 §3)
@@ -1576,7 +1581,7 @@ the one word with two homes, stated here once). `region` and `row` are accepted 
 **As built (Phase 7, VC):** `BaseSteps` holds the four verbs with the allow-lists of this table (`VISION_VERBS`,
 `POINTER_ACTIONS`, `REGION_ID`); `PlanCompiler.visionStep` compiles them (the compiler, not `BaseSteps`, attaches the
 `VisualCheck` and the `ImageCheck`, since a `StepLibrary` returns calls only). Three choices the table left open
-(D-VC-5, D-VC-6): `expectImage` without `region` or `clip` writes no `scope` and lets the agent's default answer
+(D363, D364): `expectImage` without `region` or `clip` writes no `scope` and lets the agent's default answer
 (`WINDOW` for a window and for no target, `COMPONENT` for a component; the compiler cannot tell which a locator names);
 `pointer` always writes `action` (default `CLICK`: the primitive requires it) and checks `strict` as a boolean without
 sending it (the primitive has no fall-back to restrict); an `await` capture on `pointer` declares its slot as `uiCalls`
@@ -1611,7 +1616,7 @@ regenerated every committed plan: `-Dskillroy.plans.update=true` in `PlansUpToDa
 `scenarios/exported/plan/` from `scenarios/exported/*.yaml` too), `BranchPlansUpToDateTest` and the web host's
 `PlansUpToDateTest` (profile `jcef`), then `-Dskillroy.bindings.rehash=true` in `BindingsUpToDateTest`, which rewrites the
 `planHash` of every committed bindings file (the standard ones, the branch variant's, the session export's) from its
-YAML's compiled plan and nothing else (D-VC-15); step 2b reruns both after the pack's bump.
+YAML's compiled plan and nothing else (D373); step 2b reruns both after the pack's bump.
 
 ### 8.3 `region` beside `by`
 
@@ -1637,9 +1642,9 @@ maxChannelDelta?, expected?, actual?, files?}`; the detail of a failed check car
 skipped line reads `<step>: aiExpect "<question>" <expect> [capability inference.vision] skipped: no visual evaluator in
 this host; capability inference.vision is <state>`, its `expect` record `{visual, capability, result: skipped, state,
 reason}`. The `image` record's `result` adds `approved` and `rejected` (an `approve` candidate) to the four values, and a
-guard's record carries `guard: true` (D-VC-7). A `{by}` mask is resolved through `swing.find` at the step: the match's
+guard's record carries `guard: true` (D365). A `{by}` mask is resolved through `swing.find` at the step: the match's
 `bounds` (window space) mapped through the capture's `origin` and `scale`; a locator that matches no single component
-fails the step `FAIL / ASSERTION` (D-VC-17).
+fails the step `FAIL / ASSERTION` (D375).
 
 ### 8.5 Controller-side capabilities in the matrix: `CapabilityContributor` (D326, D327, D348, D354)
 
@@ -1687,10 +1692,10 @@ on it reads "`UNAVAILABLE (replay)`" in CI (today both read "missing", map 5 §1
 **As built (Phase 7, VC):** `CapabilityContributor` with the nested `CapabilityContext` and a static `load(ClassLoader)`;
 the merge is `…scenario.CapabilityMerge` (public, so that the MCP server's start uses the same rules: `load`, `merge`,
 `Refused`, `Result{merged, agent, contributed}`, `PREFIX`, `REPLAY_REASON`). A contributor that throws is refused naming
-it, as one that answers an id without the prefix is (D-VC-9). `PlanExecutor` finds the contributors through its web path
+it, as one that answers an id without the prefix is (D367). `PlanExecutor` finds the contributors through its web path
 loader (the pack loader; the context class loader without one) and `ExecutorSession` through
 `SessionOptions.webPathLoader`, the same loader the hosts already set for the packs. `CapabilityMatrix.with(contributed,
-source)`, `source(id)` and `agentOnly()` (D-VC-22). The `capabilities` record of `run.jsonl` is `{hash, ids, file,
+source)`, `source(id)` and `agentOnly()` (D380). The `capabilities` record of `run.jsonl` is `{hash, ids, file,
 agentHash, contributed}` (`hash` and the file the merged matrix's); the session journals `contributed` in
 `session-start.options` when it is not empty. `InferenceContributor` implements both SPIs (one `META-INF/services` entry
 each); `inference.gateway` and `inference.sql` are `OK` with the gateway's name as the strategy.
@@ -1716,7 +1721,7 @@ unchanged (design §3.5: no new kind).
 before the agent is contacted. `run-start` records `robot: true` when `RunOptions.robot` is set. `JunitXmlReporter`
 writes `<skipped message="SKIPPED: <message>"/>`, `ScenarioTests.report` aborts with `<id> SKIPPED: <message>`. The CLI's
 `--json` result carries `skippedReason` (the result's `skipped` list is P3 9's skipped cross-checks and keeps its
-meaning; D-VC-8); the summary line ends `…, N errors, N skipped`.
+meaning; D366); the summary line ends `…, N errors, N skipped`.
 
 ### 8.7 Baselines and anchors: the bindings file, version 2 (D329, D330, D350, D355)
 
@@ -1789,16 +1794,16 @@ writes at bind time:
 **As built (Phase 7, VC):** `BindingsFile` gains the eleventh component `images` (label to render key to
 `BindingsFile.ImageEntry`; `Focus`, `Anchor` beside it); `VERSION` 2, `VERSION_WITHOUT_IMAGES` 1, and the constructor
 writes 1 for a file without images whatever version it is given. A render key in a file is `[A-Za-z0-9]{8,64}` (it names
-a file; D-VC-10). The entry's `window` is optional; an approved baseline records `{size}` from the capture's one window
-rectangle and `{insets}` from a `WINDOW` capture's origin (D-VC-23). The derived-path rule: the binder refuses an entry
+a file; D368). The entry's `window` is optional; an approved baseline records `{size}` from the capture's one window
+rectangle and `{insets}` from a `WINDOW` capture's origin (D381). The derived-path rule: the binder refuses an entry
 whose `file` is not `<scenarioId>.images/<label>.<renderKey>.png` (`ERROR / ENVIRONMENT`, in `replay`), and
 `ImageBaselines` reads a PNG from the derived path only, inside `<bindingsRoot>/<envId>/`, never through a link, at most
 64 MB, and only when it decodes to the entry's `sha256`. The lifecycle: `Binder.approve` asks nothing at bind time for a
-plan whose bindings hold images only (no resolution, no oracle: its baselines are approved at their steps; D-VC-4);
+plan whose bindings hold images only (no resolution, no oracle: its baselines are approved at their steps; D362);
 `Binder.file(env)` takes the existing file's `images` (a live write, `approve`, a re-resolve); the second write is
 `Binder.writeApprovedImages` after the steps, run also when a later step failed, since each baseline was approved by a
-person at its step (D-VC-21). `ImageSteps.Outcome` has a fifth kind, `ERROR` (an unusable capture or baseline file, a
-target that cannot answer `swing.rendering`: `ERROR / ENVIRONMENT`; D-VC-18).
+person at its step (D379). `ImageSteps.Outcome` has a fifth kind, `ERROR` (an unusable capture or baseline file, a
+target that cannot answer `swing.rendering`: `ERROR / ENVIRONMENT`; D376).
 
 ### 8.8 The fingerprint and `swing.rendering`
 
@@ -1917,7 +1922,7 @@ policy, or one that offers no verbs, the module offers reads only (§6.3); a ste
 **As built (Phase 7, VM, 2026-10-10):** a facade refusal is an `IllegalArgumentException` naming the verb or primitive
 and the reason (nothing journaled or sent), which a tool answers as an error result; the facade acts only within a tool
 call of a turn (its origin), and refuses otherwise. The service counts a UI action per facade `execute` (a tool's act
-that ran two steps counts two; D-VM-7) and a model turn per call while a tool set applies (its loop's and every
+that ran two steps counts two; D426) and a model turn per call while a tool set applies (its loop's and every
 `visionCall`, the player's included); at a limit the facade's or `visionCall`'s refusal ends the turn `LIMIT` after the
 tool call and closes the tool sets; the vocabulary then says why. A tool set's parts and results pass the session's mask
 (images as the settings say; an image while images are off ends the turn `QUESTION`); a result is rebuilt with the call's
@@ -2001,18 +2006,18 @@ id and toolset name. `maxActionsPerTurn` counts every action but a tool set's re
 any `resolve` that joins a secret, whatever its origin, and a person's step consumes a slot when one of its compiled
 calls references the slot's secret field; while a credential is in flight a non-person's step is refused when one of
 its compiled calls is `swing.type`, or `swing.key` with a key outside a fixed set of keys that type nothing (`ENTER`,
-`TAB`, `ESCAPE`, the arrows, `F1`-`F24` and the like: deny by default), which covers a pack verb that types (D-VC-11). The
+`TAB`, `ESCAPE`, the arrows, `F1`-`F24` and the like: deny by default), which covers a pack verb that types (D369). The
 refusals' detail is `{refused: robot | glass | credential}`, never a value. `expectImage(Plan.Step, Origin)` has an
 overload with `ImageSteps.Baselines` and the static `ExecutorSession.baselines(bindingsRoot, envId, scenarioId)`: a
 session holds no bindings file, so the two-argument form records and skips an `expectImage` (the session is `live`;
 the skipped line is in the outcome's `degradedFidelity`, the session having no skipped-expectations list) and answers
-an anchored step `REBIND_NEEDED`; the scenario player hands in the scenario's baselines (D-VC-1, D-VC-19). The step is
-journaled with its verb and the arguments reconstructed from the compiled step (D-VC-2). A guarded `pointer` executed
+an anchored step `REBIND_NEEDED`; the scenario player hands in the scenario's baselines (D359, D377). The step is
+journaled with its verb and the arguments reconstructed from the compiled step (D360). A guarded `pointer` executed
 with a provenance whose `anchor` carries the guard's label is not compared: the recorder took that anchor with the
-guard's own call an instant before, and the comparison starts with the export's replay (D-VC-3). `session-start.options`
-holds `robot` only when true, `host` only when not empty (D-VC-16).
+guard's own call an instant before, and the comparison starts with the export's replay (D361). `session-start.options`
+holds `robot` only when true, `host` only when not empty (D374).
 
-**As built (Phase 7, VM, D-VM-6):** `ExecutorSession.fixture(slot, value, credential, origin)` binds a fixture slot into
+**As built (Phase 7, VM, D425):** `ExecutorSession.fixture(slot, value, credential, origin)` binds a fixture slot into
 the session, as a plan's fixture is bound: the value's `$references` to earlier slots are substituted (public values),
 the slot is declared `fixture` so that a later verb compiles against it, its strategy is `FIXTURE` (it has no
 resolution and no bindings-file entry), and with a credential the entry's id is the value's `key` field and the
@@ -2053,7 +2058,7 @@ pixels`, the candidate's path (or that the run has no `--out`), another renderin
 `approve the baseline <label>? [y/N]`. `call --allow-robot`: without it `via: ROBOT` or `mode: ROBOT` at the arguments'
 top level is a usage error (exit 64) before anything is sent. `caps` takes `--pack` and the gateway options; with either it
 merges the contributors of the packs' loader in mode `live` without host features (`inference.vision` then answers `no
-vision session`), and both the table (`SOURCE`) and `--json` carry the source (D-VC-14). The JUnit glue reads
+vision session`), and both the table (`SOURCE`) and `--json` carry the source (D372). The JUnit glue reads
 `skillroy.robot` (`true`, `false` or unset; another value is the `environment` failure) and prints its warning once per
 stream whenever the effective options allow Robot; a scenario with an `expectImage` or an anchored `pointer` counts as
 needing bindings.
@@ -2084,7 +2089,7 @@ the host features only when `--vision` names a tier, a `SessionTools` of id `vis
 named and `images: true` (the server never names a vision type); the captures are listed after each
 `skillroy_session_ask`. `PlanPolicy.refusals(plan, scenario)` (the one `skillroy_scenario_run` calls) applies the
 credential rule's plan form to a pack verb's arguments as the client wrote them too (a pass-through verb given
-`$staff.password`), never to the verb's own compiled references (D-VM-8); `refusals(plan)` keeps the base-verb form.
+`$staff.password`), never to the verb's own compiled references (D427); `refusals(plan)` keeps the base-verb form.
 
 ### 9.5 The overlay
 
@@ -2235,7 +2240,7 @@ committed depends on (the session recordings are made on `HeadlessDesk`, which h
 
 **As built (Phase 7, VS).** The keypad sits in a panel anchored `NORTH` inside the bottom panel's centre, so that its
 keys keep their 64 px beside the 160 px number pad (the keys' tree paths change; nothing committed depends on them)
-(D-VS-15).
+(D397).
 
 ### 12.2 The agent module (`skillroy-sample-lending-agent`, Java 8; version `0.2.0`)
 
@@ -2268,7 +2273,7 @@ has), so that a scenario can ask for an item that needs no induction; the commit
 **As built (Phase 7, VS).** `inductionRequired` null means either kind of item, so the committed queries keep their
 meaning; a query that names it reads `LENDABLE_ITEM_BY_INDUCTION_SQL` (one more condition) and the verifier checks the
 desk's `inductionRequired`, while a query without it reads exactly the old `LENDABLE_ITEM_SQL`, so the committed
-bindings' evidence is unchanged; the two-argument constructor stays (D-VS-12).
+bindings' evidence is unchanged; the two-argument constructor stays (D394).
 
 **As built (Phase 7, VC):** `DomainPack.screenLegend()` (default null) and `DelegatingDomainPack` forwarding it, in step 1.
 
@@ -2288,16 +2293,16 @@ run from the seed-A target as `basic-loan` and `basic-loan-ui` are today; only `
 
 **As built (Phase 7, VC):** the four YAML files and their plans are committed in step 1, `keypad-image`'s plan included (it
 compiles without VS); only its bindings files, baselines and replay wait behind the test-side marker `Phase7Pending`
-(`NEEDS_BASELINES`), and `sign-on-by-number-pad`'s run behind `NEEDS_DESK` (D-VC-12). `sign-on-by-number-pad` ends with
+(`NEEDS_BASELINES`), and `sign-on-by-number-pad`'s run behind `NEEDS_DESK` (D370). `sign-on-by-number-pad` ends with
 `signOff: {}` and `verify: state.name SIGNED_OFF`, so that it leaves the desk signed off as every committed scenario does.
 `loan-table-visual-check`'s question reads "the loan table shows one line for the scanned item, with a quantity of 2"
-and stands after the scans, before `DUE` (D-VC-13): two scans of one item are one line of quantity 2 on the desk, and
+and stands after the scans, before `DUE` (D371): two scans of one item are one line of quantity 2 on the desk, and
 after the deposit the loan is posted, so "two lines … " after `basic-loan`'s last step would be false for a live player;
 the rest of `basic-loan`'s steps follow it. `vision-live-only` and `loan-table-visual-check` carry `launchProperties:
 {lending.seed: A}` with `basic-loan`'s fixtures; none of the three seed-A scenarios has a bindings file.
 
 **As built (Phase 7, VS, step 2b):** `keypad-frame` masks three locators, not one: `{by: {id: entry}}`,
-`{by: {id: totalsLine}}` and `{by: {name: Printer, role: scrollpane}}` (D-VS-21). The frame is approved on a fresh
+`{by: {id: totalsLine}}` and `{by: {name: Printer, role: scrollpane}}` (D403). The frame is approved on a fresh
 desk (`ResolutionChecks`, per seed) but also replays in the glue after earlier scenarios on a used desk, where the totals
 line and the printer's slips differ (about 11 700 pixels on both Javas); masking them keeps the frame's check on the
 desk's layout and static parts on any signed-off desk. The locator form of `mask` is exercised as before; the `keypad`
@@ -2467,13 +2472,13 @@ AChangedOneFails` (`@Order(19)`, both seeds; the changed baseline is a copy of t
 
 **As built (Phase 7, VS, step 2b).** Every plan of both scenario modules and the branch variant carries `packVersion`
 0.6.0 (the export's at plan version 6), every committed bindings file the same pack version (`BindingsUpToDateTest`'s
-rehash now carries the compiled plan's `packVersion` too; an `approve` writes the same bytes), the five goldens hold the
+rehash now carries the compiled plan's `packVersion` too, D401; an `approve` writes the same bytes), the five goldens hold the
 five Swing ids; `keypad-image` is approved in the arm64 image on the Java 25 and the Java 8 target, both seeds: per seed a
 bindings file with one baseline per render key (`d0bd5ce68e2f111c`, Java 25; `6ccffcf8f0c8db46`, Java 8) for `keypad`
 and `keypad-frame` under `bindings/seed-<a|b>/keypad-image.images/`. `Phase7Pending` is deleted: `sign-on-by-number-pad`
 runs in `LoadModeChecks` and the glue, `keypad-image` in `ResolutionChecks`, `BindingsUpToDateTest` and the glue.
 `Runs.assertPassedWithoutSleeping` counts an `image` record as a check, and a scenario whose only steps are image checks
-needs no wait.
+needs no wait (D402).
 
 **As built (Phase 7, VM):** item 8 is `InferenceChecks#theVisionSessionExportsTheCommittedScenarioWhichReplaysWithZeroModelCalls`
 (seed A, the agent on the command line). The scripted model names a mark by the control's quoted name in the marks list
@@ -2487,7 +2492,7 @@ held byte for byte with a Java 8 target. The export's YAML records `click {by: {
 text: "10.00"}` (the focus owner's locator) and `click {by: {action: DEPOSIT}}`, each with its provenance comment, and
 `requires` gains `swing.tree`. The player half is
 `InferenceChecks#thePlayerPlaysTheTwoVisionScenariosWithAScriptedModel` (seed A, both Javas): the player binds both
-scenarios' fixture slots through `ExecutorSession.fixture` as the person (§9.2's note, D-VM-6). `vision-live-only.yaml`
+scenarios' fixture slots through `ExecutorSession.fixture` as the person (§9.2's note, D425). `vision-live-only.yaml`
 passes with the scripted model resolving a plain item, scanning it, clicking the `DUE` key's mark and taking the deposit
 due, five vision calls. `loan-table-visual-check.yaml` passes with its `aiExpect` answered `YES` in one vision call, the
 verdict journaled as a note.
@@ -2679,15 +2684,22 @@ the recorded step's act is closed by the stale-capture check and the verb's exac
 locator that matches exactly one *other* component after a window change acts on it (§6.4); `expectTarget` closes it
 for the live-only raw calls only.
 
+Numbered **88-90** by the build (2026-10-10; `../TODO.md`): **(88)** the routed `MODAL_OPENED` rule reports `fired: false`
+also when a release, not the press, opens the dialog and only the trailing `MOUSE_CLICKED` is withheld although the button's
+action fired (§3.3, VS); the executor's A29 then fails such a `pointer` step. **(89)** The MCP server's
+`skillroy_session_export` writes no anchor PNGs: only `session` (the REPL's `export` and `--play --export`) does (§9.3, D429,
+VM). **(90)** `web.pointer`'s `hit` is the main frame's, a frame element when the point lies in an iframe; only `web.hitTest`
+descends (§4.2, §4.3, VW).
+
 ---
-## 17. Decisions taken in this contract (D287-D358)
+## 17. Decisions taken in this contract (D287-D358) and by its build (D359-D430)
 
 D287-D340 were taken with the contract on 2026-10-10; D341-D358 were added by the revision after the contract review
 the same day (the session notes' `contract-review/revision-log.md` names the finding behind each, and the rows of
 D287-D340 whose text the revision changed: D294, D302, D304, D305, D306, D308, D309, D312, D326, D327, D329, D330,
 D331, D332, D334, D337, D338, D339, D340; the last round after the recheck changed D332, D337, D339, D342, D348, D352,
-D355 and D357 once more, `revision-log.md` "Last round"). The build's decisions start at D359, numbered by the orchestrator at integration in the
-order the packages land.
+D355 and D357 once more, `revision-log.md` "Last round"). The build's decisions, D359-D430, follow the table below, in a
+table of their own.
 
 | # | Decision | Alternatives rejected | Reason |
 |---|---|---|---|
@@ -2763,6 +2775,96 @@ order the packages land.
 | D356 | **The exported comment carries no hash, handle or mark**; the report does; `captures/<hash>.png` is the raster as captured, named by its content hash; the committed vision export is generated by §13.2 item 8 on one named leg (§6.6, §9.6, §12.4) | the hash and the handle in the comment; the comparison modulo comments; the export generated by `SessionExportTest` | the capture's hash differs between the Java lines (BS11: the JDK line changes the desk's pixels) and between two runs on one Java (the caret's blink phase), and a handle is a per-start counter, so exit criterion 1's byte-for-byte comparison on both Javas could not have held; `HeadlessDesk` answers no `swing.*` method and cannot produce a capture |
 | D357 | **An anchored step is `Plan.Call.guard {label}`**, the anchor taken at record time with the guard's own call (`swing.capture {scope: REGION}` of the window's root pane through `read`), written as `captures/<hash>.png`, `swing.rendering` read once per session, the window's size and insets kept, all in the provenance's `anchor` object with the crop's `masks`, `carets` and `focus`; the executor takes the guard's rectangle from the bindings entry of the current render key (§6.5, §6.7, §8.2) | the crop cut from the `SCREEN` composite at export time; the guard as a separate `swing.capture` call and check compiled into the plan with the rectangle | the controller never holds the composite's unmarked pixels in the form a crop needs, a crop of a frame's `SCREEN` paint may differ from a root-pane `REGION` paint, and the entry's render key, rendering, window and origin were in no provenance; `Plan.Call` had nothing that marked a call as guarded and the guard's rectangle is environment data that must stay out of the plan |
 | D358 | **The recorder refuses a masked target for every input**: no `click`, `pointer`, `type`, `press` or toolset `key` at a component the hit-test reports `masked`; the threat model's sentence is scoped to the vision module's tools; the sample's `LendingCaptureMask` names the number pad while the entry field is masked (§6.5, §11, §12.2) | the `type` refusal alone; an agent-side rule for every typing primitive | the `key` tool spelled a secret digit by digit (`1`, `0`, `0`, `Return`) past a rule that covered `type` only, and region clicks on the sample's own number pad typed it through the pad; a model with `allowBasePrimitives`, an MCP client under `--mutating` and a pack verb never pass through the recorder, so the threat model's "never typed into on a model's behalf" is scoped to what the mechanism covers, with the credential rule (D342) and `CallPolicy` on the raw paths beside it |
+
+### Decisions taken by the build, D359-D430
+
+The four packages took 72 decisions while they built Phase 7 on 2026-10-10 and recorded them in their reports as a tag
+and a number (VC 1 to 24, VS 1 to 21, VW 1 to 16, VM 1 to 11, each package's numbers running from 1 without a gap). The
+orchestrator numbered them at integration on 2026-10-10, in the order VC, VS, VW, VM and by that number within a tag: **VC
+D359-D382, VS D383-D403, VW D404-D419, VM D420-D430**; every "As built" note of this contract and every Javadoc or code
+comment that cited a decision by its tag now cites the number, and the last column keeps the tag and the package's own
+number for the reader of the reports. D401-D403 are VS's three decisions of the regeneration step 2b. The section in
+parentheses after each decision says where it is built. Together they are decision **B30** (`../DECISIONS.md`, provisional, as
+B29 was while the build ran on it); the decisions of the code review's fix wave and of the security delta review's fixes
+(§15) continue from D431 and join B30. No decision of B1-B28 or of B29 is reversed by any of them. Where a decision
+differs from the contract's own sentence, the passage carries an "As built" note: D371 (the visual check's question,
+§12.4), D383 and D384 (§3.6, §3.1), D403 (§12.4), D404 (a field added to P4 §4.2's `web.browsers`) and D420-D421 (the
+facade and the tool-set interface of §9.1 gain a few methods).
+
+| # | Decision | Alternatives rejected | Reason | Tag |
+|---|---|---|---|---|
+| D359 | **The session's `expectImage` takes its baselines from the caller**: `ExecutorSession.expectImage(step, origin, baselines)` and the static `ExecutorSession.baselines(root, env, scenarioId)`; the contract's two-argument form holds none (live: the check is recorded and skipped; an anchor: `REBIND_NEEDED`) (§9.2, §6.8) | a baselines setter on the session; the session reading a bindings file itself | a session has neither a scenario nor a bindings file; the player (§6.8) knows both and hands them in | VC 1 |
+| D360 | **`expectImage(Plan.Step)` journals the verb's arguments reconstructed from the compiled step** (§9.2) | journal no arguments | the journal and the export need the step as written | VC 2 |
+| D361 | **A guarded `pointer` executed with a provenance whose `anchor` carries the guard's label is not compared** (§9.2) | compare against the just-taken crop; refuse | the recorder took the anchor with the guard's own call an instant before; without this rule the recording of an anchored step was always `REBIND_NEEDED` | VC 3 |
+| D362 | **No bind-time approval for a plan whose bindings hold only images** (§8.7) | ask the approver with empty resolutions | `REJECT_ALL` would refuse the run before its baseline steps; there is nothing to approve at bind time, each baseline being approved at its step | VC 4 |
+| D363 | **`expectImage` writes `scope` only for `REGION`**; otherwise the agent's default applies (§8.1) | `WINDOW` or `COMPONENT` decided at compile | the compiler cannot tell what a locator names | VC 5 |
+| D364 | **`pointer` always writes `action` (default `CLICK`)**; `strict` is checked by the compiler and not sent (§8.1) | omit the default; send `strict` | the primitive requires `action` and has no fall-back | VC 6 |
+| D365 | **The `image` record's results add `approved` and `rejected`**, and a guard's record carries `guard: true` (§8.4) | reuse `held` and `missing` | approve's outcome is neither | VC 7 |
+| D366 | **`run --json` gives each result a `skippedReason`** (§8.6) | `skipped: true` | a result's `skipped` already means P3 §9's list of skipped cross-checks | VC 8 |
+| D367 | **A contributor that throws is refused `ERROR` / `ENVIRONMENT`, naming it** (§8.5) | skip it | a pure function that throws is a bug, as is a contributor that answers an id without the prefix | VC 9 |
+| D368 | **A render key in a bindings file is `[A-Za-z0-9]{8,64}`** (§8.7) | exactly 16 lower-case hex digits | it names a file, so the form is bounded; VS fixes the exact form the agent writes (D350) | VC 10 |
+| D369 | **"A credential is in flight" is set by any secret-joining resolve, and typing is `swing.type`, or `swing.key` outside a fixed set of non-printable keys, on the compiled calls (pack verbs included)** (§9.2) | base verbs only; a printable whitelist | deny by default; a pack verb that types is typing | VC 11 |
+| D370 | **`keypad-image`'s plan was committed in step 1**; only its bindings, baselines and replay waited behind `Phase7Pending`; `sign-on-by-number-pad` ends with `signOff` (§12.4) | keep it out of `PlansUpToDateTest` | it compiles without VS's desk; every committed scenario leaves the desk signed off | VC 12 |
+| D371 | **`loan-table-visual-check`'s question reads "…one line for the scanned item, with a quantity of 2" and stands after the scans** (§12.4) | the contract's "two lines" after the deposit | false on the desk: two scans of one item are one line of quantity 2, and the loan is posted after the deposit | VC 13 |
+| D372 | **`caps` merges in mode `live`, with no host features, when `--pack` or an inference option is given**; `--json` carries `source` (§9.3) | `replay`; merge only when both are given | it shows what a live run would see; the source is the point of the column | VC 14 |
+| D373 | **The regeneration scripts**: `skillroy.plans.update` also covers `exported/plan`, and the new `skillroy.bindings.rehash` rewrites every committed bindings file's `planHash` from its YAML's compiled plan, and nothing else (§8.2, §12.5) | a standalone script | the update-flag pattern the module already uses | VC 15 |
+| D374 | **`session-start.options` records `robot` only when true, and `host` and `contributed` only when not empty** (§9.2) | always | Phase 5's journals stay unchanged | VC 16 |
+| D375 | **A `{by}` mask is resolved by `swing.find` and its bounds mapped through origin and scale; no single match is `FAIL` / `ASSERTION`** (§8.4) | `ERROR` / `ENVIRONMENT` | a step's NOT_FOUND is an assertion everywhere else | VC 17 |
+| D376 | **`ImageSteps.Outcome.Kind.ERROR`** answers an unusable capture or baseline file and a target without `swing.rendering` (§8.7) | throw | one mapping in `ImageRuns` serves both hosts | VC 18 |
+| D377 | **A session's skipped image check goes to the outcome's `degradedFidelity`** (§9.2) | a new field | the session has no skipped-expectations list | VC 19 |
+| D378 | **The web host scenarios' `PlansUpToDateTest` pin (plan version 5 to 6) is edited**, one line outside VC's files (§12.5) | leave it red under `-Pjcef` | VC's regeneration made it stale | VC 20 |
+| D379 | **Approve's second write of the bindings file also happens after a later step failed** (§8.7) | only after a passing run | each baseline was approved by a person at its step | VC 21 |
+| D380 | **`CapabilityMatrix.agentOnly()`** beside `with` and `source` (§8.5) | none | the `capabilities` record's `agentHash` and the tests need the agent's part back | VC 22 |
+| D381 | **`ImageEntry`, `Focus` and `Anchor` are nested in `BindingsFile`; `window` is optional**; a baseline's window comes from the capture (§8.7) | top-level types | they are the file's records | VC 23 |
+| D382 | **`ExportResult.images` is a record component, and the export's `Report` gains `visionDerived` and `liveOnly`** (§6.6, §8.7) | side channels | one result, as the export's other parts | VC 24 |
+| D383 | **A component inside a masked component is masked too** (no text, value or mark; `masked` in the hit-test) (§3.6) | only the named component (the contract's wording) | its pixels are inside the blanked rectangle; a pack that masks a container expects its content hidden; the safe side | VS 1 |
+| D384 | **The heap bound refuses** (`INVALID_PARAMS`, `neededMb`, `freeMb`); only the 4096 cap lowers the scale (§3.1) | lower the scale under the heap bound too (§3.1's sentence) | §2.4 and §13.1 item 1 say refuse; a silently tiny image would mislead a model | VS 2 |
+| D385 | **The root pane replaces the painted component for a `RootPaneContainer` that is a window**; a `JInternalFrame` keeps its title bar (§3.1) | every `RootPaneContainer` | the imitation decorations belong to a heavyweight window's peer; an internal frame's title bar is real paint | VS 3 |
+| D386 | **`DOUBLE_CLICK` is two triples with counts 1 and 2; `CLICK` with `clickCount: n` is one triple of count n** (§3.3) | one triple of count 2 | BS10's native sequence; lists and tables see the first click too | VS 4 |
+| D387 | **`dispatched.sent` counts dispatches that returned; on `EDT_BUSY`, `balanced: true` is a promise** kept by the next task the EDT runs (§3.3) | count at the start of a dispatch; report the balance only once it is done | it matches §13.2 item 11's "1 of 4"; a call cannot wait for a blocked EDT | VS 5 |
+| D388 | **The hit-test's target form answers the named component as `target` with `targetKind: "TARGET"`** (§3.2) | `MOUSE_TARGET` or `DEEPEST` at the component's centre | the recorder's focus-owner description must be about that component | VS 6 |
+| D389 | **Carets are reported for every focused text component without a selection, whatever the blink phase, masked or not**, widened by 2 px either side (§3.1) | only while the caret is drawn (`Caret.isVisible`) | the rectangle a comparison blanks must not depend on the blink phase; §13.2 item 1 wants the masked field's caret | VS 7 |
+| D390 | **Marks**: none for the children of `JComboBox` and `JScrollBar`; one per tab; regions replace the component's mark; labels read `role 'name': text`, at most 120 characters; covered `SCREEN` marks are left out (§3.1) | marks for every button, arrow buttons included | the marks list a model reads stays the controls a person would use | VS 8 |
+| D391 | **The `SCREEN` canvas outside the windows' content is RGB 64, 64, 64** (§3.1) | the mask grey; white | distinct from a mask, deterministic | VS 9 |
+| D392 | **The Robot press observation waits at most 3 s within the call's remaining time** (§3.4) | the whole remaining time (up to the 30 s default) | a dropped press is answered in seconds; the call's budget still bounds it | VS 10 |
+| D393 | **The delivery probe moves one pixel aside first when the pointer already sits on the point, accepts `MOUSE_ENTERED`, and restores the pointer when it fails** (§3.4) | none | a move to the current position produces no native event | VS 11 |
+| D394 | **`LendableItem.inductionRequired`: null means either kind**; a separate `LENDABLE_ITEM_BY_INDUCTION_SQL` exists only when the argument is named; the two-argument constructor stays (§12.3) | null means false (as `ItemsTriggering`); one SQL with a nullable parameter | committed scenarios keep their meaning and their bindings' evidence (the SQL text) unchanged | VS 12 |
+| D395 | **The holder of the capture geometry a `captureId` names is `RecentCaptures`** (32 geometries for ten minutes, the window held weakly) (§3.1) | none | the repository's vocabulary rule for names | VS 13 |
+| D396 | **A glass capture ignores `scale` (it reports 1), refuses a rectangle over 4096 a side, carries `glassNote` and reports `surfaces`** (§3.4) | none | user-space size as specified; the bound of §2.4 | VS 14 |
+| D397 | **The keypad row stays 64 px high (wrapped in `NORTH`) beside the 160 px number pad** (§12.1) | let the keys stretch | §12.1: "about 160 px beside the 64 px keypad row" | VS 15 |
+| D398 | **`VisionSwingChecks` extends `LoadModeChecks` (orders 52-58) instead of launching targets of its own; `RobotChecks` launches its own** (§13.2) | a separate class per mode with its own launch | items 1-5 run on the same target per mode with no extra launches; every check recovers the desk in a `finally` | VS 16 |
+| D399 | **`swing.capture` of a target in no window**: `origin` is relative to the topmost ancestor and there is no `window` (§3.1) | refuse | the headless tests' trees; production targets are in windows | VS 17 |
+| D400 | **The routed `received` counts the window itself only when it listens**; the call recognises its own events by a unique `when` (§3.3) | identity of event objects | retargeted events are new objects; the window gets the event only when nothing lightweight takes it | VS 18 |
+| D401 | **The rehash of committed bindings files carries the compiled plan's `packVersion` too** (one hunk in VC's `BindingsUpToDateTest`); the field is information and neither hash covers it (§12.5, §13.2) | none recorded in the package's report | the rehash as VC wrote it rewrote `planHash` only, so `BindingsUpToDateTest` and `PackOnRealSchemaTest` (approve's bytes) still failed on the files' `packVersion` 0.5.0 | VS 19 |
+| D402 | **`Runs.assertPassedWithoutSleeping` counts an `image` record as a check, and an images-only scenario needs no wait** (a VC helper) (§13.2) | none recorded in the package's report | the ten resolution classes failed one assertion each: an images-only scenario has no `expect` record and no wait, while its replay was `PASS` with both images `held` | VS 20 |
+| D403 | **`keypad-frame` masks three locators**, `{by: {id: entry}}`, `{by: {id: totalsLine}}` and `{by: {name: Printer, role: scrollpane}}`, instead of §12.4's single mask; its baselines were approved afresh on both Javas and seeds (§12.4) | running `keypad-image` only in `ResolutionChecks`; a `maxDiffPixels` budget; a recovery that clears the slips first | the baselines are approved on a fresh desk but the glue replays after the earlier scenarios, where the totals line shows the last loan and the printer's scroll pane holds slips (11,724 differing pixels); with the three masks the frame checks the layout and the static parts on any signed-off desk and still exercises the locator form of `mask`; the first alternative would leave the glue unable to run every committed scenario, the second would hide real layout drift of that size, and the third needs a desk action that does not exist and makes the scenario depend on what ran before | VS 21 |
+| D404 | **The CDP path hands a browser the agent reports blocked by a modal dialog to the agent**: before every `web.pointer` it re-reads the agent's `web.browsers`, which gains the optional entry field `blockedBy: {dialog, title}` (an additive change of P4 §4.2); the agent answers `MODAL_OPEN` unless `force` (§4.3, §4.7) | no modal check on the CDP path; never serve `web.pointer` on the CDP path; a new agent primitive for the modal state | the contract's modal rule (W5, D335) would otherwise hold on one path only: a model's or a client's pointer would act past a modal dialog whenever the run uses CDP; the agent already owns the check; an additive optional field changes no shape for an unblocked browser; the error shapes stay identical because the agent produces them | VW 1 |
+| D405 | **The script library's version rule**: a slot that already holds a library is never replaced; the functions added in version 2 are installed into an older slot once (non-enumerable, non-writable, non-configurable); `version` is raised where it is configurable (a version 1 slot keeps `"1"`); install answers `"upgraded"`; a slot that refuses is left and the call fails naming the function (§4.6) | replace the slot; a second version marker property | D300's reason stands; version 1 made `version` non-configurable, so raising it is impossible there, and the presence of the function is the check that matters | VW 2 |
+| D406 | **Every pointer action starts with a `mouseMoved`**; `CLICK` with count n sends press/release pairs with counts 1..n; `DOUBLE_CLICK` is `CLICK` with n 2 (§4.3) | no move for `PRESS` and `RELEASE`; one pair with count n | a person's pointer arrives before it acts (hover, pointer-enter); Chromium raises `dblclick` from the second pair | VW 3 |
+| D407 | **After a failure that follows a press, one release of that button (at most 1 s), then the failure** (§4.3) | leave the button held | a held button in a page outlives the call (the same reason as D343 and §4.3's one-call `CLICK`) | VW 4 |
+| D408 | **`web.hitTest` rectangles are in the starting frame's viewport**; `iframe` names the innermost frame element; the `frame` parameter is the starting frame (§4.2) | rectangles in each frame's own viewport | §4's one coordinate space; a nested rectangle would be unusable otherwise | VW 5 |
+| D409 | **One shared class, `protocol.web.WebInput`**, holds the parameters, the plan, the protocol parameters, the hit bounds, the child-frame rule and the result shapes of both paths (§4.3, §4.7) | each path with its own copy | D48 and D335 want byte identity of the two paths, and CLAUDE.md's rule "never duplicate" covers shared wire-side code | VW 6 |
+| D410 | **Child frame by name, then URL, then the only child**: among the frame's children by the element's name (exactly one), else by URL (exactly one), else the only child; read over `Page.getFrameTree` on both paths (§4.2) | descend in the page (same origin only); give up at every iframe | `data:` frames are cross-origin; both paths read the same tree | VW 7 |
+| D411 | **Hit-test locators are only those `find` answers with exactly the element**: `{role, name}` not for generic, none or presentation roles, empty names or names over 1000 characters; `{selector}` is a unique plain id, else the shortest `tag.class:nth-of-type(n)` path (8 steps) anchored at an ancestor's unique id; `unique` means at least one (§4.2) | report non-unique candidates | the recorder needs exact-match locators only | VW 8 |
+| D412 | **`web.pointer`'s hit read**: `NOT_FOUND` refuses before anything is sent, any other failure of the read omits `hit`; without `EVALUATE` only negative coordinates are refused as outside (§4.3) | fail the pointer on any hit failure | a busy page should not block a person's pointer; a point outside must never act | VW 9 |
+| D413 | **JxBrowser `INPUT` roles are named from the public 7.x API as best known** (`com.teamdev.jxbrowser.ui.Point`, `ui.MouseButton`, the `ui.event.Mouse{Pressed,Released,Moved,Wheel}` builders, setters by arity); modifier keys are refused; the strategy note "input unverified" appears only when the roles resolve (§4.5) | map modifiers by a guessed `KeyModifiers` type; always print the note | unverified anyway (wall, gap 41); refusing is honest; the note means nothing without the roles | VW 10 |
+| D414 | **The modal heuristic is the Swing module's** (the dialog is not the browser's window, and the window is not owned by the dialog); with several blockers, the active one, else the last created (§4.3) | the contract's literal phrase; the first created | the contract says "the same heuristic as the Swing module's" | VW 11 |
+| D415 | **The web module's `SurfaceSource` is registered at install and answered from the component recorded per index entry at rebuild**, closed browsers left out; the class that walks the parents is loaded at the first call (§4.8) | install it at readiness; ask the adapter's `component()` | "answered from what the module already holds"; install must request no AWT class (the recording-loader test caught a verification-time load) | VW 12 |
+| D416 | **`web.browsers.blockedBy` is read per open browser with a component, by one bounded EDT read, while the call has time** (the field of D404) (§4.7) | always; never | bounded and cheap; an absent field keeps today's shape | VW 13 |
+| D417 | **A `COMPONENT` point needs `EVALUATE`** (`innerWidth` read in the main frame); `INVALID_PARAMS` reasons `no component`, `no component size`, `viewport override`; the override flag is the module's own (§4.2) | read the adapter's `viewport()` | `viewport()` is null or stale on JCEF; the CDP path refuses component points anyway | VW 14 |
+| D418 | **The web host has no capability goldens**; nothing was regenerated there (§4.4) | add goldens | the contract's "(if present)"; out of scope | VW 15 |
+| D419 | **`WebPointerEvent` bounds**: coordinates 0..16384, click count 0..3, deltas within 16384; defaults per action; press and release need a button and a count of at least 1; a delta for `WHEEL` only; the shape test allows public static final constants (§4.1) | unbounded ints | 16384 is the largest viewport `web.resize` accepts; fail fast at the SPI | VW 16 |
+| D420 | **`SessionActions` gains `outputDir()`, `screenLegend()` (masked) and `note(text)`** (§6.1, §9.1) | let the module reach the session; drop `skillroy_look`'s note and the captures | the facade the contract fixed could not reach where `captures/` goes, the pack's legend for a visual question, or the look's journal note | VM 1 |
+| D421 | **`SessionTools.modelClass(ctx)`, a default method** (Sonnet) (§6.2, §9.1) | a service option | the contract's interface could not name the loop's model class per tool set | VM 2 |
+| D422 | **V1's `<target-ui>` block carries the marks list alone** (and the image's size), not the text snapshot again (§6.2) | repeat the snapshot | the model has `skillroy_snapshot`, and BS12 found the marks list carries what the snapshot drops | VM 3 |
+| D423 | **A hit-test on a `HEAVYWEIGHT` surface is recorded as an anchored step; on a `NONE` surface it is answered as text** (§6.4) | refuse both | §6.5's rule for `HEAVYWEIGHT` wins over §6.4's sentence | VM 4 |
+| D424 | **The player narrows the tier only between V2 and V3**; a step's tier to or from V1 is a usage error, like a widening (§6.8) | allow any narrowing | the service fixes the tool vocabulary at its start, and V1's tools differ from V2's | VM 5 |
+| D425 | **`ExecutorSession.fixture(slot, value, credential, origin)` binds a fixture slot as a plan binds one**: the value's references are substituted with public values, the slot is declared `fixture` with strategy `FIXTURE` and no bindings-file entry, and with a credential the secret is joined and in flight; a credential slot is bound for a person's origin only (`FIXTURE_CREDENTIAL_REFUSED` otherwise, before anything is joined or journaled); one `fixture` journal record; the export writes the slot back as `resolve: <slot>: {fixture: …}`; the player's default `FixtureBinder.SESSION` calls it as the person. First built as a `FixtureBinder` the player's host supplies, because `ExecutorSession` was VC's file; the method followed at the orchestrator's request (`e11ae08`) (§6.8, §9.2) | editing VC's file during the build (the shared-file rule forbade it); rewriting fixture slots as queries | `ExecutorSession` could not bind a fixture slot, so a scenario with one (`vision-live-only`, `loan-table-visual-check`) could not be played; the origin rule keeps D342 whole: no credential is bound on a model's or a client's behalf | VM 6 |
+| D426 | **A UI action counts toward `vision.maxActions` per facade `execute`** (an act that ran two steps counts two) (§9.1) | per tool call | the limit protects the target, not the model | VM 7 |
+| D427 | **`PlanPolicy.refusals(plan, scenario)` applies the credential rule's plan form to a pack verb's arguments as the client wrote them**, never to the verb's own compiled references (§9.4, §11) | judge compiled calls only (a pass-through verb would slip through); judge every reference (the pack's own `signOn` join would be refused) | a client must not hand a secret field to a verb; the verb's own join is the pack's business | VM 8 |
+| D428 | **`ScenarioPlayer.withBaselines(root, env)`** reads the scenario's baselines once per play and hands them to every `expectImage` and anchored `pointer` (D359's consumer); the CLI passes the session's bindings root and environment (§6.8) | a tenth constructor parameter | the baselines are optional (null for a host without bindings) | VM 9 |
+| D429 | **`export` (the REPL's and `--play --export`) writes each anchor PNG where its bindings entry says**, created exclusively; the JSON form lists them under `images` (§9.3) | leave them to the person | §9.3: "PNGs beside" | VM 10 |
+| D430 | **`VisionLiveIT` runs item 3 second and records an `INVALID_REQUEST` as the finding instead of failing**; the bounds of items 1, 2 and 4 count the turn's `vision` calls only; the framework's own files are checked for the key after each item (§13.3) | fail on a 400; count every ledger entry | the item exists to record the finding; a resolution the person asked for is not part of the turn; the framework writes its files itself | VM 11 |
 
 ---
 

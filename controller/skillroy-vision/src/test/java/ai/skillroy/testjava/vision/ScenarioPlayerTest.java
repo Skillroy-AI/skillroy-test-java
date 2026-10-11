@@ -48,7 +48,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * {@code UNSURE} (the run {@code DEGRADED}), each question one {@code vision} call through the service's meter; a step's
  * {@code tier: V3} without the person's flag is refused before anything runs; an {@code expectImage} goes through the
  * session's image route and is journaled under its verb; a fixture credential slot is bound through the session as the
- * person (D-VM-6) and its {@code signOn} runs before the model acts.
+ * person (D425) and its {@code signOn} runs before the model acts.
  */
 class ScenarioPlayerTest {
 
