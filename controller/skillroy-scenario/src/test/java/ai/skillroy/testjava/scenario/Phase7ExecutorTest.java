@@ -259,9 +259,9 @@ class Phase7ExecutorTest {
 
     /**
      * The fix wave of the Phase 7 review (FB, L1-F1 = L2-F3): a raw {@code call:} step's {@code via} or {@code mode}
-     * reaches the agent as written, and the agent reads it trimmed and upper-cased, so the plan's gate reads it the same
-     * way: {@code via: robot}, {@code via: " Robot"} and a glass capture's {@code mode: robot} are refused before the
-     * agent is asked without {@code RunOptions.robot}, and the pointer's plan names {@code swing.pointer.robot}.
+     * reaches the agent as written, and the agent reads it trimmed and upper-cased, so the plan's gate reads it the
+     * same way: {@code via: robot}, {@code via: " Robot"} and a glass capture's {@code mode: robot} are refused before
+     * the agent is asked without {@code RunOptions.robot}, and the pointer's plan names {@code swing.pointer.robot}.
      */
     @Test
     void aRawCallSpellingRobotInAnyCaseIsRefusedBeforeTheAgentIsAsked() throws Exception {
@@ -281,6 +281,28 @@ class Phase7ExecutorTest {
         assertEquals(0, agent.capabilityReads, "before checkRequires: the agent was asked nothing");
         assertTrue(agent.callsTo("swing.pointer").isEmpty() && agent.callsTo("swing.capture").isEmpty(),
                 "nothing was sent");
+    }
+
+    /**
+     * The fix wave of the Phase 7 review (FB, D-FB-2): the gates read {@code via} and {@code mode} as written, so a
+     * reference that resolves to ROBOT is refused at the call, before it is sent, even with {@code RunOptions.robot}.
+     */
+    @Test
+    void aReferenceThatResolvesToRobotIsRefusedAtTheCall() throws Exception {
+        Plan plan = plan("resolve:\n  r: { fixture: { v: robot } }\nsteps:\n  - call: { primitive: swing.pointer,"
+                + " args: { action: CLICK, point: { x: 1, y: 1 }, via: $r.v } }\n");
+        assertFalse(plan.usesRobot(), "as written, the plan names no Robot");
+        for (RunOptions options : List.of(options(BindMode.LIVE, null), options(BindMode.LIVE, null).withRobot(true))) {
+            RunResult refused = run(plan, options);
+            assertEquals(Status.ERROR, refused.status(), refused.message());
+            assertEquals(FailureKind.ENVIRONMENT, refused.failureKind());
+            assertEquals(CallRunner.ROBOT_REFERENCE_REFUSAL, refused.message());
+        }
+        assertTrue(agent.callsTo("swing.pointer").isEmpty(), "nothing was sent");
+        Plan routed = plan("resolve:\n  r: { fixture: { v: ROUTED } }\nsteps:\n  - call: { primitive: swing.pointer,"
+                + " args: { action: CLICK, point: { x: 1, y: 1 }, via: $r.v } }\n");
+        assertEquals(Status.PASS, run(routed, options(BindMode.LIVE, null)).status(), "any other value is sent");
+        assertEquals(1, agent.callsTo("swing.pointer").size());
     }
 
     // ------------------------------------------------------------------------------------------------ the merge
@@ -410,8 +432,8 @@ class Phase7ExecutorTest {
     }
 
     /** A canned capture whose focus owner is {@code ownerLocator} with the window rectangle {@code ownerRect}. */
-    static Map<String, Object> capture(BufferedImage image, Map<String, Object> ownerLocator, ImageCompare.Rect ownerRect)
-            throws Exception {
+    static Map<String, Object> capture(BufferedImage image, Map<String, Object> ownerLocator,
+                                       ImageCompare.Rect ownerRect) throws Exception {
         Map<String, Object> capture = capture(image, List.of());
         Map<String, Object> focus = new LinkedHashMap<>();
         focus.put("owner", "h5");

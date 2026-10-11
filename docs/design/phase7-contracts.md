@@ -1920,7 +1920,11 @@ spelled names `swing.pointer.robot`), `ExecutorSession`'s origin-free gate and i
 step spelled `via: robot` is live-only, never exported), and `CallPolicy` and the facade's `read` (above), which
 delegate to it. `read`'s exclusion list refuses `redact` whenever it is present and not the boolean `true`
 (`Plan.unredacted`: a string `"false"`, which the agent coerces, included), as the facade does. A plan's arguments are
-not normalised, so no committed plan changes (D-FB-1).
+not normalised, so no committed plan changes (D-FB-1). Since every gate reads the arguments as written, **`via` and
+`mode` take a literal value**: a reference (`via: $r.v`) that resolves to `ROBOT` in any spelling is refused by the
+call itself after substitution and before anything is sent (`CallRunner`, every route, every origin, whatever the flags;
+`ERROR / ENVIRONMENT`, "robot: via and mode take a literal value; a reference that resolves to ROBOT is refused"),
+D-FB-2.
 
 The hosts load the tools with `SessionTools.load(ClassLoader)` (`ServiceLoader`, the pack loader) and pass the options
 from their flags: `vision.tier` (`v1 | v2 | v3 | off`), `vision.model`, `vision.tools` (`toolset | custom`),

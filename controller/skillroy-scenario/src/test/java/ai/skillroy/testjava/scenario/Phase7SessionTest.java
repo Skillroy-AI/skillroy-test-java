@@ -191,6 +191,20 @@ class Phase7SessionTest {
                 }
             }
             assertTrue(fx.agent.callsTo("swing.capture").isEmpty(), "no glass capture was sent for them");
+            // D-FB-2: a reference that resolves to ROBOT passes no gate as written, so the call refuses it, for every
+            // origin and whatever the flag.
+            session.fixture("r", Map.of("v", "robot", "m", " Robot"), null, PERSON);
+            for (Origin origin : List.of(PERSON, MODEL)) {
+                StepOutcome pointer = session.execute(PlannedCall.of("swing.pointer", Map.of("point", Map.of("x", 1L,
+                        "y", 1L), "action", "CLICK", "via", "$r.v"), Sync.NONE), origin);
+                assertEquals(Status.ERROR, pointer.status(), origin.kind().name());
+                assertEquals(CallRunner.ROBOT_REFERENCE_REFUSAL, pointer.message());
+                StepOutcome glass = session.execute(PlannedCall.of("swing.capture", Map.of("mode", "$r.m"),
+                        Sync.NONE), origin);
+                assertEquals(CallRunner.ROBOT_REFERENCE_REFUSAL, glass.message(), origin.kind().name());
+            }
+            assertTrue(fx.agent.callsTo("swing.pointer").isEmpty() && fx.agent.callsTo("swing.capture").isEmpty(),
+                    "nothing was sent");
         }
     }
 

@@ -576,10 +576,10 @@ abstract class WebHostChecks {
 
     /**
      * Item 10's Swing half (phase7-contracts.md 4.8, 13.2 item 10; the Swing side's extended capture and
-     * {@code swing.hitTest}, whose {@code OK} it asserts first): {@code swing.capture} of the host's window lists the front browser as a
-     * {@code WEB} surface with its ref and {@code redacted: false}; {@code swing.hitTest} at the Borrow button's point
-     * in the window answers {@code surface: WEB} with {@code surfaceLocal}, and {@code web.hitTest {space: COMPONENT}}
-     * with that point answers the button.
+     * {@code swing.hitTest}, whose {@code OK} it asserts first): {@code swing.capture} of the host's window lists the
+     * front browser as a {@code WEB} surface with its ref and {@code redacted: false}; {@code swing.hitTest} at the
+     * Borrow button's point in the window answers {@code surface: WEB} with {@code surfaceLocal}, and
+     * {@code web.hitTest {space: COMPONENT}} with that point answers the button.
      */
     @Test
     @Order(8)

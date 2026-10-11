@@ -828,8 +828,8 @@ abstract class LoadModeChecks {
      * {@code loan-table-visual-check} is DEGRADED, its visual check skipped with the reason naming
      * {@code inference.vision} {@code UNAVAILABLE (replay)} (the vision module, a test dependency of this module, is on
      * the class path; the fix wave of the Phase 7 review, FB, L3-F6, asserts it unconditionally, so that a lost
-     * dependency or a renamed contributor fails here instead of weakening exit criterion 3); {@code vision-live-only} is
-     * SKIPPED: its {@code run.jsonl} holds
+     * dependency or a renamed contributor fails here instead of weakening exit criterion 3); {@code vision-live-only}
+     * is SKIPPED: its {@code run.jsonl} holds
      * {@code run-start}, {@code skipped}, {@code ledger {count: 0}} and {@code run-end} and nothing was sent to the
      * agent. None of the three has a bindings file.
      */

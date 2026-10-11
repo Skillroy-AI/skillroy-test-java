@@ -273,8 +273,9 @@ final class JournalExport {
     /**
      * Why a step is live-only and not exported (phase7-contracts.md 6.5, 6.6, decision D307), or null: it acted through
      * Robot (no CI target has it; {@code via} in any spelling the agent reads, {@link Plan#robotValue}, so that a
-     * person's {@code call} step spelled {@code via: robot} is not exported as a replayable step), or it is a raw {@code swing.pointer} or {@code web.pointer} call (a hover, a press
-     * by halves, a page pointer the recorder could not turn into a locator step).
+     * person's {@code call} step spelled {@code via: robot} is not exported as a replayable step), or it is a raw
+     * {@code swing.pointer} or {@code web.pointer} call (a hover, a press by halves, a page pointer the recorder could
+     * not turn into a locator step).
      */
     private static String liveOnly(StepJournal.StepEntry s) {
         if (s.provenance() != null && Plan.robotValue(s.provenance().get("via"))) {
