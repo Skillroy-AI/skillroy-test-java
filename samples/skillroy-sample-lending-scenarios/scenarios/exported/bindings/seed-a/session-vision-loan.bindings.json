@@ -1,0 +1,183 @@
+{
+  "bindingsVersion": 1,
+  "scenarioId": "session-vision-loan",
+  "envId": "seed-a",
+  "pack": "lending",
+  "packVersion": "0.6.0",
+  "planHash": "sha256:3ed613d0ed21460b99fa9b4038e2d1dcdafc251baf38a8701d97e5027e8971a6",
+  "resolveHash": "sha256:fb4cd2191bd7907dc157851c8270efdba83d7e35255d2e23f7b63ac2026c62cd",
+  "env": {
+    "fingerprint": "sha256:ba8e0fe3089ab50e4f708f73e42e1dd914456472429f1b67cfc538ad75f08944",
+    "components": {
+      "lending.schema": "sha256:f8e03d38af714e3af3af6542a10c70a8acb6157e8f00dda21f7903e379e58504",
+      "lending.seed": "A",
+      "lending.site": "TOOL LIBRARY - MILL LANE",
+      "skillroy.fingerprint": "1",
+      "skillroy.protocolMajor": "0"
+    }
+  },
+  "resolutions": {
+    "assistant": {
+      "query": "StaffWithPermission",
+      "args": {
+        "interactiveSignOn": true,
+        "perform": [
+          "SIGN_ON"
+        ]
+      },
+      "argsHash": "sha256:0dade4955e16865a96f0abcbbaddc6c403787e8f05b35ec6cbc9ae6db200c363",
+      "value": {
+        "code": "100",
+        "limits": {
+          "RETURN": "20.00"
+        },
+        "permissions": [
+          "RETURN",
+          "SIGN_ON"
+        ]
+      },
+      "credential": {
+        "realm": "staff",
+        "id": "100"
+      },
+      "strategy": "CANONICAL_SQL",
+      "provenance": {
+        "resolver": "lending.sql.StaffWithPermission",
+        "statements": [
+          {
+            "channel": "agent",
+            "source": "lending",
+            "sql": "SELECT s.code AS code, s.auto_sign_on AS auto_sign_on, (SELECT MAX(rl.amount) FROM staff_role sr JOIN role_cap rl ON rl.role_id = sr.role_id WHERE sr.staff_code = s.code AND rl.kind = ?) AS limit_amount FROM staff s WHERE s.active = TRUE ORDER BY s.code",
+            "params": [
+              "RETURN"
+            ],
+            "rowCount": 6,
+            "truncated": false
+          },
+          {
+            "channel": "agent",
+            "source": "lending",
+            "sql": "SELECT DISTINCT rp.permission AS permission FROM staff_role sr JOIN role_permission rp ON rp.role_id = sr.role_id WHERE sr.staff_code = ? ORDER BY permission",
+            "params": [
+              "100"
+            ],
+            "rowCount": 2,
+            "truncated": false
+          },
+          {
+            "channel": "agent",
+            "source": "lending",
+            "sql": "SELECT DISTINCT rp.permission AS permission FROM staff_role sr JOIN role_permission rp ON rp.role_id = sr.role_id WHERE sr.staff_code = ? ORDER BY permission",
+            "params": [
+              "101"
+            ],
+            "rowCount": 1,
+            "truncated": false
+          },
+          {
+            "channel": "agent",
+            "source": "lending",
+            "sql": "SELECT DISTINCT rp.permission AS permission FROM staff_role sr JOIN role_permission rp ON rp.role_id = sr.role_id WHERE sr.staff_code = ? ORDER BY permission",
+            "params": [
+              "104"
+            ],
+            "rowCount": 0,
+            "truncated": false
+          },
+          {
+            "channel": "agent",
+            "source": "lending",
+            "sql": "SELECT DISTINCT rp.permission AS permission FROM staff_role sr JOIN role_permission rp ON rp.role_id = sr.role_id WHERE sr.staff_code = ? ORDER BY permission",
+            "params": [
+              "200"
+            ],
+            "rowCount": 3,
+            "truncated": false
+          },
+          {
+            "channel": "agent",
+            "source": "lending",
+            "sql": "SELECT DISTINCT rp.permission AS permission FROM staff_role sr JOIN role_permission rp ON rp.role_id = sr.role_id WHERE sr.staff_code = ? ORDER BY permission",
+            "params": [
+              "300"
+            ],
+            "rowCount": 3,
+            "truncated": false
+          }
+        ],
+        "calls": [],
+        "candidates": 1,
+        "candidatesTruncated": false,
+        "rejected": []
+      },
+      "verifier": [
+        {
+          "id": "lending.access.check",
+          "passed": true,
+          "reason": "SIGN_ON permitted; limit 20.00; asked for a password"
+        }
+      ],
+      "confidence": 1.0,
+      "approval": {
+        "state": "NOT_REQUIRED",
+        "by": "live"
+      },
+      "llm": null
+    },
+    "item": {
+      "query": "LendableItem",
+      "args": {
+        "deposit": {
+          "between": [
+            "1.00",
+            "2.00"
+          ]
+        },
+        "perDay": false
+      },
+      "argsHash": "sha256:039323ce6938da4ce768e7ca436993667a807996a5efab42b5b75ed96bb64bd7",
+      "value": {
+        "barcode": "5000000000048",
+        "code": "HND-001",
+        "deposit": "1.10",
+        "title": "Claw hammer"
+      },
+      "strategy": "CANONICAL_SQL",
+      "provenance": {
+        "resolver": "lending.sql.LendableItem",
+        "statements": [
+          {
+            "channel": "agent",
+            "source": "lending",
+            "sql": "SELECT code, barcode, title, deposit FROM item WHERE active = TRUE AND barcode IS NOT NULL AND per_day = ? AND deposit >= CAST(? AS DECIMAL(10,2)) AND deposit <= CAST(? AS DECIMAL(10,2)) ORDER BY deposit, code",
+            "params": [
+              false,
+              "1.00",
+              "2.00"
+            ],
+            "rowCount": 3,
+            "truncated": false
+          }
+        ],
+        "calls": [],
+        "candidates": 1,
+        "candidatesTruncated": false,
+        "rejected": []
+      },
+      "verifier": [
+        {
+          "id": "lending.deposit",
+          "passed": true,
+          "reason": "a scan of 5000000000048 finds HND-001 at 1.10, active, counted"
+        }
+      ],
+      "confidence": 1.0,
+      "approval": {
+        "state": "NOT_REQUIRED",
+        "by": "live"
+      },
+      "llm": null
+    }
+  },
+  "oracles": {}
+}

@@ -1,0 +1,23 @@
+# Exported from a vision session on the sample desk (phase7-contracts.md 12.4): a person signs on and scans a plain item, a model looking at the screen asks for the deposit due, takes the deposit and records the loan, the person checks it.
+# Session vision-loan-session on 2026-10-08, pack lending 0.6.0, environment seed-a.
+# Acted: person: 2 steps, model scripted-model: 3 steps.
+# Model cost: $0.
+scenario: session-vision-loan
+pack: lending
+requires: [lending.input, swing.tree]
+resolve:
+  assistant:
+    query: StaffWithPermission
+    args: { interactiveSignOn: true, perform: [SIGN_ON] }
+    credential: { realm: staff, key: code }
+  item: { query: LendableItem, args: { deposit: { between: ["1.00", "2.00"] }, perDay: false } }
+steps:
+  - signOn: { staff: $assistant }
+  - scan: { item: $item }
+  - click: { by: { action: DUE } }    # aiAct "I ask for the deposit due." by scripted-model: unknown "DUE" (IconKey)
+  - type: { by: { id: entry }, text: "10.00" }    # aiAct "I take ten as the deposit." by scripted-model: textbox "entry" (EntryField)
+  - click: { by: { action: DEPOSIT } }    # aiAct "I record the deposit." by scripted-model: unknown "DEPOSIT" (IconKey)
+  - expect:
+      loan.total: $item.deposit
+      state.name: IDLE
+timeouts: { step: "10s" }

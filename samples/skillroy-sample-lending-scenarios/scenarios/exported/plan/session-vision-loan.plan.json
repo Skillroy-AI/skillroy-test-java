@@ -1,0 +1,204 @@
+{
+  "planVersion": 6,
+  "scenarioId": "session-vision-loan",
+  "pack": "lending",
+  "packVersion": "0.6.0",
+  "sourceHash": "sha256:1412a87a39553c29221dc3c8dbd7163b12e630fb9d243807a148fc6bc0b0a668",
+  "inference": "none",
+  "requires": [
+    "lending.input",
+    "swing.tree",
+    "lending.access.check",
+    "lending.deposit"
+  ],
+  "slots": [
+    {
+      "name": "assistant",
+      "kind": "query",
+      "query": "StaffWithPermission",
+      "args": {
+        "interactiveSignOn": true,
+        "perform": [
+          "SIGN_ON"
+        ]
+      },
+      "verify": [
+        "lending.access.check"
+      ],
+      "credential": {
+        "realm": "staff",
+        "key": "code"
+      }
+    },
+    {
+      "name": "item",
+      "kind": "query",
+      "query": "LendableItem",
+      "args": {
+        "deposit": {
+          "between": [
+            "1.00",
+            "2.00"
+          ]
+        },
+        "perDay": false
+      },
+      "verify": [
+        "lending.deposit"
+      ]
+    }
+  ],
+  "oracles": [],
+  "resolutionGraph": [
+    "assistant",
+    "item"
+  ],
+  "steps": [
+    {
+      "id": "s1",
+      "verb": "signOn",
+      "source": {
+        "line": 15
+      },
+      "calls": [
+        {
+          "primitive": "lending.input",
+          "args": {
+            "source": "Entry",
+            "value": "$assistant.code"
+          },
+          "sync": "READY",
+          "timeoutMs": 10000
+        },
+        {
+          "primitive": "lending.input",
+          "args": {
+            "source": "Entry",
+            "value": "$assistant.password"
+          },
+          "sync": "READY",
+          "timeoutMs": 10000
+        }
+      ],
+      "expect": []
+    },
+    {
+      "id": "s2",
+      "verb": "scan",
+      "source": {
+        "line": 16
+      },
+      "calls": [
+        {
+          "primitive": "lending.input",
+          "args": {
+            "source": "Barcode",
+            "value": "$item.barcode"
+          },
+          "sync": "READY",
+          "timeoutMs": 10000
+        }
+      ],
+      "expect": []
+    },
+    {
+      "id": "s3",
+      "verb": "click",
+      "source": {
+        "line": 17
+      },
+      "calls": [
+        {
+          "primitive": "swing.click",
+          "args": {
+            "by": {
+              "action": "DUE"
+            }
+          },
+          "sync": "SETTLE",
+          "timeoutMs": 10000
+        }
+      ],
+      "expect": []
+    },
+    {
+      "id": "s4",
+      "verb": "type",
+      "source": {
+        "line": 18
+      },
+      "calls": [
+        {
+          "primitive": "swing.type",
+          "args": {
+            "by": {
+              "id": "entry"
+            },
+            "text": "10.00"
+          },
+          "sync": "SETTLE",
+          "timeoutMs": 10000
+        }
+      ],
+      "expect": []
+    },
+    {
+      "id": "s5",
+      "verb": "click",
+      "source": {
+        "line": 19
+      },
+      "calls": [
+        {
+          "primitive": "swing.click",
+          "args": {
+            "by": {
+              "action": "DEPOSIT"
+            }
+          },
+          "sync": "SETTLE",
+          "timeoutMs": 10000
+        }
+      ],
+      "expect": []
+    },
+    {
+      "id": "s6",
+      "verb": "expect",
+      "source": {
+        "line": 20
+      },
+      "calls": [],
+      "expect": [
+        {
+          "path": "loan.total",
+          "matcher": {
+            "equals": "$item.deposit"
+          }
+        },
+        {
+          "path": "state.name",
+          "matcher": {
+            "equals": "IDLE"
+          }
+        }
+      ]
+    }
+  ],
+  "verify": [],
+  "cleanup": [
+    {
+      "primitive": "lending.input",
+      "args": {
+        "source": "Key.SIGN_OFF"
+      },
+      "sync": "READY",
+      "timeoutMs": 10000
+    }
+  ],
+  "launchProperties": {},
+  "artifacts": [],
+  "onPrompt": {},
+  "stepTimeoutMs": 10000,
+  "bindTimeoutMs": 60000
+}
