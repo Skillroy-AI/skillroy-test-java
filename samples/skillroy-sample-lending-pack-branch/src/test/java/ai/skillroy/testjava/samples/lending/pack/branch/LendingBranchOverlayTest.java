@@ -50,7 +50,7 @@ class LendingBranchOverlayTest {
         assertEquals(1, packs.size(), String.valueOf(packs));
         DomainPack pack = packs.get(0);
         assertEquals("lending", pack.id(), "scenarios keep pack: lending");
-        assertEquals("0.5.0+lending-branch@0.1.0", pack.version());
+        assertEquals("0.6.0+lending-branch@0.1.0", pack.version());
         assertTrue(pack instanceof BranchPack, String.valueOf(pack));
     }
 
