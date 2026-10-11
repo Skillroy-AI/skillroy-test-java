@@ -29,6 +29,7 @@ import java.net.Socket;
 import java.net.URL;
 import java.nio.charset.Charset;
 import java.nio.file.Files;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.LinkedHashMap;
@@ -58,7 +59,22 @@ final class AgentHarness implements AutoCloseable {
     private AgentHarness(AgentRuntime runtime, Path discoveryDir) throws IOException {
         this.runtime = runtime;
         this.discoveryDir = discoveryDir;
-        this.token = new String(Files.readAllBytes(Paths.get(runtime.tokenFile())), UTF8);
+        this.token = readToken(runtime);
+    }
+
+    /**
+     * The runtime's token, or null when a runtime that refused to start (a production gate) has already closed and
+     * deleted its token file: the refusal is asynchronous, so the file may be gone before it is read.
+     */
+    private static String readToken(AgentRuntime runtime) throws IOException {
+        try {
+            return new String(Files.readAllBytes(Paths.get(runtime.tokenFile())), UTF8);
+        } catch (NoSuchFileException e) {
+            if (runtime.isClosed()) {
+                return null;
+            }
+            throw e;
+        }
     }
 
     /** Starts with enabled=true, the given discovery dir and extra key/value options. */
