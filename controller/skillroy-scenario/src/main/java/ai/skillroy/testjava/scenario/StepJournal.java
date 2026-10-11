@@ -200,8 +200,8 @@ public final class StepJournal {
     // ------------------------------------------------------------------------------------------------ entries
 
     /** One journal record. */
-    public sealed interface Entry permits SessionStart, StepEntry, ResolveEntry, OracleEntry, CheckEntry, ObserveEntry,
-            NoteEntry, BudgetEntry, SessionEnd {
+    public sealed interface Entry permits SessionStart, StepEntry, ResolveEntry, FixtureEntry, OracleEntry, CheckEntry,
+            ObserveEntry, NoteEntry, BudgetEntry, SessionEnd {
 
         /** The record's {@code type}. */
         String type();
@@ -441,6 +441,49 @@ public final class StepJournal {
     }
 
     /**
+     * {@code fixture}: a fixture slot the session bound (phase7-contracts.md 9.2, D-VM-6; the scenario player binds a
+     * scenario's fixture slots this way).
+     *
+     * @param slot the slot name
+     * @param value the value as given (references in place)
+     * @param credential the slot's credential declaration, or null
+     * @param origin who bound it (a slot with a credential: always a person)
+     */
+    public record FixtureEntry(String slot, Object value, CredentialSpec credential, Origin origin) implements Entry {
+
+        /** Freezes. */
+        public FixtureEntry {
+            Objects.requireNonNull(slot, "slot");
+            Objects.requireNonNull(origin, "origin");
+            value = Plan.freeze(value);
+        }
+
+        @Override
+        public String type() {
+            return "fixture";
+        }
+
+        @Override
+        public Map<String, Object> toJson() {
+            Map<String, Object> json = RunLog.fields("type", type(), "slot", slot, "value", value);
+            if (credential != null) {
+                json.put("credential", RunLog.fields("realm", credential.realm(), "key", credential.key()));
+            }
+            json.put("origin", origin.toJson());
+            return json;
+        }
+
+        static FixtureEntry fromJson(Map<String, Object> json) {
+            CredentialSpec credential = null;
+            if (json.get("credential") instanceof Map<?, ?> c) {
+                credential = new CredentialSpec(String.valueOf(c.get("realm")), String.valueOf(c.get("key")));
+            }
+            return new FixtureEntry(text(json, "slot"), json.get("value"), credential,
+                    Origin.fromJson(json.get("origin")));
+        }
+    }
+
+    /**
      * {@code oracle}: an oracle the session evaluated.
      *
      * @param name its name ({@code $oracle.<name>})
@@ -632,6 +675,7 @@ public final class StepJournal {
             case "session-start" -> SessionStart.fromJson(json);
             case "step" -> StepEntry.fromJson(json);
             case "resolve" -> ResolveEntry.fromJson(json);
+            case "fixture" -> FixtureEntry.fromJson(json);
             case "oracle" -> OracleEntry.fromJson(json);
             case "check" -> CheckEntry.fromJson(json);
             case "observe" -> ObserveEntry.fromJson(json);

@@ -68,10 +68,17 @@ import java.util.Objects;
  */
 public final class ScenarioPlayer {
 
-    /** Binds a fixture slot into the session (the host's; see {@link #play}). */
+    /**
+     * Binds a fixture slot into the session; by default {@link ExecutorSession#fixture} as the person
+     * (phase7-contracts.md 9.2, D-VM-6).
+     */
     @FunctionalInterface
     public interface FixtureBinder {
         void bind(ExecutorSession session, Scenario.Slot slot, Origin person) throws BindException;
+
+        /** The session's own fixture binding, for the person's origin. */
+        FixtureBinder SESSION = (session, slot, person) -> session.fixture(slot.name(), slot.value(),
+                slot.credential(), person);
     }
 
     /** Answers a model's question at the terminal; null when the run is not interactive. */
@@ -117,8 +124,7 @@ public final class ScenarioPlayer {
      * @param mask the session's mask
      * @param person who runs the deterministic steps ({@code Origin.person})
      * @param asker the terminal's answer to a model's question, or null for a non-interactive run
-     * @param fixtures how a fixture slot is bound into the session, or null (then a scenario with a fixture slot is
-     *     refused before anything runs; see the contract's as-built note)
+     * @param fixtures how a fixture slot is bound into the session, or null for {@link FixtureBinder#SESSION}
      */
     public ScenarioPlayer(ExecutorSession session, SessionService service, VisionSessionTools tools,
                           VisionOptions options, boolean robotAllowed, PromptMask mask, Origin person, Person asker,
@@ -131,7 +137,7 @@ public final class ScenarioPlayer {
         this.mask = Objects.requireNonNull(mask, "mask");
         this.person = Objects.requireNonNull(person, "person");
         this.asker = asker;
-        this.fixtures = fixtures;
+        this.fixtures = fixtures == null ? FixtureBinder.SESSION : fixtures;
     }
 
     /**
@@ -171,12 +177,6 @@ public final class ScenarioPlayer {
                 narrowed(step);
             }
         }
-        for (Scenario.Slot slot : scenario.slots()) {
-            if ("fixture".equals(slot.kind()) && fixtures == null) {
-                throw new ScenarioException(sourceName + ": slot '" + slot.name() + "' is a fixture, which this host"
-                        + " cannot bind into a session");
-            }
-        }
         ImageSteps.Baselines baselines = ImageSteps.Baselines.none();
         if (bindingsRoot != null && envId != null) {
             try {
@@ -193,6 +193,8 @@ public final class ScenarioPlayer {
             }
         } catch (BindException e) {
             return new Result(scenario.id(), Status.ERROR, results, "slot '" + e.slot() + "': " + e.getMessage());
+        } catch (IllegalArgumentException e) {
+            return new Result(scenario.id(), Status.ERROR, results, e.getMessage());
         }
         boolean degraded = false;
         int index = 0;

@@ -108,6 +108,8 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
  *       item 4, through the assembled launcher;</li>
  *   <li>{@link #theVisionSessionExportsTheCommittedScenarioWhichReplaysWithZeroModelCalls()} (seed A):
  *       phase7-contracts.md 13.2 item 8, the vision session with the scripted model;</li>
+ *   <li>{@link #thePlayerPlaysTheTwoVisionScenariosWithAScriptedModel()} (seed A): phase7-contracts.md 13.2 item 8,
+ *       the player half;</li>
  *   <li>{@link #noSecretInAnythingTheseChecksWrote()}: item 8, last, over the outputs of every check above.</li>
  * </ol>
  *
@@ -521,6 +523,46 @@ abstract class InferenceChecks {
         assertSignedOffAndQuiet(-1);
     }
 
+    /**
+     * phase7-contracts.md 13.2 item 8, the player half (seed A, once per Java): the scenario player plays the two
+     * committed vision scenarios on this desk with a scripted model, their fixture slots bound through the session as
+     * the person (D-VM-6). {@code vision-live-only.yaml}: the person's {@code signOn}, then the {@code aiAct} (the
+     * model resolves a plain item, scans it, clicks the {@code DUE} key's mark, takes the deposit due, {@code done})
+     * and the {@code expect} that the desk is {@code IDLE}: {@code PASS}, five vision calls.
+     * {@code loan-table-visual-check.yaml}: the deterministic steps and the {@code aiExpect} answered {@code YES}:
+     * {@code PASS}, one vision call. Each session recovers the desk when it closes.
+     */
+    @Test
+    @Order(11)
+    void thePlayerPlaysTheTwoVisionScenariosWithAScriptedModel() throws Exception {
+        assumeTrue(full() && env() == Env.SEED_A, "seed A, once");
+        ScriptedGateway actor = ScriptedGateway.of(ScriptedAnswers.visionLiveOnlyScript());
+        VisionPlayerScript.Played liveOnly = VisionPlayerScript.play(client(), Runs.credentials(env()), actor,
+                runDir("player-live-only"), "vision-live-only.yaml");
+        assertEquals(Status.PASS, liveOnly.result().status(), liveOnly.result().message() + " "
+                + liveOnly.result().steps());
+        assertEquals(List.of("signOn", "aiAct", "expect"), liveOnly.result().steps().stream()
+                .map(ai.skillroy.testjava.vision.ScenarioPlayer.StepResult::verb).toList());
+        assertEquals(5, actor.requests().size(), "five vision calls");
+        assertTrue(liveOnly.ledger().entries().stream().allMatch(e -> CostLedger.Entry.PURPOSE_VISION.equals(
+                e.purpose())), "every call a vision call");
+        assertTrue(Files.readString(liveOnly.journal()).contains("\"type\":\"fixture\""),
+                "the assistant bound as a fixture");
+        assertSignedOffAndQuiet(-1);
+
+        ScriptedGateway judge = ScriptedGateway.of(ScriptedAnswers.visualYes());
+        VisionPlayerScript.Played visual = VisionPlayerScript.play(client(), Runs.credentials(env()), judge,
+                runDir("player-visual-check"), "loan-table-visual-check.yaml");
+        assertEquals(Status.PASS, visual.result().status(), visual.result().message() + " "
+                + visual.result().steps());
+        assertTrue(visual.result().steps().stream().anyMatch(st -> "aiExpect".equals(st.verb())
+                && st.status() == Status.PASS), String.valueOf(visual.result().steps()));
+        assertEquals(1, judge.requests().size(), "one visual question");
+        assertTrue(Files.readString(visual.journal()).contains("aiExpect YES (expected YES)"),
+                "the verdict journaled as a note");
+        assertSignedOffAndQuiet(-1);
+    }
+
     // ------------------------------------------------------------------------------------------------ items 5 and 4
 
     /**
@@ -690,7 +732,7 @@ abstract class InferenceChecks {
      * launcher, {@value Credentials#FILE_NAME}) are left out by name: they hold the passwords by design.
      */
     @Test
-    @Order(10)
+    @Order(20)
     void noSecretInAnythingTheseChecksWrote() throws Exception {
         assumeTrue(full(), "once per seed");
         Set<String> secrets = new java.util.HashSet<>(SampleCredentials.staff(env()).values());

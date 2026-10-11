@@ -245,6 +245,59 @@ final class ScriptedAnswers {
         };
     }
 
+    /** The answer of the {@code aiAct} of {@code vision-live-only.yaml} with {@link #visionLiveOnlyScript()}. */
+    static final String LIVE_ONLY_ANSWER = "One plain item is lent to the walk-in borrower and its deposit is settled.";
+
+    /**
+     * The model's side of the {@code aiAct} of {@code vision-live-only.yaml} played by the scenario player
+     * (phase7-contracts.md 13.2 item 8), one answer per {@code vision} call, in order: resolve a plain item (counted,
+     * a deposit between 1.00 and 2.00), scan it, click the mark of the {@code DUE} key, take exactly the deposit due,
+     * and say {@code done}: the verbs where the session offers them, a mark where the key is only on the screen.
+     */
+    static ScriptedGateway.Script visionLiveOnlyScript() {
+        AtomicInteger next = new AtomicInteger();
+        return request -> {
+            int i = next.getAndIncrement();
+            if (!"vision".equals(request.purpose())) {
+                throw new InferenceException(InferenceException.Kind.UNSUPPORTED, "the script answers vision"
+                        + " requests only, not " + request.purpose());
+            }
+            Object[] step = switch (i) {
+                case 0 -> step("Find a plain item the desk lends first, cheap and counted.", "skillroy_resolve",
+                        input("slot", "item", "kind", "LendableItem", "args", input("deposit",
+                                input("between", List.of("1.00", "2.00")), "perDay", false), "strategy", null));
+                case 1 -> step("Scan the item.", "lending_scan", input("item", "$item", "barcode", null, "times",
+                        null));
+                case 2 -> step("I ask for the deposit due.", "click_mark", input("mark", mark(request, "DUE"),
+                        "button", null, "count", null));
+                case 3 -> step("Take exactly the deposit due.", "lending_deposit", input("amount", null));
+                case 4 -> step("The loan is recorded.", "done", input("answer", LIVE_ONLY_ANSWER));
+                default -> throw new InferenceException(InferenceException.Kind.UNSUPPORTED, "the script has no"
+                        + " answer " + (i + 1));
+            };
+            Content.ToolUse use = new Content.ToolUse("toolu_live_only_" + (i + 1), (String) step[1],
+                    copy((Map<?, ?>) step[2]));
+            return new ModelResponse(List.of(Content.Text.of((String) step[0]), use), ModelResponse.StopReason.TOOL_USE,
+                    usage(request, Map.of("text", step[0], "tool", use.name(), "input", use.input())), null);
+        };
+    }
+
+    /**
+     * A visual question answered {@code YES} (the {@code aiExpect} of {@code loan-table-visual-check.yaml}, 13.2 item
+     * 8): the structured verdict with no evidence. Only a {@code vision} request with an output schema is answered.
+     */
+    static ScriptedGateway.Script visualYes() {
+        return request -> {
+            if (!"vision".equals(request.purpose()) || request.outputSchema() == null) {
+                throw new InferenceException(InferenceException.Kind.UNSUPPORTED, "the script answers a visual"
+                        + " question only");
+            }
+            Map<String, Object> verdict = input("verdict", "YES", "evidence", List.of(), "explanation",
+                    "The loan table shows one line for the item with a quantity of 2.");
+            return ScriptedGateway.structured(verdict, usage(request, verdict));
+        };
+    }
+
     /** A mark line of the marks list: {@code mark 7: button DUE}. */
     private static final java.util.regex.Pattern MARK_LINE = java.util.regex.Pattern.compile("mark (\\d+): ([^\\n]*)");
 

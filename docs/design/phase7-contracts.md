@@ -1452,10 +1452,8 @@ client authors through the planner, P5 §10, whose server has no gateway).
 **As built (Phase 7, VM, 2026-10-10):** the player takes the host's `VisionSessionTools` instance (or null) so that a
 step can narrow the model class, the tier between V2 and V3 and `maxActions` (a narrowed turn ends `LIMIT` at the
 step's limit); a step's tier that would change to or from V1 changes the tool vocabulary the service fixed at its start
-and is a usage error like a widening one (D-VM-5). `ExecutorSession` has no way to bind a fixture slot (the contract
-names `resolve` only, which takes a query kind), so the player takes a `FixtureBinder` from its host and refuses, before
-anything runs, a scenario with a fixture slot when it has none (D-VM-6: proposed `ExecutorSession.fixture(slot, value,
-credential, origin)`, VC's file). An `aiExpect`'s capture is a `swing.capture {scope: SCREEN, mode: PAINT, redact: true,
+and is a usage error like a widening one (D-VM-5). A fixture slot is bound through `ExecutorSession.fixture(slot, value,
+credential, origin)` as the person (§9.2's note, D-VM-6); a host may pass its own `FixtureBinder`. An `aiExpect`'s capture is a `swing.capture {scope: SCREEN, mode: PAINT, redact: true,
 annotateRefs: <V1>}` through `ExecutorSession.read` with the marks drawn, its verdict journaled as a note. The player hands every `expectImage` and anchored `pointer` the scenario's baselines, `ExecutorSession.baselines(root, env, scenarioId)` read once per play, when its host gave a bindings root and an environment (`withBaselines`; D-VC-1); without them a session holds none (an `expectImage` is recorded and skipped, an anchored step `REBIND_NEEDED`).
 
 ---
@@ -2014,6 +2012,20 @@ with a provenance whose `anchor` carries the guard's label is not compared: the 
 guard's own call an instant before, and the comparison starts with the export's replay (D-VC-3). `session-start.options`
 holds `robot` only when true, `host` only when not empty (D-VC-16).
 
+**As built (Phase 7, VM, D-VM-6):** `ExecutorSession.fixture(slot, value, credential, origin)` binds a fixture slot into
+the session, as a plan's fixture is bound: the value's `$references` to earlier slots are substituted (public values),
+the slot is declared `fixture` so that a later verb compiles against it, its strategy is `FIXTURE` (it has no
+resolution and no bindings-file entry), and with a credential the entry's id is the value's `key` field and the
+secret is joined (an absent credential entry or a secret field that is already a field of the value is
+`ENVIRONMENT`, as in a bind). **Origin rule:** a slot that declares a credential is bound only for a person's origin
+(the scenario player binds as the person); for a model's or a client's origin it is refused before anything is joined
+or journaled ("a credential slot is bound by a person, never on a model's or a client's behalf"), consistent with D342.
+Joining a secret puts the slot in flight exactly as a `resolve` does. **Journal:** one `fixture` record
+`{type: fixture, slot, value, credential?: {realm, key}, origin}`, the value masked like every record; the export
+writes the slot back as `resolve: <slot>: {fixture: <value>, credential?: …}` in the order the journal bound it, and a
+later `resolve` or `fixture` of the same slot replaces it. The scenario player's default `FixtureBinder` is this
+method; a host may still pass its own.
+
 ### 9.3 The CLI (`skillroy session`, `run`, `mcp`, `caps`)
 
 | Command | Addition |
@@ -2465,13 +2477,20 @@ needs no wait.
 
 **As built (Phase 7, VM):** item 8 is `InferenceChecks#theVisionSessionExportsTheCommittedScenarioWhichReplaysWithZeroModelCalls`
 (seed A, the agent on the command line). The scripted model names a mark by the control's quoted name in the marks list
-(`button 'DUE'`), so that the prompt line, which holds the word too, is never chosen. The committed
+(`button 'DUE'`), so that the prompt line, which holds the word too, is never chosen. Before the model's turn the harness
+brings the desk to the front outside the session (`swing.click {by: {id: entry}, rung: COMPONENT, activateWindow: true}`,
+not journaled, as `VisionSwingChecks` does): a WM-less display gives the focus to no window by itself, and one run
+without it ended with the model's `type` refused ("nothing has the focus"). The session recovers the desk when it
+closes, so that a failure does not leave the next check a signed-on desk. The committed
 `exported/session-vision-loan.*` were generated on the arm64 image with a Java 25 controller and a Java 25 target and
 held byte for byte with a Java 8 target. The export's YAML records `click {by: {action: DUE}}`, `type {by: {id: entry},
 text: "10.00"}` (the focus owner's locator) and `click {by: {action: DEPOSIT}}`, each with its provenance comment, and
-`requires` gains `swing.tree`. The player half of item 8 (`vision-live-only.yaml` to `PASS`, the `aiExpect` of
-`loan-table-visual-check.yaml` on a scripted `YES`) has not run: both scenarios bind fixture credential slots, and
-`ExecutorSession` cannot bind a fixture slot (D-VM-6).
+`requires` gains `swing.tree`. The player half is
+`InferenceChecks#thePlayerPlaysTheTwoVisionScenariosWithAScriptedModel` (seed A, both Javas): the player binds both
+scenarios' fixture slots through `ExecutorSession.fixture` as the person (§9.2's note, D-VM-6). `vision-live-only.yaml`
+passes with the scripted model resolving a plain item, scanning it, clicking the `DUE` key's mark and taking the deposit
+due, five vision calls. `loan-table-visual-check.yaml` passes with its `aiExpect` answered `YES` in one vision call, the
+verdict journaled as a note.
 
 ### 13.3 Live (profile `inference-live`; needs `ANTHROPIC_API_KEY`; skipped without it; never in CI)
 
@@ -2489,9 +2508,9 @@ recorded in `../TODO.md` under "Phase 7, the live items" with the spend.
 reads the profile's settings file. Item 3 runs second, so that a fallback header the provider refuses is recorded
 before item 2 needs it: an answer means the header coexists, and `INVALID_REQUEST` is printed as the finding, not
 failed. Items 1, 2 and 4 bound the turn's `vision` calls (a resolution the person asked for is not counted) and every
-vision call's model. Item 5 is a read-only V1 turn asked to use `skillroy_look`, then the player on an inline scenario
-with query slots (the fixture slots of the committed ones cannot be bound, D-VM-6) and two `aiExpect` steps, a true
-statement and a false one with `expect: NO`. An item whose bound would pass the class budget is skipped. The files the
+vision call's model. Item 5 is a read-only V1 turn asked to use `skillroy_look`, then the player on the committed
+`loan-table-visual-check.yaml` (its true statement, `YES`) and on the same scenario with the question "the loan table is
+empty" and `expect: NO`. An item whose bound would pass the class budget is skipped. The files the
 class writes itself are checked for the key's value before they are written; the framework's files (journals,
 `inference.jsonl`, captures, run directories) at the end of each item and again by the last check.
 

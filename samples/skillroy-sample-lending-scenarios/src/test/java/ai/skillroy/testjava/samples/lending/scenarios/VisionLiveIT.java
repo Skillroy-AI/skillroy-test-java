@@ -108,8 +108,9 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
  *   <li>{@link #aV1SessionOnHaiku()} (item 4): the same task, V1 on the class {@code haiku} ({@code claude-haiku-5-5}
  *       by the settings file): {@code DONE}, at most USD 0.01;</li>
  *   <li>{@link #aLookQuestionAndTheAiExpectStepsOfThePlayer()} (item 5): a read-only V1 turn asked to use
- *       {@code skillroy_look}, then the player on a scenario with two {@code aiExpect} steps, a true statement
- *       ({@code YES}) and a false one ({@code expect: NO}): both hold;</li>
+ *       {@code skillroy_look}, then the player on the committed {@code loan-table-visual-check.yaml} (its true
+ *       statement answered {@code YES}) and on the same scenario asking a false statement with {@code expect: NO}:
+ *       both pass;</li>
  *   <li>{@link #theExportOfItemOneReplaysWithZeroModelCalls()} (item 6): the export of item 1, compiled, replays and
  *       passes with zero model calls and an empty ledger;</li>
  *   <li>{@link #noSecretAndNoKeyInAnythingThisClassWrote()}: the secret scan (the staff passwords of seed A, the desk's
@@ -265,8 +266,10 @@ class VisionLiveIT {
 
     /**
      * One vision session on the desk: the person resolves a staff member who signs on with a password and signs them on,
-     * resolves a plain item; one turn of the session service with the vision tools ({@code vision} options as given)
-     * is asked {@code request}; the person checks the loan and the state; the journal is exported as {@code exportId}.
+     * resolves a plain item, and brings the desk to the front (a WM-less display never does,
+     * {@link VisionSessionScript#activate}); one turn of the session service with the vision tools ({@code vision}
+     * options as given) is asked {@code request}; the person checks the loan and the state; the journal is exported
+     * as {@code exportId}.
      * The session's settings are the profile's, its host features {@code vision-session} and the tier's, and it closes
      * with the pack's recover.
      */
@@ -288,6 +291,7 @@ class VisionLiveIT {
             assertEquals(Status.PASS, signOn.status(), signOn.message());
             session.resolve("item", "LendableItem", ScriptedAnswers.input("perDay", false), List.of(), List.of(), null,
                     PERSON);
+            VisionSessionScript.activate(client());
             BudgetMeter meter = BudgetMeter.of(BudgetMeter.Scope.SESSION, null, SESSION_BUDGET, ledger);
             LedgerWriter writer = new LedgerWriter(ledger, meter, InferenceLog.toFile(dir.resolve("session")
                     .resolve("inference.jsonl")), mask, false, Clock.systemUTC());
@@ -444,35 +448,33 @@ class VisionLiveIT {
 
     // ------------------------------------------------------------------------------------------------ item 5
 
-    /** Item 5's scenario: a signed-on desk with one item scanned twice, then two visual questions. */
-    static String questionsScenario() {
-        return String.join("\n",
-                "scenario: live-vision-questions",
-                "pack: lending",
-                "resolve:",
-                "  assistant:",
-                "    query: StaffWithPermission",
-                "    args: { interactiveSignOn: true, perform: [SIGN_ON] }",
-                "    credential: { realm: staff, key: code }",
-                "  item: { query: LendableItem, args: { perDay: false } }",
-                "steps:",
-                "  - signOn: { staff: $assistant }",
-                "  - scan: { item: $item, times: 2 }",
-                "  - expect: { \"loan.lines[code=$item.code].qty\": 2 }",
-                "  - aiExpect: { question: \"the loan table shows one line for the scanned item, with a quantity of"
-                        + " 2\" }",
-                "  - aiExpect: { question: \"the loan table is empty\", expect: NO }",
-                "on_prompt: { unexpected: fail }",
-                "timeouts: { step: 30s }",
-                "");
+    /** The committed scenario item 5 plays (seed A's fixtures: assistant 100, the item YRD-001 scanned twice). */
+    static final String VISUAL_CHECK = "loan-table-visual-check.yaml";
+    /** The committed scenario's question, a true statement on its screen. */
+    static final String TRUE_STATEMENT = "the loan table shows one line for the scanned item, with a quantity of 2";
+    /** The false statement item 5's second play asks instead, expecting {@code NO}. */
+    static final String FALSE_STATEMENT = "the loan table is empty";
+
+    /**
+     * The committed scenario with its {@code aiExpect} asking {@link #FALSE_STATEMENT} and expecting {@code NO}: the
+     * same fixtures and steps, one question changed.
+     */
+    static String falseStatementVariant(String committed) {
+        String asked = "aiExpect: { question: \"" + TRUE_STATEMENT + "\" }";
+        if (!committed.contains(asked)) {
+            throw new IllegalStateException("the committed " + VISUAL_CHECK + " no longer asks: " + TRUE_STATEMENT);
+        }
+        return committed.replace(asked, "aiExpect: { question: \"" + FALSE_STATEMENT + "\", expect: NO }")
+                .replace("scenario: loan-table-visual-check", "scenario: loan-table-visual-check-false");
     }
 
     /**
      * Item 5: (a) a read-only V1 turn ({@link SessionPolicy#readOnlyPolicy()}: the module offers {@code capture},
      * {@code wait} and {@code skillroy_look} only) asked to use {@code skillroy_look}: {@code DONE}, the tool was
-     * called, nothing acted; (b) the player on {@link #questionsScenario()}: the {@code aiExpect} on a true statement
-     * answers {@code YES} and the one on a false statement {@code NO} (its {@code expect}), so the run passes. Bound:
-     * USD 0.10.
+     * called, nothing acted; (b) the player on the committed {@value #VISUAL_CHECK}, its fixture slots bound through the
+     * session as the person (D-VM-6): its {@code aiExpect} on a true statement answers {@code YES} and the run passes;
+     * (c) the same scenario with the question {@value #FALSE_STATEMENT} and {@code expect: NO}: the verdict is
+     * {@code NO} and the run passes. Bound: USD 0.10.
      */
     @Test
     @Order(5)
@@ -485,43 +487,33 @@ class VisionLiveIT {
                 "the model asked its question: " + look.turn().actions());
         assertEquals(0, look.uiActions(), "a read-only turn acts on nothing");
 
-        Path dir = runDir("player");
-        Path yaml = dir.resolve("live-vision-questions.yaml");
-        write(yaml, questionsScenario());
+        String committed = Files.readString(ItEnv.scenario(VISUAL_CHECK), StandardCharsets.UTF_8);
+        Path variant = runDir("player-false").resolve("loan-table-visual-check-false.yaml");
+        write(variant, falseStatementVariant(committed));
+        playVisualCheck(runDir("player-true"), VISUAL_CHECK, committed.getBytes(StandardCharsets.UTF_8));
+        playVisualCheck(variant.getParent(), variant.getFileName().toString(), Files.readAllBytes(variant));
+    }
+
+    /** One play of item 5 through the live gateway: PASS, its one {@code aiExpect} held. */
+    private void playVisualCheck(Path dir, String name, byte[] yaml) throws Exception {
         Credentials credentials = Runs.credentials(ENV);
-        CostLedger ledger = new CostLedger();
-        Map<String, String> vision = Map.of(VisionOptions.TIER, "v1");
-        SessionOptions options = SessionOptions.defaults(dir.resolve("session")).withClock(Clock.systemUTC())
-                .withId("live-vision-questions-session").withRecoverOnClose(true).withBind(BindOptions.defaults()
-                        .withEnvId(ENV.id).withCredentials(credentials).withLedger(ledger).withInference(live))
-                .withHost(Set.of("vision-session", "vision-tier:v1"));
         PromptMask mask = PromptMask.of(credentials.mask(), Runs.PACK.sqlAllowLists(), Runs.PACK.rowMasks())
                 .withImages(true);
-        ScenarioPlayer.Result result;
-        try (ExecutorSession session = ExecutorSession.open(Runs.PACK, client(), options)) {
-            BudgetMeter meter = BudgetMeter.of(BudgetMeter.Scope.SESSION, null, SESSION_BUDGET, ledger);
-            LedgerWriter writer = new LedgerWriter(ledger, meter, InferenceLog.toFile(dir.resolve("session")
-                    .resolve("inference.jsonl")), mask, false, Clock.systemUTC());
-            VisionSessionTools tools = new VisionSessionTools();
-            InferenceGateway gateway = Gateways.open(live, mask);
-            try (SessionService service = new SessionService(session, gateway, SessionPolicy.acting(), meter, writer,
-                    PriceTable.builtIn(), Clock.systemUTC(), new SessionExtensions(List.of(tools), vision))) {
-                ScenarioPlayer player = new ScenarioPlayer(session, service, tools, VisionOptions.from(vision), false,
-                        mask, PERSON, null, null);
-                result = player.play(Files.readAllBytes(yaml), yaml.getFileName().toString());
-            } finally {
-                gateway.close();
-                spent = spent.add(cost(ledger));
-            }
+        VisionPlayerScript.Played played;
+        try (InferenceGateway gateway = Gateways.open(live, mask)) {
+            played = VisionPlayerScript.play(client(), credentials, gateway, live, dir, name, yaml);
         } finally {
             assertNoKeyBelow(dir);
         }
-        System.out.println("[live] item 5: player " + result.status() + ", steps " + result.steps().stream()
-                .map(s -> s.verb() + " " + s.status()).toList() + ", cost USD " + cost(ledger).toPlainString());
-        InferenceLiveIT.printCalls("item 5", ledger.entries());
+        spent = spent.add(cost(played.ledger()));
+        ScenarioPlayer.Result result = played.result();
+        System.out.println("[live] item 5, " + name + ": player " + result.status() + ", steps " + result.steps()
+                .stream().map(st -> st.verb() + " " + st.status()).toList() + ", cost USD "
+                + cost(played.ledger()).toPlainString());
+        InferenceLiveIT.printCalls("item 5", played.ledger().entries());
         assertEquals(Status.PASS, result.status(), result.message() + " " + result.steps());
-        assertEquals(2, result.steps().stream().filter(s -> "aiExpect".equals(s.verb())
-                && s.status() == Status.PASS).count(), "both questions held: " + result.steps());
+        assertEquals(1, result.steps().stream().filter(st -> "aiExpect".equals(st.verb())
+                && st.status() == Status.PASS).count(), "the question held: " + result.steps());
     }
 
     // ------------------------------------------------------------------------------------------------ item 6

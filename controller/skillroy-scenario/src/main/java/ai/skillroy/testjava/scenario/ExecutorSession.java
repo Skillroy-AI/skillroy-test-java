@@ -52,6 +52,7 @@ import ai.skillroy.testjava.scenario.resolve.CredentialRef;
 import ai.skillroy.testjava.scenario.resolve.CredentialSpec;
 import ai.skillroy.testjava.scenario.resolve.EnvFingerprint;
 import ai.skillroy.testjava.scenario.resolve.Resolution;
+import ai.skillroy.testjava.scenario.resolve.Strategy;
 import ai.skillroy.testjava.scenario.web.WebRunContext;
 import ai.skillroy.testjava.scenario.web.WebSettings;
 import ai.skillroy.testjava.scenario.image.ImageSteps;
@@ -989,6 +990,90 @@ public final class ExecutorSession implements AutoCloseable {
         journal.append(new StepJournal.ResolveEntry(slot, kind, jsonMap(given), tokens, verifiers, credential,
                 BindingsFile.resolutionJson(resolution)), mask);
         return resolution;
+    }
+
+    /** Why a credential slot is never bound on a model's or a client's behalf (phase7-contracts.md 9.2, D342). */
+    public static final String FIXTURE_CREDENTIAL_REFUSED = "a credential slot is bound by a person, never on a model's"
+            + " or a client's behalf";
+
+    /**
+     * Binds a fixture slot into the session as a plan's fixture is bound (phase7-contracts.md 9.2, D-VM-6): the value's
+     * {@code $references} to earlier slots are substituted with public values; the slot is declared {@code fixture},
+     * so that a later verb compiles against it (a {@code signOn} sees its credential); its strategy is
+     * {@code FIXTURE}, with no resolution and no bindings-file entry. With a credential, the entry's id is the value's
+     * {@code key} field and its secret fields are joined, which puts the slot in flight as a {@link #resolve} does.
+     * A slot with a credential is bound only for a person's origin. Journaled as one {@code fixture} record.
+     *
+     * @param value the fixture's value as a scenario writes it (JSON-like, {@code $references} in place)
+     * @param credential the slot's credential declaration, or null
+     * @param origin who binds it
+     * @throws BindException RESOLUTION_FAILED for a reference that does not resolve or a value that is not JSON-like;
+     *     ENVIRONMENT for a credential whose key field is missing, whose entry the credentials do not have, or whose
+     *     secret field is already a field of the value
+     * @throws IllegalArgumentException if the slot name is not a name or is reserved, or a credential slot is bound for
+     *     a model's or a client's origin ({@link #FIXTURE_CREDENTIAL_REFUSED}; nothing is joined or journaled)
+     */
+    public Object fixture(String slot, Object value, CredentialSpec credential, Origin origin) throws BindException {
+        requireName(slot, "slot");
+        Objects.requireNonNull(origin, "origin");
+        requireOpen();
+        if (credential != null && origin.kind() != Origin.Kind.PERSON) {
+            throw new IllegalArgumentException("slot '" + slot + "': " + FIXTURE_CREDENTIAL_REFUSED);
+        }
+        Object substituted;
+        try {
+            substituted = runner.bindings.substitutePublic(Values.normaliseSorted(value));
+        } catch (ResolutionException e) {
+            throw new BindException(FailureKind.RESOLUTION_FAILED, ResolutionException.REFERENCE, slot,
+                    mask.apply(e.getMessage()), RunLog.fields("reference", e.reference()));
+        } catch (JsonException e) {
+            throw new BindException(FailureKind.RESOLUTION_FAILED, "ARGS", slot, "slot '" + slot + "': the value is"
+                    + " not JSON-like: " + e.getMessage(), null);
+        }
+        CredentialRef ref = null;
+        Map<String, String> secret = null;
+        if (credential != null) {
+            if (!(substituted instanceof Map<?, ?> map) || map.get(credential.key()) == null
+                    || map.get(credential.key()) instanceof Map || map.get(credential.key()) instanceof List) {
+                throw new BindException(FailureKind.ENVIRONMENT, null, slot, "slot '" + slot + "' declares credential"
+                        + " realm " + credential.realm() + " with key '" + credential.key() + "', but its value has no"
+                        + " such scalar field", null);
+            }
+            ref = new CredentialRef(credential.realm(), Values.stringOf(map.get(credential.key())));
+            secret = options.bind().credentials().secrets(ref.realm(), ref.id());
+            if (secret == null) {
+                throw new BindException(FailureKind.ENVIRONMENT, null, slot, "slot '" + slot + "' needs the credential "
+                        + ref + ", which the credentials (" + options.bind().credentials().origin() + ") do not have",
+                        RunLog.fields("credential", Map.of("realm", ref.realm(), "id", ref.id())));
+            }
+            for (String field : secret.keySet()) {
+                if (map.containsKey(field)) {
+                    throw new BindException(FailureKind.ENVIRONMENT, null, slot, "slot '" + slot + "': the credential"
+                            + " field '" + field + "' of " + ref + " is already a field of the value", null);
+                }
+            }
+        }
+        slotValues.remove(slot);
+        slotValues.put(slot, substituted);
+        strategies.put(slot, Strategy.FIXTURE.name());
+        resolutions.remove(slot);
+        joins.remove(slot);
+        inFlight.remove(slot);
+        credentialRefs.remove(slot);
+        if (ref != null) {
+            credentialRefs.put(slot, ref);
+            joins.put(slot, secret);
+            mask = mask.plus(secret.values());
+            log.mask(mask);
+            // phase7-contracts.md 9.2 (D342): in flight until a person's step consumes it.
+            inFlight.add(slot);
+        }
+        declaredSlots.remove(slot);
+        declaredSlots.put(slot, new Scenario.Slot(slot, "fixture", substituted, 0, null, null, null, null,
+                credential));
+        rebuildBindings();
+        journal.append(new StepJournal.FixtureEntry(slot, jsonForm(value), credential, origin), mask);
+        return substituted;
     }
 
     /**

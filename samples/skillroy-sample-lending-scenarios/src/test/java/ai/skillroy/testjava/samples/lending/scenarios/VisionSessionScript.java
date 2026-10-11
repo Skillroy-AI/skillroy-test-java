@@ -62,7 +62,9 @@ import java.util.Set;
  * exported as {@value #SCENARIO_ID}. The session opens with constructed inference settings (gateway {@code recorded},
  * {@code images: true}) beside the gateway the caller gives (the scripted one declares {@code IMAGES}) and the host
  * features {@code vision-session} and {@code vision-tier:v1}, so that {@code inference.vision} is {@code OK} in its
- * merged matrix. Everything that reaches the export is fixed: the session id, the clock, the environment.
+ * merged matrix. Before the model's turn the harness brings the desk to the front ({@link #activate}, not journaled),
+ * and the session recovers the desk when it closes. Everything that reaches the export is fixed: the session id, the
+ * clock, the environment.
  *
  * <p>Single-threaded test code.
  */
@@ -87,6 +89,19 @@ final class VisionSessionScript {
                   ExportResult exportFromFile, CostLedger ledger, Path journal, List<String> toolSets) {
     }
 
+    /**
+     * Makes the desk's frame the focused window, the entry field the focus owner, outside any session (nothing is
+     * journaled): what a person does by bringing the window to the front, which a WM-less display never does by itself
+     * (BS9 K7; {@code VisionSwingChecks.activate} does the same). A model's {@code type} at the focus owner needs it.
+     */
+    static void activate(AgentConnection desk) throws Exception {
+        Map<String, Object> click = LoadModeChecks.value(desk.call("swing.click", Map.of("by", Map.of("id", "entry"),
+                "rung", "COMPONENT", "activateWindow", true, "focusTimeoutMs", 20_000L), ResolutionChecks.CALL));
+        if (!Boolean.TRUE.equals(click.get("fired"))) {
+            throw new IllegalStateException("the desk could not be brought to the front: " + click);
+        }
+    }
+
     /** The settings the session opens with: the recorded gateway's, with images on. */
     static InferenceSettings settings() {
         return new InferenceSettings(InferenceSettings.GATEWAY_RECORDED, ScriptedAnswers.recordings(), false, null,
@@ -102,6 +117,7 @@ final class VisionSessionScript {
         CostLedger ledger = new CostLedger();
         Path out = dir.resolve("session");
         SessionOptions options = SessionOptions.defaults(out).withClock(ScriptedAnswers.CLOCK).withId(SESSION_ID)
+                .withRecoverOnClose(true)
                 .withBind(BindOptions.defaults().withEnvId(Env.SEED_A.id).withCredentials(credentials)
                         .withLedger(ledger).withInference(settings()))
                 .withHost(Set.of("vision-session", "vision-tier:v1"));
@@ -112,6 +128,7 @@ final class VisionSessionScript {
             session.resolve("item", "LendableItem", ScriptedAnswers.input("deposit", ScriptedAnswers.input("between",
                     List.of("1.00", "2.00")), "perDay", false), List.of(), List.of(), null, PERSON);
             StepOutcome scan = session.execute("scan", Map.of("item", "$item"), PERSON);
+            activate(desk);
             BudgetMeter meter = BudgetMeter.of(BudgetMeter.Scope.SESSION, null, "1.00", ledger);
             PromptMask mask = PromptMask.of(credentials.mask(), Runs.PACK.sqlAllowLists(), Runs.PACK.rowMasks())
                     .withImages(true);

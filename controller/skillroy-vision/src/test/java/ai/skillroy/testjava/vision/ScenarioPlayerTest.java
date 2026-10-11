@@ -47,7 +47,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * {@code YES} (and on {@code NO} with {@code expect: NO}), fails {@code ASSERTION} against its expectation, and skips on
  * {@code UNSURE} (the run {@code DEGRADED}), each question one {@code vision} call through the service's meter; a step's
  * {@code tier: V3} without the person's flag is refused before anything runs; an {@code expectImage} goes through the
- * session's image route and is journaled under its verb.
+ * session's image route and is journaled under its verb; a fixture credential slot is bound through the session as the
+ * person (D-VM-6) and its {@code signOn} runs before the model acts.
  */
 class ScenarioPlayerTest {
 
@@ -157,6 +158,33 @@ class ScenarioPlayerTest {
             assertTrue(h.agent.bridge.callsTo("swing.capture").stream().anyMatch(c -> Boolean.TRUE.equals(
                     c.get("redact"))), "the step's capture was taken");
             assertTrue(h.gateway.requests().isEmpty(), "no model call");
+        }
+    }
+
+    @Test
+    void aFixtureCredentialSlotIsBoundAsThePersonAndSignsOnBeforeTheModelActs() throws Exception {
+        try (VisionHarness h = new VisionHarness(dir, Map.of(), List.of(
+                tools("r1", use("t1", "click_mark", Map.of("mark", 1L))), done("r2")))) {
+            byte[] yaml = String.join("\n",
+                    "scenario: fixture-played",
+                    "pack: toy",
+                    "resolve:",
+                    "  assistant: { fixture: { code: \"100\" }, credential: { realm: staff, key: code } }",
+                    "steps:",
+                    "  - signOn: { staff: $assistant }",
+                    "  - aiAct: { intent: \"ask for the deposit due\" }",
+                    "").getBytes(StandardCharsets.UTF_8);
+            ScenarioPlayer.Result result = player(h, Map.of(), false).play(yaml, "fixture-played.yaml");
+            assertEquals(Status.PASS, result.status(), result.message() + " " + result.steps());
+            StepJournal.FixtureEntry bound = h.session.journal().entries().stream()
+                    .filter(e -> e instanceof StepJournal.FixtureEntry).map(e -> (StepJournal.FixtureEntry) e)
+                    .findFirst().orElseThrow();
+            assertEquals("assistant", bound.slot());
+            assertEquals(Origin.Kind.PERSON, bound.origin().kind(), "the player binds as the person");
+            assertTrue(!h.session.secretsInFlight(), "the person's signOn consumed the secret");
+            assertEquals(1, h.agent.bridge.callsTo("swing.click").size(), "then the model acted");
+            String journal = java.nio.file.Files.readString(h.session.journal().file());
+            assertTrue(!journal.contains(ai.skillroy.testjava.scenario.VisionBridge.PASSWORD_100), "no secret");
         }
     }
 }

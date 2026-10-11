@@ -99,6 +99,8 @@ final class JournalExport {
 
     private StepJournal.SessionStart start;
     private final Map<String, StepJournal.ResolveEntry> resolves = new LinkedHashMap<>();
+    /** Every bound slot's last record, a {@code resolve} or a {@code fixture}, in the order the journal bound it. */
+    private final Map<String, StepJournal.Entry> slots = new LinkedHashMap<>();
     private final Map<String, StepJournal.OracleEntry> oracles = new LinkedHashMap<>();
     /** What a value of an exported call may be written back as: a reference and the value it stands for. */
     private final Map<String, Object> bound = new LinkedHashMap<>();
@@ -167,14 +169,25 @@ final class JournalExport {
         for (StepJournal.Entry entry : entries) {
             switch (entry) {
                 case StepJournal.ResolveEntry r -> {
-                    if (resolves.containsKey(r.slot())) {
-                        notes.add("slot " + r.slot() + " was resolved more than once; the last resolution is"
-                                + " exported");
-                        resolves.remove(r.slot());
+                    if (slots.containsKey(r.slot())) {
+                        notes.add("slot " + r.slot() + " was bound more than once; the last binding is exported");
                     }
+                    resolves.remove(r.slot());
                     resolves.put(r.slot(), r);
+                    slots.remove(r.slot());
+                    slots.put(r.slot(), r);
                     Object value = r.resolution().get("value");
                     bound.put("$" + r.slot(), value);
+                }
+                case StepJournal.FixtureEntry f -> {
+                    // phase7-contracts.md 9.2 (D-VM-6): a fixture the person bound is written back as one.
+                    if (slots.containsKey(f.slot())) {
+                        notes.add("slot " + f.slot() + " was bound more than once; the last binding is exported");
+                    }
+                    resolves.remove(f.slot());
+                    slots.remove(f.slot());
+                    slots.put(f.slot(), f);
+                    bound.put("$" + f.slot(), f.value());
                 }
                 case StepJournal.OracleEntry o -> {
                     oracles.remove(o.name());
@@ -702,10 +715,14 @@ final class JournalExport {
         if (!requires.isEmpty()) {
             yaml.entry(0, "requires", new ArrayList<>(requires), null);
         }
-        if (!resolves.isEmpty()) {
+        if (!slots.isEmpty()) {
             yaml.line("resolve:");
-            for (StepJournal.ResolveEntry r : resolves.values()) {
-                yaml.entry(2, r.slot(), slot(r), null);
+            for (StepJournal.Entry e : slots.values()) {
+                if (e instanceof StepJournal.ResolveEntry r) {
+                    yaml.entry(2, r.slot(), slot(r), null);
+                } else if (e instanceof StepJournal.FixtureEntry f) {
+                    yaml.entry(2, f.slot(), fixture(f), null);
+                }
             }
         }
         if (!oracles.isEmpty()) {
@@ -792,6 +809,22 @@ final class JournalExport {
             Map<String, Object> credential = new LinkedHashMap<>();
             credential.put("realm", r.credential().realm());
             credential.put("key", r.credential().key());
+            slot.put("credential", credential);
+        }
+        return slot;
+    }
+
+    /** A fixture slot from its journal entry: {@code {fixture: <value>, credential?: {realm, key}}}. */
+    private Map<String, Object> fixture(StepJournal.FixtureEntry f) throws ExportException {
+        if (masked(f.value())) {
+            throw new ExportException(null, "the value of fixture slot " + f.slot() + " was masked in the journal");
+        }
+        Map<String, Object> slot = new LinkedHashMap<>();
+        slot.put("fixture", Values.sortKeys(f.value()));
+        if (f.credential() != null) {
+            Map<String, Object> credential = new LinkedHashMap<>();
+            credential.put("realm", f.credential().realm());
+            credential.put("key", f.credential().key());
             slot.put("credential", credential);
         }
         return slot;
@@ -935,6 +968,25 @@ final class JournalExport {
             strategies.put(r.slot(), r.strategy().name());
             if (r.credential() != null) {
                 credentials.put(r.slot(), r.credential());
+            }
+        }
+        // phase7-contracts.md 9.2 (D-VM-6): the fixtures the journal bound, their references substituted as a bind
+        // substitutes them (the value as journaled when one does not resolve: the compile reports it).
+        for (StepJournal.Entry e : slots.values()) {
+            if (!(e instanceof StepJournal.FixtureEntry f)) {
+                continue;
+            }
+            Object value = f.value();
+            try {
+                value = Bindings.of(valueMap, strategies).substitutePublic(f.value());
+            } catch (ResolutionException ignored) {
+                // Kept as journaled.
+            }
+            valueMap.put(f.slot(), value);
+            strategies.put(f.slot(), Strategy.FIXTURE.name());
+            if (f.credential() != null && value instanceof Map<?, ?> map && map.get(f.credential().key()) != null) {
+                credentials.put(f.slot(), new CredentialRef(f.credential().realm(),
+                        Values.stringOf(map.get(f.credential().key()))));
             }
         }
         Bindings bindings = Bindings.of(valueMap, strategies).withBind(start.envId(), BindMode.LIVE,
