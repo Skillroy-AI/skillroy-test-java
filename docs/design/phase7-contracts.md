@@ -2056,6 +2056,15 @@ after the deposit the loan is posted, so "two lines … " after `basic-loan`'s l
 the rest of `basic-loan`'s steps follow it. `vision-live-only` and `loan-table-visual-check` carry `launchProperties:
 {lending.seed: A}` with `basic-loan`'s fixtures; none of the three seed-A scenarios has a bindings file.
 
+**As built (Phase 7, VS, step 2b):** `keypad-frame` masks three locators, not one: `{by: {id: entry}}`,
+`{by: {id: totalsLine}}` and `{by: {name: Printer, role: scrollpane}}` (D-VS-21). The frame is approved on a fresh
+desk (`ResolutionChecks`, per seed) but also replays in the glue after earlier scenarios on a used desk, where the totals
+line and the printer's slips differ (about 11 700 pixels on both Javas); masking them keeps the frame's check on the
+desk's layout and static parts on any signed-off desk. The locator form of `mask` is exercised as before; the `keypad`
+baselines are unchanged, and `keypad-frame`'s were approved afresh on both Javas and seeds, so each entry records the
+three masks' rectangles (a compare masks the union of an entry's recorded masks and the step's resolved ones, so an
+entry approved under one mask would still have passed, but would have recorded less than its plan says).
+
 ### 12.5 Regenerated committed artifacts
 
 One regeneration, by the build, of: every plan (`planVersion` 6, `packVersion` 0.6.0) and bindings file (`planHash`)

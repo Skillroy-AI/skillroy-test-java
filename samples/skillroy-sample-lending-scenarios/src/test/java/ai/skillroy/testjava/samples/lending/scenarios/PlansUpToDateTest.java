@@ -239,7 +239,9 @@ class PlansUpToDateTest {
         assertEquals(Map.of("by", Map.of("id", "numberPad"), "redact", true), keypad.args());
         ImageCheck frame = (ImageCheck) image.steps().get(1).expect().get(0);
         assertEquals("keypad-frame", frame.label());
-        assertEquals(List.of(Map.of("by", Map.of("id", "entry"))), frame.masks(), "masked by locator");
+        // step 2b (VS): the totals line and the printer's slips are masked too, so the frame holds on any signed-off desk
+        assertEquals(List.of(Map.of("by", Map.of("id", "entry")), Map.of("by", Map.of("id", "totalsLine")),
+                Map.of("by", Map.of("name", "Printer", "role", "scrollpane"))), frame.masks(), "masked by locator");
         assertEquals(0, frame.maxDiffPixels());
     }
 

@@ -4,7 +4,7 @@
   "envId": "seed-b",
   "pack": "lending",
   "packVersion": "0.6.0",
-  "planHash": "sha256:563c4b5ca099c7026388d4989d85e8de5a0ccc56a8942bb8fa6fd7055dabd01f",
+  "planHash": "sha256:4cc6c6dea558af76ccf3b216b293d01e39d6af23e5f6cdd22f1359f05d0f9286",
   "resolveHash": "sha256:a50a2bd84aa0df976a6d1e0bbdf4fe7c1d2f5655d627f051befa5f2fe8020430",
   "env": {
     "fingerprint": "sha256:f13ef74b54cc11e3cdc4875b35119fe1c728e4121517cb91ed273b5ea5bb6cc5",
@@ -101,7 +101,7 @@
     },
     "keypad-frame": {
       "6ccffcf8f0c8db46": {
-        "sha256": "sha256:a97b69a52dec8353df947094edb5ef019ed671fb1a85051718468dfefa36e69b",
+        "sha256": "sha256:08902f1db210d11dd561d5e66a7e9ee5e015ba79525e4c0c3351e9e564672fcf",
         "width": 1024,
         "height": 768,
         "masks": [
@@ -110,27 +110,24 @@
             "y": 560,
             "w": 1000,
             "h": 28
-          }
-        ],
-        "carets": [
+          },
           {
-            "x": 12,
-            "y": 562,
-            "w": 5,
-            "h": 24
+            "x": 0,
+            "y": 521,
+            "w": 695,
+            "h": 31
+          },
+          {
+            "x": 703,
+            "y": 47,
+            "w": 321,
+            "h": 505
           }
         ],
+        "carets": [],
         "focus": {
-          "owner": {
-            "id": "entry"
-          },
-          "ownerRect": {
-            "x": 12,
-            "y": 560,
-            "w": 1000,
-            "h": 28
-          },
-          "active": true
+          "owner": null,
+          "active": false
         },
         "file": "keypad-image.images/keypad-frame.6ccffcf8f0c8db46.png",
         "rendering": {
@@ -164,7 +161,7 @@
         }
       },
       "d0bd5ce68e2f111c": {
-        "sha256": "sha256:181897ae49bd14b3268a2ffd8f0b6dbeab5d05c0e9b277607f3caa14fa9576ce",
+        "sha256": "sha256:df285790322fc8a9f7c719c317d3a4810b434648b1766f5ac2c764a9a969ed81",
         "width": 1024,
         "height": 768,
         "masks": [
@@ -173,6 +170,18 @@
             "y": 560,
             "w": 1000,
             "h": 28
+          },
+          {
+            "x": 0,
+            "y": 521,
+            "w": 695,
+            "h": 31
+          },
+          {
+            "x": 703,
+            "y": 47,
+            "w": 321,
+            "h": 505
           }
         ],
         "carets": [
