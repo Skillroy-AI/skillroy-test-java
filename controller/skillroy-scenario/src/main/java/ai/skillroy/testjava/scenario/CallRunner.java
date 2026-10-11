@@ -81,7 +81,7 @@ final class CallRunner {
     static final String META = "_meta";
     /** The arguments that name Robot ({@code via} of a pointer, {@code mode} of a capture). */
     private static final List<String> ROBOT_ARGUMENTS = List.of("via", "mode");
-    /** The refusal of a reference that resolves to ROBOT in {@code via} or {@code mode} (D-FB-2). */
+    /** The refusal of a reference that resolves to ROBOT in {@code via} or {@code mode} (D441). */
     static final String ROBOT_REFERENCE_REFUSAL = "robot: via and mode take a literal value; a reference that resolves"
             + " to ROBOT is refused";
 
@@ -266,7 +266,7 @@ final class CallRunner {
                     RunLog.fields("reason", e.reason(), "reference", e.reference(), "primitive",
                             call.primitive()));
         }
-        // phase7-contracts.md 9.1, the fix wave's note (FB, D-FB-2): every Robot gate reads the call's arguments as
+        // phase7-contracts.md 9.1, the fix wave's note (FB, D441): every Robot gate reads the call's arguments as
         // written, before this substitution, so via and mode take a literal value; a reference that resolves to ROBOT
         // in any spelling would pass them all, and is refused here, on every route, before anything is sent.
         for (String key : ROBOT_ARGUMENTS) {

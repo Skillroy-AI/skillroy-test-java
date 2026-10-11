@@ -1,6 +1,6 @@
 # Decisions: base framework
 
-Decisions for the base framework (`skillroy-test-java`), as of 2026-10-10 (B1-B30). The project owner answered B1-B14
+Decisions for the base framework (`skillroy-test-java`), as of 2026-10-11 (B1-B31). The project owner answered B1-B14
 on 2026-10-02; each entry records the answer, what it changed, and what the build has established. B15 and B16 follow
 from those answers. B17 and B18 were taken without the owner, on the evidence of the security review and of the
 end-to-end review, B19 as the answers to the open questions of the Phase 2 contract and B20 as those of the Phase 3
@@ -9,7 +9,7 @@ base stays restrictive by default; a private overlay may override it"), and answ
 B10 and B12. **B21** (the answers to the fifteen questions of the Phase 4 contract) was taken without the owner later
 on 2026-10-06 and **confirmed by the owner on 2026-10-07** without a veto. **B22** (the eleven decisions the Phase 4
 build and its review took on their own, the contract's D59-D69) was taken without the owner on 2026-10-07 and
-**confirmed by the owner the same evening** (`B22 ok`). **B23** (the Phase 5 contract's eighteen answers, `design/phase5-contracts.md` §17, Q11 withdrawn) and **B24** (the eighteen decisions of its build and review, D88-D104 and D110) were taken without the owner on 2026-10-08 and **confirmed by the owner the same day** (`B23 ok`, `B24 ok`). **B25** (the live session's three decisions, D111-D113) was taken without the owner in the afternoon of 2026-10-08 and **confirmed by the owner on 2026-10-09** (`B25 ok`). **B26** (the Phase 6 contract's twenty-two answers, `design/phase6-contracts.md` §17) and **B27** (the 127 decisions of its build, of the code review's fix wave and of the security fix rounds, D160-D286) were taken without the owner on 2026-10-09, the build proceeding on them because the owner asked for progress that day, and **confirmed by the owner on 2026-10-10** (`B26 ok`, `B27 ok`); the owner **signed off B28**, the repeat security review, the same day (`B28 ok`, the eight lows accepted). **B29** (the Phase 7 contract's thirty-nine answers, `design/phase7-contracts.md` §18, which produced D287-D358) was taken without the owner on 2026-10-10, and the build proceeded on it, as it did on B26; it is **provisional** until the owner answers. **B30** (the 72 decisions of the Phase 7 build, D359-D430, `design/phase7-contracts.md` §17) was taken without the owner the same day, while the build ran, and is **provisional** too; the decisions of the Phase 7 code review's fix wave and of the security delta review's fixes will be numbered on from D431 and join it, and B31 is reserved for the security delta review's sign-off. Every decision stays changeable
+**confirmed by the owner the same evening** (`B22 ok`). **B23** (the Phase 5 contract's eighteen answers, `design/phase5-contracts.md` §17, Q11 withdrawn) and **B24** (the eighteen decisions of its build and review, D88-D104 and D110) were taken without the owner on 2026-10-08 and **confirmed by the owner the same day** (`B23 ok`, `B24 ok`). **B25** (the live session's three decisions, D111-D113) was taken without the owner in the afternoon of 2026-10-08 and **confirmed by the owner on 2026-10-09** (`B25 ok`). **B26** (the Phase 6 contract's twenty-two answers, `design/phase6-contracts.md` §17) and **B27** (the 127 decisions of its build, of the code review's fix wave and of the security fix rounds, D160-D286) were taken without the owner on 2026-10-09, the build proceeding on them because the owner asked for progress that day, and **confirmed by the owner on 2026-10-10** (`B26 ok`, `B27 ok`); the owner **signed off B28**, the repeat security review, the same day (`B28 ok`, the eight lows accepted). **B29** (the Phase 7 contract's thirty-nine answers, `design/phase7-contracts.md` §18, which produced D287-D358) was taken without the owner on 2026-10-10, and the build proceeded on it, as it did on B26; it is **provisional** until the owner answers. **B30** (the 128 decisions of the Phase 7 build, of its code review's fix wave, of the race fix and of the security delta review's fix round, D359-D486, `design/phase7-contracts.md` §17: 72 taken by the build on 2026-10-10 and 56 by the fixers on 2026-10-10 and 2026-10-11) was taken without the owner, while the work ran, and is **provisional** too. **B31**, the sign-off of the Phase 7 security delta review (S101-S148), is **open and the owner's**: the review is run and fixed, and the orchestrator does not sign it. Every decision stays changeable
 until the first public release, at a cost that grows with the code written on it. Decisions that concern one tenant
 application live in that tenant's private repo, not here.
 
@@ -62,8 +62,9 @@ review items of the end-to-end review, and `Sn` the confirmed findings of the se
 | B26 | Phase 6 contract answers (22 questions: the B4 carve-out's wording, Byteman in process behind BS14, the overlay SPI, the Windows host, telemetry egress, the review's sign-off, SECURITY.md, pass 1's four decision amendments and five accepted lows) | the §17 answers | taken 2026-10-09; **confirmed by the owner 2026-10-10** (`B26 ok`, all twenty-two, no veto) | built 2026-10-09 on the answers while they were provisional (`TODO.md`, "Phase 6"); `NOTICE`, `CONTRIBUTING.md`, the licence audit and, since 2026-10-10, `CLAUDE.md` carry Q1's wording | |
 | B27 | Phase 6 build, review and security-fix decisions (127: D160-D286 of `design/phase6-contracts.md` §16, 62 taken by six packages during the build of 2026-10-09 and 65 by the code review's fix wave and the fix rounds of the repeat security review's pass 2) | as taken | taken 2026-10-09; **confirmed by the owner 2026-10-10** (`B27 ok`, all 127, no veto) | built, reviewed, fixed and security-reviewed twice 2026-10-09 (`TODO.md`, "Phase 6"; the final Linux matrix is recorded there) | |
 | B28 | The repeat security review's sign-off (S35-S100: 66 confirmed findings, 2 high, 18 medium, 46 low; everything of medium or above fixed; eight lows accepted with a release note each; the "not verified" list; no outside reader yet, not a gate) | the orchestrator recommended yes once the final matrix was green | **signed off by the owner 2026-10-10** (`B28 ok`, the eight lows accepted) | records written 2026-10-09 (`TODO.md`, "Security review (repeat, pass 1)" and "(repeat, pass 2)"); `SECURITY.md` and `docs/release-checklist.md` in the tree | |
-| B29 | Phase 7 contract answers (39 questions: the Robot placement and its double opt-in, redaction by default and one rule for pixels and text, root-pane painting, Robot keys left out, the two homes of `region`, `Status.SKIPPED`, the vision module's seams and facade, the merged matrix, baselines by render key and their approval at the step, the gateway's additive changes, the defaults BS12 measured, the sample's number pad, the security delta review, and, added by the contract review: no glass capture for a model, no credential used on a model's or a client's behalf, a Robot press always paired, the controller draws the marks) | the §18 answers | taken 2026-10-10 by the orchestrator without the owner; **provisional** until the owner answers | built 2026-10-10 on them in four worktree packages, merged into `main` (`TODO.md`, "Phase 7"); the code review and the security delta review (B31) follow | the owner's `B29 ok` or vetoes in the forms of §18; Q27 and Q34 rest on the owner's knowledge, Q25 on taste |
-| B30 | Phase 7 build decisions (72: D359-D430 of `design/phase7-contracts.md` §17, taken by four packages during the build of 2026-10-10; the code review's fix wave and the security delta review's fixes follow from D431 and join the row) | as taken | taken 2026-10-10 by the orchestrator without the owner; **provisional** until the owner answers | built 2026-10-10 in four worktree packages (VC, VS, VW, VM), merged into `main` with the head `e11ae08` (`TODO.md`, "Phase 7") | the owner's `B30 ok` or `B30 D<n> veto` forms of the B30 table |
+| B29 | Phase 7 contract answers (39 questions: the Robot placement and its double opt-in, redaction by default and one rule for pixels and text, root-pane painting, Robot keys left out, the two homes of `region`, `Status.SKIPPED`, the vision module's seams and facade, the merged matrix, baselines by render key and their approval at the step, the gateway's additive changes, the defaults BS12 measured, the sample's number pad, the security delta review, and, added by the contract review: no glass capture for a model, no credential used on a model's or a client's behalf, a Robot press always paired, the controller draws the marks) | the §18 answers | taken 2026-10-10 by the orchestrator without the owner; **provisional** until the owner answers | built 2026-10-10 on them in four worktree packages, merged into `main`; reviewed (three lenses), fixed and security-reviewed (delta, B31) 2026-10-10/11 (`TODO.md`, "Phase 7") | the owner's `B29 ok` or vetoes in the forms of §18; Q27 and Q34 rest on the owner's knowledge, Q25 on taste |
+| B30 | Phase 7 build, review and security-fix decisions (128: D359-D430 of `design/phase7-contracts.md` §17, 72 taken by four packages during the build of 2026-10-10, and D431-D486, 56 taken by the code review's fix wave (FA, FB, FC), the race fix (FX) and the security delta review's four fix packages (SG, SH, SI, SJ), 2026-10-10 and 2026-10-11) | as taken | taken 2026-10-10 and 2026-10-11 by the orchestrator without the owner; **provisional** until the owner answers | built, reviewed, fixed and security-reviewed (delta) 2026-10-10/11, merged into `main` with the head `c94aade` (`TODO.md`, "Phase 7"; the final Linux matrix `[final matrix]`) | the owner's `B30 ok` or `B30 D<n> veto` forms of the B30 table |
+| B31 | The Phase 7 security delta review's sign-off (S101-S148: 48 confirmed findings, 2 high, 13 medium, 33 low; everything of medium or above fixed and 31 lows fixed; S142 and S144 proposed for acceptance with a release note each; the "not verified" list; the note that the clipboard route S110 predates Phase 7 for the planner and that B28 did not see it; no outside reader yet, not a gate) | the orchestrator recommends yes once the final matrix is green and the owner has read the two release notes | **open, the owner's** (the orchestrator does not sign, P6 §12.6) | records written 2026-10-11 (`TODO.md`, "Security review (Phase 7 delta)"); `SECURITY.md` and `docs/release-checklist.md` carry it as open | the owner's `B31 ok`, or `B31 S<n> fix` (S142 or S144) or `B31 outside reader first` |
 
 Phase 1 details are fixed in `design/phase1-contracts.md`; the same file carries the Phase 1.x specification
 (A17-A33, H1-H3). Phase 2 details are fixed in `design/phase2-contracts.md`, whose open questions B19 answers. What
@@ -1383,7 +1384,7 @@ decorations on the X toolkit, a root-pane `PAINT` equals a `ROBOT` capture), BS1
 modal-blocked window and a covering window, are by construction), BS11 passed with conditions (`spikes/BS11/RESULT.md`:
 `PAINT` is pixel-deterministic within one environment but for the blinking caret; across environments no tolerance
 separates noise from a one-character change), BS12 passed live (`spikes/BS12/RESULT.md`: V1 with marks and V2 through the
-computer toolset answered 100 % on Sonnet 5.5 and Opus 5.5, sessions USD 0.02-0.06, USD 5.64 spent). B30 holds the build's decisions (D359-D430; the reviews' fixes join it from D431), B31 is reserved for the security delta review's sign-off.
+computer toolset answered 100 % on Sonnet 5.5 and Opus 5.5, sessions USD 0.02-0.06, USD 5.64 spent). B30 holds the build's decisions (D359-D430) and those of the code review's fix wave, the race fix and the security fixes (D431-D486), B31 is the security delta review's sign-off.
 **Question.** Thirty-nine points the contract could have decided either way. Q27 and Q34 rest on knowledge only the owner
 has (§18 marks them: whether a JxBrowser licence holder's run is near, and how V3 sessions on a person's desktop, which
 §18 calls the overlay sessions, will be run); Q25, the choice of the sample's component, is a matter of taste the owner
@@ -1434,11 +1435,11 @@ may hold. Q35-Q39 were added by the review: four of them (Q35-Q38) are safety ru
 **What it changes.** The Phase 7 contract and, through its §16.1, the Phase 1-6 contracts and the design overview
 (written in when the build starts; design §3.10's V3 row (D341) and the two sentences that D314 and D330 overturn among
 them, with the matching lines of design §8 and §9); `design/threat-model.md` (extended on 2026-10-10, D334); the
-amendments file's index (D301, by the build). **State of the build.** Specified and reviewed on 2026-10-10 (the contract is committed as `2eebeed`); the build proceeded on the provisional answers in four worktree packages, VS (the agent's Swing side, the sample's desk and pack), VW (the web side), VC (the scenario, controller, JUnit and CLI side) and VM (the gateway, the session seam, `skillroy-vision` and the MCP and session options), and was built and merged into `main` the same day in the order VC, VS (with VM's step 1b and the regeneration step 2b), VW, VM; its own 72 decisions are B30 below (`TODO.md`, "Phase 7"). **Blocks.** Nothing; a
+amendments file's index (D301, by the build). **State of the build.** Specified and reviewed on 2026-10-10 (the contract is committed as `2eebeed`); the build proceeded on the provisional answers in four worktree packages, VS (the agent's Swing side, the sample's desk and pack), VW (the web side), VC (the scenario, controller, JUnit and CLI side) and VM (the gateway, the session seam, `skillroy-vision` and the MCP and session options), and was built and merged into `main` the same day in the order VC, VS (with VM's step 1b and the regeneration step 2b), VW, VM; its own decisions are B30 below, 128 with the fixers' (`TODO.md`, "Phase 7"); the code review, the fixes and the security delta review (B31) ran on 2026-10-10/11 and are in B30 and B31. **Blocks.** Nothing; a
 veto before the package that builds the item lands is cheap, after it costs the rework §17's row names.
 
 
-## B30 Phase 7 build, review and security-fix decisions (2026-10-10; provisional)
+## B30 Phase 7 build, review and security-fix decisions (2026-10-10/11; provisional)
 
 **From:** the decisions taken while building Phase 7 on 2026-10-10 without the owner, by four packages in worktrees (VS the
 agent's Swing side, the sample's desk and pack; VW the web side; VC the scenario, controller, JUnit and CLI side; VM the gateway,
@@ -1446,12 +1447,20 @@ the session seam, `skillroy-vision` and the MCP and session options), recorded a
 (each with the alternatives rejected and the reason) and numbered by the orchestrator at integration in the order VC D359-D382,
 VS D383-D403, VW D404-D419, VM D420-D430 (72 decisions, each package's ids from 1 without a gap; D401-D403 are VS's three
 decisions of the regeneration step 2b, and D425 is VM's decision about `ExecutorSession.fixture`, built at the orchestrator's
-request in the closing commit `e11ae08`). The decisions of the Phase 7 code review's fix wave and of the security delta
-review's fix rounds (`design/phase7-contracts.md` §15) will be numbered on from D431 and join this entry, as the fixers'
-decisions joined B27. **Provisional**: taken without the owner on 2026-10-10, the build having proceeded on them as it did on
-B26 and B27, until the owner answers (`B30 ok`, or a veto in the form of a row below). **Question.** Seventy-two points the
-build could have decided either way. None changes a decision of B1-B28 or an answer of B29; in a few places the build departs
-from the contract's own sentence, and the contract carries an "As built" note there (see "What it changes").
+request in the closing commit `e11ae08`); and the decisions taken afterwards, on 2026-10-10 and 2026-10-11 and again without the
+owner, by the fixers of the Phase 7 code review (FA the agent's Swing side, FB the scenario, controller and CLI side, FC the
+vision module and the session), by the fixer of a race in the hooks engine that the first Linux matrix of the integrated tree
+found (FX) and by the four packages of the security delta review's fix round (SG the agent's Swing side, SH credentials,
+slots and the client's plan form, SI the vision module, the session service, the web reads and the CDP path, SJ the image
+baselines, the bindings files and the run output), recorded as D431-D486 in the same place and numbered by the orchestrator at
+the closing documentation pass in the order of the tags, FA D431-D439, FB D440-D442, FC D443-D448, FX D449, SG D450-D462, SH
+D463-D469, SI D470-D480, SJ D481-D486 (56 decisions, each tag's ids from 1 without a gap; SG's thirteenth, the `bounds` of a
+browser surface, was added by a follow-up after SI had landed). The order is the tags', not the order the fixers landed on `main` (FA,
+FC, FB, FX, SG, SH, SJ, SI), as the fixers' decisions joined B27. **Provisional**: taken without the owner, the work having
+proceeded on them as it did on B26 and B27, until the owner answers (`B30 ok`, or a veto in the form of a row below).
+**Question.** One hundred and twenty-eight points the build, the review's fixes and the security fixes could have decided
+either way (72 + 56). None changes a decision of B1-B28 or an answer of B29; in a few places the build departs from the
+contract's own sentence, and the contract carries an "As built" note there (see "What it changes").
 
 | D | Question | Answer | Veto form offered |
 |---|---|---|---|
@@ -1527,6 +1536,62 @@ from the contract's own sentence, and the contract carries an "As built" note th
 | D428 | How does the player get the scenario's baselines? | `withBaselines(root, env)`, read once per play | `B30 D428 veto`: a further constructor parameter |
 | D429 | Does the session's export write the anchors' PNGs? | Yes, beside the bindings file, created exclusively | `B30 D429 veto`: leave the PNGs to the person |
 | D430 | How does the live class treat the fallback header's possible refusal, and what does it count? | As a recorded finding; item 3 second; the bounds count the turn's `vision` calls; key scans after each item | `B30 D430 veto`: fail on a 400, and count every ledger entry |
+| D431 | Is a capture of a component inside a masked container blanked? | Yes: the ancestors up to the window are walked, their `regions` included; a masked ancestor blanks its rectangle united with the paint root's | `B30 D431 veto`: refuse a capture inside a masked component |
+| D432 | Which windows' masks does a person's glass capture apply? | Every window of the JVM whose rectangle meets the captured one, wherever it stands | `B30 D432 veto`: only the windows above the target, or a second mask-only walk |
+| D433 | What does a Robot call check before the delivery probe moves the pointer? | The same read as before the press, once: bounds, the drag's end point, `requireFocus`, covering, `expectTarget`; the probe is skipped under a modal dialog | `B30 D433 veto`: a lighter read for the probe |
+| D434 | Is the person's pointer restored after a probe that passed? | Yes, in every outcome; one extra move per probe | `B30 D434 veto`: restore on failure only |
+| D435 | How is a press balanced when a post fails midway through a routed sequence? | `Pointer.postAll` cancels the sequence and posts one balancing task, once | `B30 D435 veto`: `cancel` alone |
+| D436 | What do the Robot capabilities say between AWT being confirmed and the probe's answer? | `UNAVAILABLE` with the reason `robot: probe not run`; a refused post leaves them so | `B30 D436 veto`: retry the post from the watcher |
+| D437 | Does the glass capture keep the heap bound? | Yes, per allocation, with an out-of-memory catch; the outside is filled by rectangles | `B30 D437 veto`: one up-front check of twice the raster |
+| D438 | Which vector do the agent's and the controller's raster-hash tests share? | `CaptureTest`'s, and the desk check compares the two implementations on a real raster | `B30 D438 veto`: the controller's vector |
+| D439 | How does the Robot leg test the `requireFocus` refusal? | In its own test that assumes the unfocused state and reports itself skipped when the frame kept the focus | `B30 D439 veto`: a fixture action that takes the focus away |
+| D440 | How does the controller recognise a Robot request, given that the agent reads `via` and `mode` leniently? | One predicate, a superset of the agent's reading, at the seven sites and in `CallPolicy`; `redact` strict | `B30 D440 veto`: normalise `via` and `mode` at compile, or make the agent strict |
+| D441 | May `via` or `mode` be a `$slot` reference? | Only if it does not resolve to Robot: the call refuses such a reference | `B30 D441 veto`: re-run the gates after substitution |
+| D442 | Is the desk's transient focus recorded in a baseline entry? | No: the approve activates the desk first, and seed B's two `keypad-frame` entries were regenerated | `B30 D442 veto`: hand-edit the entry, or leave it |
+| D443 | Does the scenario player evaluate a plan's `verify`? | Yes, once after the last step, all of it, through the journaled checks | `B30 D443 veto`: poll as the executor does, or stop at the first failure |
+| D444 | How does a model learn which `$references` the person bound before the turn? | A `<target-state>` block in the turn's first message, from the journal, names only; none when no slot is bound | `B30 D444 veto`: a system part or a new label |
+| D445 | Where do an anchor's window insets come from? | From a `WINDOW` capture's origin, read once per window per session | `B30 D445 veto`: an additive `content` rectangle in `windows[]` |
+| D446 | Whose role does the recorder read for a click by reference? | The named component's own (`targetNode` on the hit-test's target form) | `B30 D446 veto`: controller only |
+| D447 | How long does the vision `wait` tool settle? | For the session's step timeout, between 1 and 110 s | `B30 D447 veto`: a fixed 5 s |
+| D448 | How does an export of a played session say what it dropped? | A line per dropped `aiExpect` under 'Live-only'; `verify` as trailing expectations | `B30 D448 veto`: a new report section, or a `verify:` block |
+| D449 | A `hook.<id>` declared after the target is ready: pending until a worker probes it, or set at declaration? | Set at declaration to its probe's first answer, under the engine's lock; `hook.install` answers after that | `B30 D449 veto`: the core probes a late declaration synchronously, or the controller polls |
+| D450 | Does a Robot press land in a minimised frame? | No: a point in an iconified frame or a window it owns is `NOT_FOUND iconified`, and the window leaves the composite | `B30 D450 veto`: the Robot check alone |
+| D451 | Is a Robot press at a point no screen shows refused? | Yes, `NOT_FOUND off-screen`; a press received elsewhere forces a fresh probe | `B30 D451 veto`: the union rectangle of the screens |
+| D452 | Is a masked label's or button's name withheld with its text? | Yes, when the name is the text; an accessible name set apart from the text stays and must not itself be a secret | `B30 D452 veto`: withhold every name of a masked component |
+| D453 | How do two registered masks combine? | By union | `B30 D453 veto`: the first mask decides |
+| D454 | Does a mask's `regions` form hide the text under the regions as well as the pixels? | Yes: a component a region holds whole or a text-bearing one it meets is masked; a table's cells are judged one by one | `B30 D454 veto`: a disclosure sentence that says it does not |
+| D455 | How does the agent say what lies above a browser in a capture? | A `covered` list on the surface, by paint order; the surface is its visible part | `B30 D455 veto`: name the layered pane's layers |
+| D456 | Does the heap bound count the encoded reply? | Yes, after the encoding, with an out-of-memory catch | `B30 D456 veto`: stream the base64 |
+| D457 | What does the glass capture's bound count at a UI scale above 1? | The device pixels at the screen's scale | `B30 D457 veto`: (s^2 + 1) at every scale |
+| D458 | When is a second screen's Robot constructed? | On demand, on a worker, and cached | `B30 D458 veto`: one per device at the capability probe |
+| D459 | What does a Robot pointer call do with `modifiers`? | Refuses them (`INVALID_PARAMS`); the recorder says why in words | `B30 D459 veto`: ignore them |
+| D460 | May the focus owner's locator be the field's text? | No, never; the hit-test's candidate list is unchanged | `B30 D460 veto`: change the hit-test's locators |
+| D461 | How is the hidden-browser case tested on real JCEF? | Item 10 asserts the back browser absent and `covered` empty; the wrapped case is a headless test | `B30 D461 veto`: wrap the back browser in the host |
+| D462 | How does the controller place a browser's page when a viewport clips it? | The agent sends the whole rectangle as `bounds` on every `WEB` surface | `B30 D462 veto`: clip `bounds` to the image |
+| D463 | May a model's or a client's argument reach the credential-joined slot as a whole? | No, in any spelling; their steps resolve against public values only | `B30 D463 veto`: rule 1 alone, or a public view of the bindings during the step |
+| D464 | How does the plan policy judge a client's reference to a credential slot? | By the executor's tokenizer, in three places: compiled calls, a pack verb's written arguments, a pack verb's compiled calls | `B30 D464 veto`: refuse every whole-slot reference, or judge compiled calls only |
+| D465 | How are a pack verb's written arguments paired with the plan's steps? | By step identity, not by source line | `B30 D465 veto`: `Plan.Step` carrying its written arguments |
+| D466 | May the plan policy be asked without the scenario as written? | No: the one-argument form is gone, and `author --run` passes the file it read back | `B30 D466 veto`: keep a one-argument form that fails closed |
+| D467 | What may a model or a client do while a credential is in flight? | Reads only; every call that may change the target is refused | `B30 D467 veto`: a value check on every string argument |
+| D468 | May a model or a client rebind a slot the person bound? | No; the export marks what they bound `REQUIRED` | `B30 D468 veto`: the credential-only rule |
+| D469 | What does the plan form do with a value nested deeper than 64 levels? | Refuses it in a plan with a credential slot | `B30 D469 veto`: fail open past the bound |
+| D470 | May a model or a client paste, copy or cut through the person's clipboard? | No, on every route; no chord and no middle button is ever sent for them | `B30 D470 veto`: allow and document |
+| D471 | Is a browser a pack's mask names masked for the raw `web_*` reads and the snapshot too? | Yes, on every route; the CDP path costs one more agent `web.browsers` per read | `B30 D471 veto`: withhold only the pixels |
+| D472 | May the recorder click a page whose window a modal dialog blocks? | No; refused before `web.hitTest` | `B30 D472 veto`: a modal check in the web DOM primitives for models and clients |
+| D473 | What does the stale-capture rule compare the hit with? | With what the capture showed (the mark's ref, the window at the pixel), not with a second live hit-test | `B30 D473 veto`: compare two live hit-tests, as built |
+| D474 | Is a tool set's reading bounded per turn? | Yes: 20 reads or twice the action limit, and three step timeouts of waiting | `B30 D474 veto`: a new record component, or a sentence in the instructions |
+| D475 | Where does the composite draw a browser's page? | At `bounds`, clipped to `rect` minus `covered`; not at all if `bounds` is missing and `rect` is not the bitmap's shape | `B30 D475 veto`: scale the whole page into the visible part |
+| D476 | Is the provider's token count sent when the session's budget cannot pay for the call? | No: the local estimate is checked first | `B30 D476 veto`: send the count anyway |
+| D477 | Which web hits are recorded as ordinary `webClick` steps? | Those in the starting frame of the browser the step resolves to; the rest are live-only | `B30 D477 veto`: record every hit |
+| D478 | What does the CDP pointer do once its caller timed out? | Dispatches nothing more; a press already sent is released | `B30 D478 veto`: a timer in the page |
+| D479 | May a recorded locator name a text field by its content? | No, never | `B30 D479 veto`: change the hit-test's candidates |
+| D480 | How are the inner-size and title reads bounded against a hostile page? | Built from `typeof`, two numbers and a primitive `length`, and parsed with the channel check | `B30 D480 veto`: the `web.evaluate` wrapper |
+| D481 | How much of a compared raster may the focus rule blank? | At most a quarter; above it the rectangle is compared and the message says so | `B30 D481 veto`: bound each rectangle separately, or drop the focus rule |
+| D482 | May an `approve` write the bindings file without a person's yes? | Not for anything but a baseline approved at its step; a change of the header or the resolutions needs the approver's yes, and a client's run under `REJECT_ALL` cannot approve | `B30 D482 veto`: ask at bind time, or let a header change ride on an approved baseline |
+| D483 | How does the export of a re-recorded anchor reach an existing bindings file? | The export writes its own file and the report names each entry to merge | `B30 D483 veto`: the CLI merges into the existing file |
+| D484 | May a baseline's focus owner be identified by the field's text? | No: the `text` key is dropped, the role stays | `B30 D484 veto`: a hash of the text |
+| D485 | Where does a session without `--out` write? | Into a new owner-only temporary directory whose path it prints | `B30 D485 veto`: correct the documentation to `./run-output/<id>`, or a `--no-out` |
+| D486 | What does a writing bind do with a bindings file it cannot read? | Ends `ERROR / ENVIRONMENT` naming the file and the reason | `B30 D486 veto`: fail every bind that finds one |
 
 **What it changes.** Each is built and tested (`TODO.md`, "Phase 7"), and the contract carries an "As built (Phase 7, <TAG>)"
 note at every section a decision touches. The decisions that differ from the contract's own sentence are D371 (the visual
@@ -1540,18 +1605,115 @@ path hands a blocked browser to the agent), and D413 is the one decision that re
 cannot run (JxBrowser's input roles, wall gap 41). **Behaviour changes the owner should know:** (a) `skillroy session --play`
 now binds a scenario's fixture slots as the person, a credential slot included (D425); (b) a mask on a container hides the text,
 value and mark of everything inside it (D383); (c) a `web.browsers` entry may carry `blockedBy` (D404); (d) the committed
-`keypad-image` baselines carry three masks and the reviewer-only text of the container's `os.version` (D403, D350). **State of the
-build.** Built 2026-10-10: the native reactor on the head `e11ae08` is green (surefire 4,454 tests, 0 failures, 118 skipped;
-failsafe 512, 0 failures, 458 skipped), the packages' image runs on both Java lines are recorded in `TODO.md`, and the Linux
-matrix of the integrated tree, the code review and the security delta review are still to do. **Blocks.** Nothing; a veto costs
-the rework the row names, and `design/phase7-contracts.md` §17 gives the alternative with its reason.
+`keypad-image` baselines carry three masks and the reviewer-only text of the container's `os.version` (D403, D350).
+
+The fixers' decisions are marked in the contract where they differ from or add to a sentence ("Fix wave (Phase 7 review, <TAG>,
+2026-10-10)", "(Phase 7 security fix, S<nnn>, built 2026-10-11, <TAG>)", and "As built (Phase 7, FX, 2026-10-11)" in P6 §4.6).
+D452 and D454 widen D349 and D383 (a masked label's name and the text under a mask's `regions` are withheld), D463, D467 and
+D468 widen D342 and D425 (the credential rule: the joined slot as a whole, mutating calls in flight, a person's slot not
+rebound), D464, D465, D466 and D469 amend D427 (the plan form), D482 amends D362 (no bind-time write), D470 adds rule 11 to
+§11 (the person's clipboard), D440 and D441 close the spelling and the reference route round the Robot opt-in, and D449 is the
+one decision that changes a Phase 6 behaviour (a `hook.<id>` holds its state when `hook.install` answers). D462 completes
+D475 (the agent now sends the browser's whole `bounds`). **Behaviour changes the owner should know**, from the fix wave and the
+security fixes: (e) the controller's Robot and glass gates (the executor, the session, the CLI's `call`, the plan compiler
+and the export) read `via` and `mode` as the agent does, in any case and with white space and control characters trimmed, and
+a `$slot` reference that resolves to Robot is refused at the call (D440, D441); (f) a Robot press refuses a point in a minimised
+frame or a window it owns, a point no screen shows, and `modifiers`, and a press received by another component makes the
+next action probe again (D450, D451, D459); (g) a model or an MCP client can no longer paste, copy or cut through the
+person's clipboard or the X11 selection, or press the middle button, through any tool or raw primitive (D470); an application's
+own Paste control stays an ordinary click, to be masked; (h) a browser a pack's `CaptureMask` names is masked on every route:
+no pixels, text or tree for a model or a client (D471); (i) no credential-joined slot is ever a model's or a client's
+argument in any spelling, their steps resolve against the slots' public values, nothing that changes the target runs for them
+while a credential is in flight, and a slot the person bound is not rebound by them (their bindings are marked `REQUIRED` in
+the export; the committed `session-basic-loan` bindings were regenerated key-free) (D463, D464, D467, D468); (j)
+`skillroy_scenario_run` in `approve` is refused without an approver and never writes into the bindings root, an images-only
+`approve` writes nothing at bind time, and an `approve` with `REJECT_ALL` after an environment change now ends
+`RESOLUTION_FAILED / NOT_APPROVED` (D482); (k) the image comparison blanks a focus owner's rectangle only up to a quarter of
+the compared raster, so a baseline approved while the compared component held the focus may need re-approval if the focus
+differs at replay (D481); (l) `skillroy session` without `--out` writes into a new owner-only temporary directory and prints
+its path (D485); (m) the scenario player evaluates the plan's `verify` after the last step, so a played scenario can now end
+`FAIL` where it ended `PASS` (D443); (n) the turn's first message lists the slots the person bound, and the five Phase 5
+session recordings were regenerated key-free for it: any later change of that message regenerates them again (D444).
+**State of the build.** Built, reviewed, fixed and security-reviewed (delta) 2026-10-10/11: the native reactor on the head
+`c94aade` is green (5,099 tests, 0 failures, 0 errors, 592 skipped, surefire and failsafe together), the fixers' image runs on
+both Java lines are recorded in `TODO.md`, and the Linux matrix of the final tree is `[final matrix]`. **Blocks.** Nothing; a
+veto costs the rework the row names, and `design/phase7-contracts.md` §17 gives the alternative with its reason.
+
+## B31 The Phase 7 security delta review's sign-off (2026-10-11; open, the owner's)
+
+**From:** the delta review that B13 and the release checklist's item 2 ask of a phase that opens a new boundary, specified in
+`design/phase7-contracts.md` §15 (D338; the sign-off rule is P6 §12.6: the owner writes it, the orchestrator does not) and run
+on 2026-10-10/11 over everything Phase 7 changed since `af29e59`, the tree B28 covered. Its records are in the session notes,
+outside the repository: `notes/2026-10-10/phase7/security/` (`record.json` in the 2026-10-02 shape, with the dispositions as
+built, `dispositions.md`, the eight lenses' reports with their sceptics' verdicts, and the four fix reports); `TODO.md`
+summarises them under "Security review (Phase 7 delta, 2026-10-10/11)".
+
+- **The review:** eight lenses (L1 controller correctness and bounds, L2 host safety, L3 the data channels and, found there,
+  the credential rule, L4 the web boundary, L5 the model boundary, L6 the model as an actor, L7 Windows and file-system trust,
+  L8 evidence at rest), one reviewer and one sceptic each; L1, L3, L4, L7 and L8 on `e96a20b`, L2, L5 and L6 on `c690bef`.
+  52 findings raised (29 by the reviewers, 23 by the sceptics), 1 refuted (L8-F4, no number), 3 duplicates merged:
+  **48 standing, S101-S148: 0 critical, 2 high, 13 medium, 33 low; 42 counted (2 high, 13 medium, 27 low), 6 operator-only
+  (S117, S119, S126, S136, S143, S147), none token-holder-only**. 22 were raised by the sceptics; the sceptics re-rated S129
+  and S141 (to low) and restated the reach of S103, S110, S145 and S147. Per lens: L1 6, L2 9, L3 5, L4 7, L5 5, L6 6, L7 6, L8 4.
+  The code review's fix wave closed none of them.
+- **The two high findings:** S101, the credential rule of D342 missed the credential-joined slot as a whole (`x$staff` resolved
+  to the slot with its joined password in a model's or a client's argument, past every refusal on every route), and S102, the
+  plan form keyed a pack verb's written arguments by source line (flow-style YAML or a one-line JSON scenario let
+  `$staff.password` through a pass-through verb). Both were reachable by a model or an MCP client.
+- **Dispositions:** every finding of medium or above is **fixed**, and so are 31 of the 33 lows (contract first, a test that
+  fails on the old code, marked in the contract with the review id), by four packages with the primary assignment SG 12, SH 7,
+  SI 14 and SJ 13 findings (S108, S124, S143 and S146 shared by two packages), merged into `main` as SG `5d6fdd8`, SH `edba708`,
+  SJ `73e406a`, SI `056a007` and SG's follow-up for S108 `c94aade`; their 37 decisions are D450-D486 (B30). No fixer found a
+  finding wrong or already fixed. Nothing of medium or above is accepted or deferred.
+- **Proposed for the owner's acceptance (P6 §12.5: a documentation-only change is an acceptance), each with its release note
+  (also in `SECURITY.md` "Known limitations", marked provisional until this sign-off):** the two lows below.
+- **Not verified** (also in `README.md`, `SECURITY.md` and `design/threat-model.md` §8): everything on Windows (the ACL
+  judgement of S141 on built values only, S142's junction, S144's inheritance, a minimised frame's parking position,
+  `SetCursorPos` clamping), where no host exists; macOS (the routing of a button event at an off-display point, the first glass
+  capture's screen-recording consent dialog) and the minimised-frame refusal off the WM-less display (it ran once under
+  openbox); a window of the target JVM on another virtual desktop or workspace, which AWT cannot see; a real masked browser
+  (S111 ran against fakes and over real Swing components), one desktop with a real JCEF frame and a `JOptionPane` (S108), the
+  paste of S110 and the middle click on an X11 desktop with a headed JVM, S133's late click on real Chromium; every path that
+  needs a live model call (a provider's handling of a toolset member whose `configs` disable it, the planner's model choosing
+  `approve`, the 5.5 models' history rule under the automatic cache hint); a second OS user for the writers' link rule (S140),
+  an APFS case-insensitive volume (S118), a real multi-screen desktop, HiDPI (the glass bound at scale 3 through a seam only),
+  the amd64 image; and the other items of `threat-model.md` §8. The lenses themselves ran with no display and no image run.
+- **Two notes for the owner, not findings.** (1) The clipboard route of S110 (a model pasting the person's clipboard or the X11
+  selection into the target, and so to the provider through the next capture) **predates Phase 7**: the planner's server is
+  always `mcp --mutating` and has offered `swing_key` with modifiers since Phase 5, so the route existed for the planner and for
+  a client of a `--mutating` server when B28 signed off S35-S100, and B28 did not see it; D470 closes it for every route and
+  Phase 7 added the second default route (every vision session). (2) Under the default `fallbacks: true` a refused vision
+  request is re-run by the provider on a fallback model of the same provider, redacted captures included; the fallback targets'
+  data-handling regime is the owner's to confirm (the open S52 question of pass 2, now with pixels; `SECURITY.md` says so).
+- **Outside reader:** none has read the record yet (B26 Q12: recommended, recorded, not a gate).
+- **Matrix:** the final Linux matrix is `[final matrix]`; the live acceptance of `VisionLiveIT` ran three times (the last on
+  the final code: 7 of 7, USD 0.148; `TODO.md`).
+
+**Question.** Does the owner sign the delta review off, with the two lows below accepted? The orchestrator recommends yes,
+once the final matrix is green and the owner has read the two release notes. The signature is the owner's; this entry is a
+draft until it is given.
+
+| Item | Low finding proposed for acceptance, with its release note (also in `SECURITY.md` "Known limitations") | Veto form offered |
+|---|---|---|
+| S142 (L7-F4) | On Windows a directory junction (`mklink /J`, which needs no privilege) in place of a run's `failure/`, `captures/` or `candidates/` directory, of the per-scenario output directory, or of a bindings environment's `<id>.images/` directory is taken for an ordinary directory and judged by its target's owner: the run then writes its PNG files into, and deletes files of its own names from, the directory the junction points at, if the operator owns it; a symbolic link in the same place is refused unless the operator owns it. Give `--out` and the working copy a directory under your profile whose ACL others cannot write (`icacls <dir> /inheritance:r /grant:r "%USERNAME%":(OI)(CI)F`). Not verified on a Windows host (a code remedy, comparing the real path, is named in the finding for a later Windows host) | `B31 S142 fix` (waits for the Windows host) |
+| S144 (L7-S2) | On Windows, run output, a session's `captures/` (a screenshot of every screen the model acted on), `candidates/`, `failure/image-*.png` and an uncommitted `<id>.images/` directory inherit the access list of the directory they are created in; the `umask 077` remedy of the POSIX hosts has no counterpart there, and a folder under `C:\` gives every local user read access by default. On a shared Windows host give `--out` and the working copy a directory under your profile, or remove inheritance from the directory you choose. Not verified on a Windows host (the code alternative, S37's option (i) for ACL volumes, is not built) | `B31 S144 fix` (waits for the Windows host) |
+
+Other veto form: `B31 outside reader first` would make an outside human reader of the record a gate of the sign-off. Two optional
+choices the review left to the owner are not part of the sign-off: whether replay should refuse `NOT_APPROVED` for a recorded
+`REQUIRED` approval whatever the strategy (one line in `Binder`; gap 93), and whether `web.dom.click` and `web.dom.fill` should
+refuse a page under a modal dialog for a model or a client (gap 96). **What it changes.** With `B31 ok` the "Reviews" paragraph
+of `SECURITY.md` carries the signature and drops "provisional" from the two release notes, `docs/release-checklist.md` item 2
+records it, and in `TODO.md` the Phase 7 item "The security delta review" is ticked and the Exit item's criterion "the security
+delta review is signed off" is marked met. The two release notes join the release note (checklist item 11), ten with B28's
+eight. **State of the build.** Everything is built and merged into `main` (head `c94aade`; nothing pushed). **Blocks.** Nothing
+for the build; the first public release waits for the signature and for the owner's word to push (B1).
 
 ---
 
 ## Questions for the owner
 
-**Two open as of 2026-10-10: B29 and B30.** **B29** is the Phase 7 contract's thirty-nine answers (`design/phase7-contracts.md` §18, decisions D287-D358), taken without the owner on 2026-10-10 and **provisional**; the build proceeded on them, as it did on B26. Three of the points need the owner's own knowledge or taste: Q27 (whether a JxBrowser licence holder's run is near, for the JxBrowser input that is built against a fake), Q34 (how V3 sessions on a person's desktop will be run, which decides whether the focus rule's default stands) and Q25 (the number pad as the sample's component, a matter of taste). The answer form is the one of the earlier questions: `B29 ok` to confirm all thirty-nine, or a veto in the form the B29 table gives (for example `B29 Q27 veto`, `B29 Q11 veto refuse`, `B29 Q16 veto vendor`, `B29 Q21 veto toolsetName`); any question not mentioned keeps its answer. **B30** is the 72 decisions the Phase 7 build took (`design/phase7-contracts.md` §17, D359-D430), taken without the owner on 2026-10-10 and **provisional**; none rests on knowledge only the owner has, but D413 (JxBrowser's input roles, named from the public API without the library), D425 (`ExecutorSession.fixture` and its origin rule) and D403 (`keypad-image`'s frame check with three masks) are the ones worth a look. The answer form is `B30 ok`, or `B30 D<n> veto` in the form the B30 table gives (for example `B30 D384 veto`, `B30 D404 veto`); any decision not mentioned keeps its answer. The decisions of the Phase 7 code review's fix wave and of the security delta review's fixes will join B30 from D431, and B31 (the security delta review's sign-off) will follow; neither is open yet.
-Before B29 and B30 none was open: the owner confirmed **B26** (the twenty-two answers of the Phase 6 contract,
+**Three open as of 2026-10-11: B29, B30 and B31.** **B29** is the Phase 7 contract's thirty-nine answers (`design/phase7-contracts.md` §18, decisions D287-D358), taken without the owner on 2026-10-10 and **provisional**; the build proceeded on them, as it did on B26. Three of the points need the owner's own knowledge or taste: Q27 (whether a JxBrowser licence holder's run is near, for the JxBrowser input that is built against a fake), Q34 (how V3 sessions on a person's desktop will be run, which decides whether the focus rule's default stands) and Q25 (the number pad as the sample's component, a matter of taste). The answer form is the one of the earlier questions: `B29 ok` to confirm all thirty-nine, or a veto in the form the B29 table gives (for example `B29 Q27 veto`, `B29 Q11 veto refuse`, `B29 Q16 veto vendor`, `B29 Q21 veto toolsetName`); any question not mentioned keeps its answer. **B30** is the 128 decisions the Phase 7 build, its code review's fix wave, the race fix and the security fixes took (`design/phase7-contracts.md` §17, D359-D486), taken without the owner on 2026-10-10 and 2026-10-11 and **provisional**; none rests on knowledge only the owner has, but D413 (JxBrowser's input roles, named from the public API without the library), D425 (`ExecutorSession.fixture` and its origin rule), D403 (`keypad-image`'s frame check with three masks), D470 (no clipboard for a model or a client) and D482 (no bind-time write; `approve` under `REJECT_ALL`) are the ones worth a look. The answer form is `B30 ok`, or `B30 D<n> veto` in the form the B30 table gives (for example `B30 D384 veto`, `B30 D404 veto`, `B30 D470 veto`); any decision not mentioned keeps its answer. **B31** is the sign-off of the Phase 7 security delta review (S101-S148: 2 high, 13 medium, 33 low; everything of medium or above and 31 lows fixed): the orchestrator recommends yes once the final Linux matrix is green and the owner has read the two release notes of S142 and S144 (a Windows junction and the Windows ACL inheritance of the pixel files); the answer form is `B31 ok`, or `B31 S142 fix`, `B31 S144 fix` or `B31 outside reader first`; it is the owner's to give, and the orchestrator does not sign it. Two optional choices ride along (gaps 93 and 96 of `TODO.md`): whether replay should refuse a recorded `REQUIRED` approval whatever the strategy, and whether the DOM click and fill primitives should refuse a page under a modal dialog for a model or a client.
+Before B29, B30 and B31 none was open: the owner confirmed **B26** (the twenty-two answers of the Phase 6 contract,
 `design/phase6-contracts.md` §17, D114-D159) and **B27** (the 127 decisions the Phase 6 build, its code review's fix wave
 and the security fix rounds took, D160-D286) on 2026-10-10, every row, without a veto, and signed off **B28** (the repeat
 security review, S35-S100) the same day with the eight lows accepted as proposed: "I confirm all your default decisions,

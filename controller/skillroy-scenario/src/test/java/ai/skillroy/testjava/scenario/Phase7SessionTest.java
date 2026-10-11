@@ -191,7 +191,7 @@ class Phase7SessionTest {
                 }
             }
             assertTrue(fx.agent.callsTo("swing.capture").isEmpty(), "no glass capture was sent for them");
-            // D-FB-2: a reference that resolves to ROBOT passes no gate as written, so the call refuses it, for every
+            // D441: a reference that resolves to ROBOT passes no gate as written, so the call refuses it, for every
             // origin and whatever the flag.
             session.fixture("r", Map.of("v", "robot", "m", " Robot"), null, PERSON);
             for (Origin origin : List.of(PERSON, MODEL)) {

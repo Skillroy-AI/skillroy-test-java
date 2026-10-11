@@ -202,7 +202,7 @@ class InstallTest {
     }
 
     /**
-     * phase6-contracts.md 4.6, as built in Phase 7 (FX, D-FX-1): {@code hook.install} answers after every declared
+     * phase6-contracts.md 4.6, as built in Phase 7 (FX, D449): {@code hook.install} answers after every declared
      * {@code hook.<id>} holds its health state, also while the core has not yet run the probe it posted to a worker
      * for the late declaration; the read that follows the answer (a run's step 0b) never sees "not probed yet". The
      * worker's probe, when it runs, answers the same. Fails without the first answer set at declaration.

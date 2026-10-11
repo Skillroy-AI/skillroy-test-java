@@ -702,7 +702,7 @@ class CaptureTest {
     }
 
     /**
-     * Security fix S108 follow-up (SI's D-SI-6): a scroll-clipped browser's surface carries {@code bounds}, the
+     * Security fix S108 follow-up (SI's D475): a scroll-clipped browser's surface carries {@code bounds}, the
      * component's whole rectangle in image coordinates, not clipped to the image or to the visible part, so that the
      * composite can place the page's bitmap and clip it to {@code rect}; here the browser starts 30 pixels above the
      * viewport (and above the image) and ends below it.

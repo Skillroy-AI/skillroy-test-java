@@ -284,7 +284,7 @@ class Phase7ExecutorTest {
     }
 
     /**
-     * The fix wave of the Phase 7 review (FB, D-FB-2): the gates read {@code via} and {@code mode} as written, so a
+     * The fix wave of the Phase 7 review (FB, D441): the gates read {@code via} and {@code mode} as written, so a
      * reference that resolves to ROBOT is refused at the call, before it is sent, even with {@code RunOptions.robot}.
      */
     @Test

@@ -808,7 +808,7 @@ final class HookEngineImpl implements HookEngine {
 
     /**
      * Declares {@code hook.<id>} with its health probe and sets it at once to the probe's first answer (section 4.6,
-     * as built in Phase 7, FX, D-FX-1). The core probes a declaration made after the target is ready later, on the agent
+     * as built in Phase 7, FX, D449). The core probes a declaration made after the target is ready later, on the agent
      * worker it posts to, and reads it {@code UNAVAILABLE("not probed yet: ...")} until then; without the first answer
      * a matrix read right after {@code hook.install}'s answer could catch the hook pending. The probe stays declared for
      * {@code agent.capabilities {reprobe}}, and the worker's later run answers the same. Called under {@link #lock}.

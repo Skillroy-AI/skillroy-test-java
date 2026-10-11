@@ -9,8 +9,9 @@ Tick each item in the release's own record (the release note or its pull request
    (`-Dskillroy.it.targetJava=/opt/jdk8/bin/java`), and the agent-side modules on a Java 8 test JVM (`-Djvm=…`). The
    live profiles report themselves skipped.
 2. **The security review.** The first public release: the repeat review's record (both passes) and the owner's
-   sign-off, B28 in `DECISIONS.md`, given on 2026-10-10. Every later release: a delta review of what changed since the
-   last signed record.
+   sign-off, B28 in `DECISIONS.md`, given on 2026-10-10; and the Phase 7 delta review's record (S101-S148, run and fixed
+   2026-10-10/11) with the owner's sign-off, B31 in `DECISIONS.md`, **open** (the orchestrator does not sign it). Every later
+   release: a delta review of what changed since the last signed record.
    Every confirmed finding is fixed, or, if low, accepted in writing by the owner with a release note.
 3. **Was the record read by someone outside the project?** Record "done" (by whom) or "waived by the owner"; recommended,
    not a gate (B26 Q12).
@@ -21,8 +22,11 @@ Tick each item in the release's own record (the release note or its pull request
 6. **The "not verified" list is current** in `README.md`'s status paragraph, `SECURITY.md` and
    `design/threat-model.md` §8 (the Windows items, the `jxbrowser` adapter against the real product, the live-only
    paths, and the Phase 7 items of `design/phase7-contracts.md` §13.4: Robot input off the Linux image's display, any
-   display scale other than 1, JxBrowser pointer input, the vision loop beyond the spikes' short sessions). The `.bat`
-   launcher is marked unverified or verified accordingly.
+   display scale other than 1, JxBrowser pointer input, the vision loop beyond the spikes' short sessions and the live class's
+   three short runs) and the delta review's fixes (a masked browser on real JCEF, the minimised-frame and off-screen refusals
+   off the Linux image's display, the paste and the middle click on an X11 desktop, a second OS user, an APFS
+   case-insensitive volume, the Windows ACL judgement of the run-output directory; `design/phase7-contracts.md` §13.4). The
+   `.bat` launcher is marked unverified or verified accordingly.
 7. **The committed artefacts are up to date**: plans, bindings, capability goldens, recordings and the scenario schema
    (`PlansUpToDateTest`, `BindingsUpToDateTest`, `CapabilityGoldenTest`, `ScenarioSchemaCommittedTest` and their
    siblings green).
@@ -31,5 +35,7 @@ Tick each item in the release's own record (the release note or its pull request
 9. **Coordinates**: the domain behind the `ai.skillroy` groupId is under the project's control (B2).
 10. **The DCO trail**: every commit since the last release carries a `Signed-off-by` line.
 11. **The release note** names every accepted or deferred low finding with its release-note text (the eight of B28
-    for the first release: the five of B26 Q22 and S77's residual, S84 and S94 of pass 2), the "not verified" list, and the outcome of item 3.
+    for the first release: the five of B26 Q22 and S77's residual, S84 and S94 of pass 2; and, once B31 is given, S142 and S144
+    of the Phase 7 delta review, ten in all), the behaviour changes of the fixes that a user can see (`DECISIONS.md` B27 and
+    B30), the "not verified" list, and the outcome of item 3.
 12. **Neutrality**: the private deny-list check of the sibling repository passes on the release commit.

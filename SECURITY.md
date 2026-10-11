@@ -53,7 +53,9 @@ Read these before you run the agent on a shared host.
   that other users cannot write to, never a path directly under `/tmp`: a run refuses an output directory another user
   owns or others may write to (without the sticky bit), and never writes through a file or link already in place of
   one of its files (security pass 2, P2-L8-F3, P2-L8-S1). That a private umask is the advice and not the default is
-  accepted by the owner (B28, 2026-10-10).
+  accepted by the owner (B28, 2026-10-10). On Windows the output directory's access list is judged too: a directory that
+  lets another user write to it, or to the files created in it (a folder under `C:\` inherits Modify for Authenticated
+  Users), is refused with the `icacls` remedy (Phase 7 security fix, S141; not verified on a Windows host).
 - **Settings files must be your own.** `telemetry.yaml` and `inference.yaml` beside the credentials file (or in the
   bindings environment directory) are read only when no other user could have written them: a file others (or a
   shared group) may write to, or another user's, stops the command with a settings error naming it; on a Linux host
@@ -89,40 +91,86 @@ Read these before you run the agent on a shared host.
   component after it was painted, so the layout and a value's width stay visible; and pixels carry no value mask: a
   component no mask names reaches a model as rendered. A pack's `CaptureMask` must name every component that can show a
   secret, and any control that feeds a secret field as well (the sample's number pad is masked while its entry field is).
+  A mask's `regions` hide both the pixels and the text they cover (a label or field they meet, a table's cells, a list's
+  selected item); two masks combine by union; the accessible name of a masked label or button is its text and is withheld
+  with it, while a name set apart from the text (an accessible name, a `labelFor` label, a border title, `setName`) stays and
+  must not itself be a secret (Phase 7 security fix, S106, S122, S123).
 - **A page's pixels are masked as a whole or not at all** (P7 §11 (b)). There is no mask for a DOM element: a pack whose
-  page shows personal data masks the whole browser component (with a `CaptureMask`) while it does.
+  page shows personal data masks the whole browser component (with a `CaptureMask`) while it does, and a masked browser is
+  masked on every route: its page reaches no model and no client as pixels, text or tree (`web_bitmap`, `web_dom_text`,
+  `web_aria_snapshot` and `web_hit_test` are refused, the snapshot shows `[web <ref> masked]`; Phase 7 security fix, S111).
 - **With vision on, pixels leave for the model provider** (P7 §11, rule 2). With `--vision` and the inference settings'
   `images: true`, redacted captures of the target's own windows go to the provider with every vision call; `images: false`
   (the default) or `--vision off` keeps every pixel at home. A capture of the glass (`mode: ROBOT`) never goes to a model or
-  a client.
-- **The Robot tier presses where the pointer lands** (P7 §11 (c), (d)). V3 presses whatever is at the screen point when the
-  desktop changed in the milliseconds between the agent's focus read and the press, and a covering window of another
-  process cannot be seen; the first press that is not received degrades the capability, so the damage is bounded to about
-  one stray click per focus loss. A person's `ROBOT` capture shows the glass inside the target's window rectangles, so a
-  window of another process that covers the target is in it; it never goes to a model or a client.
+  a client. A model or a client can no longer paste, copy or cut through the person's clipboard or the X11 selection, nor
+  press the middle button, through any tool or raw primitive (S110), but an application's own Paste control is an ordinary
+  click: mask it. Under the default `fallbacks: true` a refused request is re-run by the provider on a fallback model of the
+  same provider, redacted captures included; whether the fallback targets' data handling suits you is yours to confirm.
+  Two bounds were added: no token count is sent to the provider when the session's budget is exhausted or too small (S135),
+  and a turn's tool reads (captures, waits, zooms) are bounded, to 20 or twice the action limit, and its waits together to
+  three step timeouts (S138).
+- **The Robot tier presses where the pointer lands** (P7 §11 (c), (d)). V3 refuses a point in a window of the target JVM
+  that the toolkit reports minimised (or a window a minimised frame owns), a point no screen shows, a point under another
+  window of the JVM, and `modifiers` (Phase 7 security fix, S104, S105, S124). It still presses whatever is at the screen
+  point when the desktop changed in the milliseconds between the agent's focus read and the press, when a covering window of
+  another process cannot be seen, and when a window of the JVM lies on another virtual desktop or workspace, which AWT cannot
+  see (the focus rule is the only guard there). A press that is not received, or that another component received, makes the
+  next call probe delivery again, and that probe degrades the capability when it fails (the press itself does not), so the
+  damage is about one stray click per successful action in between. A person's `ROBOT` capture shows the glass inside the
+  target's window rectangles (and blanks the masks of every window of the JVM that meets them), so a window of another
+  process that covers the target is in it; it never goes to a model or a client.
 - **Committed baselines and anchors are screenshots** (P7 §11 (e)). `<scenarioId>.images/` beside a bindings file holds the
   application's data as rendered, masked per component only: mask with `expectImage`'s `mask` what must not be committed, and
-  review the PNGs as you review the YAML.
+  review the PNGs as you review the YAML. `skillroy_scenario_run` over MCP refuses `approve` on a server without an approver and
+  never writes into the bindings root, an images-only `approve` writes nothing at bind time, an unreadable bindings file stops
+  `approve` instead of being rewritten, and `approve` without `--out` rejects a candidate it cannot show (only `--yes` approves
+  unseen; S115, S116, S117). The image comparison blanks a focus owner's rectangle only up to a quarter of the compared raster
+  (S103): a baseline approved while the compared component held the focus may need re-approval if the focus differs at replay;
+  the message says it was compared, not masked.
 - **`captures/` holds a screenshot of every acted-on screen** (P7 §11 (f)). Under the session's output directory, the raster
   as the agent captured it (redacted, never a glass capture), with the process umask: run a vision session on a shared host
-  under `umask 077`, or without an output directory, which keeps nothing and cannot export an anchored step.
+  under `umask 077`; without `--out` the session writes into a new owner-only directory under the system's temporary
+  directory, whose path it prints at the start and the end (it is kept: remove it when done), so on a shared host give
+  `--out` a directory you own (Phase 7 security fix, S148).
 - **The Robot opt-in can be committed** (P7 §11 (h)). The agent option `robot=true` in a launcher configuration and
   `skillroy.robot=true` in a build file are halves of the opt-in (the other is `--allow-robot` on the command): do not commit
   either. The JUnit glue prints a warning whenever the property is true.
 - **The Robot tier is verified on the Linux image's display only** (P7 §11 (g), §13.4). macOS with the Accessibility
   permission granted (without it Robot delivers nothing, silently, and the delivery probe says so), Windows, Wayland, a locked
   session and a scale other than 1 are not verified, nor is a person's desktop with another process's window over the target.
+- **A directory junction in a run's output tree** (S142; provisional until the owner's sign-off, B31). On Windows a directory
+  junction (`mklink /J`, which needs no privilege) in place of a run's `failure/`, `captures/` or `candidates/` directory, of
+  the per-scenario output directory, or of a bindings environment's `<id>.images/` directory is taken for an ordinary
+  directory and judged by its target's owner: the run then writes its PNG files into, and deletes files of its own names
+  (`image-*`, `web-*`, `run.jsonl`, `bindings.json`, the ledgers, `capabilities.json`, `failure/*.json`, `capture.png`) from,
+  the directory the junction points at, if the operator owns it. A symbolic link in the same place is refused unless the
+  operator owns it. Nothing is read back through the junction except a baseline whose hash is still checked. Give `--out`
+  and the working copy a directory under your profile whose ACL others cannot write (`icacls <dir> /inheritance:r /grant:r
+  "%USERNAME%":(OI)(CI)F`). Not verified on a Windows host.
+- **Windows run output inherits its parent's access list** (S144; provisional until the owner's sign-off, B31). On Windows,
+  run output, a session's `captures/` (a screenshot of every screen the model acted on), `candidates/`,
+  `failure/image-*.png` and an uncommitted `<id>.images/` directory inherit the access list of the directory they are
+  created in; the `umask 077` remedy of the POSIX hosts has no counterpart there, and a folder under `C:\` gives every local
+  user read access by default. On a shared Windows host give `--out` and the working copy a directory under your profile, or
+  remove inheritance from the directory you choose (`icacls <dir> /inheritance:r /grant:r "%USERNAME%":(OI)(CI)F`). Not
+  verified on a Windows host.
 - **Not verified on Windows.** No Windows host has run this code: the access-control branches that make the token,
   credential and discovery files owner-only, the `.bat` launcher, the planner's `cmd.exe /c` form, `JAVAAGENT` as the
-  logged-on user, the input rungs and the Robot tier (UIPI, session 0, the popup trigger on the release). Until the project
+  logged-on user, the input rungs and the Robot tier (UIPI, session 0, the popup trigger on the release, a minimised frame's parking position and
+  the cursor clamping of S104 and S105), and the ACL judgement of the run-output directory (S141, tested on built ACL values;
+  it resolves CREATOR OWNER by its English name). Until the project
   says otherwise, treat Windows as unverified.
 - **Not verified elsewhere.** The `jxbrowser` adapter against the real library, its pointer input included (the roles are
   named from the public API); the paths that need a live model key, among them the vision loop beyond the short sessions of
-  the spikes (the Phase 7 live class has not been run); a hook detach that ran out of its time budget on a real application
+  the spikes and the Phase 7 live class's three short runs (the last on the final code, 7 of 7), a provider's handling of a
+  toolset member whose `configs` disable it, and the planner's model choosing `approve`; a hook detach that ran out of its time budget on a real application
   (a Byteman rule left installed by such a detach keeps running until the target restarts). Phase 7 adds heavyweight popups
   and native drag and drop under the pointer primitives, windowed JCEF on a Java 8 target, a long vision session and the
   session's fold under the provider's history rule, and the committed image baselines on the amd64 image (a key that differs
-  there is settled by an `approve` run on that leg). The full list is §8 of the threat model.
+  there is settled by an `approve` run on that leg). The delta review's fixes add a masked browser on real JCEF (the fixes ran
+  against fakes and over real Swing components), a real JCEF frame under a `JOptionPane`, the paste and the middle click on an
+  X11 desktop with a headed JVM, a second OS user for the writers' link rule, an APFS case-insensitive volume, a real
+  multi-screen desktop and HiDPI (the glass bound at scale 3 through a seam only). The full list is §8 of the threat model.
 
 ## Reviews
 
@@ -131,7 +179,11 @@ The design was reviewed for security on 2026-10-02 (findings S1-S34, all fixed).
 eight lows are accepted by the owner in the limitations above; `docs/TODO.md`, "Security review (repeat, pass 1)" and
 "(repeat, pass 2)"). The owner signed the repeat review off on 2026-10-10 (B28 in `docs/DECISIONS.md`). No outside reader
 has read the record yet; one is recommended, not a gate (B26 Q12). Phase 7 (the vision bolt-on, pointer input and the Robot
-tier, built 2026-10-10) opens new boundaries (pixels leave the JVM, screen content steers a model, Robot acts outside the
-application) and has not been security-reviewed yet: its delta review (`docs/design/phase7-contracts.md` §15, findings from
-S101, the owner's sign-off B31) is still to do, and the limitations above are the build's own statement of what masking and
-the Robot tier cannot do.
+tier, built 2026-10-10) opened new boundaries (pixels leave the JVM, screen content steers a model, Robot acts outside the
+application) and was code-reviewed and security-reviewed on 2026-10-10/11: a delta review over everything it changed since the
+signed record (`docs/design/phase7-contracts.md` §15; eight lenses with a sceptic each; findings S101-S148: 48 confirmed, 2 high,
+13 medium, 33 low). Every finding of medium or above and 31 of the 33 lows are fixed; the two others, S142 and S144, are
+proposed for the owner's acceptance with the release notes above, marked provisional. **The owner's sign-off of the delta
+review (B31 in `docs/DECISIONS.md`) is open**: until it is given, Phase 7's boundary is reviewed and fixed, not signed off, and
+the limitations above are the build's own statement of what masking and the Robot tier cannot do. The clipboard route (S110)
+was found by this review in code that predates Phase 7 (the planner's mutating server) and is fixed for every route.

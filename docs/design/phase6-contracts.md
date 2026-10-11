@@ -1348,7 +1348,7 @@ without the base learning the pack's vocabulary (design §1.3: hook-dependent ex
 capabilities). The ids `hook.engine`, `hook.probe`, `hook.install`, `hook.stub`, `hook.remove`, `hook.health` and
 `hook.events` are reserved and refused as hook ids (`INVALID_PARAMS`).
 
-**As built (Phase 7, FX, 2026-10-11): a `hook.<id>` holds its state when `hook.install` answers** (D-FX-1). The core
+**As built (Phase 7, FX, 2026-10-11): a `hook.<id>` holds its state when `hook.install` answers** (D449). The core
 probes a capability declared after the target is ready later, on an agent worker the declaration posts to, and until
 that probe has run the entry reads `UNAVAILABLE("not probed yet: the target is not ready")` (P1 §5: the pending case);
 `hook.install` declares its `hook.<id>` after the target is ready. The engine therefore also **sets each `hook.<id>` at

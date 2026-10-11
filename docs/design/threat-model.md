@@ -5,7 +5,8 @@ same day after the contract review and pass 1 of the repeat security review; cit
 there) and by `SECURITY.md`; **extended 2026-10-10 for Phase 7** (`phase7-contracts.md` §11 and §15, decision D334: the
 rows and lines marked "(Phase 7)" below, written with the contract and completed by its build and its security delta
 review, B31; revised the same day after the contract review: the §3 bullet, the §5 paragraph, the §6 rows, the §7
-line and the §8 lines). It says who the adversaries are, where the
+line and the §8 lines; **completed 2026-10-11 by the delta review's fixes** (findings S101-S148, `phase7-contracts.md` §15,
+marked "Phase 7 security fix" below): the delta review is run and fixed and its sign-off, B31, is the owner's and open). It says who the adversaries are, where the
 trust boundaries run, what the framework trusts on purpose, and what is out of scope, so that a reviewer's "who can
 reach it" and a release reader's "what does this protect me from" rest on one text. Where this document and a
 contract disagree, the contract has the detail and this document the judgement; change this one first when the
@@ -43,7 +44,7 @@ evidence) and, in Phase 6, may export spans to a telemetry backend.
 | A12 | **Other code in the target JVM**: another bytecode agent, a profiler, an application plugin | retransform the same classes, redefine them, register transformers before or after ours; **call the public statics `Spy.enter`/`Spy.exit` and `RuleHelper.fired` and so forge a hook or rule event**; claim `Spy`'s slot if it were ever free; reach, by reflection, the package-private statics through which the Byteman module takes its `Retransformer` (§7); on Java 8, have its own redefinition reverted by the engine's restore (BS3, case BC4) | no: it is not hostile by assumption, but the engine must survive it and report what it cannot see (P6 §3.5, D154); hook and rule events are evidence against non-adversarial application code only (§3) |
 | A13 | **A reader of what a run leaves behind**: whoever reads `run.jsonl`, `failure/`, `capabilities.json`, bindings, ledgers, `spans.jsonl`, a planner's envelope, an MCP `--out` directory, a CI artifact | read every value written there; on a shared host, read a run output tree that took the process umask (pass 1, S37) | no: hence P2 §11.4's "never written" list, the masks on every capture and attribute, and the `umask 077` rule for shared hosts |
 | A14 | **The model provider**, or whatever `ANTHROPIC_BASE_URL` names | read every prompt and image sent; answer anything | no for its answers (A5); its handling of what it received is out of scope (§7); the masks run before a request is built, and the key goes to it alone (P5 §2.3, §6.2); (Phase 7) an image reaches it only as a redacted `PAINT` capture of the target's own windows, never a capture of the glass, and only under `images: true`; pixels carry no value mask, so what the application renders in a component no mask names reaches it as rendered (P7 §3.4, §3.6, §11) |
-| A15 | **(Phase 7) Whatever else is on the desktop where the V3 tier runs**: another application's window, a notification, a screen lock, the person's own hand on the pointer | receive a Robot click aimed at the target, or take the pointer while the agent moves it; on macOS without the Accessibility permission swallow every event silently (BS9) | no: Robot acts on whatever is at a screen point, so V3 is behind a double opt-in (the agent option `robot` and a person's `--allow-robot`) and is never a per-call choice of a model or a client, refuses a point outside the target's windows and a point any window of the target JVM covers, requires the target JVM to hold the focused window at the press (`requireFocus`, read on the EDT immediately before the pointer moves), never leaves a button pressed (a press and its release in one task, the release in a `finally` before the pointer is restored), probes delivery, reports `NOT_DELIVERED` instead of a success it cannot see, and on a person's desktop the loop stops the turn when the target JVM loses the focus instead of clicking to win it back (P7 §3.4, §11) |
+| A15 | **(Phase 7) Whatever else is on the desktop where the V3 tier runs**: another application's window, a notification, a screen lock, the person's own hand on the pointer | receive a Robot click aimed at the target, or take the pointer while the agent moves it; on macOS without the Accessibility permission swallow every event silently (BS9) | no: Robot acts on whatever is at a screen point, so V3 is behind a double opt-in (the agent option `robot` and a person's `--allow-robot`) and is never a per-call choice of a model or a client, refuses a point outside the target's windows, a point in a minimised frame or a window it owns, a point no screen shows (Phase 7 security fix, S104, S105), `modifiers`, and a point any window of the target JVM covers, requires the target JVM to hold the focused window at the press (`requireFocus`, read on the EDT immediately before the pointer moves), never leaves a button pressed (a press and its release in one task, the release in a `finally` before the pointer is restored), probes delivery, reports `NOT_DELIVERED` instead of a success it cannot see, and on a person's desktop the loop stops the turn when the target JVM loses the focus instead of clicking to win it back (P7 §3.4, §11) |
 
 ## 3. What is trusted, on purpose
 
@@ -57,7 +58,9 @@ evidence) and, in Phase 6, may export spans to a telemetry backend.
   was committed. **(Phase 7) Image baselines and anchors are committed reviewed code in the same sense**: a baseline
   shows the application's data as rendered, masked per component only (the password rule and the pack's `CaptureMask`),
   so the author masks with `expectImage`'s `mask` what must not be committed, a reviewer looks at the PNG as at the YAML,
-  and `approve` and the export write one only after the person saw the file (P7 §8.7).
+  and `approve` and the export write one only after the person saw the file (P7 §8.7); an images-only `approve` writes the bindings
+  file only with a person's approval, at a step for a baseline or of the change for anything else, and a client's
+  `skillroy_scenario_run` never writes into the bindings root (Phase 7 security fix, S115).
 - **Hook and rule events as evidence.** An `OBSERVE`, `CAPTURE` or `rule.fired` event says that the hooked method ran
   with those values only if no code in the JVM called `Spy.enter`/`Spy.exit` or `RuleHelper.fired` itself (A12): the
   statics are public because an advice must reach them from every loader. A hook expectation is therefore evidence
@@ -145,18 +148,26 @@ well as its pixels), and nothing a model or an MCP client says can switch that o
 receives is a redacted `PAINT` capture of the target JVM's windows in every tier; a capture of the glass (`mode:
 ROBOT`), which holds other processes' pixels and the desktop, is a person's evidence only and is refused for a model or
 a client on every route (P7 §3.4, D341). Pixels carry no value mask: a component no mask names reaches the model as
-rendered, which is why **no credential is ever a model's or a client's argument**: a `$slot.secret` reference, and a verb
-given a credential-joined slot, are refused for every origin but a person's before anything is journaled or sent, a
-client's scenario run meets the same rule in the server's plan policy (a base verb or raw call naming a credential slot's
-field), no `type` runs for them while a credential is in flight, and sign-on runs through the pack's verb by the person
-or the player before the loop (P7 §9.2, D342).
+rendered, which is why **no credential is ever a model's or a client's argument**: a `$slot.secret` reference, the
+credential-joined slot as a whole (`$slot` in any spelling, whose value carries the joined fields) and a verb given a
+credential-joined slot are refused for every origin but a person's before anything is journaled or sent, and such a step's
+call arguments resolve against the slots' public values only; a client's scenario run meets the same rule in the server's
+plan policy (a base verb or raw call naming a credential slot's field or the slot itself, and a pack verb's arguments as the
+client wrote them, judged by step identity, with every caller passing the written scenario); nothing of a model's or a client's
+changes the target while a credential is in flight; a slot the person bound is never rebound on their behalf; and sign-on
+runs through the pack's verb by the person or the player before the loop (P7 §9.2, §9.4, D342, D425, D427; Phase 7 security
+fix, S101, S102, S107, S113, S127, S128).
 Text in a capture may carry instructions (vision §Risk7): the tools a vision session offers are the target's own
 primitives through the pack's verbs and the module's own tools, each acted through the session service's facade under
 the same `CallPolicy`, which the hosts' raw primitive paths run too (P7 §9.1). A pixel the model names becomes an
 action only through `swing.hitTest` (grounding), the stale-capture check and, in V1 and V2, the step that will be
 replayed, under `Origin.model`; in V3 a Robot press at the hit-tested point under the double opt-in, journaled
 live-only; a locator the mask would change is never recorded; the vision module's tools never click, type or press a
-key at a component a mask names (P7 §6.4, §6.5, §11). A visual verdict (`aiExpect`, `skillroy_look`) is advisory
+key at a component a mask names, nor with V2's raw button halves or a move onto one (P7 §6.3, §6.4, §6.5, §11). The person's
+clipboard and the X11 selection are not the target's: no paste, copy or cut chord and no middle button is ever sent for a model
+or a client (`CallPolicy`, every route; P7 §11 rule 11), and a browser a pack's mask names is masked on every route: no
+pixels, no text, no tree, in the loop's image, the session's snapshot and the raw `web_*` reads (P7 §3.6; Phase 7 security
+fix, S110, S111, S112). A visual verdict (`aiExpect`, `skillroy_look`) is advisory
 behind the capability `inference.vision`, which is `UNAVAILABLE` in `replay` and in every run that is not a vision
 session, so it never turns a failing scenario green and never gates CI. The one path from a model to the operating
 system's input queue, the V3 tier through `java.awt.Robot`, is a person's choice twice over (the agent option `robot`
@@ -181,8 +192,8 @@ client (P7 §3.4, §9.1).
 | the pack ↔ the base | a pack is reviewed code (§3); the base bounds what a pack's code receives (masked rows, bounded reads) and what it may declare (allow-lists checked against the database, D100) | P2 §6, P5 §5.2 |
 | **(Phase 7)** the agent against the host's desktop (the V3 tier) | `java.awt.Robot` constructed only behind the agent option `robot`, after the application started AWT (A4), on a worker and never the EDT; a `via: ROBOT` or `mode: ROBOT` call refused by the executor, the session and the raw `call` command without a person's `--allow-robot`, `mode: ROBOT` refused for every origin but a person's whatever the flag, and `via: ROBOT` never a model's or a client's per-call choice (`CallPolicy.arguments` on every route; the vision module's own V3 steps alone pass it); a point outside every showing window of the target JVM refused, any covering window of the JVM refused; the target JVM must hold a focused window at the press (`requireFocus`, default true, read on the EDT immediately before the pointer moves); a press always paired with its release in one task, the release in a `finally` before the pointer is restored (`PRESS`/`RELEASE` refused through Robot); a bounded delivery probe before the first action and `NOT_DELIVERED` when no press arrives, so a silent drop (macOS without the Accessibility permission, BS9) is never reported as a success; a press received by another component reported as a failure; on a person's desktop the loop stops the turn when the target JVM loses the focus | P7 §3.4, §9.1, §9.2, §11 |
 | **(Phase 7)** controller ↔ model, pixels | a capture reaches a model only as a redacted `PAINT` capture of the target JVM's own windows (never a capture of the glass, D341), redacted by the agent before it left the JVM, only under the inference settings' `images: true`, only as an image part (never as text on any route, D244; its `base64` never masked and never on a text route), its hash in the journal's provenance and in a recording; a page's pixels composited only into a surface no mask names (masked as a whole component or not at all); the marks list and the hit-test's names as target text inside `<target-ui>`, the model's own question inside `<model-question>`, the pack's screen legend and a tool's instructions in the system parts masked as the vocabulary is; no credential offered (the `$slot.secret` refusal, the refusal of a model's or a client's verb with a credential-joined slot, the plan policy's form for a client's scenario and the in-flight rule, D342); the budget reserved with the image's tokens before the call; every vision call through the service's metered, ledgered `visionCall`, so `replay`'s zero-call assertion covers it | P7 §3.6, §4.8, §6.2, §7, §9.2, §10 |
-| **(Phase 7)** the model's pixel ↔ the target | a coordinate acts only through `swing.hitTest` (grounding) and, when the window set changed since the capture, a fresh capture and a same-component check; the recorded step is then guarded by the verb's exact-match locator (`expectTarget` closes the window for the live-only raw calls and an MCP client's call; the residual is gap 87); the recorder refuses a masked target for every input and a screen-text locator the mask would change; the routed pointer keeps the modal check before the first event and before every further one, and the covering-window check, that AWT's modal loop and stacking would apply to a person, and acts on nothing after its call failed (a dispatched press is disarmed and released without an action); `web.pointer` refuses a browser whose window a modal dialog blocks on both paths, the CDP path through the agent's `web.browsers.blockedBy` (D404, D416); `force` on every input primitive, `via: ROBOT`, `mode: ROBOT` and `redact: false` are never a model's or a client's to give (`CallPolicy.arguments` at every host's raw primitive path and at the service's facade) | P7 §3.3, §6.4, §6.5, §9.1 |
-| **(Phase 7)** evidence at rest, pixels | captures the loop acted on (`captures/<sha256>.png`, the raster as captured, never a capture of the glass), image baselines and anchors beside the bindings file (reviewed code, §3; the file's path derived from the label and the render key and resolved inside the bindings directory without links), and `failure/image-*.png` hold masked pixels only, are written through `OutputFiles`, never travel on a text route, take the process umask (`umask 077` on a shared host), and are served to an MCP client only under `images: true` | P7 §8.7, §9.6, §11 |
+| **(Phase 7)** the model's pixel ↔ the target | a coordinate acts only through `swing.hitTest` (grounding) and, when the window set changed since the capture, a fresh capture and a same-component check; the recorded step is then guarded by the verb's exact-match locator (`expectTarget` closes the window for the live-only raw calls and an MCP client's call; the residual is gap 87); the recorder refuses a masked target for every input and a screen-text locator the mask would change; the routed pointer keeps the modal check before the first event and before every further one, and the covering-window check, that AWT's modal loop and stacking would apply to a person, and acts on nothing after its call failed (a dispatched press is disarmed and released without an action); `web.pointer` refuses a browser whose window a modal dialog blocks on both paths, the CDP path through the agent's `web.browsers.blockedBy` (D404, D416), **and the recorder refuses a page hit under a modal dialog before `webClick`**; a `webClick` is recorded only for the frame the call started in and the browser the step resolves to; the CDP path dispatches nothing after the call's deadline (Phase 7 security fix, S109, S130, S132, S133); the stale-capture rule compares the hit with what the capture showed (V1's mark, the window at the pixel; S114); `force` on every input primitive, `via: ROBOT`, `mode: ROBOT` and `redact: false` are never a model's or a client's to give (`CallPolicy.arguments` at every host's raw primitive path and at the service's facade) | P7 §3.3, §6.4, §6.5, §9.1 |
+| **(Phase 7)** evidence at rest, pixels | captures the loop acted on (`captures/<sha256>.png`, the raster as captured, never a capture of the glass), image baselines and anchors beside the bindings file (reviewed code, §3; the file's path derived from the label and the render key and resolved inside the bindings directory without links), and `failure/image-*.png` hold masked pixels only, are written through `OutputFiles`, never travel on a text route, take the process umask (`umask 077` on a shared host), and are served to an MCP client only under `images: true`; `failure/image-*.png` hold the compared rasters with the step's masks blanked, and `failure/capture.png` the window as the agent redacted it (Phase 7 security fix, S145); a session without `--out` writes into a new owner-only temporary directory (S148) | P7 §8.7, §9.6, §11 |
 
 ## 7. Out of scope
 
@@ -202,6 +213,10 @@ client (P7 §3.4, §9.1).
   their pixels are in scope in one way only, that they never reach a model or a client (a glass capture is a person's
   evidence, blanked outside the target's windows, P7 §3.4), and the agent cannot see whether one covers the target
   (§8).
+- (Phase 7) The person's clipboard and the X11 PRIMARY selection are a personal asset outside the target: the framework never
+  reads them, and never sends a chord or a middle button that would paste them into the target for a model or a client (P7 §11
+  rule 11). An application's own Paste item, context-menu command or button is an ordinary click that the framework cannot
+  enumerate: a pack masks it, and rule 6 then refuses every input at it (§8).
 - Correctness of the application under test: a wrong `PASS` from the application's own defect is a test problem, not
   a security one; a wrong `PASS` from **hostile input** is in scope (High).
 
@@ -238,6 +253,17 @@ client (P7 §3.4, §9.1).
   event in that interval is the residual (P7 §3.4).
 - (Phase 7) The Windows ACL branch of the new writers (`captures/`, `candidates/`, `<scenarioId>.images/`,
   `failure/image-*.png`): built on `OutputFiles`, not verified on a Windows host (the first line of this list).
+- (Phase 7 security fixes) A window of the target JVM on another virtual desktop or workspace is undetectable through AWT, so
+  `requireFocus` is the only guard there; the iconified refusal (S104) ran on the WM-less display and once under openbox, not
+  on macOS or Windows (Windows parks a minimised frame at about (-32000, -32000), now left out as hidden); macOS's routing of a
+  button event at an off-display point is undetermined (now refused before any move, S105); the first glass capture on macOS
+  raises the screen-recording consent dialog in the target application's name; an in-window change between a V2 or V3 capture
+  and the act (a glass-pane dialog that opens no window) is outside the stale rule's trigger (S114); a browser a pack's mask
+  names is masked on every route, but that ran against fakes and over real Swing components, not a real masked JCEF browser
+  (S111); the paste of S110 and the middle click on an X11 desktop are stated from the JDK's and Blink's behaviour, with the
+  refusal tested at every gate; the Windows ACL judgement of the run-output directory (S141) is built and unit-tested on ACL
+  values, not verified on a Windows host (a directory under `C:\` on a shared host is refused), and S142's directory junction
+  and S144's inheritance of the pixel files are limits proposed for the owner's acceptance (B31; `SECURITY.md`).
 - (Phase 7) HiDPI: every spike ran at scale 1; the Swing side reports user-space pixels and the web side an empirical
   factor flagged `scaleAssumed` (P7 §4.8, gap 78).
 - (Phase 7) JxBrowser pointer input (`WebCapability.INPUT` behind descriptor roles, strategy "input unverified") against
