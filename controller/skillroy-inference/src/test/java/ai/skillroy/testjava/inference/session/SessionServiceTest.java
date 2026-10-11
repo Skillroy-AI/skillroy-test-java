@@ -282,6 +282,7 @@ class SessionServiceTest {
         String text = all.toString();
         assertTrue(text.contains(SessionService.REFERENCE_SENTENCE), text);
         assertTrue(SessionService.REFERENCE_SENTENCE.contains("non-secret field"));
+        assertTrue(SessionService.REFERENCE_SENTENCE.contains("nor a credential slot as a whole"), "gap 94");
         assertFalse(text.contains("names a resolved slot's field"), "the Phase 6 sentence is gone: " + text);
         assertEquals(PHASE6_SYSTEM_TEXT, text.replace(SessionService.REFERENCE_SENTENCE, PHASE6_REFERENCE_SENTENCE),
                 "the same system text but for the one sentence");

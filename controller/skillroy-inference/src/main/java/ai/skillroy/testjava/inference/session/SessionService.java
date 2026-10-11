@@ -158,11 +158,12 @@ public final class SessionService implements AutoCloseable {
     /**
      * The vocabulary's sentence on the verbs and their {@code $reference}s (phase7-contracts.md 9.2, D342): a reference
      * names a resolved slot's non-secret fields only; a credential's secret is never the model's to use (the person
-     * signs on). Before Phase 7 it read "(a $reference such as $item.code names a resolved slot's field)".
+     * signs on), nor a credential-joined slot as a whole (gap 94, the S101 rule). Before Phase 7 it read "(a
+     * $reference such as $item.code names a resolved slot's field)".
      */
     static final String REFERENCE_SENTENCE = "Its verbs, each a tool, with the JSON Schema of their arguments (a"
-            + " $reference such as $item.code names a non-secret field of a resolved slot, never a credential's secret:"
-            + " the person signs on):";
+            + " $reference such as $item.code names a non-secret field of a resolved slot, never a credential's secret"
+            + " nor a credential slot as a whole: the person signs on):";
 
     private static final int RESULT_MAX = 25_000;
     private static final int INTENT_MAX = 500;
@@ -1668,6 +1669,11 @@ public final class SessionService implements AutoCloseable {
         @Override
         public boolean secretsInFlight() {
             return session.secretsInFlight();
+        }
+
+        @Override
+        public boolean namesSecret(String text) {
+            return session.namesSecret(text);
         }
 
         @Override

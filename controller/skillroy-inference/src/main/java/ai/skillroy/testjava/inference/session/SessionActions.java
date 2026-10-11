@@ -111,6 +111,17 @@ public interface SessionActions {
     boolean secretsInFlight();
 
     /**
+     * True when the text holds a reference the session's credential rule refuses for a model (phase7-contracts.md 9.2
+     * rule 1, gap 94): a credential join's secret field or a credential-joined slot as a whole, read with the
+     * substitution's own tokenizer. The vision recorder asks it before it acts, so that its refusal names the reason
+     * and nothing is journaled; the session's {@code execute} refuses the same text in any case. The default answers
+     * false: a facade without the session's joins leaves the refusal to the session.
+     */
+    default boolean namesSecret(String text) {
+        return false;
+    }
+
+    /**
      * The session's output directory, where the vision module keeps {@code captures/} (phase7-contracts.md 9.6), or
      * null for a session without one (it keeps nothing). As built (Phase 7, VM): the contract's facade had no way to
      * reach it.

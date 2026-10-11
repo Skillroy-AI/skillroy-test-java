@@ -21,6 +21,7 @@ import ai.skillroy.testjava.controller.AgentRpcException;
 import ai.skillroy.testjava.inference.prompt.PromptMask;
 import ai.skillroy.testjava.inference.session.SessionActions;
 import ai.skillroy.testjava.inference.tools.CallPolicy;
+import ai.skillroy.testjava.scenario.References;
 import ai.skillroy.testjava.scenario.StepOutcome;
 import ai.skillroy.testjava.scenario.pack.PlannedCall;
 import ai.skillroy.testjava.scenario.pack.Sync;
@@ -34,8 +35,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 /**
  * From a model's grounded action to the step that will be replayed (phase7-contracts.md 6.5, decisions D306-D308,
@@ -83,8 +82,6 @@ public final class Recorder {
             + " person";
     /** The refusal of a click on a page under a modal dialog (phase7-contracts.md 6.5 step 4; security fix S109). */
     public static final String PAGE_BLOCKED = "a modal dialog blocks the page; answer the dialog first";
-    /** A {@code $slot.key} reference. */
-    private static final Pattern REFERENCE = Pattern.compile("\\$([A-Za-z_][A-Za-z0-9_-]*)\\.([A-Za-z0-9_-]+)");
     /** The side of an anchor crop around the point (6.5). */
     static final int ANCHOR_SIDE = 64;
 
@@ -741,18 +738,23 @@ public final class Recorder {
         }
     }
 
-    /** True when the text names a slot's field whose key looks secret ({@code $staff.password}). */
+    /**
+     * True when the text names a credential (D342, gap 94): read with the substitution's own tokenizer
+     * ({@code References.references}: {@code $$} a literal dollar, a field ending at the first character outside
+     * {@code [A-Za-z0-9_]}), a reference whose first field's key looks secret by the mask's key rule
+     * ({@code $staff.password}), or one the session's credential rule refuses (the facade's {@code namesSecret}: a
+     * joined secret field or a credential-joined slot as a whole, {@code $staff}, {@code x$staff.}).
+     */
     boolean namesSecret(String text) {
-        if (text == null) {
+        if (text == null || text.indexOf('$') < 0) {
             return false;
         }
-        Matcher m = REFERENCE.matcher(text);
-        while (m.find()) {
-            if (mask.secretKey(m.group(2))) {
+        for (References.Reference ref : References.references(text)) {
+            if (!ref.fields().isEmpty() && mask.secretKey(ref.fields().get(0))) {
                 return true;
             }
         }
-        return false;
+        return actions.namesSecret(text);
     }
 
     // ------------------------------------------------------------------------------------------------ acting

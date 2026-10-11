@@ -293,6 +293,13 @@ class Phase7SessionTest {
                 assertEquals(ExecutorSession.CREDENTIAL_REFUSAL, input.message(), "the slot handed to a verb");
             }
             assertTrue(fx.agent.callsTo("swing.type").isEmpty(), "nothing typed");
+            for (String text : List.of("x$assistant", "$assistant", "x$assistant.", "x$assistant..password",
+                    "$assistant.password")) {
+                assertTrue(session.namesSecret(text), "rule 1's predicate, public for the recorder (gap 94): " + text);
+            }
+            assertFalse(session.namesSecret("$assistant.code"), "a non-secret field");
+            assertFalse(session.namesSecret("$item"), "a slot without a credential join");
+            assertFalse(session.namesSecret("$$assistant"), "a literal dollar");
             int before = fx.agent.callsTo("toy.input").size();
             assertEquals(Status.PASS, session.execute(PlannedCall.of("toy.input", Map.of("source", "Entry", "value",
                     "$assistant.code"), Sync.READY), CLIENT).status(), "a non-secret field stays usable");

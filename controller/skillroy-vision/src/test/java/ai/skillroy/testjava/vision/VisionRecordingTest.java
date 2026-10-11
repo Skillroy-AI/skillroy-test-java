@@ -44,6 +44,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -261,6 +262,32 @@ class VisionRecordingTest {
             assertEquals(1, h.agent.bridge.callsTo("swing.type").size(), "typing is the model's again");
             String journal = Files.readString(h.session.journal().file());
             assertFalse(journal.contains(VisionBridge.PASSWORD_100), "the journal holds no secret");
+        }
+    }
+
+    /**
+     * Gap 94 (S101 item 3): after the person's sign-on, a model's {@code type} naming the credential-joined slot as a
+     * whole, in spellings the old field-only expression missed, is refused by the recorder itself through the facade's
+     * {@code namesSecret}: the recorder's credential text, no step, nothing typed.
+     */
+    @Test
+    void theRecorderRefusesAWholeCredentialSlotThroughTheFacade() throws Exception {
+        Origin person = Origin.person("tester");
+        try (VisionHarness h = new VisionHarness(dir, Map.of(), List.of(
+                tools("r1", use("t1", "type", Map.of("text", "x$assistant."))),
+                done("r2"),
+                tools("r3", use("t3", "type", Map.of("text", "$assistant"))),
+                done("r4")))) {
+            VisionBridge.resolveItemAndAssistant(h.session, person);
+            assertEquals(Status.PASS, h.session.execute("signOn", Map.of("staff", "$assistant"), person).status());
+            assertFalse(h.session.secretsInFlight(), "the person's sign-on consumed it");
+            for (String text : List.of("x$assistant.", "$assistant")) {
+                Turn turn = h.service.ask("type " + text + " into the entry field");
+                Turn.Action typed = turn.actions().get(0);
+                assertEquals(Recorder.CREDENTIAL, typed.result(), String.valueOf(turn.actions()));
+                assertNull(typed.step(), "refused before the session: " + typed);
+            }
+            assertTrue(h.agent.bridge.callsTo("swing.type").isEmpty(), "nothing was typed");
         }
     }
 }

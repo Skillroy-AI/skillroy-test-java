@@ -25,6 +25,7 @@ import ai.skillroy.testjava.inference.spi.Content;
 import ai.skillroy.testjava.inference.spi.ModelRequest;
 import ai.skillroy.testjava.inference.spi.ModelResponse;
 import ai.skillroy.testjava.protocol.Event;
+import ai.skillroy.testjava.scenario.References;
 import ai.skillroy.testjava.scenario.StepOutcome;
 import ai.skillroy.testjava.scenario.pack.PlannedCall;
 import org.junit.jupiter.api.Test;
@@ -157,6 +158,13 @@ class VisionLimitsTest {
             return true;
         }
 
+        /** The session's rule 1 for one credential-joined slot, {@code staff}: its whole-slot spellings. */
+        @Override
+        public boolean namesSecret(String text) {
+            return References.references(text).stream().anyMatch(r -> r.slot().equals("staff")
+                    && r.fields().isEmpty());
+        }
+
         @Override
         public Path outputDir() {
             return null;
@@ -181,5 +189,12 @@ class VisionLimitsTest {
         assertTrue(facade.executed.isEmpty(), "nothing ran");
         assertTrue(recorder.namesSecret("sign on as $staff.password now"));
         assertFalse(recorder.namesSecret("$item.code"), "a non-secret field");
+        // Gap 94: read as the substitution reads it, and the slot as a whole through the facade.
+        assertTrue(recorder.namesSecret("$staff"), "the joined slot as a whole");
+        assertTrue(recorder.namesSecret("x$staff."), "a trailing dot ends the reference");
+        assertTrue(recorder.namesSecret("x$staff..password"), "an empty field ends the reference");
+        assertFalse(recorder.namesSecret("$$staff.password"), "a literal dollar: no reference");
+        assertFalse(recorder.namesSecret("$item"), "a slot without a credential join");
+        assertFalse(recorder.namesSecret("costs $5"), "not a slot name");
     }
 }

@@ -2117,7 +2117,8 @@ instructions and the pack's screen legend as system parts (masked), `CacheHint.A
 batch's results; `act` consulted for its names; `endTurn` `QUESTION`/`LIMIT`; `vision.maxActions` (30) and
 `vision.maxTurns` (20) enforced by the service, which then closes the tool sets; `visionCall(ModelRequest)`; the raw
 primitive branch under `CallPolicy.arguments(…, false)` (refused, never stripped). The vocabulary's `$reference`
-sentence names a non-secret field of a resolved slot only (D342).
+sentence names a non-secret field of a resolved slot only (D342), and never a credential slot as a whole (P7 §9.2 rule 1,
+gap 94, 2026-10-11).
 
 ---
 

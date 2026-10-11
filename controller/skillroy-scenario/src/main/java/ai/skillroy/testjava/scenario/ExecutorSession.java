@@ -1894,6 +1894,16 @@ public final class ExecutorSession implements AutoCloseable {
         return null;
     }
 
+    /**
+     * True when the value holds a reference that rule 1 of the credential rule refuses for every origin but a person's
+     * (phase7-contracts.md 9.2): a credential join's secret field or the joined slot as a whole, in every spelling the
+     * substitution reads, or a value too deep to be read while a join exists. The recorder asks it through the
+     * session facade before it acts (gap 94); {@link #execute} stays the gate. Called on the session's thread.
+     */
+    public boolean namesSecret(Object value) {
+        return secretReference(value) != null;
+    }
+
     /** {@code Bindings.isSecretField}'s predicate over the session's joins: a secret field or the slot as a whole. */
     private boolean reachesSecret(String slot, List<String> fields) {
         Map<String, String> secret = joins.get(slot);

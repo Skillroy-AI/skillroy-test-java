@@ -1548,6 +1548,12 @@ For one grounded action on `target` with hit-test result `H` (vision §R3; desig
      **(Phase 7 security fix, S101, S127, built 2026-10-11, SH)** A secret slot reference includes the joined slot as a
      whole (`$<slot>`, alone or embedded), and while a credential is in flight `ExecutorSession` refuses every call of
      the model's that changes the target, not only typing (§9.2 rules 1 and 2).
+     **(Phase 7 follow-up, gap 94, built 2026-10-11)** The recorder reads a `type`'s text with the substitution's own
+     tokenizer (`References.references`: `$$` a literal dollar, a field ending at the first character outside
+     `[A-Za-z0-9_]`) and refuses it with the text above, before anything reaches the session, when a reference's first
+     field looks secret by the mask's key rule or when the facade's `namesSecret(text)` answers true (§9.1: rule 1 of
+     §9.2 over the session's credential joins, the joined slot as a whole in every spelling); nothing is journaled, and
+     `ExecutorSession` stays the gate.
 3. **Choose the step** (the roles are `Roles.ALL`'s, the closed set the agent reports: `window, dialog, panel, button,
    toggle, checkbox, radio, textbox, password, label, combobox, list, table, tree, tab, menu, menuitem, scrollpane, text,
    unknown`):
@@ -2277,6 +2283,7 @@ public interface SessionActions {
     String snapshotText(int maxChars) throws AgentLostException, InterruptedException;
     List<Event> eventsSince(long seq, String topics, int max);
     boolean secretsInFlight();                                         // §9.2, D342
+    default boolean namesSecret(String text) { return false; }         // §9.2 rule 1 over the joins (gap 94, built 2026-10-11)
 }
 public record SessionExtensions(List<SessionTools> tools, Map<String, String> options) { public static SessionExtensions none() … }
 ```
@@ -2448,6 +2455,13 @@ action but a tool set's read" above now reads "… a tool set's read, which coun
      a model never signs on with a person's credential and no dead end follows (only a person's step consumes a secret,
      and the person is at hand); the session's vocabulary (`SessionService.vocabulary()`, VM's first commit, §12.5) stops
      telling the model that a `$reference` names a resolved slot's secret field (it names the non-secret fields only).
+     **(Phase 7 follow-up, gap 94, built 2026-10-11)** The sentence names the whole-slot rule too
+     (`SessionService.REFERENCE_SENTENCE`: "… names a non-secret field of a resolved slot, never a credential's secret
+     nor a credential slot as a whole: the person signs on"), and the five Phase 5 session recordings were regenerated on
+     the key-free route. The earlier wording reached the model as "never a credential's secret: <redacted> person signs
+     on" (the mask's `key: value` rule read "secret: the" as a secret's value); the new wording passes the mask whole.
+     Rule 1's predicate is public as `ExecutorSession.namesSecret(value)`, which the facade's `namesSecret` answers
+     with (§9.1, §6.5).
      **(Phase 7 security fix, S101, built 2026-10-11, SH)** The slot as a whole is such a reference: `$<slot>` of a
      credential-joined slot, alone or embedded (`x$<slot>`, `x$<slot>.`, `x$<slot>..password`: every spelling the
      substitution reads as the slot), resolves to the slot's value with its joined fields (A34: `Bindings.isSecretField`
@@ -3414,11 +3428,9 @@ would show the same pending state, and the reason text is misleading for a late 
 synchronous first probe in the core or an agent-api `declare(id, probe, initial)`, both rejected for D449). **(93)** Replay
 refuses an unapproved value for a model's strategy only (D72): the export's `REQUIRED` mark on a model's or a client's
 tier (a) binding (D468) is the reviewer's mark and no replay gate; refusing `NOT_APPROVED` for a recorded `REQUIRED`
-whatever the strategy is one line in `Binder`, the owner's call (SH). **(94)** `Recorder.namesSecret` still reads the
-credential rule's reference with the field-only expression (S101 item 3, cosmetic: the session's gate refuses first), and
-`SessionService.REFERENCE_SENTENCE` does not yet say "nor a credential slot as a whole"; changing the sentence changes every
-session's system prompt and so the five Phase 5 session recordings, to be regenerated on the key-free route (SH proposed,
-SI left it for the integration pass; nobody holds it). **(95)** S111's agent half and the composite's clip ran against fakes:
+whatever the strategy is one line in `Binder`, the owner's call (SH). **(94)** Closed 2026-10-11 (a follow-up after Phase 7): the recorder reads a `type`'s text with
+`References.references` and asks the facade's `namesSecret` (§6.5, §9.1), and the vocabulary's sentence names the
+whole-slot rule (§9.2 rule 1); the five Phase 5 session recordings regenerated key-free. **(95)** S111's agent half and the composite's clip ran against fakes:
 a web-host check with a mask on the front browser's panel, and one desktop with a real JCEF frame and a `JOptionPane`, would
 close them (SI). **(96)** A modal check in `web.dom.click` and `web.dom.fill` for MODEL and CLIENT origins, the broader
 alternative of S109, a P4 amendment; the recorder's path is closed by D472 (SI, optional). **(97)** Two residuals of the
