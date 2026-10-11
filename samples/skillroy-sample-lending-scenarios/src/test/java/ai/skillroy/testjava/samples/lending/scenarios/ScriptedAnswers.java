@@ -249,8 +249,9 @@ final class ScriptedAnswers {
     private static final java.util.regex.Pattern MARK_LINE = java.util.regex.Pattern.compile("mark (\\d+): ([^\\n]*)");
 
     /**
-     * The number of the mark whose label names {@code word} as a whole word, in the latest marks list of the request
-     * (the last {@code <target-ui>} block of its messages that holds one).
+     * The number of the mark whose label names a control {@code 'word'}, else the first whose label holds {@code word}
+     * as a whole word, in the latest marks list of the request (the last {@code <target-ui>} block of its messages that
+     * holds one).
      *
      * @throws InferenceException {@code UNSUPPORTED} when no mark names it
      */
@@ -265,7 +266,16 @@ final class ScriptedAnswers {
             }
         }
         if (marks != null) {
+            // The agent's label is "role 'name': text" (D-VS-8): a control named the word wins over a label whose text
+            // merely holds it (the prompt line "Scan or enter item, or DUE" comes first in reading order).
+            String quoted = "'" + word + "'";
             java.util.regex.Matcher m = MARK_LINE.matcher(marks);
+            while (m.find()) {
+                if (m.group(2).contains(quoted)) {
+                    return Long.parseLong(m.group(1));
+                }
+            }
+            m = MARK_LINE.matcher(marks);
             while (m.find()) {
                 if (named.matcher(m.group(2)).find()) {
                     return Long.parseLong(m.group(1));
