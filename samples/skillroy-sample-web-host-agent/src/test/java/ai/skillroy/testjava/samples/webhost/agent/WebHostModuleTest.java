@@ -18,6 +18,7 @@
 package ai.skillroy.testjava.samples.webhost.agent;
 
 import ai.skillroy.testjava.agent.api.AgentModule;
+import ai.skillroy.testjava.agent.api.spi.CaptureMask;
 import ai.skillroy.testjava.agent.api.spi.ReadinessSource;
 import ai.skillroy.testjava.agent.api.spi.web.BrowserRegistryAdapter;
 import ai.skillroy.testjava.agent.api.spi.web.BrowserSeed;
@@ -26,6 +27,7 @@ import org.cef.browser.CefBrowser;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
+import java.awt.Component;
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
@@ -35,6 +37,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.ServiceLoader;
+import javax.swing.JPanel;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -60,13 +63,58 @@ class WebHostModuleTest {
     @Test
     void installRegistersOneRegistryAdapterAndOneReadinessSourceAndNothingElse() {
         assertEquals("webhost", module.id());
-        assertEquals("0.1.0", module.version());
+        assertEquals("0.2.0", module.version());
         assertEquals(Collections.emptySet(), module.requires());
         module.install(ctx.context);
         assertEquals(2, ctx.spi.count());
         assertEquals(1, ctx.spi.all(BrowserRegistryAdapter.class).size());
         assertEquals(1, ctx.spi.all(ReadinessSource.class).size());
+        assertEquals(0, ctx.spi.all(CaptureMask.class).size(), "no mask without the option");
         assertEquals(Collections.<String>emptyList(), ctx.log.lines, "install logs nothing");
+    }
+
+    /**
+     * Gap 95 (phase4-contracts.md 9.2): with {@code webhost.mask=front} the module also registers a mask that names
+     * the front card, the component named {@code front} in the panel named {@code deck}, and nothing else; another
+     * value registers none.
+     */
+    @Test
+    void theMaskOptionRegistersAMaskOnTheFrontCardOnly() {
+        ctx.options.put(WebHostModule.OPTION_MASK, "back");
+        module.install(ctx.context);
+        assertEquals(0, ctx.spi.all(CaptureMask.class).size(), "only the value front registers a mask");
+        module.uninstall();
+
+        ctx.options.put(WebHostModule.OPTION_MASK, WebHostModule.MASK_FRONT);
+        module.install(ctx.context);
+        assertEquals(3, ctx.spi.count());
+        List<CaptureMask> masks = ctx.spi.all(CaptureMask.class);
+        assertEquals(1, masks.size());
+        assertEquals(Collections.singletonList("INFO webhost: webhost.mask=front: the front card is masked"),
+                ctx.log.lines);
+        CaptureMask mask = masks.get(0);
+        JPanel deck = named(new JPanel(), "deck");
+        Component front = named(new JPanel(), "front");
+        Component back = named(new JPanel(), "back");
+        deck.add(front);
+        deck.add(back);
+        JPanel elsewhere = named(new JPanel(), "bar");
+        Component frontElsewhere = named(new JPanel(), "front");
+        elsewhere.add(frontElsewhere);
+        assertTrue(mask.masks(front), "the front card");
+        assertFalse(mask.masks(back), "the back card");
+        assertFalse(mask.masks(deck), "the deck itself (it holds the back card too)");
+        assertFalse(mask.masks(frontElsewhere), "a component named front outside the deck");
+        assertFalse(mask.masks(named(new JPanel(), "front")), "a front without a parent");
+        assertFalse(mask.masks(null));
+        assertEquals(null, mask.regions(front), "the whole card, not regions");
+        module.uninstall();
+        assertEquals(0, ctx.spi.count(), "uninstall withdraws the mask too");
+    }
+
+    private static <C extends Component> C named(C component, String name) {
+        component.setName(name);
+        return component;
     }
 
     @Test

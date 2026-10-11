@@ -16,8 +16,9 @@
 
 
 /**
- * Agent module {@code webhost}: the sample web host's browser seeds and readiness (Phase 4 contract, section 9.2).
- * It depends on the agent API and on the host's registry class, nothing else; the generic web module turns the seeds
+ * Agent module {@code webhost}: the sample web host's browser seeds and readiness (Phase 4 contract, section 9.2),
+ * and, only with the agent option {@code webhost.mask=front}, a capture mask on the front card (gap 95's check). It
+ * depends on the agent API and on the host's registry class, nothing else; the generic web module turns the seeds
  * into browser handles.
  */
 package ai.skillroy.testjava.samples.webhost.agent;

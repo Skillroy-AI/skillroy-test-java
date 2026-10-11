@@ -19,6 +19,7 @@ package ai.skillroy.testjava.samples.webhost.agent;
 
 import ai.skillroy.testjava.agent.api.AgentContext;
 import ai.skillroy.testjava.agent.api.AgentModule;
+import ai.skillroy.testjava.agent.api.spi.CaptureMask;
 import ai.skillroy.testjava.agent.api.spi.ReadinessSource;
 import ai.skillroy.testjava.agent.api.spi.web.BrowserRegistryAdapter;
 import ai.skillroy.testjava.agent.api.spi.web.BrowserSeed;
@@ -40,7 +41,12 @@ import java.util.List;
  *       scan (displayable, not showing), the detached one only through its seed, and the front one through both; the
  *       seeds give all three the tag a scenario selects them by ({@code by: {tag: front}});</li>
  *   <li>a {@link ReadinessSource}: ready once the host has registered its browsers (the registry holds the front
- *       browser), which the host does only when its pages have loaded.</li>
+ *       browser), which the host does only when its pages have loaded;</li>
+ *   <li>only with the agent option {@value #OPTION_MASK}{@code =}{@value #MASK_FRONT} (read once at install, so the
+ *       system property {@code skillroy.agent.webhost.mask} sets it too): a {@link CaptureMask} that names the front
+ *       card ({@link FrontCardMask}), for the web host's end-to-end check of a masked browser on real JCEF
+ *       (phase7-contracts.md 13.2 item 10, gap 95). Without it the module registers no mask, and the web module makes
+ *       no masked read.</li>
  * </ul>
  * It registers no primitive and declares no capability.
  *
@@ -56,8 +62,8 @@ public final class WebHostModule implements AgentModule {
 
     /** Module id. */
     public static final String ID = "webhost";
-    /** Module version. */
-    public static final String VERSION = "0.1.0";
+    /** Module version: {@code 0.2.0} (Phase 7 follow-up, gap 95) adds the optional {@link FrontCardMask}. */
+    public static final String VERSION = "0.2.0";
     /** Tag of the seed for the browser in the front card. */
     public static final String TAG_FRONT = "front";
     /** Tag of the seed for the browser in the hidden back card. */
@@ -66,6 +72,10 @@ public final class WebHostModule implements AgentModule {
     public static final String TAG_DETACHED = "detached";
     /** Id of the readiness source. */
     static final String READINESS_ID = "webhost.browsers";
+    /** Agent option: {@value #MASK_FRONT} registers {@link FrontCardMask}; anything else, or none, no mask. */
+    public static final String OPTION_MASK = "webhost.mask";
+    /** The one value of {@link #OPTION_MASK} the module acts on. */
+    public static final String MASK_FRONT = "front";
 
     private final List<AutoCloseable> registrations = new ArrayList<AutoCloseable>();
     private volatile AgentContext ctx;
@@ -89,6 +99,10 @@ public final class WebHostModule implements AgentModule {
         ctx = context;
         register(BrowserRegistryAdapter.class, new Seeds());
         register(ReadinessSource.class, new Readiness());
+        if (MASK_FRONT.equals(context.option(OPTION_MASK))) {
+            register(CaptureMask.class, new FrontCardMask());
+            context.log().info("webhost: " + OPTION_MASK + "=" + MASK_FRONT + ": the front card is masked");
+        }
     }
 
     @Override
