@@ -67,6 +67,7 @@ review items of the end-to-end review, and `Sn` the confirmed findings of the se
 | B31 | The Phase 7 security delta review's sign-off (S101-S148: 48 confirmed findings, 2 high, 13 medium, 33 low; everything of medium or above fixed and 31 lows fixed; S142 and S144 accepted with a release note each; the "not verified" list; the note that the clipboard route S110 predates Phase 7 for the planner and that B28 did not see it; no outside reader yet, not a gate) | the orchestrator recommended yes once the final matrix was green (the amd64 Java 8 legs excepted) and the owner had read the two release notes | **signed off by the owner 2026-10-11** (`B31 ok`, S142 and S144 accepted; the orchestrator did not sign, P6 §12.6) | records written 2026-10-11 (`TODO.md`, "Security review (Phase 7 delta)"); `SECURITY.md` and `docs/release-checklist.md` carry the signature | |
 | B32 | Follow-ups after Phase 7 (D487-D491: gaps 94, 99, 92 and 63, taken without the owner on 2026-10-11) | as taken | **confirmed by the owner 2026-10-11** (`B32 ok`, no veto) | built, tested and matrix-verified 2026-10-11 (`TODO.md`, "Phase 7 final matrix") | – |
 | B33 | The owner's answers of the evening of 2026-10-11 (gaps 93 and 96, the domain, a JxBrowser licence) | – | **given by the owner 2026-10-11** | recorded 2026-10-11 | – |
+| B34 | Follow-ups of the evening of 2026-10-11 (D492 onwards: gap 101 and what the JxBrowser kit run and gap 95 decide) | as taken | provisional | built and tested 2026-10-11 | – |
 
 Phase 1 details are fixed in `design/phase1-contracts.md`; the same file carries the Phase 1.x specification
 (A17-A33, H1-H3). Phase 2 details are fixed in `design/phase2-contracts.md`, whose open questions B19 answers. What
@@ -1741,11 +1742,21 @@ env var JXBROWSER_LICENSE_KEY."
 | B2: is the domain behind the `ai.skillroy` groupId under the project's control? | Yes (the owner holds `skillroy.ai`) | The release checklist's item 9 is met |
 | B9: a JxBrowser licence for the adapter's real verification | A 30-day evaluation key from 2026-10-11, in the owner's login shell as `JXBROWSER_LICENSE_KEY` | The kit run against the real product can proceed outside this repository (the wall "A JxBrowser licence"); the key never enters a repository, the notes or a page |
 
+## B34 Follow-ups of the evening of 2026-10-11 (provisional)
+
+**From:** the work after B33, without the owner (the owner: "do whatever remaining work you can"). Each is built and tested
+and the contract carries it as "(Phase 7 follow-up, gap <n>, built 2026-10-11)". Answer in one line: `B34 ok`, or a veto by
+name.
+
+| D | Question | Default taken | Veto form |
+|---|---|---|---|
+| D492 | Gap 101: which covering windows may the Robot press past without `force`? | None but one: a window that owns the target's window, while the target's window is the active window (an owner lies below the windows it owns; the active window was raised when it was activated, and without a window manager nothing else keeps an owned window above its owner), for the point and a drag's end point; the hit-test still reports the owner under `covering` | `B34 D492 veto`: leave out every owner whatever the active window, or keep refusing every covering window |
+
 ---
 
 ## Questions for the owner
 
-**None open as of the evening of 2026-10-11.** The owner answered **B33** (gaps 93 and 96 not refused, the domain confirmed,
+**Open as of the evening of 2026-10-11: B34** (above, provisional; answer `B34 ok` or a veto by name). Before it, none was open: the owner answered **B33** (gaps 93 and 96 not refused, the domain confirmed,
 a JxBrowser evaluation licence) and confirmed **B32** (D487-D491, the decisions of gaps 94, 99, 92 and 63)
 on 2026-10-11 without a veto (`B32 ok`), and accepted the three Phase 6 merge commits without a `Signed-off-by`
 (`ee020ad`, `6a342e7`, `f33488f`; "DCO accept": the release checklist's item 10 for the first release). Before it, none was open as of 2026-10-11: the owner confirmed **B29** (the Phase 7 contract's thirty-nine answers, `design/phase7-contracts.md` §18, decisions D287-D358) and **B30** (the 128 decisions the Phase 7 build, its code review's fix wave, the race fix and the security fixes took, D359-D486) on 2026-10-11, every row, without a veto (`B29 ok`, `B30 ok`); both had been taken without the owner on 2026-10-10 (B30 also on 2026-10-11) and were provisional while the build ran on them. Among the confirmed points are the three that rested on the owner's knowledge or taste (Q27, JxBrowser input behind descriptor roles, unverified; Q34, V3 on a person's desktop acting only while the target holds the focus; Q25, the number pad as the sample's component) and the decisions worth a look (D403, D413, D425, D470, D482), so the built behaviour stands as it is, the behaviour changes listed in B30 included. The owner signed off **B31** (the Phase 7 security delta review, S101-S148) the same day (`B31 ok`), with the two lows proposed for acceptance accepted as proposed: S142 (a Windows directory junction in a run's output tree) and S144 (Windows run output inheriting its parent's access list), each with its release note in `SECURITY.md`. Outside the decisions, the push still waits for the owner's word (B1) and the Windows host is still missing (`TODO.md`, "Walls"). Two optional choices that the delta review left to the owner rode along as gaps 93 and 96 of `TODO.md`; the owner answered both on 2026-10-11, not to refuse (B33).

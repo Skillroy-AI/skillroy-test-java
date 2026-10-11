@@ -815,6 +815,38 @@ class SessionServiceTest {
         }
     }
 
+    /**
+     * Gap 102 (fix wave LV-1, D444): the target-state block is bounded: 40 slots and 30 fields a slot, the rest counted
+     * ("and 5 more slots", "and 5 more"), in binding order, still without a value.
+     */
+    @Test
+    void theTargetStateBlockListsAtMost40SlotsAnd30FieldsASlotAndCountsTheRest() throws Exception {
+        Origin person = Origin.person("tester");
+        try (ExecutorSession bound = ExecutorSession.open(pack, SessionDesk.agent(), SessionOptions.defaults(
+                tmp.resolve("many")).withClock(clock).withBind(BindOptions.defaults().withEnvId("test-env")
+                .withLedger(ledger)).withId("sess-many"))) {
+            Map<String, Object> wide = new java.util.LinkedHashMap<>();
+            for (int f = 0; f < 35; f++) {
+                wide.put(String.format("f%02d", f), "value-of-f" + f);
+            }
+            bound.fixture("wide", wide, null, person);
+            for (int n = 1; n < 45; n++) {
+                bound.fixture(String.format("s%02d", n), Map.of("code", "value-of-s" + n), null, person);
+            }
+            ScriptedGateway gateway = ScriptedGateway.sequence(List.of(done("r1", "listed")));
+            BudgetMeter meter = BudgetMeter.of(BudgetMeter.Scope.SESSION, null, "1.00", ledger);
+            new SessionService(bound, gateway, SessionPolicy.acting(), meter, new LedgerWriter(ledger, meter, log,
+                    PromptMask.keysOnly(), false, clock), PriceTable.builtIn(), clock).ask("look");
+            String slots = ((Content.Text) gateway.requests().get(0).messages().get(0).parts().get(1)).text();
+            assertTrue(slots.contains("$wide.f29") && !slots.contains("$wide.f30"), slots);
+            assertTrue(slots.contains("$wide.f29 (and 5 more)"), slots);
+            assertTrue(slots.contains("\n- $s39: fixture"), "the 40th slot: " + slots);
+            assertFalse(slots.contains("\n- $s40: "), "the 41st slot: " + slots);
+            assertTrue(slots.contains("\n(and 5 more slots)"), slots);
+            assertFalse(slots.contains("value-of-"), "never a value: " + slots);
+        }
+    }
+
     @Test
     void aClosedServiceRefusesATurnAndClosesNothingOfTheSession() throws Exception {
         SessionService service = service(ScriptedGateway.sequence(List.of()), SessionPolicy.acting(), "1.00");

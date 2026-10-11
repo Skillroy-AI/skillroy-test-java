@@ -724,7 +724,8 @@ final class Pointer {
 
     /**
      * The pre-check's refusals (section 3.3 step 1, section 3.4): {@code MODAL_OPEN} (routed only), the covering
-     * rule (routed: a ranked window; Robot: any window), {@code expectTarget}; all but {@code expectTarget} skipped
+     * rule (routed: a ranked window; Robot: any window but an owner of the active target window, gap 101),
+     * {@code expectTarget}; all but {@code expectTarget} skipped
      * by {@code force}. EDT only.
      */
     void precheck(ComponentView view, Request r, HitTest.Hit hit, boolean robot) {
@@ -743,7 +744,7 @@ final class Pointer {
                         + "dialog first, or pass force:true to act anyway", data);
             }
         }
-        if (!r.force && (robot ? !hit.covering.isEmpty() : hit.rankedCovering())) {
+        if (!r.force && (robot ? hit.robotCovering() : hit.rankedCovering())) {
             throw new RpcException(ErrorCodes.INPUT_REJECTED, "another window of the JVM covers the point"
                     + (robot ? " (the Robot presses whatever is really on top)" : "") + "; pass force:true to act "
                     + "anyway", Errors.data("reason", "covered", "covering", hit.json.get("covering")));

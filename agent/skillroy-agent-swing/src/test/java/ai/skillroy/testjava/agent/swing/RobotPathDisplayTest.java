@@ -354,6 +354,38 @@ class RobotPathDisplayTest extends DisplayTestBase {
     }
 
     /**
+     * Gap 101: a dialog over its own owner frame takes a Robot click while it is the active window (the owner lies
+     * below the windows it owns, and is still reported under {@code covering}); once the frame is the active window
+     * again the dialog's point is refused as covered, as any other covering window refuses it.
+     */
+    @Test
+    void aDialogOverItsOwnOwnerTakesTheRobotWhileItIsActive() throws Exception {
+        final JDialog[] dialog = new JDialog[1];
+        onEdt(() -> {
+            dialog[0] = new JDialog(ui.frame, "Prompt", false);
+            JButton yes = new JButton("Yes");
+            yes.setName("promptYes");
+            dialog[0].getContentPane().add(yes);
+            dialog[0].setBounds(200, 150, 200, 80);
+            dialog[0].setVisible(true);
+            return null;
+        });
+        activate("the prompt is the focused window", dialog[0]);
+        settle();
+        Map<String, Object> routed = robot("by", map("id", "promptYes"), "action", "MOVE");
+        List<Object> covering = arr(obj(routed.get("hit")).get("covering"));
+        assertEquals(1, covering.size(), "the owner lies under the point and is reported");
+        assertEquals(rref(ui.frame), obj(covering.get(0)).get("ref"));
+        assertEquals(Boolean.TRUE, robot("by", map("id", "promptYes"), "action", "CLICK", "via", "ROBOT")
+                .get("fired"));
+        activate("the frame is the focused window again", ui.frame);
+        settle();
+        RpcException e = expectError(ErrorCodes.INPUT_REJECTED, () -> robot("by", map("id", "promptYes"), "action",
+                "CLICK", "via", "ROBOT"));
+        assertEquals("covered", e.error().data().get("reason"));
+    }
+
+    /**
      * Fix wave (Phase 7 review, FA, L2-F4): with a delivery probe due, a point outside the window is {@code NOT_FOUND
      * outside} from the probe's own read; the real pointer never moves and the capability stays {@code OK}.
      */

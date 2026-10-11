@@ -613,7 +613,13 @@ save and restore return it to the person's location, not to the probed point.
   "covered": the covering window got it); other processes' windows cannot be seen, which the result says
   (`stackingAssumed: true`). A `DRAG`'s end point (`to`) is held to the same two rules in the same read
   (`NOT_FOUND outside` and `INPUT_REJECTED covered` with `data.param: "to"`), since the Robot releases the button
-  there (fix wave (Phase 7 review, FA, 2026-10-10; L2-S2): it was checked only to lie in the same window). No modal check: input into a blocked window is dropped by AWT as for a person (BS9 case
+  there (fix wave (Phase 7 review, FA, 2026-10-10; L2-S2): it was checked only to lie in the same window).
+  **(Phase 7 follow-up, gap 101, built 2026-10-11)** One window is left out of the Robot's covering rule, for the point
+  and a drag's end point alike: a window that owns the target's window, while the target's window is the active window.
+  An owner lies below the windows it owns, and the active window was raised when it was activated (on a display without
+  a window manager nothing else keeps an owned window above its owner, hence the second condition); before, a prompt
+  dialog over its own frame could not be clicked through the Robot without `force`. The hit-test still reports the owner
+  under `covering` (`ranked: false`); every other covering window still refuses the point. No modal check: input into a blocked window is dropped by AWT as for a person (BS9 case
   "modal"), and the result reports that nothing arrived. (Phase 7 security fix, S104 and S105, built 2026-10-11, SG)
   "Showing" means **on the glass**: a point in a window the toolkit reports **iconified** (`Frame.getExtendedState() &
   Frame.ICONIFIED`, read on the EDT in the pre-check), or in a window such a frame owns directly or transitively, is
@@ -2755,7 +2761,8 @@ extended with this phase, D334):
    a model or a client even with both flags** (`via: ROBOT` passes on the facade's route for the module's V3 steps and
    nowhere else, D347). Both halves can sit in committed files (the agent option in a launcher, `skillroy.robot` in a
    build file), so the JUnit glue warns whenever the property is true and `SECURITY.md` says not to commit it. A point
-   outside every window of the target JVM is refused, **any** covering window of the JVM refuses the point, the target
+   outside every window of the target JVM is refused, **any** covering window of the JVM refuses the point (but an owner
+   of the active target window, gap 101, §3.4), the target
    JVM must hold a focused window at the press (`requireFocus`, default true), a press is always paired with its release
    before the pointer moves back (D343), the delivery probe and `NOT_DELIVERED` make a silent drop visible (BS9: macOS),
    Robot never runs on the EDT, and the loop stops the turn when the JVM loses the focus instead of clicking to win it
@@ -3449,7 +3456,8 @@ writers adopted; SJ). **(100)** The Windows ACL judgement of `OutputFiles` resol
 a Windows with localised built-in names it is not exempt (a false refusal, the limitation of S94 extended; SJ). **(101)**
 The Robot covering rule refuses every point of a dialog that lies over its own owner (`HitTest.covering` lists the owner
 frame below it), so V3 cannot click a prompt dialog of the desk without `force`; a fix must leave out only windows that own
-the target and stay on the safe side for every other unranked window (code review's security lens L2, a functional note).
+the target and stay on the safe side for every other unranked window (code review's security lens L2, a functional note). *Closed 2026-10-11
+(a follow-up after Phase 7): an owner of the target's window is left out while that window is the active one (§3.4).*
 **(102)** The `<target-state>` block of the bound slots is capped at 40 slots and 30 fields a slot (counted beyond) and was
 exercised with a few slots only (FC, D444).
 

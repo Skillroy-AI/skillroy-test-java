@@ -83,6 +83,26 @@ final class HitTest {
         boolean rankedCovering() {
             return ranked.contains(Boolean.TRUE);
         }
+
+        /** True when a covering window refuses a Robot press at the point ({@link #refusesRobot}). EDT only. */
+        boolean robotCovering() {
+            Window active = Windows.activeWindow();
+            for (Window other : covering) {
+                if (refusesRobot(other, window, active)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+    }
+
+    /**
+     * Whether a window covering a point of {@code window} refuses a Robot press there (phase7-contracts.md 3.4): every
+     * covering window does, but one that owns {@code window} while {@code window} is the active window (gap 101): an
+     * owner lies below the windows it owns, and the active window was raised when it was activated.
+     */
+    static boolean refusesRobot(Window other, Window window, Window active) {
+        return window == null || window != active || other == null || !Windows.ownedBy(window, other);
     }
 
     /**
@@ -245,13 +265,21 @@ final class HitTest {
     }
 
     /**
-     * The covering windows of a screen point as the hit-test reports them ({@code [{ref, rect, ranked}]}); used for a
-     * Robot drag's end point (fix wave of the Phase 7 review, FA, L2-S2). EDT only.
+     * The covering windows of a screen point that refuse a Robot press there ({@link #refusesRobot}), as the hit-test
+     * reports them ({@code [{ref, rect, ranked}]}); used for a Robot drag's end point (fix wave of the Phase 7 review,
+     * FA, L2-S2; gap 101). EDT only.
      */
     static List<Object> coveringAt(ComponentView view, Windows windows, Window window, Point screen) {
         List<Window> out = new ArrayList<Window>();
         List<Boolean> ranked = new ArrayList<Boolean>();
         covering(windows, window, screen, out, ranked);
+        Window active = Windows.activeWindow();
+        for (int i = out.size() - 1; i >= 0; i--) {
+            if (!refusesRobot(out.get(i), window, active)) {
+                out.remove(i);
+                ranked.remove(i);
+            }
+        }
         return coveringJson(view, out, ranked);
     }
 

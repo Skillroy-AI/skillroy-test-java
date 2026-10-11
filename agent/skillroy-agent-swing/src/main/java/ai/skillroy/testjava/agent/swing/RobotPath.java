@@ -75,7 +75,7 @@ import javax.swing.SwingUtilities;
  *       is refused ({@code NOT_FOUND "off-screen"}: the platform would press at the nearest screen edge; Phase 7
  *       security fix, S104, S105); {@code requireFocus} (default true) refuses a JVM without a focused window
  *       ({@code INPUT_REJECTED "not focused"}); any covering window of the JVM refuses the point unless
- *       {@code force}. {@code modifiers} are refused (the Robot path holds no key; S124).</li>
+ *       {@code force}, but an owner of the target's window while that window is the active one (gap 101). {@code modifiers} are refused (the Robot path holds no key; S124).</li>
  *   <li><b>The press</b>: {@code PRESS} and {@code RELEASE} are refused; a press and its release run in one worker task
  *       with no wait between them, a {@code finally} releases every button the call pressed before anything else, and
  *       the pointer is restored only afterwards (D343).</li>
@@ -272,7 +272,7 @@ final class RobotPath {
                     return check(r);
                 }
             });
-            if (where.hit.blocker == null && where.hit.covering.isEmpty()) {
+            if (where.hit.blocker == null && !where.hit.robotCovering()) {
                 probe(inv, where.window, where.screen);
             }
             // else AWT drops the probe's move into a blocked window, and a (forced) covering window takes it: the probe
