@@ -32,7 +32,17 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
 import org.junit.jupiter.api.TestMethodOrder;
 
+import ai.skillroy.testjava.scenario.FailureKind;
+import ai.skillroy.testjava.scenario.Plan;
+import ai.skillroy.testjava.scenario.PlanCompiler;
+import ai.skillroy.testjava.scenario.PlanExecutor;
+import ai.skillroy.testjava.scenario.RunOptions;
+import ai.skillroy.testjava.scenario.RunResult;
+import ai.skillroy.testjava.scenario.Status;
+
 import java.awt.GraphicsEnvironment;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.awt.image.BufferedImage;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -60,9 +70,9 @@ import static org.junit.jupiter.api.Assumptions.assumeFalse;
  * {@code requireFocus: false} explicitly where the frame may legitimately hold no focus (BS9 K7). The capability is
  * {@code OK("robot")}; a Robot click on {@code DUE} fires the key; {@code requireFocus} (the default) refuses while the
  * frame holds no focus and passes once it has it; a point outside every window is {@code NOT_FOUND}; {@code PRESS} is
- * refused; a person's glass capture of the frame equals the root-pane {@code PAINT} raster (BS9). The controller's half
- * of the double opt-in (a plan with {@code pointer {via: ROBOT}} refused without {@code RunOptions.robot}) needs the
- * scenario side's verb and is added with it.
+ * refused; a person's glass capture of the frame equals the root-pane {@code PAINT} raster (BS9); and the controller's
+ * half of the double opt-in: a plan with {@code pointer {via: ROBOT}} refused without {@code RunOptions.robot}, run
+ * with it, and PRECONDITION_FAILED on a target without the agent option.
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
@@ -182,6 +192,65 @@ abstract class RobotChecks {
         AgentRpcException press = assertThrows(AgentRpcException.class, () -> call("swing.pointer", "by",
                 Map.of("id", "entry"), "action", "PRESS", "via", "ROBOT"));
         assertEquals(ErrorCodes.INVALID_PARAMS, press.error().code());
+    }
+
+    /** A plan whose two pointer steps go through Robot (the compiler adds {@code swing.pointer.robot} to requires). */
+    static final String ROBOT_PLAN = """
+            scenario: robot-pointer-check
+            pack: lending
+            requires: [swing.tree, lending.state]
+            steps:
+              - pointer: { by: { id: numberPad }, region: "key:1", via: ROBOT }
+              - pointer: { by: { id: numberPad }, region: "key:clear", via: ROBOT }
+            timeouts: { step: 30s }
+            """;
+
+    static Plan robotPlan() throws Exception {
+        return PlanCompiler.compile(ROBOT_PLAN.getBytes(StandardCharsets.UTF_8), "robot-pointer-check.yaml",
+                Runs.PACK);
+    }
+
+    static RunResult runWithRobot(AgentClient agent, Plan plan, Path dir, boolean robot) {
+        RunOptions options = RunOptions.defaults().withOutputDir(dir).withBind(Runs.bind(SampleCredentials.Env.SEED_A))
+                .withRobot(robot);
+        return new PlanExecutor(Runs.PACK, agent, options).run(plan);
+    }
+
+    /**
+     * The controller's half of the double opt-in (phase7-contracts.md 3.4, 9.2, 13.2 item 6, D332): a plan with
+     * {@code pointer {via: ROBOT}} is refused ERROR / ENVIRONMENT before the agent is asked anything when the run lacks
+     * {@code RunOptions.robot} (a person's {@code --allow-robot}), even on this target where the agent option is set;
+     * with the flag it runs here; and on a target started without the agent option it is PRECONDITION_FAILED naming
+     * {@code swing.pointer.robot}.
+     */
+    @Test
+    @Order(45)
+    void aRobotPlanNeedsThePersonsFlagAndTheAgentOption() throws Exception {
+        Plan plan = robotPlan();
+        assertTrue(plan.usesRobot());
+        assertTrue(plan.requires().contains("swing.pointer.robot"), String.valueOf(plan.requires()));
+
+        Path refusedDir = ItEnv.runDir(mode().slug, "robot-plan-without-flag");
+        RunResult refused = runWithRobot(client(), plan, refusedDir, false);
+        assertEquals(Status.ERROR, refused.status(), refused.message());
+        assertEquals(FailureKind.ENVIRONMENT, refused.failureKind());
+        assertEquals("robot: not allowed; a person passes --allow-robot", refused.message());
+        assertEquals(List.of(), Runs.calls(refusedDir, "swing.pointer"), "the agent was asked nothing");
+
+        activate();
+        Path allowedDir = ItEnv.runDir(mode().slug, "robot-plan-with-flag");
+        RunResult allowed = runWithRobot(client(), plan, allowedDir, true);
+        assertEquals(Status.PASS, allowed.status(), allowed.message());
+        assertEquals(2, Runs.calls(allowedDir, "swing.pointer").size());
+
+        try (LendingTarget plain = LendingTarget.launch(LendingTarget.Mode.JAVAAGENT)) {
+            Path preconditionDir = ItEnv.runDir(mode().slug, "robot-plan-without-option");
+            RunResult precondition = runWithRobot(plain.client, plan, preconditionDir, true);
+            assertEquals(Status.ERROR, precondition.status(), precondition.message());
+            assertEquals(FailureKind.PRECONDITION_FAILED, precondition.failureKind(), precondition.message());
+            assertTrue(precondition.message().contains("swing.pointer.robot"), precondition.message());
+            assertEquals(List.of(), Runs.calls(preconditionDir, "swing.pointer"));
+        }
     }
 
     @Test

@@ -1,0 +1,231 @@
+{
+  "bindingsVersion": 2,
+  "scenarioId": "keypad-image",
+  "envId": "seed-a",
+  "pack": "lending",
+  "packVersion": "0.6.0",
+  "planHash": "sha256:563c4b5ca099c7026388d4989d85e8de5a0ccc56a8942bb8fa6fd7055dabd01f",
+  "resolveHash": "sha256:a50a2bd84aa0df976a6d1e0bbdf4fe7c1d2f5655d627f051befa5f2fe8020430",
+  "env": {
+    "fingerprint": "sha256:ba8e0fe3089ab50e4f708f73e42e1dd914456472429f1b67cfc538ad75f08944",
+    "components": {
+      "lending.schema": "sha256:f8e03d38af714e3af3af6542a10c70a8acb6157e8f00dda21f7903e379e58504",
+      "lending.seed": "A",
+      "lending.site": "TOOL LIBRARY - MILL LANE",
+      "skillroy.fingerprint": "1",
+      "skillroy.protocolMajor": "0"
+    }
+  },
+  "resolutions": {},
+  "oracles": {},
+  "images": {
+    "keypad": {
+      "6ccffcf8f0c8db46": {
+        "sha256": "sha256:b92134e41fb1e52a276b59996f6312ed658154a93655f082ff2a6e58b6efceed",
+        "width": 144,
+        "height": 160,
+        "masks": [],
+        "carets": [],
+        "focus": {
+          "owner": {
+            "id": "entry"
+          },
+          "active": true
+        },
+        "file": "keypad-image.images/keypad.6ccffcf8f0c8db46.png",
+        "rendering": {
+          "jdk": {
+            "vendor": "Temurin",
+            "version": "1.8.0_504-b01",
+            "specification": "1.8"
+          },
+          "os": {
+            "name": "Linux",
+            "version": "7.0.14-orbstack-00380-ga7e0a2dc9535",
+            "arch": "aarch64"
+          },
+          "lookAndFeel": "javax.swing.plaf.metal.MetalLookAndFeel",
+          "antialiasing": {
+            "desktopHints": [],
+            "property": null
+          },
+          "screenScale": 1.0,
+          "probeHash": "sha256:873a24c99df96806c8569b288ec3ff10e9675c42efd6738914d3395f1e97a053"
+        },
+        "window": {
+          "size": {
+            "w": 144,
+            "h": 160
+          }
+        }
+      },
+      "d0bd5ce68e2f111c": {
+        "sha256": "sha256:b92134e41fb1e52a276b59996f6312ed658154a93655f082ff2a6e58b6efceed",
+        "width": 144,
+        "height": 160,
+        "masks": [],
+        "carets": [],
+        "focus": {
+          "owner": {
+            "id": "entry"
+          },
+          "active": true
+        },
+        "file": "keypad-image.images/keypad.d0bd5ce68e2f111c.png",
+        "rendering": {
+          "jdk": {
+            "vendor": "Eclipse Adoptium",
+            "version": "25.0.4.1+1-LTS",
+            "specification": "25"
+          },
+          "os": {
+            "name": "Linux",
+            "version": "7.0.14-orbstack-00380-ga7e0a2dc9535",
+            "arch": "aarch64"
+          },
+          "lookAndFeel": "javax.swing.plaf.metal.MetalLookAndFeel",
+          "antialiasing": {
+            "desktopHints": [],
+            "property": null
+          },
+          "screenScale": 1.0,
+          "probeHash": "sha256:5a2607adc4f29e7bd092bdef168f1f40a868660468df0fe15bb65a52d332fbb0"
+        },
+        "window": {
+          "size": {
+            "w": 144,
+            "h": 160
+          }
+        }
+      }
+    },
+    "keypad-frame": {
+      "6ccffcf8f0c8db46": {
+        "sha256": "sha256:a5ac5956a71d43e51487d2015c165128ae4f2fb14f15a14f5528f72e99f58058",
+        "width": 1024,
+        "height": 768,
+        "masks": [
+          {
+            "x": 12,
+            "y": 560,
+            "w": 1000,
+            "h": 28
+          }
+        ],
+        "carets": [
+          {
+            "x": 12,
+            "y": 562,
+            "w": 5,
+            "h": 24
+          }
+        ],
+        "focus": {
+          "owner": {
+            "id": "entry"
+          },
+          "ownerRect": {
+            "x": 12,
+            "y": 560,
+            "w": 1000,
+            "h": 28
+          },
+          "active": true
+        },
+        "file": "keypad-image.images/keypad-frame.6ccffcf8f0c8db46.png",
+        "rendering": {
+          "jdk": {
+            "vendor": "Temurin",
+            "version": "1.8.0_504-b01",
+            "specification": "1.8"
+          },
+          "os": {
+            "name": "Linux",
+            "version": "7.0.14-orbstack-00380-ga7e0a2dc9535",
+            "arch": "aarch64"
+          },
+          "lookAndFeel": "javax.swing.plaf.metal.MetalLookAndFeel",
+          "antialiasing": {
+            "desktopHints": [],
+            "property": null
+          },
+          "screenScale": 1.0,
+          "probeHash": "sha256:873a24c99df96806c8569b288ec3ff10e9675c42efd6738914d3395f1e97a053"
+        },
+        "window": {
+          "size": {
+            "w": 1024,
+            "h": 768
+          },
+          "insets": {
+            "top": 0,
+            "left": 0
+          }
+        }
+      },
+      "d0bd5ce68e2f111c": {
+        "sha256": "sha256:ab41b3b23335b507ac75c9ae7cf4fd4825ff7c4118c392280eab87058ddbd78f",
+        "width": 1024,
+        "height": 768,
+        "masks": [
+          {
+            "x": 12,
+            "y": 560,
+            "w": 1000,
+            "h": 28
+          }
+        ],
+        "carets": [
+          {
+            "x": 12,
+            "y": 562,
+            "w": 5,
+            "h": 24
+          }
+        ],
+        "focus": {
+          "owner": {
+            "id": "entry"
+          },
+          "ownerRect": {
+            "x": 12,
+            "y": 560,
+            "w": 1000,
+            "h": 28
+          },
+          "active": true
+        },
+        "file": "keypad-image.images/keypad-frame.d0bd5ce68e2f111c.png",
+        "rendering": {
+          "jdk": {
+            "vendor": "Eclipse Adoptium",
+            "version": "25.0.4.1+1-LTS",
+            "specification": "25"
+          },
+          "os": {
+            "name": "Linux",
+            "version": "7.0.14-orbstack-00380-ga7e0a2dc9535",
+            "arch": "aarch64"
+          },
+          "lookAndFeel": "javax.swing.plaf.metal.MetalLookAndFeel",
+          "antialiasing": {
+            "desktopHints": [],
+            "property": null
+          },
+          "screenScale": 1.0,
+          "probeHash": "sha256:5a2607adc4f29e7bd092bdef168f1f40a868660468df0fe15bb65a52d332fbb0"
+        },
+        "window": {
+          "size": {
+            "w": 1024,
+            "h": 768
+          },
+          "insets": {
+            "top": 0,
+            "left": 0
+          }
+        }
+      }
+    }
+  }
+}

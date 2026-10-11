@@ -534,7 +534,7 @@ abstract class ResolutionChecks {
      * without sleeping, each {@code image} record {@code held}; and against a deliberately changed baseline (one pixel of
      * the {@code keypad} PNG flipped, its entry's {@code sha256} following it, in a copy of the bindings root) it is
      * FAIL / ASSERTION with the three files under {@code failure/}. The missing-key case is the executor's unit test.
-     * Held back until step 2b commits the bindings and baselines ({@link Phase7Pending#NEEDS_BASELINES}).
+     * The bindings files and baselines are committed since step 2b (one baseline per render key and seed).
      *
      * <p>{@code -Dskillroy.bindings.update=true} is VC's script for step 2b: before the replay, {@code approve} with
      * every candidate approved writes this seed's committed bindings file and the PNG of the target's render key
@@ -544,8 +544,6 @@ abstract class ResolutionChecks {
     @Order(19)
     void keypadImageHoldsAgainstItsBaselinesAndAChangedOneFails() throws Exception {
         boolean update = Boolean.getBoolean("skillroy.bindings.update");
-        org.junit.jupiter.api.Assumptions.assumeTrue(update || !Phase7Pending.NEEDS_BASELINES.contains(
-                "keypad-image"), "step 2b commits keypad-image's bindings files and baselines");
         Plan plan = Runs.committed("keypad-image");
         if (update) {
             Runs.Outcome approved = Runs.run(client(), plan, runDir("keypad-image-approve"), bind(BindMode.APPROVE)

@@ -825,7 +825,7 @@ abstract class LoadModeChecks {
 
     /**
      * Item 7, the seed-A scenarios (phase7-contracts.md 12.4, 13.2 item 7): {@code sign-on-by-number-pad} passes (its
-     * region steps through the number pad, once VS's desk has it: {@link Phase7Pending#NEEDS_DESK});
+     * region steps through the number pad);
      * {@code loan-table-visual-check} is DEGRADED, its visual check skipped with the reason naming
      * {@code inference.vision} ({@code missing} until the vision module's contributor is on the class path,
      * {@code UNAVAILABLE (replay)} once it is); {@code vision-live-only} is SKIPPED: its {@code run.jsonl} holds
@@ -835,13 +835,11 @@ abstract class LoadModeChecks {
     @Test
     @Order(155)
     void thePhase7SeedAScenariosRunAsDesigned() throws Exception {
-        if (!Phase7Pending.NEEDS_DESK.contains("sign-on-by-number-pad")) {
-            Runs.Outcome pad = Runs.run(client(), Runs.committed("sign-on-by-number-pad"),
-                    ItEnv.runDir(mode().slug, "sign-on-by-number-pad"));
-            Runs.assertPassedWithoutSleeping(pad);
-            assertEquals(3, Runs.calls(pad.dir(), "swing.pointer").size(), "three region clicks on the pad");
-            assertSignedOff();
-        }
+        Runs.Outcome pad = Runs.run(client(), Runs.committed("sign-on-by-number-pad"),
+                ItEnv.runDir(mode().slug, "sign-on-by-number-pad"));
+        Runs.assertPassedWithoutSleeping(pad);
+        assertEquals(3, Runs.calls(pad.dir(), "swing.pointer").size(), "three region clicks on the pad");
+        assertSignedOff();
 
         Runs.Outcome visual = Runs.run(client(), Runs.committed("loan-table-visual-check"),
                 ItEnv.runDir(mode().slug, "loan-table-visual-check"));
@@ -927,14 +925,13 @@ abstract class LoadModeChecks {
     Stream<DynamicTest> junitGlueRunsTheCommittedScenarios() {
         RunOptions options = RunOptions.defaults().withOutputDir(ItEnv.runDir(mode().slug, "junit-glue"))
                 .withBind(Runs.bind(SampleCredentials.Env.SEED_A));
-        List<DynamicTest> tests = ScenarioTests.dynamicTests(withoutPhase7Pending(
+        List<DynamicTest> tests = ScenarioTests.dynamicTests(
                 ScenarioD.withoutScenarioDUntilItHasBindings(ScenarioSource.directory(ItEnv.moduleDir()
-                        .resolve("scenarios")))), this::client, options).toList();
+                        .resolve("scenarios"))), this::client, options).toList();
         List<String> names = tests.stream().map(DynamicTest::getDisplayName).toList();
         List<String> all = new ArrayList<>(List.of("basic-loan", "basic-loan-ui", ScenarioB.ID, ScenarioA.ID,
                 ScenarioC.ID, ScenarioE.ID, ScenarioD.ID, "loan-table-visual-check", "vision-live-only",
                 "sign-on-by-number-pad", "keypad-image"));
-        all.removeIf(Phase7Pending::pending);
         List<String> ids = all.stream().filter(id -> !id.equals("loan-table-visual-check")
                 && !id.equals("vision-live-only")).toList();
         assertEquals(all.stream().sorted().toList(), names.subList(0, all.size()).stream().sorted().toList(),
@@ -965,22 +962,6 @@ abstract class LoadModeChecks {
             assertSignedOff();
         }));
         return checked.stream();
-    }
-
-    /** The glue's source without the scenarios {@link Phase7Pending} holds back until a later integration step. */
-    static ScenarioSource withoutPhase7Pending(ScenarioSource source) {
-        return new ScenarioSource() {
-            @Override
-            public List<Entry> entries() throws IOException {
-                return source.entries().stream().filter(entry -> !Phase7Pending.pending(entry.name()
-                        .replaceFirst("\\.ya?ml$", ""))).toList();
-            }
-
-            @Override
-            public Path scenarioDirectory() {
-                return source.scenarioDirectory();
-            }
-        };
     }
 
     // ------------------------------------------------------------------ re-attach

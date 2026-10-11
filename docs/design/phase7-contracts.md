@@ -2197,6 +2197,16 @@ and leaves out what `Phase7Pending` holds back. `keypad-image` is `ResolutionChe
 AChangedOneFails` (`@Order(19)`, both seeds; the changed baseline is a copy of the bindings root with one pixel of the
 `keypad` PNG flipped and its entry's `sha256` following it), assumed away until step 2b.
 
+**As built (Phase 7, VS, step 2b).** Every plan of both scenario modules and the branch variant carries `packVersion`
+0.6.0 (the export's at plan version 6), every committed bindings file the same pack version (`BindingsUpToDateTest`'s
+rehash now carries the compiled plan's `packVersion` too; an `approve` writes the same bytes), the five goldens hold the
+five Swing ids; `keypad-image` is approved in the arm64 image on the Java 25 and the Java 8 target, both seeds: per seed a
+bindings file with one baseline per render key (`d0bd5ce68e2f111c`, Java 25; `6ccffcf8f0c8db46`, Java 8) for `keypad`
+and `keypad-frame` under `bindings/seed-<a|b>/keypad-image.images/`. `Phase7Pending` is deleted: `sign-on-by-number-pad`
+runs in `LoadModeChecks` and the glue, `keypad-image` in `ResolutionChecks`, `BindingsUpToDateTest` and the glue.
+`Runs.assertPassedWithoutSleeping` counts an `image` record as a check, and a scenario whose only steps are image checks
+needs no wait.
+
 ### 13.3 Live (profile `inference-live`; needs `ANTHROPIC_API_KEY`; skipped without it; never in CI)
 
 `VisionLiveIT` in the sample scenarios module, on the desk in the image, budget USD 1.00 per session and USD 3.00 for
