@@ -3427,11 +3427,10 @@ descends (§4.2, §4.3, VW).
 Numbered **91-102** by the code review's fix wave, the race fix and the security fix round (2026-10-11; `../TODO.md`): **(91)**
 the committed image entries carry `rendering.os.version` and `jdk.version`, the container host's kernel release among them:
 reviewer-only text that is not part of the key (D350) and that every `approve` on another host rewrites (code review L1-F7,
-refuted as a churn problem; FB; a contract change, not a fix). **(92)** A capability declared after the target is ready is
-held `UNAVAILABLE("not probed yet: the target is not ready")` until a posted worker probe has run; only the hooks module
-declares late today and D449 closes its window, but an agent module outside this repository that declares after readiness
-would show the same pending state, and the reason text is misleading for a late declaration (FX; proposed shape: a
-synchronous first probe in the core or an agent-api `declare(id, probe, initial)`, both rejected for D449). **(93)** Replay
+refuted as a churn problem; FB; a contract change, not a fix). **(92)** Closed 2026-10-11 for its reason text (a follow-up after Phase 7): a capability declared after the target is
+ready reads `UNAVAILABLE("not probed yet: declared after the target was ready, its probe is queued")` until its posted
+worker probe has run (`CoreCapabilityRegistry.LATE_REASON`, the `not probed yet` prefix kept); the state and the timing
+are unchanged, and the synchronous first probe and an agent-api `declare(id, probe, initial)` stay rejected (D449). **(93)** Replay
 refuses an unapproved value for a model's strategy only (D72): the export's `REQUIRED` mark on a model's or a client's
 tier (a) binding (D468) is the reviewer's mark and no replay gate; refusing `NOT_APPROVED` for a recorded `REQUIRED`
 whatever the strategy is one line in `Binder`, the owner's call (SH). **(94)** Closed 2026-10-11 (a follow-up after Phase 7): the recorder reads a `type`'s text with

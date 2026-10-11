@@ -40,7 +40,8 @@ import java.util.concurrent.Callable;
 /**
  * The {@link CapabilityRegistry}. A capability declared with a probe is <em>pending</em> (reported as UNAVAILABLE
  * "not probed yet") until the target is ready and its probe has run; the dispatcher answers NOT_READY for it in the
- * meantime. Probes run on agent workers, one at a time, each bounded by {@link #PROBE_TIMEOUT_MS}.
+ * meantime. One declared after the target is ready says so in its reason ({@link #LATE_REASON}, gap 92) while its
+ * posted probe waits for a worker. Probes run on agent workers, one at a time, each bounded by {@link #PROBE_TIMEOUT_MS}.
  *
  * <p>Withdrawal (contract amendment A18): each entry records who declared or first set it (a module's context, or
  * null for the core); {@link #removeOwnedBy} withdraws a module's capabilities after its {@code uninstall()} or a
@@ -55,6 +56,8 @@ final class CoreCapabilityRegistry implements CapabilityRegistry {
 
     static final long PROBE_TIMEOUT_MS = 10000L;
     static final String PENDING_REASON = "not probed yet: the target is not ready";
+    /** The pending reason of a capability declared once probes run: its probe is posted to a worker (gap 92). */
+    static final String LATE_REASON = "not probed yet: declared after the target was ready, its probe is queued";
 
     private final AgentLog log;
     private final Map<String, Entry> entries = new LinkedHashMap<String, Entry>();
@@ -94,8 +97,9 @@ final class CoreCapabilityRegistry implements CapabilityRegistry {
             entry.probe = probe;
             entry.declaration = declaration;
             entry.pending = true;
-            entry.capability = new Capability(id, CapabilityState.UNAVAILABLE, PENDING_REASON, null);
             probeNow = probesEnabled;
+            entry.capability = new Capability(id, CapabilityState.UNAVAILABLE, probeNow ? LATE_REASON : PENDING_REASON,
+                    null);
         }
         if (probeNow) {
             CoreThreadBroker b = broker;

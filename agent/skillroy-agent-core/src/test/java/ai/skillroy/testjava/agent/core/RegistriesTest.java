@@ -116,6 +116,7 @@ class RegistriesTest {
         caps.set("z.set", CapabilityState.OK, null, "direct");
         assertTrue(caps.isPending("x.probe"));
         assertEquals(CapabilityState.UNAVAILABLE, caps.get("x.probe").state());
+        assertEquals(CoreCapabilityRegistry.PENDING_REASON, caps.get("x.probe").reason());
         assertFalse(caps.isPending("z.set"));
         assertNull(caps.get("nope"));
         assertEquals(Arrays.asList("x.probe", "y.ok", "z.set"), Arrays.asList(caps.snapshot().keySet().toArray()));
@@ -126,6 +127,12 @@ class RegistriesTest {
         assertEquals("slow", caps.get("y.ok").reason());
         Map<String, Object> json = caps.toJson();
         assertTrue(((Map<?, ?>) json.get("capabilities")).containsKey("z.set"));
+        // gap 92: declared once probes run, pending until its posted probe has run (no worker here), and it says so
+        caps.declare("w.late", (ctx) -> ai.skillroy.testjava.agent.api.ProbeResult.ok());
+        assertTrue(caps.isPending("w.late"));
+        assertEquals(CapabilityState.UNAVAILABLE, caps.get("w.late").state());
+        assertEquals(CoreCapabilityRegistry.LATE_REASON, caps.get("w.late").reason());
+        assertTrue(caps.get("w.late").reason().startsWith("not probed yet"), "the prefix callers read");
     }
 
     @Test

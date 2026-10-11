@@ -1350,7 +1350,9 @@ capabilities). The ids `hook.engine`, `hook.probe`, `hook.install`, `hook.stub`,
 
 **As built (Phase 7, FX, 2026-10-11): a `hook.<id>` holds its state when `hook.install` answers** (D449). The core
 probes a capability declared after the target is ready later, on an agent worker the declaration posts to, and until
-that probe has run the entry reads `UNAVAILABLE("not probed yet: the target is not ready")` (P1 §5: the pending case);
+that probe has run the entry reads `UNAVAILABLE("not probed yet: the target is not ready")` (P1 §5: the pending case;
+since gap 92, 2026-10-11, a late declaration reads `UNAVAILABLE("not probed yet: declared after the target was ready, its
+probe is queued")`, P7 §16 gap 92);
 `hook.install` declares its `hook.<id>` after the target is ready. The engine therefore also **sets each `hook.<id>` at
 once to its probe's first answer** (the health of the table above, computed on the install's thread under the engine's
 lock, right after the declaration and only while no detach has begun); the declared probe stays for
