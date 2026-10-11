@@ -281,20 +281,7 @@ class RobotPathDisplayTest extends DisplayTestBase {
 
     @Test
     void requireFocusRefusesAJvmWithoutAFocusedWindow() throws Exception {
-        final JFrame[] thief = new JFrame[1];
-        onEdt(() -> {
-            thief[0] = new JFrame("Takes the focus away");
-            thief[0].setBounds(700, 500, 150, 80);
-            thief[0].setVisible(true);
-            return null;
-        });
-        awaitFocusedWindow("the thief is focused", thief[0]);
-        onEdt(() -> {
-            thief[0].dispose();
-            return null;
-        });
-        await("no window of the JVM is focused", WAIT_MS, () -> java.awt.KeyboardFocusManager
-                .getCurrentKeyboardFocusManager().getFocusedWindow() == null);
+        loseTheFocus();
         RpcException e = expectError(ErrorCodes.INPUT_REJECTED, () -> robot("by", map("id", "okButton"), "action",
                 "CLICK", "via", "ROBOT"));
         assertEquals("not focused", e.error().data().get("reason"));
@@ -304,6 +291,38 @@ class RobotPathDisplayTest extends DisplayTestBase {
         activate("the test frame is focused again", ui.frame);
         assertEquals(Boolean.TRUE, robot("by", map("id", "okButton"), "action", "CLICK", "via", "ROBOT")
                 .get("fired"));
+    }
+
+    /**
+     * Leaves the JVM without a focused window: a second frame takes the focus and is disposed, and nothing gives the
+     * focus back under the WM-less Xvfb. Once (the amd64 Java 8 targets leg, under emulation, 2026-10-11) the test frame
+     * was focused again within the wait, most likely a late activation of its own landing after the thief's (A39's
+     * first way); the cycle runs up to three times, the last with the whole wait.
+     */
+    private static void loseTheFocus() throws Exception {
+        for (int attempt = 1; ; attempt++) {
+            final JFrame[] thief = new JFrame[1];
+            onEdt(() -> {
+                thief[0] = new JFrame("Takes the focus away");
+                thief[0].setBounds(700, 500, 150, 80);
+                thief[0].setVisible(true);
+                return null;
+            });
+            awaitFocusedWindow("the thief is focused", thief[0]);
+            onEdt(() -> {
+                thief[0].dispose();
+                return null;
+            });
+            try {
+                await("no window of the JVM is focused (attempt " + attempt + ")", attempt < 3 ? WAIT_MS / 3 : WAIT_MS,
+                        () -> java.awt.KeyboardFocusManager.getCurrentKeyboardFocusManager().getFocusedWindow() == null);
+                return;
+            } catch (AssertionError e) {
+                if (attempt == 3) {
+                    throw e;
+                }
+            }
+        }
     }
 
     @Test
