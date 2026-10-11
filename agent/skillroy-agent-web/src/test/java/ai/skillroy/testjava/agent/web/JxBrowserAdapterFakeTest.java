@@ -394,6 +394,119 @@ class JxBrowserAdapterFakeTest {
         }
     }
 
+    /**
+     * Gap 47 (JxBrowser kit run against 8.18.3: {@code on(...)} waits while the Chromium process does not answer):
+     * with the engine hung, {@code subscribe()} and {@code addInitScript()} return within their bound, and on the EDT
+     * at once without calling the vendor there; once the engine answers, the observers registered late deliver; a
+     * registration that answers only after {@code detach()} is unsubscribed at once, and the application's own
+     * observer stays.
+     */
+    @Test
+    void aHungObserverRegistrationKeepsSubscribeWithinItsBoundAndDetachRemovesWhatAnsweredLate() throws Exception {
+        FakeEngine engine = FakeEngine.newInstance(null, Paths.get("hung-on"), FakeRenderingMode.OFF_SCREEN);
+        try {
+            final FakeBrowser b = browser(engine);
+            b.on(FakeConsoleMessageReceived.class, new FakeObserver<FakeConsoleMessageReceived>() {
+                @Override
+                public void on(FakeConsoleMessageReceived event) {
+                    // the application's own observer
+                }
+            });
+            int application = b.observerCount();
+            CountDownLatch release = new CountDownLatch(1);
+            JxBrowserAdapter adapter = new JxBrowserAdapter(FakeJxFixture.DESCRIPTOR, null,
+                    JxBrowserAdapter.NO_OPTIONS);
+            try {
+                adapter.probe(HOST);
+                final WebBrowser h = adapter.browsers(Collections.singletonList(b)).get(0);
+                b.hang(release);
+                final List<WebEvent> seen = new CopyOnWriteArrayList<WebEvent>();
+                long started = System.nanoTime();
+                h.subscribe(new WebEventListener() {
+                    @Override
+                    public void onEvent(WebBrowser browser, WebEvent event) {
+                        seen.add(event);
+                    }
+                });
+                assertTrue(ms(started) < 4000, "subscribe() is bounded: " + ms(started) + " ms");
+                started = System.nanoTime();
+                h.addInitScript(KitScripts.INIT_SOURCE);
+                assertTrue(ms(started) < 6000, "addInitScript() is bounded (isClosed() and the registration, 2 s "
+                        + "each): " + ms(started) + " ms");
+                final long[] onEdt = {0};
+                EventQueue.invokeAndWait(new Runnable() {
+                    @Override
+                    public void run() {
+                        long t0 = System.nanoTime();
+                        h.subscribe(new WebEventListener() {
+                            @Override
+                            public void onEvent(WebBrowser browser, WebEvent event) {
+                                // nothing
+                            }
+                        });
+                        onEdt[0] = ms(t0);
+                    }
+                });
+                assertTrue(onEdt[0] < 100, "subscribe() on the EDT answers at once: " + onEdt[0] + " ms");
+                assertEquals(application, b.observerCount(), "nothing registered while the engine hangs");
+                release.countDown();
+                long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+                while (b.observerCount() == application && System.nanoTime() < deadline) {
+                    Thread.yield();
+                }
+                assertTrue(b.observerCount() > application, "the observers registered once the engine answered");
+                b.loadAndWait(PAGE);
+                deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+                while (!kinds(seen).contains(WebEvent.Kind.LOAD_FINISHED) && System.nanoTime() < deadline) {
+                    Thread.yield();
+                }
+                assertTrue(kinds(seen).contains(WebEvent.Kind.LOAD_FINISHED), "events after a late registration: "
+                        + seen);
+            } finally {
+                adapter.detach();
+            }
+            assertEquals(application, b.observerCount(), "detach removed the adapter's observers");
+
+            CountDownLatch late = new CountDownLatch(1);
+            JxBrowserAdapter second = new JxBrowserAdapter(FakeJxFixture.DESCRIPTOR, null,
+                    JxBrowserAdapter.NO_OPTIONS);
+            try {
+                second.probe(HOST);
+                WebBrowser h = second.browsers(Collections.singletonList(b)).get(0);
+                b.hang(late);
+                h.subscribe(new WebEventListener() {
+                    @Override
+                    public void onEvent(WebBrowser browser, WebEvent event) {
+                        // nothing
+                    }
+                });
+                long started = System.nanoTime();
+                second.detach();
+                assertTrue(ms(started) < 4000, "detach() is bounded while a registration hangs: " + ms(started)
+                        + " ms");
+            } finally {
+                late.countDown();
+                second.detach();
+            }
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+            while (b.observerCount() != application && System.nanoTime() < deadline) {
+                Thread.yield();
+            }
+            assertEquals(application, b.observerCount(), "a registration that answered after detach() was removed");
+            assertEquals(Collections.emptyList(), engine.violations(), "no vendor call on the EDT");
+        } finally {
+            engine.shutdown();
+        }
+    }
+
+    private static Set<WebEvent.Kind> kinds(List<WebEvent> events) {
+        Set<WebEvent.Kind> out = new HashSet<WebEvent.Kind>();
+        for (WebEvent e : events) {
+            out.add(e.kind());
+        }
+        return out;
+    }
+
     private static long ms(long startedNanos) {
         return TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedNanos);
     }

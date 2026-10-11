@@ -42,7 +42,8 @@ import java.util.concurrent.TimeUnit;
  * chained document-start callback runs first, then the page's inline scripts, then the events
  * ({@code NavigationFinished}, {@code FrameDocumentLoadFinished} per frame, {@code FrameLoadFinished} of the children
  * and then of the main frame), each delivered on the EDT. For the tests of bounded vendor calls, {@link #hang} makes
- * {@code isClosed()}, {@code mainFrame()} and {@code frames()} block, as calls to a hung Chromium process do.
+ * {@code isClosed()}, {@code mainFrame()}, {@code frames()} and {@code on(...)} block, as calls to a hung Chromium
+ * process do.
  */
 public final class FakeBrowser {
 
@@ -92,7 +93,10 @@ public final class FakeBrowser {
         return closed;
     }
 
-    /** Until the latch is released (at most 30 s) {@code isClosed()}, {@code mainFrame()}, {@code frames()} block. */
+    /**
+     * Until the latch is released (at most 30 s) {@code isClosed()}, {@code mainFrame()}, {@code frames()} and
+     * {@code on(...)} block.
+     */
     public void hang(java.util.concurrent.CountDownLatch until) {
         hang = until;
     }
@@ -165,8 +169,14 @@ public final class FakeBrowser {
         return navigation;
     }
 
-    /** Subscribes an observer to the events of the type (and its subtypes). */
+    /**
+     * Subscribes an observer to the events of the type (and its subtypes). A round trip to the Chromium process in the
+     * product (JxBrowser 8.18.3 waits here while that process is stopped): blocks while {@link #hang} says so, and a
+     * call on the EDT is a violation.
+     */
     public FakeSubscription on(Class<?> type, FakeObserver<?> observer) {
+        engine.violations.blockingCall("Browser.on()");
+        hangIfAsked();
         final Object[] entry = {type, observer};
         observers.add(entry);
         return new FakeSubscription(new Runnable() {
