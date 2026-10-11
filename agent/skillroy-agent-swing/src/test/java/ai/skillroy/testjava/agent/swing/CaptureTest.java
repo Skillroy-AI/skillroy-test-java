@@ -68,7 +68,12 @@ class CaptureTest {
     static final Color RED = new Color(190, 30, 30);
     static final int GREY = 0xFF808080;
 
-    /** The shared raster hash vector: a 3 x 2 opaque raster (also in the controller's {@code ImageCompareTest}). */
+    /**
+     * The shared raster hash vector: a 3 x 2 opaque raster. The same six pixels and the same hash literal are the
+     * controller's {@code ImageCompareTest.VECTOR} and {@code VECTOR_HASH} ({@code skillroy-scenario}), so that
+     * {@link Capture#hash} and {@code ImageCompare.rasterHash} are proven to agree (fix wave of the Phase 7 review, FA,
+     * L3-F1).
+     */
     static final int[] VECTOR = {0xFF000000, 0xFFFFFFFF, 0xFF808080, 0xFF102030, 0xFFFF0000, 0xFF00FF00};
     static final String VECTOR_HASH = "sha256:6be118c38e93cd2b790c98897d10e69afa4ea5b1248c59203b1c2633a884c4ba";
 
@@ -372,6 +377,111 @@ class CaptureTest {
         Capture.Shot shot = take(root, req(null));
         assertEquals(GREY, shot.image.getRGB(20, 15));
         assertEquals(GREEN, at(shot.image, 100, 80));
+    }
+
+    /**
+     * Fix wave (Phase 7 review, FA, L2-F1): a capture whose paint root lies inside a component a mask names (a
+     * {@code COMPONENT} or {@code REGION} capture of a child of a masked container) is blanked by the ancestor's rule
+     * and reports it under the ancestor's ref; nothing inside it is marked.
+     */
+    @Test
+    void aCaptureInsideAMaskedContainerIsBlankedByTheContainersMask() throws Exception {
+        JPanel root = panel(BACK, 0, 0, 400, 300);
+        JPanel parent = panel(GREEN, 20, 20, 200, 100);
+        JPanel child = panel(RED, 20, 20, 60, 40);
+        JButton inner = new JButton("Inner");
+        inner.setBounds(5, 5, 40, 20);
+        child.add(inner);
+        parent.add(child);
+        root.add(parent);
+        ctx.spi.register(CaptureMask.class, c -> c == parent);
+        String parentRef = ctx.handles.handleFor(parent, ComponentView.KIND);
+
+        Capture.Request component = req(null);
+        component.annotate = true;
+        Capture.Shot shot = take(child, component);
+        assertEquals(GREY, shot.image.getRGB(10, 10), "the child of a masked panel is grey");
+        assertEquals(GREY, shot.image.getRGB(55, 35));
+        List<Object> redacted = arr(shot.fields.get("redacted"));
+        assertEquals(1, redacted.size(), redacted.toString());
+        assertEquals(parentRef, obj(redacted.get(0)).get("ref"), "reported under the masking ancestor");
+        assertEquals("capture-mask", obj(redacted.get(0)).get("rule"));
+        assertEquals(map("x", 0L, "y", 0L, "w", 60L, "h", 40L), obj(redacted.get(0)).get("rect"));
+        assertEquals(0, arr(shot.fields.get("marks")).size(), "nothing inside a masked component is marked");
+
+        Capture.Request region = req(Capture.Scope.REGION);
+        region.region = new Rectangle(10, 10, 30, 20);
+        Capture.Shot part = take(child, region);
+        assertEquals(GREY, part.image.getRGB(2, 2), "a region of the child likewise");
+        assertEquals(1, arr(part.fields.get("redacted")).size());
+
+        Capture.Request open = req(null);
+        open.redact = false;
+        assertEquals(RED, at(take(child, open).image, 55, 35), "a person's redact: false leaves it in");
+    }
+
+    /**
+     * Fix wave (Phase 7 review, FA, L2-F1 restated by its sceptic, probe D): an ancestor's mask {@code regions} (the
+     * table-cell form, {@code masks} false) blank the part of a descendant's capture that lies inside them.
+     */
+    @Test
+    void anAncestorsMaskRegionsBlankADescendantsCapture() throws Exception {
+        JPanel root = panel(BACK, 0, 0, 400, 300);
+        JPanel parent = panel(GREEN, 20, 20, 200, 100);
+        JPanel child = panel(RED, 20, 20, 60, 40);
+        parent.add(child);
+        root.add(parent);
+        ctx.spi.register(CaptureMask.class, new CaptureMask() {
+            @Override
+            public boolean masks(Component component) {
+                return false;
+            }
+
+            @Override
+            public List<Rectangle> regions(Component component) {
+                return component == parent ? Arrays.asList(new Rectangle(20, 20, 40, 30)) : null;
+            }
+        });
+        Capture.Shot shot = take(child, req(null));
+        assertEquals(GREY, shot.image.getRGB(10, 10), "inside the ancestor's region");
+        assertEquals(RED, at(shot.image, 50, 35), "outside it");
+        List<Object> redacted = arr(shot.fields.get("redacted"));
+        assertEquals(1, redacted.size(), redacted.toString());
+        assertEquals(ctx.handles.handleFor(parent, ComponentView.KIND), obj(redacted.get(0)).get("ref"));
+        assertEquals(map("x", 0L, "y", 0L, "w", 40L, "h", 30L), obj(redacted.get(0)).get("rect"));
+    }
+
+    /**
+     * Fix wave (Phase 7 review, FA, L2-F1 case b): a mask that names the window, whose root pane is the paint root
+     * (the stand-ins of the window-list seam: a panel for the window, its child for the root pane), blanks the whole
+     * layer of a {@code SCREEN} capture.
+     */
+    @Test
+    void aMaskOnTheWindowBlanksItsLayer() throws Exception {
+        JPanel window = panel(GREEN, 0, 0, 200, 100);
+        JPanel pane = panel(RED, 0, 0, 200, 100);
+        JButton button = new JButton("In the masked window");
+        button.setBounds(10, 10, 150, 30);
+        pane.add(button);
+        window.add(pane);
+        JPanel other = panel(BACK, 0, 0, 100, 100);
+        windows.source(() -> Arrays.asList(
+                new Windows.Layer(other, other, new Rectangle(300, 100, 100, 100), new Point(0, 0), false),
+                new Windows.Layer(window, pane, new Rectangle(100, 100, 200, 100), new Point(0, 0), true)));
+        ctx.spi.register(CaptureMask.class, c -> c == window);
+        Capture.Request r = req(Capture.Scope.SCREEN);
+        r.annotate = true;
+        Capture.Shot shot = take(null, r);
+        assertEquals(GREY, shot.image.getRGB(50, 50), "the masked window's layer is grey");
+        assertEquals(GREY, shot.image.getRGB(20, 20));
+        assertEquals(BACK, at(shot.image, 250, 50), "the other window is painted");
+        List<Object> redacted = arr(shot.fields.get("redacted"));
+        assertEquals(1, redacted.size(), redacted.toString());
+        assertEquals(ctx.handles.handleFor(window, ComponentView.KIND), obj(redacted.get(0)).get("ref"));
+        assertEquals(map("x", 0L, "y", 0L, "w", 200L, "h", 100L), obj(redacted.get(0)).get("rect"));
+        for (Object m : arr(shot.fields.get("marks"))) {
+            assertFalse(String.valueOf(obj(m).get("label")).contains("masked window"), "no mark: " + m);
+        }
     }
 
     @Test

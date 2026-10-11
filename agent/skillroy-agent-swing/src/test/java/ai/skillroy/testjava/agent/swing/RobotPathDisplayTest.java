@@ -60,8 +60,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * with a fake port that delivers like the OS (window-sourced events at the screen point) or drops: the capability probe,
  * the delivery probe before the pre-check, {@code NOT_DELIVERED}, {@code received elsewhere}, {@code PRESS} refused,
  * {@code requireFocus}, any covering window refusing the point, and a person's glass capture (masks before and after
- * the grab, {@code unstable}, the pixels outside the JVM's windows blanked). A second module instance with the agent
- * option {@code robot=true} serves the calls.
+ * the grab, {@code unstable}, the pixels outside the JVM's windows blanked). The fix wave of the Phase 7 review (FA)
+ * adds: the probe's own read refusing an outside point, an unfocused JVM and a covered point before anything moves, the
+ * probe skipped for a modal-blocked window, the pointer restored after a passing probe, a drag's end point bounded and
+ * checked for covering, the ids' reason before the capability probe has run, the masks of a dialog over the captured
+ * frame and the glass capture's heap bound. A second module instance with the agent option {@code robot=true} serves
+ * the calls.
  */
 class RobotPathDisplayTest extends DisplayTestBase {
 
@@ -135,14 +139,31 @@ class RobotPathDisplayTest extends DisplayTestBase {
                         target = w;
                     }
                 }
-                if (target == null) {
-                    return;
+                if (target == null || blockedByModal(target)) {
+                    return; // nothing there, or AWT drops input into a window a modal dialog blocks (BS9 "modal")
                 }
                 Point o = target.getLocationOnScreen();
                 target.dispatchEvent(new MouseEvent(target, id, System.currentTimeMillis(), mods, screen.x - o.x,
                         screen.y - o.y, screen.x, screen.y, count, false, button));
             });
         }
+    }
+
+    /** Whether a showing modal dialog other than the window (and not its owner) blocks it: AWT's filter, roughly. */
+    static boolean blockedByModal(Window w) {
+        for (Window other : Window.getWindows()) {
+            if (other != w && other instanceof java.awt.Dialog && ((java.awt.Dialog) other).isModal()
+                    && other.isShowing()) {
+                boolean owned = false;
+                for (Window o = w.getOwner(); o != null; o = o.getOwner()) {
+                    owned |= o == other;
+                }
+                if (!owned) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     private FakeContext rctx;
@@ -207,6 +228,8 @@ class RobotPathDisplayTest extends DisplayTestBase {
         assertTrue(press > 0 && os.calls.get(0).equals("move"), "the probe's move comes first: " + os.calls);
         assertEquals("release", os.calls.get(press + 1), "the release follows the press at once");
         assertEquals("move", os.calls.get(os.calls.size() - 1), "the pointer is restored last");
+        // fix wave (Phase 7 review, FA, L2-F6): restored to where the person left it, not to the probed point
+        assertEquals(new Point(900, 700), os.pointer(), "the pointer is back where it was before the probe");
     }
 
     @Test
@@ -273,7 +296,9 @@ class RobotPathDisplayTest extends DisplayTestBase {
         RpcException e = expectError(ErrorCodes.INPUT_REJECTED, () -> robot("by", map("id", "okButton"), "action",
                 "CLICK", "via", "ROBOT"));
         assertEquals("not focused", e.error().data().get("reason"));
-        assertFalse(os.calls.contains("press"));
+        // fix wave (Phase 7 review, FA, L2-F4): refused in the delivery probe's own read, so nothing moves at all
+        assertTrue(os.calls.isEmpty(), "nothing moves, not even the delivery probe: " + os.calls);
+        assertEquals(CapabilityState.OK, rctx.capabilities.get(SwingModule.CAP_POINTER_ROBOT).state());
         activate("the test frame is focused again", ui.frame);
         assertEquals(Boolean.TRUE, robot("by", map("id", "okButton"), "action", "CLICK", "via", "ROBOT")
                 .get("fired"));
@@ -305,6 +330,189 @@ class RobotPathDisplayTest extends DisplayTestBase {
         List<Object> covering = arr(obj(routed.get("hit")).get("covering"));
         assertEquals(1, covering.size());
         assertEquals(Boolean.FALSE, obj(covering.get(0)).get("ranked"), "reported, not refused, when routed");
+    }
+
+    /**
+     * Fix wave (Phase 7 review, FA, L2-F4): with a delivery probe due, a point outside the window is {@code NOT_FOUND
+     * outside} from the probe's own read; the real pointer never moves and the capability stays {@code OK}.
+     */
+    @Test
+    void aPointOutsideTheWindowIsRefusedBeforeTheProbeMovesAnything() throws Exception {
+        RpcException e = expectError(ErrorCodes.NOT_FOUND, () -> robot("point", map("x", 700L, "y", 10L), "space",
+                map("window", rref(ui.frame)), "action", "CLICK", "via", "ROBOT", "requireFocus", false));
+        assertEquals("outside", e.error().data().get("reason"));
+        assertTrue(os.calls.isEmpty(), "nothing moved: " + os.calls);
+        assertEquals(CapabilityState.OK, rctx.capabilities.get(SwingModule.CAP_POINTER_ROBOT).state());
+    }
+
+    /**
+     * Fix wave (Phase 7 review, FA, L2-F4): with a delivery probe due, a covering window of the JVM refuses the point
+     * ({@code covered}) before the probe moves the pointer onto it; the capability stays {@code OK}.
+     */
+    @Test
+    void aCoveredPointIsRefusedBeforeTheProbeMovesAnything() throws Exception {
+        Point okScreen = onEdt(() -> {
+            Point p = new Point(ui.ok.getWidth() / 2, ui.ok.getHeight() / 2);
+            SwingUtilities.convertPointToScreen(p, ui.ok);
+            return p;
+        });
+        onEdt(() -> {
+            JFrame cover = new JFrame("Unrelated frame on top");
+            cover.add(new JButton("Cover"));
+            cover.setBounds(okScreen.x - 20, okScreen.y - 20, 60, 60);
+            cover.setFocusableWindowState(false);
+            cover.setVisible(true);
+            return null;
+        });
+        settle();
+        RpcException e = expectError(ErrorCodes.INPUT_REJECTED, () -> robot("by", map("id", "okButton"), "action",
+                "CLICK", "via", "ROBOT", "requireFocus", false));
+        assertEquals("covered", e.error().data().get("reason"));
+        assertTrue(os.calls.isEmpty(), "nothing moved: " + os.calls);
+        assertEquals(CapabilityState.OK, rctx.capabilities.get(SwingModule.CAP_POINTER_ROBOT).state());
+    }
+
+    /**
+     * Fix wave (Phase 7 review, FA, L2-F4 as restated by its sceptic): a modal dialog blocks the target window, so AWT
+     * would drop the probe's move as it drops the press; the probe is skipped, the action reports that nothing arrived
+     * ({@code NOT_DELIVERED}) and the capability is not degraded.
+     */
+    @Test
+    void aModalBlockedWindowSkipsTheProbeAndReportsNothingDelivered() throws Exception {
+        final JDialog[] modal = new JDialog[1];
+        onEdt(() -> {
+            modal[0] = new JDialog(ui.frame, "Blocks the frame", true);
+            modal[0].setBounds(700, 500, 200, 100);
+            return null;
+        });
+        SwingUtilities.invokeLater(() -> modal[0].setVisible(true));
+        await("the modal dialog is showing", WAIT_MS, () -> modal[0].isShowing());
+        settle();
+        Map<String, Object> r = robot("by", map("id", "okButton"), "action", "CLICK", "via", "ROBOT",
+                "requireFocus", false);
+        assertEquals(Boolean.FALSE, r.get("fired"), r.toString());
+        assertEquals(RobotPath.NOT_DELIVERED, r.get("reason"));
+        assertEquals(CapabilityState.OK, rctx.capabilities.get(SwingModule.CAP_POINTER_ROBOT).state(),
+                "a blocked window is not a delivery failure");
+    }
+
+    /**
+     * Fix wave (Phase 7 review, FA, L2-S2): a Robot {@code DRAG}'s end point is bounded by the window and checked for
+     * covering in the same read as its start; nothing moves.
+     */
+    @Test
+    void aRobotDragsEndPointOutsideTheWindowOrCoveredIsRefused() throws Exception {
+        RpcException outside = expectError(ErrorCodes.NOT_FOUND, () -> robot("point", map("x", 20L, "y", 20L),
+                "space", map("window", rref(ui.frame)), "to", map("x", 900L, "y", 20L), "action", "DRAG", "via",
+                "ROBOT", "requireFocus", false));
+        assertEquals("outside", outside.error().data().get("reason"));
+        assertEquals("to", outside.error().data().get("param"));
+        assertFalse(os.calls.contains("press"), "no press: " + os.calls);
+        onEdt(() -> {
+            JFrame cover = new JFrame("Covers the drop point");
+            cover.setBounds(500, 380, 60, 60);
+            cover.setFocusableWindowState(false);
+            cover.setVisible(true);
+            return null;
+        });
+        settle();
+        os.calls.clear();
+        RpcException covered = expectError(ErrorCodes.INPUT_REJECTED, () -> robot("point", map("x", 20L, "y", 20L),
+                "space", map("window", rref(ui.frame)), "to", map("x", 530L, "y", 410L), "action", "DRAG", "via",
+                "ROBOT", "requireFocus", false));
+        assertEquals("covered", covered.error().data().get("reason"));
+        assertFalse(os.calls.contains("press"), "no press: " + os.calls);
+    }
+
+    /**
+     * Fix wave (Phase 7 review, FA, L2-F8): for an agent attached to a running application, both Robot ids read
+     * {@code UNAVAILABLE("robot: probe not run")} from the moment AWT is confirmed until the worker's probe declares
+     * them; a refused post leaves that reason, and a Robot call is refused rather than constructing the Robot on the
+     * call thread.
+     */
+    @Test
+    void aRefusedProbePostLeavesBothIdsUnavailableWithTheReason() throws Exception {
+        FakeContext c = new FakeContext();
+        c.options.put("robot", "true");
+        c.threads.refuseWorkerPosts = true;
+        SwingModule m = new SwingModule(() -> true, device -> os);
+        try {
+            m.install(c);
+            m.onTargetReady(c);
+            for (String id : new String[] {SwingModule.CAP_POINTER_ROBOT, SwingModule.CAP_CAPTURE_ROBOT}) {
+                Capability cap = c.capabilities.get(id);
+                assertTrue(cap != null, id + " is set before the probe is posted");
+                assertEquals(CapabilityState.UNAVAILABLE, cap.state(), id);
+                assertEquals("robot: probe not run", cap.reason(), id);
+            }
+            expectError(ErrorCodes.CAPABILITY_UNAVAILABLE, () -> c.call("swing.pointer", map("by",
+                    map("id", "okButton"), "action", "CLICK", "via", "ROBOT", "requireFocus", false), CALL_MS));
+            assertTrue(os.calls.isEmpty(), "nothing constructed or moved: " + os.calls);
+        } finally {
+            m.uninstall();
+            c.shutdown();
+        }
+    }
+
+    /**
+     * Fix wave (Phase 7 review, FA, L2-S1): a glass capture of the frame blanks the masks of every JVM window whose
+     * rectangle meets the captured one, here a modal sign-on dialog's password field over the frame.
+     */
+    @Test
+    void aGlassCaptureBlanksTheMasksOfADialogOverTheFrame() throws Exception {
+        final JDialog[] dialog = new JDialog[1];
+        final javax.swing.JPasswordField[] secret = new javax.swing.JPasswordField[1];
+        onEdt(() -> {
+            dialog[0] = new JDialog(ui.frame, "Sign on", true);
+            secret[0] = new javax.swing.JPasswordField("hunter2", 12);
+            dialog[0].getContentPane().add(secret[0]);
+            dialog[0].setBounds(300, 300, 200, 80);
+            return null;
+        });
+        SwingUtilities.invokeLater(() -> dialog[0].setVisible(true));
+        await("the sign-on dialog is showing", WAIT_MS, () -> secret[0].isShowing());
+        settle();
+        Map<String, Object> shot = rctx.call("swing.capture", map("target", rref(ui.frame), "mode", "ROBOT"),
+                CALL_MS);
+        boolean listed = false;
+        for (Object o : arr(shot.get("redacted"))) {
+            listed |= rref(secret[0]).equals(obj(o).get("ref"));
+        }
+        assertTrue(listed, "the dialog's password field is in redacted: " + shot.get("redacted"));
+        BufferedImage img = ImageIO.read(new ByteArrayInputStream(Base64.getDecoder().decode((String)
+                shot.get("base64"))));
+        Map<String, Object> origin = obj(shot.get("origin"));
+        Point centre = onEdt(() -> {
+            Point p = new Point(secret[0].getWidth() / 2, secret[0].getHeight() / 2);
+            SwingUtilities.convertPointToScreen(p, secret[0]);
+            return p;
+        });
+        assertEquals(0xFF808080, img.getRGB((int) (centre.x - (Long) origin.get("x")),
+                (int) (centre.y - (Long) origin.get("y"))), "the dialog's password field is grey in the glass");
+    }
+
+    /**
+     * Fix wave (Phase 7 review, FA, L2-S3): the glass capture keeps section 2.4's heap bound (refused before the grab,
+     * naming both figures) and answers an {@code OutOfMemoryError} of the grab {@code INTERNAL_ERROR}.
+     */
+    @Test
+    void aGlassCaptureKeepsTheHeapBoundAndCatchesOutOfMemory() throws Exception {
+        try {
+            Capture.heap = () -> 1L << 20; // 1 MB free: an eighth is 128 KB; the frame's grab needs about 1.2 MB
+            RpcException e = expectError(ErrorCodes.INVALID_PARAMS, () -> rctx.call("swing.capture", map("target",
+                    rref(ui.frame), "mode", "ROBOT"), CALL_MS));
+            assertTrue(e.error().data().containsKey("neededMb") && e.error().data().containsKey("freeMb"),
+                    String.valueOf(e.error().data()));
+            assertFalse(os.calls.contains("grab"), "refused before the grab: " + os.calls);
+        } finally {
+            Capture.heap = Capture.RUNTIME_HEAP;
+        }
+        os.duringGrab = () -> {
+            throw new OutOfMemoryError("test: no room for the grab");
+        };
+        RpcException oom = expectError(ErrorCodes.INTERNAL_ERROR, () -> rctx.call("swing.capture", map("target",
+                rref(ui.frame), "mode", "ROBOT"), CALL_MS));
+        assertEquals("out of memory", oom.error().data().get("reason"));
     }
 
     @Test

@@ -125,25 +125,8 @@ final class HitTest {
         hit.masked = target != null && view.masked(target);
         hit.enabled = target != null && target.isEnabled();
 
-        boolean unranked = false;
-        Window active = Windows.activeWindow();
-        for (Window other : Windows.roots(false)) {
-            if (other == window || hit.covering.size() >= MAX_COVERING) {
-                continue;
-            }
-            Rectangle r;
-            try {
-                r = new Rectangle(other.getLocationOnScreen(), other.getSize());
-            } catch (RuntimeException e) {
-                continue;
-            }
-            if (r.contains(hit.screen)) {
-                boolean ranked = rankedAbove(windows, other, window, active);
-                hit.covering.add(other);
-                hit.ranked.add(Boolean.valueOf(ranked));
-                unranked |= !ranked;
-            }
-        }
+        covering(windows, window, hit.screen, hit.covering, hit.ranked);
+        boolean unranked = hit.ranked.contains(Boolean.FALSE);
         hit.blocker = windows.blockingModal(window);
         Map<String, Object> blockedBy = null;
         if (hit.blocker != null) {
@@ -163,16 +146,7 @@ final class HitTest {
         Map<String, Object> m = new LinkedHashMap<String, Object>();
         m.put("window", view.ref(window));
         m.put("windowRect", Capture.rectJson(windowRect));
-        List<Object> covering = new ArrayList<Object>();
-        for (int i = 0; i < hit.covering.size(); i++) {
-            Window other = hit.covering.get(i);
-            Map<String, Object> one = new LinkedHashMap<String, Object>();
-            one.put("ref", view.ref(other));
-            one.put("rect", Capture.rectJson(new Rectangle(other.getLocationOnScreen(), other.getSize())));
-            one.put("ranked", hit.ranked.get(i));
-            covering.add(one);
-        }
-        m.put("covering", covering);
+        m.put("covering", coveringJson(view, hit.covering, hit.ranked));
         m.put("deepest", hit.deepest == null ? null : view.node(hit.deepest));
         m.put("mouseTarget", hit.mouseTarget == null ? null : view.node(hit.mouseTarget));
         m.put("mouseTargetInferred", Boolean.TRUE);
@@ -241,6 +215,53 @@ final class HitTest {
         m.put("seq", Long.valueOf(seq));
         hit.json = m;
         return hit;
+    }
+
+    /**
+     * The JVM's other showing windows whose screen rectangle holds the screen point, at most {@value #MAX_COVERING},
+     * each with whether it may be ranked above the window ({@code covering} of the hit-test). EDT only.
+     */
+    static void covering(Windows windows, Window window, Point screen, List<Window> out, List<Boolean> ranked) {
+        Window active = Windows.activeWindow();
+        for (Window other : Windows.roots(false)) {
+            if (other == window || out.size() >= MAX_COVERING) {
+                continue;
+            }
+            Rectangle r;
+            try {
+                r = new Rectangle(other.getLocationOnScreen(), other.getSize());
+            } catch (RuntimeException e) {
+                continue;
+            }
+            if (r.contains(screen)) {
+                out.add(other);
+                ranked.add(Boolean.valueOf(rankedAbove(windows, other, window, active)));
+            }
+        }
+    }
+
+    /**
+     * The covering windows of a screen point as the hit-test reports them ({@code [{ref, rect, ranked}]}); used for a
+     * Robot drag's end point (fix wave of the Phase 7 review, FA, L2-S2). EDT only.
+     */
+    static List<Object> coveringAt(ComponentView view, Windows windows, Window window, Point screen) {
+        List<Window> out = new ArrayList<Window>();
+        List<Boolean> ranked = new ArrayList<Boolean>();
+        covering(windows, window, screen, out, ranked);
+        return coveringJson(view, out, ranked);
+    }
+
+    private static List<Object> coveringJson(ComponentView view, List<Window> windows, List<Boolean> ranked) {
+        List<Object> covering = new ArrayList<Object>();
+        for (int i = 0; i < windows.size(); i++) {
+            Window other = windows.get(i);
+            Map<String, Object> one = new LinkedHashMap<String, Object>();
+            one.put("ref", view.ref(other));
+            one.put("rect", Capture.rectJson(new Rectangle(other.getLocationOnScreen(), other.getSize())));
+            one.put("ranked", ranked.get(i));
+            covering.add(one);
+        }
+        return covering;
     }
 
     /** A component's centre in its window's space, the point of the target form. */

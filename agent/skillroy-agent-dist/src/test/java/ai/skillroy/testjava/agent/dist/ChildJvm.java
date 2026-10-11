@@ -93,13 +93,18 @@ final class ChildJvm implements AutoCloseable {
         return new String(Files.readAllBytes(log.toPath()), UTF8);
     }
 
-    /** The value of the first output line {@code key=value}, waiting for it. */
+    /**
+     * The value of the first output line {@code key=value}, waiting for it, without the whole {@code [Loaded … from …]}
+     * lines that a Java 8 child run with {@code -verbose:class} can put between the value and its newline (see
+     * {@link #pidOf}; fix wave of the Phase 7 review, FA: {@code HostSafetyIT}'s {@code shown=true} read
+     * {@code true[Loaded …]} on every Java 8 target run).
+     */
     String awaitLine(String key) throws Exception {
         long deadline = System.currentTimeMillis() + START_TIMEOUT_MS;
         while (System.currentTimeMillis() < deadline) {
             for (String line : output().split("\\r?\\n")) {
                 if (line.startsWith(key + "=")) {
-                    return line.substring(key.length() + 1);
+                    return line.substring(key.length() + 1).replaceAll("\\[Loaded [^\\]]*\\]", "");
                 }
             }
             if (!process.isAlive()) {

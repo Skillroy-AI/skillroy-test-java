@@ -457,16 +457,7 @@ final class Pointer {
         toolkit.addAWTEventListener(listener, AWTEvent.MOUSE_EVENT_MASK | AWTEvent.MOUSE_MOTION_EVENT_MASK
                 | AWTEvent.MOUSE_WHEEL_EVENT_MASK);
         try {
-            for (int i = 0; i < plan.events.size(); i++) {
-                final int index = i;
-                final MouseEvent e = plan.events.get(i);
-                Edt.post(ctx, inv.remainingMs(), "swing.pointer", new Edt.Action() {
-                    @Override
-                    public void run() {
-                        dispatch(plan, st, index, e, r.force);
-                    }
-                });
-            }
+            postAll(inv, plan, st, r.force);
             long wait = Math.max(0, inv.remainingMs() - RESULT_RESERVE_MS - SAFETY_MS);
             boolean finished = st.done.await(wait, TimeUnit.MILLISECONDS);
             boolean promise = finished ? false : cancel(st);
@@ -501,6 +492,60 @@ final class Pointer {
             return m;
         } finally {
             toolkit.removeAWTEventListener(listener);
+        }
+    }
+
+    /**
+     * Posts one {@code invokeLater} task per event of the plan (section 3.3). A post that fails midway (a refusal of
+     * the thread broker, a dead event queue) cancels the sequence, so that the tasks already queued dispatch nothing
+     * more, and a press already dispatched is balanced by one more posted task (best effort; the balance is taken once,
+     * under the state's lock, by whichever task runs first) before the failure is rethrown (fix wave of the Phase 7
+     * review, FA, L2-F7). Package-private for the tests.
+     */
+    void postAll(Invocation inv, final Plan plan, final State st, final boolean force) throws Exception {
+        try {
+            for (int i = 0; i < plan.events.size(); i++) {
+                final int index = i;
+                final MouseEvent e = plan.events.get(i);
+                Edt.post(ctx, inv.remainingMs(), "swing.pointer", new Edt.Action() {
+                    @Override
+                    public void run() {
+                        dispatch(plan, st, index, e, force);
+                    }
+                });
+            }
+        } catch (Exception failure) {
+            stopAfterFailedPost(inv, plan, st);
+            throw failure;
+        } catch (Error failure) {
+            stopAfterFailedPost(inv, plan, st);
+            throw failure;
+        }
+    }
+
+    private void stopAfterFailedPost(Invocation inv, final Plan plan, final State st) {
+        if (!cancel(st)) {
+            return;
+        }
+        final long when = plan.events.isEmpty() ? nextWhen() : plan.events.get(0).getWhen();
+        try {
+            Edt.post(ctx, Math.max(1, inv.remainingMs()), "swing.pointer balance", new Edt.Action() {
+                @Override
+                public void run() {
+                    boolean balance;
+                    synchronized (st) {
+                        balance = needsBalance(st);
+                    }
+                    if (balance) {
+                        balance(plan.source, st, when);
+                    }
+                }
+            });
+        } catch (Throwable ignored) {
+            if (ignored instanceof VirtualMachineError) {
+                throw (VirtualMachineError) ignored;
+            }
+            // the queue refuses this post too: nothing more can be sent; the failure is rethrown by the caller
         }
     }
 

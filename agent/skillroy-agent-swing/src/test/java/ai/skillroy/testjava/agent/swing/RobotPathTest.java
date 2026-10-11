@@ -59,7 +59,7 @@ class RobotPathTest {
     }
 
     /** Records what the path asks of the OS; may fail on the n-th move. */
-    static final class FakePort implements RobotPort {
+    static class FakePort implements RobotPort {
         final List<String> calls = new ArrayList<String>();
         int failOnMove = -1;
         private int moves;
@@ -134,6 +134,34 @@ class RobotPathTest {
                 port.calls, "released in the finally, and only then restored");
     }
 
+    /**
+     * Fix wave (Phase 7 review, FA, L2-F5): a press that throws after the native press took effect is still released in
+     * the {@code finally} before the pointer is restored (a spurious release of a button never pressed is harmless).
+     */
+    @Test
+    void aPressThatThrowsIsStillReleasedBeforeThePointerIsRestored() {
+        FakePort port = new FakePort() {
+            @Override
+            public void mousePress(int buttons) {
+                super.mousePress(buttons);
+                throw new IllegalStateException("the toolkit failed after the press");
+            }
+        };
+        assertThrows(IllegalStateException.class, () -> RobotPath.act(port, request("action", "CLICK"),
+                new Point(10, 20), null));
+        assertEquals(Arrays.asList("move 10,20", "press " + B1, "release " + B1, "move 500,400"), port.calls);
+        FakePort dragging = new FakePort() {
+            @Override
+            public void mousePress(int buttons) {
+                super.mousePress(buttons);
+                throw new IllegalStateException("the toolkit failed after the press");
+            }
+        };
+        assertThrows(IllegalStateException.class, () -> RobotPath.act(dragging,
+                request("action", "DRAG", "to", map("fx", 1.0, "fy", 1.0)), new Point(10, 20), new Point(50, 20)));
+        assertEquals(Arrays.asList("move 10,20", "press " + B1, "release " + B1, "move 500,400"), dragging.calls);
+    }
+
     @Test
     void aWheelTurnsOneNotchAtATime() {
         FakePort port = new FakePort();
@@ -185,6 +213,41 @@ class RobotPathTest {
         assertEquals(0xFF102030, image.getRGB(3, 3));
         assertEquals(0xFF102030, image.getRGB(6, 6));
         assertEquals(0xFF808080, image.getRGB(7, 7));
+    }
+
+    /**
+     * Fix wave (Phase 7 review, FA, L2-S3): the outside of the windows is blanked with filled complement rectangles,
+     * pixel for pixel what the per-pixel rule says (overlapping windows, a window partly outside the grab, none).
+     */
+    @Test
+    void theOutsideIsBlankedPixelForPixelAsThePerPixelRuleSays() {
+        Rectangle screen = new Rectangle(100, 50, 64, 48);
+        List<List<Rectangle>> cases = Arrays.asList(
+                Arrays.<Rectangle>asList(),
+                Arrays.asList(new Rectangle(100, 50, 64, 48)),
+                Arrays.asList(new Rectangle(90, 40, 30, 30), new Rectangle(110, 60, 30, 20)),
+                Arrays.asList(new Rectangle(120, 55, 10, 40), new Rectangle(105, 70, 50, 5),
+                        new Rectangle(150, 30, 40, 100)),
+                Arrays.asList(new Rectangle(0, 0, 10, 10), new Rectangle(163, 97, 5, 5)));
+        for (List<Rectangle> windowRects : cases) {
+            BufferedImage image = new BufferedImage(screen.width, screen.height, BufferedImage.TYPE_INT_RGB);
+            for (int y = 0; y < screen.height; y++) {
+                for (int x = 0; x < screen.width; x++) {
+                    image.setRGB(x, y, 0xFF102030);
+                }
+            }
+            RobotPath.blankOutside(image, screen, windowRects);
+            for (int y = 0; y < screen.height; y++) {
+                for (int x = 0; x < screen.width; x++) {
+                    boolean inside = false;
+                    for (Rectangle r : windowRects) {
+                        inside |= r.contains(screen.x + x, screen.y + y);
+                    }
+                    assertEquals(inside ? 0xFF102030 : 0xFF808080, image.getRGB(x, y),
+                            "pixel " + x + "," + y + " of " + windowRects);
+                }
+            }
+        }
     }
 
     static Invocation invocation(final AgentContext ctx) {

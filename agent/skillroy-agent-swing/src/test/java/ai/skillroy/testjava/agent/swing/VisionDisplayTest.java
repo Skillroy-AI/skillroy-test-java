@@ -163,6 +163,56 @@ class VisionDisplayTest extends DisplayTestBase {
         assertEquals(java.awt.Color.MAGENTA.getRGB(), img.getRGB(x, y));
     }
 
+    /**
+     * Fix wave (Phase 7 review, FA, L2-F1 case b): a {@code CaptureMask} that names a dialog (whose root pane, not the
+     * dialog, is the paint root) blanks the dialog's whole image in {@code WINDOW} and its layer in {@code SCREEN},
+     * reported under the dialog's ref; the frame beside it is painted.
+     */
+    @Test
+    void aMaskThatNamesADialogBlanksItInWindowAndScreenCaptures() throws Exception {
+        final JDialog[] d = new JDialog[1];
+        onEdt(() -> {
+            d[0] = new JDialog(ui.frame, "Shows personal data", false);
+            d[0].getContentPane().setBackground(java.awt.Color.MAGENTA);
+            d[0].setBounds(100, 100, 200, 120);
+            d[0].setVisible(true);
+            return null;
+        });
+        await("dialog showing", WAIT_MS, d[0]::isShowing);
+        settle();
+        AutoCloseable mask = ctx.spi.register(ai.skillroy.testjava.agent.api.spi.CaptureMask.class,
+                c -> c == d[0]);
+        try {
+            Map<String, Object> window = call("swing.capture", "target", ref(d[0]), "annotateRefs", true);
+            BufferedImage wi = decode(window);
+            assertEquals(0xFF808080, wi.getRGB(wi.getWidth() / 2, wi.getHeight() / 2), "the dialog is grey");
+            assertEquals(0xFF808080, wi.getRGB(1, 1));
+            List<Object> redacted = arr(window.get("redacted"));
+            assertEquals(1, redacted.size(), redacted.toString());
+            assertEquals(ref(d[0]), obj(redacted.get(0)).get("ref"));
+            assertEquals(0, arr(window.get("marks")).size(), "nothing in a masked dialog is marked");
+
+            Map<String, Object> screen = call("swing.capture", "scope", "SCREEN");
+            BufferedImage si = decode(screen);
+            Map<String, Object> dr = null;
+            for (Object o : arr(screen.get("windows"))) {
+                if (ref(d[0]).equals(obj(o).get("ref"))) {
+                    dr = obj(obj(o).get("rect"));
+                }
+            }
+            assertNotNull(dr, "the dialog is in the composite");
+            assertEquals(0xFF808080, si.getRGB((int) ((Long) dr.get("x") + 100), (int) ((Long) dr.get("y") + 60)),
+                    "the dialog's layer is grey");
+            boolean listed = false;
+            for (Object o : arr(screen.get("redacted"))) {
+                listed |= ref(d[0]).equals(obj(o).get("ref"));
+            }
+            assertTrue(listed, "reported under the dialog's ref: " + screen.get("redacted"));
+        } finally {
+            mask.close();
+        }
+    }
+
     @Test
     void marksStandOnTheControlsAndLeaveThePixelsAlone() throws Exception {
         focusOk();

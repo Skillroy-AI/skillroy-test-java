@@ -20,6 +20,7 @@ import ai.skillroy.testjava.controller.AgentRpcException;
 import ai.skillroy.testjava.protocol.ErrorCodes;
 import ai.skillroy.testjava.protocol.Event;
 import ai.skillroy.testjava.protocol.RpcResult;
+import ai.skillroy.testjava.scenario.image.ImageCompare;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 
@@ -214,6 +215,9 @@ abstract class VisionSwingChecks extends LoadModeChecks {
                     "the frame's capture is its root pane's raster: the top rows hold the prompt line, not a title bar");
             Map<String, Object> again = call("swing.capture", "target", frame);
             assertTrue(sameRaster(withoutCarets(shot), withoutCarets(again)), "stable but for the caret (BS11)");
+            // the agent's hash and the controller's ImageCompare.rasterHash agree on the desk's raster (fix wave of the
+            // Phase 7 review, FA, L3-F1: the export checks an anchor's capture file by exactly this equality)
+            assertEquals(shot.get("hash"), ImageCompare.rasterHash(decode(shot)), "Capture.hash == rasterHash");
 
             Map<String, Object> table = node(Map.of("name", "loanTable"));
             Map<String, Object> component = call("swing.capture", "target", table.get("ref"));
@@ -221,6 +225,9 @@ abstract class VisionSwingChecks extends LoadModeChecks {
             assertEquals(Map.of("x", tb.get("x"), "y", tb.get("y")), component.get("origin"));
 
             Map<String, Object> marked = call("swing.capture", "target", frame, "annotateRefs", true);
+            // the agent draws nothing: the annotated raster is the plain one, carets blanked as above since the desk is
+            // focused here and the caret blinks (fix wave, FA, L3-F4; the raw hash would be flaky)
+            assertTrue(sameRaster(withoutCarets(shot), withoutCarets(marked)), "marks leave the pixels untouched");
             List<String> keyMarks = new ArrayList<>();
             List<String> regions = new ArrayList<>();
             boolean header = false;
@@ -459,6 +466,11 @@ abstract class VisionSwingChecks extends LoadModeChecks {
                     (String) before.get("ref"));
             assertNotNull(viewport, "the slip panel's viewport");
             long beforeY = n(map(before.get("bounds")).get("y"));
+            long areaH = n(map(before.get("bounds")).get("h"));
+            long viewH = n(map(viewport.get("bounds")).get("h"));
+            // the six loans are there so that the slip is taller than its view; the wheel must then move it (fix wave,
+            // FA, L3-F5: the check no longer accepts "nothing moved" for a slip that happens to fit)
+            assertTrue(areaH > viewH, "the slip's text (" + areaH + " px) is taller than its view (" + viewH + " px)");
             // at the top of its view the slip scrolls down, else up
             long direction = beforeY >= n(map(viewport.get("bounds")).get("y")) ? 5L : -5L;
             Map<String, Object> wheel = call("swing.pointer", "point", centre(viewport), "space", Map.of("window",
@@ -468,17 +480,11 @@ abstract class VisionSwingChecks extends LoadModeChecks {
             call("swing.settle", "timeoutMs", 10_000L);
             Map<String, Object> after = node(Map.of("name", "slip"));
             long afterY = n(map(after.get("bounds")).get("y"));
-            long areaH = n(map(before.get("bounds")).get("h"));
-            long viewH = n(map(viewport.get("bounds")).get("h"));
             String slipText = String.valueOf(before.get("text"));
             ItEnv.timing("java=" + java + " mode=" + mode().slug + " slipWheel=" + beforeY + "->" + afterY
                     + " area=" + areaH + " view=" + viewH + " lines=" + slipText.split("\n", -1).length
 );
-            if (areaH > viewH) {
-                assertNotEquals(beforeY, afterY, "the slip panel scrolled (its text is taller than its view)");
-            } else {
-                assertEquals(beforeY, afterY, "a slip that fits its view does not move");
-            }
+            assertNotEquals(beforeY, afterY, "the slip panel scrolled (its text is taller than its view)");
 
             Map<String, Object> rendering = call("swing.rendering");
             for (String key : List.of("jdk", "os", "lookAndFeel", "antialiasing", "screenScale", "probeHash", "keyed",

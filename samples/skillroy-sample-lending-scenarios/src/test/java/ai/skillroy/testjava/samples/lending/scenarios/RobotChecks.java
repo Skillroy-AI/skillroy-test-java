@@ -56,21 +56,22 @@ import static ai.skillroy.testjava.samples.lending.scenarios.LoadModeChecks.valu
 import static ai.skillroy.testjava.samples.lending.scenarios.VisionSwingChecks.centre;
 import static ai.skillroy.testjava.samples.lending.scenarios.VisionSwingChecks.first;
 import static ai.skillroy.testjava.samples.lending.scenarios.VisionSwingChecks.map;
-import static ai.skillroy.testjava.samples.lending.scenarios.VisionSwingChecks.sameRaster;
 import static ai.skillroy.testjava.samples.lending.scenarios.VisionSwingChecks.withoutCarets;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeFalse;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
  * The Robot leg (phase7-contracts.md section 13.2 item 6): the desk launched with the agent option {@code robot=true}
  * ({@link LendingTarget.Mode#JAVAAGENT_ROBOT}), once per target Java, on the WM-less display, every Robot call passing
  * {@code requireFocus: false} explicitly where the frame may legitimately hold no focus (BS9 K7). The capability is
  * {@code OK("robot")}; a Robot click on {@code DUE} fires the key; {@code requireFocus} (the default) refuses while the
- * frame holds no focus and passes once it has it; a point outside every window is {@code NOT_FOUND}; {@code PRESS} is
- * refused; a person's glass capture of the frame equals the root-pane {@code PAINT} raster (BS9); and the controller's
+ * frame holds no focus (skipped on a leg where the frame keeps it) and passes once it has it; a point outside every
+ * window is {@code NOT_FOUND}; {@code PRESS} is refused; a person's glass capture of the frame equals the root-pane
+ * {@code PAINT} raster (BS9); and the controller's
  * half of the double opt-in: a plan with {@code pointer {via: ROBOT}} refused without {@code RunOptions.robot}, run
  * with it, and PRECONDITION_FAILED on a target without the agent option.
  */
@@ -155,30 +156,52 @@ abstract class RobotChecks {
         Runs.PACK.recover(client());
     }
 
+    /**
+     * The refusal half of {@code requireFocus} (the default) on the desk: after a prompt dialog closed, a WM-less
+     * display hands the frame the focus back to nobody (BS9 K7), so a Robot click is {@code INPUT_REJECTED("not
+     * focused")}. Whether the frame lost the focus is observed, not made (the desk offers no action that takes it away),
+     * so a leg on which the frame kept it reports this test skipped rather than passing without the refusal (fix wave of
+     * the Phase 7 review, FA, L3-F2); the deterministic refusal is {@code RobotPathDisplayTest
+     * .requireFocusRefusesAJvmWithoutAFocusedWindow} in the agent's display tests.
+     */
     @Test
     @Order(30)
-    void requireFocusRefusesAnUnfocusedFrameAndPassesOnceItHasTheFocus() throws Exception {
-        send("Entry", "100");
-        assertEquals("IDLE", send("Entry", PASSWORD).payload().get("state"));
-        RpcResult scan = client().call("lending.input", Map.of("source", "Barcode", "value", "0000000000000"), CALL);
-        assertNotNull(client().await("window.opened", scan.seqBefore(), Map.of("modal", true), WAIT));
-        RpcResult answer = client().call("lending.prompt.answer", Map.of("choice", "OK"), CALL);
-        assertNotNull(client().await(READY_TOPICS, answer.seqBefore(), null, WAIT));
-        call("swing.settle", "timeoutMs", 10_000L);
-        // On a display without a window manager nothing hands the frame the focus back after the dialog (BS9 K7)
-        Object focused = map(call("swing.capture", "scale", 0.25).get("focus")).get("window");
-        if (focused == null) {
+    void requireFocusRefusesAnUnfocusedFrame() throws Exception {
+        try {
+            send("Entry", "100");
+            assertEquals("IDLE", send("Entry", PASSWORD).payload().get("state"));
+            RpcResult scan = client().call("lending.input", Map.of("source", "Barcode", "value", "0000000000000"),
+                    CALL);
+            assertNotNull(client().await("window.opened", scan.seqBefore(), Map.of("modal", true), WAIT));
+            RpcResult answer = client().call("lending.prompt.answer", Map.of("choice", "OK"), CALL);
+            assertNotNull(client().await(READY_TOPICS, answer.seqBefore(), null, WAIT));
+            call("swing.settle", "timeoutMs", 10_000L);
+            // On a display without a window manager nothing hands the frame the focus back after the dialog (BS9 K7)
+            Object focused = map(call("swing.capture", "scale", 0.25).get("focus")).get("window");
+            ItEnv.timing("java=" + java + " mode=" + mode().slug + " focusedAfterPrompt=" + focused);
+            assumeTrue(focused == null, "the frame kept the focus after the prompt (" + focused + "): the refusal "
+                    + "cannot be exercised on this leg");
             AgentRpcException e = assertThrows(AgentRpcException.class, () -> call("swing.pointer", "by",
                     Map.of("id", "entry"), "action", "CLICK", "via", "ROBOT"));
             assertEquals(ErrorCodes.INPUT_REJECTED, e.error().code());
             assertEquals("not focused", e.error().data().get("reason"));
+        } finally {
+            Runs.PACK.recover(client());
         }
-        ItEnv.timing("java=" + java + " mode=" + mode().slug + " focusedAfterPrompt=" + focused);
-        activate();
-        Map<String, Object> passed = call("swing.pointer", "by", Map.of("id", "entry"), "action", "CLICK", "via",
-                "ROBOT");
-        assertEquals(Boolean.TRUE, passed.get("fired"), "requireFocus passes with the focus: " + passed);
-        Runs.PACK.recover(client());
+    }
+
+    /** The passing half of {@code requireFocus}: once a routed click gave the frame the focus, a Robot click acts. */
+    @Test
+    @Order(31)
+    void requireFocusPassesOnceTheFrameHasTheFocus() throws Exception {
+        try {
+            activate();
+            Map<String, Object> passed = call("swing.pointer", "by", Map.of("id", "entry"), "action", "CLICK", "via",
+                    "ROBOT");
+            assertEquals(Boolean.TRUE, passed.get("fired"), "requireFocus passes with the focus: " + passed);
+        } finally {
+            Runs.PACK.recover(client());
+        }
     }
 
     @Test
@@ -282,6 +305,7 @@ abstract class RobotChecks {
         }
         ItEnv.timing("java=" + java + " mode=" + mode().slug + " glassVsPaintDiffering=" + differing);
         assertEquals(0, differing, "BS9: a ROBOT capture equals a root-pane PAINT inside the root pane");
-        assertTrue(sameRaster(p, p));
+        // the grey outside the JVM's windows is RobotPathDisplayTest.aGlassCaptureIsMaskedAndBlankedOutsideTheWindows':
+        // a glass capture of the WM-less frame lies wholly inside it (fix wave, FA, L3-S3: a tautology stood here)
     }
 }

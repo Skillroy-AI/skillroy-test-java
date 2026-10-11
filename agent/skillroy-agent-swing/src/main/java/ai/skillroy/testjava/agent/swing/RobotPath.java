@@ -64,7 +64,10 @@ import javax.swing.SwingUtilities;
  *       was not received, the real pointer is moved to the target point and a native {@code MOUSE_MOVED} at a
  *       component of the target window is awaited for at most {@value #PROBE_MS} ms (BS9: macOS without the
  *       Accessibility permission drops everything silently); nothing arriving degrades {@code swing.pointer.robot}
- *       and refuses the call. It runs before the pre-check, never between the pre-check and the press.</li>
+ *       and refuses the call; the pointer is put back where it was either way. It runs before the pre-check, never
+ *       between the pre-check and the press; its own read applies the pre-check's refusals first (nothing moves for a
+ *       refused call), and it is skipped for a window a modal dialog blocks or a point another window covers under
+ *       {@code force}, where AWT would drop or divert its move (fix wave of the Phase 7 review, FA).</li>
  *   <li><b>The pre-check</b>: the hit-test; {@code requireFocus} (default true) refuses a JVM without a focused window
  *       ({@code INPUT_REJECTED "not focused"}); any covering window of the JVM refuses the point unless
  *       {@code force}.</li>
@@ -81,6 +84,8 @@ final class RobotPath {
 
     /** The capabilities' reason without the agent option. */
     static final String NOT_ENABLED = "robot: not enabled (agent option robot=true)";
+    /** The capabilities' reason from the moment AWT is confirmed until the capability probe has run (L2-F8). */
+    static final String PROBE_NOT_RUN = "robot: probe not run";
     /** The reason of a failed delivery probe. */
     static final String NOT_DELIVERED_REASON = "robot: native input is not delivered (no event within 1000 ms)";
     /** {@code fired: false} reasons. */
@@ -184,44 +189,25 @@ final class RobotPath {
                     "action", "via", Pointer.ROBOT));
         }
         if (!deliveryOk) {
+            // the probe's own read refuses what the pre-check would refuse, so that nothing moves for such a call
+            // (fix wave of the Phase 7 review, FA, L2-F4); the pre-check below repeats it right before the press
             Plan where = Edt.read(ctx, inv.remainingMs(), new Callable<Plan>() {
                 @Override
                 public Plan call() {
-                    ComponentView view = new ComponentView(ctx);
-                    Pointer.Target t = pointer.address(view, new SwingSpis(ctx), r);
-                    Plan p = new Plan();
-                    p.window = t.window;
-                    Point o = t.window.getLocationOnScreen();
-                    p.screen = new Point(o.x + t.p.x, o.y + t.p.y);
-                    return p;
+                    return check(r);
                 }
             });
-            probe(inv, where.window, where.screen);
+            if (where.hit.blocker == null && where.hit.covering.isEmpty()) {
+                probe(inv, where.window, where.screen);
+            }
+            // else AWT drops the probe's move into a blocked window, and a (forced) covering window takes it: the probe
+            // could prove nothing, so the action's own observation reports what arrived (NOT_DELIVERED, received
+            // elsewhere) and the capability is not degraded
         }
         final Plan plan = Edt.read(ctx, inv.remainingMs(), new Callable<Plan>() {
             @Override
             public Plan call() {
-                ComponentView view = new ComponentView(ctx);
-                SwingSpis spis = new SwingSpis(ctx);
-                Pointer.Target t = pointer.address(view, spis, r);
-                HitTest.Hit hit = HitTest.at(view, windows, spis, t.window, t.p, null, true, ctx.events().lastSeq());
-                if (r.requireFocus
-                        && KeyboardFocusManager.getCurrentKeyboardFocusManager().getFocusedWindow() == null) {
-                    throw new RpcException(ErrorCodes.INPUT_REJECTED, "the target JVM holds no focused window, so "
-                            + "its windows may not be in front; bring it to the front (requireFocus)",
-                            Errors.data("reason", "not focused"));
-                }
-                pointer.precheck(view, r, hit, true);
-                Plan p = new Plan();
-                p.window = t.window;
-                p.hit = hit;
-                p.wasFocused = t.window.isFocused();
-                Point o = t.window.getLocationOnScreen();
-                p.screen = new Point(o.x + t.p.x, o.y + t.p.y);
-                if (t.to != null) {
-                    p.screenTo = new Point(o.x + t.to.x, o.y + t.to.y);
-                }
-                return p;
+                return check(r);
             }
         });
         final int observed = r.kind == Pointer.Kind.MOVE ? MouseEvent.MOUSE_MOVED
@@ -284,6 +270,51 @@ final class RobotPath {
     }
 
     /**
+     * The pre-check (section 3.4), one EDT read: the address, the hit-test (a point outside the window is
+     * {@code NOT_FOUND outside}), a {@code DRAG}'s end point bounded by the window and checked for covering windows too
+     * (fix wave, L2-S2), {@code requireFocus} ({@code INPUT_REJECTED not focused}), then the covering rule and
+     * {@code expectTarget} ({@link Pointer#precheck}). Run by the delivery probe's read and again right before the
+     * press. EDT only.
+     */
+    private Plan check(Pointer.Request r) {
+        ComponentView view = new ComponentView(ctx);
+        SwingSpis spis = new SwingSpis(ctx);
+        Pointer.Target t = pointer.address(view, spis, r);
+        HitTest.Hit hit = HitTest.at(view, windows, spis, t.window, t.p, null, true, ctx.events().lastSeq());
+        Point o = t.window.getLocationOnScreen();
+        Point screenTo = null;
+        if (t.to != null) {
+            if (t.to.x < 0 || t.to.y < 0 || t.to.x >= t.window.getWidth() || t.to.y >= t.window.getHeight()) {
+                throw Errors.notFound("the drag's end point (" + t.to.x + ", " + t.to.y + ") lies outside "
+                        + view.describe(t.window), Errors.data("reason", "outside", "param", "to", "window",
+                        view.ref(t.window)));
+            }
+            screenTo = new Point(o.x + t.to.x, o.y + t.to.y);
+        }
+        if (r.requireFocus && KeyboardFocusManager.getCurrentKeyboardFocusManager().getFocusedWindow() == null) {
+            throw new RpcException(ErrorCodes.INPUT_REJECTED, "the target JVM holds no focused window, so its windows "
+                    + "may not be in front; bring it to the front (requireFocus)", Errors.data("reason",
+                    "not focused"));
+        }
+        pointer.precheck(view, r, hit, true);
+        if (screenTo != null && !r.force) {
+            List<Object> covering = HitTest.coveringAt(view, windows, t.window, screenTo);
+            if (!covering.isEmpty()) {
+                throw new RpcException(ErrorCodes.INPUT_REJECTED, "another window of the JVM covers the drag's end "
+                        + "point (the Robot releases on whatever is really on top); pass force:true to act anyway",
+                        Errors.data("reason", "covered", "param", "to", "covering", covering));
+            }
+        }
+        Plan p = new Plan();
+        p.window = t.window;
+        p.hit = hit;
+        p.wasFocused = t.window.isFocused();
+        p.screen = new Point(o.x + t.p.x, o.y + t.p.y);
+        p.screenTo = screenTo;
+        return p;
+    }
+
+    /**
      * The native sequence on the worker (D343): the pointer saved, moved, the buttons pressed and released with no
      * wait between, every button the call pressed released in a {@code finally} before anything else (a timeout or an
      * interruption too), then the pointer restored. Package-private for the headless tests.
@@ -297,23 +328,23 @@ final class RobotPath {
             switch (r.kind) {
                 case CLICK:
                     for (int i = 0; i < r.clickCount; i++) {
+                        down = true; // before the press: one that throws after taking effect is released too (L2-F5)
                         port.mousePress(mask);
-                        down = true;
                         port.mouseRelease(mask);
                         down = false;
                     }
                     break;
                 case DOUBLE_CLICK:
                     for (int i = 0; i < 2; i++) {
-                        port.mousePress(mask);
                         down = true;
+                        port.mousePress(mask);
                         port.mouseRelease(mask);
                         down = false;
                     }
                     break;
                 case DRAG: {
-                    port.mousePress(mask);
                     down = true;
+                    port.mousePress(mask);
                     for (int i = 1; i <= r.steps; i++) {
                         port.mouseMove(p.x + (to.x - p.x) * i / r.steps, p.y + (to.y - p.y) * i / r.steps);
                         if (Thread.currentThread().isInterrupted()) {
@@ -346,7 +377,9 @@ final class RobotPath {
 
     /**
      * The delivery probe: moves the real pointer to the point and awaits a native {@code MOUSE_MOVED} at a component
-     * of the window for at most {@value #PROBE_MS} ms.
+     * of the window for at most {@value #PROBE_MS} ms, then puts the pointer back where it was, whether the move
+     * arrived or not (fix wave of the Phase 7 review, FA, L2-F6: the action that follows saves and restores the
+     * person's location, not the probed point).
      *
      * @throws RpcException CAPABILITY_UNAVAILABLE (and {@code swing.pointer.robot} DEGRADED) when nothing arrives
      */
@@ -386,17 +419,17 @@ final class RobotPath {
         } finally {
             toolkit.removeAWTEventListener(listener);
         }
+        if (saved[0] != null) {
+            final Point back = saved[0];
+            ctx.threads().call(ThreadPolicy.WORKER, new Callable<Object>() {
+                @Override
+                public Object call() {
+                    port.mouseMove(back.x, back.y);
+                    return null;
+                }
+            }, Math.max(1, inv.remainingMs() - Pointer.SAFETY_MS));
+        }
         if (!arrived) {
-            if (saved[0] != null) {
-                final Point back = saved[0];
-                ctx.threads().call(ThreadPolicy.WORKER, new Callable<Object>() {
-                    @Override
-                    public Object call() {
-                        port.mouseMove(back.x, back.y);
-                        return null;
-                    }
-                }, Math.max(1, inv.remainingMs() - Pointer.SAFETY_MS));
-            }
             ctx.capabilities().set(SwingModule.CAP_POINTER_ROBOT, CapabilityState.DEGRADED, NOT_DELIVERED_REASON,
                     "robot");
             throw Errors.unavailable(SwingModule.CAP_POINTER_ROBOT, NOT_DELIVERED_REASON);
@@ -437,12 +470,18 @@ final class RobotPath {
             before = read(inv, target, req);
             final Read b = before;
             final RobotPort port = portFor(b.window instanceof Window ? (Window) b.window : null);
-            image = ctx.threads().call(ThreadPolicy.WORKER, new Callable<BufferedImage>() {
-                @Override
-                public BufferedImage call() {
-                    return port.createScreenCapture(b.screen);
-                }
-            }, Math.max(1, inv.remainingMs() - Pointer.SAFETY_MS));
+            // section 2.4's heap bound and out-of-memory catch, as for a PAINT capture (fix wave, FA, L2-S3)
+            Capture.heapBound(4L * b.screen.width * b.screen.height, "scope", "capture a smaller scope");
+            try {
+                image = ctx.threads().call(ThreadPolicy.WORKER, new Callable<BufferedImage>() {
+                    @Override
+                    public BufferedImage call() {
+                        return port.createScreenCapture(b.screen);
+                    }
+                }, Math.max(1, inv.remainingMs() - Pointer.SAFETY_MS));
+            } catch (OutOfMemoryError e) {
+                throw outOfMemory(b.screen);
+            }
             afterRead = read(inv, target, req);
             List<Event> between = ctx.events().since(before.seq, TopicFilter.parse("window.opened,window.closed"),
                     10);
@@ -458,12 +497,17 @@ final class RobotPath {
         }
         BufferedImage rgb = image;
         if (image.getType() != BufferedImage.TYPE_INT_RGB) {
-            rgb = new BufferedImage(image.getWidth(), image.getHeight(), BufferedImage.TYPE_INT_RGB);
-            Graphics2D g = rgb.createGraphics();
+            Capture.heapBound(4L * image.getWidth() * image.getHeight(), "scope", "capture a smaller scope");
             try {
-                g.drawImage(image, 0, 0, null);
-            } finally {
-                g.dispose();
+                rgb = new BufferedImage(image.getWidth(), image.getHeight(), BufferedImage.TYPE_INT_RGB);
+                Graphics2D g = rgb.createGraphics();
+                try {
+                    g.drawImage(image, 0, 0, null);
+                } finally {
+                    g.dispose();
+                }
+            } catch (OutOfMemoryError e) {
+                throw outOfMemory(before.screen);
             }
         }
         blankOutside(rgb, before.screen, before.windowRects);
@@ -510,6 +554,12 @@ final class RobotPath {
         Capture.Geometry geometry = new Capture.Geometry("SCREEN", null, before.screen.x, before.screen.y, 1.0,
                 rgb.getWidth(), rgb.getHeight());
         return new Capture.Shot(rgb, m, geometry, new ArrayList<Capture.Skipped>());
+    }
+
+    private static RpcException outOfMemory(Rectangle screen) {
+        return new RpcException(ErrorCodes.INTERNAL_ERROR, "out of memory while capturing the screen rectangle of "
+                + screen.width + " x " + screen.height + " pixels; capture a smaller scope", Errors.data("reason",
+                "out of memory"));
     }
 
     private Read read(Invocation inv, final Component target, final Capture.Request req) throws Exception {
@@ -569,8 +619,10 @@ final class RobotPath {
                         r.screen = new Rectangle(o.x + to.x + local.x, o.y + to.y + local.y, local.width,
                                 local.height);
                     }
+                    // every window of the JVM the glass holds a part of, the target's and any other that meets the
+                    // rectangle (a dialog over the frame): its masks are blanked too (fix wave, FA, L2-S1)
                     for (Windows.Layer l : layers) {
-                        if (l.window == w) {
+                        if (l.window == w || l.screen.intersects(r.screen)) {
                             used.add(l);
                         }
                     }
@@ -579,30 +631,66 @@ final class RobotPath {
                     throw Errors.invalid("a screen capture is at most " + Capture.MAX_SIDE + " pixels a side",
                             Errors.data("param", "scope"));
                 }
-                r.facts = Capture.facts(view, spis, used, r.screen, req.redact);
+                r.facts = Capture.facts(view, spis, used, r.screen, req.redact, r.window);
                 return r;
             }
         });
     }
 
-    /** Blanks grey every pixel of the image outside the screen rectangles of the JVM's showing windows. */
+    /**
+     * Blanks grey every pixel of the image outside the screen rectangles of the JVM's showing windows, by filling the
+     * complement's rectangles band by band (fix wave of the Phase 7 review, FA, L2-S3: at most 2n + 1 bands of at most
+     * n + 1 gaps for n windows, instead of a pixel walk over up to 4096 x 4096 pixels).
+     */
     static void blankOutside(BufferedImage image, Rectangle screen, List<Rectangle> windowRects) {
-        int grey = Redaction.FILL.getRGB();
-        for (int y = 0; y < image.getHeight(); y++) {
-            for (int x = 0; x < image.getWidth(); x++) {
-                int sx = screen.x + x;
-                int sy = screen.y + y;
-                boolean inside = false;
-                for (Rectangle r : windowRects) {
-                    if (r.contains(sx, sy)) {
-                        inside = true;
-                        break;
+        Rectangle bounds = new Rectangle(0, 0, image.getWidth(), image.getHeight());
+        List<Rectangle> inside = new ArrayList<Rectangle>();
+        java.util.TreeSet<Integer> edges = new java.util.TreeSet<Integer>();
+        edges.add(Integer.valueOf(0));
+        edges.add(Integer.valueOf(bounds.height));
+        for (Rectangle r : windowRects) {
+            Rectangle local = new Rectangle(r.x - screen.x, r.y - screen.y, r.width, r.height).intersection(bounds);
+            if (!local.isEmpty()) {
+                inside.add(local);
+                edges.add(Integer.valueOf(local.y));
+                edges.add(Integer.valueOf(local.y + local.height));
+            }
+        }
+        Graphics2D g = image.createGraphics();
+        try {
+            g.setColor(Redaction.FILL);
+            Integer top = null;
+            for (Integer edge : edges) {
+                if (top != null && edge.intValue() > top.intValue()) {
+                    int y0 = top.intValue();
+                    int h = edge.intValue() - y0;
+                    List<int[]> spans = new ArrayList<int[]>();
+                    for (Rectangle r : inside) {
+                        if (r.y <= y0 && r.y + r.height >= y0 + h) {
+                            spans.add(new int[] {r.x, r.x + r.width});
+                        }
+                    }
+                    java.util.Collections.sort(spans, new java.util.Comparator<int[]>() {
+                        @Override
+                        public int compare(int[] a, int[] b) {
+                            return a[0] < b[0] ? -1 : a[0] == b[0] ? 0 : 1;
+                        }
+                    });
+                    int x = 0;
+                    for (int[] span : spans) {
+                        if (span[0] > x) {
+                            g.fillRect(x, y0, span[0] - x, h);
+                        }
+                        x = Math.max(x, span[1]);
+                    }
+                    if (x < bounds.width) {
+                        g.fillRect(x, y0, bounds.width - x, h);
                     }
                 }
-                if (!inside) {
-                    image.setRGB(x, y, grey);
-                }
+                top = edge;
             }
+        } finally {
+            g.dispose();
         }
     }
 }

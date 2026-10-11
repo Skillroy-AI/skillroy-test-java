@@ -234,7 +234,9 @@ class HostSafetyIT {
 
     /**
      * Polls {@code agent.capabilities} until the capability's reason starts with {@code reasonPrefix} (any state when
-     * the prefix is empty and the waiting reason is gone; the state {@code OK} when it is null).
+     * the prefix is empty and both waiting reasons are gone, "AWT not started…" and, between {@code checkAwt} and the
+     * Robot ids' probe, "robot: probe not run" (fix wave of the Phase 7 review, FA, L2-F8); the state {@code OK} when
+     * it is null).
      */
     @SuppressWarnings("unchecked")
     private static Map<String, Object> awaitCapability(ChildJvm.Agent agent, String id, String reasonPrefix)
@@ -249,6 +251,7 @@ class HostSafetyIT {
                 String reason = String.valueOf(last.get("reason"));
                 if (reasonPrefix == null ? "OK".equals(last.get("state"))
                         : reasonPrefix.isEmpty() ? !reason.startsWith("AWT not started")
+                                && !reason.equals("robot: probe not run")
                         : reason.startsWith(reasonPrefix)) {
                     return last;
                 }

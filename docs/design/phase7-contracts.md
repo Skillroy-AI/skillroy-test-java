@@ -200,7 +200,7 @@ and their bounds:
 | `swing.capture` | one EDT read for the paint, the masks, the carets, the marks' geometry and the window geometry; PNG encoding off the EDT; one raster per call, at most 4096 pixels a side after `scale`, and never larger than an eighth of the JVM's heap headroom (`maxMemory() - (totalMemory() - freeMemory())`, read before the allocation, so that a heap that may still grow towards `-Xmx` is not refused an ordinary capture; a larger one is `INVALID_PARAMS` naming the needed and the free megabytes); an `OutOfMemoryError` around the allocation or the paint is caught and answered `INTERNAL_ERROR`, never left on the EDT; a `SCREEN` composite of at most 32 windows; at most 200 marks; at most 64 redacted rectangles reported (more are blanked but counted in `redactedTruncated`); `focus.ownerLocator` is the first candidate of §3.2's order that matches exactly one component, found under the locator regex budget, never all six |
 | `swing.hitTest` | one EDT read; at most 6 locator candidates, each checked with the engine under the locator regex budget (P1 §6); covering windows: at most 32 |
 | `swing.pointer` ROUTED | one EDT read (the pre-check), then one `invokeLater` task per event, at most 100 events per call (a drag of at most 50 steps, a wheel of at most 50 notches), each task checking the call's `cancelled` flag and the modal state first (§3.3), then one bounded EDT read for the result; a press that opens a modal dialog is never awaited beyond that read's deadline |
-| `swing.pointer` ROBOT, `swing.capture` ROBOT | Robot on `WORKER`, never the EDT (`waitForIdle` throws there, vision §F6); the delivery probe waits at most 1000 ms for the native `MOUSE_MOVED` (BS9 RESULT "What a `ROBOT` rung and the V3 tier need"); a press and its release in one worker task with no wait between them, the release in a `finally` that runs on a timeout or an interruption too, before the pointer is restored (D343); the press observation at most the call's remaining time; a screen capture at most 4096 pixels a side |
+| `swing.pointer` ROBOT, `swing.capture` ROBOT | Robot on `WORKER`, never the EDT (`waitForIdle` throws there, vision §F6); the delivery probe waits at most 1000 ms for the native `MOUSE_MOVED` (BS9 RESULT "What a `ROBOT` rung and the V3 tier need"); a press and its release in one worker task with no wait between them, the release in a `finally` that runs on a timeout or an interruption too, before the pointer is restored (D343); the press observation at most the call's remaining time; a screen capture at most 4096 pixels a side, and under `swing.capture`'s heap bound: the grab and, when the toolkit's image needs one, its conversion copy are each refused beyond an eighth of the heap headroom read before it (`INVALID_PARAMS` with `neededMb` and `freeMb`), an `OutOfMemoryError` of either is answered `INTERNAL_ERROR`, and the outside is blanked by filled rectangles, not a pixel walk (fix wave (Phase 7 review, FA, 2026-10-10): the glass capture had neither bound, L2-S3) |
 | `swing.rendering` | one EDT read; the probe render is a fixed 320 x 120 off-screen panel |
 | `CaptureMask`, `RegionResolver`, `SurfaceSource`, `LocatorResolver.describe` | called on the EDT inside the capture's, the snapshot's or the hit-test's read; must be fast and lock-free; a throwing implementation is logged once and ignored (as `NameEnricher` is, P1 §4), a throwing `CaptureMask` blanks the component |
 | `web.hitTest`, `web.pointer` | `WORKER`, 10 s; a pointer `CLICK` is move, press and release awaited in sequence under the call's budget; iframes descended to depth 3; a mutating call is never retried and never re-sent on the shared JCEF client (P4 §4.2, D62) |
@@ -536,7 +536,17 @@ window (an `AWTEventListener`); nothing arriving is `CAPABILITY_UNAVAILABLE(swin
 is not delivered (no event within 1000 ms)")`, and the capability is set `DEGRADED` with that reason until the next
 reprobe, so that the matrix shows it. A probe that passes is remembered while actions keep being received. **The probe runs before the action's pre-check**,
 never between it and the press: the focus and covering read of the pre-check is the last thing before `mousePress`, so
-that it is never a second old.
+that it is never a second old. **Fix wave (Phase 7 review, FA, 2026-10-10; L2-F4):** the probe's own EDT read (the read
+that finds its point) applies the pre-check's refusals first, so that nothing moves for a call they refuse: a point
+outside the window (`NOT_FOUND outside`; a `DRAG`'s end point likewise), `requireFocus` (`INPUT_REJECTED not focused`),
+the covering rule (`INPUT_REJECTED covered` unless `force`) and `expectTarget`; and when a modal dialog blocks the target
+window, or under `force` another window of the JVM covers the point, the probe is skipped, since AWT drops its move into
+a blocked window as it drops the press and a covering window takes it: the action's own observation then reports what
+arrived (`NOT_DELIVERED`, `received elsewhere`) and the capability is not degraded. The pre-check read is repeated
+unchanged right before the press. Before, a point outside the window, an unfocused JVM or a modal dialog made the probe
+move the real pointer and fail by construction, setting `DEGRADED` and answering `CAPABILITY_UNAVAILABLE` instead of the
+refusal. A probe that passes, like one that fails, puts the pointer back where it was (L2-F6), so that the action's own
+save and restore return it to the person's location, not to the probed point.
 
 **`swing.pointer {via: ROBOT}`.** The parameters of §3.3, with these differences:
 
@@ -556,7 +566,9 @@ that it is never a second old.
   `data.reason: "outside"`), and a point that **any** covering window of the JVM covers, ranked or not, is refused
   (`INPUT_REJECTED`, `covered`) unless `force`, since Robot presses whatever is really on top (BS9 RESULT case
   "covered": the covering window got it); other processes' windows cannot be seen, which the result says
-  (`stackingAssumed: true`). No modal check: input into a blocked window is dropped by AWT as for a person (BS9 case
+  (`stackingAssumed: true`). A `DRAG`'s end point (`to`) is held to the same two rules in the same read
+  (`NOT_FOUND outside` and `INPUT_REJECTED covered` with `data.param: "to"`), since the Robot releases the button
+  there (fix wave (Phase 7 review, FA, 2026-10-10; L2-S2): it was checked only to lie in the same window). No modal check: input into a blocked window is dropped by AWT as for a person (BS9 case
   "modal"), and the result reports that nothing arrived.
 - On the worker: the pointer's location is saved (`MouseInfo`), `mouseMove` to the point, the native sequence
   (`mousePress`/`mouseRelease` with the button masks, a drag as `steps` moves, `mouseWheel` per notch), the `finally`'s
@@ -576,7 +588,10 @@ component's or a region's screen rectangle (`COMPONENT`, `REGION`), or of the un
 to user space, so text differs from a `PAINT` by antialiasing, BS9 RESULT leg `mac-j25`: 8,718 pixels); **every pixel
 outside the screen rectangles of the JVM's showing windows is blanked grey** (the desktop, the bands of a `SCREEN`
 union), and the result carries `glass: true` with the sentence "pixels inside a window's rectangle may belong to a
-window of another process that covers it"; `redact` applies by rectangle: the mask rectangles are read on the EDT
+window of another process that covers it"; `redact` applies by rectangle: the mask rectangles of every JVM window whose
+screen rectangle meets the captured one (fix wave (Phase 7 review, FA, 2026-10-10; L2-S1): not only the target
+window's, so that a sign-on dialog over the captured frame is blanked too; `windows`, `surfaces` and `carets` then list
+what the image holds of those windows, `focus.active` stays the captured window's) are read on the EDT
 before and after the grab and the union is blanked, and when the bus `seq` shows a `window.opened` or `window.closed`
 between the two reads the capture is taken once more, and a second attempt that again sees a window event is answered
 with `unstable: true`; `carets`, `focus`, `hash` as
@@ -601,7 +616,7 @@ interfaces `RobotPort` and `RobotFactory`; `RobotFactory.DEFAULT` loads `RobotIn
 logic. (b) The capability probe runs on an agent worker posted from `checkAwt`; in a headless JVM both ids are set
 `UNAVAILABLE("headless")` there and then. (c) The delivery probe moves the pointer one pixel aside first when it already
 sits on the point (a move to where it is produces no native event) and also accepts the `MOUSE_ENTERED` it causes;
-it restores the pointer when it fails (D393). (d) The press observation waits at most 3 s within the call's
+it restores the pointer when it fails (D393), and since the fix wave (FA, L2-F6) when it passes too. (d) The press observation waits at most 3 s within the call's
 remaining time (D392). (e) A glass capture ignores `scale` (user-space size, `scale: 1` reported), refuses a screen
 rectangle over 4096 pixels a side, carries the limitation sentence as `glassNote`, and reports `surfaces` beside
 `windows` (D396).
@@ -661,6 +676,17 @@ value, `masked: true`, no mark, `masked` in the hit-test (its pixels lie inside 
 masks a container expects its content hidden); the safe side (D383). A mask's `regions` blank those rectangles whether
 or not `masks` is true, as the Javadoc says; the text rule follows `masks` alone. The rule lives in `Redaction` and is
 memoised per call in `ComponentView.masked`.
+
+**Fix wave (Phase 7 review, FA, 2026-10-10; L2-F1).** The pixels follow the rule when the component a mask names lies
+**outside** the paint root, too: a capture whose paint root lies inside it (a `COMPONENT` or `REGION` capture of a child
+of a masked container; any capture of a window a mask names, whose root pane is the paint root of every scope, A61)
+blanks, for every ancestor of the paint root up to and including its window, that ancestor's `regions` where they meet
+the image, and for an ancestor masked whole its rectangle together with the paint root's own (a `COMPONENT` capture
+paints a child whole even where it overhangs its parent), reported in `redacted` under the ancestor's ref with the
+ancestor's rule; below an ancestor masked whole nothing is marked or walked (the paint root's caret is still reported).
+Before, only components inside the paint root were blanked, so such a capture left the JVM with the masked content as
+rendered and `redacted: []` while the snapshot and the hit-test said `masked: true` (D383's premise did not hold there).
+A glass capture inherits the rule through `Capture.facts`.
 
 ### 3.7 `RegionResolver`, `SurfaceSource`, `LocatorResolver.describe` (A64)
 
@@ -739,7 +765,7 @@ the bindings file's `images` entries are keyed by (§8.7); the comparison, `appr
 | `swing.hittest` | joins `DISPLAY_CAPABILITIES` (`SwingModule`'s array): follows AWT's state as `swing.tree` does (`UNAVAILABLE("AWT not started…")`, `UNAVAILABLE("headless")`, `OK`) | – | `swing.hitTest` |
 | `swing.pointer.routed` | likewise | – | `swing.pointer` with `via: ROUTED` |
 | `swing.capture.screen` | likewise | – | `swing.capture {scope: SCREEN}` in `PAINT` mode (the composite; what the loop and `inference.vision` gate on, §8.5) |
-| `swing.pointer.robot` | without the option `robot`: `set` `UNAVAILABLE("robot: not enabled (agent option robot=true)")` at install; with it: declared after `checkAwt` with the Robot probe of §3.4 | `OK("robot")`, `UNAVAILABLE(reason)`, `DEGRADED("robot: native input is not delivered…")` after a failed delivery probe | `swing.pointer {via: ROBOT}` |
+| `swing.pointer.robot` | without the option `robot`: `set` `UNAVAILABLE("robot: not enabled (agent option robot=true)")` at install; with it: declared after `checkAwt` with the Robot probe of §3.4, posted to an agent worker; from the moment `checkAwt` confirms AWT until that probe has run both ids read `UNAVAILABLE("robot: probe not run")`, which a refused post leaves in place, so that a Robot call is refused rather than constructing the Robot on its own thread (fix wave (Phase 7 review, FA, 2026-10-10; L2-F8): an agent attached to a running application left both ids absent, an agent loaded before AWT left "AWT not started") | `OK("robot")`, `UNAVAILABLE(reason)`, `DEGRADED("robot: native input is not delivered…")` after a failed delivery probe | `swing.pointer {via: ROBOT}` |
 | `swing.capture.robot` | the same probe | the same | `swing.capture {mode: ROBOT}` (a person's) |
 | `swing.click.robot` | unchanged: `UNAVAILABLE("opt-in rung, not implemented")` | – | the rung stays refused (D291) |
 
@@ -2359,10 +2385,25 @@ rule's text, the `outside` message) and `WebInputTest` (the shared parameters, p
 child-frame rule and shapes); the CDP side is `CdpWebPathServesTest` and `CdpWebPathCallTest` (both primitives, the
 descent through the frame tree, the hand-over of a blocked browser, the balancing release, read-only mode).
 
+**Fix wave (Phase 7 review, FA, 2026-10-10; L3-F7), item 1:** as built, the Robot items of the row that need real
+windows (the delivery probe and its order, `NOT_DELIVERED`, `received elsewhere`, `requireFocus`, the covering rule, a
+`ROBOT` capture's masks before and after the grab, `unstable`, `glass`, and since the fix wave the probe's own refusals,
+the modal skip, the drag's end point, the glass capture's heap bound and the masks of a dialog over the frame) run in the
+display test `RobotPathDisplayTest`, with a fake OS port behind `RobotFactory` that delivers like the OS (and drops into a
+modal-blocked window as AWT does), in the image and not headless; `RobotPathTest` keeps, headless, the paired press, the
+release in the `finally` (a press that throws included), `PRESS`/`RELEASE` refused, the capability probe of a headless
+JVM and the outside blanking (checked pixel for pixel against the per-pixel rule). `expectTarget` and the covering rule's
+ranking have a headless case in `PointerTest` on a hand-built hit; their real-window cases are `VisionDisplayTest`'s. A
+capture inside a masked container, an ancestor's mask regions and a mask that names the window are `CaptureTest` cases
+(the window through the window-list seam), a mask that names a real `JDialog` a `VisionDisplayTest` case.
+
 **As built (Phase 7, VC):** item 5 is `Phase7CompileTest`, `Phase7ExecutorTest`, `Phase7SessionTest`, `Phase7ExportTest`,
-`Phase7BindingsTest`, `ImageCompareTest` (`…scenario.image`; the shared vector: the 3 x 2 raster `0xFF000000 0xFFFFFFFF
-0xFF808080 / 0xFFFF0000 0xFF00FF00 0xFF0000FF` hashes to
-`sha256:74cb35da6463af3998f014bf275125c00dd69f294b8e29bc3cfe032f48b36eec`), the extended `JunitXmlReporterTest`,
+`Phase7BindingsTest`, `ImageCompareTest` (`…scenario.image`; the shared vector, the same six pixels and the same hash
+literal in `ImageCompareTest` and the agent's `CaptureTest`: the 3 x 2 raster `0xFF000000 0xFFFFFFFF 0xFF808080 /
+0xFF102030 0xFFFF0000 0xFF00FF00` hashes to `sha256:6be118c38e93cd2b790c98897d10e69afa4ea5b1248c59203b1c2633a884c4ba`;
+fix wave (Phase 7 review, FA, 2026-10-10; L3-F1): the two tests had held two different vectors, this note the
+controller's `… / 0xFFFF0000 0xFF00FF00 0xFF0000FF` → `sha256:74cb35da…6eec`, so that neither proved the two layouts
+agree), the extended `JunitXmlReporterTest`,
 `ScenarioSchemaTest`, `CapabilityMatrixTest` and `InferenceContributorTest`; the contributors of the executor and
 session tests are found through a class loader built in the test (a `META-INF/services` file in a temporary directory),
 so that no test-scope registration changes every other run. Item 6 is `ScenarioTestsTest`'s two tests and the CLI's
@@ -2460,6 +2501,20 @@ checks (VW), item 11 in the host-safety tests (VS).
     `robot` (the scan sees loading, not initialisation, which is why `RobotInput` is loaded lazily behind `RobotFactory`
     and nothing else in the module names `Robot` in a signature), and, with it, loaded only after `checkAwt` confirmed AWT (the capability probe constructs the Robot, §3.4), never at
     install and never in a headless JVM.
+
+**Fix wave (Phase 7 review, FA, 2026-10-10), items 1, 3 and 6.** Item 1 (`VisionSwingChecks`, L3-F4, L3-F1): the
+check runs on the focused desk, so its two hash equalities (two captures; an annotated against a plain capture, which
+the check had not compared at all) are asserted on the rasters with the reported carets blanked, not on `hash`; it also
+asserts that the agent's `hash` equals `ImageCompare.rasterHash` of the decoded image, on both target Javas, the
+agreement on which the export's anchor check rests. Item 3 (L3-F5): the wheel check asserts first that the slip's text is
+taller than its view (the six loans guarantee it), then that the wheel moved it; it no longer accepts an unmoved slip
+that happened to fit. Item 6 (`RobotChecks`, L3-F2, L3-S3): the `requireFocus` refusal is its own test
+(`requireFocusRefusesAnUnfocusedFrame`, `@Order(30)`), which begins with an assumption on the focus observed after the
+prompt, so that a leg on which the frame keeps the focus reports it skipped instead of passing without the refusal (the
+deterministic refusal is `RobotPathDisplayTest.requireFocusRefusesAJvmWithoutAFocusedWindow`); the pass is
+`requireFocusPassesOnceTheFrameHasTheFocus` (`@Order(31)`). The glass capture's grey outside the frame lives in
+`RobotPathDisplayTest.aGlassCaptureIsMaskedAndBlankedOutsideTheWindows`: a glass capture of the WM-less frame lies wholly
+inside it, so the end-to-end check asserts the raster equality and `glass` only.
 
 **As built (Phase 7, VC):** item 7's seed-A part and item 9 are `LoadModeChecks.thePhase7SeedAScenariosRunAsDesigned`
 (`@Order(155)`) and `theCapabilitiesRecordCarriesTheAgentsHashAndTheContributedIds` (`@Order(156)`), in every load mode;

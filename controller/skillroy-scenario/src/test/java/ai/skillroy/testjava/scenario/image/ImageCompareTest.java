@@ -39,13 +39,16 @@ class ImageCompareTest {
 
     /**
      * The shared test vector (phase7-contracts.md 3.1: "both modules' tests share one vector"): a 3 x 2 raster, rows
-     * {@code 0xFF000000 0xFFFFFFFF 0xFF808080 / 0xFFFF0000 0xFF00FF00 0xFF0000FF}; its hash over the width and the
-     * height as 4-byte big-endian integers, then every pixel's {@code getRGB} as a 4-byte big-endian integer.
+     * {@code 0xFF000000 0xFFFFFFFF 0xFF808080 / 0xFF102030 0xFFFF0000 0xFF00FF00}; its hash over the width and the
+     * height as 4-byte big-endian integers, then every pixel's {@code getRGB} as a 4-byte big-endian integer. The same
+     * six pixels and the same hash literal are the agent's {@code CaptureTest.VECTOR} and {@code VECTOR_HASH}
+     * ({@code skillroy-agent-swing}), so that the two implementations of the layout are proven to agree (fix wave of
+     * the Phase 7 review, FA, L3-F1: the two tests used to hold two different vectors).
      */
-    static final int[] VECTOR = {0xFF000000, 0xFFFFFFFF, 0xFF808080, 0xFFFF0000, 0xFF00FF00, 0xFF0000FF};
+    static final int[] VECTOR = {0xFF000000, 0xFFFFFFFF, 0xFF808080, 0xFF102030, 0xFFFF0000, 0xFF00FF00};
 
-    /** The vector's hash: the same bytes as the agent's {@code swing.capture} {@code hash} (VS's side). */
-    static final String VECTOR_HASH = "sha256:74cb35da6463af3998f014bf275125c00dd69f294b8e29bc3cfe032f48b36eec";
+    /** The vector's hash: the agent's {@code CaptureTest.VECTOR_HASH}, the same literal. */
+    static final String VECTOR_HASH = "sha256:6be118c38e93cd2b790c98897d10e69afa4ea5b1248c59203b1c2633a884c4ba";
 
     static BufferedImage vector(int type) {
         BufferedImage image = new BufferedImage(3, 2, type);

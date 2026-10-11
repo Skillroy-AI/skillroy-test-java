@@ -338,13 +338,7 @@ final class Capture {
         double scale = Math.min(req.scale, Math.min(MAX_SIDE / w, MAX_SIDE / h));
         int iw = Math.max(1, (int) Math.floor(w * scale));
         int ih = Math.max(1, (int) Math.floor(h * scale));
-        long needed = 4L * iw * ih;
-        long headroom = heap.headroom();
-        if (needed > headroom / 8) {
-            throw Errors.invalid("the capture needs " + mb(needed) + " MB, more than an eighth of the " + mb(headroom)
-                    + " MB of free heap; lower 'scale' or capture a smaller scope", Errors.data("param", "scale",
-                    "neededMb", Long.valueOf(mb(needed)), "freeMb", Long.valueOf(mb(headroom))));
-        }
+        heapBound(4L * iw * ih, "scale", "lower 'scale' or capture a smaller scope");
         Geometry geometry = new Geometry(space, window, ox, oy, scale, iw, ih);
         List<Skipped> skipped = new ArrayList<Skipped>();
         BufferedImage image;
@@ -436,10 +430,12 @@ final class Capture {
 
     /**
      * The facts of a screen rectangle (a person's {@code ROBOT} capture, section 3.4): the mask rectangles, the carets,
-     * the focus, the windows and the surfaces of the given layers, in the rectangle's pixels (scale 1). EDT only.
+     * the focus, the windows and the surfaces of the given layers (every window the rectangle meets), in the
+     * rectangle's pixels (scale 1); {@code focus.active} is the captured window's, or for a {@code SCREEN} capture
+     * (null) whether any window is active. EDT only.
      */
     static Facts facts(ComponentView view, SwingSpis spis, List<Windows.Layer> layers, Rectangle screen,
-                       boolean redact) {
+                       boolean redact, Component captured) {
         Geometry g = new Geometry("SCREEN", null, screen.x, screen.y, 1.0, screen.width, screen.height);
         List<Root> roots = new ArrayList<Root>();
         for (Windows.Layer l : layers) {
@@ -452,10 +448,24 @@ final class Capture {
         f.redacted = walk.redacted;
         f.redactedTruncated = walk.redactedTruncated;
         f.carets = walk.carets;
-        f.focus = walk.focus(layers.size() == 1 ? layers.get(0).window : null, layers.size() != 1);
+        f.focus = walk.focus(captured, captured == null);
         f.windows = walk.windowsJson();
         f.surfaces = walk.surfaces;
         return f;
+    }
+
+    /**
+     * Section 2.4's heap bound: a raster of {@code needed} bytes is refused when it is larger than an eighth of the heap
+     * headroom read now ({@code INVALID_PARAMS} naming the needed and the free megabytes). Used by the PAINT capture and
+     * the glass capture (its grab and its conversion copy each).
+     */
+    static void heapBound(long needed, String param, String hint) {
+        long headroom = heap.headroom();
+        if (needed > headroom / 8) {
+            throw Errors.invalid("the capture needs " + mb(needed) + " MB, more than an eighth of the " + mb(headroom)
+                    + " MB of free heap; " + hint, Errors.data("param", param, "neededMb", Long.valueOf(mb(needed)),
+                    "freeMb", Long.valueOf(mb(headroom))));
+        }
     }
 
     /** The component's offset in its window's space (its own location for a window; the topmost ancestor's else). */
@@ -506,6 +516,10 @@ final class Capture {
         void run() {
             for (Root r : roots) {
                 rootOf.put(r.paint, r);
+                if (redact && blankAncestors(r)) {
+                    caret(r, r.paint);
+                    continue; // a masked ancestor blanked the whole paint root: nothing below is marked
+                }
                 Component parent = r.paint.getParent();
                 walk(r, r.paint, !(r.paint instanceof Window) && parent != null && view.masked(parent));
             }
@@ -546,6 +560,65 @@ final class Capture {
             return null;
         }
 
+        /**
+         * Blanks what the ancestors of a paint root, up to and including its window, mask (fix wave of the Phase 7
+         * review, FA, L2-F1): a paint root inside a masked component (a {@code COMPONENT} or {@code REGION} capture of
+         * a child of a masked container, or any capture of a window a mask names, whose root pane is the paint root)
+         * is otherwise never blanked, since the walk visits the paint root and what lies below it only. An ancestor's
+         * {@code regions} are blanked where they meet the image; an ancestor masked whole blanks its rectangle and the
+         * paint root's own (which a {@code COMPONENT} capture paints whole even where it overhangs the ancestor),
+         * reported as one rectangle under the ancestor's ref.
+         *
+         * @return true when an ancestor was masked whole, so that nothing below the paint root is marked or walked
+         */
+        private boolean blankAncestors(Root root) {
+            if (root.paint instanceof Window) {
+                return false;
+            }
+            boolean whole = false;
+            for (Component a = root.paint.getParent(); a != null; a = a.getParent()) {
+                String rule = view.redaction().ownRule(a);
+                List<Rectangle> blank = view.redaction().blanked(a, rule);
+                boolean all = isWhole(a, rule, blank);
+                for (Rectangle b : blank) {
+                    Rectangle rect = toImage(root, a, b);
+                    if (all) {
+                        Rectangle own = toImage(root, root.paint, new Rectangle(0, 0, root.paint.getWidth(),
+                                root.paint.getHeight()));
+                        rect = rect == null ? own : own == null ? rect : rect.union(own);
+                    }
+                    addBlanked(a, rect, rule);
+                }
+                whole |= all;
+                if (a instanceof Window) {
+                    break; // a window's owner is its parent in AWT; the masked-text rule stops here too
+                }
+            }
+            return whole;
+        }
+
+        private static boolean isWhole(Component c, String rule, List<Rectangle> blank) {
+            return rule != null && blank.size() == 1
+                    && blank.get(0).equals(new Rectangle(0, 0, c.getWidth(), c.getHeight()));
+        }
+
+        /** Adds one blanked rectangle (image pixels; null is ignored) and reports it under the component's ref. */
+        private void addBlanked(Component c, Rectangle rect, String rule) {
+            if (rect == null) {
+                return;
+            }
+            blankedPixels.add(rect);
+            if (redacted.size() < MAX_REDACTED) {
+                Map<String, Object> one = new LinkedHashMap<String, Object>();
+                one.put("ref", view.ref(c));
+                one.put("rect", rectJson(rect));
+                one.put("rule", rule != null ? rule : Redaction.CAPTURE_MASK);
+                redacted.add(one);
+            } else {
+                redactedTruncated = true;
+            }
+        }
+
         private void walk(Root root, Component c, boolean insideMasked) {
             if (!c.isVisible()) {
                 return;
@@ -555,22 +628,9 @@ final class Capture {
             boolean whole = false;
             if (redact) {
                 List<Rectangle> blank = view.redaction().blanked(c, rule);
-                whole = rule != null && blank.size() == 1
-                        && blank.get(0).equals(new Rectangle(0, 0, c.getWidth(), c.getHeight()));
+                whole = isWhole(c, rule, blank);
                 for (Rectangle b : blank) {
-                    Rectangle rect = toImage(root, c, b);
-                    if (rect != null) {
-                        blankedPixels.add(rect);
-                        if (redacted.size() < MAX_REDACTED) {
-                            Map<String, Object> one = new LinkedHashMap<String, Object>();
-                            one.put("ref", view.ref(c));
-                            one.put("rect", rectJson(rect));
-                            one.put("rule", rule != null ? rule : Redaction.CAPTURE_MASK);
-                            redacted.add(one);
-                        } else {
-                            redactedTruncated = true;
-                        }
-                    }
+                    addBlanked(c, toImage(root, c, b), rule);
                 }
             }
             // the caret is geometry a comparison blanks: reported for a masked field too (P7 13.2 item 1)

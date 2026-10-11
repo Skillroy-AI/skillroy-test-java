@@ -296,6 +296,12 @@ public final class SwingModule implements AgentModule {
                 if (headless) {
                     robot.declare(true);
                 } else {
+                    // until the worker's probe declares them (and for good when the post is refused) both ids say so,
+                    // and a Robot call is refused rather than constructing the Robot on its own thread (fix wave of
+                    // the Phase 7 review, FA, L2-F8)
+                    for (String id : ROBOT_CAPABILITIES) {
+                        ctx.capabilities().set(id, CapabilityState.UNAVAILABLE, RobotPath.PROBE_NOT_RUN, null);
+                    }
                     ctx.threads().post(ThreadPolicy.WORKER, new Runnable() {
                         @Override
                         public void run() {

@@ -345,6 +345,83 @@ class PointerTest {
         assertEquals(0, st.done.getCount());
     }
 
+    /**
+     * Fix wave (Phase 7 review, FA, L2-F7): a post refused midway (here the release's, after the press ran) cancels the
+     * sequence and balances the dispatched press before the failure reaches the caller; no click follows.
+     */
+    @Test
+    void aPostRefusedMidwayCancelsTheSequenceAndBalancesThePress() throws Exception {
+        final Recorder rec = new Recorder();
+        final List<MouseEvent> es = Pointer.events(request("action", "CLICK"), rec, new Point(10, 20), null,
+                new Point(0, 0), null, 9L, true);
+        final Pointer pointer = new Pointer(ctx, new Windows(), new RecentCaptures(), "Linux");
+        final Pointer.Plan plan = plan(rec, new AtomicBoolean(), es);
+        final Pointer.State st = state(es.size(), false);
+        ctx.threads.failEdtAsyncCall = 2; // move and press are queued and run; the release's post is refused
+        expectError(ErrorCodes.FORBIDDEN_THREAD, () -> pointer.postAll(RobotPathTest.invocation(ctx), plan, st,
+                false));
+        onEdt(() -> null);
+        assertTrue(st.stopped, "the sequence is cancelled");
+        assertTrue(st.balanced, "the dispatched press is balanced");
+        assertEquals(4, rec.seen.size(), "move, press, then the balance only: " + rec.seen);
+        assertEquals(MouseEvent.MOUSE_DRAGGED, rec.seen.get(2).getID());
+        assertEquals(new Point(-1, -1), rec.seen.get(2).getPoint());
+        assertEquals(MouseEvent.MOUSE_RELEASED, rec.seen.get(3).getID());
+        assertEquals(0, rec.seen.get(3).getClickCount());
+        for (MouseEvent e : rec.seen) {
+            assertFalse(e.getID() == MouseEvent.MOUSE_CLICKED, "no click after a failed post");
+        }
+    }
+
+    /**
+     * Fix wave (Phase 7 review, FA, L3-F7): the pre-check's rules on a hit without a display: {@code expectTarget} is
+     * never skipped by {@code force}; a covering window refuses a Robot point whether ranked or not, a routed one only
+     * when ranked; {@code force} skips the covering rule.
+     */
+    @Test
+    void thePreCheckAppliesExpectTargetAndTheCoveringRule() throws Exception {
+        final Recorder target = new Recorder();
+        final Pointer pointer = new Pointer(ctx, new Windows(), new RecentCaptures(), "Linux");
+        final String ref = ctx.handles.handleFor(target, ComponentView.KIND);
+        final HitTest.Hit hit = new HitTest.Hit();
+        hit.target = target;
+        hit.json = new java.util.LinkedHashMap<String, Object>();
+        hit.json.put("covering", new ArrayList<Object>());
+        onEdt(() -> {
+            ComponentView view = new ComponentView(ctx);
+            pointer.precheck(view, request("action", "CLICK", "expectTarget", ref), hit, false);
+            return null;
+        });
+        ai.skillroy.testjava.protocol.RpcException changed = expectError(ErrorCodes.INPUT_REJECTED, () -> onEdt(() -> {
+            pointer.precheck(new ComponentView(ctx), request("action", "CLICK", "expectTarget", "h-other",
+                    "force", true), hit, false);
+            return null;
+        }));
+        assertEquals("target changed", changed.error().data().get("reason"), "force never skips expectTarget");
+
+        hit.covering.add(null); // one covering window of the JVM, not ranked (only the count matters here)
+        hit.ranked.add(Boolean.FALSE);
+        onEdt(() -> {
+            pointer.precheck(new ComponentView(ctx), request("action", "CLICK"), hit, false);
+            return null;
+        });
+        ai.skillroy.testjava.protocol.RpcException covered = expectError(ErrorCodes.INPUT_REJECTED, () -> onEdt(() -> {
+            pointer.precheck(new ComponentView(ctx), request("action", "CLICK", "via", "ROBOT"), hit, true);
+            return null;
+        }));
+        assertEquals("covered", covered.error().data().get("reason"), "any covering window refuses the Robot");
+        hit.ranked.set(0, Boolean.TRUE);
+        expectError(ErrorCodes.INPUT_REJECTED, () -> onEdt(() -> {
+            pointer.precheck(new ComponentView(ctx), request("action", "CLICK"), hit, false);
+            return null;
+        }));
+        onEdt(() -> {
+            pointer.precheck(new ComponentView(ctx), request("action", "CLICK", "via", "ROBOT", "force", true), hit,
+                    true);
+            return null;
+        });
+    }
+
     @Test
     void anIntendedPressIsNeverBalanced() throws Exception {
         final Recorder rec = new Recorder();

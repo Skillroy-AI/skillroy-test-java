@@ -433,6 +433,14 @@ final class FakeContext implements AgentContext {
 
     final class Broker implements ThreadBroker {
         final ExecutorService workers = Executors.newCachedThreadPool(daemon("skillroy-test-worker"));
+        /**
+         * The index (from 0) of the one {@code EDT_ASYNC} call that is refused with {@code FORBIDDEN_THREAD}, once the
+         * tasks queued before it have run; -1 for none (the fix wave's L2-F7 test).
+         */
+        volatile int failEdtAsyncCall = -1;
+        final AtomicInteger edtAsyncCalls = new AtomicInteger();
+        /** When true, a {@code WORKER} post is refused and logged, as a full pool's would be (L2-F8's test). */
+        volatile boolean refuseWorkerPosts;
 
         @Override
         public <T> T call(ThreadPolicy policy, final Callable<T> task, long timeoutMs) throws Exception {
@@ -447,6 +455,17 @@ final class FakeContext implements AgentContext {
                     EventQueue.invokeLater(ft);
                     return await(ft, timeoutMs, "EDT");
                 case EDT_ASYNC:
+                    if (edtAsyncCalls.getAndIncrement() == failEdtAsyncCall) {
+                        if (!EventQueue.isDispatchThread()) {
+                            EventQueue.invokeAndWait(new Runnable() {
+                                @Override
+                                public void run() {
+                                    // the tasks queued before this one have run
+                                }
+                            });
+                        }
+                        throw new RpcException(ErrorCodes.FORBIDDEN_THREAD, "test: the post is refused");
+                    }
                     EventQueue.invokeLater(new Runnable() {
                         @Override
                         public void run() {
@@ -481,6 +500,10 @@ final class FakeContext implements AgentContext {
 
         @Override
         public void post(ThreadPolicy policy, final Runnable task) {
+            if (policy == ThreadPolicy.WORKER && refuseWorkerPosts) {
+                log.warn("broker: post refused (test): the worker pool is full", null);
+                return;
+            }
             try {
                 call(policy, new Callable<Object>() {
                     @Override
