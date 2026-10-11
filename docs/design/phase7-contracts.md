@@ -1017,7 +1017,8 @@ and prints it, asserting only that no event is waited for beyond the bound (the 
 answered); item 18 is item 11's check around two `hit` calls. `WebHostChecks` gains
 `item10HitTestAndPointerOnBothPathsAnswerTheSameShapes` (the agent's answers, and with a port the CDP path's, opened in
 the check, compared for equality) and `item10TheSwingCaptureListsTheBrowserAndASwingPointReachesThePage` (the Swing
-half; it needs VS's `swing.capture` surfaces and `swing.hitTest` and skips while the matrix has no `swing.hittest`).
+half, on VS's `swing.capture` surfaces and `swing.hitTest`; it would skip while the matrix had no `swing.hittest`, and
+runs in every launch since VS landed).
 The fakes serve `hit` and the counter over a fixed layout of the kit page (`FakeDocument.BLOCK_RECT`,
 `COUNT_RECT`).
 
@@ -2319,8 +2320,9 @@ checks (VW), item 11 in the host-safety tests (VS).
     as a `WEB` surface with its ref and `redacted: false`; `swing.hitTest` at a point in the browser answers `surface:
     WEB` with `surfaceLocal`, and `web.hitTest {space: COMPONENT}` with that point answers the element under it.
     **As built (Phase 7, VW, 2026-10-10):** `WebHostChecks.item10HitTestAndPointerOnBothPathsAnswerTheSameShapes` and
-    `item10TheSwingCaptureListsTheBrowserAndASwingPointReachesThePage` (the second skips until the Swing side's
-    `swing.hittest` is in the matrix); the kit's items run in `JcefKitWindowedDisplayTest` and
+    `item10TheSwingCaptureListsTheBrowserAndASwingPointReachesThePage` (the second skips only while `swing.hittest` is
+    absent from the matrix; on the head with VS's Swing side it ran and passed in all eight Java 25 launches, both JCEF
+    modes, and the four Java 8 off-screen launches); the kit's items run in `JcefKitWindowedDisplayTest` and
     `JcefKitOffScreenDisplayTest`.
 11. **Host safety** (`HostSafetyDisplayTest`, `HostSafetyIT`): a blocked EDT makes `swing.capture`, `swing.hitTest`
     and `swing.pointer` time out cleanly and nothing runs late, **including an EDT blocked from inside the
