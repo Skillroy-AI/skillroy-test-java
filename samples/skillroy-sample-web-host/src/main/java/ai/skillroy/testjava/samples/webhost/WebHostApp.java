@@ -66,7 +66,8 @@ import javax.swing.JFrame;
  * One {@link JFrame} titled "Web host" with a {@code CardLayout} of two browsers: card {@code front} (shown) and card
  * {@code back} (hidden: a cached browser the Swing tree holds as displayable but not showing; the host calls
  * {@code createImmediately()} on it, because a browser whose component is never shown is otherwise never created),
- * and a button "Swap" that shows the other card. With off-screen rendering a third browser, {@code detached}, is
+ * a button "Swap" that shows the other card, and a button "Notice" that shows a modal notice over the page (Phase 7
+ * follow-up, gap 95). With off-screen rendering a third browser, {@code detached}, is
  * created with {@code createImmediately()} and never added to any window. The pages are {@link WebHostPages}.
  *
  * <h2>Start-up ({@link #launch})</h2>
@@ -114,7 +115,8 @@ import javax.swing.JFrame;
  * {@code the <page> page loaded (HTTP status <n>)} per main-frame load (also later ones, such as a reload), or the
  * warning {@code the <page> page failed to load: <code> <text>}; the warning
  * {@code the <page> page did not finish loading within <s> s}; {@code ready; registered in WebHostBrowsers: <names>}.
- * Later: {@code showing the <card> card} per swap; {@code shutting down}, {@code CEF state SHUTTING_DOWN}, the
+ * Later: {@code showing the <card> card} per swap; {@code showing the notice} and {@code the notice was closed} per
+ * notice; {@code shutting down}, {@code CEF state SHUTTING_DOWN}, the
  * warning {@code the window was not disposed of within 5 s} if so, {@code CEF state TERMINATED} and
  * {@code CEF terminated} (or the warning {@code CEF did not report TERMINATED within <s> s (state <state>)}),
  * {@code removed the cache directory <dir>} (or the warning {@code could not remove the cache directory <dir>: <e>}).
