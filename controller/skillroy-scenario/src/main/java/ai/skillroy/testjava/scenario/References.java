@@ -32,9 +32,11 @@ import java.util.regex.Pattern;
  * number a number); a reference embedded in a longer string is replaced by the value's text. {@code $$} writes a
  * literal {@code $}; a {@code $} not followed by a slot name is kept as it is. Map keys are never substituted.
  *
- * <p>Public for one predicate only (phase6 security fix S55): a host that hands a client's text to a call whose
+ * <p>Public for two predicates only (phase6 security fix S55): a host that hands a client's text to a call whose
  * arguments must stay literal ({@code data_query}'s SQL) asks {@link #containsReference(String)} and
- * {@link #anyReference(Object)} first; the substitution itself stays the package's.
+ * {@link #anyReference(Object)} first; and (Phase 7 security fix, S101, S128) a host that judges a client's references
+ * before anything runs ({@code PlanPolicy}'s credential rule) reads them with {@link #references(Object)}, the
+ * substitution's own tokenizer, rather than a second pattern; the substitution itself stays the package's.
  *
  * <p>Stateless; safe from any thread.
  */
@@ -42,7 +44,74 @@ public final class References {
 
     static final Pattern REFERENCE = Pattern.compile("\\$([A-Za-z_][A-Za-z0-9_]*)((?:\\.[A-Za-z0-9_]+)*)");
 
+    /** How deep {@link #references(Object)} and {@link #anyReference(Object)} search before they refuse. */
+    public static final int MAX_DEPTH = 64;
+
     private References() {
+    }
+
+    /**
+     * One reference as substitution reads it (Phase 7 security fix, S101): the slot name, its fields (empty for the
+     * whole slot, {@code $slot}) and whether the string is exactly this one reference (substituted by the value with
+     * its type) rather than embedded in a longer text (substituted by the value's text).
+     *
+     * @param slot the slot name
+     * @param fields the fields after the slot name; empty for a whole-slot reference
+     * @param whole true when the string is exactly this reference
+     */
+    public record Reference(String slot, List<String> fields, boolean whole) {
+
+        /** Copies the fields. */
+        public Reference {
+            fields = List.copyOf(fields);
+        }
+    }
+
+    /**
+     * Every reference in a JSON-like value, in order, read exactly as {@link #substitute} reads them (strings at any
+     * depth of its maps and lists, whole or embedded, {@code $$} a literal dollar; map keys are never substituted and
+     * are not read): {@code x$staff.}, {@code x$staff..password} and {@code $staff} are the whole slot {@code staff}
+     * (Phase 7 security fix, S101).
+     *
+     * @throws IllegalArgumentException if the value is nested deeper than {@link #MAX_DEPTH} levels: refused rather
+     *     than searched, as {@link #anyReference(Object)} does (S128)
+     */
+    public static List<Reference> references(Object value) {
+        List<Reference> out = new ArrayList<>();
+        references(value, 0, out);
+        return out;
+    }
+
+    private static void references(Object value, int depth, List<Reference> out) {
+        if (depth > MAX_DEPTH) {
+            throw new IllegalArgumentException("a value nested deeper than " + MAX_DEPTH + " levels");
+        }
+        if (value instanceof String text) {
+            if (text.indexOf('$') < 0) {
+                return;
+            }
+            Matcher whole = REFERENCE.matcher(text);
+            if (whole.matches()) {
+                out.add(new Reference(whole.group(1), fields(whole.group(2)), true));
+                return;
+            }
+            try {
+                substituteString(text, (slot, fields, ref) -> {
+                    out.add(new Reference(slot, fields, false));
+                    return "";
+                });
+            } catch (ResolutionException e) {
+                throw new IllegalStateException("a collecting lookup does not fail", e);
+            }
+        } else if (value instanceof Map<?, ?> map) {
+            for (Object item : map.values()) {
+                references(item, depth + 1, out);
+            }
+        } else if (value instanceof List<?> list) {
+            for (Object item : list) {
+                references(item, depth + 1, out);
+            }
+        }
     }
 
     /** Looks a reference up: the slot name, its fields and the reference text for messages. */
@@ -114,7 +183,7 @@ public final class References {
     }
 
     private static boolean anyReference(Object value, int depth) {
-        if (depth > 64) {
+        if (depth > MAX_DEPTH) {
             return true;
         }
         if (value instanceof String text) {

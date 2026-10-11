@@ -916,7 +916,15 @@ final class JournalExport {
             } catch (IllegalArgumentException e) {
                 throw new ExportException(null, e.getMessage(), e);
             }
-            resolutions.put(node, resolution.withApproval(approval(resolution)));
+            Approval approval = approval(resolution);
+            if (r.origin() != null && r.origin().kind() != Origin.Kind.PERSON
+                    && approval.state() == Approval.State.NOT_REQUIRED) {
+                // Phase 7 security fix, S113 (SH): a slot a model or a client bound is REQUIRED until a person
+                // approves it (D97), whatever its strategy; the exporter's own label approves it as for tier (b).
+                approval = new Approval(options.approvedBy() != null ? Approval.State.APPROVED
+                        : Approval.State.REQUIRED, options.approvedBy());
+            }
+            resolutions.put(node, resolution.withApproval(approval));
         }
         Map<String, String> components = new LinkedHashMap<>();
         if (start.env().get("components") instanceof Map<?, ?> map) {

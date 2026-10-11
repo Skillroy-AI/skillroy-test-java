@@ -1433,6 +1433,9 @@ For one grounded action on `target` with hit-test result `H` (vision §R3; desig
      session holds a secret in flight** (`actions.secretsInFlight()`, §9.2: a credential a person resolved in the
      session and no person's step has consumed yet): "a credential is never used on a model's behalf; the person signs
      on first" (D342). Sign-on is a person's or the player's `signOn` step before the loop (§6.8, §11).
+     **(Phase 7 security fix, S101, S127, built 2026-10-11, SH)** A secret slot reference includes the joined slot as a
+     whole (`$<slot>`, alone or embedded), and while a credential is in flight `ExecutorSession` refuses every call of
+     the model's that changes the target, not only typing (§9.2 rules 1 and 2).
 3. **Choose the step** (the roles are `Roles.ALL`'s, the closed set the agent reports: `window, dialog, panel, button,
    toggle, checkbox, radio, textbox, password, label, combobox, list, table, tree, tab, menu, menuitem, scrollpane, text,
    unknown`):
@@ -1626,7 +1629,11 @@ play is `FAIL / ASSERTION` with the first that did not, after all were evaluated
 capability the session's merged matrix does not have `OK`, and a stored-row (`db`) check, which a session does not
 evaluate, are skipped with the reason (the play at best `DEGRADED`). The block is reported as one step `verify` after the
 scenario's steps; a play that failed at a step does not reach it. Without this a played scenario was `PASS` whatever its
-post-conditions said, where a plan run of the same file checks them (P2's run order). **The dropped `aiExpect` steps
+post-conditions said, where a plan run of the same file checks them (P2's run order). **(Phase 7 security fix, S113,
+built 2026-10-11, SH)** The scenario's slots are the person's for the whole play: the player binds them as the person,
+and a model's `skillroy_resolve` of one of them in an `aiAct` turn is refused before anything is resolved or journaled
+(§9.2, D425's note), so the person's later steps act on, and the `verify` judges, the scenario's values; the model may
+resolve a slot under another name, which the export marks `REQUIRED` (D97). **The dropped `aiExpect` steps
 are listed** (L1-S1): `ScenarioPlayer.Result` carries one line per `aiExpect` step of the scenario (its line, its
 question masked and cut at 200 characters, its expectation, and its status in the play or "not reached"), and
 `Result.annotate(ExportResult)` adds them to the export's report under "Live-only" (a visual question needs a model;
@@ -2182,18 +2189,36 @@ and were regenerated on the key-free fixture route (`-Dskillroy.inference.fixtur
      a model never signs on with a person's credential and no dead end follows (only a person's step consumes a secret,
      and the person is at hand); the session's vocabulary (`SessionService.vocabulary()`, VM's first commit, §12.5) stops
      telling the model that a `$reference` names a resolved slot's secret field (it names the non-secret fields only).
+     **(Phase 7 security fix, S101, built 2026-10-11, SH)** The slot as a whole is such a reference: `$<slot>` of a
+     credential-joined slot, alone or embedded (`x$<slot>`, `x$<slot>.`, `x$<slot>..password`: every spelling the
+     substitution reads as the slot), resolves to the slot's value with its joined fields (A34: `Bindings.isSecretField`
+     treats the empty field list as secret) and is refused exactly as the field form is, on both checks; a person's call
+     that references the slot as a whole consumes it (rule 2) as the field form does. And for every origin but `PERSON`
+     the session resolves a step's call arguments against the slots' public values (`Bindings.substitutePublic`; P2 §8.4
+     as amended), so that no spelling of a reference reaches a joined secret on a model's or a client's behalf; the
+     refusal stays the early, well-worded answer, and a value nested too deep to be read counts as a secret reference
+     while a join exists.
      **The plan form of the same rule**: `PlanPolicy.refusals(plan)` refuses, for a client's scenario
      (`skillroy_scenario_run` under the mutating server, the planner's server), a step whose arguments as written (a base
      verb's or a raw `call`'s, not a pack verb's own compiled references) name a field of a slot the plan declares with
      `credential:`, unless the slot's own `fixture` value provides that field; the refusal names the step and the slot,
      never a value, and nothing runs (§9.1, §9.4): such a run goes through `PlanExecutor` with the operator's
      credentials and meets none of the session-side mechanisms, and a `swing_capture` read would otherwise carry what the
-     step typed as pixels;
+     step typed as pixels. **(Phase 7 security fix, S101, S102, S107, S128, built 2026-10-11, SH)** The plan form
+     refuses a credential slot's field its `fixture` does not provide **or the slot itself**, reads the references with
+     the executor's own tokenizer, judges a pack verb's written arguments by step identity, fails closed past the depth
+     bound and needs the written scenario from every caller: §9.4's note;
   2. **`secretsInFlight()`**: true from the moment a credential join resolves a secret into the session's bindings (a
      person's `resolve` of a credential slot) until a step of a `PERSON` origin has consumed every such reference (its
      compiled calls referenced the slot's secret field); while it is true, `execute` refuses, for every origin but
      `PERSON`, every `type`, every printable `press` and every raw `swing.type`/`swing.key` ("a credential is in flight;
-     the person signs on first"), and the facade and the recorder refuse the same before the call is built (§6.5);
+     the person signs on first"), and the facade and the recorder refuse the same before the call is built (§6.5).
+     **(Phase 7 security fix, S127, built 2026-10-11, SH)** Widened (D342): while it is true `execute` refuses, for every
+     origin but `PERSON`, every step one of whose compiled calls may change the target (a primitive the catalogue lists
+     as mutating or destructive, one it does not list, and every typing call as above), a pack verb over the
+     application's input seam (`enter`, `scan`, `key`, `quantity` over `lending.input`) and its raw primitive included,
+     with the same text and `{refused: credential}`; reads still run (the model has nothing to change while the person
+     is mid-sign-on); the facade's and the recorder's earlier refusals stay as they are;
   3. a `type` whose text contains a secret value the session's mask knows (`PromptMask.holdsSecret(text)`) is refused by
      the facade and the recorder (§6.5).
   Sign-on in a vision session therefore runs through the `signOn` verb's credential join **by the person** (the REPL
@@ -2236,7 +2261,20 @@ secret is joined (an absent credential entry or a secret field that is already a
 `ENVIRONMENT`, as in a bind). **Origin rule:** a slot that declares a credential is bound only for a person's origin
 (the scenario player binds as the person); for a model's or a client's origin it is refused before anything is joined
 or journaled ("a credential slot is bound by a person, never on a model's or a client's behalf"), consistent with D342.
-Joining a secret puts the slot in flight exactly as a `resolve` does. **Journal:** one `fixture` record
+Joining a secret puts the slot in flight exactly as a `resolve` does.
+**(Phase 7 security fix, S113, S139, built 2026-10-11, SH)** The origin rule extends to every slot and to `resolve`: a
+slot whose current binding a person made (a person's `resolve` or `fixture`, the scenario player's binding of a
+scenario's slots) is rebound for a person's origin only; for any other origin `resolve` and `fixture` refuse it before
+anything is resolved, joined or journaled (`BindException` `ENVIRONMENT`, "slot $<slot> was bound by the person;
+resolve under another name", `detail.refused: slot`; `ExecutorSession.personSlotRefusal`), so a model or a client can
+neither move what a person's later step acts on nor drop a credential slot's join and in-flight state; it binds new
+slots and rebinds those a model or a client bound (either), and the person rebinds any. The `resolve` record carries
+`origin` (`StepJournal.ResolveEntry`'s eighth component; the seven-argument constructor and a journal written before
+the fix have none). The export marks a slot whose `resolve` record names an origin other than `PERSON` `REQUIRED` by
+nobody until a person approves it, whatever its strategy (D97), or `APPROVED` by the exporter's own label when one is
+named (the CLI's `--approved-by`, a person typing it); a record without an origin exports as before. Replay refuses
+an unapproved value for a model's strategy only (D72), so for a tier (a) slot the mark is the reviewer's, in the
+export's bindings file. **Journal:** one `fixture` record
 `{type: fixture, slot, value, credential?: {realm, key}, origin}`, the value masked like every record; the export
 writes the slot back as `resolve: <slot>: {fixture: <value>, credential?: …}` in the order the journal bound it, and a
 later `resolve` or `fixture` of the same slot replaces it. The scenario player's default `FixtureBinder` is this
@@ -2301,6 +2339,24 @@ named and `images: true` (the server never names a vision type); the captures ar
 `skillroy_session_ask`. `PlanPolicy.refusals(plan, scenario)` (the one `skillroy_scenario_run` calls) applies the
 credential rule's plan form to a pack verb's arguments as the client wrote them too (a pass-through verb given
 `$staff.password`), never to the verb's own compiled references (D427); `refusals(plan)` keeps the base-verb form.
+
+**Phase 7 security fix (S101, S102, S107, S128, built 2026-10-11, SH):** `PlanPolicy.refusals(plan, scenario)` is the one
+form: the scenario as written is required (`NullPointerException` otherwise) and every caller passes it,
+`skillroy_scenario_run` and `skillroy author --run`, which reads the scenario back from the file the planner wrote and
+refuses the run, nothing sent, when it cannot or when the file no longer compiles to the planner's plan; the
+one-argument form, which judged a pack verb on its compiled calls only, is removed (S107). Plan step `s<i>` is judged
+with the scenario's step `i`, the compiler's one-to-one numbering, never by source line, which two flow-style steps or a
+scenario written as one line of JSON share (S102); in a plan that declares a credential slot, a plan that does not
+number the scenario's steps so is refused. The references are read with the executor's own tokenizer
+(`References.references`, public for this), so that every spelling the substitution reads as a slot is the slot
+(S101). Refused, naming the step and the slot (and the field), never a value: in a base verb's or a raw `call`'s
+compiled arguments, a field of a credential slot its `fixture` does not provide and the slot as a whole; in a pack
+verb's arguments as written, such a field and the slot as a whole embedded in a longer text, while a string that is
+exactly `$<slot>` hands the slot to the verb (the verb's own join, `signOn {staff: $staff}`, D427); in a pack verb's
+compiled calls and in the cleanup calls, the slot as a whole, which would reach the agent with its joined secret
+whatever the verb meant (a verb that joins names the field it puts where, as the sample's `signOn` does); the verb's
+own field references stay unjudged (D427). A value nested deeper than 64 levels (`References.MAX_DEPTH`) in a plan
+that declares a credential slot is refused rather than searched (S128), as `References.anyReference` does.
 
 ### 9.5 The overlay
 
@@ -2392,7 +2448,10 @@ extended with this phase, D334):
    `$<slot>.<secret>` and a step whose compiled calls would reference one for every origin but a person's before anything
    is journaled or sent; `PlanPolicy` refuses a client scenario's base verb or raw `call` that names a credential slot's
    field its `fixture` does not provide, §9.2); no `type`, printable `press` or raw `swing.type` runs for them while a credential is in
-   flight (`secretsInFlight`); a `type` whose text holds a known secret value is refused; sign-on runs through the
+   flight (`secretsInFlight`); **(Phase 7 security fix, S101, S127, built 2026-10-11, SH)** the joined slot as a whole
+   (`$<slot>`, in every spelling) is such a reference, on every route and in the plan form too (§9.4), a model's or a
+   client's step resolves its call arguments against public values only, and while a credential is in flight nothing
+   of theirs changes the target; a `type` whose text holds a known secret value is refused; sign-on runs through the
    `signOn` verb's credential join by the person or the player before the loop (§9.2, §6.8). The recorder refuses a
    `click`, `pointer`, `type`, `press` or toolset `key` at a component the hit-test reports `masked` (§3.2, §6.5) with the
    text "the component takes a secret; ask the person to sign on"; a pack's mask names what
@@ -2537,6 +2596,11 @@ request and so in every recording's fingerprint; VM's first commit is that sente
 alone, before VS), so that the recordings are regenerated exactly once in the phase and no integration step is red for
 it; the scenario JSON schema committed copy; `exported/session-basic-loan.*` (the pack
 version in its head comment; the same VS run).
+
+(Phase 7 security fix, S113, built 2026-10-11, SH) `exported/bindings/seed-a/session-basic-loan.bindings.json`
+regenerated on the same key-free route (`-Dskillroy.inference.fixtures.update=true`, `SessionExportTest`): its `item`
+slot, which the session's model resolves, is now `approval: {state: REQUIRED, by: null}` (§9.2, D425's note); the
+YAML, the plan and the session recordings came out byte-identical.
 
 ---
 
@@ -3052,7 +3116,7 @@ table of their own.
 | D339 | The hosts' options: `session --vision/--vision-model/--vision-tools/--allow-robot/--play`, `run --allow-robot`, `call --allow-robot`, `mcp --vision/--allow-robot`, `caps` with `source`, the JUnit property `skillroy.robot` with its warning (§9.3, §9.4) | settings-file keys for the tier; a scenario key for Robot; `call` without a flag | a run-level switch is an option, never a scenario key (D127); the tier is a session's choice, not an installation's; a property can be committed, so the glue says so; the raw `call` bypasses `ExecutorSession` and `CallPolicy`, so its own flag is the person's second half there |
 | D340 | The CI image stays WM-less; the Robot checks run WM-less with the agent option on a target started for them (a `LendingTarget.Mode`), passing `requireFocus: false`; no openbox image joins the matrix (§13.2) | an openbox leg | BS9: Robot pointer input lands WM-less and routed input needs no window manager; keys through Robot are not built (D345); a WM-less frame may hold no focus (BS9 K7), so the checks say so explicitly; the derived image's recipe stays under `spikes/BS9/docker/` for a later keyboard tier |
 | D341 | **A capture of the glass is a person's evidence only.** `swing.capture {mode: ROBOT}` is refused for every origin but `PERSON` by `ExecutorSession` and for every model's or client's call by `CallPolicy.arguments` whatever the flags; the V3 `capture` tool has no mode and the loop observes through a redacted `PAINT` composite in every tier ("the model sees `PAINT`, Robot acts"); a person's `ROBOT` capture blanks every pixel outside the JVM's windows' screen rectangles, says `glass: true`, is never written to `captures/` and never served over MCP; design §3.10's V3 row is amended (§3.4, §6.2, §9.1, §11, §16.1) | the V3 tool `capture {mode: ROBOT}` "to look at the glass"; a glass check in the agent (a `ROBOT` raster compared with a root-pane `PAINT` of each window, the differing regions blanked) | a `ROBOT` capture holds other processes' pixels and the desktop (the bands of a `SCREEN` union, a covering window), which no mask can name, so under V3 and `images: true` a model would have received what §11 rule 1 promises it never sees; BS9 showed a root-pane `PAINT` pixel-identical to the glass when nothing covers the target, so the model loses nothing it may see; the glass check is more code than Phase 7 needs and BS12 never ran V3 (§18 Q35) |
-| D342 | **No credential is ever a model's or a client's argument.** `ExecutorSession.execute` (both forms) refuses, for every origin but `PERSON`, a step whose arguments name a secret field of a credential join (`$<slot>.<key>`) and a step whose compiled calls would reference one (a pack verb given a credential-joined slot), before anything is journaled or sent; `PlanPolicy.refusals` refuses a client scenario's base verb or raw `call` that names a credential slot's field its `fixture` does not provide (`skillroy_scenario_run`, the planner's server); `secretsInFlight()` is true from a credential's join until a person's step consumed it and, while it is, every `type`, printable `press` and raw `swing.type`/`swing.key` of a `MODEL` or `CLIENT` origin is refused; a `type` whose text holds a known secret value is refused by the facade and the recorder; sign-on runs through `signOn` by the person or the player before the loop; the vocabulary names no secret field (§6.5, §6.8, §9.2, §11) | the recorder's masked-field rule alone; a per-type `confirm`; the mask on the way out only | a model's `type {text: "$assistant.password"}` into an unmasked field (the desk's entry field outside the `PASSWORD` state) would render the credential, and the next capture would carry it to the provider as pixels, which no value mask can reach; the session's vocabulary told the model the reference form; screen text can steer it (vision §Risk7), and it works in the default tier; the mechanisms at the executor, the facade, the recorder and `PlanPolicy` keep every route (the session's verb and raw tool, an MCP client's raw tool and scenario run, the planner) under one rule (D244): a client's scenario run goes through `PlanExecutor` with the operator's credentials and met none of the session-side mechanisms, so the plan form closes it; a model's `signOn` with a person's credential is refused rather than allowed to consume the in-flight flag, since only a person's step clears it and the person is at hand; a pack verb's own join in a client's committed scenario stays what Phase 5 allowed (the reviewed verb puts the credential where the pack's author said) |
+| D342 | **No credential is ever a model's or a client's argument.** `ExecutorSession.execute` (both forms) refuses, for every origin but `PERSON`, a step whose arguments name a secret field of a credential join (`$<slot>.<key>`) and a step whose compiled calls would reference one (a pack verb given a credential-joined slot), before anything is journaled or sent; `PlanPolicy.refusals` refuses a client scenario's base verb or raw `call` that names a credential slot's field its `fixture` does not provide (`skillroy_scenario_run`, the planner's server); `secretsInFlight()` is true from a credential's join until a person's step consumed it and, while it is, every `type`, printable `press` and raw `swing.type`/`swing.key` of a `MODEL` or `CLIENT` origin is refused; a `type` whose text holds a known secret value is refused by the facade and the recorder; sign-on runs through `signOn` by the person or the player before the loop; the vocabulary names no secret field (§6.5, §6.8, §9.2, §11). **(Phase 7 security fix, S101, S127, built 2026-10-11, SH)** The joined slot as a whole (`$<slot>`, in every spelling the substitution reads) is a secret reference (A34) on every route and in the plan form; a non-person's session step resolves its call arguments against public values; while a credential is in flight every call of a non-person that changes the target is refused, not only typing (rule 2 widened) | the recorder's masked-field rule alone; a per-type `confirm`; the mask on the way out only | a model's `type {text: "$assistant.password"}` into an unmasked field (the desk's entry field outside the `PASSWORD` state) would render the credential, and the next capture would carry it to the provider as pixels, which no value mask can reach; the session's vocabulary told the model the reference form; screen text can steer it (vision §Risk7), and it works in the default tier; the mechanisms at the executor, the facade, the recorder and `PlanPolicy` keep every route (the session's verb and raw tool, an MCP client's raw tool and scenario run, the planner) under one rule (D244): a client's scenario run goes through `PlanExecutor` with the operator's credentials and met none of the session-side mechanisms, so the plan form closes it; a model's `signOn` with a person's credential is refused rather than allowed to consume the in-flight flag, since only a person's step clears it and the person is at hand; a pack verb's own join in a client's committed scenario stays what Phase 5 allowed (the reviewed verb puts the credential where the pack's author said) |
 | D343 | **A Robot press is always paired with its release.** `swing.pointer {via: ROBOT}` refuses `PRESS` and `RELEASE` (`INVALID_PARAMS`, "a Robot press is never left held: use CLICK or DRAG"); a press and its release run in one worker task with no wait between them; a `finally` releases every button the call pressed before anything else, on a timeout or an interruption too; the pointer is never restored while a button is down; the toolset's `left_mouse_down`/`left_mouse_up` are answered as text in V3 and `pointer {action: PRESS}` with `via: ROBOT` is a compile error (§3.4, §6.3, §8.1) | the halves through Robot with the release on the next call or at the turn's end; the pointer not restored at all | a held Robot press followed by the pointer restore is an OS-level drag from inside the target to wherever the person left the pointer, across whatever windows lie between, left held across the model's next request and beyond a turn that ends at a limit; the web side already made `CLICK` one call for the same reason (§4.3); a cut-short `DRAG` or `CLICK` must release too, which only a `finally` guarantees |
 | D344 | **V3 acts only on a focused target, checked at the press.** `swing.pointer {via: ROBOT}` gains `requireFocus` (default **true**): the pre-check's EDT read requires the target JVM to hold a focused window and the worker moves at once, else `INPUT_REJECTED("not focused")` and nothing moves; every covering window of the JVM refuses the point (ranked or not); a `received` outside `hit.target` is `fired: false, "received elsewhere"`; the WM-less `RobotChecks` pass `false` explicitly; the V3 loop stops the turn (`endTurn: QUESTION`) when the JVM holds no focused window and never clicks to activate a window it cannot know to be uncovered; a Robot click into a field is allowed only while the JVM holds the focused window and another component owns the focus (§3.4) | the check from the last capture on the controller (one model call old); `requireFocus` default false with the loop passing true; a Robot click to re-activate the window after a dialog | a model call is 1-2 s and up to 12 s (BS12), in which the person switches windows or a notification appears, and Robot presses whatever is on top; BS9's own strict mode read the focus on the EDT before every press and refused to click an inactive application (K6 on the Mac "not run"); the executor's `run --allow-robot` path needs the rule as much as the loop, so the default is the safe one; Robot goes to the real top, so an unranked covering window is a wrong press there, not a reported guess as on the routed path; the residual window of milliseconds is A15's and `SECURITY.md`'s |
 | D345 | Robot key input is not built in Phase 7: V3's keyboard is the routed `swing.type {mode: SET}` by locator and `swing.key`, after the focus rule of D344; `swing.type {mode: ROBOT}` stays refused "not in this version"; gap 77 (§1, §3.4, §16.2) | `swing.type {mode: ROBOT}` and `swing.key {via: ROBOT}` with X-keysym translation and the re-activation after a dialog | BS9's key conditions: keys land in the AWT focus owner if and only if the target JVM has a focused window, and on a WM-less display nothing restores a frame's focus after a modal dialog closes; the routed `SET` needs no OS focus and types what the recorded step will type; the OS key path is a later tier if a target needs it proven (§18 Q6) |
@@ -3153,9 +3217,9 @@ facade and the tool-set interface of §9.1 gain a few methods).
 | D422 | **V1's `<target-ui>` block carries the marks list alone** (and the image's size), not the text snapshot again (§6.2) | repeat the snapshot | the model has `skillroy_snapshot`, and BS12 found the marks list carries what the snapshot drops | VM 3 |
 | D423 | **A hit-test on a `HEAVYWEIGHT` surface is recorded as an anchored step; on a `NONE` surface it is answered as text** (§6.4) | refuse both | §6.5's rule for `HEAVYWEIGHT` wins over §6.4's sentence | VM 4 |
 | D424 | **The player narrows the tier only between V2 and V3**; a step's tier to or from V1 is a usage error, like a widening (§6.8) | allow any narrowing | the service fixes the tool vocabulary at its start, and V1's tools differ from V2's | VM 5 |
-| D425 | **`ExecutorSession.fixture(slot, value, credential, origin)` binds a fixture slot as a plan binds one**: the value's references are substituted with public values, the slot is declared `fixture` with strategy `FIXTURE` and no bindings-file entry, and with a credential the secret is joined and in flight; a credential slot is bound for a person's origin only (`FIXTURE_CREDENTIAL_REFUSED` otherwise, before anything is joined or journaled); one `fixture` journal record; the export writes the slot back as `resolve: <slot>: {fixture: …}`; the player's default `FixtureBinder.SESSION` calls it as the person. First built as a `FixtureBinder` the player's host supplies, because `ExecutorSession` was VC's file; the method followed at the orchestrator's request (`e11ae08`) (§6.8, §9.2) | editing VC's file during the build (the shared-file rule forbade it); rewriting fixture slots as queries | `ExecutorSession` could not bind a fixture slot, so a scenario with one (`vision-live-only`, `loan-table-visual-check`) could not be played; the origin rule keeps D342 whole: no credential is bound on a model's or a client's behalf | VM 6 |
+| D425 | **`ExecutorSession.fixture(slot, value, credential, origin)` binds a fixture slot as a plan binds one**: the value's references are substituted with public values, the slot is declared `fixture` with strategy `FIXTURE` and no bindings-file entry, and with a credential the secret is joined and in flight; a credential slot is bound for a person's origin only (`FIXTURE_CREDENTIAL_REFUSED` otherwise, before anything is joined or journaled); one `fixture` journal record; the export writes the slot back as `resolve: <slot>: {fixture: …}`; the player's default `FixtureBinder.SESSION` calls it as the person. First built as a `FixtureBinder` the player's host supplies, because `ExecutorSession` was VC's file; the method followed at the orchestrator's request (`e11ae08`) (§6.8, §9.2). **(Phase 7 security fix, S113, S139, built 2026-10-11, SH)** For every slot, `resolve` and `fixture` refuse for any origin but a person's a slot whose current binding a person made; the `resolve` record carries `origin`; the export marks a non-person's binding `REQUIRED` (D97) | editing VC's file during the build (the shared-file rule forbade it); rewriting fixture slots as queries | `ExecutorSession` could not bind a fixture slot, so a scenario with one (`vision-live-only`, `loan-table-visual-check`) could not be played; the origin rule keeps D342 whole: no credential is bound on a model's or a client's behalf | VM 6 |
 | D426 | **A UI action counts toward `vision.maxActions` per facade `execute`** (an act that ran two steps counts two) (§9.1) | per tool call | the limit protects the target, not the model | VM 7 |
-| D427 | **`PlanPolicy.refusals(plan, scenario)` applies the credential rule's plan form to a pack verb's arguments as the client wrote them**, never to the verb's own compiled references (§9.4, §11) | judge compiled calls only (a pass-through verb would slip through); judge every reference (the pack's own `signOn` join would be refused) | a client must not hand a secret field to a verb; the verb's own join is the pack's business | VM 8 |
+| D427 | **`PlanPolicy.refusals(plan, scenario)` applies the credential rule's plan form to a pack verb's arguments as the client wrote them**, never to the verb's own compiled references (§9.4, §11). **(Phase 7 security fix, S101, S102, S107, S128, built 2026-10-11, SH)** Every caller passes the written scenario (the one-argument form is removed; `author --run` reads the file back); the written arguments are found by step identity; the executor's tokenizer reads them, the slot as a whole refused where it would reach a call (a pack verb's compiled calls, a base verb's, an embedded written reference) and admitted only as a slot handed whole to a pack verb; past the depth bound the form refuses | judge compiled calls only (a pass-through verb would slip through); judge every reference (the pack's own `signOn` join would be refused) | a client must not hand a secret field to a verb; the verb's own join is the pack's business | VM 8 |
 | D428 | **`ScenarioPlayer.withBaselines(root, env)`** reads the scenario's baselines once per play and hands them to every `expectImage` and anchored `pointer` (D359's consumer); the CLI passes the session's bindings root and environment (§6.8) | a tenth constructor parameter | the baselines are optional (null for a host without bindings) | VM 9 |
 | D429 | **`export` (the REPL's and `--play --export`) writes each anchor PNG where its bindings entry says**, created exclusively; the JSON form lists them under `images` (§9.3) | leave them to the person | §9.3: "PNGs beside" | VM 10 |
 | D430 | **`VisionLiveIT` runs item 3 second and records an `INVALID_REQUEST` as the finding instead of failing**; the bounds of items 1, 2 and 4 count the turn's `vision` calls only; the framework's own files are checked for the key after each item (§13.3) | fail on a 400; count every ledger entry | the item exists to record the finding; a resolution the person asked for is not part of the turn; the framework writes its files itself | VM 11 |

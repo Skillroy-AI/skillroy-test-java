@@ -138,6 +138,9 @@ class ExecutorSessionTest {
      */
     @Test
     void aLiteralCallReachesTheAgentUnsubstitutedAndIsJournaledAsGiven() throws Exception {
+        // A read: Phase 7 security fix S127 refuses a model's call that may change the target while the credential the
+        // person resolved below is in flight, and an uncatalogued primitive may.
+        fx.agent.describe("toy.read", false);
         try (ExecutorSession session = fx.open()) {
             SessionFixture.resolveItemAndAssistant(session, PERSON);
             String text = "'$item.code' $$ $nobody.code US$ 5";

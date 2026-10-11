@@ -1516,6 +1516,13 @@ A joined field resolves in the `args` of step calls and cleanup calls and nowher
 reference to one in an expectation, a `db` element, or a matcher (`RESOLUTION_FAILED` / `REFERENCE`): those are
 written to evidence and sent as SQL parameters.
 
+(Phase 7 security fix, S101, built 2026-10-11, SH) In an interactive session (P5 §12, P7 §9.2) a joined field resolves
+in the `args` of a person's step only: the session resolves the call arguments of a model's, a client's or the
+system's step against the values without joined fields (`Bindings.substitutePublic`), so that no spelling of a
+reference, the slot as a whole (`$<slot>`, whose value carries the joined fields) included, reaches a joined field on
+their behalf. A plan run keeps the join in every step and cleanup call, a client's plan included, whose pack verbs may
+join by design under the plan form of P7 §9.4 (D427).
+
 ### 8.5 Ordering and purity summary
 
 | Call | When | May touch the target | May throw for "no" |

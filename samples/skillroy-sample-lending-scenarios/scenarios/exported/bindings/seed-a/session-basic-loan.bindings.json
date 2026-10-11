@@ -173,8 +173,8 @@
       ],
       "confidence": 1.0,
       "approval": {
-        "state": "NOT_REQUIRED",
-        "by": "live"
+        "state": "REQUIRED",
+        "by": null
       },
       "llm": null
     }

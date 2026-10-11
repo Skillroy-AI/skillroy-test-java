@@ -22,15 +22,18 @@ import ai.skillroy.testjava.inference.tools.ToolProjection;
 import ai.skillroy.testjava.protocol.PrimitiveDescriptor;
 import ai.skillroy.testjava.scenario.Plan;
 import ai.skillroy.testjava.scenario.PlanCompiler;
+import ai.skillroy.testjava.scenario.References;
 import ai.skillroy.testjava.scenario.Scenario;
 import ai.skillroy.testjava.scenario.ScenarioException;
 import ai.skillroy.testjava.scenario.pack.DomainPack;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
@@ -152,28 +155,32 @@ public final class PlanPolicy {
      * Why the plan may not run on a client's behalf: one line per call that may not, in plan order, naming the step
      * (its id, verb and line) or the cleanup call and the primitive; empty when it may run. Never a value of the
      * arguments.
-     */
-    public List<String> refusals(Plan plan) {
-        return refusals(plan, null);
-    }
-
-    /**
-     * {@link #refusals(Plan)} with the scenario as written, so that a pack verb's arguments as the client wrote them
-     * meet the credential rule's plan form too (phase7-contracts.md 9.2, 9.4: a pass-through verb given
-     * {@code $staff.password}), while the verb's own compiled references (a {@code signOn} joining the password) are
-     * not judged.
      *
-     * @param scenario the scenario the plan was compiled from, or null
+     * <p>The scenario as written is required (Phase 7 security fix, S107: every caller passes it; the one-argument form
+     * that judged a pack verb on its compiled calls only is gone), so that a pack verb's arguments as the client wrote
+     * them meet the credential rule's plan form too (phase7-contracts.md 9.2, 9.4: a pass-through verb given
+     * {@code $staff.password}), while the verb's own compiled field references (a {@code signOn} joining the password)
+     * are not judged. Plan step {@code s<i>} is judged with the scenario's step {@code i}, the compiler's one-to-one
+     * numbering (Phase 7 security fix, S102: by identity, never by source line, which two flow-style or JSON steps
+     * share); a plan that does not number the scenario's steps so, in a plan that declares a credential slot, is
+     * refused. The references are read with the executor's own tokenizer ({@link References#references}, S101),
+     * whole-slot references included, and a value nested deeper than {@value References#MAX_DEPTH} levels is refused
+     * rather than searched (S128).
+     *
+     * @param scenario the scenario the plan was compiled from
+     * @throws NullPointerException if the plan or the scenario is null
      */
     public List<String> refusals(Plan plan, Scenario scenario) {
+        Objects.requireNonNull(plan, "plan");
+        Objects.requireNonNull(scenario, "scenario");
         List<String> out = new ArrayList<>();
         Map<String, Set<String>> credentials = credentialSlots(plan);
-        Map<Integer, Object> written = new TreeMap<>();
-        if (scenario != null) {
-            for (Scenario.Step step : scenario.steps()) {
-                written.put(step.line(), step.args());
-            }
+        Map<String, Scenario.Step> written = new HashMap<>();
+        List<Scenario.Step> source = scenario.steps();
+        for (int i = 0; i < source.size(); i++) {
+            written.put("s" + (i + 1), source.get(i));
         }
+        boolean numbered = source.size() == plan.steps().size();
         for (Plan.Step step : plan.steps()) {
             String where = "step " + step.id() + " (" + step.verb() + (step.line() > 0 ? ", line " + step.line() : "")
                     + "): ";
@@ -183,24 +190,40 @@ public final class PlanPolicy {
                 continue;
             }
             boolean packVerb = packVerbs.contains(step.verb());
+            boolean writtenRefused = false;
+            if (packVerb && !credentials.isEmpty()) {
+                Scenario.Step as = written.get(step.id());
+                String why = !numbered || as == null || !step.verb().equals(as.verb())
+                        ? "its arguments as written are not the scenario's step " + step.id() + ": refused, since a"
+                        + " pack verb's arguments meet the credential rule as the client wrote them"
+                        : credentialRefusal(as.args(), credentials, Judged.WRITTEN);
+                if (why != null) {
+                    out.add(where + why);
+                    writtenRefused = true;
+                }
+            }
             for (Plan.Call call : step.calls()) {
                 String why = packVerb ? packCall(call.primitive()) : baseCall(call.primitive());
                 if (why == null) {
                     why = arguments(call);
                 }
-                if (why == null && !packVerb) {
-                    why = credentialRefusal(call.args(), credentials);
-                }
-                if (why == null && packVerb && step.line() > 0 && written.containsKey(step.line())) {
-                    why = credentialRefusal(written.get(step.line()), credentials);
+                if (why == null && !writtenRefused) {
+                    why = credentialRefusal(call.args(), credentials, packVerb ? Judged.PACK_CALL : Judged.CALL);
                 }
                 if (why != null) {
-                    out.add("step " + step.id() + " (" + step.verb() + (step.line() > 0 ? ", line " + step.line()
-                            : "") + "): " + why);
+                    out.add(where + why);
                 }
             }
         }
         out.addAll(packRefusals(List.of(), plan.cleanup()));
+        int n = 0;
+        for (Plan.Call call : plan.cleanup()) {
+            n++;
+            String why = credentialRefusal(call.args(), credentials, Judged.PACK_CALL);
+            if (why != null) {
+                out.add("cleanup call " + n + " (" + call.primitive() + "): " + why);
+            }
+        }
         return out;
     }
 
@@ -304,10 +327,6 @@ public final class PlanPolicy {
     /** The verbs of a model's step, which a client's scenario never runs (phase7-contracts.md 9.4). */
     public static final Set<String> MODEL_VERBS = Set.of("aiAct", "aiExpect");
 
-    /** A {@code $slot.field} reference. */
-    private static final java.util.regex.Pattern FIELD_REFERENCE = java.util.regex.Pattern.compile(
-            "\\$([A-Za-z_][A-Za-z0-9_-]*)\\.([A-Za-z0-9_-]+)");
-
     /**
      * The slots the plan declares with {@code credential:}, each with the fields its own fixture value provides (none
      * for a query slot).
@@ -327,46 +346,64 @@ public final class PlanPolicy {
         return out;
     }
 
+    /** What the credential rule's plan form judges in a value (Phase 7 security fix, S101). */
+    enum Judged {
+        /**
+         * A base verb's or a raw {@code call}'s compiled arguments: every reference to a credential slot, whole or a
+         * field its fixture does not provide.
+         */
+        CALL,
+        /**
+         * A pack verb's arguments as the client wrote them: a field its fixture does not provide, and the slot as a
+         * whole embedded in a longer text; a string that is exactly {@code $<slot>} hands the slot to the verb (the
+         * verb's own join, {@code signOn {staff: $staff}}, D427).
+         */
+        WRITTEN,
+        /**
+         * A pack verb's compiled call or a cleanup call: the slot as a whole, which reaches the agent with its joined
+         * secret whatever the verb meant; the verb's own field references are its reviewed code (D427).
+         */
+        PACK_CALL
+    }
+
     /**
-     * The credential rule's plan form (phase7-contracts.md 9.2, 9.4; D342): a base verb's or a raw call's arguments as
-     * written that name a field of a slot the plan declares with {@code credential:}, which the slot's own fixture does
-     * not provide (a secret the credentials file joins), refused naming the slot and the field, never a value; null
-     * when none does. A pack verb's own compiled references are its reviewed code and are not judged here.
+     * The credential rule's plan form (phase7-contracts.md 9.2, 9.4; D342, D427): a reference in the value to a slot the
+     * plan declares with {@code credential:} that reaches its joined secret, judged as {@code judged} says, refused
+     * naming the slot (and the field), never a value; null when none does. The references are read with the executor's
+     * own tokenizer, so that every spelling that resolves to the slot as a whole ({@code $staff}, {@code x$staff},
+     * {@code x$staff.}, {@code x$staff..password}) is one (S101); a value nested deeper than
+     * {@value References#MAX_DEPTH} levels is refused rather than searched (S128).
      */
-    static String credentialRefusal(Object args, Map<String, Set<String>> credentials) {
+    static String credentialRefusal(Object args, Map<String, Set<String>> credentials, Judged judged) {
         if (credentials.isEmpty()) {
             return null;
         }
-        List<String> texts = new ArrayList<>();
-        strings(args, texts, 0);
-        for (String text : texts) {
-            java.util.regex.Matcher m = FIELD_REFERENCE.matcher(text);
-            while (m.find()) {
-                Set<String> provided = credentials.get(m.group(1));
-                if (provided != null && !provided.contains(m.group(2))) {
-                    return "names the field '" + m.group(2) + "' of the credential slot '" + m.group(1) + "', which"
-                            + " its fixture does not provide: a credential is never used on a client's behalf (the"
-                            + " person signs on, or a pack verb joins it)";
+        List<References.Reference> refs;
+        try {
+            refs = References.references(args);
+        } catch (IllegalArgumentException e) {
+            return "holds a value nested deeper than " + References.MAX_DEPTH + " levels in a scenario with a"
+                    + " credential slot: refused rather than searched";
+        }
+        for (References.Reference ref : refs) {
+            Set<String> provided = credentials.get(ref.slot());
+            if (provided == null) {
+                continue;
+            }
+            if (ref.fields().isEmpty()) {
+                if (judged == Judged.WRITTEN && ref.whole()) {
+                    continue;
                 }
+                return "names the credential slot '" + ref.slot() + "' as a whole, whose value carries its joined"
+                        + " secret: a credential is never used on a client's behalf (the person signs on, or a pack"
+                        + " verb joins the field it names)";
+            }
+            if (judged != Judged.PACK_CALL && !provided.contains(ref.fields().get(0))) {
+                return "names the field '" + ref.fields().get(0) + "' of the credential slot '" + ref.slot() + "',"
+                        + " which its fixture does not provide: a credential is never used on a client's behalf (the"
+                        + " person signs on, or a pack verb joins it)";
             }
         }
         return null;
-    }
-
-    private static void strings(Object value, List<String> out, int depth) {
-        if (depth > 64) {
-            return;
-        }
-        if (value instanceof String s) {
-            out.add(s);
-        } else if (value instanceof Map<?, ?> map) {
-            for (Object v : map.values()) {
-                strings(v, out, depth + 1);
-            }
-        } else if (value instanceof List<?> list) {
-            for (Object v : list) {
-                strings(v, out, depth + 1);
-            }
-        }
     }
 }

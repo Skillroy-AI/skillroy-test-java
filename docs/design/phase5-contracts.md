@@ -1916,7 +1916,8 @@ entry, in order: `session-start {id, pack, packVersion, envId, env: fingerprint 
 masked), sync, timeoutMs, await?, capture?}], outcome: {status, kind?, message?, detail?, executed, seqBefore,
 seqAfter, durationMs, degradedFidelity}, snapshotHash? (sha256 of the snapshot text taken after a PASS, when the
 origin asked for one)}`, `resolve {slot, kind, args, strategy, resolution (the bindings-file shape of the slot, P2 §9,
-with provenance, verifier results, confidence, approval, usage)}`, `oracle {name, fn, inputsHash, value}`, `check
+with provenance, verifier results, confidence, approval, usage), origin (Phase 7 security fix, S113, built 2026-10-11,
+SH)}`, `oracle {name, fn, inputsHash, value}`, `check
 {path, matcher, actual, held, reason}`, `observe {path, value}`, `note {origin, text}`, `budget {scope, spentUsd,
 limitUsd, exhausted}`, `session-end {reason, steps, cost}`. Model provenance lives in `origin` (`kind: MODEL, by: the
 model id, requestId, intent`); the cost of a model call is in the session's `cost-ledger.jsonl` and `inference.jsonl`,
@@ -2052,6 +2053,14 @@ stays); the history beyond the limit is folded by one `summary` call. `OverlayBr
 subscription, sinceSeq)` owns no thread: the subscription's consumer queues requests (16 at most, the rest dropped and
 counted) and the host serves them with `serveNext(Duration)`; the answer is a plain call of the pack's answer primitive,
 not a journaled step.
+
+(Phase 7 security fix, S113, S139, built 2026-10-11, SH) A model's `skillroy_resolve` and the MCP server's
+`skillroy_resolve` (a model's or a client's origin, with or without an actor) never rebind a slot a person bound in the
+session: `ExecutorSession.resolve` refuses it before anything is resolved or journaled (`BindException` `ENVIRONMENT`,
+"slot $<slot> was bound by the person; resolve under another name", P7 §9.2), which each tool answers as its error
+result; the model or the client resolves under another name, and rebinds the slots a model or a client bound. The
+journal's `resolve` record carries the origin (§12.3), and the export writes a slot a model or a client bound
+`REQUIRED` until a person approves it (D97).
 
 As built (2026-10-08, fix wave; D101): the session's tier (b) resolves are metered on the session's budget.
 `SessionService.resolve(slot, kind, args, strategy, verify, credential, origin)` is the session's metered resolve
