@@ -45,6 +45,8 @@ final class FakeSessionTools implements SessionTools {
 
     boolean applies = true;
     boolean toolset;
+    /** Names {@link #handles} answers without listing them (Phase 7 security fix S137: never acted for a model). */
+    final java.util.Set<String> unlisted = new java.util.HashSet<>();
     Handler handler = (use, ctx) -> Outcome.of(new Content.ToolResult(use.id(), "ok", false));
     final List<String> asked = new ArrayList<>();
     int turnStarts;
@@ -101,7 +103,8 @@ final class FakeSessionTools implements SessionTools {
 
     @Override
     public boolean handles(String toolName) {
-        return toolName.equals("fake_click") || toolName.equals("fake_look") || toolset && toolName.equals("left_click");
+        return toolName.equals("fake_click") || toolName.equals("fake_look") || toolset && toolName.equals("left_click")
+                || unlisted.contains(toolName);
     }
 
     @Override

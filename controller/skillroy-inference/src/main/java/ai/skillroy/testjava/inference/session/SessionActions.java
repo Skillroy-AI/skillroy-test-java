@@ -128,6 +128,16 @@ public interface SessionActions {
     }
 
     /**
+     * The session's default browser selection ({@code web.yaml}'s {@code browser}, a {@code by} object such as
+     * {@code {title: "Front"}}), or null when it names none: what a recorded {@code webClick} without {@code browser}
+     * resolves to (phase7-contracts.md 6.5 step 4; Phase 7 security fix S132). The default, for a facade that does not
+     * know it, is null.
+     */
+    default java.util.Map<String, Object> webDefaultBrowser() {
+        return null;
+    }
+
+    /**
      * The pack's screen legend through the session's mask, or null (phase7-contracts.md 6.4, 12.3: a visual
      * question carries it). As built (Phase 7, VM): the contract's context had no way to reach the pack.
      */

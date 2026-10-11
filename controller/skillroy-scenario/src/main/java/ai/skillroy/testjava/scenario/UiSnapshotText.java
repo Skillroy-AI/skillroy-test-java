@@ -26,7 +26,9 @@ import java.util.Set;
  * and reports, and after the Swing windows the {@code WEB} surface (phase4-contracts.md 6.2): one block per embedded
  * browser that is visible in Swing, headed {@code [web <ref>] <title> <url> (<adapter>, <rendering>, <path>)} and
  * followed by the nodes of its {@code web.ariaSnapshot}, one line {@code role "name" [value]} per node, indented one
- * level per depth; a hidden browser is one line {@code [web <ref> hidden] <title> <url>}. For example:
+ * level per depth; a hidden browser is one line {@code [web <ref> hidden] <title> <url>}; a masked browser (a pack's
+ * {@code CaptureMask} names its component, Phase 7 security fix S111) is one line {@code [web <ref> masked]} with
+ * nothing of its page. For example:
  *
  * <pre>
  * app:
@@ -191,9 +193,59 @@ public final class UiSnapshotText {
         }
     }
 
+    /**
+     * True when a browser of {@code web.browsers} is masked (phase7-contracts.md 3.6, 4.8; Phase 7 security fix S111):
+     * the agent says {@code masked: true}, or, from an older agent that does not, its {@code component} is a ref the
+     * {@code swing.snapshot} value marks {@code masked: true} (itself or through an ancestor).
+     *
+     * @param snapshot the {@code swing.snapshot} value, or null
+     */
+    public static boolean masked(Map<?, ?> browser, Object snapshot) {
+        if (Boolean.TRUE.equals(browser.get("masked"))) {
+            return true;
+        }
+        Object component = browser.get("component");
+        if (component == null || !(snapshot instanceof Map<?, ?> snap) || !(snap.get("windows") instanceof List<?> ws)) {
+            return false;
+        }
+        for (Object w : ws) {
+            if (maskedRef(w, String.valueOf(component), false, 0)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean maskedRef(Object raw, String ref, boolean inMasked, int depth) {
+        if (!(raw instanceof Map<?, ?> n) || depth > MAX_DEPTH) {
+            return false;
+        }
+        boolean masked = inMasked || Boolean.TRUE.equals(n.get("masked"));
+        if (masked && ref.equals(String.valueOf(n.get("ref")))) {
+            return true;
+        }
+        if (n.get("children") instanceof List<?> children) {
+            for (Object child : children) {
+                if (maskedRef(child, ref, masked, depth + 1)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /** The view of a masked browser: its ref alone, so that nothing of its page is rendered (S111). */
+    public static WebView maskedView(Map<?, ?> browser) {
+        return new WebView(Map.of("ref", String.valueOf(browser.get("ref")), "masked", true), null, null);
+    }
+
     /** One browser of the {@code WEB} surface: its header line and, when visible, its aria nodes. */
     private static void web(WebView view, List<String> lines) {
         Map<?, ?> b = view.browser();
+        if (Boolean.TRUE.equals(b.get("masked"))) {
+            lines.add("[web " + oneLine(text(b.get("ref")), MAX_TEXT) + " masked]");
+            return;
+        }
         boolean visible = Boolean.TRUE.equals(b.get("visibleInSwing"));
         StringBuilder head = new StringBuilder("[web ").append(oneLine(text(b.get("ref")), MAX_TEXT));
         if (!visible) {

@@ -274,6 +274,16 @@ final class Selection {
         }
     }
 
+    /**
+     * The read of a page's title: the title when it is a primitive string, cut at {@link WebLib#MAX_URL_CHARS} in the
+     * page and checked by its primitive {@code length} afterwards (a page may replace {@code slice}), else "". Phase 7
+     * security fix S131 (P4 4.6): a page chooses its title, never the size of what crosses the channel.
+     */
+    static final String TITLE = "(function(){var t;try{t=document.title;}catch(e){return \"\";}"
+            + "if(typeof t!==\"string\"){return \"\";}if(t.length>" + WebLib.MAX_URL_CHARS + "){try{t=t.slice(0,"
+            + WebLib.MAX_URL_CHARS + ");}catch(e){return \"\";}}return typeof t===\"string\"&&t.length<="
+            + WebLib.MAX_URL_CHARS + "?t:\"\";})()";
+
     /** The titles of the given browsers that can evaluate, read concurrently within the bound; absent on failure. */
     static Map<Entry, String> titles(Collection<Entry> entries, long boundMs) {
         Map<Entry, CompletableFuture<String>> pending = new LinkedHashMap<Entry, CompletableFuture<String>>();
@@ -283,7 +293,7 @@ final class Selection {
                 continue;
             }
             try {
-                pending.put(e, b.evaluate(WebEval.of("document.title").timeoutMs(Math.max(1, boundMs)).build()));
+                pending.put(e, b.evaluate(WebEval.of(TITLE).timeoutMs(Math.max(1, boundMs)).build()));
             } catch (RuntimeException ex) {
                 // no title for this one
             }
@@ -293,7 +303,8 @@ final class Selection {
         for (Map.Entry<Entry, CompletableFuture<String>> p : pending.entrySet()) {
             try {
                 String json = p.getValue().get(Math.max(1, remainingMs(deadline)), TimeUnit.MILLISECONDS);
-                Object value = Json.parse(json);
+                // S131: through the channel check, as every page answer is.
+                Object value = WebPrimitives.parse(p.getKey(), json);
                 if (value instanceof String) {
                     out.put(p.getKey(), (String) value);
                 }

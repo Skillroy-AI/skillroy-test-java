@@ -604,4 +604,192 @@ class SessionServiceToolsTest {
         assertEquals("fine", light.visionCall(ModelRequest.builder("q", ModelClass.SONNET_CLASS).maxTokens(1)
                 .message(Message.user("look at these")).build()).text());
     }
+
+    // ------------------------------------------------------------------------------------------------ security fixes
+
+    /**
+     * Phase 7 security fix S110 (phase7-contracts.md 11, 9.1): the raw primitive branch refuses a clipboard chord and a
+     * middle button, as every route does; nothing sent, nothing journaled.
+     */
+    @Test
+    void theRawPrimitiveBranchRefusesTheClipboard() throws Exception {
+        fake.applies = false;
+        ScriptedGateway gateway = ScriptedGateway.sequence(List.of(tools("r1",
+                use("t1", "swing_key", Map.of("key", "V", "modifiers", List.of("CTRL"))),
+                use("t2", "swing_key", Map.of("key", "INSERT", "modifiers", List.of("SHIFT"))),
+                use("t3", "swing_pointer", Map.of("action", "CLICK", "button", "MIDDLE"))), done("r2")));
+        Turn turn = service(session, gateway, SessionPolicy.acting().withBasePrimitives(true), "1.00", Map.of())
+                .ask("paste");
+        assertEquals(Turn.Outcome.DONE, turn.outcome(), turn.answer());
+        for (int i = 0; i < 3; i++) {
+            Turn.Action a = turn.actions().get(i);
+            assertNull(a.step(), a.result());
+            assertTrue(a.result().contains("clipboard"), a.tool() + ": " + a.result());
+        }
+        assertTrue(agent.callsTo("swing.key").isEmpty());
+        assertTrue(agent.callsTo("swing.pointer").isEmpty());
+        assertTrue(steps(session).isEmpty());
+    }
+
+    /** A gateway with the provider's token count that counts what it was asked. */
+    private static final class Counting implements InferenceGateway {
+        final ScriptedGateway scripted;
+        int counts;
+        int completions;
+
+        Counting(ScriptedGateway scripted) {
+            this.scripted = scripted;
+        }
+
+        @Override
+        public String provider() {
+            return scripted.provider();
+        }
+
+        @Override
+        public java.util.Set<GatewayCapability> capabilities() {
+            return scripted.capabilities();
+        }
+
+        @Override
+        public ModelResponse complete(ModelRequest request) throws InferenceException {
+            completions++;
+            return scripted.complete(request);
+        }
+
+        @Override
+        public ai.skillroy.testjava.inference.spi.BatchHandle submitBatch(List<ModelRequest> requests) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public ai.skillroy.testjava.inference.spi.BatchStatus batchStatus(
+                ai.skillroy.testjava.inference.spi.BatchHandle handle) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public List<ai.skillroy.testjava.inference.spi.BatchResult> collectBatch(
+                ai.skillroy.testjava.inference.spi.BatchHandle handle) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public void cancelBatch(ai.skillroy.testjava.inference.spi.BatchHandle handle) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public long countTokens(ModelRequest request) {
+            counts++;
+            return scripted.countTokens(request);
+        }
+
+        @Override
+        public void close() {
+        }
+    }
+
+    private static ModelRequest picture() {
+        return ModelRequest.builder("question", ModelClass.SONNET_CLASS).message(Message.user(
+                Content.Text.of("is the loan shown?"), new Content.Image("image/png", FakeSessionTools.PNG, null)))
+                .build();
+    }
+
+    /**
+     * Phase 7 security fix S135 (P5 7.2, P7 10): a token count transmits the request, pixels included, so an exhausted
+     * meter, a zero budget and a call whose local estimate exceeds what is left are refused before the count: neither
+     * {@code countTokens} nor {@code complete} is reached, on {@code visionCall} and on a tool set's {@code complete}.
+     */
+    @Test
+    void noRequestIsCountedOrSentWithoutBudget() throws Exception {
+        for (String budget : List.of("exhausted", "0", "0.000001")) {
+            Counting gateway = new Counting(ScriptedGateway.sequence(List.of(ScriptedGateway.text("YES"))));
+            BudgetMeter meter = BudgetMeter.of(BudgetMeter.Scope.SESSION, null, budget.equals("exhausted") ? "1.00"
+                    : budget, ledger);
+            LedgerWriter writer = new LedgerWriter(ledger, meter, log, PromptMask.keysOnly(), false, clock);
+            SessionService service = new SessionService(session, gateway, SessionPolicy.acting(), meter, writer,
+                    PriceTable.builtIn(), clock, new SessionExtensions(List.of(fake), Map.of()));
+            if (budget.equals("exhausted")) {
+                meter.markExhausted();
+            }
+            assertThrows(BudgetException.class, () -> service.visionCall(picture()), budget);
+            assertEquals(0, gateway.counts, budget + ": the request was counted (sent to the provider)");
+            assertEquals(0, gateway.completions, budget);
+        }
+        Counting gateway = new Counting(ScriptedGateway.sequence(List.of(ScriptedGateway.text("YES"))));
+        BudgetMeter roomy = BudgetMeter.of(BudgetMeter.Scope.SESSION, null, "1.00", ledger);
+        LedgerWriter writer = new LedgerWriter(ledger, roomy, log, PromptMask.keysOnly(), false, clock);
+        SessionService service = new SessionService(session, gateway, SessionPolicy.acting(), roomy, writer,
+                PriceTable.builtIn(), clock, new SessionExtensions(List.of(fake), Map.of()));
+        assertEquals("YES", service.visionCall(picture()).text());
+        assertEquals(1, gateway.counts, "with room the provider's count is asked");
+    }
+
+    /**
+     * Phase 7 security fix S136 (P7 9.1 as built): a tool set's request reaches the provider with its tools, output
+     * schema and provider tools masked, as its parts are; a recording masks the output schema too.
+     */
+    @Test
+    void aToolSetsToolsSchemaAndProviderToolsAreMasked() throws Exception {
+        ScriptedGateway gateway = ScriptedGateway.sequence(List.of(ScriptedGateway.text("NO")));
+        SessionService service = service(gateway);
+        Map<String, Object> secretProperty = Map.of("type", "object", "properties", Map.of("password",
+                Map.of("type", "string", "default", "Hunter-Pw-8812")), "required", List.of(), "additionalProperties",
+                false);
+        ModelRequest request = ModelRequest.builder("question", ModelClass.SONNET_CLASS)
+                .message(Message.user("look"))
+                .tools(List.of(new ToolSpec("fake_t", "uses token=" + FakeSessionTools.SECRET, secretProperty, true,
+                        false)))
+                .outputSchema(Map.of("type", "object", "properties", Map.of("apiKey", Map.of("type", "string",
+                        "default", "Key-Default-4471"))))
+                .providerTools(List.of(new ai.skillroy.testjava.inference.spi.ProviderTool("claude", "other_tool",
+                        Map.of("configs", Map.of("password", "Prov-Pw-0193")))))
+                .build();
+        service.visionCall(request);
+        ModelRequest sent = gateway.requests().get(0);
+        String text = String.valueOf(sent.tools()) + sent.outputSchema() + sent.providerTools();
+        for (String secret : List.of(FakeSessionTools.SECRET, "Hunter-Pw-8812", "Key-Default-4471", "Prov-Pw-0193")) {
+            assertFalse(text.contains(secret), secret + " reached the provider: " + text);
+        }
+        Map<String, Object> recorded = ai.skillroy.testjava.inference.recorded.Recording.json(request,
+                ScriptedGateway.text("NO"), PromptMask.keysOnly(), Instant.parse("2026-10-11T09:00:00Z"));
+        assertFalse(String.valueOf(recorded).contains("Key-Default-4471"), "the recording's output schema");
+    }
+
+    /**
+     * Phase 7 security fix S137 (P7 6.3, 9.1): a tool set's custom tool the request did not list is no tool, though the
+     * set would handle its name; nothing is acted.
+     */
+    @Test
+    void anUnlistedCustomToolIsNeverActed() throws Exception {
+        fake.unlisted.add("fake_hidden");
+        ScriptedGateway gateway = ScriptedGateway.sequence(List.of(tools("r1", use("t1", "fake_hidden", Map.of())),
+                done("r2")));
+        Turn turn = service(gateway).ask("act");
+        assertTrue(turn.actions().get(0).result().contains("there is no tool fake_hidden"),
+                turn.actions().get(0).result());
+        assertTrue(fake.asked.isEmpty(), "the tool set was never asked to act");
+    }
+
+    /**
+     * Phase 7 security fix S138 (P7 9.1, 10): a tool set's reads are bounded per turn ({@code maxReadsPerTurn}, here
+     * 20 since twice the action limit of 3 is less); the calls past the bound are not run and the turn ends LIMIT.
+     */
+    @Test
+    void aTurnsToolReadsAreBounded() throws Exception {
+        List<Content> looks = new ArrayList<>();
+        for (int i = 0; i < 25; i++) {
+            looks.add(use("t" + i, "fake_look", Map.of()));
+        }
+        ScriptedGateway gateway = ScriptedGateway.sequence(List.of(tools("r1", looks.toArray(new Content[0])),
+                done("r2")));
+        SessionPolicy policy = SessionPolicy.acting().withMaxActionsPerTurn(3);
+        assertEquals(20, policy.maxReadsPerTurn());
+        assertEquals(30, SessionPolicy.acting().withMaxActionsPerTurn(15).maxReadsPerTurn());
+        Turn turn = service(session, gateway, policy, "1.00", Map.of()).ask("look and look");
+        assertEquals(Turn.Outcome.LIMIT, turn.outcome(), turn.answer());
+        assertTrue(turn.answer().contains("read limit of 20"), turn.answer());
+        assertEquals(20, fake.asked.size(), "20 reads acted, the rest not run");
+    }
 }

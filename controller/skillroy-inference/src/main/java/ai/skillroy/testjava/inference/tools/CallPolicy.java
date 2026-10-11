@@ -38,7 +38,9 @@ import java.util.TreeSet;
  * primitive whose descriptor carries the {@code script} flag, D156); and a call
  * whose arguments carry {@code confirm} or {@code _meta}, and (Phase 7, phase7-contracts.md 9.1) {@code redact: false}
  * or {@code mode: ROBOT} on a capture, {@code force} on the five acting primitives, or {@code via: ROBOT} on a pointer
- * except on the session facade's route under the host's robot flag. Every reason names the primitive, never a value.
+ * except on the session facade's route under the host's robot flag; and (Phase 7 security fixes S110, S111) a clipboard
+ * chord on {@code swing.key} or {@code button: MIDDLE} on a pointer (the person's clipboard and the system selection),
+ * and {@code redact: false} on the four web reads of a masked browser. Every reason names the primitive, never a value.
  * Phase 7 adds the routes that call it: the session's raw primitive branch, the MCP server's raw tools and the facade.
  *
  * <p>Stateless; safe from any thread.
@@ -59,6 +61,21 @@ public final class CallPolicy {
     /** The primitives whose {@code force} is a person's argument only (phase7-contracts.md 9.1, D294). */
     public static final Set<String> FORCE_PRIMITIVES = Set.of("swing.pointer", "swing.click", "swing.type", "swing.key",
             "web.pointer");
+    /**
+     * The web reads whose {@code redact: false} is a person's argument only: of a browser a pack's {@code CaptureMask}
+     * names they answer {@code INVALID_PARAMS masked} unless {@code redact: false} (phase7-contracts.md 3.6, 4.8, 9.1;
+     * Phase 7 security fix S111).
+     */
+    public static final Set<String> MASKED_WEB_READS = Set.of("web.bitmap", "web.dom.text", "web.ariaSnapshot",
+            "web.hitTest");
+    /** The primitives whose {@code button: MIDDLE} pastes the system selection (Phase 7 security fix S110). */
+    public static final Set<String> BUTTON_PRIMITIVES = Set.of("swing.pointer", "swing.click", "web.pointer");
+    /**
+     * Why a clipboard chord or a middle button is refused, the same text on every route (phase7-contracts.md 11, the
+     * clipboard rule; Phase 7 security fix S110). Names no value.
+     */
+    public static final String CLIPBOARD = "the person's clipboard and the system selection are never read into the"
+            + " target or written on a client's or a model's behalf (no paste, copy or cut chord, no middle button)";
 
     private CallPolicy() {
     }
@@ -122,7 +139,10 @@ public final class CallPolicy {
      * {@code swing.capture} whatever the flag ("a capture of the glass is a person's evidence"); {@code force} other
      * than {@code false} on {@code swing.pointer}, {@code swing.click}, {@code swing.type}, {@code swing.key} or
      * {@code web.pointer} ("acting past a modal dialog or a covering window is a person's choice"); and {@code via:
-     * ROBOT} on {@code swing.pointer} unless {@code robotAllowed} ("robot input is a person's opt-in"). Refused, never
+     * ROBOT} on {@code swing.pointer} unless {@code robotAllowed} ("robot input is a person's opt-in"); (Phase 7 security
+     * fixes S110, S111) a clipboard chord on {@code swing.key} ({@link #clipboardKey}) and {@code button: MIDDLE} on
+     * {@code swing.pointer}, {@code swing.click} or {@code web.pointer} ({@link #CLIPBOARD}), and {@code redact} other
+     * than {@code true} on {@link #MASKED_WEB_READS} ("a masked browser's page is a person's to read"). Refused, never
      * stripped; the reason names the primitive and the argument, never a value.
      *
      * @param robotAllowed the host's robot flag, true only on the session facade's route, where the vision module's
@@ -155,7 +175,78 @@ public final class CallPolicy {
         if (POINTER.equals(primitive) && robot(args.get(VIA)) && !robotAllowed) {
             return "the arguments of " + primitive + " carry 'via: ROBOT': robot input is a person's opt-in";
         }
+        if (MASKED_WEB_READS.contains(primitive) && args.containsKey(REDACT)
+                && !Boolean.TRUE.equals(args.get(REDACT))) {
+            // Phase 7 security fix S111: a masked browser's page is read unmasked by a person only.
+            return "the arguments of " + primitive + " carry 'redact: false': a masked browser's page is a person's"
+                    + " to read";
+        }
+        if (KEY.equals(primitive) && clipboardKey(args.get("key"), args.get("modifiers"))) {
+            return "the arguments of " + primitive + " carry a clipboard chord in 'key' and 'modifiers': " + CLIPBOARD;
+        }
+        if (BUTTON_PRIMITIVES.contains(primitive) && middleButton(args.get("button"))) {
+            return "the arguments of " + primitive + " carry 'button: MIDDLE': " + CLIPBOARD;
+        }
         return null;
+    }
+
+    private static final String KEY = "swing.key";
+
+    /**
+     * True when a key with these modifiers reads or writes the clipboard in a Swing look and feel (phase7-contracts.md
+     * 11, the clipboard rule; Phase 7 security fix S110): {@code V} with {@code CTRL} or {@code META} (paste),
+     * {@code INSERT} with {@code SHIFT} (paste), {@code PASTE}; {@code C}, {@code X} or {@code INSERT} with {@code CTRL}
+     * or {@code META} (copy, cut), {@code DELETE} with {@code SHIFT} (cut), {@code COPY}, {@code CUT}; any further
+     * modifier changes nothing. The key and the modifiers are read in every spelling the agent reads (its
+     * {@code Keys.code}: trimmed, upper-cased, an optional {@code VK_} prefix; its {@code Keys.modifiers}:
+     * {@code CONTROL} for {@code CTRL}), stripped of what {@code String.strip()} strips too (a superset, fix wave FB's
+     * lesson); a single modifier given as a text counts as a list of one.
+     */
+    public static boolean clipboardKey(Object key, Object modifiers) {
+        String k = keyName(key);
+        if (k == null) {
+            return false;
+        }
+        Set<String> mods = new java.util.HashSet<>();
+        if (modifiers instanceof java.util.Collection<?> list) {
+            for (Object m : list) {
+                String name = keyName(m);
+                if (name != null) {
+                    mods.add("CONTROL".equals(name) ? "CTRL" : name);
+                }
+            }
+        } else if (modifiers instanceof String one) {
+            String name = keyName(one);
+            if (name != null) {
+                mods.add("CONTROL".equals(name) ? "CTRL" : name);
+            }
+        }
+        boolean command = mods.contains("CTRL") || mods.contains("META");
+        boolean shift = mods.contains("SHIFT");
+        return switch (k) {
+            case "PASTE", "COPY", "CUT" -> true;
+            case "V", "C", "X" -> command;
+            case "INSERT" -> shift || command;
+            case "DELETE" -> shift;
+            default -> false;
+        };
+    }
+
+    /** True for {@code MIDDLE} in any spelling the agent reads ({@code Pointer}: trimmed, upper-cased; a superset). */
+    public static boolean middleButton(Object button) {
+        return "MIDDLE".equals(keyName(button));
+    }
+
+    /** A key or modifier name as the agent reads it: stripped, upper-cased, without a {@code VK_} prefix; or null. */
+    private static String keyName(Object value) {
+        if (!(value instanceof String s)) {
+            return null;
+        }
+        String n = s.trim().strip().toUpperCase(java.util.Locale.ROOT);
+        if (n.startsWith("VK_")) {
+            n = n.substring(3).trim().strip();
+        }
+        return n;
     }
 
     /** {@code ROBOT} in any spelling the agent reads as it: the scenario module's one definition (fix wave FB). */

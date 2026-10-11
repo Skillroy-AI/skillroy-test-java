@@ -42,6 +42,7 @@ final class Harness implements AutoCloseable {
     final WebModule module;
 
     Harness(WebEngineAdapter... builtIns) {
+        walk.spi = ctx.spi();
         adapters.addAll(Arrays.asList(builtIns));
         module = new WebModule(new WebModule.SeedWalkFactory() {
             @Override

@@ -99,8 +99,13 @@ final class Scripts {
                 + ";return r.ready===true||r.compileError!==undefined?r:false;})()";
     }
 
-    /** {@code ({w: innerWidth, h: innerHeight})} of the page's window. */
+    /**
+     * {@code {w: innerWidth, h: innerHeight}} of the page's window when both are numbers, else null. Phase 7 security fix
+     * S131 (P4 4.6): built from {@code typeof} and two numbers only, so a page that redefines {@code innerWidth} chooses
+     * the value, never the size of the answer.
+     */
     static String innerSize() {
-        return "({w:window.innerWidth,h:window.innerHeight})";
+        return "(function(){var w,h;try{w=window.innerWidth;h=window.innerHeight;}catch(e){return null;}"
+                + "return typeof w===\"number\"&&typeof h===\"number\"?{w:w,h:h}:null;})()";
     }
 }

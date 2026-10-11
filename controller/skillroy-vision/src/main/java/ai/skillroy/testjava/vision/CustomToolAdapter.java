@@ -19,6 +19,7 @@ package ai.skillroy.testjava.vision;
 import ai.skillroy.testjava.inference.spi.Content;
 import ai.skillroy.testjava.inference.spi.ProviderTool;
 import ai.skillroy.testjava.inference.spi.ToolSpec;
+import ai.skillroy.testjava.inference.tools.CallPolicy;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -34,7 +35,8 @@ import java.util.Set;
  * vocabulary offer {@code capture}, {@code click_at}, {@code drag}, {@code scroll}, {@code click_ref}, {@code type},
  * {@code key}, {@code wait} and {@code skillroy_look} (as built: no {@code click_mark}, since V2 and V3 captures carry no
  * marks). Under a read-only policy, or one that offers no verbs, {@code capture}, {@code wait} and
- * {@code skillroy_look} only.
+ * {@code skillroy_look} only. Phase 7 security fix S110: a click with {@code button: middle} and a {@code key} that is a
+ * clipboard chord are answered as text before anything is grounded.
  */
 public final class CustomToolAdapter implements ToolAdapter {
 
@@ -87,6 +89,9 @@ public final class CustomToolAdapter implements ToolAdapter {
     @Override
     public Action map(Content.ToolUse use, VisionTier tier) {
         Map<String, Object> in = use.input();
+        if (Set.of("click_mark", "click_ref", "click_at").contains(use.name()) && "MIDDLE".equals(button(in))) {
+            return new Refused(Recorder.CLIPBOARD);
+        }
         return switch (use.name()) {
             case "capture" -> new Capture();
             case "click_mark" -> new ClickMark(integer(in, "mark"), button(in), count(in));
@@ -103,7 +108,11 @@ public final class CustomToolAdapter implements ToolAdapter {
                         modifiers.add(String.valueOf(m).toUpperCase(Locale.ROOT));
                     }
                 }
-                yield new Key(text(in, "key").toUpperCase(Locale.ROOT), modifiers, 1);
+                String key = text(in, "key").toUpperCase(Locale.ROOT);
+                if (CallPolicy.clipboardKey(key, modifiers)) {
+                    yield new Refused(Recorder.CLIPBOARD);
+                }
+                yield new Key(key, modifiers, 1);
             }
             case "wait" -> new Wait(null);
             case LOOK -> new Look(text(in, "question"));
@@ -146,7 +155,7 @@ public final class CustomToolAdapter implements ToolAdapter {
     }
 
     private static Map<String, Object> button() {
-        return Map.of("type", List.of("string", "null"), "description", "left (default), middle or right");
+        return Map.of("type", List.of("string", "null"), "description", "left (default) or right");
     }
 
     private static Map<String, Object> count() {

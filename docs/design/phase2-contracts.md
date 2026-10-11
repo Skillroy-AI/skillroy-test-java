@@ -1870,6 +1870,13 @@ label, renderKey, result, …}`; `capabilities` gains `agentHash` and `contribut
 the person's flag is set. New files: `failure/image-<label>-expected.png`, `-actual.png`, `-diff.png`, and in `approve`
 `candidates/image-<label>.png`.
 
+*(Phase 7 security fix, S143, built 2026-10-11, SI; the vision module's and the CDP path's half.)* **No pixel data
+passes through `java.io.tmpdir`**: the vision module's PNG decoding and encoding (`Grounding.decode`, `encode`: the
+model's composited and marked image) and the CDP path's screenshot scaling (`Png`) go through memory-cached image
+streams (`MemoryCacheImageInputStream`, `MemoryCacheImageOutputStream`), as the agent's capture does, never through
+`ImageIO.read`/`write` of a stream, which write the pixels into a temporary file of ImageIO's disk cache (outside
+`OutputFiles`, left behind on a crash). The scenario module's `ImageCompare` is SJ's half.
+
 ### 11.4 What is never written
 
 A value from `credentials.yaml` (a credential field, a JDBC password, a driver property, URL user-info) is never

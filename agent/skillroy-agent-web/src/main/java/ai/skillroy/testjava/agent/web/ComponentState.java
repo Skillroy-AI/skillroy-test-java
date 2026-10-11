@@ -21,7 +21,8 @@ package ai.skillroy.testjava.agent.web;
  * its own pixels, the scale of its screen ({@code GraphicsConfiguration.getDefaultTransform().getScaleX()}, 1 when
  * unknown), and the showing modal dialog that blocks its window, if any (phase7-contracts.md section 4.3: a dialog
  * whose modality is not {@code MODELESS} and that is neither the component's window nor a window that owns it, the
- * Swing module's heuristic). Typed with {@code Object} so that the module names no AWT class outside its walk.
+ * Swing module's heuristic), and whether a pack's {@code CaptureMask} names it (Phase 7 security fix S111). Typed with
+ * {@code Object} so that the module names no AWT class outside its walk.
  *
  * <p>Immutable.
  */
@@ -38,19 +39,31 @@ final class ComponentState {
     final Object blocker;
     /** Its title, or null. */
     final String blockerTitle;
+    /**
+     * True when a registered {@code CaptureMask} names the component or one of its ancestors, or throws for one (the
+     * Swing module's rule, the safe side): its page is masked on every route (phase7-contracts.md 3.6, 4.8; Phase 7
+     * security fix S111).
+     */
+    final boolean masked;
 
     ComponentState(boolean showing, int width, int height, double scale, Object blocker, String blockerTitle) {
+        this(showing, width, height, scale, blocker, blockerTitle, false);
+    }
+
+    ComponentState(boolean showing, int width, int height, double scale, Object blocker, String blockerTitle,
+                   boolean masked) {
         this.showing = showing;
         this.width = width;
         this.height = height;
         this.scale = scale;
         this.blocker = blocker;
         this.blockerTitle = blockerTitle;
+        this.masked = masked;
     }
 
     @Override
     public String toString() {
         return "ComponentState{showing=" + showing + ", " + width + "x" + height + ", scale=" + scale
-                + (blocker == null ? "" : ", blocked by '" + blockerTitle + "'") + "}";
+                + (blocker == null ? "" : ", blocked by '" + blockerTitle + "'") + (masked ? ", masked" : "") + "}";
     }
 }

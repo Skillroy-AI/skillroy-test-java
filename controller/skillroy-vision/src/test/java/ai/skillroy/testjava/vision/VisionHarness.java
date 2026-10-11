@@ -73,9 +73,9 @@ class VisionHarness implements AutoCloseable {
         configure(agent);
         SessionOptions base = agent.bridge.options();
         String tier = options.getOrDefault(VisionOptions.TIER, "v1");
-        this.session = ExecutorSession.open(agent.bridge.pack(), agent.bridge.agent(), base
+        this.session = ExecutorSession.open(agent.bridge.pack(), agent.bridge.agent(), options(base
                 .withBind(base.bind().withInference(settings(images)).withLedger(ledger))
-                .withRobot(robot).withHost(Set.of("vision-session", "vision-tier:" + tier)));
+                .withRobot(robot).withHost(Set.of("vision-session", "vision-tier:" + tier))));
         this.gateway = ScriptedGateway.sequence(answers);
         BudgetMeter meter = BudgetMeter.of(BudgetMeter.Scope.SESSION, null, "1.00", ledger);
         LedgerWriter writer = new LedgerWriter(ledger, meter, InferenceLog.inMemory(), PromptMask.keysOnly(), false,
@@ -88,6 +88,11 @@ class VisionHarness implements AutoCloseable {
 
     /** A hook for a test to program the fake before the session opens. */
     void configure(FakeVisionAgent fake) {
+    }
+
+    /** A hook for a test to change the session's options before it opens (its web settings, security fix S132). */
+    SessionOptions options(SessionOptions options) {
+        return options;
     }
 
     List<StepJournal.StepEntry> steps() {

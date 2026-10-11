@@ -20,6 +20,7 @@ import ai.skillroy.testjava.controller.AgentLostException;
 import ai.skillroy.testjava.controller.AgentRpcException;
 import ai.skillroy.testjava.inference.prompt.PromptMask;
 import ai.skillroy.testjava.inference.session.SessionActions;
+import ai.skillroy.testjava.inference.tools.CallPolicy;
 import ai.skillroy.testjava.scenario.StepOutcome;
 import ai.skillroy.testjava.scenario.pack.PlannedCall;
 import ai.skillroy.testjava.scenario.pack.Sync;
@@ -46,7 +47,10 @@ import java.util.regex.Pattern;
  * with its provenance, so that the consequence observed while recording is the recorded step's. V3 clicks, drags and
  * wheels run as {@code pointer {…, via: ROBOT}} (the facade lets the module's own V3 steps set it, D347) and are listed
  * live-only by the export. A {@code WEB} hit becomes {@code webClick {role, name}} when the page's hit-test proposes a
- * unique one, else a live-only raw {@code web.pointer}.
+ * unique one in the frame the call started in and the hit's browser is the one the step resolves to, else a live-only
+ * raw {@code web.pointer}; a page under a modal dialog is refused (Phase 7 security fixes S109, S130, S132). A middle
+ * click and a clipboard chord are refused (S110), a V3 click with modifier keys too (S124), and the target's text in an
+ * answer reaches the model inside a {@code <target-state>} block (S134).
  *
  * <p>Owned by one session's thread.
  */
@@ -68,6 +72,17 @@ public final class Recorder {
     public static final String IN_FLIGHT = "a credential is in flight; the person signs on first";
     /** The answer of V3 when the target holds no focused window (D344). */
     public static final String FOCUS_LOST = "the target lost the focus; bring it to the front and ask again";
+    /**
+     * The refusal of a clipboard chord or a middle click (phase7-contracts.md 11, the clipboard rule; Phase 7 security
+     * fix S110): the person's clipboard and the system selection are a person's.
+     */
+    public static final String CLIPBOARD = "that would paste, copy or cut through the person's clipboard or the system"
+            + " selection, which is never done on a model's behalf; type the text instead";
+    /** The refusal of a V3 click with modifier keys (phase7-contracts.md 3.4; Phase 7 security fix S124). */
+    public static final String V3_MODIFIERS = "V3 cannot hold a key while it clicks; click without it, or ask the"
+            + " person";
+    /** The refusal of a click on a page under a modal dialog (phase7-contracts.md 6.5 step 4; security fix S109). */
+    public static final String PAGE_BLOCKED = "a modal dialog blocks the page; answer the dialog first";
     /** A {@code $slot.key} reference. */
     private static final Pattern REFERENCE = Pattern.compile("\\$([A-Za-z_][A-Za-z0-9_-]*)\\.([A-Za-z0-9_-]+)");
     /** The side of an anchor crop around the point (6.5). */
@@ -148,6 +163,14 @@ public final class Recorder {
             throws AgentLostException, InterruptedException {
         Map<String, Object> hit = grounded.hit();
         String surface = str(hit.get("surface"));
+        if (gesture instanceof Click c && CallPolicy.middleButton(c.button())) {
+            // Phase 7 security fix S110: a middle click pastes the system selection where the platform has one.
+            return Recorded.refused(CLIPBOARD);
+        }
+        if (tier == VisionTier.V3 && gesture instanceof Click c && !c.modifiers().isEmpty()) {
+            // Phase 7 security fix S124: the Robot path holds no key; a modified click is refused, never pressed plain.
+            return Recorded.refused(V3_MODIFIERS);
+        }
         // D358 for every surface (fix wave FC, L2-F2): a masked target is refused before the web branch, so that a page
         // a pack masked is never hit-tested and none of its text enters a step, the journal or the export.
         if (Boolean.TRUE.equals(hit.get("masked"))) {
@@ -234,15 +257,26 @@ public final class Recorder {
         return node.isEmpty() ? map(hit.get("deepest")) : node;
     }
 
+    /** The roles whose {@code text} is the component's content, not its caption (Phase 7 security fixes S106, S146). */
+    static final Set<String> CONTENT_ROLES = Set.of("textbox", "text", "password");
+
     /**
      * The first of the hit-test's verified locators that the session's mask would not change (6.5 step 1: a locator
-     * whose value is a joined credential is never chosen), or null.
+     * whose value is a joined credential is never chosen), or null. Phase 7 security fix, S146's rule on the recorder's
+     * side (SG's handover): a {@code {text, …}} candidate of a component whose role is {@code textbox}, {@code text} or
+     * {@code password} is never chosen either, since that text is the field's content (what a person or a model typed,
+     * which the step would carry into the journal, the export and a committed scenario, and which changes with the
+     * next {@code type}); the {@code {class, index}} or {@code {path}} candidate names such a field instead.
      */
     Map<String, Object> locator(Map<String, Object> hit) {
         if (!(hit.get("locators") instanceof List<?> list)) {
             return null;
         }
+        boolean content = CONTENT_ROLES.contains(str(node(hit).get("role")));
         for (Object l : list) {
+            if (content && l instanceof Map<?, ?> m && m.containsKey("text")) {
+                continue;
+            }
             if (l instanceof Map<?, ?> m && !m.isEmpty() && safe(m)) {
                 Map<String, Object> copy = new LinkedHashMap<>();
                 m.forEach((k, v) -> copy.put(String.valueOf(k), v));
@@ -350,7 +384,7 @@ public final class Recorder {
         try {
             described = grounding.describe(window);
         } catch (AgentRpcException e) {
-            return Recorded.refused("the window cannot be described: " + e.getMessage());
+            return agentRefused("the window cannot be described", e);
         }
         Map<String, Object> windowLocator = locator(described);
         if (windowLocator == null) {
@@ -375,14 +409,16 @@ public final class Recorder {
             params.put("region", crop.json());
             params.put("redact", true);
             anchor = Capture.of(actions.read("swing.capture", params));
-        } catch (AgentRpcException | IllegalArgumentException e) {
+        } catch (AgentRpcException e) {
+            return agentRefused("the anchor could not be captured", e);
+        } catch (IllegalArgumentException e) {
             return Recorded.refused("the anchor could not be captured: " + e.getMessage());
         }
         Map<String, Object> rendering;
         try {
             rendering = rendering();
         } catch (AgentRpcException e) {
-            return Recorded.refused("the rendering could not be read: " + e.getMessage());
+            return agentRefused("the rendering could not be read", e);
         }
         String file;
         try {
@@ -499,11 +535,14 @@ public final class Recorder {
         if (browser == null || local.isEmpty()) {
             return Recorded.refused("the page at that point cannot be grounded");
         }
-        for (Capture.Surface s : grounded.capture().surfaces()) {
-            if (s.redacted() && (browser.equals(s.browser()) || s.ref() != null && s.ref().equals(hit.get("target")))) {
-                // The capture kept this page grey (a mask names it, 3.6, 4.8): the same as masked (L2-F2).
-                return Recorded.refused(MASKED);
-            }
+        if (redactedPage(grounded.capture(), hit)) {
+            // The capture kept this page grey (a mask names it, 3.6, 4.8): the same as masked (L2-F2).
+            return Recorded.refused(MASKED);
+        }
+        if (hit.get("blockedBy") != null) {
+            // Phase 7 security fix S109 (6.5 step 4; D294, D335): a page under a modal dialog, in-window dialogs
+            // included, takes no click of a model's, as the routed pointer refuses it; nothing is read or sent.
+            return Recorded.refused(PAGE_BLOCKED);
         }
         if (!(gesture instanceof Click c) || !"LEFT".equals(c.button()) || c.count() != 1) {
             return Recorded.refused("only a left click is recorded on a page");
@@ -513,12 +552,16 @@ public final class Recorder {
             page = Grounding.map(actions.read("web.hitTest", Map.of("browser", browser, "point", local, "space",
                     "COMPONENT")));
         } catch (AgentRpcException e) {
-            return Recorded.refused("the page's hit-test failed: " + e.getMessage());
+            return agentRefused("the page's hit-test failed", e);
         }
         Map<String, Object> provenance = provenance(grounded.capture(), x, y, hit, null, mark);
         provenance.put("via", "ROUTED");
-        if (Boolean.TRUE.equals(page.get("unique")) && page.get("locators") instanceof List<?> locators) {
-            for (Object l : locators) {
+        String liveOnly = page.get("iframe") != null ? CHILD_FRAME : null;
+        if (liveOnly == null && !resolvesTo(browser, page)) {
+            liveOnly = OTHER_BROWSER;
+        }
+        if (liveOnly == null && Boolean.TRUE.equals(page.get("unique")) && page.get("locators") instanceof List<?> ls) {
+            for (Object l : ls) {
                 if (l instanceof Map<?, ?> m && m.get("role") instanceof String role && m.get("name") instanceof String n
                         && n.equals(mask.text(n))) {
                     Map<String, Object> args = new LinkedHashMap<>();
@@ -528,12 +571,70 @@ public final class Recorder {
                 }
             }
         }
+        if (liveOnly != null) {
+            provenance.put("liveOnly", liveOnly);
+        }
         Map<String, Object> raw = new LinkedHashMap<>();
         raw.put("browser", browser);
         raw.put("point", local);
         raw.put("space", "COMPONENT");
         raw.put("action", "CLICK");
         return raw(new PlannedCall("web.pointer", raw, Sync.SETTLE, 10_000L), provenance);
+    }
+
+    /** The reason a page's hit found in a child frame is acted live-only (phase7-contracts.md 6.5 step 4; S130). */
+    static final String CHILD_FRAME = "the element lies in a child frame; a frame key is a per-load handle, so the click"
+            + " is acted as a live-only web.pointer";
+    /** The reason a hit in a browser the step would not resolve to is acted live-only (6.5 step 4; S132). */
+    static final String OTHER_BROWSER = "the page lies in a browser a recorded webClick would not reach (another"
+            + " browser is the session's default or also showing), so the click is acted as a live-only web.pointer";
+
+    /** True when the capture kept the hit's page grey (a mask names it, 3.6, 4.8). */
+    static boolean redactedPage(Capture capture, Map<String, Object> hit) {
+        String browser = str(hit.get("browser"));
+        for (Capture.Surface s : capture.surfaces()) {
+            if (s.redacted() && (browser != null && browser.equals(s.browser())
+                    || s.ref() != null && s.ref().equals(hit.get("target")))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * True when a recorded {@code webClick} without {@code browser} would act in the hit's browser (phase7-contracts.md
+     * 6.5 step 4; Phase 7 security fix S132): with a default browser in the session's web settings, the browser that
+     * selection names now ({@code web.hitTest} at the hit's viewport point with that {@code by}, the agent's own
+     * selection rule) is the hit's; without one, the hit's browser is the only showing one ({@code web.browsers}).
+     * A read that fails answers false (the click is then acted live-only).
+     */
+    private boolean resolvesTo(String browser, Map<String, Object> page) throws AgentLostException,
+            InterruptedException {
+        Map<String, Object> defaultBrowser = actions.webDefaultBrowser();
+        try {
+            if (defaultBrowser != null && !defaultBrowser.isEmpty()) {
+                Map<String, Object> point = map(page.get("viewportPoint"));
+                if (point.isEmpty()) {
+                    return false;
+                }
+                Map<String, Object> selected = Grounding.map(actions.read("web.hitTest", Map.of("by",
+                        new LinkedHashMap<>(defaultBrowser), "point", point)));
+                return browser.equals(selected.get("browser"));
+            }
+            Object listed = Grounding.map(actions.read("web.browsers", Map.of())).get("browsers");
+            int showing = 0;
+            boolean hitShowing = false;
+            for (Object b : listed instanceof List<?> l ? l : List.of()) {
+                Map<String, Object> entry = map(b);
+                if (Boolean.TRUE.equals(entry.get("visibleInSwing")) && !Boolean.TRUE.equals(entry.get("closed"))) {
+                    showing++;
+                    hitShowing |= browser.equals(entry.get("ref"));
+                }
+            }
+            return showing == 1 && hitShowing;
+        } catch (AgentRpcException | IllegalArgumentException e) {
+            return false;
+        }
     }
 
     // ------------------------------------------------------------------------------------------------ keyboard
@@ -588,6 +689,10 @@ public final class Recorder {
      */
     public Recorded key(String key, List<String> modifiers, int repeat) throws AgentLostException,
             InterruptedException {
+        if (CallPolicy.clipboardKey(key, modifiers)) {
+            // Phase 7 security fix S110: refused before anything is read or grounded.
+            return Recorded.refused(CLIPBOARD);
+        }
         Focus focus = focus();
         if (focus.lost != null) {
             return focus.lost;
@@ -622,7 +727,7 @@ public final class Recorder {
         try {
             owner = Grounding.map(actions.read("swing.edtState", Map.of())).get("focusOwner");
         } catch (AgentRpcException e) {
-            return new Focus(null, Recorded.refused("the focus cannot be read: " + e.getMessage()));
+            return new Focus(null, agentRefused("the focus cannot be read", e));
         }
         if (!(owner instanceof String ref)) {
             // D344: in V3 the turn stops when the target JVM holds no focused window.
@@ -632,7 +737,7 @@ public final class Recorder {
         try {
             return new Focus(grounding.describe(ref), null);
         } catch (AgentRpcException e) {
-            return new Focus(null, Recorded.refused("the focus owner cannot be described: " + e.getMessage()));
+            return new Focus(null, agentRefused("the focus owner cannot be described", e));
         }
     }
 
@@ -681,7 +786,9 @@ public final class Recorder {
     private Recorded outcome(String verb, StepOutcome step) {
         StringBuilder text = new StringBuilder(verb).append(": ").append(step.status());
         if (step.message() != null) {
-            text.append(" (").append(step.message()).append(')');
+            // Phase 7 security fix S134 (6.2 step 3): a step's message carries the target's text (a dialog's title and
+            // text, a locator's component text, an agent's error), so it reaches the model inside <target-state>.
+            text.append('\n').append(targetText(step.message()));
         }
         boolean focusLost = tier == VisionTier.V3 && !step.succeeded() && String.valueOf(step.message())
                 .contains("not focused");
@@ -738,6 +845,20 @@ public final class Recorder {
             h.put("mark", (long) mark);
         }
         return h;
+    }
+
+    /**
+     * Text that came from the target (an agent's error, a step's message) as the model reads it: inside a
+     * {@code <target-state>} block through the session's mask, a label tag in it neutralised (phase7-contracts.md 6.2
+     * step 3; Phase 7 security fix S134). The module's own refusal texts stay bare.
+     */
+    String targetText(String text) {
+        return mask.block("target-state", text == null ? "" : text);
+    }
+
+    /** A refusal whose cause is an agent's error: the module's own words, then the agent's text in its block. */
+    private Recorded agentRefused(String what, AgentRpcException e) {
+        return Recorded.refused(what + ":\n" + targetText(e.getMessage()));
     }
 
     @SuppressWarnings("unchecked")

@@ -1106,6 +1106,14 @@ gains `claude-haiku-5-5` at USD 0.10 / 0.50, cache read 0.01 (its prompt tier ab
 not modelled: `PriceTable.tierNote`); the Haiku class's default stays `claude-haiku-4-5` (D84). The session's estimate
 fallback adds `ceil(w / 28) * ceil(h / 28)` tokens per image.
 
+(Phase 7 security fix, S135, built 2026-10-11, SI; P7 §10) **A token count transmits the request**, images included,
+to the provider, so "no further model call" is read to cover it: the session service refuses a call before anything is
+counted or sent when the meter is exhausted or its limit is `0`, and when the gateway has `TOKEN_COUNT` it first checks
+the local estimate (text length / 4, each image's tokens, the maximum answer) against what is left of the budget and
+asks the provider's count only when even that fits; such a refusal is the `BudgetException` of a refused reservation.
+Before, the count (and with it the prompt and its pixels) went to the provider once more for every call the budget then
+refused (L5-F3).
+
 ### 7.3 The ledger writer and `CostLedger.Entry`
 
 `CostLedger.Entry` gains `String purpose`, `long cacheReadTokens`, `long cacheWriteTokens`, `boolean batch` and `String

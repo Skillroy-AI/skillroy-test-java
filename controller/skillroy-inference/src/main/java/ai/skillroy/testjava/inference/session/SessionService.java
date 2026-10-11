@@ -790,8 +790,10 @@ public final class SessionService implements AutoCloseable {
 
     private Loop loop(List<Message> turn, List<Turn.Action> actions, List<Usage> usages)
             throws BudgetException, AgentLostException, InterruptedException {
-        // What counts against maxActionsPerTurn: every action but a tool set's read (phase7-contracts.md 9.1).
+        // What counts against maxActionsPerTurn: every action but a tool set's read (phase7-contracts.md 9.1); a tool
+        // set's reads count against maxReadsPerTurn (Phase 7 security fix S138).
         int counted = 0;
+        int reads = 0;
         while (true) {
             if (counted >= policy.maxActionsPerTurn()) {
                 return new Loop(Turn.Outcome.LIMIT, limitAnswer(actions));
@@ -851,6 +853,13 @@ public final class SessionService implements AutoCloseable {
                     end = new Loop(Turn.Outcome.LIMIT, limitAnswer(actions));
                     continue;
                 }
+                if (reads >= policy.maxReadsPerTurn() && toolSetOwner(use) != null) {
+                    // S138: a tool set's reads are bounded per turn too (a wait, a capture, a zoom each hold the turn).
+                    results.add(new Content.ToolResult(use.id(), "not run: the read limit of "
+                            + policy.maxReadsPerTurn() + " tool reads per turn was reached", true, use.toolsetName()));
+                    end = new Loop(Turn.Outcome.LIMIT, readLimitAnswer(actions));
+                    continue;
+                }
                 Origin origin = Origin.model(response.usage().model(), bounded(mask.text(intent.toString().strip()),
                         INTENT_MAX), response.usage().requestId());
                 intent.setLength(0);
@@ -863,6 +872,8 @@ public final class SessionService implements AutoCloseable {
                 }
                 if (!result.toolRead) {
                     counted++;
+                } else {
+                    reads++;
                 }
                 if (result.lost != null) {
                     turn.add(new Message(Message.Role.USER, results));
@@ -891,6 +902,15 @@ public final class SessionService implements AutoCloseable {
                 return end;
             }
         }
+    }
+
+    private String readLimitAnswer(List<Turn.Action> actions) {
+        List<String> names = new ArrayList<>();
+        for (Turn.Action a : actions) {
+            names.add(a.tool() + (a.step() == null ? "" : " (" + a.step().status() + ")"));
+        }
+        return "The read limit of " + policy.maxReadsPerTurn() + " tool reads per turn was reached; done so far: "
+                + String.join(", ", names) + ".";
     }
 
     private String limitAnswer(List<Turn.Action> actions) {
@@ -979,6 +999,8 @@ public final class SessionService implements AutoCloseable {
         if (closed) {
             throw new IllegalStateException("the session service is closed");
         }
+        // S135: an exhausted or a zero budget refuses before anything is built, counted or sent.
+        refuseWithoutBudget(BigDecimal.ZERO);
         if (toolsApplied) {
             if (toolsClosed != null || visionTurns >= maxVisionTurns) {
                 String reason = toolsClosed != null ? toolsClosed : limitReason("model turns", maxVisionTurns);
@@ -995,9 +1017,23 @@ public final class SessionService implements AutoCloseable {
         }
         Map<String, String> metadata = new LinkedHashMap<>(request.metadata());
         metadata.put(META_SESSION, session.id());
+        // S136: a tool set's tools, output schema and provider tools pass the session's mask as its parts do.
+        List<ToolSpec> maskedTools = new ArrayList<>();
+        for (ToolSpec t : request.tools()) {
+            maskedTools.add(ToolProjection.masked(t, mask));
+        }
+        @SuppressWarnings("unchecked")
+        Map<String, Object> maskedSchema = request.outputSchema() == null ? null
+                : (Map<String, Object>) mask.schema(request.outputSchema());
+        List<ai.skillroy.testjava.inference.spi.ProviderTool> maskedProvided = new ArrayList<>();
+        for (ai.skillroy.testjava.inference.spi.ProviderTool t : request.providerTools()) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> raw = t.raw() == null ? null : (Map<String, Object>) mask.jsonLike(t.raw());
+            maskedProvided.add(new ai.skillroy.testjava.inference.spi.ProviderTool(t.provider(), t.type(), raw));
+        }
         ModelRequest vision = new ModelRequest(PURPOSE_VISION, request.modelClass(), request.effort(),
-                request.maxTokens(), request.cache(), maskedParts(request.system()), messages, request.tools(),
-                request.outputSchema(), metadata, request.providerTools());
+                request.maxTokens(), request.cache(), maskedParts(request.system()), messages, maskedTools,
+                maskedSchema, metadata, maskedProvided);
         List<Usage> usages = turnUsages != null ? turnUsages : new ArrayList<>();
         try {
             return complete(vision, usages, model(vision.modelClass()));
@@ -1042,11 +1078,17 @@ public final class SessionService implements AutoCloseable {
 
     private ModelResponse complete(ModelRequest request, List<Usage> usages, String estimateModel)
             throws BudgetException, InferenceException, InterruptedException {
-        BigDecimal estimate = estimate(request, estimateModel);
-        if (meter.exhausted()) {
-            // A refused resolve exhausted the service during this turn: no further model call (D74).
-            throw new BudgetException(meter.scope(), meter.id(), meter.limit(), meter.spent(), estimate);
+        // S135 (P5 7.2, P7 10): a token count transmits the request, images included, to the provider, so the meter's
+        // exhausted state, a zero limit and the remaining budget are checked against the local estimate first; the
+        // count is asked only when even that fits.
+        BigDecimal local = localEstimate(request, estimateModel);
+        refuseWithoutBudget(local);
+        BigDecimal remaining = meter.remaining();
+        if (remaining != null && local.compareTo(remaining) > 0) {
+            throw new BudgetException(meter.scope(), meter.id(), meter.limit(), meter.limit().subtract(remaining),
+                    local);
         }
+        BigDecimal estimate = estimate(request, estimateModel, local);
         meter.reserve(estimate);
         ModelResponse response;
         try {
@@ -1077,52 +1119,72 @@ public final class SessionService implements AutoCloseable {
     }
 
     /**
-     * The estimate of a call (7.2): the gateway's token count, else text length / 4 plus each image's tokens
-     * (phase7-contracts.md 7.5), plus its maximum answer.
+     * Refuses a call before anything is built or counted when the meter is exhausted (a refused resolve or call
+     * exhausted the service: D74) or its limit is zero (Phase 7 security fix S135); a {@link BudgetException} naming
+     * {@code estimate}.
      */
-    private BigDecimal estimate(ModelRequest request, String model) {
-        long input = -1;
+    private void refuseWithoutBudget(BigDecimal estimate) throws BudgetException {
+        if (meter.exhausted() || meter.limit() != null && meter.limit().signum() == 0) {
+            throw new BudgetException(meter.scope(), meter.id(), meter.limit(), meter.spent(), estimate);
+        }
+    }
+
+    /**
+     * The estimate of a call (7.2): the gateway's token count, else the local estimate (text length / 4 plus each
+     * image's tokens, phase7-contracts.md 7.5), plus its maximum answer.
+     */
+    private BigDecimal estimate(ModelRequest request, String model, BigDecimal local) {
         if (gateway.capabilities().contains(GatewayCapability.TOKEN_COUNT)) {
+            long input;
             try {
                 input = gateway.countTokens(request);
             } catch (InferenceException | RuntimeException e) {
                 input = -1;
             }
-        }
-        if (input < 0) {
-            long chars = 0;
-            long images = 0;
-            for (Content part : request.system()) {
-                chars += part instanceof Content.Text t ? t.text().length() : 0;
+            if (input >= 0) {
+                return prices.estimate(model, input, request.maxTokens(), false);
             }
-            for (Message m : request.messages()) {
-                for (Content part : m.parts()) {
-                    if (part instanceof Content.Text t) {
-                        chars += t.text().length();
-                    } else if (part instanceof Content.Image i) {
-                        images += Prompts.imageTokens(i.bytes());
-                    } else if (part instanceof Content.ToolResult r && r.parts() != null) {
-                        for (Content nested : r.parts()) {
-                            if (nested instanceof Content.Text t) {
-                                chars += t.text().length();
-                            } else if (nested instanceof Content.Image i) {
-                                images += Prompts.imageTokens(i.bytes());
-                            }
+        }
+        return local;
+    }
+
+    /**
+     * The local estimate of a call, which sends nothing: text length / 4 plus each image's tokens read from its header
+     * (phase7-contracts.md 7.5, D324), plus its maximum answer, at the price table.
+     */
+    private BigDecimal localEstimate(ModelRequest request, String model) {
+        long chars = 0;
+        long images = 0;
+        for (Content part : request.system()) {
+            chars += part instanceof Content.Text t ? t.text().length() : 0;
+        }
+        for (Message m : request.messages()) {
+            for (Content part : m.parts()) {
+                if (part instanceof Content.Text t) {
+                    chars += t.text().length();
+                } else if (part instanceof Content.Image i) {
+                    images += Prompts.imageTokens(i.bytes());
+                } else if (part instanceof Content.ToolResult r && r.parts() != null) {
+                    for (Content nested : r.parts()) {
+                        if (nested instanceof Content.Text t) {
+                            chars += t.text().length();
+                        } else if (nested instanceof Content.Image i) {
+                            images += Prompts.imageTokens(i.bytes());
                         }
-                    } else if (part instanceof Content.ToolResult r) {
-                        chars += String.valueOf(r.content()).length();
                     }
+                } else if (part instanceof Content.ToolResult r) {
+                    chars += String.valueOf(r.content()).length();
                 }
             }
-            for (ToolSpec tool : request.tools()) {
-                chars += tool.description().length() + Json.write(tool.inputSchema()).length();
-            }
-            for (ai.skillroy.testjava.inference.spi.ProviderTool tool : request.providerTools()) {
-                chars += Json.write(tool.raw()).length();
-            }
-            // phase7-contracts.md 7.5 (D324): ceil(w / 28) * ceil(h / 28) tokens per image, read from its header.
-            input = chars / 4 + images;
         }
+        for (ToolSpec tool : request.tools()) {
+            chars += tool.description().length() + Json.write(tool.inputSchema()).length();
+        }
+        for (ai.skillroy.testjava.inference.spi.ProviderTool tool : request.providerTools()) {
+            chars += Json.write(tool.raw()).length();
+        }
+        // phase7-contracts.md 7.5 (D324): ceil(w / 28) * ceil(h / 28) tokens per image, read from its header.
+        long input = chars / 4 + images;
         return prices.estimate(model, input, request.maxTokens(), false);
     }
 
@@ -1226,16 +1288,8 @@ public final class SessionService implements AutoCloseable {
                 long timeout = Math.max(PRIMITIVE_TIMEOUT_FLOOR_MS, primitive.timeoutMs());
                 return step(session.execute(new PlannedCall(primitive.name(), in, Sync.NONE, timeout), origin));
             }
-            SessionTools owner = toolOwners.get(name);
-            if (owner == null) {
-                for (SessionTools set : applied) {
-                    if (set.handles(name)) {
-                        owner = set;
-                        break;
-                    }
-                }
-            }
-            if (owner != null && applied.contains(owner)) {
+            SessionTools owner = toolSetOwner(use);
+            if (owner != null) {
                 return toolAct(owner, use, origin);
             }
             return Result.error("there is no tool " + name + " in this session");
@@ -1244,6 +1298,25 @@ public final class SessionService implements AutoCloseable {
         } catch (IllegalArgumentException | IllegalStateException e) {
             return Result.error(mask.text(String.valueOf(e.getMessage())));
         }
+    }
+
+    /**
+     * The applying tool set that answers a call, or null (phase7-contracts.md 9.1): a custom tool's owner is the set
+     * that listed it ({@code tools()}), never one that merely {@code handles} the name, so that a tool a read-only
+     * policy withheld is "no tool" (Phase 7 security fix S137); a provider toolset's member (the call carries its
+     * {@code toolsetName}) goes to the set that handles it.
+     */
+    private SessionTools toolSetOwner(Content.ToolUse use) {
+        SessionTools owner = toolOwners.get(use.name());
+        if (owner == null && use.toolsetName() != null) {
+            for (SessionTools set : applied) {
+                if (set.handles(use.name())) {
+                    owner = set;
+                    break;
+                }
+            }
+        }
+        return owner != null && applied.contains(owner) ? owner : null;
     }
 
     /**
@@ -1605,6 +1678,11 @@ public final class SessionService implements AutoCloseable {
         @Override
         public Duration stepTimeout() {
             return session.options().stepTimeout();
+        }
+
+        @Override
+        public Map<String, Object> webDefaultBrowser() {
+            return session.options().web() == null ? null : session.options().web().defaultBrowser();
         }
 
         @Override

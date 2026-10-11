@@ -16,10 +16,13 @@
 
 package ai.skillroy.testjava.agent.web;
 
+import ai.skillroy.testjava.agent.api.spi.CaptureMask;
+
 import java.awt.Component;
 import java.awt.Dialog;
 import java.awt.GraphicsConfiguration;
 import java.awt.Window;
+import java.util.List;
 
 /**
  * The EDT reads of one browser component for the input primitives ({@link SwingSeeds#state}, phase7-contracts.md
@@ -33,8 +36,13 @@ final class ComponentReads {
     private ComponentReads() {
     }
 
-    /** {@link SwingSeeds#state} on the EDT. */
+    /** {@link SwingSeeds#state} on the EDT, without masks. */
     static ComponentState stateOf(Object component) {
+        return stateOf(component, null);
+    }
+
+    /** {@link SwingSeeds#state} on the EDT: {@code masks} are the registered {@code CaptureMask}s (null: none). */
+    static ComponentState stateOf(Object component, List<CaptureMask> masks) {
         Component c = (Component) component;
         double scale = 1.0;
         GraphicsConfiguration gc = c.getGraphicsConfiguration();
@@ -46,7 +54,37 @@ final class ComponentReads {
         }
         Dialog blocker = blockingModal(windowOf(c));
         return new ComponentState(c.isShowing(), c.getWidth(), c.getHeight(), scale, blocker,
-                blocker == null ? null : blocker.getTitle());
+                blocker == null ? null : blocker.getTitle(), masked(c, masks));
+    }
+
+    /**
+     * True when a mask names the component or one of its ancestors up to and including its window, or throws for one
+     * (phase7-contracts.md 3.6: a mask that throws masks, the safe side; D383: a component inside a masked one is
+     * masked; Phase 7 security fix S111). A mask's {@code regions} do not make a browser masked here: they blank part
+     * of the capture, and the capture then reports the surface {@code redacted} (4.8). EDT only.
+     */
+    static boolean masked(Component c, List<CaptureMask> masks) {
+        if (masks == null || masks.isEmpty()) {
+            return false;
+        }
+        for (Component p = c; p != null; p = p.getParent()) {
+            for (CaptureMask mask : masks) {
+                try {
+                    if (mask.masks(p)) {
+                        return true;
+                    }
+                } catch (Throwable t) {
+                    if (t instanceof VirtualMachineError && !(t instanceof StackOverflowError)) {
+                        throw (VirtualMachineError) t;
+                    }
+                    return true;
+                }
+            }
+            if (p instanceof Window) {
+                break;
+            }
+        }
+        return false;
     }
 
     /** The window of a component (itself when it is one), or null. */
