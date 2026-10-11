@@ -2091,8 +2091,13 @@ owner on 2026-10-10 (B28); ticked below with the code review item and the matrix
   launcher path and a `--pack` path with a space, the ACL branches, `JAVAAGENT` as the logged-on user with the rungs and
   paint capture, S7 and S15
 - [x] OTel export (B11): built 2026-10-09 (TL), controller only, off by default, no class loaded without it
-  (`ClassLoadingProbeTest`); `TelemetryEndToEndIT` green in the image on both Javas; [ ] the live, opt-in run against a
-  real OpenTelemetry Collector (§13.4)
+  (`ClassLoadingProbeTest`); `TelemetryEndToEndIT` green in the image on both Javas; [x] the live, opt-in run against a
+  real OpenTelemetry Collector (§13.4): **run 2026-10-11** in the arm64 image, README's procedure: the core Collector
+  `otelcol` 0.162.0 (its release's linux/arm64 build, the digest checked) with an OTLP/HTTP receiver on `127.0.0.1:4318`
+  and the debug exporter, and `skillroy run basic-loan basic-loan-ui --env seed-a --telemetry otlp` against the attached
+  desk: 2 `PASS`, `telemetry: otlp 127.0.0.1:4318, trace 0f59dd01…, 0 batches dropped`; the Collector received that one
+  trace, 95 spans with `service.name` `skillroy` (`skillroy run`, two `scenario`, `bind`, `step`, `call` with its
+  reconstructed `agent` span and its `await`s), and neither staff password of the run appears in its output
 - [x] Repeat the security review before the first release (the findings of 2026-10-02 are closed by H1-H3 in
   Phase 1.x): **pass 1 and pass 2 run, every medium and high fixed; signed off by the owner on 2026-10-10 (B28)** (S35-S62
   and S63-S100, "Security review (repeat, pass 1)" and "(repeat, pass 2)" under "Status at a glance"; eight lows accepted

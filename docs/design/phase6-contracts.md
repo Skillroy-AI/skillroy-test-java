@@ -3639,7 +3639,9 @@ the marks stay and §14 says so.
 
 A recording of scenario D for the branch edition (`inference-record` profile, the owner's key) so that D could join
 the variant's runs; `--telemetry otlp` against a real OpenTelemetry Collector on the operator's machine, following the
-procedure in `README.md`'s telemetry paragraph. Neither is an exit criterion.
+procedure in `README.md`'s telemetry paragraph. Neither is an exit criterion. *(The Collector run was made on 2026-10-11
+in the arm64 image: one trace of 95 spans received, no password in the Collector's output; `../TODO.md`, Phase 6. The
+variant's recording of D is not made.)*
 
 ---
 
