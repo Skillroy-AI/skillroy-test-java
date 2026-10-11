@@ -103,7 +103,8 @@ import java.util.TreeSet;
  * inference module, not by the pack's catalogue), and is a compile error naming the pack otherwise; the plan's
  * {@code inference} is {@code bind} when a slot names it ({@link Plan#inferenceOf}). The base verb {@code call} (P1
  * 8.3, unchanged) is reserved: a pack may not declare a verb of that name, since an exported session step relies on
- * it. Plans were written as version 5 (version 6 since Phase 7). A {@code _meta} key at any depth of a step's arguments (every verb but
+ * it. Plans were written as version 5 (version 6 since Phase 7). A {@code _meta} key at any depth of a step's
+ * arguments (every verb but
  * {@code expect}) or of a call a verb compiles to, cleanup calls and a session's raw call included, is a compile
  * error naming its path: a call's {@code _meta} is the executor's, built from the call's options (13.1, the fix wave).
  *

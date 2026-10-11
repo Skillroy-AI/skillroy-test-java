@@ -1692,6 +1692,12 @@ is written also without an output directory (`file: null`) and before the `requi
 `requires` still archives what it saw. The MCP server reads the matrix again after its session's install and writes
 `<out>/capabilities.json`.
 
+
+*(Phase 7, built 2026-10-10, VC; P7 §8.5.)* The matrix archived is the merged one (the agent's with the contributed
+`inference.*` ids, each `UNAVAILABLE (replay)` in `replay`); `capabilities.json` keeps the wire shape and carries no
+source; the `capabilities` record gains `agentHash`, the hash of the agent's matrix after step 0b, which is what the
+"one matrix per target" check compares (D130 kept on the agent's), and `contributed`; a session merges with
+`SessionOptions.host` at open and writes `capabilities.json` once.
 ### 6.5 Hooks and the fingerprint (D128)
 
 Hooks **never enter the environment fingerprint**: not the catalogue's version, id or hash, not the matrix. Bindings

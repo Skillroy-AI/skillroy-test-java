@@ -104,6 +104,14 @@ import java.util.regex.Pattern;
  * run's are ({@link CallRunner}), and {@link #observer()} hands the same observer to the session service and the MCP
  * server for their turns and tool calls.
  *
+ * <p>Phase 7 (phase7-contracts.md 9.2): {@link #read} is the unjournaled read of a capture, a hit-test or
+ * {@code swing.rendering}; the four-argument {@code execute} forms write a vision tool's provenance on the step; the
+ * session merges the controller-side capabilities at {@link #open} with {@link SessionOptions#host()}
+ * ({@link #capabilities()}); a call with {@code via: ROBOT} or {@code mode: ROBOT} needs {@link SessionOptions#robot()}
+ * and a {@code mode: ROBOT} capture a person's origin; the credential rule refuses, for every origin but a person's, a
+ * step that names or compiles to a credential join's secret field, and any typing while a credential is in flight
+ * ({@link #secretsInFlight()}); {@link #expectImage} runs an image step through {@code ImageSteps}.
+ *
  * <p>Not thread-safe: one session is driven by one thread at a time; it starts no threads (a web path may run its
  * own). {@link #close()} is idempotent.
  */
@@ -1395,8 +1403,9 @@ public final class ExecutorSession implements AutoCloseable {
         if (descriptor.mutating() || descriptor.destructive()) {
             return primitive + " changes the target: a read serves no mutating or destructive primitive";
         }
+        boolean hookOrRule = primitive.startsWith("hook.") || primitive.startsWith("rule.");
         if (descriptor.script() || "data.query".equals(primitive) || primitive.startsWith("agent.")
-                || ((primitive.startsWith("hook.") || primitive.startsWith("rule.")) && !HOOK_READS.contains(primitive))) {
+                || (hookOrRule && !HOOK_READS.contains(primitive))) {
             return primitive + " is not served by a read";
         }
         if ("swing.capture".equals(primitive)) {
@@ -1689,7 +1698,7 @@ public final class ExecutorSession implements AutoCloseable {
         return null;
     }
 
-    /** Whether a call types: {@code swing.type}, or {@code swing.key} with a key that is not in the non-printable set. */
+    /** Whether a call types: {@code swing.type}, or {@code swing.key} with a key outside the non-printable set. */
     private static boolean types(Plan.Call call) {
         if ("swing.type".equals(call.primitive())) {
             return true;

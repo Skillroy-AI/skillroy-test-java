@@ -274,6 +274,9 @@ Rules:
    a pack whose `FactProvider` claims the fact root `db` fails compilation. An `expect` step is a YAML mapping, so
    it can hold one check per table (duplicate keys are errors); `verify` is a list and can hold any number.
 
+*(Phase 7, built 2026-10-10, VC; P7 §8.9.)* The token `llm-vision` is still parsed and refused "not in this version" by the
+loader, the compiler and the plan reader (D316).
+
 ### 3.2 References, the resolution graph, and what replaces expressions
 
 References keep the Phase 1 syntax and substitution rules (P1 §8.1). New:
@@ -309,6 +312,10 @@ as built 2026-10-02, the pack loader's test is the public `DomainPacks.reservedI
 
 (Phase 5, built 2026-10-08; P5 §13.1) `call` joins the reserved verb names: it is a base verb
 (P1 §8.3), and a pack that declares a verb `call` is refused.
+
+*(Phase 7, built 2026-10-10, VC; P7 §8.5.)* The `inference.` prefix is enforced against the agent's matrix too: an agent
+that declares an id with it is refused ERROR / ENVIRONMENT at the merge (`CapabilityMerge`), and a contributed id that two
+contributors answer is refused naming both.
 
 ### 3.4 A slot captured from an event
 
@@ -577,6 +584,13 @@ schema differs compiles its own plans from the same YAML.
   a new pack version whenever a verb compiles differently, and that must not invalidate the bindings of every
   scenario in every environment. What a pack change can really alter is caught where it matters: verifiers re-run
   in every mode, and an oracle whose output changed is `ORACLE_CHANGED` (§8.3).
+
+*(Phase 7, built 2026-10-10, VC; P7 §8.2; the row of P7 §16.1 says "P2 §8.2", which is this section.)* Version 6: the
+top-level `images` (sorted labels, absent when empty), a `swing.pointer` call's `guard {label}`, the checks `visual` and
+`image`, `inference: run` (a step's verb is `aiAct`; `Plan.inferenceOf(slots, steps)`), `needsBindings()` true for a plan
+with `images`; the version rule applied once more: a version 5 plan is read as version 6 without that content, which a
+version below 6 may not hold. One regeneration of every committed plan and bindings file (`planHash`) in both sample
+scenario modules, the branch variant and the session export; no `resolveHash` changed.
 
 ### 5.1 Java shape of the changed Phase 1 types
 
@@ -1652,6 +1666,15 @@ public record BindingsDiff(List<Change> changes) {
 
 ---
 
+*(Phase 7, built 2026-10-10, VC; P7 §8.7.)* Version 2 holds `images`: per label (an `expectImage` baseline or an anchored
+`pointer`'s anchor) per render key one entry `{sha256, width, height, masks, carets, focus: {owner, ownerRect?, active},
+file, rendering, window?, anchor?}`, the masked PNG beside the file under `<scenarioId>.images/<label>.<renderKey>.png`;
+`file` is informative and derived (a mismatch is ERROR / ENVIRONMENT; a PNG is read from the derived path only, never
+through a link); a file without images is still written as version 1. The lifecycle: `replay` checks that every label of
+the plan's `images` has an entry; a baseline is approved at its step (`Approver.reviewImage`, whose default delegates to
+`review`); `approve` writes the file a second time after the steps; every writing bind carries the existing `images`
+forward; the export writes its anchors' entries into its own file and hands the PNGs out (`ExportResult.images()`).
+
 ## 10. Failure taxonomy and status mapping
 
 No value is added to `FailureKind`. Phase 2 starts raising `REBIND_NEEDED` and extends `RESOLUTION_FAILED`;
@@ -1707,6 +1730,9 @@ some may be stale while others are not). This narrows the design overview's sent
 belong to the `environment` testcase.
 
 ---
+
+*(Phase 7, built 2026-10-10, VC; P7 §6.7, §8.7.)* `REBIND_NEEDED` gains the reason `IMAGE`: no baseline for the target's
+render key in `replay`, a candidate the approver rejected, an anchor mismatch or no anchor for the key (in every mode).
 
 ## 11. Executor changes and run outputs
 
@@ -1839,6 +1865,11 @@ change, so that a bind span's events show where model latency and SQL time went;
 `traceId`, and `--telemetry file` writes `<out>/telemetry/spans.jsonl` (`skillroy-spans/1`) beside the scenario
 directories.
 
+*(Phase 7, built 2026-10-10, VC; P7 §8.4-§8.6.)* New records: `skipped {reason}` (a `run` plan in `replay`), `image {step,
+label, renderKey, result, …}`; `capabilities` gains `agentHash` and `contributed`; `run-start` gains `robot: true` when
+the person's flag is set. New files: `failure/image-<label>-expected.png`, `-actual.png`, `-diff.png`, and in `approve`
+`candidates/image-<label>.png`.
+
 ### 11.4 What is never written
 
 A value from `credentials.yaml` (a credential field, a JDBC password, a driver property, URL user-info) is never
@@ -1952,6 +1983,11 @@ counts, durations, hashes, masked one-line messages), never a call's parameters 
 resolved value, SQL, rows, a prompt, a credential, the workspace id or a path under a user's home; and **the values of
 the environment variables a telemetry header names**, which the exporter reads at its start and nothing writes,
 logs or prints (a header naming an `ANTHROPIC_*` variable is refused).
+
+*(Phase 7, built 2026-10-10, VC; P7 §11.)* Never written: an unredacted capture's bytes to a model or a client; a capture
+of the glass to a model or a client at all; a capture's bytes on any text route (unchanged: the journal, `run.jsonl` and
+the export hold hashes and file names); the baselines and anchors beside a bindings file hold masked pixels only, and
+are reviewed code.
 
 ### 11.5 Reserved for interactive use (not built)
 
@@ -2103,6 +2139,9 @@ fingerprinter and its tests need the table name as an upper-case literal for the
 the project's neutrality check rejects the upper-case form of the old name. After the rename nothing in the
 repository contains the old name in any case, so this contract does not spell it either. The prose keeps saying
 "limit" (a staff member's return limit); only the table is renamed.
+
+*(Phase 7, specified 2026-10-10; P7 §12.3.)* `DomainPack.screenLegend()` is the default method VC built (null); the
+lending pack's legend, its version 0.6.0 and gap 49's `inductionRequired` argument are VS's.
 
 ### 13.1 The rule the scenario tests (as the application implements it)
 

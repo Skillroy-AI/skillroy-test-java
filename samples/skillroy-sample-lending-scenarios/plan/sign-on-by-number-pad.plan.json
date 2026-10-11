@@ -3,7 +3,7 @@
   "scenarioId": "sign-on-by-number-pad",
   "pack": "lending",
   "packVersion": "0.5.0",
-  "sourceHash": "sha256:fc7cc438783c6eecf88b9351d201731315d032bd7713a8569f41d67f4a2f0772",
+  "sourceHash": "sha256:f0c4975707c67a10bd44aa8b6d75e77e6b1e5cf2da9ee181a9d0d2fdd06b0f4f",
   "inference": "none",
   "requires": [
     "swing.tree",
@@ -32,7 +32,7 @@
       "id": "s1",
       "verb": "pointer",
       "source": {
-        "line": 14
+        "line": 15
       },
       "calls": [
         {
@@ -54,7 +54,7 @@
       "id": "s2",
       "verb": "pointer",
       "source": {
-        "line": 15
+        "line": 16
       },
       "calls": [
         {
@@ -76,7 +76,7 @@
       "id": "s3",
       "verb": "pointer",
       "source": {
-        "line": 16
+        "line": 17
       },
       "calls": [
         {
@@ -98,7 +98,7 @@
       "id": "s4",
       "verb": "press",
       "source": {
-        "line": 17
+        "line": 18
       },
       "calls": [
         {
@@ -134,7 +134,7 @@
       "id": "s5",
       "verb": "type",
       "source": {
-        "line": 18
+        "line": 19
       },
       "calls": [
         {
@@ -171,7 +171,7 @@
       "id": "s6",
       "verb": "expect",
       "source": {
-        "line": 23
+        "line": 24
       },
       "calls": [],
       "expect": [
@@ -188,9 +188,34 @@
           }
         }
       ]
+    },
+    {
+      "id": "s7",
+      "verb": "signOff",
+      "source": {
+        "line": 25
+      },
+      "calls": [
+        {
+          "primitive": "lending.input",
+          "args": {
+            "source": "Key.SIGN_OFF"
+          },
+          "sync": "READY",
+          "timeoutMs": 30000
+        }
+      ],
+      "expect": []
     }
   ],
-  "verify": [],
+  "verify": [
+    {
+      "path": "state.name",
+      "matcher": {
+        "equals": "SIGNED_OFF"
+      }
+    }
+  ],
   "cleanup": [],
   "launchProperties": {
     "lending.seed": "A"

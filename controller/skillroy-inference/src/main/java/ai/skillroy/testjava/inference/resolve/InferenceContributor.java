@@ -180,7 +180,8 @@ public final class InferenceContributor implements ResolverContributor, Capabili
         InferenceSettings settings = ctx.settings();
         boolean on = settings != null && settings.enabled();
         Map<String, Capability> out = new LinkedHashMap<>();
-        out.put(CAPABILITY_GATEWAY, on ? new Capability(CAPABILITY_GATEWAY, CapabilityState.OK, null, settings.gateway())
+        out.put(CAPABILITY_GATEWAY, on
+                ? new Capability(CAPABILITY_GATEWAY, CapabilityState.OK, null, settings.gateway())
                 : new Capability(CAPABILITY_GATEWAY, CapabilityState.UNAVAILABLE, "gateway none", null));
         boolean allowList;
         try {

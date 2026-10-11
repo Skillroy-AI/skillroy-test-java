@@ -138,8 +138,8 @@ class ScenarioSchemaCommittedTest {
                 used.add(verb);
             }
         }
-        assertEquals(Set.of("authorise", "deposit", "expectPrompt", "key", "quantity", "scan", "signOn"), used,
-                "the lending verbs the sample's scenarios use");
+        assertEquals(Set.of("authorise", "deposit", "expectPrompt", "key", "quantity", "scan", "signOff", "signOn"),
+                used, "the lending verbs the sample's scenarios use");
     }
 
     @Test

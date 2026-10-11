@@ -337,7 +337,8 @@ public record BindingsFile(int bindingsVersion, String scenarioId, String envId,
      * @param sha256 the masked raster's hash ({@code ImageCompare.rasterHash}), {@code sha256:<hex>}
      * @param width the image's width
      * @param height the image's height
-     * @param masks the rectangles the capture blanked (its {@code redacted}) and the step's own masks, image coordinates
+     * @param masks the rectangles the capture blanked (its {@code redacted}) and the step's own masks, in image
+     *     coordinates
      * @param carets the capture's caret rectangles, image coordinates
      * @param focus the capture's focus state
      * @param file {@code <scenarioId>.images/<label>.<renderKey>.png}: informative; the reader derives the path and

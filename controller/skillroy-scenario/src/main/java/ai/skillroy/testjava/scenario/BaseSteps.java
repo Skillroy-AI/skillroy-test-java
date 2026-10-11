@@ -108,6 +108,22 @@ import java.util.TreeSet;
  * dialog). Every step of a scenario with a base web verb adds {@code web.evaluate} and {@code web.browsers} to the
  * plan's {@code requires} (the compiler does it).
  *
+ * <p>The vision verbs (phase7-contracts.md 8.1, decision D310; reserved names since B16, still reserved for a pack):
+ *
+ * <ul>
+ *   <li>{@code aiAct: {intent, tier?, model?, maxActions?}}: no call; the plan's {@code inference} becomes {@code run}
+ *       (SKIPPED in {@code replay}, run by the vision module's scenario player); {@code tier: V3} adds
+ *       {@code swing.pointer.robot} to {@code requires}.</li>
+ *   <li>{@code aiExpect: {question, expect?}}: no call; the compiler attaches a {@link VisualCheck} guarded by
+ *       {@code inference.vision}, which no argument changes.</li>
+ *   <li>{@code pointer: {target|by, region?, row?, at?, action?, to?, button?, modifiers?, clickCount?, wheel?, steps?,
+ *       via?, guard?, force?, await?, strict?}} -> {@code swing.pointer} in its component form, SETTLE (or EVENT then
+ *       {@code swing.settle} with {@code await}); {@code via: ROBOT} adds {@code swing.pointer.robot}, {@code PRESS}
+ *       and {@code RELEASE} through Robot are refused; {@code guard} makes the call anchored.</li>
+ *   <li>{@code expectImage: {label, target|by?, region?|clip?, mask?, maxDiffPixels?}} -> one {@code swing.capture}
+ *       with {@code redact: true}, NONE; the compiler attaches the {@link ImageCheck}.</li>
+ * </ul>
+ *
  * <p>Unknown argument keys are errors. Stateless; safe from any thread.
  */
 public final class BaseSteps implements StepLibrary {
@@ -309,7 +325,8 @@ public final class BaseSteps implements StepLibrary {
         }
         Object expect = a.getOrDefault("expect", "YES");
         if (!"YES".equals(expect) && !"NO".equals(expect)) {
-            throw new ScenarioException("aiExpect: 'expect' must be YES or NO, found " + ScenarioLoader.describe(expect));
+            throw new ScenarioException("aiExpect: 'expect' must be YES or NO, found "
+                    + ScenarioLoader.describe(expect));
         }
         a.put("expect", expect);
         return a;

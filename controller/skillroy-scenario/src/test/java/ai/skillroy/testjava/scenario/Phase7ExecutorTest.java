@@ -313,8 +313,8 @@ class Phase7ExecutorTest {
 
     @Test
     void anExpectImageIsApprovedAtItsStepThenHeldThenFailsWithItsThreeFiles() throws Exception {
-        Plan plan = plan("steps:\n  - expectImage: { label: pad, by: { id: numberPad }, mask: [ { by: { id: entry } } ] }"
-                + "\n");
+        Plan plan = plan("steps:\n  - expectImage: { label: pad, by: { id: numberPad }, mask: [ { by: { id: entry }"
+                + " } ] }\n");
         List<Approver.ImageApproval> asked = new ArrayList<>();
         Approver approver = new Approver() {
             @Override

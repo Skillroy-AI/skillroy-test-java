@@ -67,7 +67,8 @@ import java.util.regex.Pattern;
  * credential?}) or {@code capture} ({@code step, fields}); an oracle is {@code {name, fn, args, mustEqual?,
  * crossCheck?}}; an element of {@code verify} or of a step's {@code expect} is an {@link Expectation} ({@code path})
  * or a {@link RowCheck} ({@code db}, with {@code aggregates} from version 3); a step's {@code expect} may also hold
- * a {@link VisualCheck} ({@code visual}) or an {@link ImageCheck} ({@code image}), both version 6. {@code "ui"} is written only when the
+ * a {@link VisualCheck} ({@code visual}) or an {@link ImageCheck} ({@code image}), both version 6.
+ * {@code "ui"} is written only when the
  * scenario has the key (amendment A29), and so is {@code "web"} ({@code {path, browser?, frozenTargets, trace}},
  * version 4: the web path policy, the default browser, the frozen-target policy and CDP tracing).
  *

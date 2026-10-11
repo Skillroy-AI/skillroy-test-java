@@ -309,7 +309,7 @@ final class JournalExport {
         return comment.toString();
     }
 
-    /** The report line of a vision-derived step: the step, the capture's hash and file, the ref, the mark, the point. */
+    /** The report line of a vision-derived step: the step, the capture's hash and file, ref, mark and point. */
     private static String visionLine(StepJournal.StepEntry s, YamlStep step) {
         Map<String, Object> p = s.provenance();
         StringBuilder line = new StringBuilder(s.stepId()).append(' ').append(step.verb()).append(' ')
@@ -461,7 +461,8 @@ final class JournalExport {
                     s.provenance() == null ? null : visionComment(s), List.of());
             if (s.provenance() != null) {
                 visionDerived.add(visionLine(s, step));
-                if (s.provenance().get("anchor") instanceof Map<?, ?> anchor && anchor.get("label") instanceof String l) {
+                if (s.provenance().get("anchor") instanceof Map<?, ?> anchor
+                        && anchor.get("label") instanceof String l) {
                     anchors.put(l, anchor);
                     anchorSteps.put(l, s.stepId());
                 }

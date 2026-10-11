@@ -124,7 +124,8 @@ class Phase7CompileTest {
         assertTrue(refusal("  - pointer: { region: \"key:1\" }\n").contains("exactly one of 'by'"));
         assertTrue(refusal("  - pointer: { by: { id: p }, region: { x: 1 } }\n").contains("region id"));
         assertTrue(refusal("  - pointer: { by: { id: p }, action: DRAG }\n").contains("DRAG needs 'to"));
-        assertTrue(refusal("  - pointer: { by: { id: p }, to: { fx: 1, fy: 1 } }\n").contains("'to' needs action DRAG"));
+        assertTrue(refusal("  - pointer: { by: { id: p }, to: { fx: 1, fy: 1 } }\n")
+                .contains("'to' needs action DRAG"));
         assertTrue(refusal("  - pointer: { by: { id: p }, at: { fx: 2, fy: 0 } }\n").contains("fraction"));
         assertTrue(refusal("  - pointer: { by: { id: p }, action: WHEEL, wheel: { notches: 51 } }\n")
                 .contains("-50 to 50"));

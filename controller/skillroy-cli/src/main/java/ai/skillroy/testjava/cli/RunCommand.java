@@ -545,7 +545,8 @@ final class RunCommand implements Command {
         json.put("failedStepLine", line > 0 ? (long) line : null);
         json.put("message", result.message());
         if (result.status() == Status.SKIPPED) {
-            // phase7-contracts.md 8.6: a run not executed by design (the bind's skipped list below keeps P3 9's meaning).
+            // phase7-contracts.md 8.6: a run not executed by design (the bind's skipped list below keeps P3 9's
+            // meaning).
             json.put("skippedReason", result.message());
         }
         json.put("mode", result.mode() == null ? null : result.mode().label());

@@ -204,6 +204,14 @@ import java.util.stream.Stream;
  * wrapped ({@code RunObservers.safe}): one that throws is logged once and ignored for the rest of the run, and nothing
  * of it changes a verdict; with {@link RunObserver#NONE} no record is built for it.
  *
+ * <p>Phase 7 (phase7-contracts.md 8.4-8.7): a plan with {@code inference: run} is SKIPPED in {@code replay} right after
+ * {@code run-start} (the agent is not contacted) and refused in every other mode; a plan with {@code via: ROBOT} or
+ * {@code mode: ROBOT} calls is refused before {@code checkRequires} without {@link RunOptions#robot()}; after step 0b
+ * the controller-side contributors' capabilities are merged into the matrix ({@link CapabilityMerge}); a
+ * {@link VisualCheck} is skipped unconditionally; an {@link ImageCheck} and an anchored {@code pointer} call's guard
+ * run through {@code ImageSteps} against the bindings file's baselines and anchors, which {@code approve} writes a
+ * second time after the steps.
+ *
  * <p>Not thread-safe: one executor runs one plan at a time on the calling thread; it starts no threads (a web path
  * may run threads of its own).
  */
@@ -988,7 +996,8 @@ public final class PlanExecutor {
                 try (Stream<Path> files = Files.list(candidates)) {
                     for (Path file : files.toList()) {
                         if (file.getFileName().toString().startsWith(ImageSteps.FILE_PREFIX)
-                                && (Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS) || Files.isSymbolicLink(file))) {
+                                && (Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)
+                                || Files.isSymbolicLink(file))) {
                             Files.deleteIfExists(file);
                         }
                     }
