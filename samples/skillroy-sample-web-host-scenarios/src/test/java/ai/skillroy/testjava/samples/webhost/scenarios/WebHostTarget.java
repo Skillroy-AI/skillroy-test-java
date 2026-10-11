@@ -172,7 +172,17 @@ final class WebHostTarget implements AutoCloseable {
 
     /** Attaches an agent again (a fresh agent after {@code agent.disable}). */
     Endpoint attach() throws AttachFailedException {
-        return AttachSession.attach(launched.pid(), home, Map.of("discoveryDir", discoveryDir.toString()));
+        return attach(Map.of());
+    }
+
+    /**
+     * Attaches an agent again with further agent options (gap 95's check (d): {@code webhost.mask=front}, so that the
+     * sample's module registers its mask on the front card).
+     */
+    Endpoint attach(Map<String, String> options) throws AttachFailedException {
+        Map<String, String> all = new java.util.LinkedHashMap<>(options);
+        all.put("discoveryDir", discoveryDir.toString());
+        return AttachSession.attach(launched.pid(), home, all);
     }
 
     long pid() {

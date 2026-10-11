@@ -73,6 +73,16 @@
       <artifactId>skillroy-data</artifactId>
       <scope>test</scope>
     </dependency>
+    <!-- Phase 7 follow-up, gap 95 (phase7-contracts.md 13.2 item 10): the vision module (and with it the inference
+         layer) for the checks that run its Grounding, composite and Recorder, and CallPolicy, against real JCEF; test
+         scope only, nothing of it reaches the pack or a target. On the test class path its VisionCapabilities
+         contributes inference.vision to every run's matrix (UNAVAILABLE in replay), as in the lending scenarios. -->
+    <dependency>
+      <groupId>ai.skillroy</groupId>
+      <artifactId>skillroy-vision</artifactId>
+      <version>${project.version}</version>
+      <scope>test</scope>
+    </dependency>
     <!-- The agent home (zip); never on a class path (the exclusion keeps the agent jars it is assembled from off the
          test class path). Declared so that the reactor builds it first. -->
     <dependency>
