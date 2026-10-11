@@ -1095,6 +1095,14 @@ is built and dispatched on the adapter's threads, the caller bounding the wait; 
 event that names one is refused (`UnsupportedOperationException`, `CAPABILITY_UNAVAILABLE`). The fake mirrors the
 roles with `FakePoint`, `FakeMouseButton` and `FakeMouse{Pressed,Released,Moved,Wheel}` (each with its builder);
 `FakeBrowser.dispatch` hands the event to the fake page; `fake-jxbrowser-noinput.json` is a line without the roles.
+(JxBrowser kit run against 8.18.3, built 2026-10-11; P4 §4.5 *Against the product*.) The run settled D413: the names
+resolve, but `Browser.dispatch` has one overload per event type, so `browser.dispatch` (arity 1) is replaced by four
+roles with their parameter types (`browser.dispatchMousePressed`, `browser.dispatchMouseReleased`,
+`browser.dispatchMouseMoved`, `browser.dispatchMouseWheel`); the product's wheel deltas have the opposite sign of the
+DOM's, so the handle negates `deltaX` and `deltaY`; `Point` is in CSS pixels on a HiDPI view (Retina,
+`devicePixelRatio` 2); kit items 16 and 17 pass against the product. The strategy's note is dropped on line 8 and reads
+`", input unverified on this line (verified on line 8)"` on any other line (`JxBrowserAdapter.INPUT_UNVERIFIED`);
+modifier keys stay refused. The fake mirrors the overloads (`FakeBrowser.dispatch` per event type) and the sign.
 
 ### 4.6 The script library: `hit`, version 2 (`skillroy-protocol`, `web-lib.js`, `WebLib`)
 

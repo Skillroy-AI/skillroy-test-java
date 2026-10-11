@@ -889,7 +889,8 @@ everything by reflection through the host's loader:
   accessor in flight (a hung call is waited for, not repeated); enumeration is bounded at 2 s, one at a time, and on a
   timeout keeps the browsers found before and reports `DEGRADED`; `detach()`'s vendor calls run within its own bound.
   Observer and callback registration (`on`, `set`) and `cdpEndpoints` still call the vendor on the calling worker
-  without a bound of their own: whether those members can block needs the product (§13).) (4.x, A37, built 2026-10-08:
+  without a bound of their own: whether those members can block needs the product (§13). Settled by the kit's run
+  against the product, *Against the product* below: `on` can wait and is bounded since.) (4.x, A37, built 2026-10-08:
   `reload` = `navigation().reload()` / `reloadIgnoringCache()` (the descriptor's `reload` roles) on the adapter's own
   threads, and where those roles do not resolve the SPI's default, `location.reload()` through the page, where the
   handle refused with `UnsupportedOperationException` before; `bitmapSource()` = `VENDOR`.)
@@ -902,6 +903,45 @@ everything by reflection through the host's loader:
   `licenseKey` role at all. Three member names could not be confirmed without the product: `getChromeVersion`
   (alternative `CHROME_VERSION_MAJOR`), `FrameLoadFailed.error` (alternative `errorCode`) and `Browser.set`, matched by
   its parameter count; a licence holder verifies them, the `../TODO.md` wall "A JxBrowser licence".)
+- *Against the product* (JxBrowser kit run against 8.18.3, built 2026-10-11). The contract kit (§10.1) ran in process
+  against JxBrowser 8.18.3 on macOS (arm64, Java 25), outside this repository, through a `WebAdapterFixture` over a
+  real engine, in three variants: hardware-accelerated rendering, the same with `web.jxbrowser.chainInjectJs=true`,
+  and off-screen rendering. Every role of `jxbrowser.json` resolves against the product; the strategy is "jxbrowser 8"
+  from the package's `Implementation-Version` (line 8 has no `version.info` resource and needs none). The three names
+  above: `FrameLoadFailed.error()` is the product's member (the alternative `errorCode` is not); `Browser.set` resolves
+  by its parameter count (`Advisable.set(Class, C)` is the only `set` with two); `getChromeVersion` /
+  `CHROME_VERSION_MAJOR` are roles of `jcef.json` (`CefApp$CefVersion`), not of this descriptor, which reads no
+  Chromium version. What the run changed:
+  - `Browser.dispatch` is overloaded per event type (fourteen one-parameter overloads), so the role matched by
+    parameter count did not resolve and `INPUT` was absent. The descriptor names one role per event type with its
+    parameter type (`browser.dispatchMousePressed`, `browser.dispatchMouseReleased`, `browser.dispatchMouseMoved`,
+    `browser.dispatchMouseWheel`), and the handle calls the one of the event it built.
+  - The product's `MouseWheel` deltas have the opposite sign of the DOM's: a `deltaY` of -120 reaches the page as a
+    `wheel` event with `deltaY` 120 and scrolls down, and the same holds for `deltaX`. The handle negates both, so the
+    SPI's deltas (positive to the right and down, CSS pixels) reach the page as given.
+  - A `Point` is in CSS pixels of the view: on a Retina screen (`devicePixelRatio` 2) `Point.of(100, 50)` reaches the
+    page as `clientX` 100 and `clientY` 50, in both rendering modes, and the press, release and click are trusted
+    (`isTrusted`), the secondary button gives `contextmenu` and `auxclick`. On line 8 the strategy carries no input
+    note any more; on another line (7, 9, or one not read) it ends in ", input unverified on this line (verified on line
+    8)". Modifier keys stay refused (the product's builders take a `KeyModifiers`; mapping it is a later amendment).
+  - Whether a call can block (gap 47). With the page's renderer busy in a script loop every member the adapter calls
+    answered within 2 ms, also on the EDT. With the Chromium main process stopped (SIGSTOP), `on(Class, Observer)` (of
+    the browser and of its navigation), `devTools().remoteDebuggingUrl()`, `url()`, `mainFrame()` and `size()` waited
+    for it, while `set`, `get`, `remove`, `isClosed()`, `navigation()`, `engine()`, `devTools()`, `getBrowser()` and the
+    reads of the engine's options answered at once. So `subscribe()` and `addInitScript()` now register the adapter's
+    observers on the adapter's own threads and wait for that at most 2 s on the calling worker (not at all on the EDT),
+    as `jcef`'s `subscribe()` waits for its domains; a registration that completes after `detach()` is unsubscribed at
+    once, and a console subscription the budget resumes is made outside the handle's lock. The chained callback
+    (`get`, `set`, `remove`) and `cdpEndpoints` (the engine's options) stay on the calling worker: their members do not
+    wait.
+  - Limits of the product, recorded, not the adapter's: on macOS Chromium renders in the display's colour profile, and
+    `Browser.bitmap()` holds those colours (the page's sRGB (32, 96, 160) read back as (0, 87, 146) on the external
+    display used); the kit's colour check passes when the engine runs with `--force-color-profile=srgb`, which is the
+    application's choice (`../TODO.md` gap 103). On a HiDPI screen the bitmap is in device pixels (2048 x 1480 for a view of 1024 x 740),
+    while `viewport()` and `Browser.size()` are in CSS pixels. A browser whose view is in a card that is not showing,
+    and one without a view, render, answer pointer input and give a bitmap (at device-pixel ratio 1), unlike JCEF
+    (§10.3).
+  - The console budget (D266, gap 74): kit item 14 passes against the product.
 
 ### 4.6 The script library (`skillroy-protocol`, `…protocol.web.WebLib`)
 
@@ -1106,7 +1146,8 @@ neither (the class itself); `params`, or `arity` for a generic signature; `stati
 load it); `for`, its group; and `alternatives`, tried in order. A group is `core` (missing: the probe answers
 `UNAVAILABLE`), the name of a `WebCapability` (missing: that flag is absent) or a name the adapter interprets (`walk`,
 `endpoints`, …); a missing optional role is never an error. `jcef.json` has 32 roles (four of them, the `raw.*` roles of
-§4.5, added after the kit's run against real JCEF), `jxbrowser.json` 70 and no role for `licenseKey`; the JSON resources
+§4.5, added after the kit's run against real JCEF), `jxbrowser.json` 70 (92 after the JxBrowser kit run against 8.18.3,
+§4.5) and no role for `licenseKey`; the JSON resources
 carry no licence header (§2.3). A vendor failure arrives as a
 `ReflectiveException` naming the role, the vendor class and its message. `LoadedClasses` answers "has the host
 already loaded this class?" without loading it: through `Instrumentation.getInitiatedClasses` where an
