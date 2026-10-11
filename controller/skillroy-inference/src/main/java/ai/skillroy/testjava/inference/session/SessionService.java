@@ -51,6 +51,7 @@ import ai.skillroy.testjava.scenario.ExecutorSession;
 import ai.skillroy.testjava.scenario.FailureKind;
 import ai.skillroy.testjava.scenario.Origin;
 import ai.skillroy.testjava.scenario.Schemas;
+import ai.skillroy.testjava.scenario.StepJournal;
 import ai.skillroy.testjava.scenario.StepOutcome;
 import ai.skillroy.testjava.scenario.observe.TurnRecord;
 import ai.skillroy.testjava.scenario.pack.DomainPack;
@@ -519,7 +520,15 @@ public final class SessionService implements AutoCloseable {
                     total(usages), elapsed(t0)), List.of());
         }
         List<Message> turn = new ArrayList<>();
-        turn.add(Message.user(Content.Text.of(mask.block("person", text))));
+        List<Content> opening = new ArrayList<>();
+        opening.add(Content.Text.of(mask.block("person", text)));
+        // Fix wave LV-1 (phase7-contracts.md 9.1, 9.2): the slots bound in the session, so that the model knows which
+        // $references the session fills in; nothing at all when none is bound (the Phase 5 shape).
+        String bound = boundSlots();
+        if (bound != null) {
+            opening.add(Content.Text.of(mask.block("target-state", bound)));
+        }
+        turn.add(new Message(Message.Role.USER, opening));
         Turn.Outcome outcome;
         String answer;
         turnUsages = usages;
@@ -553,6 +562,79 @@ public final class SessionService implements AutoCloseable {
         }
         recordBudget(usages);
         return finish(new Turn(index, text, actions, answer, outcome, total(usages), elapsed(t0)), turn);
+    }
+
+    /** What the list of the bound slots begins with (phase7-contracts.md 9.1; fix wave LV-1). */
+    static final String BOUND_SLOTS_HEADING = "Slots bound in this session before this request. Write a slot's"
+            + " $reference in a tool's arguments, a text to type included, where its value belongs: the session puts"
+            + " the value in its place. The fields are the slot's non-secret fields; a credential's secret is never"
+            + " yours to use (the person signs on).";
+    /** The most slots, and fields per slot, the list names; the rest are counted. */
+    private static final int BOUND_SLOTS_MAX = 40;
+    private static final int BOUND_FIELDS_MAX = 30;
+
+    /** One slot as the journal bound it last: its kind as the list says it, its public value, a credential or not. */
+    private record Bound(String kind, Object value, boolean credential) {
+    }
+
+    /**
+     * The slots bound in the session, one line each, for the turn's first message (phase7-contracts.md 9.1, 9.2; fix
+     * wave LV-1, D342), or null when none is: from the session's journal (the last {@code resolve} or {@code fixture}
+     * record of each slot, in binding order), which holds the public value only (a credential's secret is joined into
+     * the bindings, never journaled). Each line names the slot's reference, its query kind or {@code fixture}, whether
+     * it is a credential, and its fields as references: the keys of its value, without one the mask's key rule calls
+     * secret. Never a value.
+     */
+    private String boundSlots() {
+        Map<String, Bound> slots = new LinkedHashMap<>();
+        for (StepJournal.Entry entry : session.journal().entries()) {
+            if (entry instanceof StepJournal.ResolveEntry r) {
+                slots.remove(r.slot());
+                slots.put(r.slot(), new Bound("query " + r.kind(), r.resolution().get("value"),
+                        r.credential() != null));
+            } else if (entry instanceof StepJournal.FixtureEntry f) {
+                slots.remove(f.slot());
+                slots.put(f.slot(), new Bound("fixture", f.value(), f.credential() != null));
+            }
+        }
+        if (slots.isEmpty()) {
+            return null;
+        }
+        StringBuilder out = new StringBuilder(BOUND_SLOTS_HEADING);
+        int n = 0;
+        for (Map.Entry<String, Bound> e : slots.entrySet()) {
+            if (++n > BOUND_SLOTS_MAX) {
+                out.append("\n(and ").append(slots.size() - BOUND_SLOTS_MAX).append(" more slots)");
+                break;
+            }
+            String ref = "$" + e.getKey();
+            Bound b = e.getValue();
+            out.append("\n- ").append(ref).append(": ").append(b.kind());
+            if (b.credential()) {
+                out.append(", a credential (the person signs on with it; its secret is not listed)");
+            }
+            List<String> fields = new ArrayList<>();
+            if (b.value() instanceof Map<?, ?> m) {
+                for (Object key : m.keySet()) {
+                    String k = String.valueOf(key);
+                    if (!mask.secretKey(k)) {
+                        fields.add(k);
+                    }
+                }
+            }
+            if (fields.isEmpty()) {
+                out.append("; the reference ").append(ref).append(" is the value itself");
+                continue;
+            }
+            out.append("; fields ");
+            for (int i = 0; i < fields.size() && i < BOUND_FIELDS_MAX; i++) {
+                out.append(i == 0 ? "" : ", ").append(ref).append('.').append(fields.get(i));
+            }
+            if (fields.size() > BOUND_FIELDS_MAX) {
+                out.append(" (and ").append(fields.size() - BOUND_FIELDS_MAX).append(" more)");
+            }
+        }
+        return out.toString();
     }
 
     /** A tool set's parts that cannot go into a request (an image while images are off): the turn ends. */
@@ -1519,6 +1601,11 @@ public final class SessionService implements AutoCloseable {
         @Override
         public java.nio.file.Path outputDir() {
             return session.options().outputDir();
+        }
+
+        @Override
+        public Duration stepTimeout() {
+            return session.options().stepTimeout();
         }
 
         @Override

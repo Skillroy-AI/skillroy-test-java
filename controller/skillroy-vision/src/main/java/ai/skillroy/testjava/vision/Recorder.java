@@ -108,6 +108,8 @@ public final class Recorder {
     private VisionTier tier;
     private final Grounding grounding;
     private Map<String, Object> rendering;
+    /** Each anchored window's insets, read once per session (L1-F4). */
+    private final Map<String, Map<String, Object>> windowInsets = new LinkedHashMap<>();
     private int anchors;
 
     /**
@@ -146,15 +148,17 @@ public final class Recorder {
             throws AgentLostException, InterruptedException {
         Map<String, Object> hit = grounded.hit();
         String surface = str(hit.get("surface"));
+        // D358 for every surface (fix wave FC, L2-F2): a masked target is refused before the web branch, so that a page
+        // a pack masked is never hit-tested and none of its text enters a step, the journal or the export.
+        if (Boolean.TRUE.equals(hit.get("masked"))) {
+            return Recorded.refused(MASKED);
+        }
         if ("WEB".equals(surface)) {
             return web(grounded, x, y, gesture, mark);
         }
         if ("NONE".equals(surface) || hit.get("target") == null) {
             return Recorded.refused("nothing at that point can be grounded (no component of the application lies"
                     + " there)");
-        }
-        if (Boolean.TRUE.equals(hit.get("masked"))) {
-            return Recorded.refused(MASKED);
         }
         Map<String, Object> node = node(hit);
         String role = str(node.get("role"));
@@ -201,8 +205,30 @@ public final class Recorder {
         return act(verb, args, provenance);
     }
 
-    /** The node the hit-test's {@code target} is about: its mouse target, else the deepest component. */
+    /**
+     * The node the hit-test's {@code target} is about. The point form: its mouse target, else the deepest component.
+     * The target form ({@code click_ref}, the focus owner) names the component itself (fix wave FC, L1-F5): the agent's
+     * {@code targetNode}; from an agent that does not answer it, the mouse target or the deepest component at its
+     * centre when either is that component, else the mouse target (a composite's listener is usually the component, a
+     * label drawn at its centre is not), else the deepest.
+     */
     static Map<String, Object> node(Map<String, Object> hit) {
+        if ("TARGET".equals(hit.get("targetKind"))) {
+            Map<String, Object> own = map(hit.get("targetNode"));
+            if (!own.isEmpty()) {
+                return own;
+            }
+            Object target = hit.get("target");
+            Map<String, Object> mouse = map(hit.get("mouseTarget"));
+            Map<String, Object> deepest = map(hit.get("deepest"));
+            if (target != null && target.equals(mouse.get("ref"))) {
+                return mouse;
+            }
+            if (target != null && target.equals(deepest.get("ref"))) {
+                return deepest;
+            }
+            return mouse.isEmpty() ? deepest : mouse;
+        }
         Map<String, Object> node = "MOUSE_TARGET".equals(hit.get("targetKind")) ? map(hit.get("mouseTarget"))
                 : map(hit.get("deepest"));
         return node.isEmpty() ? map(hit.get("deepest")) : node;
@@ -381,7 +407,7 @@ public final class Recorder {
         keyed.remove("keyed");
         a.put("renderKey", renderKey);
         a.put("rendering", keyed);
-        a.put("window", windowFacts(capture, window, windowRect));
+        a.put("window", windowFacts(window, windowRect));
         List<Object> masks = new ArrayList<>();
         for (Capture.Rect r : anchor.redacted()) {
             masks.add(r.json());
@@ -406,8 +432,12 @@ public final class Recorder {
         args.put("at", Map.of("fx", round((double) wx / Math.max(1, windowRect.w())), "fy",
                 round((double) wy / Math.max(1, windowRect.h()))));
         gesture(args, gesture, Map.of(), capture, x, y);
-        if (gesture instanceof Drag) {
-            args.put("to", args.get("at"));
+        if (gesture instanceof Drag d) {
+            // Fix wave FC (L1-F3): the end point mapped to the window's fractions as the start is, not the start again.
+            int tx = (int) Math.round(capture.originX() + d.toX() / scale) - windowRect.x();
+            int ty = (int) Math.round(capture.originY() + d.toY() / scale) - windowRect.y();
+            args.put("to", Map.of("fx", round((double) tx / Math.max(1, windowRect.w())), "fy",
+                    round((double) ty / Math.max(1, windowRect.h()))));
         }
         args.put("guard", label);
         if (tier == VisionTier.V3) {
@@ -416,20 +446,40 @@ public final class Recorder {
         return act("pointer", args, provenance);
     }
 
-    /** The window's size and insets for the anchor's entry (8.7). */
-    private static Map<String, Object> windowFacts(Capture capture, String window, Capture.Rect windowRect) {
-        long top = 0;
-        long left = 0;
-        double scale = capture.scale() <= 0 ? 1.0 : capture.scale();
-        for (Capture.Region r : capture.windows()) {
-            if (r.ref().equals(window) && "SCREEN".equals(capture.space())) {
-                left = Math.max(0, Math.round(capture.originX() + r.rect().x() / scale) - windowRect.x());
-                top = Math.max(0, Math.round(capture.originY() + r.rect().y() / scale) - windowRect.y());
+    /**
+     * The window's size and insets for the anchor's entry (8.7). The insets are the root pane's position in the window
+     * (fix wave FC, L1-F4): a {@code WINDOW} capture's {@code origin} (3.1), read once per window per session at the
+     * smallest scale (the pixels are not used), redacted as every capture; {@code {0, 0}} when that read fails, since
+     * the insets are the reviewer's information and the guard does not depend on them (6.7).
+     */
+    private Map<String, Object> windowFacts(String window, Capture.Rect windowRect)
+            throws AgentLostException, InterruptedException {
+        Map<String, Object> insets = windowInsets.get(window);
+        if (insets == null) {
+            long top = 0;
+            long left = 0;
+            try {
+                Map<String, Object> params = new LinkedHashMap<>();
+                params.put("target", window);
+                params.put("scope", "WINDOW");
+                params.put("scale", INSETS_SCALE);
+                params.put("redact", true);
+                Map<String, Object> origin = map(Grounding.map(actions.read("swing.capture", params)).get("origin"));
+                if (origin.get("x") instanceof Number ox && origin.get("y") instanceof Number oy) {
+                    left = Math.max(0, Math.round(ox.doubleValue()));
+                    top = Math.max(0, Math.round(oy.doubleValue()));
+                }
+            } catch (AgentRpcException | IllegalArgumentException e) {
+                // informative only: {0, 0}
             }
+            insets = Map.of("top", top, "left", left);
+            windowInsets.put(window, insets);
         }
-        return Map.of("size", Map.of("w", (long) windowRect.w(), "h", (long) windowRect.h()), "insets",
-                Map.of("top", top, "left", left));
+        return Map.of("size", Map.of("w", (long) windowRect.w(), "h", (long) windowRect.h()), "insets", insets);
     }
+
+    /** The scale of the read that finds a window's insets: the least the capture accepts (3.1). */
+    static final double INSETS_SCALE = 0.25;
 
     /** {@code swing.rendering}, read once per session (cached). */
     private Map<String, Object> rendering() throws AgentRpcException, AgentLostException, InterruptedException {
@@ -448,6 +498,12 @@ public final class Recorder {
         Map<String, Object> local = map(hit.get("surfaceLocal"));
         if (browser == null || local.isEmpty()) {
             return Recorded.refused("the page at that point cannot be grounded");
+        }
+        for (Capture.Surface s : grounded.capture().surfaces()) {
+            if (s.redacted() && (browser.equals(s.browser()) || s.ref() != null && s.ref().equals(hit.get("target")))) {
+                // The capture kept this page grey (a mask names it, 3.6, 4.8): the same as masked (L2-F2).
+                return Recorded.refused(MASKED);
+            }
         }
         if (!(gesture instanceof Click c) || !"LEFT".equals(c.button()) || c.count() != 1) {
             return Recorded.refused("only a left click is recorded on a page");

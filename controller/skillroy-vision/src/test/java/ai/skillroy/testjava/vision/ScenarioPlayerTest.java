@@ -20,6 +20,8 @@ import ai.skillroy.testjava.inference.prompt.PromptMask;
 import ai.skillroy.testjava.inference.scripted.ScriptedGateway;
 import ai.skillroy.testjava.inference.spi.ModelRequest;
 import ai.skillroy.testjava.inference.spi.ModelResponse;
+import ai.skillroy.testjava.scenario.ExportOptions;
+import ai.skillroy.testjava.scenario.ExportResult;
 import ai.skillroy.testjava.scenario.FailureKind;
 import ai.skillroy.testjava.scenario.Origin;
 import ai.skillroy.testjava.scenario.ScenarioException;
@@ -37,6 +39,7 @@ import static ai.skillroy.testjava.vision.VisionHarness.done;
 import static ai.skillroy.testjava.vision.VisionHarness.tools;
 import static ai.skillroy.testjava.vision.VisionHarness.use;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -48,7 +51,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * {@code UNSURE} (the run {@code DEGRADED}), each question one {@code vision} call through the service's meter; a step's
  * {@code tier: V3} without the person's flag is refused before anything runs; an {@code expectImage} goes through the
  * session's image route and is journaled under its verb; a fixture credential slot is bound through the session as the
- * person (D425) and its {@code signOn} runs before the model acts.
+ * person (D425) and its {@code signOn} runs before the model acts; the scenario's {@code verify} is evaluated after the
+ * last step and a check that does not hold fails the play (fix wave FC, L1-F2); the export of a played session lists
+ * the {@code aiExpect} steps it dropped and carries the {@code verify} as expectations (L1-S1).
  */
 class ScenarioPlayerTest {
 
@@ -152,8 +157,11 @@ class ScenarioPlayerTest {
         try (VisionHarness h = new VisionHarness(dir, Map.of(), List.of())) {
             ScenarioPlayer.Result result = player(h, Map.of(), false).withBaselines(dir.resolve("bindings"), "env")
                     .play(scenario("  - expectImage: { label: deskPanel, by: { id: entry } }"), "played.yaml");
-            assertTrue(result.status() == Status.PASS || result.status() == Status.DEGRADED, result.message() + " "
-                    + result.steps());
+            // L3-F10: an empty bindings root holds no baseline for the rendering: recorded and skipped, never PASS.
+            assertEquals(Status.DEGRADED, result.status(), result.message() + " " + result.steps());
+            ScenarioPlayer.StepResult image = result.steps().get(1);
+            assertEquals(Status.DEGRADED, image.status(), String.valueOf(image));
+            assertTrue(String.valueOf(image.message()).contains("no baseline for rendering"), String.valueOf(image));
             assertEquals("expectImage", h.steps().get(1).verb(), "journaled under its verb");
             assertTrue(h.agent.bridge.callsTo("swing.capture").stream().anyMatch(c -> Boolean.TRUE.equals(
                     c.get("redact"))), "the step's capture was taken");
@@ -185,6 +193,60 @@ class ScenarioPlayerTest {
             assertEquals(1, h.agent.bridge.callsTo("swing.click").size(), "then the model acted");
             String journal = java.nio.file.Files.readString(h.session.journal().file());
             assertTrue(!journal.contains(ai.skillroy.testjava.scenario.VisionBridge.PASSWORD_100), "no secret");
+        }
+    }
+
+    /**
+     * L1-F2 (phase7-contracts.md 6.8, fix wave FC): the scenario's {@code verify} is evaluated after the last step
+     * through the session's checks, in file order, each journaled; one that does not hold fails the play
+     * {@code FAIL / ASSERTION} although every step passed; when all hold the block is a passed {@code verify} step.
+     */
+    @Test
+    void theVerifyBlockIsEvaluatedAfterTheLastStepAndACheckThatDoesNotHoldFailsThePlay() throws Exception {
+        try (VisionHarness h = new VisionHarness(dir, Map.of(), List.of())) {
+            ScenarioPlayer.Result result = player(h, Map.of(), false).play((HEAD + "verify:\n"
+                    + "  - { \"loan.total\": \"7.00\" }\n  - { \"loan.total\": \"9.99\" }\n")
+                    .getBytes(StandardCharsets.UTF_8), "played.yaml");
+            assertEquals(Status.FAIL, result.status(), result.message() + " " + result.steps());
+            assertEquals(List.of("signOn", "verify"), result.steps().stream().map(ScenarioPlayer.StepResult::verb)
+                    .toList());
+            ScenarioPlayer.StepResult verify = result.steps().get(1);
+            assertEquals(Status.FAIL, verify.status());
+            assertEquals(FailureKind.ASSERTION, verify.failureKind());
+            assertTrue(verify.message().contains("loan.total") && verify.message().contains("9.99"),
+                    verify.message());
+            assertEquals(2L, h.session.journal().entries().stream().filter(e -> e instanceof StepJournal.CheckEntry)
+                    .count(), "each verify check journaled, in file order");
+        }
+        try (VisionHarness h = new VisionHarness(dir.resolve("held"), Map.of(), List.of())) {
+            ScenarioPlayer.Result result = player(h, Map.of(), false).play((HEAD + "verify:\n"
+                    + "  - { \"loan.total\": \"7.00\" }\n").getBytes(StandardCharsets.UTF_8), "played.yaml");
+            assertEquals(Status.PASS, result.status(), result.message() + " " + result.steps());
+            assertEquals(List.of(Status.PASS, Status.PASS), result.steps().stream()
+                    .map(ScenarioPlayer.StepResult::status).toList());
+        }
+    }
+
+    /**
+     * L1-S1 (phase7-contracts.md 6.8, fix wave FC): the export of a played session lists each {@code aiExpect} it
+     * dropped (its line, its question) under "Live-only" in the report, and carries the scenario's {@code verify} as
+     * expectations after the last step.
+     */
+    @Test
+    void aPlayedExportListsTheDroppedVisualChecksAndCarriesTheVerify() throws Exception {
+        try (VisionHarness h = new VisionHarness(dir, Map.of(), List.of(verdict("YES")))) {
+            ScenarioPlayer.Result result = player(h, Map.of(), false).play((HEAD
+                    + "  - aiExpect: { question: \"the loan table shows one line\" }\n"
+                    + "verify:\n  - { \"loan.total\": \"7.00\" }\n").getBytes(StandardCharsets.UTF_8),
+                    "played.yaml");
+            assertEquals(Status.PASS, result.status(), result.message() + " " + result.steps());
+            ExportResult export = result.annotate(h.session.journal().export(ExportOptions.of("played-export")));
+            List<String> liveOnly = export.report().liveOnly();
+            assertTrue(liveOnly.stream().anyMatch(l -> l.contains("aiExpect") && l.contains("line 8")
+                    && l.contains("the loan table shows one line")), String.valueOf(liveOnly));
+            assertTrue(export.report().text().contains("the loan table shows one line"), export.report().text());
+            assertFalse(export.yaml().contains("aiExpect"), "dropped from the deterministic form: " + export.yaml());
+            assertTrue(export.yaml().contains("loan.total"), "the verify carried as an expectation: " + export.yaml());
         }
     }
 }

@@ -122,6 +122,87 @@ class VisionRecordingTest {
         }
     }
 
+    /**
+     * L1-F3 (phase7-contracts.md 6.5 step 3; fix wave FC): an anchored drag records its end point as fractions of the
+     * window, as its start is recorded, so that the replay drags where the model dragged.
+     */
+    @Test
+    void anAnchoredDragRecordsWhereItEnds() throws Exception {
+        try (VisionHarness h = new VisionHarness(dir, Map.of(VisionOptions.TIER, "v2"), List.of(
+                tools("r1", member("t1", "left_click_drag", Map.of("start_coordinate", List.of(250L, 220L),
+                        "coordinate", List.of(290L, 225L)))),
+                done("r2")))) {
+            Turn turn = h.service.ask("drag along the status strip");
+            assertEquals(Turn.Outcome.DONE, turn.outcome(), turn.answer());
+            List<Map<String, Object>> pointers = h.agent.bridge.callsTo("swing.pointer");
+            assertEquals(1, pointers.size(), String.valueOf(turn.actions()));
+            Map<String, Object> drag = pointers.get(0);
+            assertEquals("DRAG", drag.get("action"));
+            assertEquals(Map.of("name", "Desk", "role", "window"), drag.get("by"), "anchored on the window");
+            Map<?, ?> args = h.steps().get(0).calls().get(0);
+            assertEquals(Map.of("fx", 0.781, "fy", 0.917), at(h), "the start in the window's fractions");
+            assertEquals(Map.of("fx", 0.906, "fy", 0.938), to(h), "the end, not the start again: " + args);
+        }
+    }
+
+    /** The journaled step's {@code at} (its arguments as the export writes them). */
+    private static Map<?, ?> at(VisionHarness h) {
+        return (Map<?, ?>) ((Map<?, ?>) h.steps().get(0).args()).get("at");
+    }
+
+    /** The journaled step's {@code to}. */
+    private static Map<?, ?> to(VisionHarness h) {
+        return (Map<?, ?>) ((Map<?, ?>) h.steps().get(0).args()).get("to");
+    }
+
+    /**
+     * L1-F4 (phase7-contracts.md 6.5 as built, 8.7; fix wave FC): an anchor's {@code window.insets} come from the
+     * window's own capture's {@code origin} (the root pane's position in the window, 3.1), read once per window per
+     * session, not from the composite (where they are zero by construction).
+     */
+    @Test
+    void anAnchorsWindowInsetsAreTheWindowCapturesOrigin() throws Exception {
+        try (VisionHarness h = new VisionHarness(dir, Map.of(VisionOptions.TIER, "v2"), List.of(
+                tools("r1", member("t1", "left_click", Map.of("coordinate", List.of(270L, 220L)))),
+                tools("r2", member("t2", "left_click", Map.of("coordinate", List.of(260L, 215L)))),
+                done("r3")))) {
+            h.agent.insets = new int[] {3, 21};
+            Turn turn = h.service.ask("click the status strip twice");
+            assertEquals(Turn.Outcome.DONE, turn.outcome(), turn.answer());
+            Map<?, ?> anchor = (Map<?, ?>) h.steps().get(0).provenance().get("anchor");
+            Map<?, ?> window = (Map<?, ?>) anchor.get("window");
+            assertEquals(Map.of("top", 21L, "left", 3L), window.get("insets"), String.valueOf(window));
+            assertEquals(Map.of("w", 320L, "h", 240L), window.get("size"));
+            List<Map<String, Object>> windowCaptures = h.agent.bridge.callsTo("swing.capture").stream()
+                    .filter(c -> "WINDOW".equals(c.get("scope"))).toList();
+            assertEquals(1, windowCaptures.size(), "one read per window per session: " + windowCaptures);
+            assertEquals(true, windowCaptures.get(0).get("redact"));
+            assertEquals("anchor-s2", ((Map<?, ?>) h.steps().get(1).provenance().get("anchor")).get("label"));
+        }
+    }
+
+    /**
+     * L1-F5 (phase7-contracts.md 3.2, 6.5 step 3; fix wave FC): a {@code click_ref} on a composite button (a label drawn
+     * at its centre) takes the role and class of the named component from the target form's {@code targetNode}, so
+     * that it is recorded as a {@code click} on the button and described as the button, not as the label.
+     */
+    @Test
+    void aClickByRefTakesTheNamedComponentsRoleNotTheLabelAtItsCentre() throws Exception {
+        try (VisionHarness h = new VisionHarness(dir, Map.of(VisionOptions.TIER, "v2", VisionOptions.TOOLS,
+                "custom"), List.of(tools("r1", use("t1", "click_ref", Map.of("ref", "h10"))), done("r2")))) {
+            Turn turn = h.service.ask("renew the loan");
+            assertEquals(Turn.Outcome.DONE, turn.outcome(), turn.answer());
+            assertEquals(1, h.agent.bridge.callsTo("swing.click").size(), "a click, the position does not matter: "
+                    + turn.actions());
+            assertTrue(h.agent.bridge.callsTo("swing.pointer").isEmpty());
+            StepJournal.StepEntry step = h.steps().get(0);
+            assertEquals("click", step.verb());
+            Map<?, ?> hit = (Map<?, ?>) step.provenance().get("hitTest");
+            assertEquals("button", hit.get("role"));
+            assertEquals("lending.RoundKey", hit.get("className"));
+        }
+    }
+
     @Test
     void v3ActsThroughRobotWithTheFocusRuleOn() throws Exception {
         try (VisionHarness h = new VisionHarness(dir, Map.of(VisionOptions.TIER, "v3"), List.of(

@@ -194,6 +194,78 @@ class VisionLoopTest {
         }
     }
 
+    /**
+     * L2-F2 (phase7-contracts.md 6.5 step 2, D358; fix wave FC): a browser surface a pack's mask names takes no click
+     * either: the masked test comes before the web branch for every surface, so the page is never hit-tested and no page
+     * text enters a step, the journal or the export; a surface the capture reports redacted is refused the same.
+     */
+    @Test
+    void aMaskedOrRedactedBrowserSurfaceTakesNoClickAndItsPageIsNeverRead() throws Exception {
+        for (String why : List.of("masked", "redacted")) {
+            Path sub = dir.resolve("web-" + why);
+            try (VisionHarness h = new VisionHarness(sub, Map.of(VisionOptions.TIER, "v2", VisionOptions.TOOLS,
+                    "custom"), List.of(tools("r1", use("t1", "click_at", Map.of("x", 60L, "y", 220L))),
+                    done("r2")))) {
+                h.agent.webMasked = "masked".equals(why);
+                h.agent.webRedacted = "redacted".equals(why);
+                Turn turn = h.service.ask("borrow on the page");
+                assertEquals(Recorder.MASKED, turn.actions().get(0).result(), why);
+                assertTrue(h.agent.bridge.callsTo("web.hitTest").isEmpty(), why + ": the page is never read");
+                assertTrue(h.agent.bridge.callsTo("web.dom.click").isEmpty(), why);
+                assertTrue(h.agent.bridge.callsTo("web.pointer").isEmpty(), why);
+                assertTrue(h.steps().isEmpty(), why + ": nothing journaled");
+                assertFalse(Files.readString(h.session.journal().file()).contains("Borrow"), why + ": no page text");
+            }
+        }
+    }
+
+    /**
+     * L1-F6 (phase7-contracts.md 6.3; fix wave FC): the {@code wait} tool settles for the session's step timeout, not a
+     * fixed 5 s.
+     */
+    @Test
+    void waitSettlesForTheSessionsStepTimeout() throws Exception {
+        try (VisionHarness h = new VisionHarness(dir, Map.of(), List.of(tools("r1", use("t1", "wait", Map.of())),
+                done("r2")))) {
+            h.service.ask("wait until the desk is quiet");
+            List<Map<String, Object>> settles = h.agent.bridge.callsTo("swing.settle");
+            assertEquals(1, settles.size());
+            assertEquals(h.session.options().stepTimeout().toMillis(), settles.get(0).get("timeoutMs"),
+                    "the session's step timeout");
+        }
+    }
+
+    /**
+     * LV-1 (phase7-contracts.md 9.1, 9.2, D342; fix wave FC): the person bound slots before the turn, and the turn's
+     * first message names them after the person's block (their references, kinds and non-secret fields, never a value
+     * or a secret), before the capture; the model's {@code $item.code} is filled in by the session when it types it.
+     */
+    @Test
+    void theTurnNamesTheSlotsThePersonBoundAndTheirReferencesWork() throws Exception {
+        Origin person = Origin.person("tester");
+        try (VisionHarness h = new VisionHarness(dir, Map.of(), List.of(
+                tools("r1", use("t1", "type", Map.of("text", "$item.code"))), done("r2")))) {
+            VisionBridge.resolveItemAndAssistant(h.session, person);
+            assertEquals(ai.skillroy.testjava.scenario.Status.PASS, h.session.execute("signOn",
+                    Map.of("staff", "$assistant"), person).status());
+            Turn turn = h.service.ask("enter the code of $item at the desk");
+            assertEquals(Turn.Outcome.DONE, turn.outcome(), turn.answer());
+            List<Content> opening = h.gateway.requests().get(0).messages().get(0).parts();
+            assertTrue(((Content.Text) opening.get(0)).text().startsWith("<person>"));
+            String slots = ((Content.Text) opening.get(1)).text();
+            assertTrue(slots.startsWith("<target-state>"), slots);
+            assertTrue(slots.contains("$item") && slots.contains("$item.code") && slots.contains("$assistant"),
+                    slots);
+            assertFalse(slots.contains(VisionBridge.PASSWORD_100), "no secret: " + slots);
+            assertFalse(slots.contains("password"), "no secret field's name: " + slots);
+            assertInstanceOf(Content.Image.class, opening.get(2), "the capture after the slots");
+            List<Map<String, Object>> typed = h.agent.bridge.callsTo("swing.type");
+            assertEquals(1, typed.size(), String.valueOf(turn.actions()));
+            assertNotEquals("$item.code", typed.get(0).get("text"), "the session filled the reference in");
+            assertEquals("type", h.steps().get(1).verb());
+        }
+    }
+
     @Test
     void aTypeNamingOrHoldingACredentialIsRefused() throws Exception {
         try (VisionHarness h = new VisionHarness(dir, Map.of(), List.of(

@@ -213,4 +213,28 @@ class VisionPartsTest {
         assertTrue(java.util.ServiceLoader.load(CapabilityContributor.class, getClass().getClassLoader()).stream()
                 .anyMatch(p -> p.type() == VisionCapabilities.class));
     }
+
+    /**
+     * L1-F5 (phase7-contracts.md 3.2, 6.5; fix wave FC): the node a hit is about. The target form names the component
+     * itself: its {@code targetNode} when the agent answers one; from an agent without it, the mouse target or the
+     * deepest component when either is that component, else the mouse target (usually the button, not its label). The
+     * point form keeps its rule: the mouse target, else the deepest component.
+     */
+    @Test
+    void theNodeOfATargetHitIsTheNamedComponent() {
+        Map<String, Object> label = Map.of("ref", "h10-label", "role", "label");
+        Map<String, Object> button = Map.of("ref", "h10", "role", "button");
+        Map<String, Object> own = Map.of("ref", "h10", "role", "button", "class", "lending.RoundKey");
+        assertEquals(own, Recorder.node(Map.of("target", "h10", "targetKind", "TARGET", "targetNode", own,
+                "deepest", label, "mouseTarget", button)));
+        assertEquals(button, Recorder.node(Map.of("target", "h10", "targetKind", "TARGET", "deepest", label,
+                "mouseTarget", button)));
+        assertEquals(button, Recorder.node(Map.of("target", "h10", "targetKind", "TARGET", "deepest", button)));
+        Map<String, Object> other = Map.of("ref", "h11", "role", "panel");
+        assertEquals(other, Recorder.node(Map.of("target", "h10", "targetKind", "TARGET", "deepest", label,
+                "mouseTarget", other)), "neither is the target: the mouse target");
+        assertEquals(label, Recorder.node(Map.of("target", "h10-label", "targetKind", "DEEPEST", "deepest", label)));
+        assertEquals(button, Recorder.node(Map.of("target", "h10", "targetKind", "MOUSE_TARGET", "deepest", label,
+                "mouseTarget", button)));
+    }
 }

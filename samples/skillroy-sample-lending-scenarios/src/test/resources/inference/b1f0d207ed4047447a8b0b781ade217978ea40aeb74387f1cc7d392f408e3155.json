@@ -1,5 +1,5 @@
 {
-  "fingerprint": "23afe558a08c9b1970a04ed2cb8992ee9497bf638e1ce6833b0430e7665f8dd9",
+  "fingerprint": "b1f0d207ed4047447a8b0b781ade217978ea40aeb74387f1cc7d392f408e3155",
   "model": "scripted-model",
   "modelClass": "SONNET_CLASS",
   "purpose": "session",
@@ -11,6 +11,10 @@
         "parts": [
           {
             "text": "<person>\nLend one plain item to the walk-in borrower and settle the deposit.\n</person>",
+            "type": "text"
+          },
+          {
+            "text": "<target-state>\nSlots bound in this session before this request. Write a slot's $reference in a tool's arguments, a text to type included, where its value belongs: the session puts the value in its place. The fields are the slot's non-secret fields; a credential's secret is never yours to use (the person signs on).\n- $assistant: query StaffWithPermission, a credential (the person signs on with it; its secret is not listed); fields $assistant.code, $assistant.limits, $assistant.permissions\n</target-state>",
             "type": "text"
           }
         ],
@@ -752,12 +756,12 @@
       "cacheWrite5mTokens": 0,
       "costUsd": "0",
       "elapsedMs": 0,
-      "inputTokens": 5165,
+      "inputTokens": 5292,
       "model": "scripted-model",
       "note": null,
       "outputTokens": 23,
       "provider": "scripted",
-      "requestId": "scripted-5165-23",
+      "requestId": "scripted-5292-23",
       "requestedModel": "scripted-model"
     }
   },

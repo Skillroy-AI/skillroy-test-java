@@ -64,6 +64,10 @@ final class FakeVisionAgent {
     boolean dialog;
     String focusOwner = "h4";
     boolean webRedacted;
+    /** The browser surface is one a pack's mask names: its hit-test answers {@code masked: true} (L2-F2). */
+    boolean webMasked;
+    /** The frame's insets {left, top}: a {@code WINDOW} capture's {@code origin} (L1-F4). */
+    int[] insets = {0, 0};
     int captures;
     final List<Comp> comps = new ArrayList<>();
     final List<Comp> dialogComps = new ArrayList<>();
@@ -92,6 +96,9 @@ final class FakeVisionAgent {
                 false, false, "SWING", null, Map.of(), 0));
         comps.add(new Comp("h7", "h1", new Capture.Rect(20, 205, 100, 30), "panel", null, "lending.BrowserPanel",
                 List.of(), false, false, "WEB", "b1", Map.of(), 0));
+        // A composite button: a label is drawn at its centre (what the target form's deepest names), L1-F5.
+        comps.add(new Comp("h10", "h1", new Capture.Rect(125, 205, 100, 30), "button", "Renew", "lending.RoundKey",
+                List.of(Map.of("name", "Renew", "role", "button")), false, false, "SWING", null, Map.of(), 0));
         dialogComps.add(new Comp("d1", "d1", new Capture.Rect(0, 0, 160, 100), "dialog", "Question",
                 "javax.swing.JDialog", List.of(Map.of("name", "Question", "role", "dialog")), false, false, "SWING",
                 null, Map.of(), 0));
@@ -235,6 +242,27 @@ final class FakeVisionAgent {
             r.put("hash", hash(crop));
             return r;
         }
+        if ("WINDOW".equals(scope) && params.get("target") != null) {
+            // A window's own capture: the root pane's paint, its origin the window's insets (3.1).
+            r.put("format", "png");
+            r.put("width", 64L);
+            r.put("height", 64L);
+            r.put("base64", Base64.getEncoder().encodeToString(crop));
+            r.put("captureId", "cap-" + captures);
+            r.put("seq", bridge.lastSeq());
+            r.put("mode", "PAINT");
+            r.put("scope", "WINDOW");
+            r.put("space", "WINDOW");
+            r.put("window", params.get("target"));
+            r.put("origin", Map.of("x", (long) insets[0], "y", (long) insets[1]));
+            r.put("scale", params.getOrDefault("scale", 1.0));
+            r.put("windows", List.of(Map.of("ref", String.valueOf(params.get("target")), "rect", Map.of("x", 0L,
+                    "y", 0L, "w", 64L, "h", 64L))));
+            r.put("redacted", List.of());
+            r.put("carets", List.of());
+            r.put("hash", hash(crop));
+            return r;
+        }
         byte[] png = dialog ? deskDialog : desk;
         int[] o = origin();
         String id = "cap-" + captures;
@@ -338,10 +366,26 @@ final class FakeVisionAgent {
         r.put("windowRect", Map.of("x", (long) w[0], "y", (long) w[1], "w", "d1".equals(hit.window()) ? 160L : 320L,
                 "h", "d1".equals(hit.window()) ? 100L : 240L));
         r.put("covering", List.of());
-        r.put("deepest", node);
+        boolean targetForm = params.get("target") instanceof String;
+        if (targetForm && "h10".equals(hit.ref())) {
+            // The agent's target form reports what is drawn at the component's centre beside it (D388): a label.
+            Map<String, Object> label = new LinkedHashMap<>();
+            label.put("ref", "h10-label");
+            label.put("role", "label");
+            label.put("name", "Renew");
+            label.put("class", "javax.swing.JLabel");
+            label.put("bounds", Map.of("x", 30L, "y", 7L, "w", 40L, "h", 16L));
+            r.put("deepest", label);
+        } else {
+            r.put("deepest", node);
+        }
         r.put("mouseTarget", null);
         r.put("target", hit.ref());
-        r.put("targetKind", "DEEPEST");
+        r.put("targetKind", targetForm ? "TARGET" : "DEEPEST");
+        if (targetForm) {
+            // The target form's own node (fix wave FC, L1-F5).
+            r.put("targetNode", node);
+        }
         Capture.Rect s = screen(hit);
         int lx = sx - s.x();
         int ly = sy - s.y();
@@ -365,7 +409,7 @@ final class FakeVisionAgent {
         }
         r.put("enabled", true);
         r.put("listening", false);
-        r.put("masked", hit.masked());
+        r.put("masked", hit.masked() || webMasked && "WEB".equals(hit.surface()));
         r.put("seq", bridge.lastSeq());
         return r;
     }
