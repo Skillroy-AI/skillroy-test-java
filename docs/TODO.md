@@ -2329,6 +2329,7 @@ later commits change documentation and comments only):
 | amd64 r1 (emulated, `FORK` launch) | 5,360 / 0 / 0 / 140 (1,532 s) | not run | not run |
 | amd64, Java 8 legs, first run (on `dcc5050`, documentation only past `c94aade`) | – | stopped in the agent modules: 1 failure, 1 error, 4,321 run (706 s; `-fae` skipped every module downstream of them) | 1,849 / 0 / 0 / 30 (429 s) |
 | amd64, Java 8 legs, second run (on `bc1e250`: `aadd5f4`, `d6720ea`, gaps 94 and 99) | – | 5,362 / 0 / 0 / 176 (1,494 s) | 1,849 / 0 / 0 / 30 (423 s) |
+| arm64, the follow-ups' final code (on `117da59`: the two test fixes and gaps 94, 99, 92 and 63) | 5,362 / 0 / 0 / 141 (1,005 s) | 5,362 / 0 / 0 / 176 (937 s) | 1,849 / 0 / 0 / 30 (264 s) |
 
 Every leg that ran is green. The `jcef` profile ran in every leg; the Robot leg (`JAVAAGENT_ROBOT`) ran inside
 `LendingEndToEndIT` on both target Javas of both arm64 rounds; scenario E's matrix-hash failure of the first round (arm64 r1
