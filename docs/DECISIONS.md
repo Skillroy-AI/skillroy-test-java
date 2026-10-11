@@ -1712,7 +1712,8 @@ for the build; the signature is given, and the first public release waits for th
 ## B32 Follow-ups after Phase 7 (2026-10-11; provisional)
 
 **From:** the session of 2026-10-11 after Phase 7 closed, without the owner: gap 94 of `TODO.md` (S101 item 3 and the
-vocabulary's sentence that SH proposed and no package held) gap 99 (the bindings JSON reader's link rule) and gap 92 (a late declaration's pending reason). Each is
+vocabulary's sentence that SH proposed and no package held) gap 99 (the bindings JSON reader's link rule), gap 92 (a late declaration's pending reason) and gap 63 (`hook.events`'s
+`id`). Each is
 built and tested and the contract carries it as "(Phase 7 follow-up, gap <n>, built 2026-10-11)" in
 `design/phase7-contracts.md` §6.5, §8.7, §9.1, §9.2 rule 1 and the gaps of §16 (gap 92 in `design/phase6-contracts.md` too). Answer in one
 line: `B32 ok`, or a veto by name.
@@ -1723,12 +1724,13 @@ line: `B32 ok`, or a veto by name.
 | D488 | Should the vocabulary's sentence name the whole-slot rule? | Yes, SH's wording: "… names a non-secret field of a resolved slot, never a credential's secret nor a credential slot as a whole: the person signs on"; the five Phase 5 session recordings regenerated key-free. The old wording had reached the model as "secret: <redacted> person" (the mask's `key: value` rule); the new one passes the mask whole | `B32 D488 veto`: keep the Phase 7 sentence (and restore its recordings) |
 | D489 | Gap 99: which reads of a bindings file follow the link rule that the writers and the PNG reader follow (S140)? | Every read of a scenario's bindings file by the binder, the session and the executor (`BindingsFile.read(bindingsRoot, envId, scenarioId)`); a link at the file's position, dangling or not, is a file that cannot be read, so a writing bind refuses it (S116) instead of replacing the link; `diff-bindings` reads the files a person names, as named | `B32 D489 veto`: let a writing bind replace a dangling link, or refuse a link in `diff-bindings` too |
 | D490 | Gap 92: what does a capability declared after the target is ready read until its posted probe has run? | `UNAVAILABLE("not probed yet: declared after the target was ready, its probe is queued")`, the prefix callers read kept; the state and the timing unchanged (no synchronous probe, no SPI change, D449) | `B32 D490 veto`: keep "not probed yet: the target is not ready" for every pending entry |
+| D491 | Gap 63: what does `hook.events` do with an `id` that is not a hook id (a comma or a wildcard would widen its topic filter)? | Refuses it (`INVALID_PARAMS`, `param: id`) and answers `hook.*` topics only, as P6 §4.2 reads | `B32 D491 veto`: accept any `id` as before |
 
 ---
 
 ## Questions for the owner
 
-**Open as of 2026-10-11: B32** (above: D487-D490, the decisions of gaps 94, 99 and 92, provisional; answer `B32 ok` or a veto
+**Open as of 2026-10-11: B32** (above: D487-D491, the decisions of gaps 94, 99, 92 and 63, provisional; answer `B32 ok` or a veto
 by name). Before it, none was open as of 2026-10-11: the owner confirmed **B29** (the Phase 7 contract's thirty-nine answers, `design/phase7-contracts.md` §18, decisions D287-D358) and **B30** (the 128 decisions the Phase 7 build, its code review's fix wave, the race fix and the security fixes took, D359-D486) on 2026-10-11, every row, without a veto (`B29 ok`, `B30 ok`); both had been taken without the owner on 2026-10-10 (B30 also on 2026-10-11) and were provisional while the build ran on them. Among the confirmed points are the three that rested on the owner's knowledge or taste (Q27, JxBrowser input behind descriptor roles, unverified; Q34, V3 on a person's desktop acting only while the target holds the focus; Q25, the number pad as the sample's component) and the decisions worth a look (D403, D413, D425, D470, D482), so the built behaviour stands as it is, the behaviour changes listed in B30 included. The owner signed off **B31** (the Phase 7 security delta review, S101-S148) the same day (`B31 ok`), with the two lows proposed for acceptance accepted as proposed: S142 (a Windows directory junction in a run's output tree) and S144 (Windows run output inheriting its parent's access list), each with its release note in `SECURITY.md`. Outside the decisions, the push still waits for the owner's word (B1) and the Windows host is still missing (`TODO.md`, "Walls"). Two optional choices that the delta review left to the owner and that no sign-off covered ride along as gaps 93 and 96 of `TODO.md`, unanswered: whether replay should refuse a recorded `REQUIRED` approval whatever the strategy, and whether the DOM click and fill primitives should refuse a page under a modal dialog for a model or a client.
 Before B29, B30 and B31 none was open: the owner confirmed **B26** (the twenty-two answers of the Phase 6 contract,
 `design/phase6-contracts.md` §17, D114-D159) and **B27** (the 127 decisions the Phase 6 build, its code review's fix wave

@@ -1205,7 +1205,8 @@ client's `hook.remove` would drop a person's evidence mid-run.
 `hook.probe` and `hook.install` take at most 64 specs. `hook.health` also answers `otherAgents` and `spy.onBootPath`
 (D180: `skillroy hooks status` prints `otherAgents`, §6.2, and reads them from `hook.health`); without a `Spy` on the
 bootstrap path `spy.version` is null and the counters are zero. `hook.events` refuses a `limit` outside 1 to 1000 with
-`INVALID_PARAMS`; for an id that is not installed it filters on `hook.<id>`. `hook.stub` refuses a JSON object or array
+`INVALID_PARAMS`, and (gap 63, 2026-10-11) an `id` that is not a hook id (`HookSpec.ID_REGEX`: no comma or wildcard widens
+its filter), and answers `hook.*` topics only; for an id that is not installed it filters on `hook.<id>`. `hook.stub` refuses a JSON object or array
 as `value`.
 
 As built (Phase 6, CP): `ToolProjection.NEVER_OFFERED` and `ToolProjection.HOOK_READS`; the three reads are offered by

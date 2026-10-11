@@ -139,11 +139,18 @@ final class HookPrimitives {
                                     + EVENTS_MAX_LIMIT, HookEngineImpl.data("param", "limit"));
                         }
                         String id = inv.args().str("id");
+                        // gap 63: an id is a hook id, so that no comma or wildcard widens the filter past hook.*
+                        if (id != null && !id.matches(HookSpec.ID_REGEX)) {
+                            throw new RpcException(ErrorCodes.INVALID_PARAMS, "id is not a hook id",
+                                    HookEngineImpl.data("param", "id"));
+                        }
                         TopicFilter filter = TopicFilter.parse(id == null ? HookSpec.TOPIC_PREFIX + "*"
                                 : engine.topicOf(id));
                         List<Object> events = new ArrayList<Object>();
                         for (Event e : inv.context().events().since(since, filter, (int) limit)) {
-                            events.add(e.toJson());
+                            if (e.topic().startsWith(HookSpec.TOPIC_PREFIX)) {
+                                events.add(e.toJson());
+                            }
                         }
                         Map<String, Object> out = new LinkedHashMap<String, Object>();
                         out.put("events", events);

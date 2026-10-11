@@ -164,6 +164,10 @@ class ModesTest {
         assertEquals("hook.deposit.computed", ((Map<String, Object>) limited.get(0)).get("topic"));
         assertEquals(ai.skillroy.testjava.protocol.ErrorCodes.INVALID_PARAMS, harness.ctx.error("hook.events",
                 map("since", since, "limit", 1001)).error().code());
+        for (String notAnId : new String[] {"deposit.computed,app.*", "*", "deposit."}) {
+            assertEquals(ai.skillroy.testjava.protocol.ErrorCodes.INVALID_PARAMS, harness.ctx.error("hook.events",
+                    map("since", since, "id", notAnId)).error().code(), "gap 63: " + notAnId);
+        }
         harness.ctx.call("hook.remove", map());
     }
 
