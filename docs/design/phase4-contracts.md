@@ -1756,6 +1756,12 @@ A Swing application ("the web host") that embeds JCEF through jcefmaven:
   `setCloseAllowed()` on the three browsers before `CefApp.dispose()` (JCEF cancels every browser close otherwise, and
   CEF never reaches `TERMINATED`), disposes the frame, waits at most 10 s for `TERMINATED` and deletes a cache
   directory the host created. Off-screen rendering on Java 16 or newer needs `WebHostApp.OFF_SCREEN_JVM_ARGS`, §11.)
+  (Phase 7 follow-up, gap 95, built 2026-10-11) The bar also holds a `JButton` "Notice" (name `notice`), which posts
+  (`invokeLater`, so that the click's own event returns at once) a modal `JOptionPane` message dialog titled "Loan
+  notice", with the text "Check the loan terms before you borrow." and one OK button, centred on the frame and so over
+  the page; it logs "showing the notice" and, when it is answered, "the notice was closed". The deck itself is named
+  `deck`. Nothing but that button opens the dialog, so the pack's sync policy still lists no prompt topic (§9.3); the
+  dialog exists for P7 §13.2 item 10's gap-95 check (a), a modal dialog over a real page.
 - **Pages** are the sample's own, served from the class path through a CEF scheme handler is **not** used (a handler
   slot the agent must never take would then be the application's; fine, but it adds surface). Instead the pages are
   `data:` URLs built from resources `webhost/front.html`, `webhost/back.html`, `webhost/detached.html` (no network,
@@ -1810,7 +1816,13 @@ selects `{tag: front}`; it returns the seeds that exist, in the order front, bac
 `webhost.browsers`, is ready once the registry holds the front browser, which it does once the pages have loaded
 (§9.1). The module registers no capability and starts no thread, touches no AWT class at install, and its `uninstall`
 never throws; it depends on `skillroy-agent-api` and the host module, both at `provided` scope; version `0.1.0`,
-`requires()` empty.)
+`requires()` empty.) (Phase 7 follow-up, gap 95, built 2026-10-11; version `0.2.0`) With the agent option
+`webhost.mask=front`, read once at install through `AgentContext.option` (so the system property
+`skillroy.agent.webhost.mask` sets it too), the module also registers a `CaptureMask` (P7 §3.6) that names the front
+card: the component the host names `front` whose parent is the deck named `deck` (§9.1), and through the ancestor rule
+nothing else; it reads the two names only, on the EDT, and changes nothing. Without the option, or with another value,
+it registers no mask (and so the web module makes no masked read, P7 §3.6), and install still touches no AWT class.
+Only P7 §13.2 item 10's gap-95 check (d) sets the option, on a fresh attach after `agent.disable`.
 
 ### 9.3 `skillroy-sample-web-host-scenarios` (Java 25): pack, scenarios, acceptance
 

@@ -25,17 +25,29 @@ import ai.skillroy.testjava.controller.CapabilityMatrix;
 import ai.skillroy.testjava.controller.Discovery;
 import ai.skillroy.testjava.controller.Endpoint;
 import ai.skillroy.testjava.data.Credentials;
+import ai.skillroy.testjava.inference.prompt.PromptMask;
+import ai.skillroy.testjava.inference.tools.CallPolicy;
 import ai.skillroy.testjava.protocol.Capability;
 import ai.skillroy.testjava.protocol.CapabilityState;
+import ai.skillroy.testjava.protocol.ErrorCodes;
+import ai.skillroy.testjava.protocol.Event;
 import ai.skillroy.testjava.protocol.Json;
 import ai.skillroy.testjava.protocol.RpcResult;
 import ai.skillroy.testjava.samples.webhost.WebHostOptions;
 import ai.skillroy.testjava.samples.webhost.WebHostPages;
 import ai.skillroy.testjava.scenario.BindOptions;
+import ai.skillroy.testjava.scenario.ExecutorSession;
 import ai.skillroy.testjava.scenario.FailureKind;
 import ai.skillroy.testjava.scenario.Plan;
+import ai.skillroy.testjava.scenario.SessionOptions;
 import ai.skillroy.testjava.scenario.Status;
+import ai.skillroy.testjava.scenario.web.WebPathException;
 import ai.skillroy.testjava.scenario.web.WebSettings;
+import ai.skillroy.testjava.vision.Capture;
+import ai.skillroy.testjava.vision.Captures;
+import ai.skillroy.testjava.vision.Grounding;
+import ai.skillroy.testjava.vision.Recorder;
+import ai.skillroy.testjava.vision.VisionTier;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.MethodOrderer;
@@ -56,6 +68,7 @@ import java.nio.file.Path;
 import java.security.SecureRandom;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -63,13 +76,17 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
 import java.util.stream.Stream;
 import javax.imageio.ImageIO;
 
+import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeFalse;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
@@ -78,8 +95,10 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
  * The checks of phase4-contracts.md 12.2 against one launch of the web host: items 1 to 5, 7 and 8, and the
  * assembled launcher's checks in the one launch per target Java that runs them (item 6 is {@link CdpAttachSoakIT};
  * item 9, the kit, runs in the web host module); and item 10 of phase7-contracts.md 13.2 ({@code web.hitTest} and
- * {@code web.pointer} on both paths, the browser as a {@code WEB} surface of the Swing capture). A subclass names the load mode, the rendering and whether the host
- * has a remote-debugging port. Windowed rendering on a Java 8 target is skipped (spike BS8 saw no native browser
+ * {@code web.pointer} on both paths, the browser as a {@code WEB} surface of the Swing capture), with its gap-95 checks
+ * (a) to (d), after item 8: a modal dialog over the page, no late click on the CDP path, a middle click a person's only,
+ * and a masked browser on every route (the last, on a fresh agent attached with the mask option). A subclass names the
+ * load mode, the rendering and whether the host has a remote-debugging port. Windowed rendering on a Java 8 target is skipped (spike BS8 saw no native browser
  * created there). Every wait is an event, a settle or a bounded poll of a socket or a file; nothing sleeps.
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
@@ -777,6 +796,548 @@ abstract class WebHostChecks {
                 throw new AssertionError("the target exited while waiting for " + what);
             }
         }
+    }
+
+    // ------------------------------------------------------------------------- gap 95 (Phase 7 follow-up)
+
+    /** A pointer click as the front page's counter records it: four trusted events. */
+    static final List<String> TRUSTED_CLICK = List.of("pointerdown:true", "mousedown:true", "mouseup:true",
+            "click:true");
+    /** The three events of {@code web.pointer}'s {@code CLICK}. */
+    static final List<String> DISPATCHED_CLICK = List.of("mouseMoved", "mousePressed", "mouseReleased");
+    /** The solid grey a capture blanks a masked component with (phase7-contracts.md 3.6), as RGB. */
+    static final int GREY = 0x808080;
+    /** How long the front page stalls its own hit in check (b). */
+    static final long STALL_MS = 4_000L;
+    /** The budget the CDP path's caller gives up after in check (b). */
+    static final long LATE_BUDGET_MS = 1_000L;
+    /** The budget of the person's middle click recorded in (e), and how long (e) waits for the page afterwards. */
+    static final long MIDDLE_BUDGET_MS = 5_000L;
+    static final long MIDDLE_RECOVERY_MS = 20_000L;
+    /**
+     * The agent option and value with which the sample's module masks the front card (phase4-contracts.md 9.2; the
+     * module's {@code OPTION_MASK} and {@code MASK_FRONT}, spelled out: the module's class is not on this side).
+     */
+    static final String MASK_OPTION = "webhost.mask";
+    static final String MASK_FRONT = "front";
+
+    /**
+     * Gap 95 (a), phase7-contracts.md 13.2 item 10 (S108 on one desktop, S109, the modal check of 4.3, D404): the
+     * host's notice, a modal {@code JOptionPane} over the page. While it shows, {@code web.browsers} names it as the
+     * front browser's blocker; the agent's pointer is {@code MODAL_OPEN} and the CDP path hands the same call to the
+     * agent; the vision capture reports the dialog's part of the page as {@code covered} and the composite keeps the
+     * dialog's own pixels there while it shows the page around it; the recorder refuses a page click under the dialog
+     * before it reads anything; the page counts no pointer event. Once the notice is answered the page takes a pointer
+     * click again (the control).
+     */
+    @Test
+    @Order(11)
+    void gap95aAModalDialogOverThePageKeepsItsPixelsAndTakesNoPointer() throws Exception {
+        String frontRef = ref("front");
+        Map<String, Object> point = borrowCentre();
+        Map<String, Object> click = Map.of("by", Map.of("tag", "front"), "action", "CLICK", "point", point);
+        int before = pointerLog().size();
+        RpcResult opened = client().call("swing.click", Map.of("by", Map.of("id", "notice")), CALL);
+        Event shown = client().await("window.opened", opened.seqBefore(), Map.of("modal", true), WAIT);
+        assertNotNull(shown, "the notice opened: " + opened.value());
+        String dialog = String.valueOf(shown.payload().get("ref"));
+        ReadFacade facade = new ReadFacade(client());
+        Grounding grounding = new Grounding(facade);
+        try {
+            assertAll("gap 95 (a), a modal dialog over the page, " + target.label,
+                    () -> {
+                        Map<?, ?> blocked = (Map<?, ?>) browser("front").get("blockedBy");
+                        assertNotNull(blocked, "web.browsers names the front browser's blocker");
+                        assertEquals(dialog, blocked.get("dialog"), String.valueOf(blocked));
+                    },
+                    () -> {
+                        AgentRpcException e = assertThrows(AgentRpcException.class,
+                                () -> client().call("web.pointer", click, CALL), "the agent's pointer");
+                        assertEquals(ErrorCodes.MODAL_OPEN, e.error().code(), e.getMessage());
+                        assertEquals(dialog, e.error().data().get("dialog"), e.getMessage());
+                        assertEquals(frontRef, e.error().data().get("browser"), e.getMessage());
+                    },
+                    () -> {
+                        if (withPort()) {
+                            CdpWebPath path = new CdpWebPath();
+                            try {
+                                assertNull(path.open(client(), WebSettings.DEFAULT, null), "the CDP path opens");
+                                WebPathException e = assertThrows(WebPathException.class,
+                                        () -> path.call("web.pointer", click, CallOptions.defaults()),
+                                        "the CDP path hands a blocked browser's pointer to the agent");
+                                assertTrue(String.valueOf(e.getMessage()).contains("modal dialog"), e.getMessage());
+                            } finally {
+                                path.close();
+                            }
+                        }
+                    },
+                    () -> theCompositeKeepsTheDialogsPixels(grounding, frontRef, dialog),
+                    () -> {
+                        Capture capture = grounding.capture(false);
+                        Capture.Surface s = surfaceOf(capture, frontRef);
+                        assertNotNull(s, "the front browser is a WEB surface: " + capture.surfaces());
+                        int[] px = pixel(capture, s, point);
+                        Grounding.Grounded g = grounding.ground(capture, px[0], px[1], false);
+                        assertEquals("WEB", g.hit().get("surface"), String.valueOf(g.hit()));
+                        assertTrue(g.hit().get("blockedBy") instanceof Map<?, ?> m && dialog.equals(m.get("ref")),
+                                "the hit names the dialog as its blocker: " + g.hit());
+                        int reads = facade.reads.size();
+                        Recorder.Recorded r = recorder(facade).pointer(g, px[0], px[1],
+                                new Recorder.Click("LEFT", 1, List.of()), null);
+                        assertTrue(r.error(), String.valueOf(r));
+                        assertEquals(Recorder.PAGE_BLOCKED, r.text());
+                        assertEquals(List.of(), facade.reads.subList(reads, facade.reads.size()), "S109: refused "
+                                + "before the page is read");
+                        assertEquals(List.of(), facade.executed, "nothing acted");
+                    },
+                    () -> assertEquals(before, pointerLog().size(), "the page counted no pointer event while the"
+                            + " notice was open: " + pointerLog()));
+        } finally {
+            RpcResult dismissed = client().call("swing.dismiss", Map.of("dialog", dialog), CALL);
+            assertNotNull(client().await("window.closed", dismissed.seqBefore(), Map.of("ref", dialog), WAIT),
+                    "the notice closed: " + dismissed.value());
+        }
+        assertNull(browser("front").get("blockedBy"), "nothing blocks the front browser once the notice is answered");
+        Map<String, Object> clicked = value(client().call("web.pointer", click, CALL));
+        assertEquals(DISPATCHED_CLICK, clicked.get("dispatched"), String.valueOf(clicked));
+        assertEquals(TRUSTED_CLICK, pointerLog().subList(before, before + 4), "the control: a pointer click again");
+    }
+
+    /**
+     * S108 on one desktop: in the vision capture ({@code SCREEN}) the notice is the top window and the front
+     * surface's {@code covered} is exactly the notice's part of the page; in the model image every pixel of
+     * {@code covered} is the capture's own (the dialog), and the rest of the surface shows the page's
+     * {@code web.bitmap}. The dialog's pixels differ from the page's there, so the comparison says something.
+     */
+    void theCompositeKeepsTheDialogsPixels(Grounding grounding, String frontRef, String dialog) throws Exception {
+        Capture capture = grounding.capture(false);
+        assertEquals(1.0, capture.scale(), "the capture is at scale 1");
+        Capture.Region top = capture.windows().get(capture.windows().size() - 1);
+        assertEquals(dialog, top.ref(), "the notice is the top window: " + capture.windows());
+        Capture.Surface s = surfaceOf(capture, frontRef);
+        assertNotNull(s, "the front browser is a WEB surface: " + capture.surfaces());
+        assertFalse(s.redacted(), String.valueOf(s));
+        Capture.Rect over = top.rect().intersect(s.rect());
+        assertNotNull(over, "the notice lies over the page: notice " + top.rect() + ", page " + s.rect());
+        assertEquals(List.of(over), s.covered(), "S108: covered is the notice's part of the page");
+        BufferedImage shot = Grounding.decode(capture.png());
+        BufferedImage model = Grounding.decode(grounding.modelImage(capture, false));
+        Map<String, Object> bitmap = value(client().call("web.bitmap", Map.of("browser", frontRef), CALL));
+        BufferedImage page = Grounding.decode(Base64.getDecoder().decode(String.valueOf(bitmap.get("base64"))));
+        assertNotNull(shot);
+        assertNotNull(model);
+        assertNotNull(page);
+        Capture.Rect at = s.bounds() != null ? s.bounds() : s.rect();
+        assertEquals(List.of(at.w(), at.h()), List.of(page.getWidth(), page.getHeight()), "the page's bitmap has the"
+                + " component's size, so the composite draws it unscaled");
+        long covered = 0;
+        long kept = 0;
+        long differs = 0;
+        long rest = 0;
+        long shown = 0;
+        Capture.Rect r = s.rect();
+        for (int y = r.y(); y < r.y() + r.h(); y++) {
+            for (int x = r.x(); x < r.x() + r.w(); x++) {
+                int m = model.getRGB(x, y) & 0xFFFFFF;
+                int p = page.getRGB(x - at.x(), y - at.y()) & 0xFFFFFF;
+                if (over.contains(x, y)) {
+                    int c = shot.getRGB(x, y) & 0xFFFFFF;
+                    covered++;
+                    kept += m == c ? 1 : 0;
+                    differs += c != p ? 1 : 0;
+                } else {
+                    rest++;
+                    shown += m == p ? 1 : 0;
+                }
+            }
+        }
+        ItEnv.timing("java=" + java + " launch=" + target.label + " gap95a covered=" + over + " kept=" + kept + "/"
+                + covered + " dialogDiffersFromPage=" + differs + " pageShown=" + shown + "/" + rest);
+        assertEquals(covered, kept, "every pixel of the notice is kept in the model image");
+        assertTrue(differs * 2 > covered, "the notice's pixels differ from the page's there: " + differs + " of "
+                + covered);
+        assertTrue(shown * 100 >= rest * 99, "the page is composited around the notice: " + shown + " of " + rest);
+    }
+
+    /**
+     * Gap 95 (b), phase7-contracts.md 13.2 item 10 (S133, the probe on a real page): the front page stalls its own
+     * hit for {@value #STALL_MS} ms (its next {@code document.elementFromPoint}, once); the CDP path's pointer with a
+     * {@value #LATE_BUDGET_MS} ms budget answers {@code TIMEOUT}, and once the path's Playwright thread has returned
+     * from the abandoned call the page has counted no event: nothing was dispatched after the caller's deadline. The
+     * same call with the default budget then clicks (the control).
+     */
+    @Test
+    @Order(12)
+    void gap95bACallerThatGaveUpGetsNoLateClickOnTheCdpPath() throws Exception {
+        assumeTrue(withPort(), "the CDP path needs the remote-debugging port");
+        String frontRef = ref("front");
+        Map<String, Object> click = Map.of("browser", frontRef, "action", "CLICK", "point", borrowCentre());
+        CdpWebPath path = new CdpWebPath();
+        try {
+            assertNull(path.open(client(), WebSettings.DEFAULT, null), "the CDP path opens");
+            int before = pointerLog().size();
+            Map<String, Object> stall = new LinkedHashMap<>();
+            stall.put("by", Map.of("tag", "front"));
+            stall.put("expression", "(function () { var own = Document.prototype.elementFromPoint;"
+                    + " document.elementFromPoint = function (x, y) { delete document.elementFromPoint;"
+                    + " var t = Date.now(); while (Date.now() - t < " + STALL_MS + ") { }"
+                    + " return own.call(document, x, y); }; return true; })()");
+            client().call("web.evaluate", stall, CALL);
+            long t0 = System.nanoTime();
+            AgentRpcException late = assertThrows(AgentRpcException.class, () -> path.call("web.pointer", click,
+                    CallOptions.defaults().withTimeoutMs(LATE_BUDGET_MS)), "the caller gives up after its budget");
+            long answeredMs = (System.nanoTime() - t0) / 1_000_000L;
+            assertEquals(ErrorCodes.TIMEOUT, late.error().code(), late.getMessage());
+            assertTrue(answeredMs < STALL_MS, "answered before the page was free: " + answeredMs + " ms");
+            long t1 = System.nanoTime();
+            List<String> after = pointerLogOnceThePathIsFree(path, frontRef);
+            ItEnv.timing("java=" + java + " launch=" + target.label + " gap95b timeoutAfterMs=" + answeredMs
+                    + " pathFreeAfterMs=" + (answeredMs + (System.nanoTime() - t1) / 1_000_000L) + " events="
+                    + after.subList(before, after.size()));
+            assertEquals(List.of(), after.subList(before, after.size()), "S133: nothing was dispatched after the "
+                    + "caller's deadline");
+            Map<String, Object> clicked = value(path.call("web.pointer", click, CallOptions.defaults()));
+            assertEquals(DISPATCHED_CLICK, clicked.get("dispatched"), String.valueOf(clicked));
+            assertEquals(TRUSTED_CLICK, pointerLog().subList(before, before + 4), "the control: the path clicks");
+        } finally {
+            path.close();
+        }
+    }
+
+    /**
+     * The front page's pointer log read through the CDP path once its Playwright thread has returned from an
+     * abandoned call: while it is busy a call is {@code UNSUPPORTED} at once ("an earlier CDP operation has not
+     * returned"), so this re-asks (a bounded poll, {@link #awaitCondition}) until a read is served.
+     */
+    List<String> pointerLogOnceThePathIsFree(CdpWebPath path, String frontRef) throws Exception {
+        Map<String, Object> read = Map.of("browser", frontRef, "expression", "webhostPointer()");
+        AtomicReference<String> log = new AtomicReference<>();
+        awaitCondition("the CDP path's abandoned call to return", WAIT, () -> {
+            try {
+                Object v = path.call("web.evaluate", read, CallOptions.defaults()).value();
+                log.set(String.valueOf(Json.parse(String.valueOf(((Map<?, ?>) v).get("json")))));
+                return true;
+            } catch (WebPathException e) {
+                if (String.valueOf(e.getMessage()).contains("has not returned")) {
+                    return false;
+                }
+                throw new AssertionError("the CDP path refused the read: " + e.getMessage(), e);
+            } catch (Exception e) {
+                throw new AssertionError("the read through the CDP path failed: " + e, e);
+            }
+        });
+        return log.get().isEmpty() ? List.of() : List.of(log.get().split(","));
+    }
+
+    /**
+     * Gap 95 (c), phase7-contracts.md 13.2 item 10 (S110 on a real page): {@code CallPolicy} refuses a middle button
+     * on {@code web.pointer} (a model's or a client's call, every route; a left click passes it, the control) and the
+     * recorder refuses a middle click on the page before anything is read or sent, while the page counts nothing. What
+     * a person's middle click does to the page is item (e)'s record, the launch's last act (it may leave the page
+     * unresponsive).
+     */
+    @Test
+    @Order(13)
+    void gap95cAMiddleClickIsAPersonsOnly() throws Exception {
+        String frontRef = ref("front");
+        Map<String, Object> front = Map.of("tag", "front");
+        Map<String, Object> point = borrowCentre();
+        Map<String, Object> middle = Map.of("by", front, "action", "CLICK", "point", point, "button", "MIDDLE");
+        int before = pointerLog().size();
+        ReadFacade facade = new ReadFacade(client());
+        Grounding grounding = new Grounding(facade);
+        assertAll("gap 95 (c), a middle click on the page, " + target.label,
+                () -> {
+                    String refusal = CallPolicy.arguments("web.pointer", middle);
+                    assertNotNull(refusal, "a model's or a client's middle click is refused");
+                    assertTrue(refusal.contains("button: MIDDLE"), refusal);
+                    assertNull(CallPolicy.arguments("web.pointer", Map.of("by", front, "action", "CLICK", "point",
+                            point)), "a left click passes the rule (the control)");
+                },
+                () -> {
+                    Capture capture = grounding.capture(false);
+                    Capture.Surface s = surfaceOf(capture, frontRef);
+                    assertNotNull(s, "the front browser is a WEB surface: " + capture.surfaces());
+                    int[] px = pixel(capture, s, point);
+                    Grounding.Grounded g = grounding.ground(capture, px[0], px[1], false);
+                    assertEquals("WEB", g.hit().get("surface"), String.valueOf(g.hit()));
+                    int reads = facade.reads.size();
+                    Recorder.Recorded r = recorder(facade).pointer(g, px[0], px[1],
+                            new Recorder.Click("MIDDLE", 1, List.of()), null);
+                    assertTrue(r.error(), String.valueOf(r));
+                    assertEquals(Recorder.CLIPBOARD, r.text());
+                    assertEquals(List.of(), facade.reads.subList(reads, facade.reads.size()), "refused before the"
+                            + " page is read");
+                    assertEquals(List.of(), facade.executed, "nothing acted");
+                },
+                () -> assertEquals(before, pointerLog().size(), "the page counted nothing: " + pointerLog()));
+    }
+
+    /**
+     * Gap 95 (d), phase7-contracts.md 13.2 item 10 (S111, the grey surface of S108's composite, D358 in the
+     * recorder; the launch's last item): a fresh agent attached with {@code webhost.mask=front} masks the front card;
+     * the browser is then masked on every route a model or a client has: {@code web.browsers} withholds its URL,
+     * title and frame names; its four page reads are refused on the agent's path and handed to the agent by the CDP
+     * path; the vision capture keeps its surface grey and composites nothing; the recorder refuses a click on it; the
+     * session's text snapshot shows one line for it. The controls: a session snapshot before the mask shows the page,
+     * a person's {@code redact: false} reads it on both paths, and {@code CallPolicy} refuses that argument to a model
+     * or a client.
+     */
+    @Test
+    @Order(14)
+    void gap95dAMaskedBrowserIsMaskedOnEveryRoute() throws Exception {
+        String unmasked = snapshotText(runDir("gap95d-snapshot-unmasked"));
+        assertTrue(unmasked.contains("\"Borrow\""), "the control: before the mask the snapshot shows the page: "
+                + unmasked);
+
+        disableAndAwaitStopped();
+        target.endpoint = target.attach(Map.of(MASK_OPTION, MASK_FRONT));
+        target.client = AgentClient.connect(target.endpoint);
+        WebHostTarget.awaitReady(client());
+        String frontRef = ref("front");
+        Map<String, Object> point = borrowCentre();
+        Map<String, Map<String, Object>> reads = new LinkedHashMap<>();
+        reads.put("web.bitmap", Map.of("browser", frontRef));
+        reads.put("web.dom.text", Map.of("browser", frontRef));
+        reads.put("web.ariaSnapshot", Map.of("browser", frontRef));
+        reads.put("web.hitTest", Map.of("browser", frontRef, "point", point));
+        ReadFacade facade = new ReadFacade(client());
+        Grounding grounding = new Grounding(facade);
+        assertAll("gap 95 (d), a masked browser, " + target.label,
+                () -> {
+                    Map<String, Object> f = browser("front");
+                    assertEquals(Boolean.TRUE, f.get("masked"), String.valueOf(f));
+                    assertEquals("", f.get("url"), "no URL");
+                    assertFalse(f.containsKey("title"), "no title: " + f.get("title"));
+                    List<?> frames = (List<?>) f.get("frames");
+                    assertTrue(frames != null && frames.size() >= 2, "the frames' keys stay: " + frames);
+                    for (Object o : frames) {
+                        Map<?, ?> frame = (Map<?, ?>) o;
+                        assertNotNull(frame.get("key"), String.valueOf(frame));
+                        assertEquals("", frame.get("name"), String.valueOf(frame));
+                        assertEquals("", frame.get("url"), String.valueOf(frame));
+                    }
+                    Map<String, Object> b = browser("back");
+                    assertNull(b.get("masked"), "the back browser is not masked: " + b);
+                    assertEquals(WebHostPages.title("back"), b.get("title"));
+                },
+                () -> {
+                    for (Map.Entry<String, Map<String, Object>> read : reads.entrySet()) {
+                        AgentRpcException e = assertThrows(AgentRpcException.class,
+                                () -> client().call(read.getKey(), read.getValue(), CALL), read.getKey());
+                        assertEquals(ErrorCodes.INVALID_PARAMS, e.error().code(), read.getKey() + ": " + e.getMessage());
+                        Map<String, Object> data = e.error().data();
+                        assertEquals("redact", data.get("param"), read.getKey() + ": " + data);
+                        assertEquals("masked", data.get("reason"), read.getKey() + ": " + data);
+                        assertEquals(frontRef, data.get("browser"), read.getKey() + ": " + data);
+                    }
+                },
+                () -> {
+                    for (Map.Entry<String, Map<String, Object>> read : reads.entrySet()) {
+                        assertNull(CallPolicy.arguments(read.getKey(), read.getValue()), read.getKey());
+                        assertNotNull(CallPolicy.arguments(read.getKey(), unredacted(read.getValue())),
+                                read.getKey() + ": redact: false is a person's argument");
+                        assertNotNull(client().call(read.getKey(), unredacted(read.getValue()), CALL).value(),
+                                read.getKey() + ": a person reads the page");
+                    }
+                    String text = String.valueOf(value(client().call("web.dom.text", unredacted(reads.get(
+                            "web.dom.text")), CALL)).get("text"));
+                    assertTrue(text.contains("Borrow"), "the control: a person's redact: false reads the page");
+                },
+                () -> {
+                    if (withPort()) {
+                        CdpWebPath path = new CdpWebPath();
+                        try {
+                            assertNull(path.open(client(), WebSettings.DEFAULT, null), "the CDP path opens");
+                            for (Map.Entry<String, Map<String, Object>> read : reads.entrySet()) {
+                                WebPathException e = assertThrows(WebPathException.class, () -> path.call(
+                                        read.getKey(), read.getValue(), CallOptions.defaults()),
+                                        read.getKey() + " is handed to the agent");
+                                assertTrue(String.valueOf(e.getMessage()).contains("masked"), e.getMessage());
+                            }
+                            Map<?, ?> text = (Map<?, ?>) path.call("web.dom.text", unredacted(reads.get(
+                                    "web.dom.text")), CallOptions.defaults()).value();
+                            assertTrue(String.valueOf(text.get("text")).contains("Borrow"),
+                                    "the control: a person's redact: false reads the page on the CDP path");
+                        } finally {
+                            path.close();
+                        }
+                    }
+                },
+                () -> {
+                    int bitmaps = facade.reads.size();
+                    Capture capture = grounding.capture(false);
+                    Capture.Surface s = surfaceOf(capture, frontRef);
+                    assertNotNull(s, "the masked browser is still a WEB surface: " + capture.surfaces());
+                    assertTrue(s.redacted(), "redacted: " + s);
+                    BufferedImage model = Grounding.decode(grounding.modelImage(capture, false));
+                    assertNotNull(model);
+                    long other = 0;
+                    Capture.Rect r = s.rect();
+                    for (int y = r.y(); y < r.y() + r.h(); y++) {
+                        for (int x = r.x(); x < r.x() + r.w(); x++) {
+                            other += (model.getRGB(x, y) & 0xFFFFFF) != GREY ? 1 : 0;
+                        }
+                    }
+                    assertEquals(0, other, "the masked page is solid grey in the model image: " + other + " of "
+                            + (long) r.w() * r.h() + " pixels are not");
+                    assertFalse(facade.reads.subList(bitmaps, facade.reads.size()).contains("web.bitmap"),
+                            "nothing was composited: " + facade.reads.subList(bitmaps, facade.reads.size()));
+                },
+                () -> {
+                    Capture capture = grounding.capture(false);
+                    Capture.Surface s = surfaceOf(capture, frontRef);
+                    assertNotNull(s, "the masked browser is still a WEB surface: " + capture.surfaces());
+                    int[] px = pixel(capture, s, point);
+                    Grounding.Grounded g = grounding.ground(capture, px[0], px[1], false);
+                    assertEquals(Boolean.TRUE, g.hit().get("masked"), "the hit is masked: " + g.hit());
+                    Recorder.Recorded rec = recorder(facade).pointer(g, px[0], px[1],
+                            new Recorder.Click("LEFT", 1, List.of()), null);
+                    assertTrue(rec.error(), String.valueOf(rec));
+                    assertEquals(Recorder.MASKED, rec.text());
+                    assertEquals(List.of(), facade.executed, "nothing acted");
+                },
+                () -> {
+                    String text = snapshotText(runDir("gap95d-snapshot-masked"));
+                    assertTrue(text.contains("[web " + frontRef + " masked]"), text);
+                    for (String page : List.of(WebHostPages.title("front"), WebHostPages.marker("front"),
+                            "\"Borrow\"", "Quantity")) {
+                        assertFalse(text.contains(page), "the snapshot shows nothing of the front page (" + page
+                                + "): " + text);
+                    }
+                });
+    }
+
+    /**
+     * Gap 95 (e), phase7-contracts.md 13.2 item 10 (S110: what Chromium does with a synthetic middle click, which SI
+     * stated from its behaviour; recorded in {@code timings.txt}, not asserted; the launch's last act, since it may
+     * leave the page unresponsive): a person's {@code web.pointer {action: CLICK, button: MIDDLE}} at the Borrow
+     * button through the agent with a {@value #MIDDLE_BUDGET_MS} ms budget, what it answered, how long the page then
+     * took to answer an evaluation again (re-asked, bounded at {@value #MIDDLE_RECOVERY_MS} ms), what the page
+     * counted, and whether the host's event dispatch thread and the back page still answer.
+     */
+    @Test
+    @Order(15)
+    void gap95eWhatAPersonsMiddleClickDoesToTheRealPageIsRecorded() throws Exception {
+        Map<String, Object> front = Map.of("tag", "front");
+        Map<String, Object> point = borrowCentre();
+        int before = pointerLog().size();
+        String answered;
+        long t0 = System.nanoTime();
+        try {
+            Map<String, Object> pressed = value(client().call("web.pointer", Map.of("by", front, "action", "CLICK",
+                    "point", point, "button", "MIDDLE"), CallOptions.defaults().withTimeoutMs(MIDDLE_BUDGET_MS)));
+            answered = "dispatched " + pressed.get("dispatched");
+        } catch (AgentRpcException e) {
+            answered = ErrorCodes.name(e.error().code());
+        }
+        long answeredMs = (System.nanoTime() - t0) / 1_000_000L;
+        long t1 = System.nanoTime();
+        Map<String, Object> probe = new LinkedHashMap<>();
+        probe.put("by", front);
+        probe.put("expression", "webhostPointer()");
+        AtomicReference<String> log = new AtomicReference<>();
+        String page;
+        try {
+            awaitCondition("the page to answer again", Duration.ofMillis(MIDDLE_RECOVERY_MS), () -> {
+                try {
+                    log.set(String.valueOf(Json.parse(String.valueOf(value(client().call("web.evaluate", probe,
+                            CallOptions.defaults().withTimeoutMs(1_000L))).get("json")))));
+                    return true;
+                } catch (AgentRpcException e) {
+                    return false;
+                } catch (AgentLostException e) {
+                    throw new AssertionError("the agent is gone", e);
+                }
+            });
+            page = "the page answered again after " + (System.nanoTime() - t1) / 1_000_000L + " ms";
+        } catch (AssertionError e) {
+            page = "the page did not answer within " + MIDDLE_RECOVERY_MS + " ms";
+        }
+        List<String> all = log.get() == null ? null : log.get().isEmpty() ? List.of() : List.of(log.get().split(","));
+        Object events = all == null ? "nothing it could report" : all.subList(Math.min(before, all.size()), all.size());
+        ItEnv.timing("java=" + java + " launch=" + target.label + " gap95e a person's middle click: " + answered
+                + " after " + answeredMs + " ms; " + page + "; the page counted " + events + "; the event dispatch"
+                + " thread " + answers("swing.snapshot", Map.of("maxDepth", 0L)) + "; the back page "
+                + answers("web.evaluate", Map.of("by", Map.of("tag", "back"), "expression", "1")));
+    }
+
+    /** "answers" or what a call with a 2 s budget answered instead, for (e)'s record. */
+    String answers(String primitive, Map<String, Object> params) {
+        try {
+            client().call(primitive, params, CallOptions.defaults().withTimeoutMs(2_000L));
+            return "answers";
+        } catch (AgentRpcException e) {
+            return "answers " + ErrorCodes.name(e.error().code()) + " (" + primitive + ")";
+        } catch (AgentLostException e) {
+            return "lost the agent (" + primitive + ")";
+        }
+    }
+
+    /** The parameters with {@code redact: false} (a person's argument). */
+    static Map<String, Object> unredacted(Map<String, Object> params) {
+        Map<String, Object> p = new LinkedHashMap<>(params);
+        p.put("redact", false);
+        return p;
+    }
+
+    /** A session's text snapshot ({@code ExecutorSession.snapshotText}), the session's output under {@code dir}. */
+    String snapshotText(Path dir) throws Exception {
+        SessionOptions options = SessionOptions.defaults(dir).withRecoverOnClose(false);
+        try (ExecutorSession session = ExecutorSession.open(Runs.PACK, client(), options)) {
+            return session.snapshotText(20_000);
+        }
+    }
+
+    /** The vision module's recorder over the check's facade, as a V1 session would hold it. */
+    static Recorder recorder(ReadFacade facade) {
+        return new Recorder(facade, PromptMask.keysOnly(), Captures.none(), VisionTier.V1);
+    }
+
+    /** The ref of the open browser with this tag. */
+    String ref(String tag) throws Exception {
+        return String.valueOf(browser(tag).get("ref"));
+    }
+
+    /** The {@code web.browsers} entry of the open browser with this tag. */
+    Map<String, Object> browser(String tag) throws Exception {
+        for (Map<String, Object> b : browsers(client())) {
+            if (tag.equals(b.get("tag"))) {
+                return b;
+            }
+        }
+        throw new AssertionError("no browser tagged " + tag);
+    }
+
+    /** The capture's {@code WEB} surface of a browser, or null. */
+    static Capture.Surface surfaceOf(Capture capture, String browserRef) {
+        for (Capture.Surface s : capture.surfaces()) {
+            if ("WEB".equals(s.kind()) && browserRef.equals(s.browser())) {
+                return s;
+            }
+        }
+        return null;
+    }
+
+    /** The image pixel of a viewport point of a surface's page (scale 1): the component's origin plus the point. */
+    static int[] pixel(Capture capture, Capture.Surface s, Map<String, Object> point) {
+        assertEquals(1.0, capture.scale(), "the capture is at scale 1");
+        Capture.Rect at = s.bounds() != null ? s.bounds() : s.rect();
+        return new int[] {at.x() + (int) number(point.get("x")), at.y() + (int) number(point.get("y"))};
+    }
+
+    /** {@code web.evaluate} of an expression in a page: the value parsed from its JSON. */
+    Object evaluate(Map<String, Object> by, String expression) throws Exception {
+        Map<String, Object> params = new LinkedHashMap<>();
+        params.put("by", by);
+        params.put("expression", expression);
+        return Json.parse(String.valueOf(value(client().call("web.evaluate", params, CALL)).get("json")));
+    }
+
+    /** {@link #evaluate} of an expression whose value is an object. */
+    @SuppressWarnings("unchecked")
+    Map<String, Object> evaluateObject(Map<String, Object> by, String expression) throws Exception {
+        return (Map<String, Object>) evaluate(by, expression);
     }
 
     // ------------------------------------------------------------------------------------------- helpers

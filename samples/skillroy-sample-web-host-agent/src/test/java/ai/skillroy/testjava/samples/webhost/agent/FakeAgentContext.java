@@ -27,18 +27,23 @@ import java.lang.reflect.Proxy;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
- * An {@link AgentContext} for the webhost module's tests: a real SPI registry and a recording log; every other
- * accessor fails the test, which shows that the module uses nothing else (no primitive, no capability, no event, no
- * thread of the agent, nothing of the host but its registry).
+ * An {@link AgentContext} for the webhost module's tests: a real SPI registry, a recording log and the agent options
+ * ({@code options()} and {@code option(key)} over {@link #options}); every other accessor fails the test, which shows
+ * that the module uses nothing else (no primitive, no capability, no event, no thread of the agent, nothing of the
+ * host but its registry).
  */
 final class FakeAgentContext {
 
     final Spi spi = new Spi();
     final Log log = new Log();
     final List<String> unexpected = new CopyOnWriteArrayList<String>();
+    /** The agent options the context answers. */
+    final Map<String, String> options = new ConcurrentHashMap<String, String>();
     final AgentContext context = (AgentContext) Proxy.newProxyInstance(AgentContext.class.getClassLoader(),
             new Class<?>[] {AgentContext.class}, new InvocationHandler() {
                 @Override
@@ -49,6 +54,12 @@ final class FakeAgentContext {
                     }
                     if ("log".equals(name)) {
                         return log;
+                    }
+                    if ("options".equals(name)) {
+                        return Collections.unmodifiableMap(options);
+                    }
+                    if ("option".equals(name)) {
+                        return args[0] == null ? null : options.get((String) args[0]);
                     }
                     if ("toString".equals(name)) {
                         return "FakeAgentContext";

@@ -165,9 +165,11 @@ Read these before you run the agent on a shared host.
   toolset member whose `configs` disable it, and the planner's model choosing `approve`; a hook detach that ran out of its time budget on a real application
   (a Byteman rule left installed by such a detach keeps running until the target restarts). Phase 7 adds heavyweight popups
   and native drag and drop under the pointer primitives, windowed JCEF on a Java 8 target, a long vision session and the
-  session's fold under the provider's history rule. The delta review's fixes add a masked browser on real JCEF (the fixes ran
-  against fakes and over real Swing components), a real JCEF frame under a `JOptionPane`, the paste and the middle click on an
-  X11 desktop with a headed JVM, a second OS user for the writers' link rule, an APFS case-insensitive volume, a real
+  session's fold under the provider's history rule. The delta review's fixes add the paste and the middle click on an X11
+  desktop with a headed JVM (a masked browser and a modal dialog over a page have run against real JCEF since, gap 95;
+  there a person's synthetic middle click left an off-screen JCEF page unresponsive, a click a model or a client cannot
+  send, S110; whether Chromium pastes the PRIMARY selection was not run), a second OS user for the writers' link rule,
+  an APFS case-insensitive volume, a real
   multi-screen desktop and HiDPI (the glass bound at scale 3 through a seam only). The full list is §8 of the threat model.
 
 ## Reviews

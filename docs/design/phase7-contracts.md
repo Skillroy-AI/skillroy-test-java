@@ -3118,6 +3118,63 @@ checks (VW), item 11 in the host-safety tests (VS).
     `JcefKitOffScreenDisplayTest`. **Fix wave (Phase 7 review, FB, 2026-10-10):** the second check no longer skips: it
     asserts `swing.hittest` `OK` first, so that a web host target that lost the Swing side's ids fails item 10's Swing
     half instead of skipping it (L3-S2).
+    **(Phase 7 follow-up, gap 95, built 2026-10-11.)** Five more `WebHostChecks` items run in every launch of
+    `WebHostEndToEndIT` (both renderings on a Java 25 target, off screen on a Java 8 target), after item 8, so that the
+    security fixes S108, S109, S110, S111 and S133, whose tests ran against fakes, also run against real JCEF. The host
+    gains the button `notice` (P4 §9.1) and its agent module an optional `CaptureMask` (P4 §9.2) for them. The
+    controller's halves are the vision module's own classes (`Grounding.capture`, `Grounding.modelImage`,
+    `Grounding.ground`, `Recorder.pointer`) over a facade (`SessionActions`) that passes the check's reads to the agent,
+    and `CallPolicy.arguments`. Within an item every route is asserted in one `assertAll`, so that a run with several
+    protections off reports each; nothing sleeps (events, `window.opened` and `window.closed` among them, and a bounded
+    poll in (b) and (e)).
+    (a) **A modal dialog over the page** (S108 on one desktop, S109, the modal check of §4.3 and D404):
+    `swing.click {by: {id: notice}}` opens the host's modal `JOptionPane` over the page (`window.opened {modal: true}`
+    awaited). While it shows: `web.browsers` gives the front entry `blockedBy.dialog`, the dialog's ref; the agent's
+    `web.pointer {action: CLICK}` at the Borrow button is `MODAL_OPEN` with `data {dialog, browser}`, and with a port
+    the CDP path hands the same call to the agent (`UNSUPPORTED`); the page's pointer counter counts nothing; the vision
+    capture (`SCREEN`) has the dialog's window on top and the front surface's `covered` is exactly the dialog's
+    rectangle within the surface's `rect`; the model image keeps the capture's own pixels (the dialog) in every pixel of
+    `covered` and shows the page's `web.bitmap` in the rest of `rect` (at least 99 % of those pixels equal, and the
+    dialog's area differs from the page's pixels there, so the comparison says something); `Grounding.ground` at the
+    Borrow button's pixel answers `surface: WEB` with `blockedBy` the dialog, and `Recorder.pointer` (a left click)
+    refuses it with `Recorder.PAGE_BLOCKED` before anything is read or sent. Then `swing.dismiss` answers the dialog
+    (`window.closed` awaited), `blockedBy` is gone and the agent's pointer click counts four trusted events again (the
+    control). (b) **No late click on the CDP path** (S133, the sceptic's probe on a real page; launches with a port):
+    through `web.evaluate` the front page replaces its own `document.elementFromPoint`, once, by one that is busy for
+    4 s, so that the page stalls the pointer's own hit read; the CDP path's `web.pointer {browser: <front ref>, action:
+    CLICK}` (the selection by ref, so that the path asks the agent nothing before the hit) with a 1 s budget answers
+    `TIMEOUT`; once the path's Playwright thread has returned (a bounded poll: a call while it is busy is `UNSUPPORTED`)
+    the page's counter shows no event, and the same call with the default budget then clicks (the control). (c) **A
+    middle click is a person's only** (S110 on a real page): `CallPolicy.arguments` refuses `web.pointer` with `button:
+    MIDDLE` (a model's or a client's call, every route; a left click passes, the control), and `Recorder.pointer`
+    refuses a middle click on the page (`Recorder.CLIPBOARD`) before anything is read or sent, with the counter
+    unchanged. (d) **A masked browser on every route** (S111, S108's grey surface, D358 in the recorder; the last
+    item but (e)): the check disables the
+    agent and attaches a fresh one with the agent option `webhost.mask=front` (item 8's mechanism), so that the
+    sample's module registers a `CaptureMask` naming the front card; then `web.browsers` lists the front browser with
+    `masked: true`, `url: ""`, no `title`, its frames' `name` and `url` empty (their keys kept) and the back browser
+    unmasked; `web.bitmap`, `web.dom.text`, `web.ariaSnapshot` and `web.hitTest` of the front browser are
+    `INVALID_PARAMS {param: redact, reason: masked, browser}` on the agent's path, and with a port the CDP path hands
+    them to the agent (`UNSUPPORTED`); a person's `redact: false` reads the page on both paths (the control), and
+    `CallPolicy.arguments` refuses that argument on the four for a model or a client; the vision capture's front
+    surface is `redacted: true` and its `rect` is solid grey (RGB 128, 128, 128) in the model image (nothing
+    composited); `Grounding.ground` at the Borrow button's pixel answers `masked: true` and `Recorder.pointer` refuses
+    it (`Recorder.MASKED`); a session's text snapshot (`ExecutorSession.snapshotText`) holds the line `[web <front ref>
+    masked]` and nothing of the front page (its title, its URL's marker, its text), where a snapshot taken before the
+    re-attach showed the page (the control). (e) **What a person's middle click does to a real page** (S110's reason,
+    which SI stated from Blink's behaviour; recorded in `timings.txt`, not asserted; the launch's very last act, because
+    it may leave the page unresponsive): a person's `web.pointer {action: CLICK, button: MIDDLE}` at the Borrow button
+    through the agent with a 5 s budget, what it answered, how long the page then took to answer an evaluation again
+    (re-asked, at most 20 s), which pointer events the page counted, and whether the host's event dispatch thread
+    (`swing.snapshot`) and the back page (`web.evaluate`) still answer within 2 s. **As run (2026-10-11, the arm64
+    image):** green in all eight launches on a Java 25 target and the four off-screen launches on a Java 8 target ((b)
+    in the launches with a port); `covered` was the notice's 358 x 90 part of the page, all its 32,220 pixels kept and
+    the page shown around it; the late call answered `TIMEOUT` after 1.0 s and the path's thread returned after about
+    4.0 s with no event sent. Each protection neutralised in place made its check fail (the late click's four events
+    arrived after the caller's `TIMEOUT` under the pre-S133 order). (e) found that a person's synthetic middle click
+    leaves an **off-screen** JCEF page unresponsive (the call `TIMEOUT` at 5 s, no evaluation answered for 20 s, the event
+    dispatch thread and the back page answering, on both target Javas), while a windowed page takes it as `pointerdown`,
+    `mousedown` and `mouseup`, trusted, and no `click`. `../TODO.md`, gap 95.
 11. **Host safety** (`HostSafetyDisplayTest`, `HostSafetyIT`): a blocked EDT makes `swing.capture`, `swing.hitTest`
     and `swing.pointer` time out cleanly and nothing runs late, **including an EDT blocked from inside the
     `MOUSE_PRESSED` handler of the sequence's own press**: the call returns `fired: false, EDT_BUSY, dispatched 1 of 4, balanced: true`,
@@ -3256,7 +3313,11 @@ inheritance of the pixel files, on no Windows host; a second OS user for the wri
 probing user's); an APFS case-insensitive volume for S118's labels (a string comparison, tested in the compiler, the reader
 and the constructor); the amd64 image, which no fix round used. The delta review's own lenses ran with no display and no
 image run: S104 and S105 were shown from the code and the JDK's sources and only then run by SG, and the paste of S110 from
-the agent's dispatch probed headless with Swing's sandbox clipboard.
+the agent's dispatch probed headless with Swing's sandbox clipboard. (Phase 7 follow-up, gap 95, built 2026-10-11: the
+real masked browser, one desktop holding a real JCEF frame and a `JOptionPane` (S108), and S133's late click on real
+Chromium have run since, §13.2 item 10's gap-95 checks, on both target Javas in the arm64 image; whether Chromium pastes
+the PRIMARY selection on a synthetic middle click and the paste of S110 on a headed JVM stay not verified, and a person's
+synthetic middle click was found to leave an off-screen JCEF page unresponsive.)
 
 ---
 
