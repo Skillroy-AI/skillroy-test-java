@@ -1368,7 +1368,10 @@ on a source with an allow-list, through `SqlGuard` and `PromptMask.rows`; images
 runs live under `<out>/runs/run-<n>/`, exports directly under `<out>`, and of a run's `failure/` files only `.json`,
 `.jsonl`, `.txt` and `.png` are served (the mask cannot read a trace zip); a `readOnly` flag on a resource travels in
 its `_meta` (MCP resource annotations have none); `skillroy_scenario_run` in `approve` uses the session's approver
-(`REJECT_ALL` by default, so the server never approves on a client's behalf); calls are serialised on the session;
+(`REJECT_ALL` by default, so the server never approves on a client's behalf; (Phase 7 security fix, S115, built
+2026-10-11, SJ; P7 §9.4) `approve` is refused while that approver is `REJECT_ALL`, before anything is compiled or
+reserved, and `live` never writes, so a client's run writes nothing in the operator's bindings root in either mode);
+calls are serialised on the session;
 the stdin bridge lets the SDK see the end of its input only once every request has been answered (the SDK's stdio
 transport stops writing the moment its input ends); a lost agent while idle is noticed at the next call unless the
 host calls `agentLost` (the CLI watches the event stream); `slf4j-api` finds no provider and prints its notice once

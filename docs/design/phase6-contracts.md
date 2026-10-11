@@ -2723,7 +2723,9 @@ with user information, a query or a fragment is refused; **every `ANTHROPIC_*` v
 (the four named and `ANTHROPIC_BASE_URL`, which the gateway reads, among them; `inference.yaml` names no variable
 today); a header name or a key the grammar does not fix is never echoed in a message; the options map onto the
 property names (`--telemetry` is `skillroy.telemetry`, …) and the messages name the property. The file exporter's
-directory is `<out>/telemetry/` for `run` (its `--out`), `session` (its `--out` or `run-output/<session id>`), `mcp`
+directory is `<out>/telemetry/` for `run` (its `--out`), `session` (its `--out` or `run-output/<session id>`; (Phase 7
+security fix, S148, built 2026-10-11, SJ; P7 §9.3) without `--out` a new owner-only directory under the system's
+temporary directory), `mcp`
 (its `--out`) and `re-resolve` (its report directory); `triage` and `author` (whose `--out` is the scenarios
 directory) need `out:` in `telemetry.yaml` or `skillroy.telemetry.out`, else the usage error names the setting.
 `re-resolve` and `triage` export their root span only (their model calls are in their own ledgers and reports);

@@ -964,6 +964,14 @@ public final class PlanCompiler {
                 throw error(line, "the image label '" + label + "' is used twice; a label names one baseline or"
                         + " anchor per scenario");
             }
+            // Phase 7 security fix, S118 (phase7-contracts.md 8.1): labels are unique ignoring case, since a label
+            // names a file and two such labels share one on a case-insensitive volume.
+            for (String other : imageLabels) {
+                if (!other.equals(label) && other.equalsIgnoreCase(label)) {
+                    throw error(line, "the image label '" + label + "' differs from '" + other + "' only in case; a"
+                            + " label names a file");
+                }
+            }
         }
 
         /** A base verb's calls compiled as {@link #step} compiles a step's calls (no captures, no cleanups). */

@@ -209,7 +209,9 @@ class SessionToolsTest {
             assertTrue(fx.desk.recovered.get() >= 1, "a run that did not pass recovers");
             McpSchema.CallToolResult approve = fx.call("skillroy_scenario_run", Map.of("yaml", yaml.replace("desk-run",
                     "desk-approve"), "mode", "approve"));
-            assertEquals("APPROVE", String.valueOf(McpFixture.json(approve).get("mode")).toUpperCase());
+            // Phase 7 security fix, S115: approve is refused on a server without an approver (ScenarioRunApproveTest).
+            assertTrue(approve.isError() && McpFixture.text(approve).contains("mode approve is refused"),
+                    McpFixture.text(approve));
             assertTrue(fx.call("skillroy_scenario_run", Map.of("yaml", yaml, "mode", "replay")).isError());
         }
     }

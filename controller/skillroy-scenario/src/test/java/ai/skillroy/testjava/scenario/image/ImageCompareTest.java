@@ -165,4 +165,39 @@ class ImageCompareTest {
         assertNull(ImageCompare.Rect.of(java.util.Map.of("x", 1L, "y", 2L, "w", -3L, "h", 4L)));
         assertThrows(IllegalArgumentException.class, () -> new ImageCompare.Rect(0, 0, -1, 1));
     }
+
+    /**
+     * Phase 7 security fix, S143 (P2 11.3: no pixel data passes through {@code java.io.tmpdir}): the PNG encoding and
+     * decoding never use ImageIO's file cache. The cache directory is pointed at a directory that is then removed, so
+     * any use of the file cache fails ({@code ImageIO.write} and {@code ImageIO.createImageInputStream} did, throwing
+     * "Not a directory!" or "Can't create cache file!"), while the memory-cached streams encode and decode as before
+     * and nothing is created where the cache would be. The bytes are those {@code ImageIO.write} gives.
+     */
+    @Test
+    void aPngIsEncodedAndDecodedWithoutImageIoFileCache() throws Exception {
+        java.nio.file.Path parent = java.nio.file.Files.createTempDirectory("s143-");
+        java.nio.file.Path cache = java.nio.file.Files.createDirectory(parent.resolve("cache"));
+        boolean useCache = javax.imageio.ImageIO.getUseCache();
+        java.io.File cacheDir = javax.imageio.ImageIO.getCacheDirectory();
+        BufferedImage image = vector(BufferedImage.TYPE_INT_ARGB);
+        ByteArrayOutputStream reference = new ByteArrayOutputStream();
+        javax.imageio.ImageIO.setUseCache(false);
+        assertTrue(javax.imageio.ImageIO.write(image, "png", reference));
+        try {
+            javax.imageio.ImageIO.setUseCache(true);
+            javax.imageio.ImageIO.setCacheDirectory(cache.toFile());
+            java.nio.file.Files.delete(cache);
+            byte[] png = ImageCompare.encodePng(image);
+            assertArrayEquals(reference.toByteArray(), png, "the bytes ImageIO.write gives");
+            assertEquals(VECTOR_HASH, ImageCompare.rasterHash(ImageCompare.decodePng(png)));
+            try (java.util.stream.Stream<java.nio.file.Path> entries = java.nio.file.Files.list(parent)) {
+                assertEquals(List.of(), entries.toList(), "nothing was created where the file cache would be");
+            }
+        } finally {
+            javax.imageio.ImageIO.setCacheDirectory(cacheDir);
+            javax.imageio.ImageIO.setUseCache(useCache);
+            java.nio.file.Files.deleteIfExists(cache);
+            java.nio.file.Files.deleteIfExists(parent);
+        }
+    }
 }

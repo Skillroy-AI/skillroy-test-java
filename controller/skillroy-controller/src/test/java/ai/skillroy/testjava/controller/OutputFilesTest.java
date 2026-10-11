@@ -28,6 +28,7 @@ import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.nio.file.attribute.UserPrincipal;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -181,5 +182,61 @@ class OutputFilesTest {
         assertTrue(OutputFiles.directoryProblem(tmp.resolve("missing")).contains("does not exist"));
         Path file = Files.writeString(tmp.resolve("plain"), "x");
         assertTrue(OutputFiles.directoryProblem(file).contains("not a directory"));
+    }
+
+    private static java.nio.file.attribute.AclEntry allow(UserPrincipal who, Set<java.nio.file.attribute.AclEntryFlag>
+            flags, java.nio.file.attribute.AclEntryPermission... rights) {
+        return java.nio.file.attribute.AclEntry.newBuilder().setType(java.nio.file.attribute.AclEntryType.ALLOW)
+                .setPrincipal(who).setFlags(flags).setPermissions(rights).build();
+    }
+
+    /**
+     * Phase 7 security fix, S141 (phase2-contracts.md 11.3), Windows-only behaviour unit-tested on built ACL values
+     * (no Windows host): the ACL branch of the directory rule now judges what others may write, as the POSIX branch
+     * does. Modify for Authenticated Users (inherited from a drive root, the default under {@code C:\}) is refused, also
+     * when it applies only to the files created in the directory; the owner's, the system account's and the
+     * administrators' entries, a read-only entry, a DENY entry and an inherit-only CREATOR OWNER entry (a server
+     * edition's drive root passes one to every folder) are accepted. Before the fix the ACL branch judged the owner
+     * only, and the judgement did not exist.
+     */
+    @Test
+    void anAclThatLetsAnotherPrincipalWriteIsRefused() {
+        UserPrincipal me = () -> "me";
+        UserPrincipal system = () -> "SYSTEM";
+        UserPrincipal admins = () -> "Administrators";
+        UserPrincipal creator = () -> "CREATOR OWNER";
+        UserPrincipal users = () -> "Authenticated Users";
+        Set<java.nio.file.attribute.AclEntryFlag> inherit = Set.of(java.nio.file.attribute.AclEntryFlag.FILE_INHERIT,
+                java.nio.file.attribute.AclEntryFlag.DIRECTORY_INHERIT);
+        Set<java.nio.file.attribute.AclEntryFlag> inheritOnly = Set.of(java.nio.file.attribute.AclEntryFlag
+                .FILE_INHERIT, java.nio.file.attribute.AclEntryFlag.DIRECTORY_INHERIT,
+                java.nio.file.attribute.AclEntryFlag.INHERIT_ONLY);
+        java.nio.file.attribute.AclEntryPermission[] all = java.nio.file.attribute.AclEntryPermission.values();
+        java.util.List<java.nio.file.attribute.AclEntry> accepted = java.util.List.of(allow(me, inherit, all),
+                allow(system, inherit, all), allow(admins, inherit, all), allow(creator, inheritOnly, all),
+                allow(users, inherit, java.nio.file.attribute.AclEntryPermission.READ_DATA,
+                        java.nio.file.attribute.AclEntryPermission.EXECUTE),
+                java.nio.file.attribute.AclEntry.newBuilder().setType(java.nio.file.attribute.AclEntryType.DENY)
+                        .setPrincipal(users).setPermissions(all).build());
+        assertNull(OutputFiles.aclWriteProblem(accepted, me, system, admins, creator));
+
+        java.util.List<java.nio.file.attribute.AclEntry> modify = new java.util.ArrayList<>(accepted);
+        modify.add(allow(users, inherit, java.nio.file.attribute.AclEntryPermission.READ_DATA,
+                java.nio.file.attribute.AclEntryPermission.WRITE_DATA, java.nio.file.attribute.AclEntryPermission
+                        .APPEND_DATA, java.nio.file.attribute.AclEntryPermission.DELETE));
+        String problem = OutputFiles.aclWriteProblem(modify, me, system, admins, creator);
+        assertTrue(problem != null && problem.startsWith("its ACL allows Authenticated Users APPEND_DATA, DELETE,"
+                + " WRITE_DATA (remove the inheritance") && problem.contains("icacls"), String.valueOf(problem));
+
+        java.util.List<java.nio.file.attribute.AclEntry> files = java.util.List.of(allow(me, inherit, all),
+                allow(users, inheritOnly, java.nio.file.attribute.AclEntryPermission.WRITE_DATA));
+        String toFiles = OutputFiles.aclWriteProblem(files, me, system, admins, creator);
+        assertTrue(toFiles != null && toFiles.contains("on the files created in it"), String.valueOf(toFiles));
+        assertTrue(OutputFiles.aclWriteProblem(java.util.List.of(allow(creator, inherit,
+                java.nio.file.attribute.AclEntryPermission.WRITE_DATA)), me, system, admins, creator) != null,
+                "CREATOR OWNER is exempt only where it is inherit-only");
+        assertTrue(OutputFiles.aclWriteProblem(java.util.List.of(allow(admins, inherit, all)), me, system, null,
+                creator) != null, "a built-in that could not be resolved is not exempt");
+        assertEquals("its ACL cannot be read", OutputFiles.aclWriteProblem(null, me, system, admins, creator));
     }
 }

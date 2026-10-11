@@ -993,9 +993,15 @@ public record Plan(int planVersion, String scenarioId, String pack, String packV
             });
         }
         List<String> images = json.containsKey("images") ? r.strings(json, "images") : List.of();
+        Set<String> folded = new HashSet<>();
         for (String label : images) {
             if (!ImageCheck.LABEL.matcher(label).matches()) {
                 throw r.error("images: '" + label + "' is not a label ([A-Za-z0-9][A-Za-z0-9._-]{0,63})");
+            }
+            // Phase 7 security fix, S118 (phase7-contracts.md 8.2): a label names a file, so two labels equal
+            // ignoring case would share one on a case-insensitive volume.
+            if (!folded.add(label.toLowerCase(Locale.ROOT))) {
+                throw r.error("images: '" + label + "' differs from another label only in case; a label names a file");
             }
         }
         if (!images.equals(imagesOf(steps))) {
@@ -1008,7 +1014,13 @@ public record Plan(int planVersion, String scenarioId, String pack, String packV
         }
         List<Call> cleanup = new ArrayList<>();
         for (Map<String, Object> c : r.objects(json, "cleanup")) {
-            cleanup.add(r.call(c));
+            Call call = r.call(c);
+            // Phase 7 security fix, S119 (phase7-contracts.md 8.2): a cleanup call is sent without a guard, so the
+            // reader refuses one rather than show a guard that is never evaluated.
+            if (call.guard() != null) {
+                throw r.error("cleanup: a guard is allowed on a step's swing.pointer only");
+            }
+            cleanup.add(call);
         }
         Map<String, String> launchProperties = new LinkedHashMap<>();
         for (Map.Entry<String, Object> e : r.object(json, "launchProperties").entrySet()) {
@@ -1534,6 +1546,10 @@ public record Plan(int planVersion, String scenarioId, String pack, String packV
             keys(image, Set.of("label", "masks", "maxDiffPixels"), "image check");
             if (!(image.get("masks") instanceof List<?> masks)) {
                 throw error("image check: 'masks' must be an array");
+            }
+            if (masks.size() > ImageMasks.MAX_MASKS) {
+                // Phase 7 security fix, S119: the compiler's bound holds for a plan written by hand too.
+                throw error("image check: at most " + ImageMasks.MAX_MASKS + " masks, found " + masks.size());
             }
             for (Object mask : masks) {
                 String problem = ImageMasks.problem(mask);

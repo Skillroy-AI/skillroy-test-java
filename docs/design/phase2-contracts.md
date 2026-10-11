@@ -1481,6 +1481,12 @@ Two definitions used below:
    `live` with `writeBindings`, for a plan that needs bindings is refused before any pack call as `ENVIRONMENT`
    ("approve needs a bindings root …; nothing was resolved"), by `Binder.bind` and by `PlanExecutor` before the
    pre-flight (built 2026-10-03; the CLI refuses it as a usage error earlier still).
+   **(Phase 7 security fix, S116, built 2026-10-11, SJ; P7 §8.7.)** An existing file at the derived path that cannot be
+   read, or that names another scenario or environment, is not taken for an absent one: `approve`, `live` or
+   `re-resolve` with `writeBindings`, and a bind whose plan has images, end `ENVIRONMENT` naming the file and the
+   reason, and the file is left as it is (before, `approve` rewrote a corrupt file from the new resolutions, dropping
+   its images; a person repairs or removes such a file now). A plan whose bindings hold images only writes nothing
+   here at bind time (P7 §8.7, S115).
 9. The run continues with these bindings (the `resolve` command stops here instead, §12.1).
 
 **`re-resolve` (Phase 5, built 2026-10-08; P5 §8.1, §8.2).** `BindMode.RE_RESOLVE` binds as `live`
@@ -1877,6 +1883,24 @@ label, renderKey, result, …}`; `capabilities` gains `agentHash` and `contribut
 the person's flag is set. New files: `failure/image-<label>-expected.png`, `-actual.png`, `-diff.png`, and in `approve`
 `candidates/image-<label>.png`.
 
+**(Phase 7 security fix, S141, built 2026-10-11, SJ.) The ACL rule of a run's directory.** On a volume with ACLs
+(Windows) "others may not write to it" is judged too, not only the owner: `OutputFiles.directoryProblem` refuses a
+directory whose ACL has an ALLOW entry giving a principal other than the current user, the system account or the
+administrators group `WRITE_DATA`, `APPEND_DATA`, `DELETE`, `DELETE_CHILD`, `WRITE_ACL` or `WRITE_OWNER`, entries that
+only children inherit included (the run's files and subdirectories receive them), except an inherit-only CREATOR
+OWNER entry (it becomes the creator's own entry; a server edition's drive root passes one to every folder); a DENY
+entry is not credited, a built-in that cannot be resolved is not exempt, and the message carries the remedy (`icacls
+<dir> /inheritance:r /grant:r "%USERNAME%":(OI)(CI)F`). A folder under `C:\` inherits Modify for Authenticated Users
+and is therefore refused. Unit-tested on built ACL values; not verified on a Windows host. A directory junction is
+still taken for a directory (S142, proposed for the owner's acceptance).
+
+**(Phase 7 security fix, S143, built 2026-10-11, SJ: `ImageCompare`.) No pixel data passes through
+`java.io.tmpdir`:** the controller encodes and decodes PNG through ImageIO's memory-cached streams
+(`MemoryCacheImageOutputStream`, `MemoryCacheImageInputStream`), never through `ImageIO.write` or
+`ImageIO.createImageInputStream`, whose default file cache wrote every baseline, candidate, diff and failure image (up to
+64 MB for a decoded baseline) into a temporary file outside `OutputFiles`; the agent's capture already did so. The
+vision module's `Grounding` and the CDP path's `Png` are the other half of S143 (SI's package).
+
 ### 11.4 What is never written
 
 A value from `credentials.yaml` (a credential field, a JDBC password, a driver property, URL user-info) is never
@@ -1995,6 +2019,12 @@ logs or prints (a header naming an `ANTHROPIC_*` variable is refused).
 of the glass to a model or a client at all; a capture's bytes on any text route (unchanged: the journal, `run.jsonl` and
 the export hold hashes and file names); the baselines and anchors beside a bindings file hold masked pixels only, and
 are reviewed code.
+
+**(Phase 7 security fix, S146, S145, built 2026-10-11, SJ; P7 §6.6, §6.7, §8.7.)** The bindings file's rule covers its
+`images` section: the export refuses a bindings file whose text, images included, holds a masked value, and a focus
+owner's `{text}` locator (a text field's content) is never recorded in an entry. The mismatch's
+`failure/image-<label>-expected.png` and `-actual.png` hold the compared rasters with the comparison's masks blanked,
+so a step's `mask` hides its rectangle in run output as in the baseline.
 
 ### 11.5 Reserved for interactive use (not built)
 

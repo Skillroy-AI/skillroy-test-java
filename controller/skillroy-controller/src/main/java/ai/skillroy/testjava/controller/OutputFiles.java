@@ -23,18 +23,28 @@ import java.io.OutputStreamWriter;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.DirectoryNotEmptyException;
 import java.nio.file.FileAlreadyExistsException;
+import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.nio.file.attribute.AclEntry;
+import java.nio.file.attribute.AclEntryFlag;
+import java.nio.file.attribute.AclEntryPermission;
+import java.nio.file.attribute.AclEntryType;
+import java.nio.file.attribute.AclFileAttributeView;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.nio.file.attribute.PosixFileAttributes;
 import java.nio.file.attribute.PosixFilePermission;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.nio.file.attribute.UserPrincipal;
+import java.util.Collections;
+import java.util.EnumSet;
+import java.util.List;
 import java.util.Objects;
 import java.util.Set;
+import java.util.TreeSet;
 
 /**
  * The one way every writer of a run's output opens a file (Phase 6 security fix, pass 2, P2-L8-F3 and P2-L8-S1;
@@ -62,7 +72,9 @@ import java.util.Set;
  *
  * <p>On a volume with neither POSIX permissions nor ACLs (FAT, exFAT) no owner can be judged and nothing can be
  * linked: the directory rule accepts it. The ACL branch (Windows) compares the owner with the owner of a file this
- * process creates, the system account and the administrators group; <em>not verified on a Windows host</em>.
+ * process creates, the system account and the administrators group, and refuses a directory whose ACL lets another
+ * principal write to it or to the files created in it ({@link #aclWriteProblem}; Phase 7 security fix, S141, the ACL
+ * twin of the POSIX "others may write" rule); <em>not verified on a Windows host</em>.
  *
  * <p>Stateless; safe from any thread.
  */
@@ -149,9 +161,80 @@ public final class OutputFiles {
                             + PosixFilePermissions.toString(permissions) + ")";
                 }
             }
+            if (protection == SecureFiles.Protection.ACL) {
+                AclFileAttributeView view = Files.getFileAttributeView(absolute, AclFileAttributeView.class);
+                return aclWriteProblem(view == null ? null : view.getAcl(), aclMe, SecureFiles.systemAccount(),
+                        SecureFiles.administrators(), CreatorOwner.PRINCIPAL);
+            }
             return null;
         } catch (IOException | RuntimeException e) {
             return "its attributes cannot be read (" + e.getClass().getSimpleName() + ")";
+        }
+    }
+
+    /**
+     * ACL rights that let a principal plant, replace or remove an entry of a directory, change a file created in it, or
+     * take either over (Phase 7 security fix, S141).
+     */
+    static final Set<AclEntryPermission> WRITE_RIGHTS = Collections.unmodifiableSet(EnumSet.of(
+            AclEntryPermission.WRITE_DATA, AclEntryPermission.APPEND_DATA, AclEntryPermission.DELETE,
+            AclEntryPermission.DELETE_CHILD, AclEntryPermission.WRITE_ACL, AclEntryPermission.WRITE_OWNER));
+
+    /**
+     * The ACL half of "others may not write to it" (Phase 7 security fix, S141; phase2-contracts.md 11.3): why the
+     * directory's ACL lets a principal other than the current user, the system account or the administrators group
+     * write to the directory or to the files a run creates in it, or null. Every ALLOW entry is judged, the ones only
+     * children inherit ({@code INHERIT_ONLY}) too, since the run's files and subdirectories receive them; an
+     * inherit-only entry for CREATOR OWNER is not refused (it becomes the creator's own entry on the new file, and a
+     * server edition's drive root passes one to every folder); DENY entries are not credited. A built-in that could
+     * not be resolved (null) is not exempt. The remedy in the message is the one of {@code SECURITY.md}.
+     *
+     * @param acl the directory's ACL, or null when it cannot be read
+     */
+    static String aclWriteProblem(List<AclEntry> acl, UserPrincipal me, UserPrincipal system,
+                                  UserPrincipal administrators, UserPrincipal creatorOwner) {
+        if (acl == null) {
+            return "its ACL cannot be read";
+        }
+        for (AclEntry entry : acl) {
+            if (entry.type() != AclEntryType.ALLOW) {
+                continue;
+            }
+            UserPrincipal who = entry.principal();
+            if (who.equals(me) || who.equals(system) || who.equals(administrators)) {
+                continue;
+            }
+            if (entry.flags().contains(AclEntryFlag.INHERIT_ONLY) && who.equals(creatorOwner)) {
+                continue;
+            }
+            Set<AclEntryPermission> granted = EnumSet.noneOf(AclEntryPermission.class);
+            granted.addAll(entry.permissions());
+            granted.retainAll(WRITE_RIGHTS);
+            if (!granted.isEmpty()) {
+                Set<String> names = new TreeSet<>();
+                granted.forEach(p -> names.add(p.name()));
+                return "its ACL allows " + who.getName() + " " + String.join(", ", names)
+                        + (entry.flags().contains(AclEntryFlag.INHERIT_ONLY) ? " on the files created in it" : "")
+                        + " (remove the inheritance and grant only yourself: icacls <dir> /inheritance:r /grant:r"
+                        + " \"%USERNAME%\":(OI)(CI)F)";
+            }
+        }
+        return null;
+    }
+
+    /** The CREATOR OWNER principal, resolved once; null where it cannot be resolved (then it is not exempt). */
+    private static final class CreatorOwner {
+        static final UserPrincipal PRINCIPAL = lookup();
+
+        private CreatorOwner() {
+        }
+
+        private static UserPrincipal lookup() {
+            try {
+                return FileSystems.getDefault().getUserPrincipalLookupService().lookupPrincipalByName("CREATOR OWNER");
+            } catch (IOException | RuntimeException e) {
+                return null;
+            }
         }
     }
 

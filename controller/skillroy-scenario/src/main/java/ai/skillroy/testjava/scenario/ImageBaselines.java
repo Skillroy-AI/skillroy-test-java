@@ -136,7 +136,9 @@ final class ImageBaselines implements ImageSteps.Baselines {
         }
         for (Map.Entry<String, Map<String, BindingsFile.ImageEntry>> e : approved.entrySet()) {
             for (String key : e.getValue().keySet()) {
-                OutputFiles.write(envDir.resolve(BindingsFile.ImageEntry.fileName(scenarioId, e.getKey(), key)),
+                // Phase 7 security fix, S140: written under the reader's rule (no link from the environment's
+                // directory down), so that approve never writes where replay refuses to read.
+                OutputFiles.write(BindingsFile.imageFile(envDir, scenarioId, e.getKey(), key),
                         approvedPngs.get(e.getKey() + "." + key));
             }
         }
@@ -151,20 +153,8 @@ final class ImageBaselines implements ImageSteps.Baselines {
         if (envDir == null) {
             throw new IOException("no bindings root: the baselines of " + scenarioId + " cannot be read");
         }
-        if (!ImageCheck.LABEL.matcher(label).matches() || !BindingsFile.RENDER_KEY.matcher(renderKey).matches()) {
-            throw new IOException("not a label and render key: " + label + ", " + renderKey);
-        }
-        Path dir = envDir.resolve(scenarioId + ".images");
-        Path file = dir.resolve(label + "." + renderKey + ".png");
-        Path base = envDir.toAbsolutePath().normalize();
-        if (!file.toAbsolutePath().normalize().startsWith(base)) {
-            throw new IOException(file + " lies outside the bindings directory");
-        }
-        for (Path p = file.toAbsolutePath().normalize(); p != null && p.startsWith(base); p = p.getParent()) {
-            if (Files.isSymbolicLink(p)) {
-                throw new IOException(base.relativize(p) + " is a link: a baseline is never read through one");
-            }
-        }
+        // Phase 7 security fix, S140: the one walk the writers share (BindingsFile.imageFile), naming the link.
+        Path file = BindingsFile.imageFile(envDir, scenarioId, label, renderKey);
         if (!Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)) {
             throw new IOException("no file " + BindingsFile.ImageEntry.fileName(scenarioId, label, renderKey));
         }

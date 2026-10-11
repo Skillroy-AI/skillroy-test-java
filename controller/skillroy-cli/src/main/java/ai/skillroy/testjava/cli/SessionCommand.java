@@ -172,7 +172,7 @@ final class SessionCommand implements Command {
         List<OptionSpec> options = new ArrayList<>(List.of(Packs.OPTION_SPEC, BindArgs.ENV_OPTION,
                 BindArgs.CREDENTIALS_OPTION, BindArgs.BINDINGS_OPTION,
                 OptionSpec.value(OUT, "dir", "where the journal, the model's calls and the exports go\n"
-                        + "(default run-output/<session id>/)"),
+                        + "(default: a new owner-only directory under the system's\ntemporary directory, printed)"),
                 OptionSpec.flag(READ_ONLY, "refuse every action that changes the target"),
                 OptionSpec.flag(ALLOW_BASE, "offer the model the base swing_* and web_* actions too"),
                 OptionSpec.value(MAX_ACTIONS, "n", "the most actions one turn of the model may take (10)"),
@@ -266,7 +266,7 @@ final class SessionCommand implements Command {
             }
             Clock clock = Clock.systemUTC();
             String sessionId = id != null ? id : "session-" + Long.toString(clock.millis(), 36);
-            Path dir = out != null ? out : Path.of("run-output", sessionId);
+            Path dir = out != null ? out : defaultOutputDirectory(cli);
             // phase6-contracts.md 10.3: before the agent is contacted; <dir>/telemetry/ for the file exporter.
             observer = TelemetryArgs.open(TelemetryArgs.load(args, BindArgs.credentialsDir(settings), dir), cli);
             Target target = Connector.connect(args, cli);
@@ -331,6 +331,9 @@ final class SessionCommand implements Command {
                     }
                 }
                 repl.summary(ledger.entries(), inference.budgets().get(InferenceSettings.BUDGET_SESSION));
+                if (out == null) {
+                    cli.err().println("skillroy session: the session's files are in " + dir);
+                }
                 if (playExit != null) {
                     return playExit;
                 }
@@ -340,6 +343,30 @@ final class SessionCommand implements Command {
             TelemetryArgs.finish(observer, json ? cli.err() : cli.out());
             Thread.currentThread().setContextClassLoader(previous);
         }
+    }
+
+    /**
+     * The output directory of a session started without {@code --out} (Phase 7 security fix, S148;
+     * phase7-contracts.md 9.3, 9.6): a new owner-only directory under the system's temporary directory, as the MCP
+     * server's (phase6-contracts.md 9.3, S60's rule), never {@code ./run-output/<session id>/} with the process umask,
+     * since the session writes its journal, its ledgers and a screenshot of every acted-on screen there. Its path is
+     * printed now and at the end; it is kept.
+     *
+     * @throws CliException when no such directory can be created (nothing was contacted yet)
+     */
+    static Path defaultOutputDirectory(Cli cli) throws CliException {
+        Path dir;
+        try {
+            dir = ai.skillroy.testjava.controller.SecureFiles.createOwnerOnlyTempDirectory(
+                    Path.of(System.getProperty("java.io.tmpdir")), "skillroy-session-");
+        } catch (IOException | RuntimeException e) {
+            throw new CliException(Exit.FAILED, "no --out was given and no private output directory can be created"
+                    + " under the system's temporary directory (" + e.getMessage() + "); give --out a directory you"
+                    + " own", e);
+        }
+        cli.err().println("skillroy session: no --out given: writing into " + dir + " (owner-only; kept after the"
+                + " session)");
+        return dir;
     }
 
     /**
@@ -414,6 +441,28 @@ final class SessionCommand implements Command {
             repl.exportPlayed(exportId, result::annotate);
         }
         return passed && !repl.lastExportFailed ? Exit.OK : Exit.FAILED;
+    }
+
+    /**
+     * The anchors' PNGs of an export ({@link ExportResult#images()}), each where its bindings entry says
+     * ({@code <scenarioId>.images/<label>.<renderKey>.png} beside the bindings file; phase7-contracts.md 8.7, 9.3),
+     * created exclusively as every exported file is, and under the bindings directory's rule: no symbolic link from the
+     * environment's directory down (Phase 7 security fix, S140; {@link BindingsFile#imageFile}).
+     */
+    static List<Path> writeImages(ExportResult result, Path bindingsFile, String scenarioId) throws IOException {
+        List<Path> written = new ArrayList<>();
+        for (Map.Entry<String, byte[]> image : result.images().entrySet()) {
+            Map<String, BindingsFile.ImageEntry> byKey = result.bindings().images().get(image.getKey());
+            if (byKey == null || byKey.isEmpty()) {
+                throw new IOException("the export's image " + image.getKey() + " has no bindings entry");
+            }
+            for (String key : byKey.keySet()) {
+                Path file = BindingsFile.imageFile(bindingsFile.getParent(), scenarioId, image.getKey(), key);
+                OutputFiles.write(file, image.getValue());
+                written.add(file);
+            }
+        }
+        return written;
     }
 
     /** One command's result: what {@code --json} prints, what a person reads, and whether it failed. */
@@ -831,7 +880,7 @@ final class SessionCommand implements Command {
                 plan.write(planFile);
                 if (bindingsFile != null) {
                     result.bindings().write(bindingsFile);
-                    images = writeImages(result, bindingsFile, scenarioId);
+                    images = SessionCommand.writeImages(result, bindingsFile, scenarioId);
                 }
             } catch (ScenarioException e) {
                 return error("export", "the exported scenario does not compile: " + e.getMessage());
@@ -857,29 +906,6 @@ final class SessionCommand implements Command {
             json.put("images", images.stream().map(Path::toString).toList());
             json.put("report", result.report().text());
             return new Result(json, text.toString(), false);
-        }
-
-        /**
-         * The anchors' PNGs of an export ({@link ExportResult#images()}), each where its bindings entry says
-         * ({@code <scenarioId>.images/<label>.<renderKey>.png} beside the bindings file; phase7-contracts.md 8.7, 9.3),
-         * created exclusively as every exported file is.
-         */
-        private static List<Path> writeImages(ExportResult result, Path bindingsFile, String scenarioId)
-                throws IOException {
-            List<Path> written = new ArrayList<>();
-            for (Map.Entry<String, byte[]> image : result.images().entrySet()) {
-                Map<String, BindingsFile.ImageEntry> byKey = result.bindings().images().get(image.getKey());
-                if (byKey == null || byKey.isEmpty()) {
-                    throw new IOException("the export's image " + image.getKey() + " has no bindings entry");
-                }
-                for (String key : byKey.keySet()) {
-                    Path file = bindingsFile.getParent().resolve(BindingsFile.ImageEntry.fileName(scenarioId,
-                            image.getKey(), key));
-                    OutputFiles.write(file, image.getValue());
-                    written.add(file);
-                }
-            }
-            return written;
         }
 
         /** A step's outcome: one line with the status, then a call's value, then the detail when it did not pass. */

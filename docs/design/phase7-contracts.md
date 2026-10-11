@@ -1537,6 +1537,22 @@ export's PNGs are reviewed like its YAML (threat model §3). The committed examp
 on one named leg (VM's report says which; the Java 25 arm64 leg by default), as `SessionExportTest` generates the Phase 5
 export; `HeadlessDesk` cannot produce it (it answers no `swing.*` method).
 
+**(Phase 7 security fix, S146, S147, S120, built 2026-10-11, SJ.)** Three rules of the export's `images` section. (a)
+**The export's bindings file, images included, is refused when its text holds a masked value** (P2 §11.4): the
+`<redacted>` check runs again after the anchors' entries were added (it ran on the slots and oracles only), and an
+anchor entry the journal masked (its `focus.owner`, its `window`) is an `ExportException` naming the anchor and its
+step, never an entry that says `<redacted>` (S146). (b) **An anchor whose label is not a label is an `ExportException`**
+naming the step (`[A-Za-z0-9][A-Za-z0-9._-]{0,63}`, checked where the journal's step is read, before any path is built
+from it), and the `BindingsFile` constructor refuses a label or a render key its reader would refuse and two labels
+that differ only in case, so that a file that cannot be read back is never written (S147; a pack's own session tool is
+the actor that could write such a label into a provenance). (c) **The export writes its own bindings file with the
+renderings this session recorded only**; the report's **Notes** carry one line per anchor entry to merge, `to merge:
+images.<label>.<renderKey> (<scenarioId>.images/<label>.<renderKey>.png) into the committed bindings file beside its
+other renderings' entries; the export's bindings file holds this session's renderings only`, and the person merges the
+entry into the committed file (S120, option (a): the export stays a pure function of the journal; option (b), the CLI
+merging into an existing file at the destination, is not built; D-SJ-3). The lines are notes rather than a new report
+section so that a played session's export, whose report `ScenarioPlayer.annotate` rebuilds, keeps them.
+
 ### 6.7 Pixel-anchored replay, the image guard, `expectImage` and the comparison (D313-D315, D357)
 
 **The comparison** lives in `skillroy-scenario` (`…scenario.image.ImageCompare`), not in the vision module, because
@@ -1569,8 +1585,10 @@ window>, scope: REGION, region: <that rectangle in the window's space>, redact: 
 recorder did) and compares it with the entry; a match lets the pointer call run; a mismatch, or no entry for this
 rendering, is `REBIND_NEEDED` with reason `IMAGE` **in every mode, `approve` included** (an anchor is recorded by a
 session and never approved at a step: without an entry for the current key the guard's rectangle is unknown, so the
-person re-records the step through `session --play`, whose export writes the new key's entry beside the old ones) (the
-detail: `label`, both hashes, the counts, the files; the
+person re-records the step through `session --play`, whose export writes the new key's entry into the export's own
+bindings file; the person merges it into the committed one, and the report names the anchors and keys to merge, §6.6
+(Phase 7 security fix, S120, built 2026-10-11, SJ: this sentence said "writes the new key's entry beside the old ones",
+which nothing built)) (the detail: `label`, both hashes, the counts, the files; the
 "recorded answer no longer fits" semantics of P2 §10, never a verdict on the application). Compared before the start
 mark? No: the capture is a read sent to the target, which D30/Q11 allows only after the start mark; an anchored step's
 guard therefore runs at its step.
@@ -1586,6 +1604,34 @@ approves and a terminal-less `REJECT_ALL` rejects, the step then `REBIND_NEEDED(
 CLI's terminal approver asks; §8.7), and the bindings file is rewritten after the steps with the new entry; in `live` a missing baseline is recorded and the check is skipped with the
 reason "no baseline for rendering <key>" (the run at best `DEGRADED`), so that a first live run can be followed by
 `approve`.
+
+**(Phase 7 security fix, S103, built 2026-10-11, SJ.) The focus mask has a bound** (D-SJ-1). When the recorded
+`focus.owner` and the capture's `focus.ownerLocator` differ, the two owners' rectangles are blanked on both sides only
+as far as **they cover at most a quarter of the compared raster together** (the baseline's width times height,
+divided by 4, the union counted once): a rectangle that alone covers more is not blanked, and when the rest still
+covers more together none is; what is not blanked is **compared**. So a focus owner whose rectangle covers the compared
+region (the compared component itself holding the focus at approval, the focus elsewhere or nowhere at replay, which a
+session recorded from a terminal and the WM-less display give) no longer blanks it and makes the check hold whatever the
+pixels show; a component that draws no focus indication still holds, and one that does shows a mismatch whose message
+ends `the focus owner changed (<recorded> to <current>) and covers N % of the compared raster; it was compared, not
+masked`. The record and the detail gain `focusMaskedPixels` (the pixels the focus rectangles blanked) and, when a
+rectangle was compared instead, `focusMaskSkipped: [{side: recorded | current, owner, rect, pixels}]`; `focusMasked` is
+true when the owners differ and no rectangle was skipped. The anchored step's guard takes the same path, so a guard
+whose anchor's owner covers the crop is `REBIND_NEEDED`, never a press at the recorded point over pixels that differ.
+§3.1's `ownerRect` and §8.7's `focus` are used only within this bound. A baseline approved while the compared component
+held the focus may need re-approval if the focus differs at replay (the release note).
+
+**(Phase 7 security fix, S145, built 2026-10-11, SJ.) The mismatch's PNGs are written as compared:**
+`failure/image-<label>-expected.png` and `-actual.png` hold both rasters with the comparison's masks (the entry's masks,
+the step's `mask`, both sides' carets, the focus rectangles that were blanked) blanked on both sides, as the diff
+already did and as the baseline holds them, so the rectangle a step's `mask` hides never reaches run output.
+
+**(Phase 7 security fix, S117, built 2026-10-11, SJ.) The person sees the candidate before approving it.** A
+candidate that cannot be written under `candidates/` (a directory `OutputFiles` refuses, an I/O error) ends the step
+`ERROR / ENVIRONMENT` naming the directory, instead of asking about no file; and a run without an output directory has
+no candidate file, so the CLI's terminal approver rejects it without asking (`candidate not approved (no candidate file
+to review: run with --out)`, the step `REBIND_NEEDED(IMAGE)`); only `--yes` (`APPROVE_ALL`, the contract's exception,
+and the JUnit glue's `skillroy.approve=all`) approves a baseline unseen.
 
 ### 6.8 The scenario player (D311)
 
@@ -1768,6 +1814,11 @@ does. One label per baseline or anchor in a scenario: an `expectImage` label and
 ("used twice"). The scenario schema's `baseVerbs` lists the four (`ScenarioSchemaTest`); no committed schema copy exists
 to regenerate.
 
+**(Phase 7 security fix, S118, built 2026-10-11, SJ.)** Labels are **unique ignoring case** in a scenario: a label names
+a file (`<label>.<renderKey>.png`), and two labels equal ignoring case share one on a case-insensitive volume (macOS's
+default APFS, NTFS), where approve wrote one file for two entries and every later run ended `ERROR / ENVIRONMENT`. The
+compiler refuses the second ("the image label 'pad' differs from 'Pad' only in case; a label names a file").
+
 ### 8.2 `plan.json` version 6 (D325)
 
 `Plan.VERSION = 6`; the reader accepts 1 to 6 and refuses version-6 content below 6 ("'images' needs a version 6
@@ -1796,6 +1847,13 @@ regenerated every committed plan: `-Dskillroy.plans.update=true` in `PlansUpToDa
 `PlansUpToDateTest` (profile `jcef`), then `-Dskillroy.bindings.rehash=true` in `BindingsUpToDateTest`, which rewrites the
 `planHash` of every committed bindings file (the standard ones, the branch variant's, the session export's) from its
 YAML's compiled plan and nothing else (D373); step 2b reruns both after the pack's bump.
+
+**(Phase 7 security fix, S118, S119, built 2026-10-11, SJ.)** The reader is as strict as the compiler: it refuses an
+`images` list with two labels equal ignoring case (S118), a `guard` on a **cleanup** call ("cleanup: a guard is allowed
+on a step's swing.pointer only": a cleanup call is sent without looking at its guard, so a guard there would be shown
+and never evaluated), and an image check with **more than 64 masks** (`ImageMasks.MAX_MASKS`, the compiler's bound);
+the `ImageCheck` constructor enforces the 64 too, so every construction path has the bound (S119). A plan the compiler
+wrote holds none of these, so no committed plan changes.
 
 ### 8.3 `region` beside `by`
 
@@ -1983,6 +2041,52 @@ plan whose bindings hold images only (no resolution, no oracle: its baselines ar
 `Binder.writeApprovedImages` after the steps, run also when a later step failed, since each baseline was approved by a
 person at its step (D379). `ImageSteps.Outcome` has a fifth kind, `ERROR` (an unusable capture or baseline file, a
 target that cannot answer `swing.rendering`: `ERROR / ENVIRONMENT`; D376).
+
+**(Phase 7 security fix, S115, built 2026-10-11, SJ.) D362 as amended: `approve` of a plan whose bindings hold images
+only asks nothing and writes nothing at bind time; after the steps, a file that would change for another reason than
+an approved baseline is written only when the approver approves it** (D-SJ-2). The bind-time write went to the
+operator's bindings root with no approver asked, so a client's (or the planner's) `skillroy_scenario_run {mode:
+approve}` replaced a committed scenario's file (its resolutions and oracles gone) or planted one, and a `REJECT_ALL`
+approve after an environment change rewrote the file's `env`, clearing the fingerprint gate. As built
+(`Binder.writeImagesOnly`, called by `PlanExecutor` after the steps, and after a bind alone for `skillroy resolve`):
+with a baseline a person approved at its step the file is written with it beside the old entries, as before (D355,
+D379); when an existing file would also change for another reason (its `env`, plan hash, resolve hash, pack,
+resolutions or oracles) that change needs one `Approver.review` with no resolution and no oracle and the `BindingsDiff`
+against the existing file, and refused, the approved baselines go into the existing file as it is and the run ends
+`RESOLUTION_FAILED / NOT_APPROVED`; without an approved baseline, after steps that did not fail, a file that is absent
+or would change is written only on the approver's yes (refused: `NOT_APPROVED`, nothing written), and after a failed
+step nothing is written. So `REJECT_ALL` writes nothing, `--yes` keeps the operator's refresh of an environment whose
+baselines still hold, and the terminal approver asks once at the end. D355 (a baseline approved at its step is kept)
+and S61 (a client never replaces a scenario) stand. A plan with a slot or an oracle is approved and written at bind
+time as before.
+
+**(Phase 7 security fix, S116, built 2026-10-11, SJ.) An unusable bindings file is never taken for an absent one.** A
+file at the derived path that cannot be read (a `bindingsVersion` this code does not know, a merge conflict left in
+its JSON, one refused entry) or that names another scenario or environment ends a bind that would write the file
+(`approve`, `live` or `re-resolve` with `writeBindings`), or whose plan has images (their baselines come from the file),
+`ERROR / ENVIRONMENT` naming the file and the reason, as `replay` refuses it (`UNREADABLE`); before, such a bind
+rewrote it without its images (every committed baseline and anchor of the scenario in that environment dropped). A
+`live` run of a plan without images reads nothing from the file and is unchanged. P2 §8.3's approve step 8 says the
+same.
+
+**(Phase 7 security fix, S140, built 2026-10-11, SJ.) The writers follow the reader's link rule.** The bindings file's
+writer (`BindingsFile.writeText`: the binder's, the export's) refuses an environment directory that is a symbolic link,
+and every writer of a baseline's or an anchor's PNG (the binder's approve, the export's caller,
+`SessionCommand.writeImages`) derives its path through `BindingsFile.imageFile`, the reader's one walk: inside
+`<bindingsRoot>/<envId>/`, no symbolic link from that directory down, the directory itself included; the message names
+the link (the directory by its path, an entry below it relative to it). So approve never writes where replay refuses
+to read. A link above `<envId>` is P2 §11.3's documented non-coverage, unchanged.
+
+**(Phase 7 security fix, S146, built 2026-10-11, SJ, the controller's half.) A `{text}` locator is never recorded as
+the owner: target text never enters the file.** `ImageSteps` drops a `text` key from the capture's
+`focus.ownerLocator` before the entry is built (an older agent may answer a nameless text field's content there;
+the agent no longer does, SG's half), and `JournalExport` drops it from an exported anchor's owner, keeping what is left (`{role}`), null when nothing is; the owner comparison of
+§6.7 uses the same value. A `{text}` is no stable identity of a field anyway (typing changes it), and a hash of a short
+text could be confirmed by guessing (D-SJ-4). The export's `<redacted>` check covers its `images` section (§6.6).
+
+**(Phase 7 security fix, S118, S147, built 2026-10-11, SJ.)** The bindings file's reader refuses two labels that
+differ only in case, and its constructor refuses a label or a render key the reader would refuse and such a pair
+(`IllegalArgumentException`): a file that cannot be read back is never written.
 
 ### 8.8 The fingerprint and `swing.rendering`
 
@@ -2312,6 +2416,17 @@ vision session`), and both the table (`SOURCE`) and `--json` carry the source (D
 stream whenever the effective options allow Robot; a scenario with an `expectImage` or an anchored `pointer` counts as
 needing bindings.
 
+**(Phase 7 security fix, S117, S148, built 2026-10-11, SJ.)** `run --mode approve`: without an output directory there is
+no candidate file, so the terminal approver rejects each baseline without asking (`no candidate file to review: run
+with --out`) and `--yes` approves (§6.7). `session` without `--out` writes into a **new owner-only directory under the
+system's temporary directory** (`SecureFiles.createOwnerOnlyTempDirectory(java.io.tmpdir, "skillroy-session-")`, the
+MCP server's rule, P6 §9.3, S60), printed on stderr at the start (`no --out given: writing into <dir> (owner-only; kept
+after the session)`) and at the end (`the session's files are in <dir>`), never `./run-output/<session id>/` with the
+process umask: the session writes its journal, its ledgers, its telemetry and a screenshot of every acted-on screen
+there (§9.6), and `SECURITY.md` (f) advised running "without an output directory, which keeps nothing", which the CLI
+did not offer (D-SJ-5). `export` without its own `--out` writes into that directory too. A system temporary directory
+on a volume with neither POSIX permissions nor ACLs ends the command before the agent is contacted; give `--out`.
+
 ### 9.4 The MCP server
 
 `ServerOptions` gains `vision` (`Map<String, String>` tool options) and `robot` (boolean); the actor factory of
@@ -2358,6 +2473,14 @@ whatever the verb meant (a verb that joins names the field it puts where, as the
 own field references stay unjudged (D427). A value nested deeper than 64 levels (`References.MAX_DEPTH`) in a plan
 that declares a credential slot is refused rather than searched (S128), as `References.anyReference` does.
 
+**(Phase 7 security fix, S115, built 2026-10-11, SJ.) A client's `skillroy_scenario_run` writes nothing in the
+operator's bindings root, in either mode.** `live` never wrote (`withWriteBindings(false)`); `approve` is now refused,
+before the scenario is compiled and before any model budget is reserved, while the session's approver is
+`REJECT_ALL` (the CLI's server always: `this server has no approver (a person approves bindings and baselines); run
+approve at the CLI`), since nothing can be approved there, and an images-only plan in `approve` writes nothing without
+an approver anyway (§8.7). A server a Java host builds with another approver runs `approve` under that approver's
+decisions. The tool's schema still lists both modes (a pinned list).
+
 ### 9.5 The overlay
 
 `OverlayBridge` is unchanged: `assist.requested` carries the person's request, `ask` is the one entry, the tier is the
@@ -2379,6 +2502,13 @@ the bindings file, not here (§8.7).
 
 **As built (Phase 7, VM, 2026-10-10):** `Captures.write` skips a file that exists (a regular file, links not followed)
 and otherwise writes through `OutputFiles.write`; the name is checked to be `sha256:` and 64 hex digits.
+
+**(Phase 7 security fix, S148, built 2026-10-11, SJ.)** "Without an output directory" exists for the Java API
+(`SessionOptions.defaults(null)`) only: `skillroy session` always has one, and without `--out` it is a new owner-only
+directory under the system's temporary directory, printed at the start and the end (§9.3), not `./run-output/<session
+id>/` with the process umask. The advice reads: without `--out` the session writes under an owner-only temporary
+directory; on a shared host give `--out` a directory you own, under `umask 077` (the text for `SECURITY.md` (f) and
+`README.md` is the orchestrator's).
 
 ---
 
@@ -3154,7 +3284,7 @@ facade and the tool-set interface of §9.1 gain a few methods).
 | D359 | **The session's `expectImage` takes its baselines from the caller**: `ExecutorSession.expectImage(step, origin, baselines)` and the static `ExecutorSession.baselines(root, env, scenarioId)`; the contract's two-argument form holds none (live: the check is recorded and skipped; an anchor: `REBIND_NEEDED`) (§9.2, §6.8) | a baselines setter on the session; the session reading a bindings file itself | a session has neither a scenario nor a bindings file; the player (§6.8) knows both and hands them in | VC 1 |
 | D360 | **`expectImage(Plan.Step)` journals the verb's arguments reconstructed from the compiled step** (§9.2) | journal no arguments | the journal and the export need the step as written | VC 2 |
 | D361 | **A guarded `pointer` executed with a provenance whose `anchor` carries the guard's label is not compared** (§9.2) | compare against the just-taken crop; refuse | the recorder took the anchor with the guard's own call an instant before; without this rule the recording of an anchored step was always `REBIND_NEEDED` | VC 3 |
-| D362 | **No bind-time approval for a plan whose bindings hold only images** (§8.7) | ask the approver with empty resolutions | `REJECT_ALL` would refuse the run before its baseline steps; there is nothing to approve at bind time, each baseline being approved at its step | VC 4 |
+| D362 | **No bind-time approval for a plan whose bindings hold only images** (§8.7) (amended by the Phase 7 security fix, S115, built 2026-10-11, SJ: nor a bind-time write; after the steps a change other than an approved baseline is written only on the approver's yes, §8.7, D-SJ-2) | ask the approver with empty resolutions | `REJECT_ALL` would refuse the run before its baseline steps; there is nothing to approve at bind time, each baseline being approved at its step | VC 4 |
 | D363 | **`expectImage` writes `scope` only for `REGION`**; otherwise the agent's default applies (§8.1) | `WINDOW` or `COMPONENT` decided at compile | the compiler cannot tell what a locator names | VC 5 |
 | D364 | **`pointer` always writes `action` (default `CLICK`)**; `strict` is checked by the compiler and not sent (§8.1) | omit the default; send `strict` | the primitive requires `action` and has no fall-back | VC 6 |
 | D365 | **The `image` record's results add `approved` and `rejected`**, and a guard's record carries `guard: true` (§8.4) | reuse `held` and `missing` | approve's outcome is neither | VC 7 |

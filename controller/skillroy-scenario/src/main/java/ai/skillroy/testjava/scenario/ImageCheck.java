@@ -46,13 +46,18 @@ public record ImageCheck(String label, List<Object> masks, int maxDiffPixels) im
     public static final int MAX_DIFF_PIXELS = 10_000;
 
     /**
-     * @throws IllegalArgumentException if the label is malformed or {@code maxDiffPixels} is outside 0 to 10000
+     * @throws IllegalArgumentException if the label is malformed, there are more than 64 masks (Phase 7 security fix,
+     *     S119: every construction path has the compiler's bound) or {@code maxDiffPixels} is outside 0 to 10000
      */
     @SuppressWarnings("unchecked")
     public ImageCheck {
         if (label == null || !LABEL.matcher(label).matches()) {
             throw new IllegalArgumentException("an image label must match [A-Za-z0-9][A-Za-z0-9._-]{0,63}, found "
                     + label);
+        }
+        if (masks != null && masks.size() > ImageMasks.MAX_MASKS) {
+            throw new IllegalArgumentException("an image check has at most " + ImageMasks.MAX_MASKS + " masks, found "
+                    + masks.size());
         }
         masks = masks == null ? List.of() : (List<Object>) Plan.freeze(masks);
         if (maxDiffPixels < 0 || maxDiffPixels > MAX_DIFF_PIXELS) {

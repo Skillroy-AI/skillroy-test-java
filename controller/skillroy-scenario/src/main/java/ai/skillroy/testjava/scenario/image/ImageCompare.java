@@ -18,7 +18,10 @@ package ai.skillroy.testjava.scenario.image;
 
 import javax.imageio.ImageIO;
 import javax.imageio.ImageReader;
+import javax.imageio.ImageWriter;
 import javax.imageio.stream.ImageInputStream;
+import javax.imageio.stream.MemoryCacheImageInputStream;
+import javax.imageio.stream.MemoryCacheImageOutputStream;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -47,7 +50,9 @@ import java.util.Map;
  * raster. Both modules' tests share one vector ({@code ImageCompareTest}).
  *
  * <p>Bounds: rasters of at most {@value #MAX_SIDE} pixels a side; a PNG's size is read from its header before it is
- * decoded. Stateless; thread-safe.
+ * decoded. A PNG is encoded and decoded through memory-cached streams only, never through ImageIO's file cache, so no
+ * pixel data passes through {@code java.io.tmpdir} (Phase 7 security fix, S143: phase2-contracts.md 11.3; the agent's
+ * {@code Capture.png} does the same). Stateless; thread-safe.
  */
 public final class ImageCompare {
 
@@ -312,10 +317,8 @@ public final class ImageCompare {
         if (png == null || png.length == 0) {
             throw new IOException("no image bytes");
         }
-        try (ImageInputStream in = ImageIO.createImageInputStream(new ByteArrayInputStream(png))) {
-            if (in == null) {
-                throw new IOException("the bytes cannot be read as an image");
-            }
+        // Phase 7 security fix, S143: a memory cache, never ImageIO.createImageInputStream's file cache.
+        try (ImageInputStream in = new MemoryCacheImageInputStream(new ByteArrayInputStream(png))) {
             Iterator<ImageReader> readers = ImageIO.getImageReadersByFormatName("png");
             if (!readers.hasNext()) {
                 throw new IOException("no PNG reader in this runtime");
@@ -339,14 +342,23 @@ public final class ImageCompare {
     }
 
     /**
-     * Encodes a raster as PNG.
+     * Encodes a raster as PNG (the bytes {@code ImageIO.write} gives, through a memory cache).
      *
      * @throws IOException if the runtime cannot write PNG
      */
     public static byte[] encodePng(BufferedImage image) throws IOException {
-        ByteArrayOutputStream out = new ByteArrayOutputStream();
-        if (!ImageIO.write(image, "png", out)) {
+        Iterator<ImageWriter> writers = ImageIO.getImageWritersByFormatName("png");
+        if (!writers.hasNext()) {
             throw new IOException("no PNG writer in this runtime");
+        }
+        ImageWriter writer = writers.next();
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        // Phase 7 security fix, S143: a memory cache, never ImageIO.write's file cache in java.io.tmpdir.
+        try (MemoryCacheImageOutputStream stream = new MemoryCacheImageOutputStream(out)) {
+            writer.setOutput(stream);
+            writer.write(image);
+        } finally {
+            writer.dispose();
         }
         return out.toByteArray();
     }

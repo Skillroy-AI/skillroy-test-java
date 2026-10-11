@@ -763,7 +763,31 @@ public final class PlanExecutor {
                 failure = new Abort(Status.ERROR, FailureKind.ENVIRONMENT, runner.currentStep, "internal error: "
                         + e.getClass().getName(), RunLog.fields("exception", e.toString()));
             }
-            if (!bindOnly && baselines != null && baselines.hasApprovals()) {
+            if (baselines != null && provided == null && outcome != null && outcome.file() != null
+                    && options.bind().mode() == BindMode.APPROVE && Binder.imagesOnly(plan)) {
+                // Phase 7 security fix, S115 (phase7-contracts.md 8.7, D362 as amended): a plan whose bindings hold
+                // images only wrote nothing at bind time; its file is written now, with the baselines a person
+                // approved at their steps, and any other change only when the approver approves it (also for a bind
+                // alone, skillroy resolve, which has no steps).
+                try {
+                    Path written = Binder.writeImagesOnly(plan, options.bind(), outcome.file(), baselines,
+                            failure != null);
+                    if (written != null) {
+                        outcome = new BindOutcome(outcome.bindings(), outcome.file(), outcome.env(), written,
+                                outcome.skipped());
+                        log.write("bind", RunLog.fields("ok", true, "images", new ArrayList<>(baselines.merged()
+                                .keySet()), "written", options.bind().envId() + "/" + plan.scenarioId()
+                                + BindingsFile.SUFFIX));
+                    }
+                } catch (BindException e) {
+                    log.write("bind", RunLog.fields("ok", false, "images", true, "reason", e.reason(), "error",
+                            e.getMessage()));
+                    if (failure == null) {
+                        failure = new Abort(Status.ERROR, e.kind(), null, e.getMessage(),
+                                new LinkedHashMap<>(e.detail()));
+                    }
+                }
+            } else if (!bindOnly && baselines != null && baselines.hasApprovals()) {
                 // phase7-contracts.md 8.7 (D355): approve's second write, after the steps, also after a failed one (a
                 // person approved each baseline at its step).
                 try {
