@@ -35,8 +35,8 @@ import java.util.concurrent.TimeUnit;
  * {@code url()}, {@code title()}, {@code isClosed()}, {@code engine()}, {@code mainFrame()}, {@code frames()},
  * {@code navigation()}, {@code on(Class, Observer)}, {@code size()}, {@code resize(int, int)}, {@code bitmap()},
  * {@code devTools()}, {@code set(Class, callback)}, {@code get(Class)}, {@code remove(Class)}, and
- * {@code dispatch(Object)}, which hands an input event to the page (Phase 7). The application's own actions are
- * {@link #loadHtml}, {@link #close} and {@link #fire}.
+ * {@code dispatch(...)} per input event type, which hands the event to the page (Phase 7). The application's own
+ * actions are {@link #loadHtml}, {@link #close} and {@link #fire}.
  *
  * <p>A load replaces the document: the main frame stays, the child frames are new (the old ones are closed); a
  * chained document-start callback runs first, then the page's inline scripts, then the events
@@ -231,11 +231,33 @@ public final class FakeBrowser {
     }
 
     /**
-     * The vendor's input (Phase 7, {@code INPUT}): the page receives the event (a {@link FakeMouseMoved},
-     * {@link FakeMousePressed}, {@link FakeMouseReleased} or {@link FakeMouseWheel}); every event is also kept in
-     * {@link #dispatched()}. Anything else is refused as the vendor would refuse a wrong type.
+     * The vendor's input (Phase 7, {@code INPUT}), one overload per event type as the product has (JxBrowser 8.18.3:
+     * {@code dispatch(MousePressed)}, {@code dispatch(MouseReleased)}, ...): the page receives the event; every event
+     * is also kept in {@link #dispatched()}.
      */
-    public void dispatch(Object event) {
+    public void dispatch(FakeMousePressed event) {
+        dispatchAny(event);
+    }
+
+    /** As {@link #dispatch(FakeMousePressed)}. */
+    public void dispatch(FakeMouseReleased event) {
+        dispatchAny(event);
+    }
+
+    /** As {@link #dispatch(FakeMousePressed)}. */
+    public void dispatch(FakeMouseMoved event) {
+        dispatchAny(event);
+    }
+
+    /**
+     * As {@link #dispatch(FakeMousePressed)}; the deltas have the opposite sign of the page's, as the product's do (a
+     * {@code deltaY} of -120 reaches the page as 120, downwards).
+     */
+    public void dispatch(FakeMouseWheel event) {
+        dispatchAny(event);
+    }
+
+    private void dispatchAny(Object event) {
         engine.violations.blockingCall("Browser.dispatch()");
         dispatched.add(event);
         FakeDocument d = document;
@@ -250,7 +272,7 @@ public final class FakeBrowser {
             pointer(d, "mouseReleased", e.location, e.button.protocolName(), e.clickCount, 0, 0);
         } else if (event instanceof FakeMouseWheel) {
             FakeMouseWheel e = (FakeMouseWheel) event;
-            pointer(d, "mouseWheel", e.location, "none", 0, Math.round(e.deltaX), Math.round(e.deltaY));
+            pointer(d, "mouseWheel", e.location, "none", 0, -Math.round(e.deltaX), -Math.round(e.deltaY));
         } else {
             throw new IllegalArgumentException("not an input event: " + event);
         }

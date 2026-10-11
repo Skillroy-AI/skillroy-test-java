@@ -256,10 +256,28 @@
       "static": true,
       "for": "chain"
     },
-    "browser.dispatch": {
+    "browser.dispatchMousePressed": {
       "class": "ai.skillroy.testjava.agent.web.fake.FakeBrowser",
       "method": "dispatch",
-      "arity": 1,
+      "params": ["ai.skillroy.testjava.agent.web.fake.FakeMousePressed"],
+      "for": "INPUT"
+    },
+    "browser.dispatchMouseReleased": {
+      "class": "ai.skillroy.testjava.agent.web.fake.FakeBrowser",
+      "method": "dispatch",
+      "params": ["ai.skillroy.testjava.agent.web.fake.FakeMouseReleased"],
+      "for": "INPUT"
+    },
+    "browser.dispatchMouseMoved": {
+      "class": "ai.skillroy.testjava.agent.web.fake.FakeBrowser",
+      "method": "dispatch",
+      "params": ["ai.skillroy.testjava.agent.web.fake.FakeMouseMoved"],
+      "for": "INPUT"
+    },
+    "browser.dispatchMouseWheel": {
+      "class": "ai.skillroy.testjava.agent.web.fake.FakeBrowser",
+      "method": "dispatch",
+      "params": ["ai.skillroy.testjava.agent.web.fake.FakeMouseWheel"],
       "for": "INPUT"
     },
     "point.of": {
