@@ -154,6 +154,10 @@ class HostSafetyDisplayTest extends DisplayTestBase {
             timesOut("swing.find", map("by", map("name", "entry")), shortMs);
             timesOut("swing.dialogs", map(), shortMs);
             timesOut("swing.capture", map(), shortMs);
+            timesOut("swing.capture", map("scope", "SCREEN", "annotateRefs", true), shortMs);
+            timesOut("swing.hitTest", map("target", ref(ui.ok)), shortMs);
+            timesOut("swing.pointer", map("target", ref(ui.ok), "action", "CLICK"), shortMs);
+            timesOut("swing.rendering", map(), shortMs);
             timesOut("swing.click", map("target", ref(ui.ok)), shortMs);
             timesOut("swing.click", map("target", ref(ui.ok), "rung", "COMPONENT"), shortMs);
             timesOut("swing.click", map("target", ref(ui.ok), "rung", "DISPATCH"), shortMs);
@@ -176,6 +180,96 @@ class HostSafetyDisplayTest extends DisplayTestBase {
         assertEquals(actions, ui.entryActions.get(), "no ENTER was delivered late");
         assertEquals(text, onEdt(() -> ui.entry.getText()), "no text was typed late");
         assertEquals(listeners, (int) onEdt(() -> ui.ok.getFocusListeners().length), "no focus listener was left");
+    }
+
+    /**
+     * Phase 7 (phase7-contracts.md section 13.2 item 11, D352): an EDT blocked from inside the {@code MOUSE_PRESSED}
+     * handler of the pointer's own press. The call returns {@code fired: false, EDT_BUSY, dispatched 1 of 4,
+     * balanced: true}; afterwards the disarming drag and the release are the only events delivered, no action fires,
+     * no click arrives, and no listener the pointer added survives the call.
+     */
+    @Test
+    void anEdtBlockedInsideThePointersOwnPressGivesEdtBusyAndTheBalanceAlone() throws Exception {
+        final CountDownLatch release = new CountDownLatch(1);
+        final AtomicInteger actions = new AtomicInteger();
+        final List<Integer> after = new CopyOnWriteArrayList<Integer>();
+        final AtomicBoolean pressed = new AtomicBoolean();
+        final JButton[] button = new JButton[1];
+        final JFrame[] host = new JFrame[1];
+        onEdt(() -> {
+            JFrame f = new JFrame("Press blocks the EDT");
+            JButton b = new JButton("Blocks on press");
+            b.addActionListener(e -> actions.incrementAndGet());
+            b.addMouseListener(new java.awt.event.MouseAdapter() {
+                @Override
+                public void mousePressed(java.awt.event.MouseEvent e) {
+                    pressed.set(true);
+                    try {
+                        release.await(60, TimeUnit.SECONDS);
+                    } catch (InterruptedException ex) {
+                        Thread.currentThread().interrupt();
+                    }
+                }
+
+                @Override
+                public void mouseReleased(java.awt.event.MouseEvent e) {
+                    after.add(e.getID());
+                }
+
+                @Override
+                public void mouseClicked(java.awt.event.MouseEvent e) {
+                    after.add(e.getID());
+                }
+
+                @Override
+                public void mouseExited(java.awt.event.MouseEvent e) {
+                    if (pressed.get()) {
+                        after.add(e.getID());
+                    }
+                }
+            });
+            b.addMouseMotionListener(new java.awt.event.MouseMotionAdapter() {
+                @Override
+                public void mouseDragged(java.awt.event.MouseEvent e) {
+                    after.add(e.getID());
+                }
+            });
+            f.add(b);
+            f.setBounds(660, 220, 240, 120);
+            f.setVisible(true);
+            host[0] = f;
+            button[0] = b;
+            return null;
+        });
+        await("fixture showing", WAIT_MS, () -> button[0].isShowing());
+        settle();
+        Map<String, Object> r;
+        try {
+            r = ctx.call("swing.pointer", map("target", ref(button[0]), "action", "CLICK"), 4000);
+        } finally {
+            release.countDown();
+        }
+        assertEquals(Boolean.FALSE, r.get("fired"), r.toString());
+        assertEquals("EDT_BUSY", r.get("reason"));
+        assertEquals(map("sent", 1L, "of", 4L), r.get("dispatched"));
+        assertEquals(Boolean.TRUE, r.get("balanced"));
+        settle();
+        assertEquals(0, actions.get(), "no action fired");
+        assertFalse(after.contains(java.awt.event.MouseEvent.MOUSE_CLICKED), "no click arrived: " + after);
+        assertTrue(after.contains(java.awt.event.MouseEvent.MOUSE_DRAGGED), "the disarming drag: " + after);
+        assertEquals(java.awt.event.MouseEvent.MOUSE_RELEASED, (int) after.get(after.size() - 1),
+                "the release closes the balance: " + after);
+        for (java.awt.event.AWTEventListener l : java.awt.Toolkit.getDefaultToolkit().getAWTEventListeners()) {
+            java.awt.event.AWTEventListener inner = l instanceof java.awt.event.AWTEventListenerProxy
+                    ? ((java.awt.event.AWTEventListenerProxy) l).getListener() : l;
+            assertFalse(inner.getClass().getName().startsWith(Pointer.class.getName()),
+                    "no listener the pointer added survives the call: " + inner);
+        }
+        assertFalse(onEdt(() -> button[0].getModel().isPressed()));
+        onEdt(() -> {
+            host[0].dispose();
+            return null;
+        });
     }
 
     private static void timesOut(String method, Map<String, Object> params, long timeoutMs) {

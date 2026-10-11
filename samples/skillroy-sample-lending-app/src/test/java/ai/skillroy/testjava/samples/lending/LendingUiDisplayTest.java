@@ -529,6 +529,48 @@ class LendingUiDisplayTest {
             "one click, one input");
     }
 
+    /** Phase 7 (phase7-contracts.md section 12.1): a press and release on the number pad's {@code key:7} types 7. */
+    @Test
+    void aPressOnTheNumberPadsKeySevenAppendsSeven() throws Exception {
+        launch(LendingOptions.defaults());
+        LendingFrame frame = app.frame();
+        eventually("frame showing", frame::isShowing);
+        NumberPad pad = frame.numberPad();
+        assertEquals(NumberPad.NAME, pad.getName());
+        assertTrue(onEdt(pad::isShowing));
+        assertEquals(javax.accessibility.AccessibleRole.PANEL,
+            onEdt(() -> pad.getAccessibleContext().getAccessibleRole()));
+        java.awt.Rectangle seven = NumberPad.keyRect("7");
+        onEdt(() -> {
+            long when = System.currentTimeMillis();
+            int x = seven.x + seven.width / 2;
+            int y = seven.y + seven.height / 2;
+            pad.dispatchEvent(new MouseEvent(pad, MouseEvent.MOUSE_PRESSED, when, InputEvent.BUTTON1_DOWN_MASK,
+                x, y, 1, false, MouseEvent.BUTTON1));
+            pad.dispatchEvent(new MouseEvent(pad, MouseEvent.MOUSE_RELEASED, when, 0, x, y, 1, false,
+                MouseEvent.BUTTON1));
+            return null;
+        });
+        assertEquals("7", onEdt(() -> frame.entryField().value()));
+        java.awt.Rectangle clear = NumberPad.keyRect("CLEAR");
+        onEdt(() -> {
+            pad.press("0");
+            assertEquals("70", frame.entryField().value());
+            long when = System.currentTimeMillis();
+            int x = clear.x + 5;
+            int y = clear.y + 5;
+            pad.dispatchEvent(new MouseEvent(pad, MouseEvent.MOUSE_PRESSED, when, InputEvent.BUTTON1_DOWN_MASK,
+                x, y, 1, false, MouseEvent.BUTTON1));
+            // released over another key: nothing happens
+            pad.dispatchEvent(new MouseEvent(pad, MouseEvent.MOUSE_RELEASED, when, 0, 5, 5, 1, false,
+                MouseEvent.BUTTON1));
+            return null;
+        });
+        assertEquals("70", onEdt(() -> frame.entryField().value()), "a release outside the pressed key does nothing");
+        assertTrue(onEdt(() -> pad.getHeight()) >= 160, "the bottom panel grew to the pad's height");
+        assertEquals(64, (int) onEdt(() -> frame.key("DUE").getHeight()), "the keypad row keeps its height");
+    }
+
     @Test
     void aStaleDialogDoesNotAnswerANewerPromptWithTheSameId() throws Exception {
         PromptService service = new PromptService();

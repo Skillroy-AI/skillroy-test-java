@@ -2,7 +2,7 @@
   "planVersion": 6,
   "scenarioId": "return-over-limit-needs-supervisor",
   "pack": "lending",
-  "packVersion": "0.5.0",
+  "packVersion": "0.6.0",
   "sourceHash": "sha256:a90c88c3351dd6c604b49122d37f572b13ad3b4ab96da3297536136126709518",
   "inference": "none",
   "requires": [

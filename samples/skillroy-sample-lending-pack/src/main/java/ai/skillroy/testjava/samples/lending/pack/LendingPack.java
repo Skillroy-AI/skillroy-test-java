@@ -86,9 +86,25 @@ public final class LendingPack implements DomainPack {
      * Written into every plan; change it whenever a verb compiles differently or the pack's surface grows.
      * {@code 0.3.0}: the waiver queries, oracles and cross-check of phase3-contracts.md 10.3. {@code 0.4.0}: the SQL
      * allow-list and the verbs' argument schemas of phase5-contracts.md 14.1. {@code 0.5.0}: the hook catalogue,
-     * {@link #settings()} and the public surface an overlay needs (phase6-contracts.md 6.3, 11.3).
+     * {@link #settings()} and the public surface an overlay needs (phase6-contracts.md 6.3, 11.3). {@code 0.6.0}:
+     * {@link #screenLegend()} and the {@code inductionRequired} argument of {@code LendableItem} (gap 49;
+     * phase7-contracts.md 12.3).
      */
-    public static final String VERSION = "0.5.0";
+    public static final String VERSION = "0.6.0";
+    /**
+     * The legend of the desk's icon-only and custom-painted controls for a model that looks at the screen
+     * (phase7-contracts.md 12.3; BS12: a legend roughly halved the actions a toolset session needed). Plain text in the
+     * lending vocabulary; masked like the vocabulary and placed among the system parts, never inside a
+     * {@code <target-ui>} block.
+     */
+    public static final String SCREEN_LEGEND = "The lending desk's controls. The entry field across the bottom takes "
+            + "staff codes, passwords, item barcodes, quantities and amounts; Enter submits it. The keypad below it has "
+            + "six icon-only keys, left to right: QTY sets the quantity of the next item from the entry field, CANCEL "
+            + "abandons the open loan, RETURN toggles return mode, DUE ends item entry and computes the deposit due "
+            + "(waivers applied), DEPOSIT takes the deposit (the amount in the entry field, else exactly the amount "
+            + "due) and records the loan, and SIGN_OFF signs the staff member off. The number pad to the right of the keypad types digits and the point into the entry field and "
+            + "CLEAR empties it; it is greyed out while a password is expected. A prompt dialog asks a question in "
+            + "its own window and is answered with one of its buttons, such as OK, Yes or No.";
     /**
      * The pack setting naming the {@code desk_setting} row of the system maximum return (phase6-contracts.md 11.3):
      * read by the {@code SystemLimit} resolver through its context's {@code settings()}; the branch edition's overlay
@@ -140,6 +156,11 @@ public final class LendingPack implements DomainPack {
     @Override
     public String version() {
         return VERSION;
+    }
+
+    @Override
+    public String screenLegend() {
+        return SCREEN_LEGEND;
     }
 
     @Override

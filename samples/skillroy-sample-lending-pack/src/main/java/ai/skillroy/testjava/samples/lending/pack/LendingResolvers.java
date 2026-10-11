@@ -103,6 +103,16 @@ public final class LendingResolvers {
             + " ORDER BY deposit, code";
 
     /**
+     * {@link #LENDABLE_ITEM_SQL} with the induction condition of a query that names one (gap 49, pack 0.6.0); a query
+     * without it reads exactly {@link #LENDABLE_ITEM_SQL}, so that the committed bindings keep their evidence.
+     */
+    public static final String LENDABLE_ITEM_BY_INDUCTION_SQL = "SELECT code, barcode, title, deposit FROM item"
+            + " WHERE active = TRUE AND barcode IS NOT NULL AND per_day = ?"
+            + " AND deposit >= CAST(? AS DECIMAL(10,2)) AND deposit <= CAST(? AS DECIMAL(10,2))"
+            + " AND induction_required = ?"
+            + " ORDER BY deposit, code";
+
+    /**
      * Every active staff member with the auto-sign-on flag and the maximum limit of a kind over their roles (null =
      * unlimited), by code. Parameter: the limit kind.
      */
@@ -301,6 +311,10 @@ public final class LendingResolvers {
             params.add(Boolean.TRUE.equals(query.perDay()));
             params.add(lower == null ? NO_LOWER : lower.toPlainString());
             params.add(upper == null ? NO_UPPER : upper.toPlainString());
+            if (query.inductionRequired() != null) {
+                params.add(query.inductionRequired());
+                return ctx.data().query(SOURCE, LENDABLE_ITEM_BY_INDUCTION_SQL, params, DataChannel.MAX_ROWS, null);
+            }
             return ctx.data().query(SOURCE, LENDABLE_ITEM_SQL, params, DataChannel.MAX_ROWS, null);
         }
 

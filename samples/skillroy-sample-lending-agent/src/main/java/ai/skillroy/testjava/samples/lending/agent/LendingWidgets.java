@@ -31,6 +31,7 @@ import java.awt.Window;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -40,7 +41,9 @@ import java.util.Set;
  *   <li>{@link NameEnricher}: an {@code IconKey} (icon only, no text, no accessible name) is named by its
  *       {@code actionId} ({@code "DUE"}); a prompt's custom-painted {@code PromptButton} by its label
  *       ({@code "OK"}), which also lets {@code swing.dismiss {button}} find it.</li>
- *   <li>{@link LocatorResolver}, strategy {@value #ACTION}: {@code {action: "DUE"}} finds the keypad key.</li>
+ *   <li>{@link LocatorResolver}, strategy {@value #ACTION}: {@code {action: "DUE"}} finds the keypad key; its
+ *       {@code describe} (Phase 7) answers {@code {action: <actionId>}} for an {@code IconKey} and
+ *       {@code {name: <label>}} for a {@code PromptButton}, so that a hit-test proposes the domain locator first.</li>
  *   <li>{@link ActionFirer}: the ACTION click rung calls {@code IconKey.perform()} (the key's action, without its
  *       focus-gated debounce, which ignores a programmatic click on an unfocused window) and
  *       {@code PromptButton.press()}.</li>
@@ -83,6 +86,17 @@ final class LendingWidgets implements NameEnricher, LocatorResolver, ActionFirer
             collectKeys(root, value, found);
         }
         return found;
+    }
+
+    @Override
+    public Map<String, String> describe(Component component) {
+        if (component instanceof IconKey) {
+            return Collections.singletonMap(ACTION, ((IconKey) component).actionId());
+        }
+        if (component instanceof PromptButton) {
+            return Collections.singletonMap("name", ((PromptButton) component).label());
+        }
+        return Collections.emptyMap();
     }
 
     private static void collectKeys(Component c, String actionId, List<Component> out) {

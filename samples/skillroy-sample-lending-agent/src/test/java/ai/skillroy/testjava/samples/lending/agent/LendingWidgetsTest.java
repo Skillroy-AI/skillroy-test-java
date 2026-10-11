@@ -91,6 +91,9 @@ class LendingWidgetsTest {
                 widgets.fire(due.get());
                 assertEquals(Collections.singletonList("DUE"), fired);
                 assertNull(widgets.extract(null));
+                // Phase 7: describe proposes the domain locator first (phase7-contracts.md section 12.2)
+                assertEquals(Collections.singletonMap("action", "DUE"), widgets.describe(due.get()));
+                assertTrue(widgets.describe(new JButton("OK")).isEmpty());
             }
         });
     }

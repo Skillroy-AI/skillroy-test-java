@@ -140,6 +140,89 @@ class ModalBlockingDisplayTest extends DisplayTestBase {
         await("unblocked click delivered", WAIT_MS, () -> ui.okClicks.get() == ok + 2);
     }
 
+    /**
+     * Phase 7 (phase7-contracts.md sections 3.3 step 7, 13.2 item 3, D352): a routed press whose handler shows an
+     * application-modal dialog runs the dialog's secondary loop inside the press's own task; the remaining events are
+     * withheld (the per-event modal re-read), the press is disarmed by a drag to (-1, -1) and released there into the
+     * now-blocked window, and no action fires.
+     */
+    @Test
+    void aPointerPressThatOpensAModalDialogStopsTheSequenceAndFiresNothing() throws Exception {
+        final AtomicInteger actions = new AtomicInteger();
+        final AtomicInteger clicks = new AtomicInteger();
+        final JDialog[] shown = new JDialog[1];
+        final JFrame[] host = new JFrame[1];
+        final JButton[] button = new JButton[1];
+        onEdt(() -> {
+            JFrame f = new JFrame("Press opens a dialog");
+            JButton b = new JButton("Opens on press");
+            b.addActionListener(e -> actions.incrementAndGet());
+            b.addMouseListener(new java.awt.event.MouseAdapter() {
+                @Override
+                public void mousePressed(java.awt.event.MouseEvent e) {
+                    JDialog d = new JDialog(f, "Opened by the press", true);
+                    d.add(new JButton("Close me"));
+                    d.setBounds(700, 400, 200, 80);
+                    shown[0] = d;
+                    d.setVisible(true); // the secondary loop runs inside the press's own task
+                }
+
+                @Override
+                public void mouseClicked(java.awt.event.MouseEvent e) {
+                    clicks.incrementAndGet();
+                }
+            });
+            f.add(b);
+            f.setBounds(660, 220, 240, 120);
+            f.setVisible(true);
+            host[0] = f;
+            button[0] = b;
+            return null;
+        });
+        await("fixture showing", WAIT_MS, () -> button[0].isShowing());
+        settle();
+        Map<String, Object> r = call("swing.pointer", "target", ref(button[0]), "action", "CLICK");
+        assertEquals(Boolean.FALSE, r.get("fired"), r.toString());
+        assertEquals("MODAL_OPENED", r.get("reason"));
+        assertEquals(Boolean.TRUE, r.get("balanced"));
+        assertEquals(map("sent", 1L, "of", 4L), r.get("dispatched"), "the move returned; the press is in the loop");
+        await("the dialog the press opened is showing", WAIT_MS, () -> shown[0] != null && shown[0].isShowing());
+        assertEquals(Boolean.FALSE, onEdt(() -> button[0].getModel().isArmed()), "disarmed by the balance");
+        call("swing.dismiss", "dialog", ref(shown[0]), "close", true);
+        await("the dialog closed", WAIT_MS, () -> !shown[0].isShowing());
+        settle();
+        assertEquals(0, actions.get(), "no ActionEvent: Swing acts on the release, which was disarmed");
+        assertEquals(0, clicks.get(), "no click was delivered");
+        assertEquals(Boolean.FALSE, onEdt(() -> button[0].getModel().isPressed()), "no model is left pressed");
+        onEdt(() -> {
+            host[0].dispose();
+            return null;
+        });
+    }
+
+    @Test
+    void aPointerIntoABlockedFrameIsModalOpenUnlessForced() throws Exception {
+        final JDialog[] d = new JDialog[1];
+        onEdt(() -> {
+            d[0] = new JDialog(ui.frame, "Blocks the pointer", true);
+            d[0].add(new JButton("Wait"));
+            d[0].setBounds(660, 0, 220, 90);
+            return null;
+        });
+        SwingUtilities.invokeLater(() -> d[0].setVisible(true));
+        await("modal showing", WAIT_MS, d[0]::isShowing);
+        settle();
+        final int ok = ui.okClicks.get();
+        RpcException e = expectError(ErrorCodes.MODAL_OPEN, () -> call("swing.pointer", "target", ref(ui.ok),
+                "action", "CLICK"));
+        assertEquals(ref(d[0]), e.error().data().get("dialog"));
+        settle();
+        assertEquals(ok, ui.okClicks.get());
+        Map<String, Object> forced = call("swing.pointer", "target", ref(ui.ok), "action", "CLICK", "force", true);
+        assertEquals(Boolean.TRUE, forced.get("fired"), forced.toString());
+        await("the forced routed click reached the blocked window", WAIT_MS, () -> ui.okClicks.get() == ok + 1);
+    }
+
     @Test
     void anyUnownedWindowIsBlockedAndTheTopmostBlockerIsNamed() throws Exception {
         final JFrame[] other = new JFrame[1];

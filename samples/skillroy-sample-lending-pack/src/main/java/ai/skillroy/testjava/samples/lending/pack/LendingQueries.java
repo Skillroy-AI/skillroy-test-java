@@ -53,8 +53,16 @@ public final class LendingQueries {
      *
      * @param deposit the deposit condition, or null for any deposit
      * @param perDay whether the item is lent per day; null means false (a counted item)
+     * @param inductionRequired whether lending the item asks for the induction check; null means either (gap 49,
+     *     pack 0.6.0: a scenario can ask for an item that needs no induction, as {@link ItemsTriggering} can)
      */
-    public record LendableItem(NumberRange deposit, Boolean perDay) implements Query<ItemRef> {
+    public record LendableItem(NumberRange deposit, Boolean perDay, Boolean inductionRequired)
+            implements Query<ItemRef> {
+
+        /** The query without an induction condition (either kind of item), as before pack 0.6.0. */
+        public LendableItem(NumberRange deposit, Boolean perDay) {
+            this(deposit, perDay, null);
+        }
     }
 
     /**

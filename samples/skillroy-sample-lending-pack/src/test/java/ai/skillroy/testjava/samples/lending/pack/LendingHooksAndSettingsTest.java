@@ -88,7 +88,7 @@ class LendingHooksAndSettingsTest {
     void theSettingsNameTheSystemMaximumsSetting() {
         assertEquals(Map.of(LendingPack.MAX_RETURN_SETTING, "max_return"), pack.settings().asMap());
         assertEquals("lending.maxReturnSetting", LendingPack.MAX_RETURN_SETTING);
-        assertEquals("0.5.0", LendingPack.VERSION);
+        assertEquals("0.6.0", LendingPack.VERSION);
     }
 
     /** The {@code SystemLimit} resolver reads the setting's name from its context (the branch overlay's constant). */

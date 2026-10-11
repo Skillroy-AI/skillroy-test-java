@@ -24,7 +24,7 @@ import ai.skillroy.testjava.scenario.pack.DomainPackOverlay;
  * The overlay {@value #ID} of pack {@code lending} for the sample desk's branch edition (phase6-contracts.md 11.3,
  * decision D146): found by {@code ServiceLoader<DomainPackOverlay>} when this jar is on the class path beside the base
  * pack's, applied by {@code DomainPacks.discover}. Scenarios keep {@code pack: lending}; the pack they get is
- * {@link BranchPack}, whose version is {@code 0.5.0+lending-branch@0.1.0}.
+ * {@link BranchPack}, whose version is {@code 0.6.0+lending-branch@0.1.0}.
  *
  * <p>Stateless; one instance serves every scenario in the JVM.
  */

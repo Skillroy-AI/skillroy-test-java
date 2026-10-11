@@ -2,8 +2,8 @@
   "planVersion": 6,
   "scenarioId": "keypad-image",
   "pack": "lending",
-  "packVersion": "0.5.0",
-  "sourceHash": "sha256:62260af74756c9b031f80fbc0904a92439cf59009beabdaa37fc53639a207b63",
+  "packVersion": "0.6.0",
+  "sourceHash": "sha256:a51b6f2f249efe91a74d388438f548ab8c2980bb9cb89c880097535da96d88ea",
   "inference": "none",
   "requires": [
     "swing.capture.paint",
@@ -17,7 +17,7 @@
       "id": "s1",
       "verb": "expectImage",
       "source": {
-        "line": 11
+        "line": 13
       },
       "calls": [
         {
@@ -46,7 +46,7 @@
       "id": "s2",
       "verb": "expectImage",
       "source": {
-        "line": 12
+        "line": 14
       },
       "calls": [
         {
@@ -66,6 +66,17 @@
               {
                 "by": {
                   "id": "entry"
+                }
+              },
+              {
+                "by": {
+                  "id": "totalsLine"
+                }
+              },
+              {
+                "by": {
+                  "name": "Printer",
+                  "role": "scrollpane"
                 }
               }
             ],

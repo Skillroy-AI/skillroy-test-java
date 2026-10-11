@@ -20,12 +20,19 @@ import java.awt.Component;
 import java.awt.Dialog;
 import java.awt.Frame;
 import java.awt.KeyboardFocusManager;
+import java.awt.Point;
+import java.awt.Rectangle;
 import java.awt.Window;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.WeakHashMap;
+import javax.swing.JRootPane;
+import javax.swing.RootPaneContainer;
+import javax.swing.SwingUtilities;
 
 /**
  * Window enumeration, the choice of a default window, and the modal-blocking heuristic of {@code MODAL_OPEN} (dialog
@@ -42,6 +49,145 @@ final class Windows {
     /** Open order per window, weakly held so that it never keeps a closed window alive. */
     private final Map<Window, Long> openOrder = new WeakHashMap<Window, Long>();
     private long openCounter;
+    /** Where the stacking of the showing windows comes from: the real windows, or a test's stand-ins. */
+    private volatile Source source = new Source() {
+        @Override
+        public List<Layer> stacking() {
+            return realStacking();
+        }
+    };
+
+    /**
+     * One showing window as the SCREEN composite and the hit-test see it (phase7-contracts.md section 3.1): the
+     * window, the component painted for it (its root pane, or the window itself without one), its screen bounds and
+     * where the painted component's (0, 0) lies in the window's space (the insets).
+     */
+    static final class Layer {
+        /** The window (a {@code java.awt.Window} in production; a stand-in component in headless tests). */
+        final Component window;
+        /** The component painted for the window. */
+        final Component paint;
+        /** The window's screen bounds. */
+        final Rectangle screen;
+        /** The painted component's origin in the window's space. */
+        final Point content;
+        /** The layer may be placed above the windows before it with confidence (modal, owned or active). */
+        final boolean ranked;
+
+        Layer(Component window, Component paint, Rectangle screen, Point content, boolean ranked) {
+            this.window = window;
+            this.paint = paint;
+            this.screen = new Rectangle(screen);
+            this.content = new Point(content);
+            this.ranked = ranked;
+        }
+    }
+
+    /**
+     * The package-private window-list seam (phase7-contracts.md section 13.1 item 1): the showing windows bottom to
+     * top. Production reads {@code Window.getWindows()}; headless tests, which cannot create a window, hand in
+     * lightweight stand-ins. EDT only.
+     */
+    interface Source {
+        List<Layer> stacking();
+    }
+
+    /** Replaces the window list (tests only). */
+    void source(Source s) {
+        this.source = s;
+    }
+
+    /** The showing windows bottom to top, from the {@link Source}. EDT only. */
+    List<Layer> stacking() {
+        return source.stacking();
+    }
+
+    /**
+     * The module's stacking order of the showing windows, bottom to top (phase7-contracts.md section 3.1): windows
+     * neither active nor owned nor modal in creation order, then the active window, then owned windows above their
+     * owners, then the modal dialogs as {@link #topmostModal()} ranks them, last on top. AWT has no public z-order, so
+     * this is assumed ({@code stackingAssumed}). EDT only.
+     */
+    List<Window> stackingOrder() {
+        List<Window> showing = roots(false);
+        Window active = activeWindow();
+        List<Window> base = new ArrayList<Window>();
+        List<Window> owned = new ArrayList<Window>();
+        List<Dialog> modal = new ArrayList<Dialog>();
+        Window activeBase = null;
+        for (Window w : showing) {
+            if (modal(w)) {
+                modal.add((Dialog) w);
+            } else if (w.getOwner() != null && w.getOwner().isShowing()) {
+                owned.add(w);
+            } else if (w == active) {
+                activeBase = w;
+            } else {
+                base.add(w);
+            }
+        }
+        List<Window> out = new ArrayList<Window>(base);
+        if (activeBase != null) {
+            out.add(activeBase);
+        }
+        final Map<Window, Integer> depth = new IdentityHashMap<Window, Integer>();
+        for (Window w : owned) {
+            int d = 0;
+            for (Window o = w.getOwner(); o != null; o = o.getOwner()) {
+                d++;
+            }
+            depth.put(w, Integer.valueOf(d));
+        }
+        List<Window> ownedSorted = new ArrayList<Window>(owned);
+        Collections.sort(ownedSorted, new Comparator<Window>() {
+            @Override
+            public int compare(Window a, Window b) {
+                return depth.get(a).intValue() - depth.get(b).intValue();
+            }
+        });
+        out.addAll(ownedSorted);
+        List<Dialog> rest = new ArrayList<Dialog>(modal);
+        List<Dialog> top = new ArrayList<Dialog>();
+        while (!rest.isEmpty()) {
+            Dialog t = topmostOf(rest);
+            top.add(0, t);
+            rest.remove(t);
+        }
+        out.addAll(top);
+        return out;
+    }
+
+    private List<Layer> realStacking() {
+        List<Layer> out = new ArrayList<Layer>();
+        Window active = activeWindow();
+        for (Window w : stackingOrder()) {
+            Component paint = paintRoot(w);
+            Point content = paint == w ? new Point(0, 0) : SwingUtilities.convertPoint(paint, 0, 0, w);
+            Rectangle screen;
+            try {
+                screen = new Rectangle(w.getLocationOnScreen(), w.getSize());
+            } catch (RuntimeException e) {
+                continue; // stopped showing in between
+            }
+            boolean ranked = modal(w) || w == active || (w.getOwner() != null && w.getOwner().isShowing());
+            out.add(new Layer(w, paint, screen, content, ranked));
+        }
+        return out;
+    }
+
+    /**
+     * The component a capture paints for a window (A61, D288): the root pane of a {@code RootPaneContainer} window
+     * (every {@code JFrame}, {@code JDialog}, {@code JWindow}), else the window itself.
+     */
+    static Component paintRoot(Window w) {
+        if (w instanceof RootPaneContainer) {
+            JRootPane root = ((RootPaneContainer) w).getRootPane();
+            if (root != null && root.getParent() == w) {
+                return root;
+            }
+        }
+        return w;
+    }
 
     /**
      * Records that the tap reported the window opened (first shown, or shown again after it was hidden or disposed):

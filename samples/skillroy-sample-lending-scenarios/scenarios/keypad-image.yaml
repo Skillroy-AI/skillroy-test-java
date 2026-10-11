@@ -1,5 +1,7 @@
 # Image baselines on the signed-off desk (phase7-contracts.md 12.4, 6.7, 8.7): the number pad (static, identical on
-# both seeds) and the whole frame with the entry field masked by its locator. Each capture is compared exactly with
+# both seeds) and the whole frame with the entry field masked by its locator, and with the parts that show what the desk
+# did before (the totals line's last loan, the printer's slips) masked too, so that the frame holds on any signed-off
+# desk, a fresh one or one many loans old. Each capture is compared exactly with
 # the baseline of the target's render key (the Java line, the look and feel, the antialiasing, the screen scale, a
 # probe render) in this environment's bindings file; the PNGs lie beside it under keypad-image.images/. A rendering
 # without a baseline is REBIND_NEEDED in replay and is approved at its step in approve.
@@ -9,6 +11,8 @@ tags: [vision, image]
 requires: [swing.capture.paint, swing.tree]
 steps:
   - expectImage: { label: keypad, by: { id: numberPad } }
-  - expectImage: { label: keypad-frame, mask: [ { by: { id: entry } } ] }
+  - expectImage:
+      label: keypad-frame
+      mask: [ { by: { id: entry } }, { by: { id: totalsLine } }, { by: { name: Printer, role: scrollpane } } ]
 on_prompt: { unexpected: fail }
 timeouts: { step: 30s }

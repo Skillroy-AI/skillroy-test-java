@@ -168,6 +168,96 @@ class HostSafetyIT {
         assertEquals("from-the-application", child.awaitLine("logConfig"), child.output());
     }
 
+    /**
+     * Phase 7 (phase7-contracts.md sections 2.5, 3.4, 13.2 item 11; D290): with the full home ({@code modules/} on), an
+     * AWT application and the display, the {@code -verbose:class} scan shows no {@code java.awt.Robot} loaded without
+     * the agent option {@code robot}; with it, none before the application started AWT (never at install), one after
+     * the Swing module confirmed AWT (the capability probe constructs it), and none in a headless JVM.
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    void aFullHomeLoadsNoRobotWithoutTheOptionAndWithItOnlyAfterTheApplicationStartedAwt() throws Exception {
+        Assumptions.assumeFalse(java.awt.GraphicsEnvironment.isHeadless(), "needs a display: run under "
+                + "ci/run-in-linux.sh with -Dskillroy.headless=false");
+        // without the option
+        File plain = it.newDir("disc-");
+        ChildJvm without = it.launch(list("-Djava.awt.headless=false", "-verbose:class",
+                "-Dskillroy.agent.enabled=true", ItWork.javaagent(it.home, "discoveryDir=" + plain.getPath())),
+                it.appJar.getPath(), APP + "SwingMain", list(), Collections.<String, String>emptyMap());
+        ChildJvm.Agent a = new ChildJvm.Agent(without.awaitDiscovery(plain));
+        go(without);
+        assertEquals("true", without.awaitLine("shown"));
+        Map<String, Object> robot = awaitCapability(a, "swing.pointer.robot", "robot: not enabled");
+        assertEquals("UNAVAILABLE", robot.get("state"));
+        assertEquals("OK", awaitCapability(a, "swing.tree", null).get("state"), "the module confirmed AWT");
+        assertFalse(robotLoaded(without.output()), "no java.awt.Robot without the option");
+
+        // with the option: nothing before the application starts AWT, the probe's Robot after
+        File withDir = it.newDir("disc-");
+        ChildJvm with = it.launch(list("-Djava.awt.headless=false", "-verbose:class",
+                "-Dskillroy.agent.enabled=true", ItWork.javaagent(it.home, "discoveryDir=" + withDir.getPath()
+                        + ";robot=true")), it.appJar.getPath(), APP + "SwingMain", list(),
+                Collections.<String, String>emptyMap());
+        ChildJvm.Agent b = new ChildJvm.Agent(with.awaitDiscovery(withDir));
+        assertEquals("true", String.valueOf(((Map<String, Object>) b.value("agent.info", null).get("options"))
+                .get("robot")), "agent.info reports the option");
+        assertEquals("AWT not started by the application yet",
+                awaitCapability(b, "swing.pointer.robot", "AWT not started").get("reason"));
+        assertFalse(robotLoaded(with.output()), "never at install, never before checkAwt");
+        go(with);
+        assertEquals("true", with.awaitLine("shown"));
+        Map<String, Object> declared = awaitCapability(b, "swing.pointer.robot", "");
+        assertTrue("OK".equals(declared.get("state")) || String.valueOf(declared.get("reason")).startsWith("robot: "),
+                "declared by the probe: " + declared);
+        assertTrue(robotLoaded(with.output()), "the capability probe constructed the Robot after checkAwt");
+
+        // with the option in a headless JVM
+        File headlessDir = it.newDir("disc-");
+        ChildJvm headless = it.launch(list("-verbose:class", "-Dskillroy.agent.enabled=true",
+                ItWork.javaagent(it.home, "discoveryDir=" + headlessDir.getPath() + ";robot=true")),
+                it.appJar.getPath(), APP + "SwingMain", list("headless"), Collections.<String, String>emptyMap());
+        ChildJvm.Agent c = new ChildJvm.Agent(headless.awaitDiscovery(headlessDir));
+        go(headless);
+        assertEquals("headless", headless.awaitLine("awt"));
+        assertEquals("headless", awaitCapability(c, "swing.pointer.robot", "headless").get("reason"));
+        assertFalse(robotLoaded(headless.output()), "never in a headless JVM");
+    }
+
+    private static void go(ChildJvm child) throws Exception {
+        child.process.getOutputStream().write("go\n".getBytes(ChildJvm.UTF8));
+        child.process.getOutputStream().flush();
+    }
+
+    private static boolean robotLoaded(String output) {
+        return Pattern.compile("(?:\\[Loaded |\\[class,load\\] )java\\.awt\\.Robot[ \\]]").matcher(output).find();
+    }
+
+    /**
+     * Polls {@code agent.capabilities} until the capability's reason starts with {@code reasonPrefix} (any state when
+     * the prefix is empty and the waiting reason is gone; the state {@code OK} when it is null).
+     */
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> awaitCapability(ChildJvm.Agent agent, String id, String reasonPrefix)
+            throws Exception {
+        long deadline = System.currentTimeMillis() + 60000;
+        Map<String, Object> last = null;
+        while (System.currentTimeMillis() < deadline) {
+            Map<String, Object> caps = (Map<String, Object>) agent.value("agent.capabilities", null)
+                    .get("capabilities");
+            last = (Map<String, Object>) caps.get(id);
+            if (last != null) {
+                String reason = String.valueOf(last.get("reason"));
+                if (reasonPrefix == null ? "OK".equals(last.get("state"))
+                        : reasonPrefix.isEmpty() ? !reason.startsWith("AWT not started")
+                        : reason.startsWith(reasonPrefix)) {
+                    return last;
+                }
+            }
+            Thread.sleep(100);
+        }
+        throw new AssertionError("capability " + id + " never reached " + reasonPrefix + ": " + last);
+    }
+
     @Test
     void theDefaultDiscoveryDirectoryIsPerUserAndOwnerOnly() throws Exception {
         File tmpdir = it.newDir("tmpdir-");

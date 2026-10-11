@@ -69,11 +69,12 @@ import static org.junit.jupiter.api.Assertions.fail;
  * names the live re-record it came from.
  *
  * <p>Phase 7 (phase7-contracts.md 8.7, 12.4, 13.1 item 9): {@code keypad-image}, the one Phase 7 scenario with a
- * bindings file per seed (its {@code images}), joins the list once step 2b commits it ({@link Phase7Pending}); every
+ * bindings file per seed (its {@code images}), is in the list since step 2b committed it; every
  * PNG under a {@code <scenarioId>.images/} directory is walked separately, and must be named by an entry of its
  * bindings file and match that entry's {@code sha256}. {@code -Dskillroy.bindings.rehash=true} rewrites the
  * {@code planHash} of every committed bindings file (the standard ones, the branch variant's, the session exports')
- * to the hash of the plan its YAML compiles to now, and nothing else: VC's script for the one regeneration of plan
+ * to the hash of the plan its YAML compiles to now, and (step 2b, VS) its {@code packVersion} to that plan's, nothing
+ * else: VC's script for the one regeneration of plan
  * version 6 (phase7-contracts.md 8.2, 12.5), run after {@code -Dskillroy.plans.update=true}, and again after the pack's
  * version changes.
  */
@@ -102,10 +103,13 @@ class BindingsUpToDateTest {
         }
         for (Path file : files) {
             BindingsFile read = BindingsFile.read(file);
-            String hash = PlanCompiler.compile(yamlOf.apply(read.scenarioId()), pack).hash();
-            if (!hash.equals(read.planHash())) {
+            Plan compiled = PlanCompiler.compile(yamlOf.apply(read.scenarioId()), pack);
+            String hash = compiled.hash();
+            // Phase 7, step 2b (VS): the pack's version follows too, as approve would write it (the field is
+            // information: neither the plan hash nor the resolve hash covers it)
+            if (!hash.equals(read.planHash()) || !compiled.packVersion().equals(read.packVersion())) {
                 BindingsFile rehashed = new BindingsFile(read.bindingsVersion(), read.scenarioId(), read.envId(),
-                        read.pack(), read.packVersion(), hash, read.resolveHash(), read.env(), read.resolutions(),
+                        read.pack(), compiled.packVersion(), hash, read.resolveHash(), read.env(), read.resolutions(),
                         read.oracles(), read.images());
                 Files.writeString(file, rehashed.toJsonText(), StandardCharsets.UTF_8);
             }
@@ -129,9 +133,7 @@ class BindingsUpToDateTest {
         List<Path> expected = new ArrayList<>();
         for (Env env : Env.values()) {
             expected.add(ScenarioB.committedBindings(env));
-            if (!Phase7Pending.pending(KEYPAD_IMAGE)) {
-                expected.add(BindingsFile.locate(root, env.id, KEYPAD_IMAGE));
-            }
+            expected.add(BindingsFile.locate(root, env.id, KEYPAD_IMAGE));
             expected.add(ScenarioA.committedBindings(env));
             expected.add(ScenarioC.committedBindings(env));
             expected.add(ScenarioE.committedBindings(env));
@@ -215,9 +217,7 @@ class BindingsUpToDateTest {
                     bindings.getParent().resolve(BindingsFile.ImageEntry.fileName(file.scenarioId(), label, key))),
                     bindings + ": the baseline " + label + " for " + key + " has its PNG")));
         }
-        if (Phase7Pending.pending(KEYPAD_IMAGE)) {
-            assertEquals(List.of(), pngs, "no baseline before step 2b");
-        }
+        assertFalse(pngs.isEmpty(), "keypad-image's baselines are committed (step 2b)");
     }
 
     /**
@@ -230,7 +230,7 @@ class BindingsUpToDateTest {
         for (Path yaml : PlansUpToDateTest.committedScenarios()) {
             Plan plan = Plan.read(PlansUpToDateTest.planFor(yaml));
             boolean expected = plan.needsBindings() && (!plan.scenarioId().equals(ScenarioD.ID)
-                    || ScenarioD.HAS_BINDINGS) && !Phase7Pending.pending(plan.scenarioId());
+                    || ScenarioD.HAS_BINDINGS);
             for (Env env : Env.values()) {
                 Path file = BindingsFile.locate(ScenarioA.bindingsRoot(), env.id, plan.scenarioId());
                 assertEquals(expected, Files.isRegularFile(file), file.toString());

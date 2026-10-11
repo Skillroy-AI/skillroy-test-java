@@ -37,7 +37,8 @@ import javax.swing.WindowConstants;
 
 /**
  * The desk's main window (1024x768): the prompt line and status at the top, the loan table and totals in the
- * middle, the printer's slip panel on the right, and the entry field and keypad of {@link IconKey}s at the bottom.
+ * middle, the printer's slip panel on the right, and the entry field, the keypad of {@link IconKey}s and the
+ * {@link NumberPad} beside it at the bottom.
  *
  * <p>The window only observes the engine and feeds its inbox: the entry field posts {@code Entry} on Enter, each key
  * posts {@code Key.<ACTION>} ({@code DEPOSIT} and {@code QTY} carry the entry-field text as their value). It never
@@ -71,6 +72,7 @@ public final class LendingFrame extends JFrame {
     private final JLabel totalsLine = new JLabel(" ");
     private final JTextArea slipArea = new JTextArea(30, SlipPrinter.WIDTH + 2);
     private final List<IconKey> keys;
+    private final NumberPad numberPad;
     private final transient EngineListener engineListener;
     private final transient SlipListener slipListener;
 
@@ -124,10 +126,14 @@ public final class LendingFrame extends JFrame {
             list.add(key);
         }
         keys = Collections.unmodifiableList(list);
-        JPanel bottom = new JPanel(new BorderLayout(0, 8));
+        numberPad = new NumberPad(entry);
+        JPanel bottom = new JPanel(new BorderLayout(8, 8));
         bottom.setBorder(BorderFactory.createEmptyBorder(8, 12, 12, 12));
         bottom.add(entry, BorderLayout.NORTH);
-        bottom.add(keypad, BorderLayout.CENTER);
+        JPanel keyRow = new JPanel(new BorderLayout());
+        keyRow.add(keypad, BorderLayout.NORTH); // the keys keep their 64 px beside the taller number pad
+        bottom.add(keyRow, BorderLayout.CENTER);
+        bottom.add(numberPad, BorderLayout.EAST);
 
         JPanel content = new JPanel(new BorderLayout(8, 0));
         content.add(top, BorderLayout.NORTH);
@@ -248,6 +254,11 @@ public final class LendingFrame extends JFrame {
     /** @return the keypad keys in {@link #KEYPAD} order */
     public List<IconKey> keys() {
         return keys;
+    }
+
+    /** @return the number pad beside the keypad */
+    public NumberPad numberPad() {
+        return numberPad;
     }
 
     /** @return the key with that action id, or null */
