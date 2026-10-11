@@ -784,7 +784,7 @@ re-run. BS8 comes from `research/embedded-browser-spi.md` R4 (B9); BS9-BS12 from
 | Id | Proves | Status |
 |---|---|---|
 | BS1 | The agent loads into stock JVMs in all load modes, across JDK versions | **Answered for Java 8 and Java 25 targets on Linux** (Java 21 targets before the switch). Since 2026-10-09 (Phase 6, check 1b) the JEP 451 warning is shown for `ATTACH` on a Java 25 target and absent for `JAVAAGENT`, `JAVA_TOOL_OPTIONS` and `EMBEDDED`. Open: cross-user attach and jattach, the refusal under `-XX:-EnableDynamicAgentLoading`, Windows |
-| BS2 | The control channel survives a soak; the agent is isolated from the host class path | **Answered in part**: 3-minute soak per JDK (before the switch, on the JDK server), bounds and isolation tested; the agent's own listener (H1) is built and its per-call cost measured (1.4-5 ms). Open: the one-hour soak, loader collectability, a soak on the agent's own listener. Finding: about 45 ms per call on the JDK HTTP server on Java 8 and Java 21 targets; absent on a Java 25 target; gone with H1 |
+| BS2 | The control channel survives a soak; the agent is isolated from the host class path | **Answered in part**: 3-minute soak per JDK (before the switch, on the JDK server), bounds and isolation tested; the agent's own listener (H1) is built and its per-call cost measured (1.4-5 ms); **the one-hour soak on the agent's own listener passed 2026-10-11 on a Java 25 and a Java 8 target** (`ListenerSoakIT`: 26 million calls each, 0 errors, p99 about 10 ms, 360,000 events each in order across 78 resumes). Open: loader collectability, a soak on a target other than the sample. Finding: about 45 ms per call on the JDK HTTP server on Java 8 and Java 21 targets; absent on a Java 25 target; gone with H1 |
 | BS3 | Byte Buddy retransformation with inline Advice and a bootstrap `Spy`; original bytes restored on detach | **Passed with conditions 2026-10-09** (`spikes/BS3/RESULT.md`): on Java 8 and Java 25 targets in the arm64 image, `JAVAAGENT` and `ATTACH`, a hook on the sample's `AccessControl.check` and on a toy class in a custom loader installs in 111-197 ms (later ones 6-23 ms), fires on the host's thread in `OBSERVE`, `CAPTURE` and `STUB`, switches mode without a retransform and restores byte for byte; Byte Buddy 1.18.14 shaded under the project prefix coexists with a host's Byte Buddy 1.12.19, ASM 5.0.3 and JNA 4.5.2; 17 configurations. Conditions: Byte Buddy injects `Nexus` (and on Java 25 a `java.lang` accessor with an `Unsafe` warning) unless its relocated `nexus.disabled` property is set; each bootstrap append prints a class-data-sharing warning on Java 25 (append once per JVM); the byte check holds by construction, so the engine also counts transform events it did not cause; a loader that delegates only `java.*` cannot see `Spy` (probe and refuse, or a `java.*`-package `Spy`); every retransform is a stop-the-world pause (size limit proposed: 256 KiB and 2,000 methods); maven-shade-plugin 3.6.2 or newer |
 | BS4 | Which Swing input rungs work on an Xvfb display with no window manager | **Answered** for Java 8 and 21 (before the switch); the end-to-end check built on it passed on Java 8 and Java 25 targets. The ROBOT rung is not built; its facts, and the mechanism behind "nothing gives the focus back" after a dialog closes, are BS9's (2026-10-10). Open: a large-sample focus statistic, the display-test flake |
 | BS5 | Playwright attaches over CDP to an already-running Chromium safely | **Met 2026-10-07 by the Phase 4 acceptance** against JCEF's Chromium in the image (D53): 50 of 50 attach attempts against a frozen page ended with `FROZEN_TARGETS` within the deadline, the slowest in about 2.02 s. A stock-Chromium run is a manual procedure, `spikes/BS5/README.md` |
@@ -866,9 +866,60 @@ re-run. BS8 comes from `research/embedded-browser-spi.md` R4 (B9); BS9-BS12 from
 - **Seen on 2026-10-02.** In the end-to-end test `basic-loan` took about 0.3 s on a Java 25 target and about 2.0 s
   on a Java 8 target (`basic-loan-ui` 0.6 s and 2.9 s): the stall is absent with the JDK 25 server and present with
   the Java 8 one. Why the JDK 25 server avoids it was not investigated; H1 replaces the server on every line.
-- **Not shown.** The one-hour soak at 100 events/s with a client that disconnects and resumes repeatedly; a
-  conflicting library version on the host class path (the agent shades nothing yet); that the isolated loader is
-  collectable after shutdown (a self-close is shown to release it, S31); any soak on the agent's own listener.
+- **Shown 2026-10-11 on the agent's own listener** (`ListenerSoakIT` in the sample scenarios module, opt-in:
+  `-Dskillroy.soak.minutes=<n>`, else it reports itself skipped; the sample desk with the agent on the command line;
+  one hour per target Java in the arm64 Linux image, on a 10-CPU Docker VM that other runs shared; each run's
+  `target/it-runs/soak/java-<version>-60min/report.json` holds the numbers below, a sample every 30 s, the live-heap
+  class histograms and the per-operation latencies).
+  - Load: 8 threads calling 15 read-only operations flat out (agent, JVM, event, desk, Swing and `GET /capabilities`
+    calls; every reply checked, and one operation echoes a name unique to the call so that a reply reaching the wrong
+    caller shows); one desk transaction a second (`basic-loan`'s inputs, each followed by a `sync.await` on the desk's
+    events, the posted loan read back); `trace.mark` bringing the event stream to 100 events/s; one unfiltered event
+    stream that closes and resumes from its last event id every 30-60 s (offline 0.2-3 s, so each resume replays a
+    backlog) and one stream filtered by `loan.posted`.
+  - **Java 25 target (25.0.4.1): passed.** 26,535,001 calls (7,370/s), 0 errors; p50 0.54 ms, p95 3.74, p99 9.98, max
+    83.8, none at 100 ms or more (`swing.snapshot`, the heaviest: p50 5.1, p99 16.0; every other operation p99 3.0-4.5
+    ms); 3,601 transactions (mean 11.7 ms, p99 23.6 ms). 360,012 events published (100.0/s; 313,199 of them marks),
+    all 360,012 received in order by the unfiltered stream across 78 resumes (backlog at a resume up to 297 events,
+    first event 2.4 ms after the reconnect on average, 16 ms at most), no gap frame, no duplicate; the marks numbered
+    without a break; the filtered stream received the 3,601 `loan.posted` events, exactly the transactions; the
+    client never had to reconnect by itself. Agent threads 6 -> 28 (at most 32; its pools allow 152), all the
+    target's threads 19 -> 41 (at most 44), no growth between the first and the last quarter. Live heap after a full
+    GC: 7.9 MB at the start, 15.6 MB at 5 minutes, lowest 16.4 MB in the first quarter after the 10-minute warm-up
+    and 23.9 MB in the last, highest 27.3 MB, 24.5 MB after the run; the growth (+7.4 MB, 2.8 KB a transaction) is the
+    desk's own slip text and database rows, and the agent's own classes hold 0.48 MB (the 10,000-event ring) at every
+    checkpoint. At the end the agent answered a ping, the desk was idle with its event thread alive, and
+    `basic-loan` passed on the executor without a pause.
+  - **Java 8 target (1.8.0_504): passed.** 26,203,622 calls (7,278/s), 0 errors; p50 0.54 ms, p95 3.84, p99 10.4, max
+    69.1, none at 100 ms or more (`swing.snapshot` p50 5.3, p99 16.6; the others p99 3.0-4.5 ms); 3,601 transactions
+    (mean 11.4 ms, p99 22.0 ms). 360,031 events published (100.0/s; 313,218 marks), all received in order by the
+    unfiltered stream across 78 resumes (backlog up to 296, first event 3.1 ms after the reconnect on average, 20 ms at
+    most), no gap, no duplicate; the filtered stream 3,601 of 3,601; no reconnect by the client. Agent threads 5 -> 29
+    (at most 32), all threads 16 -> 40 (at most 42), no growth. Live heap: 5.8 MB at the start, lowest 14.4 MB in the
+    first quarter after the warm-up and 25.2 MB in the last (+10.8 MB; the largest growers are the desk's slip text and
+    database rows and the arrays under them; a checkpoint under load read 35.9 MB, which a lower one in the same
+    quarter shows to be what the calls in flight held), highest 35.9 MB, 23.0 MB after the run; the agent's own
+    classes 0.48 MB at every checkpoint. The desk answered at the end and `basic-loan` passed.
+  - Bounds asserted (tolerances in the test): 0 errors; the unfiltered stream complete and in order with no gap
+    frame (the ring holds 10,000 events, 100 s at this rate, and a resume is offline for seconds, so a gap would be a
+    fault, not the permitted overflow); the filtered stream equal to the matching events of the unfiltered one; p99 of
+    the read load below 100 ms; the lowest live heap of the last quarter within 32 MiB or 25 % of the lowest of the first
+    quarter after the warm-up; the agent's own live objects within 2 MiB; threads in the last quarter within 8 of
+    the first and the agent's under its pools; the controller's stream threads gone after close; the desk answering.
+  - Seen while building it. A 3-minute run with the transactions unthrottled (56 a second) published 724 events/s and
+    served 2,900 calls/s with nothing lost, and the first hour (4 transactions a second) was stopped at 15 minutes:
+    the live heap rose 4 KB a transaction, the desk's own (it appends every slip to a text area and keeps every loan),
+    which at 4 a second passes any fixed tolerance within the hour; transactions are 1 a second, and the report
+    splits the live heap into the agent's classes, the desk's and the rest. The heap is read from a full GC with a
+    class histogram through the target's own `jcmd` (an unforced reading swings from tens of MB to nearly 1 GB with
+    the collector's cycle); the checkpoints' collections fall inside the latencies above, none of the 26 million calls of
+    either hour taking 100 ms.
+- **Not shown.** A conflicting library version on the host class path (the agent shades nothing yet); that the
+  isolated loader is collectable after shutdown (a self-close is shown to release it, S31). Of the soak: a target
+  other than the sample desk; amd64 (the hours ran on arm64); the optional hooks, Byteman or web modules loaded;
+  longer than an hour; the `Last-Event-ID` header (the soak resumes with `since=<last id>` on a new stream; the
+  header is sent only by the client's own reconnect, which the unit tests cover and this run never needed); the
+  controller's own heap, which the report records unforced and does not assert.
 
 ### BS3 Retransformation, Advice and bootstrap `Spy`
 
@@ -1301,8 +1352,8 @@ tests are green in every configuration of the status table (with the one open fl
 - [x] `skillroy-cli`: `jvms`, `attach`, `info`, `caps`, `schema`, `call`, `snapshot`, `events`, `compile`, `run`
 - [x] `skillroy-sample-lending-app`, `skillroy-sample-lending-agent` (`AgentModule` `lending`), minimal `skillroy-sample-lending-pack`, scenarios `basic-loan` and `basic-loan-ui` in `skillroy-sample-lending-scenarios`
 - [ ] BS1 and BS2 passed. Not ticked: both are answered for what Phase 1 needs (Java 8 and Java 25 targets on
-  Linux), but not as specified. BS1 lacks the cross-user case and Windows; BS2 lacks the one-hour soak and is to be
-  repeated on the agent's own listener.
+  Linux), but not as specified. BS1 lacks the cross-user case and Windows; BS2 has had its one-hour soak on the
+  agent's own listener since 2026-10-11 and lacks the loader-collectability check and the conflicting-library case.
 - **Exit**, split into what is proven and what is not:
   - [x] `basic-loan` and `basic-loan-ui` run green against the sample lending desk from a clean build, with the
     target on Java 8 and on Java 25, in every load mode (`JAVAAGENT`, `JAVAAGENT` through `JAVA_TOOL_OPTIONS`,
@@ -2467,7 +2518,9 @@ owner's optional choices; gap 95; gap 94 is done). The owner's B29, B30 and B31 
 - [x] Licence audit of all dependencies: `docs/licence-audit.md` (2026-10-02). Its packaging gaps are Phase 1.x;
   the planned pieces it lists in §8 are audited when they are adopted
 - [x] Confirm control of the domain behind the `ai.skillroy` groupId (B2): **confirmed by the owner 2026-10-11** (B33)
-- [ ] A longer soak, and a soak on a target other than the sample lending desk
+- [x] A longer soak: one hour per target Java (25 and 8) on the agent's own listener, `ListenerSoakIT`, 2026-10-11
+  (section "BS2 Control-channel soak"); longer than an hour is not shown
+- [ ] A soak on a target other than the sample lending desk
 
 ## Open SPI and DSL gaps
 
