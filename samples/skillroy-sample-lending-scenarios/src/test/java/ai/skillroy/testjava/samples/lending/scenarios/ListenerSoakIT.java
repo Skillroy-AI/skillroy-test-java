@@ -37,6 +37,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.BitSet;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -116,8 +117,10 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
  * <p>Opt-in: without {@code -Dskillroy.soak.minutes=<n>} (a number above zero) the test reports itself skipped, so the
  * normal build and the matrix are unchanged. Other properties, all optional: {@code skillroy.soak.loadThreads} (8),
  * {@code skillroy.soak.callsPerSecond} (the read load's total, 0 for no limit), {@code skillroy.soak.eventsPerSecond}
- * (100), {@code skillroy.soak.transactionsPerSecond} (4; 0 for no limit: a transaction publishes about 13 events,
- * so unlimited transactions alone publish about 700 events per second), {@code skillroy.soak.filter}
+ * (100), {@code skillroy.soak.transactionsPerSecond} (1; 0 for no limit: a transaction publishes about 13 events, so
+ * unlimited transactions alone publish about 700 events per second; the desk keeps every slip in a text area and
+ * every loan in its database, about 4 KB a transaction, so at 4 a second its own records would pass the heap
+ * tolerance within the hour), {@code skillroy.soak.filter}
  * ({@code loan.posted}), {@code skillroy.soak.resumeMinSeconds} and {@code skillroy.soak.resumeMaxSeconds} (30, 60),
  * {@code skillroy.soak.sampleSeconds} and {@code skillroy.soak.checkpointSeconds}.
  *
@@ -140,7 +143,17 @@ final class ListenerSoakIT {
     private static final Duration AWAIT = Duration.ofSeconds(30);
     private static final long HEAP_TOLERANCE_BYTES = 32L << 20;
     private static final int THREAD_TOLERANCE = 8;
+    private static final long AGENT_OWNED_TOLERANCE_BYTES = 2L << 20;
+    /** The packages of the agent: its core and modules, the wire types, and the sample's lending module. */
+    private static final List<String> AGENT_PACKAGES = List.of("ai.skillroy.testjava.agent.",
+            "ai.skillroy.testjava.protocol.", "ai.skillroy.testjava.samples.lending.agent.");
+    /** What the desk itself keeps: its database, the text area its slips are appended to, its own classes. */
+    private static final List<String> DESK_PACKAGES = List.of("org.hsqldb.", "javax.swing.text.",
+            "ai.skillroy.testjava.samples.lending.");
     private static final double P99_LIMIT_MS = 100.0;
+    /** A line of {@code jcmd GC.class_histogram}: rank, instances, bytes, class (the module in brackets is ignored). */
+    private static final java.util.regex.Pattern HISTOGRAM_LINE =
+            java.util.regex.Pattern.compile("\\d+:\\s+(\\d+)\\s+(\\d+)\\s+(\\S+).*");
     private static final long NEVER_SEQ = 1_000_000_000_000L;
 
     @Test
@@ -185,7 +198,7 @@ final class ListenerSoakIT {
             int checkpoint = integer("checkpointSeconds",
                     (int) Math.min(300, Math.max(sample, runSeconds / 8)));
             return new Config(minutes, integer("loadThreads", 8), integer("callsPerSecond", 0),
-                    integer("eventsPerSecond", 100), integer("transactionsPerSecond", 4),
+                    integer("eventsPerSecond", 100), integer("transactionsPerSecond", 1),
                     System.getProperty("skillroy.soak.filter", "loan.posted"), integer("resumeMinSeconds", 30),
                     integer("resumeMaxSeconds", 60), sample, checkpoint);
         }
@@ -267,7 +280,29 @@ final class ListenerSoakIT {
                           int threadsAgent, Map<String, Object> agentByPrefix, long workersActive, long workersMax,
                           long callersActive, long callersMax, long httpThreads, long ringLast, long ringOldest,
                           long calls, long controllerHeapUsed, int controllerThreads, int controllerSseThreads,
-                          long histogramBytes, List<String> topClasses) {
+                          long histogramBytes, List<String> topClasses, Map<String, long[]> classes,
+                          long transactionsSoFar) {
+
+        /** The bytes of live objects of the agent's own classes (the lending module's included). */
+        long agentOwned() {
+            return ownedBy(AGENT_PACKAGES, List.of());
+        }
+
+        /** The bytes of live objects of the desk's own data: its database, its text area, its classes. */
+        long deskOwned() {
+            return ownedBy(DESK_PACKAGES, AGENT_PACKAGES);
+        }
+
+        private long ownedBy(List<String> packages, List<String> except) {
+            long sum = 0;
+            for (Map.Entry<String, long[]> e : classes.entrySet()) {
+                String name = e.getKey();
+                if (packages.stream().anyMatch(name::startsWith) && except.stream().noneMatch(name::startsWith)) {
+                    sum += e.getValue()[1];
+                }
+            }
+            return sum;
+        }
 
         /**
          * What the target holds that is alive: after a collection with a histogram, the bytes of the live objects (no
@@ -294,11 +329,14 @@ final class ListenerSoakIT {
             m.put("ringLastSeq", ringLast);
             m.put("ringOldestSeq", ringOldest);
             m.put("callsSoFar", calls);
+            m.put("transactionsSoFar", transactionsSoFar);
             m.put("controllerHeapUsedMB", mb(controllerHeapUsed));
             m.put("controllerThreads", (long) controllerThreads);
             m.put("controllerSseThreads", (long) controllerSseThreads);
             if (gcForced) {
                 m.put("liveObjectsTotalMB", mb(histogramBytes));
+                m.put("liveAgentOwnedMB", mb(agentOwned()));
+                m.put("liveDeskOwnedMB", mb(deskOwned()));
                 m.put("liveClassesTop", topClasses);
             }
             return m;
@@ -1200,7 +1238,8 @@ final class ListenerSoakIT {
                         number(callers.get("active")), number(callers.get("max")), httpThreads,
                         number(ring.get("lastSeq")), number(ring.get("oldestSeq")), calls.sum(),
                         rt.totalMemory() - rt.freeMemory(), Thread.getAllStackTraces().size(), sse,
-                        forced ? collected.totalBytes() : 0L, forced ? collected.top() : List.of());
+                        forced ? collected.totalBytes() : 0L, forced ? collected.top() : List.of(),
+                        forced ? collected.classes() : Map.of(), transactions.sum());
                 agentThreadCap = s.workersMax() + s.callersMax() + s.httpThreads() + 8;
                 samples.add(s);
                 if (!label.equals("sample")) {
@@ -1217,7 +1256,7 @@ final class ListenerSoakIT {
         }
 
         /** What a collection with a class histogram found: the live objects' bytes in all and the biggest classes. */
-        private record Collected(long totalBytes, List<String> top) {
+        private record Collected(long totalBytes, List<String> top, Map<String, long[]> classes) {
         }
 
         /**
@@ -1242,20 +1281,31 @@ final class ListenerSoakIT {
                     List<String> lines = Files.readAllLines(raw, StandardCharsets.UTF_8);
                     long total = 0;
                     List<String> top = new ArrayList<>();
+                    Map<String, long[]> classes = new java.util.HashMap<>();
                     for (String line : lines) {
                         String text = line.strip();
                         if (text.startsWith("Total")) {
                             String[] parts = text.split("\\s+");
                             total = Long.parseLong(parts[2]);
-                        } else if (top.size() < 10 && text.matches("\\d+:\\s.*")) {
+                            continue;
+                        }
+                        java.util.regex.Matcher m = HISTOGRAM_LINE.matcher(text);
+                        if (!m.matches()) {
+                            continue;
+                        }
+                        if (top.size() < 10) {
                             top.add(text.replaceAll("\\s+", " "));
+                        }
+                        long bytes = Long.parseLong(m.group(2));
+                        if (bytes >= 16_384 || m.group(3).startsWith("ai.skillroy.")) {
+                            classes.put(m.group(3), new long[] {Long.parseLong(m.group(1)), bytes});
                         }
                     }
                     List<String> kept = new ArrayList<>(lines.subList(0, Math.min(80, lines.size())));
                     kept.addAll(lines.stream().filter(l -> l.strip().startsWith("Total")).toList());
                     Files.write(reportDir.resolve(String.format(Locale.ROOT, "histogram-%s-%.0fs.txt", label,
                             elapsedSeconds())), kept, StandardCharsets.UTF_8);
-                    return new Collected(total, top);
+                    return new Collected(total, top, classes);
                 } finally {
                     Files.deleteIfExists(raw);
                 }
@@ -1467,6 +1517,43 @@ final class ListenerSoakIT {
                         + "the warm-up, lowest %.1f MB in the last quarter (tolerance %.1f MB)",
                         settledMin / 1048576.0, lastMin / 1048576.0, tolerance / 1048576.0));
             }
+
+            // What the growth is made of: the agent's own classes, the desk's own data, the rest.
+            Sample first = settled.stream().min(Comparator.comparingLong(Sample::live)).get();
+            Sample last = lastQuarter.stream().min(Comparator.comparingLong(Sample::live)).get();
+            long agentFirst = settled.stream().mapToLong(Sample::agentOwned).min().getAsLong();
+            long agentLast = lastQuarter.stream().mapToLong(Sample::agentOwned).min().getAsLong();
+            heap.put("agentOwnedRule", "the lowest bytes of live objects of the agent's own classes ("
+                    + String.join(", ", AGENT_PACKAGES) + ") in the last quarter is at most the lowest in the first "
+                    + "quarter after the warm-up plus " + (AGENT_OWNED_TOLERANCE_BYTES >> 20) + " MiB");
+            heap.put("agentOwnedFirstQuarterLowestMB", mb(agentFirst));
+            heap.put("agentOwnedLastQuarterLowestMB", mb(agentLast));
+            heap.put("deskOwnedGrowthMB", mb(last.deskOwned() - first.deskOwned()));
+            heap.put("transactionsBetween", last.transactionsSoFar() - first.transactionsSoFar());
+            heap.put("growthComparedBetweenSecond", SoakHistogram.round(first.t()) + " and "
+                    + SoakHistogram.round(last.t()));
+            heap.put("largestGrowthByClass", largestGrowth(first, last));
+            if (agentLast > agentFirst + AGENT_OWNED_TOLERANCE_BYTES) {
+                failures.add(String.format(Locale.ROOT, "the agent's own live objects grew: lowest %.2f MB in the "
+                        + "first quarter after the warm-up, lowest %.2f MB in the last quarter (tolerance %d MB)",
+                        agentFirst / 1048576.0, agentLast / 1048576.0, AGENT_OWNED_TOLERANCE_BYTES >> 20));
+            }
+        }
+
+        /** The classes whose live bytes grew most between two collected samples, as {@code name +n KB}. */
+        private static List<String> largestGrowth(Sample from, Sample to) {
+            Map<String, Long> growth = new java.util.HashMap<>();
+            for (Map.Entry<String, long[]> e : to.classes().entrySet()) {
+                growth.merge(e.getKey(), e.getValue()[1], Long::sum);
+            }
+            for (Map.Entry<String, long[]> e : from.classes().entrySet()) {
+                growth.merge(e.getKey(), -e.getValue()[1], Long::sum);
+            }
+            List<String> out = new ArrayList<>();
+            growth.entrySet().stream().sorted((a, b) -> Long.compare(b.getValue(), a.getValue())).limit(8)
+                    .forEach(e -> out.add(e.getKey() + " " + (e.getValue() >= 0 ? "+" : "") + (e.getValue() >> 10)
+                            + " KB"));
+            return out;
         }
 
         private void threadBounds(double runSeconds, double warm) {
