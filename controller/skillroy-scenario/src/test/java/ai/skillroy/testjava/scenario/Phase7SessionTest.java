@@ -148,6 +148,52 @@ class Phase7SessionTest {
         }
     }
 
+    /**
+     * The fix wave of the Phase 7 review (FB, L1-F1 = L2-F3): the session's gates read {@code via} and {@code mode} as
+     * the agent does (trimmed, any case): without {@code SessionOptions.robot} a pointer spelled {@code robot},
+     * {@code " Robot"} or behind a control character and a capture spelled {@code robot} are refused with nothing
+     * sent; with it the person-only glass gate refuses {@code mode: Robot} for a model and a client; {@code read}
+     * refuses a glass capture in any spelling and a {@code redact} that is not the boolean {@code true}.
+     */
+    @Test
+    void theRobotAndGlassGatesCannotBePassedBySpelling() throws Exception {
+        try (ExecutorSession session = fx.open()) {
+            for (String via : List.of("robot", " Robot", "\u0001ROBOT")) {
+                StepOutcome pointer = session.execute(PlannedCall.of("swing.pointer", Map.of("point", Map.of("x", 1L,
+                        "y", 1L), "action", "CLICK", "via", via), Sync.NONE), PERSON);
+                assertEquals(Status.ERROR, pointer.status(), via);
+                assertEquals("robot: not allowed; a person passes --allow-robot", pointer.message(), via);
+            }
+            StepOutcome verb = session.execute("call", Map.of("primitive", "swing.pointer", "args", Map.of("point",
+                    Map.of("x", 1L, "y", 1L), "action", "CLICK", "via", "robot")), PERSON);
+            assertEquals("robot: not allowed; a person passes --allow-robot", verb.message(), "the REPL's call verb");
+            StepOutcome mode = session.execute(PlannedCall.of("swing.capture", Map.of("mode", "robot"), Sync.NONE),
+                    PERSON);
+            assertEquals("robot: not allowed; a person passes --allow-robot", mode.message());
+            for (Map<String, Object> args : List.<Map<String, Object>>of(Map.of("mode", "robot"), Map.of("mode",
+                    " Robot "), Map.of("mode", "\u0001ROBOT"), Map.of("redact", "false"), Map.of("redact", "no"))) {
+                assertThrows(IllegalArgumentException.class, () -> session.read("swing.capture", args),
+                        String.valueOf(args.keySet()));
+            }
+            assertTrue(fx.agent.callsTo("swing.pointer").isEmpty() && fx.agent.callsTo("swing.capture").isEmpty(),
+                    "nothing was sent");
+        }
+        fx.agent.value("swing.capture", Map.of("format", "png", "base64", ""));
+        try (ExecutorSession session = ExecutorSession.open(fx.pack, fx.agent, fx.options().withRobot(true)
+                .withId("sess-2"))) {
+            for (Origin origin : List.of(MODEL, CLIENT)) {
+                for (String spelling : List.of("Robot", "robot ", "\u0001ROBOT")) {
+                    StepOutcome glass = session.execute(PlannedCall.of("swing.capture", Map.of("mode", spelling),
+                            Sync.NONE), origin);
+                    assertEquals(Status.ERROR, glass.status(), origin.kind().name());
+                    assertTrue(glass.message().contains("a capture of the glass is a person's evidence"),
+                            glass.message());
+                }
+            }
+            assertTrue(fx.agent.callsTo("swing.capture").isEmpty(), "no glass capture was sent for them");
+        }
+    }
+
     // ------------------------------------------------------------------------------------------------ D342
 
     @Test

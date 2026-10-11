@@ -34,7 +34,6 @@ import ai.skillroy.testjava.protocol.LoadMode;
 import ai.skillroy.testjava.protocol.RpcResult;
 import ai.skillroy.testjava.protocol.SecretKeys;
 import ai.skillroy.testjava.scenario.BindingsFile;
-import ai.skillroy.testjava.scenario.CapabilityMerge;
 import ai.skillroy.testjava.scenario.FailureKind;
 import ai.skillroy.testjava.scenario.JunitXmlReporter;
 import ai.skillroy.testjava.scenario.RunOptions;
@@ -827,8 +826,10 @@ abstract class LoadModeChecks {
      * Item 7, the seed-A scenarios (phase7-contracts.md 12.4, 13.2 item 7): {@code sign-on-by-number-pad} passes (its
      * region steps through the number pad);
      * {@code loan-table-visual-check} is DEGRADED, its visual check skipped with the reason naming
-     * {@code inference.vision} ({@code missing} until the vision module's contributor is on the class path,
-     * {@code UNAVAILABLE (replay)} once it is); {@code vision-live-only} is SKIPPED: its {@code run.jsonl} holds
+     * {@code inference.vision} {@code UNAVAILABLE (replay)} (the vision module, a test dependency of this module, is on
+     * the class path; the fix wave of the Phase 7 review, FB, L3-F6, asserts it unconditionally, so that a lost
+     * dependency or a renamed contributor fails here instead of weakening exit criterion 3); {@code vision-live-only} is
+     * SKIPPED: its {@code run.jsonl} holds
      * {@code run-start}, {@code skipped}, {@code ledger {count: 0}} and {@code run-end} and nothing was sent to the
      * agent. None of the three has a bindings file.
      */
@@ -844,11 +845,10 @@ abstract class LoadModeChecks {
         Runs.Outcome visual = Runs.run(client(), Runs.committed("loan-table-visual-check"),
                 ItEnv.runDir(mode().slug, "loan-table-visual-check"));
         assertEquals(Status.DEGRADED, visual.result().status(), visual.describe());
-        String state = visionContributor() ? "UNAVAILABLE (replay)" : "missing";
         assertEquals(1, visual.result().skippedExpectations().size(), visual.describe());
         String line = visual.result().skippedExpectations().get(0);
         assertTrue(line.contains("aiExpect") && line.contains("no visual evaluator in this host")
-                && line.endsWith("capability inference.vision is " + state), line);
+                && line.endsWith("capability inference.vision is UNAVAILABLE (replay)"), line);
         assertEquals(List.of(), visual.result().modelCalls(), "no model call");
         assertSignedOff();
 
@@ -876,8 +876,8 @@ abstract class LoadModeChecks {
      * Item 9, the run's side (phase7-contracts.md 8.5, 13.2 item 9): the {@code capabilities} record of a run holds
      * {@code agentHash}, the hash of the agent's matrix after step 0b, and {@code contributed}, the ids the controller
      * contributors on the class path add ({@code inference.gateway} and {@code inference.sql} from VC's step 1,
-     * {@code inference.vision} once the vision module is on it), each {@code UNAVAILABLE (replay)} in the archived
-     * {@code capabilities.json}; {@code hash} is the merged matrix's.
+     * {@code inference.vision} from the vision module, asserted unconditionally since the fix wave, FB, L3-F6), each
+     * {@code UNAVAILABLE (replay)} in the archived {@code capabilities.json}; {@code hash} is the merged matrix's.
      */
     @Test
     @Order(156)
@@ -887,10 +887,7 @@ abstract class LoadModeChecks {
                 .findFirst().orElseThrow();
         CapabilityMatrix agent = client().capabilities();
         assertEquals(agent.hash(), record.get("agentHash"), "the agent's matrix after step 0b");
-        List<String> contributed = new ArrayList<>(List.of("inference.gateway", "inference.sql"));
-        if (visionContributor()) {
-            contributed.add("inference.vision");
-        }
+        List<String> contributed = List.of("inference.gateway", "inference.sql", "inference.vision");
         assertEquals(contributed, record.get("contributed"));
         CapabilityMatrix archived = CapabilityMatrix.fromJson(Json.parseObject(Files.readString(dir.resolve(
                 "capabilities.json"), StandardCharsets.UTF_8)));
@@ -902,12 +899,6 @@ abstract class LoadModeChecks {
         assertEquals(agent.all().keySet(), archived.agentOnly().all().keySet().stream().filter(
                 id -> !contributed.contains(id)).collect(Collectors.toSet()),
                 "the archive is the agent's matrix plus the contributed ids");
-    }
-
-    /** Whether the vision module's capability contributor is on the class path (it lands with VM, step 4). */
-    static boolean visionContributor() {
-        return CapabilityMerge.load(LoadModeChecks.class.getClassLoader())
-                .contributors().stream().anyMatch(c -> "vision".equals(c.id()));
     }
 
     // ------------------------------------------------------------------ JUnit glue

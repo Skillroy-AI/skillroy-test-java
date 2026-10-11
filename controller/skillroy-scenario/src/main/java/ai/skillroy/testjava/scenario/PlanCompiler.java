@@ -448,7 +448,7 @@ public final class PlanCompiler {
             for (int i = 0; i < steps.size(); i++) {
                 Plan.Step step = steps.get(i);
                 for (Plan.Call call : step.calls()) {
-                    robot |= "swing.pointer".equals(call.primitive()) && "ROBOT".equals(call.args().get("via"));
+                    robot |= "swing.pointer".equals(call.primitive()) && Plan.robotValue(call.args().get("via"));
                 }
                 if ("aiAct".equals(step.verb()) && scenario.steps().get(i).args() instanceof Map<?, ?> a
                         && "V3".equals(a.get("tier"))) {

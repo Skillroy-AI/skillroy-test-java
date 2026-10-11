@@ -115,6 +115,26 @@ class Phase7ExportTest {
         }
     }
 
+    /**
+     * The fix wave of the Phase 7 review (FB, L1-F1 = L2-F3, the sceptic's added site): a person's REPL step
+     * {@code call {primitive: swing.pointer, args: {via: robot}}} (verb {@code call}) acted through Robot, so it is
+     * listed as live-only and never exported as a replayable step (its CI form would carry the gap: a plan that
+     * compiles without {@code swing.pointer.robot} where the spelling was not read as Robot).
+     */
+    @Test
+    void aPersonsCallStepSpellingRobotInLowerCaseIsLiveOnly() throws Exception {
+        try (ExecutorSession session = ExecutorSession.open(fx.pack, fx.agent, fx.options().withRobot(true))) {
+            session.execute("poke", null, PERSON);
+            assertEquals(Status.PASS, session.execute("call", Map.of("primitive", "swing.pointer", "args", Map.of(
+                    "point", Map.of("x", 3L, "y", 4L), "action", "CLICK", "via", "robot")), PERSON).status());
+            ExportResult result = session.journal().export(ExportOptions.of("robot-call"));
+            assertFalse(result.yaml().contains("swing.pointer"), result.yaml());
+            assertEquals(1, result.report().liveOnly().size(), String.valueOf(result.report().liveOnly()));
+            assertTrue(result.report().liveOnly().get(0).contains("acted through Robot"),
+                    result.report().liveOnly().get(0));
+        }
+    }
+
     @Test
     void anAnchoredStepsAnchorBecomesTheExportsImageEntryAndPng() throws Exception {
         BufferedImage crop = Phase7ExecutorTest.image(0x445566, 2, 2);

@@ -575,8 +575,8 @@ abstract class WebHostChecks {
     }
 
     /**
-     * Item 10's Swing half (phase7-contracts.md 4.8, 13.2 item 10; needs the Swing side's extended capture and
-     * {@code swing.hitTest}, package VS): {@code swing.capture} of the host's window lists the front browser as a
+     * Item 10's Swing half (phase7-contracts.md 4.8, 13.2 item 10; the Swing side's extended capture and
+     * {@code swing.hitTest}, whose {@code OK} it asserts first): {@code swing.capture} of the host's window lists the front browser as a
      * {@code WEB} surface with its ref and {@code redacted: false}; {@code swing.hitTest} at the Borrow button's point
      * in the window answers {@code surface: WEB} with {@code surfaceLocal}, and {@code web.hitTest {space: COMPONENT}}
      * with that point answers the button.
@@ -584,7 +584,11 @@ abstract class WebHostChecks {
     @Test
     @Order(8)
     void item10TheSwingCaptureListsTheBrowserAndASwingPointReachesThePage() throws Exception {
-        assumeTrue(client().capabilities().get("swing.hittest") != null, "needs swing.hitTest (package VS)");
+        // The fix wave of the Phase 7 review (FB, L3-S2): the Swing side has landed, so a web host target without
+        // swing.hitTest fails this item instead of skipping it.
+        Capability hitTest = client().capabilities().get("swing.hittest");
+        assertNotNull(hitTest, "the web host target declares swing.hittest (the Swing side's hit-test)");
+        assertEquals(CapabilityState.OK, hitTest.state(), String.valueOf(hitTest));
         String frontRef = null;
         for (Map<String, Object> b : browsers(client())) {
             if ("front".equals(b.get("tag"))) {

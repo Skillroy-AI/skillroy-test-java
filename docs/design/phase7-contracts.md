@@ -1908,6 +1908,20 @@ names, `data.query`, a script primitive, `agent.*`, `hook.*`/`rule.*` beyond the
 unredacted capture is an `execute` under a `PERSON` origin or the CLI's `call`, never a `read`), one rule for later
 callers.
 
+**Fix wave (Phase 7 review, FB, 2026-10-10):** wherever this contract says `via: ROBOT` or `mode: ROBOT`, it means the
+value in **any spelling the agent reads as `ROBOT`**: the agent upper-cases the trimmed value (§3.3, §3.4), so a gate that
+compared the exact string let `via: robot` on a raw `call:` step, `" Robot"` or `ROBOT` behind a control character
+through to an agent that acted on it. Every controller gate now tests one predicate, `Plan.robotValue(Object)` in
+`skillroy-scenario`: both ends stripped of what `String.trim()` strips (code points up to U+0020) and of what
+`String.strip()` strips, then `ROBOT` ignoring case (a superset of the agent's reading). Its users: `Plan.usesRobot`
+(`PlanExecutor`'s refusal before `checkRequires`, §8.1), `PlanCompiler`'s `requires` rule (a raw `swing.pointer` call so
+spelled names `swing.pointer.robot`), `ExecutorSession`'s origin-free gate and its person-only glass gate (§9.2),
+`ExecutorSession.read`'s exclusion list, `CallCommand` (§9.3), `JournalExport`'s live-only rule (§6.6: a person's `call`
+step spelled `via: robot` is live-only, never exported), and `CallPolicy` and the facade's `read` (above), which
+delegate to it. `read`'s exclusion list refuses `redact` whenever it is present and not the boolean `true`
+(`Plan.unredacted`: a string `"false"`, which the agent coerces, included), as the facade does. A plan's arguments are
+not normalised, so no committed plan changes (D-FB-1).
+
 The hosts load the tools with `SessionTools.load(ClassLoader)` (`ServiceLoader`, the pack loader) and pass the options
 from their flags: `vision.tier` (`v1 | v2 | v3 | off`), `vision.model`, `vision.tools` (`toolset | custom`),
 `vision.zoom`, `vision.maxActions`, `vision.maxTurns`. `applies` is false when `vision.tier` is `off`, when the
@@ -2449,7 +2463,9 @@ checks (VW), item 11 in the host-safety tests (VS).
     `item10TheSwingCaptureListsTheBrowserAndASwingPointReachesThePage` (the second skips only while `swing.hittest` is
     absent from the matrix; on the head with VS's Swing side it ran and passed in all eight Java 25 launches, both JCEF
     modes, and the four Java 8 off-screen launches); the kit's items run in `JcefKitWindowedDisplayTest` and
-    `JcefKitOffScreenDisplayTest`.
+    `JcefKitOffScreenDisplayTest`. **Fix wave (Phase 7 review, FB, 2026-10-10):** the second check no longer skips: it
+    asserts `swing.hittest` `OK` first, so that a web host target that lost the Swing side's ids fails item 10's Swing
+    half instead of skipping it (L3-S2).
 11. **Host safety** (`HostSafetyDisplayTest`, `HostSafetyIT`): a blocked EDT makes `swing.capture`, `swing.hitTest`
     and `swing.pointer` time out cleanly and nothing runs late, **including an EDT blocked from inside the
     `MOUSE_PRESSED` handler of the sequence's own press**: the call returns `fired: false, EDT_BUSY, dispatched 1 of 4, balanced: true`,
@@ -2463,12 +2479,21 @@ checks (VW), item 11 in the host-safety tests (VS).
 
 **As built (Phase 7, VC):** item 7's seed-A part and item 9 are `LoadModeChecks.thePhase7SeedAScenariosRunAsDesigned`
 (`@Order(155)`) and `theCapabilitiesRecordCarriesTheAgentsHashAndTheContributedIds` (`@Order(156)`), in every load mode;
-the expected reason and contributed ids follow whether the vision module's contributor is on the class path
-(`LoadModeChecks.visionContributor()`), so that they tighten by themselves when VM lands. The glue over the committed
+the expected reason and contributed ids followed whether the vision module's contributor was on the class path
+(`LoadModeChecks.visionContributor()`), so that they tightened by themselves when VM landed. **Fix wave (Phase 7 review,
+FB, 2026-10-10):** VM has landed and `skillroy-vision` is a test dependency of the module, so both checks assert the
+tightened form unconditionally (`inference.vision is UNAVAILABLE (replay)`; `contributed` is `inference.gateway`,
+`inference.sql`, `inference.vision`) and `visionContributor()` is gone: a dropped dependency or a renamed contributor
+now fails items 7 and 9 instead of weakening them (L3-F6). The glue over the committed
 directory (`junitGlueRunsTheCommittedScenarios`) runs the two new runnable scenarios (DEGRADED and SKIPPED, both aborted)
 and leaves out what `Phase7Pending` holds back. `keypad-image` is `ResolutionChecks.keypadImageHoldsAgainstItsBaselinesAnd
 AChangedOneFails` (`@Order(19)`, both seeds; the changed baseline is a copy of the bindings root with one pixel of the
-`keypad` PNG flipped and its entry's `sha256` following it), assumed away until step 2b.
+`keypad` PNG flipped and its entry's `sha256` following it), assumed away until step 2b. **Fix wave (Phase 7 review,
+FB, 2026-10-10):** the `approve` that `-Dskillroy.bindings.update=true` runs first brings the desk to the front with the
+entry field focused (`ResolutionChecks.activateDesk`, a `swing.click {by: {id: entry}, rung: COMPONENT, activateWindow:
+true}` outside the run, as `VisionSwingChecks` and `VisionSessionScript` do), so that an entry's `focus` and `carets`
+record that known state and not the focus the WM-less display happened to leave (L3-F9; the replay is unchanged and
+holds across focus states through §6.7's focus rule).
 
 **As built (Phase 7, VS, step 2b).** Every plan of both scenario modules and the branch variant carries `packVersion`
 0.6.0 (the export's at plan version 6), every committed bindings file the same pack version (`BindingsUpToDateTest`'s

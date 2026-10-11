@@ -221,6 +221,46 @@ class BindingsUpToDateTest {
     }
 
     /**
+     * phase7-contracts.md 13.1 item 9 (the fix wave of the Phase 7 review, FB, L3-F8): {@link SecretScan} over every
+     * committed file the AI layer or an approval wrote, in the normal build: every bindings file of both seeds (the
+     * Phase 7 {@code keypad-image} files among them), the branch variant's, the committed plans, and the session
+     * exports under {@code scenarios/exported/} (YAML, plan, bindings); no sample staff password of either seed is a
+     * value in any of them. A baseline PNG is bytes, so its half is its name: no password in it (and
+     * {@link #everyBaselinePngIsNamedByItsBindingsFileAndIsItsRaster} pins every name to an entry).
+     */
+    @Test
+    void noCommittedBindingsPlanOrExportHoldsASamplePassword() throws Exception {
+        Set<String> passwords = new HashSet<>();
+        for (Env env : Env.values()) {
+            passwords.addAll(SampleCredentials.staff(env).values());
+        }
+        List<Path> files = new ArrayList<>();
+        for (Path root : List.of(ScenarioA.bindingsRoot(), BranchVariant.bindingsRoot(), ItEnv.moduleDir()
+                .resolve("plan"), ItEnv.moduleDir().resolve("scenarios").resolve("exported"))) {
+            try (Stream<Path> walk = Files.walk(root)) {
+                walk.filter(Files::isRegularFile).sorted().forEach(files::add);
+            }
+        }
+        int scanned = 0;
+        int pngs = 0;
+        for (Path file : files) {
+            String name = file.getFileName().toString();
+            assertEquals(List.of(), SecretScan.leaks(name, passwords), file + ": a password in the name");
+            if (name.endsWith(".png")) {
+                pngs++;
+                continue;
+            }
+            assertEquals(List.of(), SecretScan.leaks(file, passwords), file + " holds a staff password as a value");
+            scanned++;
+        }
+        assertTrue(files.stream().anyMatch(f -> f.endsWith(Path.of("seed-b", KEYPAD_IMAGE + BindingsFile.SUFFIX))),
+                "keypad-image's files are among them");
+        assertTrue(files.stream().anyMatch(f -> f.getFileName().toString().equals("session-vision-loan.yaml")),
+                "and the vision session's export");
+        assertTrue(scanned >= 20 && pngs == 8, scanned + " text files, " + pngs + " baselines");
+    }
+
+    /**
      * Every committed scenario whose plan needs bindings has its file on both seeds, and one that needs none has none;
      * scenario D's follow {@link ScenarioD#HAS_BINDINGS}, which must say what is on disk.
      */

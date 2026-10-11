@@ -1477,8 +1477,7 @@ public final class SessionService implements AutoCloseable {
                 why = primitive + " is not served by a read";
             }
             if (why == null && "swing.capture".equals(primitive)) {
-                Object mode = params.get("mode");
-                if (mode != null && "ROBOT".equalsIgnoreCase(String.valueOf(mode).strip())) {
+                if (ai.skillroy.testjava.scenario.Plan.robotValue(params.get("mode"))) {
                     why = "swing.capture {mode: ROBOT} is a person's evidence: never a read";
                 } else if (params.containsKey("redact") && !Boolean.TRUE.equals(params.get("redact"))) {
                     why = "swing.capture {redact: false} is a person's call: never a read";

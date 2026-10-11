@@ -22,6 +22,7 @@ import ai.skillroy.testjava.protocol.ErrorCodes;
 import ai.skillroy.testjava.protocol.Json;
 import ai.skillroy.testjava.protocol.JsonException;
 import ai.skillroy.testjava.protocol.RpcResult;
+import ai.skillroy.testjava.scenario.Plan;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -105,13 +106,14 @@ final class CallCommand implements Command {
 
     /**
      * {@code via: ROBOT} or {@code mode: ROBOT} when the arguments carry one at the top level (where
-     * {@code swing.pointer} and {@code swing.capture} read them), else null.
+     * {@code swing.pointer} and {@code swing.capture} read them), in any spelling the agent reads as {@code ROBOT}
+     * ({@link Plan#robotValue}: case and the ends' blanks ignored), else null.
      */
     static String robotArgument(Map<String, Object> params) {
-        if ("ROBOT".equals(params.get("via"))) {
+        if (Plan.robotValue(params.get("via"))) {
             return "via: ROBOT";
         }
-        if ("ROBOT".equals(params.get("mode"))) {
+        if (Plan.robotValue(params.get("mode"))) {
             return "mode: ROBOT";
         }
         return null;
