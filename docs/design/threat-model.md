@@ -255,17 +255,20 @@ client (P7 §3.4, §9.1).
   event in that interval is the residual (P7 §3.4).
 - (Phase 7) The Windows ACL branch of the new writers (`captures/`, `candidates/`, `<scenarioId>.images/`,
   `failure/image-*.png`): built on `OutputFiles`, not verified on a Windows host (the first line of this list).
-- (Phase 7 security fixes) A window of the target JVM on another virtual desktop or workspace is undetectable through AWT, so
-  `requireFocus` is the only guard there; the iconified refusal (S104) ran on the WM-less display and once under openbox, not
-  on macOS or Windows (Windows parks a minimised frame at about (-32000, -32000), now left out as hidden); macOS's routing of a
-  button event at an off-display point is undetermined (now refused before any move, S105); the first glass capture on macOS
-  raises the screen-recording consent dialog in the target application's name; an in-window change between a V2 or V3 capture
-  and the act (a glass-pane dialog that opens no window) is outside the stale rule's trigger (S114); a browser a pack's mask
-  names is masked on every route, but that ran against fakes and over real Swing components, not a real masked JCEF browser
-  (S111); the paste of S110 and the middle click on an X11 desktop are stated from the JDK's and Blink's behaviour, with the
-  refusal tested at every gate; the Windows ACL judgement of the run-output directory (S141) is built and unit-tested on ACL
-  values, not verified on a Windows host (a directory under `C:\` on a shared host is refused), and S142's directory junction
-  and S144's inheritance of the pixel files are limits accepted by the owner (B31, 2026-10-11; `SECURITY.md`).
+- (Phase 7 security fixes) A window of the target JVM on another virtual desktop or workspace is undetectable through
+  AWT, so `requireFocus` is the only guard there; the iconified refusal (S104) ran on the WM-less display and once
+  under openbox, not on macOS or Windows (Windows parks a minimised frame at about (-32000, -32000), now left out as
+  hidden); macOS's routing of a button event at an off-display point is undetermined (now refused before any move,
+  S105); the first glass capture on macOS raises the screen-recording consent dialog in the target application's name;
+  an in-window change between a V2 or V3 capture and the act (a glass-pane dialog that opens no window) is outside the
+  stale rule's trigger (S114); a browser a pack's mask names is masked on every route (S111), run since against a real
+  masked JCEF browser, as were S108's clip under a real `JOptionPane` and S133's late click on real Chromium (gap 95,
+  P7 §13.2 item 10); the paste of S110 on an X11 desktop is stated from the JDK's and Blink's behaviour, with the
+  refusal tested at every gate and against a real page (a person's synthetic middle click there left an off-screen
+  JCEF page unresponsive, a windowed page took it as a plain press); the Windows ACL judgement of the run-output
+  directory (S141) is built and unit-tested on ACL values, not verified on a Windows host (a directory under `C:\` on
+  a shared host is refused), and S142's directory junction and S144's inheritance of the pixel files are limits
+  accepted by the owner (B31, 2026-10-11; `SECURITY.md`).
 - (Phase 7) HiDPI: every spike ran at scale 1; the Swing side reports user-space pixels and the web side an empirical
   factor flagged `scaleAssumed` (P7 §4.8, gap 78).
 - (Phase 7) JxBrowser pointer input (`WebCapability.INPUT` behind descriptor roles, strategy "input unverified") against

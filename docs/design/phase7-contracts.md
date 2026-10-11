@@ -3166,7 +3166,15 @@ checks (VW), item 11 in the host-safety tests (VS).
     it may leave the page unresponsive): a person's `web.pointer {action: CLICK, button: MIDDLE}` at the Borrow button
     through the agent with a 5 s budget, what it answered, how long the page then took to answer an evaluation again
     (re-asked, at most 20 s), which pointer events the page counted, and whether the host's event dispatch thread
-    (`swing.snapshot`) and the back page (`web.evaluate`) still answer within 2 s.
+    (`swing.snapshot`) and the back page (`web.evaluate`) still answer within 2 s. **As run (2026-10-11, the arm64
+    image):** green in all eight launches on a Java 25 target and the four off-screen launches on a Java 8 target ((b)
+    in the launches with a port); `covered` was the notice's 358 x 90 part of the page, all its 32,220 pixels kept and
+    the page shown around it; the late call answered `TIMEOUT` after 1.0 s and the path's thread returned after about
+    4.0 s with no event sent. Each protection neutralised in place made its check fail (the late click's four events
+    arrived after the caller's `TIMEOUT` under the pre-S133 order). (e) found that a person's synthetic middle click
+    leaves an **off-screen** JCEF page unresponsive (the call `TIMEOUT` at 5 s, no evaluation answered for 20 s, the event
+    dispatch thread and the back page answering, on both target Javas), while a windowed page takes it as `pointerdown`,
+    `mousedown` and `mouseup`, trusted, and no `click`. `../TODO.md`, gap 95.
 11. **Host safety** (`HostSafetyDisplayTest`, `HostSafetyIT`): a blocked EDT makes `swing.capture`, `swing.hitTest`
     and `swing.pointer` time out cleanly and nothing runs late, **including an EDT blocked from inside the
     `MOUSE_PRESSED` handler of the sequence's own press**: the call returns `fired: false, EDT_BUSY, dispatched 1 of 4, balanced: true`,
@@ -3305,7 +3313,11 @@ inheritance of the pixel files, on no Windows host; a second OS user for the wri
 probing user's); an APFS case-insensitive volume for S118's labels (a string comparison, tested in the compiler, the reader
 and the constructor); the amd64 image, which no fix round used. The delta review's own lenses ran with no display and no
 image run: S104 and S105 were shown from the code and the JDK's sources and only then run by SG, and the paste of S110 from
-the agent's dispatch probed headless with Swing's sandbox clipboard.
+the agent's dispatch probed headless with Swing's sandbox clipboard. (Phase 7 follow-up, gap 95, built 2026-10-11: the
+real masked browser, one desktop holding a real JCEF frame and a `JOptionPane` (S108), and S133's late click on real
+Chromium have run since, §13.2 item 10's gap-95 checks, on both target Javas in the arm64 image; whether Chromium pastes
+the PRIMARY selection on a synthetic middle click and the paste of S110 on a headed JVM stay not verified, and a person's
+synthetic middle click was found to leave an off-screen JCEF page unresponsive.)
 
 ---
 
