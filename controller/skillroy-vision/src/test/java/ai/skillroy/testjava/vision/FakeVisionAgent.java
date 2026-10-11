@@ -68,6 +68,25 @@ final class FakeVisionAgent {
     boolean webMasked;
     /** The frame's insets {left, top}: a {@code WINDOW} capture's {@code origin} (L1-F4). */
     int[] insets = {0, 0};
+    /** The dialog's screen position (security fix S114: a dialog inside the frame's bounds moves no origin). */
+    int dialogX = DIALOG_X;
+    int dialogY = DIALOG_Y;
+    /** The browser surface's {@code covered} rectangles in image coordinates (security fix S108), none by default. */
+    List<Map<String, Object>> surfaceCovered = List.of();
+    /** The browser surface's {@code rect} and {@code bounds} as an agent sends them (S108), or null for the default. */
+    Map<String, Object> surfaceRect;
+    Map<String, Object> surfaceBounds;
+    /** The modal dialog a {@code WEB} hit reports as blocking (security fix S109), or null. */
+    Map<String, Object> webBlockedBy;
+    /** Components the target form describes but no point hit-test finds (S114: a composite under its child). */
+    final List<Comp> extraComps = new ArrayList<>();
+    /** Marks added to the fixture's (security fix S114: a composite's mark), in image coordinates. */
+    final List<Map<String, Object>> extraMarks = new ArrayList<>();
+    /** The target form's {@code deepest} by ref, replacing the component's own node (S114: a composite's child). */
+    final Map<String, Map<String, Object>> targetDeepest = new LinkedHashMap<>();
+    /** {@code web.browsers}' entries (security fix S132): the browser {@code b1}, showing, by default. */
+    List<Map<String, Object>> browsers = List.of(Map.of("ref", "b1", "adapter", "jcef", "url", "data:front",
+            "closed", false, "visibleInSwing", true));
     int captures;
     final List<Comp> comps = new ArrayList<>();
     final List<Comp> dialogComps = new ArrayList<>();
@@ -110,7 +129,7 @@ final class FakeVisionAgent {
                 .capability("swing.hittest", CapabilityState.OK, null)
                 .capability("swing.pointer.routed", CapabilityState.OK, null);
         for (String read : List.of("swing.capture", "swing.hitTest", "swing.rendering", "swing.edtState",
-                "swing.settle", "web.bitmap", "web.hitTest", "swing.snapshot")) {
+                "swing.settle", "web.bitmap", "web.hitTest", "swing.snapshot", "web.browsers")) {
             bridge.describe(read, false);
         }
         for (String act : List.of("swing.click", "swing.type", "swing.key", "swing.pointer", "web.dom.click",
@@ -129,23 +148,36 @@ final class FakeVisionAgent {
         bridge.on("web.bitmap", params -> Map.of("format", "png", "width", 100L, "height", 30L, "base64",
                 Base64.getEncoder().encodeToString(page), "source", "PROTOCOL"));
         bridge.on("web.hitTest", params -> Map.of("browser", "b1", "unique", true, "element", Map.of("role", "button",
-                "name", "Borrow", "tag", "BUTTON"), "locators", List.of(Map.of("role", "button", "name", "Borrow"))));
+                "name", "Borrow", "tag", "BUTTON"), "viewportPoint", Map.of("x", 10L, "y", 12L), "locators",
+                List.of(Map.of("role", "button", "name", "Borrow"))));
+        bridge.on("web.browsers", params -> Map.of("browsers", browsers));
     }
 
     /** A window's screen position. */
-    static int[] windowAt(String window) {
-        return "d1".equals(window) ? new int[] {DIALOG_X, DIALOG_Y} : new int[] {ORIGIN_X, ORIGIN_Y};
+    int[] windowAt(String window) {
+        return "d1".equals(window) ? new int[] {dialogX, dialogY} : new int[] {ORIGIN_X, ORIGIN_Y};
     }
 
     /** A component's rectangle in screen coordinates. */
-    static Capture.Rect screen(Comp c) {
+    Capture.Rect screen(Comp c) {
         int[] w = windowAt(c.window());
         return new Capture.Rect(c.rect().x() + w[0], c.rect().y() + w[1], c.rect().w(), c.rect().h());
     }
 
-    /** The current composite's origin. */
+    /** The current composite's origin: the top-left corner of the windows' union. */
     int[] origin() {
-        return dialog ? new int[] {DIALOG_X, ORIGIN_Y} : new int[] {ORIGIN_X, ORIGIN_Y};
+        return dialog ? new int[] {Math.min(ORIGIN_X, dialogX), Math.min(ORIGIN_Y, dialogY)}
+                : new int[] {ORIGIN_X, ORIGIN_Y};
+    }
+
+    /** The current composite's size: the windows' union. */
+    int[] size() {
+        if (!dialog) {
+            return new int[] {320, 240};
+        }
+        int[] o = origin();
+        return new int[] {Math.max(ORIGIN_X + 320, dialogX + 160) - o[0], Math.max(ORIGIN_Y + 240, dialogY + 100)
+                - o[1]};
     }
 
     /** A screen rectangle in the current composite's image coordinates. */
@@ -192,6 +224,11 @@ final class FakeVisionAgent {
             Capture.Rect r = k.getValue();
             out.add(mark(++n, "h6", image(new Capture.Rect(pad.x() + r.x(), pad.y() + r.y(), r.w(), r.h())), null,
                     "panel", null, k.getKey()));
+        }
+        for (Map<String, Object> extra : extraMarks) {
+            Map<String, Object> m = new LinkedHashMap<>(extra);
+            m.put("mark", (long) ++n);
+            out.add(m);
         }
         return out;
     }
@@ -268,8 +305,8 @@ final class FakeVisionAgent {
         String id = "cap-" + captures;
         origins.put(id, o);
         r.put("format", "png");
-        r.put("width", dialog ? 360L : 320L);
-        r.put("height", 240L);
+        r.put("width", (long) size()[0]);
+        r.put("height", (long) size()[1]);
         r.put("base64", Base64.getEncoder().encodeToString(png));
         r.put("captureId", id);
         r.put("seq", bridge.lastSeq());
@@ -284,8 +321,19 @@ final class FakeVisionAgent {
             windows.add(Map.of("ref", "d1", "rect", image(screen(dialogComps.get(0))).json()));
         }
         r.put("windows", windows);
-        r.put("surfaces", List.of(Map.of("kind", "WEB", "rect", image(screen(comps.get(7))).json(), "ref", "h7",
-                "browser", "b1", "redacted", webRedacted)));
+        Map<String, Object> surface = new LinkedHashMap<>();
+        surface.put("kind", "WEB");
+        surface.put("rect", surfaceRect != null ? surfaceRect : image(screen(comps.get(7))).json());
+        surface.put("ref", "h7");
+        surface.put("browser", "b1");
+        surface.put("redacted", webRedacted);
+        if (!surfaceCovered.isEmpty()) {
+            surface.put("covered", surfaceCovered);
+        }
+        if (surfaceBounds != null) {
+            surface.put("bounds", surfaceBounds);
+        }
+        r.put("surfaces", List.of(surface));
         if (Boolean.TRUE.equals(params.get("annotateRefs"))) {
             r.put("marks", marks());
         }
@@ -367,7 +415,9 @@ final class FakeVisionAgent {
                 "h", "d1".equals(hit.window()) ? 100L : 240L));
         r.put("covering", List.of());
         boolean targetForm = params.get("target") instanceof String;
-        if (targetForm && "h10".equals(hit.ref())) {
+        if (targetForm && targetDeepest.containsKey(hit.ref())) {
+            r.put("deepest", targetDeepest.get(hit.ref()));
+        } else if (targetForm && "h10".equals(hit.ref())) {
             // The agent's target form reports what is drawn at the component's centre beside it (D388): a label.
             Map<String, Object> label = new LinkedHashMap<>();
             label.put("ref", "h10-label");
@@ -410,12 +460,16 @@ final class FakeVisionAgent {
         r.put("enabled", true);
         r.put("listening", false);
         r.put("masked", hit.masked() || webMasked && "WEB".equals(hit.surface()));
+        if (webBlockedBy != null && "WEB".equals(hit.surface())) {
+            r.put("blockedBy", webBlockedBy);
+        }
         r.put("seq", bridge.lastSeq());
         return r;
     }
 
     private List<Comp> all() {
         List<Comp> out = new ArrayList<>(comps);
+        out.addAll(extraComps);
         if (dialog) {
             out.addAll(dialogComps);
         }

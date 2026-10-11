@@ -786,6 +786,24 @@ widened, not contradicted ("one rule for pixels and text"):
   marks list, the node's text, a table's value, the hit-test's nodes and a recorded `{name, role}` locator carried the
   content the pixels hid (L2-F4). Chosen over the alternative of a disclosure sentence (the owner's choice; D-SG-5).
 
+**Phase 7 security fix, S111 (built 2026-10-11, SI): a masked browser is masked on every route.** D349's one rule
+for pixels and text reaches the web module and the snapshot's web views: a browser whose Swing component a registered
+`CaptureMask` names, itself or through an ancestor up to its window (`masks` true, or a mask that throws for one of
+them: the safe side; a mask's `regions` alone do not make a browser masked, they make its surface `redacted`, §4.8),
+is masked on every route: no pixels, no text, no tree. `web.bitmap`, `web.dom.text`, `web.ariaSnapshot` and
+`web.hitTest` of a masked browser answer `INVALID_PARAMS` with `data {param: "redact", reason: "masked", browser}`
+before the page is evaluated, unless the call says `redact: false` (a person's argument, which `CallPolicy` refuses for
+a model or a client, §9.1); `web.browsers` lists it with `masked: true`, `url: ""`, no `title`, and its frames' `name`
+and `url` empty (the frame keys stay: handles, not page data); the session's text snapshot (`ExecutorSession.snapshotText`,
+what `skillroy_snapshot` and the MCP server's snapshot read) shows it as the one line `[web <ref> masked]` and never
+reads its tree, and also treats as masked an older agent's browser whose `component` ref the `swing.snapshot` marks
+`masked: true`; the CDP path hands the four reads of a browser the agent reports masked to the agent (§4.7). The check
+is one bounded EDT read of the component and its ancestors (`SeedWalk.state`, at most 2 s), made only while a pack has
+registered a `CaptureMask`; a read that fails counts as masked. A run's web failure evidence (P4 §6.4) of a masked
+browser is therefore its `web-<ref>-error.txt` with the refusal, as the Swing failure capture is redacted. Before, the
+page's text reached every session model through the snapshot and its pixels, text and tree reached a read-only MCP
+client through the raw reads, while the capture kept the surface grey (L5-S1). D-SI-2.
+
 ### 3.7 `RegionResolver`, `SurfaceSource`, `LocatorResolver.describe` (A64)
 
 Three additions to `…agent.api.spi`, all called on the EDT, all fast and change nothing (the family's rule, P1 §4):
@@ -962,6 +980,11 @@ both paths, S43); rectangles are whole CSS pixels, a fractional point is rounded
 (`WebLib.errorOf`). A component point needs `EVALUATE` (the page's `innerWidth`); a browser without a component is
 `INVALID_PARAMS` with `data.reason: "no component"`, a component without a width `"no component size"`.
 
+**Phase 7 security fix, S130 (built 2026-10-11, SI):** `unique` is **the library's word**: the library in the frame
+that answered says that `find` matched exactly that element there; it is page-chosen data like every other field of
+the answer (threat model A3), and a child frame's answer says nothing about the frame the call started in. The vision
+recorder therefore records a `webClick {role, name}` only for a hit found in the frame the call started in (§6.5 step 4).
+
 ### 4.3 `web.pointer` (mutating; capability `web.pointer`; `WORKER`, 10 s)
 
 | Parameter | Values | Default |
@@ -1096,6 +1119,21 @@ the pointer reads the agent's `web.browsers` once more and hands a browser the a
 to the agent (D404); `visibleInSwing` comes from that read; a component point, a secret parameter or a read-only
 target hands the call to the agent before anything reached the page.
 
+**Phase 7 security fixes, S133, S111 and S131 (built 2026-10-11, SI):** (a) **Nothing is dispatched after the call's
+deadline** (S133): `web.pointer` on the CDP path reads the page's `hit` first, then the agent's `web.browsers` for the
+modal check immediately before the first event (before, the modal check came first, so a page that stalled its own hit
+made it stale), and checks the deadline before every `Input.dispatchMouseEvent`; once the caller's budget has passed
+(it answered `TIMEOUT` already, and the abandoned operation still runs on the Playwright thread) nothing more is sent,
+and a press already sent is balanced by one release, as after a failure. The hit read gets no bound of its own:
+Playwright's `evaluate` has none, and an in-page timer cannot interrupt a page that stalls synchronously; the deadline
+check is what keeps the late click out (D-SI-9). (b) **A masked browser's reads are the agent's** (S111, D404's method):
+before `web.bitmap`, `web.dom.text`, `web.ariaSnapshot` and `web.hitTest` the path reads the agent's `web.browsers`
+once more and hands a browser the entry marks `masked: true` to the agent (`UNSUPPORTED`), which refuses the read
+(§3.6), unless `redact: false`; a `web.browsers` that fails hands the call to the agent too. (c) The inner size the
+path reads for `web.resize`'s answer is built in the page from `typeof` and two numbers (`{w, h}`, else `null`), so a
+page that redefines `innerWidth` chooses no long answer (S131). (d) The path's PNG scaling decodes and encodes through
+memory-cached image streams (S143, P2 §11.3).
+
 ### 4.8 Web surfaces in a Swing capture, and a Swing point in a page
 
 - **Surfaces** (W4 (a)): the web module registers a `SurfaceSource` (§3.7) answered from its browser index: one
@@ -1135,6 +1173,22 @@ window above in the composite, a popup, modal or drag layer or a visible glass p
 the composite does with `covered` (the page drawn into `rect` minus `covered`; an agent without `covered` read as
 empty) is the controller's half (the vision module's `Capture.Surface` and `Grounding.composite`), built with the
 security fix's SI package.
+
+**Phase 7 security fixes, S108 (the controller's half), S111 and S131 (built 2026-10-11, SI):** (a) **The composite
+draws only where the page is seen** (S108): the vision module's `Capture.Surface` reads `covered` (absent: none) and
+the composite draws the page's bitmap clipped to `rect` minus every `covered` rectangle, so a modal dialog, an owned
+window, a popup or an in-window dialog above the browser keeps its own pixels in the model's picture. The bitmap is
+drawn at the component's whole rectangle: an additive `bounds` when an agent sends one (no agent does yet; proposed),
+else `rect`; since §3.1's `rect` is the **visible** part, a `rect` whose shape is not the bitmap's (a browser a viewport
+cuts) is not drawn at all without `bounds` (where the visible part lies in the page is not known), and the area keeps
+what the capture painted (D-SI-6). (b) **A masked browser is masked on every route** (S111, §3.6): the web module asks
+the registered `CaptureMask`s for the browser's component and its ancestors in its own bounded EDT read; the composite
+already never drew a `redacted` surface. (c) **Every page evaluation of the module is guarded** (S131, P4 §4.6): the
+component-point conversion reads the inner size with an expression built from `typeof` and two numbers (`[w, h]`, else
+`null`, which converts nothing), and `web.browsers`' title read cuts the title at 4096 characters in the page and checks
+its primitive `length` afterwards (a page may replace `slice`); both answers pass the channel check (`WebPrimitives.parse`)
+before they are parsed. Before, the inner size was a raw `evaluate` whose answer a page sized up to the channel bound,
+and the title was parsed with no channel check at all (L4-F3; D-SI-11).
 
 ### 4.9 The web host, the kit and the acceptance (profile `jcef`)
 
@@ -1314,6 +1368,14 @@ drops (D422). A capture in a model's view is the agent's PNG unchanged unless ma
 (the re-encoding is `javax.imageio`'s). `afterBatch` is skipped when the batch's last view was the model's own capture
 and no event arrived since, and when the turn ended in the batch.
 
+**Phase 7 security fix, S134 (built 2026-10-11, SI):** step 3's tool results put **the target's text inside a
+`<target-state>` block**, as the service's own step results are (P5 §6.2 "By origin", §11 rule 3): a step's message (a
+`MODAL_OPEN` with the dialog's title and text, a `NOT_FOUND` quoting a locator's text), an agent's error on the vision
+route (the capture that could not be taken, the page's hit-test, the focus read, the window or the anchor), each after
+the module's own words, through the session's mask with a label tag in it neutralised; the module's own refusal texts
+(`MASKED`, the credential and in-flight refusals, "the screen changed …", the clipboard, read-only and limit answers)
+stay bare.
+
 ### 6.3 The tool adapters
 
 **The provider-neutral custom tools** (strict `ToolSpec`s through `ToolProjection.strict`, names `[a-z0-9_]`; B7's
@@ -1379,6 +1441,25 @@ answers from `SessionOptions.stepTimeout` (§9.1); the settle's `timeoutMs` is t
 (below `ExecutorSession.read`'s 120 s bound for one read, §9.2, so that the settle's own answer ends a slow wait), and
 the result names it ("did not settle within 30 s").
 
+**Phase 7 security fixes, S110, S112, S124, S137 and S138 (built 2026-10-11, SI):** (a) **No clipboard chord, no
+middle click** (S110, §11 rule 11): a `key` (custom tool, toolset member) that is a paste, copy or cut chord in any
+spelling the agent reads (`CallPolicy.clipboardKey`: `V` with `CTRL` or `META`, `INSERT` with `SHIFT`, `PASTE`; `C`,
+`X` or `INSERT` with `CTRL` or `META`, `DELETE` with `SHIFT`, `COPY`, `CUT`), a click with `button: middle`
+(`click_mark`, `click_ref`, `click_at`) and the toolset's `middle_click` are answered as text ("that would paste, copy
+or cut through the person's clipboard …") before anything is grounded, read or sent; the toolset entry's `configs`
+disable `middle_click` always. (b) **V2's raw halves refuse a masked target** (S112): `left_mouse_down`,
+`left_mouse_up` and `mouse_move` are grounded with the stale-capture rule (§6.4) as every pointer action is, and
+answered `MASKED` before anything is sent when the hit is masked or lies on a page the capture kept grey (the test
+`Recorder.web` applies). (c) **A V3 click with modifier keys is refused** with a sentence the model reads ("V3 cannot
+hold a key while it clicks …"), as the agent refuses `modifiers` with `via: ROBOT` (§3.4; S124). (d) **The module
+refuses an acting call it did not offer** (S137): under a read-only policy, or one that offers no verbs, every action
+but a capture, a `wait`, a `zoom`, `cursor_position`, `skillroy_look` and a refusal is answered "this session does not
+act (read-only) …" before anything is grounded, whatever the provider sent (a member its `configs` disabled). (e) **A
+turn's waits are bounded** (S138): the `wait` calls of one turn together settle for at most three step timeouts (30 s by
+default, at most 330 s), each counted as what it waited (the settle's reported `ms` or the time it took, at most its
+timeout), each settling for at most what is left; at the bound the call answers "not run: the wait limit of N s per
+turn was reached" and ends the turn `LIMIT` (D-SI-5).
+
 ### 6.4 Grounding, the stale-capture rule, visual questions
 
 **Grounding** of a pixel `(x, y)` of capture `C`: `swing.hitTest {point, space: {captureId: C}}` (§3.2) before anything
@@ -1412,6 +1493,20 @@ the same `row`. A hit-test of a `NONE` surface is answered as text, a `HEAVYWEIG
 (§6.5's rule wins over this section's sentence for `HEAVYWEIGHT`; D423). A visual question is one request of
 `maxTokens` 1024 with the schema strict (`mark` and `box` nullable), the question in its labelled block and the legend as
 a system part; an answer with no structured verdict is `UNSURE` with the stop reason.
+
+**Phase 7 security fix, S114 (built 2026-10-11, SI): "C's target" is what the capture showed.** Both hit-tests of the
+rule are live (the agent resolves a capture's pixel to the topmost window **now**, through the capture's geometry), so
+comparing them caught only a window that moved the composite's origin, and a dialog that opened over the point inside
+the composite's bounds was named by both and clicked (L6-S3). The rule now also compares the hit with the capture's own
+view: **V1**: the hit's `target` is the mark's own `ref` (`Capture.Mark.ref`), **always**, not only after a window
+event; or, for a composite whose centre is a child (an editable combo box's editor, a spinner's field), the component
+the mark's component draws at its centre now (`swing.hitTest {target: <mark ref>}`'s `mouseTarget` or `deepest`) in the
+window the capture shows at the pixel. **V2 and V3**: when the window set changed since the capture, the hit's `window`
+is the window the capture shows at that pixel (`Capture.windowAt`, topmost first). Otherwise the model is answered "the
+screen changed since that capture" with a fresh capture, nothing acted. The fresh capture and the second hit-test of the
+same point are kept after a window event, as before (D-SI-4). An in-window change (a glass-pane dialog, no
+`window.opened`) stays outside the rule's trigger for V2 and V3, the residual; V1's mark rule catches it unless the new
+content is the mark's own component.
 
 ### 6.5 The recorder: from a model's action to the step that will be replayed (D306-D308, D342, D357, D358)
 
@@ -1511,6 +1606,26 @@ the composite's `windows[].rect`, which is the window's own bounds, so its inset
 and the export's comment is, for a target-form hit (`click_ref`, the focus owner), the hit-test's `targetNode` (§3.2);
 from an agent without it, the `mouseTarget` or the `deepest` node that is the target itself, else the `mouseTarget`,
 else the `deepest`; the point form keeps its rule (the `mouseTarget`, else the `deepest`) (L1-F5, D-FC-4).
+
+**Phase 7 security fixes, S109, S130, S132 and the recorder's half of S146 (built 2026-10-11, SI):** (a) **A page
+under a modal dialog takes no click** (S109, step 4): a `WEB` hit whose window a modal dialog blocks (the hit-test's
+`blockedBy`, in-window dialogs included) is refused ("a modal dialog blocks the page; answer the dialog first") before
+the page's hit-test is read or anything is sent, as the routed pointer refuses it (D294, D335); before, the click was
+acted as `webClick` (`web.dom.click`, which has no modal check) whenever the page proposed a unique `{role, name}`
+(L4-S2; D-SI-3). (b) **A `webClick` only where a recorded step would act** (S130, S132, step 4): the recorder records
+`webClick {role, name}` only for a hit found in the frame the call started in (no `iframe` in `web.hitTest`'s answer:
+`unique` is that frame's library's word, §4.2) **and** in the browser the step without `browser` resolves to: with a
+default browser in the session's web settings (the facade's new default method `SessionActions.webDefaultBrowser()`),
+the browser that selection names now (`web.hitTest {by: <default>, point: <the hit's viewportPoint>}`, the agent's own
+selection rule), else the only showing browser (`web.browsers`); a read that fails counts as another browser. Otherwise
+the click is the live-only raw `web.pointer {browser, point, space: COMPONENT}` with the reason in the provenance's
+`liveOnly` ("the element lies in a child frame; a frame key is a per-load handle …", "the page lies in a browser a
+recorded webClick would not reach …"). No uniqueness read beyond the starting frame's own `find` is made (D-SI-8). (c)
+**A text field is never named by its content** (step 1, S146's rule on the recorder's side, SG's handover): a
+`{text, …}` candidate of a component whose role is `textbox`, `text` or `password` is never chosen (its text is what a
+person or a model typed, which the step would carry into the journal, the export and a committed scenario, and which
+the next `type` changes); the `{class, index}` or `{path}` candidate names such a field (D-SI-10). (d) Step 2 also
+refuses a middle click (S110) and, in V3, a click with modifier keys (S124), before anything is built (§6.3).
 
 ### 6.6 Export into ordinary steps (D309, D355, D356)
 
@@ -2250,6 +2365,29 @@ and were regenerated on the key-free fixture route (`-Dskillroy.inference.fixtur
 (b) `SessionActions` gains the default method `stepTimeout()`, which the facade answers from `SessionOptions.stepTimeout`
 (for `wait`, §6.3; L1-F6).
 
+**Phase 7 security fixes, S110, S111, S135, S136, S137 and S138 (built 2026-10-11, SI):** (a) **`CallPolicy.arguments`'
+list gains** (S110, S111), for a `MODEL` or `CLIENT` origin on every route of the table above: a clipboard chord on
+`swing.key` (`CallPolicy.clipboardKey`, read as the agent reads keys and modifiers: trimmed and stripped, upper-cased,
+an optional `VK_`, `CONTROL` for `CTRL`, a single modifier text as a list of one; the `press` verb compiles to it, so
+the verb route meets it too), `button: MIDDLE` on `swing.pointer`, `swing.click` and `web.pointer` ("the person's
+clipboard and the system selection are never read into the target or written on a client's or a model's behalf"; the
+web pointer's middle button pastes the X11 selection in a Linux browser as Swing's does), and `redact` other than
+`true` on `web.bitmap`, `web.dom.text`, `web.ariaSnapshot` and `web.hitTest` ("a masked browser's page is a person's to
+read"); refused, never stripped, no value in the reason (D-SI-1, D-SI-2). (b) **`visionCall` masks a tool set's tools,
+output schema and provider tools** as its parts (S136): each tool through `ToolProjection.masked`, the schema through
+`mask.schema`, each provider tool's `raw` through `mask.jsonLike`; a recording masks `outputSchema` too (unchanged
+for a schema without a secret-named key or a known secret value, so no committed recording changes). (c) **The service
+acts only a custom tool it listed** (S137): a custom tool's owner is the tool set that listed it in `tools()`; the
+`handles` fallback serves only a provider toolset's member (the call carries its `toolsetName`), so a tool a read-only
+policy withheld is "there is no tool …"; the module's own refusal (§6.3) comes before the executor's read-only refusal.
+(d) **A tool set's reads count against `maxReadsPerTurn`** (S138): `SessionPolicy.maxReadsPerTurn()` is 20 or twice
+`maxActionsPerTurn`, whichever is larger (a method, not a new component of the record, so no construction site
+changes); a tool-set call made once that many reads were acted in the turn is answered "not run: the read limit of N
+tool reads per turn was reached" and the turn ends `LIMIT`, as at the action limit; "`maxActionsPerTurn` counts every
+action but a tool set's read" above now reads "… a tool set's read, which counts against `maxReadsPerTurn`" (D-SI-5).
+(e) **The budget before the count** (S135, §10). (f) `SessionActions` gains the default method `webDefaultBrowser()`
+(null by default; the facade answers the session's web settings' default browser), which §6.5's `webClick` rule reads.
+
 ### 9.2 `ExecutorSession`: `read`, the four-argument `execute`, the credential rule, the opt-ins, `host` (D308, D331, D332, D341, D342, D348, D351)
 
 - **`public Object read(String primitive, Map<String, Object> args) throws AgentRpcException, AgentLostException,
@@ -2529,6 +2667,18 @@ Every vision call is a `ModelRequest` with purpose `vision` through **`SessionSe
 failed call is a ledger entry too (D102). The `modelCall` span of the telemetry observer is built from the entry as
 today and carries no image, prompt or intent (P6 §10.2).
 
+**Phase 7 security fixes, S135 and S138 (built 2026-10-11, SI):** the table's "actions per turn … unchanged" row is
+corrected and joined by two rows: **tool-set reads per turn**, `SessionPolicy.maxReadsPerTurn()` (20, or twice the
+action limit when that is larger), the service, the turn ending `LIMIT` at the bound; **the waits of a turn**, at most
+three step timeouts together (30 s with the default 10 s, at most 330 s), the vision module, the turn ending `LIMIT`
+(§6.3). Since Phase 7 the action row counts every action but a tool set's read (§9.1). **A token count transmits the
+request** (images included) to the provider, so the service refuses before anything is counted or sent when the meter
+is exhausted or its limit is zero (in `complete` and at the top of `visionCall`), and, when the gateway has
+`TOKEN_COUNT`, checks the local estimate (text length / 4 plus each image's tokens, §7.5, plus the maximum answer)
+against the remaining budget first and asks the provider's count only when even that fits; a call refused so is a
+`BudgetException` as a refused reservation is (S135). The local estimate overcounts as a rule, so a call close to the
+remaining budget may be refused that the provider's count would have admitted (D-SI-7). P5 §7.2 as built reads the same.
+
 ---
 ## 11. Safety and data
 
@@ -2599,6 +2749,15 @@ extended with this phase, D334):
    `UNAVAILABLE("replay")`, a `run` plan is `SKIPPED` before the agent is contacted, and the ledger check covers every
    vision call of every other mode (every one goes through `visionCall`, §10).
 10. **Budgets** bound every vision call before it is made (§10).
+11. **The person's clipboard and the system selection are the desktop's** (Phase 7 security fix, S110, built
+    2026-10-11, SI): never read into the target or written on a model's or a client's behalf. `CallPolicy.arguments`
+    refuses a paste, copy or cut chord on `swing.key` and the middle button on `swing.pointer`, `swing.click` and
+    `web.pointer` for a `MODEL` or `CLIENT` origin on every route (§9.1), and the vision module answers the same as text
+    before anything is grounded (§6.3, §6.5). Before, a model (V1 by default, the planner's mutating server since Phase
+    5) or a client could paste whatever the person's clipboard or the X11 selection held into an unmasked field, and the
+    next capture sent it to the provider (L5-F1, L6-F1; D-SI-1). The residual: an application's own Paste item, context
+    menu or button is an ordinary click the framework cannot enumerate; a pack masks such a control, and rule 6 then
+    refuses every input at it. Rule 6's recorder refusal also covers V2's button halves and `mouse_move` (S112, §6.3).
 
 **The limitation sentences the build writes into `SECURITY.md`'s "Known limitations"** (§15's L2 and L8 check that
 they are there; the threat model's §8 carries the same facts):

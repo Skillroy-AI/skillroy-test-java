@@ -109,7 +109,9 @@ public record Recording(String fingerprint, String purpose, ModelResponse respon
             tools.add(Prompts.tool(ToolProjection.masked(t, mask)));
         }
         req.put("tools", tools);
-        req.put("outputSchema", request.outputSchema());
+        // Phase 7 security fix S136: the output schema through the mask too, as the tools' schemas are (unchanged for a
+        // schema that holds nothing a key or value rule would mask, so no earlier recording's bytes change).
+        req.put("outputSchema", request.outputSchema() == null ? null : mask.schema(request.outputSchema()));
         if (!request.providerTools().isEmpty()) {
             // phase7-contracts.md 7.3: the provider tools as the fingerprint holds them, only when there are any, so that
             // no earlier recording's bytes change.

@@ -110,6 +110,54 @@ class VisionOverMcpTest {
         }
     }
 
+    /**
+     * Phase 7 security fixes S110 and S111 over MCP: a client's raw {@code swing_key} with a paste chord, a
+     * {@code swing_pointer} or {@code web_pointer} with the middle button and a {@code web_bitmap} with
+     * {@code redact: false} are refused with nothing sent; a {@code web_bitmap} of a browser a pack's mask names is the
+     * agent's refusal ({@code INVALID_PARAMS masked}), and no image resource is registered for it.
+     */
+    @Test
+    void aClientsRawToolNeverReachesTheClipboardOrAMaskedPage() throws Exception {
+        try (McpFixture fx = new McpFixture(dir)) {
+            fx.desk.agent.describe("swing.key", true, false, null);
+            fx.desk.agent.describe("swing.pointer", true, false, null);
+            fx.desk.agent.describe("web.pointer", true, false, null);
+            fx.desk.agent.describe("web.bitmap", false, false, null);
+            fx.desk.agent.value("swing.key", Map.of("fired", true));
+            fx.desk.agent.on("web.bitmap", params -> {
+                throw new ai.skillroy.testjava.controller.AgentRpcException("web.bitmap",
+                        new ai.skillroy.testjava.protocol.RpcError(ai.skillroy.testjava.protocol.ErrorCodes
+                                .INVALID_PARAMS, "browser b1 is masked: a pack's CaptureMask names its component",
+                                Map.of("param", "redact", "reason", "masked", "browser", "b1")));
+            });
+            fx.start(fx.options().mutating(true).inference(images(true)).build());
+            List.of(
+                    Map.entry("swing_key", args("key", "V", "modifiers", List.of("CTRL"))),
+                    Map.entry("swing_key", args("key", " vk_insert ", "modifiers", List.of("shift"))),
+                    Map.entry("swing_pointer", args("action", "CLICK", "button", "MIDDLE")),
+                    Map.entry("web_pointer", args("action", "CLICK", "point", args("x", 5L, "y", 5L), "button",
+                            "MIDDLE")),
+                    Map.entry("web_bitmap", args("redact", false)))
+                    .forEach(call -> {
+                        McpSchema.CallToolResult result = fx.call(call.getKey(), call.getValue());
+                        String text = McpFixture.text(result);
+                        assertTrue(result.isError(), call + ": " + text);
+                        assertTrue(text.contains("refused, nothing was sent"), text);
+                    });
+            for (String method : List.of("swing.key", "swing.pointer", "web.pointer", "web.bitmap")) {
+                assertTrue(fx.desk.agent.callsTo(method).isEmpty(), method + " reached the agent");
+            }
+            McpSchema.CallToolResult masked = fx.call("web_bitmap", args());
+            assertTrue(masked.isError() || McpFixture.text(masked).contains("masked"), McpFixture.text(masked));
+            assertTrue(McpFixture.text(masked).contains("masked"), McpFixture.text(masked));
+            assertTrue(fx.client.listResources().resources().stream().noneMatch(r -> r.uri().contains("mcp/")
+                    || r.uri().endsWith(".png")), "no image resource for a masked page");
+            McpSchema.CallToolResult enter = fx.call("swing_key", args("key", "ENTER"));
+            assertFalse(enter.isError(), McpFixture.text(enter));
+            assertEquals(1, fx.desk.agent.callsTo("swing.key").size(), "an ordinary key runs");
+        }
+    }
+
     /** The desk's pack with a {@code signOn} verb that joins the staff slot's password itself, as the sample's does. */
     private static DomainPack withSignOn(Desk desk) {
         DomainPack base = desk.pack;

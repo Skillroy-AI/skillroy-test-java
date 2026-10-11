@@ -162,7 +162,8 @@ class SelectionTest {
             sent.addAll(back.evals.subList(backBefore, back.evals.size()));
             assertFalse(sent.isEmpty());
             for (WebEval e : sent) {
-                assertEquals("document.title", e.expression(), "only the selection's own title reads reach the page");
+                assertEquals(Selection.TITLE, e.expression(), "only the selection's own (guarded, S131) title reads"
+                        + " reach the page");
             }
             RpcException byUrl = h.ctx.error("web.dom.text", Harness.args("by", Harness.args("url", "^nowhere")));
             Map<?, ?> untitled = (Map<?, ?>) ((List<?>) byUrl.error().data().get("browsers")).get(0);

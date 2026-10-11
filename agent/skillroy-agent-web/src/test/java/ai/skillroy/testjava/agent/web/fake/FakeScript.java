@@ -72,6 +72,11 @@ public final class FakeScript {
         ClassInitialisations.record(FakeScript.class);
     }
 
+    /** The opening of the web module's guarded inner-size read (Phase 7 security fix S131). */
+    public static final String GUARDED_INNER_SIZE = "(function(){var w,h;try{w=window.innerWidth;h=window.innerHeight;}";
+    /** The opening of the web module's guarded title read (Phase 7 security fix S131). */
+    public static final String GUARDED_TITLE = "(function(){var t;try{t=document.title;}";
+
     /** JavaScript's {@code undefined}. */
     public static final Object UNDEFINED = new Object() {
         @Override
@@ -373,6 +378,16 @@ public final class FakeScript {
         if ("[window.innerWidth, window.innerHeight]".equals(e)) {
             int[] size = doc.host.innerSize();
             return Arrays.asList(Long.valueOf(size[0]), Long.valueOf(size[1]));
+        }
+        if (e.startsWith(GUARDED_INNER_SIZE)) {
+            // Phase 7 security fix S131: the module's guarded read of the inner size (typeof and two numbers only).
+            int[] size = doc.host.innerSize();
+            return Arrays.asList(Long.valueOf(size[0]), Long.valueOf(size[1]));
+        }
+        if (e.startsWith(GUARDED_TITLE)) {
+            // S131: the module's guarded read of the title, cut at 4096 in the page.
+            String t = doc.title == null ? "" : doc.title;
+            return t.length() > WebLib.MAX_URL_CHARS ? t.substring(0, WebLib.MAX_URL_CHARS) : t;
         }
         if (RESTORED_SIZE.matcher(e).matches()) {
             int[] size = doc.host.innerSize();

@@ -88,6 +88,9 @@ final class WebPrimitives {
     private static final String SELECT_DOC = "select the browser by {url: regex} | {tag} | {title: regex} | "
             + "{nativeId} (every key given must match); default: the single browser whose component is showing";
     private static final String ANY_JSON = "string|number|integer|boolean|object|array|null";
+    /** The {@code redact} parameter of the four reads a mask withholds (Phase 7 security fix S111). */
+    private static final String REDACT_DOC = "false reads a browser a pack's CaptureMask names, which is otherwise "
+            + "refused INVALID_PARAMS {reason: masked} (default true; a person's argument)";
 
     private final AgentContext ctx;
     private final BrowserIndex index;
@@ -118,6 +121,7 @@ final class WebPrimitives {
         list.add(Primitives.of(selecting(PrimitiveSpec.builder("web.ariaSnapshot")
                 .description("The accessibility tree of the page (role, accessible name, states), as the script "
                         + "library's walker computes it over the DOM. Not mutating."), true)
+                .param("redact", "boolean", false, REDACT_DOC)
                 .param("maxNodes", "integer", false, "at most this many nodes (default 2000, cap 20000)")
                 .param("interestingOnly", "boolean", false, "drop generic and presentational nodes, hoisting "
                         + "their children (default true)")
@@ -133,6 +137,7 @@ final class WebPrimitives {
                         + "(PROTOCOL: a DevTools screenshot; VENDOR: the product's own bitmap). Not mutating.")
                 .param("browser", "string", false, "ref of the browser (from web.browsers)")
                 .param("by", "object", false, SELECT_DOC)
+                .param("redact", "boolean", false, REDACT_DOC)
                 .param("maxWidth", "integer", false, "scale down above this width, keeping the aspect ratio "
                         + "(default 4096)")
                 .thread(ThreadPolicy.WORKER).timeoutMs(20000).capability(WebCapabilities.BITMAP).build(),
@@ -206,6 +211,7 @@ final class WebPrimitives {
                 }));
         list.add(Primitives.of(selecting(PrimitiveSpec.builder("web.dom.text")
                 .description("The innerText of an element (the body by default). Not mutating."), true)
+                .param("redact", "boolean", false, REDACT_DOC)
                 .param("selector", "string", false, "CSS selector (default body)")
                 .param("maxChars", "integer", false, "cut the text at this many characters (default 10000, cap "
                         + "100000)")
@@ -238,6 +244,7 @@ final class WebPrimitives {
                 .param("point", "object", true, "{x, y}: CSS pixels of the viewport, or of the browser's component "
                         + "with space: COMPONENT")
                 .param("space", "string", false, "VIEWPORT (default) or COMPONENT (the agent converts)")
+                .param("redact", "boolean", false, REDACT_DOC)
                 .thread(ThreadPolicy.WORKER).timeoutMs(10000).capability(WebCapabilities.HITTEST).build(),
                 new Primitives.Body() {
                     @Override
@@ -362,9 +369,11 @@ final class WebPrimitives {
         Map<Entry, String> ids = awaitTargetIds(targets, remaining(readDeadline));
         List<Object> out = new ArrayList<Object>();
         for (Entry e : listed) {
-            Map<String, Object> m = describe(e, titles.get(e), ids.get(e),
-                    remaining(deadline) > PER_BROWSER_READ_MS / 2);
-            Map<String, Object> blocked = blockedBy(e, deadline);
+            ComponentState state = entryState(e, deadline);
+            boolean masked = masked(e, state);
+            Map<String, Object> m = describe(e, masked ? null : titles.get(e), ids.get(e),
+                    remaining(deadline) > PER_BROWSER_READ_MS / 2, masked);
+            Map<String, Object> blocked = blockedBy(state);
             if (blocked != null) {
                 m.put("blockedBy", blocked);
             }
@@ -381,18 +390,7 @@ final class WebPrimitives {
      * agent; phase7-contracts.md section 4.3). One bounded EDT read per open browser that has a component, while the
      * call has time for it; a read that fails reports nothing.
      */
-    private Map<String, Object> blockedBy(Entry e, long deadline) {
-        Object component = e.component;
-        long left = remaining(deadline);
-        if (component == null || Selection.isClosed(e.browser()) || left <= PER_BROWSER_READ_MS / 2) {
-            return null;
-        }
-        ComponentState state;
-        try {
-            state = walk.state(component, Math.min(Pointing.STATE_MS, left - PER_BROWSER_READ_MS / 4));
-        } catch (Exception ex) {
-            return null;
-        }
+    private Map<String, Object> blockedBy(ComponentState state) {
         if (state == null || state.blocker == null) {
             return null;
         }
@@ -402,7 +400,36 @@ final class WebPrimitives {
         return m;
     }
 
-    private Map<String, Object> describe(Entry e, String title, String targetId, boolean withFrames) {
+    /**
+     * The state of an open browser's component, one bounded EDT read while the call has time for it, or null (no
+     * component, a closed browser, no time left, or the read failed); {@link #UNREAD} when the read failed or there was
+     * no time while a pack registered a {@code CaptureMask}, so that the entry is withheld as masked (the safe side).
+     */
+    private ComponentState entryState(Entry e, long deadline) {
+        Object component = e.component;
+        long left = remaining(deadline);
+        if (component == null || Selection.isClosed(e.browser())) {
+            return null;
+        }
+        if (left <= PER_BROWSER_READ_MS / 2) {
+            return walk.masksRegistered() ? UNREAD : null;
+        }
+        try {
+            return walk.state(component, Math.min(Pointing.STATE_MS, left - PER_BROWSER_READ_MS / 4));
+        } catch (Exception ex) {
+            return walk.masksRegistered() ? UNREAD : null;
+        }
+    }
+
+    /** The state that stands for a read that could not be made while masks are registered: masked. */
+    private static final ComponentState UNREAD = new ComponentState(false, 0, 0, 1.0, null, null, true);
+
+    /** True when the entry's state says a mask names its component (S111). */
+    private static boolean masked(Entry e, ComponentState state) {
+        return state != null && state.masked;
+    }
+
+    private Map<String, Object> describe(Entry e, String title, String targetId, boolean withFrames, boolean masked) {
         WebBrowser b = e.browser();
         Map<String, Object> m = new LinkedHashMap<String, Object>();
         m.put("ref", e.ref);
@@ -411,8 +438,15 @@ final class WebPrimitives {
         if (nativeId != null) {
             m.put("nativeId", nativeId);
         }
-        // S43: a page's URL and title are cut on the receiving side, whatever the page or the adapter gave.
-        m.put("url", WebLib.cut(Selection.safeUrl(b), WebLib.MAX_URL_CHARS));
+        if (masked) {
+            // Phase 7 security fix S111 (P7 3.6, 4.8): a browser a pack's CaptureMask names is masked on every route;
+            // its URL, title and frames' names and URLs are withheld, the entry says masked: true.
+            m.put("url", "");
+            m.put("masked", Boolean.TRUE);
+        } else {
+            // S43: a page's URL and title are cut on the receiving side, whatever the page or the adapter gave.
+            m.put("url", WebLib.cut(Selection.safeUrl(b), WebLib.MAX_URL_CHARS));
+        }
         if (title != null) {
             m.put("title", WebLib.cut(title, WebLib.MAX_URL_CHARS));
         }
@@ -448,8 +482,8 @@ final class WebPrimitives {
                     if (f.parentKey() != null) {
                         fm.put("parentKey", f.parentKey());
                     }
-                    fm.put("name", WebLib.cut(f.name(), WebLib.MAX_URL_CHARS));
-                    fm.put("url", WebLib.cut(f.url(), WebLib.MAX_URL_CHARS));
+                    fm.put("name", masked ? "" : WebLib.cut(f.name(), WebLib.MAX_URL_CHARS));
+                    fm.put("url", masked ? "" : WebLib.cut(f.url(), WebLib.MAX_URL_CHARS));
                     fm.put("main", Boolean.valueOf(f.main()));
                     frames.add(fm);
                 }
@@ -607,6 +641,7 @@ final class WebPrimitives {
         boolean interestingOnly = a.bool("interestingOnly", true);
         Entry e = select(inv);
         require(e, WebCapability.EVALUATE, "web.ariaSnapshot", WebCapabilities.EVALUATE);
+        refuseMasked(inv, e);
         return library(inv, e, "web.ariaSnapshot", true, "aria", null,
                 Long.valueOf(Math.min(maxNodes, MAX_NODES_CAP)), Boolean.valueOf(interestingOnly));
     }
@@ -623,6 +658,7 @@ final class WebPrimitives {
         options.put("maxChars", Long.valueOf(Math.min(maxChars, MAX_CHARS_CAP)));
         Entry e = select(inv);
         require(e, WebCapability.EVALUATE, "web.dom.text", WebCapabilities.EVALUATE);
+        refuseMasked(inv, e);
         return library(inv, e, "web.dom.text", true, "domText", options);
     }
 
@@ -943,6 +979,7 @@ final class WebPrimitives {
         }
         final Entry e = select(inv);
         require(e, WebCapability.BITMAP, "web.bitmap", WebCapabilities.BITMAP);
+        refuseMasked(inv, e);
         long budget = Await.budget(inv);
         BufferedImage image = Await.read(new Await.Attempt<BufferedImage>() {
             @Override
@@ -1004,6 +1041,51 @@ final class WebPrimitives {
             throw Errors.staleBrowser(e.ref, "has closed");
         }
         return e;
+    }
+
+    /**
+     * Phase 7 security fix S111 (phase7-contracts.md 3.6, 4.8): {@code INVALID_PARAMS} with {@code data.reason:
+     * "masked"} when a pack's {@code CaptureMask} names the browser's component or one of its ancestors (one bounded
+     * EDT read, made only while a mask is registered; a read that fails counts as masked, the safe side), unless the
+     * call says {@code redact: false}, a person's argument that {@code CallPolicy} refuses for a model or a client.
+     * Used by {@code web.bitmap}, {@code web.dom.text}, {@code web.ariaSnapshot} and {@code web.hitTest}.
+     */
+    void refuseMasked(Invocation inv, Entry e) {
+        if (unredacted(inv) || !walk.masksRegistered()) {
+            return;
+        }
+        Object component = e.component != null ? e.component : safeComponent(e.browser());
+        if (component == null) {
+            return;
+        }
+        boolean masked;
+        try {
+            ComponentState state = walk.state(component, Math.max(1, Math.min(Pointing.STATE_MS,
+                    Await.budget(inv) / 2)));
+            masked = state != null && state.masked;
+        } catch (Exception ex) {
+            masked = true;
+        }
+        if (masked) {
+            throw Errors.invalid("browser " + e.ref + " is masked: a pack's CaptureMask names its component, so its "
+                    + "page is not read on this route (a person may pass redact: false)", Errors.data("param",
+                    "redact", "reason", "masked", "browser", e.ref));
+        }
+    }
+
+    /** True when the call asks for the page unmasked: {@code redact} is {@code false} (or the text "false"). */
+    static boolean unredacted(Invocation inv) {
+        Object value = inv.args().raw().get("redact");
+        return Boolean.FALSE.equals(value) || value instanceof String
+                && "false".equalsIgnoreCase(((String) value).trim());
+    }
+
+    private static Object safeComponent(WebBrowser b) {
+        try {
+            return b.component();
+        } catch (RuntimeException ex) {
+            return null;
+        }
     }
 
     /** CAPABILITY_UNAVAILABLE when the selected browser lacks the flag the primitive needs. */

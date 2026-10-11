@@ -50,10 +50,18 @@ interface SeedWalk {
     /**
      * What {@code web.hitTest} and {@code web.pointer} need of a browser's component, in one bounded EDT read
      * (phase7-contracts.md sections 4.3 and 4.8): whether it is showing, its size, its screen's scale and the modal
-     * dialog that blocks its window. An object that is not a component, and any object when no event-dispatch thread
+     * dialog that blocks its window; and whether a {@code CaptureMask} names it (S111). An object that is not a component, and any object when no event-dispatch thread
      * runs, is {@link ComponentState#UNKNOWN}.
      *
      * @throws Exception when the bounded EDT read fails or times out
      */
     ComponentState state(Object component, long budgetMs) throws Exception;
+
+    /**
+     * True when a pack registered a {@code CaptureMask} (Phase 7 security fix S111): only then does a web read ask
+     * {@link #state} whether its browser's component is masked. The default, for a walk that has no registry, is false.
+     */
+    default boolean masksRegistered() {
+        return false;
+    }
 }

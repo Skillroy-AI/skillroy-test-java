@@ -45,6 +45,11 @@ public record SessionPolicy(boolean readOnly, boolean allowMutatingVerbs, boolea
     public static final int DEFAULT_MAX_HISTORY = 20;
     /** The default bound of a read's result. */
     public static final int DEFAULT_SNAPSHOT_MAX_CHARS = 20_000;
+    /**
+     * The least number of a tool set's reads one turn may take (phase7-contracts.md 9.1, 10; Phase 7 security fix
+     * S138): {@link #maxReadsPerTurn()} is this or twice the action limit, whichever is larger.
+     */
+    public static final int DEFAULT_MAX_READS = 20;
 
     /**
      * Checks the bounds.
@@ -81,6 +86,17 @@ public record SessionPolicy(boolean readOnly, boolean allowMutatingVerbs, boolea
     /** True when the pack's verbs are offered. */
     public boolean offersVerbs() {
         return !readOnly && allowMutatingVerbs;
+    }
+
+    /**
+     * The most reads of a tool set (a call whose outcome ran no step: a capture, a {@code wait}, a {@code zoom}, a
+     * visual question, a refusal) one turn may take, which do not count against {@link #maxActionsPerTurn}
+     * (phase7-contracts.md 9.1, 10; Phase 7 security fix S138): {@link #DEFAULT_MAX_READS}, or twice
+     * {@code maxActionsPerTurn} when that is larger. At the bound the remaining calls are not run and the turn ends
+     * {@code LIMIT}, as at the action limit.
+     */
+    public int maxReadsPerTurn() {
+        return Math.max(DEFAULT_MAX_READS, 2 * maxActionsPerTurn);
     }
 
     /** True when the base {@code swing_*} and {@code web_*} mutating primitives are offered. */

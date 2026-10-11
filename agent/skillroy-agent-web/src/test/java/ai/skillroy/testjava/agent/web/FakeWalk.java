@@ -26,8 +26,15 @@ import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 
-/** A fake Swing walk: the components a test lists, showing as the test says, their states; counts the reads. */
+/**
+ * A fake Swing walk: the components a test lists, showing as the test says, their states; counts the reads. A state's
+ * {@code masked} follows the {@code CaptureMask}s registered in {@link #spi} (Phase 7 security fix S111), computed by
+ * the module's own {@code ComponentReads.masked} over the component's parents.
+ */
 final class FakeWalk implements SeedWalk {
+
+    /** The registry the masks are looked up in (the harness's context's), or null for none. */
+    volatile ai.skillroy.testjava.agent.api.SpiRegistry spi;
 
     final List<Object> components = new CopyOnWriteArrayList<Object>();
     final Set<Object> showing = Collections.synchronizedSet(Collections.newSetFromMap(
@@ -62,12 +69,26 @@ final class FakeWalk implements SeedWalk {
             throw failure;
         }
         ComponentState s = states.get(component);
+        boolean masked = component instanceof java.awt.Component && ComponentReads.masked(
+                (java.awt.Component) component, masks());
         if (s != null) {
             return new ComponentState(showing.contains(component), s.width, s.height, s.scale, s.blocker,
-                    s.blockerTitle);
+                    s.blockerTitle, masked);
         }
         return component == null ? ComponentState.UNKNOWN : new ComponentState(showing.contains(component), 800, 600,
-                1.0, null, null);
+                1.0, null, null, masked);
+    }
+
+    @Override
+    public boolean masksRegistered() {
+        return !masks().isEmpty();
+    }
+
+    private List<ai.skillroy.testjava.agent.api.spi.CaptureMask> masks() {
+        ai.skillroy.testjava.agent.api.SpiRegistry r = spi;
+        List<ai.skillroy.testjava.agent.api.spi.CaptureMask> all = r == null ? null
+                : r.all(ai.skillroy.testjava.agent.api.spi.CaptureMask.class);
+        return all == null ? Collections.<ai.skillroy.testjava.agent.api.spi.CaptureMask>emptyList() : all;
     }
 
     @Override

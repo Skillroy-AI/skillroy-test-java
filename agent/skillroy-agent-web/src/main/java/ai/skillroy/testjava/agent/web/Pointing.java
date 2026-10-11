@@ -69,8 +69,14 @@ final class Pointing {
     static final long HIT_MS = 5000;
     /** The balancing release after a failed sequence waits at most this long. */
     static final long BALANCE_MS = 1000;
-    /** The read of the page's inner size for a component point. */
-    static final String INNER_SIZE = "[window.innerWidth, window.innerHeight]";
+    /**
+     * The read of the page's inner size for a component point: {@code [innerWidth, innerHeight]} when both are numbers,
+     * else null. Phase 7 security fix S131 (P4 4.6): the answer is built from {@code typeof} and two numbers only, so a
+     * page that redefines {@code innerWidth} (a replaceable attribute) chooses the value, never the size of what crosses
+     * the channel; it is still parsed through the channel check.
+     */
+    static final String INNER_SIZE = "(function(){var w,h;try{w=window.innerWidth;h=window.innerHeight;}catch(e){"
+            + "return null;}return typeof w===\"number\"&&typeof h===\"number\"?[w,h]:null;})()";
 
     private final AgentContext ctx;
     private final SeedWalk walk;
@@ -97,6 +103,7 @@ final class Pointing {
         String frame = inv.args().str("frame");
         Entry e = web.select(inv);
         WebPrimitives.require(e, WebCapability.EVALUATE, "web.hitTest", WebCapabilities.HITTEST);
+        web.refuseMasked(inv, e);
         long deadline = deadline(inv);
         int x = target.x();
         int y = target.y();

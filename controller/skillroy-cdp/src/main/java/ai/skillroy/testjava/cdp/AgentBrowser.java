@@ -35,14 +35,23 @@ import java.util.Map;
  * @param tag the pack's tag of the browser, or null
  * @param blocked whether the agent reported a modal dialog blocking the browser's window ({@code blockedBy}, Phase 7:
  *     the CDP path then hands {@code web.pointer} to the agent, which answers {@code MODAL_OPEN})
+ * @param masked whether the agent reported that a pack's {@code CaptureMask} names the browser's component
+ *     ({@code masked: true}, Phase 7 security fix S111: the CDP path then hands the four masked reads to the agent,
+ *     which refuses them)
  */
 record AgentBrowser(String ref, String nativeId, String url, String title, boolean closed, boolean visibleInSwing,
-                    String cdpTargetId, String tag, boolean blocked) {
+                    String cdpTargetId, String tag, boolean blocked, boolean masked) {
 
     /** An entry the agent reported no modal dialog for. */
     AgentBrowser(String ref, String nativeId, String url, String title, boolean closed, boolean visibleInSwing,
                  String cdpTargetId, String tag) {
-        this(ref, nativeId, url, title, closed, visibleInSwing, cdpTargetId, tag, false);
+        this(ref, nativeId, url, title, closed, visibleInSwing, cdpTargetId, tag, false, false);
+    }
+
+    /** An entry the agent reported no mask for. */
+    AgentBrowser(String ref, String nativeId, String url, String title, boolean closed, boolean visibleInSwing,
+                 String cdpTargetId, String tag, boolean blocked) {
+        this(ref, nativeId, url, title, closed, visibleInSwing, cdpTargetId, tag, blocked, false);
     }
 
     /** The entries of a {@code web.browsers} value ({@code {browsers: [...]}}); entries without a ref are skipped. */
@@ -58,7 +67,7 @@ record AgentBrowser(String ref, String nativeId, String url, String title, boole
             out.add(new AgentBrowser(ref, text(b.get("nativeId")), b.get("url") == null ? "" : String.valueOf(
                     b.get("url")), text(b.get("title")), Boolean.TRUE.equals(b.get("closed")),
                     Boolean.TRUE.equals(b.get("visibleInSwing")), text(b.get("cdpTargetId")), text(b.get("tag")),
-                    b.get("blockedBy") != null));
+                    b.get("blockedBy") != null, Boolean.TRUE.equals(b.get("masked"))));
         }
         return Collections.unmodifiableList(out);
     }

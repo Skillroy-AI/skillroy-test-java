@@ -52,6 +52,17 @@ public final class VisionSessionTools implements SessionTools {
 
     /** The answer to a call after a failure in the same batch (vision F1). */
     public static final String NOT_EXECUTED = "Not executed: an earlier action in this turn failed";
+    /**
+     * The answer to an acting call under a read-only policy, or one that offers no verbs (phase7-contracts.md 6.3, 9.1;
+     * Phase 7 security fix S137): the module refuses what it did not offer, whatever the provider sent.
+     */
+    public static final String READ_ONLY = "this session does not act (read-only): the acting tools are withheld; you"
+            + " may capture, wait and ask skillroy_look";
+    /**
+     * A turn's {@code wait} calls together settle for at most this many step timeouts (phase7-contracts.md 10;
+     * Phase 7 security fix S138).
+     */
+    static final int WAIT_TURN_FACTOR = 3;
 
     private VisionOptions options;
     private ToolAdapter adapter;
@@ -68,6 +79,8 @@ public final class VisionSessionTools implements SessionTools {
     private boolean batchFailed;
     private Integer cursorX;
     private Integer cursorY;
+    /** What the turn's {@code wait} calls have settled for so far, in milliseconds (S138). */
+    private long turnWaitMs;
 
     @Override
     public String id() {
@@ -190,12 +203,23 @@ public final class VisionSessionTools implements SessionTools {
     public List<Content> atTurnStart(SessionToolContext ctx) throws AgentLostException, InterruptedException {
         batchFailed = false;
         batchCapture = null;
+        turnWaitMs = 0;
         try {
             last = grounding.capture(options.tier() == VisionTier.V1);
-        } catch (AgentRpcException | IllegalArgumentException e) {
+        } catch (AgentRpcException e) {
+            return List.of(Content.Text.of(noCapture(ctx, e)));
+        } catch (IllegalArgumentException e) {
             return List.of(Content.Text.of("No capture could be taken: " + e.getMessage()));
         }
         return parts(last, ctx);
+    }
+
+    /**
+     * The answer when no capture could be taken: the agent's error inside a {@code <target-state>} block
+     * (phase7-contracts.md 6.2 step 3; Phase 7 security fix S134).
+     */
+    private static String noCapture(SessionToolContext ctx, AgentRpcException e) {
+        return "No capture could be taken:\n" + ctx.mask().block("target-state", String.valueOf(e.getMessage()));
     }
 
     @Override
@@ -210,7 +234,9 @@ public final class VisionSessionTools implements SessionTools {
         }
         try {
             last = grounding.capture(options.tier() == VisionTier.V1);
-        } catch (AgentRpcException | IllegalArgumentException e) {
+        } catch (AgentRpcException e) {
+            return List.of(Content.Text.of(noCapture(ctx, e)));
+        } catch (IllegalArgumentException e) {
             return List.of(Content.Text.of("No capture could be taken: " + e.getMessage()));
         }
         return parts(last, ctx);
@@ -239,11 +265,17 @@ public final class VisionSessionTools implements SessionTools {
         }
         Outcome outcome;
         try {
-            outcome = dispatch(adapter.map(use, effective().tier()), use, ctx);
+            ToolAdapter.Action action = adapter.map(use, effective().tier());
+            if (readsOnly(ctx) && !read(action)) {
+                // S137: what the module did not offer it does not act, whatever the provider sent.
+                outcome = error(use, READ_ONLY);
+            } else {
+                outcome = dispatch(action, use, ctx);
+            }
         } catch (IllegalArgumentException e) {
             outcome = error(use, String.valueOf(e.getMessage()));
         } catch (AgentRpcException e) {
-            outcome = error(use, e.getMessage());
+            outcome = error(use, ctx.mask().block("target-state", String.valueOf(e.getMessage())));
         }
         if (outcome.result().error()) {
             batchFailed = true;
@@ -254,6 +286,13 @@ public final class VisionSessionTools implements SessionTools {
                     + turn.maxActions() + " UI actions was reached");
         }
         return outcome;
+    }
+
+    /** True for an action that changes nothing (a read, or a refusal answered as text): what a read-only session runs. */
+    static boolean read(ToolAdapter.Action action) {
+        return action instanceof ToolAdapter.Capture || action instanceof ToolAdapter.Wait
+                || action instanceof ToolAdapter.Look || action instanceof ToolAdapter.Zoom
+                || action instanceof ToolAdapter.CursorPosition || action instanceof ToolAdapter.Refused;
     }
 
     private Outcome dispatch(ToolAdapter.Action action, Content.ToolUse use, SessionToolContext ctx)
@@ -275,7 +314,8 @@ public final class VisionSessionTools implements SessionTools {
                     yield error(use, "there is no mark " + c.mark() + " on the last capture");
                 }
                 int[] at = mark.rect().centre();
-                yield pointer(use, at[0], at[1], new Recorder.Click(c.button(), c.count(), List.of()), c.mark());
+                yield pointer(use, at[0], at[1], new Recorder.Click(c.button(), c.count(), List.of()), c.mark(),
+                        mark.ref());
             }
             case ToolAdapter.ClickRef c -> {
                 Map<String, Object> hit = grounding.describe(c.ref());
@@ -290,12 +330,12 @@ public final class VisionSessionTools implements SessionTools {
                 }
                 cursorX = x;
                 cursorY = y;
-                yield pointer(use, x, y, new Recorder.Click(c.button(), c.count(), c.modifiers()), null);
+                yield pointer(use, x, y, new Recorder.Click(c.button(), c.count(), c.modifiers()), null, null);
             }
             case ToolAdapter.Drag d -> {
                 cursorX = d.x2();
                 cursorY = d.y2();
-                yield pointer(use, d.x1(), d.y1(), new Recorder.Drag(d.x2(), d.y2()), null);
+                yield pointer(use, d.x1(), d.y1(), new Recorder.Drag(d.x2(), d.y2()), null, null);
             }
             case ToolAdapter.Scroll s -> {
                 if (!"up".equals(s.direction()) && !"down".equals(s.direction())) {
@@ -307,17 +347,28 @@ public final class VisionSessionTools implements SessionTools {
                     yield error(use, "a scroll needs a coordinate (the cursor has not been moved yet)");
                 }
                 int notches = "down".equals(s.direction()) ? s.amount() : -s.amount();
-                yield pointer(use, x, y, new Recorder.Wheel(notches), null);
+                yield pointer(use, x, y, new Recorder.Wheel(notches), null, null);
             }
             case ToolAdapter.Type t -> recorded(use, recorder.type(t.text(), t.enter()));
             case ToolAdapter.Key k -> recorded(use, recorder.key(k.key(), k.modifiers(), k.repeat()));
             case ToolAdapter.Wait w -> {
-                long timeout = waitTimeoutMs(ctx);
+                long step = waitTimeoutMs(ctx);
+                long allowance = WAIT_TURN_FACTOR * step;
+                long timeout = Math.min(step, allowance - turnWaitMs);
+                if (timeout < 1) {
+                    // S138: a turn's waits together hold the session's thread for at most WAIT_TURN_FACTOR timeouts.
+                    String reason = "the wait limit of " + seconds(allowance) + " s per turn was reached";
+                    yield new Outcome(new Content.ToolResult(use.id(), "not run: " + reason, true,
+                            use.toolsetName()), null, EndTurn.LIMIT, reason);
+                }
+                long t0 = System.nanoTime();
                 Map<String, Object> settled = Grounding.map(ctx.actions().read("swing.settle", Map.of("timeoutMs",
                         timeout)));
+                long elapsed = java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - t0);
+                long reported = settled.get("ms") instanceof Number n ? n.longValue() : 0L;
+                turnWaitMs += Math.max(1L, Math.min(timeout, Math.max(elapsed, reported)));
                 String text = Boolean.TRUE.equals(settled.get("settled")) ? "the application is quiet"
-                        : "the application did not settle within " + (timeout % 1000 == 0 ? String.valueOf(
-                        timeout / 1000) : String.valueOf(timeout / 1000.0)) + " s";
+                        : "the application did not settle within " + seconds(timeout) + " s";
                 yield Outcome.of(new Content.ToolResult(use.id(), w.note() == null ? text : text + "; " + w.note(),
                         false, use.toolsetName()));
             }
@@ -348,6 +399,11 @@ public final class VisionSessionTools implements SessionTools {
         };
     }
 
+    /** Milliseconds as seconds, whole when they are. */
+    private static String seconds(long ms) {
+        return ms % 1000 == 0 ? String.valueOf(ms / 1000) : String.valueOf(ms / 1000.0);
+    }
+
     /**
      * The longest a {@code wait} settles: below {@code ExecutorSession.read}'s bound of 120 s for one read (9.2), so
      * that the settle's own answer, not the read's deadline, ends a slow wait.
@@ -364,26 +420,50 @@ public final class VisionSessionTools implements SessionTools {
         return Math.max(1000L, Math.min(WAIT_MAX_MS, ms));
     }
 
-    /** A grounded pointer action on the last capture, with the stale-capture rule (6.4). */
-    private Outcome pointer(Content.ToolUse use, int x, int y, Recorder.Gesture gesture, Integer mark)
+    /** The answer when the stale-capture rule finds another target (6.4). */
+    static final String SCREEN_CHANGED = "the screen changed since that capture; look at the fresh capture and act"
+            + " again";
+
+    /**
+     * A grounded pointer action on the last capture, with the stale-capture rule (6.4): for a V1 mark the hit must be
+     * the mark's own component (S114).
+     */
+    private Outcome pointer(Content.ToolUse use, int x, int y, Recorder.Gesture gesture, Integer mark, String markRef)
             throws AgentLostException, InterruptedException, AgentRpcException {
-        Grounding.Grounded grounded = grounding.ground(last, x, y, options.tier() == VisionTier.V1);
+        Grounding.Grounded grounded = grounding.ground(last, x, y, options.tier() == VisionTier.V1, markRef);
         if (grounded.capture() != last) {
             last = grounded.capture();
         }
         if (grounded.changed()) {
-            return error(use, "the screen changed since that capture; look at the fresh capture and act again");
+            return error(use, SCREEN_CHANGED);
         }
         return recorded(use, recorder.pointer(grounded, x, y, gesture, mark));
     }
 
-    /** V2's live-only raw pointer at a pixel of the last capture, closed by {@code expectTarget} (D305). */
+    /**
+     * V2's live-only raw pointer at a pixel of the last capture, closed by {@code expectTarget} (D305). Phase 7 security
+     * fix S112: grounded with the stale-capture rule (6.4) as every pointer action is, and refused with
+     * {@link Recorder#MASKED} before anything is sent when the hit is masked (D358) or lies on a page the capture kept
+     * grey.
+     */
     private Outcome rawPointer(Content.ToolUse use, int x, int y, String action)
             throws AgentLostException, InterruptedException, AgentRpcException {
-        Map<String, Object> hit = grounding.hitTest(last, x, y);
+        Capture seen = last;
+        Grounding.Grounded grounded = grounding.ground(seen, x, y, options.tier() == VisionTier.V1);
+        if (grounded.capture() != last) {
+            last = grounded.capture();
+        }
+        if (grounded.changed()) {
+            return error(use, SCREEN_CHANGED);
+        }
+        Map<String, Object> hit = grounded.hit();
+        if (Boolean.TRUE.equals(hit.get("masked")) || "WEB".equals(hit.get("surface"))
+                && Recorder.redactedPage(grounded.capture(), hit)) {
+            return error(use, Recorder.MASKED);
+        }
         Map<String, Object> args = new LinkedHashMap<>();
         args.put("point", Map.of("x", (long) x, "y", (long) y));
-        args.put("space", Map.of("captureId", last.captureId()));
+        args.put("space", Map.of("captureId", seen.captureId()));
         args.put("action", action);
         if (hit.get("target") instanceof String ref) {
             args.put("expectTarget", ref);

@@ -95,8 +95,34 @@ public record Capture(String captureId, long seq, String hash, int width, int he
     public record Region(String ref, Rect rect) {
     }
 
-    /** An area that is not Swing-painted ({@code WEB} or {@code HEAVYWEIGHT}). */
-    public record Surface(String kind, Rect rect, String ref, String browser, boolean redacted) {
+    /**
+     * An area that is not Swing-painted ({@code WEB} or {@code HEAVYWEIGHT}). Phase 7 security fix S108 (SI): the
+     * agent's {@code rect} is the visible part of the component and {@code covered} lists, in image coordinates, the
+     * rectangles of what lies above it (a window higher in the stack, a popup, a modal or drag layer, a glass pane), an
+     * additive field read as empty from an agent that does not send it; {@code bounds}, when an agent sends it, is the
+     * component's whole rectangle in image coordinates (the page's bitmap is drawn there, clipped to {@code rect} minus
+     * {@code covered}), else null.
+     *
+     * @param kind {@code WEB} or {@code HEAVYWEIGHT}
+     * @param rect the visible part, in image coordinates
+     * @param ref the component's ref
+     * @param browser the browser's ref, or null
+     * @param redacted true when a mask names the component or a blanked rectangle meets it
+     * @param covered what lies above the surface, in image coordinates; never null
+     * @param bounds the component's whole rectangle in image coordinates, or null
+     */
+    public record Surface(String kind, Rect rect, String ref, String browser, boolean redacted, List<Rect> covered,
+                          Rect bounds) {
+
+        /** Copies the covered rectangles (null is none). */
+        public Surface {
+            covered = covered == null ? List.of() : List.copyOf(covered);
+        }
+
+        /** A surface with nothing above it and no separate bounds (an older agent's shape). */
+        public Surface(String kind, Rect rect, String ref, String browser, boolean redacted) {
+            this(kind, rect, ref, browser, redacted, List.of(), null);
+        }
     }
 
     /**
@@ -193,8 +219,17 @@ public record Capture(String captureId, long seq, String hash, int width, int he
         List<Surface> surfaces = new ArrayList<>();
         for (Object s : list(r.get("surfaces"))) {
             if (s instanceof Map<?, ?> m && Rect.of(m.get("rect")) != null) {
+                List<Rect> covered = new ArrayList<>();
+                for (Object c : list(m.get("covered"))) {
+                    Rect over = c instanceof Map<?, ?> cm && cm.get("rect") != null ? Rect.of(cm.get("rect"))
+                            : Rect.of(c);
+                    if (over != null && over.w() > 0 && over.h() > 0) {
+                        covered.add(over);
+                    }
+                }
                 surfaces.add(new Surface(String.valueOf(m.get("kind")), Rect.of(m.get("rect")), str(m.get("ref")),
-                        str(m.get("browser")), Boolean.TRUE.equals(m.get("redacted"))));
+                        str(m.get("browser")), Boolean.TRUE.equals(m.get("redacted")), covered,
+                        Rect.of(m.get("bounds"))));
             }
         }
         List<Mark> marks = new ArrayList<>();

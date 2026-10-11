@@ -63,6 +63,74 @@ class CallPolicyArgumentsTest {
         assertNull(CallPolicy.arguments("swing.pointer", Map.of("via", "ROUTED")));
     }
 
+    /**
+     * Phase 7 security fix S110 (phase7-contracts.md 11, the clipboard rule; 9.1): a paste, copy or cut chord on
+     * {@code swing.key} and a middle button on a pointer are refused for a client or a model, read in every spelling the
+     * agent reads ({@code Keys.code}: trimmed, upper-cased, an optional {@code VK_}; {@code CONTROL} for {@code CTRL});
+     * the reason names the argument, never a value; ordinary chords pass.
+     */
+    @Test
+    void aClipboardChordAndAMiddleButtonAreAPersonsOnly() {
+        List<Map<String, Object>> refused = List.of(
+                Map.of("key", "V", "modifiers", List.of("CTRL")),
+                Map.of("key", " vk_v ", "modifiers", List.of("control")),
+                Map.of("key", "v", "modifiers", List.of("META")),
+                Map.of("key", "V", "modifiers", List.of("CTRL", "SHIFT")),
+                Map.of("key", "INSERT", "modifiers", List.of("SHIFT")),
+                Map.of("key", "PASTE"),
+                Map.of("key", "VK_PASTE", "modifiers", List.of("ALT")),
+                Map.of("key", "C", "modifiers", List.of("CTRL")),
+                Map.of("key", "X", "modifiers", List.of("META")),
+                Map.of("key", "INSERT", "modifiers", List.of("CTRL")),
+                Map.of("key", "DELETE", "modifiers", List.of("SHIFT")),
+                Map.of("key", "COPY"),
+                Map.of("key", "CUT"),
+                Map.of("key", "V", "modifiers", "CTRL"));
+        for (Map<String, Object> args : refused) {
+            String why = CallPolicy.arguments("swing.key", args);
+            assertNotNull(why, String.valueOf(args));
+            assertTrue(why.contains("swing.key") && why.contains("clipboard"), why);
+        }
+        for (Map<String, Object> args : List.of(
+                Map.<String, Object>of("key", "S", "modifiers", List.of("CTRL")),
+                Map.<String, Object>of("key", "TAB", "modifiers", List.of("SHIFT")),
+                Map.<String, Object>of("key", "F2"),
+                Map.<String, Object>of("key", "V"),
+                Map.<String, Object>of("key", "INSERT"),
+                Map.<String, Object>of("key", "DELETE"),
+                Map.<String, Object>of("key", "V", "modifiers", List.of("SHIFT")))) {
+            assertNull(CallPolicy.arguments("swing.key", args), String.valueOf(args));
+        }
+        for (String pointer : List.of("swing.pointer", "swing.click", "web.pointer")) {
+            for (Object middle : List.of("MIDDLE", " middle ")) {
+                String why = CallPolicy.arguments(pointer, Map.of("action", "CLICK", "button", middle));
+                assertNotNull(why, pointer + " " + middle);
+                assertTrue(why.contains("MIDDLE"), why);
+            }
+            assertNull(CallPolicy.arguments(pointer, Map.of("action", "CLICK", "button", "RIGHT")), pointer);
+        }
+        assertNotNull(CallPolicy.arguments("swing.pointer", Map.of("action", "PRESS", "button", "MIDDLE"), true),
+                "whatever the robot flag");
+    }
+
+    /**
+     * Phase 7 security fix S111 (phase7-contracts.md 3.6, 4.8, 9.1): {@code redact} other than {@code true} on the four
+     * web reads of a masked browser is a person's argument.
+     */
+    @Test
+    void aMaskedBrowsersPageIsReadUnmaskedByAPersonOnly() {
+        for (String read : List.of("web.bitmap", "web.dom.text", "web.ariaSnapshot", "web.hitTest")) {
+            String why = CallPolicy.arguments(read, Map.of("redact", false));
+            assertNotNull(why, read);
+            assertTrue(why.contains(read) && why.contains("redact: false"), why);
+            assertNotNull(CallPolicy.arguments(read, Map.of("redact", "false")), read);
+            assertNull(CallPolicy.arguments(read, Map.of("redact", true)), read);
+            assertNull(CallPolicy.arguments(read, Map.of()), read);
+        }
+        assertEquals(java.util.Set.of("web.bitmap", "web.dom.text", "web.ariaSnapshot", "web.hitTest"),
+                CallPolicy.MASKED_WEB_READS);
+    }
+
     @Test
     void theWebHostsHitTestIsAReadAndItsPointerAMutatingTool() {
         List<PrimitiveDescriptor> primitives = List.of(

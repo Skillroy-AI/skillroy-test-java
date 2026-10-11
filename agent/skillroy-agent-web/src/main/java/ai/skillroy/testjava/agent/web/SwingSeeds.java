@@ -115,12 +115,25 @@ final class SwingSeeds implements SeedWalk {
         if (!(component instanceof Component) || !AwtThreads.eventQueueAlive()) {
             return ComponentState.UNKNOWN;
         }
+        final List<ai.skillroy.testjava.agent.api.spi.CaptureMask> masks = masks();
         return read(budgetMs, new Callable<ComponentState>() {
             @Override
             public ComponentState call() {
-                return ComponentReads.stateOf(component);
+                return ComponentReads.stateOf(component, masks);
             }
         });
+    }
+
+    @Override
+    public boolean masksRegistered() {
+        return !masks().isEmpty();
+    }
+
+    /** The registered {@code CaptureMask}s, in registration order (Phase 7 security fix S111). */
+    private List<ai.skillroy.testjava.agent.api.spi.CaptureMask> masks() {
+        List<ai.skillroy.testjava.agent.api.spi.CaptureMask> all = ctx == null || ctx.spi() == null ? null
+                : ctx.spi().all(ai.skillroy.testjava.agent.api.spi.CaptureMask.class);
+        return all == null ? Collections.<ai.skillroy.testjava.agent.api.spi.CaptureMask>emptyList() : all;
     }
 
     /** Runs the read on the EDT, waiting at most the budget; exceptions are carried back as values. */

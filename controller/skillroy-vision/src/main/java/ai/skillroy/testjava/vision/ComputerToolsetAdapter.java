@@ -17,6 +17,7 @@
 package ai.skillroy.testjava.vision;
 
 import ai.skillroy.testjava.inference.spi.Content;
+import ai.skillroy.testjava.inference.tools.CallPolicy;
 import ai.skillroy.testjava.inference.spi.ProviderTool;
 import ai.skillroy.testjava.inference.spi.ToolSpec;
 
@@ -34,7 +35,9 @@ import java.util.Set;
  * result echoes it), and the custom {@code skillroy_look} beside it. Under a read-only policy the acting members are
  * disabled in the entry's configs, leaving {@code screenshot}, {@code zoom} (when on), {@code wait} and
  * {@code cursor_position}. In V3 {@code left_mouse_down} and {@code left_mouse_up} are answered as text (D343: a Robot
- * press is never left held).
+ * press is never left held). Phase 7 security fix S110: {@code middle_click} is disabled in the entry's configs and
+ * answered as text when called anyway, and a {@code key} that is a clipboard chord ({@code ctrl+v}, {@code shift+Insert},
+ * a copy or cut) is answered as text, before anything is grounded.
  */
 public final class ComputerToolsetAdapter implements ToolAdapter {
 
@@ -63,6 +66,8 @@ public final class ComputerToolsetAdapter implements ToolAdapter {
     public List<ProviderTool> providerTools(VisionTier tier, boolean readsOnly, boolean zoom) {
         Map<String, Object> configs = new LinkedHashMap<>();
         configs.put("zoom", Map.of("enabled", zoom));
+        // S110: a middle click pastes the system selection; the member is never offered.
+        configs.put("middle_click", Map.of("enabled", false));
         if (readsOnly) {
             for (String member : MEMBERS) {
                 if (!READ_MEMBERS.contains(member)) {
@@ -102,7 +107,7 @@ public final class ComputerToolsetAdapter implements ToolAdapter {
             case "screenshot" -> new Capture();
             case "left_click" -> click(in, "LEFT", 1);
             case "right_click" -> click(in, "RIGHT", 1);
-            case "middle_click" -> click(in, "MIDDLE", 1);
+            case "middle_click" -> new Refused(Recorder.CLIPBOARD);
             case "double_click" -> click(in, "LEFT", 2);
             case "triple_click" -> click(in, "LEFT", 3);
             case "left_click_drag" -> {
@@ -141,6 +146,9 @@ public final class ComputerToolsetAdapter implements ToolAdapter {
             case "type" -> new Type(CustomToolAdapter.text(in, "text"), false);
             case "key" -> {
                 KeyNames.Key key = KeyNames.of(CustomToolAdapter.text(in, "text"));
+                if (CallPolicy.clipboardKey(key.key(), key.modifiers())) {
+                    yield new Refused(Recorder.CLIPBOARD);
+                }
                 int repeat = in.get("repeat") instanceof Number n ? (int) Math.max(1, Math.min(MAX_REPEAT,
                         n.longValue())) : 1;
                 yield new Key(key.key(), key.modifiers(), repeat);

@@ -603,6 +603,14 @@ browser whose window a modal dialog blocks (the check of `web.pointer`, one boun
 component, while the call has time); the entry is unchanged otherwise. The CDP path reads it to hand a blocked browser's
 `web.pointer` to the agent.
 
+(Phase 7 security fix, S111, built 2026-10-11, SI; P7 §3.6, §4.8) A browser whose component a pack's `CaptureMask`
+names, itself or through an ancestor, is masked on every route: `web.bitmap`, `web.dom.text`, `web.ariaSnapshot` and
+`web.hitTest` take a parameter `redact?: bool (true)` and answer such a browser `INVALID_PARAMS` with `data {param:
+"redact", reason: "masked", browser}` unless `redact: false` (a person's argument; refused for a model or a client by
+`CallPolicy`); `web.browsers` adds `masked: true` to its entry and gives `url: ""`, no `title` and empty frame names and
+URLs. The check is one bounded EDT read per browser with a component, made only while a mask is registered; a read that
+fails counts as masked. The CDP path hands those four reads of a browser the agent reports masked to the agent.
+
 Every `web.*` call runs on `WORKER`; the adapter's futures are awaited with the call's remaining budget less 100 ms; a
 timed-out future is abandoned (`cancel(false)`), never retried on another thread (browser-spi §C1), and the call answers
 `TIMEOUT` (as built before the dispatcher's own, and like every error the module makes itself with `data.browser` and
@@ -1068,6 +1076,16 @@ acceptance (§10.3, §12.2), both under the profile `jcef` with a display, run t
 built 2026-10-08: `WebLibTest` checks the text of the guard of `web.waitFlag` and `errorLine` as well; the guard
 itself ran outside the build in Node 24, in a Chromium headless shell over CDP and under Playwright 1.63, and inside
 it only in the end-to-end acceptance's polls, §16.1.)
+
+(Phase 7 security fix, S131, built 2026-10-11, SI; P7 §4.8.) The library's bound now holds for **every page
+evaluation of the base**, not only its library calls: the two raw reads that remained are built so that their answer
+is bounded at its source whatever the page did to its globals or its built-ins. The agent's component-point conversion
+reads `[innerWidth, innerHeight]` with an expression that answers the two numbers when `typeof` says both are numbers,
+else `null` (a page that redefines `innerWidth`, a replaceable attribute, as a long text answered that text up to the
+channel bound), and `web.browsers`' title read cuts `document.title` at 4096 characters in the page and answers it only
+when its primitive `length` is within that afterwards (a page may replace `slice`), else `""`; both answers pass the
+receiving side's channel check before they are parsed (the title was parsed without one). The CDP path's inner-size read
+for `web.resize` is built the same way (`{w, h}` or `null`). `web.evaluate` keeps its wrapper (a person's script).
 
 ### 4.7 Descriptors and the reflection plumbing (`…agent.web.reflect`)
 

@@ -1375,6 +1375,12 @@ public final class ExecutorSession implements AutoCloseable {
             }
             ordered.sort(Comparator.comparing(b -> String.valueOf(b.get("ref")), PlanExecutor::compareRefs));
             for (Map<?, ?> browser : ordered) {
+                if (UiSnapshotText.masked(browser, snapshot)) {
+                    // Phase 7 security fix S111 (SI's one hunk in this file): a browser a pack's mask names shows nothing
+                    // of its page, url, title or tree here; its aria snapshot is never read.
+                    views.add(UiSnapshotText.maskedView(browser));
+                    continue;
+                }
                 Object aria = null;
                 if (Boolean.TRUE.equals(browser.get("visibleInSwing"))) {
                     aria = webRead("web.ariaSnapshot", RunLog.fields("browser", String.valueOf(browser.get("ref")),

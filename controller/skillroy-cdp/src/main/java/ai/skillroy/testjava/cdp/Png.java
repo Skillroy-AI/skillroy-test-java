@@ -17,6 +17,12 @@
 package ai.skillroy.testjava.cdp;
 
 import javax.imageio.ImageIO;
+import javax.imageio.ImageReader;
+import javax.imageio.ImageWriter;
+import javax.imageio.stream.ImageInputStream;
+import javax.imageio.stream.ImageOutputStream;
+import javax.imageio.stream.MemoryCacheImageInputStream;
+import javax.imageio.stream.MemoryCacheImageOutputStream;
 import java.awt.geom.AffineTransform;
 import java.awt.image.AffineTransformOp;
 import java.awt.image.BufferedImage;
@@ -79,10 +85,7 @@ final class Png {
         if (size[0] <= maxWidth) {
             return png;
         }
-        BufferedImage decoded = ImageIO.read(new ByteArrayInputStream(png));
-        if (decoded == null) {
-            throw new IOException("ImageIO cannot decode the PNG");
-        }
+        BufferedImage decoded = decode(png);
         int width = maxWidth;
         int height = (int) Math.max(1, Math.round(size[1] * (double) maxWidth / size[0]));
         BufferedImage image = argb(decoded);
@@ -92,11 +95,54 @@ final class Png {
         if (image.getWidth() != width || image.getHeight() != height) {
             image = resize(image, width, height);
         }
-        ByteArrayOutputStream out = new ByteArrayOutputStream();
-        if (!ImageIO.write(image, "png", out)) {
+        return encode(image);
+    }
+
+    /**
+     * Decodes a PNG through a memory-cached stream (Phase 7 security fix S143, P2 11.3): no pixel data passes through
+     * {@code java.io.tmpdir}, where {@code ImageIO.read} of a stream writes it with its default disk cache.
+     *
+     * @throws IOException if no reader decodes it
+     */
+    static BufferedImage decode(byte[] png) throws IOException {
+        try (ImageInputStream in = new MemoryCacheImageInputStream(new ByteArrayInputStream(png))) {
+            java.util.Iterator<ImageReader> readers = ImageIO.getImageReaders(in);
+            if (!readers.hasNext()) {
+                throw new IOException("ImageIO cannot decode the PNG");
+            }
+            ImageReader reader = readers.next();
+            try {
+                reader.setInput(in, true, true);
+                BufferedImage decoded = reader.read(0);
+                if (decoded == null) {
+                    throw new IOException("ImageIO cannot decode the PNG");
+                }
+                return decoded;
+            } finally {
+                reader.dispose();
+            }
+        }
+    }
+
+    /**
+     * Encodes a raster as PNG through a memory-cached stream (S143: nothing through {@code java.io.tmpdir}).
+     *
+     * @throws IOException if there is no PNG writer or the write fails
+     */
+    static byte[] encode(BufferedImage image) throws IOException {
+        java.util.Iterator<ImageWriter> writers = ImageIO.getImageWritersByFormatName("png");
+        if (!writers.hasNext()) {
             throw new IOException("ImageIO has no PNG writer");
         }
-        return out.toByteArray();
+        ImageWriter writer = writers.next();
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        try (ImageOutputStream out = new MemoryCacheImageOutputStream(bytes)) {
+            writer.setOutput(out);
+            writer.write(image);
+        } finally {
+            writer.dispose();
+        }
+        return bytes.toByteArray();
     }
 
     private static BufferedImage argb(BufferedImage source) {

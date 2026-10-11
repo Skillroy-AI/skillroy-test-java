@@ -895,6 +895,7 @@ public final class CdpWebPath implements WebPath {
                     Selection sel = select(s, p, deadline);
                     byte[] png = onPw(s, primitive, sel, budgetMs, deadline, () -> {
                         Place at = place(s, sel, null);
+                        refuseMasked(s, primitive, p, at, deadline);
                         return at.page().screenshot(new Page.ScreenshotOptions().setType(ScreenshotType.PNG)
                                 .setTimeout(Math.max(1, remainingMs(deadline) - 200)));
                     });
@@ -918,6 +919,7 @@ public final class CdpWebPath implements WebPath {
             Selection sel = select(s, p, deadline);
             return onPw(s, primitive, sel, budgetMs, deadline, () -> {
                 Place at = place(s, sel, frameKey);
+                refuseMasked(s, primitive, p, at, deadline);
                 Object raw;
                 try {
                     raw = at.frame().evaluate(script);
@@ -1122,6 +1124,7 @@ public final class CdpWebPath implements WebPath {
             Selection sel = select(s, p, deadline);
             return onPw(s, primitive, sel, budgetMs, deadline, () -> {
                 Place at = place(s, sel, frameKey);
+                refuseMasked(s, primitive, p, at, deadline);
                 String ref = refOf(s, at);
                 List<WebInput.Frame> frames = frameList(s, at.page());
                 String foundIn = frameKey instanceof String key ? key : frames.isEmpty() ? null : frames.get(0).key();
@@ -1193,13 +1196,7 @@ public final class CdpWebPath implements WebPath {
             Selection sel = select(s, p, deadline);
             return onPw(s, primitive, sel, budgetMs, deadline, () -> {
                 Place at = place(s, sel, null);
-                refreshBrowsers(s, deadline);
                 String ref = refOf(s, at);
-                AgentBrowser browser = ref == null ? null : s.byRef.get(ref);
-                if (browser != null && browser.blocked() && !ptr.force()) {
-                    throw WebPathException.unsupported("a modal dialog blocks the window of browser " + ref
-                            + ": the agent answers web.pointer");
-                }
                 Map<String, Object> hit = null;
                 try {
                     hit = hitIn(primitive, at.page().mainFrame(), x, y, ref).summary();
@@ -1218,11 +1215,22 @@ public final class CdpWebPath implements WebPath {
                             + " the viewport or hits no element", Shapes.data("reason", "outside", "x", (long) x, "y",
                             (long) y, "browser", ref));
                 }
+                // Phase 7 security fix S133 (4.7): the modal check after the page's hit, immediately before the first
+                // event, so that a page that stalls its own hit cannot make it stale; nothing after the deadline.
+                requireTime(primitive, budgetMs, deadline);
+                refreshBrowsers(s, deadline);
+                AgentBrowser browser = ref == null ? null : s.byRef.get(ref);
+                if (browser != null && browser.blocked() && !ptr.force()) {
+                    throw WebPathException.unsupported("a modal dialog blocks the window of browser " + ref
+                            + ": the agent answers web.pointer");
+                }
                 CDPSession session = s.attach.sessionOnPw(at.page());
                 List<String> dispatched = new ArrayList<>();
                 WebInput.Step held = null;
                 try {
                     for (WebInput.Step step : WebInput.plan(ptr)) {
+                        // S133: no event once the caller's deadline has passed (it has its TIMEOUT answer already).
+                        requireTime(primitive, budgetMs, deadline);
                         CdpAttach.send(session, WebInput.MOUSE_EVENT, WebInput.mouseEvent(step, x, y, ptr));
                         dispatched.add(step.type());
                         if (WebInput.PRESSED.equals(step.type())) {
@@ -1231,7 +1239,7 @@ public final class CdpWebPath implements WebPath {
                             held = null;
                         }
                     }
-                } catch (RuntimeException e) {
+                } catch (RuntimeException | AgentRpcException e) {
                     if (held != null) {
                         try {
                             CdpAttach.send(session, WebInput.MOUSE_EVENT, WebInput.mouseEvent(WebInput.RELEASED, x, y,
@@ -1246,6 +1254,39 @@ public final class CdpWebPath implements WebPath {
                         || browser.visibleInSwing());
             });
         };
+    }
+
+    /**
+     * Phase 7 security fix S133 (4.7): {@code TIMEOUT} when the call's deadline has passed, so that an operation its
+     * caller gave up on (it answered {@code TIMEOUT} already) sends nothing more; the pointer's failure path then
+     * balances a press already sent with one release.
+     */
+    private static void requireTime(String primitive, long budgetMs, long deadline) throws AgentRpcException {
+        if (remainingMs(deadline) <= 0) {
+            throw timeout(primitive, budgetMs);
+        }
+    }
+
+    /**
+     * Phase 7 security fix S111 (P7 3.6, 4.8; D404's method): the agent's {@code web.browsers} read once more, and a
+     * browser it reports {@code masked} (a pack's {@code CaptureMask} names its component) is handed to the agent
+     * ({@code UNSUPPORTED}), which refuses the read {@code INVALID_PARAMS masked}, unless {@code redact: false} (a
+     * person's argument, which {@code CallPolicy} refuses for a model or a client). A {@code web.browsers} that fails
+     * hands the call to the agent too. Call only on the Playwright thread.
+     */
+    private static void refuseMasked(Session s, String primitive, Map<String, Object> p, Place at, long deadline)
+            throws WebPathException, AgentLostException {
+        Object redact = p.get("redact");
+        if (Boolean.FALSE.equals(redact) || redact instanceof String text && "false".equalsIgnoreCase(text.strip())) {
+            return;
+        }
+        refreshBrowsers(s, deadline);
+        String ref = refOf(s, at);
+        AgentBrowser browser = ref == null ? null : s.byRef.get(ref);
+        if (browser != null && browser.masked()) {
+            throw WebPathException.unsupported("browser " + ref + " is masked (a CaptureMask names its component): the"
+                    + " agent answers " + primitive);
+        }
     }
 
     /** The library's {@code hit} in a frame, read and bounded as the agent reads it; call on the Playwright thread. */

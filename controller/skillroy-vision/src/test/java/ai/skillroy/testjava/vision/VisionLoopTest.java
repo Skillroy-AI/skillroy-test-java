@@ -338,7 +338,8 @@ class VisionLoopTest {
             assertEquals(1, first.providerTools().size());
             ProviderTool toolset = first.providerTools().get(0);
             assertEquals("computer_toolset_20260801", toolset.type());
-            assertEquals(Map.of("zoom", Map.of("enabled", false)), toolset.raw().get("configs"), "zoom off");
+            assertEquals(Map.of("zoom", Map.of("enabled", false), "middle_click", Map.of("enabled", false)),
+                    toolset.raw().get("configs"), "zoom off; the middle click never offered (security fix S110)");
             List<Content> results = h.gateway.requests().get(1).messages().get(2).parts();
             assertEquals("computer", ((Content.ToolResult) results.get(0)).toolsetName());
             assertEquals("computer", ((Content.ToolResult) results.get(1)).toolsetName());
