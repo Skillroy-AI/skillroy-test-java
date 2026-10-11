@@ -579,6 +579,10 @@ final class Capture {
                 }
                 one.put("redacted", Boolean.valueOf(view.masked(s.component) || intersectsBlanked(rect)));
                 one.put("covered", coveredOver(r, s.component, rect));
+                // the component's whole rectangle, which the page's bitmap fills, not clipped to the image or to the
+                // visible part: where the visible part lies in the page (Phase 7 security fix, S108 follow-up)
+                one.put("bounds", rectJson(unclipped(r, s.component, new Rectangle(0, 0, s.component.getWidth(),
+                        s.component.getHeight()))));
                 surfaces.add(one);
             }
             for (Root r : roots) {
@@ -800,6 +804,15 @@ final class Capture {
 
         /** A rectangle of a component's own coordinates in image pixels, clipped to the image; null when outside. */
         Rectangle toImage(Root root, Component c, Rectangle local) {
+            Rectangle r = unclipped(root, c, local).intersection(image);
+            return r.isEmpty() ? null : r;
+        }
+
+        /**
+         * A rectangle of a component's own coordinates in image pixels, not clipped to the image (it may lie partly or
+         * wholly outside it): a surface's {@code bounds} (Phase 7 security fix, S108 follow-up).
+         */
+        Rectangle unclipped(Root root, Component c, Rectangle local) {
             Point off = offsetIn(c, root.window);
             Point base = offsetIn(root.paint, root.window);
             double sx = root.x + (off.x - base.x) + local.x;
@@ -808,8 +821,7 @@ final class Capture {
             int y0 = (int) Math.floor((sy - g.originY) * g.scale);
             int x1 = (int) Math.ceil((sx + local.width - g.originX) * g.scale);
             int y1 = (int) Math.ceil((sy + local.height - g.originY) * g.scale);
-            Rectangle r = new Rectangle(x0, y0, Math.max(0, x1 - x0), Math.max(0, y1 - y0)).intersection(image);
-            return r.isEmpty() ? null : r;
+            return new Rectangle(x0, y0, Math.max(0, x1 - x0), Math.max(0, y1 - y0));
         }
 
         // ------------------------------------------------------------------------------------------------ marks

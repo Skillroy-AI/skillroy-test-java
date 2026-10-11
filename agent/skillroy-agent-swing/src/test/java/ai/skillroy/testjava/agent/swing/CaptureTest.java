@@ -653,6 +653,7 @@ class CaptureTest {
         Capture.Shot shot = take(null, r);
         Map<String, Object> surface = webSurface(shot);
         assertEquals(map("x", 10L, "y", 10L, "w", 180L, "h", 100L), surface.get("rect"));
+        assertEquals(surface.get("rect"), surface.get("bounds"), "an unclipped browser's bounds are its rect");
         assertEquals(list(map("x", 150L, "y", 100L, "w", 40L, "h", 10L), map("x", 50L, "y", 40L, "w", 60L,
                 "h", 30L)), surface.get("covered"), "the dialog above in the composite, then the popup above it");
         boolean marked = false;
@@ -698,6 +699,38 @@ class CaptureTest {
         });
         assertEquals(map("x", 0L, "y", 20L, "w", 180L, "h", 40L), webSurface(take(null, r)).get("rect"),
                 "the part the viewport shows (rows 120..160 of the form at view position 100)");
+    }
+
+    /**
+     * Security fix S108 follow-up (SI's D-SI-6): a scroll-clipped browser's surface carries {@code bounds}, the
+     * component's whole rectangle in image coordinates, not clipped to the image or to the visible part, so that the
+     * composite can place the page's bitmap and clip it to {@code rect}; here the browser starts 30 pixels above the
+     * viewport (and above the image) and ends below it.
+     */
+    @Test
+    void aScrollClippedSurfaceCarriesTheBrowsersWholeBounds() throws Exception {
+        JPanel frame = panel(GREEN, 0, 0, 200, 150);
+        JViewport viewport = new JViewport();
+        viewport.setBounds(0, 0, 200, 60);
+        JPanel form = panel(Color.WHITE, 0, 0, 180, 300);
+        JPanel browser = panel(Color.BLUE, 0, 120, 180, 150);
+        form.add(browser);
+        viewport.setView(form);
+        frame.add(viewport);
+        frame.add(panel(Color.LIGHT_GRAY, 0, 60, 200, 90));
+        source(browser);
+        windows.source(() -> Collections.singletonList(
+                new Windows.Layer(frame, frame, new Rectangle(100, 100, 200, 150), new Point(0, 0), true)));
+        onEdt(() -> {
+            form.setBounds(0, 0, 180, 300);
+            viewport.setViewPosition(new Point(0, 150));
+            return null;
+        });
+        Map<String, Object> surface = webSurface(take(null, req(Capture.Scope.SCREEN)));
+        assertEquals(map("x", 0L, "y", 0L, "w", 180L, "h", 60L), surface.get("rect"),
+                "the visible part: the viewport's 60 rows");
+        assertEquals(map("x", 0L, "y", -30L, "w", 180L, "h", 150L), surface.get("bounds"),
+                "the whole browser, 30 rows above the image");
     }
 
     /**

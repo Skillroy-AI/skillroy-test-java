@@ -615,6 +615,8 @@ abstract class WebHostChecks {
         assertEquals(Boolean.FALSE, surface.get("redacted"));
         // Phase 7 security fix, S108 (SG): nothing of the window covers the front page
         assertEquals(List.of(), surface.get("covered"), String.valueOf(surface));
+        // Phase 7 security fix, S108 follow-up (SG): the front browser is not clipped, so its bounds are its rect
+        assertEquals(surface.get("rect"), surface.get("bounds"), String.valueOf(surface));
         Map<?, ?> rect = (Map<?, ?>) surface.get("rect");
         Map<?, ?> origin = (Map<?, ?>) capture.get("origin");
         Map<String, Object> centre = borrowCentre();
