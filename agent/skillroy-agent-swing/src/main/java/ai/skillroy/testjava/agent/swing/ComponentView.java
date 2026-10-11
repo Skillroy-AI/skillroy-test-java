@@ -23,11 +23,14 @@ import java.awt.Component;
 import java.awt.Point;
 import java.awt.Rectangle;
 import java.awt.Window;
+import java.util.ArrayList;
 import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import javax.accessibility.AccessibleContext;
+import javax.swing.JList;
+import javax.swing.JTable;
 
 /**
  * Turns live components into the JSON shapes of the contract (Node, window entry) and applies the name and id rules. One
@@ -36,7 +39,10 @@ import javax.accessibility.AccessibleContext;
  *
  * <p>The masked-text rule (phase7-contracts.md section 3.6, D349): a component {@link Redaction} names (or one inside
  * it) has no {@code text} and no {@code value} in a node, and its node carries {@code masked: true}; the role is
- * unchanged.
+ * unchanged. Phase 7 security fix: a masked component's {@code name} is withheld when it is the component's own text
+ * (Swing's accessible-name fallback of a label or a button, S106), and a rectangle a mask's {@code regions} blank
+ * withholds the text under it (a component under it is masked; a table's cells and a list's selected item under it
+ * are withheld one by one, S122).
  *
  * <p>Must be used on the EDT. Not thread-safe; never shared between calls.
  */
@@ -49,6 +55,10 @@ final class ComponentView {
     private final List<NameEnricher> enrichers;
     private final Redaction redaction;
     private final Map<Component, Boolean> maskedCache = new IdentityHashMap<Component, Boolean>();
+    private final Map<Component, String> ruleCache = new IdentityHashMap<Component, String>();
+    private final Map<Component, List<Rectangle>> ownRegionsCache = new IdentityHashMap<Component, List<Rectangle>>();
+    private final Map<Component, List<Rectangle>> regionsOverCache =
+            new IdentityHashMap<Component, List<Rectangle>>();
     private boolean enricherFailureLogged;
     private boolean readFailureLogged;
 
@@ -79,10 +89,134 @@ final class ComponentView {
         if (known != null) {
             return known.booleanValue();
         }
-        boolean m = redaction.ownRule(c) != null
-                || (!(c instanceof Window) && c.getParent() != null && masked(c.getParent()));
+        boolean m = rule(c) != null
+                || (!(c instanceof Window) && c.getParent() != null && masked(c.getParent()))
+                || underRegion(c);
         maskedCache.put(c, Boolean.valueOf(m));
         return m;
+    }
+
+    /** {@link Redaction#ownRule}, memoised for the call. */
+    private String rule(Component c) {
+        if (ruleCache.containsKey(c)) {
+            return ruleCache.get(c);
+        }
+        String r = redaction.ownRule(c);
+        ruleCache.put(c, r);
+        return r;
+    }
+
+    /**
+     * True when a blanked {@code regions} rectangle withholds the component's text (Phase 7 security fix, S122): one
+     * of the rectangles the masks' {@code regions} blank on the component or an ancestor (up to its window) holds the
+     * component's whole rectangle, or, for a component that shows a text or a value (a label, a button, a field; not a
+     * plain container, whose children are judged one by one), meets any part of it. A table's cells and a list's
+     * items are judged one by one instead ({@link #cellHidden}, {@link #text}).
+     */
+    private boolean underRegion(Component c) {
+        if (!redaction.hasMasks()) {
+            return false;
+        }
+        List<Rectangle> over = regionsOver(c);
+        if (over.isEmpty()) {
+            return false;
+        }
+        Rectangle own = new Rectangle(0, 0, c.getWidth(), c.getHeight());
+        for (Rectangle r : over) {
+            if (r.equals(own)) {
+                return true;
+            }
+        }
+        if (c instanceof JTable || c instanceof JList) {
+            return false;
+        }
+        boolean bears;
+        try {
+            bears = ComponentText.text(c) != null || ComponentText.value(c) != null;
+        } catch (RuntimeException e) {
+            bears = true; // the safe side
+        }
+        return bears;
+    }
+
+    /**
+     * The rectangles the masks' {@code regions} blank on the component itself and on its ancestors up to its window
+     * that are not masked whole (an ancestor masked whole masks the component through {@link #masked}'s chain), in the
+     * component's own coordinates and clipped to its bounds; memoised for the call (Phase 7 security fix, S122).
+     */
+    List<Rectangle> regionsOver(Component c) {
+        List<Rectangle> known = regionsOverCache.get(c);
+        if (known != null) {
+            return known;
+        }
+        List<Rectangle> out = new ArrayList<Rectangle>();
+        if (redaction.hasMasks()) {
+            Rectangle bounds = new Rectangle(0, 0, c.getWidth(), c.getHeight());
+            int dx = 0;
+            int dy = 0;
+            for (Component a = c; a != null; a = a.getParent()) {
+                if (rule(a) == null) {
+                    for (Rectangle r : ownRegions(a)) {
+                        Rectangle in = new Rectangle(r.x - dx, r.y - dy, r.width, r.height).intersection(bounds);
+                        if (!in.isEmpty()) {
+                            out.add(in);
+                        }
+                    }
+                }
+                if (a instanceof Window) {
+                    break;
+                }
+                dx += a.getX();
+                dy += a.getY();
+            }
+        }
+        regionsOverCache.put(c, out);
+        return out;
+    }
+
+    private List<Rectangle> ownRegions(Component a) {
+        List<Rectangle> known = ownRegionsCache.get(a);
+        if (known == null) {
+            known = redaction.blanked(a, null);
+            ownRegionsCache.put(a, known);
+        }
+        return known;
+    }
+
+    /**
+     * True when a blanked {@code regions} rectangle meets a table's cell (view row and column), so that its value is
+     * withheld from the node's {@code value} and from a row mark's label (Phase 7 security fix, S122). EDT only.
+     */
+    boolean cellHidden(JTable table, int row, int col) {
+        List<Rectangle> over = regionsOver(table);
+        if (over.isEmpty()) {
+            return false;
+        }
+        Rectangle cell = table.getCellRect(row, col, true);
+        for (Rectangle r : over) {
+            if (r.intersects(cell)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** True when a blanked {@code regions} rectangle meets a list's item (S122). EDT only. */
+    private boolean itemHidden(JList<?> list, int index) {
+        List<Rectangle> over = regionsOver(list);
+        if (over.isEmpty() || index < 0) {
+            return false;
+        }
+        Rectangle cell = list.getCellBounds(index, index);
+        if (cell == null) {
+            return false;
+        }
+        for (Rectangle r : over) {
+            if (r.intersects(cell)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** The component's stable ref. */
@@ -94,8 +228,33 @@ final class ComponentView {
      * The name rule: the first non-empty of the {@link NameEnricher} results (in registration order), the accessible
      * name and {@code Component.getName()} (ignoring names AWT generated). HTML in an accessible name is reduced to
      * its text. Null if none.
+     *
+     * <p>The masked name rule (phase7-contracts.md section 3.6; Phase 7 security fix, S106): for a masked component a
+     * name equal to the component's own text is withheld (null), since Swing's accessible name of a label or a button
+     * falls back to its text, so that no node, no {@code {name, role}} candidate, no {@code name} match and no
+     * description carries what the mask hides; a name the application or a pack set apart from the text (the
+     * accessible name, the client property, a border title, a {@code labelFor} label, {@code setName}, a
+     * {@code NameEnricher}) stays.
      */
     String name(Component c) {
+        String n = rawName(c);
+        if (n == null || !masked(c)) {
+            return n;
+        }
+        String own;
+        try {
+            own = ComponentText.text(c);
+        } catch (RuntimeException e) {
+            return null; // the safe side
+        }
+        if (own != null && (n.equals(own) || n.trim().equals(own.trim()))) {
+            return null;
+        }
+        return n;
+    }
+
+    /** {@link #name} before the masked name rule. */
+    private String rawName(Component c) {
         for (NameEnricher enricher : enrichers) {
             try {
                 String n = enricher.nameFor(c);
@@ -182,6 +341,9 @@ final class ComponentView {
                 m.put("selected", selected);
             }
             Object value = masked ? null : ComponentText.value(c);
+            if (value != null && c instanceof JTable) {
+                hideCells((JTable) c, value);
+            }
             if (value != null) {
                 m.put("value", value);
             }
@@ -204,10 +366,37 @@ final class ComponentView {
             return null;
         }
         try {
-            return ComponentText.text(c);
+            String t = ComponentText.text(c);
+            if (t != null && c instanceof JList && itemHidden((JList<?>) c, ((JList<?>) c).getSelectedIndex())) {
+                return null; // the selected item lies under a blanked region (S122)
+            }
+            return t;
         } catch (RuntimeException e) {
             readFailed(c, e);
             return null;
+        }
+    }
+
+    /** Nulls the cells of a table value that a blanked {@code regions} rectangle meets (S122). */
+    @SuppressWarnings("unchecked")
+    private void hideCells(JTable table, Object value) {
+        if (regionsOver(table).isEmpty() || !(value instanceof Map)) {
+            return;
+        }
+        Object cells = ((Map<String, Object>) value).get("cells");
+        if (!(cells instanceof List)) {
+            return;
+        }
+        List<Object> rows = (List<Object>) cells;
+        for (int row = 0; row < rows.size(); row++) {
+            if (rows.get(row) instanceof List) {
+                List<Object> line = (List<Object>) rows.get(row);
+                for (int col = 0; col < line.size(); col++) {
+                    if (cellHidden(table, row, col)) {
+                        line.set(col, null);
+                    }
+                }
+            }
         }
     }
 

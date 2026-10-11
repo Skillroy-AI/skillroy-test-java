@@ -197,10 +197,10 @@ and their bounds:
 
 | Where | Bound |
 |---|---|
-| `swing.capture` | one EDT read for the paint, the masks, the carets, the marks' geometry and the window geometry; PNG encoding off the EDT; one raster per call, at most 4096 pixels a side after `scale`, and never larger than an eighth of the JVM's heap headroom (`maxMemory() - (totalMemory() - freeMemory())`, read before the allocation, so that a heap that may still grow towards `-Xmx` is not refused an ordinary capture; a larger one is `INVALID_PARAMS` naming the needed and the free megabytes); an `OutOfMemoryError` around the allocation or the paint is caught and answered `INTERNAL_ERROR`, never left on the EDT; a `SCREEN` composite of at most 32 windows; at most 200 marks; at most 64 redacted rectangles reported (more are blanked but counted in `redactedTruncated`); `focus.ownerLocator` is the first candidate of §3.2's order that matches exactly one component, found under the locator regex budget, never all six |
+| `swing.capture` | one EDT read for the paint, the masks, the carets, the marks' geometry and the window geometry; PNG encoding off the EDT; one raster per call, at most 4096 pixels a side after `scale`, and never larger than an eighth of the JVM's heap headroom (`maxMemory() - (totalMemory() - freeMemory())`, read before the allocation, so that a heap that may still grow towards `-Xmx` is not refused an ordinary capture; a larger one is `INVALID_PARAMS` naming the needed and the free megabytes); an `OutOfMemoryError` around the allocation or the paint is caught and answered `INTERNAL_ERROR`, never left on the EDT; a `SCREEN` composite of at most 32 windows; at most 200 marks; at most 64 redacted rectangles reported (more are blanked but counted in `redactedTruncated`); `focus.ownerLocator` is the first candidate of §3.2's order that matches exactly one component, found under the locator regex budget, never all six; (Phase 7 security fix, S125, built 2026-10-11, SG) **the encoding is counted too**: after the off-EDT encoding, the PNG is refused when six times its size (what the base64 text, the reply's JSON text and its bytes allocate beside it; two bytes a character on a Java 8 target) is more than half the heap headroom read then (`INVALID_PARAMS` with `neededMb`, `freeMb` and `reason: "encoding"`, "lower 'scale' or capture a smaller scope"), and an `OutOfMemoryError` of the encoding is answered `INTERNAL_ERROR` (the raster's bound counted the raster alone, and a high-entropy image encodes to about the raster's size: about ten times the raster was allocated beside it for a 4096² capture, L2-S4); a `ROBOT` capture's PNG meets the same bound; at most 32 `covered` rectangles per surface (§3.1; more become one, the whole surface) |
 | `swing.hitTest` | one EDT read; at most 6 locator candidates, each checked with the engine under the locator regex budget (P1 §6); covering windows: at most 32 |
 | `swing.pointer` ROUTED | one EDT read (the pre-check), then one `invokeLater` task per event, at most 100 events per call (a drag of at most 50 steps, a wheel of at most 50 notches), each task checking the call's `cancelled` flag and the modal state first (§3.3), then one bounded EDT read for the result; a press that opens a modal dialog is never awaited beyond that read's deadline |
-| `swing.pointer` ROBOT, `swing.capture` ROBOT | Robot on `WORKER`, never the EDT (`waitForIdle` throws there, vision §F6); the delivery probe waits at most 1000 ms for the native `MOUSE_MOVED` (BS9 RESULT "What a `ROBOT` rung and the V3 tier need"); a press and its release in one worker task with no wait between them, the release in a `finally` that runs on a timeout or an interruption too, before the pointer is restored (D343); the press observation at most the call's remaining time; a screen capture at most 4096 pixels a side, and under `swing.capture`'s heap bound: the grab and, when the toolkit's image needs one, its conversion copy are each refused beyond an eighth of the heap headroom read before it (`INVALID_PARAMS` with `neededMb` and `freeMb`), an `OutOfMemoryError` of either is answered `INTERNAL_ERROR`, and the outside is blanked by filled rectangles, not a pixel walk (fix wave (Phase 7 review, FA, 2026-10-10): the glass capture had neither bound, L2-S3) |
+| `swing.pointer` ROBOT, `swing.capture` ROBOT | Robot on `WORKER`, never the EDT (`waitForIdle` throws there, vision §F6); the delivery probe waits at most 1000 ms for the native `MOUSE_MOVED` (BS9 RESULT "What a `ROBOT` rung and the V3 tier need"); a press and its release in one worker task with no wait between them, the release in a `finally` that runs on a timeout or an interruption too, before the pointer is restored (D343); the press observation at most the call's remaining time; a screen capture at most 4096 pixels a side, and under `swing.capture`'s heap bound: the grab and, when the toolkit's image needs one, its conversion copy are each refused beyond an eighth of the heap headroom read before it (`INVALID_PARAMS` with `neededMb` and `freeMb`), an `OutOfMemoryError` of either is answered `INTERNAL_ERROR`, and the outside is blanked by filled rectangles, not a pixel walk (fix wave (Phase 7 review, FA, 2026-10-10): the glass capture had neither bound, L2-S3); (Phase 7 security fix, S126, built 2026-10-11, SG) the grab's bound counts what `Robot` allocates at the screen's UI scale `s` (read, as `Robot` reads it, from the default configuration of the screen whose bounds hold the rectangle's centre): `4 w h` bytes at scale 1, and `4 (ceil(w sx) ceil(h sy) + w h)` bytes, about (s² + 1) times the raster, at another scale (the device-space pixels and the user-space image beside them), checked before the port is looked up; a non-default screen's Robot is constructed on an agent worker within the call's remaining time (S121, §3.4) |
 | `swing.rendering` | one EDT read; the probe render is a fixed 320 x 120 off-screen panel |
 | `CaptureMask`, `RegionResolver`, `SurfaceSource`, `LocatorResolver.describe` | called on the EDT inside the capture's, the snapshot's or the hit-test's read; must be fast and lock-free; a throwing implementation is logged once and ignored (as `NameEnricher` is, P1 §4), a throwing `CaptureMask` blanks the component |
 | `web.hitTest`, `web.pointer` | `WORKER`, 10 s; a pointer `CLICK` is move, press and release awaited in sequence under the call's budget; iframes descended to depth 3; a mutating call is never retried and never re-sent on the shared JCEF client (P4 §4.2, D62) |
@@ -304,10 +304,10 @@ pixels after `scale` as before):
 | `origin` | `{x, y}`, where pixel (0, 0) lies in `space` |
 | `scale` | the effective factor (the requested one, lowered by the 4096 cap and the heap bound) |
 | `windows` | `[{ref, rect}]`: every window in the image, `rect` in image coordinates (one entry for the three single-window scopes, several for `SCREEN`) |
-| `surfaces` | `[{kind: WEB \| HEAVYWEIGHT, rect, ref, browser?, redacted}]`: areas that are not Swing-painted, `rect` in image coordinates; `WEB` entries come from the registered `SurfaceSource`s (§3.7, the web module's index: `browser` is the browser's ref), `HEAVYWEIGHT` from the capture's own heavyweight walk (P4 §2.5) for components nobody claims; `redacted: true` when the surface's component is one a mask names or its rectangle intersects a `redacted` rectangle (the loop then never paints a page's pixels into it, §4.8); a part that threw is in `skipped` as before and in `surfaces` too (`skipped` is kept as built, D289) |
+| `surfaces` | `[{kind: WEB \| HEAVYWEIGHT, rect, ref, browser?, redacted}]`: areas that are not Swing-painted, `rect` in image coordinates; `WEB` entries come from the registered `SurfaceSource`s (§3.7, the web module's index: `browser` is the browser's ref), `HEAVYWEIGHT` from the capture's own heavyweight walk (P4 §2.5) for components nobody claims; `redacted: true` when the surface's component is one a mask names or its rectangle intersects a `redacted` rectangle (the loop then never paints a page's pixels into it, §4.8); a part that threw is in `skipped` as before and in `surfaces` too (`skipped` is kept as built, D289); (Phase 7 security fix, S108, S129, built 2026-10-11, SG) a `WEB` entry also carries **`covered: [{x, y, w, h}]`**, its `rect` is the component's **visible part**, and it is listed only for a component that is **showing** (below) |
 | `marks` | with `annotateRefs`: `[{mark, ref, rect, label, role, row?, region?}]`: `mark` the number a drawn mark would carry (1 to n in reading order), `rect` the rectangle a mark stands on, in image coordinates (the component's, a table row's, a region's), `label` the text the marks list gives the model (role, name, text; nothing for a masked component, §3.6), `row` the model row index for a table row, `region` the region id for a `RegionResolver` region; the pixels are untouched |
 | `carets` | `[{ref, rect}]`: for every showing, focused `JTextComponent` in the image whose caret is visible, the caret's rectangle (`modelToView` of the dot, widened to the caret's width; a selection has no caret entry), in image coordinates, computed in the same EDT read; the host's caret is never hidden (BS11 RESULT condition 1 and "Proposal" 2) |
-| `focus` | `{owner: ref \| null, ownerLocator: <locator> \| null, ownerRect: {x, y, w, h} \| null, window: ref \| null, active: boolean}`: the focus owner, the first locator of §3.2's order that matches it alone (so that a baseline can record it across agent starts; bounded, §2.4), its rectangle in image coordinates (what a comparison blanks on a focus mismatch, §6.7), the focused window and whether the captured window (or, for `SCREEN`, the active window) is active (BS11 condition 2: under Aqua losing the focus repaints the focus ring, 9,625 pixels) |
+| `focus` | `{owner: ref \| null, ownerLocator: <locator> \| null, ownerRect: {x, y, w, h} \| null, window: ref \| null, active: boolean}`: the focus owner, the first locator of §3.2's order that matches it alone (so that a baseline can record it across agent starts; bounded, §2.4), its rectangle in image coordinates (what a comparison blanks on a focus mismatch, §6.7), the focused window and whether the captured window (or, for `SCREEN`, the active window) is active (BS11 condition 2: under Aqua losing the focus repaints the focus ring, 9,625 pixels); (Phase 7 security fix, S146, built 2026-10-11, SG) `ownerLocator` is never a `{text, role}` candidate: the first unique candidate of §3.2's order without it (a nameless text field is named by `{class, index}` or `{path}`), since a text field's text is its content, which a baseline's or an anchor's `focus.owner` would carry into a committed bindings file, past the step's mask and even when the owner lies outside the image (the hit-test's own `locators` keep the candidate) |
 | `redacted` | `[{ref, rect, rule}]`: the rectangles blanked, `rule` `password-field` or `capture-mask` (§3.6); `redactedTruncated: true` when more than 64 were blanked |
 | `hash` | `sha256:<hex>` over the decoded raster the image in `base64` holds, the content: the width and the height as 4-byte big-endian integers, then every pixel's `getRGB` value (alpha included, `0xFF` for an opaque image) as a 4-byte big-endian integer, rows top to bottom (never the PNG bytes: the same raster encodes to different bytes on Java 8 and Java 25, BS11 RESULT condition 4); the controller's `ImageCompare.rasterHash` computes the same bytes and both modules' tests share one vector |
 | `stackingAssumed` | `SCREEN` only: true |
@@ -348,6 +348,29 @@ component's own mark, and a label reads `role 'name': text`, one line, at most 1
 reported for every focused text component without a selection whatever the caret's blink phase, masked or not (the
 rectangle a comparison blanks), widened by 2 pixels either side of `Caret.width` (D389). (g) For a target in no window
 (the headless tests' trees) `origin` is relative to the topmost ancestor and `window` is absent.
+
+**Phase 7 security fix, S108 and S129 (built 2026-10-11, SG): a surface is the showing component's visible part, with
+what is painted above it.** A `WEB` surface (a registered `SurfaceSource`'s component) is listed only when the component
+is **showing**: it and every ancestor up to its window are visible (`isShowing()` relative to the painted root, which
+the window-list seam's stand-ins answer too), not when its own `isVisible()` is true alone, so a browser in a
+`CardLayout` card that is not shown is no surface (L4-F1: it was listed at the rectangle its card would have, and the
+loop asked for its bitmap; on JCEF the adapter refused it, a vendor or third-party adapter need not). Its `rect` is the
+component's **visible part** in image coordinates: its bounds clipped by every ancestor's up to its window (what
+`JComponent.getVisibleRect` computes, computed the same way for a heavyweight), so a browser a viewport scrolled partly
+out is clipped to the viewport, and one scrolled wholly out (an empty visible part) is no surface at all (before, its
+whole bounds lay over whatever the paint put below the viewport). It carries **`covered`**, a list of `{x, y, w, h}`
+in image coordinates, each inside `rect`: the part of `rect` that every window **above** the surface's own in the
+composite covers (the windows painted after it in a `SCREEN` capture: a modal dialog, an owned window), and, in its own
+root, the part that every visible component **Swing paints above** a component of the surface's ancestry covers (a
+sibling with a lower child index, which Swing paints later: the layered pane's popup, modal and drag layers above the
+content layer, an in-window dialog in a higher layer, a visible glass pane), up to the painted root; more than 32 such
+rectangles are answered as one, the whole `rect`. `covered` is additive: an older agent sends none, which the
+controller reads as empty (§4.8). A registered surface that is not listed (not showing, or scrolled out) is still
+claimed, so the heavyweight walk never lists it as a `HEAVYWEIGHT` entry. `HEAVYWEIGHT` entries are unchanged (their
+walk already tests visibility at every level, and nothing is drawn into them). Before, the surface's rectangle was the
+component's whole bounds clipped to the image only, while the same class's marks took the visible part and dropped what
+a higher window covers, so the composite painted the page over a modal dialog, an owned window, a popup or an in-window
+dialog above the browser, and the model's click there landed on the hidden target control (L4-S1).
 
 ### 3.2 `swing.hitTest` (A63; read-only; capability `swing.hittest`)
 
@@ -557,7 +580,10 @@ save and restore return it to the person's location, not to the probed point.
 **`swing.pointer {via: ROBOT}`.** The parameters of §3.3, with these differences:
 
 - `action` is `MOVE`, `CLICK`, `DOUBLE_CLICK`, `DRAG` or `WHEEL`; **`PRESS` and `RELEASE` are refused**
-  (`INVALID_PARAMS`, "a Robot press is never left held: use CLICK or DRAG"; D343). A press and its release run in one
+  (`INVALID_PARAMS`, "a Robot press is never left held: use CLICK or DRAG"; D343). **`modifiers` are refused**
+  (`INVALID_PARAMS`, `data.param: "modifiers"`; Phase 7 security fix, S124, built 2026-10-11, SG): the Robot path
+  holds no key (V3 has no Robot keyboard in Phase 7, D345), so a modified click would be pressed plain and reported as
+  the modified one; an empty list is no modifier. A press and its release run in one
   worker task with no wait between them; a `finally` releases every button the call pressed before anything else, on a
   timeout or an interruption too; **the pointer is never restored while a button is down**.
 - `requireFocus` (boolean, default **true**; D344): the pre-check's EDT read also requires that the target JVM holds a
@@ -575,13 +601,22 @@ save and restore return it to the person's location, not to the probed point.
   (`stackingAssumed: true`). A `DRAG`'s end point (`to`) is held to the same two rules in the same read
   (`NOT_FOUND outside` and `INPUT_REJECTED covered` with `data.param: "to"`), since the Robot releases the button
   there (fix wave (Phase 7 review, FA, 2026-10-10; L2-S2): it was checked only to lie in the same window). No modal check: input into a blocked window is dropped by AWT as for a person (BS9 case
-  "modal"), and the result reports that nothing arrived.
+  "modal"), and the result reports that nothing arrived. (Phase 7 security fix, S104 and S105, built 2026-10-11, SG)
+  "Showing" means **on the glass**: a point in a window the toolkit reports **iconified** (`Frame.getExtendedState() &
+  Frame.ICONIFIED`, read on the EDT in the pre-check), or in a window such a frame owns directly or transitively, is
+  refused `NOT_FOUND` with `data.reason: "iconified"`, and such a window is never a covering window; a screen point, and
+  a `DRAG`'s end point, that **no screen device's bounds** hold (the default configuration's bounds of every
+  `GraphicsDevice`, read in the same EDT task) is refused `NOT_FOUND` with `data.reason: "off-screen"` (`data.param:
+  "to"` for the end point), since the platform moves the pointer to the nearest screen edge instead and the press would
+  land there (below).
 - On the worker: the pointer's location is saved (`MouseInfo`), `mouseMove` to the point, the native sequence
   (`mousePress`/`mouseRelease` with the button masks, a drag as `steps` moves, `mouseWheel` per notch), the `finally`'s
   release, then the pointer restored to the saved location; the result's `received` is the component that received
   `MOUSE_PRESSED` (the `AWTEventListener` for the call's duration), and **nothing received within the call's deadline
   is `fired: false, reason: "NOT_DELIVERED"`**, never a success that cannot be seen (BS9: macOS drops silently); a
-  `received` that is neither `hit.target` nor inside it is `fired: false, reason: "received elsewhere"`. `activated`
+  `received` that is neither `hit.target` nor inside it is `fired: false, reason: "received elsewhere"`, and (Phase 7
+  security fix, S105) it clears the passed delivery probe as `NOT_DELIVERED` does, so the next action is probed again
+  rather than pressed at once. `activated`
   reports a window the press activated.
 
 **`swing.capture {mode: ROBOT}`** (capability `swing.capture.robot`; **a person's evidence**, D341): refused for every
@@ -627,6 +662,32 @@ remaining time (D392). (e) A glass capture ignores `scale` (user-space size, `sc
 rectangle over 4096 pixels a side, carries the limitation sentence as `glassNote`, and reports `surfaces` beside
 `windows` (D396).
 
+**Phase 7 security fix (built 2026-10-11, SG): the glass, the screens and the probe's order.**
+
+- **S104, iconified.** `Window.isShowing()` is `visible` alone and does not change when a frame is iconified, so AWT's
+  "showing" is not "on the glass". One predicate, `Windows.hidden(window)` (the window is a frame the toolkit reports
+  `ICONIFIED`, or a frame so reported owns it, directly or transitively), refuses a Robot point in such a window
+  (`NOT_FOUND iconified`, in the delivery probe's read too, so nothing moves), leaves it out of the covering windows of
+  the hit-test and of a Robot point, and leaves it out of the module's stacking, so of the `SCREEN` composite (the model
+  is never shown a minimised frame painted at its last position, nor a window it owns painted over the focused frame),
+  of a `SCREEN` point, and of the glass capture's window rectangles (whose pixels inside a minimised frame's rectangle
+  are another application's, now blanked grey as the desktop is). Snapshots, locators and the routed pointer are
+  unchanged (a minimised frame's tree is still read and its events still dispatched). The undetectable neighbour, a
+  window of the JVM on another virtual desktop or workspace, cannot be seen through AWT; `requireFocus` is the only
+  guard there (§13.4).
+- **S105, off-screen.** X11 keeps the pointer on the screen, so a Robot press at a point no screen shows landed at the
+  nearest edge: on another component of the same window when the window spans the edge (and the delivery probe passed
+  there), on whatever lies at the edge otherwise. The pre-check now requires the screen point, and a drag's end point, to
+  lie in some screen device's default-configuration bounds (`NOT_FOUND off-screen`), and a press `received elsewhere`
+  is re-probed before the next one. macOS (`CRobot` posts the button event at the requested point while the cursor sits
+  at the clamped one) is undetermined and Windows unverified (§13.4); the refusal covers both.
+- **S121, the probe's port.** The delivery probe obtains its port before it adds its listener, so a port that cannot
+  be had leaves no listener on the toolkit (before, one leaked per failed call, holding the target window for the JVM's
+  life). As built (a) amended: the default screen's Robot is constructed by the capability probe on its worker; a Robot
+  for another `GraphicsDevice` is constructed on demand **on an agent worker** (`ThreadPolicy.WORKER`, the call's
+  remaining time), never on the call's thread, and cached per device.
+- **S124, modifiers** (the differences list above) and **S126, the grab's bound at a UI scale** (§2.4's Robot row).
+
 ### 3.5 `swing.type` with an omitted target (A62)
 
 `TargetSpec.parse(a, false)`: without `target` and `by` the text goes to `Typing.defaultKeyTarget()`, the rule
@@ -658,7 +719,8 @@ public interface CaptureMask {
     /** True to blank the component's whole rectangle and withhold its text. */
     boolean masks(java.awt.Component component);
     /** Rectangles inside the component to blank instead of the whole (a table's cells, a row's column); null or empty
-     *  means the whole rectangle when {@link #masks} is true, nothing when it is false. The text rule is unaffected. */
+     *  means the whole rectangle when {@link #masks} is true, nothing when it is false. With masks false the text under
+     *  them is withheld (Phase 7 security fix, S122); with masks true all of the component's text is. */
     default java.util.List<java.awt.Rectangle> regions(java.awt.Component component) { return null; }
 }
 ```
@@ -693,6 +755,36 @@ ancestor's rule; below an ancestor masked whole nothing is marked or walked (the
 Before, only components inside the paint root were blanked, so such a capture left the JVM with the masked content as
 rendered and `redacted: []` while the snapshot and the hit-test said `masked: true` (D383's premise did not hold there).
 A glass capture inherits the rule through `Capture.facts`.
+
+**Phase 7 security fix (built 2026-10-11, SG): the name, how masks combine, and the text under `regions`.** D349 is
+widened, not contradicted ("one rule for pixels and text"):
+
+- **S106, the masked name rule.** Swing's accessible name of a `JLabel` and of every `AbstractButton` falls back to the
+  component's text, so withholding `text` and `value` left a masked label's or button's content in `name`. For a masked
+  component (named by a mask, inside one, or under a blanked region) **a name equal to the component's own text is
+  withheld** (`name: null`), and so no `{name, role}` candidate of the hit-test, no first unique locator
+  (`focus.ownerLocator`), no `name` match of the locator engine (no oracle through `{regex}` or `{contains}`), no
+  description in an error message, no dialog button label and no node carries it. A name set apart from the text stays
+  (the accessible name, the client property, a border title, a `labelFor` label, `setName`, a `NameEnricher`), so a
+  committed `{name: …}` locator of a masked entry field keeps resolving; one that happens to equal the text is withheld
+  too (the safe side). The sample is unaffected (its masked components take their names from the client property, a
+  border title or a `labelFor` label, or carry an id).
+- **S123, masks combine by union.** Each registered mask contributes, for a component, its `regions` when it gives
+  some, else the whole rectangle when its `masks` is true, else nothing; the union is blanked, so one mask's `regions`
+  never cancel another mask's whole-component blanking (before, `regions` of any mask replaced the whole rectangle, and
+  the component's other pixels and its children's left the JVM while every text route said `masked: true`). A mask that
+  names the component **and** gives `regions` still blanks only those (the conservative per-column form: its pixels by
+  the rectangles, all of its text withheld).
+- **S122, a blanked region withholds the text under it.** A rectangle a mask's `regions` blank, with `masks` false (the
+  SPI's form for "a table's cells, a row's column"), withholds the text of what it covers on every text route, as the
+  pixels are withheld: a component whose whole rectangle such a rectangle (of its own masks or of an ancestor's, up to
+  its window) holds, or a component that shows a text or a value (a label, a button, a field; not a plain container,
+  whose children are judged one by one) that such a rectangle meets, is **masked** (no `text`, no `value`, no name from
+  its text, `masked: true`, no mark, the hit-test's `masked`); a `JTable`'s cell that such a rectangle meets is left out
+  of the row mark's label and nulled in the node's `value.cells`, and a `JList`'s selected item that one meets is left
+  out of its `text`; the table's or the list's other text stays. Before, the text rule followed `masks` alone, so the
+  marks list, the node's text, a table's value, the hit-test's nodes and a recorded `{name, role}` locator carried the
+  content the pixels hid (L2-F4). Chosen over the alternative of a disclosure sentence (the owner's choice; D-SG-5).
 
 ### 3.7 `RegionResolver`, `SurfaceSource`, `LocatorResolver.describe` (A64)
 
@@ -782,7 +874,12 @@ hash of every leg changes once (`CapabilityGoldenTest`, `LoadModeChecks`, `AwtSt
 `AgentRuntime.resolveOptions`, validated like `readOnly`, read by the Swing module from `ctx.options()`;
 `agent.info.options` reports it) joins P1 §2.4's table (A65). No new error code (`NOT_FOUND` outside, `INVALID_PARAMS`,
 `INPUT_REJECTED` with the reasons `covered`, `target changed` and `not focused`, `CAPABILITY_UNAVAILABLE`, `MODAL_OPEN`
-cover every case; D299) and no new topic: the pointer publishes nothing, and `swing.events` stays gap 31.
+cover every case; D299) and no new topic: the pointer publishes nothing, and `swing.events` stays gap 31. (Phase 7
+security fix, S104, S105, S124, S125, built 2026-10-11, SG) Still no new code: a Robot point in an iconified frame or a
+window it owns is `NOT_FOUND` with `data.reason: "iconified"`, a screen point no screen shows `NOT_FOUND` with
+`data.reason: "off-screen"` (`data.param: "to"` for a drag's end point), `modifiers` with `via: ROBOT` are
+`INVALID_PARAMS` with `data.param: "modifiers"`, and a capture whose PNG exceeds the encoding bound is `INVALID_PARAMS`
+with `data.reason: "encoding"` (§2.4).
 
 ---
 ## 4. The web side (`skillroy-agent-web`, `skillroy-cdp`, the script library)
@@ -1031,6 +1128,13 @@ requests no AWT class (`WebModuleInstallTest`). The conversion of a component po
 the module's own bounded EDT read and the page's `innerWidth`; the override that refuses it is the one this module's
 `web.resize` set (an override the CDP path set on its own session is not seen by the agent, and the CDP path refuses a
 component point anyway). `scaleAssumed` is `true` when the component's screen transform is not 1, else `false`.
+
+**Phase 7 security fix, S108 and S129, the agent's half (built 2026-10-11, SG):** the Swing capture lists a `WEB`
+surface only for a showing component, with `rect` its visible part and `covered` the rectangles painted above it (a
+window above in the composite, a popup, modal or drag layer or a visible glass pane above it in its root), §3.1. What
+the composite does with `covered` (the page drawn into `rect` minus `covered`; an agent without `covered` read as
+empty) is the controller's half (the vision module's `Capture.Surface` and `Grounding.composite`), built with the
+security fix's SI package.
 
 ### 4.9 The web host, the kit and the acceptance (profile `jcef`)
 
@@ -2478,6 +2582,27 @@ ranking have a headless case in `PointerTest` on a hand-built hit; their real-wi
 capture inside a masked container, an ancestor's mask regions and a mask that names the window are `CaptureTest` cases
 (the window through the window-list seam), a mask that names a real `JDialog` a `VisionDisplayTest` case.
 
+**Phase 7 security fix (built 2026-10-11, SG), item 1.** Headless: `WindowsTest` (new; S104: the hidden predicate
+through the window-list seam and the state seam `Windows.State`, whose stand-ins say which window is an iconified frame
+and who owns whom: the iconified frame and the windows it owns transitively left out of the stacking and the `SCREEN`
+composite), `CaptureTest` (S129: a browser in a hidden card is no surface; S108: `covered` holds the dialog above in
+the composite and a popup-layer component above in the root, and `rect` is the visible part, none for a browser scrolled
+wholly out of a viewport; S122: a regions-only mask's label masked and the table's covered cells withheld from the
+marks and the value; S123: two masks by union; S125: the encoding bound with a noise raster through the heap seam;
+S146: the focus owner's locator without `{text}`), `HitTestLocatorsTest` (S106: a masked label, a button inside a
+masked container and a directly masked label have no name, candidate, first unique locator, description or `name`
+match from their text; an accessible name set apart from the text survives), `RobotPathTest` (S121: a probe whose port
+cannot be had leaves no toolkit listener; S124: `modifiers` refused with nothing moved; S126: the grab's bytes per UI
+scale, and a glass capture at scale 3 refused by the bound through the screens seam `RobotPath.Screens`). On the
+display (the image): `RobotPathDisplayTest` (S104: a real frame the toolkit reports `ICONIFIED`, which the WM-less
+display keeps as the frame's state although it cannot unmap it (the case also ran under openbox, which unmaps it, §13.4),
+and a dialog it owns refused `NOT_FOUND iconified` with
+nothing moved and left out of the composite; the same through the state seam, which also shows it is no covering
+window; S105: a frame at x = 1024 - 124, 300 wide: a point at window x = 250 and a drag's end point there refused
+`NOT_FOUND off-screen` with nothing moved and the capability `OK`; a press `received elsewhere` probed again before the
+next press), `VisionDisplayTest` (S146: a focused nameless text field's `focus.ownerLocator` holds no text; S125: a
+512 x 512 noise component refused by the encoding bound with an 8 MB headroom, captured with the JVM's own).
+
 **As built (Phase 7, VC):** item 5 is `Phase7CompileTest`, `Phase7ExecutorTest`, `Phase7SessionTest`, `Phase7ExportTest`,
 `Phase7BindingsTest`, `ImageCompareTest` (`…scenario.image`; the shared vector, the same six pixels and the same hash
 literal in `ImageCompareTest` and the agent's `CaptureTest`: the 3 x 2 raster `0xFF000000 0xFFFFFFFF 0xFF808080 /
@@ -2599,6 +2724,16 @@ deterministic refusal is `RobotPathDisplayTest.requireFocusRefusesAJvmWithoutAFo
 `RobotPathDisplayTest.aGlassCaptureIsMaskedAndBlankedOutsideTheWindows`: a glass capture of the WM-less frame lies wholly
 inside it, so the end-to-end check asserts the raster equality and `glass` only.
 
+**Phase 7 security fix (built 2026-10-11, SG), items 6, 10 and 11.** Item 6: the WM-less off-screen case (a frame
+across the 1024-pixel display's right edge, `NOT_FOUND off-screen` for the point and a drag's end point, nothing moved)
+and the iconified case (the frame state the WM-less toolkit keeps) are `RobotPathDisplayTest` cases on the module's
+fake OS port (§13.1 item 1), not `RobotChecks` steps: the desk's frame is not moved off the screen or iconified in the
+end-to-end target. Item 10: the web host's back browser is a `CardLayout` card of its own, so `WebHostChecks` item 10
+asserts that it is absent from `surfaces` (it was by its own `isVisible()` before the fix too); a browser wrapped in a
+hidden card's panel, the case S129 is about, is `CaptureTest`'s, since wrapping the host's back browser would change
+the web host application (another package's files and the BS8 sentinels). Item 11: `HostSafetyIT` and
+`HostSafetyDisplayTest` run unchanged.
+
 **As built (Phase 7, VC):** item 7's seed-A part and item 9 are `LoadModeChecks.thePhase7SeedAScenariosRunAsDesigned`
 (`@Order(155)`) and `theCapabilitiesRecordCarriesTheAgentsHashAndTheContributedIds` (`@Order(156)`), in every load mode;
 the expected reason and contributed ids followed whether the vision module's contributor was on the class path
@@ -2677,6 +2812,18 @@ history rule (§7.4), V3 on a person's desktop with another process's window cov
 does; `keypad-image`'s committed keys are expected to hold there (BS11), and a key that differs there is a finding for
 the orchestrator, settled by an `approve` on that leg, not a failure of the matrix. Each is a line of §15's "not
 verified" list and of `threat-model.md` §8.
+
+**Phase 7 security fix (2026-10-11, SG):** the iconified refusal ran on the WM-less display (where the toolkit keeps the
+frame's `ICONIFIED` state while the frame stays mapped), through the state seam, and once under openbox in BS9's derived
+image (`skillroy-spike-bs9:wm-arm64`, the two iconified cases of `RobotPathDisplayTest` on Java 25, green), not as a
+matrix leg; also not verified: macOS's and Windows' minimised windows; a window of the JVM on another virtual
+desktop or workspace (AWT cannot see it; `requireFocus` is the only guard); Windows' parking of a minimised frame at
+about (-32000, -32000) (now left out of the composite as hidden, so its union no longer scales the picture down) and
+`SetCursorPos`' clamping; macOS's routing of a button event at an off-display point (now refused before any move); a
+real multi-screen desktop (the off-screen rule reads every device's bounds; the second device's Robot on a worker);
+HiDPI (the grab's bound at scale 2 or 3 computed from the configuration's transform, not measured); the encoding bound's
+Java 8 allocation (the factor six assumes two-byte characters there, not measured); on macOS, the screen-recording
+consent dialog the first glass capture raises in the target application's name.
 
 ---
 

@@ -228,8 +228,8 @@ final class HitTest {
     static void covering(Windows windows, Window window, Point screen, List<Window> out, List<Boolean> ranked) {
         Window active = Windows.activeWindow();
         for (Window other : Windows.roots(false)) {
-            if (other == window || out.size() >= MAX_COVERING) {
-                continue;
+            if (other == window || out.size() >= MAX_COVERING || Windows.hidden(other)) {
+                continue; // an iconified frame and the windows it owns are not on the glass (security fix, S104)
             }
             Rectangle r;
             try {
@@ -408,7 +408,7 @@ final class HitTest {
                                  boolean includeHidden) {
         List<Object> out = new ArrayList<Object>();
         LocatorEngine engine = new LocatorEngine(view);
-        for (Map<String, Object> candidate : candidates(view, spis, target, root, includeHidden)) {
+        for (Map<String, Object> candidate : candidates(view, spis, target, root, includeHidden, true)) {
             if (out.size() >= max) {
                 break;
             }
@@ -427,8 +427,19 @@ final class HitTest {
     /** {@link #firstUniqueLocator} under a root (headless tests). */
     static Map<String, Object> firstUniqueLocator(ComponentView view, SwingSpis spis, Component target,
                                                   Component root, boolean includeHidden) {
+        return firstUniqueLocator(view, spis, target, root, includeHidden, true);
+    }
+
+    /**
+     * {@link #firstUniqueLocator} under a root, with or without the {@code {text, role}} candidate. The focus owner of
+     * a capture is described without it ({@code focus.ownerLocator}, Phase 7 security fix, S146): a text field's text
+     * is its content, which a baseline's or an anchor's {@code focus.owner} would carry into a committed bindings
+     * file; the {@code {class, index}} or {@code {path}} candidate names such a field instead.
+     */
+    static Map<String, Object> firstUniqueLocator(ComponentView view, SwingSpis spis, Component target,
+                                                  Component root, boolean includeHidden, boolean withText) {
         LocatorEngine engine = new LocatorEngine(view);
-        for (Map<String, Object> candidate : candidates(view, spis, target, root, includeHidden)) {
+        for (Map<String, Object> candidate : candidates(view, spis, target, root, includeHidden, withText)) {
             if (unique(engine, candidate, target, root, includeHidden)) {
                 return candidate;
             }
@@ -454,7 +465,7 @@ final class HitTest {
     }
 
     private static List<Map<String, Object>> candidates(ComponentView view, SwingSpis spis, Component target,
-                                                        Component root, boolean includeHidden) {
+                                                        Component root, boolean includeHidden, boolean withText) {
         List<Map<String, Object>> out = new ArrayList<Map<String, Object>>();
         for (Map.Entry<String, String> e : spis.describe(target).entrySet()) {
             out.add(one(e.getKey(), e.getValue(), null, null));
@@ -464,11 +475,11 @@ final class HitTest {
         if (id != null) {
             out.add(one("id", id, null, null));
         }
-        String name = view.name(target);
+        String name = view.name(target); // withheld for a masked component when it is the component's text (S106)
         if (name != null && !name.isEmpty()) {
             out.add(one("name", name, role, null));
         }
-        if (!view.masked(target)) {
+        if (withText && !view.masked(target)) {
             String text = view.text(target);
             if (text != null && !text.isEmpty() && text.length() <= MAX_TEXT_LOCATOR && text.indexOf('\n') < 0) {
                 out.add(one("text", text, role, null));

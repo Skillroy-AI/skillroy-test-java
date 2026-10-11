@@ -27,6 +27,7 @@ import ai.skillroy.testjava.protocol.TopicFilter;
 
 import java.awt.AWTEvent;
 import java.awt.Component;
+import java.awt.GraphicsConfiguration;
 import java.awt.GraphicsDevice;
 import java.awt.GraphicsEnvironment;
 import java.awt.Graphics2D;
@@ -38,6 +39,7 @@ import java.awt.Window;
 import java.awt.event.AWTEventListener;
 import java.awt.event.InputEvent;
 import java.awt.event.MouseEvent;
+import java.awt.geom.AffineTransform;
 import java.awt.image.BufferedImage;
 import java.util.ArrayList;
 import java.util.IdentityHashMap;
@@ -68,14 +70,18 @@ import javax.swing.SwingUtilities;
  *       between the pre-check and the press; its own read applies the pre-check's refusals first (nothing moves for a
  *       refused call), and it is skipped for a window a modal dialog blocks or a point another window covers under
  *       {@code force}, where AWT would drop or divert its move (fix wave of the Phase 7 review, FA).</li>
- *   <li><b>The pre-check</b>: the hit-test; {@code requireFocus} (default true) refuses a JVM without a focused window
+ *   <li><b>The pre-check</b>: a window the toolkit reports iconified, or one such a frame owns, refuses the point
+ *       ({@code NOT_FOUND "iconified"}); the hit-test; a screen point (and a drag's end point) no screen device shows
+ *       is refused ({@code NOT_FOUND "off-screen"}: the platform would press at the nearest screen edge; Phase 7
+ *       security fix, S104, S105); {@code requireFocus} (default true) refuses a JVM without a focused window
  *       ({@code INPUT_REJECTED "not focused"}); any covering window of the JVM refuses the point unless
- *       {@code force}.</li>
+ *       {@code force}. {@code modifiers} are refused (the Robot path holds no key; S124).</li>
  *   <li><b>The press</b>: {@code PRESS} and {@code RELEASE} are refused; a press and its release run in one worker task
  *       with no wait between them, a {@code finally} releases every button the call pressed before anything else, and
  *       the pointer is restored only afterwards (D343).</li>
  *   <li><b>The observation</b>: an {@code AWTEventListener} for the call's duration; nothing received is
- *       {@code fired: false, reason: "NOT_DELIVERED"}, a receiver outside the target {@code "received elsewhere"}.</li>
+ *       {@code fired: false, reason: "NOT_DELIVERED"}, a receiver outside the target {@code "received elsewhere"};
+ *       either makes the next action probe delivery again (S105).</li>
  * </ul>
  *
  * <p>Thread-safe.
@@ -98,6 +104,48 @@ final class RobotPath {
     /** The sentence a glass capture carries. */
     static final String GLASS_NOTE = "pixels inside a window's rectangle may belong to a window of another process "
             + "that covers it";
+
+    /**
+     * The screens as the toolkit reports them (Phase 7 security fix, S105, S126): the bounds of every screen device's
+     * default configuration, and the UI scale of the configuration at a screen point, the one {@code Robot} reads for a
+     * screen capture. A package-private seam, so that a headless test can say what the screens are.
+     */
+    interface Screens {
+        /** The bounds of every screen device's default configuration, in screen coordinates. */
+        List<Rectangle> bounds();
+
+        /** {@code {scaleX, scaleY}} of the configuration whose bounds hold the point (the default screen's else). */
+        double[] scaleAt(double x, double y);
+    }
+
+    /** The toolkit's screens: {@code GraphicsEnvironment.getScreenDevices()}. */
+    static final Screens TOOLKIT_SCREENS = new Screens() {
+        @Override
+        public List<Rectangle> bounds() {
+            List<Rectangle> out = new ArrayList<Rectangle>();
+            for (GraphicsDevice d : GraphicsEnvironment.getLocalGraphicsEnvironment().getScreenDevices()) {
+                out.add(d.getDefaultConfiguration().getBounds());
+            }
+            return out;
+        }
+
+        @Override
+        public double[] scaleAt(double x, double y) {
+            GraphicsConfiguration at = defaultDevice().getDefaultConfiguration();
+            for (GraphicsDevice d : GraphicsEnvironment.getLocalGraphicsEnvironment().getScreenDevices()) {
+                GraphicsConfiguration gc = d.getDefaultConfiguration();
+                if (gc.getBounds().contains(x, y)) {
+                    at = gc;
+                    break;
+                }
+            }
+            AffineTransform tx = at.getDefaultTransform();
+            return new double[] {tx.getScaleX(), tx.getScaleY()};
+        }
+    };
+
+    /** The screens seam (tests only replace it, and put {@link #TOOLKIT_SCREENS} back). */
+    static volatile Screens screens = TOOLKIT_SCREENS;
 
     private final AgentContext ctx;
     private final Windows windows;
@@ -148,6 +196,7 @@ final class RobotPath {
         return GraphicsEnvironment.getLocalGraphicsEnvironment().getDefaultScreenDevice();
     }
 
+    /** The port of a device, constructed here when it has none yet: the capability probe's, already on a worker. */
     private RobotPort port(GraphicsDevice device) throws Exception {
         synchronized (ports) {
             RobotPort p = ports.get(device);
@@ -159,7 +208,12 @@ final class RobotPath {
         }
     }
 
-    private RobotPort portFor(final Window w) throws Exception {
+    /**
+     * The port of the window's device (the default screen's when it has none). The default device's port is the one
+     * the capability probe built; a port for another device is constructed on an agent worker within the call's
+     * remaining time, never on the call's thread (section 3.4; Phase 7 security fix, S121).
+     */
+    private RobotPort portFor(final Window w, Invocation inv) throws Exception {
         GraphicsDevice d = null;
         try {
             if (w != null && w.getGraphicsConfiguration() != null) {
@@ -168,7 +222,27 @@ final class RobotPath {
         } catch (RuntimeException ignored) {
             // the default screen
         }
-        return port(d != null ? d : defaultDevice());
+        final GraphicsDevice device = d != null ? d : defaultDevice();
+        synchronized (ports) {
+            RobotPort p = ports.get(device);
+            if (p != null) {
+                return p;
+            }
+        }
+        RobotPort made = ctx.threads().call(ThreadPolicy.WORKER, new Callable<RobotPort>() {
+            @Override
+            public RobotPort call() throws Exception {
+                return factory.create(device);
+            }
+        }, Math.max(1, inv.remainingMs() - Pointer.SAFETY_MS));
+        synchronized (ports) {
+            RobotPort p = ports.get(device);
+            if (p == null) {
+                ports.put(device, made);
+                p = made;
+            }
+            return p;
+        }
     }
 
     // --------------------------------------------------------------------------------------------------- pointer
@@ -188,6 +262,7 @@ final class RobotPath {
             throw Errors.invalid("a Robot press is never left held: use CLICK or DRAG", Errors.data("param",
                     "action", "via", Pointer.ROBOT));
         }
+        refuseModifiers(r);
         if (!deliveryOk) {
             // the probe's own read refuses what the pre-check would refuse, so that nothing moves for such a call
             // (fix wave of the Phase 7 review, FA, L2-F4); the pre-check below repeats it right before the press
@@ -230,7 +305,7 @@ final class RobotPath {
         toolkit.addAWTEventListener(listener, AWTEvent.MOUSE_EVENT_MASK | AWTEvent.MOUSE_MOTION_EVENT_MASK
                 | AWTEvent.MOUSE_WHEEL_EVENT_MASK);
         try {
-            final RobotPort port = portFor(plan.window);
+            final RobotPort port = portFor(plan.window, inv);
             ctx.threads().call(ThreadPolicy.WORKER, new Callable<Object>() {
                 @Override
                 public Object call() {
@@ -255,6 +330,9 @@ final class RobotPath {
             m.put("fired", Boolean.FALSE);
             m.put("reason", NOT_DELIVERED);
         } else if (target != null && in != target && !SwingUtilities.isDescendingFrom(in, target)) {
+            // an unexplained receiver is probed again before the next press, never repeated without a probe (Phase 7
+            // security fix, S105: a point the platform moved to a screen's edge lands on another component)
+            deliveryOk = false;
             m.put("fired", Boolean.FALSE);
             m.put("reason", RECEIVED_ELSEWHERE);
         } else {
@@ -280,8 +358,18 @@ final class RobotPath {
         ComponentView view = new ComponentView(ctx);
         SwingSpis spis = new SwingSpis(ctx);
         Pointer.Target t = pointer.address(view, spis, r);
+        if (Windows.hidden(t.window)) {
+            // Phase 7 security fix, S104: AWT calls an iconified frame (and a window it owns) showing, but the glass
+            // shows whatever lies at its last position
+            throw Errors.notFound(view.describe(t.window) + " is iconified, or owned by an iconified frame: the "
+                    + "screen does not show it, so a Robot press there would land on whatever the desktop shows; "
+                    + "restore the window first", Errors.data("reason", "iconified", "window", view.ref(t.window)));
+        }
         HitTest.Hit hit = HitTest.at(view, windows, spis, t.window, t.p, null, true, ctx.events().lastSeq());
         Point o = t.window.getLocationOnScreen();
+        List<Rectangle> shown = screens.bounds();
+        Point screen = new Point(o.x + t.p.x, o.y + t.p.y);
+        requireOnAScreen(view, t.window, screen, shown, null);
         Point screenTo = null;
         if (t.to != null) {
             if (t.to.x < 0 || t.to.y < 0 || t.to.x >= t.window.getWidth() || t.to.y >= t.window.getHeight()) {
@@ -290,6 +378,7 @@ final class RobotPath {
                         view.ref(t.window)));
             }
             screenTo = new Point(o.x + t.to.x, o.y + t.to.y);
+            requireOnAScreen(view, t.window, screenTo, shown, "to");
         }
         if (r.requireFocus && KeyboardFocusManager.getCurrentKeyboardFocusManager().getFocusedWindow() == null) {
             throw new RpcException(ErrorCodes.INPUT_REJECTED, "the target JVM holds no focused window, so its windows "
@@ -309,9 +398,54 @@ final class RobotPath {
         p.window = t.window;
         p.hit = hit;
         p.wasFocused = t.window.isFocused();
-        p.screen = new Point(o.x + t.p.x, o.y + t.p.y);
+        p.screen = screen;
         p.screenTo = screenTo;
         return p;
+    }
+
+    /**
+     * {@code NOT_FOUND off-screen} unless a screen device's bounds hold the screen point (Phase 7 security fix, S105):
+     * the platform moves the pointer to the nearest screen edge instead (X11 keeps the pointer on the screen), and the
+     * press would land there, on another component of the same window or on whatever lies at the edge.
+     *
+     * @param param null for the point, {@code "to"} for a drag's end point
+     */
+    private static void requireOnAScreen(ComponentView view, Window window, Point screen, List<Rectangle> shown,
+                                         String param) {
+        if (onAScreen(shown, screen)) {
+            return;
+        }
+        Map<String, Object> data = Errors.data("reason", "off-screen", "window", view.ref(window), "screen",
+                Capture.point(screen.x, screen.y));
+        if (param != null) {
+            data.put("param", param);
+        }
+        throw Errors.notFound((param == null ? "the point" : "the drag's end point") + " lies on no screen (screen "
+                + "point " + screen.x + ", " + screen.y + " of " + view.describe(window) + "): the platform would move "
+                + "the pointer to the nearest screen edge and press there; bring the window onto the screen", data);
+    }
+
+    /** True when one of the screens' bounds holds the point. */
+    static boolean onAScreen(List<Rectangle> shown, Point screen) {
+        for (Rectangle r : shown) {
+            if (r.contains(screen)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * {@code INVALID_PARAMS} for {@code modifiers} with {@code via: ROBOT} (Phase 7 security fix, S124): the Robot
+     * path presses no key, and V3 has no Robot keyboard in Phase 7, so a modified click would be pressed plain and
+     * reported as the modified one.
+     */
+    static void refuseModifiers(Pointer.Request r) {
+        if (r.modifiers != 0) {
+            throw Errors.invalid("modifiers are refused with via: ROBOT (the Robot path holds no key in this "
+                    + "version): click without them, or ask the person", Errors.data("param", "modifiers", "via",
+                    Pointer.ROBOT));
+        }
     }
 
     /**
@@ -383,7 +517,10 @@ final class RobotPath {
      *
      * @throws RpcException CAPABILITY_UNAVAILABLE (and {@code swing.pointer.robot} DEGRADED) when nothing arrives
      */
-    private void probe(Invocation inv, final Window window, final Point screen) throws Exception {
+    void probe(Invocation inv, final Window window, final Point screen) throws Exception {
+        // the port first, outside the listener's lifetime: a port that cannot be had leaves no listener behind (Phase
+        // 7 security fix, S121)
+        final RobotPort port = portFor(window, inv);
         final CountDownLatch moved = new CountDownLatch(1);
         AWTEventListener listener = new AWTEventListener() {
             @Override
@@ -398,7 +535,6 @@ final class RobotPath {
         };
         Toolkit toolkit = Toolkit.getDefaultToolkit();
         toolkit.addAWTEventListener(listener, AWTEvent.MOUSE_EVENT_MASK | AWTEvent.MOUSE_MOTION_EVENT_MASK);
-        final RobotPort port = portFor(window);
         final Point[] saved = new Point[1];
         boolean arrived;
         try {
@@ -469,9 +605,16 @@ final class RobotPath {
         for (int attempt = 0; attempt < 2; attempt++) {
             before = read(inv, target, req);
             final Read b = before;
-            final RobotPort port = portFor(b.window instanceof Window ? (Window) b.window : null);
-            // section 2.4's heap bound and out-of-memory catch, as for a PAINT capture (fix wave, FA, L2-S3)
-            Capture.heapBound(4L * b.screen.width * b.screen.height, "scope", "capture a smaller scope");
+            // section 2.4's heap bound and out-of-memory catch, as for a PAINT capture (fix wave, FA, L2-S3), with what
+            // the grab allocates at the screen's UI scale (Phase 7 security fix, S126), before the port is looked up
+            double[] s;
+            try {
+                s = screens.scaleAt(b.screen.getCenterX(), b.screen.getCenterY());
+            } catch (RuntimeException e) {
+                s = new double[] {1.0, 1.0};
+            }
+            Capture.heapBound(grabBytes(b.screen, s[0], s[1]), "scope", "capture a smaller scope");
+            final RobotPort port = portFor(b.window instanceof Window ? (Window) b.window : null, inv);
             try {
                 image = ctx.threads().call(ThreadPolicy.WORKER, new Callable<BufferedImage>() {
                     @Override
@@ -554,6 +697,22 @@ final class RobotPath {
         Capture.Geometry geometry = new Capture.Geometry("SCREEN", null, before.screen.x, before.screen.y, 1.0,
                 rgb.getWidth(), rgb.getHeight());
         return new Capture.Shot(rgb, m, geometry, new ArrayList<Capture.Skipped>());
+    }
+
+    /**
+     * What a screen grab of the rectangle allocates (Phase 7 security fix, S126): at a UI scale of 1 the user-space
+     * raster ({@code 4 w h} bytes); at another scale {@code Robot} reads the device-space pixels
+     * ({@code ceil(w sx) x ceil(h sy)}) and then allocates the user-space image beside them, about
+     * {@code (s² + 1) 4 w h} bytes.
+     */
+    static long grabBytes(Rectangle screen, double sx, double sy) {
+        long user = 4L * screen.width * screen.height;
+        if (sx == 1.0 && sy == 1.0) {
+            return user;
+        }
+        long device = 4L * (long) Math.ceil(screen.width * Math.max(sx, 0.0))
+                * (long) Math.ceil(screen.height * Math.max(sy, 0.0));
+        return user + device;
     }
 
     private static RpcException outOfMemory(Rectangle screen) {

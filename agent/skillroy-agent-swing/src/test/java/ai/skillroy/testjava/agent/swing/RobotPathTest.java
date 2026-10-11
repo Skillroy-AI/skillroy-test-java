@@ -90,6 +90,7 @@ class RobotPathTest {
 
         @Override
         public BufferedImage createScreenCapture(Rectangle screen) {
+            calls.add("grab");
             return new BufferedImage(screen.width, screen.height, BufferedImage.TYPE_INT_RGB);
         }
 
@@ -247,6 +248,117 @@ class RobotPathTest {
                             "pixel " + x + "," + y + " of " + windowRects);
                 }
             }
+        }
+    }
+
+    // ------------------------------------------------------------------- Phase 7 security fix (SG, 2026-10-11)
+
+    private static int robotPathListeners() {
+        int n = 0;
+        for (java.awt.event.AWTEventListener l : java.awt.Toolkit.getDefaultToolkit().getAWTEventListeners()) {
+            java.awt.event.AWTEventListener inner = l instanceof java.awt.event.AWTEventListenerProxy
+                    ? ((java.awt.event.AWTEventListenerProxy) l).getListener() : l;
+            if (inner.getClass().getName().startsWith(RobotPath.class.getName())) {
+                n++;
+            }
+        }
+        return n;
+    }
+
+    /**
+     * Security fix S121 (L2-F3; the L2 reviewer's probe 1 inverted): a delivery probe whose Robot port cannot be had
+     * (the factory fails for the device, or the JVM has no screen) leaves no listener on the toolkit: the port is
+     * obtained before the listener is added. Reached by reflection, so that the same test runs against the code
+     * before the fix, where it fails (the listener count grows by one per failed probe).
+     */
+    @Test
+    void aProbeWhosePortCannotBeHadLeavesNoListener() throws Exception {
+        RobotPath robot = new RobotPath(ctx, new Windows(), new Pointer(ctx, new Windows(), new RecentCaptures()),
+                new RecentCaptures(), device -> {
+                    throw new java.awt.AWTException("the Robot cannot be constructed for this device");
+                });
+        java.lang.reflect.Method probe = RobotPath.class.getDeclaredMethod("probe", Invocation.class,
+                java.awt.Window.class, Point.class);
+        probe.setAccessible(true);
+        int before = robotPathListeners();
+        for (int i = 0; i < 2; i++) {
+            try {
+                probe.invoke(robot, invocation(ctx), null, new Point(10, 10));
+                throw new AssertionError("the probe should fail without a port");
+            } catch (java.lang.reflect.InvocationTargetException expected) {
+                // the factory's AWTException, or a headless JVM's HeadlessException
+            }
+        }
+        assertEquals(before, robotPathListeners(), "no listener leaked by a probe without a port");
+    }
+
+    /**
+     * Security fix S124 (L2-S3): {@code modifiers} with {@code via: ROBOT} are refused ({@code INVALID_PARAMS},
+     * {@code data.param: "modifiers"}) before anything moves: the Robot path holds no key, so a modified click would be
+     * pressed plain and reported as the modified one.
+     */
+    @Test
+    void modifiersAreRefusedWithTheRobotBeforeAnythingMoves() throws Exception {
+        final FakePort port = new FakePort();
+        RobotPath robot = new RobotPath(ctx, new Windows(), new Pointer(ctx, new Windows(), new RecentCaptures()),
+                new RecentCaptures(), device -> port);
+        for (String mod : new String[] {"SHIFT", "CTRL", "ALT", "META"}) {
+            RpcException e = expectError(ErrorCodes.INVALID_PARAMS, () -> robot.pointer(invocation(ctx),
+                    request("action", "CLICK", "modifiers", Arrays.<Object>asList(mod))));
+            assertEquals("modifiers", e.error().data().get("param"), mod);
+        }
+        assertTrue(port.calls.isEmpty(), "nothing moved: " + port.calls);
+        RobotPath.refuseModifiers(request("action", "CLICK", "modifiers", Arrays.<Object>asList()));
+    }
+
+    /**
+     * Security fix S126 (L2-S5): what a glass capture's grab allocates at the screen's UI scale, the device-space
+     * pixels beside the user-space image ({@code (s² + 1) 4 w h}), and the user-space raster alone at scale 1.
+     */
+    @Test
+    void theGrabsBytesFollowTheScreensScale() {
+        Rectangle screen = new Rectangle(0, 0, 400, 300);
+        assertEquals(4L * 400 * 300, RobotPath.grabBytes(screen, 1.0, 1.0));
+        assertEquals(4L * 400 * 300 * 5, RobotPath.grabBytes(screen, 2.0, 2.0));
+        assertEquals(4L * 400 * 300 * 10, RobotPath.grabBytes(screen, 3.0, 3.0));
+        assertEquals(4L * 400 * 300 + 4L * 600 * 450, RobotPath.grabBytes(screen, 1.5, 1.5));
+    }
+
+    /**
+     * Security fix S126 (L2-S5): a person's glass capture on a screen at UI scale 3 is refused by section 2.4's heap
+     * bound when the device-space grab would exceed an eighth of the headroom, although the user-space raster would
+     * not (the window list and the screens through their seams; refused before any port is looked up).
+     */
+    @Test
+    void aGlassCaptureAtAUiScaleCountsTheDevicePixels() throws Exception {
+        javax.swing.JPanel frame = CaptureTest.panel(CaptureTest.GREEN, 0, 0, 400, 300);
+        Windows windows = new Windows();
+        windows.source(() -> java.util.Collections.singletonList(new Windows.Layer(frame, frame,
+                new Rectangle(100, 100, 400, 300), new Point(0, 0), true)));
+        final FakePort port = new FakePort();
+        RobotPath robot = new RobotPath(ctx, windows, new Pointer(ctx, windows, new RecentCaptures()),
+                new RecentCaptures(), device -> port);
+        Capture.Request req = new Capture.Request();
+        req.scope = Capture.Scope.SCREEN;
+        try {
+            RobotPath.screens = new RobotPath.Screens() {
+                @Override
+                public List<Rectangle> bounds() {
+                    return Arrays.asList(new Rectangle(0, 0, 4000, 3000));
+                }
+
+                @Override
+                public double[] scaleAt(double x, double y) {
+                    return new double[] {3.0, 3.0};
+                }
+            };
+            Capture.heap = () -> 4L << 20; // an eighth is 512 KB: the 469 KB raster fits, the 4.6 MB grab does not
+            RpcException e = expectError(ErrorCodes.INVALID_PARAMS, () -> robot.capture(invocation(ctx), null, req));
+            assertEquals(5L, e.error().data().get("neededMb"), String.valueOf(e.error().data()));
+            assertTrue(port.calls.isEmpty(), "nothing grabbed: " + port.calls);
+        } finally {
+            RobotPath.screens = RobotPath.TOOLKIT_SCREENS;
+            Capture.heap = Capture.RUNTIME_HEAP;
         }
     }
 

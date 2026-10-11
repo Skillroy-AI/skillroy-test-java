@@ -590,9 +590,13 @@ abstract class WebHostChecks {
         assertNotNull(hitTest, "the web host target declares swing.hittest (the Swing side's hit-test)");
         assertEquals(CapabilityState.OK, hitTest.state(), String.valueOf(hitTest));
         String frontRef = null;
+        String backRef = null;
         for (Map<String, Object> b : browsers(client())) {
             if ("front".equals(b.get("tag"))) {
                 frontRef = String.valueOf(b.get("ref"));
+            }
+            if ("back".equals(b.get("tag"))) {
+                backRef = String.valueOf(b.get("ref"));
             }
         }
         assertNotNull(frontRef);
@@ -603,9 +607,14 @@ abstract class WebHostChecks {
             if ("WEB".equals(m.get("kind")) && frontRef.equals(m.get("browser"))) {
                 surface = m;
             }
+            // Phase 7 security fix, S129 (SG): a browser in a card that is not shown is no surface
+            assertFalse("WEB".equals(m.get("kind")) && backRef != null && backRef.equals(m.get("browser")),
+                    "the back browser's card is hidden: " + capture.get("surfaces"));
         }
         assertNotNull(surface, "the front browser is a WEB surface: " + capture.get("surfaces"));
         assertEquals(Boolean.FALSE, surface.get("redacted"));
+        // Phase 7 security fix, S108 (SG): nothing of the window covers the front page
+        assertEquals(List.of(), surface.get("covered"), String.valueOf(surface));
         Map<?, ?> rect = (Map<?, ?>) surface.get("rect");
         Map<?, ?> origin = (Map<?, ?>) capture.get("origin");
         Map<String, Object> centre = borrowCentre();

@@ -563,7 +563,7 @@ final class SwingPrimitives {
                 }
             });
         }
-        byte[] png = Capture.png(shot.image);
+        byte[] png = Capture.encode(shot.image);
         Map<String, Object> m = new LinkedHashMap<String, Object>();
         m.put("format", "png");
         m.put("width", Long.valueOf(shot.image.getWidth()));
@@ -658,6 +658,7 @@ final class SwingPrimitives {
                 throw Errors.invalid("a Robot press is never left held: use CLICK or DRAG", Errors.data("param",
                         "action", "via", Pointer.ROBOT));
             }
+            RobotPath.refuseModifiers(r);
             requireCapability(SwingModule.CAP_POINTER_ROBOT, RobotPath.NOT_ENABLED);
             return robot.pointer(inv, r);
         }

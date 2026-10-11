@@ -37,6 +37,8 @@ import javax.swing.JPasswordField;
  *
  * <p>As built (Phase 7, VS): a component that lies inside a masked component is treated as masked too (its pixels are
  * inside the blanked rectangle anyway, and a pack that masks a container expects its content hidden); the safe side.
+ * Phase 7 security fix: masks combine by union ({@link #blanked}, S123), and a rectangle a mask's {@code regions}
+ * blank withholds the text under it ({@code ComponentView.masked}, S122).
  *
  * <p>A mask that throws is logged once per mask instance (one instance lives for one agent start) and the component is
  * treated as masked, the safe side. One instance serves one primitive call: it takes the registered masks at
@@ -88,34 +90,65 @@ final class Redaction {
         return null;
     }
 
+    /** True when a {@link CaptureMask} is registered (the built-in rule alone gives no {@code regions}). */
+    boolean hasMasks() {
+        return !masks.isEmpty();
+    }
+
     /**
-     * The rectangles to blank inside a component, in its own coordinates: the masks' {@code regions} when a mask
-     * gives some, else the whole component when the component is masked, else none.
+     * The rectangles to blank inside a component, in its own coordinates. Masks combine by union (Phase 7 security
+     * fix, S123): each mask contributes its {@code regions} when it gives some, else the whole component when it
+     * names the component ({@code masks} true), else nothing; one whole rectangle stands for the union when any mask
+     * contributes it. A password field (the built-in rule) and a mask that throws blank the whole component. Before,
+     * one mask's {@code regions} replaced another mask's whole-component blanking.
+     *
+     * @param rule the component's {@link #ownRule}: null when no mask names it
      */
     List<Rectangle> blanked(Component c, String rule) {
         List<Rectangle> out = new ArrayList<Rectangle>();
-        if (!(c instanceof JPasswordField)) {
-            for (CaptureMask mask : masks) {
-                try {
-                    List<Rectangle> rs = mask.regions(c);
-                    if (rs != null) {
-                        for (Rectangle r : rs) {
-                            if (r != null && !r.isEmpty()) {
-                                out.add(new Rectangle(r));
-                            }
+        Rectangle whole = new Rectangle(0, 0, c.getWidth(), c.getHeight());
+        if (c instanceof JPasswordField) {
+            out.add(whole);
+            return out;
+        }
+        for (CaptureMask mask : masks) {
+            boolean gave = false;
+            try {
+                List<Rectangle> rs = mask.regions(c);
+                if (rs != null) {
+                    for (Rectangle r : rs) {
+                        if (r != null && !r.isEmpty()) {
+                            out.add(new Rectangle(r));
+                            gave = true;
                         }
                     }
+                }
+            } catch (Throwable t) {
+                failed(mask, t);
+                return whole(whole);
+            }
+            if (!gave && rule != null) {
+                boolean names;
+                try {
+                    names = mask.masks(c);
                 } catch (Throwable t) {
                     failed(mask, t);
-                    out.clear();
-                    out.add(new Rectangle(0, 0, c.getWidth(), c.getHeight()));
-                    return out;
+                    names = true;
+                }
+                if (names) {
+                    return whole(whole);
                 }
             }
         }
         if (out.isEmpty() && rule != null) {
-            out.add(new Rectangle(0, 0, c.getWidth(), c.getHeight()));
+            out.add(whole);
         }
+        return out;
+    }
+
+    private static List<Rectangle> whole(Rectangle whole) {
+        List<Rectangle> out = new ArrayList<Rectangle>(1);
+        out.add(whole);
         return out;
     }
 

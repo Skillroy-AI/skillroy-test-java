@@ -22,6 +22,7 @@ import ai.skillroy.testjava.protocol.ErrorCodes;
 import ai.skillroy.testjava.protocol.RpcException;
 
 import java.awt.Color;
+import java.awt.Frame;
 import java.awt.Graphics2D;
 import java.awt.Point;
 import java.awt.Rectangle;
@@ -54,6 +55,7 @@ import static ai.skillroy.testjava.agent.swing.LocatorTest.onEdt;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
  * The Robot path behind the {@link RobotFactory} seam on a real display (phase7-contracts.md sections 3.4, 13.1 item 1),
@@ -546,6 +548,160 @@ class RobotPathDisplayTest extends DisplayTestBase {
                 "the desktop between the windows is grey");
         expectError(ErrorCodes.INVALID_PARAMS, () -> rctx.call("swing.capture", map("mode", "ROBOT",
                 "annotateRefs", true), CALL_MS));
+    }
+
+    // ------------------------------------------------------------------- Phase 7 security fix (SG, 2026-10-11)
+
+    /** A second frame (and a window it owns) away from the test frame; neither takes the focus. */
+    private Window[] secondFrameAndItsDialog(Rectangle frameBounds, Rectangle dialogBounds) throws Exception {
+        final Window[] made = new Window[2];
+        onEdt(() -> {
+            JFrame other = new JFrame("A second desk frame");
+            other.getContentPane().add(new JButton("Renew"));
+            other.setBounds(frameBounds);
+            other.setFocusableWindowState(false);
+            other.setVisible(true);
+            JDialog owned = new JDialog(other, "Its dialog", false);
+            owned.setBounds(dialogBounds);
+            owned.setFocusableWindowState(false);
+            owned.setVisible(true);
+            made[0] = other;
+            made[1] = owned;
+            return null;
+        });
+        await("the second frame and its dialog are showing", WAIT_MS, () -> made[0].isShowing()
+                && made[1].isShowing());
+        settle();
+        return made;
+    }
+
+    private void assertIconifiedRefusals(Window frame, Window owned) throws Exception {
+        for (Window w : new Window[] {frame, owned}) {
+            RpcException e = expectError(ErrorCodes.NOT_FOUND, () -> robot("point", map("x", 20L, "y", 20L), "space",
+                    map("window", rref(w)), "action", "CLICK", "via", "ROBOT", "requireFocus", false));
+            assertEquals("iconified", e.error().data().get("reason"), e.getMessage());
+        }
+        assertTrue(os.calls.isEmpty(), "nothing moved: " + os.calls);
+        assertEquals(CapabilityState.OK, rctx.capabilities.get(SwingModule.CAP_POINTER_ROBOT).state());
+        Map<String, Object> shot = rctx.call("swing.capture", map("scope", "SCREEN"), CALL_MS);
+        for (Object o : arr(shot.get("windows"))) {
+            assertFalse(rref(frame).equals(obj(o).get("ref")) || rref(owned).equals(obj(o).get("ref")),
+                    "the SCREEN composite leaves them out: " + shot.get("windows"));
+        }
+    }
+
+    /**
+     * Security fix S104 (L2-F1): a Robot point in a frame the toolkit reports iconified, or in a window it owns, is
+     * {@code NOT_FOUND iconified} before anything moves, and the {@code SCREEN} composite leaves both out. A display
+     * without a window manager cannot really iconify a frame; where the toolkit still reports the state the test runs
+     * on the real frame, else it reports itself skipped and the seam variant below stands in.
+     */
+    @Test
+    void aPointInAnIconifiedFrameOrAWindowItOwnsIsRefused() throws Exception {
+        final Window[] two = secondFrameAndItsDialog(new Rectangle(660, 20, 300, 200),
+                new Rectangle(680, 260, 150, 100));
+        onEdt(() -> {
+            ((Frame) two[0]).setExtendedState(Frame.ICONIFIED);
+            return null;
+        });
+        long deadline = System.currentTimeMillis() + 3000;
+        boolean iconified = false;
+        while (!iconified && System.currentTimeMillis() < deadline) {
+            iconified = onEdt(() -> (((Frame) two[0]).getExtendedState() & Frame.ICONIFIED) != 0);
+            if (!iconified) {
+                settle();
+            }
+        }
+        assumeTrue(iconified, "the toolkit reports no iconified state on this display");
+        assertIconifiedRefusals(two[0], two[1]);
+    }
+
+    /**
+     * Security fix S104, through the state seam on real windows (any display): the frame the seam calls iconified and
+     * the dialog it owns are refused {@code NOT_FOUND iconified} with nothing moved, are left out of the composite,
+     * and are no covering window of a point of the test frame they lie over.
+     */
+    @Test
+    void theHiddenPredicateRefusesRealWindowsAndIsNoCoveringWindow() throws Exception {
+        Point okScreen = onEdt(() -> {
+            Point p = new Point(ui.ok.getWidth() / 2, ui.ok.getHeight() / 2);
+            SwingUtilities.convertPointToScreen(p, ui.ok);
+            return p;
+        });
+        final Window[] two = secondFrameAndItsDialog(new Rectangle(okScreen.x - 30, okScreen.y - 30, 200, 120),
+                new Rectangle(680, 260, 150, 100));
+        try {
+            Windows.state = new Windows.State() {
+                @Override
+                public boolean iconified(java.awt.Component window) {
+                    return window == two[0];
+                }
+
+                @Override
+                public java.awt.Component owner(java.awt.Component window) {
+                    return Windows.TOOLKIT_STATE.owner(window);
+                }
+            };
+            assertIconifiedRefusals(two[0], two[1]);
+            Map<String, Object> hit = rctx.call("swing.hitTest", map("target", rref(ui.ok)), CALL_MS);
+            for (Object o : arr(hit.get("covering"))) {
+                assertFalse(rref(two[0]).equals(obj(o).get("ref")), "not a covering window: " + hit.get("covering"));
+            }
+        } finally {
+            Windows.state = Windows.TOOLKIT_STATE;
+        }
+    }
+
+    /**
+     * Security fix S105 (L2-F2): a Robot point, or a drag's end point, that lies inside the target window but on no
+     * screen (the WM-less display is 1024 x 768; a frame at x = 900, 300 wide, reaches x = 1199) is
+     * {@code NOT_FOUND off-screen} before anything moves, instead of a press at the screen's edge (window x = 123).
+     */
+    @Test
+    void aPointOnNoScreenIsRefusedBeforeAnythingMoves() throws Exception {
+        Rectangle screens = onEdt(() -> {
+            Rectangle all = null;
+            for (java.awt.GraphicsDevice d : java.awt.GraphicsEnvironment.getLocalGraphicsEnvironment()
+                    .getScreenDevices()) {
+                Rectangle b = d.getDefaultConfiguration().getBounds();
+                all = all == null ? b : all.union(b);
+            }
+            return all;
+        });
+        int x = screens.x + screens.width - 124;
+        final Window[] two = secondFrameAndItsDialog(new Rectangle(x, 100, 300, 200), new Rectangle(680, 400, 100,
+                60));
+        assertEquals(x, (int) onEdt(() -> two[0].getLocationOnScreen().x), "the frame lies across the edge");
+        RpcException e = expectError(ErrorCodes.NOT_FOUND, () -> robot("point", map("x", 250L, "y", 50L), "space",
+                map("window", rref(two[0])), "action", "CLICK", "via", "ROBOT", "requireFocus", false));
+        assertEquals("off-screen", e.error().data().get("reason"), e.getMessage());
+        RpcException drag = expectError(ErrorCodes.NOT_FOUND, () -> robot("point", map("x", 20L, "y", 50L), "space",
+                map("window", rref(two[0])), "to", map("x", 250L, "y", 50L), "action", "DRAG", "via", "ROBOT",
+                "requireFocus", false));
+        assertEquals("off-screen", drag.error().data().get("reason"));
+        assertEquals("to", drag.error().data().get("param"));
+        assertTrue(os.calls.isEmpty(), "nothing moved: " + os.calls);
+        assertEquals(CapabilityState.OK, rctx.capabilities.get(SwingModule.CAP_POINTER_ROBOT).state());
+    }
+
+    /**
+     * Security fix S105 (the L2 sceptic's restatement): a press received by another component than the hit-tested
+     * one clears the passed delivery probe, so that the next action is probed again rather than pressed at once.
+     */
+    @Test
+    void aPressReceivedElsewhereIsProbedAgainBeforeTheNextPress() throws Exception {
+        assertEquals(Boolean.TRUE, robot("by", map("id", "okButton"), "action", "CLICK", "via", "ROBOT",
+                "requireFocus", false).get("fired"));
+        Rectangle okRect = onEdt(() -> SwingUtilities.convertRectangle(ui.ok.getParent(), ui.ok.getBounds(), ui.frame));
+        Rectangle cancelRect = onEdt(() -> SwingUtilities.convertRectangle(ui.cancel.getParent(),
+                ui.cancel.getBounds(), ui.frame));
+        os.pressOffset = new Point((int) (cancelRect.getCenterX() - okRect.getCenterX()),
+                (int) (cancelRect.getCenterY() - okRect.getCenterY()));
+        assertEquals("received elsewhere", robot("by", map("id", "okButton"), "action", "CLICK", "via", "ROBOT",
+                "requireFocus", false).get("reason"));
+        os.calls.clear();
+        robot("by", map("id", "okButton"), "action", "CLICK", "via", "ROBOT", "requireFocus", false);
+        assertTrue(os.calls.indexOf("press") > 1, "a delivery probe's moves came before the press: " + os.calls);
     }
 
     @Test

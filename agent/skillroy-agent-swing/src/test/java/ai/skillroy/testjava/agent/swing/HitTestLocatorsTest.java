@@ -178,6 +178,59 @@ class HitTestLocatorsTest {
         assertFalse(onEdt(() -> new SwingSpis(ctx).fires(new JButton())));
     }
 
+    /**
+     * Security fix S106 (L2-S1; the L2 sceptic's probe A): a masked label's or button's accessible name is its text,
+     * so the name is withheld with the text, for a component a mask names and for one inside a masked container: no
+     * node, no candidate, no first unique locator ({@code focus.ownerLocator}'s rule) and no description carries it, and
+     * the {@code name} matcher finds nothing by it; a name the application set apart from the text stays.
+     */
+    @Test
+    void aMaskedLabelsOrButtonsTextIsWithheldAsItsName() throws Exception {
+        JPanel root = new JPanel(null);
+        root.setBounds(0, 0, 400, 200);
+        JPanel card = new JPanel(null);
+        card.setBounds(10, 10, 300, 80);
+        card.setName("memberCard");
+        JLabel number = new JLabel("Member no 4111 2222 3333");
+        number.setBounds(5, 5, 200, 20);
+        card.add(number);
+        JButton reveal = new JButton("PIN 4711");
+        reveal.setBounds(5, 40, 120, 25);
+        card.add(reveal);
+        root.add(card);
+        JLabel direct = new JLabel("Deposit ref 0815-77");
+        direct.setBounds(10, 120, 200, 20);
+        root.add(direct);
+        JTextField code = new JTextField("9911");
+        code.getAccessibleContext().setAccessibleName("Member code");
+        code.setBounds(220, 120, 100, 20);
+        root.add(code);
+        ctx.spi.register(CaptureMask.class, c -> c == card || c == direct || c == code);
+        for (final Component c : new Component[] {number, reveal, direct}) {
+            final String content = onEdt(() -> ComponentText.text(c));
+            Map<String, Object> node = onEdt(() -> new ComponentView(ctx).node(c));
+            assertEquals(Boolean.TRUE, node.get("masked"), content);
+            assertNull(node.get("text"), content);
+            assertNull(node.get("name"), "the name Swing takes from the text is withheld: " + content);
+            assertFalse(onEdt(() -> new ComponentView(ctx).describe(c)).contains(content));
+            List<Object> found = locators(c, root);
+            assertFalse(String.valueOf(found).contains(content), String.valueOf(found));
+            assertFalse(String.valueOf(onEdt(() -> HitTest.firstUniqueLocator(new ComponentView(ctx),
+                    new SwingSpis(ctx), c, root, true))).contains(content));
+        }
+        List<Component> byRegex = onEdt(() -> new LocatorEngine(new ComponentView(ctx)).find(Locator.parse(
+                map("name", map("regex", "^Member no 41")), "by"), root, true));
+        assertTrue(byRegex.isEmpty(), "the name matcher is no oracle: " + byRegex);
+        Map<String, Object> field = onEdt(() -> new ComponentView(ctx).node(code));
+        assertEquals("Member code", field.get("name"), "an accessible name set apart from the text stays");
+        assertTrue(locators(code, root).contains(map("name", "Member code", "role", "textbox")));
+        String snapshot = String.valueOf(onEdt(() -> new SnapshotWalker(new ComponentView(ctx), 10, 100, true)
+                .walk(root)));
+        for (String secret : new String[] {"4111", "4711", "0815", "9911"}) {
+            assertFalse(snapshot.contains(secret), secret + " in " + snapshot);
+        }
+    }
+
     @Test
     void theDialogReaderWithholdsAMaskedComponentsText() throws Exception {
         JPanel message = new JPanel();

@@ -97,9 +97,69 @@ final class Windows {
         this.source = s;
     }
 
-    /** The showing windows bottom to top, from the {@link Source}. EDT only. */
+    /**
+     * What the toolkit says about a window's place on the glass (phase7-contracts.md section 3.4, the point bullet;
+     * Phase 7 security fix, S104): whether it is iconified, and who owns it. A package-private seam, so that the
+     * headless tests, which cannot create a {@code Frame}, can hand in stand-ins for the windows of the
+     * {@link Source}, and a display test on a display without a window manager (which cannot iconify) can say that a
+     * real frame is. EDT only.
+     */
+    interface State {
+        /** True when the window is a frame the toolkit reports iconified ({@code Frame.ICONIFIED}). */
+        boolean iconified(Component window);
+
+        /** The window's owner, or null. */
+        Component owner(Component window);
+    }
+
+    /** The toolkit's own answers: {@code Frame.getExtendedState() & Frame.ICONIFIED}, {@code Window.getOwner()}. */
+    static final State TOOLKIT_STATE = new State() {
+        @Override
+        public boolean iconified(Component window) {
+            return window instanceof Frame && (((Frame) window).getExtendedState() & Frame.ICONIFIED) != 0;
+        }
+
+        @Override
+        public Component owner(Component window) {
+            return window instanceof Window ? ((Window) window).getOwner() : null;
+        }
+    };
+
+    /** The state seam (tests only replace it, and put {@link #TOOLKIT_STATE} back). */
+    static volatile State state = TOOLKIT_STATE;
+
+    /**
+     * True when the glass does not show the window although AWT calls it showing (Phase 7 security fix, S104): a
+     * frame the toolkit reports iconified, or a window such a frame owns directly or transitively (a window manager
+     * hides them with it). {@code Window.isShowing()} is {@code visible} alone and does not change when a frame is
+     * iconified. Such a window is left out of the stacking (so of the {@code SCREEN} composite, of a {@code SCREEN}
+     * point, of the glass capture's window rectangles), is never a covering window, and a Robot point in it is refused
+     * {@code NOT_FOUND iconified}. EDT only.
+     */
+    static boolean hidden(Component window) {
+        State s = state;
+        int depth = 0;
+        for (Component w = window; w != null && depth < 64; w = s.owner(w), depth++) {
+            if (s.iconified(w)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * The showing windows bottom to top, from the {@link Source}, without the {@link #hidden} ones (Phase 7 security
+     * fix, S104). EDT only.
+     */
     List<Layer> stacking() {
-        return source.stacking();
+        List<Layer> all = source.stacking();
+        List<Layer> out = new ArrayList<Layer>(all.size());
+        for (Layer l : all) {
+            if (!hidden(l.window)) {
+                out.add(l);
+            }
+        }
+        return out;
     }
 
     /**

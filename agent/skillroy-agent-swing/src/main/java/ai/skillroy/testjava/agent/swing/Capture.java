@@ -109,6 +109,13 @@ final class Capture {
     static final int MAX_MARKS = 200;
     /** Most redacted rectangles reported (more are blanked and counted). */
     static final int MAX_REDACTED = 64;
+    /** Most {@code covered} rectangles of a surface (more become one, the whole surface; security fix, S108). */
+    static final int MAX_COVERED = 32;
+    /**
+     * What delivering a PNG allocates beside it, as a factor of its size (Phase 7 security fix, S125): the base64 text
+     * (two bytes a character on a Java 8 target), the reply's JSON text and its bytes.
+     */
+    static final int ENCODING_FACTOR = 6;
     /** Smallest and largest {@code scale}. */
     static final double MIN_SCALE = 0.25;
     static final double MAX_SCALE = 4.0;
@@ -468,6 +475,28 @@ final class Capture {
         }
     }
 
+    /**
+     * The visible part of a component in its own coordinates (Phase 7 security fix, S108): its bounds clipped by every
+     * ancestor's up to its window, as {@code JComponent.getVisibleRect} computes it, for a heavyweight too; empty when
+     * a viewport has scrolled it wholly out.
+     */
+    static Rectangle visibleRect(Component c) {
+        Rectangle r = new Rectangle(0, 0, c.getWidth(), c.getHeight());
+        int dx = 0;
+        int dy = 0;
+        Component child = c;
+        for (Container p = c.getParent(); p != null && !(child instanceof Window) && !(p instanceof Window);
+             child = p, p = p.getParent()) {
+            dx += child.getX();
+            dy += child.getY();
+            r = r.intersection(new Rectangle(-dx, -dy, p.getWidth(), p.getHeight()));
+            if (r.isEmpty()) {
+                return new Rectangle(0, 0, 0, 0);
+            }
+        }
+        return r;
+    }
+
     /** The component's offset in its window's space (its own location for a window; the topmost ancestor's else). */
     static Point offsetIn(Component c, Component window) {
         if (c == window || c instanceof Window) {
@@ -525,15 +554,22 @@ final class Capture {
             }
             for (SurfaceSource.Surface s : known) {
                 Root r = rootFor(s.component);
-                if (r == null || !s.component.isVisible()) {
+                if (r == null) {
                     continue;
                 }
-                Rectangle rect = toImage(r, s.component, new Rectangle(0, 0, s.component.getWidth(),
-                        s.component.getHeight()));
+                claimed.put(s.component, Boolean.TRUE); // never listed again as a heavyweight, shown or not
+                // Phase 7 security fix, S129 and S108: a surface only for a component that is showing (visible at
+                // every level up to its window, not its own isVisible() alone: a browser in a hidden card is none),
+                // its rect the component's visible part (the viewport's and every ancestor's clip), and covered the
+                // rectangles painted above it there
+                if (!shownIn(r, s.component)) {
+                    continue;
+                }
+                Rectangle vis = visibleRect(s.component);
+                Rectangle rect = vis.isEmpty() ? null : toImage(r, s.component, vis);
                 if (rect == null) {
                     continue;
                 }
-                claimed.put(s.component, Boolean.TRUE);
                 Map<String, Object> one = new LinkedHashMap<String, Object>();
                 one.put("kind", s.kind == null ? "WEB" : s.kind);
                 one.put("rect", rectJson(rect));
@@ -542,6 +578,7 @@ final class Capture {
                     one.put("browser", s.browserRef);
                 }
                 one.put("redacted", Boolean.valueOf(view.masked(s.component) || intersectsBlanked(rect)));
+                one.put("covered", coveredOver(r, s.component, rect));
                 surfaces.add(one);
             }
             for (Root r : roots) {
@@ -558,6 +595,78 @@ final class Capture {
                 }
             }
             return null;
+        }
+
+        /**
+         * True when the component and every ancestor up to its window (the root's window, or the topmost ancestor of
+         * a tree in no window) are visible: {@code isShowing()} relative to the painted root, which the window-list
+         * seam's stand-ins answer too (Phase 7 security fix, S129).
+         */
+        private boolean shownIn(Root root, Component c) {
+            for (Component p = c; p != null; p = p.getParent()) {
+                if (!p.isVisible()) {
+                    return false;
+                }
+                if (p == root.window || p instanceof Window) {
+                    break;
+                }
+            }
+            return true;
+        }
+
+        /**
+         * {@code covered} of a surface (Phase 7 security fix, S108): the parts of its image rectangle that something
+         * is painted above, in image coordinates. Every window above the surface's own in the composite (the roots
+         * painted after it), and in its own root every visible sibling that Swing paints above a component of the
+         * surface's ancestry (a lower child index is painted later: the layered pane's popup, modal and drag layers
+         * above the content, an in-window dialog, a visible glass pane). More than {@value #MAX_COVERED} rectangles
+         * become one: the whole surface.
+         */
+        private List<Object> coveredOver(Root root, Component surface, Rectangle rect) {
+            List<Rectangle> found = new ArrayList<Rectangle>();
+            boolean above = false;
+            for (Root r : roots) {
+                if (r == root) {
+                    above = true;
+                    continue;
+                }
+                if (above) {
+                    Rectangle wr = windowRect(r);
+                    if (wr != null && wr.intersects(rect)) {
+                        found.add(wr.intersection(rect));
+                    }
+                }
+            }
+            for (Component child = surface; child != null && child != root.paint && !(child instanceof Window);
+                 child = child.getParent()) {
+                Container parent = child.getParent();
+                if (parent == null) {
+                    break;
+                }
+                Component[] kids = parent.getComponents();
+                for (Component k : kids) {
+                    if (k == child) {
+                        break; // only the children before it (index 0 is painted last, on top)
+                    }
+                    if (k == null || k instanceof Window || !k.isVisible() || k.getWidth() <= 0
+                            || k.getHeight() <= 0) {
+                        continue;
+                    }
+                    Rectangle kr = toImage(root, k, new Rectangle(0, 0, k.getWidth(), k.getHeight()));
+                    if (kr != null && kr.intersects(rect)) {
+                        found.add(kr.intersection(rect));
+                    }
+                }
+            }
+            List<Object> out = new ArrayList<Object>();
+            if (found.size() > MAX_COVERED) {
+                out.add(rectJson(rect));
+                return out;
+            }
+            for (Rectangle f : found) {
+                out.add(rectJson(f));
+            }
+            return out;
         }
 
         /**
@@ -624,7 +733,9 @@ final class Capture {
                 return;
             }
             String rule = view.redaction().ownRule(c);
-            boolean masked = insideMasked || rule != null;
+            // a component under a blanked region of its own or an ancestor's mask is masked too: no mark, no text
+            // (Phase 7 security fix, S122)
+            boolean masked = insideMasked || rule != null || view.masked(c);
             boolean whole = false;
             if (redact) {
                 List<Rectangle> blank = view.redaction().blanked(c, rule);
@@ -832,7 +943,8 @@ final class Capture {
             for (int col = 0; col < table.getColumnCount() && sb.length() < MAX_LABEL; col++) {
                 Object v;
                 try {
-                    v = table.getValueAt(row, col);
+                    // a cell under a blanked region of a mask is withheld (Phase 7 security fix, S122)
+                    v = view.cellHidden(table, row, col) ? null : table.getValueAt(row, col);
                 } catch (RuntimeException e) {
                     v = null;
                 }
@@ -967,7 +1079,8 @@ final class Capture {
             Map<String, Object> locator = null;
             Map<String, Object> ownerRect = null;
             if (owner != null && owner.isShowing()) {
-                locator = HitTest.firstUniqueLocator(view, spis, owner);
+                // never a {text} candidate: a text field's text is its content (Phase 7 security fix, S146)
+                locator = HitTest.firstUniqueLocator(view, spis, owner, null, false, false);
                 Root r = rootFor(owner);
                 if (r != null) {
                     Rectangle rect = toImage(r, owner, new Rectangle(0, 0, owner.getWidth(), owner.getHeight()));
@@ -1268,6 +1381,40 @@ final class Capture {
             sb.append(Character.forDigit((b >> 4) & 0xF, 16)).append(Character.forDigit(b & 0xF, 16));
         }
         return sb.toString();
+    }
+
+    /**
+     * The PNG a capture answers, under section 2.4's encoding bound (Phase 7 security fix, S125): the encoding's own
+     * {@code OutOfMemoryError} answered {@code INTERNAL_ERROR}, then {@link #encodingBound}. Any thread.
+     */
+    static byte[] encode(BufferedImage image) throws IOException {
+        byte[] bytes;
+        try {
+            bytes = png(image);
+        } catch (OutOfMemoryError e) {
+            throw new RpcException(ErrorCodes.INTERNAL_ERROR, "out of memory while encoding an image of "
+                    + image.getWidth() + " x " + image.getHeight() + " pixels; lower 'scale' or capture a smaller "
+                    + "scope", Errors.data("reason", "out of memory"));
+        }
+        encodingBound(bytes.length);
+        return bytes;
+    }
+
+    /**
+     * Section 2.4's encoding bound (Phase 7 security fix, S125): a PNG of {@code pngBytes} is refused when
+     * {@value #ENCODING_FACTOR} times its size (what the base64 text, the reply's text and its bytes allocate) is more
+     * than half the heap headroom read after the encoding ({@code INVALID_PARAMS} naming the needed and the free
+     * megabytes): the raster's bound counts the raster alone, and a high-entropy image encodes to about its size.
+     */
+    static void encodingBound(long pngBytes) {
+        long needed = ENCODING_FACTOR * pngBytes;
+        long headroom = heap.headroom();
+        if (needed > headroom / 2) {
+            throw Errors.invalid("sending the capture's PNG of " + mb(pngBytes) + " MB needs about " + mb(needed)
+                    + " MB, more than half of the " + mb(headroom) + " MB of free heap; lower 'scale' or capture a "
+                    + "smaller scope", Errors.data("param", "scale", "neededMb", Long.valueOf(mb(needed)), "freeMb",
+                    Long.valueOf(mb(headroom)), "reason", "encoding"));
+        }
     }
 
     /**

@@ -32,6 +32,7 @@ import javax.swing.JDialog;
 import javax.swing.JFrame;
 import javax.swing.JList;
 import javax.swing.JScrollPane;
+import javax.swing.JTextField;
 import javax.swing.SwingUtilities;
 
 import org.junit.jupiter.api.AfterEach;
@@ -390,6 +391,91 @@ class VisionDisplayTest extends DisplayTestBase {
         call("swing.type", "text", "gap", "mode", "DISPATCH", "enter", true);
         await("the field that has the focus was submitted", WAIT_MS, () -> ui.entryActions.get() == actions + 1);
         assertEquals("gap", ui.lastEntry.get());
+    }
+
+    // ------------------------------------------------------------------- Phase 7 security fix (SG, 2026-10-11)
+
+    /**
+     * Security fix S146 (L8-F2): the focus owner's locator a capture reports is never a {@code {text}} candidate, so a
+     * nameless text field's content never enters a baseline's or an anchor's {@code focus.owner}.
+     */
+    @Test
+    void theFocusOwnersLocatorNeverCarriesItsText() throws Exception {
+        final JFrame[] frame = new JFrame[1];
+        final JTextField[] field = new JTextField[1];
+        onEdt(() -> {
+            frame[0] = new JFrame("Borrower");
+            field[0] = new JTextField("Jane Doe", 12);
+            frame[0].getContentPane().add(field[0]);
+            frame[0].setBounds(660, 20, 300, 100);
+            frame[0].setVisible(true);
+            return null;
+        });
+        try {
+            activate("the borrower frame is the focused window", frame[0]);
+            onEdt(() -> field[0].requestFocusInWindow());
+            await("the nameless field owns the focus", WAIT_MS, () -> field[0].hasFocus());
+            settle();
+            Map<String, Object> focus = obj(call("swing.capture", "target", ref(frame[0])).get("focus"));
+            assertEquals(ref(field[0]), focus.get("owner"));
+            Map<String, Object> locator = obj(focus.get("ownerLocator"));
+            assertNotNull(locator, "the field is still named, by class and index or path");
+            assertFalse(locator.containsKey("text"), String.valueOf(locator));
+            assertFalse(String.valueOf(locator).contains("Jane Doe"), String.valueOf(locator));
+        } finally {
+            onEdt(() -> {
+                frame[0].dispose();
+                return null;
+            });
+            activate("the test frame is the focused window again", ui.frame);
+        }
+    }
+
+    /**
+     * Security fix S125 (L2-S4): a capture whose raster the heap bound admits, but whose PNG (a high-entropy component
+     * encodes to about its raster) would need more than half the free heap to be sent, is refused with both figures
+     * instead of being delivered.
+     */
+    @Test
+    void aCaptureWhosePngExceedsTheEncodingBoundIsRefused() throws Exception {
+        final BufferedImage noise = new BufferedImage(512, 512, BufferedImage.TYPE_INT_RGB);
+        java.util.Random random = new java.util.Random(11);
+        for (int y = 0; y < 512; y++) {
+            for (int x = 0; x < 512; x++) {
+                noise.setRGB(x, y, random.nextInt(0x1000000));
+            }
+        }
+        final javax.swing.JComponent[] photo = new javax.swing.JComponent[1];
+        onEdt(() -> {
+            JFrame frame = new JFrame("Item photo");
+            photo[0] = new javax.swing.JComponent() {
+                private static final long serialVersionUID = 1L;
+
+                @Override
+                protected void paintComponent(java.awt.Graphics g) {
+                    g.drawImage(noise, 0, 0, null);
+                }
+            };
+            photo[0].setPreferredSize(new java.awt.Dimension(512, 512));
+            frame.getContentPane().add(photo[0]);
+            frame.setFocusableWindowState(false);
+            frame.pack();
+            frame.setLocation(480, 40);
+            frame.setVisible(true);
+            return null;
+        });
+        await("the photo is showing", WAIT_MS, () -> photo[0].isShowing() && photo[0].getWidth() == 512);
+        settle();
+        try {
+            Capture.heap = () -> 8L << 20; // the 1 MB raster is an eighth of 8 MB; its PNG of about 0.8 MB is not
+            RpcException e = expectError(ErrorCodes.INVALID_PARAMS, () -> call("swing.capture", "target",
+                    ref(photo[0])));
+            assertEquals(8L, e.error().data().get("freeMb"), String.valueOf(e.error().data()));
+            assertTrue((Long) e.error().data().get("neededMb") > 4L, String.valueOf(e.error().data()));
+        } finally {
+            Capture.heap = Capture.RUNTIME_HEAP;
+        }
+        assertNotNull(call("swing.capture", "target", ref(photo[0])).get("base64"), "with the JVM's own headroom");
     }
 
     @Test

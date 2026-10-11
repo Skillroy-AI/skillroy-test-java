@@ -18,9 +18,11 @@ package ai.skillroy.testjava.agent.swing;
 
 import ai.skillroy.testjava.agent.api.spi.CaptureMask;
 import ai.skillroy.testjava.agent.api.spi.RegionResolver;
+import ai.skillroy.testjava.agent.api.spi.SurfaceSource;
 import ai.skillroy.testjava.protocol.ErrorCodes;
 import ai.skillroy.testjava.protocol.RpcException;
 
+import java.awt.CardLayout;
 import java.awt.Color;
 import java.awt.Component;
 import java.awt.Graphics;
@@ -29,15 +31,18 @@ import java.awt.Rectangle;
 import java.awt.image.BufferedImage;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import javax.swing.JButton;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
+import javax.swing.JLayeredPane;
 import javax.swing.JPanel;
 import javax.swing.JPasswordField;
 import javax.swing.JTable;
 import javax.swing.JTextField;
+import javax.swing.JViewport;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -45,6 +50,7 @@ import org.junit.jupiter.api.Test;
 
 import static ai.skillroy.testjava.agent.swing.JsonCheck.arr;
 import static ai.skillroy.testjava.agent.swing.JsonCheck.expectError;
+import static ai.skillroy.testjava.agent.swing.JsonCheck.list;
 import static ai.skillroy.testjava.agent.swing.JsonCheck.map;
 import static ai.skillroy.testjava.agent.swing.JsonCheck.obj;
 import static ai.skillroy.testjava.agent.swing.LocatorTest.onEdt;
@@ -561,6 +567,259 @@ class CaptureTest {
         List<Object> marks = arr(shot.fields.get("marks"));
         assertEquals(1, marks.size(), "the covered button has no mark: " + marks);
         assertEquals("button 'Visible'", obj(marks.get(0)).get("label"));
+    }
+
+    // ------------------------------------------------------------------- Phase 7 security fix (SG, 2026-10-11)
+
+    private void source(final Component browser) {
+        ctx.spi.register(SurfaceSource.class, () -> Collections.singletonList(new SurfaceSource.Surface(browser,
+                "WEB", "b1")));
+    }
+
+    private static Map<String, Object> webSurface(Capture.Shot shot) {
+        Map<String, Object> found = null;
+        for (Object o : arr(shot.fields.get("surfaces"))) {
+            if ("WEB".equals(obj(o).get("kind"))) {
+                found = obj(o);
+            }
+        }
+        return found;
+    }
+
+    /**
+     * Security fix S129 (L4-F1; the L4 sceptic's probe case B): a browser in a {@code CardLayout} card that is not
+     * shown keeps its own {@code isVisible()}, but is no surface: a surface is listed only for a component that is
+     * showing (visible at every level up to its window).
+     */
+    @Test
+    void aBrowserInsideAHiddenCardIsNoSurface() throws Exception {
+        JPanel frame = panel(GREEN, 0, 0, 200, 100);
+        JPanel deck = new JPanel(new CardLayout());
+        deck.setBounds(0, 0, 200, 100);
+        JPanel front = panel(BACK, 0, 0, 200, 100);
+        JPanel back = new JPanel(null);
+        JPanel browser = panel(Color.BLUE, 0, 30, 200, 70);
+        back.add(browser);
+        deck.add(front, "front");
+        deck.add(back, "back");
+        frame.add(deck);
+        onEdt(() -> {
+            deck.doLayout();
+            ((CardLayout) deck.getLayout()).show(deck, "front");
+            return null;
+        });
+        assertTrue(browser.isVisible() && !back.isVisible(), "the browser's own isVisible() is true");
+        source(browser);
+        windows.source(() -> Collections.singletonList(
+                new Windows.Layer(frame, frame, new Rectangle(100, 100, 200, 100), new Point(0, 0), true)));
+        Capture.Request r = req(Capture.Scope.SCREEN);
+        assertNull(webSurface(take(null, r)), "a browser in a hidden card is no surface");
+        onEdt(() -> {
+            ((CardLayout) deck.getLayout()).show(deck, "back");
+            return null;
+        });
+        Map<String, Object> shown = webSurface(take(null, r));
+        assertEquals(map("x", 0L, "y", 30L, "w", 200L, "h", 70L), shown.get("rect"), "once its card is shown");
+        assertEquals(list(), shown.get("covered"));
+    }
+
+    /**
+     * Security fix S108 (L4-S1; the L4 sceptic's probe case A): a surface's {@code covered} lists, in image
+     * coordinates, what is painted above it: a window above its own in the composite, and in its own root a component
+     * Swing paints later (a popup in the layered pane's popup layer over the content).
+     */
+    @Test
+    void aSurfaceCarriesTheRectanglesPaintedAboveIt() throws Exception {
+        JPanel frame = panel(GREEN, 0, 0, 200, 150);
+        JLayeredPane layers = new JLayeredPane();
+        layers.setBounds(0, 0, 200, 150);
+        JPanel content = panel(Color.WHITE, 0, 0, 200, 150);
+        JPanel browser = panel(Color.BLUE, 10, 10, 180, 100);
+        content.add(browser);
+        layers.add(content, JLayeredPane.DEFAULT_LAYER);
+        JPanel popup = panel(RED, 50, 40, 60, 30);
+        layers.add(popup, JLayeredPane.POPUP_LAYER);
+        frame.add(layers);
+        JPanel dialog = panel(RED, 0, 0, 100, 100);
+        JButton yes = new JButton("Yes, return the loan");
+        yes.setBounds(10, 10, 80, 20);
+        dialog.add(yes);
+        source(browser);
+        windows.source(() -> Arrays.asList(
+                new Windows.Layer(frame, frame, new Rectangle(100, 100, 200, 150), new Point(0, 0), true),
+                new Windows.Layer(dialog, dialog, new Rectangle(250, 200, 100, 100), new Point(0, 0), true)));
+        Capture.Request r = req(Capture.Scope.SCREEN);
+        r.annotate = true;
+        Capture.Shot shot = take(null, r);
+        Map<String, Object> surface = webSurface(shot);
+        assertEquals(map("x", 10L, "y", 10L, "w", 180L, "h", 100L), surface.get("rect"));
+        assertEquals(list(map("x", 150L, "y", 100L, "w", 40L, "h", 10L), map("x", 50L, "y", 40L, "w", 60L,
+                "h", 30L)), surface.get("covered"), "the dialog above in the composite, then the popup above it");
+        boolean marked = false;
+        for (Object m : arr(shot.fields.get("marks"))) {
+            marked |= String.valueOf(obj(m).get("label")).contains("return the loan");
+        }
+        assertTrue(marked, "the dialog's button keeps its mark inside the surface's rectangle");
+    }
+
+    /**
+     * Security fix S108 (the L4 sceptic's probe case C): a surface's {@code rect} is the browser's visible part, so a
+     * browser a viewport has scrolled partly out is clipped to the viewport, and one scrolled wholly out is no surface
+     * at all (before, its whole bounds lay over the panel below the viewport).
+     */
+    @Test
+    void aSurfaceIsTheVisiblePartOfTheBrowser() throws Exception {
+        JPanel frame = panel(GREEN, 0, 0, 200, 150);
+        JViewport viewport = new JViewport();
+        viewport.setBounds(0, 0, 200, 60);
+        JPanel form = panel(Color.WHITE, 0, 0, 180, 300);
+        JPanel browser = panel(Color.BLUE, 0, 120, 180, 150);
+        form.add(browser);
+        viewport.setView(form);
+        frame.add(viewport);
+        JPanel bar = panel(Color.LIGHT_GRAY, 0, 60, 200, 90);
+        JButton waive = new JButton("Waive deposit");
+        waive.setBounds(10, 10, 120, 20);
+        bar.add(waive);
+        frame.add(bar);
+        source(browser);
+        windows.source(() -> Collections.singletonList(
+                new Windows.Layer(frame, frame, new Rectangle(100, 100, 200, 150), new Point(0, 0), true)));
+        onEdt(() -> {
+            form.setBounds(0, 0, 180, 300);
+            viewport.setViewPosition(new Point(0, 0));
+            return null;
+        });
+        Capture.Request r = req(Capture.Scope.SCREEN);
+        assertNull(webSurface(take(null, r)), "scrolled wholly out of the viewport: no surface over the bar below");
+        onEdt(() -> {
+            viewport.setViewPosition(new Point(0, 100));
+            return null;
+        });
+        assertEquals(map("x", 0L, "y", 20L, "w", 180L, "h", 40L), webSurface(take(null, r)).get("rect"),
+                "the part the viewport shows (rows 120..160 of the form at view position 100)");
+    }
+
+    /**
+     * Security fix S122 (L2-F4; the L2 reviewer's probe 2): a mask's {@code regions} withhold the text under them,
+     * with {@code masks} false: a label a region holds is masked (no mark, no text, {@code masked: true}); a table's
+     * cells under a region are left out of its row marks and nulled in its value, its other cells stay.
+     */
+    @Test
+    void aRegionsOnlyMaskWithholdsTheTextUnderItsRegions() throws Exception {
+        JPanel root = panel(BACK, 0, 0, 320, 120);
+        JLabel label = new JLabel("PIN 4711");
+        label.setBounds(10, 10, 120, 20);
+        root.add(label);
+        JTable table = new JTable(new Object[][] {{"Ann", "4711"}, {"Bo", "0815"}}, new Object[] {"Name", "PIN"});
+        table.setRowHeight(20);
+        table.setBounds(10, 40, 220, 40);
+        root.add(table);
+        Rectangle pinColumn = onEdt(() -> table.getCellRect(0, 1, true).union(table.getCellRect(1, 1, true)));
+        ctx.spi.register(CaptureMask.class, new CaptureMask() {
+            @Override
+            public boolean masks(Component component) {
+                return false;
+            }
+
+            @Override
+            public List<Rectangle> regions(Component component) {
+                if (component == root) {
+                    return Arrays.asList(new Rectangle(10, 10, 120, 20));
+                }
+                return component == table ? Arrays.asList(pinColumn) : null;
+            }
+        });
+        Capture.Request r = req(null);
+        r.annotate = true;
+        Capture.Shot shot = take(root, r);
+        assertEquals(GREY, shot.image.getRGB(15, 15), "the label's pixels are blanked as before");
+        List<String> labels = new ArrayList<String>();
+        for (Object m : arr(shot.fields.get("marks"))) {
+            labels.add(String.valueOf(obj(m).get("label")));
+        }
+        assertEquals(Arrays.asList("row 0: Ann | ", "row 1: Bo | "), labels, "no mark on the label, no PIN cell");
+        Map<String, Object> labelNode = onEdt(() -> new ComponentView(ctx).node(label));
+        assertNull(labelNode.get("text"));
+        assertNull(labelNode.get("name"), "the name a label takes from its text is withheld with it (S106)");
+        assertEquals(Boolean.TRUE, labelNode.get("masked"));
+        Map<String, Object> value = obj(onEdt(() -> new ComponentView(ctx).node(table)).get("value"));
+        assertEquals(Arrays.asList(Arrays.asList("Ann", null), Arrays.asList("Bo", null)), value.get("cells"));
+        assertFalse(String.valueOf(onEdt(() -> new ComponentView(ctx).node(table))).contains("4711"));
+        assertTrue(onEdt(() -> new ComponentView(ctx).masked(label)), "the hit-test's masked follows the node's");
+    }
+
+    /**
+     * Security fix S123 (L2-S2; the L2 sceptic's probe B): two masks combine by union, so one that gives regions for a
+     * component does not cancel another's whole-component blanking of it.
+     */
+    @Test
+    void twoMasksCombineByUnion() throws Exception {
+        JPanel root = panel(new Color(240, 240, 240), 0, 0, 400, 200);
+        JPanel secret = panel(new Color(200, 30, 30), 10, 10, 300, 100);
+        JPanel child = panel(new Color(30, 160, 30), 150, 50, 100, 40);
+        secret.add(child);
+        root.add(secret);
+        ctx.spi.register(CaptureMask.class, c -> c == secret);
+        ctx.spi.register(CaptureMask.class, new CaptureMask() {
+            @Override
+            public boolean masks(Component component) {
+                return false;
+            }
+
+            @Override
+            public List<Rectangle> regions(Component component) {
+                return component == secret ? Arrays.asList(new Rectangle(0, 0, 40, 20)) : null;
+            }
+        });
+        Capture.Shot shot = take(root, req(Capture.Scope.COMPONENT));
+        assertEquals(GREY, shot.image.getRGB(12, 12), "in the second mask's region");
+        assertEquals(GREY, shot.image.getRGB(100, 80), "the panel outside that region");
+        assertEquals(GREY, shot.image.getRGB(165, 65), "the child");
+        List<Object> redacted = arr(shot.fields.get("redacted"));
+        assertEquals(1, redacted.size(), redacted.toString());
+        assertEquals(map("x", 10L, "y", 10L, "w", 300L, "h", 100L), obj(redacted.get(0)).get("rect"));
+    }
+
+    /**
+     * Security fix S125 (L2-S4; the L2 sceptic's probe C, scaled down): a high-entropy raster's PNG is about its size,
+     * and what delivering it allocates (base64, the reply's text and bytes) is counted: a PNG whose six-fold exceeds
+     * half the heap headroom is refused with both figures, while the raster bound admitted the raster.
+     */
+    @Test
+    void theEncodingBoundRefusesAPngWhoseDeliveryExceedsHalfTheFreeHeap() throws Exception {
+        BufferedImage noise = new BufferedImage(512, 512, BufferedImage.TYPE_INT_RGB);
+        java.util.Random random = new java.util.Random(7);
+        for (int y = 0; y < 512; y++) {
+            for (int x = 0; x < 512; x++) {
+                noise.setRGB(x, y, random.nextInt(0x1000000));
+            }
+        }
+        Capture.heap = () -> 8L << 20; // the raster's 1 MB is an eighth of 8 MB: admitted by the raster bound
+        Capture.heapBound(4L * 512 * 512, "scale", "lower 'scale'");
+        RpcException e = expectError(ErrorCodes.INVALID_PARAMS, () -> Capture.encode(noise));
+        assertEquals(8L, e.error().data().get("freeMb"));
+        assertTrue((Long) e.error().data().get("neededMb") > 4L, String.valueOf(e.error().data()));
+        Capture.heap = () -> 64L << 20;
+        assertTrue(Capture.encode(noise).length > 700000, "admitted with more headroom; noise does not compress");
+    }
+
+    /**
+     * Security fix S146 (L8-F2): the focus owner's locator ({@code focus.ownerLocator}) is never a {@code {text}}
+     * candidate, so a nameless text field's content never enters a baseline's or an anchor's {@code focus.owner}; the
+     * hit-test's own candidates are unchanged.
+     */
+    @Test
+    void theFocusOwnersLocatorIsNeverItsText() throws Exception {
+        JPanel root = panel(BACK, 0, 0, 300, 200);
+        JTextField field = new JTextField("Jane Doe");
+        field.setBounds(10, 10, 120, 24);
+        root.add(field);
+        Map<String, Object> owner = onEdt(() -> HitTest.firstUniqueLocator(new ComponentView(ctx), new SwingSpis(ctx),
+                field, root, true, false));
+        assertEquals(map("class", "JTextField", "index", 0L), owner);
+        assertEquals(map("text", "Jane Doe", "role", "textbox"), onEdt(() -> HitTest.firstUniqueLocator(
+                new ComponentView(ctx), new SwingSpis(ctx), field, root, true)), "the hit-test's order keeps it");
     }
 
     /** Three 30-pixel keys in a row: {@code key:1} to {@code key:3}. */
