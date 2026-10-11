@@ -20,9 +20,9 @@ Tick each item in the release's own record (the release note or its pull request
 5. **The agent home's content**: `DistributionContentIT` and `HomeConstantPoolIT` green; `NOTICE`'s wording matches
    what the home carries (the optional hooks module's relocated Byte Buddy, B26 Q1).
 6. **The "not verified" list is current** in `README.md`'s status paragraph, `SECURITY.md` and
-   `design/threat-model.md` §8 (the Windows items, the `jxbrowser` adapter against the real product, the live-only
+   `design/threat-model.md` §8 (the Windows items, the `jxbrowser` adapter beyond the version and platform its kit ran on, the live-only
    paths, and the Phase 7 items of `design/phase7-contracts.md` §13.4: Robot input off the Linux image's display, any
-   display scale other than 1, JxBrowser pointer input, the vision loop beyond the spikes' short sessions and the live class's
+   display scale other than 1, the vision loop beyond the spikes' short sessions and the live class's
    three short runs) and the delta review's fixes (a masked browser on real JCEF, the minimised-frame and off-screen refusals
    off the Linux image's display, the paste and the middle click on an X11 desktop, a second OS user, an APFS
    case-insensitive volume, the Windows ACL judgement of the run-output directory; `design/phase7-contracts.md` §13.4). The

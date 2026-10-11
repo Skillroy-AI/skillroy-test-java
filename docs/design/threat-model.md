@@ -225,7 +225,9 @@ client (P7 §3.4, §9.1).
 - The Windows path: the ACL branches of S7/S15 and of every owner-only file the controller writes, the `.bat`
   launcher and the planner's `cmd.exe /c` form, `JAVAAGENT` as the logged-on user, the rungs and paint capture
   (P6 §9, §13.3): no Windows host exists.
-- The `jxbrowser` adapter against the real product (a licence holder's repository runs the kit).
+- The `jxbrowser` adapter beyond the one run of its kit against the real product (JxBrowser 8.18.3 on macOS arm64, a JDK 25
+  test JVM, 2026-10-11, in a repository outside this one: 19 of 19 in three variants): other JxBrowser lines, Linux,
+  Windows and a Java 8 test JVM.
 - The live-only paths run only with the owner's key (P5 §15.3).
 - The CDP attach's WebSocket handshake: Playwright's driver follows an HTTP redirect of it (Playwright 1.63 has no
   option to refuse one), so a peer that holds the configured debug port before the application's engine binds it,

@@ -160,14 +160,12 @@ Read these before you run the agent on a shared host.
   the cursor clamping of S104 and S105), and the ACL judgement of the run-output directory (S141, tested on built ACL values;
   it resolves CREATOR OWNER by its English name). Until the project
   says otherwise, treat Windows as unverified.
-- **Not verified elsewhere.** The `jxbrowser` adapter against the real library, its pointer input included (the roles are
-  named from the public API); the paths that need a live model key, among them the vision loop beyond the short sessions of
+- **Not verified elsewhere.** The `jxbrowser` adapter beyond the one version and platform its kit ran on (JxBrowser 8.18.3 on macOS arm64 with a JDK 25 test JVM, 2026-10-11: 19 of 19 in three variants, its pointer input and a Retina display included), that is other JxBrowser lines, Linux, Windows and a Java 8 test JVM; the paths that need a live model key, among them the vision loop beyond the short sessions of
   the spikes and the Phase 7 live class's three short runs (the last on the final code, 7 of 7), a provider's handling of a
   toolset member whose `configs` disable it, and the planner's model choosing `approve`; a hook detach that ran out of its time budget on a real application
   (a Byteman rule left installed by such a detach keeps running until the target restarts). Phase 7 adds heavyweight popups
   and native drag and drop under the pointer primitives, windowed JCEF on a Java 8 target, a long vision session and the
-  session's fold under the provider's history rule, and the committed image baselines on the amd64 image (a key that differs
-  there is settled by an `approve` run on that leg). The delta review's fixes add a masked browser on real JCEF (the fixes ran
+  session's fold under the provider's history rule. The delta review's fixes add a masked browser on real JCEF (the fixes ran
   against fakes and over real Swing components), a real JCEF frame under a `JOptionPane`, the paste and the middle click on an
   X11 desktop with a headed JVM, a second OS user for the writers' link rule, an APFS case-insensitive volume, a real
   multi-screen desktop and HiDPI (the glass bound at scale 3 through a seam only). The full list is §8 of the threat model.

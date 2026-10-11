@@ -67,7 +67,7 @@ review items of the end-to-end review, and `Sn` the confirmed findings of the se
 | B31 | The Phase 7 security delta review's sign-off (S101-S148: 48 confirmed findings, 2 high, 13 medium, 33 low; everything of medium or above fixed and 31 lows fixed; S142 and S144 accepted with a release note each; the "not verified" list; the note that the clipboard route S110 predates Phase 7 for the planner and that B28 did not see it; no outside reader yet, not a gate) | the orchestrator recommended yes once the final matrix was green (the amd64 Java 8 legs excepted) and the owner had read the two release notes | **signed off by the owner 2026-10-11** (`B31 ok`, S142 and S144 accepted; the orchestrator did not sign, P6 §12.6) | records written 2026-10-11 (`TODO.md`, "Security review (Phase 7 delta)"); `SECURITY.md` and `docs/release-checklist.md` carry the signature | |
 | B32 | Follow-ups after Phase 7 (D487-D491: gaps 94, 99, 92 and 63, taken without the owner on 2026-10-11) | as taken | **confirmed by the owner 2026-10-11** (`B32 ok`, no veto) | built, tested and matrix-verified 2026-10-11 (`TODO.md`, "Phase 7 final matrix") | – |
 | B33 | The owner's answers of the evening of 2026-10-11 (gaps 93 and 96, the domain, a JxBrowser licence) | – | **given by the owner 2026-10-11** | recorded 2026-10-11 | – |
-| B34 | Follow-ups of the evening of 2026-10-11 (D492 onwards: gap 101 and what the JxBrowser kit run and gap 95 decide) | as taken | provisional | built and tested 2026-10-11 | – |
+| B34 | Follow-ups of the evening of 2026-10-11 (D492 onwards: gap 101, the JxBrowser kit run's D493 and D494, and what gap 95 decides) | as taken | provisional | built and tested 2026-10-11 | – |
 
 Phase 1 details are fixed in `design/phase1-contracts.md`; the same file carries the Phase 1.x specification
 (A17-A33, H1-H3). Phase 2 details are fixed in `design/phase2-contracts.md`, whose open questions B19 answers. What
@@ -1751,6 +1751,8 @@ name.
 | D | Question | Default taken | Veto form |
 |---|---|---|---|
 | D492 | Gap 101: which covering windows may the Robot press past without `force`? | None but one: a window that owns the target's window, while the target's window is the active window (an owner lies below the windows it owns; the active window was raised when it was activated, and without a window manager nothing else keeps an owned window above its owner), for the point and a drag's end point; the hit-test still reports the owner under `covering` | `B34 D492 veto`: leave out every owner whatever the active window, or keep refusing every covering window |
+| D493 | The JxBrowser kit run (8.18.3): how does the adapter dispatch pointer input, which `Browser.dispatch` offers as one overload per event type? | One descriptor role per event type (`browser.dispatchMouse{Pressed,Released,Moved,Wheel}`, matched by parameter type), the wheel's deltas negated (JxBrowser's sign is the page's opposite), and no "input unverified" note on JxBrowser 8; modifier keys stay refused (a `KeyModifiers` type exists, for later) | `B34 D493 veto`: keep input unavailable on JxBrowser until a later line |
+| D494 | Gap 47: may the adapter's observer registration (`on(...)`) wait for the Chromium process? | No: it runs on the adapter's threads, the caller waits at most 2 s (not at all on the EDT), a registration that answers after `detach()` is unsubscribed at once; `set`, `get`, `remove` and the endpoint reads, which never waited in the run, stay on the calling worker | `B34 D494 veto`: keep the registration on the calling worker |
 
 ---
 
