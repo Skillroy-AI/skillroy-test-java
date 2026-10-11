@@ -271,8 +271,9 @@ client (P7 §3.4, §9.1).
   accepted by the owner (B31, 2026-10-11; `SECURITY.md`).
 - (Phase 7) HiDPI: every spike ran at scale 1; the Swing side reports user-space pixels and the web side an empirical
   factor flagged `scaleAssumed` (P7 §4.8, gap 78).
-- (Phase 7) JxBrowser pointer input (`WebCapability.INPUT` behind descriptor roles, strategy "input unverified") against
-  the real library: a licence holder's repository runs the kit (gap 41).
+- (Phase 7) JxBrowser pointer input against the real library beyond JxBrowser 8.18.3 on macOS arm64: the kit ran there on
+  2026-10-11 with input (one dispatch role per event type, D493; a Retina display's points are CSS pixels), so the strategy
+  no longer says "input unverified" on line 8 (gap 41 closed); other lines and platforms are unverified.
 - (Phase 7) The vision loop against a live model beyond the `inference-live` profile's runs of P7 §13.3 (BS12 measured
   grounding and short sessions on the sample desk, USD 5.64); the session's fold under the provider's history rule on
   the 5.5 models (P7 §7.4, gap 85).
