@@ -931,6 +931,16 @@ canned hit-tests; the PNG fixtures are this module's) and take `ToyPack` and `Fa
 player's `ExecutorSession` and `SessionService` are opened by its host (`SessionCommand --play`, or the IT of §13.2
 item 8) and handed to it for the run; the module constructs neither (§6.8).
 
+**As built (Phase 7, VM, 2026-10-10):** the module is as specified, plus a public record `Capture` (one capture: the PNG
+as the agent sent it and its geometry, `captureId`, `seq`, `hash`, `windows`, `surfaces`, `marks`, `redacted`,
+`carets`, `focus`), and `VisionOptions.narrow` for the player. The facade the contract fixed could not reach three things
+the module needs, so `SessionActions` gains `outputDir()` (where `captures/` goes, §9.6), `screenLegend()` (the pack's
+legend through the session's mask, for a visual question, §6.4) and `note(text)` (`skillroy_look`'s journal note under
+the turn's origin): D-VM-1. The module's tests reach the scenario test-jar's package-private fixtures through a public
+bridge in the scenario package (`VisionBridge`, test scope only), as `skillroy-telemetry`'s `TelemetryFixture` does;
+`FakeVisionAgent` keeps components in window coordinates and hit-tests in screen coordinates through each capture's
+own origin, so that a dialog that grows the composite makes the same image point name another component.
+
 ### 6.2 The loop in interactive sessions: V1, V2, V3
 
 The loop is the session service's loop (P5 §12.4) with the vision tools added: the person's request (or the player's
@@ -989,6 +999,16 @@ while a secret is in flight, §6.5, §9.2); type into, press a key at or click a
 confirm anything (`confirm` is stripped from a `MODEL` origin, D158); offer `data_query`, `hook.*`, `rule.*`, `agent.*`
 or a destructive primitive (`CallPolicy`, unchanged); offer an acting tool under a read-only policy (§6.3).
 
+**As built (Phase 7, VM, 2026-10-10):** while a tool set applies, the service's own loop call is purpose `vision`, the
+class of the first applying tool set's `modelClass(ctx)` (a default method `SessionTools` gains: the contract's
+interface had no way to name it; D-VM-2), effort `effort.vision`, `CacheHint.AUTO`, with the tool sets' provider tools;
+the pack's legend is a system part the service adds after the tool sets' instructions (the context carries no pack).
+V1's capture is followed by the marks list alone in its `<target-ui>` block (with the image's size); the text snapshot
+is not repeated there, since the model has `skillroy_snapshot` and BS12 found the marks list to carry what the snapshot
+drops (D-VM-3). A capture in a model's view is the agent's PNG unchanged unless marks are drawn or a page composited
+(the re-encoding is `javax.imageio`'s). `afterBatch` is skipped when the batch's last view was the model's own capture
+and no event arrived since, and when the turn ended in the batch.
+
 ### 6.3 The tool adapters
 
 **The provider-neutral custom tools** (strict `ToolSpec`s through `ToolProjection.strict`, names `[a-z0-9_]`; B7's
@@ -1040,6 +1060,14 @@ capture's `captureId` in `swing.hitTest {space: {captureId}}`. An image in a too
 limits unscaled (the size rule of §3.1 keeps it at or under 1920 pixels, below the high-resolution tier's 2576; vision
 §F2).
 
+**As built (Phase 7, VM, 2026-10-10):** V2 and V3 with the custom tools offer `capture`, `click_at`, `drag`, `scroll`,
+`click_ref`, `type`, `key`, `wait`, `skillroy_look`, without `click_mark` (their captures carry no marks); with the
+toolset, `skillroy_look` is the one custom tool beside the provider entry. Under a read-only policy (or one without
+verbs) the toolset entry's `configs` disable every acting member (`enabled: false`), leaving `screenshot`, `zoom` (when
+on), `wait` and `cursor_position`. A toolset click's `text` (modifier keys) maps to `modifiers`; `zoom` maps the
+rectangle to the topmost window at its centre in the capture's `windows` order, assuming no insets (the WM-less image),
+at a scale that fits 1024 pixels on the long edge (at most 4).
+
 ### 6.4 Grounding, the stale-capture rule, visual questions
 
 **Grounding** of a pixel `(x, y)` of capture `C`: `swing.hitTest {point, space: {captureId: C}}` (§3.2) before anything
@@ -1066,6 +1094,13 @@ tool `skillroy_look {question}` (the model's own text, which screen content may 
 the label and it is declared data like the others, P5 §6.2). `skillroy_look` is a read with no step, journaled as a
 `note` with the verdict and the capture's hash, never a check that holds. The verdict is advisory: in a scenario it
 stands behind the guard `inference.vision` (§8.4), and it never turns a failing scenario green.
+
+**As built (Phase 7, VM, 2026-10-10):** the stale-capture rule reads `eventsSince(C.seq, "window.opened,window.closed",
+1)` through the facade; the fresh capture keeps the tier's annotation; "the same target" is the same `target` ref and
+the same `row`. A hit-test of a `NONE` surface is answered as text, a `HEAVYWEIGHT` one is recorded as an anchored step
+(§6.5's rule wins over this section's sentence for `HEAVYWEIGHT`; D-VM-4). A visual question is one request of
+`maxTokens` 1024 with the schema strict (`mark` and `box` nullable), the question in its labelled block and the legend as
+a system part; an answer with no structured verdict is `UNSURE` with the stop reason.
 
 ### 6.5 The recorder: from a model's action to the step that will be replayed (D306-D308, D342, D357, D358)
 
@@ -1133,6 +1168,20 @@ For one grounded action on `target` with hit-test result `H` (vision §R3; desig
    fractions, region and row, the mark, and for an anchored step the `anchor` object (label, rectangle, hash, file,
    `renderKey`, `rendering`, window, and the crop's `masks`, `carets` and `focus`, which the export's entry needs, §6.6).
 6. **Export** (§6.6).
+
+**As built (Phase 7, VM, 2026-10-10):** the recorder also refuses a `type` whose text holds a `$slot.key` reference whose
+key the mask's key rule calls secret (`$staff.password`), before the facade and `ExecutorSession`, which hold the exact
+rule over the session's joins. A locator is "a `describe` strategy" when it has a key outside the base grammar
+(`id`, `name`, `role`, `text`, `class`, `index`, `path`, `regex`, `ignoreCase`, `within`). `click` is chosen for a left
+single click without modifiers on a position-insensitive target outside V3; every other click is a `pointer` with the
+action (`DOUBLE_CLICK` for a count of 2 or more, `clickCount` for 3, `button` and `modifiers` when not the defaults);
+the fractions are rounded to three decimals; a row's `fy` is 0.5. The anchor's label is `anchor-s<n>`, n counting the
+session's anchors from 1; the `anchor` object carries `label`, `rect` and its `x`, `y` (the crop's origin in the window's
+space), `sha256`, `width`, `height`, `file`, `renderKey`, `rendering` (without `renderKey` and `keyed`), `window`
+(`size`, and `insets` derived from the composite: the root pane's screen position minus the window's), `masks`,
+`carets` and `focus {owner, ownerRect?, active}`. A `webClick` is recorded without `browser` (a ref is a per-start
+handle; the single showing browser is the agent's default). In V3 a focus loss reported by the agent (`not focused`)
+ends the turn `QUESTION` as the focus rule does.
 
 ### 6.6 Export into ordinary steps (D309, D355, D356)
 
@@ -1236,6 +1285,15 @@ PNGs), which is how an authored live-only scenario becomes a CI one. Reachable a
 <scenario.yaml> [--vision …] [--export <id>]` (§9.3) and as a Java API; never from `PlanExecutor`, never over MCP (a
 client authors through the planner, P5 §10, whose server has no gateway).
 
+**As built (Phase 7, VM, 2026-10-10):** the player takes the host's `VisionSessionTools` instance (or null) so that a
+step can narrow the model class, the tier between V2 and V3 and `maxActions` (a narrowed turn ends `LIMIT` at the
+step's limit); a step's tier that would change to or from V1 changes the tool vocabulary the service fixed at its start
+and is a usage error like a widening one (D-VM-5). `ExecutorSession` has no way to bind a fixture slot (the contract
+names `resolve` only, which takes a query kind), so the player takes a `FixtureBinder` from its host and refuses, before
+anything runs, a scenario with a fixture slot when it has none (D-VM-6: proposed `ExecutorSession.fixture(slot, value,
+credential, origin)`, VC's file). An `aiExpect`'s capture is a `swing.capture {scope: SCREEN, mode: PAINT, redact: true,
+annotateRefs: <V1>}` through `ExecutorSession.read` with the marks drawn, its verdict journaled as a note.
+
 ---
 ## 7. The gateway changes (`skillroy-inference`, the SPI of P5 §3)
 
@@ -1261,6 +1319,12 @@ provider `claude` is passed as a raw tool union through the SDK's JSON mapper; a
 (§13.3; map 4 T9), and the gateway drops the header for a request with a provider tool only if that check says it must
 (an "As built" note then records it).
 
+**As built (Phase 7, VM, 2026-10-10):** `ClaudeMapping.providerTool` builds `ToolUnion.ofComputerToolset20260801` with
+`configs` read by the SDK's own mapper (snake-case member keys: `zoom`, `left_click`, …); another `claude` type goes out
+as a raw union of its `type` and fields; a request with provider tools and no own tools still sends `tool_choice: auto`;
+the token count's body carries the entry. The fallback header is sent with a toolset as today (no live check ran in the
+build; §13.3 item 3 is the orchestrator's).
+
 ### 7.2 `toolset_name` and image parts in a tool result (D319, D320)
 
 `Content.ToolUse(id, name, input, toolsetName)` and `Content.ToolResult(toolUseId, content, error, toolsetName)` gain a
@@ -1274,6 +1338,12 @@ compact constructor keeps such a list as parts (every element `Text` or `Image`,
 `Block.ofImage`), an image only while `images` is on (`UNSUPPORTED` otherwise, as for a message's image part);
 `Prompts.part` renders nested parts (an image by its hash); `PromptMask.part` masks the nested texts and passes an
 image under `withImages(true)`.
+
+**As built (Phase 7, VM, 2026-10-10):** a `tool_use` block's `toolset_name` is read back bounded like a provider word; a
+parts list is any non-empty list whose first element is a `Content` (every element `Text` or `Image`, else
+`IllegalArgumentException`); `ToolResult.parts()` answers it; `Prompts.partFromJson` reads a result's parts back as JSON
+(an image cannot be). `Recording.json` and `LedgerWriter`'s logged prompt pass parts through `mask.withImages(true)`,
+since `Prompts.part` writes an image by its hash only.
 
 ### 7.3 `IMAGES` on the recorded and the scripted gateway, the price row, the `vision` purpose and effort (D321, D322)
 
@@ -1291,6 +1361,12 @@ builds its settings in code today and the profile sets a system property only) t
 `InferenceSettings.DEFAULT_EFFORT` gains `vision: low` and the reader accepts the key (P5 §4.4's effort list grows by
 one; no other new key: `images` stays the one switch, still file-only). `Effort` keeps `LOW`, `MEDIUM`, `HIGH`.
 
+**As built (Phase 7, VM, 2026-10-10):** both gateways declare every capability; `ScriptedGateway.countTokens` adds an
+image's tokens (§7.5's formula). The Haiku 5.5 row's note is `PriceTable.tierNote(model, inputTokens)`, added to a
+call's usage note when the input (cache reads and writes included) exceeds 100,000 tokens. `CostLedger.Entry` gains the
+constant `PURPOSE_VISION`. The live profile's settings file is `samples/skillroy-sample-lending-scenarios/src/test/
+resources/inference/inference-live.yaml`.
+
 ### 7.4 The automatic cache hint (D323)
 
 `CacheHint.AUTO`: the request's system prefix keeps its explicit breakpoint and the Claude mapping adds the top-level
@@ -1306,6 +1382,10 @@ recorded as a finding of §13.3 and ends the turn `QUESTION` with the provider's
 per `Image` part of the request, the size read from the PNG's IHDR (`Prompts.imageSize(bytes)`; a JPEG's SOF likewise);
 BS12 RESULT "Cost and tokens": a 1024 x 768 capture counts 1,039 tokens on all three models (the formula gives 1,036).
 The primary path (`countTokens`) already counts them.
+
+**As built (Phase 7, VM, 2026-10-10):** `Prompts.imageSize` reads a PNG's `IHDR` and a JPEG's first start-of-frame
+marker (within 64 KiB); `Prompts.imageTokens` gives the formula's count (0 for an unreadable header). The fallback counts
+images in messages and inside a tool result's parts, and a provider tool's raw JSON as text.
 
 ---
 
@@ -1608,6 +1688,17 @@ The host sets `SessionOptions.host` from the same conditions before it opens the
 policy, or one that offers no verbs, the module offers reads only (§6.3); a step a tool ran anyway meets
 `ExecutorSession`'s read-only refusal.
 
+**As built (Phase 7, VM, 2026-10-10):** a facade refusal is an `IllegalArgumentException` naming the verb or primitive
+and the reason (nothing journaled or sent), which a tool answers as an error result; the facade acts only within a tool
+call of a turn (its origin), and refuses otherwise. The service counts a UI action per facade `execute` (a tool's act
+that ran two steps counts two; D-VM-7) and a model turn per call while a tool set applies (its loop's and every
+`visionCall`, the player's included); at a limit the facade's or `visionCall`'s refusal ends the turn `LIMIT` after the
+tool call and closes the tool sets; the vocabulary then says why. A tool set's parts and results pass the session's mask
+(images as the settings say; an image while images are off ends the turn `QUESTION`); a result is rebuilt with the call's
+id and toolset name. `maxActionsPerTurn` counts every action but a tool set's read (an outcome without a step).
+`SessionService` gains `toolSets()` and `toolSetsClosed()` for the hosts' start-up line, and `PURPOSE_VISION`,
+`OPTION_MAX_ACTIONS`/`OPTION_MAX_TURNS` (1 to 1000) with their defaults.
+
 ### 9.2 `ExecutorSession`: `read`, the four-argument `execute`, the credential rule, the opt-ins, `host` (D308, D331, D332, D341, D342, D348, D351)
 
 - **`public Object read(String primitive, Map<String, Object> args) throws AgentRpcException, AgentLostException,
@@ -1692,6 +1783,14 @@ policy, or one that offers no verbs, the module offers reads only (§6.3); a ste
 
 Exit codes unchanged (`Exit`); a skipped run is `OK`.
 
+**As built (Phase 7, VM, 2026-10-10) for `session` and `mcp`:** the options are parsed by `VisionArgs`: `--vision v3`
+without `--allow-robot`, `--vision-model haiku` with `v2`/`v3`, an unknown value, `--export` without `--play`, `--play`
+with `--script` and `--play` without a gateway are usage errors before the agent is asked; the start-up line ends with
+`vision v1 (…)` or `vision off (<why>)` (`--vision off`, the module absent, no model gateway, `images: false`, or the
+target's `swing.capture.screen` not `OK`); `--play` runs the player instead of the REPL, prints each step and the
+status, and with `--export <id>` writes the session as `export` does (exit 0 for `PASS` or `DEGRADED`); `mcp --vision`
+prints its line on stderr. The anchors' PNGs beside the export wait for VC's `ExportResult.images()`.
+
 ### 9.4 The MCP server
 
 `ServerOptions` gains `vision` (`Map<String, String>` tool options) and `robot` (boolean); the actor factory of
@@ -1713,6 +1812,13 @@ credential slot's field that the slot's `fixture` does not provide is refused be
 (`skillroy_scenario_run` runs with the operator's credentials, and the client's next `swing_capture` would otherwise
 carry what such a step typed as pixels under `images: true`).
 
+**As built (Phase 7, VM, 2026-10-10):** `ServerOptions` refuses `vision.tier: v3` without `robot`; the server declares
+the host features only when `--vision` names a tier, a `SessionTools` of id `vision` is on the class path, a gateway is
+named and `images: true` (the server never names a vision type); the captures are listed after each
+`skillroy_session_ask`. `PlanPolicy.refusals(plan, scenario)` (the one `skillroy_scenario_run` calls) applies the
+credential rule's plan form to a pack verb's arguments as the client wrote them too (a pass-through verb given
+`$staff.password`), never to the verb's own compiled references (D-VM-8); `refusals(plan)` keeps the base-verb form.
+
 ### 9.5 The overlay
 
 `OverlayBridge` is unchanged: `assist.requested` carries the person's request, `ask` is the one entry, the tier is the
@@ -1731,6 +1837,9 @@ under `images: true` only (§9.4); listed in P2 §11.4's rule as "masked pixels,
 one screenshot of every acted-on screen and takes the process umask: on a shared host run the session under `umask 077`
 or without an output directory (`SECURITY.md`, S37's advice; threat model A13). The anchors an export writes go beside
 the bindings file, not here (§8.7).
+
+**As built (Phase 7, VM, 2026-10-10):** `Captures.write` skips a file that exists (a regular file, links not followed)
+and otherwise writes through `OutputFiles.write`; the name is checked to be `sha256:` and 64 hex digits.
 
 ---
 

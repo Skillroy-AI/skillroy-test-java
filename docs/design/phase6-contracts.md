@@ -2670,6 +2670,10 @@ controller sends … and nothing else" is amended: it sends the trace parent whe
 on `tools/call` (`request.meta()`, control-channel §F16) parsed as W3C and dropped when malformed, so that a client's
 trace continues into the run.
 
+(Phase 7, built 2026-10-10, VM; P7 §10) No new observer method: a vision call is a ledger entry of purpose
+`vision` (`SessionService.visionCall`, or the loop's own call while a tool set applies), so the `modelCall` record and
+span of a session are built from it as today; a vision session's turns are `sessionTurn` records as any other.
+
 ### 10.3 Settings and the CLI
 
 | Setting | Option (on `run`, `session`, `mcp`, `re-resolve`, `triage`, `author`) | System property (the JUnit glue) | `telemetry.yaml` | Default and rule |
@@ -2830,6 +2834,10 @@ already carry `ts`, `seq`, `topic`, `source`, `correlationId`, `traceparent`.
   the session's. `tools/call` is a `SERVER` span, `call` a `CLIENT` span, `agent` a `SERVER` span. Event attributes are
   `skillroy.*` names of `TelemetryAttributes` (the record's identifiers only: never an expectation's actual or matcher
   value, a prompt's payload or a captured value).
+
+(Phase 7, built 2026-10-10, VM; P7 §10, §11) No new attribute: a `modelCall` span of purpose `vision` carries the
+purpose, the model, the tokens and the cost as every model call does, and never an image, a prompt, an intent or a
+capture's hash.
 
 ### 10.5 The `file` exporter and what is not built
 

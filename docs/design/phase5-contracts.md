@@ -362,6 +362,13 @@ the ledger; `fingerprint()` is 64 hex digits without a prefix (it is a file name
 breakpoint flag out as well; `Content.Image` has `sha256()`; `Usage` has `toJson`/`fromJson`; `Effort` has
 `parse`/`label`, `ModelClass` a `settingsKey()`; `JsonLike` makes deep frozen copies.
 
+(Phase 7, built 2026-10-10, VM; P7 §7) `ModelRequest` gains the eleventh component `providerTools` (`ProviderTool(provider, type,
+raw)`, the ten-argument constructor keeps it empty; in the fingerprint only when non-empty); `GatewayCapability` gains
+`PROVIDER_TOOLS`; `Content.ToolUse` and `Content.ToolResult` gain a nullable `toolsetName` (in a part's JSON only when set);
+a `ToolResult`'s content may be a list of `Text` and `Image` parts, an error result with an image refused at
+construction; `CacheHint` gains `AUTO` (the system breakpoint plus the request's top-level `cache_control`);
+`Prompts.imageSize`/`imageTokens`.
+
 ### 3.3 Helpers in the SPI package
 
 - `Schemas.ofRecord(Class<? extends Record>)`: a JSON Schema (`type: object`, `properties`, `required` = every
@@ -458,6 +465,12 @@ D159). Zero-data-retention: the 5.5 models and Haiku are eligible, Fable is not 
 never configured by default (ai-inference F10, R15). (Phase 6 security fix S52, A52, built 2026-10-09, SR) Fable may be
 named only with a `prices:` row, and naming it leaves the zero-data-retention regime.
 
+(Phase 7, built 2026-10-10, VM; P7 §7.1, 7.2, 7.4) The computer toolset goes out typed
+(`ComputerToolset20260801` with its `configs`), another `claude` provider tool raw, another provider's
+`INVALID_REQUEST`; `toolset_name` is read from a `tool_use` block and sent on the echoed call and its result; a parts
+result is `contentOfBlocks` (an image only while images are on); `AUTO` adds the top-level marker; the gateway declares
+`PROVIDER_TOOLS`. A call of `claude-haiku-5-5` above 100K input tokens carries the price table's tier note.
+
 ### 4.2 `RecordedGateway` and `RecordingGateway` (`…inference.recorded`)
 
 This is what lets CI, the Linux image and every unit test run the AI layer with no key.
@@ -521,6 +534,11 @@ This is what lets CI, the Linux image and every unit test run the AI layer with 
   tests of §15.1 assert the fingerprint of each committed recording against the request the code builds today, so that
   a prompt change fails the build with "recording missing", not with a silently different model answer.
 
+(Phase 7, built 2026-10-10, VM; P7 §7.3) The recorded
+gateway declares every capability (`IMAGES` and `PROVIDER_TOOLS` included: a recording is keyed by a fingerprint that
+hashes them); a recording's request holds `providerTools` when there are any, and every part with its `toolsetName`
+when set and an image by its hash (the file's mask passes images; the bytes are never written).
+
 ### 4.3 `ScriptedGateway` (`…inference.scripted`)
 
 For unit tests that want to script an exchange without files: `ScriptedGateway.answering(Function<ModelRequest,
@@ -532,6 +550,10 @@ As built (2026-10-08, S2): `Gateways.serve(InferenceSettings, InferenceGateway)`
 scripted one, or a recording wrapper around it) for the settings, so that the real contributor and binder use it; the
 gateway stays the caller's and `Gateways` never closes it. This is how the sample's stand-in recordings are made
 and how the scripted negatives of §15.1 and §15.2 reach the engine.
+
+(Phase 7, built 2026-10-10, VM; P7 §7.3) The scripted gateway declares every
+capability, `IMAGES` and `PROVIDER_TOOLS` included, so that the vision loop's CI route runs on it; its token count adds an
+image's tokens.
 
 ### 4.4 Settings: `inference.yaml`, properties and options
 
@@ -585,6 +607,12 @@ a settings error naming the file and the rule ("inference settings file <file> c
 (…)"), never a silent skip. Until then a file another user planted there was read: it could set `recordings:` and
 `record: true` (the masked prompts and answers of the operator's live calls written into a directory of its choosing),
 the gateway, the budgets, the prices, `images` and `logPrompts`.
+
+(Phase 7, built 2026-10-10, VM; P7 §7.3) `effort` gains the key
+`vision` (default `low`, BS12): the vision loop's calls and its visual questions. `images` is the one switch for pixels
+(Phase 7 turns it on: an image part reaches a provider only under `images: true`). The `inference-live` profile's
+settings file `samples/skillroy-sample-lending-scenarios/src/test/resources/inference/inference-live.yaml` maps
+`models.haiku` to `claude-haiku-5-5` for `VisionLiveIT`.
 
 ---
 
@@ -982,6 +1010,13 @@ by-value rule has nothing to replace there. An `Opaque` part (a thinking block w
 passes the mask untouched and is recorded as received: it is the model's own output, built from masked input, and must
 be echoed back unchanged (3.2); `RecordedGatewayTest` round-trips one.
 
+(Phase 7, built 2026-10-10, VM; P7 §6.4, 7.2, 9.2) An image part passes under
+`withImages(true)` (redacted by the agent before it leaves the JVM), its `base64` never masked and never on a text route;
+a tool result's parts list is masked part by part; `LABELS` gains `model-question` (the model's own question to a visual
+check, declared data like the others); `holdsSecret(text)` says whether a text holds a secret value the mask knows (what
+the vision recorder and the session facade refuse to type, D342). The session's vocabulary names no secret field of a
+slot (its `$reference` sentence, D342), and a tool set's instructions and the pack's screen legend are masked like it.
+
 ---
 
 ## 7. Approval, budgets and the ledger
@@ -1066,6 +1101,11 @@ detail (Q13); in a session the turn ends with `budget: exhausted` and the servic
 person may still act, §12.4); in the nightly job the remaining scenarios are reported `BUDGET` and no further batch is
 submitted (§8.3). The `--json` of every command and the run summary print `model cost: $0.0231 (budget $0.50)`.
 
+(Phase 7, built 2026-10-10, VM; P7 §7.3, 7.5) The built-in table
+gains `claude-haiku-5-5` at USD 0.10 / 0.50, cache read 0.01 (its prompt tier above 100K input tokens, 0.50 / 2.50, is
+not modelled: `PriceTable.tierNote`); the Haiku class's default stays `claude-haiku-4-5` (D84). The session's estimate
+fallback adds `ceil(w / 28) * ceil(h / 28)` tokens per image.
+
 ### 7.3 The ledger writer and `CostLedger.Entry`
 
 `CostLedger.Entry` gains `String purpose`, `long cacheReadTokens`, `long cacheWriteTokens`, `boolean batch` and `String
@@ -1081,6 +1121,11 @@ the response's usage, records it, settles the meter and appends the record of §
 recorded with provider `recorded` and cost `0`, so that a `live`/`approve` run against recordings still shows its
 calls (`model calls: 2`), while `replay` has none. The JUnit stream's trailing `skillroy: zero model calls` test and the
 executor's ledger check are unchanged and keep meaning "zero gateway calls of any provider".
+
+(Phase 7, built 2026-10-10, VM; P7 §7.3, 10) `CostLedger.Entry.purpose` gains
+`vision` (`PURPOSE_VISION`): every vision call goes through `SessionService.visionCall` (the facade's `complete`, the
+player's `aiExpect`), metered on the session meter before and ledgered after, a failed call too; a logged prompt holds an
+image by its hash.
 
 ### 7.4 `inference.jsonl`
 
@@ -1247,6 +1292,12 @@ log goes to stderr, masked. The `claude` CLI's `--mcp-config` names it as `{"mcp
 `mcp`): the label of the server's origin, `Origin.client(<label>)` (§12.3), under which the journal and the export name
 the client's steps (`client <label>`); `skillroy author` passes `--client planner` (§10.2). `--session-budget`'s help
 says that it bounds `skillroy_session_ask`, `skillroy_resolve` and `skillroy_scenario_run` together (S56, A55).
+
+(Phase 7, built 2026-10-10, VM; P7 §9.4) `ServerOptions` gains `vision` (the tool options of
+`skillroy_session_ask`'s actor, from `skillroy mcp --vision`; empty is off) and `robot` (`--allow-robot`, V3 inside
+`skillroy_session_ask` only; `v3` without it is refused); the server sets the session's robot flag and, when the vision
+module is present, a gateway is named and `images: true`, its host features (`vision-session`, `vision-tier:<tier>`)
+before it opens.
 
 ### 9.3 Tools
 
@@ -1424,6 +1475,16 @@ overlap, since the emitting thread lets go of the sink only after its message is
 hands the SDK subscribes each send under one lock (the SDK emits on the subscribing thread once its transport has
 started, which it has before the client's first message is read) and signals the send's end outside it.
 
+(Phase 7, built 2026-10-10, VM; P7 §9.4) A raw tool's arguments meet `CallPolicy.arguments(primitive, args, false)`
+after the `confirm`/`_meta` stripping: `redact: false` and `mode: ROBOT` on `swing_capture`, `force` on the five acting
+primitives and `via: ROBOT` on `swing_pointer` are refused, never stripped, whatever `--allow-robot` says;
+`skillroy_catalogue` shows the session's merged matrix with each entry's `source`; `skillroy_scenario_run`'s
+`PlanPolicy` refuses `aiAct` and `aiExpect` steps ("run through skillroy session --play"), a person's arguments in a
+client's plan (`via: ROBOT`, `force`, …) and the credential rule's plan form (a base verb's or raw call's reference, and a
+pack verb's arguments as the client wrote them, to a field of a credential slot its fixture does not provide). The new raw
+tools follow the snake-case rule (`swing_hit_test`, `swing_rendering`, `web_hit_test` reads; `swing_pointer`,
+`web_pointer` under `--mutating`).
+
 ### 9.4 Resources
 
 `skillroy://env/profile` (pack id and version, environment id, the capability matrix, the target's Java and pid);
@@ -1457,6 +1518,10 @@ by `Masking` on everything the server answers or serves as text (for files writt
 (Phase 6, built 2026-10-09, CP; P6 §4.2, §6.4) `skillroy://env/profile`'s matrix is the one read after the start's
 hook install (with the `hook.<id>` capabilities); a run the server started holds its `capabilities.json` beside its
 `run.jsonl`. No resource serves a hook spec or takes one.
+
+(Phase 7, built 2026-10-10, VM; P7 §9.4, 9.6) After each `skillroy_session_ask` the session's
+`captures/<sha256>.png` files are listed as `skillroy://captures/<sha256>.png`, only under `images: true` (otherwise
+nothing: the journal names the file); a `ROBOT` capture is never among them.
 
 ### 9.5 `StepLibrary.argsSchema` (`skillroy-scenario`)
 
@@ -1833,6 +1898,12 @@ cleanup calls it registered, each as the verb wrote them, without running or jou
 compile is the refusal reason), so that a host checks a verb's calls with the real arguments before the first runs (the
 MCP server's verb tools and the session service, §9.3, §12.4).
 
+(Phase 7, specified 2026-10-10; P7 §9.2, built by VC, whose notes there say how)
+`ExecutorSession` gains the unjournaled `read(primitive, args)` (bounded, non-mutating only, masked but an image's
+`base64`, the agent's error thrown), the four-argument `execute` forms with the provenance a vision tool hands in,
+`capabilities()` (the merged matrix), `secretsInFlight()` and `expectImage(step, origin)`; `SessionOptions` gains
+`robot` and `host`; the robot gates and the credential rule (D342) hold for every origin but a person's.
+
 ### 12.3 `StepJournal` and the export
 
 **The journal file**, `<outputDir>/journal.jsonl`, is written as the session runs (append-only, masked), one record per
@@ -1906,6 +1977,12 @@ allows alternatives); `Schemas` lives in `ai.skillroy.testjava.scenario` (not th
 scenario module needed it first; the inference module reuses it) with `ofRecord` (strict) and `ofArguments` (lenient,
 `$` references allowed, primitive components only); the plan reader also checks that a version 5 plan's `inference`
 equals what its slots imply.
+
+(Phase 7, specified 2026-10-10; P7 §6.6, §9.2, built by VC) A journal
+step carries the optional `provenance` its acting call handed in (tier, via, capture, point, hit-test, anchor; no bytes);
+cost stays in the ledger, found by the request id. The export writes a vision-derived step as its verb step with one
+masked comment (no hash, handle or mark), the report's "Vision-derived steps" and "Live-only" sections, and the anchors'
+`images` section in its bindings file.
 
 ### 12.4 The session service (`…inference.session`)
 
@@ -2007,6 +2084,16 @@ to `AgentClient.events`), takes `{requestId, text}` from each event (masked, `<p
 through the primitive the pack names in `DomainPack.assistAnswerPrimitive()` (a new default method returning null = no
 overlay) with `{requestId, answer}`. The sample has no overlay; the bridge is tested against the executor tests' fake
 agent with scripted events (§15.1). An overlay's agent module never sees a model SDK (B15).
+
+(Phase 7, built 2026-10-10, VM; P7 §9.1, 10) The seam `SessionTools`
+(`ServiceLoader`, `load(ClassLoader)`), the facade `SessionActions` and `SessionExtensions`: the eighth constructor
+parameter; an applying tool set's tools after the projection's and before `done`/`ask_person`, its provider tools, its
+instructions and the pack's screen legend as system parts (masked), `CacheHint.AUTO`, purpose `vision` and
+`effort.vision` while it applies; its `atTurnStart` parts in a turn's first message and its `afterBatch` parts after a
+batch's results; `act` consulted for its names; `endTurn` `QUESTION`/`LIMIT`; `vision.maxActions` (30) and
+`vision.maxTurns` (20) enforced by the service, which then closes the tool sets; `visionCall(ModelRequest)`; the raw
+primitive branch under `CallPolicy.arguments(…, false)` (refused, never stripped). The vocabulary's `$reference`
+sentence names a non-secret field of a resolved slot only (D342).
 
 ---
 
@@ -2137,6 +2224,12 @@ every expectation on masked values; `triage` builds its options from the setting
 telemetry options (`--telemetry`, `--telemetry-endpoint`, `--telemetry-attributes`, `--telemetry-file`); `mcp` prints
 its telemetry line on stderr; `re-resolve` and `triage` export their root span, `author` its root span, its planner's
 model calls and its bind and run (the planner's own server child exports nothing).
+
+(Phase 7, built 2026-10-10, VM; P7 §9.3) `skillroy session` gains `--vision v1 | v2 | v3 | off` (default v1 when the
+vision module is present, a gateway is named and `images: true`), `--vision-model`, `--vision-tools`, `--allow-robot`
+(required for `v3`), `--play <scenario.yaml>` and, with it, `--export <id>`; its start-up line names the vision tier or
+why it is off. `skillroy mcp` gains `--vision v1 | v2 | v3` (default off) and `--allow-robot` (V3 inside
+`skillroy_session_ask` only).
 
 ### 13.5 JUnit
 
@@ -2539,6 +2632,9 @@ in the code), a failed repair, Windows.
 
 Exit criteria of the roadmap (design §8): (1) is §14.3 with §15.2 item 3; (2) is §15.3 item 4; (3) is §14.4 with §15.2
 item 4; all three are also exercised without a key through the recordings.
+
+(Phase 7, built 2026-10-10, VM; P7 §13.3) `VisionLiveIT` in the sample scenarios module (the
+items of P7 §13.3) joins the profile; it skips without the profile or the key like the others.
 
 ---
 

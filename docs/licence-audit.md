@@ -84,12 +84,12 @@ Modules audited (31 since Phase 6, 2026-10-09; 24 since Phase 5; 22 before): the
 `skillroy-agent-hooks`, `skillroy-agent-byteman-sys` and `skillroy-agent-byteman` (new in Phase 6), `skillroy-agent-dist`;
 the controller side `skillroy-controller`, `skillroy-data` (new in Phase 2), `skillroy-scenario`, `skillroy-inference` and
 `skillroy-mcp` (new in Phase 5), `skillroy-junit`, `skillroy-cli`, `skillroy-cdp` (new in Phase 4), `skillroy-telemetry` (new in
-Phase 6); the lending samples `skillroy-sample-lending-app`, `skillroy-sample-lending-agent`,
+Phase 6), `skillroy-vision` (new in Phase 7); the lending samples `skillroy-sample-lending-app`, `skillroy-sample-lending-agent`,
 `skillroy-sample-lending-pack`, `skillroy-sample-lending-pack-branch` (new in Phase 6), `skillroy-sample-lending-scenarios`; and the web host samples
 `skillroy-sample-web-host`, `skillroy-sample-web-host-agent` and `skillroy-sample-web-host-scenarios` (all three new
-in Phase 4). The root POM lists 27 modules in `<modules>` (all but itself and the web host samples; 20 before Phase 6, 18 before
+in Phase 4). The root POM lists 28 modules in `<modules>` (all but itself and the web host samples; 27 before Phase 7, 20 before Phase 6, 18 before
 Phase 5); the three web host samples are listed only in its profile `jcef` and are built only with `-Pjcef`, so a build
-without the profile has 28 reactor projects and one with it 31. The agent-side modules (`skillroy-agent-web` included), the sample app and sample
+without the profile has 29 reactor projects and one with it 32. The agent-side modules (`skillroy-agent-web` included), the sample app and sample
 agent, and the web host and its agent module build with `--release 8`; the controller-side modules (`skillroy-cdp`
 included), the sample pack and the scenarios of both samples build with `--release 25`.
 
@@ -123,7 +123,8 @@ included), the sample pack and the scenarios of both samples build with `--relea
 | `skillroy-mcp` (Phase 5, 2026-10-08) | the MCP Java SDK 2.0.1 (`mcp-core`, `mcp-json-jackson2`) with `reactor-core`, `reactive-streams`, `slf4j-api`, `json-schema-validator` and `itu`; the inference set through `skillroy-inference` | none | JUnit set |
 | `skillroy-junit` | Jackson set; `junit-jupiter-api` and its transitive artifacts | none | JUnit set, `junit-platform-launcher` |
 | `skillroy-telemetry` (Phase 6, built 2026-10-09, TL) | the OpenTelemetry set of section 4 (1.66.0: `opentelemetry-api`, `-context`, `-common`, `-sdk-common`, `-sdk-trace`, `-sdk-metrics`, `-sdk-logs`, `-exporter-otlp`, `-exporter-otlp-common`, `-exporter-common`, `-exporter-sender-jdk`; the OkHttp sender excluded, no autoconfiguration artifact in the tree); the Jackson set through `skillroy-scenario` | none | JUnit set, HSQLDB, `opentelemetry-sdk-testing` 1.66.0 with `opentelemetry-sdk` 1.66.0, `skillroy-scenario`'s `test-jar` |
-| `skillroy-cli` | Jackson set, through `skillroy-data`, which it also declares itself since Phase 2; since Phase 5 (2026-10-08) the inference set through `skillroy-inference` and the MCP set through `skillroy-mcp`, plus `slf4j-nop` 2.0.16, which it declares itself (D88: the only SLF4J binding, so the libraries' logging is silent); since Phase 6 (2026-10-09, TL) the OpenTelemetry set through `skillroy-telemetry` (section 4) | none | JUnit set |
+| `skillroy-vision` (Phase 7, built 2026-10-10, VM) | none of its own: it adds no dependency (image work is the JDK's `java.awt.image` and `javax.imageio`); the inference set and the Jackson set through `skillroy-inference` and `skillroy-scenario` | none | JUnit set, `skillroy-scenario`'s `test-jar` |
+| `skillroy-cli` | Jackson set, through `skillroy-data`, which it also declares itself since Phase 2; since Phase 5 (2026-10-08) the inference set through `skillroy-inference` and the MCP set through `skillroy-mcp`, plus `slf4j-nop` 2.0.16, which it declares itself (D88: the only SLF4J binding, so the libraries' logging is silent); since Phase 6 (2026-10-09, TL) the OpenTelemetry set through `skillroy-telemetry` (section 4); since Phase 7 (2026-10-10, VM) `skillroy-vision`, which brings no third-party jar | none | JUnit set |
 | `skillroy-cdp` (Phase 4) | Playwright set; Jackson set, through `skillroy-scenario` and `skillroy-data` | none | JUnit set |
 | `skillroy-sample-lending-app` | HSQLDB | none | JUnit set |
 | `skillroy-sample-lending-agent` | none | HSQLDB (through the sample app) | JUnit set |

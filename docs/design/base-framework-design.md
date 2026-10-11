@@ -352,7 +352,7 @@ hooks:
 | `skillroy-junit`, `skillroy-mcp` | one dynamic test per scenario; MCP projection of the catalogue plus domain tool packs. The MCP server is also one host of the interactive session service (Phase 5, built 2026-10-08; P5 §2.1, §9) `skillroy-mcp` (package `ai.skillroy.testjava.mcp`) is the MCP server over stdio on the MCP Java SDK, started by `skillroy mcp` and by the planner; it depends on `skillroy-inference`, `skillroy-scenario` and `skillroy-controller`. `skillroy-junit` is unchanged in its dependencies |
 | `skillroy-cli`, `skillroy-trace-viewer` | Phase 1: `jvms`, `attach`, `info`, `caps`, `schema`, `call`, `snapshot`, `events`, `compile`, `run`. Phase 2 (built 2026-10-02): `resolve`, `diff-bindings` and the binding options of `run`. Later: `probe`, `re-resolve`. Static HTML viewer for run bundles (Phase 5, built 2026-10-08; P5 §2.1, §13.4) `re-resolve` is specified as a command, with `mcp`, `author`, `triage` and `session`, and `run` and `resolve` gain the inference options; the CLI depends on `skillroy-inference` and `skillroy-mcp` |
 | `skillroy-telemetry` (Phase 6, built 2026-10-09, TL; P6 §2.1, §10) | the OpenTelemetry implementation of the `RunObserver` SPI (`…scenario.observe`, in `skillroy-scenario`, which names no OpenTelemetry type): the `otlp` and `file` providers, the span builder, the attribute allow-list. Optional at run time: found through `ServiceLoader` only when an exporter is named, so that without `--telemetry` no OpenTelemetry class loads; the CLI zip bundles it and the OpenTelemetry set in `lib/`; `skillroy-scenario`, `skillroy-junit` and `skillroy-mcp` do not depend on it (a Maven suite adds it to its test class path). It depends on `skillroy-scenario` and `skillroy-controller` |
-| `skillroy-vision` (optional; Phase 7, not built; B16) | the screenshot/act loop, the adapter between a model's tool vocabulary and agent primitives, grounding and visual-question calls, the recorder, image comparison (§3.10). Depends on `skillroy-inference` and `skillroy-scenario`; outside the base's required set |
+| `skillroy-vision` (optional; Phase 7, built 2026-10-10, VM; P7 §2.1, §6; B16) | the screenshot/act loop, the adapter between a model's tool vocabulary and agent primitives, grounding and visual-question calls, the recorder, image comparison (§3.10). Depends on `skillroy-inference` and `skillroy-scenario`; outside the base's required set (Phase 7, built 2026-10-10, VM; P7 §6.1, D302, D303, D313) package `ai.skillroy.testjava.vision`: `VisionSessionTools` (the session service's `SessionTools` seam: the loop is the service's own, the module acts only through its facade `SessionActions`), the custom tools and the computer toolset's adapter, `Grounding`, `Marks` (drawn on the controller's copy), `Recorder`, `VisualQuestion`, `ScenarioPlayer`, `Captures` and `VisionCapabilities` (`inference.vision`). The exact image comparison moved to `skillroy-scenario` (D313), so that `replay` runs anchored steps and `expectImage` without this module. Found through `ServiceLoader` (`SessionTools`, `CapabilityContributor`); nothing below it names a vision type; the CLI depends on it and bundles it in `lib/`; it also depends on `skillroy-controller`, `skillroy-protocol` and `skillroy-data`, and brings no third-party dependency (image work is `java.awt.image` and `javax.imageio`) |
 
 ### 3.2 Scenario DSL (B5)
 
@@ -632,7 +632,7 @@ Rules for both (browser-spi §C0-§C5): no adapter creates or configures an engi
 
 ### 3.10 Vision and human-like input (bolt-on)
 
-**Status.** Design direction only (B16; `docs/research/vision-input.md`, R0-R10). Nothing in this section is built. The base reserves the names in the last table so that later contracts cannot give them another meaning. The section does not reopen §10: Robot, OS input tools and computer use stay rejected as the primary driver.
+**Status.** Design direction only (B16; `docs/research/vision-input.md`, R0-R10). Nothing in this section is built. The base reserves the names in the last table so that later contracts cannot give them another meaning. The section does not reopen §10: Robot, OS input tools and computer use stay rejected as the primary driver. (Phase 7, built 2026-10-10; `phase7-contracts.md`, P7) The bolt-on is built as P7 specifies it; the marks below say what changed per paragraph, and P7's "As built" notes give the details.
 
 **Three tiers.** Use the lowest one that does the job (vision §R0).
 
@@ -653,6 +653,7 @@ Rules for both (browser-spi §C0-§C5): no adapter creates or configures an engi
 - The agent gets three small additions on JDK 8 API (an extended capture result, a read-only hit-test, a coordinate-addressed pointer) and no model code (vision §R2, §C5).
 - Every action the loop takes goes through the executor's single-call entry (§3.4). The step protocol's ack, ready signal and settle decide when the next capture is taken, not a sleep and not a `wait` requested by the model.
 - The loop runs in interactive use, in `live` mode and at authoring time. It never runs in `replay`; the cost ledger assertion already enforces that (§6).
+- (Phase 7, built 2026-10-10, VM; P7 §6.1, §6.2, §9.1, D302, D353) The loop is the interactive session service's own loop (§5): the module adds its tools through the service's `SessionTools` seam and acts only through the service's facade `SessionActions`, which fixes the turn's origin, runs `CallPolicy` on every call and meters and ledgers every model call (`SessionService.visionCall`, purpose `vision`); one loop, one meter, one journal, one mask. The service enforces the vision limits (30 UI actions, 20 model turns per session). In every tier the model sees a redacted `PAINT` composite of the target's own windows, V1 with marks drawn on the controller's copy.
 
 **Record once, replay without a model** (vision §R3, with shipping precedent for web pages in vision §F13). For one model action "click at (x, y)" on a capture:
 
@@ -860,6 +861,13 @@ A model has a place in both ways of running (§3.4), and a different one in each
 
 No new transport is involved: events ride the existing SSE stream and actions are ordinary primitive calls. The rules of §3.4 apply: a per-session budget, read-only mode, `confirm: true` for destructive primitives with the person as the one who confirms, and `ProductionMarker` unchanged. What the model reads from the target (screen content, application data) is untrusted input: the tools offered to it are the target's own primitives, and nothing it produces reaches `data.query`, hooks or module upload. The default model for the act loop is Sonnet 5.5 (vision §R6). The session service was built in Phase 5 (2026-10-08). (Phase 5, built 2026-10-08; P5 §12.4) `SessionService` is in `skillroy-inference` and drives `ExecutorSession` of `skillroy-scenario`, one action at a time and with the model's `confirm` stripped (P5 D87); its tools are the pack's verbs, and the base primitives only by policy. Its hosts are `skillroy session`, the `skillroy_session_*` tools of the MCP server and the `OverlayBridge`, which answers through the primitive the pack names in `DomainPack.assistAnswerPrimitive()`.
 
+(Phase 7, built 2026-10-10, VM; P7 §9.1, §9.3, §9.4) The vision loop (§3.10) is not a second session service: a
+controller-side module adds tools to the session service through its `SessionTools` seam (found through `ServiceLoader`)
+and reaches the session, the agent and the model only through the service's facade `SessionActions`. The CLI's
+`session --vision`, `--allow-robot` and `--play <scenario.yaml>` and the MCP server's `--vision` and `--allow-robot` (V3
+inside `skillroy_session_ask` only) are the person's switches; a model's or an MCP client's raw `redact: false`,
+`mode: ROBOT`, `force` and `via: ROBOT` are refused on every route.
+
 **MCP surface.** `skillroy-mcp` uses the MCP Java SDK 2.0.1 on the 2025-11-25 specification line, in the controller; the SDK needs Java 17+, so the agent cannot host it (control-channel §F18). Transport is stdio, or Streamable HTTP when the controller runs on another host. (Phase 5, built 2026-10-08; P5 §9) The server is stdio only, so Streamable HTTP is not in Phase 5 (P5 D76); it is read-only by default, offers mutating tools with `--mutating` and never a destructive primitive. The tool names and the resources are those of P5 §9.3 and §9.4, which win over the sketch below: the pack's verbs `<domain>_<verb>`, the domain and base primitives and the workflow tools `skillroy_*`, and the resources `skillroy://env/profile`, `skillroy://state/current`, `skillroy://events/recent`, `skillroy://schema/primitives`, `skillroy://schema/scenario` and `skillroy://run/<id>/…`.
 
 - Default namespace: the pack's tool pack `<domain>_*`, a few consolidated workflow tools. In the sample: `lending_env_profile`, `lending_capabilities`, `lending_state`, `lending_snapshot`, `lending_sign_on`, `lending_key`, `lending_scan`, `lending_deposit`, `lending_authorise`, `lending_answer_prompt`, `lending_loan`, `lending_slip`, `lending_wait_for_event`, `lending_check_access`, `lending_waiver_dry_run`, `lending_resolve_*`, `lending_sql_readonly`.
@@ -916,7 +924,7 @@ skillroy-test-java/
   controller/                   # --release 25
     skillroy-controller/  skillroy-data/  skillroy-scenario/  skillroy-inference/  skillroy-cdp/ (optional, D49)
     skillroy-junit/  skillroy-mcp/  skillroy-cli/  skillroy-trace-viewer/
-    skillroy-vision/ (optional, B16, Phase 7)
+    skillroy-vision/ (optional, B16, Phase 7; built 2026-10-10, VM: the vision loop through the session seam, P7 §6)
   samples/
     skillroy-sample-lending-app/ (--release 8)  skillroy-sample-lending-agent/ (--release 8)
     skillroy-sample-lending-pack/ (25)  skillroy-sample-lending-scenarios/ (25)
