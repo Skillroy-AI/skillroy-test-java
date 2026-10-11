@@ -18,6 +18,7 @@ package ai.skillroy.testjava.mcp;
 
 import ai.skillroy.testjava.controller.AgentConnection;
 import ai.skillroy.testjava.scenario.ScenarioException;
+import ai.skillroy.testjava.scenario.StepJournal;
 import ai.skillroy.testjava.scenario.pack.CompileContext;
 import ai.skillroy.testjava.scenario.pack.DomainPack;
 import ai.skillroy.testjava.scenario.pack.FactProvider;
@@ -47,8 +48,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * phase7-contracts.md 9.4 and 13.1 item 8 (the MCP half): a client's raw {@code swing_capture {redact: false}} and
- * {@code {mode: ROBOT}} and {@code swing_pointer {via: ROBOT}} (with {@code --allow-robot} set) are refused, never
- * stripped, with nothing sent; a client's scenario whose base verb or raw call names a credential slot's field its
+ * {@code {mode: ROBOT}}, {@code swing_pointer {via: ROBOT}} (with {@code --allow-robot} set), {@code force} on
+ * {@code swing_pointer}, {@code swing_click} and {@code web_pointer} are refused, never stripped, with nothing sent, and
+ * a raw {@code swing_type} naming {@code $assistant.password} sends nothing (a client's session holds no credential
+ * slot, D94, and the session refuses the reference); a client's scenario whose base verb or raw call names a credential slot's field its
  * fixture does not provide is refused by {@code PlanPolicy} with nothing run, a pass-through pack verb given it too,
  * while {@code signOn {staff: $staff}} (the pack verb's own join) runs; {@code skillroy_catalogue} shows each
  * capability's source; the session's host features follow {@code --vision}; the captures directory is listed only under
@@ -76,6 +79,8 @@ class VisionOverMcpTest {
     void aClientsRawToolNeverCarriesAPersonsArgument() throws Exception {
         try (McpFixture fx = new McpFixture(dir)) {
             fx.desk.agent.describe("swing.pointer", true, false, null);
+            fx.desk.agent.describe("web.pointer", true, false, null);
+            fx.desk.agent.describe("swing.type", true, false, null);
             fx.desk.agent.value("swing.pointer", Map.of("fired", true));
             fx.start(fx.options().mutating(true).robot(true).build());
             List.of(
@@ -83,13 +88,19 @@ class VisionOverMcpTest {
                     Map.entry("swing_capture", args("target", null, "mode", "ROBOT")),
                     Map.entry("swing_pointer", args("action", "CLICK", "via", "ROBOT")),
                     Map.entry("swing_pointer", args("action", "CLICK", "force", true)),
-                    Map.entry("swing_click", args("target", "h12", "force", true))).forEach(call -> {
+                    Map.entry("swing_click", args("target", "h12", "force", true)),
+                    Map.entry("web_pointer", args("action", "CLICK", "x", 5L, "y", 5L, "force", true)))
+                    .forEach(call -> {
                         McpSchema.CallToolResult result = fx.call(call.getKey(), call.getValue());
                         String text = McpFixture.text(result);
                         assertTrue(result.isError(), call + ": " + text);
                         assertTrue(text.contains("refused, nothing was sent"), text);
                     });
-            for (String method : List.of("swing.capture", "swing.pointer", "swing.click")) {
+            McpSchema.CallToolResult typed = fx.call("swing_type", args("text", "$assistant.password"));
+            assertTrue(typed.isError() || McpFixture.text(typed).contains("ERROR"), McpFixture.text(typed));
+            assertFalse(McpFixture.text(typed).contains(Desk.SECRET), "never a value");
+            for (String method : List.of("swing.capture", "swing.pointer", "swing.click", "web.pointer",
+                    "swing.type")) {
                 assertTrue(fx.desk.agent.callsTo(method).isEmpty(), method + " reached the agent");
             }
             assertTrue(fx.server.session().options().robot(), "the person's flag is the session's (for the actor)");
@@ -232,6 +243,12 @@ class VisionOverMcpTest {
             fx.start(fx.options().inference(scripted).vision(Map.of("vision.tier", "v2")).build());
             assertEquals(Set.of("vision-session", "vision-tier:v2"), fx.server.session().options().host(),
                     "the module present (a SessionTools of id vision), a gateway, images on");
+            StepJournal.SessionStart start = (StepJournal.SessionStart) fx.server.session().journal().entries()
+                    .get(0);
+            assertEquals(List.of("vision-session", "vision-tier:v2"), ((List<?>) start.options().get("host"))
+                    .stream().map(String::valueOf).sorted().toList(), "the host features journaled at the start");
+            assertFalse(((List<?>) start.options().get("contributed")).contains("inference.vision"),
+                    "the stand-in is a tool set, not the module's contributor: " + start.options());
         }
         McpFixture fx = new McpFixture(dir.resolve("v3"));
         IllegalArgumentException e = assertThrows(IllegalArgumentException.class, () -> fx.options()

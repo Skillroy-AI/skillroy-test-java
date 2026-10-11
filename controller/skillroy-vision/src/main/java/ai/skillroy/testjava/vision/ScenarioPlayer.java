@@ -37,8 +37,11 @@ import ai.skillroy.testjava.scenario.ScenarioException;
 import ai.skillroy.testjava.scenario.ScenarioLoader;
 import ai.skillroy.testjava.scenario.Status;
 import ai.skillroy.testjava.scenario.StepOutcome;
+import ai.skillroy.testjava.scenario.image.ImageSteps;
 import ai.skillroy.testjava.scenario.resolve.CredentialSpec;
 
+import java.io.IOException;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -100,6 +103,9 @@ public final class ScenarioPlayer {
     private final Origin person;
     private final Person asker;
     private final FixtureBinder fixtures;
+    /** Where the scenario's bindings file is looked for, and in which environment; null root: no baselines. */
+    private Path bindingsRoot;
+    private String envId;
 
     /**
      * @param session the host's open session ({@code live}, with the vision host features)
@@ -126,6 +132,20 @@ public final class ScenarioPlayer {
         this.person = Objects.requireNonNull(person, "person");
         this.asker = asker;
         this.fixtures = fixtures;
+    }
+
+    /**
+     * The bindings root and the environment whose bindings file of the played scenario holds its image baselines and
+     * anchors ({@link ExecutorSession#baselines(Path, String, String)}, handed to every {@code expectImage} and anchored
+     * {@code pointer}); without it a session holds none, so an {@code expectImage} is recorded and skipped and an
+     * anchored step is {@code REBIND_NEEDED}.
+     *
+     * @return this player
+     */
+    public ScenarioPlayer withBaselines(Path root, String env) {
+        this.bindingsRoot = root;
+        this.envId = env;
+        return this;
     }
 
     /**
@@ -157,6 +177,15 @@ public final class ScenarioPlayer {
                         + " cannot bind into a session");
             }
         }
+        ImageSteps.Baselines baselines = ImageSteps.Baselines.none();
+        if (bindingsRoot != null && envId != null) {
+            try {
+                baselines = ExecutorSession.baselines(bindingsRoot, envId, scenario.id());
+            } catch (IOException e) {
+                throw new ScenarioException(sourceName + ": the bindings file's images cannot be read: "
+                        + e.getMessage());
+            }
+        }
         List<StepResult> results = new ArrayList<>();
         try {
             for (Scenario.Slot slot : scenario.slots()) {
@@ -172,8 +201,9 @@ public final class ScenarioPlayer {
             StepResult r = switch (step.verb()) {
                 case "aiAct" -> aiAct(index, step);
                 case "aiExpect" -> aiExpect(index, step);
-                case "expectImage" -> image(index, step, byLine.get(step.line()));
-                case "pointer" -> guarded(byLine.get(step.line())) ? image(index, step, byLine.get(step.line()))
+                case "expectImage" -> image(index, step, byLine.get(step.line()), baselines);
+                case "pointer" -> guarded(byLine.get(step.line())) ? image(index, step, byLine.get(step.line()),
+                        baselines)
                         : deterministic(index, step);
                 default -> deterministic(index, step);
             };
@@ -237,13 +267,13 @@ public final class ScenarioPlayer {
         return false;
     }
 
-    private StepResult image(int index, Scenario.Step step, Plan.Step compiled) throws AgentLostException,
-            InterruptedException {
+    private StepResult image(int index, Scenario.Step step, Plan.Step compiled, ImageSteps.Baselines baselines)
+            throws AgentLostException, InterruptedException {
         if (compiled == null) {
             return new StepResult(index, step.verb(), Status.ERROR, FailureKind.ENVIRONMENT, "the step has no compiled"
                     + " form");
         }
-        StepOutcome o = session.expectImage(compiled, person);
+        StepOutcome o = session.expectImage(compiled, person, baselines);
         return new StepResult(index, step.verb(), o.status(), o.failureKind(), o.message());
     }
 

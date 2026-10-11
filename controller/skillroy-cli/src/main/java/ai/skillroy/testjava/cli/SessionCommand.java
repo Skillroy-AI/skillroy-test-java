@@ -389,7 +389,8 @@ final class SessionCommand implements Command {
         ai.skillroy.testjava.vision.ScenarioPlayer.Person person = terminal.interactive()
                 ? question -> terminal.readLine("the model asks: " + repl.mask(question) + "\nyour answer> ") : null;
         ai.skillroy.testjava.vision.ScenarioPlayer player = new ai.skillroy.testjava.vision.ScenarioPlayer(session,
-                repl.service.service(), visionTools, options, vision.robot(), mask, PERSON, person, null);
+                repl.service.service(), visionTools, options, vision.robot(), mask, PERSON, person, null)
+                .withBaselines(session.options().bind().bindingsRoot(), session.options().bind().envId());
         ai.skillroy.testjava.vision.ScenarioPlayer.Result result;
         try {
             result = player.play(yaml, file.getFileName().toString());
@@ -799,7 +800,9 @@ final class SessionCommand implements Command {
             }
             ExportOptions options;
             try {
-                options = ExportOptions.of(scenarioId).withApprovedBy(approvedBy);
+                // phase7-contracts.md 9.3: an anchored step's PNG is read from the session's captures/.
+                options = ExportOptions.of(scenarioId).withApprovedBy(approvedBy)
+                        .withCaptures(session.options().outputDir());
             } catch (IllegalArgumentException e) {
                 throw new Usage("export: " + e.getMessage());
             }
@@ -815,6 +818,7 @@ final class SessionCommand implements Command {
             Path planFile = exportDir.resolve("plan").resolve(scenarioId + ".plan.json");
             Path bindingsFile = result.bindings() == null ? null
                     : BindingsFile.locate(exportDir.resolve("bindings"), envId, scenarioId);
+            List<Path> images = List.of();
             try {
                 Plan plan = PlanCompiler.compile(yaml, scenarioId + ".yaml", pack);
                 // P2-L8-F3: every exported file is created exclusively, never through what is in its place.
@@ -822,6 +826,7 @@ final class SessionCommand implements Command {
                 plan.write(planFile);
                 if (bindingsFile != null) {
                     result.bindings().write(bindingsFile);
+                    images = writeImages(result, bindingsFile, scenarioId);
                 }
             } catch (ScenarioException e) {
                 return error("export", "the exported scenario does not compile: " + e.getMessage());
@@ -834,6 +839,9 @@ final class SessionCommand implements Command {
             if (bindingsFile != null) {
                 text.append("  ").append(bindingsFile).append('\n');
             }
+            for (Path image : images) {
+                text.append("  ").append(image).append('\n');
+            }
             Map<String, Object> json = new LinkedHashMap<>();
             json.put("scenarioId", scenarioId);
             json.put("steps", (long) result.report().steps());
@@ -841,8 +849,32 @@ final class SessionCommand implements Command {
             json.put("yaml", yamlFile.toString());
             json.put("plan", planFile.toString());
             json.put("bindings", bindingsFile == null ? null : bindingsFile.toString());
+            json.put("images", images.stream().map(Path::toString).toList());
             json.put("report", result.report().text());
             return new Result(json, text.toString(), false);
+        }
+
+        /**
+         * The anchors' PNGs of an export ({@link ExportResult#images()}), each where its bindings entry says
+         * ({@code <scenarioId>.images/<label>.<renderKey>.png} beside the bindings file; phase7-contracts.md 8.7, 9.3),
+         * created exclusively as every exported file is.
+         */
+        private static List<Path> writeImages(ExportResult result, Path bindingsFile, String scenarioId)
+                throws IOException {
+            List<Path> written = new ArrayList<>();
+            for (Map.Entry<String, byte[]> image : result.images().entrySet()) {
+                Map<String, BindingsFile.ImageEntry> byKey = result.bindings().images().get(image.getKey());
+                if (byKey == null || byKey.isEmpty()) {
+                    throw new IOException("the export's image " + image.getKey() + " has no bindings entry");
+                }
+                for (String key : byKey.keySet()) {
+                    Path file = bindingsFile.getParent().resolve(BindingsFile.ImageEntry.fileName(scenarioId,
+                            image.getKey(), key));
+                    OutputFiles.write(file, image.getValue());
+                    written.add(file);
+                }
+            }
+            return written;
         }
 
         /** A step's outcome: one line with the status, then a call's value, then the detail when it did not pass. */

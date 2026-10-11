@@ -46,7 +46,7 @@ import java.util.Set;
  * {@code ExecutorSession} opened with a scripted gateway's settings ({@code images: true}) and the vision host features,
  * a {@code SessionService} with this module's {@link VisionSessionTools} and the scripted model's answers by position.
  */
-final class VisionHarness implements AutoCloseable {
+class VisionHarness implements AutoCloseable {
 
     final FakeVisionAgent agent;
     final ExecutorSession session;

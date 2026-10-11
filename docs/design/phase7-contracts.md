@@ -1292,7 +1292,7 @@ and is a usage error like a widening one (D-VM-5). `ExecutorSession` has no way 
 names `resolve` only, which takes a query kind), so the player takes a `FixtureBinder` from its host and refuses, before
 anything runs, a scenario with a fixture slot when it has none (D-VM-6: proposed `ExecutorSession.fixture(slot, value,
 credential, origin)`, VC's file). An `aiExpect`'s capture is a `swing.capture {scope: SCREEN, mode: PAINT, redact: true,
-annotateRefs: <V1>}` through `ExecutorSession.read` with the marks drawn, its verdict journaled as a note.
+annotateRefs: <V1>}` through `ExecutorSession.read` with the marks drawn, its verdict journaled as a note. The player hands every `expectImage` and anchored `pointer` the scenario's baselines, `ExecutorSession.baselines(root, env, scenarioId)` read once per play, when its host gave a bindings root and an environment (`withBaselines`; D-VC-1); without them a session holds none (an `expectImage` is recorded and skipped, an anchored step `REBIND_NEEDED`).
 
 ---
 ## 7. The gateway changes (`skillroy-inference`, the SPI of P5 §3)
@@ -1869,7 +1869,7 @@ with `--script` and `--play` without a gateway are usage errors before the agent
 `vision v1 (…)` or `vision off (<why>)` (`--vision off`, the module absent, no model gateway, `images: false`, or the
 target's `swing.capture.screen` not `OK`); `--play` runs the player instead of the REPL, prints each step and the
 status, and with `--export <id>` writes the session as `export` does (exit 0 for `PASS` or `DEGRADED`); `mcp --vision`
-prints its line on stderr. The anchors' PNGs beside the export wait for VC's `ExportResult.images()`.
+prints its line on stderr. `export` (and `--play --export`) reads the anchors' PNGs from the session's output directory (`ExportOptions.withCaptures`) and writes each of `ExportResult.images()` where its bindings entry says (`<scenarioId>.images/<label>.<renderKey>.png` beside the bindings file, created exclusively); the player gets the session's bindings root and environment (`ScenarioPlayer.withBaselines`).
 
 **As built (Phase 7, VC):** `run --allow-robot`; the terminal approver of `approve` is wrapped by
 `RunCommand.imageApprover`, which prints `image baseline <label> of <scenario> in <env> for rendering <key>: <w> x <h>
