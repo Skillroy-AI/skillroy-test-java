@@ -89,8 +89,11 @@ import java.util.function.Consumer;
  * task; the accessors ({@code isClosed()}, {@code url()}, {@code viewport()}, {@code rendering()},
  * {@code frames()}) wait at most {@value #ACCESSOR_BOUND_MS} ms and then answer what they know (open, "", unknown,
  * no frames), with at most one such call in flight per accessor (a hung one is waited for, not repeated); detach's
- * vendor calls run on the adapter's threads within detach's bound. Only the registration of the observers and of a
- * chained callback ({@code on(...)}, {@code set(...)}) runs on the calling worker.
+ * vendor calls run on the adapter's threads within detach's bound. The observers are registered ({@code on(...)}, a
+ * round trip to the Chromium process that waits while that process does not answer: JxBrowser kit run against 8.18.3,
+ * gap 47) on the adapter's threads as well, the caller waiting at most {@value #ACCESSOR_BOUND_MS} ms (not at all on the
+ * EDT). Only the chained callback ({@code get(...)}, {@code set(...)}, {@code remove(...)}, which answered at once in
+ * that run, the Chromium process stopped) is registered on the calling worker.
  *
  * <p>Thread-safe. Equality is the identity of the vendor's {@code Browser}.
  */
@@ -134,6 +137,8 @@ final class JxBrowserHandle implements WebBrowser {
     private final AtomicBoolean resumeScheduled = new AtomicBoolean();
     /** The adapter's observer proxy, once made; guarded by {@link #subscriptions}. */
     private Object observerProxy;
+    /** The registration of the adapter's observers, once started (gap 47); guarded by {@link #subscriptions}. */
+    private CompletableFuture<Object> registration;
     /** The console subscription, or null (none, or stopped by the budget); guarded by {@link #subscriptions}. */
     private Object consoleSubscription;
 
@@ -872,45 +877,99 @@ final class JxBrowserHandle implements WebBrowser {
         return s;
     }
 
-    /** Registers the adapter's observers once (load, navigation, document, console, closure). */
+    /**
+     * Registers the adapter's observers once (load, navigation, document, console, closure) on the adapter's threads
+     * (gap 47: {@code on(...)} waits while the Chromium process does not answer) and waits for the registration at
+     * most {@value #ACCESSOR_BOUND_MS} ms, not at all on the EDT; a registration still in flight is waited for again,
+     * never started twice. The observers registered after the wait ended deliver from then on.
+     */
     private void observe() {
+        CompletableFuture<Object> f;
         synchronized (subscriptions) {
-            if (observing || !api.complete("events")) {
+            if (registration == null) {
+                if (!api.complete("events")) {
+                    return;
+                }
+                observing = true;
+                observerProxy = api.implement("observer", new InvocationHandler() {
+                    @Override
+                    public Object invoke(Object proxy, Method method, Object[] args) {
+                        if ("on".equals(method.getName()) && args != null && args.length == 1) {
+                            hand(args[0]);
+                        }
+                        return null;
+                    }
+                });
+                final Object observer = observerProxy;
+                registration = new CompletableFuture<Object>();
+                submit(new Callable<Object>() {
+                    @Override
+                    public Object call() {
+                        register(observer);
+                        return null;
+                    }
+                }, registration);
+            }
+            f = registration;
+        }
+        if (onEdt()) {
+            return;
+        }
+        try {
+            f.get(ACCESSOR_BOUND_MS, TimeUnit.MILLISECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } catch (Exception e) {
+            // not registered in time (the registration goes on), or the adapter was detached
+        }
+    }
+
+    /** The vendor's {@code on(...)} calls of {@link #observe}, on the adapter's threads; each subscription is kept. */
+    private void register(Object observer) {
+        try {
+            if (api.complete("navigation")) {
+                Object navigation = api.invoke("browser.navigation", browser);
+                for (String type : new String[] {"event.frameLoadFinished", "event.frameLoadFailed",
+                        "event.navigationFinished"}) {
+                    if (!keep(api.invoke("navigation.on", navigation, api.type(type), observer), false)) {
+                        return;
+                    }
+                }
+                if (api.complete("initScript") && !keep(api.invoke("navigation.on", navigation,
+                        api.type("event.frameDocumentLoadFinished"), observer), false)) {
+                    return;
+                }
+            }
+            if (api.complete("EVENTS_CONSOLE") && !budget.stopped() && !keep(api.invoke("browser.on", browser,
+                    api.type("event.consoleMessageReceived"), observer), true)) {
                 return;
             }
-            observing = true;
-            Object observer = api.implement("observer", new InvocationHandler() {
-                @Override
-                public Object invoke(Object proxy, Method method, Object[] args) {
-                    if ("on".equals(method.getName()) && args != null && args.length == 1) {
-                        hand(args[0]);
-                    }
-                    return null;
+            keep(api.invoke("browser.on", browser, api.type("event.browserClosed"), observer), false);
+        } catch (ReflectiveException e) {
+            // the events that registered still arrive
+        }
+    }
+
+    /**
+     * Keeps a subscription the vendor answered (as the console's when {@code console}); after {@link #detach} it is
+     * unsubscribed at once instead (a registration that answered late). False when the handle was detached.
+     */
+    private boolean keep(Object subscription, boolean console) {
+        synchronized (subscriptions) {
+            if (!detached) {
+                subscriptions.add(subscription);
+                if (console) {
+                    consoleSubscription = subscription;
                 }
-            });
-            observerProxy = observer;
-            try {
-                if (api.complete("navigation")) {
-                    Object navigation = api.invoke("browser.navigation", browser);
-                    for (String type : new String[] {"event.frameLoadFinished", "event.frameLoadFailed",
-                            "event.navigationFinished"}) {
-                        subscriptions.add(api.invoke("navigation.on", navigation, api.type(type), observer));
-                    }
-                    if (api.complete("initScript")) {
-                        subscriptions.add(api.invoke("navigation.on", navigation,
-                                api.type("event.frameDocumentLoadFinished"), observer));
-                    }
-                }
-                if (api.complete("EVENTS_CONSOLE") && !budget.stopped()) {
-                    consoleSubscription = api.invoke("browser.on", browser,
-                            api.type("event.consoleMessageReceived"), observer);
-                    subscriptions.add(consoleSubscription);
-                }
-                subscriptions.add(api.invoke("browser.on", browser, api.type("event.browserClosed"), observer));
-            } catch (ReflectiveException e) {
-                // the events that registered still arrive
+                return true;
             }
         }
+        try {
+            api.invoke("subscription.unsubscribe", subscription);
+        } catch (ReflectiveException e) {
+            // already gone
+        }
+        return false;
     }
 
     /** One vendor event, on the serial executor (in order). */
@@ -1104,19 +1163,19 @@ final class JxBrowserHandle implements WebBrowser {
         if (closed || detached || !budget.stopped()) {
             return;
         }
+        Object observer;
         synchronized (subscriptions) {
+            budget.resume(System.nanoTime());
             if (!observing || observerProxy == null || consoleSubscription != null) {
-                budget.resume(System.nanoTime());
                 return;
             }
-            budget.resume(System.nanoTime());
-            try {
-                consoleSubscription = api.invoke("browser.on", browser, api.type("event.consoleMessageReceived"),
-                        observerProxy);
-                subscriptions.add(consoleSubscription);
-            } catch (ReflectiveException e) {
-                // console events stay off for this browser
-            }
+            observer = observerProxy;
+        }
+        try {
+            // outside the lock: on(...) waits while the Chromium process does not answer (gap 47)
+            keep(api.invoke("browser.on", browser, api.type("event.consoleMessageReceived"), observer), true);
+        } catch (ReflectiveException e) {
+            // console events stay off for this browser
         }
     }
 
@@ -1422,13 +1481,14 @@ final class JxBrowserHandle implements WebBrowser {
     }
 
     /**
-     * The SPI's pointer input (A66, phase7-contracts.md section 4.5), on the descriptor's {@code INPUT} roles and
-     * unverified against the vendor's library (a licence holder's run settles it, gap 41): the event is built with the
-     * vendor's builders ({@code MousePressed.newBuilder(Point.of(x, y)).button(..).clickCount(..).build()} and its
-     * {@code MouseReleased}, {@code MouseMoved} and {@code MouseWheel} counterparts) and handed to
-     * {@code Browser.dispatch}, on the adapter's threads (the {@code resize} pattern: the caller bounds the wait).
-     * Whether the vendor's {@code Point} is in CSS or device pixels on a HiDPI view is not known. Modifier keys are not
-     * mapped: an event that names one is refused with {@link UnsupportedOperationException}.
+     * The SPI's pointer input (A66, phase7-contracts.md section 4.5), on the descriptor's {@code INPUT} roles, verified
+     * against JxBrowser 8.18.3 by the contract kit (phase4-contracts.md section 4.5, "Against the product"): the event
+     * is built with the vendor's builders ({@code MousePressed.newBuilder(Point.of(x, y)).button(..).clickCount(..)
+     * .build()} and its {@code MouseReleased}, {@code MouseMoved} and {@code MouseWheel} counterparts) and handed to
+     * the {@code Browser.dispatch} overload of its type, on the adapter's threads (the {@code resize} pattern: the
+     * caller bounds the wait). The vendor's {@code Point} is in CSS pixels (also on a HiDPI view), as the SPI's
+     * coordinates are; its wheel deltas have the opposite sign of the DOM's, so the SPI's are negated. Modifier keys
+     * are not mapped: an event that names one is refused with {@link UnsupportedOperationException}.
      */
     @Override
     public CompletableFuture<Void> dispatchPointer(final WebPointerEvent event) {
@@ -1440,21 +1500,38 @@ final class JxBrowserHandle implements WebBrowser {
             return refused;
         }
         if (!event.modifiers().isEmpty()) {
-            return failed(new UnsupportedOperationException("adapter jxbrowser maps no modifier keys for pointer input"
-                    + " (input unverified)"));
+            return failed(new UnsupportedOperationException("adapter jxbrowser maps no modifier keys for pointer"
+                    + " input"));
         }
         CompletableFuture<Void> out = tracked(new CompletableFuture<Void>());
         submit(new Callable<Void>() {
             @Override
             public Void call() throws Exception {
-                api.invoke("browser.dispatch", browser, vendorEvent(event));
+                api.invoke(dispatchRole(event.action()), browser, vendorEvent(event));
                 return null;
             }
         }, out);
         return out;
     }
 
-    /** The vendor's event for an SPI event, through the descriptor's builders. */
+    /** The {@code Browser.dispatch} overload of the vendor's event type for an SPI action. */
+    static String dispatchRole(WebPointerEvent.Action action) {
+        switch (action) {
+            case PRESS:
+                return "browser.dispatchMousePressed";
+            case RELEASE:
+                return "browser.dispatchMouseReleased";
+            case WHEEL:
+                return "browser.dispatchMouseWheel";
+            default:
+                return "browser.dispatchMouseMoved";
+        }
+    }
+
+    /**
+     * The vendor's event for an SPI event, through the descriptor's builders; the wheel's deltas negated (the
+     * product's sign is the opposite of the DOM's, JxBrowser 8.18.3).
+     */
     private Object vendorEvent(WebPointerEvent e) throws ReflectiveException {
         Object point = api.invoke("point.of", null, Integer.valueOf(e.x()), Integer.valueOf(e.y()));
         switch (e.action()) {
@@ -1464,8 +1541,8 @@ final class JxBrowserHandle implements WebBrowser {
                 return pressOrRelease("mouseReleased", point, e);
             case WHEEL: {
                 Object b = api.invoke("mouseWheel.newBuilder", null, point);
-                b = fluent(api.invoke("mouseWheel.deltaX", b, Integer.valueOf(e.deltaX())), b);
-                b = fluent(api.invoke("mouseWheel.deltaY", b, Integer.valueOf(e.deltaY())), b);
+                b = fluent(api.invoke("mouseWheel.deltaX", b, Integer.valueOf(-e.deltaX())), b);
+                b = fluent(api.invoke("mouseWheel.deltaY", b, Integer.valueOf(-e.deltaY())), b);
                 return api.invoke("mouseWheel.build", b);
             }
             default:

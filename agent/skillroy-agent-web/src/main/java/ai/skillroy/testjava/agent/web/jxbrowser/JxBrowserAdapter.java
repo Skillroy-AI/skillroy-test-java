@@ -59,8 +59,9 @@ import java.util.regex.Pattern;
  * (a seed from another loader than the host's is resolved in its own). No vendor artifact is a dependency; no vendor
  * type appears in a signature; {@code EngineOptions.licenseKey()} is never read; no {@code Browser.set(...)} callback
  * is taken unless the agent option {@code web.jxbrowser.chainInjectJs=true} asks for it; {@code dispatch(...)} is used
- * for pointer input only, through the descriptor's {@code INPUT} roles, unverified against the vendor's library
- * (Phase 7; the strategy then ends in {@link #INPUT_UNVERIFIED}).
+ * for pointer input only, through the descriptor's {@code INPUT} roles (Phase 7), verified against line
+ * {@value #INPUT_VERIFIED_LINE} (the contract kit against JxBrowser 8.18.3, 2026-10-11); on another line the strategy
+ * ends in {@link #INPUT_UNVERIFIED}.
  *
  * <p><b>Probe.</b> The gate class {@code com.teamdev.jxbrowser.engine.Engine} must already be loaded by the host
  * ({@link LoadedClasses}, asked without loading it; a gate the host has not loaded counts as absent and nothing is
@@ -90,11 +91,16 @@ public final class JxBrowserAdapter implements WebEngineAdapter {
     /** The adapter id. */
     public static final String ID = "jxbrowser";
     /**
-     * Appended to the strategy when the descriptor's {@code INPUT} roles resolve (phase7-contracts.md section 4.5, W2):
-     * the pointer input is built from the descriptor and unverified against the vendor's library, and whether its
-     * {@code Point} is in CSS or device pixels on a HiDPI view is not known.
+     * Appended to the strategy when the descriptor's {@code INPUT} roles resolve on a line other than
+     * {@link #INPUT_VERIFIED_LINE} (phase7-contracts.md section 4.5, W2, as amended by the JxBrowser kit run against
+     * 8.18.3): the pointer input is built from the descriptor and was verified against that line only.
      */
-    public static final String INPUT_UNVERIFIED = ", input unverified (HiDPI: CSS or device pixels unknown)";
+    public static final String INPUT_UNVERIFIED = ", input unverified on this line (verified on line 8)";
+    /**
+     * The product line whose pointer input the contract kit verified against the product (8.18.3, 2026-10-11:
+     * {@code Point} in CSS pixels, also on a HiDPI view; phase4-contracts.md section 4.5, "Against the product").
+     */
+    public static final int INPUT_VERIFIED_LINE = 8;
     /** The descriptor resource. */
     public static final String DESCRIPTOR = "ai/skillroy/testjava/agent/web/jxbrowser.json";
     static final String NOT_PRESENT = "not present";
@@ -243,10 +249,13 @@ public final class JxBrowserAdapter implements WebEngineAdapter {
         }
         hostApi = r;
         threads.contextLoader(hostLoader);
-        return ProbeResult.ok(strategy(d, r) + (r.complete("INPUT") ? INPUT_UNVERIFIED : ""));
+        String strategy = strategy(d, r);
+        boolean verified = line != null && line.intValue() == INPUT_VERIFIED_LINE;
+        return ProbeResult.ok(strategy + (r.complete("INPUT") && !verified ? INPUT_UNVERIFIED : ""));
     }
 
     private String strategy(Descriptor d, ResolvedApi r) {
+        line = null;
         String version = null;
         Class<?> gate = r.type("engine");
         Package pkg = gate == null ? null : gate.getPackage();
