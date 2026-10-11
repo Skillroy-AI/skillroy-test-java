@@ -87,7 +87,8 @@ class PlansUpToDateTest {
     void theCommittedPlansAreVersion5AndLeaveThePathAtAuto() throws Exception {
         for (Path yaml : committedScenarios()) {
             Plan plan = Plan.read(planFor(yaml));
-            assertEquals(5, plan.planVersion(), plan.scenarioId());
+            assertEquals(6, plan.planVersion(), plan.scenarioId() + ": plan version 6 since Phase 7 (VC's one"
+                    + " regeneration, phase7-contracts.md 8.2)");
             assertEquals(Plan.VERSION, plan.planVersion());
             assertEquals(WebHostPack.ID, plan.pack());
             assertEquals(WebHostPack.VERSION, plan.packVersion());

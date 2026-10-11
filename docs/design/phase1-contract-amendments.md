@@ -198,3 +198,27 @@ last word.
 | A32 | the arguments of the `swing.settle` call | none, sync `NONE` |
 | A21 / A19 (sample) | which key the sample module registers; whether it shows `available()` | a pattern matching `lending.pin`; it keeps the default `available()` |
 | §10 (new checks) | the names of the new negative scenarios | `click-fallback`, `click-strict` (built as `click-fallback-degraded`, `click-strict-fails` and `modal-open-step`, see above) |
+
+## A34 onwards: where the later amendments live (index, Phase 7, built 2026-10-10, VC; P7 §5, D301)
+
+The amendments after A33 change the frozen Phase 1 contract through the later contracts, which carry the full text and
+mark the Phase 1 passages in place; this index only says where each lives, so that the sequence has its second half
+here as well.
+
+| Id | Change | Where it lives |
+|---|---|---|
+| A34 | `secretParams`: the `_meta` field of a call announcing which parameters hold a secret, and the core's replacement rule in logs, traces and error data | `phase2-contracts.md` §11.4, §16.1 |
+| A35 | `web.waitFlag` answers an expression that throws the same way on both paths | `phase4-contracts.md` §16.1 |
+| A36 | a call the CDP path serves reads the agent's sequence once | `phase4-contracts.md` §16.2 |
+| A37 | the web SPI gains `reload` and the bitmap's source as default methods (gap 40) | `phase4-contracts.md` §16.3 |
+| A38 | the re-probe after `window.opened` runs at most once a second (gap 42) | `phase4-contracts.md` §16.4 |
+| A39 | the COMPONENT rung's window activation is re-issued while it waits | `phase1-contracts.md` §6 (marked "4.x, A39") |
+| A40-A60 | the Phase 6 security fixes S35-S62 whose fix changed a contract passage, one id per finding in S order; each passage is marked "(Phase 6, …, A<n>)" in P1, P2, P4 or P5 | `phase6-contracts.md` §12.2 (the list of the pass's dispositions) |
+| A61 | `swing.capture` extended: `by`, `mode: ROBOT`, `scope`, `region`, `scale`, `redact` (default true), `annotateRefs`; the result's geometry, marks, carets, focus, redactions and raster hash; a window painted from its root pane (gap 76) | `phase7-contracts.md` §3.1, §3.4, §3.6; `phase1-contracts.md` §6 |
+| A62 | `swing.type` without a target types at the focus owner; gap 60 stated | `phase7-contracts.md` §3.5; `phase1-contracts.md` §6 |
+| A63 | `swing.hitTest`, `swing.pointer`, `swing.rendering`; the five capability ids; "Modal blocking" per pointer event | `phase7-contracts.md` §3.2-§3.4, §3.8, §3.9; `phase1-contracts.md` §5, §6 |
+| A64 | the SPIs `RegionResolver`, `CaptureMask`, `SurfaceSource`; `LocatorResolver.describe` | `phase7-contracts.md` §3.6, §3.7; `phase1-contracts.md` §4 |
+| A65 | the agent option `robot` | `phase7-contracts.md` §3.4, §3.9; `phase1-contracts.md` §2.4 |
+| A66 | `WebBrowser.dispatchPointer`, `WebPointerEvent`, `WebCapability.INPUT` built; `web.hitTest`, `web.pointer`; the script library's version 2 | `phase7-contracts.md` §4; `phase4-contracts.md` §3, §4 |
+
+From A67 the orchestrator assigns any further id at integration.

@@ -57,24 +57,31 @@ import java.util.regex.Pattern;
  * order, no timestamps, no absolute paths, nothing from an environment), so compiling the same YAML with the same pack
  * version gives byte-identical files.
  *
- * <p>Shape, version 5 (phase2-contracts.md 5, phase3-contracts.md 4, phase4-contracts.md 7.3, phase5-contracts.md
- * 13.2; version 5 has the keys of version 4): {@code planVersion,
+ * <p>Shape, version 6 (phase2-contracts.md 5, phase3-contracts.md 4, phase4-contracts.md 7.3, phase5-contracts.md
+ * 13.2, phase7-contracts.md 8.2; version 6 adds {@code images} and a call's {@code guard} to the keys of version 4 and
+ * 5): {@code planVersion,
  * scenarioId, pack, packVersion, sourceHash, inference, requires, slots, oracles, resolutionGraph, steps[{id, verb,
- * source{line}, calls[{primitive, args, sync, timeoutMs, await?, handlesPrompt?, capture?}], expect[]}], verify,
- * cleanup, launchProperties, artifacts, onPrompt, stepTimeoutMs, ui?, web?, bindTimeoutMs}}. A slot is
+ * source{line}, calls[{primitive, args, sync, timeoutMs, await?, handlesPrompt?, capture?, guard?}], expect[]}],
+ * verify, cleanup, launchProperties, artifacts, onPrompt, stepTimeoutMs, ui?, web?, images?, bindTimeoutMs}}. A slot is
  * {@code fixture} ({@code value}, optional {@code credential}), {@code query} ({@code query, args, strategy?, verify,
  * credential?}) or {@code capture} ({@code step, fields}); an oracle is {@code {name, fn, args, mustEqual?,
  * crossCheck?}}; an element of {@code verify} or of a step's {@code expect} is an {@link Expectation} ({@code path})
- * or a {@link RowCheck} ({@code db}, with {@code aggregates} from version 3). {@code "ui"} is written only when the
+ * or a {@link RowCheck} ({@code db}, with {@code aggregates} from version 3); a step's {@code expect} may also hold
+ * a {@link VisualCheck} ({@code visual}) or an {@link ImageCheck} ({@code image}), both version 6.
+ * {@code "ui"} is written only when the
  * scenario has the key (amendment A29), and so is {@code "web"} ({@code {path, browser?, frozenTargets, trace}},
  * version 4: the web path policy, the default browser, the frozen-target policy and CDP tracing).
  *
- * <p>{@code inference} (phase5-contracts.md 13.2, decision D81) is {@code bind} when a query slot's strategy list
- * holds a token whose strategy needs a model ({@code llm-sql}), and {@code none} otherwise: {@link #inferenceOf}
- * computes it, and the reader requires a version 5 plan to say exactly that. {@code run} is reserved (B16) and refused
- * as "not in this version".
+ * <p>{@code inference} (phase5-contracts.md 13.2, decision D81; phase7-contracts.md 8.2, decision D325) is {@code run}
+ * when a step's verb is {@code aiAct} (a model acts while steps run: {@code replay} reports the plan SKIPPED, every
+ * other mode of {@code PlanExecutor} refuses it), else {@code bind} when a query slot's strategy list holds a token
+ * whose strategy needs a model ({@code llm-sql}), and {@code none} otherwise: {@link #inferenceOf(List, List)}
+ * computes it, and the reader requires a plan to say exactly that. {@code images} (version 6) lists, sorted, the labels
+ * of every {@code expectImage} check and of every anchored {@code pointer} call's guard; absent when empty.
  *
- * <p>The reader accepts versions 1 to 5 (decisions D41, D58, D81). A version 1 plan is read as version 5 with
+ * <p>The reader accepts versions 1 to 6 (decisions D41, D58, D81, D325; a version 5 plan is read as version 6 without
+ * {@code images}, guards, the two Phase 7 checks, the four Phase 7 verbs and {@code inference: run}, which need
+ * version 6). A version 1 plan is read as version 5 with
  * {@code inference: none}, no oracles, an empty graph and {@code bindTimeoutMs} 60000; a version 2 plan is read as
  * version 5 without cross-checks and aggregates (the keys {@code crossCheck} and {@code aggregates} need version 3);
  * a version 3 plan is read as version 5 without {@code web} (the key needs version 4); a version 4 plan is read as
@@ -107,15 +114,18 @@ import java.util.regex.Pattern;
  * @param bindTimeoutMs the bind budget in milliseconds ({@code timeouts.bind}, default 60000)
  * @param web the scenario's {@code web} settings (phase4-contracts.md 7.2), or null when it has none (then
  *     {@link WebSettings#DEFAULT} applies, see {@link #effectiveWeb()}, and {@code plan.json} carries no {@code web})
+ * @param images the labels of the plan's image baselines and anchors, sorted (phase7-contracts.md 8.2); null means
+ *     none
  */
 public record Plan(int planVersion, String scenarioId, String pack, String packVersion, String sourceHash,
                    List<String> requires, List<Slot> slots, List<Step> steps, List<Check> verify,
                    List<Call> cleanup, Map<String, String> launchProperties, List<String> artifacts,
                    Map<String, Object> onPrompt, long stepTimeoutMs, UiSettings ui, String inference,
-                   List<Oracle> oracles, List<String> resolutionGraph, long bindTimeoutMs, WebSettings web) {
+                   List<Oracle> oracles, List<String> resolutionGraph, long bindTimeoutMs, WebSettings web,
+                   List<String> images) {
 
-    /** The plan format version this code writes; it reads 1 to 5 (phase5-contracts.md 13.2). */
-    public static final int VERSION = 5;
+    /** The plan format version this code writes; it reads 1 to 6 (phase7-contracts.md 8.2, decision D325). */
+    public static final int VERSION = 6;
 
     /** {@code inference} of a plan whose bind needs no model (every plan before version 5). */
     public static final String INFERENCE_NONE = "none";
@@ -123,8 +133,15 @@ public record Plan(int planVersion, String scenarioId, String pack, String packV
     /** {@code inference} of a plan whose bind needs a model: a slot names {@code llm-sql} (P5 13.2). */
     public static final String INFERENCE_BIND = "bind";
 
-    /** {@code inference} reserved for a plan whose run needs a model (B16); refused in this version. */
-    static final String INFERENCE_RUN = "run";
+    /**
+     * {@code inference} of a plan whose run needs a model: a step's verb is {@code aiAct} (phase7-contracts.md 8.2,
+     * 8.6): SKIPPED in {@code replay}, refused by {@code PlanExecutor} in every other mode, run by the vision module's
+     * scenario player.
+     */
+    public static final String INFERENCE_RUN = "run";
+
+    /** The verbs a plan below version 6 cannot hold (phase7-contracts.md 8.2). */
+    static final Set<String> PHASE7_VERBS = Set.of("aiAct", "aiExpect", "pointer", "expectImage");
 
     /** The bind budget when {@code timeouts.bind} is absent: 60 s. */
     public static final long DEFAULT_BIND_TIMEOUT_MS = 60_000L;
@@ -141,12 +158,17 @@ public record Plan(int planVersion, String scenarioId, String pack, String packV
     /** Version 4 adds {@code web} (phase4-contracts.md 7.3). */
     private static final Set<String> TOP_KEYS_V4;
 
+    /** Version 6 adds {@code images} (phase7-contracts.md 8.2). */
+    private static final Set<String> TOP_KEYS_V6;
+
     static {
         Set<String> keys = new HashSet<>(TOP_KEYS_V1);
         keys.addAll(List.of("inference", "oracles", "resolutionGraph", "bindTimeoutMs"));
         TOP_KEYS_V2 = Set.copyOf(keys);
         keys.add("web");
         TOP_KEYS_V4 = Set.copyOf(keys);
+        keys.add("images");
+        TOP_KEYS_V6 = Set.copyOf(keys);
     }
 
     private static final Set<String> UI_KEYS = Set.of("clickRung", "strict");
@@ -177,6 +199,18 @@ public record Plan(int planVersion, String scenarioId, String pack, String packV
         if (bindTimeoutMs <= 0) {
             bindTimeoutMs = DEFAULT_BIND_TIMEOUT_MS;
         }
+        images = images == null ? List.of() : List.copyOf(new TreeSet<>(images));
+    }
+
+    /** A plan without image baselines or anchors (the Phase 4-6 shape). */
+    public Plan(int planVersion, String scenarioId, String pack, String packVersion, String sourceHash,
+                List<String> requires, List<Slot> slots, List<Step> steps, List<Check> verify,
+                List<Call> cleanup, Map<String, String> launchProperties, List<String> artifacts,
+                Map<String, Object> onPrompt, long stepTimeoutMs, UiSettings ui, String inference,
+                List<Oracle> oracles, List<String> resolutionGraph, long bindTimeoutMs, WebSettings web) {
+        this(planVersion, scenarioId, pack, packVersion, sourceHash, requires, slots, steps, verify, cleanup,
+                launchProperties, artifacts, onPrompt, stepTimeoutMs, ui, inference, oracles, resolutionGraph,
+                bindTimeoutMs, web, List.of());
     }
 
     /** A plan of a scenario without the {@code web} key (the Phase 3 shape). */
@@ -187,7 +221,7 @@ public record Plan(int planVersion, String scenarioId, String pack, String packV
                 List<Oracle> oracles, List<String> resolutionGraph, long bindTimeoutMs) {
         this(planVersion, scenarioId, pack, packVersion, sourceHash, requires, slots, steps, verify, cleanup,
                 launchProperties, artifacts, onPrompt, stepTimeoutMs, ui, inference, oracles, resolutionGraph,
-                bindTimeoutMs, null);
+                bindTimeoutMs, null, List.of());
     }
 
     /** A plan of a scenario without the {@code ui} key and without query slots or oracles (the Phase 1 shape). */
@@ -439,9 +473,12 @@ public record Plan(int planVersion, String scenarioId, String pack, String packV
      *     {@code CompileContext.markHandlesPrompt})
      * @param capture the slot bound from the event that ended the call's wait, or null; only with sync
      *     {@link Sync#EVENT} or on {@code sync.await}
+     * @param guard the image guard of an anchored {@code swing.pointer} call (phase7-contracts.md 6.7, 8.2, decision
+     *     D357; plan version 6), or null: the executor compares the anchor of the current render key before it sends
+     *     the call
      */
     public record Call(String primitive, Map<String, Object> args, Sync sync, long timeoutMs, AwaitSpec await,
-                       boolean handlesPrompt, CaptureSpec capture) {
+                       boolean handlesPrompt, CaptureSpec capture, Guard guard) {
 
         /**
          * Freezes the args and the await match.
@@ -472,17 +509,31 @@ public record Plan(int planVersion, String scenarioId, String pack, String packV
                 Map<String, Object> match = (Map<String, Object>) freeze(await.match());
                 await = new AwaitSpec(await.topics(), match, await.timeoutMs());
             }
+            if (guard != null && !"swing.pointer".equals(primitive)) {
+                throw new IllegalArgumentException("call " + primitive + ": a guard is allowed on swing.pointer only");
+            }
+        }
+
+        /** A call without a guard (the Phase 2 shape). */
+        public Call(String primitive, Map<String, Object> args, Sync sync, long timeoutMs, AwaitSpec await,
+                    boolean handlesPrompt, CaptureSpec capture) {
+            this(primitive, args, sync, timeoutMs, await, handlesPrompt, capture, null);
         }
 
         /** A call without a capture (the Phase 1 shape). */
         public Call(String primitive, Map<String, Object> args, Sync sync, long timeoutMs, AwaitSpec await,
                     boolean handlesPrompt) {
-            this(primitive, args, sync, timeoutMs, await, handlesPrompt, null);
+            this(primitive, args, sync, timeoutMs, await, handlesPrompt, null, null);
         }
 
         /** A call with any sync but {@link Sync#EVENT}, which needs an {@link AwaitSpec}. */
         public Call(String primitive, Map<String, Object> args, Sync sync, long timeoutMs, boolean handlesPrompt) {
-            this(primitive, args, sync, timeoutMs, null, handlesPrompt, null);
+            this(primitive, args, sync, timeoutMs, null, handlesPrompt, null, null);
+        }
+
+        /** This call with another guard (null: none). */
+        public Call withGuard(Guard newGuard) {
+            return new Call(primitive, args, sync, timeoutMs, await, handlesPrompt, capture, newGuard);
         }
 
         /**
@@ -512,7 +563,30 @@ public record Plan(int planVersion, String scenarioId, String pack, String packV
                 captureJson.put("fields", new LinkedHashMap<>(capture.fields()));
                 json.put("capture", captureJson);
             }
+            if (guard != null) {
+                Map<String, Object> guardJson = new LinkedHashMap<>();
+                guardJson.put("label", guard.label());
+                json.put("guard", guardJson);
+            }
             return json;
+        }
+    }
+
+    /**
+     * The image guard of an anchored {@code pointer} step (phase7-contracts.md 6.7, 8.2, decision D357): the label of
+     * the anchor in the bindings file's {@code images} section. The guard's rectangle is environment data and lives in
+     * the bindings entry of the current render key, never in the plan. {@code plan.json}: {@code "guard": {"label"}}.
+     *
+     * @param label the anchor's label, {@code [A-Za-z0-9][A-Za-z0-9._-]{0,63}}
+     */
+    public record Guard(String label) {
+
+        /** @throws IllegalArgumentException if the label is malformed */
+        public Guard {
+            if (label == null || !ImageCheck.LABEL.matcher(label).matches()) {
+                throw new IllegalArgumentException("a guard label must match [A-Za-z0-9][A-Za-z0-9._-]{0,63}, found "
+                        + label);
+            }
         }
     }
 
@@ -521,9 +595,12 @@ public record Plan(int planVersion, String scenarioId, String pack, String packV
         return web != null ? web : WebSettings.DEFAULT;
     }
 
-    /** True when the plan has a query slot or an oracle: its bind reads or writes a bindings file (8.1). */
+    /**
+     * True when the plan has a query slot, an oracle or an image baseline or anchor ({@code images}, phase7-contracts.md
+     * 8.2, 8.7, decision D355): its bind reads or writes a bindings file (8.1).
+     */
     public boolean needsBindings() {
-        if (!oracles.isEmpty()) {
+        if (!oracles.isEmpty() || !images.isEmpty()) {
             return true;
         }
         for (Slot slot : slots) {
@@ -540,6 +617,23 @@ public record Plan(int planVersion, String scenarioId, String pack, String packV
      * {@link #INFERENCE_NONE}.
      */
     public static String inferenceOf(List<Slot> slots) {
+        return inferenceOf(slots, List.of());
+    }
+
+    /**
+     * The {@code inference} field these slots and steps give (phase7-contracts.md 8.2): {@link #INFERENCE_RUN} when a
+     * step's verb is {@code aiAct}, else {@link #inferenceOf(List)}.
+     */
+    public static String inferenceOf(List<Slot> slots, List<Step> steps) {
+        for (Step step : steps == null ? List.<Step>of() : steps) {
+            if ("aiAct".equals(step.verb())) {
+                return INFERENCE_RUN;
+            }
+        }
+        return slotInference(slots);
+    }
+
+    private static String slotInference(List<Slot> slots) {
         for (Slot slot : slots) {
             if (slot.query() == null) {
                 continue;
@@ -552,6 +646,49 @@ public record Plan(int planVersion, String scenarioId, String pack, String packV
             }
         }
         return INFERENCE_NONE;
+    }
+
+    /**
+     * The image labels these steps name (phase7-contracts.md 8.2): every {@link ImageCheck}'s and every call
+     * {@link Guard}'s label, sorted and without repeats.
+     */
+    public static List<String> imagesOf(List<Step> steps) {
+        Set<String> labels = new TreeSet<>();
+        for (Step step : steps) {
+            for (Call call : step.calls()) {
+                if (call.guard() != null) {
+                    labels.add(call.guard().label());
+                }
+            }
+            for (Check check : step.expect()) {
+                if (check instanceof ImageCheck image) {
+                    labels.add(image.label());
+                }
+            }
+        }
+        return List.copyOf(labels);
+    }
+
+    /** True when a call of the steps or the cleanup carries {@code via: ROBOT} or {@code mode: ROBOT} (P7 9.2). */
+    public boolean usesRobot() {
+        for (Step step : steps) {
+            for (Call call : step.calls()) {
+                if (robot(call)) {
+                    return true;
+                }
+            }
+        }
+        for (Call call : cleanup) {
+            if (robot(call)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Whether one call carries {@code via: ROBOT} (a pointer) or {@code mode: ROBOT} (a capture). */
+    static boolean robot(Call call) {
+        return "ROBOT".equals(call.args().get("via")) || "ROBOT".equals(call.args().get("mode"));
     }
 
     /** The slot with this name, or null. */
@@ -630,6 +767,9 @@ public record Plan(int planVersion, String scenarioId, String pack, String packV
         if (web != null) {
             json.put("web", webJson(web));
         }
+        if (!images.isEmpty()) {
+            json.put("images", images);
+        }
         json.put("bindTimeoutMs", bindTimeoutMs);
         return json;
     }
@@ -689,14 +829,14 @@ public record Plan(int planVersion, String scenarioId, String pack, String packV
 
     /**
      * @throws IOException if the file cannot be read
-     * @throws ScenarioException if it is not a valid plan of version 1 to 5
+     * @throws ScenarioException if it is not a valid plan of version 1 to 6
      */
     public static Plan read(Path file) throws IOException, ScenarioException {
         return parse(Files.readString(file, StandardCharsets.UTF_8));
     }
 
     /**
-     * @throws ScenarioException if the text is not a valid plan of version 1 to 5
+     * @throws ScenarioException if the text is not a valid plan of version 1 to 6
      */
     public static Plan parse(String text) throws ScenarioException {
         Map<String, Object> json;
@@ -715,16 +855,18 @@ public record Plan(int planVersion, String scenarioId, String pack, String packV
      * guard), and, for version 2 and later, that no fixture field key looks secret. Unknown keys are rejected,
      * because a later plan version may need them to run correctly: an oracle's {@code crossCheck} and a {@code db}
      * element's {@code aggregates} need version 3, the top-level {@code web} needs version 4, {@code inference: bind}
-     * and the strategy token {@code llm-sql} need version 5. A version 5 plan's {@code inference} must be what its
-     * slots give ({@link #inferenceOf}); {@code run} and the tokens {@code llm-reason} and {@code llm-vision} are
-     * refused as not in this version.
+     * and the strategy token {@code llm-sql} need version 5; {@code images}, a call's {@code guard}, the checks
+     * {@code visual} and {@code image}, the verbs {@code aiAct}, {@code aiExpect}, {@code pointer} and
+     * {@code expectImage} and {@code inference: run} need version 6. A plan's {@code inference} must be what its slots
+     * and steps give ({@link #inferenceOf(List, List)}) and its {@code images} what its steps name
+     * ({@link #imagesOf}); the tokens {@code llm-reason} and {@code llm-vision} are refused as not in this version.
      *
-     * @throws ScenarioException if a key is missing, unknown or of the wrong type, or the version is not 1 to 5
+     * @throws ScenarioException if a key is missing, unknown or of the wrong type, or the version is not 1 to 6
      */
     public static Plan fromJson(Map<String, Object> json) throws ScenarioException {
         PlanReader r = new PlanReader(json);
         if (!(json.get("planVersion") instanceof Long rawVersion) || rawVersion < 1 || rawVersion > VERSION) {
-            throw r.error("planVersion " + json.get("planVersion") + " is not supported (expected 1, 2, 3, 4 or "
+            throw r.error("planVersion " + json.get("planVersion") + " is not supported (expected 1, 2, 3, 4, 5 or "
                     + VERSION + ")");
         }
         boolean v2OrLater = rawVersion >= 2;
@@ -733,7 +875,11 @@ public record Plan(int planVersion, String scenarioId, String pack, String packV
             if ("web".equals(key) && rawVersion < 4) {
                 throw r.error("'web' needs a version 4 plan");
             }
-            if (!(rawVersion >= 4 ? TOP_KEYS_V4 : v2OrLater ? TOP_KEYS_V2 : TOP_KEYS_V1).contains(key)) {
+            if ("images".equals(key) && rawVersion < 6) {
+                throw r.error("'images' needs a version 6 plan");
+            }
+            if (!(rawVersion >= 6 ? TOP_KEYS_V6 : rawVersion >= 4 ? TOP_KEYS_V4 : v2OrLater ? TOP_KEYS_V2
+                    : TOP_KEYS_V1).contains(key)) {
                 throw r.error("unknown key '" + key + "'" + (v2OrLater ? "" : " in a version 1 plan"));
             }
         }
@@ -745,15 +891,16 @@ public record Plan(int planVersion, String scenarioId, String pack, String packV
         String inference = INFERENCE_NONE;
         if (v2OrLater) {
             inference = r.str(json, "inference");
-            if (INFERENCE_RUN.equals(inference)) {
-                throw r.error("inference 'run' (a model at run time) is not in this version");
+            if (INFERENCE_RUN.equals(inference) && rawVersion < 6) {
+                throw r.error("inference 'run' needs a version 6 plan");
             }
             if (rawVersion < 5 && !INFERENCE_NONE.equals(inference)) {
                 throw r.error("inference '" + inference + "' needs a version 5 plan; a version " + rawVersion
                         + " plan has inference 'none'");
             }
-            if (!INFERENCE_NONE.equals(inference) && !INFERENCE_BIND.equals(inference)) {
-                throw r.error("unknown inference '" + inference + "' (expected none or bind)");
+            if (!INFERENCE_NONE.equals(inference) && !INFERENCE_BIND.equals(inference)
+                    && !INFERENCE_RUN.equals(inference)) {
+                throw r.error("unknown inference '" + inference + "' (expected none, bind or run)");
             }
         }
         List<Slot> slots = new ArrayList<>();
@@ -764,12 +911,6 @@ public record Plan(int planVersion, String scenarioId, String pack, String packV
                 throw r.error("slot '" + slot.name() + "' appears twice");
             }
             slots.add(slot);
-        }
-        if (!inference.equals(inferenceOf(slots))) {
-            throw r.error(INFERENCE_BIND.equals(inference)
-                    ? "inference is 'bind' but no slot names a strategy that needs a model"
-                    : "inference is 'none' but a slot names a strategy that needs a model (llm-sql); such a plan"
-                    + " has inference 'bind'");
         }
         List<Step> steps = new ArrayList<>();
         for (Map<String, Object> s : r.objects(json, "steps")) {
@@ -785,7 +926,35 @@ public record Plan(int planVersion, String scenarioId, String pack, String packV
             if (line < 0 || line > Integer.MAX_VALUE) {
                 throw r.error("'line' must be a line number or 0");
             }
-            steps.add(new Step(r.str(s, "id"), r.str(s, "verb"), (int) line, calls, expect));
+            String verb = r.str(s, "verb");
+            if (PHASE7_VERBS.contains(verb) && rawVersion < 6) {
+                throw r.error("the verb '" + verb + "' needs a version 6 plan");
+            }
+            steps.add(new Step(r.str(s, "id"), verb, (int) line, calls, expect));
+        }
+        String given = inference;
+        String derived = inferenceOf(slots, steps);
+        if (!given.equals(derived)) {
+            throw r.error(switch (given) {
+                case INFERENCE_RUN -> "inference is 'run' but no step's verb is aiAct";
+                case INFERENCE_BIND -> INFERENCE_RUN.equals(derived)
+                        ? "inference is 'bind' but a step's verb is aiAct; such a plan has inference 'run'"
+                        : "inference is 'bind' but no slot names a strategy that needs a model";
+                default -> INFERENCE_RUN.equals(derived)
+                        ? "inference is 'none' but a step's verb is aiAct; such a plan has inference 'run'"
+                        : "inference is 'none' but a slot names a strategy that needs a model (llm-sql); such a"
+                        + " plan has inference 'bind'";
+            });
+        }
+        List<String> images = json.containsKey("images") ? r.strings(json, "images") : List.of();
+        for (String label : images) {
+            if (!ImageCheck.LABEL.matcher(label).matches()) {
+                throw r.error("images: '" + label + "' is not a label ([A-Za-z0-9][A-Za-z0-9._-]{0,63})");
+            }
+        }
+        if (!images.equals(imagesOf(steps))) {
+            throw r.error("'images' must list the labels of the plan's image checks and guards, sorted: expected "
+                    + imagesOf(steps) + ", found " + images);
         }
         List<Check> verify = new ArrayList<>();
         for (Map<String, Object> e : r.objects(json, "verify")) {
@@ -832,7 +1001,7 @@ public record Plan(int planVersion, String scenarioId, String pack, String packV
                 launchProperties, r.strings(json, "artifacts"), r.object(json, "onPrompt"),
                 r.positive(json, "stepTimeoutMs"), json.get("ui") == null ? null : r.ui(r.object(json, "ui")),
                 inference, oracles, graph, bindTimeoutMs, json.containsKey("web") ? r.web(r.object(json, "web"))
-                        : null);
+                        : null, images);
     }
 
     private static Set<String> stepIds(List<Step> steps) {
@@ -913,7 +1082,7 @@ public record Plan(int planVersion, String scenarioId, String pack, String packV
         private static final Set<String> EXPECTATION_KEYS = Set.of("path", "matcher", "capability");
 
         private String id;
-        /** The plan's own version (1 to 5); keys of a later version are refused. */
+        /** The plan's own version (1 to 6); keys of a later version are refused. */
         private int version = VERSION;
 
         /** Errors name the scenario id as soon as the JSON holds one. */
@@ -1176,8 +1345,24 @@ public record Plan(int planVersion, String scenarioId, String pack, String packV
                     throw error("call " + primitive + ": 'capture' needs sync EVENT or sync.await");
                 }
             }
+            Guard guard = null;
+            if (json.get("guard") != null) {
+                if (version < 6) {
+                    throw error("call " + primitive + ": 'guard' needs a version 6 plan");
+                }
+                Map<String, Object> g = object(json, "guard");
+                keys(g, Set.of("label"), "call " + primitive + " guard");
+                if (!"swing.pointer".equals(primitive)) {
+                    throw error("call " + primitive + ": a guard is allowed on swing.pointer only");
+                }
+                try {
+                    guard = new Guard(str(g, "label"));
+                } catch (IllegalArgumentException e) {
+                    throw error("call " + primitive + ": " + e.getMessage());
+                }
+            }
             return new Call(primitive, object(json, "args"), sync, positive(json, "timeoutMs"), await,
-                    Boolean.TRUE.equals(handles), capture);
+                    Boolean.TRUE.equals(handles), capture, guard);
         }
 
         /** A call's {@code await} object: {@code topics}, {@code match} (object or null), {@code timeoutMs}. */
@@ -1258,14 +1443,65 @@ public record Plan(int planVersion, String scenarioId, String pack, String packV
             return new WebSettings(path, browser, policy, WebSettings.DEFAULT.attachDeadline(), trace);
         }
 
-        /** An element of verify or expect: {@code db} makes a row check, {@code path} an expectation. */
+        /**
+         * An element of verify or expect: {@code db} makes a row check, {@code path} an expectation, {@code visual} a
+         * visual check and {@code image} an image check (the last two version 6, phase7-contracts.md 8.4).
+         */
         Check check(Map<String, Object> json) throws ScenarioException {
-            boolean db = json.containsKey("db");
-            boolean path = json.containsKey("path");
-            if (db == path) {
-                throw error("a check needs exactly one of 'path' (an expectation) and 'db' (a stored-row check)");
+            int shapes = (json.containsKey("db") ? 1 : 0) + (json.containsKey("path") ? 1 : 0)
+                    + (json.containsKey("visual") ? 1 : 0) + (json.containsKey("image") ? 1 : 0);
+            if (shapes != 1) {
+                throw error("a check needs exactly one of 'path' (an expectation), 'db' (a stored-row check), 'visual'"
+                        + " (a visual check) and 'image' (an image check)");
             }
-            return db ? rowCheck(json) : expectation(json);
+            if (json.containsKey("visual")) {
+                return visualCheck(json);
+            }
+            if (json.containsKey("image")) {
+                return imageCheck(json);
+            }
+            return json.containsKey("db") ? rowCheck(json) : expectation(json);
+        }
+
+        /** {@code {visual: {question, expect}, capability: "inference.vision"}} (version 6). */
+        VisualCheck visualCheck(Map<String, Object> json) throws ScenarioException {
+            if (version < 6) {
+                throw error("a 'visual' check needs a version 6 plan");
+            }
+            keys(json, Set.of("visual", "capability"), "visual check");
+            Map<String, Object> visual = object(json, "visual");
+            keys(visual, Set.of("question", "expect"), "visual check");
+            try {
+                return new VisualCheck(str(visual, "question"), str(visual, "expect"), str(json, "capability"));
+            } catch (IllegalArgumentException e) {
+                throw error("visual check: " + e.getMessage());
+            }
+        }
+
+        /** {@code {image: {label, masks, maxDiffPixels}}} (version 6). */
+        ImageCheck imageCheck(Map<String, Object> json) throws ScenarioException {
+            if (version < 6) {
+                throw error("an 'image' check needs a version 6 plan");
+            }
+            keys(json, Set.of("image"), "image check");
+            Map<String, Object> image = object(json, "image");
+            keys(image, Set.of("label", "masks", "maxDiffPixels"), "image check");
+            if (!(image.get("masks") instanceof List<?> masks)) {
+                throw error("image check: 'masks' must be an array");
+            }
+            for (Object mask : masks) {
+                String problem = ImageMasks.problem(mask);
+                if (problem != null) {
+                    throw error("image check: " + problem);
+                }
+            }
+            long max = num(image, "maxDiffPixels");
+            try {
+                return new ImageCheck(str(image, "label"), new ArrayList<>(masks), (int) Math.min(max,
+                        Integer.MAX_VALUE));
+            } catch (IllegalArgumentException e) {
+                throw error("image check: " + e.getMessage());
+            }
         }
 
         Expectation expectation(Map<String, Object> json) throws ScenarioException {

@@ -142,4 +142,14 @@ public interface DomainPack {
     default PackSettings settings() {
         return PackSettings.EMPTY;
     }
+
+    /**
+     * A short plain-text legend of the application's icon-only or custom-painted controls, for a model that looks at
+     * the screen (phase7-contracts.md 12.3, 6.2): the vision loop puts it among the system parts, masked like the
+     * session's vocabulary, never inside a {@code <target-ui>} block. Null (the default) means the pack has none.
+     * Nothing of it enters {@code plan.json}.
+     */
+    default String screenLegend() {
+        return null;
+    }
 }

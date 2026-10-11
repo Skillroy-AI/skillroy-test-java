@@ -79,7 +79,7 @@ class Phase5CompileTest {
     void llmSqlIsAcceptedWhenThePackDeclaresAnAllowListAndThePlanSaysBind() throws Exception {
         pack.sqlAllowLists = List.of(TOY_ALLOW_LIST);
         Plan plan = compile(LLM_ITEM);
-        assertEquals(5, plan.planVersion());
+        assertEquals(6, plan.planVersion());
         assertEquals(Plan.INFERENCE_BIND, plan.inference(), "a slot that may need a model: inference bind");
         assertEquals(List.of("sql", "llm-sql"), plan.slot("item").query().strategy());
         String text = plan.toJsonText();
@@ -134,15 +134,18 @@ class Phase5CompileTest {
         String bind = compile(LLM_ITEM).toJsonText();
         String none = compile(LLM_ITEM.replace(", strategy: [sql, llm-sql]", "")).toJsonText();
         assertEquals(bind, Plan.parse(bind).toJsonText());
-        assertEquals("invalid plan: inference 'run' (a model at run time) is not in this version",
+        assertEquals("invalid plan: inference is 'run' but no step's verb is aiAct",
                 reason(bind.replace("\"inference\": \"bind\"", "\"inference\": \"run\"")));
-        assertEquals("invalid plan: unknown inference 'maybe' (expected none or bind)",
+        assertEquals("invalid plan: inference 'run' needs a version 6 plan", reason(bind.replace(
+                "\"inference\": \"bind\"", "\"inference\": \"run\"").replace("\"planVersion\": 6",
+                "\"planVersion\": 5")));
+        assertEquals("invalid plan: unknown inference 'maybe' (expected none, bind or run)",
                 reason(bind.replace("\"inference\": \"bind\"", "\"inference\": \"maybe\"")));
         assertEquals("invalid plan: inference is 'bind' but no slot names a strategy that needs a model",
                 reason(none.replace("\"inference\": \"none\"", "\"inference\": \"bind\"")));
         assertTrue(reason(bind.replace("\"inference\": \"bind\"", "\"inference\": \"none\""))
                 .contains("inference is 'none' but a slot names a strategy that needs a model"));
-        String v4 = bind.replace("\"planVersion\": 5", "\"planVersion\": 4");
+        String v4 = bind.replace("\"planVersion\": 6", "\"planVersion\": 4");
         assertEquals("invalid plan: inference 'bind' needs a version 5 plan; a version 4 plan has inference 'none'",
                 reason(v4));
         assertEquals("invalid plan: slot item: strategy llm-sql needs a version 5 plan",
@@ -151,9 +154,9 @@ class Phase5CompileTest {
             assertEquals("invalid plan: slot item: strategy " + token + " is not in this version",
                     reason(bind.replace("\"llm-sql\"", "\"" + token + "\"")));
         }
-        assertEquals(Plan.parse(none).toJsonText(), Plan.parse(none.replace("\"planVersion\": 5",
-                "\"planVersion\": 4")).toJsonText(), "a version 4 plan is read as version 5");
-        assertTrue(reason(none.replace("\"planVersion\": 5", "\"planVersion\": 6")).contains("not supported"));
+        assertEquals(Plan.parse(none).toJsonText(), Plan.parse(none.replace("\"planVersion\": 6",
+                "\"planVersion\": 4")).toJsonText(), "a version 4 plan is read as version 6");
+        assertTrue(reason(none.replace("\"planVersion\": 6", "\"planVersion\": 7")).contains("not supported"));
     }
 
     private static String reason(String planText) {
@@ -197,7 +200,8 @@ class Phase5CompileTest {
                 "scenario: t\npack: toy\nsteps: []\n".getBytes(StandardCharsets.UTF_8), "t.yaml", shadowing));
         assertTrue(e.reason().contains("declares the verb 'call', which is reserved"), e.reason());
         assertTrue(fails("scenario: t\npack: toy\nsteps:\n  - aiAct: { goal: x }\n").reason()
-                .contains("reserved for a later version"), "the later verbs stay refused as steps");
+                .contains("aiAct: unknown argument 'goal'"), "the Phase 7 verbs are base verbs with their own"
+                + " arguments (phase7-contracts.md 8.1)");
     }
 
     /**

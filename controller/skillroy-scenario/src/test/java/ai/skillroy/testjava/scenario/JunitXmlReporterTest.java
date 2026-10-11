@@ -227,4 +227,22 @@ class JunitXmlReporterTest {
             }
         }
     }
+
+    /**
+     * phase7-contracts.md 8.6 (D328): a run that was not executed is {@code <skipped message="SKIPPED: ..."/>} whatever
+     * the DEGRADED mapping, and counts as skipped.
+     */
+    @Test
+    void aSkippedRunIsSkippedWhateverDegradedAsSays() throws Exception {
+        RunResult skipped = new RunResult("vision-live-only", Status.SKIPPED, null, null,
+                "not executed: the plan needs a model while steps run (inference: run)", Map.of(), List.of(),
+                List.of(), Duration.ZERO);
+        for (RunOptions.DegradedAs mapping : RunOptions.DegradedAs.values()) {
+            String xml = new JunitXmlReporter(mapping).render("suite", List.of(skipped), null);
+            assertTrue(xml.contains("<skipped message=\"SKIPPED: not executed: the plan needs a model while steps run"
+                    + " (inference: run)\"/>"), mapping + ": " + xml);
+            assertTrue(xml.contains("skipped=\"1\"") && xml.contains("failures=\"0\"") && xml.contains(
+                    "errors=\"0\""), mapping + ": " + xml);
+        }
+    }
 }

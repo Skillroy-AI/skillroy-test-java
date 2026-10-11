@@ -69,8 +69,8 @@ class ScenarioSchemaCommittedTest {
     void everyCommittedScenarioIsValidAgainstThePacksSchema() throws Exception {
         Map<String, Object> schema = ScenarioSchema.generate(pack, List.of());
         List<Path> files = everyScenario();
-        assertEquals(18, files.size(), "the seven committed scenarios (scenario E with them) and the eleven negative"
-                + " ones");
+        assertEquals(22, files.size(), "the eleven committed scenarios (scenario E and the four of phase7-contracts.md"
+                + " 12.4 with them) and the eleven negative ones");
         for (Path yaml : files) {
             assertEquals(List.of(), ScenarioSchema.validate(schema, document(yaml)), yaml.getFileName().toString());
         }
@@ -138,8 +138,8 @@ class ScenarioSchemaCommittedTest {
                 used.add(verb);
             }
         }
-        assertEquals(Set.of("authorise", "deposit", "expectPrompt", "key", "quantity", "scan", "signOn"), used,
-                "the lending verbs the sample's scenarios use");
+        assertEquals(Set.of("authorise", "deposit", "expectPrompt", "key", "quantity", "scan", "signOff", "signOn"),
+                used, "the lending verbs the sample's scenarios use");
     }
 
     @Test

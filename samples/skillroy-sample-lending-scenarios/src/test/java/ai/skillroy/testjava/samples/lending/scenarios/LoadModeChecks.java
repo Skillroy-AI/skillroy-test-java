@@ -33,6 +33,8 @@ import ai.skillroy.testjava.protocol.Json;
 import ai.skillroy.testjava.protocol.LoadMode;
 import ai.skillroy.testjava.protocol.RpcResult;
 import ai.skillroy.testjava.protocol.SecretKeys;
+import ai.skillroy.testjava.scenario.BindingsFile;
+import ai.skillroy.testjava.scenario.CapabilityMerge;
 import ai.skillroy.testjava.scenario.FailureKind;
 import ai.skillroy.testjava.scenario.JunitXmlReporter;
 import ai.skillroy.testjava.scenario.RunOptions;
@@ -52,6 +54,7 @@ import org.junit.jupiter.api.TestMethodOrder;
 import javax.imageio.ImageIO;
 import java.awt.GraphicsEnvironment;
 import java.awt.image.BufferedImage;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -69,6 +72,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -109,6 +113,10 @@ import static org.junit.jupiter.api.Assumptions.assumeFalse;
  *   <li>{@link #aModalDialogInTheWayOfAStepFailsItAsAssertion()}: amendment A30;</li>
  *   <li>{@link #theUiScenarioActivatesTheWindowAndClicksAtFullFidelityAfterAPrompt()}: A29 with window
  *       activation;</li>
+ *   <li>{@link #thePhase7SeedAScenariosRunAsDesigned()}: phase7-contracts.md 13.2 item 7 (seed A's part: the number
+ *       pad's sign-on, the visual check DEGRADED, the live-only plan SKIPPED without an agent call);</li>
+ *   <li>{@link #theCapabilitiesRecordCarriesTheAgentsHashAndTheContributedIds()}: phase7-contracts.md 13.2 item 9
+ *       (the run's side; the goldens stay item 1c's);</li>
  *   <li>{@link #junitGlueRunsTheCommittedScenarios()}: the JUnit dynamic-test glue (one dynamic test per committed
  *       scenario, the ledger check and a check of what the glue wrote);</li>
  *   <li>{@link #aSecondAttachReusesTheRunningAgent()}: re-attach, one agent;</li>
@@ -813,6 +821,97 @@ abstract class LoadModeChecks {
         assertSignedOff();
     }
 
+    // ------------------------------------------------------------------ phase7-contracts.md 13.2 items 7 and 9
+
+    /**
+     * Item 7, the seed-A scenarios (phase7-contracts.md 12.4, 13.2 item 7): {@code sign-on-by-number-pad} passes (its
+     * region steps through the number pad, once VS's desk has it: {@link Phase7Pending#NEEDS_DESK});
+     * {@code loan-table-visual-check} is DEGRADED, its visual check skipped with the reason naming
+     * {@code inference.vision} ({@code missing} until the vision module's contributor is on the class path,
+     * {@code UNAVAILABLE (replay)} once it is); {@code vision-live-only} is SKIPPED: its {@code run.jsonl} holds
+     * {@code run-start}, {@code skipped}, {@code ledger {count: 0}} and {@code run-end} and nothing was sent to the
+     * agent. None of the three has a bindings file.
+     */
+    @Test
+    @Order(155)
+    void thePhase7SeedAScenariosRunAsDesigned() throws Exception {
+        if (!Phase7Pending.NEEDS_DESK.contains("sign-on-by-number-pad")) {
+            Runs.Outcome pad = Runs.run(client(), Runs.committed("sign-on-by-number-pad"),
+                    ItEnv.runDir(mode().slug, "sign-on-by-number-pad"));
+            Runs.assertPassedWithoutSleeping(pad);
+            assertEquals(3, Runs.calls(pad.dir(), "swing.pointer").size(), "three region clicks on the pad");
+            assertSignedOff();
+        }
+
+        Runs.Outcome visual = Runs.run(client(), Runs.committed("loan-table-visual-check"),
+                ItEnv.runDir(mode().slug, "loan-table-visual-check"));
+        assertEquals(Status.DEGRADED, visual.result().status(), visual.describe());
+        String state = visionContributor() ? "UNAVAILABLE (replay)" : "missing";
+        assertEquals(1, visual.result().skippedExpectations().size(), visual.describe());
+        String line = visual.result().skippedExpectations().get(0);
+        assertTrue(line.contains("aiExpect") && line.contains("no visual evaluator in this host")
+                && line.endsWith("capability inference.vision is " + state), line);
+        assertEquals(List.of(), visual.result().modelCalls(), "no model call");
+        assertSignedOff();
+
+        Runs.Outcome live = Runs.run(client(), Runs.committed("vision-live-only"),
+                ItEnv.runDir(mode().slug, "vision-live-only"));
+        assertEquals(Status.SKIPPED, live.result().status(), live.describe());
+        assertNull(live.result().failureKind());
+        assertEquals("not executed: the plan needs a model while steps run (inference: run)", live.result().message());
+        assertEquals(List.of(), live.result().steps());
+        List<Map<String, Object>> log = Runs.runLog(live.dir());
+        assertEquals(List.of("run-start", "skipped", "ledger", "run-end"), log.stream().map(r -> r.get("type"))
+                .toList(), "nothing was sent to the agent: no requires, hooks, capabilities or call record");
+        assertEquals(0L, log.get(2).get("count"));
+        assertEquals("SKIPPED", log.get(3).get("status"));
+        for (String id : List.of("sign-on-by-number-pad", "loan-table-visual-check", "vision-live-only")) {
+            for (SampleCredentials.Env env : SampleCredentials.Env.values()) {
+                assertFalse(Files.exists(BindingsFile.locate(ScenarioA.bindingsRoot(),
+                        env.id, id)), id + " has no bindings file");
+            }
+        }
+        assertSignedOff();
+    }
+
+    /**
+     * Item 9, the run's side (phase7-contracts.md 8.5, 13.2 item 9): the {@code capabilities} record of a run holds
+     * {@code agentHash}, the hash of the agent's matrix after step 0b, and {@code contributed}, the ids the controller
+     * contributors on the class path add ({@code inference.gateway} and {@code inference.sql} from VC's step 1,
+     * {@code inference.vision} once the vision module is on it), each {@code UNAVAILABLE (replay)} in the archived
+     * {@code capabilities.json}; {@code hash} is the merged matrix's.
+     */
+    @Test
+    @Order(156)
+    void theCapabilitiesRecordCarriesTheAgentsHashAndTheContributedIds() throws Exception {
+        Path dir = ItEnv.runDir(mode().slug, "loan-table-visual-check");
+        Map<String, Object> record = Runs.runLog(dir).stream().filter(r -> "capabilities".equals(r.get("type")))
+                .findFirst().orElseThrow();
+        CapabilityMatrix agent = client().capabilities();
+        assertEquals(agent.hash(), record.get("agentHash"), "the agent's matrix after step 0b");
+        List<String> contributed = new ArrayList<>(List.of("inference.gateway", "inference.sql"));
+        if (visionContributor()) {
+            contributed.add("inference.vision");
+        }
+        assertEquals(contributed, record.get("contributed"));
+        CapabilityMatrix archived = CapabilityMatrix.fromJson(Json.parseObject(Files.readString(dir.resolve(
+                "capabilities.json"), StandardCharsets.UTF_8)));
+        assertEquals(archived.hash(), record.get("hash"), "the merged matrix is archived and hashed");
+        for (String id : contributed) {
+            assertEquals(CapabilityState.UNAVAILABLE, archived.get(id).state(), id);
+            assertEquals("replay", archived.get(id).reason(), id);
+        }
+        assertEquals(agent.all().keySet(), archived.agentOnly().all().keySet().stream().filter(
+                id -> !contributed.contains(id)).collect(Collectors.toSet()),
+                "the archive is the agent's matrix plus the contributed ids");
+    }
+
+    /** Whether the vision module's capability contributor is on the class path (it lands with VM, step 4). */
+    static boolean visionContributor() {
+        return CapabilityMerge.load(LoadModeChecks.class.getClassLoader())
+                .contributors().stream().anyMatch(c -> "vision".equals(c.id()));
+    }
+
     // ------------------------------------------------------------------ JUnit glue
 
     /**
@@ -828,14 +927,20 @@ abstract class LoadModeChecks {
     Stream<DynamicTest> junitGlueRunsTheCommittedScenarios() {
         RunOptions options = RunOptions.defaults().withOutputDir(ItEnv.runDir(mode().slug, "junit-glue"))
                 .withBind(Runs.bind(SampleCredentials.Env.SEED_A));
-        List<DynamicTest> tests = ScenarioTests.dynamicTests(ScenarioD.withoutScenarioDUntilItHasBindings(
-                ScenarioSource.directory(ItEnv.moduleDir().resolve("scenarios"))), this::client, options).toList();
+        List<DynamicTest> tests = ScenarioTests.dynamicTests(withoutPhase7Pending(
+                ScenarioD.withoutScenarioDUntilItHasBindings(ScenarioSource.directory(ItEnv.moduleDir()
+                        .resolve("scenarios")))), this::client, options).toList();
         List<String> names = tests.stream().map(DynamicTest::getDisplayName).toList();
-        List<String> ids = List.of("basic-loan", "basic-loan-ui", ScenarioB.ID, ScenarioA.ID, ScenarioC.ID,
-                ScenarioE.ID, ScenarioD.ID);
-        assertEquals(ids, names.subList(0, 7).stream().sorted().toList(), String.valueOf(names));
-        assertEquals("skillroy: zero model calls", names.get(7), "the stream ends with the ledger check");
-        assertEquals(8, names.size());
+        List<String> all = new ArrayList<>(List.of("basic-loan", "basic-loan-ui", ScenarioB.ID, ScenarioA.ID,
+                ScenarioC.ID, ScenarioE.ID, ScenarioD.ID, "loan-table-visual-check", "vision-live-only",
+                "sign-on-by-number-pad", "keypad-image"));
+        all.removeIf(Phase7Pending::pending);
+        List<String> ids = all.stream().filter(id -> !id.equals("loan-table-visual-check")
+                && !id.equals("vision-live-only")).toList();
+        assertEquals(all.stream().sorted().toList(), names.subList(0, all.size()).stream().sorted().toList(),
+                String.valueOf(names));
+        assertEquals("skillroy: zero model calls", names.get(all.size()), "the stream ends with the ledger check");
+        assertEquals(all.size() + 1, names.size());
         List<DynamicTest> checked = new ArrayList<>(tests);
         checked.add(DynamicTest.dynamicTest("run.jsonl written by the glue", () -> {
             for (String id : ids) {
@@ -849,9 +954,33 @@ abstract class LoadModeChecks {
             }
             Runs.assertComponentClicksAtFullFidelity(ItEnv.runDir(mode().slug, "junit-glue").resolve("basic-loan-ui"),
                     UI_CLICKS);
+            // phase7-contracts.md 8.6, 13.2 item 7: the visual check DEGRADED (reported as skipped), the live-only plan
+            // SKIPPED (aborted), neither a failure.
+            List<Map<String, Object>> visual = Runs.runLog(ItEnv.runDir(mode().slug, "junit-glue")
+                    .resolve("loan-table-visual-check"));
+            assertEquals("DEGRADED", visual.get(visual.size() - 1).get("status"));
+            List<Map<String, Object>> live = Runs.runLog(ItEnv.runDir(mode().slug, "junit-glue")
+                    .resolve("vision-live-only"));
+            assertEquals("SKIPPED", live.get(live.size() - 1).get("status"));
             assertSignedOff();
         }));
         return checked.stream();
+    }
+
+    /** The glue's source without the scenarios {@link Phase7Pending} holds back until a later integration step. */
+    static ScenarioSource withoutPhase7Pending(ScenarioSource source) {
+        return new ScenarioSource() {
+            @Override
+            public List<Entry> entries() throws IOException {
+                return source.entries().stream().filter(entry -> !Phase7Pending.pending(entry.name()
+                        .replaceFirst("\\.ya?ml$", ""))).toList();
+            }
+
+            @Override
+            public Path scenarioDirectory() {
+                return source.scenarioDirectory();
+            }
+        };
     }
 
     // ------------------------------------------------------------------ re-attach

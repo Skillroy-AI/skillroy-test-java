@@ -1,5 +1,5 @@
 {
-  "planVersion": 5,
+  "planVersion": 6,
   "scenarioId": "return-within-limit-observed",
   "pack": "lending",
   "packVersion": "0.5.0+lending-branch@0.1.0",

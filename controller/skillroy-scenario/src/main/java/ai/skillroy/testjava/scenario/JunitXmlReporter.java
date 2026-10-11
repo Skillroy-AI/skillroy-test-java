@@ -189,8 +189,8 @@ public final class JunitXmlReporter {
                     xml.append("    <error message=\"").append(a(firstLine(message))).append("\" type=\"")
                             .append(kind).append("\">").append(t(body(message, result))).append("</error>\n");
                 }
-                case "skipped" -> xml.append("    <skipped message=\"").append(a(degradedMessage(result)))
-                        .append("\"/>\n");
+                case "skipped" -> xml.append("    <skipped message=\"").append(a(result.status() == Status.SKIPPED
+                        ? skippedMessage(result) : degradedMessage(result))).append("\"/>\n");
                 default -> {
                 }
             }
@@ -210,7 +210,14 @@ public final class JunitXmlReporter {
                 case FAILURE -> "failure";
                 case PASS -> "pass";
             };
+            // phase7-contracts.md 8.6 (D328): a plan not executed by design is skipped whatever degradedAs says.
+            case SKIPPED -> "skipped";
         };
+    }
+
+    /** {@code SKIPPED: <the run's message>} for a run that was not executed (phase7-contracts.md 8.6). */
+    private static String skippedMessage(RunResult result) {
+        return "SKIPPED: " + message(result);
     }
 
     private static String message(RunResult result) {

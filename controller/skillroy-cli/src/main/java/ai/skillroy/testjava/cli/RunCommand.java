@@ -104,6 +104,15 @@ import java.util.function.UnaryOperator;
  * child of the root span {@code skillroy run}), {@code run-start} and the JUnit report carry the trace id,
  * {@code --json} carries {@code telemetry: {exporter, traceId}}, {@code --telemetry file} writes
  * {@code <out>/telemetry/spans.jsonl}, and the summary ends with the {@code telemetry:} line.
+ *
+ * <p>Phase 7 (phase7-contracts.md 8.6, 8.7, 9.3, decisions D328, D332, D355): {@code --allow-robot} sets
+ * {@code RunOptions.robot}, the person's half of the double opt-in for Robot input (without it a plan with
+ * {@code via: ROBOT} or {@code mode: ROBOT} calls is ERROR / ENVIRONMENT before the agent is asked anything). A run
+ * that was not executed by design ({@code SKIPPED}: a plan with {@code inference: run} in {@code replay}) is counted
+ * as {@code skipped} in the summary line and {@code --json}'s summary, carries {@code skippedReason} in its result, and
+ * is no failure for the exit code. In {@code --mode approve} an {@code expectImage} without a baseline for the
+ * target's render key asks at its step: the candidate's path ({@code <out>/<scenario-id>/candidates/image-<label>.png})
+ * and size are printed and the person answers; {@code --yes} approves without asking.
  */
 final class RunCommand implements Command {
 
@@ -112,6 +121,7 @@ final class RunCommand implements Command {
     private static final String SUITE = "--suite";
     private static final String DEGRADED_AS = "--degraded-as";
     private static final String STEP_TIMEOUT = "--step-timeout";
+    private static final String ALLOW_ROBOT = "--allow-robot";
     private static final String DEFAULT_SUITE = "skillroy";
 
     private static final CommandSpec SPEC = new CommandSpec("run", "run scenarios or plans against the agent",
@@ -136,7 +146,12 @@ final class RunCommand implements Command {
             inference.jsonl, the masked record of its model calls. The summary ends with model calls: N and
             model cost: $x (budget $y). An inference setting that cannot be used (--inference claude without the
             key) is exit code 64 before anything runs. --telemetry otlp exports the run's spans over OTLP/HTTP (to a
-            loopback address, or https://), --telemetry file writes <out>/telemetry/spans.jsonl; off by default.""",
+            loopback address, or https://), --telemetry file writes <out>/telemetry/spans.jsonl; off by default.
+            A plan whose steps need a model while they run (aiAct; inference: run) is SKIPPED in replay: counted
+            as skipped, exit code 0; it runs with skillroy session --play. In approve, an expectImage without a
+            baseline for the target's rendering shows its candidate (path and size) and asks (--yes approves).
+            --allow-robot lets steps act through java.awt.Robot (pointer via: ROBOT); the target's agent option
+            robot=true is the other half of that opt-in.""",
             runOptions(), 1, CommandSpec.UNLIMITED);
 
     /** The options of {@code run}, in help order. */
@@ -150,7 +165,9 @@ final class RunCommand implements Command {
                 OptionSpec.value(DEGRADED_AS, "skipped|failure|pass", "how a DEGRADED scenario is reported\n"
                         + "and counted; default skipped: shown as skipped in the\n"
                         + "report, and not a failure for the exit code"),
-                OptionSpec.value(STEP_TIMEOUT, "duration", "override every scenario's step timeout (10s, 2m)")));
+                OptionSpec.value(STEP_TIMEOUT, "duration", "override every scenario's step timeout (10s, 2m)"),
+                OptionSpec.flag(ALLOW_ROBOT, "allow steps that act through java.awt.Robot (pointer via:\n"
+                        + "ROBOT); the target's agent option robot=true is the\nother half of the opt-in")));
         options.addAll(BindArgs.RUN_OPTIONS);
         options.add(InferenceArgs.NO_REUSE_OPTION);
         options.addAll(InferenceArgs.gateway());
@@ -262,7 +279,7 @@ final class RunCommand implements Command {
                         + " used");
             }
             if (approver == null) {
-                approver = BindArgs.terminalApprover(cli, mask);
+                approver = imageApprover(BindArgs.terminalApprover(cli, mask), cli);
             }
             Target target;
             try {
@@ -287,7 +304,7 @@ final class RunCommand implements Command {
                         .withTargetRestarted(restartProbe(target))
                         .withBind(BindArgs.options(bindSettings, credentials, approver, inference,
                                 !args.flag(InferenceArgs.NO_REUSE_BINDINGS)))
-                        .withObserver(observer);
+                        .withObserver(observer).withRobot(args.flag(ALLOW_ROBOT));
                 if (stepTimeoutMs != null) {
                     base = base.withStepTimeout(Duration.ofMillis(stepTimeoutMs));
                 }
@@ -326,7 +343,8 @@ final class RunCommand implements Command {
             results.forEach(r -> counts.merge(r.status(), 1, Integer::sum));
             String summary = results.size() + " scenario" + (results.size() == 1 ? "" : "s") + ": "
                     + counts.get(Status.PASS) + " passed, " + counts.get(Status.DEGRADED) + " degraded, "
-                    + counts.get(Status.FAIL) + " failed, " + counts.get(Status.ERROR) + " errors";
+                    + counts.get(Status.FAIL) + " failed, " + counts.get(Status.ERROR) + " errors, "
+                    + counts.get(Status.SKIPPED) + " skipped";
             int exit = counts.get(Status.FAIL) + counts.get(Status.ERROR) > 0
                     || (degradedAs == RunOptions.DegradedAs.FAILURE && counts.get(Status.DEGRADED) > 0)
                     ? Exit.FAILED : Exit.OK;
@@ -399,6 +417,35 @@ final class RunCommand implements Command {
         return new Loaded(file, compiled.plan(), pack);
     }
 
+    /**
+     * The terminal approver with the image approval of phase7-contracts.md 8.7 (D355): a baseline candidate's path
+     * and size are printed, then the person answers y or n; end of input is n. The bind-time review is the given one.
+     */
+    static Approver imageApprover(Approver bindings, Cli cli) {
+        return new Approver() {
+            @Override
+            public Decision review(ApprovalRequest request) {
+                return bindings.review(request);
+            }
+
+            @Override
+            public Decision reviewImage(ImageApproval request) {
+                cli.out().println("image baseline " + request.label() + " of " + request.scenarioId() + " in "
+                        + request.envId() + " for rendering " + request.renderKey() + ": " + request.width() + " x "
+                        + request.height() + " pixels");
+                cli.out().println("  candidate: " + (request.candidate() == null ? "(not written: the run has no --out)"
+                        : request.candidate().toString()));
+                if (request.existing() != null) {
+                    cli.out().println("  another rendering's baseline: " + request.existing().file());
+                }
+                cli.out().flush();
+                String answer = cli.terminal().readLine("approve the baseline " + request.label() + "? [y/N] ");
+                boolean yes = answer != null && List.of("y", "yes").contains(answer.strip().toLowerCase(Locale.ROOT));
+                return new Decision(yes, null, yes ? null : answer == null ? "end of input" : "answered no");
+            }
+        };
+    }
+
     static RunOptions.DegradedAs degradedAs(String text) throws UsageException {
         if (text == null) {
             return RunOptions.DegradedAs.SKIPPED;
@@ -459,6 +506,8 @@ final class RunCommand implements Command {
             if (!degraded.isEmpty()) {
                 text.append("\n  degraded: ").append(String.join("\n            ", degraded));
             }
+        } else if (result.status() == Status.SKIPPED) {
+            text.append("\n  ").append(result.message());
         } else if (result.status() != Status.PASS) {
             text.append("\n  ").append(result.failureKind());
             if (result.failedStepId() != null) {
@@ -478,7 +527,7 @@ final class RunCommand implements Command {
                 text.append("\n  UI at failure:\n").append(Text.indent(ui.stripTrailing(), "    "));
             }
         }
-        if (dir != null && result.status() != Status.PASS) {
+        if (dir != null && result.status() != Status.PASS && result.status() != Status.SKIPPED) {
             text.append("\n  evidence: ").append(dir);
         }
         return text.toString();
@@ -495,6 +544,11 @@ final class RunCommand implements Command {
         int line = stepLine(result);
         json.put("failedStepLine", line > 0 ? (long) line : null);
         json.put("message", result.message());
+        if (result.status() == Status.SKIPPED) {
+            // phase7-contracts.md 8.6: a run not executed by design (the bind's skipped list below keeps P3 9's
+            // meaning).
+            json.put("skippedReason", result.message());
+        }
         json.put("mode", result.mode() == null ? null : result.mode().label());
         json.put("envId", result.envId());
         json.put("modelCalls", (long) result.modelCalls().size());

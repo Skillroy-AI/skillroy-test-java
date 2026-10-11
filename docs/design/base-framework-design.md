@@ -376,6 +376,13 @@ The primary surface is YAML:
 The deterministic `PlanCompiler` emits **`plan.json`**. In Phase 1 it is `{planVersion, scenarioId, pack, packVersion, sourceHash, requires, slots[], steps[{id, verb, source, calls[{primitive, args, sync, timeoutMs, await?, handlesPrompt?}], expect[]}], verify[], cleanup[], launchProperties, artifacts[], onPrompt, stepTimeoutMs}`; Phase 1.x adds `ui`, and Phase 2 (built 2026-10-02; plan version 2) adds `inference`, `oracles[]`, `resolutionGraph[]` and `bindTimeoutMs`. The same YAML and pack version produce a byte-identical plan (no timestamps, no absolute paths). It is committed beside the YAML and executed verbatim. `$slot` references are resolved at bind time (run start), never at compile time.
 
 Reserved for the vision bolt-on (B16, §3.10; nothing built beyond the plan field itself, which Phase 2 writes as `none` and requires to be `none`): the compiled plan field `inference` with the values `none`, `bind` (a model produced bindings; replayable) and `run` (a model is needed while steps run; such a plan is never executed in `replay` and is reported as skipped); the scenario verbs `aiAct`, `aiExpect`, `pointer` and `expectImage`; and an optional `region` beside `by` in a step locator. Base verbs are a closed set and unknown keys are errors, which is why the names are fixed now.
+**(Phase 7, built 2026-10-10, VC; P7 §8.1, §8.2, §8.6.)** Built: plan version 6 writes `inference: run` for a plan with an
+`aiAct` step, which `replay` reports as `SKIPPED` before the agent is contacted and every other mode of the executor
+refuses (the vision module's scenario player runs it); the four verbs are base verbs (`aiAct` compiles to no call,
+`aiExpect` to a check guarded by `inference.vision` that the executor always skips, `pointer` to `swing.pointer` by
+locator with an optional region, row and image guard, `expectImage` to one redacted capture compared exactly with the
+baseline of the target's render key); `region` is a sibling argument of `by` on `pointer` and `expectImage`, a region id
+resolved by the agent, while `by`'s grammar is unchanged.
 
 A fluent Java DSL is the secondary surface and produces the same plan (not built in Phase 1). Gherkin is deferred: it pays only when non-developers author scenarios (ai-inference §F20).
 
@@ -447,6 +454,9 @@ The earlier rule "no model mid-scenario" now reads "no model mid-scenario in CI"
 
 - *Single-call entry.* The executor gets a public entry for one call: "execute this call with the step protocol, return events and snapshot". It applies the same ack, ready and settle waits, the same prompt policy and the same failure classification as a plan step. The session service (§5), the MCP surface, the authoring planner and the vision loop all use it.
 - *Journal.* Every call made through that entry is journaled with its arguments, sync level, result, events and, where a model chose it, the provenance (intent, model, request id, tokens, cost).
+  **(Phase 7, built 2026-10-10, VC; P7 §9.2, D331.)** The provenance is handed in by the acting call and journaled on the
+  step's own line: (intent, model, request id; the capture's and the hit-test's facts, an anchor's); the cost stays in
+  the ledger, found by the request id.
 - *Export.* The journal exports ordinary scenario steps and bindings for review. The exported scenario compiles to a plan without model calls and replays like any other. That is how interactive work becomes a CI scenario.
 
 **Budget and safety in a session.** A per-session budget stands beside the per-scenario one. Read-only mode is available to a session as to any client. A destructive primitive still needs `confirm: true`, and a model's request is never the confirmation: the person confirms. (Phase 6 security fix S57, built 2026-10-09, SR; D158) This now holds for an MCP client and so for the planner: the MCP server acts under `Origin.Kind.CLIENT` (`skillroy mcp --client <label>`, `planner` for `author`), which never confirms, and a pack verb called by a client or by the session service's model is checked at call time on the calls it compiles to with the real arguments. `ProductionMarker` is unchanged.
@@ -477,6 +487,10 @@ Built in Phase 1.x (2026-10-02): a `MODAL_OPEN` answer to a step's call is `FAIL
 
 A pack's `PromptPolicy` handles known interrupting prompts (a session lock, a housekeeping reminder) deterministically.
 
+
+**(Phase 7, built 2026-10-10, VC; P7 §8.6, D328.)** A fifth status, `SKIPPED`: a plan with `inference: run` in `replay`,
+neither a failure nor a pass (JUnit shows it skipped, the CLI exits 0 for it); no new failure kind. `REBIND_NEEDED` gains
+the reason `IMAGE` (no baseline for the render key, a rejected candidate, an anchor that no longer matches).
 ### 3.6 DomainPack SPI and tenant packs
 
 ```java
@@ -886,6 +900,7 @@ The base defines a contract; a pack supplies the launch recipe for its applicati
 | Run | `mvn -pl <scenarios module> verify -Dskillroy.mode=replay -Dskillroy.env=<envId>` on JDK 25 or newer |
 | Mode | `replay` only; the model API key is absent from CI agents. A plan that needs a model while steps run is not executed and is reported as skipped with that reason (reserved, §3.10). A nightly `re-resolve` job, outside the gate, opens a pull request with the bindings diff (B6) (Phase 5, built 2026-10-08; P5 §8.2): the job writes the files and a report, and the pipeline opens the pull request; `ci/examples/nightly-re-resolve.yml` is the sample workflow |
 | Zero-LLM assertion | the cost ledger must be empty after a replay run, or the run fails |
+| Phase 7 (built 2026-10-10, VC; P7 §8.5, §8.6) | a plan that needs a model while steps run is `SKIPPED` in `replay` (JUnit `<skipped>`, exit 0, the agent not contacted); a guarded visual check reads `inference.vision UNAVAILABLE (replay)` in the merged matrix and is skipped (the run DEGRADED at best); controller-side capabilities are merged into each run's matrix, every one `UNAVAILABLE (replay)` in `replay` |
 | Hooks (Phase 6, built 2026-10-09, CP; P6 §5.3, §6.1, §6.4) | `-Dskillroy.hooks=auto\|on\|off` (the JUnit glue) or `--hooks` (the CLI): `auto`, the default, installs the pack's catalogue when the target's hooks module is loaded, once per target and idempotent by hash; a `replay` run against an armed stub is ERROR / ENVIRONMENT. Every run's directory holds `capabilities.json`, which is what tells a hooks-on run from a hooks-off one |
 | junit.xml | one testcase per scenario, plus one `environment` testcase for handshake, backend and pre-flight failures and a credentials file that cannot be loaded, so an unusable environment is one failure, not one per scenario. (Phase 2 contract, built 2026-10-02: a fingerprint failure is reported per scenario, because bindings files go stale per scenario) |
 | Artifacts (B11) | `run.jsonl`, `agent-events.jsonl`, per-step bundles (snapshot text, PNG, events, state transitions, device output), Playwright `trace.zip`; optional `ffmpeg -f x11grab` video, default off, kept for failed scenarios only. (Phase 6, built 2026-10-09, TL; P6 §10.5) `spans.jsonl` under `<out>/telemetry/` when a run uses `--telemetry file` (the JUnit glue: `-Dskillroy.telemetry=file -Dskillroy.telemetry.out=<dir>`), the trace without a collector |
