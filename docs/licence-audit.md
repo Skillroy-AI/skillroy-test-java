@@ -7,7 +7,9 @@ day the agent home's seventh jar was inspected and the web host scenarios module
 2026-10-09 for Phase 6 (each package updated the sections for its dependencies; the documents pass brought section 1
 and the table of section 3 to the agent home as built, eleven jars), and on 2026-10-10 for Phase 7 (a new controller module,
 `skillroy-vision`, and no new dependency: the module counts of section 2, its row in the table of section 3, the CLI
-distribution's ninth project jar in section 4). Version
+distribution's ninth project jar in section 4), and re-checked on 2026-10-11 for the release checklist's item 4: no
+dependency changed since Phase 7, and each of the reactor's 60 third-party runtime artifacts (`dependency:list`, runtime
+scope) is named here with its version; `DistributionNoticesIT` is green in that day's matrices. Version
 audited: 0.1.0-SNAPSHOT, all 31 reactor modules since Phase 7 (28 in a build without the Maven profile `jcef`; the 3
 web host samples are built only with `-Pjcef`); the spike projects under `spikes/` are not reactor modules and
 distribute nothing.
