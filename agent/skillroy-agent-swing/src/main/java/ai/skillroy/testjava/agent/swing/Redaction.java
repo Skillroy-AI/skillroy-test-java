@@ -88,19 +88,6 @@ final class Redaction {
         return null;
     }
 
-    /** True when the component or one of its ancestors is masked: no text, no value, no mark, no typing. */
-    boolean masked(Component c) {
-        for (Component p = c; p != null; p = p.getParent()) {
-            if (ownRule(p) != null) {
-                return true;
-            }
-            if (p instanceof java.awt.Window) {
-                return false;
-            }
-        }
-        return false;
-    }
-
     /**
      * The rectangles to blank inside a component, in its own coordinates: the masks' {@code regions} when a mask
      * gives some, else the whole component when the component is masked, else none.
@@ -130,11 +117,6 @@ final class Redaction {
             out.add(new Rectangle(0, 0, c.getWidth(), c.getHeight()));
         }
         return out;
-    }
-
-    /** True when some mask is registered (the built-in rule always applies). */
-    boolean anyMask() {
-        return !masks.isEmpty();
     }
 
     private void failed(CaptureMask mask, Throwable t) {

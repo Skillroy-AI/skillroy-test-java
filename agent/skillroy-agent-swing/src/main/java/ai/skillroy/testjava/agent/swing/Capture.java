@@ -573,11 +573,12 @@ final class Capture {
                     }
                 }
             }
+            // the caret is geometry a comparison blanks: reported for a masked field too (P7 13.2 item 1)
+            caret(root, c);
             if (!masked) {
                 if (annotate) {
                     mark(root, c);
                 }
-                caret(root, c);
             } else if (whole || !redact) {
                 return; // nothing below a blanked component is visible, marked or typed into
             }

@@ -330,6 +330,20 @@ at the window's own size (`scale: 1`; a 1024 x 768 capture is 1,039 tokens, BS12
 down only when the long edge exceeds 1920 pixels and never below 0.75 (BS12 RESULT "Failures": icons failed first at
 0.5), `annotateRefs: true` for V1 and false for V2 and V3. Never `mode: ROBOT` (D341).
 
+**As built (Phase 7, VS).** (a) The 4096 cap lowers the effective `scale`; the heap bound refuses
+(`INVALID_PARAMS` with `data.neededMb` and `data.freeMb`) rather than lowering it, as §2.4 and §13.1 item 1 say (D-VS-2).
+(b) The root pane replaces the painted component for a `RootPaneContainer` that is a **window** (`JFrame`, `JDialog`,
+`JWindow`); a `JInternalFrame`, also a `RootPaneContainer`, keeps its own (real, Swing-painted) title bar in a
+`COMPONENT` capture (D-VS-3). (c) A lightweight paint root (a root pane) has the heavyweights below it printed on top at
+their place, since a Swing container's printing does not reach them. (d) The `SCREEN` canvas outside the windows'
+content (decoration bands, gaps between windows) is RGB 64, 64, 64, distinct from the mask grey (D-VS-9); a mark whose
+centre a window higher in the stack covers is left out. (e) Marks: the children of a `JComboBox` and a `JScrollBar`
+(their arrow buttons) carry none, a `JTabbedPane` carries one per tab, a region resolver's regions replace the
+component's own mark, and a label reads `role 'name': text`, one line, at most 120 characters (D-VS-8). (f) `carets` are
+reported for every focused text component without a selection whatever the caret's blink phase, masked or not (the
+rectangle a comparison blanks), widened by 2 pixels either side of `Caret.width` (D-VS-7). (g) For a target in no window
+(the headless tests' trees) `origin` is relative to the topmost ancestor and `window` is absent.
+
 ### 3.2 `swing.hitTest` (A63; read-only; capability `swing.hittest`)
 
 **Decision (D292).** A point to the component under it, with every candidate locator checked to match exactly that
@@ -371,6 +385,13 @@ needs for the focus owner (§6.5).
 **Errors.** `NOT_FOUND` with `data.reason: "outside"` when the point lies in no showing window of the JVM (`SCREEN`) or
 outside the named window or capture; `INVALID_PARAMS` for a malformed point, an unknown space form or capture id;
 `STALE_HANDLE`, `NOT_FOUND`, `AMBIGUOUS` for the target form as for every locator (P1 §6).
+
+**As built (Phase 7, VS).** The target form answers the named component as `target` with `targetKind: "TARGET"`
+(`deepest` and `mouseTarget` at its centre are reported beside it), so that the recorder's description of the focus
+owner is about that component (D-VS-6). `ranked` places `other` above `window` when `other` is owned by `window`, a modal
+dialog over a window that is not modal (or ranked higher among modal dialogs by the stacking order), or the active
+window, and never when `window` is owned by `other`. A `{text, role}` candidate is proposed for a text of at most 100
+characters on one line. The capture geometry a `captureId` names is kept by `RecentCaptures`, the window held weakly.
 
 ### 3.3 `swing.pointer` with `via: ROUTED` (A63; mutating; capability `swing.pointer.routed`)
 
@@ -465,6 +486,14 @@ region or row), `INVALID_PARAMS` (a malformed point, an unknown action or button
 without `DRAG`, `region` or `row` with a point form), `STALE_HANDLE`/`AMBIGUOUS` for the component form,
 `CAPABILITY_UNAVAILABLE` for `swing.pointer.routed` (AWT not started, headless) and for `via: ROBOT` without
 `swing.pointer.robot`.
+
+**As built (Phase 7, VS).** (a) `DOUBLE_CLICK` is two press-release-click triples with click counts 1 and 2, BS10's
+native sequence; `CLICK` with `clickCount: n` is one triple of count n (D-VS-4). (b) `dispatched.sent` counts the events
+whose dispatch **returned**: a press whose handler blocks the EDT or runs a modal dialog's loop is not counted
+(§13.2 item 11's "dispatched 1 of 4"); on an `EDT_BUSY` result `balanced: true` is a promise, kept by the first task the
+EDT runs after the cancellation, since the call cannot wait for a blocked EDT (D-VS-5). (c) The call's
+`AWTEventListener` recognises its own events, retargeted ones included, by a `when` unique to the call; the window
+itself counts as `received` only when it listens (D-VS-18). (d) The per-event modal re-read is skipped under `force`.
 
 ### 3.4 `via: ROBOT` and `mode: ROBOT`: the V3 tier's agent half (A63, A65)
 
@@ -562,6 +591,16 @@ which component owns the focus:
   nothing restores a frame's focus after a modal dialog closes (BS9 K7; BS4); case (c) is then the normal case after a
   dialog, and the person brings the window to the front.
 
+**As built (Phase 7, VS).** (a) The Robot code is `RobotInput` (the only class naming `java.awt.Robot`) behind the
+interfaces `RobotPort` and `RobotFactory`; `RobotFactory.DEFAULT` loads `RobotInput` by name, and `RobotPath` holds the
+logic. (b) The capability probe runs on an agent worker posted from `checkAwt`; in a headless JVM both ids are set
+`UNAVAILABLE("headless")` there and then. (c) The delivery probe moves the pointer one pixel aside first when it already
+sits on the point (a move to where it is produces no native event) and also accepts the `MOUSE_ENTERED` it causes;
+it restores the pointer when it fails (D-VS-11). (d) The press observation waits at most 3 s within the call's
+remaining time (D-VS-10). (e) A glass capture ignores `scale` (user-space size, `scale: 1` reported), refuses a screen
+rectangle over 4096 pixels a side, carries the limitation sentence as `glassNote`, and reports `surfaces` beside
+`windows` (D-VS-14).
+
 ### 3.5 `swing.type` with an omitted target (A62)
 
 `TargetSpec.parse(a, false)`: without `target` and `by` the text goes to `Typing.defaultKeyTarget()`, the rule
@@ -611,6 +650,12 @@ text's width (R-a of map 7), stated in `SECURITY.md`'s limitations (§11). A `RO
 components' screen rectangles after the capture (§3.4). The hit-test's `masked` field uses the same rule (§3.2).
 `redact: false` leaves everything in; who may say so is §9.1 and §11 (a person at the CLI; never a model, never an MCP
 client).
+
+**As built (Phase 7, VS).** A component that lies **inside** a masked component is treated as masked too: no text, no
+value, `masked: true`, no mark, `masked` in the hit-test (its pixels lie inside the blanked rectangle, and a pack that
+masks a container expects its content hidden); the safe side (D-VS-1). A mask's `regions` blank those rectangles whether
+or not `masks` is true, as the Javadoc says; the text rule follows `masks` alone. The rule lives in `Redaction` and is
+memoised per call in `ComponentView.masked`.
 
 ### 3.7 `RegionResolver`, `SurfaceSource`, `LocatorResolver.describe` (A64)
 
@@ -1857,6 +1902,10 @@ row), so the loan table above it shrinks and the snapshot bounds of the earlier 
 committed depends on (the session recordings are made on `HeadlessDesk`, which has no Swing tree, §12.5).
 `LendingUiDisplayTest` gains a test that a press on `key:7` appends `7`.
 
+**As built (Phase 7, VS).** The keypad sits in a panel anchored `NORTH` inside the bottom panel's centre, so that its
+keys keep their 64 px beside the 160 px number pad (the keys' tree paths change; nothing committed depends on them)
+(D-VS-15).
+
 ### 12.2 The agent module (`skillroy-sample-lending-agent`, Java 8; version `0.2.0`)
 
 - `LendingRegions implements RegionResolver`: `supports` a `NumberPad`; `regionAt` the key under the point;
@@ -1884,6 +1933,11 @@ vocabulary (S49) and enters the system parts, never a `<target-ui>` block (§6.2
 (the surface grew); every committed plan's `packVersion` changes with it in the same regeneration as the plan version.
 The same pack change takes gap 49: the `LendableItem` query gains the argument `inductionRequired` (as `ItemsTriggering`
 has), so that a scenario can ask for an item that needs no induction; the committed scenarios are unchanged by it.
+
+**As built (Phase 7, VS).** `inductionRequired` null means either kind of item, so the committed queries keep their
+meaning; a query that names it reads `LENDABLE_ITEM_BY_INDUCTION_SQL` (one more condition) and the verifier checks the
+desk's `inductionRequired`, while a query without it reads exactly the old `LENDABLE_ITEM_SQL`, so the committed
+bindings' evidence is unchanged; the two-argument constructor stays (D-VS-12).
 
 ### 12.4 The Phase 7 scenarios (`skillroy-sample-lending-scenarios/scenarios/`)
 
