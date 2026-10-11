@@ -1,8 +1,8 @@
 {
-  "planVersion": 5,
+  "planVersion": 6,
   "scenarioId": "return-within-limit-observed",
   "pack": "lending",
-  "packVersion": "0.5.0",
+  "packVersion": "0.6.0",
   "sourceHash": "sha256:cfe6531173913da8cf786ba4baae01f795f217f2840a9028080b3f3bf2d89e3e",
   "inference": "none",
   "requires": [

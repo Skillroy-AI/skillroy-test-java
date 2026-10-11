@@ -1,8 +1,8 @@
 {
-  "planVersion": 5,
+  "planVersion": 6,
   "scenarioId": "return-refunds-deposit",
   "pack": "lending",
-  "packVersion": "0.5.0",
+  "packVersion": "0.6.0",
   "sourceHash": "sha256:d561aa696958027cf913693717255b8a4d5bb0f02cf64db8f3c208c178928ff2",
   "inference": "none",
   "requires": [

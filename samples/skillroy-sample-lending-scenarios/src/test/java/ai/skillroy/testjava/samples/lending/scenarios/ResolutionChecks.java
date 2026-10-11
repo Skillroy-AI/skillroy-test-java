@@ -526,6 +526,79 @@ abstract class ResolutionChecks {
         assertSignedOffAndQuiet(-1);
     }
 
+    // ------------------------------------------------------------------ keypad-image (phase7-contracts.md 13.2 item 7)
+
+    /**
+     * phase7-contracts.md 12.4, 13.2 item 7 (this seed's part): {@code keypad-image} replays against the committed
+     * baselines of the target's render key (its bindings file and PNGs per seed, one render key per Java line), PASS
+     * without sleeping, each {@code image} record {@code held}; and against a deliberately changed baseline (one pixel of
+     * the {@code keypad} PNG flipped, its entry's {@code sha256} following it, in a copy of the bindings root) it is
+     * FAIL / ASSERTION with the three files under {@code failure/}. The missing-key case is the executor's unit test.
+     * The bindings files and baselines are committed since step 2b (one baseline per render key and seed).
+     *
+     * <p>{@code -Dskillroy.bindings.update=true} is VC's script for step 2b: before the replay, {@code approve} with
+     * every candidate approved writes this seed's committed bindings file and the PNG of the target's render key
+     * beside the entries already there (one run per Java line adds that line's key), whatever the marker says.
+     */
+    @Test
+    @Order(19)
+    void keypadImageHoldsAgainstItsBaselinesAndAChangedOneFails() throws Exception {
+        boolean update = Boolean.getBoolean("skillroy.bindings.update");
+        Plan plan = Runs.committed("keypad-image");
+        if (update) {
+            Runs.Outcome approved = Runs.run(client(), plan, runDir("keypad-image-approve"), bind(BindMode.APPROVE)
+                    .withApprover(Approver.APPROVE_ALL));
+            assertEquals(Status.PASS, approved.result().status(), approved.describe());
+        }
+        Runs.Outcome held = Runs.run(client(), plan, runDir("keypad-image"), bind(BindMode.REPLAY));
+        Runs.assertPassedWithoutSleeping(held);
+        List<Map<String, Object>> images = Runs.runLog(held.dir()).stream().filter(r -> "image".equals(r.get("type")))
+                .toList();
+        assertEquals(List.of("keypad", "keypad-frame"), images.stream().map(r -> r.get("label")).toList());
+        assertTrue(images.stream().allMatch(r -> "held".equals(r.get("result"))), String.valueOf(images));
+
+        Path root = ItEnv.runDir("resolution", slug() + "/keypad-changed-root");
+        deleteTree(root);
+        Path envDir = root.resolve(env().id);
+        Files.createDirectories(envDir.resolve("keypad-image.images"));
+        Path committed = BindingsFile.locate(ScenarioA.bindingsRoot(), env().id, "keypad-image");
+        BindingsFile file = BindingsFile.read(committed);
+        Map<String, Map<String, BindingsFile.ImageEntry>> changed = new java.util.TreeMap<>();
+        for (Map.Entry<String, Map<String, BindingsFile.ImageEntry>> label : file.images().entrySet()) {
+            Map<String, BindingsFile.ImageEntry> byKey = new java.util.TreeMap<>();
+            for (Map.Entry<String, BindingsFile.ImageEntry> key : label.getValue().entrySet()) {
+                Path png = committed.getParent().resolve(key.getValue().file());
+                java.awt.image.BufferedImage raster = ai.skillroy.testjava.scenario.image.ImageCompare.decodePng(
+                        Files.readAllBytes(png));
+                BindingsFile.ImageEntry entry = key.getValue();
+                if (label.getKey().equals("keypad")) {
+                    int x = raster.getWidth() / 2;
+                    int y = raster.getHeight() / 2;
+                    raster.setRGB(x, y, raster.getRGB(x, y) ^ 0x00FFFFFF);
+                    entry = new BindingsFile.ImageEntry(ai.skillroy.testjava.scenario.image.ImageCompare.rasterHash(
+                            raster), entry.width(), entry.height(), entry.masks(), entry.carets(), entry.focus(),
+                            entry.file(), entry.rendering(), entry.window(), entry.anchor());
+                }
+                Files.write(envDir.resolve(entry.file()), ai.skillroy.testjava.scenario.image.ImageCompare.encodePng(
+                        raster));
+                byKey.put(key.getKey(), entry);
+            }
+            changed.put(label.getKey(), byKey);
+        }
+        Files.writeString(BindingsFile.locate(root, env().id, "keypad-image"), file.withImages(changed).toJsonText(),
+                StandardCharsets.UTF_8);
+        Runs.Outcome failed = Runs.run(client(), plan, runDir("keypad-image-changed"), bind(BindMode.REPLAY)
+                .withBindingsRoot(root));
+        assertEquals(Status.FAIL, failed.result().status(), failed.describe());
+        assertEquals(FailureKind.ASSERTION, failed.result().failureKind());
+        assertEquals("s1", failed.result().failedStepId());
+        for (String suffix : List.of("expected", "actual", "diff")) {
+            assertTrue(Files.isRegularFile(failed.dir().resolve("failure/image-keypad-" + suffix + ".png")), suffix);
+        }
+        assertEquals(1L, failed.result().detail().get("differing"), "one pixel differs");
+        assertSignedOffAndQuiet(-1);
+    }
+
     // ------------------------------------------------------------------ scenario B (phase3-contracts.md 11.2)
 
     /** The desk's business date, as {@code app.state} reports it: the date its waiver rules are evaluated on. */

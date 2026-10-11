@@ -1,0 +1,18 @@
+# A vision-driven loan (phase7-contracts.md 12.4): the person signs on, then "aiAct" hands the desk to a model that
+# looks at the screen. Its plan's inference is "run" (a model while steps run), so a plan run never executes it:
+# replay reports it SKIPPED (neither a failure nor a pass; JUnit shows it skipped, the CLI exits 0) before the agent is
+# contacted, and the other modes refuse it. It runs live with skillroy session --play, whose export is the
+# deterministic scenario a CI run replays.
+# Seed A fixtures: assistant 100 (its password comes from credentials.yaml).
+scenario: vision-live-only
+pack: lending
+tags: [live, vision]
+launchProperties: { lending.seed: A }
+resolve:
+  assistant: { fixture: { code: "100" }, credential: { realm: staff, key: code } }
+steps:
+  - signOn: { staff: $assistant }
+  - aiAct: { intent: "lend one plain item to the walk-in borrower and settle the deposit" }
+  - expect: { "state.name": IDLE }
+on_prompt: { unexpected: fail }
+timeouts: { step: 30s }

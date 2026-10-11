@@ -32,9 +32,12 @@ package ai.skillroy.testjava.scenario;
  *     {@code session-start} lists under {@code reads}) as a {@code call} step too; false (the default) leaves such a
  *     call out and lists it in the report: a read is an observation, not a step (a read that captures a slot is always
  *     exported, since later steps may refer to the capture)
+ * @param captures the session's output directory, where {@code captures/<sha256>.png} lie (phase7-contracts.md 6.6,
+ *     9.6): an anchored step's PNG is read from there for {@link ExportResult#images()}; null when the session kept
+ *     none (an anchored step then cannot be exported)
  */
 public record ExportOptions(String scenarioId, boolean includeFailed, String approvedBy, String description,
-                            boolean includeReads) {
+                            boolean includeReads, java.nio.file.Path captures) {
 
     /**
      * @throws IllegalArgumentException if the id is not {@code [a-z0-9-]+} or the approver label is blank
@@ -55,31 +58,46 @@ public record ExportOptions(String scenarioId, boolean includeFailed, String app
      * @throws IllegalArgumentException as the canonical constructor
      */
     public ExportOptions(String scenarioId, boolean includeFailed, String approvedBy, String description) {
-        this(scenarioId, includeFailed, approvedBy, description, false);
+        this(scenarioId, includeFailed, approvedBy, description, false, null);
+    }
+
+    /**
+     * The options before {@code captures} (phase7-contracts.md 6.6): no captures directory.
+     *
+     * @throws IllegalArgumentException as the canonical constructor
+     */
+    public ExportOptions(String scenarioId, boolean includeFailed, String approvedBy, String description,
+                         boolean includeReads) {
+        this(scenarioId, includeFailed, approvedBy, description, includeReads, null);
     }
 
     /** Options exporting the passed steps as {@code scenarioId}, tier (b) slots {@code REQUIRED}, reads left out. */
     public static ExportOptions of(String scenarioId) {
-        return new ExportOptions(scenarioId, false, null, null, false);
+        return new ExportOptions(scenarioId, false, null, null, false, null);
     }
 
     /** A copy that does or does not include the steps up to the first failure. */
     public ExportOptions withIncludeFailed(boolean on) {
-        return new ExportOptions(scenarioId, on, approvedBy, description, includeReads);
+        return new ExportOptions(scenarioId, on, approvedBy, description, includeReads, captures);
     }
 
     /** A copy with this approver label (null: tier (b) slots {@code REQUIRED}). */
     public ExportOptions withApprovedBy(String label) {
-        return new ExportOptions(scenarioId, includeFailed, label, description, includeReads);
+        return new ExportOptions(scenarioId, includeFailed, label, description, includeReads, captures);
     }
 
     /** A copy with this description. */
     public ExportOptions withDescription(String text) {
-        return new ExportOptions(scenarioId, includeFailed, approvedBy, text, includeReads);
+        return new ExportOptions(scenarioId, includeFailed, approvedBy, text, includeReads, captures);
     }
 
     /** A copy that does or does not export the raw calls of primitives that change nothing. */
     public ExportOptions withIncludeReads(boolean on) {
-        return new ExportOptions(scenarioId, includeFailed, approvedBy, description, on);
+        return new ExportOptions(scenarioId, includeFailed, approvedBy, description, on, captures);
+    }
+
+    /** A copy that reads anchors' PNGs from this session output directory (null: none). */
+    public ExportOptions withCaptures(java.nio.file.Path dir) {
+        return new ExportOptions(scenarioId, includeFailed, approvedBy, description, includeReads, dir);
     }
 }

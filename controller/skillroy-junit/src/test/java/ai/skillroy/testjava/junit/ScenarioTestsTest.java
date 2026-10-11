@@ -305,4 +305,60 @@ class ScenarioTestsTest {
         assertEquals(List.of(AssertionFailedError.class, ScenarioRunException.class, ScenarioException.class),
                 summary.getFailures().stream().map(f -> (Class<?>) f.getException().getClass()).toList());
     }
+
+    /**
+     * phase7-contracts.md 8.6, 13.1 item 6 (D328): a plan with {@code inference: run} in {@code replay} is SKIPPED and
+     * the glue aborts it (shown as skipped) whatever {@code degradedAs} says; the agent is asked nothing.
+     */
+    @Test
+    void aSkippedRunAbortsWhateverDegradedAsSays(@TempDir Path dir) throws Throwable {
+        Files.writeString(dir.resolve("live.yaml"), "scenario: live-only\npack: mini\nsteps:\n"
+                + "  - aiAct: { intent: \"lend one item\" }\n");
+        for (RunOptions.DegradedAs mapping : RunOptions.DegradedAs.values()) {
+            List<DynamicTest> tests = ScenarioTests.dynamicTests(ScenarioSource.directory(dir), () -> agent,
+                    RunOptions.defaults().withDegradedAs(mapping), new MiniPack()).toList();
+            TestAbortedException aborted = assertThrows(TestAbortedException.class,
+                    () -> tests.get(0).getExecutable().execute(), mapping.name());
+            assertTrue(aborted.getMessage().contains("live-only SKIPPED: not executed: the plan needs a model while"
+                    + " steps run (inference: run)"), aborted.getMessage());
+        }
+    }
+
+    /**
+     * phase7-contracts.md 9.3, 13.1 item 6 (D332, D339): {@code skillroy.robot=true} sets the controller half of the
+     * Robot opt-in and the glue prints one warning line naming both halves; any other value is the environment
+     * failure; without it no warning.
+     */
+    @Test
+    void theRobotPropertyIsReadAndWarnedAbout(@TempDir Path dir) throws Exception {
+        Files.writeString(dir.resolve("a.yaml"), "scenario: a\npack: mini\nsteps: []\n");
+        java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+        java.io.PrintStream before = ScenarioTests.warnings;
+        String property = System.getProperty(ScenarioTests.ROBOT_PROPERTY);
+        try {
+            ScenarioTests.warnings = new java.io.PrintStream(out, true, StandardCharsets.UTF_8);
+            System.clearProperty(ScenarioTests.ROBOT_PROPERTY);
+            assertFalse(ScenarioTests.robotFromSystemProperties());
+            ScenarioTests.dynamicTests(ScenarioSource.directory(dir), () -> agent, RunOptions.defaults(),
+                    new MiniPack()).toList();
+            assertEquals("", out.toString(StandardCharsets.UTF_8), "no warning without the opt-in");
+            System.setProperty(ScenarioTests.ROBOT_PROPERTY, "true");
+            assertTrue(ScenarioTests.robotFromSystemProperties());
+            ScenarioTests.dynamicTests(ScenarioSource.directory(dir), () -> agent, RunOptions.defaults()
+                    .withRobot(true), new MiniPack()).toList();
+            String warning = out.toString(StandardCharsets.UTF_8);
+            assertEquals(1, warning.lines().count(), warning);
+            assertTrue(warning.contains("skillroy.robot=true") && warning.contains("agent option robot=true")
+                    && warning.contains("Do not commit either"), warning);
+            System.setProperty(ScenarioTests.ROBOT_PROPERTY, "maybe");
+            assertThrows(IllegalArgumentException.class, ScenarioTests::robotFromSystemProperties);
+        } finally {
+            ScenarioTests.warnings = before;
+            if (property == null) {
+                System.clearProperty(ScenarioTests.ROBOT_PROPERTY);
+            } else {
+                System.setProperty(ScenarioTests.ROBOT_PROPERTY, property);
+            }
+        }
+    }
 }

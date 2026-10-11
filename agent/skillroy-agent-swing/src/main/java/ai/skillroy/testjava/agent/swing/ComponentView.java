@@ -23,6 +23,7 @@ import java.awt.Component;
 import java.awt.Point;
 import java.awt.Rectangle;
 import java.awt.Window;
+import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -30,8 +31,12 @@ import javax.accessibility.AccessibleContext;
 
 /**
  * Turns live components into the JSON shapes of the contract (Node, window entry) and applies the name and id rules. One
- * instance serves one primitive call: it takes the registered {@link NameEnricher}s at construction, so modules that
- * register later are seen by the next call.
+ * instance serves one primitive call: it takes the registered {@link NameEnricher}s and {@code CaptureMask}s at
+ * construction, so modules that register later are seen by the next call.
+ *
+ * <p>The masked-text rule (phase7-contracts.md section 3.6, D349): a component {@link Redaction} names (or one inside
+ * it) has no {@code text} and no {@code value} in a node, and its node carries {@code masked: true}; the role is
+ * unchanged.
  *
  * <p>Must be used on the EDT. Not thread-safe; never shared between calls.
  */
@@ -42,16 +47,42 @@ final class ComponentView {
 
     private final AgentContext ctx;
     private final List<NameEnricher> enrichers;
+    private final Redaction redaction;
+    private final Map<Component, Boolean> maskedCache = new IdentityHashMap<Component, Boolean>();
     private boolean enricherFailureLogged;
     private boolean readFailureLogged;
 
     ComponentView(AgentContext ctx) {
         this.ctx = ctx;
         this.enrichers = ctx.spi().all(NameEnricher.class);
+        this.redaction = new Redaction(ctx);
     }
 
     AgentContext context() {
         return ctx;
+    }
+
+    /** The call's redaction rule (the built-in rule and the registered masks). */
+    Redaction redaction() {
+        return redaction;
+    }
+
+    /**
+     * True when the component or one of its ancestors is masked (phase7-contracts.md section 3.6); memoised for the
+     * call, so a tree walk asks each mask once per component.
+     */
+    boolean masked(Component c) {
+        if (c == null) {
+            return false;
+        }
+        Boolean known = maskedCache.get(c);
+        if (known != null) {
+            return known.booleanValue();
+        }
+        boolean m = redaction.ownRule(c) != null
+                || (!(c instanceof Window) && c.getParent() != null && masked(c.getParent()));
+        maskedCache.put(c, Boolean.valueOf(m));
+        return m;
     }
 
     /** The component's stable ref. */
@@ -89,6 +120,24 @@ final class ComponentView {
         return null;
     }
 
+    /** The first non-empty {@link NameEnricher} name of the component, or null (the marks rule's custom components). */
+    String enrichedName(Component c) {
+        for (NameEnricher enricher : enrichers) {
+            try {
+                String n = enricher.nameFor(c);
+                if (n != null && !n.isEmpty()) {
+                    return n;
+                }
+            } catch (Throwable t) {
+                if (!enricherFailureLogged) {
+                    enricherFailureLogged = true;
+                    ctx.log().warn("swing: NameEnricher " + enricher.getClass().getName() + " failed: " + t, t);
+                }
+            }
+        }
+        return null;
+    }
+
     /**
      * The id rule: the component's explicitly set {@code Component.getName()}, or null when it has none. AWT makes up
      * a name ({@code frame0}, {@code dialog3}, ...) for a heavyweight component that was never named; such a name is
@@ -119,8 +168,9 @@ final class ComponentView {
         if (id != null) {
             m.put("id", id);
         }
+        boolean masked = masked(c);
         m.put("name", name(c));
-        m.put("text", text(c));
+        m.put("text", masked ? null : text(c));
         m.put("enabled", Boolean.valueOf(c.isEnabled()));
         m.put("visible", Boolean.valueOf(c.isVisible()));
         m.put("showing", Boolean.valueOf(c.isShowing()));
@@ -131,21 +181,28 @@ final class ComponentView {
             if (selected != null) {
                 m.put("selected", selected);
             }
-            Object value = ComponentText.value(c);
+            Object value = masked ? null : ComponentText.value(c);
             if (value != null) {
                 m.put("value", value);
             }
         } catch (RuntimeException e) {
             readFailed(c, e);
         }
+        if (masked) {
+            m.put("masked", Boolean.TRUE);
+        }
         return m;
     }
 
     /**
-     * The component's visible text ({@link ComponentText#text}); null if the component's own code (a custom model or
-     * document) throws, so that one broken widget does not fail the whole snapshot or search.
+     * The component's visible text ({@link ComponentText#text}); null for a masked component (D349), and null if the
+     * component's own code (a custom model or document) throws, so that one broken widget does not fail the whole
+     * snapshot or search.
      */
     String text(Component c) {
+        if (masked(c)) {
+            return null;
+        }
         try {
             return ComponentText.text(c);
         } catch (RuntimeException e) {

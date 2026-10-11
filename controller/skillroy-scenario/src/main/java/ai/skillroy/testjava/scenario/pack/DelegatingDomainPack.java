@@ -161,6 +161,11 @@ public abstract class DelegatingDomainPack implements DomainPack {
     }
 
     @Override
+    public String screenLegend() {
+        return base.screenLegend();
+    }
+
+    @Override
     public String toString() {
         return getClass().getSimpleName() + "[" + version() + "]";
     }

@@ -1,0 +1,31 @@
+# The basic loan with a visual check (phase7-contracts.md 12.4): after the two scans a question about the screen,
+# "aiExpect", always guarded by inference.vision. A plan run (CI's replay included) has no visual evaluator: the
+# check is skipped with the capability's state as the reason and the run is DEGRADED at best, never red for it; the
+# vision module's scenario player (skillroy session --play) asks a model and holds or fails it.
+# Seed A fixtures: assistant 100 (its password comes from credentials.yaml); YRD-001 at 3.50, in no active waiver
+# rule.
+scenario: loan-table-visual-check
+pack: lending
+tags: [vision]
+requires: [lending.input, lending.state, lending.loan, lending.slip]
+launchProperties: { lending.seed: A }
+resolve:
+  assistant: { fixture: { code: "100" }, credential: { realm: staff, key: code } }
+  item:      { fixture: { code: YRD-001, barcode: "5000000000017", deposit: "3.50" } }
+steps:
+  - signOn: { staff: $assistant }
+  - expect: { "state.name": IDLE, "state.staff.code": $assistant.code }
+  - scan: { item: $item, times: 2 }
+  - expect:
+      "loan.lines[code=$item.code].qty": 2
+      "loan.total": "7.00"
+  - aiExpect: { question: "the loan table shows one line for the scanned item, with a quantity of 2" }
+  - key: { action: DUE }
+  - expect: { "state.name": DEPOSIT }
+  - deposit: { amount: "10.00" }
+verify:
+  - { "state.name": IDLE }
+  - { "loan.total": "7.00" }
+  - { "loan.change": "3.00" }
+on_prompt: { unexpected: fail }
+timeouts: { step: 30s }

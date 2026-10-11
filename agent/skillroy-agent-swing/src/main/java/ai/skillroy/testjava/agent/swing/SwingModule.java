@@ -29,6 +29,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Properties;
 import java.util.function.BooleanSupplier;
 
@@ -58,6 +59,12 @@ import java.util.function.BooleanSupplier;
  *       no tap; otherwise they become OK and the AWT window tap is added, which reports the windows already showing.
  *       </li>
  * </ul>
+ * Phase 7 (phase7-contracts.md section 3.9): {@code swing.hittest}, {@code swing.pointer.routed} and
+ * {@code swing.capture.screen} follow AWT's state as the display capabilities above do. {@code swing.pointer.robot} and
+ * {@code swing.capture.robot} are UNAVAILABLE("robot: not enabled (agent option robot=true)") without the agent option
+ * {@code robot} (read from {@code ctx.options()}, never through the live fallback of {@code ctx.option}) and are never
+ * probed then; with it they wait as the display capabilities do and are declared, once AWT is confirmed, by one probe on
+ * an agent worker that constructs the Robot and moves nothing ({@link RobotPath#declare}).
  * {@code swing.click.robot} is always UNAVAILABLE("opt-in rung, not implemented"). The check runs at install, at
  * {@code onTargetReady} and on every tick of the watcher thread, so a {@code swing.*} call made within a quarter of a
  * second of the application starting AWT can still be rejected with the "not started" reason.
@@ -82,6 +89,18 @@ public final class SwingModule implements AgentModule {
     public static final String CAP_CLICK_ROBOT = "swing.click.robot";
     /** PAINT capture ({@code printAll} into an image). */
     public static final String CAP_CAPTURE_PAINT = "swing.capture.paint";
+    /** {@code swing.hitTest} (Phase 7). */
+    public static final String CAP_HITTEST = "swing.hittest";
+    /** {@code swing.pointer} with {@code via: ROUTED} (Phase 7). */
+    public static final String CAP_POINTER_ROUTED = "swing.pointer.routed";
+    /** {@code swing.capture {scope: SCREEN}} in PAINT mode (Phase 7). */
+    public static final String CAP_CAPTURE_SCREEN = "swing.capture.screen";
+    /** {@code swing.pointer} with {@code via: ROBOT} (Phase 7, the agent option {@code robot}). */
+    public static final String CAP_POINTER_ROBOT = "swing.pointer.robot";
+    /** A person's {@code swing.capture {mode: ROBOT}} (Phase 7, the agent option {@code robot}). */
+    public static final String CAP_CAPTURE_ROBOT = "swing.capture.robot";
+    /** The agent option that enables the Robot path (A65). */
+    public static final String ROBOT_OPTION = "robot";
 
     /** Reason of the display capabilities in a headless JVM. */
     static final String HEADLESS_REASON = "headless";
@@ -90,8 +109,10 @@ public final class SwingModule implements AgentModule {
     static final String ROBOT_REASON = "opt-in rung, not implemented";
 
     private static final String[] DISPLAY_CAPABILITIES = {
-        CAP_TREE, CAP_CLICK_ACTION, CAP_CLICK_COMPONENT, CAP_CLICK_DISPATCH, CAP_CAPTURE_PAINT
+        CAP_TREE, CAP_CLICK_ACTION, CAP_CLICK_COMPONENT, CAP_CLICK_DISPATCH, CAP_CAPTURE_PAINT, CAP_HITTEST,
+        CAP_POINTER_ROUTED, CAP_CAPTURE_SCREEN
     };
+    private static final String[] ROBOT_CAPABILITIES = {CAP_POINTER_ROBOT, CAP_CAPTURE_ROBOT};
 
     /** How often the watcher thread looks for an event-dispatch thread (4 Hz). */
     static final long AWT_POLL_MS = 250;
@@ -111,6 +132,9 @@ public final class SwingModule implements AgentModule {
     private int generation;
     private final List<String> registered = new ArrayList<String>();
     private final BooleanSupplier edtRunning;
+    private final RobotFactory robotFactory;
+    private boolean robotEnabled;
+    private SwingPrimitives primitives;
 
     /** For {@code ServiceLoader}. */
     public SwingModule() {
@@ -124,7 +148,13 @@ public final class SwingModule implements AgentModule {
 
     /** For tests: {@code edtRunning} replaces the look for an event-dispatch thread. */
     SwingModule(BooleanSupplier edtRunning) {
+        this(edtRunning, RobotFactory.DEFAULT);
+    }
+
+    /** For tests: also the Robot seam. */
+    SwingModule(BooleanSupplier edtRunning, RobotFactory robotFactory) {
         this.edtRunning = edtRunning;
+        this.robotFactory = robotFactory;
     }
 
     /** {@value #ID}. */
@@ -156,7 +186,15 @@ public final class SwingModule implements AgentModule {
         this.awtChecks = 0;
         final int myGeneration = ++generation;
         context.capabilities().set(CAP_CLICK_ROBOT, CapabilityState.UNAVAILABLE, ROBOT_REASON, null);
-        for (Primitive p : SwingPrimitives.create(context, windows, tap, awt)) {
+        Map<String, String> options = context.options();
+        this.robotEnabled = options != null && "true".equalsIgnoreCase(options.get(ROBOT_OPTION));
+        if (!robotEnabled) {
+            for (String id : ROBOT_CAPABILITIES) {
+                context.capabilities().set(id, CapabilityState.UNAVAILABLE, RobotPath.NOT_ENABLED, null);
+            }
+        }
+        this.primitives = new SwingPrimitives(context, windows, tap, awt, robotFactory);
+        for (Primitive p : primitives.all()) {
             context.primitives().register(p);
             registered.add(p.spec().name());
         }
@@ -253,6 +291,19 @@ public final class SwingModule implements AgentModule {
             awt.markStarted(headless);
             applyCapabilities(headless ? CapabilityState.UNAVAILABLE : CapabilityState.OK,
                     headless ? HEADLESS_REASON : null);
+            if (robotEnabled) {
+                final RobotPath robot = primitives.robot();
+                if (headless) {
+                    robot.declare(true);
+                } else {
+                    ctx.threads().post(ThreadPolicy.WORKER, new Runnable() {
+                        @Override
+                        public void run() {
+                            robot.declare(false);
+                        }
+                    });
+                }
+            }
             if (!headless) {
                 tap.activate();
                 Toolkit.getDefaultToolkit().addAWTEventListener(tap, WindowTap.EVENT_MASK);
@@ -286,6 +337,16 @@ public final class SwingModule implements AgentModule {
         for (String id : DISPLAY_CAPABILITIES) {
             caps.set(id, state, reason, null);
         }
+        if (robotEnabled && state == CapabilityState.UNAVAILABLE) {
+            for (String id : ROBOT_CAPABILITIES) {
+                caps.set(id, state, reason, null);
+            }
+        }
+    }
+
+    /** The module's primitives (for tests). */
+    synchronized SwingPrimitives primitivesForTest() {
+        return primitives;
     }
 
     private void log(String msg, Throwable t) {

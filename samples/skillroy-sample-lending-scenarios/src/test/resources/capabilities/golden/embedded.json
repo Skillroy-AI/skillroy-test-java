@@ -75,6 +75,16 @@
       "strategy": null,
       "reason": false
     },
+    "swing.capture.robot": {
+      "state": "UNAVAILABLE",
+      "strategy": null,
+      "reason": true
+    },
+    "swing.capture.screen": {
+      "state": "OK",
+      "strategy": null,
+      "reason": false
+    },
     "swing.click.action": {
       "state": "OK",
       "strategy": null,
@@ -94,6 +104,21 @@
       "state": "UNAVAILABLE",
       "strategy": null,
       "reason": true
+    },
+    "swing.hittest": {
+      "state": "OK",
+      "strategy": null,
+      "reason": false
+    },
+    "swing.pointer.robot": {
+      "state": "UNAVAILABLE",
+      "strategy": null,
+      "reason": true
+    },
+    "swing.pointer.routed": {
+      "state": "OK",
+      "strategy": null,
+      "reason": false
     },
     "swing.tree": {
       "state": "OK",

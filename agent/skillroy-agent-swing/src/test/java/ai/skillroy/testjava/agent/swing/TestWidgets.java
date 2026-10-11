@@ -204,6 +204,12 @@ final class TestWidgets {
             return out;
         }
 
+        @Override
+        public java.util.Map<String, String> describe(Component c) {
+            return c instanceof GatedKey ? Collections.singletonMap("action", ((GatedKey) c).actionId)
+                    : Collections.<String, String>emptyMap();
+        }
+
         private static void collect(Component c, String value, List<Component> out) {
             if (c instanceof GatedKey && ((GatedKey) c).actionId.equals(value)) {
                 out.add(c);

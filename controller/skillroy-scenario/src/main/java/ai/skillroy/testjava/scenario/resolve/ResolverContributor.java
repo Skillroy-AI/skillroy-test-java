@@ -63,9 +63,14 @@ public interface ResolverContributor extends AutoCloseable {
             throws ContributionException;
 
     /**
-     * The capability ids this module contributes to the matrix ({@code inference.gateway}, {@code inference.sql}) with
-     * their state under these settings; empty by default.
+     * The capability ids this module contributes to the matrix with their state under these settings; empty by
+     * default.
+     *
+     * @deprecated since Phase 7: controller-side capabilities reach the matrix through
+     *     {@code ai.skillroy.testjava.scenario.CapabilityContributor} (phase7-contracts.md 8.5, decision D326); nothing
+     *     reads this method, and {@code InferenceContributor} no longer overrides it
      */
+    @Deprecated
     default Map<String, CapabilityState> capabilities(InferenceSettings settings) {
         return Map.of();
     }

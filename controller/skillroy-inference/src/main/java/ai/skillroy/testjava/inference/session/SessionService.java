@@ -152,6 +152,15 @@ public final class SessionService implements AutoCloseable {
             instructions.
             """;
 
+    /**
+     * The vocabulary's sentence on the verbs and their {@code $reference}s (phase7-contracts.md 9.2, D342): a reference
+     * names a resolved slot's non-secret fields only; a credential's secret is never the model's to use (the person
+     * signs on). Before Phase 7 it read "(a $reference such as $item.code names a resolved slot's field)".
+     */
+    static final String REFERENCE_SENTENCE = "Its verbs, each a tool, with the JSON Schema of their arguments (a"
+            + " $reference such as $item.code names a non-secret field of a resolved slot, never a credential's secret:"
+            + " the person signs on):";
+
     private static final int RESULT_MAX = 25_000;
     private static final int INTENT_MAX = 500;
     private static final int EVENTS_DEFAULT = 50;
@@ -965,8 +974,8 @@ public final class SessionService implements AutoCloseable {
         if (verbTools.isEmpty()) {
             text.append("No verb is offered in this session.\n");
         } else {
-            text.append("Its verbs, each a tool, with the JSON Schema of their arguments (a $reference such as"
-                    + " $item.code names a resolved slot's field):\n");
+            // Phase 7 (D342, phase7-contracts.md 9.2): a $reference names a slot's non-secret fields only.
+            text.append(REFERENCE_SENTENCE).append('\n');
             for (Map.Entry<String, String> e : verbTools.entrySet()) {
                 Map<String, Object> schema = pack.steps().argsSchema(e.getValue());
                 // S49: the vocabulary through the mask, as the planner's prompt (D103).

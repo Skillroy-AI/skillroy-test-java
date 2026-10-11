@@ -21,11 +21,16 @@ import ai.skillroy.testjava.data.yaml.StrictYaml;
 import ai.skillroy.testjava.samples.lending.scenarios.SampleCredentials.Env;
 import ai.skillroy.testjava.scenario.BindingsFile;
 import ai.skillroy.testjava.scenario.Plan;
+import ai.skillroy.testjava.scenario.PlanCompiler;
+import ai.skillroy.testjava.scenario.image.ImageCompare;
+import ai.skillroy.testjava.scenario.pack.DomainPack;
+import ai.skillroy.testjava.samples.lending.pack.LendingPack;
 import ai.skillroy.testjava.scenario.resolve.Approval;
 import ai.skillroy.testjava.scenario.resolve.CredentialRef;
 import ai.skillroy.testjava.scenario.resolve.Resolution;
 import ai.skillroy.testjava.scenario.resolve.Strategy;
 import ai.skillroy.testjava.scenario.resolve.VerifierResult;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
@@ -42,6 +47,7 @@ import java.util.stream.Stream;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
@@ -61,19 +67,73 @@ import static org.junit.jupiter.api.Assertions.fail;
  * of the Phase 5 build wrote them through the recorded gateway ({@link ScenarioD#HAS_BINDINGS}, which these checks
  * follow), from live recordings since the live session: the same checks apply to them, and its supervisor's approval
  * names the live re-record it came from.
+ *
+ * <p>Phase 7 (phase7-contracts.md 8.7, 12.4, 13.1 item 9): {@code keypad-image}, the one Phase 7 scenario with a
+ * bindings file per seed (its {@code images}), is in the list since step 2b committed it; every
+ * PNG under a {@code <scenarioId>.images/} directory is walked separately, and must be named by an entry of its
+ * bindings file and match that entry's {@code sha256}. {@code -Dskillroy.bindings.rehash=true} rewrites the
+ * {@code planHash} of every committed bindings file (the standard ones, the branch variant's, the session exports')
+ * to the hash of the plan its YAML compiles to now, and (step 2b, VS) its {@code packVersion} to that plan's, nothing
+ * else: VC's script for the one regeneration of plan
+ * version 6 (phase7-contracts.md 8.2, 12.5), run after {@code -Dskillroy.plans.update=true}, and again after the pack's
+ * version changes.
  */
 class BindingsUpToDateTest {
+
+    /** {@code -Dskillroy.bindings.rehash=true}: every committed bindings file's {@code planHash}, from its YAML. */
+    @BeforeAll
+    static void rehashWhenAsked() throws Exception {
+        if (!Boolean.getBoolean("skillroy.bindings.rehash")) {
+            return;
+        }
+        rehash(ScenarioA.bindingsRoot(), id -> ItEnv.scenario(id + ".yaml"), new LendingPack());
+        rehash(BranchVariant.bindingsRoot(), id -> ItEnv.scenario(id + ".yaml"), BranchVariant.pack());
+        Path exported = ItEnv.moduleDir().resolve("scenarios").resolve("exported");
+        rehash(exported.resolve("bindings"), id -> exported.resolve(id + ".yaml"), new LendingPack());
+    }
+
+    private static void rehash(Path root, java.util.function.Function<String, Path> yamlOf, DomainPack pack)
+            throws Exception {
+        if (!Files.isDirectory(root)) {
+            return;
+        }
+        List<Path> files = new ArrayList<>();
+        try (Stream<Path> walk = Files.walk(root)) {
+            walk.filter(f -> f.getFileName().toString().endsWith(BindingsFile.SUFFIX)).sorted().forEach(files::add);
+        }
+        for (Path file : files) {
+            BindingsFile read = BindingsFile.read(file);
+            Plan compiled = PlanCompiler.compile(yamlOf.apply(read.scenarioId()), pack);
+            String hash = compiled.hash();
+            // Phase 7, step 2b (VS): the pack's version follows too, as approve would write it (the field is
+            // information: neither the plan hash nor the resolve hash covers it)
+            if (!hash.equals(read.planHash()) || !compiled.packVersion().equals(read.packVersion())) {
+                BindingsFile rehashed = new BindingsFile(read.bindingsVersion(), read.scenarioId(), read.envId(),
+                        read.pack(), compiled.packVersion(), hash, read.resolveHash(), read.env(), read.resolutions(),
+                        read.oracles(), read.images());
+                Files.writeString(file, rehashed.toJsonText(), StandardCharsets.UTF_8);
+            }
+        }
+    }
+
+    /** The committed files of a bindings root, the baselines under {@code *.images/} left to their own walk. */
+    static List<Path> bindingsFiles(Path root) throws Exception {
+        List<Path> files = new ArrayList<>();
+        try (Stream<Path> walk = Files.walk(root)) {
+            walk.filter(Files::isRegularFile).filter(f -> !f.getParent().getFileName().toString().endsWith(".images"))
+                    .sorted().forEach(files::add);
+        }
+        return files;
+    }
 
     @Test
     void everyCommittedBindingsFileIsCanonicalAndTiedToItsPlan() throws Exception {
         Path root = ScenarioA.bindingsRoot();
-        List<Path> files = new ArrayList<>();
-        try (Stream<Path> walk = Files.walk(root)) {
-            walk.filter(Files::isRegularFile).sorted().forEach(files::add);
-        }
+        List<Path> files = bindingsFiles(root);
         List<Path> expected = new ArrayList<>();
         for (Env env : Env.values()) {
             expected.add(ScenarioB.committedBindings(env));
+            expected.add(BindingsFile.locate(root, env.id, KEYPAD_IMAGE));
             expected.add(ScenarioA.committedBindings(env));
             expected.add(ScenarioC.committedBindings(env));
             expected.add(ScenarioE.committedBindings(env));
@@ -81,6 +141,7 @@ class BindingsUpToDateTest {
                 expected.add(ScenarioD.committedBindings(env));
             }
         }
+        expected.sort(null);
         assertEquals(expected, files, "one file per scenario and environment, nothing else (no credentials file is"
                 + " committed; scenario D's come with the recordings)");
         for (Path file : files) {
@@ -115,6 +176,50 @@ class BindingsUpToDateTest {
         }
     }
 
+    /** The one Phase 7 scenario with bindings files (phase7-contracts.md 12.4). */
+    static final String KEYPAD_IMAGE = "keypad-image";
+
+    /**
+     * phase7-contracts.md 8.7, 13.1 item 9: every PNG under a {@code <scenarioId>.images/} directory of the bindings
+     * root is named by an entry of its bindings file ({@code <label>.<renderKey>.png}) and is that entry's raster
+     * ({@code sha256}); every entry has its PNG; nothing else lies there.
+     */
+    @Test
+    void everyBaselinePngIsNamedByItsBindingsFileAndIsItsRaster() throws Exception {
+        Path root = ScenarioA.bindingsRoot();
+        List<Path> pngs = new ArrayList<>();
+        try (Stream<Path> walk = Files.walk(root)) {
+            walk.filter(Files::isRegularFile).filter(f -> f.getParent().getFileName().toString().endsWith(".images"))
+                    .sorted().forEach(pngs::add);
+        }
+        for (Path png : pngs) {
+            String dir = png.getParent().getFileName().toString();
+            String scenarioId = dir.substring(0, dir.length() - ".images".length());
+            Path bindings = png.getParent().getParent().resolve(scenarioId + BindingsFile.SUFFIX);
+            assertTrue(Files.isRegularFile(bindings), png + " lies beside no bindings file");
+            BindingsFile file = BindingsFile.read(bindings);
+            String name = png.getFileName().toString();
+            assertTrue(name.endsWith(".png"), png + " is a PNG");
+            String stem = name.substring(0, name.length() - ".png".length());
+            int dot = stem.lastIndexOf('.');
+            assertTrue(dot > 0, png + " is <label>.<renderKey>.png");
+            BindingsFile.ImageEntry entry = file.images().getOrDefault(stem.substring(0, dot), Map.of())
+                    .get(stem.substring(dot + 1));
+            assertNotNull(entry, png + " is named by no entry of " + bindings.getFileName());
+            assertEquals(BindingsFile.ImageEntry.fileName(scenarioId, stem.substring(0, dot), stem.substring(dot + 1)),
+                    entry.file(), "the entry names its derived file");
+            assertEquals(entry.sha256(), ImageCompare.rasterHash(ImageCompare.decodePng(Files.readAllBytes(png))),
+                    png + " is the entry's raster");
+        }
+        for (Path bindings : bindingsFiles(root)) {
+            BindingsFile file = BindingsFile.read(bindings);
+            file.images().forEach((label, byKey) -> byKey.keySet().forEach(key -> assertTrue(Files.isRegularFile(
+                    bindings.getParent().resolve(BindingsFile.ImageEntry.fileName(file.scenarioId(), label, key))),
+                    bindings + ": the baseline " + label + " for " + key + " has its PNG")));
+        }
+        assertFalse(pngs.isEmpty(), "keypad-image's baselines are committed (step 2b)");
+    }
+
     /**
      * Every committed scenario whose plan needs bindings has its file on both seeds, and one that needs none has none;
      * scenario D's follow {@link ScenarioD#HAS_BINDINGS}, which must say what is on disk.
@@ -134,8 +239,10 @@ class BindingsUpToDateTest {
                 needing.add(plan.scenarioId());
             }
         }
-        assertEquals(List.of(ScenarioB.ID, ScenarioA.ID, ScenarioC.ID, ScenarioE.ID, ScenarioD.ID), needing,
-                "the scenarios with query slots");
+        List<String> expectedNeeding = new ArrayList<>(List.of(ScenarioB.ID, KEYPAD_IMAGE, ScenarioA.ID, ScenarioC.ID,
+                ScenarioE.ID, ScenarioD.ID));
+        assertEquals(expectedNeeding, needing, "the scenarios with query slots, and keypad-image with its images"
+                + " (phase7-contracts.md 8.2: needsBindings() over images)");
         assertEquals(ScenarioD.HAS_BINDINGS, ScenarioD.anyBindingsCommitted(), "ScenarioD.HAS_BINDINGS says whether"
                 + " scenario D's bindings are committed");
     }

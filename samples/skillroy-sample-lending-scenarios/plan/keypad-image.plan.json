@@ -1,0 +1,102 @@
+{
+  "planVersion": 6,
+  "scenarioId": "keypad-image",
+  "pack": "lending",
+  "packVersion": "0.6.0",
+  "sourceHash": "sha256:a51b6f2f249efe91a74d388438f548ab8c2980bb9cb89c880097535da96d88ea",
+  "inference": "none",
+  "requires": [
+    "swing.capture.paint",
+    "swing.tree"
+  ],
+  "slots": [],
+  "oracles": [],
+  "resolutionGraph": [],
+  "steps": [
+    {
+      "id": "s1",
+      "verb": "expectImage",
+      "source": {
+        "line": 13
+      },
+      "calls": [
+        {
+          "primitive": "swing.capture",
+          "args": {
+            "by": {
+              "id": "numberPad"
+            },
+            "redact": true
+          },
+          "sync": "NONE",
+          "timeoutMs": 30000
+        }
+      ],
+      "expect": [
+        {
+          "image": {
+            "label": "keypad",
+            "masks": [],
+            "maxDiffPixels": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "s2",
+      "verb": "expectImage",
+      "source": {
+        "line": 14
+      },
+      "calls": [
+        {
+          "primitive": "swing.capture",
+          "args": {
+            "redact": true
+          },
+          "sync": "NONE",
+          "timeoutMs": 30000
+        }
+      ],
+      "expect": [
+        {
+          "image": {
+            "label": "keypad-frame",
+            "masks": [
+              {
+                "by": {
+                  "id": "entry"
+                }
+              },
+              {
+                "by": {
+                  "id": "totalsLine"
+                }
+              },
+              {
+                "by": {
+                  "name": "Printer",
+                  "role": "scrollpane"
+                }
+              }
+            ],
+            "maxDiffPixels": 0
+          }
+        }
+      ]
+    }
+  ],
+  "verify": [],
+  "cleanup": [],
+  "launchProperties": {},
+  "artifacts": [],
+  "onPrompt": {
+    "unexpected": "fail"
+  },
+  "stepTimeoutMs": 30000,
+  "images": [
+    "keypad",
+    "keypad-frame"
+  ],
+  "bindTimeoutMs": 60000
+}

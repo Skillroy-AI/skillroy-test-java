@@ -1,0 +1,29 @@
+# Sign-on through the desk's number pad (phase7-contracts.md 12.4): the staff number typed by three clicks on the
+# pad's regions (key:1, key:0, key:0), each a pointer step addressed by the pad's locator and a region id that the
+# lending agent module's RegionResolver resolves, so no pixel is stored; ENTER on the entry field; then the password
+# through the person's typed credential reference, as basic-loan-ui types it; then it signs off again. Deterministic,
+# replayed in CI.
+# Seed A fixtures: assistant 100 (its password comes from credentials.yaml).
+scenario: sign-on-by-number-pad
+pack: lending
+tags: [ui, vision]
+requires: [swing.tree, swing.pointer.routed, lending.state]
+launchProperties: { lending.seed: A }
+resolve:
+  assistant: { fixture: { code: "100" }, credential: { realm: staff, key: code } }
+steps:
+  - pointer: { by: { id: numberPad }, region: "key:1" }
+  - pointer: { by: { id: numberPad }, region: "key:0" }
+  - pointer: { by: { id: numberPad }, region: "key:0" }
+  - press: { key: ENTER, by: { id: entry }, await: { topic: input.requested, match: { state: PASSWORD } } }
+  - type:
+      by: { id: entry }
+      text: $assistant.password
+      enter: true
+      await: { topic: input.requested, match: { state: IDLE } }
+  - expect: { "state.name": IDLE, "state.staff.code": $assistant.code }
+  - signOff: {}
+verify:
+  - { "state.name": SIGNED_OFF }
+on_prompt: { unexpected: fail }
+timeouts: { step: 30s }

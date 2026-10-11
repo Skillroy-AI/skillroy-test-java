@@ -26,6 +26,8 @@ import org.junit.jupiter.api.TestClassOrder;
  * End-to-end acceptance: the sample lending desk runs as a child process on the Java named by
  * {@code -Dskillroy.it.targetJava} (default: this JVM's). Phase 1 (contract section 10): once per load mode, every
  * check of {@link LoadModeChecks} runs against it through the real controller, agent home, domain pack and executor.
+ * Phase 7 (phase7-contracts.md 13.2 items 1 to 6): the load modes run {@link VisionSwingChecks} (the checks of
+ * {@link LoadModeChecks} with the Swing items woven in), and {@link RobotChecks} is the Robot leg.
  * Phase 2 and Phase 3 (phase2-contracts.md 14.2, phase3-contracts.md 11.2): once per load mode and seed, the checks of
  * {@link ResolutionChecks} run scenario A and scenario B ({@code borrow-2-waive-1-slip}: the waiver, its oracle
  * cross-checked against the desk's dry run, the wrong oracle reported as ORACLE_SUSPECT) with the committed YAML,
@@ -46,7 +48,7 @@ class LendingEndToEndIT {
     /** {@code -javaagent} on the command line. */
     @Nested
     @Order(1)
-    class JavaAgent extends LoadModeChecks {
+    class JavaAgent extends VisionSwingChecks {
         @Override
         LendingTarget.Mode mode() {
             return LendingTarget.Mode.JAVAAGENT;
@@ -56,7 +58,7 @@ class LendingEndToEndIT {
     /** {@code -javaagent} injected through {@code JAVA_TOOL_OPTIONS} with a main-class guard. */
     @Nested
     @Order(2)
-    class JavaToolOptions extends LoadModeChecks {
+    class JavaToolOptions extends VisionSwingChecks {
         @Override
         LendingTarget.Mode mode() {
             return LendingTarget.Mode.JAVA_TOOL_OPTIONS;
@@ -66,7 +68,7 @@ class LendingEndToEndIT {
     /** Attached to the running application through the attach API. */
     @Nested
     @Order(3)
-    class Attach extends LoadModeChecks {
+    class Attach extends VisionSwingChecks {
         @Override
         LendingTarget.Mode mode() {
             return LendingTarget.Mode.ATTACH;
@@ -76,7 +78,7 @@ class LendingEndToEndIT {
     /** Started by the application's own plugin mechanism ({@code lending.plugins}), with the application as context. */
     @Nested
     @Order(4)
-    class Embedded extends LoadModeChecks {
+    class Embedded extends VisionSwingChecks {
         @Override
         LendingTarget.Mode mode() {
             return LendingTarget.Mode.EMBEDDED;
@@ -234,6 +236,19 @@ class LendingEndToEndIT {
         @Override
         Env env() {
             return Env.SEED_A;
+        }
+    }
+
+    /**
+     * The Robot leg (phase7-contracts.md 13.2 item 6): {@code -javaagent} with the agent option {@code robot=true},
+     * once per target Java.
+     */
+    @Nested
+    @Order(17)
+    class JavaAgentRobot extends RobotChecks {
+        @Override
+        LendingTarget.Mode mode() {
+            return LendingTarget.Mode.JAVAAGENT_ROBOT;
         }
     }
 

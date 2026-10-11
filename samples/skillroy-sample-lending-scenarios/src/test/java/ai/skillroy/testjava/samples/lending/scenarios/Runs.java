@@ -173,9 +173,12 @@ final class Runs {
                         "a wait ended by an event or the UI settle: " + record);
             }
         }
-        assertTrue(expectations > 0, "the scenario checks something");
-        assertTrue(waits > 0 || log.stream().anyMatch(r -> "sync.await".equals(r.get("primitive"))),
-                "the scenario synchronises on events");
+        // Phase 7 (step 2b, VS): an expectImage step checks too ('image' records); a scenario whose only steps are
+        // image checks acts on nothing, so it has nothing to wait for (keypad-image)
+        long images = log.stream().filter(r -> "image".equals(r.get("type"))).count();
+        assertTrue(expectations > 0 || images > 0, "the scenario checks something");
+        assertTrue(waits > 0 || log.stream().anyMatch(r -> "sync.await".equals(r.get("primitive")))
+                || (expectations == 0 && images > 0), "the scenario synchronises on events");
         assertFalse(log.stream().anyMatch(r -> "prompt".equals(r.get("type")) && Boolean.FALSE.equals(
                 r.get("expected"))), "no unexpected prompt");
     }

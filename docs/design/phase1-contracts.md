@@ -316,6 +316,7 @@ intact; from 1025 the load is refused with an `IOException` on the attaching sid
 | `hooks.detachBudgetMs` | `8000` | **(Phase 6, HK; P6 §3.5, §3.7.)** the restore budget of the hooks module's uninstall; 1000 to 9000 |
 | `hooks.capture.maxBytes` | `16384` | **(Phase 6, HK; P6 §4.3.)** the input budget of one `CAPTURE` event's encoding, also its output bound; 1024 to 1 MiB |
 | `mainClassGuard` | – | JAVAAGENT only: start only if the system property `sun.java.command` names this launch target (lets `JAVA_TOOL_OPTIONS` inject the agent into one JVM of a process tree). **S17 (1.x, built 2026-10-02):** the guard must match the whole launch target (the main class, or the jar path for `-jar`): the command, trimmed, equals the trimmed value or continues with white space directly after it. A value that is only a prefix of a longer main-class name does not match |
+| `robot` | `false` | **A65 (Phase 7, built 2026-10-10, VS; P7 §3.4, 3.9).** `true` is the operator's consent on the host that the Swing module may take the real pointer through `java.awt.Robot` (`swing.pointer {via: ROBOT}`, a person's `swing.capture {mode: ROBOT}`): validated like `readOnly` (`true` or `false`), reported by `agent.info.options`, read by the Swing module from `ctx.options()` and never through `ctx.option(…)`'s live fallback. Without it the capabilities `swing.pointer.robot` and `swing.capture.robot` are `UNAVAILABLE("robot: not enabled (agent option robot=true)")` and no Robot class is loaded (`HostSafetyIT`); with it the Robot is constructed once, by the capability probe on an agent worker after the module confirmed that the application started AWT (A4). It is one half of the double opt-in: the controller's half is a person's `--allow-robot` (P7 §9.2, §9.3) |
 | `readOnly` | `false` | reject primitives whose spec is `mutating` **or `script`** (Phase 6 security fix S42, A44, built 2026-10-09, SR; P6 D156: a `script` primitive evaluates a caller's expression in the target, `web.evaluate` and `web.waitFlag`) |
 | `discoveryDir` | `${java.io.tmpdir}/skillroy-<user>` | where discovery and token files are written; a per-user directory, see §2.5. **S8/S19 (1.x, built 2026-10-02):** when the option is absent and the default is occupied by another user, the fall-back `<user.home>/.skillroy/run` is used (§2.5); a directory named explicitly is never substituted |
 | `readyTimeoutMs` | `120000` | how long to wait for `ReadinessSource`s before reporting `target.ready` UNAVAILABLE (the agent keeps polling, §5); at most one day |
@@ -942,6 +943,30 @@ public interface NameEnricher { String nameFor(java.awt.Component component); } 
 public interface LocatorResolver {
     Set<String> strategies();                                    // e.g. "action", used as {action:"DUE"}
     List<java.awt.Component> resolve(String strategy, String value, java.awt.Component root);
+    // A64 (Phase 7, built 2026-10-10, VS; P7 §3.7): the strategy values that name the component in the resolver's vocabulary
+    // ({action: "DUE"}), proposed first by swing.hitTest after the agent checked each matches it alone
+    default Map<String, String> describe(java.awt.Component component) { return Collections.emptyMap(); }
+}
+
+// A64 (Phase 7, built 2026-10-10, VS; P7 §3.6, 3.7): three further SPIs, all called on the EDT inside a read, fast, changing nothing;
+// a throwing implementation is logged once and ignored (a throwing CaptureMask blanks the component).
+/** A custom-painted component's stable regions (a number pad's keys): a point to a region id and back. */
+public interface RegionResolver {
+    boolean supports(java.awt.Component component);
+    Region regionAt(java.awt.Component component, java.awt.Point point);       // null = none
+    java.awt.Rectangle rectOf(java.awt.Component component, String id);       // null = unknown id
+    default List<Region> regions(java.awt.Component component) { return Collections.emptyList(); }
+    final class Region { public final String id; public final java.awt.Rectangle rect; /* equals, hashCode */ }
+}
+/** Which components show a secret: a capture blanks them grey and every reader of the tree withholds their text. */
+public interface CaptureMask {
+    boolean masks(java.awt.Component component);
+    default List<java.awt.Rectangle> regions(java.awt.Component component) { return null; }  // null = whole
+}
+/** Areas that are not Swing-painted, as another module knows them (the web module's browser index). */
+public interface SurfaceSource {
+    List<Surface> surfaces();
+    final class Surface { public final java.awt.Component component; public final String kind; public final String browserRef; }
 }
 
 /** The ACTION rung for custom widgets: trigger the widget's semantic action without focus or mouse events. EDT.
@@ -1036,6 +1061,11 @@ loader (§1; after `agent.disable` no live thread has the agent loader as its co
 ---
 
 ## 5. `skillroy-agent-core` behaviour
+
+**A63 (Phase 7, built 2026-10-10, VS; P7 §3, §5).** The Swing module's catalogue gains `swing.hitTest` (read),
+`swing.pointer` (mutating, so the read-only gate refuses it) and `swing.rendering` (read), each on `CALLER` with its
+own EDT hops and named capability (§6); no new gate, no new error code, no new topic. The core's one change is the
+option `robot` (§2.4, A65), resolved with the other options and reported by `agent.info.options`.
 
 **Start sequence** (`AgentRuntime.start`; it runs on the thread `skillroy-start` and the caller waits at most 60 s):
 resolve options -> check `enabled` -> with a generated token, check or create the token directory (§2.5), so that
@@ -1500,7 +1530,11 @@ often leave wrong). `id` is the component's explicitly set `Component.getName()`
 AWT makes up itself (`frame0`, `dialog3`, `panel2`) are not ids. `name` is the first non-empty of: `NameEnricher`
 results, accessible name, `Component.getName()`. `text` is the visible text (button/label text, text-component
 content except passwords, selected item). `bounds` are relative to the containing window. Password fields never
-expose their content. `children` appears only when non-empty. Values the contract leaves to the module: a combo
+expose their content. **A61 (Phase 7, built 2026-10-10, VS; P7 §3.6):** neither does any component a registered `CaptureMask` names (D349, one
+rule for pixels and text): it has no `text` and no `value` in any output of the module (`swing.snapshot`,
+`swing.find`, `swing.dialogs`' texts, `swing.hitTest`'s nodes, a mark's label), and its node, like a password
+field's, carries `masked: true`; the role is unchanged. As built, a component inside a masked one is treated as masked
+too (the safe side; its pixels lie inside the blanked rectangle). `children` appears only when non-empty. Values the contract leaves to the module: a combo
 box's `value` is its selected index, a list's its selected indices, a table's `{rowCount, columnCount, columns,
 selectedRows, cells}` capped at 50 x 50; HTML text is reduced to plain text; a widget whose own code throws yields a
 node without `text`/`value` instead of failing the call.
@@ -1520,15 +1554,21 @@ the accessible name first.
 | `swing.snapshot` | `root?:ref, maxDepth?:int (40, capped at 89), maxNodes?:int (2000, capped at 50000), includeHidden?:bool` | `{seq, truncated, windows:[Node with children]}` |
 | `swing.find` | `by:Locator, root?:ref, all?:bool, includeHidden?:bool` | `{matches:[Node without children]}` (with `all`, zero matches is an empty list, not an error) |
 | `swing.click` (mutating) | `target:ref` or `by:Locator`, `rung?: AUTO\|ACTION\|COMPONENT\|DISPATCH\|ROBOT (AUTO)`, `focusTimeoutMs?:int (500)`, `activateWindow?:bool (false)`, `force?:bool (false)`. **A28 (1.x, built 2026-10-02):** `fallback?: "ACTION"` (any case; with rung `COMPONENT` only) | `{rung, requestedRung, fidelity: FULL\|DEGRADED, reason?, fired:true}` when the click fired; `{rung:"FOCUS_FAILED", fired:false, reason}` (no fidelity) when it did not. **A28 (1.x, built 2026-10-02):** `requestedRung` and `fidelity` are new, see "Click rungs" |
-| `swing.type` (mutating) | `target:ref` or `by`, `text`, `mode?: SET\|DISPATCH (SET)`, `clear?:bool (true)`, `enter?:bool`, `force?:bool (false)` | `{mode, typed:int}` |
+| `swing.type` (mutating) | `target:ref` or `by`, `text`, `mode?: SET\|DISPATCH (SET)`, `clear?:bool (true)`, `enter?:bool`, `force?:bool (false)`. **A62 (Phase 7, built 2026-10-10, VS; P7 §3.5):** without `target` and `by` the text goes where `swing.key`'s key goes (the focus owner, else the active window, else the topmost modal dialog, else the first showing window; a window becomes its root pane); the modal check runs for an explicit target only. Gap 60: a dispatched `ENTER` submits the text field that most recently had the focus, so `enter` with `DISPATCH` and an omitted target may submit another field or none | `{mode, typed:int}` |
 | `swing.key` (mutating) | `key` (`KeyEvent.VK_` name without prefix, e.g. `ENTER`, `ESCAPE`, `F2`), `target?:ref\|by` (default: focus owner, else active window, else topmost modal dialog, else first showing window), `modifiers?:[SHIFT\|CTRL\|ALT\|META]`, `force?:bool (false)` | `{dispatchedTo:ref}` |
 | `swing.dialogs` | – | `{dialogs:[{ref,title,modal,text,buttons:[{ref?,text}],extractor}]}`; modeless dialogs are listed too; `extractor` is `generic` when no registered extractor claims the dialog. **A27 (1.x, built 2026-10-02):** in-window dialogs follow the window dialogs, each with `inWindow: true` and `window`, see "Dialogs that are not windows"; window dialogs keep their shape (no `inWindow` key) |
 | `swing.dismiss` (mutating) | `dialog?:ref` (a showing `java.awt.Dialog`, or **A27 (1.x, built 2026-10-02)** the root of an in-window dialog; default: the topmost modal dialog window, else the in-window dialog when it is the only dialog showing), `button?:string` (button text or name, exact then case-insensitive), `close?:bool` | `{dismissedBy: BUTTON_ACTION\|CLOSE, button?}`. `button` goes through the ACTION click rung; several matches are `AMBIGUOUS`. `close` delivers a `WINDOW_CLOSING` event to the dialog (what the title-bar close box does, so the dialog's own close handling runs); `dispose()` and `setVisible(false)` are never called, because they leave application dialogs without an answer. With neither, a dialog with exactly one button has it pressed; otherwise `INVALID_PARAMS` with `data.buttons`. Without `dialog`: no dialog at all is `NOT_FOUND`; several dialogs of which none is a modal window is `AMBIGUOUS` with `data.dialogs` (window dialogs first, then in-window ones); a `dialog` ref that is neither kind is `INVALID_PARAMS` with `{param: "dialog", ref}` |
-| `swing.capture` | `target?:ref (active window, else topmost modal dialog, else first showing window)`, `mode?: PAINT (PAINT)` | `{format:"png", width, height, base64}`; anything larger than 4096 x 4096 is scaled down keeping the aspect ratio. (Phase 4, built 2026-10-07; P4 §2.5, §14.1: `PAINT` guards embedded-browser components (BS8: a JOGL canvas throws): when the target's `printAll` throws, the image is painted again part by part, a part whose `printAll` throws on its own becomes a crossed placeholder rectangle, the heavyweight descendants are printed on their own on top, and the result gains `skipped: [{ref, className, error}]` when it is not empty) |
+| `swing.capture` | `target?:ref (active window, else topmost modal dialog, else first showing window)`, `mode?: PAINT (PAINT)` | `{format:"png", width, height, base64}`; anything larger than 4096 x 4096 is scaled down keeping the aspect ratio. (Phase 4, built 2026-10-07; P4 §2.5, §14.1: `PAINT` guards embedded-browser components (BS8: a JOGL canvas throws): when the target's `printAll` throws, the image is painted again part by part, a part whose `printAll` throws on its own becomes a crossed placeholder rectangle, the heavyweight descendants are printed on their own on top, and the result gains `skipped: [{ref, className, error}]` when it is not empty). **A61 (Phase 7, built 2026-10-10, VS; P7 §3.1, §3.4, §3.6):** `target` also takes a locator object and `by` is accepted; `mode?: PAINT\|ROBOT` (`ROBOT`: a person's glass capture, capability `swing.capture.robot`), `scope?: WINDOW\|COMPONENT\|REGION\|SCREEN`, `region?` (a rectangle or a region id, `REGION` only), `scale?` (0.25 to 4; the 4096 cap lowers it, a raster beyond an eighth of the heap headroom is `INVALID_PARAMS`), `redact?:bool (true)`, `annotateRefs?:bool (false)`; a window is painted from its root pane (no imitation decoration on the X toolkit; gap 76), a password field and every component a `CaptureMask` names are blanked grey; the result adds `captureId, seq, mode, scope, space, window?, origin, scale, windows, surfaces, marks?, marksTruncated?, carets, focus, redacted, redactedTruncated?, hash, stackingAssumed?, region?` and, for a glass capture, `glass, glassNote, unstable?` |
+| `swing.hitTest` | **A63 (Phase 7, built 2026-10-10, VS; P7 §3.2).** `point:{x,y}` with `space: {captureId}\|{window: ref}\|"SCREEN"`, or `target`/`by`; read-only, capability `swing.hittest` | `{window, windowRect, covering:[{ref,rect,ranked}], deepest, mouseTarget, mouseTargetInferred, wheelTarget, target, targetKind, local, relative, row?, locators, fires, region?, surface, browser?, surfaceLocal?, enabled, listening, masked, blockedBy?, stackingAssumed, seq}` |
+| `swing.pointer` (mutating) | **A63 (Phase 7, built 2026-10-10, VS; P7 §3.3, §3.4).** `action: MOVE\|PRESS\|RELEASE\|CLICK\|DOUBLE_CLICK\|DRAG\|WHEEL`; a point and `space`, or `target`/`by` with `region?`, `row?`, `at?:{fx,fy}`; `to?` (DRAG), `button?`, `modifiers?`, `clickCount?`, `wheel?:{notches}`, `steps?`, `via?: ROUTED\|ROBOT (ROUTED)`, `force?`, `expectTarget?`, `requireFocus?` (ROBOT); capability `swing.pointer.routed` (`via: ROBOT` checks `swing.pointer.robot`) | `{via, window, hit, fired, reason?, dispatched:{sent,of}, balanced, received, focusOwner, activated, stackingAssumed?, seq}` |
+| `swing.rendering` | **A63 (Phase 7, built 2026-10-10, VS; P7 §3.8).** – ; capability `swing.capture.paint` | `{jdk:{vendor,version,specification}, os:{name,version,arch}, lookAndFeel, antialiasing:{desktopHints,property}, screenScale, probeHash, keyed, renderKey}` |
 | `swing.edtState` | – | `{dispatchThreadAlive, edtBlocked, awtStarted, modalDialogs:[ref], windowCount, focusOwner?:ref}` (thread `CALLER`, never blocks on the EDT for more than 500 ms; `edtBlocked:true` if the marker does not run). It names no capability and answers without starting the toolkit: before the application has started AWT it reports `{dispatchThreadAlive:false, edtBlocked:false, awtStarted:false, modalDialogs:[], windowCount:0}`. `modalDialogs` lists dialog windows only, not in-window dialogs (A27) |
 | `swing.settle` | `timeoutMs?:int (5000, at most 120000), quietMs?:int (50)` | `{settled:bool, ms}`: two consecutive EDT marker round trips with no `window.opened`/`window.closed` in between and for `quietMs` after. It answers `settled:false` before the call budget runs out instead of letting the dispatcher report `TIMEOUT` |
 
 `swing.click`, `swing.type` and `swing.key` accept `target` as a ref or as a locator object, as well as `by`.
+
+**A63 (Phase 7, built 2026-10-10, VS; P7 §3.4):** the `ROBOT` rung of `swing.click` stays the sentinel; a click at a
+component's centre through Robot is `swing.pointer {target, via: ROBOT}` behind the double opt-in.
 
 Click rungs: **ACTION** = the first `ActionFirer` that `canFire`, else `AbstractButton.doClick()` posted to the EDT
 (model-level; needs no focus), else for other components a synthesized click as in DISPATCH. **COMPONENT** =
@@ -1596,7 +1636,10 @@ target) unless `force: true` is passed. Blocked means: a showing dialog with a m
 exists and the target's window is neither that dialog nor owned by it, directly or transitively; of several
 blocking dialogs the topmost is named. This is a heuristic: document modality and modal-exclusion settings are not
 modelled, so a window AWT would let through can be reported as blocked, and `force` overrides. `swing.key` without
-a target goes where a real key press would (into the dialog) and is not checked; `swing.dismiss` is not checked.
+a target goes where a real key press would (into the dialog) and is not checked; `swing.dismiss` is not checked. **A63 (Phase 7, built 2026-10-10, VS; P7 §3.3):** `swing.pointer {via: ROUTED}` is checked before its first event
+(`MODAL_OPEN` unless `force`) and again before every further event of its sequence, since a window-sourced event
+dispatched non-posted reaches a blocked window: a dialog the sequence's own press opens withholds the rest
+(`fired: false, reason: MODAL_OPENED`) and the dispatched press is disarmed and released (`balanced: true`).
 
 Type modes: **SET** = `JTextComponent.setText` (after optional clear; `clear:false` appends), then if `enter`
 `JTextField.postActionEvent()` (a dispatched `ENTER` for other text components). **DISPATCH** = per character
@@ -1647,6 +1690,12 @@ Capabilities: `swing.tree`, `swing.click.action`, `swing.click.component`, `swin
 `swing.capture.paint` (states as described at the top of this section), and `swing.click.robot` (always
 `UNAVAILABLE`). Every `swing.*` primitive except `swing.edtState` and `swing.capture` names `swing.tree`;
 `swing.capture` names `swing.capture.paint`; `swing.click` checks its rung's own capability itself.
+**A63 (Phase 7, built 2026-10-10, VS; P7 §3.9):** `swing.hittest`, `swing.pointer.routed` and `swing.capture.screen`
+follow AWT's state as `swing.tree` does; `swing.pointer.robot` and `swing.capture.robot` are
+`UNAVAILABLE("robot: not enabled (agent option robot=true)")` without the agent option `robot` and, with it, declared by
+one probe after the module confirmed AWT (`OK("robot")`, `UNAVAILABLE("headless")` or `UNAVAILABLE("robot: <message>")`,
+`DEGRADED` after a failed delivery probe). `swing.hitTest` names `swing.hittest`, `swing.pointer` names
+`swing.pointer.routed`, `swing.rendering` names `swing.capture.paint`.
 
 `skillroy-agent-data`:
 
@@ -2119,6 +2168,10 @@ any depth of a step's arguments (every verb but `expect`) is a compile error ("a
 _meta").
 No top-level key is added: `inference` is a plan field the compiler writes (P5 §13.2), not a YAML key.
 
+*(Phase 7, built 2026-10-10, VC; P7 §8.1, §8.3.)* The keys are unchanged; the step arguments `region` (a region id),
+`row`, `clip`, `guard`, `via` and `at` belong to the Phase 7 verbs `pointer` and `expectImage`, never to `by`: P1 §6's
+locator grammar gains nothing.
+
 ### 8.2 Plan
 
 `PlanCompiler.compile(Path yaml, DomainPack pack)` is deterministic: the same YAML and pack version produce a
@@ -2170,6 +2223,9 @@ refuses a version 2 plan whose `inference` is not `none` and a `bindTimeoutMs` a
 pack's ack topic is not awaited). A pack verb chooses the sync of each call it emits. `EVENT` exists because an
 application's acknowledgement can mean only "consumed", not "accepted", and some primitives publish no
 acknowledgement at all: such a verb uses `EVENT` with the pack's ready topics instead of `READY`.
+
+*(Phase 7, built 2026-10-10, VC; P7 §8.2.)* `plan.json` is version 6 (`images`, a `swing.pointer` call's `guard`, the
+`visual` and `image` checks, `inference: run`); the reader accepts 1 to 6.
 
 ### 8.3 Domain pack SPI (package `ai.skillroy.testjava.scenario.pack`, discovered by `ServiceLoader<DomainPack>`)
 
@@ -2336,6 +2392,11 @@ describes the run's steps only (a session counts from its own start mark). `METH
 `CAPABILITY_UNAVAILABLE` or `NOT_READY` from `hook.health` (or `hook.events`) give an empty list. A pack root named
 `hooks` hides it. `DomainPack` gains `hooks()` and `settings()` (P2 §6.1).
 
+*(Phase 7, built 2026-10-10, VC; P7 §8.1, §12.3.)* The base verbs are eighteen: `aiAct`, `aiExpect`, `pointer` and
+`expectImage` join them and stay reserved for a pack; `UI_VERBS` gains `pointer` (`fired: false` fails the step, A29).
+`DomainPack.screenLegend()` (default null) is the pack's legend of its icon-only controls for a model that looks at the
+screen; `DelegatingDomainPack` forwards it.
+
 ### 8.4 Expectations
 
 Path grammar: `root(.field | [n] | [field=value] | [field~regex])*`; `last` and `first` are accepted as list
@@ -2392,6 +2453,11 @@ public static final String REFERENCE = "REFERENCE";  public boolean hasReason();
 
 `Plan.verify` and `Plan.Step.expect` become `List<Check>`; every Phase 1 constructor stays, so Phase 1 callers
 and tests compile unchanged.
+
+*(Phase 7, built 2026-10-10, VC; P7 §8.4.)* A step's checks may also be a `VisualCheck` (an `aiExpect`, always guarded
+by `inference.vision`, skipped unconditionally by the executor, so DEGRADED at best) and an `ImageCheck` (an
+`expectImage`, evaluated from the step's own capture result, exactly after masks, against the baseline of the target's
+render key; no retry). The run log gains the record `image`.
 
 ### 8.5 Executor, results, reports
 
@@ -2596,6 +2662,16 @@ after `run-end`. A throwing observer is logged once and replaced by `NONE` for t
 changes a verdict. With telemetry on, the CLI's `--telemetry file` writes `<out>/telemetry/spans.jsonl` beside the
 scenario directories, and `JunitXmlReporter.withTraceId` ends the report with `<system-out>traceId=<hex></system-out>`.
 
+*(Phase 7, built 2026-10-10, VC; P7 §8.5-§8.7.)* `Status.SKIPPED` is decided right after `run-start` for a plan with
+`inference: run` in `replay` (records `skipped`, `ledger {count: 0}`, `run-end`; the agent is not contacted); in every
+other mode such a plan is ERROR / ENVIRONMENT there. A plan with `via: ROBOT` or `mode: ROBOT` calls is ERROR /
+ENVIRONMENT before `checkRequires` without `RunOptions.robot` (recorded in `run-start` when set). After step 0b the
+controller-side contributors' capabilities are merged into the matrix (`CapabilityMerge`; `UNAVAILABLE (replay)` in
+`replay`), which `requires`, guards, `capabilities.json` and the fact root `caps` read; the `capabilities` record gains
+`agentHash` and `contributed`. An anchored `pointer` call's guard is compared before it is sent; failure files
+`failure/image-<label>-expected.png`, `-actual.png`, `-diff.png`; in `approve` a baseline candidate is written to
+`candidates/image-<label>.png`, approved at its step, and the bindings file is written a second time after the steps.
+
 ### 8.6 `skillroy-junit` and `skillroy-cli`
 
 `skillroy-junit`: `ScenarioTests.dynamicTests(ScenarioSource source, Supplier<AgentConnection> connection)` (also
@@ -2683,6 +2759,13 @@ overload without `RunOptions` reads `skillroy.telemetry`, `skillroy.telemetry.en
 `skillroy.telemetry.timeoutMs` and `skillroy.telemetry.file`, finds the provider through `ServiceLoader` and closes
 it at JVM exit; an unusable setting is the `environment` test.
 
+*(Phase 7, built 2026-10-10, VC; P7 §8.6, §9.3.)* JUnit: a SKIPPED run is aborted whatever `degradedAs` says (the XML
+report writes `<skipped message="SKIPPED: …"/>`); the property `skillroy.robot` sets `RunOptions.robot` and the glue
+prints one warning line naming both halves of the opt-in. CLI: `run --allow-robot`, the summary's `skipped` count (exit 0
+for a skipped run), `--json`'s `skipped` count and per result `skippedReason`, the image approval prompt in `approve`
+(`--yes` approves); `call --allow-robot` (without it `via: ROBOT` and `mode: ROBOT` are refused before anything is sent);
+`caps` with a `SOURCE` column and, with `--pack` or `--inference`, the merged matrix.
+
 ---
 
 ## 9. Sample lending desk
@@ -2760,7 +2843,13 @@ A deliberately awkward little desk application. It knows nothing about the frame
 - **UI** (`LendingFrame`, 1024x768): prompt line and status line; an entry field (`EntryField`, a `JTextField`
   named `entry` that masks passwords itself); a loan table; totals; a keypad of `IconKey`s (icon only, **no text, no
   accessible name and no component name**, each with an `actionId` that is a `KeyAction` name); a slip panel
-  (`JTextArea` named `slip`, the "printer"). An `IconKey` debounces: a press starts a 60 ms `javax.swing.Timer`, and
+  (`JTextArea` named `slip`, the "printer"). **(Phase 7, built 2026-10-10, VS; P7 §12.1)** A number pad
+  (`NumberPad`, a custom-painted `JComponent` named `numberPad`, accessible role `PANEL`, three columns by four rows
+  of 48 x 40 keys `7 8 9 / 4 5 6 / 1 2 3 / . 0 CLEAR`) sits in the bottom panel's `EAST` beside the keypad, which
+  keeps its 64 px row; a press and release inside one key appends the digit or the point to the entry field through
+  the field's own document (so its mask applies) or clears it, and never posts to the engine. It is the desk's one
+  component with several meanings, so its keys are regions (`key:0` to `key:9`, `key:.`, `key:clear`), not
+  components. An `IconKey` debounces: a press starts a 60 ms `javax.swing.Timer`, and
   when it expires the action is delivered only if the key owns the focus or its `focusGated` flag is false (default
   true). A naive `doClick()` on an unfocused window therefore does nothing. `IconKey.perform()` delivers the action
   directly. **Fix wave (Phase 6 review, FD, 2026-10-09):** the entry field submits on Enter through `JTextField`'s
@@ -2846,7 +2935,12 @@ Registers: `ReadinessSource` (`lending.engine`), `ThreadPolicyProvider` (one dae
 `LocatorResolver` strategy `action`, `ActionFirer` for `IconKey` (calls `perform()`) and for the prompt's buttons
 (so `dismiss: {button: OK}` works on the desk's prompts), `DialogTextExtractor` (`lending`) for `PromptDialog`,
 `DataSourceProvider` `lending` (a read-only JDBC connection), `DeviceAdapter` `printer` (kind `printer`; state
-`{slips, kept, header, last}`; action `lastSlip`), and one `EngineListener` that publishes events. How the desk is
+`{slips, kept, header, last}`; action `lastSlip`), and one `EngineListener` that publishes events. **(Phase 7, built
+2026-10-10, VS; P7 §12.2)** Also a `RegionResolver` (`LendingRegions`: the number pad's twelve keys), a
+`CaptureMask` (`LendingCaptureMask`: the entry field while it is masked, and the number pad while the entry field is
+masked, D358) and `LendingWidgets.describe` (`{action: <actionId>}` for an `IconKey`, `{name: <label>}` for a
+prompt's button): thirteen SPI registrations. `LendingModule.VERSION` is `0.2.0` ("change it whenever the module's
+primitives or SPIs change"). How the desk is
 found: in EMBEDDED mode the `LendingApp` the host passed to `EmbeddedAgent.start`; in the other modes
 `LendingApp.instance()`, looked at only once a thread named `LendingEngine` exists, so that no application class is
 loaded before the application's own `main`.
@@ -2919,7 +3013,7 @@ instead of trying again.
 ### 9.3 Domain pack and scenarios
 
 `samples/skillroy-sample-lending-pack` (`DomainPack` `lending`, version `0.1.0`; **(Phase 2, built 2026-10-02)**
-`0.2.0`, with the resolution catalogue, fingerprinter, stored tables, row mask and the verb `authorise` of P2 §13.3):
+`0.2.0`, with the resolution catalogue, fingerprinter, stored tables, row mask and the verb `authorise` of P2 §13.3; **(Phase 7, built 2026-10-10, VS; P7 §12.3)** `0.6.0`, with `screenLegend()`, the keypad's legend for a model that looks at the screen, and the `inductionRequired` argument of `LendableItem`, gap 49):
 `SyncPolicy(ack = input.acked, ready = [input.requested, prompt.waiting], prompts = [prompt.waiting])`; pre-flight
 check `lending.database` (`data.query` on source `lending` answers and finds staff; since Phase 2 it reads through
 `PreflightContext.data()`, so over JDBC where the environment serves `lending` that way); facts `loan` (->
@@ -2974,6 +3068,17 @@ seven awaited UI steps, one explicit wait) and of each new negative scenario.
 ---
 
 ## 10. End-to-end acceptance for Phase 1
+
+(Phase 7, built 2026-10-10, VS; P7 §13.2 items 1-6, 9, 11) The four load modes run `VisionSwingChecks`, the checks of
+`LoadModeChecks` with the Swing items woven in at `@Order` 52 to 58 (between checks 3 and 4, each leaving the desk
+signed off): the capture painted from the root pane, its geometry, marks, redaction in the `PASSWORD` state and the
+caret; the hit-test of the keypad keys, a table row, the number pad's `key:7`, the prompt as the blocker and a ranked
+covering window; the routed pointer on `DUE` and the number pad, `MODAL_OPEN` and `force`, `expectTarget`, a drag over
+the loan table and a wheel on the slip panel; `swing.type` without a target (gap 60 named); `swing.rendering`. The
+Robot leg is a sixth mode, `JAVAAGENT_ROBOT` (`-javaagent` with `robot=true`), whose `RobotChecks` run once per Java.
+The goldens gain the five Swing ids (the three `OK`, the two Robot ids `UNAVAILABLE`) in every load mode, the hooks
+leg's too; `HostSafetyIT` gains the full-home case (no `java.awt.Robot` without the option; with it only after the
+module confirmed AWT; never headless).
 
 (Phase 6, built 2026-10-09, CP; P6 §8, §9.5, §13.2) `LoadModeChecks` gains check **1b** (no JEP 451 text in the
 target's merged log in `JAVAAGENT`, `JAVA_TOOL_OPTIONS`, the hooks leg and `EMBEDDED`, on Java 8 and Java 25; in

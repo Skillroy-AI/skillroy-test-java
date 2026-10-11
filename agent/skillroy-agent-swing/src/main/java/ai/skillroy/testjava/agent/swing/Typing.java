@@ -56,7 +56,13 @@ final class Typing {
         this.windows = windows;
     }
 
-    /** {@code swing.type}: returns {@code {mode, typed}}. */
+    /**
+     * {@code swing.type}: returns {@code {mode, typed}}. Without a target (A62, phase7-contracts.md section 3.5) the
+     * text goes where {@code swing.key}'s does ({@link #defaultKeyTarget()}; a window becomes its root pane), and the
+     * modal check runs for an explicit target only. Gap 60: a dispatched {@code ENTER} submits the text field that
+     * most recently had the focus, so {@code enter} with DISPATCH and an omitted target may submit another field or
+     * none; SET is unaffected.
+     */
     Map<String, Object> type(Invocation inv, final TargetSpec target, final String mode, final String text,
                              final boolean clear, final boolean enter, final boolean force) throws Exception {
         if (DISPATCH.equals(mode) && text.length() > MAX_DISPATCH_CHARS) {
@@ -68,9 +74,22 @@ final class Typing {
             @Override
             public Component call() {
                 ComponentView view = new ComponentView(ctx);
-                Component found = target.resolve(view);
+                Component found;
+                if (target != null) {
+                    found = target.resolve(view);
+                } else {
+                    found = defaultKeyTarget();
+                    if (found == null) {
+                        throw Errors.notFound("no target to type into: there is no focus owner and no showing "
+                                + "window", Errors.data());
+                    }
+                    if (found instanceof Window && found instanceof RootPaneContainer
+                            && ((RootPaneContainer) found).getRootPane() != null) {
+                        found = ((RootPaneContainer) found).getRootPane();
+                    }
+                }
                 Clicks.requireClickable(view, found);
-                if (!force) {
+                if (target != null && !force) {
                     windows.requireNotBlocked(view, found);
                 }
                 if (SET.equals(mode) && !(found instanceof JTextComponent)) {
@@ -198,7 +217,7 @@ final class Typing {
      *
      * @return null if there is no focus owner and no showing window
      */
-    private Component defaultKeyTarget() {
+    Component defaultKeyTarget() {
         Component target = KeyboardFocusManager.getCurrentKeyboardFocusManager().getFocusOwner();
         if (target == null || !target.isShowing()) {
             target = windows.defaultWindow();

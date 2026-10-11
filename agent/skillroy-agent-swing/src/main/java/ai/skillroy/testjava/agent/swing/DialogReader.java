@@ -104,11 +104,11 @@ final class DialogReader {
         } else {
             title = ownTitle;
             JOptionPane pane = optionPane(root);
-            text = pane != null ? messageText(pane.getMessage()) : readingText(root);
+            text = pane != null ? messageText(pane.getMessage(), view) : readingText(root, view);
             for (AbstractButton button : textButtons(root)) {
                 Map<String, Object> b = new LinkedHashMap<String, Object>();
                 b.put("ref", view.ref(button));
-                b.put("text", ComponentText.text(button));
+                b.put("text", view.text(button));
                 buttons.add(b);
             }
             extractor = GENERIC;
@@ -137,7 +137,7 @@ final class DialogReader {
             labels.addAll(info.buttons());
         } else {
             for (AbstractButton b : textButtons(root)) {
-                labels.add(ComponentText.text(b));
+                labels.add(view.text(b));
             }
         }
         return labels;
@@ -237,7 +237,7 @@ final class DialogReader {
     private List<String> labelsOf(Component c) {
         List<String> labels = new ArrayList<String>(2);
         if (c instanceof AbstractButton) {
-            labels.add(ComponentText.text(c));
+            labels.add(view.text(c));
         }
         labels.add(view.name(c));
         return labels;
@@ -258,28 +258,33 @@ final class DialogReader {
         }
     }
 
-    /** Showing buttons with text, in reading order. */
-    private static List<AbstractButton> textButtons(Component root) {
+    /** Showing buttons with text, in reading order (a masked button shows none, D349). */
+    private List<AbstractButton> textButtons(Component root) {
         List<Component> all = new ArrayList<Component>();
         collectShowing(root, all);
         List<AbstractButton> out = new ArrayList<AbstractButton>();
         for (Component c : readingOrder(all)) {
-            if (c instanceof AbstractButton && ComponentText.text(c) != null) {
+            if (c instanceof AbstractButton && view.text(c) != null) {
                 out.add((AbstractButton) c);
             }
         }
         return out;
     }
 
-    /** Texts of the showing labels and text components (never passwords) under root, in reading order. */
-    static String readingText(Component root) {
+    /**
+     * Texts of the showing labels and text components under root, in reading order: never a password field's, and,
+     * with a view, never a masked component's (D349).
+     *
+     * @param view the call's view (its masked-text rule), or null for the built-in rule alone
+     */
+    static String readingText(Component root, ComponentView view) {
         List<Component> all = new ArrayList<Component>();
         collectShowing(root, all);
         StringBuilder sb = new StringBuilder();
         for (Component c : readingOrder(all)) {
             String role = Roles.of(c);
             if ("label".equals(role) || "textbox".equals(role) || "text".equals(role)) {
-                String t = ComponentText.text(c);
+                String t = view != null ? view.text(c) : ComponentText.text(c);
                 if (t != null && !t.isEmpty()) {
                     if (sb.length() > 0) {
                         sb.append('\n');
@@ -293,6 +298,11 @@ final class DialogReader {
 
     /** The text of a {@code JOptionPane} message: strings (HTML reduced), arrays line by line, components read. */
     static String messageText(Object message) {
+        return messageText(message, null);
+    }
+
+    /** {@link #messageText(Object)} with the call's masked-text rule for the components of the message. */
+    static String messageText(Object message, ComponentView view) {
         if (message == null || message instanceof Icon) {
             return null;
         }
@@ -300,12 +310,12 @@ final class DialogReader {
             return ComponentText.visible((String) message);
         }
         if (message instanceof Component) {
-            return readingText((Component) message);
+            return readingText((Component) message, view);
         }
         if (message instanceof Object[]) {
             StringBuilder sb = new StringBuilder();
             for (Object part : (Object[]) message) {
-                String t = messageText(part);
+                String t = messageText(part, view);
                 if (t != null && !t.isEmpty()) {
                     if (sb.length() > 0) {
                         sb.append('\n');

@@ -58,6 +58,8 @@ import ai.skillroy.testjava.scenario.resolve.StoredTable;
 import ai.skillroy.testjava.scenario.web.AgentWebPath;
 import ai.skillroy.testjava.scenario.web.WebRunContext;
 import ai.skillroy.testjava.scenario.web.WebSettings;
+import ai.skillroy.testjava.scenario.image.ImageSteps;
+import ai.skillroy.testjava.scenario.resolve.EnvFingerprint;
 
 import java.io.IOException;
 import java.math.BigDecimal;
@@ -202,6 +204,14 @@ import java.util.stream.Stream;
  * wrapped ({@code RunObservers.safe}): one that throws is logged once and ignored for the rest of the run, and nothing
  * of it changes a verdict; with {@link RunObserver#NONE} no record is built for it.
  *
+ * <p>Phase 7 (phase7-contracts.md 8.4-8.7): a plan with {@code inference: run} is SKIPPED in {@code replay} right after
+ * {@code run-start} (the agent is not contacted) and refused in every other mode; a plan with {@code via: ROBOT} or
+ * {@code mode: ROBOT} calls is refused before {@code checkRequires} without {@link RunOptions#robot()}; after step 0b
+ * the controller-side contributors' capabilities are merged into the matrix ({@link CapabilityMerge}); a
+ * {@link VisualCheck} is skipped unconditionally; an {@link ImageCheck} and an anchored {@code pointer} call's guard
+ * run through {@code ImageSteps} against the bindings file's baselines and anchors, which {@code approve} writes a
+ * second time after the steps.
+ *
  * <p>Not thread-safe: one executor runs one plan at a time on the calling thread; it starts no threads (a web path
  * may run threads of its own).
  */
@@ -249,6 +259,14 @@ public final class PlanExecutor {
     private final boolean packWebRoot;
     /** True when the pack has a fact root named {@code hooks}, which then hides the base root (P6 6.3). */
     private final boolean packHooksRoot;
+    /** True when the pack has a fact root named {@code caps}, which then hides the base root. */
+    private final boolean packCapsRoot;
+
+    /** The message of a run that was not executed (phase7-contracts.md 8.6). */
+    static final String SKIPPED_MESSAGE = "not executed: the plan needs a model while steps run (inference: run)";
+
+    /** The refusal of a plan with Robot calls without the person's opt-in (phase7-contracts.md 8.1, 9.2). */
+    static final String ROBOT_REFUSAL = "robot: not allowed; a person passes --allow-robot";
 
     /**
      * An executor that finds web paths ({@code ServiceLoader<WebPath>}) through the thread's context class loader at
@@ -294,15 +312,18 @@ public final class PlanExecutor {
         List<FactProvider> packFacts = pack.facts();
         boolean webRoot = false;
         boolean hooksRoot = false;
+        boolean capsRoot = false;
         if (packFacts != null) {
             for (FactProvider fact : packFacts) {
                 facts.putIfAbsent(fact.root(), fact);
                 webRoot |= "web".equals(fact.root());
                 hooksRoot |= "hooks".equals(fact.root());
+                capsRoot |= "caps".equals(fact.root());
             }
         }
         this.packWebRoot = webRoot;
         this.packHooksRoot = hooksRoot;
+        this.packCapsRoot = capsRoot;
         for (FactProvider fact : BaseFacts.all()) {
             facts.putIfAbsent(fact.root(), fact);
         }
@@ -550,6 +571,16 @@ public final class PlanExecutor {
          * an earlier run's never count.
          */
         private long stepsSinceSeq;
+        /** The agent's matrix after step 0b, before the merge (phase7-contracts.md 8.5); null before. */
+        private CapabilityMatrix agentCaps;
+        /** The ids the controller-side contributors added (phase7-contracts.md 8.5). */
+        private List<String> contributed = List.of();
+        /** True for a {@code run} plan in {@code replay}: nothing was executed (phase7-contracts.md 8.6). */
+        private boolean notExecuted;
+        /** The run's baselines and anchors (phase7-contracts.md 8.7); built after the bind. */
+        private ImageBaselines baselines;
+        /** The run's image steps (phase7-contracts.md 6.7); built on first need. */
+        private ImageSteps imageSteps;
 
         Run(Plan plan, Bindings provided, boolean bindOnly) {
             this.plan = plan;
@@ -566,6 +597,10 @@ public final class PlanExecutor {
             }
             if (!packHooksRoot) {
                 runFacts.put("hooks", BaseFacts.hooks(() -> stepsSinceSeq));
+            }
+            if (!packCapsRoot) {
+                // phase7-contracts.md 8.5: the base root caps reads the run's merged matrix, with a source per entry.
+                runFacts.put("caps", BaseFacts.caps(() -> caps));
             }
         }
 
@@ -668,12 +703,34 @@ public final class PlanExecutor {
                 // phase6-contracts.md 10.3: with telemetry on, run-start names the trace (a trace id is not a secret).
                 start.put("traceId", traceId);
             }
+            if (options.robot()) {
+                // phase7-contracts.md 9.2: the person's half of the Robot opt-in is recorded in run-start.
+                start.put("robot", true);
+            }
             log.write("run-start", start);
             Abort failure = null;
             try {
+                if (Plan.INFERENCE_RUN.equals(plan.inference())) {
+                    // phase7-contracts.md 8.6 (D311, D328): decided before anything is sent to the target.
+                    if (options.bind().mode() != BindMode.REPLAY) {
+                        throw new Abort(Status.ERROR, FailureKind.ENVIRONMENT, null, "inference: run: run it with"
+                                + " skillroy session --play", RunLog.fields("inference", Plan.INFERENCE_RUN, "mode",
+                                options.bind().mode().label()));
+                    }
+                    notExecuted = true;
+                    log.write("skipped", RunLog.fields("reason", SKIPPED_MESSAGE));
+                }
+            } catch (Abort abort) {
+                failure = abort;
+            }
+            try {
+                if (failure != null || notExecuted) {
+                    throw new SkipRest();
+                }
                 refuseOutput();
                 requireBindingsRoot();
                 init();
+                refuseRobot();
                 checkRequires();
                 checkLaunchProperties();
                 if (!bindOnly) {
@@ -689,6 +746,8 @@ public final class PlanExecutor {
                     }
                     runVerify();
                 }
+            } catch (SkipRest skip) {
+                // A run plan: refused or not executed above.
             } catch (Abort abort) {
                 failure = abort;
             } catch (AgentLostException e) {
@@ -704,6 +763,22 @@ public final class PlanExecutor {
                 failure = new Abort(Status.ERROR, FailureKind.ENVIRONMENT, runner.currentStep, "internal error: "
                         + e.getClass().getName(), RunLog.fields("exception", e.toString()));
             }
+            if (!bindOnly && baselines != null && baselines.hasApprovals()) {
+                // phase7-contracts.md 8.7 (D355): approve's second write, after the steps, also after a failed one (a
+                // person approved each baseline at its step).
+                try {
+                    BindingsFile written = Binder.writeApprovedImages(plan, options.bind(), outcome != null
+                            && outcome.file() != null ? outcome.file() : emptyFile(), baselines);
+                    log.write("bind", RunLog.fields("ok", true, "images", new ArrayList<>(written.images().keySet()),
+                            "written", options.bind().envId() + "/" + plan.scenarioId() + BindingsFile.SUFFIX));
+                } catch (BindException e) {
+                    log.write("bind", RunLog.fields("ok", false, "images", true, "error", e.getMessage()));
+                    if (failure == null) {
+                        failure = new Abort(Status.ERROR, e.kind(), null, e.getMessage(),
+                                new LinkedHashMap<>(e.detail()));
+                    }
+                }
+            }
             List<CostLedger.Entry> modelCalls = modelCalls();
             log.write("ledger", RunLog.fields("count", modelCalls.size()));
             if (options.bind().mode() == BindMode.REPLAY && !modelCalls.isEmpty()) {
@@ -714,7 +789,7 @@ public final class PlanExecutor {
             }
             writeLedger(modelCalls);
             Map<String, Object> detail = failure == null ? new LinkedHashMap<>() : failure.detail;
-            Status status = failure != null ? failure.status
+            Status status = failure != null ? failure.status : notExecuted ? Status.SKIPPED
                     : skipped.isEmpty() && runner.degradedFidelity.isEmpty() ? Status.PASS : Status.DEGRADED;
             try {
                 if (failure != null && stepsStarted && !runner.agentLost && options.captureOnFailure()) {
@@ -723,7 +798,7 @@ public final class PlanExecutor {
                 if (failure != null && stepsStarted && options.captureOnFailure()) {
                     saveWebTrace();
                 }
-                if (failure == null) {
+                if (failure == null && !notExecuted) {
                     keepArtifacts();
                 }
             } catch (RuntimeException e) {
@@ -748,8 +823,9 @@ public final class PlanExecutor {
                 }
             }
             Duration duration = Duration.ofMillis(Math.max(0, options.clock().millis() - startMs));
+            String message = failure != null ? failure.getMessage() : notExecuted ? SKIPPED_MESSAGE : null;
             RunResult result = masked(new RunResult(plan.scenarioId(), status, failure == null ? null : failure.kind,
-                    failure == null ? null : failure.stepId, failure == null ? null : failure.getMessage(),
+                    failure == null ? null : failure.stepId, message,
                     safeDetail(detail), steps, skipped, duration, runner.degradedFidelity, options.bind().mode(),
                     options.bind().envId(), modelCalls));
             Map<String, Object> end = RunLog.fields("status", status.name(), "failureKind",
@@ -904,12 +980,28 @@ public final class PlanExecutor {
             if (Files.isDirectory(failure, LinkOption.NOFOLLOW_LINKS)) {
                 try (Stream<Path> files = Files.list(failure)) {
                     for (Path file : files.toList()) {
-                        if (file.getFileName().toString().startsWith(WEB_EVIDENCE_PREFIX)
+                        String name = file.getFileName().toString();
+                        if ((name.startsWith(WEB_EVIDENCE_PREFIX) || name.startsWith(ImageSteps.FILE_PREFIX))
                                 && (Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)
                                 || Files.isSymbolicLink(file))) {
                             Files.deleteIfExists(file);
                         }
                     }
+                } catch (IOException | RuntimeException e) {
+                    // Best effort, as below.
+                }
+            }
+            Path candidates = dir.resolve("candidates");
+            if (Files.isDirectory(candidates, LinkOption.NOFOLLOW_LINKS)) {
+                try (Stream<Path> files = Files.list(candidates)) {
+                    for (Path file : files.toList()) {
+                        if (file.getFileName().toString().startsWith(ImageSteps.FILE_PREFIX)
+                                && (Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)
+                                || Files.isSymbolicLink(file))) {
+                            Files.deleteIfExists(file);
+                        }
+                    }
+                    Files.deleteIfExists(candidates);
                 } catch (IOException | RuntimeException e) {
                     // Best effort, as below.
                 }
@@ -944,12 +1036,34 @@ public final class PlanExecutor {
             }
         }
 
+        /**
+         * The controller half of the double opt-in (phase7-contracts.md 8.1, 9.2, decision D332): a plan whose calls
+         * carry {@code via: ROBOT} or {@code mode: ROBOT} is refused without {@link RunOptions#robot()}, before
+         * {@code requires} is checked and before the agent is asked anything.
+         */
+        private void refuseRobot() throws Abort {
+            if (!options.robot() && plan.usesRobot()) {
+                log.write("robot", RunLog.fields("allowed", false, "reason", ROBOT_REFUSAL));
+                throw new Abort(Status.ERROR, FailureKind.ENVIRONMENT, null, ROBOT_REFUSAL,
+                        RunLog.fields("robot", false));
+            }
+        }
+
+        /** A bindings file of this plan without resolutions, for approve's second write when the bind wrote none. */
+        private BindingsFile emptyFile() {
+            return new BindingsFile(BindingsFile.VERSION, plan.scenarioId(), options.bind().envId(), plan.pack(),
+                    plan.packVersion(), plan.hash(), plan.resolveHash(), outcome != null && outcome.env() != null
+                    ? outcome.env() : new EnvFingerprint(EnvFingerprint.VERSION, ResolutionEngine.hash(
+                    new LinkedHashMap<>()), Map.of()), Map.of(), Map.of());
+        }
+
         private void checkRequires() throws Abort, AgentLostException {
             caps = agent.capabilities();
             if (caps == null) {
                 caps = new CapabilityMatrix(Map.of());
             }
             installHooks();
+            mergeContributed();
             archiveCapabilities();
             List<String> unmet = caps.unmet(plan.requires());
             log.write("requires", RunLog.fields("requires", plan.requires(), "unmet", unmet));
@@ -983,8 +1097,31 @@ public final class PlanExecutor {
         }
 
         /**
+         * phase7-contracts.md 8.5 (D326, D354): the controller-side contributors' capabilities merged into the
+         * matrix after step 0b and before {@code requires}, with no host features; {@code replay} forces every
+         * contributed id {@code UNAVAILABLE (replay)}. A refused merge ends the run ERROR / ENVIRONMENT.
+         */
+        private void mergeContributed() throws Abort {
+            agentCaps = caps;
+            CapabilityMerge.Loaded loaded = CapabilityMerge.load(webPathLoader);
+            try {
+                CapabilityMerge.Result merged = CapabilityMerge.merge(agentCaps, loaded.contributors(),
+                        new CapabilityContributor.CapabilityContext(options.bind().inference(), options.bind().mode(),
+                                agentCaps, Set.of(), pack));
+                caps = merged.merged();
+                contributed = merged.contributed();
+            } catch (CapabilityMerge.Refused e) {
+                log.write("capabilities", RunLog.fields("ok", false, "error", e.getMessage()));
+                throw new Abort(Status.ERROR, FailureKind.ENVIRONMENT, null, e.getMessage(),
+                        RunLog.fields("capabilities", "refused"));
+            }
+        }
+
+        /**
          * The matrix as the run uses it, archived (phase6-contracts.md 6.4, decision D130): {@code capabilities.json}
-         * beside {@code run.jsonl} (with an output directory) and the record {@code capabilities {hash, ids, file}}.
+         * beside {@code run.jsonl} (with an output directory) and the record {@code capabilities {hash, ids, file,
+         * agentHash, contributed}} (phase7-contracts.md 8.5: {@code agentHash} is the agent's matrix after step 0b, what
+         * the "one matrix per target" check compares; {@code hash} and the file are the merged matrix's).
          */
         private void archiveCapabilities() {
             Path dir = outDir;
@@ -999,7 +1136,7 @@ public final class PlanExecutor {
                 }
             }
             log.write("capabilities", RunLog.fields("hash", caps.hash(), "ids", (long) caps.all().size(), "file",
-                    file));
+                    file, "agentHash", (agentCaps == null ? caps : agentCaps).hash(), "contributed", contributed));
         }
 
         private void checkLaunchProperties() throws Abort, AgentLostException {
@@ -1325,6 +1462,11 @@ public final class PlanExecutor {
             }
             mask = mask.plus(runner.bindings.secretValues());
             log.mask(mask);
+            if (!plan.images().isEmpty()) {
+                baselines = new ImageBaselines(plan.scenarioId(), bind.bindingsRoot() == null ? null
+                        : BindingsFile.envDir(bind.bindingsRoot(), bind.envId()), outcome != null ? outcome.file()
+                        : providedFile(bind));
+            }
             Map<String, Object> record = RunLog.fields("ok", true, "slots", new ArrayList<>(runner.bindings.values()
                     .keySet()), "mode", mode, "envId", bind.envId(), "bindingsFile", bindingsFile);
             if (outcome != null && !outcome.skipped().isEmpty()) {
@@ -1337,6 +1479,19 @@ public final class PlanExecutor {
                 } catch (IOException | RuntimeException e) {
                     log.write("bind", RunLog.fields("ok", true, "writeError", e.toString()));
                 }
+            }
+        }
+
+        /** With caller-supplied bindings: the scenario's bindings file read for its images, or null. */
+        private BindingsFile providedFile(BindOptions bind) {
+            if (bind.bindingsRoot() == null) {
+                return null;
+            }
+            Path file = BindingsFile.locate(bind.bindingsRoot(), bind.envId(), plan.scenarioId());
+            try {
+                return Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS) ? BindingsFile.read(file) : null;
+            } catch (IOException | BindingsFormatException e) {
+                return null;
             }
         }
 
@@ -1438,11 +1593,81 @@ public final class PlanExecutor {
             Plan.Step step = plan.steps().get(index);
             runBlock(step.id(), step.verb(), step.line(), stepSkipped -> {
                 for (int j = 0; j < step.calls().size(); j++) {
-                    runner.execute(step, j, step.calls().get(j), plan.scenarioId() + "/" + step.id() + "/" + (j + 1),
+                    Plan.Call call = step.calls().get(j);
+                    if (call.guard() != null) {
+                        guard(step, call);
+                    }
+                    runner.execute(step, j, call, plan.scenarioId() + "/" + step.id() + "/" + (j + 1),
                             () -> nextStepHandlesPrompt(index));
                 }
                 evaluate(step.expect(), step.id(), stepSkipped);
             });
+        }
+
+        /**
+         * An anchored {@code pointer} call's image guard (phase7-contracts.md 6.7, decision D357): the anchor of the
+         * current render key compared before the pointer call is sent; a mismatch, or no anchor for the key, is
+         * REBIND_NEEDED (reason {@code IMAGE}) in every mode.
+         */
+        private void guard(Plan.Step step, Plan.Call call) throws Abort, AgentLostException, InterruptedException {
+            Object args;
+            try {
+                args = runner.bindings.substitute(call.args());
+            } catch (ResolutionException e) {
+                throw new Abort(Status.ERROR, FailureKind.RESOLUTION_FAILED, step.id(), e.getMessage(),
+                        RunLog.fields("reason", e.reason(), "reference", e.reference()));
+            }
+            @SuppressWarnings("unchecked")
+            Map<String, Object> substituted = args instanceof Map<?, ?> m ? (Map<String, Object>) m : Map.of();
+            ImageRuns.raise(step.id(), ImageRuns.run(step.id(), () -> imageSteps().guard(step.id(), call.guard(),
+                    substituted)));
+        }
+
+        /** The run's image steps, built on first need (phase7-contracts.md 6.7). */
+        private ImageSteps imageSteps() {
+            if (imageSteps == null) {
+                imageSteps = new ImageSteps(new ImageSteps.Host() {
+                    @Override
+                    public Object read(String primitive, Map<String, Object> args) throws AgentRpcException,
+                            AgentLostException {
+                        RpcResult result = agent.call(primitive, args, options(Math.max(stepTimeoutMs, 10_000L),
+                                null));
+                        noteSeq(result.seqAfter());
+                        return result.value();
+                    }
+
+                    @Override
+                    public void record(Map<String, Object> fields) {
+                        log.write("image", fields);
+                    }
+
+                    @Override
+                    public Path outputDir() {
+                        return outDir;
+                    }
+
+                    @Override
+                    public BindMode mode() {
+                        return options.bind().mode();
+                    }
+
+                    @Override
+                    public String scenarioId() {
+                        return plan.scenarioId();
+                    }
+
+                    @Override
+                    public String envId() {
+                        return options.bind().envId();
+                    }
+
+                    @Override
+                    public Approver approver() {
+                        return options.bind().approver();
+                    }
+                }, baselines);
+            }
+            return imageSteps;
         }
 
         private void runVerify() throws Abort, AgentLostException, InterruptedException {
@@ -1531,6 +1756,32 @@ public final class PlanExecutor {
             List<Bound> active = new ArrayList<>();
             List<BoundRow> rows = new ArrayList<>();
             for (Check check : checks) {
+                if (check instanceof VisualCheck visual) {
+                    // phase7-contracts.md 8.4 (D312, D354): no visual evaluator in this host, whatever the state.
+                    Capability capability = caps.get(visual.capability());
+                    String state = capability == null ? "missing" : capability.state().name()
+                            + (capability.reason() == null || capability.reason().isBlank() ? ""
+                            : " (" + capability.reason() + ")");
+                    String description = stepId + ": " + skippedText(check) + " skipped: no visual evaluator in this"
+                            + " host; capability " + visual.capability() + " is " + state;
+                    skipped.add(description);
+                    stepSkipped.add(description);
+                    log.write("expect", RunLog.fields("step", stepId, "visual", RunLog.fields("question",
+                            visual.question(), "expect", visual.expect()), "capability", visual.capability(),
+                            "result", "skipped", "state", state, "reason", "no visual evaluator in this host"));
+                    continue;
+                }
+                if (check instanceof ImageCheck image) {
+                    // phase7-contracts.md 6.7: from the step's own capture call's result, one compare, no retry.
+                    Object capture = runner.lastResult == null ? null : runner.lastResult.value();
+                    String line = ImageRuns.raise(stepId, ImageRuns.run(stepId, () -> imageSteps().check(stepId,
+                            image, capture)));
+                    if (line != null) {
+                        skipped.add(line);
+                        stepSkipped.add(line);
+                    }
+                    continue;
+                }
                 if (check.capability() != null && !caps.isOk(check.capability())) {
                     Capability capability = caps.get(check.capability());
                     String state = capability == null ? "missing" : capability.state().name()
@@ -1660,6 +1911,9 @@ public final class PlanExecutor {
         private String skippedText(Check check) {
             if (check instanceof Expectation e) {
                 return e.path() + " " + Values.safeWrite(e.matcher());
+            }
+            if (check instanceof VisualCheck || check instanceof ImageCheck) {
+                return check.describe();
             }
             RowCheck row = (RowCheck) check;
             return "db." + row.table() + " " + Values.safeWrite(row.expect());
@@ -2366,6 +2620,16 @@ public final class PlanExecutor {
             } catch (JsonException e) {
                 return RunLog.fields("unwritableDetail", e.getMessage());
             }
+        }
+    }
+
+    /** Leaves the run's main sequence for a plan that was refused or not executed before it began (P7 8.6). */
+    private static final class SkipRest extends Exception {
+
+        private static final long serialVersionUID = 1L;
+
+        SkipRest() {
+            super(null, null, false, false);
         }
     }
 }

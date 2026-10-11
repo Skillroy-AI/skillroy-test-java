@@ -105,6 +105,7 @@ class SwingDisplayTest extends DisplayTestBase {
         assertEquals("password", pin.get("role"));
         assertNull(pin.get("text"), "password content never leaves the JVM");
         assertTrue(pin.containsKey("text"));
+        assertEquals(Boolean.TRUE, pin.get("masked"), "A61: the built-in rule marks the node");
 
         assertEquals("textbox", node(root, n -> "entry".equals(n.get("name"))).get("role"));
         Map<String, Object> notes = node(root, n -> "notes".equals(n.get("name")));
@@ -405,13 +406,16 @@ class SwingDisplayTest extends DisplayTestBase {
     void captureReturnsADecodablePngOfTheRightSize() throws Exception {
         Map<String, Object> shot = call("swing.capture");
         assertEquals("png", shot.get("format"));
-        assertEquals(640L, shot.get("width"));
-        assertEquals(480L, shot.get("height"));
+        // A61: a window is the root pane's size (640 x 480 only where the insets are 0, as on the WM-less display)
+        final int rw = onEdt(() -> ui.frame.getRootPane().getWidth());
+        final int rh = onEdt(() -> ui.frame.getRootPane().getHeight());
+        assertEquals((long) rw, shot.get("width"));
+        assertEquals((long) rh, shot.get("height"));
         BufferedImage img = ImageIO.read(new ByteArrayInputStream(Base64.getDecoder().decode((String) shot
                 .get("base64"))));
         assertNotNull(img, "PNG decodes");
-        assertEquals(640, img.getWidth());
-        assertEquals(480, img.getHeight());
+        assertEquals(rw, img.getWidth());
+        assertEquals(rh, img.getHeight());
         assertTrue(distinctColours(img) > 2, "something was painted");
 
         int w = onEdt(() -> ui.ok.getWidth());
@@ -419,7 +423,10 @@ class SwingDisplayTest extends DisplayTestBase {
         Map<String, Object> button = call("swing.capture", "target", ref(ui.ok), "mode", "paint");
         assertEquals((long) w, button.get("width"));
         assertEquals((long) h, button.get("height"));
-        expectError(ErrorCodes.INVALID_PARAMS, () -> call("swing.capture", "mode", "ROBOT"));
+        // A61: mode ROBOT is the opt-in glass capture; without the agent option robot its capability is unavailable
+        RpcException robot = expectError(ErrorCodes.CAPABILITY_UNAVAILABLE, () -> call("swing.capture", "mode",
+                "ROBOT"));
+        assertEquals("swing.capture.robot", robot.error().data().get("capability"));
         expectError(ErrorCodes.INVALID_PARAMS, () -> call("swing.capture", "target", ref(ui.hidden)));
     }
 

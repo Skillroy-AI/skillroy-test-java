@@ -257,7 +257,7 @@ class RobustnessTest {
         assertTrue(ctx.primitives.list().isEmpty());
         try {
             module.install(ctx);
-            assertEquals(11, ctx.primitives.list().size());
+            assertEquals(14, ctx.primitives.list().size());
             awtRunning.set(true);
             module.onTargetReady(ctx);
             assertEquals(!GraphicsEnvironment.isHeadless(), module.tapInstalled(), "the second install is a full one");

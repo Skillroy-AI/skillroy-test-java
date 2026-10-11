@@ -17,6 +17,7 @@
 package ai.skillroy.testjava.scenario;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 /**
@@ -30,13 +31,34 @@ import java.util.Objects;
  * @param yaml the scenario's text, which the scenario loader reads and the compiler compiles
  * @param bindings the bindings file of its query slots and oracles, or null when it has none
  * @param report what the reviewer should look at
+ * @param images label to the masked PNG of each anchor the bindings file's {@code images} section names
+ *     (phase7-contracts.md 6.6, 8.7): the caller places them under {@code <scenarioId>.images/} beside the bindings
+ *     file; empty without anchors
  */
-public record ExportResult(String yaml, BindingsFile bindings, Report report) {
+public record ExportResult(String yaml, BindingsFile bindings, Report report, Map<String, byte[]> images) {
 
     /** @throws NullPointerException if the YAML or the report is null */
     public ExportResult {
         Objects.requireNonNull(yaml, "yaml");
         Objects.requireNonNull(report, "report");
+        Map<String, byte[]> copy = new java.util.TreeMap<>();
+        if (images != null) {
+            images.forEach((label, png) -> copy.put(label, png.clone()));
+        }
+        images = java.util.Collections.unmodifiableMap(copy);
+    }
+
+    /** An export without anchors (the Phase 5 shape). */
+    public ExportResult(String yaml, BindingsFile bindings, Report report) {
+        this(yaml, bindings, report, Map.of());
+    }
+
+    /** The anchors' PNGs, label to bytes; each call answers fresh copies. */
+    @Override
+    public Map<String, byte[]> images() {
+        Map<String, byte[]> copy = new java.util.TreeMap<>();
+        images.forEach((label, png) -> copy.put(label, png.clone()));
+        return copy;
     }
 
     /**
@@ -51,9 +73,14 @@ public record ExportResult(String yaml, BindingsFile bindings, Report report) {
      * @param notHeld the checks that did not hold, which are not exported
      * @param excluded the steps left out (they did not pass, or came after the first failure)
      * @param notes anything else the reviewer should know, one line each
+     * @param visionDerived one line per step a vision tool chose (phase7-contracts.md 6.6): the step, the capture's
+     *     hash and file, the hit-test's ref, the mark, the point: review the locator and the rung
+     * @param liveOnly the steps that cannot replay and are not exported, with the reason (Robot steps, raw pointer
+     *     calls)
      */
     public record Report(String scenarioId, String sessionId, int steps, String inference, List<String> observed,
-                         List<String> notHeld, List<String> excluded, List<String> notes) {
+                         List<String> notHeld, List<String> excluded, List<String> notes, List<String> visionDerived,
+                         List<String> liveOnly) {
 
         /** Copies the lists. */
         public Report {
@@ -61,6 +88,14 @@ public record ExportResult(String yaml, BindingsFile bindings, Report report) {
             notHeld = List.copyOf(notHeld);
             excluded = List.copyOf(excluded);
             notes = List.copyOf(notes);
+            visionDerived = visionDerived == null ? List.of() : List.copyOf(visionDerived);
+            liveOnly = liveOnly == null ? List.of() : List.copyOf(liveOnly);
+        }
+
+        /** A report without vision-derived or live-only steps (the Phase 5 shape). */
+        public Report(String scenarioId, String sessionId, int steps, String inference, List<String> observed,
+                      List<String> notHeld, List<String> excluded, List<String> notes) {
+            this(scenarioId, sessionId, steps, inference, observed, notHeld, excluded, notes, List.of(), List.of());
         }
 
         /** The report as text, one section per list that is not empty. */
@@ -70,6 +105,8 @@ public record ExportResult(String yaml, BindingsFile bindings, Report report) {
                     .append(steps).append(steps == 1 ? " step" : " steps").append(", inference ").append(inference)
                     .append(".\n");
             section(text, "Observed expectations: derive or confirm", observed);
+            section(text, "Vision-derived steps: review the locator and the rung", visionDerived);
+            section(text, "Live-only", liveOnly);
             section(text, "Checks that did not hold (not exported)", notHeld);
             section(text, "Steps not exported", excluded);
             section(text, "Notes", notes);

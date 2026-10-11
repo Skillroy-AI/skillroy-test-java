@@ -135,7 +135,7 @@ final class LendingVerifiers {
 
     /**
      * {@code lending.deposit}: a scan of the candidate's barcode finds the candidate, active, at its deposit, lent the
-     * way the query asks (per day or counted).
+     * way the query asks (per day or counted) and, when the query names it, with or without the induction check.
      */
     static final class DepositVerifier implements Verifier<LendableItem, ItemRef> {
 
@@ -159,7 +159,16 @@ final class LendingVerifiers {
                 throws AgentRpcException, AgentLostException {
             List<Object> calls = new ArrayList<>();
             Scan scan = scan(candidate, Boolean.TRUE.equals(query.perDay()), ctx, calls);
-            return scan.failure() != null ? scan.failure() : VerifierResult.pass(scan.found(), evidence(calls));
+            if (scan.failure() != null) {
+                return scan.failure();
+            }
+            if (query.inductionRequired() != null
+                    && !query.inductionRequired().equals(scan.answer().get("inductionRequired"))) {
+                return VerifierResult.fail("the desk " + (query.inductionRequired() ? "asks for no induction check"
+                        : "asks for the induction check") + " for " + candidate.code(), evidence(calls));
+            }
+            return VerifierResult.pass(scan.found() + (query.inductionRequired() == null ? ""
+                    : query.inductionRequired() ? ", induction checked" : ", no induction"), evidence(calls));
         }
     }
 

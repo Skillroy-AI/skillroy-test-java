@@ -3,8 +3,8 @@
   "scenarioId": "supervisor-return-llm-sql",
   "envId": "seed-a",
   "pack": "lending",
-  "packVersion": "0.5.0",
-  "planHash": "sha256:b5b51328243ff220ca4c4fc5c881d0b9d68730a2e6c3b4dbf29dc6b5ad294688",
+  "packVersion": "0.6.0",
+  "planHash": "sha256:7aa1b1abc3d2694b830a86b93e3f1a0177523e4d7f24faa6dd385c7587c127a0",
   "resolveHash": "sha256:86c1b245642ab413753a4ffb13f4b3375a730cd4b63216b7636d19f8f20c2f16",
   "env": {
     "fingerprint": "sha256:ba8e0fe3089ab50e4f708f73e42e1dd914456472429f1b67cfc538ad75f08944",

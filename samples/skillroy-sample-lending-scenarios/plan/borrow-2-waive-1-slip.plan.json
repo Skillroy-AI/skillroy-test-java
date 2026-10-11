@@ -1,8 +1,8 @@
 {
-  "planVersion": 5,
+  "planVersion": 6,
   "scenarioId": "borrow-2-waive-1-slip",
   "pack": "lending",
-  "packVersion": "0.5.0",
+  "packVersion": "0.6.0",
   "sourceHash": "sha256:dcbc6bbe50d05400ebdf214d59726910e125dc9670ee7651b4de200b578978fb",
   "inference": "none",
   "requires": [
