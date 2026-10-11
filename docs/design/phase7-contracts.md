@@ -2325,6 +2325,16 @@ runs in `LoadModeChecks` and the glue, `keypad-image` in `ResolutionChecks`, `Bi
 `Runs.assertPassedWithoutSleeping` counts an `image` record as a check, and a scenario whose only steps are image checks
 needs no wait.
 
+**As built (Phase 7, VM):** item 8 is `InferenceChecks#theVisionSessionExportsTheCommittedScenarioWhichReplaysWithZeroModelCalls`
+(seed A, the agent on the command line). The scripted model names a mark by the control's quoted name in the marks list
+(`button 'DUE'`), so that the prompt line, which holds the word too, is never chosen. The committed
+`exported/session-vision-loan.*` were generated on the arm64 image with a Java 25 controller and a Java 25 target and
+held byte for byte with a Java 8 target. The export's YAML records `click {by: {action: DUE}}`, `type {by: {id: entry},
+text: "10.00"}` (the focus owner's locator) and `click {by: {action: DEPOSIT}}`, each with its provenance comment, and
+`requires` gains `swing.tree`. The player half of item 8 (`vision-live-only.yaml` to `PASS`, the `aiExpect` of
+`loan-table-visual-check.yaml` on a scripted `YES`) has not run: both scenarios bind fixture credential slots, and
+`ExecutorSession` cannot bind a fixture slot (D-VM-6).
+
 ### 13.3 Live (profile `inference-live`; needs `ANTHROPIC_API_KEY`; skipped without it; never in CI)
 
 `VisionLiveIT` in the sample scenarios module, on the desk in the image, budget USD 1.00 per session and USD 3.00 for
@@ -2336,6 +2346,16 @@ true` (the header coexists, or the finding of §7.1 is recorded); (4) a V1 sessi
 `aiExpect` through the player (YES on a true statement, NO on a false one); (6) the export of (1) replays with zero
 model calls. Every file written is checked against the key's value before writing (common rule 6). The results are
 recorded in `../TODO.md` under "Phase 7, the live items" with the spend.
+
+**As built (Phase 7, VM; written, never run):** `VisionLiveIT` begins with `Live.assumeLive()` and a display check and
+reads the profile's settings file. Item 3 runs second, so that a fallback header the provider refuses is recorded
+before item 2 needs it: an answer means the header coexists, and `INVALID_REQUEST` is printed as the finding, not
+failed. Items 1, 2 and 4 bound the turn's `vision` calls (a resolution the person asked for is not counted) and every
+vision call's model. Item 5 is a read-only V1 turn asked to use `skillroy_look`, then the player on an inline scenario
+with query slots (the fixture slots of the committed ones cannot be bound, D-VM-6) and two `aiExpect` steps, a true
+statement and a false one with `expect: NO`. An item whose bound would pass the class budget is skipped. The files the
+class writes itself are checked for the key's value before they are written; the framework's files (journals,
+`inference.jsonl`, captures, run directories) at the end of each item and again by the last check.
 
 ### 13.4 Not verified in this phase, and why
 

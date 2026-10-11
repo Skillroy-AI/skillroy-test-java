@@ -2255,6 +2255,12 @@ fixture update path. Gap 49 (`LendableItem` without induction) is not taken. The
 edition (`lending.edition`), and `AccessControl.check` reads the return limit through `limit(code, LIMIT_RETURN)`; the
 agent module's `app.state` gains `edition`.
 
+(Phase 7, built 2026-10-10, VM marks it; VS built it; P7 §12.3) The pack is **0.6.0**: `screenLegend()` (the desk's
+icon-only keys and custom-painted controls in plain text, a system part of a vision session and of a visual question,
+masked like the vocabulary) and the argument `inductionRequired` of `LendableItem` (gap 49). Every committed plan and
+bindings file carries the new pack version, and the session recordings were regenerated once, since the version and
+the vocabulary stand in every session's system text.
+
 - **`sqlAllowLists()`**: one list for source `lending`, dialect `HSQLDB`: the tables `staff` (`code` key; `name`
   personal; `active`; `password` **not** allow-listed: it is the secret column, masked by `PASSWORD_MASK`),
   `staff_role`, `role_permission` (`permission` sampled), `role_cap`, `desk_setting` (`key` sampled), `item` (`code`
@@ -2387,6 +2393,12 @@ the pack's schema and replays on a fresh desk with zero model calls. On the live
 cannot replay (each request carries the snapshot hash and the event topics, which depend on the desk's date and the
 engine's timing), so the image drives the model with the scripted session script answering by position, and its
 export must still equal the committed copies.
+
+(Phase 7, built 2026-10-10, VM; P7 §12.4, §13.2 item 8) Beside it, the vision session `session-vision-loan`
+(`VisionSessionScript`): the person signs on and scans a plain item, one V1 turn of the session service with the vision
+tools (the scripted model naming marks of the desk's captures) asks for the deposit due, types the deposit at the focus
+owner and records it, and the person checks the loan. It runs only on the real desk in the image (its requests carry
+captures), and its export is committed under `scenarios/exported/` beside this one and replayed with zero model calls.
 
 ### 14.5 Recordings and the two profiles in the sample
 
