@@ -106,6 +106,8 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
  *   <li>{@link #theMcpServerAsASubprocessListsTheLendingToolsAndServesTheDesk()} and
  *       {@link #theSessionCommandRunsAScriptExportsAndTheExportReplays()} (seed A): item 5 and the command form of
  *       item 4, through the assembled launcher;</li>
+ *   <li>{@link #theVisionSessionExportsTheCommittedScenarioWhichReplaysWithZeroModelCalls()} (seed A):
+ *       phase7-contracts.md 13.2 item 8, the vision session with the scripted model;</li>
  *   <li>{@link #noSecretInAnythingTheseChecksWrote()}: item 8, last, over the outputs of every check above.</li>
  * </ol>
  *
@@ -461,6 +463,62 @@ abstract class InferenceChecks {
         String markdown = Files.readString(reportD.resolve(ReResolveReport.MARKDOWN_FILE));
         assertTrue(markdown.contains("; cache hits "), markdown);
         assertSignedOffAndQuiet(seq);
+    }
+
+    // ------------------------------------------------------------------------------------------------ P7 item 8
+
+    /**
+     * phase7-contracts.md 13.2 item 8 (seed A, once per Java): the vision session of 12.4 ({@link VisionSessionScript})
+     * on this desk with the scripted model: the person resolves the assistant and signs on, resolves a plain item and
+     * scans it; one V1 turn (marks) asks for the deposit due ({@code DUE} by its mark), types the deposit at the focus
+     * owner and records it ({@code DEPOSIT} by its mark), four model calls; the person's checks hold. The export equals
+     * the committed {@code scenarios/exported/session-vision-loan.*} byte for byte (the YAML, the plan, the bindings
+     * file as the agent channel writes it); the journal read back exports the same; after the pack's recover the
+     * committed plan replays and passes with zero model calls and an empty ledger. Under
+     * {@code -Dskillroy.inference.fixtures.update=true} the committed copies are written from this run first (on the
+     * Java 25 arm64 leg, as P7 13.2 item 8 says).
+     */
+    @Test
+    @Order(7)
+    void theVisionSessionExportsTheCommittedScenarioWhichReplaysWithZeroModelCalls() throws Exception {
+        assumeTrue(full() && env() == Env.SEED_A, "seed A, once");
+        Path dir = runDir("vision-session");
+        ScriptedGateway model = ScriptedGateway.of(ScriptedAnswers.visionScript());
+        VisionSessionScript.Result result = VisionSessionScript.run(client(), Runs.credentials(env()), model, dir);
+        assertEquals(List.of("vision"), result.toolSets(), "the vision tools applied");
+        assertEquals(Turn.Outcome.DONE, result.turn().outcome(), result.turn().answer());
+        assertEquals(4, model.requests().size(), "four model calls");
+        assertEquals(Status.PASS, result.signOn().status(), result.signOn().message());
+        assertEquals(Status.PASS, result.scan().status(), result.scan().message());
+        assertEquals(List.of("click_mark", "type", "click_mark"), result.turn().actions().stream()
+                .map(Turn.Action::tool).toList(), "the three model steps");
+        assertTrue(result.turn().actions().stream().allMatch(a -> a.step() != null && a.step().status()
+                == Status.PASS), String.valueOf(result.turn().actions()));
+        assertTrue(result.checks().stream().allMatch(c -> c.held()), String.valueOf(result.checks()));
+        assertTrue(result.ledger().entries().stream().allMatch(e -> CostLedger.Entry.PURPOSE_VISION.equals(e.purpose())),
+                "every call of the turn is a vision call");
+        if (ScriptedAnswers.update()) {
+            Path root = ItEnv.moduleDir().resolve("scenarios").resolve("exported");
+            VisionSessionScript.write(result.export(), root);
+            System.out.println("[fixtures] wrote the committed export " + VisionSessionScript.SCENARIO_ID + " on Java "
+                    + System.getProperty("java.specification.version") + " (controller) for a target on "
+                    + System.getProperty("skillroy.it.targetJava", "this JVM") + ", " + System.getProperty("os.arch"));
+        }
+        VisionSessionScript.Files3 written = VisionSessionScript.write(result.export(), dir.resolve("exported"));
+        VisionSessionScript.Files3 committed = VisionSessionScript.committed();
+        assertEquals(SessionScript.read(committed.yaml()), SessionScript.read(written.yaml()), "the YAML");
+        assertEquals(SessionScript.read(committed.plan()), SessionScript.read(written.plan()), "the plan");
+        assertEquals(SessionScript.read(committed.bindings()), SessionScript.read(written.bindings()), "the bindings");
+        assertEquals(result.export().yaml(), result.exportFromFile().yaml(), "the journal read back exports the same");
+
+        Runs.PACK.recover(client());
+        CostLedger ledger = new CostLedger();
+        Runs.Outcome replay = Runs.run(client(), Plan.read(committed.plan()), runDir("vision-session-replay"),
+                Runs.bind(env()).withBindingsRoot(committed.bindings().getParent().getParent()).withLedger(ledger));
+        Runs.assertPassedWithoutSleeping(replay);
+        assertEquals(List.of(), replay.result().modelCalls(), "zero model calls");
+        assertTrue(ledger.isEmpty());
+        assertSignedOffAndQuiet(-1);
     }
 
     // ------------------------------------------------------------------------------------------------ items 5 and 4

@@ -204,6 +204,78 @@ final class ScriptedAnswers {
         };
     }
 
+    /** The vision session's request (phase7-contracts.md 12.4, 13.2 item 8). */
+    static final String VISION_REQUEST = "Settle the deposit of this loan: ask for the deposit due, take ten as the"
+            + " deposit, and record it.";
+    /** The vision session's answer. */
+    static final String VISION_ANSWER = "The deposit due was asked for, ten was taken and the loan is recorded.";
+    /** The deposit the model types. */
+    static final String VISION_DEPOSIT = "10.00";
+
+    /**
+     * The model's side of the vision session of phase7-contracts.md 12.4 (V1, the real desk), one answer per call, in
+     * order: click the mark of the keypad's {@code DUE} key, type the deposit into the field that has the focus, click
+     * the mark of the {@code DEPOSIT} key, and say {@code done}. A mark is named by its label in the marks list of the
+     * request's latest capture (the {@code <target-ui>} block), never by a pixel, so that the script holds on every
+     * target whatever its pixels. A call beyond the script, or a capture without the mark, is
+     * {@code UNSUPPORTED}.
+     */
+    static ScriptedGateway.Script visionScript() {
+        AtomicInteger next = new AtomicInteger();
+        return request -> {
+            int i = next.getAndIncrement();
+            if (!"vision".equals(request.purpose())) {
+                throw new InferenceException(InferenceException.Kind.UNSUPPORTED, "the vision script answers vision"
+                        + " requests only, not " + request.purpose());
+            }
+            Object[] step = switch (i) {
+                case 0 -> step("I ask for the deposit due.", "click_mark", input("mark", mark(request, "DUE"),
+                        "button", null, "count", null));
+                case 1 -> step("I take ten as the deposit.", "type", input("text", VISION_DEPOSIT, "enter", null));
+                case 2 -> step("I record the deposit.", "click_mark", input("mark", mark(request, "DEPOSIT"), "button",
+                        null, "count", null));
+                case 3 -> step("The loan is recorded.", "done", input("answer", VISION_ANSWER));
+                default -> throw new InferenceException(InferenceException.Kind.UNSUPPORTED, "the vision script has no"
+                        + " answer " + (i + 1));
+            };
+            Content.ToolUse use = new Content.ToolUse("toolu_vision_" + (i + 1), (String) step[1],
+                    copy((Map<?, ?>) step[2]));
+            return new ModelResponse(List.of(Content.Text.of((String) step[0]), use), ModelResponse.StopReason.TOOL_USE,
+                    usage(request, Map.of("text", step[0], "tool", use.name(), "input", use.input())), null);
+        };
+    }
+
+    /** A mark line of the marks list: {@code mark 7: button DUE}. */
+    private static final java.util.regex.Pattern MARK_LINE = java.util.regex.Pattern.compile("mark (\\d+): ([^\\n]*)");
+
+    /**
+     * The number of the mark whose label names {@code word} as a whole word, in the latest marks list of the request
+     * (the last {@code <target-ui>} block of its messages that holds one).
+     *
+     * @throws InferenceException {@code UNSUPPORTED} when no mark names it
+     */
+    static long mark(ModelRequest request, String word) throws InferenceException {
+        java.util.regex.Pattern named = java.util.regex.Pattern.compile("\\b" + word + "\\b");
+        String marks = null;
+        for (Message message : request.messages()) {
+            for (Content part : message.parts()) {
+                if (part instanceof Content.Text t && t.text().contains("mark ")) {
+                    marks = t.text();
+                }
+            }
+        }
+        if (marks != null) {
+            java.util.regex.Matcher m = MARK_LINE.matcher(marks);
+            while (m.find()) {
+                if (named.matcher(m.group(2)).find()) {
+                    return Long.parseLong(m.group(1));
+                }
+            }
+        }
+        throw new InferenceException(InferenceException.Kind.UNSUPPORTED, "no mark of the latest capture names "
+                + word);
+    }
+
     private static Object[] step(String intent, String tool, Map<String, Object> input) {
         return new Object[] {intent, tool, input};
     }

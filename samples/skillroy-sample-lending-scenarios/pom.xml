@@ -118,6 +118,15 @@
       <artifactId>skillroy-telemetry</artifactId>
       <scope>test</scope>
     </dependency>
+    <!-- Phase 7 (phase7-contracts.md 2.1, 12.4, 13.2 item 8, 13.3): the vision module for the vision session's script, the
+         end-to-end check and the live test; test scope only, nothing of it reaches the pack or a target. On the test
+         class path its VisionCapabilities contributes inference.vision to every run's matrix (UNAVAILABLE in replay). -->
+    <dependency>
+      <groupId>ai.skillroy</groupId>
+      <artifactId>skillroy-vision</artifactId>
+      <version>${project.version}</version>
+      <scope>test</scope>
+    </dependency>
     <!-- Phase 6 (phase6-contracts.md 11.4): the overlay of the branch edition. Built before this module, kept off the
          test class path (classpathDependencyExcludes below: on it, ServiceLoader would overlay the pack of every
          standard-edition test) and handed to the tests as a jar they load in a class loader of their own

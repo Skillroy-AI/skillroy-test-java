@@ -49,8 +49,19 @@ session, with its own answers and actions, not a refresh of the recorded one. `S
 image's session check (`InferenceChecks`, §15.2 item 4) drives the same script by position and compares its export
 with the committed copies.
 
+### The live profile's settings file (not a recording)
+
+`inference-live.yaml` is the settings file `VisionLiveIT` reads under the profile `inference-live`
+(`phase7-contracts.md` §7.3, §13.3): the live gateway, `images: true`, `fallbacks: true`, `effort.vision: low` and the
+class `haiku` mapped to `claude-haiku-5-5`. It holds no key and no account value (the gateway reads the key from the
+environment), and nothing in the build reads it: the recorded gateway reads only the `.json` files here.
+
 ## What is not here, and why
 
+- The vision session exported as `session-vision-loan` (`phase7-contracts.md` §12.4): its requests carry the desk's
+  captures, which only a desk drawn by the same JDK line on the same seed reproduces, so its check
+  (`InferenceChecks`, §13.2 item 8) drives the scripted model by position on the real desk, as the Phase 5 session's
+  image check does, and compares the export with the committed copies under `scenarios/exported/`.
 - The triage of failed runs (§11, §14.5): a triage request carries the failed run's own records (durations, event
   times, the desk's business date), so no committed file can answer a run made later; the end-to-end check records the
   triage of its own failed runs with the scripted answers and replays them through the recorded gateway.
