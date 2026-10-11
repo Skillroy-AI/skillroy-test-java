@@ -231,8 +231,9 @@ class Phase7SessionTest {
                 assertEquals("a credential is in flight; the person signs on first", typed.message());
                 StepOutcome key = session.execute(PlannedCall.of("swing.key", Map.of("key", "7"), Sync.NONE), origin);
                 assertEquals(typed.message(), key.message(), "a printable key");
-                assertEquals(Status.PASS, session.execute(PlannedCall.of("swing.key", Map.of("key", "ENTER"),
-                        Sync.NONE), origin).status(), "a key that types nothing");
+                // Phase 7 security fix, S127: every call that changes the target waits for the sign-on now.
+                assertEquals(typed.message(), session.execute(PlannedCall.of("swing.key", Map.of("key", "ENTER"),
+                        Sync.NONE), origin).message(), "a key that types nothing changes the target all the same");
             }
             assertEquals(sent, fx.agent.callsTo("toy.input").size(), "nothing refused was sent");
             assertTrue(fx.agent.callsTo("swing.type").isEmpty());
@@ -247,7 +248,154 @@ class Phase7SessionTest {
                     "a model's sign-on stays refused whatever the flag");
             assertEquals(Status.PASS, session.execute(PlannedCall.of("toy.input", Map.of("source", "Entry", "value",
                     "$assistant.code"), Sync.READY), MODEL).status(), "a non-secret field stays usable");
+            assertEquals(Status.PASS, session.execute(PlannedCall.of("swing.key", Map.of("key", "ENTER"),
+                    Sync.NONE), MODEL).status(), "a key that types nothing, after the sign-on");
         }
+    }
+
+    /**
+     * Phase 7 security fix, S101 (L3-F1; P7 9.2 rule 1, A34): a whole-slot reference to a credential-joined slot, in
+     * every spelling the substitution reads as the slot ({@code $assistant}, {@code x$assistant}, {@code
+     * x$assistant.}, {@code x$assistant..password}), is refused for a model and a client, in flight and after the
+     * person's sign-on, on the pack verb, the base verb and the raw call, with nothing sent and no secret journaled;
+     * {@code $assistant.code} stays usable and resolves against the public values.
+     */
+    @Test
+    void aWholeCredentialSlotIsNeverUsedOnAModelsOrAClientsBehalf() throws Exception {
+        try (ExecutorSession session = fx.open()) {
+            SessionFixture.resolveItemAndAssistant(session, PERSON);
+            int sent = fx.agent.callsTo("toy.input").size();
+            for (Origin origin : List.of(MODEL, CLIENT)) {
+                StepOutcome verb = session.execute("enter", Map.of("value", "y$assistant"), origin);
+                assertEquals(Status.ERROR, verb.status(), origin.kind().name());
+                assertEquals(ExecutorSession.CREDENTIAL_REFUSAL, verb.message(), "in flight, a pack verb");
+                StepOutcome raw = session.execute(PlannedCall.of("toy.input", Map.of("source", "Entry", "value",
+                        "x$assistant"), Sync.READY), origin);
+                assertEquals(ExecutorSession.CREDENTIAL_REFUSAL, raw.message(), "in flight, a raw call");
+            }
+            assertEquals(sent, fx.agent.callsTo("toy.input").size(), "nothing refused was sent");
+            assertFalse(String.valueOf(new java.util.ArrayList<>(fx.agent.calls)).contains(TestCredentials.PW_100));
+
+            assertEquals(Status.PASS, session.execute("signOn", Map.of("staff", "$assistant"), PERSON).status());
+            assertFalse(session.secretsInFlight());
+            int mark = fx.agent.calls.size();
+            for (Origin origin : List.of(MODEL, CLIENT)) {
+                for (String text : List.of("x$assistant", "$assistant", "x$assistant.", "x$assistant..password")) {
+                    StepOutcome typed = session.execute("type", Map.of("by", Map.of("id", "entry"), "text", text),
+                            origin);
+                    assertEquals(Status.ERROR, typed.status(), origin.kind() + " " + text);
+                    assertEquals(ExecutorSession.CREDENTIAL_REFUSAL, typed.message(), text);
+                }
+                StepOutcome raw = session.execute(PlannedCall.of("swing.type", Map.of("target", "h1", "text",
+                        "x$assistant"), Sync.NONE), origin);
+                assertEquals(ExecutorSession.CREDENTIAL_REFUSAL, raw.message(), "after the sign-on, a raw call");
+                StepOutcome input = session.execute("enter", Map.of("value", "$assistant"), origin);
+                assertEquals(ExecutorSession.CREDENTIAL_REFUSAL, input.message(), "the slot handed to a verb");
+            }
+            assertTrue(fx.agent.callsTo("swing.type").isEmpty(), "nothing typed");
+            int before = fx.agent.callsTo("toy.input").size();
+            assertEquals(Status.PASS, session.execute(PlannedCall.of("toy.input", Map.of("source", "Entry", "value",
+                    "$assistant.code"), Sync.READY), CLIENT).status(), "a non-secret field stays usable");
+            List<FakeAgentConnection.Call> inputs = fx.agent.callsTo("toy.input");
+            assertEquals(before + 1, inputs.size());
+            assertEquals("100", inputs.get(inputs.size() - 1).params().get("value"));
+            for (FakeAgentConnection.Call call : new java.util.ArrayList<>(fx.agent.calls).subList(mark,
+                    fx.agent.calls.size())) {
+                assertFalse(String.valueOf(call.params()).contains(TestCredentials.PW_100), call.method());
+            }
+            assertFalse(Files.readString(dir.resolve(StepJournal.FILE)).contains(TestCredentials.PW_100));
+        }
+    }
+
+    /**
+     * Phase 7 security fix, S127 (L3-F2; P7 9.2 rule 2 widened): while a credential is in flight every call of a model
+     * or a client that changes the target is refused, a pack verb over the application's input seam and its raw
+     * primitive included; a read still runs; after the person's sign-on the same steps run.
+     */
+    @Test
+    void nothingChangesTheTargetOnAModelsOrAClientsBehalfWhileACredentialIsInFlight() throws Exception {
+        fx.agent.describe("toy.read", false);
+        try (ExecutorSession session = fx.open()) {
+            SessionFixture.resolveItemAndAssistant(session, PERSON);
+            assertTrue(session.secretsInFlight());
+            int sent = fx.agent.callsTo("toy.input").size();
+            for (Origin origin : List.of(MODEL, CLIENT)) {
+                StepOutcome verb = session.execute("enter", Map.of("value", "$item.code"), origin);
+                assertEquals(Status.ERROR, verb.status(), origin.kind().name());
+                assertEquals(ExecutorSession.IN_FLIGHT_REFUSAL, verb.message(), "a pack verb over the input seam");
+                assertEquals("credential", verb.detail().get("refused"));
+                StepOutcome raw = session.execute(PlannedCall.of("toy.input", Map.of("source", "Entry", "value",
+                        "1"), Sync.READY), origin);
+                assertEquals(ExecutorSession.IN_FLIGHT_REFUSAL, raw.message(), "its raw primitive");
+                assertEquals(ExecutorSession.IN_FLIGHT_REFUSAL, session.execute(PlannedCall.of("toy.poke", Map.of(),
+                        Sync.NONE), origin).message(), "a primitive the catalogue does not list");
+                assertEquals(Status.PASS, session.execute(PlannedCall.of("toy.read", Map.of(), Sync.NONE), origin)
+                        .status(), "a read still runs");
+            }
+            assertEquals(sent, fx.agent.callsTo("toy.input").size(), "nothing refused was sent");
+            assertTrue(fx.agent.callsTo("toy.poke").isEmpty());
+            assertEquals(Status.PASS, session.execute("signOn", Map.of("staff", "$assistant"), PERSON).status());
+            for (Origin origin : List.of(MODEL, CLIENT)) {
+                assertEquals(Status.PASS, session.execute("enter", Map.of("value", "$item.code"), origin).status(),
+                        origin.kind() + " after the sign-on");
+            }
+        }
+    }
+
+    /**
+     * Phase 7 security fix, S113 and S139 (L6-S2, L6-F4; P7 6.8, 9.2): a slot a person bound is never rebound on a model's
+     * or a client's behalf, by {@code resolve} or {@code fixture}, before anything is resolved, joined or journaled; the
+     * credential slot keeps its join and stays in flight, so the person's sign-on still runs; a model or a client binds
+     * and rebinds its own slots; the person rebinds any; the {@code resolve} record carries the origin and reads back.
+     */
+    @Test
+    void aSlotThePersonBoundIsNeverReboundOnAModelsOrAClientsBehalf() throws Exception {
+        try (ExecutorSession session = fx.open()) {
+            SessionFixture.resolveItemAndAssistant(session, PERSON);
+            long resolves = resolveCount(session);
+            for (Origin origin : List.of(MODEL, CLIENT)) {
+                for (String slot : List.of("item", "assistant")) {
+                    BindException e = assertThrows(BindException.class, () -> session.resolve(slot, "Item",
+                            Map.of("deposit", Map.of("between", List.of("6.00", "50.00"))), List.of(), List.of(),
+                            null, origin), origin.kind() + " " + slot);
+                    assertEquals(FailureKind.ENVIRONMENT, e.kind());
+                    assertEquals(ExecutorSession.personSlotRefusal(slot), e.getMessage());
+                    assertEquals("slot", e.detail().get("refused"));
+                }
+                BindException f = assertThrows(BindException.class, () -> session.fixture("item", Map.of("code", "Z9"),
+                        null, origin));
+                assertEquals(ExecutorSession.personSlotRefusal("item"), f.getMessage());
+            }
+            assertEquals(resolves, resolveCount(session), "nothing journaled");
+            assertTrue(session.secretsInFlight(), "the join and the in-flight state are kept");
+            assertEquals("B2", ((Map<?, ?>) session.bindings().values().get("item")).get("code"), "the person's value");
+
+            assertEquals("C3", ((Map<?, ?>) session.resolve("other", "Item", Map.of("deposit", Map.of("between",
+                    List.of("6.00", "50.00"))), List.of(), List.of(), null, MODEL).value()).get("code"),
+                    "a model binds its own slot");
+            assertEquals("A1", ((Map<?, ?>) session.resolve("other", "Item", Map.of("deposit", Map.of("between",
+                    List.of("0.50", "2.00"))), List.of(), List.of(), null, CLIENT).value()).get("code"),
+                    "and a model's or a client's slot is rebound by either");
+            assertEquals(Status.PASS, session.execute("signOn", Map.of("staff", "$assistant"), PERSON).status(),
+                    "the person's sign-on still compiles and runs");
+            assertEquals("C3", ((Map<?, ?>) session.resolve("item", "Item", Map.of("deposit", Map.of("between",
+                    List.of("6.00", "50.00"))), List.of(), List.of(), null, PERSON).value()).get("code"),
+                    "the person rebinds a slot");
+
+            List<Origin.Kind> origins = new java.util.ArrayList<>();
+            for (StepJournal.Entry e : StepJournal.read(dir.resolve(StepJournal.FILE), fx.pack).entries()) {
+                if (e instanceof StepJournal.ResolveEntry r) {
+                    origins.add(r.origin().kind());
+                }
+            }
+            assertEquals(List.of(Origin.Kind.PERSON, Origin.Kind.PERSON, Origin.Kind.MODEL, Origin.Kind.CLIENT,
+                    Origin.Kind.PERSON), origins, "the resolve records carry the origin and read back");
+        }
+    }
+
+    private static long resolveCount(ExecutorSession session) {
+        return session.journal().entries().stream().filter(e -> e instanceof StepJournal.ResolveEntry
+                || e instanceof StepJournal.FixtureEntry).count();
     }
 
     // ------------------------------------------------------------------------------------------------ provenance

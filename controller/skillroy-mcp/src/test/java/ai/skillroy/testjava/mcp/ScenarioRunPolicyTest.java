@@ -349,6 +349,64 @@ class ScenarioRunPolicyTest {
         };
     }
 
+    /** A scenario with the credential slot {@code staff} (the desk's {@code 100}) and the given steps text. */
+    private static String staffScenario(String id, String steps) {
+        return "scenario: " + id + "\npack: desk\nresolve:\n  staff: { fixture: { code: \"100\" }, credential:"
+                + " { realm: staff, key: code } }\n" + steps;
+    }
+
+    /**
+     * Phase 7 security fix, S101, S102 and S128 (L3-F1, L3-S1, L3-S3; phase7-contracts.md 9.2, 9.4): the credential
+     * rule's plan form reads a client's references with the executor's tokenizer and judges a pack verb's arguments
+     * as written by step identity. Refused before anything runs, naming the step and the slot: the slot as a whole
+     * through a pass-through verb ({@code x$staff}, and {@code $staff} handed whole, which its compiled call passes
+     * on); a secret field on a pack-verb step that shares its source line with another (flow style, and a scenario
+     * written as one line of JSON), the refusal naming the step that holds it; a value nested deeper than the bound.
+     * A field the fixture provides still runs.
+     */
+    @Test
+    void aClientsScenarioReachesNoCredentialInAnySpellingOrLayout() throws Exception {
+        try (McpFixture fx = new McpFixture(dir)) {
+            fx.start(fx.options().mutating(true).build());
+            refused(fx, staffScenario("whole-slot", "steps:\n  - enter: {value: \"x$staff\"}\n"),
+                    "the scenario is refused", "step s1 (enter", "the credential slot 'staff' as a whole");
+            refused(fx, staffScenario("whole-slot-dots", "steps:\n  - enter: {value: \"x$staff..password\"}\n"),
+                    "step s1 (enter", "the credential slot 'staff' as a whole");
+            refused(fx, staffScenario("slot-handed-on", "steps:\n  - enter: {value: $staff}\n"),
+                    "step s1 (enter", "the credential slot 'staff' as a whole");
+            refused(fx, staffScenario("base-whole", "steps:\n  - call: {primitive: desk.input, args: {source: Entry,"
+                    + " value: \"$staff\"}}\n"), "step s1 (call", "the credential slot 'staff' as a whole");
+            refused(fx, staffScenario("flow-field", "steps: [ {enter: {value: \"$staff.password\"}}, {enter: {value:"
+                    + " \"1\"}} ]\n"), "step s1 (enter", "the field 'password' of the credential slot 'staff'");
+            McpSchema.CallToolResult reversed = run(fx, staffScenario("flow-field-last", "steps: [ {enter: {value:"
+                    + " \"1\"}}, {enter: {value: \"$staff.password\"}} ]\n"));
+            String text = McpFixture.text(reversed);
+            assertTrue(reversed.isError() && text.contains("step s2 (enter") && !text.contains("step s1 (enter"),
+                    "the step that holds it, not the innocent one: " + text);
+            refused(fx, "{\"scenario\": \"json-one-line\", \"pack\": \"desk\", \"resolve\": {\"staff\":"
+                    + " {\"fixture\": {\"code\": \"100\"}, \"credential\": {\"realm\": \"staff\", \"key\":"
+                    + " \"code\"}}}, \"steps\": [{\"enter\": {\"value\": \"$staff.password\"}}, {\"enter\":"
+                    + " {\"value\": \"1\"}}]}\n", "step s1 (enter, line 1)", "'password'");
+            StringBuilder open = new StringBuilder();
+            StringBuilder close = new StringBuilder();
+            for (int i = 0; i < 66; i++) {
+                open.append("{a: ");
+                close.append("}");
+            }
+            refused(fx, staffScenario("deep", "steps:\n  - call: {primitive: desk.input, args: {source: Entry, value:"
+                    + " \"1\", deep: " + open + "\"$staff.password\"" + close + "}}\n"), "step s1 (call",
+                    "nested deeper than 64 levels");
+            for (McpSchema.CallToolResult r : List.of(reversed)) {
+                assertFalse(McpFixture.text(r).contains(Desk.SECRET), "never a value");
+            }
+            assertTrue(fx.desk.agent.callsTo("desk.input").isEmpty(), "nothing ran");
+            McpSchema.CallToolResult code = run(fx, staffScenario("provided", "steps: [ {enter: {value: $staff.code}},"
+                    + " {enter: {value: \"1\"}} ]\n"));
+            assertFalse(code.isError(), "a field the fixture provides runs: " + McpFixture.text(code));
+            assertEquals(2, fx.desk.agent.callsTo("desk.input").size());
+        }
+    }
+
     @Test
     void aRunOnAClientsBehalfEvaluatesExpectationsOnMaskedValues() throws Exception {
         try (McpFixture fx = new McpFixture(dir).startMutating()) {

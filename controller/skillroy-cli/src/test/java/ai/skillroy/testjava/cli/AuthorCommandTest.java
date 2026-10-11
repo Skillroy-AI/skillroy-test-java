@@ -310,6 +310,36 @@ class AuthorCommandTest {
         assertTrue(Files.isRegularFile(out.resolve("confirming.yaml")), "written for the reviewer all the same");
     }
 
+    /**
+     * Phase 7 security fix, S107 (L3-S2; phase7-contracts.md 9.4, D427): {@code author --run} judges the planner's
+     * scenario as written, as {@code skillroy_scenario_run} does, so that a pass-through pack verb given a credential
+     * slot's secret field is refused, nothing is sent and the operator's credential never reaches the target.
+     */
+    @Test
+    void aPassThroughVerbGivenACredentialsSecretFieldIsNotRun() throws Exception {
+        String password = "Cli-Desk-Pw-7713-Qz";
+        Path credentials = Files.writeString(tmp.resolve("credentials.yaml"), "version: 1\ncredentials:\n"
+                + "  staff:\n    S7: { password: '" + password + "' }\n");
+        Files.setPosixFilePermissions(credentials, PosixFilePermissions.fromString("rw-------"));
+        Map<String, Object> doc = new LinkedHashMap<>();
+        doc.put("scenario", "poke-secret");
+        doc.put("pack", "clitest");
+        doc.put("resolve", Map.of("staff", Map.of("fixture", Map.of("code", "S7"), "credential",
+                Map.of("realm", "staff", "key", "code"))));
+        doc.put("steps", List.of(Map.of("poke", Map.of("by", "$staff.password"))));
+        answer(1, envelope(doc, false, "0.20"));
+        CliHarness.Outcome outcome = author("--brief", BRIEF, "--id", "poke-secret", "--out", out.toString(),
+                "--claude-command", claude.toString(), "--credentials", credentials.toString(), "--run")
+                .expectExit(Exit.OK);
+        assertTrue(outcome.out().contains("check: run once live: refused, nothing ran"), outcome.out());
+        assertTrue(outcome.out().contains("step s1 (poke") && outcome.out().contains("the field 'password' of the"
+                + " credential slot 'staff'"), outcome.out());
+        assertTrue(agent.rpcRequests("test.poke").isEmpty(), "nothing ran");
+        assertFalse((outcome.out() + outcome.err()).contains(password));
+        Map<String, Object> authoring = Json.parseObject(Files.readString(out.resolve("poke-secret.authoring.json")));
+        assertEquals(false, ((Map<?, ?>) authoring.get("checks")).get("ran"), "the --run check failed");
+    }
+
     /** phase5-contracts.md 10.2: the planner's deadline is {@code timeouts.plannerMs} of the inference settings. */
     @Test
     void thePlannersDeadlineIsTheSettingsPlannerMs() {

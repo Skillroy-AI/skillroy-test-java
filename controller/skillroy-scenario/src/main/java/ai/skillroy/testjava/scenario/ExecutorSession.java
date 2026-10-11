@@ -110,8 +110,11 @@ import java.util.regex.Pattern;
  * session merges the controller-side capabilities at {@link #open} with {@link SessionOptions#host()}
  * ({@link #capabilities()}); a call with {@code via: ROBOT} or {@code mode: ROBOT} needs {@link SessionOptions#robot()}
  * and a {@code mode: ROBOT} capture a person's origin; the credential rule refuses, for every origin but a person's, a
- * step that names or compiles to a credential join's secret field, and any typing while a credential is in flight
- * ({@link #secretsInFlight()}); {@link #expectImage} runs an image step through {@code ImageSteps}.
+ * step that names or compiles to a credential join's secret field or the joined slot as a whole, and every call that
+ * changes the target while a credential is in flight ({@link #secretsInFlight()}), and resolves such a step's call
+ * arguments against the slots' public values, never a joined secret (Phase 7 security fix, S101, S127); a slot a
+ * person bound is never rebound on another origin's behalf (S113); {@link #expectImage} runs an image step through
+ * {@code ImageSteps}.
  *
  * <p>Not thread-safe: one session is driven by one thread at a time; it starts no threads (a web path may run its
  * own). {@link #close()} is idempotent.
@@ -154,6 +157,8 @@ public final class ExecutorSession implements AutoCloseable {
     private final Set<String> inFlight = new java.util.LinkedHashSet<>();
     /** The resolved slots as a compiled step sees them (a verb may ask for a slot's kind or credential). */
     private final Map<String, Scenario.Slot> declaredSlots = new LinkedHashMap<>();
+    /** Who made each slot's current binding (Phase 7 security fix, S113): a person's is never rebound by another. */
+    private final Map<String, Origin.Kind> boundBy = new LinkedHashMap<>();
     private final Map<String, Scenario.OracleEntry> declaredOracles = new LinkedHashMap<>();
     private int stepCount;
     private boolean mutated;
@@ -582,7 +587,8 @@ public final class ExecutorSession implements AutoCloseable {
         Object given = confirms(origin) ? args : withoutConfirmation(args);
         if (!confirms(origin)) {
             // phase7-contracts.md 9.2 (D342) rule 1: a step whose arguments as given name a credential join's secret
-            // field is refused for every origin but a person's, before anything is compiled.
+            // field, or the joined slot as a whole (Phase 7 security fix, S101), is refused for every origin but a
+            // person's, before anything is compiled.
             String secret = secretReference(given);
             if (secret != null) {
                 return refusedCredential(stepId, verb, given, origin, secret);
@@ -675,6 +681,19 @@ public final class ExecutorSession implements AutoCloseable {
     }
 
     private StepOutcome run(String stepId, String verb, Object givenArgs, Plan.Step step, Origin origin)
+            throws AgentLostException, InterruptedException {
+        // Phase 7 security fix, S101 (P2 8.4, P7 9.2): a step of any origin but a person's resolves its call arguments
+        // against the slots' public values, so that no spelling of a reference reaches a joined secret on a model's or
+        // a client's behalf; the credential rule's refusals below stay the early, well-worded answer.
+        runner.publicArguments = !confirms(origin);
+        try {
+            return runSteps(stepId, verb, givenArgs, step, origin);
+        } finally {
+            runner.publicArguments = false;
+        }
+    }
+
+    private StepOutcome runSteps(String stepId, String verb, Object givenArgs, Plan.Step step, Origin origin)
             throws AgentLostException, InterruptedException {
         long t0 = clock.millis();
         List<Map<String, Object>> callRecords = callRecords(step.calls());
@@ -855,7 +874,7 @@ public final class ExecutorSession implements AutoCloseable {
         for (Plan.Call call : calls) {
             Object args;
             try {
-                args = runner.bindings.substitute(call.args());
+                args = callArguments(call.args());
             } catch (ResolutionException e) {
                 args = call.args();
             }
@@ -872,6 +891,14 @@ public final class ExecutorSession implements AutoCloseable {
             records.add(record);
         }
         return records;
+    }
+
+    /**
+     * A call's arguments substituted as the runner will send them: against the public values for a step of any origin
+     * but a person's (Phase 7 security fix, S101), with the joined secret fields for a person's.
+     */
+    private Object callArguments(Map<String, Object> args) throws ResolutionException {
+        return runner.publicArguments ? runner.bindings.substitutePublic(args) : runner.bindings.substitute(args);
     }
 
     /**
@@ -927,8 +954,15 @@ public final class ExecutorSession implements AutoCloseable {
      * @param args the query's arguments, {@code $references} to earlier slots, oracles and captures in place
      * @param strategy strategy tokens; empty or null means not restricted
      * @param verify verifier ids; empty or null means the pack's for the kind
+     * <p>Phase 7 security fix, S113, S139: a slot whose current binding a person made (a person's {@code resolve} or
+     * {@code fixture}, the scenario player's binding of a scenario's slots) is rebound for a person's origin only; for
+     * any other origin the call is refused before anything is resolved, joined or journaled
+     * ({@link #personSlotRefusal}), while a model or a client may bind new slots and rebind the ones it bound. The
+     * {@code resolve} record carries the origin.
+     *
      * @param credential the slot's credential declaration, or null
-     * @throws BindException RESOLUTION_FAILED or ENVIRONMENT, as a bind reports them
+     * @throws BindException RESOLUTION_FAILED or ENVIRONMENT, as a bind reports them; ENVIRONMENT for a slot a person
+     *     bound, asked by another origin ({@code detail.refused: slot})
      * @throws IllegalArgumentException if the slot name is not a name or is reserved
      * @throws AgentLostException if the agent is gone
      * @throws InterruptedException if the thread is interrupted
@@ -940,6 +974,7 @@ public final class ExecutorSession implements AutoCloseable {
         Objects.requireNonNull(kind, "kind");
         Objects.requireNonNull(origin, "origin");
         requireOpen();
+        refuseRebind(slot, origin);
         List<String> tokens = strategy == null ? List.of() : List.copyOf(strategy);
         List<String> verifiers = verify == null ? List.of() : List.copyOf(verify);
         Map<String, Object> given = args == null ? Map.of() : args;
@@ -986,15 +1021,33 @@ public final class ExecutorSession implements AutoCloseable {
         declaredSlots.remove(slot);
         declaredSlots.put(slot, new Scenario.Slot(slot, "query", null, 0, kind, substituted, tokens, verifiers,
                 credential));
+        boundBy.remove(slot);
+        boundBy.put(slot, origin.kind());
         rebuildBindings();
         journal.append(new StepJournal.ResolveEntry(slot, kind, jsonMap(given), tokens, verifiers, credential,
-                BindingsFile.resolutionJson(resolution)), mask);
+                BindingsFile.resolutionJson(resolution), origin), mask);
         return resolution;
     }
 
     /** Why a credential slot is never bound on a model's or a client's behalf (phase7-contracts.md 9.2, D342). */
     public static final String FIXTURE_CREDENTIAL_REFUSED = "a credential slot is bound by a person, never on a model's"
             + " or a client's behalf";
+
+    /**
+     * Why a slot a person bound is not rebound on a model's or a client's behalf (Phase 7 security fix, S113, S139;
+     * phase7-contracts.md 6.8, 9.2): {@code slot $<slot> was bound by the person; resolve under another name}.
+     */
+    public static String personSlotRefusal(String slot) {
+        return "slot $" + slot + " was bound by the person; resolve under another name";
+    }
+
+    /** The slot rule of {@link #resolve} and {@link #fixture}: a person's binding is rebound by a person only. */
+    private void refuseRebind(String slot, Origin origin) throws BindException {
+        if (!confirms(origin) && boundBy.get(slot) == Origin.Kind.PERSON) {
+            throw new BindException(FailureKind.ENVIRONMENT, null, slot, personSlotRefusal(slot),
+                    RunLog.fields("refused", "slot"));
+        }
+    }
 
     /**
      * Binds a fixture slot into the session as a plan's fixture is bound (phase7-contracts.md 9.2, D425): the value's
@@ -1009,7 +1062,8 @@ public final class ExecutorSession implements AutoCloseable {
      * @param origin who binds it
      * @throws BindException RESOLUTION_FAILED for a reference that does not resolve or a value that is not JSON-like;
      *     ENVIRONMENT for a credential whose key field is missing, whose entry the credentials do not have, or whose
-     *     secret field is already a field of the value
+     *     secret field is already a field of the value, and for a slot a person bound, asked by another origin (Phase 7
+     *     security fix, S113, as {@link #resolve}; nothing is joined or journaled)
      * @throws IllegalArgumentException if the slot name is not a name or is reserved, or a credential slot is bound for
      *     a model's or a client's origin ({@link #FIXTURE_CREDENTIAL_REFUSED}; nothing is joined or journaled)
      */
@@ -1020,6 +1074,7 @@ public final class ExecutorSession implements AutoCloseable {
         if (credential != null && origin.kind() != Origin.Kind.PERSON) {
             throw new IllegalArgumentException("slot '" + slot + "': " + FIXTURE_CREDENTIAL_REFUSED);
         }
+        refuseRebind(slot, origin);
         Object substituted;
         try {
             substituted = runner.bindings.substitutePublic(Values.normaliseSorted(value));
@@ -1071,6 +1126,8 @@ public final class ExecutorSession implements AutoCloseable {
         declaredSlots.remove(slot);
         declaredSlots.put(slot, new Scenario.Slot(slot, "fixture", substituted, 0, null, null, null, null,
                 credential));
+        boundBy.remove(slot);
+        boundBy.put(slot, origin.kind());
         rebuildBindings();
         journal.append(new StepJournal.FixtureEntry(slot, jsonForm(value), credential, origin), mask);
         return substituted;
@@ -1541,8 +1598,10 @@ public final class ExecutorSession implements AutoCloseable {
      * Whether a credential is in flight (phase7-contracts.md 9.2, decision D342): true from the moment a credential
      * join resolves a secret into the session's bindings (a person's {@link #resolve} of a credential slot) until a
      * step of a {@link Origin.Kind#PERSON} origin has consumed every such reference (its compiled calls referenced the
-     * slot's secret field). While it is true, {@code execute} refuses, for every origin but a person's, every
-     * {@code type}, every printable {@code press} and every raw {@code swing.type} or {@code swing.key}.
+     * slot's secret field). While it is true, {@code execute} refuses, for every origin but a person's, every step
+     * whose compiled calls change the target (Phase 7 security fix, S127: a mutating, destructive or uncatalogued
+     * primitive, every {@code type}, {@code press}, raw {@code swing.type} or {@code swing.key} among them); reads
+     * still run.
      *
      * @throws IllegalStateException after {@link #close()}
      */
@@ -1719,7 +1778,7 @@ public final class ExecutorSession implements AutoCloseable {
     private void guard(String stepId, Plan.Call call) throws Abort, AgentLostException, InterruptedException {
         Object args;
         try {
-            args = runner.bindings.substitute(call.args());
+            args = callArguments(call.args());
         } catch (ResolutionException e) {
             throw new Abort(Status.ERROR, FailureKind.RESOLUTION_FAILED, stepId, mask.apply(e.getMessage()),
                     RunLog.fields("reason", e.reason(), "reference", e.reference()));
@@ -1752,7 +1811,9 @@ public final class ExecutorSession implements AutoCloseable {
     /**
      * Why the step's compiled calls may not be sent for this origin (phase7-contracts.md 9.2), or null: Robot without
      * {@link SessionOptions#robot()}, a glass capture for an origin that is not a person's, and for such an origin a
-     * call that references a credential join's secret field or that types while a credential is in flight.
+     * call that references a credential join's secret field or the joined slot as a whole (S101), or, while a
+     * credential is in flight, a call that changes the target (S127: a primitive the catalogue lists as mutating or
+     * destructive, one it does not list, and every typing call).
      */
     private String gate(Plan.Step step, Origin origin) {
         boolean person = confirms(origin);
@@ -1773,13 +1834,21 @@ public final class ExecutorSession implements AutoCloseable {
             }
         }
         if (!inFlight.isEmpty()) {
+            // Phase 7 security fix, S127 (D342 rule 2 widened): while the person is mid-sign-on nothing of another
+            // origin changes the target, a pack verb over the application's input seam included; reads still run.
             for (Plan.Call call : step.calls()) {
-                if (types(call)) {
+                if (types(call) || changes(call)) {
                     return IN_FLIGHT_REFUSAL;
                 }
             }
         }
         return null;
+    }
+
+    /** Whether a call may change the target: its primitive is mutating, destructive or not in the catalogue. */
+    private boolean changes(Plan.Call call) {
+        PrimitiveDescriptor descriptor = primitives.get(call.primitive());
+        return descriptor == null || descriptor.mutating() || descriptor.destructive();
     }
 
     /** Whether a call types: {@code swing.type}, or {@code swing.key} with a key outside the non-printable set. */
@@ -1795,40 +1864,49 @@ public final class ExecutorSession implements AutoCloseable {
         return false;
     }
 
-    /** The first reference in the value that names a credential join's secret field, or null. */
+    /**
+     * The first reference in the value that reaches a credential join's secret, or null: a secret field
+     * ({@code $<slot>.<key>}) or, Phase 7 security fix S101, the joined slot as a whole ({@code $<slot>}, embedded or
+     * not, which resolves to the slot's value with its joined fields: A34's rule, {@code Bindings.isSecretField}).
+     * A value too deep to be read (S128) counts as one while a join exists: refused rather than searched.
+     */
     private String secretReference(Object value) {
         if (joins.isEmpty() || value == null) {
             return null;
         }
-        List<References.Ref> refs;
+        List<References.Reference> refs;
         try {
-            refs = References.collect(value);
+            refs = References.references(value);
         } catch (RuntimeException e) {
-            return null;
+            return "(a value nested too deep to be read)";
         }
-        for (References.Ref ref : refs) {
-            Map<String, String> secret = joins.get(ref.slot());
-            if (secret != null && !ref.fields().isEmpty() && secret.containsKey(ref.fields().get(0))) {
-                return "$" + ref.slot() + "." + ref.fields().get(0);
+        for (References.Reference ref : refs) {
+            if (reachesSecret(ref.slot(), ref.fields())) {
+                return "$" + ref.slot() + (ref.fields().isEmpty() ? "" : "." + ref.fields().get(0));
             }
         }
         return null;
     }
 
-    /** A person's call that referenced a credential join's secret field consumed it (D342). */
+    /** {@code Bindings.isSecretField}'s predicate over the session's joins: a secret field or the slot as a whole. */
+    private boolean reachesSecret(String slot, List<String> fields) {
+        Map<String, String> secret = joins.get(slot);
+        return secret != null && (fields.isEmpty() || secret.containsKey(fields.get(0)));
+    }
+
+    /** A person's call that referenced a credential join's secret field, or the slot as a whole, consumed it (D342). */
     private void consumed(Plan.Call call) {
         if (inFlight.isEmpty()) {
             return;
         }
         try {
-            for (References.Ref ref : References.collect(call.args())) {
-                Map<String, String> secret = joins.get(ref.slot());
-                if (secret != null && !ref.fields().isEmpty() && secret.containsKey(ref.fields().get(0))) {
+            for (References.Reference ref : References.references(call.args())) {
+                if (reachesSecret(ref.slot(), ref.fields())) {
                     inFlight.remove(ref.slot());
                 }
             }
         } catch (RuntimeException e) {
-            // A call whose references cannot be collected consumed nothing.
+            // A call whose references cannot be read consumed nothing.
         }
     }
 

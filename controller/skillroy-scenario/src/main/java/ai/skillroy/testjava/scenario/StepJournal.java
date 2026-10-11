@@ -48,7 +48,7 @@ import java.util.Objects;
  * [{primitive, args, sync, timeoutMs, await?, capture?}], outcome: {status, kind?, message?, detail?, executed,
  * seqBefore, seqAfter, durationMs, degradedFidelity}, snapshotHash?, provenance?}} (provenance: phase7-contracts.md
  * 9.2), {@code resolve {slot, kind, args, strategy,
- * verify, credential?, resolution}}, {@code oracle {name, fn, args, inputsHash, value}}, {@code check {path, matcher,
+ * verify, credential?, resolution, origin?}} (origin: Phase 7 security fix, S113), {@code oracle {name, fn, args, inputsHash, value}}, {@code check {path, matcher,
  * actual, held, reason}}, {@code observe {path, value}}, {@code note {origin, text}}, {@code budget {scope, spentUsd,
  * limitUsd, exhausted}}, {@code session-end {reason, steps, cost}}. A step's {@code args} are as given (references in
  * place; for a raw call, the call's own arguments), its calls' {@code args} as sent (substituted, then masked); a
@@ -373,10 +373,11 @@ public final class StepJournal {
      * @param verify the verifier ids as given (empty: the pack's for the kind)
      * @param credential the slot's credential declaration, or null
      * @param resolution the resolution in the bindings file's shape (P2 9)
+     * @param origin who resolved it (Phase 7 security fix, S113); null only in a journal written before the fix
      */
     public record ResolveEntry(String slot, String kind, Map<String, Object> args, List<String> strategy,
-                               List<String> verify, CredentialSpec credential, Map<String, Object> resolution)
-            implements Entry {
+                               List<String> verify, CredentialSpec credential, Map<String, Object> resolution,
+                               Origin origin) implements Entry {
 
         /** Copies and freezes. */
         @SuppressWarnings("unchecked")
@@ -387,6 +388,12 @@ public final class StepJournal {
             strategy = strategy == null ? List.of() : List.copyOf(strategy);
             verify = verify == null ? List.of() : List.copyOf(verify);
             resolution = resolution == null ? Map.of() : (Map<String, Object>) Plan.freeze(resolution);
+        }
+
+        /** The record before the origin (Phase 7 security fix, S113): no origin, as an older journal reads. */
+        public ResolveEntry(String slot, String kind, Map<String, Object> args, List<String> strategy,
+                            List<String> verify, CredentialSpec credential, Map<String, Object> resolution) {
+            this(slot, kind, args, strategy, verify, credential, resolution, null);
         }
 
         /**
@@ -427,6 +434,9 @@ public final class StepJournal {
                 json.put("credential", RunLog.fields("realm", credential.realm(), "key", credential.key()));
             }
             json.put("resolution", resolution);
+            if (origin != null) {
+                json.put("origin", origin.toJson());
+            }
             return json;
         }
 
@@ -436,7 +446,8 @@ public final class StepJournal {
                 credential = new CredentialSpec(String.valueOf(c.get("realm")), String.valueOf(c.get("key")));
             }
             return new ResolveEntry(text(json, "slot"), text(json, "kind"), map(json, "args"),
-                    strings(json, "strategy"), strings(json, "verify"), credential, map(json, "resolution"));
+                    strings(json, "strategy"), strings(json, "verify"), credential, map(json, "resolution"),
+                    json.get("origin") == null ? null : Origin.fromJson(json.get("origin")));
         }
     }
 

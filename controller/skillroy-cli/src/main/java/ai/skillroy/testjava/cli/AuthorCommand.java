@@ -297,7 +297,7 @@ final class AuthorCommand implements Command {
                 Boolean ran = null;
                 String runText = null;
                 if (args.flag(RUN)) {
-                    List<String> refusals = policy.refusals(plan);
+                    List<String> refusals = runRefusals(policy, result, pack);
                     if (!refusals.isEmpty()) {
                         ran = false;
                         runText = "check: run once live: refused, nothing ran (the planner's server runs only what"
@@ -319,6 +319,28 @@ final class AuthorCommand implements Command {
             TelemetryArgs.finish(observer, json ? cli.err() : cli.out());
             Thread.currentThread().setContextClassLoader(previous);
         }
+    }
+
+    /**
+     * The plan form's refusals of the planner's scenario before {@code --run} (D96; Phase 7 security fix, S107, P7 9.4,
+     * D427): the scenario is read back from the file the planner wrote and judged as written, so that a pass-through
+     * pack verb given a credential slot's field is refused here as {@code skillroy_scenario_run} refuses it; a file
+     * that cannot be read back, or that no longer compiles to the plan, is a refusal (nothing runs).
+     */
+    static List<String> runRefusals(PlanPolicy policy, AuthoringResult result, DomainPack pack) {
+        ai.skillroy.testjava.scenario.Scenario scenario;
+        try {
+            scenario = ai.skillroy.testjava.scenario.ScenarioLoader.load(result.yaml());
+            Plan again = ai.skillroy.testjava.scenario.PlanCompiler.compile(scenario, pack);
+            if (!again.hash().equals(result.plan().hash())) {
+                return List.of("the scenario file " + result.yaml().getFileName() + " no longer compiles to the plan"
+                        + " the planner returned");
+            }
+        } catch (ScenarioException | RuntimeException e) {
+            return List.of("the scenario file " + result.yaml().getFileName() + " cannot be read back for the check: "
+                    + e.getMessage());
+        }
+        return policy.refusals(result.plan(), scenario);
     }
 
     private static boolean passed(RunResult result) {

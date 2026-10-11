@@ -281,12 +281,13 @@ class StepJournalTest {
         session.resolve("assistant", "Staff", ordered("limitBelow", "$item.deposit", "distinctFrom",
                 List.of("300")), List.of(), List.of(), new CredentialSpec("staff", "code"), MODEL);
         session.evaluate("needs", "Needs", ordered("limit", "$assistant.limit", "amount", "$item.deposit"), PERSON);
-        assertEquals(Status.PASS, session.execute("enter", ordered("value", "B2"), MODEL).status());
+        // Phase 7 security fix, S127: while the joined credential is in flight only a person's steps change the target.
+        assertEquals(Status.PASS, session.execute("enter", ordered("value", "B2"), PERSON).status());
         assertTrue(session.check("loan.lines[0]", ordered("equals", ordered("qty", 2L, "code", "B2")), MODEL)
                 .held());
-        assertEquals(Status.PASS, session.execute("enter", ordered("value", "POST"), MODEL).status());
+        assertEquals(Status.PASS, session.execute("enter", ordered("value", "POST"), PERSON).status());
         StepOutcome wait = session.execute("waitFor", ordered("within", "2s", "topic", "loan.posted", "match",
-                ordered("total", "7.00", "loanId", 41L)), MODEL);
+                ordered("total", "7.00", "loanId", 41L)), PERSON);
         assertEquals(Status.PASS, wait.status(), wait.message());
         session.close();
         ExportResult live = session.journal().export(ExportOptions.of("sorted"));

@@ -102,6 +102,12 @@ final class CallRunner {
     Set<String> packVerbs = Set.of();
     /** The slot values call arguments resolve against; a capture replaces them. */
     Bindings bindings;
+    /**
+     * True while the owner runs a step whose call arguments resolve against the public values only, never a joined
+     * credential field (Phase 7 security fix, S101: a session step of any origin but a person's); false for a plan
+     * run and a person's step.
+     */
+    boolean publicArguments;
     /** The step being run, for messages and the web path's records; null outside a step. */
     String currentStep;
     /** True once the agent was lost: nothing more is sent. */
@@ -251,7 +257,8 @@ final class CallRunner {
         AwaitSpec await;
         try {
             @SuppressWarnings("unchecked")
-            Map<String, Object> substituted = (Map<String, Object>) bindings.substitute(call.args());
+            Map<String, Object> substituted = (Map<String, Object>) (publicArguments
+                    ? bindings.substitutePublic(call.args()) : bindings.substitute(call.args()));
             params = substituted;
             await = AwaitRules.resolve(call.await(), bindings, stepTimeoutMs);
         } catch (ResolutionException e) {
