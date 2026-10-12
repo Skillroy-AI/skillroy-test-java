@@ -172,7 +172,7 @@ documents the format; the made-up passwords of staff `100` and `200` are in the 
 ci/run-in-linux.sh bash -c '
   S=samples/skillroy-sample-lending-scenarios
   cli=controller/skillroy-cli/target/skillroy-cli/bin/skillroy
-  pack=samples/skillroy-sample-lending-pack/target/skillroy-sample-lending-pack-0.1.0.jar
+  pack=samples/skillroy-sample-lending-pack/target/skillroy-sample-lending-pack-0.2.0-SNAPSHOT.jar
   scenarioA=$S/scenarios/return-over-limit-needs-supervisor.yaml
   java -Dlending.seed=A -cp "$S/target/it-target/skillroy-sample-lending-app.jar:$S/target/it-target/hsqldb.jar" \
        ai.skillroy.testjava.samples.lending.LendingApp > /tmp/lending.log 2>&1 &
@@ -221,7 +221,7 @@ path, and the in-process path otherwise; every web call in `run.jsonl` names the
 
 `skillroy-cdp` is optional (decision D49): the executor, the JUnit glue and the CLI do not depend on it, and the CLI
 distribution ships without Playwright. A Maven suite declares it as a dependency. The CLI takes it as `--pack` jars,
-one option per jar, together with Playwright's jars from the local Maven repository: `skillroy-cdp-0.1.0.jar`,
+one option per jar, together with Playwright's jars from the local Maven repository: `skillroy-cdp-0.2.0-SNAPSHOT.jar`,
 `playwright-1.63.0.jar`, `driver-1.63.0.jar`, `driver-bundle-1.63.0.jar`, `gson-2.14.0.jar`, `jspecify-1.0.1.jar`
 and `opentest4j-1.3.0.jar`. Without them the same command runs the web verbs through the agent. Playwright extracts its
 driver (about 140 MB) on first use in each JVM, and never downloads a browser: it attaches to the one the application
