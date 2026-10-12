@@ -2719,7 +2719,10 @@ Kept generic on purpose: nothing here names a machine, a user or a local path.
   development machine runs it under emulation. An arm64 build of the same Dockerfile (here tagged
   `skillroy-test-java-ci:bs8-arm64`, chosen with `SKILLROY_CI_IMAGE` and `SKILLROY_PLATFORM=linux/arm64`) runs
   natively and several times faster; it needs `-Dskillroy.jcef.platform=linux-arm64` and, for the Java 8
-  configurations, a Linux aarch64 JDK 8 as `SKILLROY_JDK8_HOME`.
+  configurations, a Linux aarch64 JDK 8 as `SKILLROY_JDK8_HOME`. Keep that JDK (and the x86-64 one of the amd64 legs) in a durable
+  directory, never under `/tmp`: macOS's periodic clean-up emptied an aarch64 JDK 8 kept in a session's temporary folder
+  on 2026-10-12 (its directories left, every file gone), and the arm64 Java 8 legs could not start until it was
+  installed again (Temurin 8u504, its release checksum checked, on the owner's external volume).
 - **Playwright's driver** is extracted by the first `Playwright.create` of a JVM, about 140 MB on Linux x86-64 and
   136 MB on arm64, into `PLAYWRIGHT_DRIVER_TMPDIR` or else the Java temporary directory, and is deleted at the JVM's
   exit. The web host acceptance points it at its module's `target/playwright-driver` and extracts it once per test JVM
