@@ -68,6 +68,7 @@ review items of the end-to-end review, and `Sn` the confirmed findings of the se
 | B32 | Follow-ups after Phase 7 (D487-D491: gaps 94, 99, 92 and 63, taken without the owner on 2026-10-11) | as taken | **confirmed by the owner 2026-10-11** (`B32 ok`, no veto) | built, tested and matrix-verified 2026-10-11 (`TODO.md`, "Phase 7 final matrix") | – |
 | B33 | The owner's answers of the evening of 2026-10-11 (gaps 93 and 96, the domain, a JxBrowser licence) | – | **given by the owner 2026-10-11** | recorded 2026-10-11 | – |
 | B34 | Follow-ups of the evening of 2026-10-11 (D492-D499: gap 101, the JxBrowser kit run's D493 and D494, gap 95's D495-D499) | as taken | **confirmed by the owner 2026-10-12** (`B34` approved, no veto) | built and tested 2026-10-11 | – |
+| B35 | Gap 104 (D500), 2026-10-12 | as taken | provisional | built 2026-10-12, checked by a probe (no full regression, the owner's instruction) | – |
 
 Phase 1 details are fixed in `design/phase1-contracts.md`; the same file carries the Phase 1.x specification
 (A17-A33, H1-H3). Phase 2 details are fixed in `design/phase2-contracts.md`, whose open questions B19 answers. What
@@ -1759,11 +1760,21 @@ and the contract carries it as "(Phase 7 follow-up, gap <n>, built 2026-10-11)".
 | D498 | How do the checks reach the recorder's refusals? | The vision module's real `Grounding` and `Recorder` over a pass-through facade to the attached agent, not a full session service | `B34 D498 veto`: run them through `SessionService` with a scripted gateway |
 | D499 | May the web host scenarios module depend on the vision module? | Yes, in test scope only | `B34 D499 veto`: copy the needed checks instead |
 
+## B35 Gap 104 (2026-10-12; provisional)
+
+**From:** the owner's "do a brief investigation of Gap 104 - see if you can fix the problem, but don't do a full
+regression test" (2026-10-12). Built and checked as `design/phase7-contracts.md` §4.3 "(Phase 7 follow-up, gap 104)"
+says. Answer `B35 ok` or a veto by name.
+
+| D | Question | Default taken | Veto form |
+|---|---|---|---|
+| D500 | How does the agent keep a person's middle click from blocking an off-screen Chromium page (gap 104: the middle `mouseup`'s default, Linux's paste of the X11 PRIMARY selection)? | Before a sequence that releases the middle button, a one-shot capture listener on the main frame's window cancels that one `mouseup`'s default (best effort within the call's bound; removed after it or after 5 s); the page's handlers still run; no paste of the PRIMARY selection through the agent, as S110 already rules for a model or a client | `B35 D500 veto`: refuse a middle click on an off-screen page instead, or leave the paste and document the hang |
+
 ---
 
 ## Questions for the owner
 
-**None open as of 2026-10-12.** The owner confirmed **B34** (D492-D499) on 2026-10-12 without a veto. Before it, the owner answered **B33** (gaps 93 and 96 not refused, the domain confirmed,
+**Open as of 2026-10-12: B35** (D500, gap 104, provisional; answer `B35 ok` or a veto by name). Before it, none was open: the owner confirmed **B34** (D492-D499) on 2026-10-12 without a veto. Before it, the owner answered **B33** (gaps 93 and 96 not refused, the domain confirmed,
 a JxBrowser evaluation licence) and confirmed **B32** (D487-D491, the decisions of gaps 94, 99, 92 and 63)
 on 2026-10-11 without a veto (`B32 ok`), and accepted the three Phase 6 merge commits without a `Signed-off-by`
 (`ee020ad`, `6a342e7`, `f33488f`; "DCO accept": the release checklist's item 10 for the first release). Before it, none was open as of 2026-10-11: the owner confirmed **B29** (the Phase 7 contract's thirty-nine answers, `design/phase7-contracts.md` §18, decisions D287-D358) and **B30** (the 128 decisions the Phase 7 build, its code review's fix wave, the race fix and the security fixes took, D359-D486) on 2026-10-11, every row, without a veto (`B29 ok`, `B30 ok`); both had been taken without the owner on 2026-10-10 (B30 also on 2026-10-11) and were provisional while the build ran on them. Among the confirmed points are the three that rested on the owner's knowledge or taste (Q27, JxBrowser input behind descriptor roles, unverified; Q34, V3 on a person's desktop acting only while the target holds the focus; Q25, the number pad as the sample's component) and the decisions worth a look (D403, D413, D425, D470, D482), so the built behaviour stands as it is, the behaviour changes listed in B30 included. The owner signed off **B31** (the Phase 7 security delta review, S101-S148) the same day (`B31 ok`), with the two lows proposed for acceptance accepted as proposed: S142 (a Windows directory junction in a run's output tree) and S144 (Windows run output inheriting its parent's access list), each with its release note in `SECURITY.md`. Outside the decisions, the push still waits for the owner's word (B1) and the Windows host is still missing (`TODO.md`, "Walls"). Two optional choices that the delta review left to the owner rode along as gaps 93 and 96 of `TODO.md`; the owner answered both on 2026-10-11, not to refuse (B33).

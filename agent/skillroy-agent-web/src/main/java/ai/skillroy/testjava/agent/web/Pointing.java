@@ -75,6 +75,10 @@ final class Pointing {
      * page that redefines {@code innerWidth} (a replaceable attribute) chooses the value, never the size of what crosses
      * the channel; it is still parsed through the channel check.
      */
+    /** Gap 104's one-shot listener (see {@link #noPrimaryPaste}). */
+    static final String NO_PRIMARY_PASTE = "(function(){var w=window,h=function(e){if(e.button===1){e.preventDefault();"
+            + "w.removeEventListener('mouseup',h,true);}};w.addEventListener('mouseup',h,true);setTimeout(function(){"
+            + "w.removeEventListener('mouseup',h,true);},5000);return 1;})()";
     static final String INNER_SIZE = "(function(){var w,h;try{w=window.innerWidth;h=window.innerHeight;}catch(e){"
             + "return null;}return typeof w===\"number\"&&typeof h===\"number\"?[w,h]:null;})()";
 
@@ -243,10 +247,14 @@ final class Pointing {
             throw Errors.notFound("the point " + x + "," + y + " lies outside the viewport or hits no element",
                     Errors.data("reason", "outside", "x", Long.valueOf(x), "y", Long.valueOf(y), "browser", e.ref));
         }
+        List<WebInput.Step> steps = WebInput.plan(p);
+        if (WebPrimitives.has(e.browser(), WebCapability.EVALUATE) && releasesMiddle(steps)) {
+            noPrimaryPaste(e, Math.min(HIT_MS, remaining(deadline) / 2));
+        }
         List<String> dispatched = new ArrayList<String>();
         WebInput.Step held = null;
         try {
-            for (WebInput.Step step : WebInput.plan(p)) {
+            for (WebInput.Step step : steps) {
                 dispatch(e, event(step, x, y, p), remaining(deadline));
                 dispatched.add(step.type());
                 if (WebInput.PRESSED.equals(step.type())) {
@@ -263,6 +271,37 @@ final class Pointing {
         }
         return WebInput.pointerResult(WebPrimitives.bitmapSource(e.browser()).name(), x, y, dispatched, hit,
                 state != null && state.showing);
+    }
+
+    /** True when the plan releases the middle button. */
+    private static boolean releasesMiddle(List<WebInput.Step> steps) {
+        for (WebInput.Step step : steps) {
+            if (WebInput.RELEASED.equals(step.type()) && "middle".equals(step.button())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Gap 104: before a middle button's release, a one-shot capture listener on the main frame's window cancels the
+     * default action of the next middle {@code mouseup} (removed after it, or after 5 s): on Linux that default is the
+     * paste of the X11 PRIMARY selection, which in an off-screen Chromium page blocks the page's renderer for tens of
+     * seconds; the page's own handlers still see the event. Best effort within the bound: a page that cannot take the
+     * listener gets the click as before. An iframe's own window is not reached.
+     */
+    private static void noPrimaryPaste(final Entry e, long budgetMs) {
+        final long budget = Math.max(1, budgetMs);
+        try {
+            Await.read(new Await.Attempt<String>() {
+                @Override
+                public CompletableFuture<String> start() {
+                    return e.browser().evaluate(WebEval.of(NO_PRIMARY_PASTE).timeoutMs(budget).build());
+                }
+            }, budget, e, "web.pointer", WebCapabilities.EVALUATE);
+        } catch (RpcException ex) {
+            // the click goes on as before (the paste may then run)
+        }
     }
 
     /** One event through the adapter, awaited within the bound; a dispatch is never retried. */

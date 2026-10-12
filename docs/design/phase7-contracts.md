@@ -1057,6 +1057,17 @@ unless `force`; so no pointer of a model or a client acts past a modal dialog on
 `bitmapSource()` on the agent (`PROTOCOL` for JCEF, `VENDOR` for JxBrowser and the SPI's default) and `PROTOCOL` on the
 CDP path. A browser that is not showing, or has no component, is served with `visibleInSwing: false`.
 
+**(Phase 7 follow-up, gap 104, built 2026-10-12.) No paste of the X11 PRIMARY selection.** A sequence that releases the
+middle button (only a person's: a model's or a client's middle button is refused, S110) first evaluates, within the
+call's bound (at most the hit's share), a one-shot capture listener on the main frame's window that cancels the default
+action of the next middle `mouseup` and removes itself after it or after 5 s. On Linux that default is Blink's paste of
+the X11 PRIMARY selection, which in an off-screen Chromium page blocked the page's renderer for 20 s to over a minute,
+whether or not the selection had an owner (measured on JCEF 2026-10-12: the click `TIMEOUT` at 5 s; with the listener it
+answered in 22 ms on a Java 25 target and 95 ms on a Java 8 one, the page answering at once and counting `pointerdown`,
+`mousedown` and `mouseup`, trusted). The page's own handlers still see the event (with `defaultPrevented`); a page that
+cannot take the listener (no `EVALUATE`, or the evaluation fails) gets the click as before; an iframe's own window is not
+reached, so a middle click inside an iframe may still paste. The CDP path's own pointer is unchanged.
+
 ### 4.4 Capabilities
 
 `web.hittest` and `web.pointer` join `WebCapabilities.GENERIC`: derived in every cycle, `web.hittest` `OK(<adapters>)`
@@ -3174,7 +3185,8 @@ checks (VW), item 11 in the host-safety tests (VS).
     arrived after the caller's `TIMEOUT` under the pre-S133 order). (e) found that a person's synthetic middle click
     leaves an **off-screen** JCEF page unresponsive (the call `TIMEOUT` at 5 s, no evaluation answered for 20 s, the event
     dispatch thread and the back page answering, on both target Javas), while a windowed page takes it as `pointerdown`,
-    `mousedown` and `mouseup`, trusted, and no `click`. `../TODO.md`, gap 95.
+    `mousedown` and `mouseup`, trusted, and no `click`. `../TODO.md`, gap 95. That was gap 104, fixed agent-side on 2026-10-12
+(§4.3: the middle `mouseup`'s default, the X11 PRIMARY paste, cancelled); (e) still records rather than asserts.
 11. **Host safety** (`HostSafetyDisplayTest`, `HostSafetyIT`): a blocked EDT makes `swing.capture`, `swing.hitTest`
     and `swing.pointer` time out cleanly and nothing runs late, **including an EDT blocked from inside the
     `MOUSE_PRESSED` handler of the sequence's own press**: the call returns `fired: false, EDT_BUSY, dispatched 1 of 4, balanced: true`,
