@@ -34,7 +34,7 @@ review items of the end-to-end review, and `Sn` the confirmed findings of the se
 
 | Id | Decision (short) | Recommended default | Decision (2026-10-02) | State of the build | Still open |
 |---|---|---|---|---|---|
-| B1 | Licence and publication | Apache-2.0; DCO sign-off, no CLA; pre-publication checklist below | Apache-2.0, DCO, no CLA, as recommended. 2026-10-06: the holder is Mike Mills; the remote is `Skillroy-AI/skillroy-test-java`, private for now; everything in one initial commit, pushed later | `LICENSE`, `NOTICE`, `CONTRIBUTING.md`, the source headers (with the holder's name since 2026-10-06), the dependency audit and the packaged notices exist. The initial commit was made on 2026-10-06; nothing pushed | The push, when the owner says (the repeated security review was signed off by the owner on 2026-10-10, B28, and the Phase 7 delta review on 2026-10-11, B31) |
+| B1 | Licence and publication | Apache-2.0; DCO sign-off, no CLA; pre-publication checklist below | Apache-2.0, DCO, no CLA, as recommended. 2026-10-06: the holder is Mike Mills; the remote is `Skillroy-AI/skillroy-test-java`, private for now; everything in one initial commit, pushed later | `LICENSE`, `NOTICE`, `CONTRIBUTING.md`, the source headers (with the holder's name since 2026-10-06), the dependency audit and the packaged notices exist. The initial commit was made on 2026-10-06; nothing pushed until the owner's word of 2026-10-12 (B36): 0.1.0 is released as the tag `v0.1.0` and pushed with `main` to the private remote | When the repository becomes public |
 | B2 | Coordinates and naming | groupId `ai.skillroy`, artifacts `skillroy-*`, package root `ai.skillroy.testjava`, version `0.1.0-SNAPSHOT`, property prefix `skillroy.` | ok: final as proposed; the sample domain id is now `lending`; the domain behind the groupId confirmed 2026-10-06 | In every module | |
 | B3 | Controller and build platform | Java 21 bytecode on any JDK >= 21; Maven 3.9; Playwright Java; planner via `claude -p` | Controller on **Java 25** (`--release 25`, build JDK >= 25); the rest as recommended. Gates: a Java 8 target and a Java 25 target | Baseline and Maven built; Playwright Java 1.63.0 in use since Phase 4 (2026-10-07), in the optional `skillroy-cdp`; the planner is design only | |
 | B4 | Agent baseline | Java 8 bytecode via `--release 8`; no third-party classes visible to the host; targets 8-25; gates on JDK 8 and JDK 25 | ok | Built. The Java 25 gate can now be run; its result is in `TODO.md` | |
@@ -69,6 +69,7 @@ review items of the end-to-end review, and `Sn` the confirmed findings of the se
 | B33 | The owner's answers of the evening of 2026-10-11 (gaps 93 and 96, the domain, a JxBrowser licence) | – | **given by the owner 2026-10-11** | recorded 2026-10-11 | – |
 | B34 | Follow-ups of the evening of 2026-10-11 (D492-D499: gap 101, the JxBrowser kit run's D493 and D494, gap 95's D495-D499) | as taken | **confirmed by the owner 2026-10-12** (`B34` approved, no veto) | built and tested 2026-10-11 | – |
 | B35 | Gap 104 (D500), 2026-10-12 | as taken | **confirmed by the owner 2026-10-12** | built 2026-10-12, checked by a probe (no full regression, the owner's instruction) | – |
+| B36 | The release of 0.1.0 and the push (the owner's word, the outside reading, the spikes' versions, the next version, publication) | – | **given by the owner 2026-10-12** | 0.1.0 cut on 2026-10-12 (`docs/release-notes/0.1.0.md`) | – |
 
 Phase 1 details are fixed in `design/phase1-contracts.md`; the same file carries the Phase 1.x specification
 (A17-A33, H1-H3). Phase 2 details are fixed in `design/phase2-contracts.md`, whose open questions B19 answers. What
@@ -1770,11 +1771,25 @@ says. **Confirmed by the owner on 2026-10-12** ("I approve B35"), no veto.
 |---|---|---|---|
 | D500 | How does the agent keep a person's middle click from blocking an off-screen Chromium page (gap 104: the middle `mouseup`'s default, Linux's paste of the X11 PRIMARY selection)? | Before a sequence that releases the middle button, a one-shot capture listener on the main frame's window cancels that one `mouseup`'s default (best effort within the call's bound; removed after it or after 5 s); the page's handlers still run; no paste of the PRIMARY selection through the agent, as S110 already rules for a model or a client | `B35 D500 veto`: refuse a middle click on an off-screen page instead, or leave the paste and document the hang |
 
+## B36 The release of 0.1.0 (2026-10-12)
+
+**From:** the owner's "Please go ahead and cut the 0.1.0 release, then push" (2026-10-12), and the owner's answers the
+same day to the four questions the release checklist left open (each the recommended option).
+
+| Subject | Answer | What it changes |
+|---|---|---|
+| B1: cut 0.1.0 and push? | Yes | 0.1.0 is cut on the release commit after the Linux matrix (release checklist item 1), tagged `v0.1.0` and pushed with `main` to the private remote `Skillroy-AI/skillroy-test-java`; the repository stays private |
+| Checklist item 3: an outside reader of the security records | Waived for 0.1.0 | Recorded as waived in the release record |
+| Checklist item 8: the 25 POMs under `spikes/` | Leave them at `0.1.0-SNAPSHOT` | They are not reactor modules and record what each spike ran against |
+| The version of `main` after the tag | `0.2.0-SNAPSHOT` | A commit after the tag |
+| Where the zips and jars are published | Nowhere: the tag and the push only | No GitHub release, no Maven repository; both are built from the tag |
+
 ---
 
 ## Questions for the owner
 
-**None open as of 2026-10-12.** The owner confirmed **B35** (D500, gap 104) and, before it, **B34** (D492-D499) on 2026-10-12 without a veto. Before it, the owner answered **B33** (gaps 93 and 96 not refused, the domain confirmed,
+**None open as of 2026-10-12.** The owner gave the word to release 0.1.0 and push, with four answers on the way (**B36**).
+Before it, the owner confirmed **B35** (D500, gap 104) and, before it, **B34** (D492-D499) on 2026-10-12 without a veto. Before it, the owner answered **B33** (gaps 93 and 96 not refused, the domain confirmed,
 a JxBrowser evaluation licence) and confirmed **B32** (D487-D491, the decisions of gaps 94, 99, 92 and 63)
 on 2026-10-11 without a veto (`B32 ok`), and accepted the three Phase 6 merge commits without a `Signed-off-by`
 (`ee020ad`, `6a342e7`, `f33488f`; "DCO accept": the release checklist's item 10 for the first release). Before it, none was open as of 2026-10-11: the owner confirmed **B29** (the Phase 7 contract's thirty-nine answers, `design/phase7-contracts.md` §18, decisions D287-D358) and **B30** (the 128 decisions the Phase 7 build, its code review's fix wave, the race fix and the security fixes took, D359-D486) on 2026-10-11, every row, without a veto (`B29 ok`, `B30 ok`); both had been taken without the owner on 2026-10-10 (B30 also on 2026-10-11) and were provisional while the build ran on them. Among the confirmed points are the three that rested on the owner's knowledge or taste (Q27, JxBrowser input behind descriptor roles, unverified; Q34, V3 on a person's desktop acting only while the target holds the focus; Q25, the number pad as the sample's component) and the decisions worth a look (D403, D413, D425, D470, D482), so the built behaviour stands as it is, the behaviour changes listed in B30 included. The owner signed off **B31** (the Phase 7 security delta review, S101-S148) the same day (`B31 ok`), with the two lows proposed for acceptance accepted as proposed: S142 (a Windows directory junction in a run's output tree) and S144 (Windows run output inheriting its parent's access list), each with its release note in `SECURITY.md`. Outside the decisions, the push still waits for the owner's word (B1) and the Windows host is still missing (`TODO.md`, "Walls"). Two optional choices that the delta review left to the owner rode along as gaps 93 and 96 of `TODO.md`; the owner answered both on 2026-10-11, not to refuse (B33).

@@ -9,10 +9,12 @@ and the table of section 3 to the agent home as built, eleven jars), and on 2026
 `skillroy-vision`, and no new dependency: the module counts of section 2, its row in the table of section 3, the CLI
 distribution's ninth project jar in section 4), and re-checked on 2026-10-11 for the release checklist's item 4: no
 dependency changed since Phase 7, and each of the reactor's 60 third-party runtime artifacts (`dependency:list`, runtime
-scope) is named here with its version; `DistributionNoticesIT` is green in that day's matrices. Version
-audited: 0.1.0-SNAPSHOT, all 31 reactor modules since Phase 7 (28 in a build without the Maven profile `jcef`; the 3
-web host samples are built only with `-Pjcef`); the spike projects under `spikes/` are not reactor modules and
-distribute nothing.
+scope) is named here with its version; `DistributionNoticesIT` is green in that day's matrices. Re-checked on
+2026-10-12 for the 0.1.0 release commit: no dependency changed since 2026-10-11 (the POMs changed in their version
+only). Version audited: 0.1.0 (0.1.0-SNAPSHOT before the release), all 31 reactor modules since Phase 7 (28 in a
+build without the Maven profile `jcef`; the 3 web host samples are built only with `-Pjcef`); the spike projects under
+`spikes/` are not reactor modules and distribute nothing (their POMs keep 0.1.0-SNAPSHOT, the owner's choice of
+2026-10-12).
 Intended licence of the project: Apache-2.0.
 
 This is an engineering inventory built from primary sources that are available locally: the `<licenses>` element of
@@ -239,8 +241,8 @@ project's own), `lib/`, which receives the module's jar and its `runtime`-scope 
 `skillroy-cli.zip`. Until Phase 5 the zip held 17 entries (three directories, the three top-level files, the
 launcher and ten jars: five project jars and the four Jackson jars and SnakeYAML). **Since Phase 5 (2026-10-08)**
 `lib/` holds 43 jars (the zip: 50 entries): seven project jars (`skillroy-cli`, `skillroy-controller`,
-`skillroy-data`, `skillroy-inference`, `skillroy-mcp`, `skillroy-protocol`, `skillroy-scenario`, version
-0.1.0-SNAPSHOT; `DistributionNoticesIT` expects exactly these seven) and the 36 third-party jars below: 27
+`skillroy-data`, `skillroy-inference`, `skillroy-mcp`, `skillroy-protocol`, `skillroy-scenario`, at the project's
+version; `DistributionNoticesIT` expects exactly these seven) and the 36 third-party jars below: 27
 Apache-2.0, 8 MIT, 1 MIT-0. They are the four Jackson jars and SnakeYAML as before, the Anthropic Java SDK 2.70.0
 with its tree (OkHttp and Okio, the Kotlin standard library and reflection with the JetBrains annotations, Jackson's
 `jdk8`, `jsr310` and Kotlin modules, the victools JSON schema generator with classmate and swagger-annotations, Error

@@ -16,7 +16,8 @@ path. (The channel and the support policy were confirmed by the owner on 2026-10
 
 ## Supported versions
 
-Only the latest minor release receives security fixes, until the project says otherwise. Nothing is released yet.
+Only the latest minor release receives security fixes, until the project says otherwise. The first release is 0.1.0
+(2026-10-12, the tag `v0.1.0`).
 
 ## What is in scope
 

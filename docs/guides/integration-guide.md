@@ -1,6 +1,6 @@
 # Integration and overlay guide: a product layer on the base
 
-**Status:** written 2026-10-12 against `main` of the base (POM version `0.1.0-SNAPSHOT`, to be released as `0.1.0`).
+**Status:** written 2026-10-12 against the base's first release, `0.1.0` (the tag `v0.1.0`; in no Maven repository, §4.2).
 This guide is a map. Every rule it states is specified, with its reasons, in the contract it cites; where this guide and
 a contract differ, the contract wins and this guide has a defect. Names in backticks are the base's own (types,
 options, files, commands, primitives). Names in angle brackets (`<product>`, `<tenant>`, `<env>`) are placeholders for
@@ -281,26 +281,28 @@ a layer uses:
 
 The CLI distribution (`bin/skillroy`, `bin/skillroy.bat`, `lib/`) is a build output of `controller/skillroy-cli`
 (`target/skillroy-cli/` and `target/skillroy-cli.zip`) and is **not attached as a Maven artifact**; the agent home zip
-is (`skillroy-agent-dist`, type `zip`, no classifier). Where the release publishes the zips is the owner's decision with
-the release (B1; [`release-notes/0.1.0.md`](../release-notes/0.1.0.md) §1).
+is (`skillroy-agent-dist`, type `zip`, no classifier). 0.1.0 is released as the tag `v0.1.0` only: the owner chose on
+2026-10-12 to publish neither the zips nor the jars, so both are built from the tag
+([`release-notes/0.1.0.md`](../release-notes/0.1.0.md) §1).
 
-### 4.2 After the release
+### 4.2 Obtaining a release
 
-Depend on `0.1.0` from wherever the owner publishes it, through the organisation's repository manager if there is one.
-Pin the version once in the layer's parent POM. The CLI distribution and the agent home come from the same release.
+`0.1.0` is in no Maven repository: build it from the tag `v0.1.0` and install or deploy it as §4.3 says. Once a
+release is published, depend on it through the organisation's repository manager if there is one. Pin the version once
+in the layer's parent POM. The CLI distribution and the agent home come from the same release.
 
-### 4.3 Before the release: the `mvn install` trap and the safe ways
+### 4.3 Until a release is published: the `mvn install` trap and the safe ways
 
 **Never `mvn install` in the base's working tree** (TODO "Environment notes"; README "Build"). The base builds partial
 reactors with `mvn -o verify -pl <module> -am`; a module whose tests unpack the agent home takes the
-`skillroy-agent-dist` zip from the reactor only when it declares it. A snapshot of the base's own `0.1.0-SNAPSHOT` in the
-local Maven repository shadows the reactor where it does not: on 2026-10-07 a partial build of the CLI module took a
+`skillroy-agent-dist` zip from the reactor only when it declares it. An installed copy of the version the base's working tree
+carries (on `main` a `-SNAPSHOT`) in the local Maven repository shadows the reactor where it does not: on 2026-10-07 a partial build of the CLI module took a
 stale zip from there, unpacked jars older than the HMAC handshake into its test agent home, and failed with a 401 on
 `/ping`. An install into the default `~/.m2` therefore breaks the base's own development on the same machine.
 
 Safe ways for a layer to obtain the base before it is published:
 
-1. **A separate clone or worktree of a tagged commit**, never the working tree someone develops in, built with
+1. **A separate clone or worktree of a release tag** (`v0.1.0`), never the working tree someone develops in, built with
    `mvn verify` and installed from there **into a dedicated local repository** that only the layer's builds use
    (`-Dmaven.repo.local=<dir>` for both the install and the layer's builds, or `<localRepository>` in a settings file
    the layer's builds name; it fills from the network or the organisation's mirror on first use). The base's working
@@ -308,8 +310,8 @@ Safe ways for a layer to obtain the base before it is published:
 2. As (1), but **deployed to an internal repository** that the layer's builds resolve from; the layer's CI then needs
    no clone of the base.
 3. If the default `~/.m2` must be used, give the installed build a version of its own in the clone first (for example
-   with `mvn versions:set`), so that it can never be mistaken for the working tree's `0.1.0-SNAPSHOT`; delete it when the
-   release arrives.
+   with `mvn versions:set`), so that it can never be mistaken for the working tree's own version; delete it when a
+   published release arrives.
 
 Whichever way: record the base commit the layer builds against (in the layer's parent POM or its README), and take the
 agent home zip, the CLI distribution and the base jars of the pack **from the same build**.
@@ -1406,6 +1408,6 @@ only under `images: true`; the Robot opt-in must not be committed.
 | Status, gaps, environment notes, walls | [`docs/TODO.md`](../TODO.md) |
 | Decisions and the owner's answers | [`docs/DECISIONS.md`](../DECISIONS.md) |
 | Licences of every dependency | [`docs/licence-audit.md`](../licence-audit.md) |
-| Release checklist and the draft 0.1.0 record | [`release-checklist.md`](../release-checklist.md), [`release-notes/0.1.0.md`](../release-notes/0.1.0.md) |
+| Release checklist and the 0.1.0 record | [`release-checklist.md`](../release-checklist.md), [`release-notes/0.1.0.md`](../release-notes/0.1.0.md) |
 | Background research (attach, channel, Swing driving, browsers, inference, vision) | [`docs/research/`](../research/) |
 | How to contribute | [`CONTRIBUTING.md`](../../CONTRIBUTING.md) |
