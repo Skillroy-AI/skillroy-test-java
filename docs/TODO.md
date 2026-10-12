@@ -1,7 +1,7 @@
 # TODO: base framework
 
 What exists, what was proven and what is open for the base framework (`skillroy-test-java`), as of
-2026-10-11. Decisions are in `DECISIONS.md` (B1-B31); the design is in `docs/design/` (Phase 1 and Phase 1.x as
+2026-10-12. Decisions are in `DECISIONS.md` (B1-B36); the design is in `docs/design/` (Phase 1 and Phase 1.x as
 built in `phase1-contracts.md`, Phase 2 as built in `phase2-contracts.md`, Phase 3 as built in
 `phase3-contracts.md`, Phase 4 as built in `phase4-contracts.md`, Phase 5 as built in `phase5-contracts.md`, Phase 6
 as built in `phase6-contracts.md`, Phase 7 as built in `phase7-contracts.md`, code-reviewed, security-reviewed (delta)
@@ -9,6 +9,10 @@ and fixed on 2026-10-10/11; B29 and B30 confirmed and B31 signed off by the owne
 research notes are in `docs/research/`; the dependency licence audit is `docs/licence-audit.md`.
 
 ## Status at a glance
+
+**0.1.0 is released (2026-10-12):** the annotated tag `v0.1.0` on the release commit `2d6d3d0`, after the Linux matrix
+on that commit (below, "Release matrix (0.1.0)"); the record is `docs/release-notes/0.1.0.md`. Published as the tag
+only, pushed with `main` to the private remote (B36); `main` moved to `0.2.0-SNAPSHOT` after the tag.
 
 **Phase 1 is built and verified on the two gates of B3 and B4: a Java 8 target and a Java 25 target.** On 2026-10-02 the
 controller side moved to Java 25 and the sample application was replaced by the sample lending desk. After both changes
@@ -2388,6 +2392,23 @@ The release checklist's item 1 on the tree that holds everything of 2026-10-11 (
 Every leg is green, first time, on every round. The release commit itself (the version change) is still to run it (the
 release checklist asks it of the release commit).
 
+#### Release matrix (0.1.0, 2026-10-12, on `2d6d3d0`)
+
+The release checklist's item 1 on the release commit (the version change, `overWriteReleases` for the CLI's test unpack,
+and, since `f9acb2c`, gap 104's fix and documentation), in a clean worktree, rounds in sequence (`release-matrix.sh` in
+the session notes); tests / failures / errors / skipped per leg, read from the reports:
+
+| Round | Java 25 targets (whole reactor, `-Pjcef`, `clean verify`) | Java 8 targets (`-Pjcef`) | Java 8 test JVM (the agent side) |
+|---|---|---|---|
+| arm64 r1 | 5,412 / 0 / 0 / 145 (1,026 s) | 5,412 / 0 / 0 / 198 (943 s) | 1,852 / 0 / 0 / 30 (285 s) |
+| arm64 r2 | 5,412 / 0 / 0 / 145 (1,036 s) | 5,412 / 0 / 0 / 199 (938 s) | 1,852 / 0 / 0 / 30 (274 s) |
+| amd64 r1 (emulated, `FORK` launch) | 5,412 / 0 / 0 / 145 (1,600 s) | 5,412 / 0 / 0 / 199 (1,393 s) | 1,852 / 0 / 0 / 30 (405 s) |
+
+Every leg is green, first time, on every round; the counts equal the release candidate's. It is the first full regression
+of gap 104's fix (D500): `WebHostEndToEndIT` 120 / 0 / 0 / 11 on Java 25 targets and 120 / 0 / 0 / 65 on Java 8 targets.
+`DistributionContentIT`, `HomeConstantPoolIT`, `DistributionNoticesIT` and the committed-artefact tests green in every
+leg that runs them. The tag `v0.1.0` was set on `2d6d3d0` after it.
+
 #### Phase 7 final matrix (2026-10-11, on `c94aade`)
 
 Tests / failures / errors / skipped per leg, read from the reports (`summarize.py`), on the tree `c94aade` (the
@@ -2875,8 +2896,9 @@ The review items of the end-to-end review, now decided (gap numbers refer to the
 
 ## Next steps I would take
 
-1. **The push**, when the owner says (every commit since the initial commit of 2026-10-06 is local). The
-   DCO trail (release checklist item 10, checked 2026-10-11): 140 of the 143 commits carry a `Signed-off-by`; the three that
+1. **The push: done 2026-10-12** with the release of 0.1.0 (B36): `main` and the tag `v0.1.0` pushed to the private
+   remote; when the repository becomes public is the owner's word. The
+   DCO trail (release checklist item 10, checked 2026-10-12 on the release commit): 179 of the 182 commits carry a `Signed-off-by`; the three that
    do not are Phase 6 merge commits of 2026-10-09, `ee020ad` and `f33488f` (clean merges) and `6a342e7` (Merge `main` into
    `p6/bw`, with its own conflict resolution), **accepted by the owner on 2026-10-11** ("DCO accept": no history rewrite). The neutrality check of the private sibling passed the same day. The repeated
    security review is signed off by the owner (2026-10-10, B28; item 5); the Phase 7 delta review is signed off by the owner (2026-10-11, B31; item 6).
