@@ -75,6 +75,7 @@ built: the fluent Java API.
 | Spike BS3 (Byte Buddy retransformation, inline Advice, a bootstrap `Spy`, restore on detach), run 2026-10-09, passed with conditions | [spikes/BS3/RESULT.md](spikes/BS3/RESULT.md) |
 | Spike BS14 (Byteman loaded in process through the agent's `Instrumentation`, no listener), run 2026-10-09, passed with conditions | [spikes/BS14/RESULT.md](spikes/BS14/RESULT.md) |
 | Design overview, all phases | [docs/design/base-framework-design.md](docs/design/base-framework-design.md) |
+| Integration and overlay guide: building a private product layer (and tenant overlays) for one application on this base | [docs/guides/integration-guide.md](docs/guides/integration-guide.md) |
 | Research notes | [docs/research/](docs/research/) |
 | Licence, notices, dependency licence audit | [LICENSE](LICENSE), [NOTICE](NOTICE), [docs/licence-audit.md](docs/licence-audit.md) |
 | Security policy (reporting, known limitations) and the release checklist | [SECURITY.md](SECURITY.md), [docs/release-checklist.md](docs/release-checklist.md) |
