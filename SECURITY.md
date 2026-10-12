@@ -168,7 +168,9 @@ Read these before you run the agent on a shared host.
   session's fold under the provider's history rule. The delta review's fixes add the paste and the middle click on an X11
   desktop with a headed JVM (a masked browser and a modal dialog over a page have run against real JCEF since, gap 95;
   there a person's synthetic middle click left an off-screen JCEF page unresponsive, a click a model or a client cannot
-  send, S110; whether Chromium pastes the PRIMARY selection was not run), a second OS user for the writers' link rule,
+  send, S110: the cause was Chromium's paste of the X11 PRIMARY selection on the middle `mouseup`, which the agent's
+  `web.pointer` has cancelled since 2026-10-12, gap 104, so no middle click through the agent pastes that selection
+  into a page's main frame), a second OS user for the writers' link rule,
   an APFS case-insensitive volume, a real
   multi-screen desktop and HiDPI (the glass bound at scale 3 through a seam only). The full list is §8 of the threat model.
 

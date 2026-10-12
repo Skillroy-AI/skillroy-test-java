@@ -265,7 +265,9 @@ client (P7 §3.4, §9.1).
   masked JCEF browser, as were S108's clip under a real `JOptionPane` and S133's late click on real Chromium (gap 95,
   P7 §13.2 item 10); the paste of S110 on an X11 desktop is stated from the JDK's and Blink's behaviour, with the
   refusal tested at every gate and against a real page (a person's synthetic middle click there left an off-screen
-  JCEF page unresponsive, a windowed page took it as a plain press); the Windows ACL judgement of the run-output
+  JCEF page unresponsive, a windowed page took it as a plain press; since 2026-10-12, gap 104, the agent cancels the
+  middle `mouseup`'s default, the X11 PRIMARY paste that blocked the page, so no middle click through the agent pastes
+  that selection into a page's main frame); the Windows ACL judgement of the run-output
   directory (S141) is built and unit-tested on ACL values, not verified on a Windows host (a directory under `C:\` on
   a shared host is refused), and S142's directory junction and S144's inheritance of the pixel files are limits
   accepted by the owner (B31, 2026-10-11; `SECURITY.md`).
