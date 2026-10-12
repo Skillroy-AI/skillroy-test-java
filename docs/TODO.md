@@ -2373,6 +2373,21 @@ the secret scan over 26 files). The day's live spend, planner check and BS12 inc
 verified live: the fold under the provider's history rule beyond one turn (gap 85), a longer session than BS12's longest (14
 actions), the 5.5 models' history rule under the automatic cache hint, a disabled toolset member, V3 (Robot) against a live model.
 
+#### Release-candidate matrix (2026-10-11, on `f9acb2c`)
+
+The release checklist's item 1 on the tree that holds everything of 2026-10-11 (the two test-side fixes, gaps 63, 92, 94, 95,
+99, 101 and 102, the JxBrowser kit run's fixes, the listener soak's opt-in IT), in a clean worktree, rounds in sequence
+(`rc-matrix-chain.sh` in the session notes); tests / failures / errors / skipped per leg, read from the reports:
+
+| Round | Java 25 targets (whole reactor, `-Pjcef`, `clean verify`) | Java 8 targets (`-Pjcef`) | Java 8 test JVM (the agent side) |
+|---|---|---|---|
+| arm64 r1 | 5,412 / 0 / 0 / 145 (1,114 s) | 5,412 / 0 / 0 / 198 (1,040 s) | 1,852 / 0 / 0 / 30 (284 s) |
+| arm64 r2 | 5,412 / 0 / 0 / 146 (1,137 s) | 5,412 / 0 / 0 / 198 (1,040 s) | 1,852 / 0 / 0 / 30 (281 s) |
+| amd64 r1 (emulated, `FORK` launch) | 5,412 / 0 / 0 / 145 (1,680 s) | 5,412 / 0 / 0 / 199 (1,480 s) | 1,852 / 0 / 0 / 30 (406 s) |
+
+Every leg is green, first time, on every round. The release commit itself (the version change) is still to run it (the
+release checklist asks it of the release commit).
+
 #### Phase 7 final matrix (2026-10-11, on `c94aade`)
 
 Tests / failures / errors / skipped per leg, read from the reports (`summarize.py`), on the tree `c94aade` (the
