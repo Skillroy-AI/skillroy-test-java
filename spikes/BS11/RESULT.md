@@ -29,7 +29,7 @@ agent module through the real `TargetLauncher`; `swing.capture {target: <window 
 with the real `AgentClient` of the built CLI distribution; every capture decoded with `ImageIO` and hashed (SHA-256
 over width, height and every ARGB pixel; and SHA-256 of the PNG bytes). State changes through the agent's own
 `swing.type` and `swing.dismiss`, waits on the desk's events and `swing.settle` (no sleeps). Built from `main` at
-`11fce4e` (the reactor's artifacts on disk, built from `4f9962f`; `main` differs by docs only).
+`763e154` (the reactor's artifacts on disk, built from `579af9c`; `main` differs by docs only).
 
 | Environment | Image / host | Target Java | Notes |
 |---|---|---|---|

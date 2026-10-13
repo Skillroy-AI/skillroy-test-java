@@ -10,9 +10,11 @@ research notes are in `docs/research/`; the dependency licence audit is `docs/li
 
 ## Status at a glance
 
-**0.1.0 is released (2026-10-12):** the annotated tag `v0.1.0` on the release commit `2d6d3d0`, after the Linux matrix
+**0.1.0 is released (2026-10-12):** the annotated tag `v0.1.0` on the release commit `47cd446`, after the Linux matrix
 on that commit (below, "Release matrix (0.1.0)"); the record is `docs/release-notes/0.1.0.md`. Published as the tag
-only, pushed with `main` to the private remote (B36); `main` moved to `0.2.0-SNAPSHOT` after the tag.
+only, pushed with `main` to the private remote on 2026-10-13 (B36), after every commit's email was rewritten to the
+owner's GitHub noreply address (B37; the old ids in `docs/commit-id-map.md`); `main` moved to `0.2.0-SNAPSHOT` after the
+tag.
 
 **Phase 1 is built and verified on the two gates of B3 and B4: a Java 8 target and a Java 25 target.** On 2026-10-02 the
 controller side moved to Java 25 and the sample application was replaced by the sample lending desk. After both changes
@@ -39,7 +41,7 @@ twice in a row (tables below). **On 2026-10-06** the owner answered every open q
 confirmed, with two vetoes inside B19 built the same day (a masking threshold per environment, `masking.minLengthInText`
 in `credentials.yaml`; no base rule on names in binding values), the holder's name went into every header, and the
 initial commit was made (not pushed). After those changes the native reactor was green (2132 tests, 0 failures, 0
-errors, 285 skipped, JDK 26, headless). **Later on 2026-10-06** the committed tree (commit `efb48b7`) was run through
+errors, 285 skipped, JDK 26, headless). **Later on 2026-10-06** the committed tree (commit `37d9377`) was run through
 the Linux matrix once (first table below): the two whole-reactor legs green at the first attempt (2156 tests each), the
 agent-side leg green at the second attempt after one display-test focus failure of the kind recorded as the open flake
 (now two occurrences, both on a Java 8 test JVM; see "Open flake" below). This is the Phase 3 tree's second clean run
@@ -118,14 +120,14 @@ views, SC the model boundary and the model as an actor, SD Windows and SQL Serve
 outputs). The 65 decisions of these fixers are D222-D286 and join B27. Every finding of medium or above of both passes is
 fixed; eight lows are accepted, each with a release note in `SECURITY.md`, and the repeat review is signed off by the owner
 (B28, 2026-10-10). The native
-reactor was green after every landing. The native reactor on `main` at `4f9962f` and the Linux matrix of the final tree
+reactor was green after every landing. The native reactor on `main` at `579af9c` and the Linux matrix of the final tree
 (arm64 twice, amd64 once): green on every leg: native 4692 tests, 0 failures, 0 errors, 493 skipped; arm64 rounds 2 and 3 and amd64 round 1 (the FORK launch mechanism under emulation), each with the whole reactor on Java 25 targets 4853/0/0/105, on Java 8 targets 4853/0/0/132 and the agent side on a Java 8 test JVM 1668/0/0/26 (reports read: hooks 70 and Byteman 43 tests on `java.version` 1.8.0_*); `-fae`, so no leg stopped early (the table "Phase 6 final matrix" below). **On 2026-10-10 the owner confirmed B26 and B27 and signed off the repeat
 security review (B28), no veto.** **Still to do:** the push (on the owner's word, B1); the Windows host; Phase 7 (built 2026-10-10, code-reviewed, security-reviewed and fixed 2026-10-10/11; the paragraphs after this one). **On 2026-10-10** the planner's stdin route was checked live (P5 section 15.3 item 5 natively on macOS, and a forced `--resume` repair round; both green, USD 2.05; the last row of the live table below), and the four Phase 7 spikes ran: BS9 (Robot input) and BS10 (routed dispatch) passed with conditions, BS11 (`PAINT` capture determinism) passed with conditions, BS12 (grounding accuracy and cost of a vision loop) passed live, USD 5.64; the live spend of those two days, with the three live runs of Phase 7's acceptance, is USD 8.12 (below). The tables that follow
 are those of Phases 1 to 5.
 
-**Later on 2026-10-10 the Phase 7 contract was written, reviewed and built** (`design/phase7-contracts.md`, committed as `2eebeed`; with `design/threat-model.md` extended): the vision bolt-on and the vision loop of interactive sessions, written from seven readers' maps and the four spikes of the same day, reviewed through three lenses with a sceptic each (94 findings, 91 applied, 3 refuted) and rechecked twice (36 more applied). Its decisions are D287-D358, the amendments A61-A66, and its thirty-nine answers are decision **B29**, taken without the owner and provisional while the build proceeded on them, as it did on B26; the owner confirmed every answer on 2026-10-11 (`B29 ok`, no veto). The build ran in four worktree packages, VS (the agent's Swing side, the sample's desk and pack), VW (the web side), VC (the scenario, controller, JUnit and CLI side) and VM (the gateway, the session seam, `skillroy-vision`, the MCP and session options), and landed on `main` the same evening in the order VC (`71efa8e`), VS with the regeneration step 2b (`482288d`, which carried VM's step 1b), VW (`e7a4cb3`), VM (`7af44eb`), then one closing commit of VM for D425 (`e11ae08`, the head of this section). The packages took 72 decisions of their own, **D359-D430**, which are decision **B30**, provisional in the same way and confirmed by the owner on 2026-10-11 with the decisions of the paragraph that follows. The native reactor was green on the head (surefire 4,454 tests, 0 failures, 118 skipped; failsafe 512, 0 failures, 458 skipped); the packages ran their image legs on the arm64 build of the Linux image on both Java lines (section "Phase 7" below); what followed is in the next paragraph.
+**Later on 2026-10-10 the Phase 7 contract was written, reviewed and built** (`design/phase7-contracts.md`, committed as `abcfe65`; with `design/threat-model.md` extended): the vision bolt-on and the vision loop of interactive sessions, written from seven readers' maps and the four spikes of the same day, reviewed through three lenses with a sceptic each (94 findings, 91 applied, 3 refuted) and rechecked twice (36 more applied). Its decisions are D287-D358, the amendments A61-A66, and its thirty-nine answers are decision **B29**, taken without the owner and provisional while the build proceeded on them, as it did on B26; the owner confirmed every answer on 2026-10-11 (`B29 ok`, no veto). The build ran in four worktree packages, VS (the agent's Swing side, the sample's desk and pack), VW (the web side), VC (the scenario, controller, JUnit and CLI side) and VM (the gateway, the session seam, `skillroy-vision`, the MCP and session options), and landed on `main` the same evening in the order VC (`06a59ed`), VS with the regeneration step 2b (`43c399c`, which carried VM's step 1b), VW (`0d4a0cb`), VM (`cf59b1f`), then one closing commit of VM for D425 (`5faacb4`, the head of this section). The packages took 72 decisions of their own, **D359-D430**, which are decision **B30**, provisional in the same way and confirmed by the owner on 2026-10-11 with the decisions of the paragraph that follows. The native reactor was green on the head (surefire 4,454 tests, 0 failures, 118 skipped; failsafe 512, 0 failures, 458 skipped); the packages ran their image legs on the arm64 build of the Linux image on both Java lines (section "Phase 7" below); what followed is in the next paragraph.
 
-**Then, on 2026-10-10 and 2026-10-11, Phase 7 was code-reviewed and fixed, then security-reviewed and fixed** (section "Phase 7 code review (2026-10-10)" and "Security review (Phase 7 delta, 2026-10-10/11)"). The code review (three lenses with a sceptic each, on `7af44eb`) found 30 distinct problems (2 high, 9 medium, 19 low) and the first live run of `VisionLiveIT` one more (LV-1, the session never told the model which slots the person had bound); three fixers closed them (FA the agent's Swing side `9f44718`, FC the vision module and the session `791e0ae`, FB the scenario, controller and CLI side `c690bef`), the first Linux matrix of the merged tree found a race in Phase 6's hook engine that had failed once in Phase 6 (a `hook.<id>` declared after readiness read back pending; fixed agent-side, FX `a134159`, D449), and the second live run passed 7 of 7 (USD 0.155). The security delta review (eight lenses with a sceptic each over everything Phase 7 changed since `af29e59`) found **48 standing findings, S101-S148: 2 high, 13 medium, 33 low**; four fix packages (SG the agent's Swing side `5d6fdd8`, SH credentials, slots and the client's plan form `edba708`, SJ the image baselines, the bindings files and the run output `73e406a`, SI the vision module, the session service, the web reads and the CDP path `056a007`, and SG's follow-up `c94aade`) fixed every medium and high and 31 of the 33 lows; S142 and S144 are accepted by the owner (B31, 2026-10-11). The decisions of the fix wave, the race fix and the security fixes are **D431-D486** and join B30. On 2026-10-11 the owner confirmed B30 (128 decisions, D359-D486; `B30 ok`, no veto), so the built behaviour stands, and signed off the delta review, **B31**, the same day. The third live run, on the final code `c94aade`, passed 7 of 7 (USD 0.148). The Linux matrix of `c94aade` is green on `c94aade` (arm64 twice on every leg, amd64 on the Java 25 leg); the amd64 Java 8 legs, which waited for the x86-64 JDK 8's volume, ran later on 2026-10-11 and are green on `bc1e250` (the same code plus two test fixes and gaps 94 and 99), `keypad-image`'s Java 8 key holding on amd64 ("Phase 7 final matrix"). **Still to do:** the push (on the owner's word, B1); the Windows host; the two amd64 Java 8 legs of that matrix.
+**Then, on 2026-10-10 and 2026-10-11, Phase 7 was code-reviewed and fixed, then security-reviewed and fixed** (section "Phase 7 code review (2026-10-10)" and "Security review (Phase 7 delta, 2026-10-10/11)"). The code review (three lenses with a sceptic each, on `cf59b1f`) found 30 distinct problems (2 high, 9 medium, 19 low) and the first live run of `VisionLiveIT` one more (LV-1, the session never told the model which slots the person had bound); three fixers closed them (FA the agent's Swing side `03625bc`, FC the vision module and the session `a54c279`, FB the scenario, controller and CLI side `2633eec`), the first Linux matrix of the merged tree found a race in Phase 6's hook engine that had failed once in Phase 6 (a `hook.<id>` declared after readiness read back pending; fixed agent-side, FX `03c8da9`, D449), and the second live run passed 7 of 7 (USD 0.155). The security delta review (eight lenses with a sceptic each over everything Phase 7 changed since `e3ceece`) found **48 standing findings, S101-S148: 2 high, 13 medium, 33 low**; four fix packages (SG the agent's Swing side `703cc9b`, SH credentials, slots and the client's plan form `ed397f0`, SJ the image baselines, the bindings files and the run output `dd2f1d6`, SI the vision module, the session service, the web reads and the CDP path `a1af6c8`, and SG's follow-up `223c5fb`) fixed every medium and high and 31 of the 33 lows; S142 and S144 are accepted by the owner (B31, 2026-10-11). The decisions of the fix wave, the race fix and the security fixes are **D431-D486** and join B30. On 2026-10-11 the owner confirmed B30 (128 decisions, D359-D486; `B30 ok`, no veto), so the built behaviour stands, and signed off the delta review, **B31**, the same day. The third live run, on the final code `223c5fb`, passed 7 of 7 (USD 0.148). The Linux matrix of `223c5fb` is green on `223c5fb` (arm64 twice on every leg, amd64 on the Java 25 leg); the amd64 Java 8 legs, which waited for the x86-64 JDK 8's volume, ran later on 2026-10-11 and are green on `832fcb2` (the same code plus two test fixes and gaps 94 and 99), `keypad-image`'s Java 8 key holding on amd64 ("Phase 7 final matrix"). **Still to do:** the push (on the owner's word, B1); the Windows host; the two amd64 Java 8 legs of that matrix.
 
 The live runs of 2026-10-08 (afternoon) and, in the last four rows, of 2026-10-10 and 2026-10-11, with the key passed through by name; every
 figure from the ledger entries the tests printed:
@@ -139,9 +141,9 @@ figure from the ledger entries the tests printed:
 | `InferenceLiveIT`, second run | the arm64 image, the Linux `claude` 2.1.294 mounted | 5 tests, 0 failures, 485.7 s: scenario D live through the agent channel to the committed supervisor (USD 0.022); the nightly job A+B `UNCHANGED` and D twice `CHANGED` with the same value, USD 0.0054 and 0.0051, **cache hits 91.4 % on both**, batches 154 s and 184 s; `skillroy author` on the brief exit 0 in 119 s (Opus 5.5, 35 turns, USD 0.907); one session turn `DONE` in 20 s after nine actions (USD 0.166), its export compiles; 26 files scanned clean; USD 1.11 in all |
 | Scenario C authored (`skillroy author --id return-refunds-deposit --run`) | the arm64 image | Opus 5.5, 43 turns, no repair, USD 0.80, 161 s with the checks; compiled, resolved, ran green on seed A; reviewed and kept; bindings approved on both seeds with no model call |
 | The planner's stdin route live (P5 section 15.3 item 5; the fix of S93, P2-L7-F3), 2026-10-10 | natively on macOS (Java 25.0.1), `claude` 2.1.286 | Run A, `InferenceLiveIT` item 5 and its secret scan alone (`-Dit.test=InferenceLiveIT#theAuthorCommandAuthorsTheBriefOfScenarioC+noSecretInAnythingThisClassWrote`): exit 0 in 159 s, 49 turns, no repair, compiled and resolved, USD 1.108. Run B, `skillroy author --claude-command <a logging wrapper> --budget-usd 1.70` with the first envelope's first verb renamed to an unknown one: two `-p` invocations, each with its prompt on stdin (14625 and 374 bytes; no text of the brief, the instructions or the problems in any argument; each command line ending with `--max-budget-usd`), the second `-p --resume <session> … --max-budget-usd 0.80` with the schema's problem as its prompt; the session resumed and answered with the original document; `repairs: 1`, 43 turns (41 + 2), exit 0, compiled and resolved; ledger 0.8965614 + 0.0483568 = 0.9449182, the last running total; both envelopes in the envelope file; USD 0.945. **New fact:** a resumed envelope's `total_cost_usd` and `modelUsage` are the session's running totals, while its `num_turns`, `usage` and `duration_ms` are its own, which is how the planner reads them. No key in any of 105 files scanned. Not verified live: a repair started by a compile problem alone (the same code path), a failed repair, Windows. USD 2.05 in all |
-| `VisionLiveIT` (`-Pinference-live`, P7 §13.3), **run 1**, 2026-10-10 on `e11ae08` (the build) | the arm64 image, Java 25 desk, `ci/run-in-linux.sh mvn -o verify -pl samples/skillroy-sample-lending-scenarios -am -Pinference-live -Dskillroy.headless=false -Dit.test=VisionLiveIT` | items 3 (the fallback header coexists with the toolset: `END_TURN`, USD 0.0107), 5 (`skillroy_look` `DONE`, USD 0.022; the player `PASS` on `loan-table-visual-check` with `YES` and on the false statement with `expect: NO`, USD 0.0045 each) and the secret scan (19 files) passed; items 1, 2 and 4 (Sonnet 5.5 V1 USD 0.029, the toolset V2 USD 0.057, Haiku 5.5 V1 USD 0.0028) ended `QUESTION`: the model read the person's resolved `$item` as an unfilled placeholder because the session never lists the bound slots (**finding LV-1**, fixed by FC); item 6 skipped. USD 0.131 |
-| `VisionLiveIT`, **run 2**, 2026-10-10 on `791e0ae` (FA and FC merged) | the same | **7 of 7**: items 1, 2 and 4 each `DONE` in 3 UI actions (Sonnet V1 USD 0.052, 7.2 s; the toolset V2 with the legend USD 0.057, 5.3 s; Haiku V1 USD 0.0028, 6.1 s), item 3 as in run 1, item 5 `skillroy_look` `DONE` (USD 0.023) and the player `PASS` with `verify` on both statements (USD 0.0047 each), item 6 the export of item 1 replays with zero model calls and an empty ledger (exit criterion 1 met live), secret scan 26 files. USD 0.155 |
-| `VisionLiveIT`, **run 3**, 2026-10-11 on `c94aade` (the final code: build, fix wave, race fix and security fixes) | the same | **7 of 7**: item 1 (V1, Sonnet 5.5 at `low`) `DONE` in 6.3 s and 3 UI actions (`lending_enter`, `lending_key`, `lending_deposit`), USD 0.045; item 2 (V2 toolset with the legend) `DONE` in 5.8 s and 3 UI actions, USD 0.057; item 4 (V1, Haiku 5.5) `DONE` in 6.4 s and 3 UI actions, USD 0.0029; item 3 the fallback header coexists with the toolset (`END_TURN`, USD 0.0107); item 5 `skillroy_look` `DONE` (USD 0.023) and the player `PASS` with `verify` on both statements (USD 0.0045 and 0.0047); item 6 the export of item 1 replays with zero model calls; the secret scan over 26 files. USD 0.148 |
+| `VisionLiveIT` (`-Pinference-live`, P7 §13.3), **run 1**, 2026-10-10 on `5faacb4` (the build) | the arm64 image, Java 25 desk, `ci/run-in-linux.sh mvn -o verify -pl samples/skillroy-sample-lending-scenarios -am -Pinference-live -Dskillroy.headless=false -Dit.test=VisionLiveIT` | items 3 (the fallback header coexists with the toolset: `END_TURN`, USD 0.0107), 5 (`skillroy_look` `DONE`, USD 0.022; the player `PASS` on `loan-table-visual-check` with `YES` and on the false statement with `expect: NO`, USD 0.0045 each) and the secret scan (19 files) passed; items 1, 2 and 4 (Sonnet 5.5 V1 USD 0.029, the toolset V2 USD 0.057, Haiku 5.5 V1 USD 0.0028) ended `QUESTION`: the model read the person's resolved `$item` as an unfilled placeholder because the session never lists the bound slots (**finding LV-1**, fixed by FC); item 6 skipped. USD 0.131 |
+| `VisionLiveIT`, **run 2**, 2026-10-10 on `a54c279` (FA and FC merged) | the same | **7 of 7**: items 1, 2 and 4 each `DONE` in 3 UI actions (Sonnet V1 USD 0.052, 7.2 s; the toolset V2 with the legend USD 0.057, 5.3 s; Haiku V1 USD 0.0028, 6.1 s), item 3 as in run 1, item 5 `skillroy_look` `DONE` (USD 0.023) and the player `PASS` with `verify` on both statements (USD 0.0047 each), item 6 the export of item 1 replays with zero model calls and an empty ledger (exit criterion 1 met live), secret scan 26 files. USD 0.155 |
+| `VisionLiveIT`, **run 3**, 2026-10-11 on `223c5fb` (the final code: build, fix wave, race fix and security fixes) | the same | **7 of 7**: item 1 (V1, Sonnet 5.5 at `low`) `DONE` in 6.3 s and 3 UI actions (`lending_enter`, `lending_key`, `lending_deposit`), USD 0.045; item 2 (V2 toolset with the legend) `DONE` in 5.8 s and 3 UI actions, USD 0.057; item 4 (V1, Haiku 5.5) `DONE` in 6.4 s and 3 UI actions, USD 0.0029; item 3 the fallback header coexists with the toolset (`END_TURN`, USD 0.0107); item 5 `skillroy_look` `DONE` (USD 0.023) and the player `PASS` with `verify` on both statements (USD 0.0045 and 0.0047); item 6 the export of item 1 replays with zero model calls; the secret scan over 26 files. USD 0.148 |
 
 The live spend of 2026-10-10 and 2026-10-11 is USD 8.12: the planner check 2.05 (run A 1.108, run B 0.945; each run counted as
 the last envelope's `total_cost_usd`, equal to the sum of the ledger entries), BS12 5.64 (the sum over every call of usage
@@ -149,7 +151,7 @@ times price; "BS12" under "Base spikes") and the three `VisionLiveIT` runs 0.131
 its ledger entries). The items are rounded: 2.05 + 5.64 + 0.131 + 0.155 + 0.148 = 8.124; with the unrounded 7.697 of the first two
 the total is 8.131.
 
-Verification of the final tree of the live session (the tree committed as `7690322` and `22ae574`; the live classes
+Verification of the final tree of the live session (the tree committed as `2314eae` and `8e556d3`; the live classes
 skip in it, no key being passed), 2026-10-08 evening: the arm64 image natively twice in a row, then the amd64 image
 under emulation once, three legs each:
 
@@ -178,14 +180,14 @@ and absent from the second round and the amd64 round):
 
 
 
-Verification of the final Phase 5 tree (`e7acd61`, the tree after the review's fix wave), 2026-10-08: the arm64 image
+Verification of the final Phase 5 tree (`c65a658`, the tree after the review's fix wave), 2026-10-08: the arm64 image
 natively twice in a row, then the amd64 image under emulation once, three legs each; the counts are the main tree's own
 (the summariser now ignores the agents' worktrees and the spikes):
 
 | Configuration | Command (from the repo root) | Result |
 |---|---|---|
-| Native, JDK 26, headless (`7a0b4c7`) | `mvn -o -q verify` | 3968 tests, 0 failures, 0 errors, 367 skipped (surefire and failsafe reports together; the image-only classes skip) |
-| arm64 image (JDK 25), targets on Java 25 | `ci/run-in-linux.sh mvn -o -q clean verify -Pjcef -Dskillroy.jcef.platform=linux-arm64 -Dskillroy.headless=false` | run 1: 4101 / 0 / 0 / 68, 817 s; run 2: stopped at `skillroy-mcp` after 253 s on one error, `ScenarioRunPolicyTest.aRunOnAClientsBehalfEvaluatesExpectationsOnMaskedValues` (the MCP client's 20 s request timeout: a defect of the SDK's stdio transport under load, found, fixed and explained below under "Status at a glance"); on the fixed tree (`7a0b4c7`, `SerialSends`) the leg ran twice more: 4102 / 0 / 0 / 68, 820 s, and 4102 / 0 / 0 / 69, 835 s |
+| Native, JDK 26, headless (`522bfed`) | `mvn -o -q verify` | 3968 tests, 0 failures, 0 errors, 367 skipped (surefire and failsafe reports together; the image-only classes skip) |
+| arm64 image (JDK 25), targets on Java 25 | `ci/run-in-linux.sh mvn -o -q clean verify -Pjcef -Dskillroy.jcef.platform=linux-arm64 -Dskillroy.headless=false` | run 1: 4101 / 0 / 0 / 68, 817 s; run 2: stopped at `skillroy-mcp` after 253 s on one error, `ScenarioRunPolicyTest.aRunOnAClientsBehalfEvaluatesExpectationsOnMaskedValues` (the MCP client's 20 s request timeout: a defect of the SDK's stdio transport under load, found, fixed and explained below under "Status at a glance"); on the fixed tree (`522bfed`, `SerialSends`) the leg ran twice more: 4102 / 0 / 0 / 68, 820 s, and 4102 / 0 / 0 / 69, 835 s |
 | arm64 image, targets on Java 8 (aarch64 JDK 8u504) | the same plus `-Dskillroy.it.targetJava=/opt/jdk8/bin/java` | run 1: 4101 / 0 / 0 / 96, 737 s; run 2: 4101 / 0 / 0 / 96, 745 s |
 | arm64 image, agent side, test JVMs and targets on Java 8 | the Java 8 command plus `-Djvm=/opt/jdk8/bin/java`, `-pl` the twelve agent-side modules | run 1: 1380 / 0 / 0 / 21, 176 s; run 2: 1380 / 0 / 0 / 21, 187 s |
 | amd64 image (JDK 25, emulated), targets on Java 25 | the arm64 command with `linux-amd64` and `-Dskillroy.test.extraArgLine=-Djdk.lang.Process.launchMechanism=FORK` | 4101 / 0 / 0 / 68, 1231 s |
@@ -198,21 +200,21 @@ allow-list check's statements through the target's `data.query` at start, the se
 the secret scan last), and the web host's kit against real JCEF off screen and windowed; the agent-side leg runs the
 kit's off-screen half on a Java 8 test JVM (item 12 among them).
 
-Verification of the Phase 5 tree, first round (2026-10-08): the committed build (`7e18e0c`) on the arm64 image natively,
-then the tree with that round's three fixes (`a6ed6e9`) on the amd64 image under emulation. The arm64 counts of this
+Verification of the Phase 5 tree, first round (2026-10-08): the committed build (`50c8968`) on the arm64 image natively,
+then the tree with that round's three fixes (`dd57142`) on the amd64 image under emulation. The arm64 counts of this
 round are not recorded: the summariser also counted the test reports of the review agents' worktrees inside the tree
 (corrected before the final round); its failures are exact. The final round, on the tree after the review's fix wave,
 is the table that follows this one.
 
 | Configuration | Command (from the repo root) | Result |
 |---|---|---|
-| Native, JDK 26, headless, the committed build `7e18e0c` | `mvn -o -q verify` | 3627 tests, 0 failures, 0 errors, 122 skipped |
-| arm64 image (JDK 25), targets on Java 25, `7e18e0c` | `ci/run-in-linux.sh mvn -o -q clean verify -Pjcef -Dskillroy.jcef.platform=linux-arm64 -Dskillroy.headless=false` | 1 failure, 2 errors, 467 s: `InferenceEndToEndIT` (approve with the reuse rule, the session export's replay), fixed in `a6ed6e9` |
-| arm64 image, targets on Java 8 (aarch64 JDK 8u504), `7e18e0c` | the same plus `-Dskillroy.it.targetJava=/opt/jdk8/bin/java` | the same three, 467 s |
-| arm64 image, agent side, test JVMs and targets on Java 8, `7e18e0c` | the Java 8 command plus `-Djvm=/opt/jdk8/bin/java`, `-pl` the twelve agent-side modules | 1361 tests, 0 failures, 1 error, 8 skipped, 178 s: kit item 12 against real JCEF (the kit's own marker script), fixed in `a6ed6e9`; after the fix the off-screen kit passes 13 of 13 on a Java 8 and on a Java 25 test JVM (run from a worktree) |
-| amd64 image (JDK 25, emulated), targets on Java 25, `a6ed6e9` | `ci/run-in-linux.sh mvn -o -q clean verify -Pjcef -Dskillroy.jcef.platform=linux-amd64 -Dskillroy.headless=false` | 4006 / 0 / 0 / 68, 1212 s |
-| amd64 image, targets on Java 8 (1.8.0_492), `a6ed6e9` | the same plus `-Dskillroy.it.targetJava=/opt/jdk8/bin/java` | 4006 / 0 / 1 / 68, 688 s: `InferenceEndToEndIT`'s session check could not spawn the CLI ("Bad code from spawn helper", the JDK's `jspawnhelper` under QEMU; the same check passed in the leg above and on arm64): an emulation flake, not a defect; the matrix now runs the amd64 test JVMs with `-Djdk.lang.Process.launchMechanism=FORK` ("Environment notes") |
-| amd64 image, agent side, test JVMs and targets on Java 8, `a6ed6e9` | the Java 8 command plus `-Djvm=/opt/jdk8/bin/java`, `-pl` the twelve agent-side modules | 1380 / 0 / 0 / 21, 250 s |
+| Native, JDK 26, headless, the committed build `50c8968` | `mvn -o -q verify` | 3627 tests, 0 failures, 0 errors, 122 skipped |
+| arm64 image (JDK 25), targets on Java 25, `50c8968` | `ci/run-in-linux.sh mvn -o -q clean verify -Pjcef -Dskillroy.jcef.platform=linux-arm64 -Dskillroy.headless=false` | 1 failure, 2 errors, 467 s: `InferenceEndToEndIT` (approve with the reuse rule, the session export's replay), fixed in `dd57142` |
+| arm64 image, targets on Java 8 (aarch64 JDK 8u504), `50c8968` | the same plus `-Dskillroy.it.targetJava=/opt/jdk8/bin/java` | the same three, 467 s |
+| arm64 image, agent side, test JVMs and targets on Java 8, `50c8968` | the Java 8 command plus `-Djvm=/opt/jdk8/bin/java`, `-pl` the twelve agent-side modules | 1361 tests, 0 failures, 1 error, 8 skipped, 178 s: kit item 12 against real JCEF (the kit's own marker script), fixed in `dd57142`; after the fix the off-screen kit passes 13 of 13 on a Java 8 and on a Java 25 test JVM (run from a worktree) |
+| amd64 image (JDK 25, emulated), targets on Java 25, `dd57142` | `ci/run-in-linux.sh mvn -o -q clean verify -Pjcef -Dskillroy.jcef.platform=linux-amd64 -Dskillroy.headless=false` | 4006 / 0 / 0 / 68, 1212 s |
+| amd64 image, targets on Java 8 (1.8.0_492), `dd57142` | the same plus `-Dskillroy.it.targetJava=/opt/jdk8/bin/java` | 4006 / 0 / 1 / 68, 688 s: `InferenceEndToEndIT`'s session check could not spawn the CLI ("Bad code from spawn helper", the JDK's `jspawnhelper` under QEMU; the same check passed in the leg above and on arm64): an emulation flake, not a defect; the matrix now runs the amd64 test JVMs with `-Djdk.lang.Process.launchMechanism=FORK` ("Environment notes") |
+| amd64 image, agent side, test JVMs and targets on Java 8, `dd57142` | the Java 8 command plus `-Djvm=/opt/jdk8/bin/java`, `-pl` the twelve agent-side modules | 1380 / 0 / 0 / 21, 250 s |
 
 Verification of the Phase 4 tree (2026-10-07). The final tree is the one after the review's fix wave; each Linux leg
 runs twice in a row (the exit criterion's "twice in a row without a flake"), on the amd64 image, which an arm64
@@ -230,7 +232,7 @@ The native skips are the display tests and the end-to-end checks, which need the
 (`WebHostEndToEndIT`, `CdpAttachSoakIT` and the kit against real JCEF) runs in the first two Linux legs, the kit's
 off-screen half on a Java 8 test JVM in the third.
 
-Verification of the committed tree (`efb48b7`, the Phase 3 tree with the 2026-10-06 changes), on 2026-10-06:
+Verification of the committed tree (`37d9377`, the Phase 3 tree with the 2026-10-06 changes), on 2026-10-06:
 
 | Configuration | Command (from the repo root) | Result |
 |---|---|---|
@@ -345,7 +347,7 @@ the times are slow. Java 21 targets are no longer run (B3).
   fresh container; Java 25 0/60 warm, 2/40 fresh container), 0 in 380 after (D234, D235). The same property holds for
   `swing.type` DISPATCH with `enter` (gap 60).
 - **Scenario E's capability-matrix hash ("one matrix for every run of this target"; once in Phase 6 on 2026-10-09, seen by
-  security fixer SD, seed A, and once in the first arm64 round of the Phase 7 matrix on `c690bef`, seed B, both in the hooks leg
+  security fixer SD, seed A, and once in the first arm64 round of the Phase 7 matrix on `2633eec`, seed B, both in the hooks leg
   on Java 25 targets): explained and fixed agent-side (Phase 7, FX, D449; the open entry of Phase 6 is closed).** The installing
   run (scenario A's `replay`, which installs the pack's catalogue with `hook.install`) read the matrix right after the
   install, and the core holds a capability declared after the target is ready pending (`UNAVAILABLE("not probed yet: the target
@@ -411,7 +413,7 @@ table above. "Java 8 test JVM" = the module's own tests also run on Java 8 (`-Dj
 | `skillroy-sample-lending-scenarios` | yes | targets only | committed plans up to date (4 plan tests); §10 acceptance, 19 checks per load mode, 21 tests with the JUnit glue's three dynamic tests, 84 end-to-end tests (`LendingEndToEndIT`) |
 | `skillroy-agent-web` (Phase 4) | yes | yes | the module (install, capabilities, index, selection, primitives, events and taps) against scripted adapters; both adapters against the fake JCEF and the JxBrowser fake; the contract kit (`test-jar`) in four fake runs; 160 tests after the fix wave, 172 after the Phase 4.x amendments A37 and A38 (2026-10-08) |
 | `skillroy-cdp` (Phase 4) | yes | n/a (Java 25) | the probe against a fake DevTools server, the attach and the path with Playwright replaced by fakes; no test starts a driver or a browser; 105 tests |
-| `skillroy-vision` (Phase 7, optional) | yes | n/a (Java 25) | the loop of the tiers V1-V3 against a scripted gateway and a fake session (the parts, the limits, the recording), the scenario player; 59 tests after the security fixes (41 after the code review's fix wave, 32 after `e11ae08`); the module is exercised end to end by `InferenceEndToEndIT` item 8 and `VisionLiveIT` (profile `inference-live`; run live three times, the last on `c94aade`: 7 of 7, see the Phase 7 checklist) |
+| `skillroy-vision` (Phase 7, optional) | yes | n/a (Java 25) | the loop of the tiers V1-V3 against a scripted gateway and a fake session (the parts, the limits, the recording), the scenario player; 59 tests after the security fixes (41 after the code review's fix wave, 32 after `5faacb4`); the module is exercised end to end by `InferenceEndToEndIT` item 8 and `VisionLiveIT` (profile `inference-live`; run live three times, the last on `223c5fb`: 7 of 7, see the Phase 7 checklist) |
 | `skillroy-sample-web-host`, `-web-host-agent` (Phase 4, profile `jcef`) | yes | yes | options, sentinels, pages, registry, the agent module's seeds; with a display the host itself and the kit against real JCEF, one surefire execution per rendering mode |
 | `skillroy-sample-web-host-scenarios` (Phase 4, profile `jcef`) | yes | targets only | committed plans up to date, the pack; with a display the end-to-end acceptance (`WebHostEndToEndIT`, eight launches) and the frozen-target soak (`CdpAttachSoakIT`) |
 
@@ -427,7 +429,7 @@ table above. "Java 8 test JVM" = the module's own tests also run on Java 8 (`-Dj
 | Research notes (`docs/research/`) | Round 1 carried over, finding ids unchanged; `embedded-browser-spi` and `vision-input` new (2026-10-02). Pruned of local-environment detail | None |
 | Security review | Run 2026-10-02 on the pre-port tree: 34 confirmed findings (4 medium, 30 low); the fixes H1-H3 are built (Phase 1.x). The Phase 2 code review of 2026-10-03 had a secrets-and-safety lens (below). **Repeat, pass 1 (2026-10-09):** 28 confirmed findings (1 high, 6 medium, 21 low), fixed by the Phase 6 build or accepted as lows with release notes (B26 Q22, confirmed by the owner 2026-10-10). **Repeat, pass 2 (2026-10-09):** 38 confirmed findings (1 high, 12 medium, 25 low) on all eight lenses, fixed by six fix rounds except three lows accepted with release notes (B28). Together S35-S100: 66 findings, 2 high, 18 medium, 46 low; `SECURITY.md` and `docs/release-checklist.md` are in the tree. **Signed off by the owner on 2026-10-10** (B28), the eight lows accepted. **Phase 7 delta review (2026-10-10/11):** 48 confirmed findings (2 high, 13 medium, 33 low; S101-S148) on all eight lenses, every medium and high and 31 lows fixed by four fix packages (SG, SH, SI, SJ), S142 and S144 accepted with a release note each (B31); with B28, S35-S148: 114 findings, 4 high, 31 medium, 79 low. **Signed off by the owner on 2026-10-11** (B31), the two lows accepted | None before the first release; an outside reader is recommended, not a gate (B26 Q12: "done" or "waived by the owner" in the release checklist) |
 | Spikes | BS7 done. **BS8 run 2026-10-06, passed with conditions** (`spikes/BS8/RESULT.md`). **BS5 met 2026-10-07** by the Phase 4 acceptance against JCEF's Chromium (D53; the stock-Chromium run is the manual procedure `spikes/BS5/README.md`). BS1 answered for Java 8 and Java 25 targets on Linux, parts open. BS2 answered in part. BS4 answered, parts open. **BS3 passed with conditions 2026-10-09** (`spikes/BS3/RESULT.md`) and **BS14 passed with conditions 2026-10-09** (`spikes/BS14/RESULT.md`), the hook go/no-go and the gate of the Byteman module. **BS6 passed 2026-10-08** and **BS13 passed 2026-10-08** (the offline part in the night, the live part in the afternoon with the owner's key), both as the Phase 5 contract's gates. **BS9, BS10 and BS11 passed with conditions 2026-10-10** (`spikes/BS9/RESULT.md`, `spikes/BS10/RESULT.md`, `spikes/BS11/RESULT.md`) and **BS12 passed 2026-10-10, live** (`spikes/BS12/RESULT.md`, USD 5.64): all four Phase 7 spikes have run, swing-driving F13 is settled by BS9, and the capture defect they found is gap 76 | See "Base spikes" |
-| Phase 7 (vision bolt-on and the vision loop) | **Contract specified and reviewed 2026-10-10** (`design/phase7-contracts.md`, `2eebeed`; three lenses with sceptics, 94 findings, 91 applied; two rechecks, 36 more applied; D287-D358; B29 confirmed by the owner 2026-10-11). **Built the same day** in four worktree packages, VS (the agent's Swing side, the sample's number pad, the sample's agent module and pack 0.6.0), VW (the web side), VC (the scenario, controller, JUnit and CLI side), VM (the gateway, the session seam, `skillroy-vision`, the MCP and session options), merged into `main` as VC `71efa8e`, VS with step 2b `482288d`, VW `e7a4cb3`, VM `7af44eb` and `e11ae08` (D425); 72 decisions of the build, D359-D430. **Code-reviewed and fixed 2026-10-10:** three lenses with sceptics on `7af44eb`, 30 distinct findings (2 high, 9 medium, 19 low) and the live finding LV-1, fixed by FA `9f44718`, FC `791e0ae` and FB `c690bef`; a hook-engine race found by the first matrix round fixed by FX `a134159`; D431-D449. **Security-reviewed (delta) and fixed 2026-10-10/11:** S101-S148 (2 high, 13 medium, 33 low), fixed by SG `5d6fdd8`, SH `edba708`, SJ `73e406a`, SI `056a007` and SG's follow-up `c94aade`, except two lows accepted by the owner (S142, S144; B31, 2026-10-11); D450-D486 (B30 holds D359-D486, confirmed by the owner 2026-10-11). **Live:** `VisionLiveIT` run three times, 7 of 7 on the last two (the last on `c94aade`). Native reactor green on `c94aade` (5,099 tests, 0 failures, 592 skipped in SG's run); the Linux matrix of the final tree is green on `c94aade` (arm64 twice on every leg, amd64 on the Java 25 leg), its amd64 Java 8 legs green on `bc1e250` later on 2026-10-11; nothing pushed | Nothing in B29-B31 (all given 2026-10-11); B32 (D487-D491, the follow-ups of 2026-10-11) confirmed the same day, B34 (D492-D499) on 2026-10-12; gaps 91-102 (93 and 96 are the owner's optional choices). See "Phase 7" in the checklist |
+| Phase 7 (vision bolt-on and the vision loop) | **Contract specified and reviewed 2026-10-10** (`design/phase7-contracts.md`, `abcfe65`; three lenses with sceptics, 94 findings, 91 applied; two rechecks, 36 more applied; D287-D358; B29 confirmed by the owner 2026-10-11). **Built the same day** in four worktree packages, VS (the agent's Swing side, the sample's number pad, the sample's agent module and pack 0.6.0), VW (the web side), VC (the scenario, controller, JUnit and CLI side), VM (the gateway, the session seam, `skillroy-vision`, the MCP and session options), merged into `main` as VC `06a59ed`, VS with step 2b `43c399c`, VW `0d4a0cb`, VM `cf59b1f` and `5faacb4` (D425); 72 decisions of the build, D359-D430. **Code-reviewed and fixed 2026-10-10:** three lenses with sceptics on `cf59b1f`, 30 distinct findings (2 high, 9 medium, 19 low) and the live finding LV-1, fixed by FA `03625bc`, FC `a54c279` and FB `2633eec`; a hook-engine race found by the first matrix round fixed by FX `03c8da9`; D431-D449. **Security-reviewed (delta) and fixed 2026-10-10/11:** S101-S148 (2 high, 13 medium, 33 low), fixed by SG `703cc9b`, SH `ed397f0`, SJ `dd2f1d6`, SI `a1af6c8` and SG's follow-up `223c5fb`, except two lows accepted by the owner (S142, S144; B31, 2026-10-11); D450-D486 (B30 holds D359-D486, confirmed by the owner 2026-10-11). **Live:** `VisionLiveIT` run three times, 7 of 7 on the last two (the last on `223c5fb`). Native reactor green on `223c5fb` (5,099 tests, 0 failures, 592 skipped in SG's run); the Linux matrix of the final tree is green on `223c5fb` (arm64 twice on every leg, amd64 on the Java 25 leg), its amd64 Java 8 legs green on `832fcb2` later on 2026-10-11; nothing pushed | Nothing in B29-B31 (all given 2026-10-11); B32 (D487-D491, the follow-ups of 2026-10-11) confirmed the same day, B34 (D492-D499) on 2026-10-12; gaps 91-102 (93 and 96 are the owner's optional choices). See "Phase 7" in the checklist |
 | CI for this repo | Not chosen. `ci/Dockerfile` and `ci/run-in-linux.sh` are what a pipeline would run; since 2026-10-06 the image holds Chromium's run-time libraries and the runner takes `SKILLROY_PLATFORM`; the Phase 4 matrix adds `-Pjcef` to every leg | Needs a JDK 8, a JDK >= 25 and Xvfb on the build agents; for the profile `jcef` the JCEF natives (152 MB per platform) and Playwright's jars (the driver bundle about 204 MB) in the Maven cache |
 
 ### What the end-to-end review fixed (2026-10-02)
@@ -470,7 +472,7 @@ low; none high or critical), 1 rejected. The confirmed findings are S1-S34; `DEC
 
 ### Security review (repeat, pass 1, 2026-10-09)
 
-The first pass of the repeat review B13 asks for before the first release, run on the committed tree `e86e8e2` with
+The first pass of the repeat review B13 asks for before the first release, run on the committed tree `5d617be` with
 the four lenses whose code Phase 6 does not change (L3 credentials, data channels and run outputs; L4 embedded web
 views; L5 the model boundary; L6 the model as an actor), one reviewer and one independent sceptic each, probes in
 scratch copies, no live model call. 28 raw findings (25 from the reviewers, 3 raised by the sceptics from refuted
@@ -492,8 +494,8 @@ findings are S35-S62; the record is in the session notes (`2026-10-09/phase6/sec
 - State on 2026-10-09: **built** in two packages (tag `SR`; the five work packages FX-web, FX-scenario, FX-ci,
   FX-inference and FX-mcp went to two implementers), contract first (the amendments A40-A60 written into P1, P2, P4 and
   P5, marked `(Phase 6 security fix S<n>, A<m>, built 2026-10-09)`), every fix with a test that fails before it (S39 and
-  S40 by hand: a `docker` stub and a parsed example; S37 and S48 documentation only); landed on `main` as `755844c`
-  (FX-2) and `822dc58` (FX-1), native reactor green. Dispositions as built:
+  S40 by hand: a `docker` stub and a parsed example; S37 and S48 documentation only); landed on `main` as `b81384e`
+  (FX-2) and `8ad100d` (FX-1), native reactor green. Dispositions as built:
   - **Fixed in full: the high and the six mediums, and all the lows but the parts below.** FX-2 (S49-S62): S55 (the
     high: `data_query` refuses a reference in its SQL or parameters and sends the guarded text byte for byte,
     `PlannedCall.literalArgs`, D208); S56 (D157: one `SESSION` meter per MCP server for `skillroy_session_ask`,
@@ -536,8 +538,8 @@ The second pass of the repeat review B13 asks for before the first release, run 
 P6 §12.3 (L1 the control channel, L2 host safety and the instrumentation path, L3 credentials and data channels, L4 embedded web
 views, L5 the model boundary, L6 the model as an actor, L7 Windows and file-system trust, L8 telemetry and evidence at rest;
 L3-L6 as deltas on pass 1's fixes), **one reviewer and one independent sceptic each**, probes in scratch copies, no live model
-call. **L1 and L3-L7 ran on `f546363`** (the tree before the code review's fix wave was integrated into `main`, so that the
-sceptics read a stable tree) and **L2 and L8 on `ce1f41f`** (after it). 39 raw findings (32 from the reviewers, 7 raised by the
+call. **L1 and L3-L7 ran on `a4b3d2e`** (the tree before the code review's fix wave was integrated into `main`, so that the
+sceptics read a stable tree) and **L2 and L8 on `6760bed`** (after it). 39 raw findings (32 from the reviewers, 7 raised by the
 sceptics from claims they broke): **38 confirmed (1 high, 12 medium, 25 low; 18 counted, 16 operator-only, 4 token-holder
 only), 1 refuted (P2-L1-F2, no number), 0 unverified.** Per lens: L1 4, L2 8, L3 2, L4 4, L5 5, L6 5, L7 4, L8 6. The sceptics
 re-rated six (S64 low to medium; S73 token-holder only to counted; S78 low to medium; S92 and S95 high to medium; S97 low to
@@ -561,10 +563,10 @@ at S35-S100: 66 findings, 2 high, 18 medium, 46 low.
   decided per provider, never per volume; S92 `skillroy.bat` ran `findstr` by bare name; S95 `telemetry.yaml` was read with no
   trust check and alone turned export on; S97 the run-output writers followed planted links.
 - **Dispositions:** every finding of medium or above is **fixed** (contract first, a test that fails on the old code, the review
-  id in the contract's mark), by six fix rounds merged into `main` on 2026-10-09: SC `2ab0f72` (L5, L6: S81-S90), SD `49becf3`
-  (L7 and L3's SQL Server items: S75, S76, S91-S94), SA `3be43b9` (L1: S63-S66; merged with SD by a resolver, the volume rule
-  inside `JarTrust` and the single-channel write in `SecureFiles`), SB `84eeab6` (L4: S77-S80), SE `378b5e0` (L2: S67-S74, and
-  the bootstrap's options file on FAT/exFAT that the SA x SD merge left open: D279), SF `4f9962f` (L8: S95-S100). Their 43
+  id in the contract's mark), by six fix rounds merged into `main` on 2026-10-09: SC `6c70747` (L5, L6: S81-S90), SD `758f916`
+  (L7 and L3's SQL Server items: S75, S76, S91-S94), SA `da41033` (L1: S63-S66; merged with SD by a resolver, the volume rule
+  inside `JarTrust` and the single-channel write in `SecureFiles`), SB `91aa9c2` (L4: S77-S80), SE `abec5c8` (L2: S67-S74, and
+  the bootstrap's options file on FAT/exFAT that the SA x SD merge left open: D279), SF `579af9c` (L8: S95-S100). Their 43
   decisions are **D244-D286** (SC D244-D249, SD D250-D261, SA D262-D265, SB D266-D270, SE D271-D279, SF D280-D286), after the
   code review's fix wave (D222-D243). 35 findings are fixed in full; S77 is fixed with a residual; S84 and S94 are left as
   they are. Nothing is deferred.
@@ -643,12 +645,12 @@ finding; P2-L1-F2 was refuted and has no number):
 
 The delta review that B13 and the release checklist ask of a phase that opens a new boundary (pixels leave the JVM, screen
 content steers a model, Robot acts outside the application), specified in `design/phase7-contracts.md` §15 (D338) and run on
-everything Phase 7 changed since `af29e59`, the tree B28 covered, with all eight lenses of P6 §12.3 (L1 controller correctness
+everything Phase 7 changed since `e3ceece`, the tree B28 covered, with all eight lenses of P6 §12.3 (L1 controller correctness
 and bounds, L2 host safety, L3 the data channels and, found there, the credential rule, L4 the web boundary, L5 the model
 boundary, L6 the model as an actor, L7 Windows and file-system trust, L8 evidence at rest), **one reviewer and one independent
 sceptic each**, probes in scratch copies, no display, no image run, no
-live model call. **L1, L3, L4, L7 and L8 ran on `e96a20b`** (the build with its documents, before the code review's fix wave was
-integrated) and **L2, L5 and L6 on `c690bef`** (after it); every `e96a20b` finding was re-checked against `c690bef`, and the
+live model call. **L1, L3, L4, L7 and L8 ran on `fbef000`** (the build with its documents, before the code review's fix wave was
+integrated) and **L2, L5 and L6 on `2633eec`** (after it); every `fbef000` finding was re-checked against `2633eec`, and the
 fix wave had closed none. 52 raw findings (29 from the reviewers, 23 raised by the sceptics from claims they broke): 1 refuted
 (L8-F4, whose premise, a dry-run `approve`, does not exist), 3 pairs merged into one finding each (S110 = L5-F1 = L6-F1,
 S115 = L7-F1 = L8-S1, S117 = L1-F3 = L8-F5): **48 standing findings, S101-S148: 0 critical, 2 high, 13 medium, 33 low; 42
@@ -684,13 +686,13 @@ security reviews stand at S35-S148: 114 findings, 4 high, 31 medium, 79 low.
   client's `skillroy_scenario_run {mode: approve}` could create or replace a file in the operator's bindings root.
 - **Dispositions:** every finding of medium or above and 31 of the 33 lows are **fixed** (contract first, a test that fails on
   the old code, the review id in the contract's mark "(Phase 7 security fix, S<nnn>, built 2026-10-11, <TAG>)"), in four
-  packages from `a134159` with disjoint files, merged into `main` on 2026-10-11: SG `5d6fdd8` (the agent's Swing side: S104,
-  S105, S106, S121-S126, S129 and the agent halves of S108 and S146; native 5027 tests, 13 of its new tests failed on `a134159`),
-  SH `edba708` (credentials, slots and the client's plan form: S101, S102, S107, S113, S127, S128, S139; native 5016), SJ
-  `73e406a` (the image baselines, the bindings files and the run output: S103, S115-S120, S140, S141, S145, S147, S148 and the
-  controller halves of S143 and S146; native 5027), SI `056a007` (the vision module, the session service, the web reads and the
+  packages from `03c8da9` with disjoint files, merged into `main` on 2026-10-11: SG `703cc9b` (the agent's Swing side: S104,
+  S105, S106, S121-S126, S129 and the agent halves of S108 and S146; native 5027 tests, 13 of its new tests failed on `03c8da9`),
+  SH `ed397f0` (credentials, slots and the client's plan form: S101, S102, S107, S113, S127, S128, S139; native 5016), SJ
+  `dd2f1d6` (the image baselines, the bindings files and the run output: S103, S115-S120, S140, S141, S145, S147, S148 and the
+  controller halves of S143 and S146; native 5027), SI `a1af6c8` (the vision module, the session service, the web reads and the
   CDP path: S109-S112, S114, S130-S138 and the controller halves of S108, S124 and S143; 36 new tests failed with their fix
-  neutralised in place; native 5065), then SG's follow-up `c94aade` (the browser's whole `bounds` on every `WEB` surface, which
+  neutralised in place; native 5065), then SG's follow-up `223c5fb` (the browser's whole `bounds` on every `WEB` surface, which
   S108's composite needed for a browser a viewport clips; native 5099 on the merged tree). Their 37 decisions are
   **D450-D486** (SG D450-D462, SH D463-D469, SI D470-D480, SJ D481-D486), after the code review's fix wave and the race fix
   (D431-D449); all are B30. No fixer found a finding wrong, already fixed or out of proportion. Image runs of the fixers
@@ -1188,8 +1190,8 @@ passed with conditions, BS12 passed; rows in the table above, sections below).
   state within one environment, how much and where the pixels change across environments, and whether a tolerance can
   make a baseline portable.
 - **Run.** `spikes/BS11/` (a standalone Maven project, not a reactor module: a Java 8 toy window and a Java 25 harness,
-  `run.sh`, `scripts/run-env.sh`, `scripts/run-mac.sh`, derived images under `images/`; built from `main` at `11fce4e`
-  with the reactor's artifacts of `4f9962f`): the sample desk (seed A) with the built agent home plus the sample's
+  `run.sh`, `scripts/run-env.sh`, `scripts/run-mac.sh`, derived images under `images/`; built from `main` at `763e154`
+  with the reactor's artifacts of `579af9c`): the sample desk (seed A) with the built agent home plus the sample's
   agent module through `TargetLauncher`, `swing.capture` over the control channel through `AgentClient`, each capture
   decoded and hashed (SHA-256 of the ARGB raster; of the PNG bytes). State changes through the agent's own `swing.type`
   and `swing.dismiss`, waits on the desk's events and `swing.settle`. Fifteen environments: the arm64 image on Temurin
@@ -1317,7 +1319,7 @@ passed with conditions, BS12 passed; rows in the table above, sections below).
   as written, a rule with the project helper fires and its removal restores the bytes, `RuleCheck` in process, nothing
   listening before, after the load and after the unload, no JEP 451 line, and a second module instance reuses the
   parked `Retransformer` (`premain` refuses a second call).
-- **Result 2026-10-09: passed with conditions** (`spikes/BS14/RESULT.md`; committed as `7640125`). Four configurations
+- **Result 2026-10-09: passed with conditions** (`spikes/BS14/RESULT.md`; committed as `dfd1ac2`). Four configurations
   PASS, the control without the manager is as expected (no `Retransformer`); `premain` took 16 ms on Java 8 and 59 ms on
   Java 25, one retransformation 7 ms, a removal 2 to 3 ms. The five conditions, all folded into P6 §7 as built (1, 2,
   3 and 5 are D194, D195, D197 and D196; 4 is in the note on `RuleManager`, with D200):
@@ -1797,7 +1799,7 @@ the two repaired checks green on both seeds). What was run is in the table below
 
 ### Phase 5 code review (2026-10-08)
 
-The method of Phases 2 to 4: three lenses, each run by one reviewer on the committed tree (`7e18e0c`, the whole build)
+The method of Phases 2 to 4: three lenses, each run by one reviewer on the committed tree (`50c8968`, the whole build)
 with a shared brief, and each verified by a sceptic who tried to refute every finding with probes in a worktree of the
 tree and added what the lens had missed. **Contract fit** (L1): 8 findings (0 high, 5 medium, 3 low); the sceptic
 raised F2 to high, split F3 (one medium, two documentation items), lowered F4 to a contract decision and added S1 (high),
@@ -1974,7 +1976,7 @@ HK (hooks and spy), CP (controller, pack, the sample's branch edition, scenario 
 behind spike BS14, and the Windows path), FX (the security fixes of the repeat review's pass 1, S35-S62).
 
 **Built 2026-10-09**, the day it was specified, in six packages (FX went to two implementers), each in an isolated
-worktree (`.claude/worktrees/p6-<tag>`, branch `p6/<tag>`) made by hand from the contract commit `065746d`: HK, CP, TL
+worktree (`.claude/worktrees/p6-<tag>`, branch `p6/<tag>`) made by hand from the contract commit `d8b326c`: HK, CP, TL
 and BW first, four at a time, FX over the merged four. Each implementer committed on its own branch, signed off, and
 touched no `TODO.md`, `DECISIONS.md`, `CLAUDE.md`, `NOTICE` or `CONTRIBUTING.md` (its text for them went into its
 report); the orchestrator merged the branches into `main` in the order below with a native reactor between
@@ -1985,12 +1987,12 @@ deviated from, and marks in the Phase 1 to 5 contracts and in the overview.
 
 | Package (landing order) | What it built | On `main` | The orchestrator's native reactor on `main` after the landing |
 |---|---|---|---|
-| TL (telemetry) | the `RunObserver` SPI in `skillroy-scenario` with its hook points, `CallOptions.traceparent` and the inbound MCP `traceparent`, `durationMs` on the bind records, the module `skillroy-telemetry` (OpenTelemetry 1.66.0: `otlp` over OTLP/HTTP and the project's `skillroy-spans/1` `file`), the CLI options `--telemetry*` on six commands, the JUnit glue's `skillroy.telemetry.*` with a JVM-exit flush, `THIRD-PARTY.txt` and `DistributionNoticesIT` for the eleven OpenTelemetry jars; D160-D168 | `8fc2384` (fast-forward) | exit 0; 4,074 tests, 0 failures, 0 errors, 385 skipped (surefire and failsafe together); 5 min 7 s |
-| HK (hooks and spy) | the wire types `…protocol.hook`, the `HookEngine` SPI and `…api.instrument` in `skillroy-agent-api`, `optionalModules` and the spy package's loader rules in the core and the bootstrap, `skillroy-agent-spy` (`Spy`), `skillroy-agent-bytebuddy` (Byte Buddy 1.18.14 relocated) and `skillroy-agent-hooks` (the engine, the six `hook.*` primitives, the recorder and the restore that is its own verification), the home's `skillroy-agent-spy.jar` and `optional/`, `DistributionContentIT`'s list and rules, `HomeConstantPoolIT`, `OptionalModulesIT`, `SharedLoadersIT`; D169-D183 | `9044c9a` (part 2; part 1 `c42f040`, merged by CP and BW) merged as `720eb6b` | exit 0; 4 min 46 s |
-| CP (controller, pack, sample, JDK 25) | the hook catalogue reader, overlay and installer (step 0b), the `hooks` fact root, `capabilities.json`, `--hooks` and `skillroy hooks status/install/remove`, the never-offered `hook.*`/`rule.*` set, the pack overlay SPI (`DomainPackOverlay`, `DelegatingDomainPack`, `PackSettings`), the sample's branch edition, pack 0.5.0 with its catalogue, the overlay module `skillroy-sample-lending-pack-branch`, scenario E `return-within-limit-observed`, checks 1b and 1c with the committed goldens, the hooks leg (`HookChecks`), `BranchEndToEndIT`, the live matrix diff; D184-D193 | `cf79b52` (fast-forward; the package `91cd1a1`, merges of TL, HK and `main`, `14bd710`, `cf79b52`) | exit 0; 4 min 38 s |
-| BW (Byteman and Windows) | spike BS14; `skillroy-agent-byteman-sys` and `skillroy-agent-byteman` (`rule.check/submit/unload/list`, the lint, `BytemanIT`, the hooks leg's checks 166-168); the Windows half: `bin/skillroy.bat`, `PATHEXT`, plain `cmd.exe /c`, `SecureFiles` public and its sites, `ci/run-on-windows.cmd`; D194-D207 | `b22013e` (fast-forward; spike `7640125`, Windows `26d3c22`, Byteman `3bf51e5`, `8ba12c9`, `9b87ba4`, documents `cd38182`, integration `5457ccb`, `b22013e`) | exit 0; 4 min 47 s |
-| FX-2 (security fixes, tag SR: FX-inference and FX-mcp) | S49-S62 and their contract text (A50-A60), D157-D159 in code; D208-D215 | `755844c` (fast-forward; `6d6ce08`, `ee020ad`, `755844c`) | exit 0; 4 min 45 s |
-| FX-1 (security fixes, tag SR: FX-web, FX-scenario, FX-ci) | S35-S48 and their contract text (A40-A49), D156 in full; D216-D221 | `822dc58` (fast-forward; `8333680` and the merge of FX-2) | not run again on `main`; FX-1's own run of the merged tree is below |
+| TL (telemetry) | the `RunObserver` SPI in `skillroy-scenario` with its hook points, `CallOptions.traceparent` and the inbound MCP `traceparent`, `durationMs` on the bind records, the module `skillroy-telemetry` (OpenTelemetry 1.66.0: `otlp` over OTLP/HTTP and the project's `skillroy-spans/1` `file`), the CLI options `--telemetry*` on six commands, the JUnit glue's `skillroy.telemetry.*` with a JVM-exit flush, `THIRD-PARTY.txt` and `DistributionNoticesIT` for the eleven OpenTelemetry jars; D160-D168 | `30bb838` (fast-forward) | exit 0; 4,074 tests, 0 failures, 0 errors, 385 skipped (surefire and failsafe together); 5 min 7 s |
+| HK (hooks and spy) | the wire types `…protocol.hook`, the `HookEngine` SPI and `…api.instrument` in `skillroy-agent-api`, `optionalModules` and the spy package's loader rules in the core and the bootstrap, `skillroy-agent-spy` (`Spy`), `skillroy-agent-bytebuddy` (Byte Buddy 1.18.14 relocated) and `skillroy-agent-hooks` (the engine, the six `hook.*` primitives, the recorder and the restore that is its own verification), the home's `skillroy-agent-spy.jar` and `optional/`, `DistributionContentIT`'s list and rules, `HomeConstantPoolIT`, `OptionalModulesIT`, `SharedLoadersIT`; D169-D183 | `6857c3c` (part 2; part 1 `2c48a82`, merged by CP and BW) merged as `81352aa` | exit 0; 4 min 46 s |
+| CP (controller, pack, sample, JDK 25) | the hook catalogue reader, overlay and installer (step 0b), the `hooks` fact root, `capabilities.json`, `--hooks` and `skillroy hooks status/install/remove`, the never-offered `hook.*`/`rule.*` set, the pack overlay SPI (`DomainPackOverlay`, `DelegatingDomainPack`, `PackSettings`), the sample's branch edition, pack 0.5.0 with its catalogue, the overlay module `skillroy-sample-lending-pack-branch`, scenario E `return-within-limit-observed`, checks 1b and 1c with the committed goldens, the hooks leg (`HookChecks`), `BranchEndToEndIT`, the live matrix diff; D184-D193 | `41bb70f` (fast-forward; the package `c4a90ce`, merges of TL, HK and `main`, `431285f`, `41bb70f`) | exit 0; 4 min 38 s |
+| BW (Byteman and Windows) | spike BS14; `skillroy-agent-byteman-sys` and `skillroy-agent-byteman` (`rule.check/submit/unload/list`, the lint, `BytemanIT`, the hooks leg's checks 166-168); the Windows half: `bin/skillroy.bat`, `PATHEXT`, plain `cmd.exe /c`, `SecureFiles` public and its sites, `ci/run-on-windows.cmd`; D194-D207 | `80a13a5` (fast-forward; spike `dfd1ac2`, Windows `dba5b52`, Byteman `bd7eb4f`, `2354590`, `7e912b0`, documents `1227f3f`, integration `b1ef29a`, `80a13a5`) | exit 0; 4 min 47 s |
+| FX-2 (security fixes, tag SR: FX-inference and FX-mcp) | S49-S62 and their contract text (A50-A60), D157-D159 in code; D208-D215 | `b81384e` (fast-forward; `665b109`, `a50d25b`, `b81384e`) | exit 0; 4 min 45 s |
+| FX-1 (security fixes, tag SR: FX-web, FX-scenario, FX-ci) | S35-S48 and their contract text (A40-A49), D156 in full; D216-D221 | `8ad100d` (fast-forward; `0c19ef0` and the merge of FX-2) | not run again on `main`; FX-1's own run of the merged tree is below |
 
 The packages' own native runs (the whole reactor, JDK 26, macOS arm64, headless; read from the XML reports by each
 package, on bases that differ, surefire alone or surefire and failsafe, so they do not add up across rows): TL 4 min 28
@@ -2052,7 +2054,7 @@ and of the lending desk, and the lending desk's other load modes, after the FX-1
 
 #### Phase 6 code review (2026-10-09)
 
-The method of Phases 2 to 5: three lenses, each run by one reviewer on the committed tree (`f13657d`, the build with its
+The method of Phases 2 to 5: three lenses, each run by one reviewer on the committed tree (`edbe37d`, the build with its
 documents) with a shared brief, and each verified by a sceptic who tried to refute every finding with probes in a copy of the
 tree and added what the lens had missed. **Contract fit** (L1): 5 findings (0 high, 1 medium, 4 low); the sceptic restated F1
 and F5 (F5 raised from low to medium) and added S1, S2 and S3 (all medium). **Host safety, secrets and bounds** (L2): 11 findings
@@ -2083,17 +2085,17 @@ The most important:
   an unbounded latch in a test, a skip-always guard that turned a non-fresh JVM into a green skip, check 18's self-check, order
   67's inability to see `secretArgs`.
 
-The fix wave: four fixers in worktrees from `edbc325`, integrated on a branch (`p6/int`) while pass 2's group a read the tree;
+The fix wave: four fixers in worktrees from `8d19607`, integrated on a branch (`p6/int`) while pass 2's group a read the tree;
 each with a report, the tests that fail on the old code and the contract text first (decisions D222-D243, B27):
 
 | Fixer | What it fixed | Fixer's commit | Merge |
 |---|---|---|---|
-| FB the Byteman modules (D222-D229) | all findings of the Byteman half: the detach budget (L1-F5, L2-S4), the encoder's allow-list and number guard (L2-F1, L2-S1, L2-F3), `maxClasses` one range (L1-F4, L2-F4), the class bound before the load (L2-F5), `JarCheck`'s owner rule and real path (L2-F6, L2-S2), the lint's limits documented (L2-F8), `FreshJvm` and `failIfNoTests` (L3-S2, L3-F1). Native 4038 surefire + 439 failsafe, 0 failures; image: Java 8 test JVM Byteman 37 + 10, `BytemanIT`, the hooks leg 37 on both Javas | `5ed6780` | `f9c8033` |
-| FC controller and telemetry (D230-D233) | `minimal` as an allow-list (L1-F1, L2-F9, L1-S1), the armed-stub check as step 0 (L1-S2), the `hooks` fact root paging (L1-S3), order 67 strict plus the headless `SignOnCheckedHeadlessIT` (L3-F3), check 18's kinds (L3-S3). Native 4029 + 440, 0 failures; image: hooks legs on both Javas | `9cd9183` | `f0e8477` |
-| FD the sample's display test (D234-D235) | the typed-keys display flake (below), fixed in the test; the Enter semantics recorded in P1's sample UI bullet | `797b5ae` | `ffa83cd` |
-| FA the hooks engine and the agent home's tests (D236-D243) | L2-S3 (high), L2-F7 (the slot and transformers released after an install of nothing), L2-F2/S1 (hooks half: `Capture`'s allow-list), L1-F2 (failure texts redacted), L1-F3 (`<init>` a per-hook state), L3-F1/F2/S1 (`failIfNoTests`, `assumeFreshJvm`, a bounded latch), the `BigDecimal` bit-length guard, `HookChecks` order 65 (the desk's unmodifiable list is one handle), the matrix's `OptionalModulesIT` on Java 8; L2-F10 and L2-F11 recorded in the contract. Native 4473 / 0 / 0 / 479; image: Java 8 test JVM 1356 / 0 / 0 / 8, hooks end-to-end 73 / 0 on both Javas | `55fe538` | `ce1f41f` |
+| FB the Byteman modules (D222-D229) | all findings of the Byteman half: the detach budget (L1-F5, L2-S4), the encoder's allow-list and number guard (L2-F1, L2-S1, L2-F3), `maxClasses` one range (L1-F4, L2-F4), the class bound before the load (L2-F5), `JarCheck`'s owner rule and real path (L2-F6, L2-S2), the lint's limits documented (L2-F8), `FreshJvm` and `failIfNoTests` (L3-S2, L3-F1). Native 4038 surefire + 439 failsafe, 0 failures; image: Java 8 test JVM Byteman 37 + 10, `BytemanIT`, the hooks leg 37 on both Javas | `9516236` | `4086dba` |
+| FC controller and telemetry (D230-D233) | `minimal` as an allow-list (L1-F1, L2-F9, L1-S1), the armed-stub check as step 0 (L1-S2), the `hooks` fact root paging (L1-S3), order 67 strict plus the headless `SignOnCheckedHeadlessIT` (L3-F3), check 18's kinds (L3-S3). Native 4029 + 440, 0 failures; image: hooks legs on both Javas | `d9e0b41` | `15933c8` |
+| FD the sample's display test (D234-D235) | the typed-keys display flake (below), fixed in the test; the Enter semantics recorded in P1's sample UI bullet | `b3b92b3` | `722b3d1` |
+| FA the hooks engine and the agent home's tests (D236-D243) | L2-S3 (high), L2-F7 (the slot and transformers released after an install of nothing), L2-F2/S1 (hooks half: `Capture`'s allow-list), L1-F2 (failure texts redacted), L1-F3 (`<init>` a per-hook state), L3-F1/F2/S1 (`failIfNoTests`, `assumeFreshJvm`, a bounded latch), the `BigDecimal` bit-length guard, `HookChecks` order 65 (the desk's unmodifiable list is one handle), the matrix's `OptionalModulesIT` on Java 8; L2-F10 and L2-F11 recorded in the contract. Native 4473 / 0 / 0 / 479; image: Java 8 test JVM 1356 / 0 / 0 / 8, hooks end-to-end 73 / 0 on both Javas | `fd4b69c` | `6760bed` |
 
-After the four, the native reactor on `p6/int` (= `main` at `ce1f41f`) was green: 4496 tests, 0 failures, 0 errors, 480 skipped.
+After the four, the native reactor on `p6/int` (= `main` at `6760bed`) was green: 4496 tests, 0 failures, 0 errors, 480 skipped.
 
 **The two findings of the first matrix round, fixed in the fix wave.** (1) `OptionalModulesIT.theDefaultHomeLoadsNoClassOfTheHooks`
 failed on the Java 8 test JVM with a `NumberFormatException` in `ChildJvm.pid`: an auto-flushing `PrintStream` on Java 8 writes
@@ -2105,14 +2107,14 @@ waits for the focus and a new test pins the lost Enter (FD, D234, D235): **5 fai
 image, one fresh JVM per run, Java 8 and Java 25, warm and fresh containers). The same property of `swing.type` DISPATCH with
 `enter` is gap 60.
 
-**Phase 6 final matrix** (2026-10-09/10, on `4f9962f`, every fix merged; the commits after it change documents and two
+**Phase 6 final matrix** (2026-10-09/10, on `579af9c`, every fix merged; the commits after it change documents and two
 comment lines only; `-fae`; counts read from the reports, the Java 8 test-JVM leg's reports checked for `java.version`
 1.8.0_*):
 
 | Run | Whole reactor, Java 25 targets | Same, Java 8 targets | Agent side on a Java 8 test JVM |
 |---|---|---|---|
 | native (headless, JDK 26) | 4692 / 0 / 0 / 493 | – | – |
-| arm64 round 1 (on `822dc58`, before the review) | 4675 / 0 / 0 / 97 | 4675 / 1 / 0 / 97, then re-run with `-fae` 4675 / 0 / 0 / 124 (the typed-keys flake, fixed by FD) | 1347 / 0 / 1 / 8 (`OptionalModulesIT` on Java 8, fixed by FA) |
+| arm64 round 1 (on `8ad100d`, before the review) | 4675 / 0 / 0 / 97 | 4675 / 1 / 0 / 97, then re-run with `-fae` 4675 / 0 / 0 / 124 (the typed-keys flake, fixed by FD) | 1347 / 0 / 1 / 8 (`OptionalModulesIT` on Java 8, fixed by FA) |
 | arm64 round 2 | 4853 / 0 / 0 / 105 (939 s) | 4853 / 0 / 0 / 132 (855 s) | 1668 / 0 / 0 / 26 (243 s) |
 | arm64 round 3 | 4853 / 0 / 0 / 105 (910 s) | 4853 / 0 / 0 / 132 (873 s) | 1668 / 0 / 0 / 26 (238 s) |
 | amd64 round 1 (emulated, FORK) | 4853 / 0 / 0 / 105 (1423 s) | 4853 / 0 / 0 / 132 (1256 s) | 1668 / 0 / 0 / 26 (356 s) |
@@ -2170,8 +2172,8 @@ owner on 2026-10-10 (B28); ticked below with the code review item and the matrix
   done 2026-10-09 ("Phase 6 code review (2026-10-09)" above; D222-D243)
 - [x] The Linux matrix of the final tree (arm64 twice, amd64 once; Java 8 and Java 25 targets; the agent side on a
   Java 8 test JVM, the matrix command's `-pl` list now seventeen modules, see "Environment notes"): green on every leg,
-  2026-10-09/10, on `4f9962f` (the table "Phase 6 final matrix" above)
-- [x] `SECURITY.md` and `docs/release-checklist.md` (D148, §12.8): written 2026-10-09 (`edbc325`: no package had written
+  2026-10-09/10, on `579af9c` (the table "Phase 6 final matrix" above)
+- [x] `SECURITY.md` and `docs/release-checklist.md` (D148, §12.8): written 2026-10-09 (`8d19607`: no package had written
   them); the release notes of the accepted lows (pass 1's five, pass 2's three) are in `SECURITY.md`
   "Known limitations", accepted by the owner (B28, 2026-10-10)
 - [ ] The amd64 image legs of the hooks module and the home's ITs (HK: only arm64 run)
@@ -2195,7 +2197,7 @@ The B12 item that stood here (`COMPONENT` with window activation for UI-verifica
 Decision B16 (the reserved names), B15 (interactive use with run-time inference, Phase 5's session service), for the
 contract's answers **B29** and for the build's decisions **B30**.
 
-**Specified and reviewed 2026-10-10** (`design/phase7-contracts.md`, committed as `2eebeed`, with `design/threat-model.md`
+**Specified and reviewed 2026-10-10** (`design/phase7-contracts.md`, committed as `abcfe65`, with `design/threat-model.md`
 extended): written from seven readers' maps and the four spikes BS9-BS12 (BS9, BS10 and BS11 passed with conditions, BS12
 live), reviewed through three lenses with a sceptic each (fit to the code and feasibility; safety, security and the threat
 model; coherence, buildability and testability): 94 findings, 91 applied (54 confirmed or restated and 37 added by the
@@ -2208,7 +2210,7 @@ fixes, D431-D486 (numbered at the closing documentation pass of 2026-10-11); the
 owner on 2026-10-11.
 
 **Built 2026-10-10**, the day the contract was written, in four packages, each in an isolated worktree
-(`.claude/worktrees/p7-<tag>`, branch `p7/<tag>`) made from the contract commit `2eebeed` (VW's over VS's first commit `e5133b6`; a package writes "As built (Phase 7,
+(`.claude/worktrees/p7-<tag>`, branch `p7/<tag>`) made from the contract commit `abcfe65` (VW's over VS's first commit `682a488`; a package writes "As built (Phase 7,
 <TAG>)" notes under its tag into the sections it builds, writes the marks of `phase7-contracts.md` §16.1 into the earlier
 contracts and the overview, regenerates only the artifacts it owns, and reports to the session notes). **VS**: the agent's Swing
 side (the three Swing SPIs and `LocatorResolver.describe` first, then `swing.capture` painting the root pane, `swing.hitTest`,
@@ -2231,11 +2233,11 @@ fast-forwarded to it, except VC, which was merged into `main`):
 
 | Package (landing order) | What it built | On `main` | The package's native reactor on its last run before landing |
 |---|---|---|---|
-| VC (scenario, controller, JUnit, CLI) | plan version 6 (`images`, `Plan.Call.guard`, `inferenceOf`) with every committed plan regenerated (both scenario modules, the branch variant, the session export, the web host); `Status.SKIPPED` (JUnit `<skipped>`, exit 0); the verbs `aiAct`, `aiExpect`, `pointer`, `expectImage`; `CapabilityContributor`, `CapabilityMerge` and the merged matrix with `agentHash` and `host`; `ImageCompare`, `ImageSteps`, `ImageBaselines`, bindings file version 2 with its bind lifecycle (`Approver.reviewImage`); `ExecutorSession.read`, the four-argument `execute`, the robot gates and the credential rule; `DomainPack.screenLegend()`; `--allow-robot` on `run` and `call`, `caps` with `SOURCE`, `skillroy.robot` and its warning; `InferenceContributor` as a contributor; the sample's four scenarios; D359-D382 | `71efa8e` (merge; the package: `8d59900` the early API commit that VM and VS merged, `96c347f`, `80e2f9d`, `06091a4`) | BUILD SUCCESS, 28 projects, 5 min 43 s: scenario 709 tests, inference 996, cli 201, sample surefire 127, 0 failures (the sample's ITs skip natively, 406 of 407) |
-| VS (the agent's Swing side, the sample's desk and pack, step 1b and step 2b) | `RegionResolver`, `CaptureMask`, `SurfaceSource`, `LocatorResolver.describe` (`e5133b6`, VS's first commit); the extended `swing.capture` (root-pane painting, scopes, scale, heap bound, redaction by default, marks, carets, focus, surfaces, raster hash, `captureId`, a person's glass capture); `swing.hitTest`; `swing.pointer` routed and via Robot; `swing.rendering`; `swing.type` without a target; the five capability ids; the agent option `robot`; the desk's `NumberPad`, `LendingRegions`, `LendingCaptureMask`, `describe`, module 0.2.0, pack 0.6.0 (`screenLegend()`, gap 49's `inductionRequired`); `VisionSwingChecks`, `RobotChecks`, the host-safety additions; the five session recordings and `exported/session-basic-loan.*` regenerated key-free. **Step 2b** (with VC's scripts, after `71efa8e`): every plan's `packVersion` 0.6.0 and every committed bindings file rehashed, the five capability goldens (exactly the five Swing ids), `keypad-image` approved on both seeds and both Javas, `Phase7Pending` deleted, `RobotChecks`' controller half, `keypad-frame`'s three masks; VM's step 1b (`fecd468`, the session vocabulary's `$reference` sentence, merged into VS's branch as `a236ccd`) reached `main` with it; D383-D403 | `482288d` (fast-forward; `e5133b6`, merges `a236ccd`, `9fcfb52` and `7f1319a`, `8b2bc36`, `12493b4`, `6819a95`, step 2b `190a6d1`, `ec8fb84`, `482288d`) | BUILD SUCCESS: 4,808 tests, 0 failures, 0 errors, 547 skipped |
-| VW (the web side) | `WebPointerEvent` and `WebBrowser.dispatchPointer` (A66, the SPI); `web.hitTest` and `web.pointer` on the agent and the CDP path (`protocol.web.WebInput` shared); `web.hittest` and `web.pointer` capabilities; script library version 2 with `hit` and the install-into-an-older-slot rule; JCEF `INPUT`; JxBrowser `INPUT` roles (unverified, wall gap 41); the web module as a `SurfaceSource`; the web host's and the kit's pointer counters, kit items 15-18, `WebHostChecks` item 1 flipped and item 10; `web.browsers.blockedBy` (an additive field of P4 §4.2); gap 36 closed; D404-D419 | `e7a4cb3` (fast-forward; `ddcb1f6`, merge `da1b667` of `main` at `482288d`, `e7a4cb3`) | BUILD SUCCESS, 5 min 40 s: 4,865 tests, 0 failures, 0 errors, 549 skipped |
-| VM (the gateway, the session seam, `skillroy-vision`, the hosts' options, the vision scenario) | `ProviderTool`, `ModelRequest.providerTools`, `toolsetName`, image parts in a tool result, `CacheHint.AUTO`, the Haiku 5.5 price row, the `vision` purpose and `effort.vision`, image tokens in the estimate; the `SessionTools` seam with `SessionActions` as the facade, `SessionExtensions`, `visionCall`, the service-enforced limits; the module `skillroy-vision` (tiers V1-V3, `Marks`, `Captures`, `Grounding`, `VisualQuestion`, the two tool adapters, the recorder, the scenario player, `VisionCapabilities`); `session --vision/--vision-model/--vision-tools/--allow-robot`, `session --play [--export]`, `mcp --vision/--allow-robot`, the captures resources; `CallPolicy.arguments` and `PlanPolicy.refusals` for the new routes; the committed `exported/session-vision-loan.*` (arm64 image, Java 25 controller and target; held byte for byte with a Java 8 target); `VisionSessionScript`, `VisionLiveIT` (written, never run); D420-D430 | `7af44eb` (fast-forward; the package commits `fecd468` ... `b374317`, merges of `main` at `71efa8e`, `482288d` and `e7a4cb3`) | BUILD SUCCESS: surefire 4,449 run, 0 failed, 118 skipped; failsafe 502 run, 0 failed, 448 skipped |
-| VM, closing commit (D425) | `ExecutorSession.fixture(slot, value, credential, origin)` (VC's file, by permission), the origin rule `FIXTURE_CREDENTIAL_REFUSED`, the `fixture` journal record and its export; the player's `FixtureBinder.SESSION`; the player half of §13.2 item 8 (`vision-live-only.yaml` and `loan-table-visual-check.yaml` played with a scripted model); a focus flake of item 8 fixed (below) | `e11ae08` | BUILD SUCCESS: surefire 4,454 run, 0 failed, 118 skipped; failsafe 512 run, 0 failed, 458 skipped |
+| VC (scenario, controller, JUnit, CLI) | plan version 6 (`images`, `Plan.Call.guard`, `inferenceOf`) with every committed plan regenerated (both scenario modules, the branch variant, the session export, the web host); `Status.SKIPPED` (JUnit `<skipped>`, exit 0); the verbs `aiAct`, `aiExpect`, `pointer`, `expectImage`; `CapabilityContributor`, `CapabilityMerge` and the merged matrix with `agentHash` and `host`; `ImageCompare`, `ImageSteps`, `ImageBaselines`, bindings file version 2 with its bind lifecycle (`Approver.reviewImage`); `ExecutorSession.read`, the four-argument `execute`, the robot gates and the credential rule; `DomainPack.screenLegend()`; `--allow-robot` on `run` and `call`, `caps` with `SOURCE`, `skillroy.robot` and its warning; `InferenceContributor` as a contributor; the sample's four scenarios; D359-D382 | `06a59ed` (merge; the package: `621da10` the early API commit that VM and VS merged, `364bd13`, `59de9a6`, `19e9062`) | BUILD SUCCESS, 28 projects, 5 min 43 s: scenario 709 tests, inference 996, cli 201, sample surefire 127, 0 failures (the sample's ITs skip natively, 406 of 407) |
+| VS (the agent's Swing side, the sample's desk and pack, step 1b and step 2b) | `RegionResolver`, `CaptureMask`, `SurfaceSource`, `LocatorResolver.describe` (`682a488`, VS's first commit); the extended `swing.capture` (root-pane painting, scopes, scale, heap bound, redaction by default, marks, carets, focus, surfaces, raster hash, `captureId`, a person's glass capture); `swing.hitTest`; `swing.pointer` routed and via Robot; `swing.rendering`; `swing.type` without a target; the five capability ids; the agent option `robot`; the desk's `NumberPad`, `LendingRegions`, `LendingCaptureMask`, `describe`, module 0.2.0, pack 0.6.0 (`screenLegend()`, gap 49's `inductionRequired`); `VisionSwingChecks`, `RobotChecks`, the host-safety additions; the five session recordings and `exported/session-basic-loan.*` regenerated key-free. **Step 2b** (with VC's scripts, after `06a59ed`): every plan's `packVersion` 0.6.0 and every committed bindings file rehashed, the five capability goldens (exactly the five Swing ids), `keypad-image` approved on both seeds and both Javas, `Phase7Pending` deleted, `RobotChecks`' controller half, `keypad-frame`'s three masks; VM's step 1b (`4ee685c`, the session vocabulary's `$reference` sentence, merged into VS's branch as `48a2c56`) reached `main` with it; D383-D403 | `43c399c` (fast-forward; `682a488`, merges `48a2c56`, `b3f52db` and `0327b31`, `627ebf7`, `bbc7292`, `ae345fc`, step 2b `d990713`, `20c1bce`, `43c399c`) | BUILD SUCCESS: 4,808 tests, 0 failures, 0 errors, 547 skipped |
+| VW (the web side) | `WebPointerEvent` and `WebBrowser.dispatchPointer` (A66, the SPI); `web.hitTest` and `web.pointer` on the agent and the CDP path (`protocol.web.WebInput` shared); `web.hittest` and `web.pointer` capabilities; script library version 2 with `hit` and the install-into-an-older-slot rule; JCEF `INPUT`; JxBrowser `INPUT` roles (unverified, wall gap 41); the web module as a `SurfaceSource`; the web host's and the kit's pointer counters, kit items 15-18, `WebHostChecks` item 1 flipped and item 10; `web.browsers.blockedBy` (an additive field of P4 §4.2); gap 36 closed; D404-D419 | `0d4a0cb` (fast-forward; `cdfbca7`, merge `2d1d10f` of `main` at `43c399c`, `0d4a0cb`) | BUILD SUCCESS, 5 min 40 s: 4,865 tests, 0 failures, 0 errors, 549 skipped |
+| VM (the gateway, the session seam, `skillroy-vision`, the hosts' options, the vision scenario) | `ProviderTool`, `ModelRequest.providerTools`, `toolsetName`, image parts in a tool result, `CacheHint.AUTO`, the Haiku 5.5 price row, the `vision` purpose and `effort.vision`, image tokens in the estimate; the `SessionTools` seam with `SessionActions` as the facade, `SessionExtensions`, `visionCall`, the service-enforced limits; the module `skillroy-vision` (tiers V1-V3, `Marks`, `Captures`, `Grounding`, `VisualQuestion`, the two tool adapters, the recorder, the scenario player, `VisionCapabilities`); `session --vision/--vision-model/--vision-tools/--allow-robot`, `session --play [--export]`, `mcp --vision/--allow-robot`, the captures resources; `CallPolicy.arguments` and `PlanPolicy.refusals` for the new routes; the committed `exported/session-vision-loan.*` (arm64 image, Java 25 controller and target; held byte for byte with a Java 8 target); `VisionSessionScript`, `VisionLiveIT` (written, never run); D420-D430 | `cf59b1f` (fast-forward; the package commits `4ee685c` ... `fab6007`, merges of `main` at `06a59ed`, `43c399c` and `0d4a0cb`) | BUILD SUCCESS: surefire 4,449 run, 0 failed, 118 skipped; failsafe 502 run, 0 failed, 448 skipped |
+| VM, closing commit (D425) | `ExecutorSession.fixture(slot, value, credential, origin)` (VC's file, by permission), the origin rule `FIXTURE_CREDENTIAL_REFUSED`, the `fixture` journal record and its export; the player's `FixtureBinder.SESSION`; the player half of §13.2 item 8 (`vision-live-only.yaml` and `loan-table-visual-check.yaml` played with a scripted model); a focus flake of item 8 fixed (below) | `5faacb4` | BUILD SUCCESS: surefire 4,454 run, 0 failed, 118 skipped; failsafe 512 run, 0 failed, 458 skipped |
 
 The counts are those of each package's own run after it had merged `main` (macOS arm64, JDK 26, headless), read from its report;
 VC's reactor was a smaller one (28 projects), so the rows do not add up. The skips are the display and live tests.
@@ -2248,7 +2250,7 @@ involved; counts read from the reports):
   target (`-Dskillroy.it.targetJava=/opt/jdk8/bin/java`) 371 / 0 / 24; items 7 (the seed-A part) and 9 pass in all five load modes;
   `InferenceEndToEndIT`, `BranchEndToEndIT` and `TelemetryEndToEndIT` on Java 25 114 / 0 / 68.
 - **VS** (the Swing modules, the desk and `HostSafetyIT`, Java 25 test JVM): agent-swing 210 run, 0 failures, 2 skipped,
-  `LendingUiDisplayTest` 11 of 11, `HostSafetyIT` 5 of 5. After step 2b, on `482288d`, the whole `LendingEndToEndIT` with no update
+  `LendingUiDisplayTest` 11 of 11, `HostSafetyIT` 5 of 5. After step 2b, on `43c399c`, the whole `LendingEndToEndIT` with no update
   flag: Java 25 target BUILD SUCCESS, the four load modes 39 tests each (0 failed, 3 skipped: the two vision scenarios, which need
   `inference.vision`, and scenario E, which the hooks leg runs), check 1c included, the ten resolution classes 19 of 19 each (item 7,
   `keypad-image`, included), `PerTargetJava` 8 (1 skipped), the hooks leg 43 (2 skipped) and its two resolution classes 19 of 19, the
@@ -2259,16 +2261,16 @@ involved; counts read from the reports):
   real JCEF in both modes; `WebHostEndToEndIT` (all eight launches, Java 25 targets) after VS's merge 80 run, 0 failures, 7 skipped,
   the Swing half of item 10 run in all eight; Java 8 targets 80 / 0 / 43 (the windowed launches skip on Java 8 by design, the four
   off-screen launches pass item 10); the agent-side modules on a Java 8 test JVM (protocol 499, agent-api 141, agent-web 235) green.
-- **VM** (on `50d83bb`): `LendingEndToEndIT` Java 25 target 403 run, 0 failed, 15 skipped; Java 8 target 403 / 0 / 14;
+- **VM** (on `4bbf0dc`): `LendingEndToEndIT` Java 25 target 403 run, 0 failed, 15 skipped; Java 8 target 403 / 0 / 14;
   `InferenceEndToEndIT` 120 / 0 / 77 on both; item 8 passes on seed A (the committed export held byte for byte, the journal read
   back, the replay with zero model calls); item 7's skip line reads `capability inference.vision is UNAVAILABLE (replay)` (10 runs)
   and item 9's `contributed` is `[inference.gateway, inference.sql, inference.vision]` (352 records), both in every load mode. On
-  `e11ae08`: the whole `InferenceEndToEndIT` Java 25 130 run, 0 failed, 86 skipped; Java 8 130 / 0 / 86; item 8's two checks 2 of 2
+  `5faacb4`: the whole `InferenceEndToEndIT` Java 25 130 run, 0 failed, 86 skipped; Java 8 130 / 0 / 86; item 8's two checks 2 of 2
   on each Java. `LendingEndToEndIT` was not rerun after the closing commit (the other paths of `ExecutorSession` did not change).
 
 **What the build found** (also in "Environment notes"):
 
-- **A focus flake of item 8** (found in one full `InferenceEndToEndIT` run on Java 25, fixed in `e11ae08`): the model's `type` was
+- **A focus flake of item 8** (found in one full `InferenceEndToEndIT` run on Java 25, fixed in `5faacb4`): the model's `type` was
   refused with "nothing has the focus" because a WM-less display gives no window the focus and the desk's entry field held it only
   by timing; the failed session left the desk signed on, which failed the MCP and CLI checks after it and, through the missing
   outputs, the secret scan. `VisionSessionScript` (and `VisionLiveIT`'s sessions) now bring the desk to the front before the model's
@@ -2296,23 +2298,23 @@ involved; counts read from the reports):
 
 **What was not run** (at the packages' reports, on 2026-10-10, before the code review; since then the fix wave and the security
 fixes ran the whole `LendingEndToEndIT` classes they touch, the `jcef` profile end to end and `VisionLiveIT` three times, and the
-matrix of the final tree is green on `c94aade` (arm64 twice on every leg, amd64 on the Java 25 leg), its amd64 Java 8 legs on `bc1e250` later on 2026-10-11): the amd64 image leg of
+matrix of the final tree is green on `223c5fb` (arm64 twice on every leg, amd64 on the Java 25 leg), its amd64 Java 8 legs on `832fcb2` later on 2026-10-11): the amd64 image leg of
 anything in Phase 7 (the render key's arm64 and amd64 equality of §13.2 item 5, the committed `keypad-image` keys on amd64, item 8
-on amd64); the whole `LendingEndToEndIT` after `e11ae08` and after VM's merges on the final head; the `jcef` profile end to end on the
-final head (VW ran it on `e7a4cb3`, VC ran the web host's plan test in the profile); anything on macOS with the Accessibility
+on amd64); the whole `LendingEndToEndIT` after `5faacb4` and after VM's merges on the final head; the `jcef` profile end to end on the
+final head (VW ran it on `0d4a0cb`, VC ran the web host's plan test in the profile); anything on macOS with the Accessibility
 permission, Windows, Wayland, a locked session or at a scale other than 1 (`phase7-contracts.md` §13.4, `SECURITY.md`); JxBrowser
 input against the real library; `VisionLiveIT` (then not run: it needs the owner's key); the MCP server's export of an anchored
 step (gap 89); any live model call (none had been made or needed).
 
 #### Phase 7 code review (2026-10-10)
 
-The method of Phases 2 to 6: three lenses on the committed tree (`7af44eb`, read from a frozen export; the build's documents
+The method of Phases 2 to 6: three lenses on the committed tree (`cf59b1f`, read from a frozen export; the build's documents
 came after it), each run by one reviewer and each verified by a sceptic who
 tried to refute every finding with probes in a copy of the tree and added what the lens had missed. **Contract fit** (L1):
 7 findings (0 high, 1 medium, 6 low); the sceptic raised F2 to medium, refuted F7 and added S1 (low): 2 medium, 5 low stand.
 **Host safety, secrets, pixels and bounds** (L2): 8 findings (1 high, 3 medium, 4 low), all confirmed (four restated); the
 sceptic added S1 (high), S3 (medium) and S2 (low): 2 high, 4 medium, 5 low. **Tests, determinism and the matrix** (L3): 10
-findings (3 medium, 7 low), all confirmed; the sceptic added S1 (medium, already fixed on `main` at `e11ae08`), S2 and S3 (low):
+findings (3 medium, 7 low), all confirmed; the sceptic added S1 (medium, already fixed on `main` at `5faacb4`), S2 and S3 (low):
 4 medium, 9 low. In all **25 findings from the reviewers and 7 added by the sceptics, 1 refuted (L1-F7), one pair merged
 (L1-F1 = L2-F3): 30 distinct findings, 2 high, 9 medium, 19 low** (the reports are in the session notes,
 `2026-10-10/phase7/review/`). Found while fixing: **FB-N1** (high by the review brief's rule: a contract guarantee not implemented)
@@ -2347,20 +2349,20 @@ and FB-N2 (low); found by the first live run: **LV-1**. The most important:
   never told the model which `$references` were bound, so the model of each of the three live items (V1 on Sonnet 5.5, the
   toolset's V2, V1 on Haiku 5.5) read `$item` as an unfilled placeholder and asked; the turn's first message now lists the bound slots by name, never a value or a secret (D444).
 
-The fix wave: three fixers in worktrees from `e96a20b`, each with a report, the tests that fail on the
+The fix wave: three fixers in worktrees from `fbef000`, each with a report, the tests that fail on the
 old code and the contract text first (marked "Fix wave (Phase 7 review, <TAG>, 2026-10-10)"); decisions D431-D448 (B30):
 
 | Fixer | What it fixed | Fixer's commit | On `main` |
 |---|---|---|---|
-| FA the agent's Swing side and its tests (D431-D439) | all 15: L2-F1, L2-S1 (high), L2-S3, L2-F4, L3-F1, L3-F2 (medium), L2-F5, F6, F7, F8, L2-S2, L3-F4, F5, F7, S3 (low). 15 new or tightened tests failed on the old code. Native 4982 run, 0 failures, 585 skipped; `agent-swing` 225 run, 0 failures on the Java 25 and the Java 8 test JVM; the end-to-end items green on both target Javas. Also: `HostSafetyIT`'s full-home Robot case had run on Java 25 targets only and failed one of its five cases in four runs out of four on a Java 8 target (a `-verbose:class` fragment between a value and its newline); `ChildJvm.awaitLine` drops it, 5 of 5 on both | `9f44718` | fast-forward to `9f44718` |
-| FC the vision module and the session (D443-D448) | L1-F2 (the player evaluates `verify`), L2-F2 (masked pages refused before the web branch), LV-1 (the bound slots listed), L1-F3 (anchored drag end point), L1-F4 (anchor insets), L1-F5 (`targetNode` on the hit-test's target form), L1-F6 (`wait` settles for the step timeout), L1-S1 (the played export lists the dropped `aiExpect`), L3-F10 (the player test asserts `DEGRADED`): nine items. The five Phase 5 session recordings were regenerated key-free (their fingerprints changed with LV-1; the exports are byte-identical). Native reactor green; `InferenceEndToEndIT` 130 run, 0 failures on both Javas | `73187c0` | `791e0ae` |
-| FB the scenario, controller and CLI side (D440-D442) | L1-F1 = L2-F3 (one Robot predicate), L3-F3 (the focus rule tested), L3-F6, L3-F8, L3-F9 (seed B's `keypad-frame` baselines re-approved with the desk activated), L3-S2: six items, plus FB-N1 and FB-N2. Native 4977 run, 0 failures, 576 skipped; image lending checks 77 run, 0 failures on both Javas; web host item 10 green | `c700772` (three commits: `a897e17`, `c3a65f1`, `c700772`) | `c690bef` |
+| FA the agent's Swing side and its tests (D431-D439) | all 15: L2-F1, L2-S1 (high), L2-S3, L2-F4, L3-F1, L3-F2 (medium), L2-F5, F6, F7, F8, L2-S2, L3-F4, F5, F7, S3 (low). 15 new or tightened tests failed on the old code. Native 4982 run, 0 failures, 585 skipped; `agent-swing` 225 run, 0 failures on the Java 25 and the Java 8 test JVM; the end-to-end items green on both target Javas. Also: `HostSafetyIT`'s full-home Robot case had run on Java 25 targets only and failed one of its five cases in four runs out of four on a Java 8 target (a `-verbose:class` fragment between a value and its newline); `ChildJvm.awaitLine` drops it, 5 of 5 on both | `03625bc` | fast-forward to `03625bc` |
+| FC the vision module and the session (D443-D448) | L1-F2 (the player evaluates `verify`), L2-F2 (masked pages refused before the web branch), LV-1 (the bound slots listed), L1-F3 (anchored drag end point), L1-F4 (anchor insets), L1-F5 (`targetNode` on the hit-test's target form), L1-F6 (`wait` settles for the step timeout), L1-S1 (the played export lists the dropped `aiExpect`), L3-F10 (the player test asserts `DEGRADED`): nine items. The five Phase 5 session recordings were regenerated key-free (their fingerprints changed with LV-1; the exports are byte-identical). Native reactor green; `InferenceEndToEndIT` 130 run, 0 failures on both Javas | `c4094f3` | `a54c279` |
+| FB the scenario, controller and CLI side (D440-D442) | L1-F1 = L2-F3 (one Robot predicate), L3-F3 (the focus rule tested), L3-F6, L3-F8, L3-F9 (seed B's `keypad-frame` baselines re-approved with the desk activated), L3-S2: six items, plus FB-N1 and FB-N2. Native 4977 run, 0 failures, 576 skipped; image lending checks 77 run, 0 failures on both Javas; web host item 10 green | `589b8f5` (three commits: `81ba7fd`, `c9f41e5`, `589b8f5`) | `2633eec` |
 
-Not fixed: L1-F7 (refuted) and L3-S1 (already fixed at `e11ae08`). **The race fix (FX).** The first arm64 round of the Phase 7
-matrix on `c690bef` failed one test in the Java 25 whole-reactor leg, `LendingEndToEndIT`'s scenario E check ("one matrix for
+Not fixed: L1-F7 (refuted) and L3-S1 (already fixed at `5faacb4`). **The race fix (FX).** The first arm64 round of the Phase 7
+matrix on `2633eec` failed one test in the Java 25 whole-reactor leg, `LendingEndToEndIT`'s scenario E check ("one matrix for
 every run of this target", two hashes), the Phase 6 one-off flake again; the other two legs were green. FX reproduced it under
 load (22 of 30 hooks targets) and found a race in Phase 6's hook engine, not a Phase 7 cause; fixed agent-side by
-`HookEngineImpl.declare` setting each `hook.<id>` to its probe's first answer (D449), merged as `a134159`; native 5005 run, 0
+`HookEngineImpl.declare` setting each `hook.<id>` to its probe's first answer (D449), merged as `03c8da9`; native 5005 run, 0
 failures, image `LendingEndToEndIT` 404 run, 0 failures on Java 25 and the hooks legs 81 run, 0 failures on Java 8 (the entry
 under "Open flake" is closed).
 
@@ -2368,16 +2370,16 @@ under "Open flake" is closed).
 
 `VisionLiveIT` (profile `inference-live`, P7 §13.3) ran **three times** with the owner's key, in the arm64 image, on the Java 25
 desk, from a detached worktree, the key passed by name through the login shell; the rows are in the live table at the top. Run 1
-on `e11ae08` (USD 0.131) found LV-1: items 1, 2 and 4 ended `QUESTION`, item 6 was skipped, items 3 and 5 and the secret scan
-passed (item 3 answers the contract's question: the fallback header coexists with the toolset). Run 2 on `791e0ae` (FA and FC
+on `5faacb4` (USD 0.131) found LV-1: items 1, 2 and 4 ended `QUESTION`, item 6 was skipped, items 3 and 5 and the secret scan
+passed (item 3 answers the contract's question: the fallback header coexists with the toolset). Run 2 on `a54c279` (FA and FC
 merged; USD 0.155): **7 of 7**, the three models each `DONE` in 3 UI actions, the player `PASS` with `verify` on both
-statements, and the export of item 1 replayed with zero model calls (exit criterion 1 met live). Run 3 on `c94aade`, the final
+statements, and the export of item 1 replayed with zero model calls (exit criterion 1 met live). Run 3 on `223c5fb`, the final
 code (USD 0.148): **7 of 7** again (V1 Sonnet 5.5 USD 0.045, V2 toolset USD 0.057, Haiku 5.5 USD 0.0029, each in 3 UI actions;
 the secret scan over 26 files). The day's live spend, planner check and BS12 included, is **USD 8.12** (table note above). Not
 verified live: the fold under the provider's history rule beyond one turn (gap 85), a longer session than BS12's longest (14
 actions), the 5.5 models' history rule under the automatic cache hint, a disabled toolset member, V3 (Robot) against a live model.
 
-#### Release-candidate matrix (2026-10-11, on `f9acb2c`)
+#### Release-candidate matrix (2026-10-11, on `3ebecf7`)
 
 The release checklist's item 1 on the tree that holds everything of 2026-10-11 (the two test-side fixes, gaps 63, 92, 94, 95,
 99, 101 and 102, the JxBrowser kit run's fixes, the listener soak's opt-in IT), in a clean worktree, rounds in sequence
@@ -2392,10 +2394,10 @@ The release checklist's item 1 on the tree that holds everything of 2026-10-11 (
 Every leg is green, first time, on every round. The release commit itself (the version change) is still to run it (the
 release checklist asks it of the release commit).
 
-#### Release matrix (0.1.0, 2026-10-12, on `2d6d3d0`)
+#### Release matrix (0.1.0, 2026-10-12, on `47cd446`)
 
 The release checklist's item 1 on the release commit (the version change, `overWriteReleases` for the CLI's test unpack,
-and, since `f9acb2c`, gap 104's fix and documentation), in a clean worktree, rounds in sequence (`release-matrix.sh` in
+and, since `3ebecf7`, gap 104's fix and documentation), in a clean worktree, rounds in sequence (`release-matrix.sh` in
 the session notes); tests / failures / errors / skipped per leg, read from the reports:
 
 | Round | Java 25 targets (whole reactor, `-Pjcef`, `clean verify`) | Java 8 targets (`-Pjcef`) | Java 8 test JVM (the agent side) |
@@ -2407,11 +2409,11 @@ the session notes); tests / failures / errors / skipped per leg, read from the r
 Every leg is green, first time, on every round; the counts equal the release candidate's. It is the first full regression
 of gap 104's fix (D500): `WebHostEndToEndIT` 120 / 0 / 0 / 11 on Java 25 targets and 120 / 0 / 0 / 65 on Java 8 targets.
 `DistributionContentIT`, `HomeConstantPoolIT`, `DistributionNoticesIT` and the committed-artefact tests green in every
-leg that runs them. The tag `v0.1.0` was set on `2d6d3d0` after it.
+leg that runs them. The tag `v0.1.0` was set on `47cd446` after it.
 
-#### Phase 7 final matrix (2026-10-11, on `c94aade`)
+#### Phase 7 final matrix (2026-10-11, on `223c5fb`)
 
-Tests / failures / errors / skipped per leg, read from the reports (`summarize.py`), on the tree `c94aade` (the
+Tests / failures / errors / skipped per leg, read from the reports (`summarize.py`), on the tree `223c5fb` (the
 later commits change documentation and comments only):
 
 | Round | Java 25 targets (whole reactor, `-Pjcef`, `clean verify`) | Java 8 targets (`-Pjcef`) | Java 8 test JVM (the agent side) |
@@ -2419,23 +2421,23 @@ later commits change documentation and comments only):
 | arm64 r2 | 5,360 / 0 / 0 / 141 (994 s) | 5,360 / 0 / 0 / 176 (935 s) | 1,849 / 0 / 0 / 30 (264 s) |
 | arm64 r3 | 5,360 / 0 / 0 / 140 (986 s) | 5,360 / 0 / 0 / 175 (942 s) | 1,849 / 0 / 0 / 30 (280 s) |
 | amd64 r1 (emulated, `FORK` launch) | 5,360 / 0 / 0 / 140 (1,532 s) | not run | not run |
-| amd64, Java 8 legs, first run (on `dcc5050`, documentation only past `c94aade`) | – | stopped in the agent modules: 1 failure, 1 error, 4,321 run (706 s; `-fae` skipped every module downstream of them) | 1,849 / 0 / 0 / 30 (429 s) |
-| amd64, Java 8 legs, second run (on `bc1e250`: `aadd5f4`, `d6720ea`, gaps 94 and 99) | – | 5,362 / 0 / 0 / 176 (1,494 s) | 1,849 / 0 / 0 / 30 (423 s) |
-| arm64, the follow-ups' final code (on `117da59`: the two test fixes and gaps 94, 99, 92 and 63) | 5,362 / 0 / 0 / 141 (1,005 s) | 5,362 / 0 / 0 / 176 (937 s) | 1,849 / 0 / 0 / 30 (264 s) |
+| amd64, Java 8 legs, first run (on `70348ef`, documentation only past `223c5fb`) | – | stopped in the agent modules: 1 failure, 1 error, 4,321 run (706 s; `-fae` skipped every module downstream of them) | 1,849 / 0 / 0 / 30 (429 s) |
+| amd64, Java 8 legs, second run (on `832fcb2`: `96061e5`, `f681e57`, gaps 94 and 99) | – | 5,362 / 0 / 0 / 176 (1,494 s) | 1,849 / 0 / 0 / 30 (423 s) |
+| arm64, the follow-ups' final code (on `7cd4dd2`: the two test fixes and gaps 94, 99, 92 and 63) | 5,362 / 0 / 0 / 141 (1,005 s) | 5,362 / 0 / 0 / 176 (937 s) | 1,849 / 0 / 0 / 30 (264 s) |
 
 Every leg that ran is green. The `jcef` profile ran in every leg; the Robot leg (`JAVAAGENT_ROBOT`) ran inside
 `LendingEndToEndIT` on both target Javas of both arm64 rounds; scenario E's matrix-hash failure of the first round (arm64 r1
-on `c690bef`) did not recur (fixed by FX, D449). The amd64 Java 25 leg settles §13.2 item 8 on amd64 and `keypad-image`'s
+on `2633eec`) did not recur (fixed by FX, D449). The amd64 Java 25 leg settles §13.2 item 8 on amd64 and `keypad-image`'s
 committed Java 25 render key there (the key is the same across the two architectures for Java 25). **The amd64 Java 8 legs**
-could not run on `c94aade`: the x86-64 JDK 8 used for them since Phase 5 lives on an external volume that was not mounted at
+could not run on `223c5fb`: the x86-64 JDK 8 used for them since Phase 5 lives on an external volume that was not mounted at
 the time (docker refused the mount: exit 126 after 1 s). The owner remounted it later on 2026-10-11 and the legs ran in the next
-session. Their first run (on `dcc5050`) failed two tests that had passed on every earlier leg, both test-side, and its Java 8
+session. Their first run (on `70348ef`) failed two tests that had passed on every earlier leg, both test-side, and its Java 8
 targets leg skipped everything downstream of the two agent modules: `ProductionGateTest.requireProductionMarkerRefusesWhenNoneIsRegistered`
 (`NoSuchFileException` on the token file: the gate's refusal closes the runtime asynchronously and close retracts the token, so
-`AgentHarness`'s read raced it; `aadd5f4` reads a null token when the file is gone and the runtime is closing) and
+`AgentHarness`'s read raced it; `96061e5` reads a null token when the file is gone and the runtime is closing) and
 `RobotPathDisplayTest.requireFocusRefusesAJvmWithoutAFocusedWindow` (30 s waiting for the JVM to hold no focused window after the
 thief frame was disposed: the test frame was focused again, most likely a late activation of its own under emulation, A39's first
-way; `d6720ea` repeats the thief cycle up to three times). The second run, on `bc1e250` (those two fixes and gaps 94 and 99), is
+way; `f681e57` repeats the thief cycle up to three times). The second run, on `832fcb2` (those two fixes and gaps 94 and 99), is
 green on both legs; the Java 8 targets leg counts the two tests the gaps added. **`keypad-image`'s committed Java 8 key holds on
 amd64:** in that leg every load mode on both seeds (ten replays) held `keypad` and `keypad-frame` against `6ccffcf8f0c8db46`, the
 Java 8 key (Temurin 1.8.0_504) recorded on arm64, so no `approve` ran and the bindings are unchanged; the render key is the same
@@ -2443,34 +2445,34 @@ across the two architectures for both Java lines (§13.2 item 5).
 
 **Status of the checklist.** The code review and the fix wave, the race fix, the security delta review and its four fix packages
 are done and ticked below; the live acceptance is done (three runs). The matrix line and the Exit item are ticked since the amd64 Java 8 legs ran green
-(2026-10-11, on `bc1e250`; `keypad-image`'s Java 8 key held on amd64). The follow-up lines are ticked: gaps 93 and 96 answered by
+(2026-10-11, on `832fcb2`; `keypad-image`'s Java 8 key held on amd64). The follow-up lines are ticked: gaps 93 and 96 answered by
 the owner (B33), gaps 94 and 95 done (2026-10-11). The owner's B29, B30 and B31 are given (2026-10-11).
 
 - [x] BS9-BS12 passed on 2026-10-10 (BS9, BS10 and BS11 with conditions, BS12 outright; the conditions are inputs of the
   Phase 7 contract, "Base spikes" below)
-- [x] The contract specified, reviewed and rechecked 2026-10-10 (`2eebeed`; D287-D358; A61-A66; gaps 77-87 opened below)
+- [x] The contract specified, reviewed and rechecked 2026-10-10 (`abcfe65`; D287-D358; A61-A66; gaps 77-87 opened below)
 - [x] B29 (thirty-nine answers) and B30 (128 decisions, D359-D486: the build's 72 and the fixers' 56), provisional while the
   build ran on them, **confirmed by the owner on 2026-10-11** (`B29 ok`, `B30 ok`, no veto); Q25 (the sample's number pad), Q27
   (JxBrowser input, a licence holder's run; still unverified) and Q34 (how V3 sessions on a person's desktop will be run), which
   rested on the owner's taste or knowledge, are confirmed with the rest
 - [x] **VC** (P7 §8, §9.2, §9.3 run/call/caps/junit, §12.3 `screenLegend`; §13.1 items 5 and 6; §13.2 items 7 and 9): built, merged as
-  `71efa8e`; plan version 6 regenerated in both scenario modules, the branch variant, the session export and the web host; bindings
+  `06a59ed`; plan version 6 regenerated in both scenario modules, the branch variant, the session export and the web host; bindings
   `planHash` rehashed; `InferenceContributor` contributes `inference.gateway` and `inference.sql`
-- [x] **VM, step 1b**: the vocabulary sentence in `SessionService` and its pin (`fecd468`), on the head before VS regenerated any
+- [x] **VM, step 1b**: the vocabulary sentence in `SessionService` and its pin (`4ee685c`), on the head before VS regenerated any
   recording
-- [x] **VS** (P7 §3, §12.1-§12.3; §13.1 items 1, 2 (Swing part) and 9; §13.2 items 1-6 and 11): built, merged as `482288d` with
+- [x] **VS** (P7 §3, §12.1-§12.3; §13.1 items 1, 2 (Swing part) and 9; §13.2 items 1-6 and 11): built, merged as `43c399c` with
   step 2b; `swing.capture` paints the root pane and reports its origin (gap 76 closed, A61); `swing.hitTest`; `swing.pointer` routed
   and through Robot (the double opt-in, a press always paired with its release); `swing.rendering`; one rule for pixels and text
   (`CaptureMask`); the number pad, `LendingRegions`, `LendingCaptureMask`, module 0.2.0 and pack 0.6.0 (gap 49 closed); the
   Swing end-to-end checks and the Robot leg; the session recordings regenerated once
 - [x] **Step 2b**: every plan's `packVersion`, the five capability goldens and `keypad-image`'s bindings file and baselines (both
   Javas, both seeds) regenerated and committed; `Phase7Pending` dropped; `RobotChecks`' controller half
-- [x] **VW** (P7 §4; §13.1 items 2 (web part) and 3; §13.2 item 10): built, merged as `e7a4cb3`; `web.hitTest` and `web.pointer` on
+- [x] **VW** (P7 §4; §13.1 items 2 (web part) and 3; §13.2 item 10): built, merged as `0d4a0cb`; `web.hitTest` and `web.pointer` on
   the agent path and the CDP path, `INPUT` for JCEF and described for JxBrowser (unverified), the script library's version 2, the
   host's pointer counter and the kit's items 15-18, `WebHostChecks` item 1 flipped and item 10 including its Swing half (gap 36
   closed; gap 86 recorded)
 - [x] **VM** (P7 §6, §7, §9.1, §9.3 session/mcp, §9.4-§9.6, §10; §13.1 items 7 and 8; §13.2 item 8; §13.3 written): built, merged as
-  `7af44eb` and `e11ae08`; the gateway's additive changes, the `SessionTools` seam and the facade, `skillroy-vision`, `session` and
+  `cf59b1f` and `5faacb4`; the gateway's additive changes, the `SessionTools` seam and the facade, `skillroy-vision`, `session` and
   `mcp` options, the credential rule's plan form in `PlanPolicy`, the committed `exported/session-vision-loan.*`, `VisionLiveIT`
 - [x] D425 closed: `ExecutorSession.fixture(slot, value, credential, origin)` and the player half of §13.2 item 8 (both vision
   scenarios played with a scripted model; green on both Javas in the arm64 image)
@@ -2483,34 +2485,34 @@ the owner (B33), gaps 94 and 95 done (2026-10-11). The owner's B29, B30 and B31 
 - [x] `ImageCompareTest` asserts the shared raster vector of `CaptureTest` (`sha256:6be118c3…c4ba`, 3 x 2 opaque pixels): the two
   tests hold the same six pixels and the same hash literal, and `VisionSwingChecks` item 1 asserts the agent's `hash` equal to
   `ImageCompare.rasterHash` of the decoded desk raster (fix wave, FA, L3-F1, D438)
-- [x] The Linux matrix of the final tree (`c94aade`: arm64 twice, amd64 once, the `jcef` profile once, the Robot leg once per
-  Java; the first arm64 round, on `c690bef` before the race fix, failed one test in its Java 25 leg, scenario E's matrix hash,
-  fixed by FX), recorded under "Phase 7 final matrix" above: green on `c94aade` (arm64 twice on every leg, amd64 on the Java 25 leg), and **the amd64 Java 8 legs green on `bc1e250`
-  (2026-10-11, the second run; the first, on `dcc5050`, failed two tests, both test-side, fixed by `aadd5f4` and `d6720ea`)**; among it the amd64 leg of item 8 (VM ran arm64
+- [x] The Linux matrix of the final tree (`223c5fb`: arm64 twice, amd64 once, the `jcef` profile once, the Robot leg once per
+  Java; the first arm64 round, on `2633eec` before the race fix, failed one test in its Java 25 leg, scenario E's matrix hash,
+  fixed by FX), recorded under "Phase 7 final matrix" above: green on `223c5fb` (arm64 twice on every leg, amd64 on the Java 25 leg), and **the amd64 Java 8 legs green on `832fcb2`
+  (2026-10-11, the second run; the first, on `70348ef`, failed two tests, both test-side, fixed by `96061e5` and `f681e57`)**; among it the amd64 leg of item 8 (VM ran arm64
   only), the render key's arm64/amd64 equality (§13.2 item 5) and `keypad-image`'s committed keys on amd64 (a key that differs
   there is a finding, settled by an `approve` run on that leg); the Robot leg's `focusedAfterPrompt` line is to be read with
   the refusal test's status (skipped when the frame kept the focus)
 - [x] The Phase 7 code review (three lenses with a sceptic each) and its fixes: done 2026-10-10 ("Phase 7 code review" above:
-  30 distinct findings, 2 high, 9 medium, 19 low, plus LV-1, FB-N1 and FB-N2; the fix wave FA `9f44718`, FC `791e0ae`, FB
-  `c690bef`; D431-D448); the committed `os.version` text of the baselines is gap 91, the reading of `MODAL_OPENED` on a release
+  30 distinct findings, 2 high, 9 medium, 19 low, plus LV-1, FB-N1 and FB-N2; the fix wave FA `03625bc`, FC `a54c279`, FB
+  `2633eec`; D431-D448); the committed `os.version` text of the baselines is gap 91, the reading of `MODAL_OPENED` on a release
   gap 88
-- [x] The hook engine's race (scenario E's matrix hash) explained and fixed: FX `a134159`, D449 (the open flake of Phase 6 is
+- [x] The hook engine's race (scenario E's matrix hash) explained and fixed: FX `03c8da9`, D449 (the open flake of Phase 6 is
   closed)
 - [x] The live acceptance of `phase7-contracts.md` §13.3 (`VisionLiveIT`, profile `inference-live`, the owner's key, at most
   USD 1.00 per session and USD 3.00 for the class; `ci/run-in-linux.sh mvn -o verify -pl
   samples/skillroy-sample-lending-scenarios -am -Pinference-live -Dskillroy.headless=false -Dit.test=VisionLiveIT
   -Dfailsafe.failIfNoSpecifiedTests=false`): **three runs, 2026-10-10 and 2026-10-11, USD 0.434 in all** ("Phase 7, the live
-  items" above; the live table at the top). Run 1 on `e11ae08` (USD 0.131): item 3 the fallback header coexists with the toolset
+  items" above; the live table at the top). Run 1 on `5faacb4` (USD 0.131): item 3 the fallback header coexists with the toolset
   (`END_TURN`); item 5 `skillroy_look` answered and the player passed `loan-table-visual-check` (`YES`) and its false variant
   (`expect: NO`); the secret scan passed (19 files); items 1, 2 and 4 ended `QUESTION` (finding LV-1: the model read the person's
-  resolved `$item` as an unfilled placeholder); item 6 skipped. Run 2 on `791e0ae` (USD 0.155): 7 of 7. Run 3 on `c94aade`, the
+  resolved `$item` as an unfilled placeholder); item 6 skipped. Run 2 on `a54c279` (USD 0.155): 7 of 7. Run 3 on `223c5fb`, the
   final code (USD 0.148): 7 of 7, items 1, 2 and 4 each in 3 UI actions (USD 0.045, 0.057, 0.0029), item 6 replaying with zero
   model calls, the secret scan over 26 files
-- [x] The security delta review (`phase7-contracts.md` §15: eight lenses with sceptics over the diff since `af29e59`, S101
+- [x] The security delta review (`phase7-contracts.md` §15: eight lenses with sceptics over the diff since `e3ceece`, S101
   onwards; every finding of medium or above fixed, nothing of medium or above accepted; the record in the session notes and
   its summary here): **run and fixed 2026-10-10/11** ("Security review (Phase 7 delta, 2026-10-10/11)" under "Status at a
-  glance": S101-S148, 2 high, 13 medium, 33 low; every medium and high and 31 lows fixed by SG `5d6fdd8`, SH `edba708`, SJ
-  `73e406a`, SI `056a007` and SG's follow-up `c94aade`; D450-D486; S142 and S144 accepted by the owner, B31, 2026-10-11)
+  glance": S101-S148, 2 high, 13 medium, 33 low; every medium and high and 31 lows fixed by SG `703cc9b`, SH `ed397f0`, SJ
+  `dd2f1d6`, SI `a1af6c8` and SG's follow-up `223c5fb`; D450-D486; S142 and S144 accepted by the owner, B31, 2026-10-11)
 - [x] **B31, the owner's sign-off of the security delta review: given on 2026-10-11** (`B31 ok`; S142 and S144 accepted as
   proposed, their two release notes in `SECURITY.md` "Known limitations")
 - [x] The security fix round's packages: SG (S104, S105, S106, S121-S126, S129, S108 and S146 agent halves), SH (S101, S102,
@@ -2527,7 +2529,7 @@ the owner (B33), gaps 94 and 95 done (2026-10-11). The owner's B29, B30 and B31 
 - [x] A web-host check with a mask on the front browser's panel (gap 95): **done 2026-10-11** (P7 §13.2 item 10's gap-95 checks
   (a)-(e) against real JCEF, green on both target Javas in the arm64 image; each check fails with its protection neutralised)
 - [x] **Exit** (`phase7-contracts.md` §14, the roadmap's row 7; **met 2026-10-11** with the amd64 Java 8 legs), item by item (each "can be met" in CI by the checks that ran in
-  the packages' image legs and in the fixers' reruns; the matrix of the final tree, green on `c94aade` on every leg that ran (arm64 twice on every leg, amd64 on the Java 25 leg), ticks them; the security sign-off, the one item that waited for the owner, was given on 2026-10-11 and is **met 2026-10-11**. The item as a whole stays unticked: §14 reads the `expectImage` criterion as holding "on every leg" (§13.2 item 7: both Javas and the amd64 leg), and the amd64 hold of `keypad-image`'s Java 8 key is open until the amd64 Java 8 legs of the matrix line above have run. It is ticked with that line, as the Phase 6 Exit item stayed unticked while its Windows criterion waited):
+  the packages' image legs and in the fixers' reruns; the matrix of the final tree, green on `223c5fb` on every leg that ran (arm64 twice on every leg, amd64 on the Java 25 leg), ticks them; the security sign-off, the one item that waited for the owner, was given on 2026-10-11 and is **met 2026-10-11**. The item as a whole stays unticked: §14 reads the `expectImage` criterion as holding "on every leg" (§13.2 item 7: both Javas and the amd64 leg), and the amd64 hold of `keypad-image`'s Java 8 key is open until the amd64 Java 8 legs of the matrix line above have run. It is ticked with that line, as the Phase 6 Exit item stayed unticked while its Windows criterion waited):
   - [x] a vision-driven session on the sample is recorded into ordinary steps that replay with zero model calls
     (§13.2 item 8 with the scripted gateway on both Javas and the committed `exported/session-vision-loan.*`, green in the arm64
     image on both; once live, §13.3 items 1 and 6)
@@ -2544,7 +2546,7 @@ the owner (B33), gaps 94 and 95 done (2026-10-11). The owner's B29, B30 and B31 
     on both Javas, the Swing half included)
   - [x] *(added)* an `expectImage` baseline holds on the target it was made on and is `REBIND_NEEDED` elsewhere (§13.2
     item 7, `keypad-image`, held on both Javas and seeds on arm64; §13.1 item 5; on amd64 the Java 25 key held in the final
-    matrix, and the Java 8 key in the amd64 Java 8 targets leg on `bc1e250`, 2026-10-11, ten replays held)
+    matrix, and the Java 8 key in the amd64 Java 8 targets leg on `832fcb2`, 2026-10-11, ten replays held)
   - [x] *(added)* the security delta review is signed off (B31: run and fixed 2026-10-10/11, signed off by the owner on
     2026-10-11)
 
@@ -2855,7 +2857,7 @@ Kept generic on purpose: nothing here names a machine, a user or a local path.
   - An accidental `mvn install` (FC, about five seconds) wrote `ai.skillroy` snapshots into `~/.m2/repository/ai`; they were
     moved out a minute later and the directory is absent; a partial build without `-am` then fails to resolve them, which is how
     it was confirmed. Never `mvn install` this project (the trap above).
-  - Native test counts of different runs do not add up: the fixers' own full-reactor runs (5005 on `a134159`, 5016, 5027 and
+  - Native test counts of different runs do not add up: the fixers' own full-reactor runs (5005 on `03c8da9`, 5016, 5027 and
     5027 for SH, SG and SJ, 5065 for SI, 5099 on the final tree) and the orchestrator's summaries of the merged trees differ by
     several dozen tests for the same tree, and the skipped counts differ with the headless display tests. Compare counts only
     within one method of counting, and read counts, not exit codes.
@@ -2872,7 +2874,7 @@ Work that cannot proceed without the project owner, or without something only th
 | A Windows host | B13, Phase 6 | Verification of the fixes S7 and S15 (not verified on Windows); the Windows path of Phase 6, built 2026-10-09 where Linux can test it and **waiting for the host** for: `ci\run-on-windows.cmd` run twice without a flake and the list of `design/phase6-contracts.md` §9.5 and §13.3 (`bin\skillroy.bat` run, the planner started through a launcher path and a `--pack` path with a space, which decides the quoted `cmd.exe` form, the ACL branches checked with `icacls`, `JAVAAGENT` as the logged-on user with the `SEMANTIC`, `ACTION`, `COMPONENT`, `DISPATCH` rungs and paint capture, one cross-session attach for its failure text, the 5 s start-up margin; and, added by the pass-2 fix rounds, `bin\skillroy.bat` run from a directory holding a decoy `findstr.cmd` and the runner from a checkout holding a decoy `mvn.cmd`, the planner through the native `claude.exe` with the prompt on stdin and npm's `claude.cmd` refused with the remedy, the schema's pre-quoted argument read back intact, a command line near 32767 characters, a FAT32 and an exFAT volume refused by every owner-only member, the new ACL branches of `OutputFiles`, `SettingsFiles`, `JarTrust`, the ancestor rule and the bootstrap's `OptionsFileCheck`, and the localised-Windows case of S94), and the exit criterion that names Windows; when it has run, the "not verified on Windows" marks come off `README.md`, `SECURITY.md`, `design/threat-model.md` §8, P1 §2.5 and this file. The matrix table rows for it are `\| windows, Java 25 targets \| ci\run-on-windows.cmd \| … \|` and `\| windows, Java 8 targets \| ci\run-on-windows.cmd (SKILLROY_JDK8_HOME) \| … \|`. The owner (2026-10-06): later, a Windows 11 machine, which also runs the tenant layers' testing under Windows and under WSL2 |
 | The owner's word on Phase 6 | B26, B27, B28 | **Resolved 2026-10-10** (`B26 ok, B27 ok, B28 ok`, no veto): every answer of B26, Q1's wording of the hard rule now in `CLAUDE.md` among them, every decision of B27, and the sign-off of the repeat security review with the eight lows accepted (B28). The build had proceeded on the then provisional answers; the built behaviour stands as it is. Nothing waits on it. |
 | The owner's word on Phase 7 | B29, B30, B31 | **Resolved 2026-10-11** (`B29 ok, B30 ok, B31 ok`, no veto): every answer of B29 (Q25, Q27 and Q34, which rested on the owner's taste or knowledge, among them), every decision of B30, the behaviour changes listed in its entry included, and the sign-off of the Phase 7 security delta review with the two lows S142 and S144 accepted (B31). The build had proceeded on the then provisional answers; the built behaviour stands as it is. Two optional choices rode along (gaps 93 and 96) and stay open. Nothing waits on it. |
-| An x86-64 JDK 8 for the amd64 image | – | **Resolved 2026-10-11: the volume remounted and both legs run green.** The amd64 legs with Java 8 (Java 8 targets, the Java 8 test JVM) use an x86-64 JDK 8 on an external volume of the owner's machine, which was not mounted for Phase 7's final matrix and which the owner remounted on 2026-10-11, so no download was needed (`ci/run-in-linux.sh` mounts any JDK 8 directory named by `SKILLROY_JDK8_HOME`). Both legs ran green the same day on `bc1e250`, and `keypad-image`'s Java 8 key held on amd64 ("Phase 7 final matrix"). Nothing waits on the owner. |
+| An x86-64 JDK 8 for the amd64 image | – | **Resolved 2026-10-11: the volume remounted and both legs run green.** The amd64 legs with Java 8 (Java 8 targets, the Java 8 test JVM) use an x86-64 JDK 8 on an external volume of the owner's machine, which was not mounted for Phase 7's final matrix and which the owner remounted on 2026-10-11, so no download was needed (`ci/run-in-linux.sh` mounts any JDK 8 directory named by `SKILLROY_JDK8_HOME`). Both legs ran green the same day on `832fcb2`, and `keypad-image`'s Java 8 key held on amd64 ("Phase 7 final matrix"). Nothing waits on the owner. |
 
 Not walls any more: the licence, the holder's name, the first commit and the remote (B1), the final names and the
 domain behind the groupId (B2) and the sample domain with its deposits (B10) are decided. B17-B20 are confirmed
@@ -2896,10 +2898,11 @@ The review items of the end-to-end review, now decided (gap numbers refer to the
 
 ## Next steps I would take
 
-1. **The push: done 2026-10-12** with the release of 0.1.0 (B36): `main` and the tag `v0.1.0` pushed to the private
+1. **The push: done 2026-10-13** with the release of 0.1.0 (B36), after the email rewrite (B37; GitHub refused the
+   first attempt of 2026-10-12 for the private address): `main` and the tag `v0.1.0` pushed to the private
    remote; when the repository becomes public is the owner's word. The
    DCO trail (release checklist item 10, checked 2026-10-12 on the release commit): 179 of the 182 commits carry a `Signed-off-by`; the three that
-   do not are Phase 6 merge commits of 2026-10-09, `ee020ad` and `f33488f` (clean merges) and `6a342e7` (Merge `main` into
+   do not are Phase 6 merge commits of 2026-10-09, `a50d25b` and `902ae10` (clean merges) and `c38372e` (Merge `main` into
    `p6/bw`, with its own conflict resolution), **accepted by the owner on 2026-10-11** ("DCO accept": no history rewrite). The neutrality check of the private sibling passed the same day. The repeated
    security review is signed off by the owner (2026-10-10, B28; item 5); the Phase 7 delta review is signed off by the owner (2026-10-11, B31; item 6).
 2. **Phase 4 follow-ups**: the JxBrowser kit run in the private repository that holds the licence (the wall "A JxBrowser
@@ -2932,10 +2935,10 @@ The review items of the end-to-end review, now decided (gap numbers refer to the
    code-review questions of D163 and D168; S46 item 4.
 6. **Phase 7 is specified, reviewed, built, code-reviewed, security-reviewed (delta) and fixed** (2026-10-10 and 2026-10-11,
    `design/phase7-contracts.md` as built; B29 and B30 confirmed and B31 signed off by the owner on 2026-10-11) in four packages (VS, VW, VC, VM), a fix wave
-   of three (FA, FB, FC), a race fix (FX) and a security fix round of four (SG, SH, SI, SJ), merged into `main` up to `c94aade`;
-   nothing pushed. In this order: (a) the Linux matrix of the final tree: green on `c94aade` (arm64 twice on every leg, amd64 on the Java 25 leg, the `jcef`
+   of three (FA, FB, FC), a race fix (FX) and a security fix round of four (SG, SH, SI, SJ), merged into `main` up to `223c5fb`;
+   nothing pushed. In this order: (a) the Linux matrix of the final tree: green on `223c5fb` (arm64 twice on every leg, amd64 on the Java 25 leg, the `jcef`
    profile once, the Robot leg once per Java), whose amd64 Java 25 leg settled the render key's equality across architectures;
-   **the two amd64 Java 8 legs ran green on `bc1e250`** later on 2026-10-11 (after two test-side fixes, `aadd5f4` and `d6720ea`),
+   **the two amd64 Java 8 legs ran green on `832fcb2`** later on 2026-10-11 (after two test-side fixes, `96061e5` and `f681e57`),
    `keypad-image`'s Java 8 key holding on amd64, and the Exit item is ticked (**Phase 7 is complete**); (b) for the owner: **done 2026-10-11** (`B29 ok, B30 ok, B31
    ok`, no veto; the built behaviour and the behaviour changes of B30 stand, S142 and S144 are accepted), the two optional
    choices of gaps 93 and 96 excepted; (c) **the push**, on the owner's word; (d) the Windows and macOS hosts, when they

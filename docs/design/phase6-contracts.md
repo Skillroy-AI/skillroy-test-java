@@ -3109,7 +3109,7 @@ are stated once, here, as D156-D159 (§12.9), and built by the security-fix pack
 
 ### 12.2 Pass 1: lenses L3-L6 on the committed tree (finished and dispositioned 2026-10-09)
 
-Pass 1 ran on HEAD `e86e8e2` while this contract was written, on the four lenses whose code Phase 6 does not change:
+Pass 1 ran on HEAD `5d617be` while this contract was written, on the four lenses whose code Phase 6 does not change:
 L3 (credentials, data channels, what a run writes), L4 (embedded web views), L5 (the model boundary), L6 (the model as
 an actor); one reviewer and one sceptic per lens. The reviewers raised 25 findings; the sceptics confirmed all 25 and
 added 3 from "found sound" claims they refuted: **28 confirmed findings, S35-S62: 1 high (S55), 6 medium (S43, S44,
@@ -3167,8 +3167,8 @@ confirmed decisions (a fix that breaks one says so and proposes the contract cha
 claim gets a sceptic's verdict (`CONFIRMED`, `CONFIRMED, RESTATED`, `REFUTED`, `UNDECIDED`) with its evidence;
 neutrality throughout.
 
-**As run (2026-10-09).** Group a (L1, L3-L7) ran on `f546363`, the tree before the code review's fix wave was integrated
-into `main`; group b (L2, L8) ran on `ce1f41f`, after it. Eight reviewers and eight sceptics raised 39 findings (32 by the
+**As run (2026-10-09).** Group a (L1, L3-L7) ran on `a4b3d2e`, the tree before the code review's fix wave was integrated
+into `main`; group b (L2, L8) ran on `6760bed`, after it. Eight reviewers and eight sceptics raised 39 findings (32 by the
 reviewers, 7 by the sceptics from claims they broke): 38 were confirmed, **S63-S100: 1 high (S93, P2-L7-F3, model text
 reaching Windows' implicit `cmd.exe` through the planner), 12 medium, 25 low; 18 counted, 16 operator-only, 4 token-holder
 only**, and one was refuted (P2-L1-F2, no S-number). Six fix rounds (SA-SF, decisions D244-D286) fixed all 13 findings of

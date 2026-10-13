@@ -23,7 +23,7 @@ Total spend **USD 5.64** of the USD 10.00 cap (method and split at the end).
 - `spikes/BS12/` (a standalone Maven project; `README.md`), the harness on Temurin 25 and the desk (seed A, the agent on
   the command line, launched with the real `TargetLauncher` and `AgentClient`) on Temurin **1.8.0_504** (`/opt/jdk8`), both
   in `skillroy-test-java-ci:bs8-arm64` under the WM-less Xvfb (1024x768x24), through `ci/run-in-linux.sh`, the key passed
-  by name. Built artifacts of `main` (4f9962f) by path; Maven offline; nothing downloaded.
+  by name. Built artifacts of `main` (579af9c) by path; Maven offline; nothing downloaded.
 - SDK `com.anthropic:anthropic-java` **2.70.0** (the CLI distribution's). Request bodies built as JSON and handed to the
   SDK as `MessageCreateParams.Body` (read by the SDK's own mapper); responses kept as the SDK's JSON of the `Message`,
   so assistant turns, signed thinking blocks and `toolset_name` replay unchanged. 2.70.0 **does** have typed classes for

@@ -63,13 +63,14 @@ review items of the end-to-end review, and `Sn` the confirmed findings of the se
 | B27 | Phase 6 build, review and security-fix decisions (127: D160-D286 of `design/phase6-contracts.md` §16, 62 taken by six packages during the build of 2026-10-09 and 65 by the code review's fix wave and the fix rounds of the repeat security review's pass 2) | as taken | taken 2026-10-09; **confirmed by the owner 2026-10-10** (`B27 ok`, all 127, no veto) | built, reviewed, fixed and security-reviewed twice 2026-10-09 (`TODO.md`, "Phase 6"; the final Linux matrix is recorded there) | |
 | B28 | The repeat security review's sign-off (S35-S100: 66 confirmed findings, 2 high, 18 medium, 46 low; everything of medium or above fixed; eight lows accepted with a release note each; the "not verified" list; no outside reader yet, not a gate) | the orchestrator recommended yes once the final matrix was green | **signed off by the owner 2026-10-10** (`B28 ok`, the eight lows accepted) | records written 2026-10-09 (`TODO.md`, "Security review (repeat, pass 1)" and "(repeat, pass 2)"); `SECURITY.md` and `docs/release-checklist.md` in the tree | |
 | B29 | Phase 7 contract answers (39 questions: the Robot placement and its double opt-in, redaction by default and one rule for pixels and text, root-pane painting, Robot keys left out, the two homes of `region`, `Status.SKIPPED`, the vision module's seams and facade, the merged matrix, baselines by render key and their approval at the step, the gateway's additive changes, the defaults BS12 measured, the sample's number pad, the security delta review, and, added by the contract review: no glass capture for a model, no credential used on a model's or a client's behalf, a Robot press always paired, the controller draws the marks) | the §18 answers | taken 2026-10-10 by the orchestrator without the owner; **confirmed by the owner 2026-10-11** (`B29 ok`, all thirty-nine, no veto) | built 2026-10-10 on them while they were provisional, in four worktree packages, merged into `main`; reviewed (three lenses), fixed and security-reviewed (delta, B31) 2026-10-10/11 (`TODO.md`, "Phase 7") | – (Q25, Q27 and Q34, which rested on the owner's taste or knowledge, are confirmed with the rest; the `jxbrowser` input stays unverified against the real product, B9) |
-| B30 | Phase 7 build, review and security-fix decisions (128: D359-D430 of `design/phase7-contracts.md` §17, 72 taken by four packages during the build of 2026-10-10, and D431-D486, 56 taken by the code review's fix wave (FA, FB, FC), the race fix (FX) and the security delta review's four fix packages (SG, SH, SI, SJ), 2026-10-10 and 2026-10-11) | as taken | taken 2026-10-10 and 2026-10-11 by the orchestrator without the owner; **confirmed by the owner 2026-10-11** (`B30 ok`, all 128, no veto) | built, reviewed, fixed and security-reviewed (delta) 2026-10-10/11, merged into `main` with the head `c94aade` (`TODO.md`, "Phase 7"; the final Linux matrix green on `c94aade` (arm64 twice on every leg, amd64 on the Java 25 leg), its amd64 Java 8 legs green on `bc1e250` later on 2026-10-11) | – |
+| B30 | Phase 7 build, review and security-fix decisions (128: D359-D430 of `design/phase7-contracts.md` §17, 72 taken by four packages during the build of 2026-10-10, and D431-D486, 56 taken by the code review's fix wave (FA, FB, FC), the race fix (FX) and the security delta review's four fix packages (SG, SH, SI, SJ), 2026-10-10 and 2026-10-11) | as taken | taken 2026-10-10 and 2026-10-11 by the orchestrator without the owner; **confirmed by the owner 2026-10-11** (`B30 ok`, all 128, no veto) | built, reviewed, fixed and security-reviewed (delta) 2026-10-10/11, merged into `main` with the head `223c5fb` (`TODO.md`, "Phase 7"; the final Linux matrix green on `223c5fb` (arm64 twice on every leg, amd64 on the Java 25 leg), its amd64 Java 8 legs green on `832fcb2` later on 2026-10-11) | – |
 | B31 | The Phase 7 security delta review's sign-off (S101-S148: 48 confirmed findings, 2 high, 13 medium, 33 low; everything of medium or above fixed and 31 lows fixed; S142 and S144 accepted with a release note each; the "not verified" list; the note that the clipboard route S110 predates Phase 7 for the planner and that B28 did not see it; no outside reader yet, not a gate) | the orchestrator recommended yes once the final matrix was green (the amd64 Java 8 legs excepted) and the owner had read the two release notes | **signed off by the owner 2026-10-11** (`B31 ok`, S142 and S144 accepted; the orchestrator did not sign, P6 §12.6) | records written 2026-10-11 (`TODO.md`, "Security review (Phase 7 delta)"); `SECURITY.md` and `docs/release-checklist.md` carry the signature | |
 | B32 | Follow-ups after Phase 7 (D487-D491: gaps 94, 99, 92 and 63, taken without the owner on 2026-10-11) | as taken | **confirmed by the owner 2026-10-11** (`B32 ok`, no veto) | built, tested and matrix-verified 2026-10-11 (`TODO.md`, "Phase 7 final matrix") | – |
 | B33 | The owner's answers of the evening of 2026-10-11 (gaps 93 and 96, the domain, a JxBrowser licence) | – | **given by the owner 2026-10-11** | recorded 2026-10-11 | – |
 | B34 | Follow-ups of the evening of 2026-10-11 (D492-D499: gap 101, the JxBrowser kit run's D493 and D494, gap 95's D495-D499) | as taken | **confirmed by the owner 2026-10-12** (`B34` approved, no veto) | built and tested 2026-10-11 | – |
 | B35 | Gap 104 (D500), 2026-10-12 | as taken | **confirmed by the owner 2026-10-12** | built 2026-10-12, checked by a probe (no full regression, the owner's instruction) | – |
 | B36 | The release of 0.1.0 and the push (the owner's word, the outside reading, the spikes' versions, the next version, publication) | – | **given by the owner 2026-10-12** | 0.1.0 cut on 2026-10-12 (`docs/release-notes/0.1.0.md`) | – |
+| B37 | The commits' email before the first push | – | **given by the owner 2026-10-13** | history rewritten 2026-10-13 (`docs/commit-id-map.md`) | – |
 
 Phase 1 details are fixed in `design/phase1-contracts.md`; the same file carries the Phase 1.x specification
 (A17-A33, H1-H3). Phase 2 details are fixed in `design/phase2-contracts.md`, whose open questions B19 answers. What
@@ -1317,10 +1318,10 @@ orchestrator does not). Its records are in the session notes, outside the reposi
 `dispositions.md`, with the lens reports and the sceptics' verdicts beside them); `TODO.md` summarises them under
 "Security review (repeat, pass 1, 2026-10-09)" and "(repeat, pass 2, 2026-10-09)".
 
-- **Pass 1** (lenses L3-L6 on `e86e8e2`, one reviewer and one sceptic each): S35-S62, 28 confirmed, **1 high** (S55,
+- **Pass 1** (lenses L3-L6 on `5d617be`, one reviewer and one sceptic each): S35-S62, 28 confirmed, **1 high** (S55,
   `data_query` substituted `$references` into the SQL after the guard ran), **6 medium**, 21 low; 18 counted, 10
   operator-only.
-- **Pass 2** (all eight lenses on the Phase 6 tree: L1 and L3-L7 on `f546363`, L2 and L8 on `ce1f41f`): S63-S100, 38
+- **Pass 2** (all eight lenses on the Phase 6 tree: L1 and L3-L7 on `a4b3d2e`, L2 and L8 on `6760bed`): S63-S100, 38
   confirmed, **1 high** (S93, the planner passed model-controlled text as an argument of `claude.cmd`, which Windows
   starts through an implicit `cmd.exe`), **12 medium**, 25 low; 18 counted, 16 operator-only, 4 token-holder only; one
   reviewer finding refuted (P2-L1-F2, no number). Seven findings were raised by the sceptics from claims they broke.
@@ -1370,7 +1371,7 @@ changed.** With `B28 ok` (given 2026-10-10), the "Reviews" paragraph of `SECURIT
 `docs/release-checklist.md` item 2 records it, and in `TODO.md` the Phase 6 item "Repeat the security review" is ticked and
 the Exit item's criterion "the repeated security review is signed off" is marked met (the Exit item stays unticked while
 the Windows criterion waits). The eight release notes go into the release note (checklist item 11). **State
-of the build.** Everything is built and merged into `main` (head `4f9962f` for the last fix; nothing pushed). **Blocks.**
+of the build.** Everything is built and merged into `main` (head `579af9c` for the last fix; nothing pushed). **Blocks.**
 Nothing since 2026-10-10; the push still waits for the owner's word (B1).
 
 ## B29 Phase 7 contract answers (2026-10-10; confirmed by the owner 2026-10-11)
@@ -1426,7 +1427,7 @@ may hold; the owner confirmed all three with the rest. Q35-Q39 were added by the
 | Q27 | JxBrowser input behind descriptor roles, unverified, with the kit against the fake **(owner's knowledge: is a licence holder's run near?)** | Yes (D336) | `B29 Q27 veto`: JCEF only; the `jxbrowser` adapter never reports `INPUT` until verified |
 | Q28 | `web.pointer` honours a blocking modal dialog (an AWT-only check in the web module)? | Yes (D335) | `B29 Q28 veto`: no check |
 | Q29 | The protocol stays 0.2? | Yes (D299) | `B29 Q29 veto`: `0.3` (`ProtocolConstantsTest` and the discovery file's `protocol` change) |
-| Q30 | The security delta review (eight lenses with sceptics over the diff since `af29e59`, S101 onwards, nothing medium or above accepted, the owner signs B31)? | Yes (D338) | `B29 Q30 veto full`: a full review of the tree; `B29 Q30 veto none`: no review before the next release (against the checklist) |
+| Q30 | The security delta review (eight lenses with sceptics over the diff since `e3ceece`, S101 onwards, nothing medium or above accepted, the owner signs B31)? | Yes (D338) | `B29 Q30 veto full`: a full review of the tree; `B29 Q30 veto none`: no review before the next release (against the checklist) |
 | Q31 | No separate `act` command: `ask` with `--vision` is the interactive form; `--play` runs a scenario? | Yes (D333, D339) | `B29 Q31 veto`: `act <intent>` and `skillroy_session_act` beside `ask` |
 | Q32 | The loop's reads unjournaled through `ExecutorSession.read` (which throws the agent's error and never masks an image's `base64`), their hashes in the provenance? | Yes (D308) | `B29 Q32 veto`: every capture and hit-test a raw read step in the journal, left out of the export by `reads` |
 | Q33 | The CI image stays WM-less; Robot checks run WM-less with the option (and `requireFocus: false`); no openbox leg? | Yes (D340) | `B29 Q33 veto`: an openbox leg from `spikes/BS9/docker/` in the matrix |
@@ -1440,7 +1441,7 @@ may hold; the owner confirmed all three with the rest. Q35-Q39 were added by the
 **What it changes.** The Phase 7 contract and, through its §16.1, the Phase 1-6 contracts and the design overview
 (written in when the build starts; design §3.10's V3 row (D341) and the two sentences that D314 and D330 overturn among
 them, with the matching lines of design §8 and §9); `design/threat-model.md` (extended on 2026-10-10, D334); the
-amendments file's index (D301, by the build). **State of the build.** Specified and reviewed on 2026-10-10 (the contract is committed as `2eebeed`); the build proceeded on the answers, which were provisional, in four worktree packages, VS (the agent's Swing side, the sample's desk and pack), VW (the web side), VC (the scenario, controller, JUnit and CLI side) and VM (the gateway, the session seam, `skillroy-vision` and the MCP and session options), and was built and merged into `main` the same day in the order VC, VS (with VM's step 1b and the regeneration step 2b), VW, VM; its own decisions are B30 below, 128 with the fixers' (`TODO.md`, "Phase 7"); the code review, the fixes and the security delta review (B31) ran on 2026-10-10/11 and are in B30 and B31. **Blocks.** Nothing; confirmed, so the built behaviour stands as it is.
+amendments file's index (D301, by the build). **State of the build.** Specified and reviewed on 2026-10-10 (the contract is committed as `abcfe65`); the build proceeded on the answers, which were provisional, in four worktree packages, VS (the agent's Swing side, the sample's desk and pack), VW (the web side), VC (the scenario, controller, JUnit and CLI side) and VM (the gateway, the session seam, `skillroy-vision` and the MCP and session options), and was built and merged into `main` the same day in the order VC, VS (with VM's step 1b and the regeneration step 2b), VW, VM; its own decisions are B30 below, 128 with the fixers' (`TODO.md`, "Phase 7"); the code review, the fixes and the security delta review (B31) ran on 2026-10-10/11 and are in B30 and B31. **Blocks.** Nothing; confirmed, so the built behaviour stands as it is.
 
 
 ## B30 Phase 7 build, review and security-fix decisions (2026-10-10/11; confirmed by the owner 2026-10-11)
@@ -1451,7 +1452,7 @@ the session seam, `skillroy-vision` and the MCP and session options), recorded a
 (each with the alternatives rejected and the reason) and numbered by the orchestrator at integration in the order VC D359-D382,
 VS D383-D403, VW D404-D419, VM D420-D430 (72 decisions, each package's ids from 1 without a gap; D401-D403 are VS's three
 decisions of the regeneration step 2b, and D425 is VM's decision about `ExecutorSession.fixture`, built at the orchestrator's
-request in the closing commit `e11ae08`); and the decisions taken afterwards, on 2026-10-10 and 2026-10-11 and again without the
+request in the closing commit `5faacb4`); and the decisions taken afterwards, on 2026-10-10 and 2026-10-11 and again without the
 owner, by the fixers of the Phase 7 code review (FA the agent's Swing side, FB the scenario, controller and CLI side, FC the
 vision module and the session), by the fixer of a race in the hooks engine that the first Linux matrix of the integrated tree
 found (FX) and by the four packages of the security delta review's fix round (SG the agent's Swing side, SH credentials,
@@ -1639,21 +1640,21 @@ its path (D485); (m) the scenario player evaluates the plan's `verify` after the
 `FAIL` where it ended `PASS` (D443); (n) the turn's first message lists the slots the person bound, and the five Phase 5
 session recordings were regenerated key-free for it: any later change of that message regenerates them again (D444).
 **State of the build.** Built, reviewed, fixed and security-reviewed (delta) 2026-10-10/11: the native reactor on the head
-`c94aade` is green (5,099 tests, 0 failures, 0 errors, 592 skipped, surefire and failsafe together), the fixers' image runs on
-both Java lines are recorded in `TODO.md`, and the Linux matrix of the final tree is green on `c94aade` (arm64 twice on every leg, amd64 on the Java 25 leg), its amd64 Java 8 legs green on `bc1e250` later on 2026-10-11. **Blocks.** Nothing; confirmed, so the built behaviour stands as it is, the behaviour changes (a) to (n) above included.
+`223c5fb` is green (5,099 tests, 0 failures, 0 errors, 592 skipped, surefire and failsafe together), the fixers' image runs on
+both Java lines are recorded in `TODO.md`, and the Linux matrix of the final tree is green on `223c5fb` (arm64 twice on every leg, amd64 on the Java 25 leg), its amd64 Java 8 legs green on `832fcb2` later on 2026-10-11. **Blocks.** Nothing; confirmed, so the built behaviour stands as it is, the behaviour changes (a) to (n) above included.
 
 ## B31 The Phase 7 security delta review's sign-off (2026-10-11; signed off by the owner 2026-10-11)
 
 **From:** the delta review that B13 and the release checklist's item 2 ask of a phase that opens a new boundary, specified in
 `design/phase7-contracts.md` §15 (D338; the sign-off rule is P6 §12.6: the owner writes it, the orchestrator does not) and run
-on 2026-10-10/11 over everything Phase 7 changed since `af29e59`, the tree B28 covered. Its records are in the session notes,
+on 2026-10-10/11 over everything Phase 7 changed since `e3ceece`, the tree B28 covered. Its records are in the session notes,
 outside the repository: `notes/2026-10-10/phase7/security/` (`record.json` in the 2026-10-02 shape, with the dispositions as
 built, `dispositions.md`, the eight lenses' reports with their sceptics' verdicts, and the four fix reports); `TODO.md`
 summarises them under "Security review (Phase 7 delta, 2026-10-10/11)".
 
 - **The review:** eight lenses (L1 controller correctness and bounds, L2 host safety, L3 the data channels and, found there,
   the credential rule, L4 the web boundary, L5 the model boundary, L6 the model as an actor, L7 Windows and file-system trust,
-  L8 evidence at rest), one reviewer and one sceptic each; L1, L3, L4, L7 and L8 on `e96a20b`, L2, L5 and L6 on `c690bef`.
+  L8 evidence at rest), one reviewer and one sceptic each; L1, L3, L4, L7 and L8 on `fbef000`, L2, L5 and L6 on `2633eec`.
   52 findings raised (29 by the reviewers, 23 by the sceptics), 1 refuted (L8-F4, no number), 3 duplicates merged:
   **48 standing, S101-S148: 0 critical, 2 high, 13 medium, 33 low; 42 counted (2 high, 13 medium, 27 low), 6 operator-only
   (S117, S119, S126, S136, S143, S147), none token-holder-only**. 22 were raised by the sceptics; the sceptics re-rated S129
@@ -1665,8 +1666,8 @@ summarises them under "Security review (Phase 7 delta, 2026-10-10/11)".
   `$staff.password` through a pass-through verb). Both were reachable by a model or an MCP client.
 - **Dispositions:** every finding of medium or above is **fixed**, and so are 31 of the 33 lows (contract first, a test that
   fails on the old code, marked in the contract with the review id), by four packages with the primary assignment SG 12, SH 7,
-  SI 14 and SJ 13 findings (S108, S124, S143 and S146 shared by two packages), merged into `main` as SG `5d6fdd8`, SH `edba708`,
-  SJ `73e406a`, SI `056a007` and SG's follow-up for S108 `c94aade`; their 37 decisions are D450-D486 (B30). No fixer found a
+  SI 14 and SJ 13 findings (S108, S124, S143 and S146 shared by two packages), merged into `main` as SG `703cc9b`, SH `ed397f0`,
+  SJ `dd2f1d6`, SI `a1af6c8` and SG's follow-up for S108 `223c5fb`; their 37 decisions are D450-D486 (B30). No fixer found a
   finding wrong or already fixed. Nothing of medium or above is accepted or deferred.
 - **Accepted by the owner on 2026-10-11, as proposed (P6 §12.5: a documentation-only change is an acceptance), each with its
   release note (also in `SECURITY.md` "Known limitations"):** the two lows below.
@@ -1689,7 +1690,7 @@ summarises them under "Security review (Phase 7 delta, 2026-10-10/11)".
   request is re-run by the provider on a fallback model of the same provider, redacted captures included; the fallback targets'
   data-handling regime is the owner's to confirm (the open S52 question of pass 2, now with pixels; `SECURITY.md` says so).
 - **Outside reader:** none has read the record yet (B26 Q12: recommended, recorded, not a gate).
-- **Matrix:** the final Linux matrix is green on `c94aade` (arm64 twice on every leg, amd64 on the Java 25 leg), its amd64 Java 8 legs green on `bc1e250` later on 2026-10-11; the live acceptance of `VisionLiveIT` ran three times (the last on
+- **Matrix:** the final Linux matrix is green on `223c5fb` (arm64 twice on every leg, amd64 on the Java 25 leg), its amd64 Java 8 legs green on `832fcb2` later on 2026-10-11; the live acceptance of `VisionLiveIT` ran three times (the last on
   the final code: 7 of 7, USD 0.148; `TODO.md`).
 
 **Question.** Does the owner sign the delta review off, with the two lows below accepted? The orchestrator recommended yes,
@@ -1710,8 +1711,8 @@ given). Two optional choices the review left to the owner were not part of the s
 refuse a page under a modal dialog for a model or a client (gap 96). **What it changed.** With `B31 ok` (given 2026-10-11) the "Reviews" paragraph
 of `SECURITY.md` carries the signature and drops "provisional" from the two release notes, `docs/release-checklist.md` item 2
 records it, and in `TODO.md` the Phase 7 item "B31, the owner's sign-off of the security delta review" is ticked, the Exit item's
-criterion "the security delta review is signed off" is marked met (2026-10-11); the Exit item stayed unticked until the amd64 Java 8 legs of the final matrix had run, because its `expectImage` criterion names every leg (`phase7-contracts.md` §14); they ran green later on 2026-10-11 (`bc1e250`) and the Exit item is ticked. The two release notes join the release note (checklist item 11), ten with B28's
-eight. **State of the build.** Everything is built and merged into `main` (head `c94aade`; nothing pushed). **Blocks.** Nothing
+criterion "the security delta review is signed off" is marked met (2026-10-11); the Exit item stayed unticked until the amd64 Java 8 legs of the final matrix had run, because its `expectImage` criterion names every leg (`phase7-contracts.md` §14); they ran green later on 2026-10-11 (`832fcb2`) and the Exit item is ticked. The two release notes join the release note (checklist item 11), ten with B28's
+eight. **State of the build.** Everything is built and merged into `main` (head `223c5fb`; nothing pushed). **Blocks.** Nothing
 for the build; the signature is given, and the first public release waits for the owner's word to push (B1).
 
 ## B32 Follow-ups after Phase 7 (2026-10-11; confirmed by the owner 2026-10-11)
@@ -1784,15 +1785,26 @@ same day to the four questions the release checklist left open (each the recomme
 | The version of `main` after the tag | `0.2.0-SNAPSHOT` | A commit after the tag |
 | Where the zips and jars are published | Nowhere: the tag and the push only | No GitHub release, no Maven repository; both are built from the tag |
 
+## B37 The commits' email (2026-10-13)
+
+**From:** GitHub refused the first push of 2026-10-12 ("push declined due to email privacy restrictions": the commits'
+address is private on the pushing account), and the owner's answer of 2026-10-13: "Can you change my email in the commits
+to "291389289+mikemills-skillroy@users.noreply.github.com"?"
+
+| Subject | Answer | What it changes |
+|---|---|---|
+| The email of the commits | The owner's GitHub noreply address, `291389289+mikemills-skillroy@users.noreply.github.com` | Before the first push, every commit's author, committer and `Signed-off-by` email was rewritten (`git filter-branch`), and the tag `v0.1.0` re-created with the same message and date. Every commit id changed; every tree is byte-identical, so the release matrix of 2026-10-12 holds for the new release commit `47cd446` (formerly `2d6d3d0`). Ids cited in commit messages were mapped in the rewrite and those in the documents on `main` in the commit after it; the history's own documents keep the old ids, which [`commit-id-map.md`](commit-id-map.md) maps. New commits use the noreply address (the repository's `user.email`). `NOTICE` and the source headers keep the holder's name as they were |
+
 ---
 
 ## Questions for the owner
 
-**None open as of 2026-10-12.** The owner gave the word to release 0.1.0 and push, with four answers on the way (**B36**).
+**None open as of 2026-10-13.** The owner had the commits' email changed to the GitHub noreply address before the first
+push (**B37**). Before it, the owner gave the word to release 0.1.0 and push, with four answers on the way (**B36**).
 Before it, the owner confirmed **B35** (D500, gap 104) and, before it, **B34** (D492-D499) on 2026-10-12 without a veto. Before it, the owner answered **B33** (gaps 93 and 96 not refused, the domain confirmed,
 a JxBrowser evaluation licence) and confirmed **B32** (D487-D491, the decisions of gaps 94, 99, 92 and 63)
 on 2026-10-11 without a veto (`B32 ok`), and accepted the three Phase 6 merge commits without a `Signed-off-by`
-(`ee020ad`, `6a342e7`, `f33488f`; "DCO accept": the release checklist's item 10 for the first release). Before it, none was open as of 2026-10-11: the owner confirmed **B29** (the Phase 7 contract's thirty-nine answers, `design/phase7-contracts.md` §18, decisions D287-D358) and **B30** (the 128 decisions the Phase 7 build, its code review's fix wave, the race fix and the security fixes took, D359-D486) on 2026-10-11, every row, without a veto (`B29 ok`, `B30 ok`); both had been taken without the owner on 2026-10-10 (B30 also on 2026-10-11) and were provisional while the build ran on them. Among the confirmed points are the three that rested on the owner's knowledge or taste (Q27, JxBrowser input behind descriptor roles, unverified; Q34, V3 on a person's desktop acting only while the target holds the focus; Q25, the number pad as the sample's component) and the decisions worth a look (D403, D413, D425, D470, D482), so the built behaviour stands as it is, the behaviour changes listed in B30 included. The owner signed off **B31** (the Phase 7 security delta review, S101-S148) the same day (`B31 ok`), with the two lows proposed for acceptance accepted as proposed: S142 (a Windows directory junction in a run's output tree) and S144 (Windows run output inheriting its parent's access list), each with its release note in `SECURITY.md`. Outside the decisions, the push still waits for the owner's word (B1) and the Windows host is still missing (`TODO.md`, "Walls"). Two optional choices that the delta review left to the owner rode along as gaps 93 and 96 of `TODO.md`; the owner answered both on 2026-10-11, not to refuse (B33).
+(`a50d25b`, `c38372e`, `902ae10`; "DCO accept": the release checklist's item 10 for the first release). Before it, none was open as of 2026-10-11: the owner confirmed **B29** (the Phase 7 contract's thirty-nine answers, `design/phase7-contracts.md` §18, decisions D287-D358) and **B30** (the 128 decisions the Phase 7 build, its code review's fix wave, the race fix and the security fixes took, D359-D486) on 2026-10-11, every row, without a veto (`B29 ok`, `B30 ok`); both had been taken without the owner on 2026-10-10 (B30 also on 2026-10-11) and were provisional while the build ran on them. Among the confirmed points are the three that rested on the owner's knowledge or taste (Q27, JxBrowser input behind descriptor roles, unverified; Q34, V3 on a person's desktop acting only while the target holds the focus; Q25, the number pad as the sample's component) and the decisions worth a look (D403, D413, D425, D470, D482), so the built behaviour stands as it is, the behaviour changes listed in B30 included. The owner signed off **B31** (the Phase 7 security delta review, S101-S148) the same day (`B31 ok`), with the two lows proposed for acceptance accepted as proposed: S142 (a Windows directory junction in a run's output tree) and S144 (Windows run output inheriting its parent's access list), each with its release note in `SECURITY.md`. Outside the decisions, the push still waits for the owner's word (B1) and the Windows host is still missing (`TODO.md`, "Walls"). Two optional choices that the delta review left to the owner rode along as gaps 93 and 96 of `TODO.md`; the owner answered both on 2026-10-11, not to refuse (B33).
 Before B29, B30 and B31 none was open: the owner confirmed **B26** (the twenty-two answers of the Phase 6 contract,
 `design/phase6-contracts.md` §17, D114-D159) and **B27** (the 127 decisions the Phase 6 build, its code review's fix wave
 and the security fix rounds took, D160-D286) on 2026-10-10, every row, without a veto, and signed off **B28** (the repeat
