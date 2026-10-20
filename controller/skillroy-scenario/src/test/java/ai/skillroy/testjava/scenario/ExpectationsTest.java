@@ -464,7 +464,10 @@ class ExpectationsTest {
         holds(Map.of("containsWhere", Map.of("amount", Map.of("gt", 5L))), DEPOSITS);
         holds(Map.of("containsWhere", Map.of("kind", "CARD", "by", Map.of("exists", false))), DEPOSITS);
         holds(Map.of("containsWhere", Map.of("note", Map.of("exists", false), "kind", "CASH")), DEPOSITS);
-        String none = failsWith(Map.of("containsWhere", Map.of("amount", "10.00", "kind", "CARD")), DEPOSITS);
+        // An ordered mapping, as a scenario's YAML gives: the message lists the fields in the matcher's order, and
+        // Map.of's iteration order changes from one JVM to the next.
+        String none = failsWith(Map.of("containsWhere", new java.util.TreeMap<>(Map.of("amount", "10.00", "kind",
+                "CARD"))), DEPOSITS);
         assertTrue(none.startsWith("no element of the list of 4 matches {\"amount\":{\"equals\":\"10.00\"}"), none);
         failsWith(Map.of("containsWhere", Map.of("by.code", "101")), DEPOSITS);
         assertEquals("no element of the list of 0 matches {\"a\":{\"equals\":1}}",
