@@ -716,11 +716,16 @@ class MaskedBrowserTest {
             seq = h.ctx.events.lastSeq();
             browser.fire(ai.skillroy.testjava.agent.api.spi.web.WebEvent.console("log", "first", null, 0));
             console(h, seq);
+            // Wait for the re-judgement to finish, not only to start: the read counts before the flag is written, and
+            // an event fired in between still reads the old flag (seen once on an emulated amd64 Java 8 test JVM).
+            BrowserIndex index = h.module.indexForTest();
             long deadline = System.currentTimeMillis() + 5000;
-            while (h.walk.maskedReads.get() == reads && System.currentTimeMillis() < deadline) {
+            while (!(h.walk.maskedReads.get() > reads && index.snapshot().byRef.get(ref).masked)
+                    && System.currentTimeMillis() < deadline) {
                 Thread.sleep(5);
             }
             assertTrue(h.walk.maskedReads.get() > reads, "the event asked for one re-judgement on a worker");
+            assertTrue(index.snapshot().byRef.get(ref).masked, "the re-judgement masked the entry");
             seq = h.ctx.events.lastSeq();
             browser.fire(ai.skillroy.testjava.agent.api.spi.web.WebEvent.console("log", "member 4711", null, 0));
             assertEquals(Harness.args("browser", ref, "level", "log", "text", "", "masked", Boolean.TRUE),
