@@ -2,7 +2,7 @@
   "planVersion": 7,
   "scenarioId": "device-scan-physical",
   "pack": "lending",
-  "packVersion": "0.6.0",
+  "packVersion": "0.7.0",
   "sourceHash": "sha256:8fdf26c815f48a2a86f9fdd4b0f32c7515364a08999472401dadb05b1ee22d05",
   "inference": "none",
   "requires": [

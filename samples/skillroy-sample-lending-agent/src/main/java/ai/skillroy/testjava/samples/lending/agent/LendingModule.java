@@ -107,7 +107,7 @@ public final class LendingModule implements AgentModule {
      * {@code 0.2.0} (Phase 7): {@link LendingRegions}, {@link LendingCaptureMask} and {@code LendingWidgets.describe};
      * the surface also grew since Phase 1 without a bump (the hooks catalogue's primitives and the waiver reads).
      */
-    public static final String VERSION = "0.2.0";
+    public static final String VERSION = "0.3.0";
 
     /** Capability: SQL through {@code data.query} on source {@code lending}. */
     static final String CAP_SQL = "lending.sql";

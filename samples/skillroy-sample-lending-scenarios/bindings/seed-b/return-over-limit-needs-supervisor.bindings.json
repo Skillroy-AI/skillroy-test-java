@@ -3,8 +3,8 @@
   "scenarioId": "return-over-limit-needs-supervisor",
   "envId": "seed-b",
   "pack": "lending",
-  "packVersion": "0.6.0",
-  "planHash": "sha256:64ad890acc90c7a867a92c0c98298173ffc136e06e555eda73f8a6bc0d10d2c5",
+  "packVersion": "0.7.0",
+  "planHash": "sha256:063f9a3e3f1115444e47c100eaf0a62b7fe7e1e593d9fe9ca2d8cc6f896f245b",
   "resolveHash": "sha256:c6e38817869ec85168c44703514bed09a40de7918d886e430bc471f1fc64195c",
   "env": {
     "fingerprint": "sha256:f13ef74b54cc11e3cdc4875b35119fe1c728e4121517cb91ed273b5ea5bb6cc5",

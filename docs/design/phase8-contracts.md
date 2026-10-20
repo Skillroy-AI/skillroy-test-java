@@ -3821,6 +3821,19 @@ catalogue's procedures line (`controller/skillroy-inference/src/test/resources/i
 procedures assertion). Nothing else: no image baseline, no live recording, no web host plan content beyond its
 version, no table or seed.
 
+**As built (Phase 8, step R, 2026-10-19).** Scenario D (`supervisor-return-llm-sql`, scenario A with the supervisor
+found by a model) gains the same `requires` entry `lending.returns.ceiling` as scenario A (D620, Q53 named A only):
+`PlansUpToDateTest.scenarioDsPlanIsScenarioAsWithTheSupervisorFoundByAModel` pins D's plan to A's but for the
+supervisor's strategy, so A's new entry made it red after the regeneration. D's tier (b) request does not carry the
+scenario's `requires` (the model's request is the slot's query, the catalogue and the allow-list), so its two live
+recordings are untouched; its plan and its two bindings files' `planHash` changed, `resolveHash` did not. The script
+ran its steps in the order 1, 2, 3, 5 (native), 4, 5 (image), 6: the image run of step 4 executes the scenario
+module's unit tests first, which need step 5's recordings. Results: the five goldens gain exactly the four ids of
+§2.4 (`lending.engine.view`, `lending.signOn`, `lending.scanChecked` OK; `lending.scanner.physical` UNAVAILABLE), no
+`allow-differences.json` change; `LendingEndToEndIT` green in the image on a Java 25 and a Java 8 target; the five
+session recordings replaced (five files), both exported heads and `session-vision-loan.*` regenerated; the lists at
+17 committed scenarios, 17 plans, 17 negatives.
+
 ---
 
 ## 13. Tests and acceptance

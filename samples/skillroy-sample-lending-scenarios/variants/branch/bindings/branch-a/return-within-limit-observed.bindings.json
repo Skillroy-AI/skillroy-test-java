@@ -3,8 +3,8 @@
   "scenarioId": "return-within-limit-observed",
   "envId": "branch-a",
   "pack": "lending",
-  "packVersion": "0.6.0+lending-branch@0.1.0",
-  "planHash": "sha256:6df1ad5af53f2b3b46cda52150bcd04a6c3bbac21b6375f8abc7303ba9704353",
+  "packVersion": "0.7.0+lending-branch@0.1.0",
+  "planHash": "sha256:a8c904a7cc6469b0e9e1adfd49ff90548ff49dde594afcf94fff26f546a27e5d",
   "resolveHash": "sha256:92157418e4f8e3a985388ec085107e2b8bd37233414aaf95222d9477b02f62e8",
   "env": {
     "fingerprint": "sha256:db90ae4d1408953ee10fd242072169bdfeb2878a1fc72a4ae49cbaccf8005b5f",

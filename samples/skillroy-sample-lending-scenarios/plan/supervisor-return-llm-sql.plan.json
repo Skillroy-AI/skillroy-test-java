@@ -2,8 +2,8 @@
   "planVersion": 7,
   "scenarioId": "supervisor-return-llm-sql",
   "pack": "lending",
-  "packVersion": "0.6.0",
-  "sourceHash": "sha256:ff627989ad82b1c7a67a25cc2bbd4dbccdb2a76b3551a9a1f431ea87a6dfe037",
+  "packVersion": "0.7.0",
+  "sourceHash": "sha256:b935aa6211a4e3b7fe7fe9eb5a17369e6a685aa72302fb58aefe01b1e55dde7a",
   "inference": "bind",
   "requires": [
     "lending.input",
@@ -13,6 +13,7 @@
     "lending.prompt",
     "lending.prompt.answer",
     "lending.slip",
+    "lending.returns.ceiling",
     "lending.access.check",
     "lending.deposit",
     "lending.limits",

@@ -2,7 +2,7 @@
   "planVersion": 7,
   "scenarioId": "loan-table-visual-check",
   "pack": "lending",
-  "packVersion": "0.6.0",
+  "packVersion": "0.7.0",
   "sourceHash": "sha256:80ca78c24bf78bc732123ddadde3e3430d9686719425c6036b2e3280d68145f2",
   "inference": "none",
   "requires": [

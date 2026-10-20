@@ -2,7 +2,7 @@
   "planVersion": 7,
   "scenarioId": "vision-live-only",
   "pack": "lending",
-  "packVersion": "0.6.0",
+  "packVersion": "0.7.0",
   "sourceHash": "sha256:e9249a573c9df009161611ce87d21cfaa8f335029d99921698f46c6a65266d35",
   "inference": "run",
   "requires": [],

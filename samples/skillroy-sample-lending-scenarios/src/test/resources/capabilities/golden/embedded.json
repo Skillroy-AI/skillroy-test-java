@@ -20,6 +20,11 @@
       "strategy": "snapshot",
       "reason": false
     },
+    "lending.engine.view": {
+      "state": "OK",
+      "strategy": "quiescent point",
+      "reason": false
+    },
     "lending.input": {
       "state": "OK",
       "strategy": "inbox",
@@ -48,6 +53,21 @@
     "lending.prompt.answer": {
       "state": "OK",
       "strategy": "snapshot",
+      "reason": false
+    },
+    "lending.scanChecked": {
+      "state": "OK",
+      "strategy": "inbox",
+      "reason": false
+    },
+    "lending.scanner.physical": {
+      "state": "UNAVAILABLE",
+      "strategy": null,
+      "reason": true
+    },
+    "lending.signOn": {
+      "state": "OK",
+      "strategy": "inbox",
       "reason": false
     },
     "lending.slip": {

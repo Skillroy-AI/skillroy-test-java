@@ -3,8 +3,8 @@
   "scenarioId": "borrow-2-waive-1-slip",
   "envId": "branch-a",
   "pack": "lending",
-  "packVersion": "0.6.0+lending-branch@0.1.0",
-  "planHash": "sha256:a2229250e3770656e1ca9b7bce49125fd4773742b5840ed85b41b465fb07eeda",
+  "packVersion": "0.7.0+lending-branch@0.1.0",
+  "planHash": "sha256:19c10b93d020bd3cab4a97e5bae97a6e2b43ed339c95091d3e4ac99b83494480",
   "resolveHash": "sha256:230844f8e74f7927167f534bc20a6abb1725b1eb9126c039e07207c2458e4b21",
   "env": {
     "fingerprint": "sha256:db90ae4d1408953ee10fd242072169bdfeb2878a1fc72a4ae49cbaccf8005b5f",

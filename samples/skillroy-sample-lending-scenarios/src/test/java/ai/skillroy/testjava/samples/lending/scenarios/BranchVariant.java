@@ -44,7 +44,7 @@ final class BranchVariant {
     /** The scenarios the variant runs (C's and D's recordings are keyed by prompt content: a live item, 13.4). */
     static final List<String> SCENARIOS = List.of(ScenarioB.ID, ScenarioA.ID, ScenarioE.ID);
     /** The overlaid pack's version, as the variant's plans record it. */
-    static final String PACK_VERSION = "0.6.0+lending-branch@0.1.0";
+    static final String PACK_VERSION = "0.7.0+lending-branch@0.1.0";
 
     private static URLClassLoader loader;
     private static DomainPack pack;

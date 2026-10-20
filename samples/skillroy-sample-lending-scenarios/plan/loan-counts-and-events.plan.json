@@ -2,7 +2,7 @@
   "planVersion": 7,
   "scenarioId": "loan-counts-and-events",
   "pack": "lending",
-  "packVersion": "0.6.0",
+  "packVersion": "0.7.0",
   "sourceHash": "sha256:ff74acbd6799c0b2cb3ea50cfc0bf09002f056221d6b2ad4598b1624aa96625d",
   "inference": "none",
   "requires": [

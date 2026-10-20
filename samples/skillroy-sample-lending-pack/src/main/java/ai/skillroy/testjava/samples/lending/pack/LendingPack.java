@@ -99,7 +99,7 @@ public final class LendingPack implements DomainPack {
      * phase7-contracts.md 12.3). {@code 0.7.0}: {@code capabilities()}, {@code warningCodes()}, {@code ackByInputId},
      * the three verbs and the suite-scoped database check (phase8-contracts.md 7, 9).
      */
-    public static final String VERSION = "0.6.0";
+    public static final String VERSION = "0.7.0";
     /**
      * The legend of the desk's icon-only and custom-painted controls for a model that looks at the screen
      * (phase7-contracts.md 12.3; BS12: a legend roughly halved the actions a toolset session needed). Plain text in the

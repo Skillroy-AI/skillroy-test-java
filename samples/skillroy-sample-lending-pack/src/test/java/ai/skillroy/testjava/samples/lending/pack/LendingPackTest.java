@@ -78,7 +78,7 @@ class LendingPackTest {
         assertEquals(1, packs.size());
         assertTrue(packs.get(0) instanceof LendingPack);
         assertEquals("lending", pack.id());
-        assertEquals("0.6.0", pack.version());
+        assertEquals("0.7.0", pack.version());
         assertEquals(new SyncPolicy("input.acked", List.of("input.requested", "prompt.waiting"),
                 List.of("prompt.waiting"), null, null, true), pack.syncPolicy(),
                 "acknowledgements correlated by inputId (phase8-contracts.md 7.4)");
@@ -379,7 +379,7 @@ class LendingPackTest {
                 """;
         Plan plan = PlanCompiler.compile(yaml.getBytes(StandardCharsets.UTF_8), "pack-check.yaml", pack);
         assertEquals("lending", plan.pack());
-        assertEquals("0.6.0", plan.packVersion());
+        assertEquals("0.7.0", plan.packVersion());
         List<Plan.Call> calls = plan.steps().stream().flatMap(s -> s.calls().stream()).toList();
         assertEquals(List.of("lending.input", "lending.input", "lending.input", "lending.input", "lending.input",
                 "sync.await", "lending.prompt.answer", "lending.input", "lending.input"),

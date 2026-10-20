@@ -75,7 +75,7 @@ class LendingModuleTest {
         FakeAgentContext ctx = new FakeAgentContext(null, LoadMode.JAVAAGENT);
         LendingModule module = new LendingModule();
         assertEquals("lending", module.id());
-        assertEquals("0.2.0", module.version());
+        assertEquals("0.3.0", module.version());
         assertEquals(Collections.emptySet(), module.requires());
         module.install(ctx);
         try {

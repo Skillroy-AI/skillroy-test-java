@@ -2,8 +2,8 @@
   "planVersion": 7,
   "scenarioId": "return-over-limit-needs-supervisor",
   "pack": "lending",
-  "packVersion": "0.6.0+lending-branch@0.1.0",
-  "sourceHash": "sha256:a90c88c3351dd6c604b49122d37f572b13ad3b4ab96da3297536136126709518",
+  "packVersion": "0.7.0+lending-branch@0.1.0",
+  "sourceHash": "sha256:258dd264f95899e45acb1eca9fbd253cfed5cd6c0c32bd0f7f782fb978e9ab3d",
   "inference": "none",
   "requires": [
     "lending.input",
@@ -13,6 +13,7 @@
     "lending.prompt",
     "lending.prompt.answer",
     "lending.slip",
+    "lending.returns.ceiling",
     "lending.access.check",
     "lending.deposit",
     "lending.limits",

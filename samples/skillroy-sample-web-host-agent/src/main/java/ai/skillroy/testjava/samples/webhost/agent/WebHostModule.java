@@ -68,7 +68,7 @@ public final class WebHostModule implements AgentModule {
     /** Module id. */
     public static final String ID = "webhost";
     /** Module version: {@code 0.2.0} (Phase 7 follow-up, gap 95) adds the optional {@link FrontCardMask}. */
-    public static final String VERSION = "0.2.0";
+    public static final String VERSION = "0.3.0";
     /** Tag of the seed for the browser in the front card. */
     public static final String TAG_FRONT = "front";
     /** Tag of the seed for the browser in the hidden back card. */

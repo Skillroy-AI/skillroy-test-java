@@ -3,8 +3,8 @@
   "scenarioId": "session-basic-loan",
   "envId": "seed-a",
   "pack": "lending",
-  "packVersion": "0.6.0",
-  "planHash": "sha256:eefa8660e08676b1990a47dc226814d2630e9021349edf09ac15ccd19cc91f5c",
+  "packVersion": "0.7.0",
+  "planHash": "sha256:150b76bc41014b331376d0dd072329581fce21b7fbeae7604fd5c89182b8366c",
   "resolveHash": "sha256:fb4cd2191bd7907dc157851c8270efdba83d7e35255d2e23f7b63ac2026c62cd",
   "env": {
     "fingerprint": "sha256:ba8e0fe3089ab50e4f708f73e42e1dd914456472429f1b67cfc538ad75f08944",

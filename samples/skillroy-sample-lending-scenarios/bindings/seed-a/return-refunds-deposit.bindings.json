@@ -3,8 +3,8 @@
   "scenarioId": "return-refunds-deposit",
   "envId": "seed-a",
   "pack": "lending",
-  "packVersion": "0.6.0",
-  "planHash": "sha256:092bf29a7f6cc0cfba0fc898c258ce6b476471ef084fa56e619bece2c7107218",
+  "packVersion": "0.7.0",
+  "planHash": "sha256:faf8dba3e6f56cc2a479d35616e7b4d6c47d6c8c91e39abce8529cb750d81fdd",
   "resolveHash": "sha256:831f5486f799f8e43e141896e718a897563be20521fdbf0ab13ca53e9777ccd1",
   "env": {
     "fingerprint": "sha256:ba8e0fe3089ab50e4f708f73e42e1dd914456472429f1b67cfc538ad75f08944",

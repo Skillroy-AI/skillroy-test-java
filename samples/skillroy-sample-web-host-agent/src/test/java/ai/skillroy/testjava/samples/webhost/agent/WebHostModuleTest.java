@@ -64,7 +64,7 @@ class WebHostModuleTest {
     @Test
     void installRegistersOneRegistryAdapterAndOneReadinessSourceAndNothingElse() {
         assertEquals("webhost", module.id());
-        assertEquals("0.2.0", module.version());
+        assertEquals("0.3.0", module.version());
         assertEquals(Collections.emptySet(), module.requires());
         module.install(ctx.context);
         assertEquals(2, ctx.spi.count());

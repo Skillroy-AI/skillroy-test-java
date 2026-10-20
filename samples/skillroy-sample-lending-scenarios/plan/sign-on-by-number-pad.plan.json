@@ -2,7 +2,7 @@
   "planVersion": 7,
   "scenarioId": "sign-on-by-number-pad",
   "pack": "lending",
-  "packVersion": "0.6.0",
+  "packVersion": "0.7.0",
   "sourceHash": "sha256:f0c4975707c67a10bd44aa8b6d75e77e6b1e5cf2da9ee181a9d0d2fdd06b0f4f",
   "inference": "none",
   "requires": [

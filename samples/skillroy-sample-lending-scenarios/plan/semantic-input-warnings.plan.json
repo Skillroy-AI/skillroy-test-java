@@ -2,7 +2,7 @@
   "planVersion": 7,
   "scenarioId": "semantic-input-warnings",
   "pack": "lending",
-  "packVersion": "0.6.0",
+  "packVersion": "0.7.0",
   "sourceHash": "sha256:1528f4dfafdb589ba9449104810f0567090b6a93c8cc816ceb1b10f199fbd55b",
   "inference": "none",
   "requires": [

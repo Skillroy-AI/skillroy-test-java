@@ -2,7 +2,7 @@
   "planVersion": 7,
   "scenarioId": "scan-checked",
   "pack": "lending",
-  "packVersion": "0.6.0",
+  "packVersion": "0.7.0",
   "sourceHash": "sha256:be4be9dbcb51f6cedcb3b64e00b2814119a14e3ad59b7c857f1015cf2234a9e3",
   "inference": "none",
   "requires": [
