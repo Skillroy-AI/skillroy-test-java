@@ -40,7 +40,9 @@ a release note, its fix recorded as gap 151). The decisions of the build, the in
 D643-D810, **B39**; the delta review's sign-off is **B40**; both wait for the owner with B38, and the built behaviour
 stands on them meanwhile, as Phase 6 and Phase 7 stood on B26-B27 and B29-B30. The native reactor on `bdafc52`: 5,861
 tests, 0 failures, 0 errors, 704 skipped (JDK 25, headless). One arm64 round of the Linux matrix on `f67402c`, before
-the fix wave, was green on every leg; the matrix of the final tree is "Phase 8 matrix" below. Nothing in Phase 8
+the fix wave, was green on every leg; the matrix of the final tree (`bdafc52`: arm64 twice, amd64 once) is green, eight
+of nine legs at the first attempt and the amd64 Java 8 test-JVM leg after two test-side race fixes (`cbaae18`; "Phase 8
+matrix" below). Nothing in Phase 8
 needed a model key, and none of its commits is pushed (the remote's `main` is at `fcfb8dc`).
 
 **Phase 1 is built and verified on the two gates of B3 and B4: a Java 8 target and a Java 25 target.** On 2026-10-02 the
@@ -2844,17 +2846,27 @@ is the round run on `f67402c`, after step R and before the fix wave, while the r
 | Round | Java 25 targets (whole reactor, `-Pjcef`, `clean verify`) | Java 8 targets (`-Pjcef`) | Java 8 test JVM (the agent side) |
 |---|---|---|---|
 | arm64, before the fix wave (on `f67402c`) | 6,105 / 0 / 0 / 154 (1,193 s) | 6,105 / 0 / 0 / 214 (1,085 s) | 2,235 / 0 / 0 / 30 (313 s) |
-| arm64 r1 (on `bdafc52`) | *(to be filled)* | *(to be filled)* | *(to be filled)* |
-| arm64 r2 (on `bdafc52`) | *(to be filled)* | *(to be filled)* | *(to be filled)* |
-| amd64 r1 (emulated, `FORK` launch, on `bdafc52`) | *(to be filled)* | *(to be filled)* | *(to be filled)* |
+| arm64 r1 (on `bdafc52`) | 6,205 / 0 / 0 / 154 (1,180 s) | 6,205 / 0 / 0 / 214 (1,101 s) | 2,307 / 0 / 0 / 30 (326 s) |
+| arm64 r2 (on `bdafc52`) | 6,205 / 0 / 0 / 154 (1,173 s) | 6,205 / 0 / 0 / 215 (1,105 s) | 2,307 / 0 / 0 / 30 (327 s) |
+| amd64 r1 (emulated, `FORK` launch, on `bdafc52`) | 6,205 / 0 / 0 / 154 (1,759 s) | 6,205 / 0 / 0 / 214 (1,551 s) | **2,273 / 1 / 0 / 30** (466 s; `LaneTest`, a test-side race, below) |
+| amd64, the Java 8 test-JVM leg again (on `42f3727`, then `cbaae18`) | – | – | `42f3727`: 2,307 / 0 / 0 / 30, then **2,203 / 1 / 0 / 11** (`MaskedBrowserTest`, a test-side race, below); `cbaae18`: 2,307 / 0 / 0 / 30 twice |
 
 The round on `f67402c` was green on every leg at the first attempt. Its Java 8 test-JVM leg printed three `Exception in thread
 "AWT-EventQueue-0"` lines with no stack at JCEF's shutdown; a web host module run on a Java 8 test JVM at `v0.1.0` prints the
-same three (checked 2026-10-20), so they are not Phase 8's. *(The orchestrator completes this section with the final rounds.)*
+same three (checked 2026-10-20), so they are not Phase 8's. The final rounds (2026-10-20, 02:42-05:12, then the reruns to
+06:45) were green on eight of nine legs at the first attempt, every named check green (`CapabilityGoldenTest` 4/0/0/0 with
+the four new ids, `PlansUpToDateTest` 11, `BindingsUpToDateTest` 10, `ScenarioSchemaCommittedTest` 6, `WebHostEndToEndIT`
+136 / 0 / 0 / 15 on Java 25 and 136 / 0 / 0 / 75 on Java 8 targets). The ninth, the emulated amd64 Java 8 test-JVM leg,
+found two test-side races, each fixed in the test only and each a wait that read a value one step too early:
+`LaneTest.laneAndQuiescentPrimitivesGoThroughTheDispatcherWithTheAbandonedCallGate` waited for the dispatcher's
+abandoned-call entry, while the lane's own counts clear a moment later on the lane's thread (`42f3727`: the wait covers
+both); `MaskedBrowserTest.aBrowserThatBecomesMaskedStopsSendingPageDataWithoutACall` (S172's test) waited for the
+re-judgement's read to start, while the entry's flag is written after it (`cbaae18`: the wait reads the flag). Both pass
+three native runs, and the leg is green twice on `cbaae18`; the later commits change documentation only.
 
 **Status of the checklist.** The build, the integration, step R, the code review, the security delta review and the fix wave
-are done and ticked below; the documentation pass is done. Open: the matrix of the final tree (the table above), and the
-owner's B38, B39 and B40. The Exit item stays unticked until both are in.
+are done and ticked below; the documentation pass is done. The matrix of the final tree is green (the table above, 2026-10-20).
+Open: the owner's B38, B39 and B40. The Exit item stays unticked until B40 is signed (P8 §14).
 
 - [x] The second domain's wave 1 recorded in "Open SPI and DSL gaps" (`aaed619`, 2026-10-19: rows 105-125 and the evidence in
   rows 9-13, 18-22, 24, 28 and 29)
@@ -2894,8 +2906,9 @@ owner's B38, B39 and B40. The Exit item stays unticked until both are in.
   map in the session notes), the two tags' passages of one section merged into one text, the index of A67-A99, gaps 151-155,
   `SECURITY.md` (S157, S180's release note), `DECISIONS.md` (B39, B40), `threat-model.md`, `README.md` and this file brought to
   as-built
-- [ ] The Linux matrix of the final tree (`bdafc52`: arm64 twice, amd64 once, the `jcef` profile, the Robot, tools, scanner and
-  small-ring legs once per target Java), recorded under "Phase 8 matrix" above
+- [x] The Linux matrix of the final tree (`bdafc52`: arm64 twice, amd64 once, the `jcef` profile, the Robot, tools, scanner and
+  small-ring legs once per target Java), recorded under "Phase 8 matrix" above: **green 2026-10-20**, eight of nine legs at
+  the first attempt, the amd64 Java 8 test-JVM leg green twice on `cbaae18` after two test-side race fixes
 - [x] The design overview's roadmap row 8 with P8 §14's criteria (added by the documentation pass, 2026-10-20)
 - [ ] **Exit** (`phase8-contracts.md` §14), item by item (each met by the checks that ran in the packages' and fixers' image
   legs and in the arm64 round on `f67402c`; the matrix of the final tree and the owner's B40 tick the whole item):
@@ -3428,7 +3441,8 @@ The review items of the end-to-end review, now decided (gap numbers refer to the
 7. **Phase 8 is specified, built, code-reviewed, security-reviewed (delta) and fixed** (2026-10-19/20,
    `design/phase8-contracts.md` as built) in seven packages (EA, ET, EW, EH, ES, EX, EP), an integrator (EI), step R and one
    fix wave of five (FA-FE), merged into `main` up to `bdafc52`; nothing pushed. In this order: (a) the Linux matrix of the
-   final tree (`bdafc52`: arm64 twice, amd64 once, every leg; "Phase 8 matrix"); (b) for the owner: B38, B39 and B40
+   final tree (`bdafc52`: arm64 twice, amd64 once, every leg; "Phase 8 matrix"): **green 2026-10-20** (the amd64 Java 8
+   test-JVM leg after two test-side race fixes, `cbaae18`); (b) for the owner: B38, B39 and B40
    (`B38 ok, B39 ok, B40 ok`, or a veto in the forms recorded there; S180's acceptance comes with B40); (c) the design
    overview's roadmap row 8 with P8 §14's criteria (done 2026-10-20); (d) **the push** of Phase 8, on the owner's word; (e) the second domain's
    layer moved onto the new SPIs outside this repository, whose findings are the base's next input. Open from the contract,
