@@ -40,8 +40,17 @@ import java.util.regex.PatternSyntaxException;
  * a string with a superfluous leading zero ({@code "0100"}) is text, not a number.
  * When the path does not resolve, only {@code exists} (and {@code not} of it, or an {@code anyOf} holding one) can
  * hold. Every {@code matches} search of one top-level evaluation, nested ones included, shares one {@link SafeRegex}
- * budget (about a second, no stack overflow; phase8-contracts.md 8.4, D599): a search it stops is a failed outcome with
- * the reason, and every later {@code matches} of the same evaluation fails at once ("regex budget spent").
+ * budget (about a second, no stack overflow; phase8-contracts.md 8.4, D599).
+ *
+ * <p>Three outcomes (Phase 8 security fix S149, FC): an evaluation holds, fails, or is <b>undecided</b>. A
+ * {@code matches} that a bound stops (the budget spent, a text over 1 Mi characters, a regex recursing too deeply, a
+ * regex a reference made that does not compile) is undecided, never "no match": {@code not} of undecided is undecided;
+ * {@code anyOf} holds when an alternative holds, else is undecided when one was; a {@code containsWhere} element fails
+ * when a field fails, else is undecided when a field was, and the list holds when an element holds, else is undecided
+ * when one was; {@code size} passes it on. An undecided outcome never holds, and its expectation ends
+ * {@code ERROR / ENVIRONMENT} at the step's timeout. A path that resolved ambiguously, that a bound stopped or that met
+ * a secret ({@link #evaluate(Object, ExpectationPath.Resolution)}) holds no matcher at all. A reason names the kind of a
+ * value that a matcher cannot take, never the value (S176), and quotes a {@code not}'s matcher cut (S150).
  *
  * <p>Stateless; safe from any thread.
  */
@@ -63,14 +72,33 @@ final class Matchers {
     /** How long an {@code anyOf} failure's reason may grow. */
     static final int MAX_ANY_OF_REASON = 2000;
 
+    /**
+     * How much of a matcher a reason quotes (Phase 8 security fix S150): a substituted operand ({@code $before.all})
+     * may hold a captured list, which a reason, a step's message and the JUnit report would otherwise copy whole.
+     */
+    static final int MAX_QUOTED_MATCHER = 300;
+
     /** A {@code containsWhere} field: a dotted relative path, as a {@code CaptureSpec} payload path. */
     private static final Pattern WHERE_FIELD = Pattern.compile("[A-Za-z0-9_]+(\\.[A-Za-z0-9_]+)*");
 
     private Matchers() {
     }
 
-    /** The result of one evaluation; {@code reason} explains a failure. */
-    record Outcome(boolean holds, String reason) {
+    /**
+     * The result of one evaluation; {@code reason} explains a failure; {@code undecided} when a bound stopped it
+     * (Phase 8 security fix S149): it does not hold, and no negation turns it into a hold.
+     */
+    record Outcome(boolean holds, String reason, boolean undecided) {
+
+        /** A decided outcome. */
+        Outcome(boolean holds, String reason) {
+            this(holds, reason, false);
+        }
+
+        /** An undecided outcome with its reason. */
+        static Outcome undecidedBecause(String reason) {
+            return new Outcome(false, reason, true);
+        }
     }
 
     /** Why no matcher holds on a value that holds a secret ({@link #maskedSecret}). */
@@ -81,7 +109,9 @@ final class Matchers {
      * The rule of a check on a secret (phase5-contracts.md 12.2): when {@code mask} changes a value, the value holds a
      * secret and satisfies no matcher, since {@code matches}, {@code contains} and the comparisons would otherwise
      * rebuild it one character at a time. Used by a session's checks always and by a run's expectations and
-     * stored-row checks with {@link RunOptions#expectationsOnMaskedValues()}.
+     * stored-row checks with {@link RunOptions#expectationsOnMaskedValues()}. A path's value is judged on the fact's
+     * {@link FactView} instead (Phase 8 security fix S173: the marker it holds is the secret); this rule stays the
+     * stored-row checks'.
      *
      * @return the value as the mask leaves it when the mask changes it (what a check reports as its actual), else null
      */
@@ -317,6 +347,20 @@ final class Matchers {
     }
 
     /**
+     * Evaluates a matcher on a path's resolution (Phase 8 security fixes S149, S154, S173): a path that met a secret
+     * on a fact's view holds no matcher ({@link #HOLDS_A_SECRET}); an ambiguous single filter holds none (FAIL); a path
+     * a bound stopped holds none and is undecided (ERROR); else as {@link #evaluate(Object, boolean, Object, String)}.
+     */
+    static Outcome evaluate(Object matcher, ExpectationPath.Resolution resolution) {
+        return switch (resolution.state()) {
+            case SECRET -> new Outcome(false, HOLDS_A_SECRET + " (" + resolution.problem() + ")");
+            case AMBIGUOUS -> new Outcome(false, "the path is ambiguous: " + resolution.problem());
+            case UNDECIDABLE -> Outcome.undecidedBecause("the path could not be decided: " + resolution.problem());
+            default -> evaluate(matcher, resolution.resolved(), resolution.value(), resolution.problem());
+        };
+    }
+
+    /**
      * Evaluates a matcher in normal form (anything else is treated as equality), with one regex budget for every
      * {@code matches} inside it (phase8-contracts.md 8.4, D599).
      *
@@ -351,8 +395,11 @@ final class Matchers {
                 return new Outcome(false, "the path did not resolve: " + problem);
             }
             Outcome inner = evaluate(expected, resolved, actual, problem, budget);
+            if (inner.undecided()) {
+                return Outcome.undecidedBecause("'not' could not be decided: " + inner.reason());
+            }
             return inner.holds()
-                    ? new Outcome(false, "expected not " + Values.safeWrite(expected) + " but was "
+                    ? new Outcome(false, "expected not " + Values.brief(expected, MAX_QUOTED_MATCHER) + " but was "
                             + Values.brief(actual, 200))
                     : new Outcome(true, null);
         }
@@ -388,18 +435,22 @@ final class Matchers {
             return new Outcome(false, "'" + ANY_OF + "' needs a list of matchers, found " + count(expected));
         }
         StringBuilder reasons = new StringBuilder();
+        boolean undecided = false;
         for (Object alternative : alternatives) {
             Outcome outcome = evaluate(alternative, resolved, actual, problem, budget);
             if (outcome.holds()) {
                 return new Outcome(true, null);
             }
+            undecided |= outcome.undecided();
             if (reasons.length() > 0) {
                 reasons.append("; ");
             }
             reasons.append(cut(String.valueOf(outcome.reason()), MAX_ALTERNATIVE_REASON));
         }
-        return new Outcome(false, cut("none of the " + alternatives.size() + " alternatives holds: " + reasons,
-                MAX_ANY_OF_REASON));
+        String reason = cut((undecided ? "no alternative holds and not all of the " + alternatives.size()
+                + " could be decided: " : "none of the " + alternatives.size() + " alternatives holds: ") + reasons,
+                MAX_ANY_OF_REASON);
+        return undecided ? Outcome.undecidedBecause(reason) : new Outcome(false, reason);
     }
 
     /**
@@ -410,31 +461,48 @@ final class Matchers {
     private static Outcome containsWhere(Object actual, Object expected, SafeRegex.Budget budget) {
         if (!(actual instanceof List<?> list)) {
             return new Outcome(false, "'" + CONTAINS_WHERE + "' needs a list, but the value is "
-                    + ScenarioLoader.describe(actual));
+                    + Values.kind(actual));
         }
         if (!(expected instanceof Map<?, ?> fields) || fields.isEmpty()) {
             return new Outcome(false, "'" + CONTAINS_WHERE + "' needs a mapping of fields to matchers, found "
                     + count(expected));
         }
+        String undecided = null;
+        int undecidedElements = 0;
         for (Object element : list) {
             if (!(element instanceof Map<?, ?>)) {
                 continue;
             }
-            boolean all = true;
+            // An element fails when a field fails, in the matcher's order (so a decided field written first spares
+            // the rest); else it is undecided when a field was; else it holds.
+            boolean fails = false;
+            String elementUndecided = null;
             for (Map.Entry<?, ?> field : fields.entrySet()) {
                 String name = String.valueOf(field.getKey());
                 Object[] value = fieldValue(element, name);
                 Outcome outcome = value == null
                         ? evaluate(field.getValue(), false, null, "no field '" + name + "'", budget)
                         : evaluate(field.getValue(), true, value[0], null, budget);
-                if (!outcome.holds()) {
-                    all = false;
+                if (outcome.undecided()) {
+                    elementUndecided = elementUndecided == null ? name + ": " + outcome.reason() : elementUndecided;
+                } else if (!outcome.holds()) {
+                    fails = true;
                     break;
                 }
             }
-            if (all) {
+            if (fails) {
+                continue;
+            }
+            if (elementUndecided == null) {
                 return new Outcome(true, null);
             }
+            undecidedElements++;
+            undecided = undecided == null ? elementUndecided : undecided;
+        }
+        if (undecided != null) {
+            return Outcome.undecidedBecause(cut("no element of the list of " + list.size() + " matches "
+                    + Values.brief(expected, 300) + ", and " + undecidedElements + " could not be decided: "
+                    + undecided, MAX_ANY_OF_REASON));
         }
         return new Outcome(false, "no element of the list of " + list.size() + " matches "
                 + Values.brief(expected, 300));
@@ -487,33 +555,34 @@ final class Matchers {
             return new Outcome(false, "expected text containing " + Values.brief(expected, 200) + " but was "
                     + Values.brief(actual, 300));
         }
-        return new Outcome(false, "'contains' needs a string or a list, but the value is "
-                + ScenarioLoader.describe(actual));
+        return new Outcome(false, "'contains' needs a string or a list, but the value is " + Values.kind(actual));
     }
 
     private static Outcome matches(Object actual, Object expected, SafeRegex.Budget budget) {
         if (!isScalar(actual)) {
-            return new Outcome(false, "'matches' needs a scalar, but the value is " + ScenarioLoader.describe(actual));
+            return new Outcome(false, "'matches' needs a scalar, but the value is " + Values.kind(actual));
         }
         Pattern pattern;
         try {
             pattern = Pattern.compile(Values.stringOf(expected));
         } catch (PatternSyntaxException e) {
-            return new Outcome(false, "bad regex " + Values.brief(expected, 200) + ": " + e.getDescription());
+            // A regex a reference made (a literal one is checked at compile): it cannot decide (S149).
+            return Outcome.undecidedBecause("bad regex " + Values.brief(expected, 200) + ": " + e.getDescription());
         }
         if (budget.expired()) {
-            return new Outcome(false, "'matches' /" + Values.stringOf(expected) + "/: regex budget spent (one budget"
-                    + " of " + budget.millis() + " ms for every regex of this matcher)");
+            return Outcome.undecidedBecause("'matches' /" + cut(Values.stringOf(expected), 200) + "/: regex budget"
+                    + " spent (one budget of " + budget.millis() + " ms for every regex of this matcher)");
         }
         boolean found;
         try {
             found = SafeRegex.find(pattern, Values.stringOf(actual), budget);
         } catch (SafeRegex.Rejected e) {
-            return new Outcome(false, "'matches' /" + Values.stringOf(expected) + "/: " + e.getMessage());
+            return Outcome.undecidedBecause("'matches' /" + cut(Values.stringOf(expected), 200) + "/: "
+                    + e.getMessage());
         }
         return found
                 ? new Outcome(true, null)
-                : new Outcome(false, "expected a match for /" + Values.stringOf(expected) + "/ but was "
+                : new Outcome(false, "expected a match for /" + cut(Values.stringOf(expected), 200) + "/ but was "
                         + Values.brief(actual, 300));
     }
 
@@ -565,11 +634,11 @@ final class Matchers {
             n = s.length();
         } else {
             return new Outcome(false, "'size' needs a list, a map or a string, but the value is "
-                    + ScenarioLoader.describe(actual));
+                    + Values.kind(actual));
         }
         if (expected instanceof Map) {
             Outcome inner = evaluate(expected, true, n, null, budget);
-            return inner.holds() ? inner : new Outcome(false, "size " + n + ": " + inner.reason());
+            return inner.holds() ? inner : new Outcome(false, "size " + n + ": " + inner.reason(), inner.undecided());
         }
         return Values.equal(n, expected)
                 ? new Outcome(true, null)

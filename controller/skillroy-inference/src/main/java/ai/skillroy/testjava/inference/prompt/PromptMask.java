@@ -21,6 +21,7 @@ import ai.skillroy.testjava.data.SecretMask;
 import ai.skillroy.testjava.inference.spi.Content;
 import ai.skillroy.testjava.protocol.SecretKeys;
 import ai.skillroy.testjava.protocol.sql.Rows;
+import ai.skillroy.testjava.protocol.text.SecretPairs;
 import ai.skillroy.testjava.scenario.Images;
 import ai.skillroy.testjava.scenario.resolve.SqlAllowList;
 
@@ -32,7 +33,6 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
@@ -334,92 +334,13 @@ public final class PromptMask {
     }
 
     /**
-     * The value of every {@code key: value} or {@code key=value} run whose key holds a secret word, replaced. Linear in
-     * the text: each secret word found is widened to its key token, and the separator and the value are read by hand
-     * (a regular expression with a free prefix before the word backtracks quadratically on a long run of letters).
+     * The value of every {@code key: value} or {@code key=value} run whose key holds a secret word, replaced: the
+     * shared rule of {@link SecretPairs} with this mask's keys ({@link #secretKey}), linear in the text. Phase 8
+     * security fix S175 (FC): a JSON text inside a JSON text (escaped quotes) and an object or a list value are
+     * replaced too, the value whole and in its key's quote form.
      */
     private String keyRule(String text) {
-        Matcher word = keyPattern.matcher(text);
-        StringBuilder out = null;
-        int copied = 0;
-        int from = 0;
-        while (from < text.length() && word.find(from)) {
-            int keyEnd = word.end();
-            while (keyEnd < text.length() && keyChar(text.charAt(keyEnd))) {
-                keyEnd++;
-            }
-            int i = keyEnd;
-            if (i < text.length() && (text.charAt(i) == '"' || text.charAt(i) == '\'')) {
-                i++;
-            }
-            i = skipSpaces(text, i);
-            if (i >= text.length() || (text.charAt(i) != ':' && text.charAt(i) != '=')) {
-                from = Math.max(keyEnd, word.start() + 1);
-                continue;
-            }
-            int valueStart = skipSpaces(text, i + 1);
-            int valueEnd = valueEnd(text, valueStart);
-            if (valueEnd <= valueStart) {
-                from = Math.max(keyEnd, word.start() + 1);
-                continue;
-            }
-            char first = text.charAt(valueStart);
-            String replacement = first == '"' ? "\"" + REDACTED + "\"" : first == '\'' ? "'" + REDACTED + "'"
-                    : REDACTED;
-            if (out == null) {
-                out = new StringBuilder(text.length());
-            }
-            out.append(text, copied, valueStart).append(replacement);
-            copied = valueEnd;
-            from = valueEnd;
-        }
-        if (out == null) {
-            return text;
-        }
-        return out.append(text, copied, text.length()).toString();
-    }
-
-    private static boolean keyChar(char c) {
-        return Character.isLetterOrDigit(c) || c == '_' || c == '.' || c == '-';
-    }
-
-    private static int skipSpaces(String text, int i) {
-        while (i < text.length() && Character.isWhitespace(text.charAt(i))) {
-            i++;
-        }
-        return i;
-    }
-
-    /** The end of a quoted value (after its closing quote, escapes honoured) or of a bare run. */
-    private static int valueEnd(String text, int start) {
-        if (start >= text.length()) {
-            return start;
-        }
-        char q = text.charAt(start);
-        if (q == '"' || q == '\'') {
-            int i = start + 1;
-            while (i < text.length()) {
-                char c = text.charAt(i);
-                if (c == '\\') {
-                    i += 2;
-                    continue;
-                }
-                if (c == q) {
-                    return i + 1;
-                }
-                i++;
-            }
-            return text.length();
-        }
-        int i = start;
-        while (i < text.length()) {
-            char c = text.charAt(i);
-            if (Character.isWhitespace(c) || ",;&}])\"'".indexOf(c) >= 0) {
-                break;
-            }
-            i++;
-        }
-        return i;
+        return SecretPairs.redact(text, this::secretKey);
     }
 
     /**

@@ -2790,8 +2790,33 @@ root     := [A-Za-z_][A-Za-z0-9_-]*                      -- unchanged
 - **Sessions** (`skillroy_check`, `skillroy_session_check`, `ExecutorSession.fact`): the same parser, so the forms work
   there unchanged (`S/ExecutorSession.java:1226`, `:1319`).
 
-Failure path: a path that does not resolve fails its matcher as today (only `exists`/`not` can hold); a regex that runs out
-of budget leaves the path unresolved with the reason (`:273-275`); both end at the step timeout as `FAIL / ASSERTION`.
+Failure path: a path that does not resolve fails its matcher as today (only `exists`/`not` can hold) and ends at the step
+timeout as `FAIL / ASSERTION`. *(Phase 8 security fix, S149, FC; this sentence replaces "a regex that runs out of budget
+leaves the path unresolved with the reason; both end at the step timeout as `FAIL / ASSERTION`", which a `not` and
+`exists: false` read as an absence.)* A filter regex that a bound stops (the budget, a subject over 1 Mi characters, the
+recursion catch) or that a `$slot` reference made uncompilable leaves the path **undecidable**, never unresolved: no
+matcher holds on it, `exists: false` and every `not` included, and the expectation ends at the step timeout as
+`ERROR / ENVIRONMENT` "expectation could not be decided: <path> <matcher>: the path could not be decided: regex in
+[…]: …" (a session's check answers `held: false` with that reason; `captureFacts` ends `ERROR / ENVIRONMENT`).
+
+**Phase 8 security fixes, S154, S176, S173 (FC).** *Ambiguous (S154).* A single filter that matches several elements no
+longer leaves the path merely unresolved: it is **ambiguous** ("2 elements of events match [topic=x]; a single filter
+needs exactly one (count with [*…] and size)"), on which no matcher holds, `{exists: false}`, `{not: {exists: true}}`
+and an `anyOf` holding one included (`FAIL / ASSERTION` "the path is ambiguous: …"), so "none" is no longer told from
+"two" by a pass; zero matches stay unresolved, and the list form with `{size: 0}` stays the way to say "none". This is a
+behaviour change at every plan version (§8.11 item 8). *Kinds only (S176).* A path that stops at a value names the
+value's kind (`a string`, `a number`, `true`/`false`, `null`, `a mapping`, `a list`), never the value: "cannot take
+field 'x' of state.pin (a number)", "… is not a list (a string)". *On the fact's view (S173).* Where the masked-value
+rule applies (a session always; a run with `RunOptions.expectationsOnMaskedValues()`, P5 §12.2), a path is followed on
+the fact **as the mask leaves it** (`FactView`: the fact's JSON form through the run's or the session's `SecretMask`,
+then the key rule of the model-facing mask, a map entry whose key `SecretKeys.looksSecret` names becoming `<redacted>`
+and a secret-keyed pair inside a text replaced by `SecretPairs`, uncut), so that no filter, regex, index, `[json]` or
+`size` ever reads a value the mask changes: a filter whose field holds the marker `<redacted>` on any element of the
+list answers "holds a secret" before anything is compared or searched (no matcher holds: `HOLDS_A_SECRET`), the same
+for every guess and in the same time, and a resolved value that holds the marker anywhere is a secret
+(`HOLDS_A_SECRET`; the marker counts as a secret, `equals: "<redacted>"` and `matches: "^<red"` included). `fact`,
+`observe` (`skillroy_facts`, `skillroy_observe`, the MCP tools) read the same view. A person's run (the option off) is
+evaluated on the values as read, as before.
 
 **As built (Phase 8, EX).** `ExpectationPath.Filter` keeps a three-argument constructor for the single form;
 `fieldPath()` splits the field at `.` when asked, and the parser refuses an empty part ("empty part in the filter field
@@ -2827,6 +2852,23 @@ out fails with the existing reason, and every later `matches` of the same evalua
 spent". P1 §8.4's "one budget per matcher evaluation" then reads literally (A93). The path's own budget (§8.3) stays
 separate: at most 2 s of regex per expectation per attempt.
 
+**Three outcomes (Phase 8 security fix, S149, FC).** An evaluation holds, fails or is **undecided**; this replaces "a
+`matches` that runs out fails with the existing reason" above, which every negation read as "no match". A `matches`
+that a bound stops (the budget spent, the subject over
+1 Mi characters, the recursion catch, a regex a `$slot` reference made that does not compile) is undecided, never "no
+match". `not` of undecided is undecided (so no number of `not`s flips it); `anyOf` holds when an alternative holds,
+else is undecided when one was ("no alternative holds and not all of the N could be decided: …"); a `containsWhere`
+element fails when one of its fields fails, in the matcher's order (so `topic: loan.posted` written first spares the
+regex of an element of another topic), else is undecided when a field was, and the list holds when an element holds,
+else is undecided when an element was; `size` passes it on. An undecided outcome never holds; a run's expectation and a
+session `expect` step whose last attempt is undecided end `ERROR / ENVIRONMENT` "expectation could not be decided: …",
+a stored-row check's "db check could not be decided: …", a session's check answers `held: false`. A path that is
+ambiguous (§8.3) fails every matcher, a path that is undecidable makes every matcher undecided, a path that met a secret
+holds none (`Matchers.evaluate(matcher, Resolution)`). *(S150.)* A `not`'s reason quotes its matcher cut at 300
+characters (`Values.brief`), and so does a step's message ("expectation failed: <path> <matcher, cut at 300>: …"), since
+a substituted operand (`{not: {in: $before.ids}}`) can hold a captured list; a reason names the kind of a value a
+matcher cannot take, never the value (S176).
+
 **As built (Phase 8, EX).** `Matchers.evaluate(matcher, resolved, actual, problem)` starts one `SafeRegex.Budget` and
 calls a package-private overload taking the budget (the tests pass a small one); a `matches` on a spent budget fails at
 once with "'matches' /<regex>/: regex budget spent (one budget of 1000 ms for every regex of this matcher)". `anyOf`'s
@@ -2846,6 +2888,14 @@ characters"), or is not JSON ("… is not JSON: <JsonException message>"). Sever
 (each bounded). A plain regex on the text (`[*payload.value~"qty":2]`) works without it. The segment is a free token today
 (`[json]` is "neither an index nor a filter", `:132-135`), so an old reader refuses it; the version 7 gate names it (§8.2).
 Not in Phase 8: a `json: matcher` matcher form (it cannot be followed by segments; D601).
+
+**Phase 8 security fixes, S149, S174, S176 (FC).** A string over 1 Mi characters and a text nested deeper than 200
+make the path **undecidable** (§8.3, §8.4: no matcher holds, the expectation ends `ERROR / ENVIRONMENT`), never "not
+there"; a text that is simply not JSON leaves it unresolved, its reason "<walked> is not JSON (at offset N)", never the
+character the parser stopped at; a value that is not a string is named by its kind ("… is not a string (a number)").
+Where the masked-value rule applies (§8.3) `[json]` parses the text of the fact's view and the parsed value passes the
+view again before the path goes on, so that a key the text held meets the key rule as a map key:
+`events[topic=api.response].payload.body[json].password` reads `<redacted>`, which no matcher holds.
 
 **As built (Phase 8, EX).** The segment is `ExpectationPath.JsonText`; `[ json ]` is the segment too (an index's spaces
 are stripped as before). The reasons read "<walked> is not a string (…)", "<walked> is longer than 1048576 characters"
@@ -2886,6 +2936,15 @@ engine thread carry none). Single filters work too: `events[topic=loan.posted].p
 
 **Scope (D603).** The agent's bus only. A CDP path's own events (a separate sequence, `S/WebRun.java`) are not in the root
 in Phase 8 (gap 146); a scenario on a non-agent web path asserts on them through the web verbs' `await` as before.
+
+**Phase 8 security fix, S151 (FC; D602 extended).** The read also **fails** when an event of the window carries
+`truncated: true` at its payload's root: the ring cut it at publish (§5.1's scalar budget, D541, or the character bound
+`eventRingChars`, S43) or its module did (a long `web.console` text), so the payload is not what was published and a
+count or a negation over it cannot be exact ("fact 'events' could not be read: event N (topic) was cut at publish
+(truncated: true); a check over the window cannot be exact: publish smaller payloads or raise the agent option
+eventRingChars"). Restrictive: a module's own top-level `truncated` key, and one long console line in the window, make
+every `events` expectation of the run `ERROR`; the alternative (only a check that reads into a cut payload undecided)
+is the veto form, `D-FC-3` in the fix report.
 
 **As built (Phase 8, EX).** `BaseFacts.events(LongSupplier)` is public (§10's table) and `BaseFacts.all()` gives eight
 providers. Each page is checked whole: besides the first page's `oldestSeq`, every event's `seq` must be the previous
@@ -2955,6 +3014,18 @@ facts unless the pack has a root `events` (`PlanExecutor.packEventsRoot`), and a
 - **Replay.** No model; the verb reads the agent only.
 - **Timing.** A capture happens where the step stands; place it after a sync point (a `READY` step, a `waitFor`) when the
   count must include a late event (§8.8).
+
+**Phase 8 security fixes, S173, S177, S150, S149, S176 (FC).** Where the masked-value rule applies (D605: a session
+always, a run with `expectationsOnMaskedValues`) each path is followed on the fact's view (§8.3), and a value that holds
+the marker, or a path that met it in a filter, fails the step `FAIL / ASSERTION` with `HOLDS_A_SECRET` **before** a
+`size` is measured or its failure written, so neither a secret's length nor a count a filter over a secret made is
+ever captured. A plain path's value whose JSON text is longer than **65,536 characters** (estimated as
+`TextBounds.size` estimates, never under-counting a string) fails `FAIL / ASSERTION` "captureFacts s.f: the value is
+too large to capture (more than 65536 characters of JSON, a list of N); capture its size or a field": a slot exists to
+feed an operand, and the `capture` record, `bindings.json`'s `captured`, every matcher that substitutes it and every
+message that quotes that matcher would copy it. A path a bound stopped (undecidable, §8.3, §8.5) ends `ERROR /
+ENVIRONMENT` "captureFacts s.f: <path> could not be decided: …", as a read error does; an ambiguous single filter fails
+as an unresolved path does; a `size` of a value without one names its kind ("… but the value is a number").
 
 **As built (Phase 8, EX).** The compiler (`PlanCompiler.captureFacts`) answers "captureFacts: needs exactly 'slot' and
 'fields', found keys […]", "captureFacts: 'fields' needs 1 to 32 fields, found N", "captureFacts <slot>.<field>: a field
@@ -3065,6 +3136,8 @@ check (`INVALID_PARAMS`) rather than by `AwaitRules.resolve`. The seven test fak
 | `PayloadMatch` | linear in the match's entries and one list's length; under the ring lock on the agent, so text only |
 | `actual` in `run.jsonl` (D608) | **Behaviour change:** the `expect` record's `actual` and a failure's `detail.actual` are written whole up to 200 elements per list at any depth; a longer list is cut to its first 200 and the record gains `actualTruncated: true` (`RunLog` writes it, where the depth bound `MAX_DEPTH = 200` lives, `S/RunLog.java:75`, `:206`). The verdict is unchanged; `failure/` evidence is unchanged. Today no root is cut (`ui`, `events` would write everything) |
 
+| a session's journal and an `expect` step's detail *(Phase 8 security fix, S150, FC)* | D608's cut everywhere a session keeps a fact's value: a `check` entry's `actual` and an `observe` entry's `value` cut to 200 elements per list at any depth, with `actualTruncated: true` / `valueTruncated: true` after them (the caller's `CheckOutcome` and `observe`'s answer keep the whole value); a session `expect` step's failure detail cut as a run's; an export writes no cut value as a literal (a note instead); a captured value at most 65,536 characters of JSON (§8.7), so a slot and every substituted matcher, record and message that copies it is bounded; a `not`'s reason and a step's message quote the matcher cut at 300 characters (§8.4) |
+
 Records: `capture {step, slot, value, source: "facts"}` (new form); `expect` unchanged in keys but for `actualTruncated`;
 `sync` unchanged (`match` is logged as sent). No new record type from this section (`capture` is already observed; §7.1 adds `warning`, `rung` and `rungs` to `RunLog.OBSERVED`).
 
@@ -3084,6 +3157,14 @@ expectation failure's detail, so `RunResult.detail.actual` is cut the same way.
    (no break); a pack verb `captureFacts` is refused (a break for a layer that has one; §2.2, Q45).
 6. `actual` in `run.jsonl` cut at 200 list elements with `actualTruncated: true` (§8.10).
 7. `BaseFacts.ROOTS` has eight entries; `Matchers.NAMES` thirteen; `BaseSteps.VERBS` nineteen (tests that pin them move).
+8. *(Phase 8 security fixes, FC.)* A regex or a `[json]` that a bound stops makes its expectation `ERROR / ENVIRONMENT`
+   under any negation instead of a pass or a `FAIL` (S149); a single filter that matches several elements holds no
+   `exists` form (S154); an `events` window with an event cut at publish fails the read (S151); a session's checks,
+   reads and captures and a model's or a client's run (`expectationsOnMaskedValues`) follow paths on the fact's masked
+   view, the marker counting as a secret (S173, S174); a reason names a value's kind, never the value, and a `[json]`
+   error its offset (S176); a captured value is at most 65,536 characters of JSON, a session's journal cuts a window
+   to 200 elements per list, a reason and a message quote a matcher cut at 300 (S150); a session's check normalises its
+   matcher before it substitutes `$slot` values, as a run does (S153).
 
 ---
 
@@ -3690,6 +3771,15 @@ place):
    `actual` cut at 200 list elements; the agent-side `PayloadMatch` is a linear text comparison under the ring lock, no
    regex, no parsing. Under `expectationsOnMaskedValues` a captured value the mask changes fails the step, so a captured
    secret can never become an operand or an argument; a session's `captureFacts` runs under the session mask.
+   *(Phase 8 security fixes, S149, S150, S151, S154, S173, S174, S176, S177, FC.)* A regex or a `[json]` that a bound
+   stops decides nothing: no negation turns it into a pass, and the expectation ends `ERROR / ENVIRONMENT`; an event cut
+   at publish fails the `events` root's read as a lost one does; a single filter that matches twice holds no `exists`
+   form. Where the masked-value rule applies (a session always, a run with `expectationsOnMaskedValues`) every path is
+   followed on the fact as the mask leaves it (the run's or the session's secret values, then the model-facing key rule,
+   uncut), a filter over a field that holds a secret compares nothing and a value that holds the marker is a secret, so
+   no filter, regex, index, `[json]`, `size` or capture answers, or takes longer, by a secret's characters. A reason
+   names a value's kind, never the value; a captured value is at most 65,536 characters of JSON, and a session's journal
+   and a step's detail keep a fact's lists cut at 200 elements.
 10. **Pack capability evaluation is pack code at run start that reads only** (§9.1): through the guarded read-only data
     channel, with no bind mode, no inference settings and no gateway in its context (so it is honoured in `replay` and
     the D19 ledger check still catches a model call), after the contributors' merge and before `requires`; nothing
@@ -3730,7 +3820,10 @@ place):
    result has columns (§4.8);
 7. every `CALL`/`EXEC` is refused by `SqlGuard` with a reason, and a non-empty `SqlAllowList.procedures` is refused where
    a list is put to use (§4.5);
-8. a target publishing more than `eventRing` events in a run makes an `events` expectation `ERROR` (§8.6); `actual` in
+8. a target publishing more than `eventRing` events in a run makes an `events` expectation `ERROR` (§8.6), and so does
+   an event cut at publish (`truncated: true`; Phase 8 security fix, S151, FC); a regex or a `[json]` a bound stops ends
+   its expectation `ERROR` under any negation, and a single filter matching twice holds no `exists` form (S149, S154);
+   checks of a session and of a model's or a client's run follow paths on the fact's masked view (S173); `actual` in
    `run.jsonl` is cut at 200 list elements (§8.10); a filter field holding a dot is a sub-path (§8.3); a `waitFor` or
    pack `sync.await` `match` holding a list or a map is a compile error, and an invalid `match` on the wire is
    `INVALID_PARAMS` instead of `TIMEOUT` (§8.9);
@@ -3759,7 +3852,9 @@ by a `BrowserMask`; (d) a denied subtype loaded after a `^`/`INTERFACE` Byteman 
 list only tightens for the life of an agent instance; (e) the secret-echo check compares short secrets by equality
 only; a composite that answers a question it does not own cannot be detected by the base; `taken` records application
 data; (f) the `events` root sees the run's window only while the ring holds it: a target that publishes more than
-`eventRing` events in a run makes such expectations `ERROR`, by design; (g) a pack capability's evaluation and a
+`eventRing` events in a run makes such expectations `ERROR`, by design, and so does an event its module or the ring cut
+at publish (`truncated: true`, a long console line included; Phase 8 security fix, S151, FC); a regex or a `[json]` text
+that a bound stops makes its expectation `ERROR`, never a pass (S149); (g) a pack capability's evaluation and a
 pre-flight check run pack code on the controller with no host timeout (the data channel's per-query bound is the
 bound); (h) the CDP path's gate for an older Playwright is proved through a seam: only 1.63.0 was run.
 

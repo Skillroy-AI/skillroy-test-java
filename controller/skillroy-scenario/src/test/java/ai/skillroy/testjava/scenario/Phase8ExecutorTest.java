@@ -215,8 +215,8 @@ class Phase8ExecutorTest {
         state.put("count", 3L);
         RunResult number = run("steps:\n  - captureFacts: { slot: b, fields: { n: { size: state.count } } }\n");
         assertOutcome(number, Status.FAIL, FailureKind.ASSERTION);
-        assertTrue(number.message().contains("'size' needs a list, a map or a string, but the value is 3"),
-                number.message());
+        assertTrue(number.message().contains("'size' needs a list, a map or a string, but the value is a number"),
+                number.message() + " (S176: the kind, never the value)");
     }
 
     @Test

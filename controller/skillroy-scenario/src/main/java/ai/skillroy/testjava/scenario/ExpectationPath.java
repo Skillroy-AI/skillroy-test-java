@@ -34,7 +34,8 @@ import java.util.regex.PatternSyntaxException;
  *       ({@code slip.last.text}).</li>
  *   <li>{@code [n]}, {@code [first]}, {@code [last]} index a list.</li>
  *   <li>{@code [field=value]} on a list yields the single element whose {@code field} equals {@code value} (numbers
- *       compare as decimals); zero or several matches and the path does not resolve. The value runs to the first
+ *       compare as decimals); zero matches and the path does not resolve, several and it is ambiguous (no matcher
+ *       holds on it, {@code exists: false} included: Phase 8 security fix S154). The value runs to the first
  *       {@code ]} and may be or contain a {@code $slot} reference.</li>
  *   <li>{@code [field~regex]} is the same with a regular expression searched for in the field's text (anchor it with
  *       {@code ^…$} for a full match); brackets inside the regex must balance.</li>
@@ -46,11 +47,15 @@ import java.util.regex.PatternSyntaxException;
  *       each part a map key on a map, or an index ({@code digits}, {@code first}, {@code last}) on a list; an element
  *       on which it does not resolve does not match. Only a map element can match.</li>
  *   <li>{@code [json]} (Phase 8) parses the current value, a string of at most 1 Mi characters, as JSON (depth at
- *       most 200) and continues with the result; anything else leaves the path unresolved with the reason.</li>
+ *       most 200) and continues with the result; a value that is not a string or not JSON leaves the path unresolved
+ *       with the reason, a longer or deeper text leaves it undecidable.</li>
  * </ul>
  *
- * <p>The regex searches of one {@link #resolve} call share one {@link SafeRegex.Budget}. Immutable; safe to share
- * between threads.
+ * <p>The regex searches of one {@link #resolve} call share one {@link SafeRegex.Budget}; a search the budget or a
+ * bound stops leaves the path undecidable, never unresolved, so that no negation reads a stop as an absence (Phase 8
+ * security fix S149). A reason names the kind of the value a path stopped at, never the value (S176). Where the
+ * masked-value rule applies the path is followed on the fact's view ({@link #resolveViewed}, S173). Immutable; safe
+ * to share between threads.
  */
 final class ExpectationPath {
 
@@ -97,17 +102,51 @@ final class ExpectationPath {
     record JsonText() implements Segment {
     }
 
-    /** The outcome of following a path: the value, or why the path did not resolve. */
-    record Resolution(boolean resolved, Object value, String problem) {
+    /**
+     * What following a path gave (Phase 8 security fixes S149, S154, S173, FC): {@code RESOLVED} with a value;
+     * {@code MISSING}, the path does not resolve (no such field, no element, not a list, not JSON), which only an
+     * {@code exists: false} form holds on; {@code AMBIGUOUS}, a single filter matched several elements, on which no
+     * matcher holds ("none" cannot be told from "two"); {@code UNDECIDABLE}, a bound stopped the walk (a filter regex
+     * stopped by its budget, over 1 Mi characters or recursing too deeply, a regex a reference made that does not
+     * compile, a {@code [json]} text over 1 Mi characters or nested deeper than 200), on which no matcher holds and the
+     * expectation ends {@code ERROR / ENVIRONMENT}; {@code SECRET}, on a fact's view ({@link FactView}) a filter's field
+     * held a secret on some element, on which no matcher holds ({@link Matchers#HOLDS_A_SECRET}).
+     */
+    enum State {
+        RESOLVED, MISSING, AMBIGUOUS, UNDECIDABLE, SECRET
+    }
+
+    /** The outcome of following a path: the value, or why the path did not resolve, and how. */
+    record Resolution(State state, Object value, String problem) {
+
+        /** True when the path resolved (to a value, possibly null). */
+        boolean resolved() {
+            return state == State.RESOLVED;
+        }
 
         static Resolution of(Object value) {
-            return new Resolution(true, value, null);
+            return new Resolution(State.RESOLVED, value, null);
         }
 
         static Resolution missing(String problem) {
-            return new Resolution(false, null, problem);
+            return new Resolution(State.MISSING, null, problem);
+        }
+
+        static Resolution ambiguous(String problem) {
+            return new Resolution(State.AMBIGUOUS, null, problem);
+        }
+
+        static Resolution undecidable(String problem) {
+            return new Resolution(State.UNDECIDABLE, null, problem);
+        }
+
+        static Resolution secret(String problem) {
+            return new Resolution(State.SECRET, null, problem);
         }
     }
+
+    /** The deepest {@code [json]} text parsed, as the codec's own bound ({@code Json.MAX_DEPTH}). */
+    static final int JSON_MAX_DEPTH = 200;
 
     /** The text of the {@code [json]} segment. */
     static final String JSON = "json";
@@ -298,10 +337,27 @@ final class ExpectationPath {
     }
 
     /**
-     * Follows the segments from the root's value. The regex searches of every filter of the path share one
-     * {@link SafeRegex.Budget} for the whole call (S24); a search it stops leaves the path unresolved with the reason.
+     * Follows the segments from the root's value as read (a person's run). The regex searches of every filter of the
+     * path share one {@link SafeRegex.Budget} for the whole call (S24); a search it stops leaves the path
+     * {@code UNDECIDABLE} with the reason.
      */
     Resolution resolve(Object rootValue) {
+        return walk(rootValue, null);
+    }
+
+    /**
+     * Follows the segments on a fact's view (Phase 8 security fix S173): {@code viewedRoot} is
+     * {@code view.apply(root)}, so every comparison, search and parse reads masked text; a value {@code [json]}
+     * parses passes {@code view} before the path goes on (a key the text held meets the key rule as a map key); a
+     * filter whose field holds the marker on any element answers {@code SECRET} before anything is compared or
+     * searched. The final value may hold the marker: the caller's rule ({@link FactView#holdsMarker}) decides what
+     * that means.
+     */
+    Resolution resolveViewed(Object viewedRoot, FactView view) {
+        return walk(viewedRoot, view);
+    }
+
+    private Resolution walk(Object rootValue, FactView view) {
         SafeRegex.Budget budget = null;
         Object current = rootValue;
         StringBuilder walked = new StringBuilder(root);
@@ -322,12 +378,12 @@ final class ExpectationPath {
                     current = list.get(index);
                 } else {
                     return Resolution.missing("cannot take field '" + f.name() + "' of " + walked + " ("
-                            + ScenarioLoader.describe(current) + ")");
+                            + Values.kind(current) + ")");
                 }
                 walked.append('.').append(f.name());
             } else if (segment instanceof Index ix) {
                 if (!(current instanceof List<?> list)) {
-                    return Resolution.missing(walked + " is not a list (" + ScenarioLoader.describe(current) + ")");
+                    return Resolution.missing(walked + " is not a list (" + Values.kind(current) + ")");
                 }
                 int index = References.index(ix.index(), list.size());
                 if (index < 0) {
@@ -338,20 +394,34 @@ final class ExpectationPath {
                 walked.append('[').append(ix.index()).append(']');
             } else if (segment instanceof JsonText) {
                 if (!(current instanceof String json)) {
-                    return Resolution.missing(walked + " is not a string (" + ScenarioLoader.describe(current) + ")");
+                    return Resolution.missing(walked + " is not a string (" + Values.kind(current) + ")");
                 }
                 if (json.length() > SafeRegex.MAX_SUBJECT) {
-                    return Resolution.missing(walked + " is longer than " + SafeRegex.MAX_SUBJECT + " characters");
+                    return Resolution.undecidable(walked + " is longer than " + SafeRegex.MAX_SUBJECT
+                            + " characters");
                 }
                 try {
                     current = Json.parse(json);
                 } catch (JsonException e) {
-                    return Resolution.missing(walked + " is not JSON: " + e.getMessage());
+                    // S149: past the codec's depth the text is not "not JSON" but undecided; S176: never the
+                    // character the parser stopped at, only its offset.
+                    if (String.valueOf(e.getMessage()).startsWith("nesting depth exceeds")) {
+                        return Resolution.undecidable(walked + " nests deeper than " + JSON_MAX_DEPTH);
+                    }
+                    return Resolution.missing(walked + " is not JSON" + (e.offset() >= 0 ? " (at offset "
+                            + e.offset() + ")" : ""));
+                }
+                if (view != null) {
+                    try {
+                        current = view.apply(current);
+                    } catch (IllegalArgumentException e) {
+                        return Resolution.undecidable(walked + "[" + JSON + "]: " + e.getMessage());
+                    }
                 }
                 walked.append('[').append(JSON).append(']');
             } else if (segment instanceof Filter f) {
                 if (!(current instanceof List<?> list)) {
-                    return Resolution.missing(walked + " is not a list (" + ScenarioLoader.describe(current) + ")");
+                    return Resolution.missing(walked + " is not a list (" + Values.kind(current) + ")");
                 }
                 String description = f.describe();
                 Pattern pattern = null;
@@ -359,16 +429,27 @@ final class ExpectationPath {
                     try {
                         pattern = Pattern.compile(Values.stringOf(f.value()));
                     } catch (PatternSyntaxException e) {
-                        return Resolution.missing("bad regex in " + description + ": " + e.getDescription());
+                        // A regex a reference made (a literal one is checked when the path is parsed).
+                        return Resolution.undecidable("bad regex in " + description + ": " + e.getDescription());
                     }
+                }
+                List<String> fieldPath = f.fieldPath();
+                List<Object[]> fields = new ArrayList<>(list.size());
+                for (Object element : list) {
+                    Object[] fieldValue = element instanceof Map<?, ?> ? field(element, fieldPath) : null;
+                    if (view != null && fieldValue != null && FactView.holdsMarker(fieldValue[0])) {
+                        // S173: the secret test before any comparison or search, on every element.
+                        return Resolution.secret("the field '" + f.field() + "' holds a secret on an element of "
+                                + walked + ", so " + description + " compares nothing");
+                    }
+                    fields.add(fieldValue);
                 }
                 if (pattern != null && budget == null) {
                     budget = SafeRegex.Budget.start();
                 }
-                List<String> fieldPath = f.fieldPath();
                 List<Object> matches = new ArrayList<>();
-                for (Object element : list) {
-                    Object[] fieldValue = element instanceof Map<?, ?> ? field(element, fieldPath) : null;
+                for (int i = 0; i < list.size(); i++) {
+                    Object[] fieldValue = fields.get(i);
                     if (fieldValue == null) {
                         continue;
                     }
@@ -380,18 +461,22 @@ final class ExpectationPath {
                                         && SafeRegex.find(pattern, Values.stringOf(fieldValue[0]), budget)
                                 : Values.equal(fieldValue[0], f.value());
                     } catch (SafeRegex.Rejected e) {
-                        return Resolution.missing("regex in " + description + ": " + e.getMessage());
+                        return Resolution.undecidable("regex in " + description + ": " + e.getMessage());
                     }
                     if (hit) {
-                        matches.add(element);
+                        matches.add(list.get(i));
                     }
                 }
                 if (f.all()) {
                     current = matches;
                 } else {
-                    if (matches.size() != 1) {
-                        return Resolution.missing((matches.isEmpty() ? "no element" : matches.size() + " elements")
-                                + " of " + walked + " match " + description);
+                    if (matches.isEmpty()) {
+                        return Resolution.missing("no element of " + walked + " match " + description);
+                    }
+                    if (matches.size() > 1) {
+                        // S154: "two" is not "none"; use [*…] with {size: 0} for "none".
+                        return Resolution.ambiguous(matches.size() + " elements of " + walked + " match "
+                                + description + "; a single filter needs exactly one (count with [*…] and size)");
                     }
                     current = matches.get(0);
                 }

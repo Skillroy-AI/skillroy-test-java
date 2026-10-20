@@ -876,7 +876,7 @@ public final class ExecutorSession implements AutoCloseable {
                 cache.put(root, fact);
             }
             return fact;
-        }, captured -> Matchers.maskedSecret(mask, captured));
+        }, () -> FactView.of(mask));
         runner.bindings = runner.bindings.withCaptured(step.facts().slot(), value);
         log.write("capture", RunLog.fields("step", step.id(), "slot", step.facts().slot(), "value", value, "source",
                 "facts"));
@@ -1048,11 +1048,18 @@ public final class ExecutorSession implements AutoCloseable {
                 throw new Abort(Status.ERROR, FailureKind.ENVIRONMENT, stepId, evaluation.reason(),
                         RunLog.fields("path", expectation.path()));
             }
+            // Phase 8 security fix S150: the detail's actual cut as a run's is (D608); the matcher quoted cut.
+            Map<String, Object> detail = RunLog.cutActual(RunLog.fields("path", expectation.path(), "matcher",
+                    expectation.matcher(), "actual", evaluation.actual(), "reason", evaluation.reason()));
+            String quoted = expectation.path() + " " + Values.brief(expectation.matcher(), Matchers.MAX_QUOTED_MATCHER)
+                    + ": " + evaluation.reason();
+            if (evaluation.undecided()) {
+                // S149: a bound stopped it; not a pass, not a failure of the target.
+                throw new Abort(Status.ERROR, FailureKind.ENVIRONMENT, stepId, "expectation could not be decided: "
+                        + quoted, detail);
+            }
             if (!evaluation.held()) {
-                throw new Abort(Status.FAIL, FailureKind.ASSERTION, stepId, "expectation failed: "
-                        + expectation.path() + " " + Values.safeWrite(expectation.matcher()) + ": "
-                        + evaluation.reason(), RunLog.fields("path", expectation.path(), "matcher",
-                        expectation.matcher(), "actual", evaluation.actual(), "reason", evaluation.reason()));
+                throw new Abort(Status.FAIL, FailureKind.ASSERTION, stepId, "expectation failed: " + quoted, detail);
             }
         }
         return skippedLine;
@@ -1308,7 +1315,10 @@ public final class ExecutorSession implements AutoCloseable {
      * An expectation evaluated now (P1 8.4 matchers over the fact roots, the UI snapshot among them): one read of the
      * path's root, no waiting. Journaled with its outcome; a matcher or path that is not valid does not hold, and
      * neither does any matcher on a value the session's mask changes (it holds a secret, which {@link #observe} shows
-     * as {@code <redacted>}): a check is no oracle on a secret (phase5-contracts.md 12.2).
+     * as {@code <redacted>}): a check is no oracle on a secret (phase5-contracts.md 12.2). Since the Phase 8 security
+     * fixes S173 and S174 the path itself is followed on the fact as the mask leaves it ({@link FactView}), so that no
+     * filter, regex, index or {@code [json]} reads a secret either; a regex or a {@code [json]} a bound stops answers
+     * {@code held: false} with why (S149); the journal keeps the {@code actual} cut at 200 elements per list (S150).
      *
      * @param matcher a scalar or a matcher object, {@code $references} in place
      * @throws AgentLostException if the agent is gone
@@ -1323,13 +1333,24 @@ public final class ExecutorSession implements AutoCloseable {
         Evaluation evaluation = evaluateCheck(path, matcher);
         Object actual = mask.apply(jsonForm(evaluation.actual()));
         String reason = evaluation.reason() == null ? null : mask.apply(evaluation.reason());
-        journal.append(new StepJournal.CheckEntry(path, jsonForm(matcher), actual, evaluation.held(), reason), mask);
+        // Phase 8 security fix S150: the journal keeps the actual cut as a run's expect record does (D608), with
+        // actualTruncated; the caller's outcome keeps the whole value.
+        RunLog.Cut kept = RunLog.cut(actual);
+        journal.append(new StepJournal.CheckEntry(path, jsonForm(matcher), kept.value(), evaluation.held(), reason,
+                kept.truncated()), mask);
         return new CheckOutcome(path, matcher, actual, evaluation.held(), reason,
                 Duration.ofMillis(Math.max(0, clock.millis() - t0)));
     }
 
-    /** One evaluation of an expectation: whether it held, the value found, why not, and a read's failure. */
-    private record Evaluation(boolean held, Object actual, String reason, String fetchError) {
+    /**
+     * One evaluation of an expectation: whether it held, the value found, why not, a read's failure, and whether a
+     * bound stopped it (Phase 8 security fix S149: it never holds; an {@code expect} step ends {@code ERROR}).
+     */
+    private record Evaluation(boolean held, Object actual, String reason, String fetchError, boolean undecided) {
+
+        Evaluation(boolean held, Object actual, String reason, String fetchError) {
+            this(held, actual, reason, fetchError, false);
+        }
     }
 
     private Evaluation evaluateCheck(String path, Object matcher) throws AgentLostException,
@@ -1343,7 +1364,9 @@ public final class ExecutorSession implements AutoCloseable {
                         + ("db".equals(parsed.root()) ? " (stored-row checks are not evaluated in a session)" : ""),
                         null);
             }
-            normal = Matchers.normalise(runner.bindings.substitutePublic(Values.normalise(matcher)));
+            // Phase 8 security fix S153: normalised first and substituted after, as the compiler and a run do, so that
+            // a captured map shaped like a matcher stays a value ({equals: …}) and never becomes a matcher.
+            normal = runner.bindings.substitutePublic(Matchers.normalise(Values.normalise(matcher)));
         } catch (IllegalArgumentException | ResolutionException | JsonException e) {
             return new Evaluation(false, null, "not a valid expectation: " + e.getMessage(), null);
         }
@@ -1354,17 +1377,22 @@ public final class ExecutorSession implements AutoCloseable {
             return new Evaluation(false, null, "fact '" + parsed.root() + "' could not be read: " + e.getMessage(),
                     e.getMessage());
         }
-        ExpectationPath.Resolution resolution = parsed.resolve(fact);
-        if (resolution.resolved()) {
-            // On the value as the session's mask leaves it (phase5-contracts.md 12.2).
-            Object masked = Matchers.maskedSecret(mask, resolution.value());
-            if (masked != null) {
-                return new Evaluation(false, masked, Matchers.HOLDS_A_SECRET, null);
-            }
+        FactView view = FactView.of(mask);
+        Object viewed;
+        try {
+            viewed = view.apply(fact);
+        } catch (IllegalArgumentException e) {
+            return new Evaluation(false, null, "fact '" + parsed.root() + "' could not be read: " + e.getMessage(),
+                    e.getMessage());
         }
-        Matchers.Outcome outcome = Matchers.evaluate(normal, resolution.resolved(), resolution.value(),
-                resolution.problem());
-        return new Evaluation(outcome.holds(), resolution.value(), outcome.reason(), null);
+        // On the fact as the session's mask leaves it (phase5-contracts.md 12.2; Phase 8 security fix S173): every
+        // filter, regex, index, [json] and size reads the view, and a value that holds its marker holds a secret.
+        ExpectationPath.Resolution resolution = parsed.resolveViewed(viewed, view);
+        if (resolution.resolved() && FactView.holdsMarker(resolution.value())) {
+            return new Evaluation(false, resolution.value(), Matchers.HOLDS_A_SECRET, null);
+        }
+        Matchers.Outcome outcome = Matchers.evaluate(normal, resolution);
+        return new Evaluation(outcome.holds(), resolution.value(), outcome.reason(), null, outcome.undecided());
     }
 
     /**
@@ -1383,7 +1411,10 @@ public final class ExecutorSession implements AutoCloseable {
         requireOpen();
         Object value = valueAt(path);
         Object masked = mask.apply(jsonForm(value));
-        journal.append(new StepJournal.ObserveEntry(path, masked), mask);
+        // Phase 8 security fix S150: the journal keeps the value cut (D608's rule) and says so; an export writes no
+        // cut value as a literal.
+        RunLog.Cut kept = RunLog.cut(masked);
+        journal.append(new StepJournal.ObserveEntry(path, kept.value(), kept.truncated()), mask);
         return masked;
     }
 
@@ -1408,7 +1439,7 @@ public final class ExecutorSession implements AutoCloseable {
         } catch (FactFailure e) {
             throw new IllegalStateException("fact '" + parsed.root() + "' could not be read: " + e.getMessage(), e);
         }
-        ExpectationPath.Resolution resolution = parsed.resolve(fact);
+        ExpectationPath.Resolution resolution = resolveViewed(parsed, fact);
         return resolution.resolved() ? mask.apply(jsonForm(resolution.value())) : null;
     }
 
@@ -1420,11 +1451,27 @@ public final class ExecutorSession implements AutoCloseable {
         } catch (FactFailure e) {
             throw new IllegalStateException("fact '" + parsed.root() + "' could not be read: " + e.getMessage(), e);
         }
-        ExpectationPath.Resolution resolution = parsed.resolve(fact);
+        ExpectationPath.Resolution resolution = resolveViewed(parsed, fact);
         if (!resolution.resolved()) {
             throw new IllegalArgumentException("path " + path + " does not resolve now: " + resolution.problem());
         }
         return resolution.value();
+    }
+
+    /**
+     * A path followed on the fact's view through the session's mask (Phase 8 security fix S173): the same view a
+     * check reads, so that what a filter, a regex or {@code [json]} answers is the same for a right guess at a secret
+     * and a wrong one.
+     *
+     * @throws IllegalStateException if the fact cannot be masked
+     */
+    private ExpectationPath.Resolution resolveViewed(ExpectationPath parsed, Object fact) {
+        FactView view = FactView.of(mask);
+        try {
+            return parsed.resolveViewed(view.apply(fact), view);
+        } catch (IllegalArgumentException e) {
+            throw new IllegalStateException("fact '" + parsed.root() + "' could not be read: " + e.getMessage(), e);
+        }
     }
 
     private ExpectationPath parsePath(String path) {

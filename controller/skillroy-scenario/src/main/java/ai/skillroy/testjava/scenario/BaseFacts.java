@@ -76,8 +76,9 @@ import java.util.function.Supplier;
  *       each full page's last {@code seq}, at most {@value #EVENTS_PAGES} pages. The read <em>fails</em>, rather than
  *       answering fewer events, when the ring has evicted any event of the window (the first page's
  *       {@code oldestSeq} past {@code since + 1}, or a gap in the sequence while paging) and when the tenth page is
- *       full: a count that a {@code {size: 0}} or a delta rests on must be exact or absent. Payloads are as the agent
- *       published them (masked at publish). Filter it with the list form:
+ *       full: a count that a {@code {size: 0}} or a delta rests on must be exact or absent. It fails as well when an
+ *       event of the window carries {@code truncated: true} at its payload's root (cut at publish: Phase 8 security
+ *       fix S151). Payloads are as the agent published them (masked at publish). Filter it with the list form:
  *       {@code events[*topic=input.acked][*payload.source=Barcode]}. This class's own provider reads from sequence
  *       0.</li>
  * </ul>
@@ -378,6 +379,10 @@ public final class BaseFacts {
                 if (seq.longValue() != expected) {
                     throw evicted(expected, seq.longValue() - 1);
                 }
+                if (event.get("payload") instanceof Map<?, ?> payload
+                        && Boolean.TRUE.equals(payload.get("truncated"))) {
+                    throw cut(seq.longValue(), event.get("topic"));
+                }
                 Map<String, Object> entry = new LinkedHashMap<>();
                 for (String key : EVENT_KEYS) {
                     entry.put(key, event.get(key));
@@ -392,6 +397,17 @@ public final class BaseFacts {
         }
         throw new IllegalStateException("more than " + EVENTS_PAGES * EVENTS_LIMIT + " events since the run's start:"
                 + " the events root cannot see them all; raise eventRing or shorten the scenario");
+    }
+
+    /**
+     * The read's failure when an event of the window was cut at publish (Phase 8 security fix S151, FC; D602 extended):
+     * a payload marked {@code truncated: true} at its root (the ring's scalar budget D541 or character bound S43, or
+     * a module's own cut) is not the payload that was published, so a count or a negation over it cannot be exact.
+     */
+    private static IllegalStateException cut(long seq, Object topic) {
+        return new IllegalStateException("event " + seq + " (" + (topic instanceof String t ? t : "no topic")
+                + ") was cut at publish (truncated: true); a check over the window cannot be exact: publish smaller"
+                + " payloads or raise the agent option eventRingChars");
     }
 
     /** The read's failure when the ring no longer holds events {@code from..to} of the window (D602). */
