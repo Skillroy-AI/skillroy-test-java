@@ -1,5 +1,5 @@
 {
-  "planVersion": 6,
+  "planVersion": 7,
   "scenarioId": "return-refunds-deposit",
   "pack": "lending",
   "packVersion": "0.6.0",

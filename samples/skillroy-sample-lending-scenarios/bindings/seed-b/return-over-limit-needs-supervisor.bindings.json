@@ -4,7 +4,7 @@
   "envId": "seed-b",
   "pack": "lending",
   "packVersion": "0.6.0",
-  "planHash": "sha256:eadce47d046cb584054fae1df0a1591bd17537d76d7b5728ebbe2ecc8a4596d1",
+  "planHash": "sha256:64ad890acc90c7a867a92c0c98298173ffc136e06e555eda73f8a6bc0d10d2c5",
   "resolveHash": "sha256:c6e38817869ec85168c44703514bed09a40de7918d886e430bc471f1fc64195c",
   "env": {
     "fingerprint": "sha256:f13ef74b54cc11e3cdc4875b35119fe1c728e4121517cb91ed273b5ea5bb6cc5",

@@ -2226,6 +2226,22 @@ below 6, and the `startsWith` at `:229`), `ST/WebCompileTest.java:409-427`, `ST/
 becomes 7, every refused version 8**. `ContributedResolutionTest:138` and `InferenceContributorTest:277` call the full
 `Plan` constructor and are unaffected (no `Plan` component is added).
 
+**As built (Phase 8, EX, step 1).** The skeleton commit holds `Plan.VERSION = 7`, the message, `STEP_KEYS_V7` and
+`CALL_KEYS_V7` (§7's three keys reserved), every gate of the table above, and the whole `facts` member (`FactCapture`,
+`FactField`, `Step.facts` with the five-argument constructor kept, written after `expect` and read back as §8.7 says),
+so that EX's later hunks leave `Plan.java` to ES and EP. Where the text above is silent: a `captureFacts` step without
+`facts` is "step sN: captureFacts needs 'facts'"; a `facts` member on another verb below 7 is "step sN: 'facts' needs a
+version 7 plan"; a check on a `captureFacts` step is refused with the same "captureFacts has no calls"; the gate on a
+`sync.await` call's `args.match` uses the await message ("call sync.await await: {has} needs a version 7 plan"), and
+that match is checked by `AwaitRules.checkMatch` at every version; the path gate names the item it finds
+(`ExpectationPath.version7Item()`: "a list filter" for a filter field starting with `*`, "a dotted filter field" for one
+holding a `.`) and the matcher gate the first of `anyOf` and `containsWhere` it finds (`Matchers.version7Matcher`,
+through `not`, `size`, `anyOf` and `containsWhere`; an operand of `equals`, `contains` or `in` is a value); the reader's
+`containsWhere` refusal in stored-row checks (§8.4) is wired already. Until §8.3-§8.5 land, `[*f=v]` in a version 7 plan
+still parses as a single filter on the field `*f`, and `[json]`, `anyOf` and `containsWhere` are refused by the parsers
+at every version (no committed plan holds one). The 19 plans and the 17 bindings hashes are regenerated in the same
+commit, the version line and `planHash` alone.
+
 ### 8.3 List filters and dotted filter fields (gap 108, gap 21(b); D597, D598)
 
 Grammar (additive to P1 §8.4; `S/ExpectationPath.java:26-37` doc, `:96-170` parser):
@@ -2473,6 +2489,11 @@ CLI `FakeAgent`s, `LST/HeadlessDesk.java:255`, the Swing, web and lending `FakeC
 **YAML.** `waitFor: {topic: input.requested, match: {state: DEPOSIT, validInputs: {has: Key.DEPOSIT}}}`; the same in every
 `await:` (`call`, `click`, `type`, `press`, `pointer`, the web verbs). **plan.json:** the shape is unchanged
 (`"match": {"state": "DEPOSIT", "validInputs": {"has": "Key.DEPOSIT"}}`, keys sorted).
+
+**As built (Phase 8, EX, step 1).** `PayloadMatch.matches` lets an invalid entry hold never (a list or map value other
+than a valid `{has: scalar}`; callers refuse it with `problem` first, so the whole-list text comparison of today ends with
+the rule); a scalar is anything but a map, a collection or an array, so a set or array element never equals either;
+`problem` quotes at most 100 characters of a key or of an object's key list.
 
 **Behaviour change:** a hand-written `waitFor` whose `match` held a list or a map compiled and never matched (whole-list
 text); it is now a compile error (none committed). A `sync.await` sent by a client (`skillroy call`, MCP) with an invalid

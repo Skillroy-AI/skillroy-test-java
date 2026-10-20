@@ -32,8 +32,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * phase7-contracts.md 13.1 item 5, the compiler and plan parts (8.1, 8.2, decisions D310, D325, D343): the four verbs
- * compile to their shapes, their argument rules hold, a plan is written as version 6 with {@code inference: run},
- * {@code images} and a call's {@code guard}, and the reader refuses that content in a version 5 plan.
+ * compile to their shapes, their argument rules hold, a plan is written as version 6 (7 since phase8-contracts.md
+ * 8.2) with {@code inference: run}, {@code images} and a call's {@code guard}, and the reader refuses that content in a
+ * version 5 plan.
  */
 class Phase7CompileTest {
 
@@ -68,7 +69,7 @@ class Phase7CompileTest {
         assertEquals(List.of(), plan.steps().get(0).calls());
         assertEquals(Plan.INFERENCE_RUN, plan.inference());
         assertEquals(Plan.VERSION, plan.planVersion());
-        assertEquals(6, Plan.VERSION);
+        assertEquals(7, Plan.VERSION);
         assertEquals(Plan.INFERENCE_RUN, Plan.inferenceOf(plan.slots(), plan.steps()));
         assertEquals(Plan.INFERENCE_NONE, Plan.inferenceOf(plan.slots()), "the slots alone say none");
         assertFalse(plan.requires().contains("swing.pointer.robot"));
@@ -198,25 +199,25 @@ class Phase7CompileTest {
     @Test
     void theReaderRefusesVersion6ContentBelowVersion6() throws Exception {
         String run = compile("  - aiAct: { intent: x }\n").toJsonText();
-        assertTrue(reason(run.replace("\"planVersion\": 6", "\"planVersion\": 5")).contains("inference 'run' needs a"
+        assertTrue(reason(run.replace("\"planVersion\": 7", "\"planVersion\": 5")).contains("inference 'run' needs a"
                 + " version 6 plan"));
         String images = compile("  - expectImage: { label: a }\n").toJsonText();
-        assertTrue(reason(images.replace("\"planVersion\": 6", "\"planVersion\": 5")).contains("'images' needs a"
+        assertTrue(reason(images.replace("\"planVersion\": 7", "\"planVersion\": 5")).contains("'images' needs a"
                 + " version 6 plan"));
         String guard = compile("  - pointer: { by: { id: p }, guard: g }\n").toJsonText()
-                .replace("\"planVersion\": 6", "\"planVersion\": 5").replace(",\n  \"images\": [\n    \"g\"\n  ]",
+                .replace("\"planVersion\": 7", "\"planVersion\": 5").replace(",\n  \"images\": [\n    \"g\"\n  ]",
                         "");
         assertTrue(reason(guard).contains("needs a version 6 plan"), reason(guard));
         String visual = compile("  - aiExpect: { question: q }\n").toJsonText();
-        assertTrue(reason(visual.replace("\"planVersion\": 6", "\"planVersion\": 5")).contains("needs a version 6"
+        assertTrue(reason(visual.replace("\"planVersion\": 7", "\"planVersion\": 5")).contains("needs a version 6"
                 + " plan"));
         String pointer = compile("  - pointer: { by: { id: p } }\n").toJsonText();
-        assertTrue(reason(pointer.replace("\"planVersion\": 6", "\"planVersion\": 5")).contains("the verb 'pointer'"
+        assertTrue(reason(pointer.replace("\"planVersion\": 7", "\"planVersion\": 5")).contains("the verb 'pointer'"
                 + " needs a version 6 plan"));
         assertTrue(reason(run.replace("\"inference\": \"run\"", "\"inference\": \"none\"")).contains("a step's verb is"
                 + " aiAct"));
         assertTrue(reason(images.replace("\"images\": [\n    \"a\"\n  ],\n", "")).contains("'images' must list"));
-        assertEquals(Plan.parse(pointer).toJsonText(), pointer, "version 6 accepted");
+        assertEquals(Plan.parse(pointer).toJsonText(), pointer, "version 7 accepted");
         assertTrue(reason(images.replace("\"label\": \"a\",", "\"label\": \"b\",")).contains("'images' must list"));
     }
 
@@ -226,7 +227,7 @@ class Phase7CompileTest {
         String text = plan.toJsonText();
         assertFalse(text.contains("\"images\""), "absent when empty, as web is");
         assertFalse(text.contains("\"guard\""));
-        assertTrue(text.startsWith("{\n  \"planVersion\": 6,\n"), text);
+        assertTrue(text.startsWith("{\n  \"planVersion\": 7,\n"), text);
         assertFalse(plan.needsBindings());
         assertEquals(List.of(), plan.images());
     }
