@@ -300,4 +300,56 @@ class RolesAndTextTest {
         assertNull(DialogReader.messageText(null));
         assertEquals("42", DialogReader.messageText(42));
     }
+
+    /**
+     * Phase 8 (phase8-contracts.md 3.2 rule 7, 3.3, 13.1 row 2): a node without a veto or a collapse keeps the pinned
+     * shape ({@link #nodeShape}); a vetoed node carries {@code vetoed: true} after {@code masked}, and a showing node
+     * without a visible area {@code collapsed: true} after it.
+     */
+    @Test
+    void aVetoedAndACollapsedNodeCarryTheirFlagsLast() throws Exception {
+        ctx.spi.register(ai.skillroy.testjava.agent.api.spi.InputVeto.class, (c, route) ->
+                "closeMenu".equals(c.getName()) ? "closes the desk" : null);
+        Map<String, Object> vetoed = onEdt(() -> {
+            JPanel menu = new JPanel(null);
+            menu.setName("closeMenu");
+            menu.setBounds(0, 0, 200, 100);
+            JPasswordField field = new JPasswordField("x");
+            field.setBounds(0, 0, 100, 20);
+            menu.add(field);
+            return new ComponentView(ctx).node(field);
+        });
+        List<String> keys = new java.util.ArrayList<String>(vetoed.keySet());
+        assertEquals(Arrays.asList("masked", "vetoed"), keys.subList(keys.size() - 2, keys.size()),
+                "vetoed after masked: " + keys);
+        Map<String, Object> collapsed = onEdt(() -> {
+            JPanel pane = new JPanel(null);
+            pane.setBounds(0, 0, 0, 100);
+            JButton button = new JButton("Print slip") {
+                private static final long serialVersionUID = 1L;
+
+                @Override
+                public boolean isShowing() {
+                    return true; // headless: nothing shows, so a stand-in says it does
+                }
+            };
+            button.setBounds(0, 0, 80, 20);
+            pane.add(button);
+            return new ComponentView(ctx).node(button);
+        });
+        assertEquals(Boolean.TRUE, collapsed.get("collapsed"));
+        assertFalse(collapsed.containsKey("vetoed"));
+        List<String> ckeys = new java.util.ArrayList<String>(collapsed.keySet());
+        assertEquals("collapsed", ckeys.get(ckeys.size() - 1));
+        Map<String, Object> plain = onEdt(() -> {
+            JPanel other = new JPanel(null);
+            other.setBounds(0, 0, 0, 100);
+            JButton hidden = new JButton("Print slip");
+            hidden.setBounds(0, 0, 80, 20);
+            other.add(hidden);
+            return new ComponentView(ctx).node(hidden);
+        });
+        assertFalse(plain.containsKey("collapsed"), "a component that is not showing is hidden, not collapsed");
+        assertFalse(plain.containsKey("vetoed"));
+    }
 }

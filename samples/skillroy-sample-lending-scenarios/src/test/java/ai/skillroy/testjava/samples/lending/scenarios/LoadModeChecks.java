@@ -901,6 +901,17 @@ abstract class LoadModeChecks {
                 "the archive is the agent's matrix plus the contributed ids");
     }
 
+    /**
+     * Phase 8 (phase8-contracts.md 13.2 item 1, slot 157, EA): off the tools leg the desk opens no "Desk tools" window,
+     * so the {@code lending} section of {@code app.state} has no {@code tools} key (its committed shapes are
+     * unchanged).
+     */
+    @Test
+    @Order(157)
+    void theToolsKeyIsAbsentOffTheToolsLeg() throws Exception {
+        assertFalse(lendingState(client()).containsKey("tools"), "no tools window on the " + mode().slug + " leg");
+    }
+
     // ------------------------------------------------------------------ JUnit glue
 
     /**

@@ -158,4 +158,23 @@ class ClickFidelityAndDialogShapesTest {
         });
         assertEquals(0, asked[0], "a locator is asked about showing windows only");
     }
+
+    /**
+     * Phase 8 (phase8-contracts.md 3.5, 13.1 row 2): the semantic click without a display: none for a plain panel (a
+     * dispatched mouse click then), {@code doClick} for an {@code AbstractButton}; the AWT controls are the display
+     * tests' (their constructors need a display).
+     */
+    @Test
+    void theSemanticClickIsDoClickForASwingButtonAndNothingForAPanel() throws Exception {
+        assertNull(Clicks.semantic(new JPanel()), "a plain panel gets the dispatched mouse click");
+        final javax.swing.JButton button = new javax.swing.JButton("Print test slip");
+        final int[] fired = new int[1];
+        button.addActionListener(e -> fired[0]++);
+        final Edt.Action click = Clicks.semantic(button);
+        onEdt(() -> {
+            click.run();
+            return null;
+        });
+        assertEquals(1, fired[0], "doClick fires the button once");
+    }
 }

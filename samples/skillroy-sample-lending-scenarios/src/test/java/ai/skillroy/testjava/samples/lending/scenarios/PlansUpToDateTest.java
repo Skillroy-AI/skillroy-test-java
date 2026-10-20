@@ -252,8 +252,10 @@ class PlansUpToDateTest {
             List<Path> yamls = files.filter(p -> p.getFileName().toString().endsWith(".yaml")).sorted().toList();
             assertEquals(List.of("click-fallback-degraded.yaml", "click-strict-fails.yaml", "guarded-unavailable.yaml",
                     "missing-capability.yaml", "modal-open-step.yaml", "no-item-in-range.yaml", "no-rule-of-kind.yaml",
-                    "prompt-left-open.yaml", "return-within-limit.yaml", "waiver-guard-fails.yaml",
-                    "wrong-expectation.yaml"), yamls.stream().map(p -> p.getFileName().toString()).toList());
+                    "prompt-left-open.yaml", "return-within-limit.yaml",
+                    "vetoed-click.yaml", // Phase 8, EA (phase8-contracts.md 12.4)
+                    "waiver-guard-fails.yaml", "wrong-expectation.yaml"),
+                    yamls.stream().map(p -> p.getFileName().toString()).toList());
             for (Path yaml : yamls) {
                 Plan plan = PlanCompiler.compile(yaml, new LendingPack());
                 assertEquals(yaml.getFileName().toString(), plan.scenarioId() + ".yaml");

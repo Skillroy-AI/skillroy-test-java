@@ -18,6 +18,7 @@ package ai.skillroy.testjava.agent.swing;
 
 import ai.skillroy.testjava.agent.api.AgentContext;
 import ai.skillroy.testjava.agent.api.Invocation;
+import ai.skillroy.testjava.agent.api.spi.InputVeto;
 
 import java.awt.Component;
 import java.awt.Dialog;
@@ -27,8 +28,11 @@ import java.awt.event.KeyEvent;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.Callable;
+import java.util.concurrent.atomic.AtomicLong;
+import javax.swing.JRootPane;
 import javax.swing.JTextField;
 import javax.swing.RootPaneContainer;
+import javax.swing.SwingUtilities;
 import javax.swing.text.JTextComponent;
 
 /**
@@ -38,6 +42,14 @@ import javax.swing.text.JTextComponent;
  * {@code force}, an explicit target whose window a modal dialog blocks, or that lies outside a blocking dialog drawn
  * inside its window, gets {@code MODAL_OPEN} (see {@link Windows#requireNotBlocked}); a key without a target goes
  * where a real key press would and needs no such check.
+ *
+ * <p>Phase 8 (phase8-contracts.md 3.2, D502): every delivery target, explicit or default (a window's root pane
+ * included), is asked the input veto after the clickable test and before the modal test, never skipped by
+ * {@code force}; with ENTER ({@code swing.key ENTER} with or without modifiers, {@code swing.type enter}) the target's
+ * root pane's default button too, since Swing's window-wide binding presses it (the Basic look and feel binds
+ * {@code ctrl ENTER} as well as {@code ENTER}). Every posted task (the SET task, the
+ * prepare task, each character's task, the ENTER task, the key's task) asks again immediately before it acts
+ * ({@link InputVetoes.Withheld}).
  *
  * <p>Thread-safe. The public-to-package methods run on an agent thread and hop to the EDT themselves.
  */
@@ -50,10 +62,17 @@ final class Typing {
 
     private final AgentContext ctx;
     private final Windows windows;
+    /** The module's count of calls whose posted task a veto withheld ({@code vetoWithheld}, D503). */
+    private final AtomicLong withheld;
 
     Typing(AgentContext ctx, Windows windows) {
+        this(ctx, windows, new AtomicLong());
+    }
+
+    Typing(AgentContext ctx, Windows windows, AtomicLong withheld) {
         this.ctx = ctx;
         this.windows = windows;
+        this.withheld = withheld;
     }
 
     /**
@@ -70,6 +89,8 @@ final class Typing {
                     + text.length() + " (use mode SET for long texts)", Errors.data("param", "text", "reason",
                     "too long"));
         }
+        final String route = SET.equals(mode) ? InputVeto.TYPE_SET : InputVeto.TYPE_DISPATCH;
+        final InputVetoes.Withheld task = new InputVetoes.Withheld(ctx, withheld);
         final Component c = Edt.read(ctx, inv.remainingMs(), new Callable<Component>() {
             @Override
             public Component call() {
@@ -89,6 +110,7 @@ final class Typing {
                     }
                 }
                 Clicks.requireClickable(view, found);
+                requireKeyTargetsNotVetoed(view, found, route, enter);
                 if (target != null && !force) {
                     windows.requireNotBlocked(view, found);
                 }
@@ -109,6 +131,9 @@ final class Typing {
             Edt.post(ctx, inv.remainingMs(), "swing.type SET", new Edt.Action() {
                 @Override
                 public void run() {
+                    if (!task.allows(route, tc, enter ? defaultButton(tc) : null)) {
+                        return;
+                    }
                     tc.setText(clear ? text : tc.getText() + text);
                     if (enter) {
                         if (tc instanceof JTextField) {
@@ -123,6 +148,9 @@ final class Typing {
             Edt.post(ctx, inv.remainingMs(), "swing.type DISPATCH prepare", new Edt.Action() {
                 @Override
                 public void run() {
+                    if (!task.allows(route, c)) {
+                        return;
+                    }
                     if (c instanceof JTextComponent) {
                         JTextComponent tc = (JTextComponent) c;
                         if (clear) {
@@ -139,7 +167,9 @@ final class Typing {
                 Edt.post(ctx, inv.remainingMs(), "swing.type DISPATCH", new Edt.Action() {
                     @Override
                     public void run() {
-                        Keys.type(c, ch);
+                        if (task.allows(route, c)) {
+                            Keys.type(c, ch);
+                        }
                     }
                 });
             }
@@ -147,7 +177,9 @@ final class Typing {
                 Edt.post(ctx, inv.remainingMs(), "swing.type DISPATCH enter", new Edt.Action() {
                     @Override
                     public void run() {
-                        Keys.press(c, KeyEvent.VK_ENTER, 0);
+                        if (task.allows(route, c, defaultButton(c))) {
+                            Keys.press(c, KeyEvent.VK_ENTER, 0);
+                        }
                     }
                 });
             }
@@ -166,6 +198,10 @@ final class Typing {
     Map<String, Object> key(Invocation inv, final TargetSpec target, final int code, final int modifiers,
                             final boolean force) throws Exception {
         final String[] ref = new String[1];
+        // As built (Phase 8, EA): ENTER with any modifier, since the Basic look and feel binds "ctrl ENTER" to the
+        // default button as well as "ENTER" (RootPane.defaultButtonWindowKeyBindings); the safe side
+        final boolean enter = code == KeyEvent.VK_ENTER;
+        final InputVetoes.Withheld task = new InputVetoes.Withheld(ctx, withheld);
         final Component c = Edt.read(ctx, inv.remainingMs(), new Callable<Component>() {
             @Override
             public Component call() {
@@ -185,6 +221,7 @@ final class Typing {
                     found = ((RootPaneContainer) found).getRootPane();
                 }
                 Clicks.requireClickable(view, found);
+                requireKeyTargetsNotVetoed(view, found, InputVeto.KEY, enter);
                 if (target != null && !force) {
                     windows.requireNotBlocked(view, found);
                 }
@@ -199,12 +236,42 @@ final class Typing {
         Edt.post(ctx, inv.remainingMs(), "swing.key " + code, new Edt.Action() {
             @Override
             public void run() {
-                Keys.press(c, code, modifiers);
+                if (task.allows(InputVeto.KEY, c, enter ? defaultButton(c) : null)) {
+                    Keys.press(c, code, modifiers);
+                }
             }
         });
         Map<String, Object> m = new LinkedHashMap<String, Object>();
         m.put("dispatchedTo", ref[0]);
         return m;
+    }
+
+    /**
+     * The input veto for a key's delivery target and, with ENTER, its root pane's default button (D502): Swing's
+     * {@code WHEN_IN_FOCUSED_WINDOW} binding presses that button whatever the target. EDT only.
+     *
+     * @throws ai.skillroy.testjava.protocol.RpcException INPUT_REJECTED {@code vetoed}; for the default button with
+     *     {@code data.defaultButton} its ref
+     */
+    static void requireKeyTargetsNotVetoed(ComponentView view, Component target, String route, boolean enter) {
+        Clicks.requireNotVetoed(view, target, route);
+        if (!enter) {
+            return;
+        }
+        Component button = defaultButton(target);
+        if (button == null) {
+            return;
+        }
+        InputVetoes.Refusal r = view.vetoes().check(button, route);
+        if (r != null) {
+            throw Errors.vetoedDefaultButton(view, target, button, r);
+        }
+    }
+
+    /** The default button of the component's root pane, or null. EDT only. */
+    static Component defaultButton(Component c) {
+        JRootPane root = c == null ? null : SwingUtilities.getRootPane(c);
+        return root == null ? null : root.getDefaultButton();
     }
 
     /**

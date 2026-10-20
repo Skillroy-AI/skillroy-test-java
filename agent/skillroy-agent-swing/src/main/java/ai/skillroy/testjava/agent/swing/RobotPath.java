@@ -19,6 +19,7 @@ package ai.skillroy.testjava.agent.swing;
 import ai.skillroy.testjava.agent.api.AgentContext;
 import ai.skillroy.testjava.agent.api.Invocation;
 import ai.skillroy.testjava.agent.api.ThreadPolicy;
+import ai.skillroy.testjava.agent.api.spi.InputVeto;
 import ai.skillroy.testjava.protocol.CapabilityState;
 import ai.skillroy.testjava.protocol.ErrorCodes;
 import ai.skillroy.testjava.protocol.Event;
@@ -350,9 +351,11 @@ final class RobotPath {
     /**
      * The pre-check (section 3.4), one EDT read: the address, the hit-test (a point outside the window is
      * {@code NOT_FOUND outside}), a {@code DRAG}'s end point bounded by the window and checked for covering windows too
-     * (fix wave, L2-S2), {@code requireFocus} ({@code INPUT_REJECTED not focused}), then the covering rule and
+     * (fix wave, L2-S2), the input veto (Phase 8, phase8-contracts.md 3.2: {@code INPUT_REJECTED vetoed} for the
+     * target, the deepest component, the component form's component and the drag's end, never skipped by
+     * {@code force}), {@code requireFocus} ({@code INPUT_REJECTED not focused}), then the covering rule and
      * {@code expectTarget} ({@link Pointer#precheck}). Run by the delivery probe's read and again right before the
-     * press. EDT only.
+     * press, so a veto refuses before anything moves. EDT only.
      */
     private Plan check(Pointer.Request r) {
         ComponentView view = new ComponentView(ctx);
@@ -380,6 +383,10 @@ final class RobotPath {
             screenTo = new Point(o.x + t.to.x, o.y + t.to.y);
             requireOnAScreen(view, t.window, screenTo, shown, "to");
         }
+        // Phase 8 (phase8-contracts.md 3.2 rule 2, D502): the input veto for the hit's target and deepest component,
+        // the component form's component and a drag's end, before anything moves; never skipped by force
+        Pointer.requireNotVetoed(view, hit, InputVeto.POINTER_ROBOT, t.component,
+                t.to == null ? null : HitTest.targetsAt(spis, t.window, t.to));
         if (r.requireFocus && KeyboardFocusManager.getCurrentKeyboardFocusManager().getFocusedWindow() == null) {
             throw new RpcException(ErrorCodes.INPUT_REJECTED, "the target JVM holds no focused window, so its windows "
                     + "may not be in front; bring it to the front (requireFocus)", Errors.data("reason",

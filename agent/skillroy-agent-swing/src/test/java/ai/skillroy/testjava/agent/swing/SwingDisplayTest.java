@@ -166,6 +166,24 @@ class SwingDisplayTest extends DisplayTestBase {
         expectError(ErrorCodes.STALE_HANDLE, () -> call("swing.snapshot", "root", "h987654"));
     }
 
+    /**
+     * Phase 8 (phase8-contracts.md 3.2, 3.3, 3.4): a tree without a veto, a collapsed pane or a heavyweight container
+     * answers as before: no node carries {@code vetoed} or {@code collapsed}, and the hit-test says {@code vetoed:
+     * false} with the window as the routed {@code source}.
+     */
+    @Test
+    void aTreeWithoutVetoesOrCollapsedPanesKeepsItsShape() throws Exception {
+        Map<String, Object> root = obj(arr(call("swing.snapshot", "root", ref(ui.frame)).get("windows")).get(0));
+        assertNull(nodeOrNull(root, n -> n.containsKey("vetoed") || n.containsKey("collapsed")),
+                "no flag on a desk without vetoes or collapsed panes");
+        Map<String, Object> hit = call("swing.hitTest", "target", ref(ui.ok));
+        assertEquals(Boolean.FALSE, hit.get("vetoed"));
+        assertEquals(ref(ui.frame), hit.get("source"));
+        List<String> keys = new ArrayList<String>(hit.keySet());
+        assertEquals(keys.indexOf("masked") + 1, keys.indexOf("vetoed"), "vetoed right after masked: " + keys);
+        assertEquals(keys.indexOf("surface") + 1, keys.indexOf("source"), "source right after surface: " + keys);
+    }
+
     @Test
     void snapshotSeqIsTheBusPosition() throws Exception {
         long seq = ctx.events.publish("trace.mark", "test", map("label", "x"));

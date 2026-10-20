@@ -91,6 +91,14 @@ class AgentCommandsTest {
         assertTrue(out.contains("options    eventRing=10000"), out);
     }
 
+    /** Phase 8 (phase8-contracts.md 3.2 rule 4, A68): a module's non-empty info follows its state. */
+    @Test
+    void infoPrintsAModulesInfoAfterItsState() {
+        assertEquals("swing 0.2.0 INSTALLED {vetoWithheld=1}, data 0.2.0 INSTALLED", InfoCommand.modules(List.of(
+                Map.of("id", "swing", "version", "0.2.0", "state", "INSTALLED", "info", Map.of("vetoWithheld", 1L)),
+                Map.of("id", "data", "version", "0.2.0", "state", "INSTALLED", "info", Map.of()))));
+    }
+
     @Test
     void infoJsonIsTheAgentInfoValueWithoutSecrets() {
         String out = cli("info", "--json").expectExit(Exit.OK).never(agent.agentNonce).out();

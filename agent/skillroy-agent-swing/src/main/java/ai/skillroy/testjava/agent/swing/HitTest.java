@@ -20,11 +20,16 @@ import ai.skillroy.testjava.agent.api.spi.RegionResolver;
 import ai.skillroy.testjava.agent.api.spi.SurfaceSource;
 import ai.skillroy.testjava.protocol.RpcException;
 
+import java.awt.Button;
+import java.awt.Checkbox;
+import java.awt.Choice;
 import java.awt.Component;
 import java.awt.Container;
 import java.awt.Dialog;
 import java.awt.Point;
 import java.awt.Rectangle;
+import java.awt.Scrollbar;
+import java.awt.TextComponent;
 import java.awt.Window;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -46,6 +51,14 @@ import javax.swing.SwingUtilities;
  * mouse, mouse-motion or mouse-wheel listener, or is a {@code JComponent} with a component popup menu or with
  * autoscrolls, searching siblings and then the container; the enabled-event-mask half of AWT's filter is not readable,
  * so {@code mouseTargetInferred} is always true (gap 79).
+ *
+ * <p>Phase 8 (phase8-contracts.md 3.4, D513, D518): the routed event's {@code source} is the innermost showing
+ * heavyweight component on the containment path at the point that no {@code SurfaceSource} claims ({@link #sourceAt}),
+ * else the window; the mouse-target search runs below it as that heavyweight's own lightweight dispatcher would
+ * (lightweight children, the heavyweight itself when it listens; a heavyweight leaf when it listens or is an AWT
+ * control whose peer acts on a press). HW/LW mixing cut-outs are not modelled. The result gains {@code source} (after
+ * {@code surface}) and {@code vetoed} (always, after {@code masked}: a registered {@code InputVeto} refuses input to
+ * the target or the deepest component on some route, phase8-contracts.md 3.2).
  *
  * <p>Stateless; every method EDT only.
  */
@@ -71,9 +84,12 @@ final class HitTest {
         Component deepest;
         Component mouseTarget;
         Component target;
+        /** The routed event's source: the window, or the innermost unclaimed heavyweight at the point (D513). */
+        Component source;
         String targetKind;
         Point local;
         boolean masked;
+        boolean vetoed;
         boolean enabled;
         Dialog blocker;
         List<Window> covering = new ArrayList<Window>();
@@ -130,7 +146,9 @@ final class HitTest {
         Rectangle windowRect = new Rectangle(origin, window.getSize());
 
         hit.deepest = SwingUtilities.getDeepestComponentAt(window, p.x, p.y);
-        hit.mouseTarget = mouseTarget(window, p.x, p.y);
+        List<SurfaceSource.Surface> surfaces = spis.surfaces();
+        hit.source = sourceAt(window, p, surfaces);
+        hit.mouseTarget = mouseTarget(window, hit.source, p);
         if (given != null) {
             hit.target = given;
             hit.targetKind = "TARGET";
@@ -143,6 +161,7 @@ final class HitTest {
         }
         Component target = hit.target;
         hit.masked = target != null && view.masked(target);
+        hit.vetoed = target != null && (view.vetoed(target) || view.vetoed(hit.deepest));
         hit.enabled = target != null && target.isEnabled();
 
         covering(windows, window, hit.screen, hit.covering, hit.ranked);
@@ -210,7 +229,6 @@ final class HitTest {
                 one.put("resolver", region[1].getClass().getName());
                 m.put("region", one);
             }
-            List<SurfaceSource.Surface> surfaces = spis.surfaces();
             SurfaceSource.Surface claimed = spis.claiming(surfaces, target);
             if (claimed != null) {
                 surface = claimed.kind == null ? "WEB" : claimed.kind;
@@ -229,9 +247,11 @@ final class HitTest {
             m.put("fires", Boolean.FALSE);
         }
         m.put("surface", surface);
+        m.put("source", view.ref(hit.source));
         m.put("enabled", Boolean.valueOf(hit.enabled));
         m.put("listening", Boolean.valueOf(hit.mouseTarget != null));
         m.put("masked", Boolean.valueOf(hit.masked));
+        m.put("vetoed", Boolean.valueOf(hit.vetoed));
         if (blockedBy != null) {
             m.put("blockedBy", blockedBy);
         }
@@ -376,6 +396,94 @@ final class HitTest {
      */
     static Component mouseTarget(Container window, int x, int y) {
         return target(window, x, y, true);
+    }
+
+    /**
+     * The routed event's source at a point of {@code root} (Phase 8, phase8-contracts.md 3.4 rule 1, D513): walking
+     * up from the deepest component at the point to {@code root}, the first one that is displayable and not
+     * lightweight (other than {@code root}); {@code root} when there is none, or when that heavyweight or any component
+     * on the path is claimed by a {@code SurfaceSource} (a browser's surface keeps page input on the web routes'
+     * checks, rule 2). {@code root} is the window in production and a container in the headless tests. EDT only.
+     */
+    static Component sourceAt(Container root, Point p, List<SurfaceSource.Surface> claimed) {
+        Component deepest = SwingUtilities.getDeepestComponentAt(root, p.x, p.y);
+        Component source = null;
+        for (Component c = deepest; c != null && c != root; c = c.getParent()) {
+            if (claims(claimed, c)) {
+                return root;
+            }
+            if (source == null && c.isDisplayable() && !c.isLightweight()) {
+                source = c;
+            }
+        }
+        return source != null ? source : root;
+    }
+
+    private static boolean claims(List<SurfaceSource.Surface> claimed, Component c) {
+        if (claimed == null) {
+            return false;
+        }
+        for (SurfaceSource.Surface s : claimed) {
+            if (s != null && s.component == c) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * What the routed event's source would deliver a mouse event at a point of {@code root} to (D513 rule 6): the
+     * window's dispatcher when the source is {@code root}; below a heavyweight container its own dispatcher's search
+     * (lightweight children, the container itself when it listens); a heavyweight leaf itself when it listens or is an
+     * AWT control whose peer acts on a press ({@link #peerActs}); else null. EDT only.
+     */
+    static Component mouseTarget(Container root, Component source, Point p) {
+        if (source == null || source == root) {
+            return target(root, p.x, p.y, true);
+        }
+        Point q = SwingUtilities.convertPoint(root, p, source);
+        if (source instanceof Container) {
+            return target((Container) source, q.x, q.y, true);
+        }
+        return listens(source) || peerActs(source) ? source : null;
+    }
+
+    /**
+     * The component a routed event at {@code (x, y)} of its source reaches (the per-event veto's question, D505): the
+     * source's mouse target, else the deepest component there, else the source itself. EDT only.
+     */
+    static Component deliveryTarget(Component source, int x, int y) {
+        if (!(source instanceof Container)) {
+            return source;
+        }
+        Component t = target((Container) source, x, y, true);
+        if (t == null) {
+            t = SwingUtilities.getDeepestComponentAt(source, x, y);
+        }
+        return t != null ? t : source;
+    }
+
+    /**
+     * The target and the deepest component at a point of the window, for a drag's end (the veto's second hit-test,
+     * phase8-contracts.md 3.2 rule 2): {@code [target, deepest]}, either null. EDT only.
+     */
+    static Component[] targetsAt(SwingSpis spis, Window window, Point p) {
+        Component deepest = SwingUtilities.getDeepestComponentAt(window, p.x, p.y);
+        Component source = sourceAt(window, p, spis.surfaces());
+        Component mouse = mouseTarget(window, source, p);
+        return new Component[] {mouse != null ? mouse : deepest, deepest};
+    }
+
+    /** An AWT control whose peer acts on a press: {@code Button}, {@code Checkbox}, {@code Choice}, {@code List},
+     *  {@code Scrollbar}, {@code TextComponent}. */
+    static boolean peerActs(Component c) {
+        return c instanceof Button || c instanceof Checkbox || c instanceof Choice || c instanceof java.awt.List
+                || c instanceof Scrollbar || c instanceof TextComponent;
+    }
+
+    /** A heavyweight component that is not a container (a {@code Button}, a {@code Checkbox}, a {@code Canvas}). */
+    static boolean heavyweightLeaf(Component c) {
+        return c != null && !(c instanceof Container) && !c.isLightweight();
     }
 
     private static Component target(Container parent, int x, int y, boolean includeSelf) {

@@ -44,6 +44,11 @@ import javax.swing.JTable;
  * withholds the text under it (a component under it is masked; a table's cells and a list's selected item under it
  * are withheld one by one, S122).
  *
+ * <p>Phase 8 (phase8-contracts.md 3.2, 3.3): a node carries {@code vetoed: true} when a registered {@code InputVeto}
+ * refuses input to the component on any route ({@link #vetoed}, asked with route {@code ANY}, ancestor rule), and
+ * {@code collapsed: true} when it is showing but has no effective visible area ({@link #collapsedBy}); both keys only
+ * when true, after {@code masked}. The veto answers and the visible areas are memoised for the call.
+ *
  * <p>Must be used on the EDT. Not thread-safe; never shared between calls.
  */
 final class ComponentView {
@@ -61,6 +66,8 @@ final class ComponentView {
             new IdentityHashMap<Component, List<Rectangle>>();
     private boolean enricherFailureLogged;
     private boolean readFailureLogged;
+    private InputVetoes vetoes;
+    private final Visibility visibility = new Visibility();
 
     ComponentView(AgentContext ctx) {
         this.ctx = ctx;
@@ -75,6 +82,42 @@ final class ComponentView {
     /** The call's redaction rule (the built-in rule and the registered masks). */
     Redaction redaction() {
         return redaction;
+    }
+
+    /** The call's input vetoes (Phase 8, phase8-contracts.md 3.2): asked lazily, memoised per route. */
+    InputVetoes vetoes() {
+        if (vetoes == null) {
+            vetoes = new InputVetoes(ctx);
+        }
+        return vetoes;
+    }
+
+    /**
+     * True when a registered {@code InputVeto} refuses input to the component or an ancestor up to its window on any
+     * route (route {@code ANY}, the readers' question, D506); memoised for the call.
+     */
+    boolean vetoed(Component c) {
+        return c != null && vetoes().vetoed(c);
+    }
+
+    /** The effective visible area in the component's own coordinates (phase8-contracts.md 3.3); memoised. */
+    Rectangle area(Component c) {
+        return visibility.areaOf(c);
+    }
+
+    /** The component or the ancestor that leaves it no visible area; null when it has one; memoised. */
+    Component collapsedBy(Component c) {
+        return visibility.collapsedByOf(c);
+    }
+
+    /** Showing and not collapsed (phase8-contracts.md 3.3, D510); memoised. */
+    boolean onScreen(Component c) {
+        return visibility.onScreenOf(c);
+    }
+
+    /** The call's memo of visible areas. */
+    Visibility visibility() {
+        return visibility;
     }
 
     /**
@@ -352,6 +395,12 @@ final class ComponentView {
         }
         if (masked) {
             m.put("masked", Boolean.TRUE);
+        }
+        if (vetoed(c)) {
+            m.put("vetoed", Boolean.TRUE);
+        }
+        if (c.isShowing() && collapsedBy(c) != null) {
+            m.put("collapsed", Boolean.TRUE);
         }
         return m;
     }

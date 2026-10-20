@@ -58,6 +58,28 @@ class UiSnapshotTextTest {
                 """, text);
     }
 
+    /** Phase 8 (phase8-contracts.md 3.2, D507, 13.1 row 4): the flag {@code vetoed} after {@code selected}. */
+    @Test
+    void flagsAVetoedNodeAfterSelectedAndNothingWithoutTheKey() {
+        Object snapshot = Json.parse("""
+                {"windows": [
+                  {"ref": "h1", "role": "window", "name": "Desk tools", "children": [
+                    {"ref": "h2", "role": "button", "name": "Close the desk", "vetoed": true},
+                    {"ref": "h3", "role": "toggle", "name": "Lid", "selected": true, "vetoed": true},
+                    {"ref": "h4", "role": "button", "name": "Print test slip", "vetoed": false},
+                    {"ref": "h5", "role": "button", "name": "Re-read member card"}
+                  ]}
+                ]}
+                """);
+        assertEquals("""
+                - window "Desk tools" [ref=h1]
+                  - button "Close the desk" [ref=h2] (vetoed)
+                  - toggle "Lid" [ref=h3] (selected, vetoed)
+                  - button "Print test slip" [ref=h4]
+                  - button "Re-read member card" [ref=h5]
+                """, UiSnapshotText.render(snapshot, null));
+    }
+
     @Test
     void respectsTheBudgetAndMarksTruncation() {
         List<Object> children = new ArrayList<>();

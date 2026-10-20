@@ -43,6 +43,10 @@ import java.util.Set;
  * [web h21 hidden] Back data:text/html;base64,PCFkb2N0eXBlIGh0bWw+...
  * </pre>
  *
+ * <p>A node's flags are {@code disabled}, {@code hidden}, {@code focused}, {@code selected} and (Phase 8,
+ * phase8-contracts.md 3.2, D507) {@code vetoed}: the application's agent module refuses input to the component, so a
+ * model reading the text knows not to aim at it; its text is kept (a veto is safety, not privacy).
+ *
  * <p>Unnamed panels, scroll panes and unknown containers are not shown; their children move up a level. The text is
  * capped by a character budget, which the web blocks share, and ends with a note of how many lines were left out.
  * Every value taken from the target (role, name, text, ref, value, application-state keys and values, a browser's
@@ -180,6 +184,9 @@ public final class UiSnapshotText {
             }
             if (Boolean.TRUE.equals(n.get("selected"))) {
                 flags.add("selected");
+            }
+            if (Boolean.TRUE.equals(n.get("vetoed"))) {
+                flags.add("vetoed"); // Phase 8 (phase8-contracts.md 3.2, D507): the agent refuses input to it
             }
             if (!flags.isEmpty()) {
                 line.append(" (").append(String.join(", ", flags)).append(')');

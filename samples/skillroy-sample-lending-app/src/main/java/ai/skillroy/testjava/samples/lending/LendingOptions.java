@@ -46,6 +46,9 @@ import java.util.concurrent.TimeUnit;
  *   <tr><td>{@value #PROP_DB_PASSWORD}</td><td>none</td><td>the password of the read-only account
  *       {@value LendingDb#READER_USER}: required when {@value #PROP_DB_PORT} is set (the desk refuses to start
  *       without it, naming this property), not used otherwise. A secret: the desk never logs it</td></tr>
+ *   <tr><td>{@value #PROP_TOOLS}</td><td>false</td><td>{@code true} also opens the "Desk tools" window
+ *       ({@link DeskTools}, Phase 8, phase8-contracts.md 12.1) beside the desk frame; {@code false} does not. Only
+ *       with a window ({@link #ui()})</td></tr>
  * </table>
  */
 public final class LendingOptions {
@@ -58,6 +61,8 @@ public final class LendingOptions {
     public static final String PROP_TITLE = "lending.title";
     public static final String PROP_DB_PORT = "lending.dbPort";
     public static final String PROP_DB_PASSWORD = "lending.dbPassword";
+    /** {@code true} to open the "Desk tools" window ({@link DeskTools}) too; default {@code false} (Phase 8). */
+    public static final String PROP_TOOLS = "lending.tools";
     /** {@link #dbPort()} when the database is not served on a port (the default). */
     public static final int NO_DB_PORT = -1;
 
@@ -70,6 +75,7 @@ public final class LendingOptions {
     private int dbPort = NO_DB_PORT;
     private String dbPassword;
     private Boolean ui;
+    private boolean tools;
     private Clock clock = Clock.systemDefaultZone();
 
     /** @return the defaults (seed A, no plugins, no idle lock, default title, database {@code lending}) */
@@ -84,9 +90,11 @@ public final class LendingOptions {
 
     /**
      * @return options from the given properties ({@value #PROP_SEED}, {@value #PROP_EDITION}, {@value #PROP_PLUGINS},
-     *     {@value #PROP_IDLE_LOCK}, {@value #PROP_TITLE}, {@value #PROP_DB_PORT}, {@value #PROP_DB_PASSWORD})
-     * @throws IllegalArgumentException for an unknown seed or edition, a malformed idle-lock value or a port that is
+     *     {@value #PROP_IDLE_LOCK}, {@value #PROP_TITLE}, {@value #PROP_DB_PORT}, {@value #PROP_DB_PASSWORD},
+     *     {@value #PROP_TOOLS})
+     * @throws IllegalArgumentException for an unknown seed or edition, a malformed idle-lock value, a port that is
      *     not a whole number between 0 and 65535 (a port without a password is refused by {@link LendingApp#launch})
+     *     or a tools value other than true or false
      */
     public static LendingOptions fromProperties(Properties props) {
         LendingOptions o = new LendingOptions();
@@ -130,6 +138,14 @@ public final class LendingOptions {
             o.dbPort(value);
         }
         o.dbPassword(props.getProperty(PROP_DB_PASSWORD));
+        String tools = props.getProperty(PROP_TOOLS);
+        if (tools != null && !tools.trim().isEmpty()) {
+            String t = tools.trim();
+            if (!"true".equalsIgnoreCase(t) && !"false".equalsIgnoreCase(t)) {
+                throw new IllegalArgumentException(PROP_TOOLS + " must be true or false: " + tools);
+            }
+            o.tools(Boolean.parseBoolean(t));
+        }
         return o;
     }
 
@@ -196,6 +212,15 @@ public final class LendingOptions {
         return this;
     }
 
+    /**
+     * @param open true to open the "Desk tools" window ({@link DeskTools}) beside the desk frame as well (only when
+     *     the desk shows a window); false (the default) for the desk frame alone
+     */
+    public LendingOptions tools(boolean open) {
+        this.tools = open;
+        return this;
+    }
+
     /** @param show true to show the Swing window, false for none; unset = show unless the JVM is headless */
     public LendingOptions ui(boolean show) {
         this.ui = show;
@@ -249,5 +274,10 @@ public final class LendingOptions {
 
     public Clock clock() {
         return clock;
+    }
+
+    /** @return whether the "Desk tools" window opens too ({@value #PROP_TOOLS}); false unless set */
+    public boolean tools() {
+        return tools;
     }
 }

@@ -17,6 +17,7 @@
 package ai.skillroy.testjava.agent.api;
 
 import java.util.Collections;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -69,5 +70,16 @@ public interface AgentModule {
      * is disabled; must not throw and must not block for long.
      */
     default void uninstall() {
+    }
+
+    /**
+     * What the module wants an operator to see about its running state, shown as the {@code info} entry of the
+     * module's record in {@code agent.info.modules[]} when non-empty (and printed by {@code skillroy info}); empty by
+     * default (Phase 8, phase8-contracts.md 3.2 rule 4, A68). Plain JSON values only (strings, numbers, booleans,
+     * lists and maps of them); called on an agent thread, must be cheap, must not block and should not throw (a
+     * failure is logged and the entry left out).
+     */
+    default Map<String, Object> info() {
+        return Collections.emptyMap();
     }
 }

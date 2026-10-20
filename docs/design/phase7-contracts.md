@@ -215,6 +215,11 @@ and their bounds:
 | `web.hitTest`, `web.pointer` | `WORKER`, 10 s; a pointer `CLICK` is move, press and release awaited in sequence under the call's budget; iframes descended to depth 3; a mutating call is never retried and never re-sent on the shared JCEF client (P4 §4.2, D62) |
 | The loop (controller) | one model call per iteration under `timeouts.callMs`; the budget reserved before the call (D74); the step protocol's waits (`sync.await`, `swing.settle`) with the step timeout; a model's `wait` is a settle, never a sleep (vision §R1; BS12 RESULT "Sessions": `wait` was answered by the settle 97 times); at most 30 UI actions and 20 model turns per session, enforced by the service (§10); the marks drawn on the controller's copy of the raster (Java 25 `java.awt.image`) |
 | Image comparison (controller) | decoded rasters of at most 4096 x 4096; the exact hash first, a pixel walk only on a mismatch, for the report |
+| `InputVeto` (Phase 8, built 2026-10-19, EA; P8 §3.7) | EDT only, inside the call's read or posted task; at most 64 ancestors per ask (deeper refused), memoised per call and route; a throwing veto refuses; the text one line of 200 characters; no new timeout |
+| `Visibility` (Phase 8, built 2026-10-19, EA; P8 §3.7) | EDT only; O(depth) per component, O(nodes) per walk (each area computed from the parent's, memoised for the call) |
+| `HitTest.sourceAt` (Phase 8, built 2026-10-19, EA; P8 §3.7) | one `getDeepestComponentAt` and one walk up, inside the existing pre-check read |
+| `swing.pointer` ROUTED (Phase 8, built 2026-10-19, EA; P8 §3.7) | at most **101** events per call (the 100 above plus the exit to the previous source); each task checks `cancelled`, the modal state and the per-event veto (asked outside the state's lock); the balance into a heavyweight leaf adds at most one `MOUSE_EXITED` |
+| `Clicks.semantic` (Phase 8, built 2026-10-19, EA; P8 §3.7) | one dispatched `ActionEvent`/`ItemEvent` inside the posted task |
 
 ### 2.5 What a target JVM sees
 
@@ -440,6 +445,17 @@ the focus owner, §6.5) takes the component's role, class and name from the comp
 at its centre (a label inside a composite button; review finding L1-F5, D446). `deepest` and `mouseTarget` keep their
 meaning: what lies at the centre.
 
+**Phase 8 (built 2026-10-19, EA; P8 §3.2 rule 7, §3.4 rule 6, A68, A70).** The result gains **`vetoed`** (always,
+right after `masked`: true when a registered `InputVeto` refuses input on some route, asked with route `ANY`, to the
+target or the deepest component, either chain) and **`source`** (right after `surface`: the ref of the routed event's
+source, the window or the innermost showing heavyweight on the containment path at the point that no `SurfaceSource`
+claims). The mouse target is searched below that heavyweight as its own lightweight dispatcher would: its lightweight
+children, the heavyweight itself when it listens; a heavyweight leaf (an AWT `Button`, `Checkbox`, `Canvas`) is its
+own mouse target when it listens or is an AWT control whose peer acts on a press (`Button`, `Checkbox`, `Choice`,
+`List`, `Scrollbar`, `TextComponent`). `surface` keeps its meaning (`HEAVYWEIGHT` still anchors the recorder's step,
+whose replay now reaches inside); `targetNode` is unchanged; HW/LW mixing cut-outs are not modelled. The target form
+refuses a collapsed component (`INVALID_PARAMS collapsed`, P8 §3.3).
+
 ### 3.3 `swing.pointer` with `via: ROUTED` (A63; mutating; capability `swing.pointer.routed`)
 
 **Decision (D293, D294, D352).** A pointer action at coordinates, delivered as a `MouseEvent` whose source is the
@@ -541,6 +557,30 @@ whose dispatch **returned**: a press whose handler blocks the EDT or runs a moda
 EDT runs after the cancellation, since the call cannot wait for a blocked EDT (D387). (c) The call's
 `AWTEventListener` recognises its own events, retargeted ones included, by a `when` unique to the call; the window
 itself counts as `received` only when it listens (D400). (d) The per-event modal re-read is skipped under `force`.
+
+**Phase 8 (built 2026-10-19, EA; P8 §3.2-§3.4, A68-A70, D505, D512-D514).** (a) *Source.* The events' source is the
+innermost unclaimed heavyweight at the point (§3.2's `source`), else the window; the point is converted to it, `xAbs`,
+`yAbs` and the call's `when` unchanged; a drag keeps the press's source (the implicit grab), `to` converted into it;
+a heavyweight a `SurfaceSource` claims (a browser's surface), or any component on the path to it, keeps the window as
+the source, so page input stays on `web.pointer`'s checks. The result gains `source` after `window`. (b) *Step 1, the
+pre-check,* asks the input veto first (route `swing.pointer.routed`, never skipped by `force`) for the hit's target and
+deepest component, the component form's component and, for a drag, the target and deepest component at `to`:
+`INPUT_REJECTED {reason: "vetoed", veto, ref, vetoed, route, hit}`; the component form refuses a collapsed component
+(`INVALID_PARAMS collapsed`) and a point its component does not show, outside its strict visible rectangle
+(`JComponent.getVisibleRect()`, else the effective area): `INPUT_REJECTED {reason: "not visible", ref, point, param:
+at|to}`, the point in the component's own coordinates. (c) *Step 2, enter and exit.* The last routed position is kept
+per source and the last source per window (both weakly); a call whose source differs from the window's last routed
+source, which is still showing, starts with one `MOUSE_EXITED` to that source at its last point (one more event in
+`dispatched.of`), then the move when the point differs from the new source's last position. (d) *Step 7, per event.*
+After the `cancelled` and modal tests every task asks the veto for the component AWT will deliver the event to (while
+a press of the call is down, the pressed one; otherwise the event source's mouse target at the event's point, else the
+deepest component there), with a fresh evaluator, outside the call's state lock; a refusal stops the sequence
+(`fired: false, reason: VETOED, vetoed: {ref, veto, route}`), the dispatched press balanced, `force` or not. Every event
+is dispatched to its own source. (e) *Received* counts the source itself when it is a heavyweight leaf or listens.
+(f) *The balance* into a heavyweight leaf dispatches the drag to (-1, -1), then one `MOUSE_EXITED` there (the X peers
+disarm on exit), then the release with click count 0; into a container none is needed (its dispatcher delivers the
+exit). Verified on the Linux image, Java 8 and Java 25 targets (`HeavyweightRoutingDisplayTest`, the tools leg).
+**Errors** gain `INPUT_REJECTED` `vetoed` and `not visible`, and `INVALID_PARAMS` `collapsed`.
 
 ### 3.4 `via: ROBOT` and `mode: ROBOT`: the V3 tier's agent half (A63, A65)
 
@@ -706,6 +746,13 @@ rectangle over 4096 pixels a side, carries the limitation sentence as `glassNote
   for another `GraphicsDevice` is constructed on demand **on an agent worker** (`ThreadPolicy.WORKER`, the call's
   remaining time), never on the call's thread, and cached per device.
 - **S124, modifiers** (the differences list above) and **S126, the grab's bound at a UI scale** (§2.4's Robot row).
+
+**Phase 8 (built 2026-10-19, EA; P8 §3.2 rule 2, A68).** `check` asks the input veto (route `swing.pointer.robot`,
+never skipped by `force`) for the hit's target and deepest component, the component form's component and a drag's end
+point, after the on-a-screen tests and before `requireFocus`; it runs in the delivery probe's read and again right
+before the press, so a vetoed point, and a drag ending on one, are refused before anything moves
+(`RobotPathDisplayTest`, `os.calls` empty). Delivery is unchanged; the hit-test's heavyweight search makes `target` the
+component inside a heavyweight `Panel`, which `received elsewhere` compares against.
 
 ### 3.5 `swing.type` with an omitted target (A62)
 
@@ -917,6 +964,11 @@ window it owns is `NOT_FOUND` with `data.reason: "iconified"`, a screen point no
 `data.reason: "off-screen"` (`data.param: "to"` for a drag's end point), `modifiers` with `via: ROBOT` are
 `INVALID_PARAMS` with `data.param: "modifiers"`, and a capture whose PNG exceeds the encoding bound is `INVALID_PARAMS`
 with `data.reason: "encoding"` (§2.4).
+
+**Phase 8 (built 2026-10-19, EA; P8 §3.6, A68, A69).** Still no new id and no new code: `INPUT_REJECTED` gains the
+`data.reason` values `vetoed` (an `InputVeto` refused the input) and `not visible` (the pointer's component form at a
+point its component does not show), `INVALID_PARAMS` gains `collapsed`, and the pointer's `fired: false` reason gains
+`VETOED`.
 
 ---
 ## 4. The web side (`skillroy-agent-web`, `skillroy-cdp`, the script library)
@@ -1562,6 +1614,9 @@ For one grounded action on `target` with hit-test result `H` (vision §R3; desig
      no `pointer`, no `type`, no `press` and no toolset `key` at it, with the text "the component takes a secret; ask the
      person to sign on" (D358). The sample's mask names the number pad while the entry field is
      masked (§12.2), so digits cannot be spelled into a secret by region clicks either;
+   - **(Phase 8, built 2026-10-19, EA; P8 §3.2, D507)** a target the hit-test reports **`vetoed`** (an `InputVeto`
+     of the application's module refuses input to it): refused as a masked one, on every gesture, for a vetoed focus
+     owner (`type`, `press`) and in V2's raw pointer, with `Recorder.VETOED`;
    - a `type` whose text names a secret slot reference (`$<slot>.<key>` where the session's credential joins hold
      `key`), or **any step, a pack verb's included, whose compiled calls would reference a credential join's secret
      field** (`ExecutorSession` refuses both for every origin but a person's before anything is journaled or sent, §9.2:
@@ -2798,7 +2853,11 @@ extended with this phase, D334):
    `signOn` verb's credential join by the person or the player before the loop (§9.2, §6.8). The recorder refuses a
    `click`, `pointer`, `type`, `press` or toolset `key` at a component the hit-test reports `masked` (§3.2, §6.5) with the
    text "the component takes a secret; ask the person to sign on"; a pack's mask names what
-   feeds a secret field too (the sample's number pad while the entry field is masked, §12.2).
+   feeds a secret field too (the sample's number pad while the entry field is masked, §12.2). **(Phase 8, built
+   2026-10-19, EA; P8 §3.2, D507)** It refuses a component the hit-test reports `vetoed` the same way, on every gesture,
+   for a vetoed focus owner and in V2's raw pointer, with `Recorder.VETOED` ("the application's agent module refuses
+   input to that component"): nothing vetoed becomes a step, a journal line or an export; a hit without the key (a
+   0.1.0 agent) is not refused for it, since the agent is the enforcer.
 7. **Captures the loop acted on are kept masked** under the session's output directory, referenced by hash (§9.6; a
    screenshot per acted-on screen, under the process umask); a baseline or an anchor holds masked pixels only and is
    reviewed code (§8.7; `approve` and the export write one only after the person saw the file, `--yes` aside); the
@@ -2892,6 +2951,9 @@ keys keep their 64 px beside the 160 px number pad (the keys' tree paths change;
 - Registered in `LendingModule.install` beside the eleven SPIs of today (thirteen); `LendingModule.VERSION` becomes
   `0.2.0` with the pack's bump rule in its Javadoc ("change it whenever the module's primitives or SPIs change"; it has
   not changed since Phase 1 although its surface grew, map 7 T8).
+- **(Phase 8, built 2026-10-19, EA; P8 §12.2)** `LendingInputVeto implements InputVeto`, the fourteenth SPI type:
+  refuses the "Desk tools" window's panel `closeMenu` by name on every route and `ANY` ("closes the desk (the
+  application would end)"); the version is written in step R.
 
 ### 12.3 The pack (`skillroy-sample-lending-pack`; version `0.6.0`)
 
@@ -3490,7 +3552,9 @@ routed primitives after a focus check, and stops the turn when the target JVM ho
 `scaleAssumed`; nothing runs at another scale than 1 here (BS9 leg `mac-j25`: a `ROBOT` capture on a Retina display
 differs from a `PAINT` by antialiasing). **(79)** `swing.hitTest`'s mouse target is inferred with public API plus two
 rules (`componentPopupMenu`, `autoscrolls`); a component that calls `enableEvents` otherwise is invisible to it (BS10
-condition 3); `swing.pointer`'s `received` reports the real one. **(80)** The covering-window rule of the routed path
+condition 3); `swing.pointer`'s `received` reports the real one. **(Phase 8, built 2026-10-19, EA; P8 §3.2 rule 6)**
+The routed pointer's per-event veto asks for that inferred mouse target, so the deepest component at the point is
+asked too, before the sequence (the pre-check's two chains) and per event when no mouse target is found. **(80)** The covering-window rule of the routed path
 ranks only a modal dialog, an owned window and the active window; two unrelated frames of the JVM are reported, not
 ranked (§3.2, §3.3); the Robot path refuses every covering window instead (§3.4), and a window of another process is
 invisible to both. **(81)** `web.pointer` has no key input (`Input.dispatchKeyEvent`, `Input.insertText`), the later

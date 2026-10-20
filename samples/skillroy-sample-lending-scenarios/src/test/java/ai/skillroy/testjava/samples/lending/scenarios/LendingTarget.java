@@ -66,7 +66,13 @@ final class LendingTarget implements AutoCloseable {
          * the operator's half of the double opt-in; no other leg sets it, so the goldens hold the Robot ids
          * {@code UNAVAILABLE("robot: not enabled…")}.
          */
-        JAVAAGENT_ROBOT("javaagent-robot", LoadMode.JAVAAGENT);
+        JAVAAGENT_ROBOT("javaagent-robot", LoadMode.JAVAAGENT),
+        /**
+         * The tools leg (phase8-contracts.md 12.1, 13.2 items 1-10, D516): {@code -javaagent} on a desk launched with
+         * {@code -Dlending.tools=true} (the "Desk tools" window) and the agent option {@code robot=true}, so that the
+         * Robot route's veto refusal is proven end to end; no golden is compared on this leg.
+         */
+        JAVAAGENT_TOOLS("javaagent-tools", LoadMode.JAVAAGENT);
 
         final String slug;
         final LoadMode loadMode;
@@ -199,6 +205,9 @@ final class LendingTarget implements AutoCloseable {
         if (edition != null) {
             builder.jvmArg("-Dlending.edition=" + edition);
         }
+        if (mode == Mode.JAVAAGENT_TOOLS) {
+            builder.jvmArg("-Dlending.tools=true"); // Phase 8: the "Desk tools" window (phase8-contracts.md 12.1)
+        }
         String dbPassword = databaseListener ? generatePassword() : null;
         if (databaseListener) {
             builder.jvmArg("-Dlending.dbPort=0").jvmArg("-Dlending.dbPassword=" + dbPassword);
@@ -206,9 +215,10 @@ final class LendingTarget implements AutoCloseable {
         Map<String, String> agentOptions = mode == Mode.JAVAAGENT_HOOKS
                 ? Map.of("discoveryDir", dir.toString(), OPTIONAL_MODULES, HOOKS_LEG_MODULES, BYTEMAN_JAR, bytemanJar())
                 : mode == Mode.JAVAAGENT_ROBOT ? Map.of("discoveryDir", dir.toString(), ROBOT_OPTION, "true")
+                : mode == Mode.JAVAAGENT_TOOLS ? Map.of("discoveryDir", dir.toString(), ROBOT_OPTION, "true")
                 : Map.of("discoveryDir", dir.toString());
         switch (mode) {
-            case JAVAAGENT, JAVAAGENT_HOOKS, JAVAAGENT_ROBOT -> builder.javaAgent(home, agentOptions);
+            case JAVAAGENT, JAVAAGENT_HOOKS, JAVAAGENT_ROBOT, JAVAAGENT_TOOLS -> builder.javaAgent(home, agentOptions);
             case JAVA_TOOL_OPTIONS -> builder.javaAgent(home, agentOptions).viaJavaToolOptions(true);
             case ATTACH -> {
                 // Launched without the agent; it is attached once the JVM runs.

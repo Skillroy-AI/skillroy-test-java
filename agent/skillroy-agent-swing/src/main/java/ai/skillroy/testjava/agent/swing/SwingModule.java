@@ -134,7 +134,7 @@ public final class SwingModule implements AgentModule {
     private final BooleanSupplier edtRunning;
     private final RobotFactory robotFactory;
     private boolean robotEnabled;
-    private SwingPrimitives primitives;
+    private volatile SwingPrimitives primitives;
 
     /** For {@code ServiceLoader}. */
     public SwingModule() {
@@ -219,6 +219,20 @@ public final class SwingModule implements AgentModule {
     @Override
     public synchronized void onTargetReady(AgentContext context) {
         checkAwt();
+    }
+
+    /**
+     * {@code {vetoWithheld: n}}: the calls whose posted input task an {@code InputVeto} withheld since install
+     * (Phase 8, phase8-contracts.md 3.2 rule 4, D503), shown as the {@code info} entry of the module's record in
+     * {@code agent.info.modules[]}; empty before install.
+     */
+    @Override
+    public Map<String, Object> info() {
+        SwingPrimitives p = primitives;
+        if (p == null) {
+            return java.util.Collections.emptyMap();
+        }
+        return java.util.Collections.<String, Object>singletonMap("vetoWithheld", Long.valueOf(p.vetoWithheld()));
     }
 
     /** Stops the watcher thread and removes the AWT tap and the primitives. Never throws, never initialises AWT. */

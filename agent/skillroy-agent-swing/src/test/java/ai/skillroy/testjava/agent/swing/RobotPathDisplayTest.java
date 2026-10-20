@@ -399,6 +399,31 @@ class RobotPathDisplayTest extends DisplayTestBase {
     }
 
     /**
+     * Phase 8 (phase8-contracts.md 3.2 rule 2, 13.2 item 10): the input veto refuses a vetoed point, and a drag that
+     * ends on a vetoed component, in the check before anything moves, {@code force} or not; the capability stays
+     * {@code OK}.
+     */
+    @Test
+    void aVetoedPointAndADragEndingOnOneAreRefusedBeforeAnythingMoves() throws Exception {
+        rctx.spi.register(ai.skillroy.testjava.agent.api.spi.InputVeto.class, (c, route) ->
+                c == ui.ok ? "the agent never presses this one" : null);
+        RpcException e = expectError(ErrorCodes.INPUT_REJECTED, () -> robot("by", map("id", "okButton"), "action",
+                "CLICK", "via", "ROBOT", "requireFocus", false, "force", true));
+        assertEquals("vetoed", e.error().data().get("reason"));
+        assertEquals("swing.pointer.robot", e.error().data().get("route"));
+        assertEquals(rref(ui.ok), e.error().data().get("vetoed"));
+        assertTrue(os.calls.isEmpty(), "nothing moved: " + os.calls);
+        Point from = onEdt(() -> HitTest.centre(ui.entry));
+        Point to = onEdt(() -> HitTest.centre(ui.ok));
+        RpcException drag = expectError(ErrorCodes.INPUT_REJECTED, () -> robot("point", map("x", (long) from.x, "y",
+                (long) from.y), "to", map("x", (long) to.x, "y", (long) to.y), "space", map("window",
+                rref(ui.frame)), "action", "DRAG", "via", "ROBOT", "requireFocus", false));
+        assertEquals("vetoed", drag.error().data().get("reason"), "the drag's end is asked");
+        assertTrue(os.calls.isEmpty(), "nothing moved: " + os.calls);
+        assertEquals(CapabilityState.OK, rctx.capabilities.get(SwingModule.CAP_POINTER_ROBOT).state());
+    }
+
+    /**
      * Fix wave (Phase 7 review, FA, L2-F4): with a delivery probe due, a covering window of the JVM refuses the point
      * ({@code covered}) before the probe moves the pointer onto it; the capability stays {@code OK}.
      */

@@ -33,7 +33,9 @@ import javax.swing.SwingUtilities;
 /**
  * Resolves {@link Locator}s against the live component tree. Built-in strategies walk the tree in pre-order (document
  * order) from each root; custom strategies are delegated to the first registered {@link LocatorResolver} that names
- * them, looked up at call time. Only showing components match unless {@code includeHidden}.
+ * them, looked up at call time. Only components on screen match unless {@code includeHidden}: showing and not
+ * collapsed (an effective visible area, Phase 8, phase8-contracts.md 3.3; a component scrolled out of a viewport stays
+ * on screen).
  *
  * <p>Must be used on the EDT. One instance per primitive call.
  */
@@ -140,8 +142,8 @@ final class LocatorEngine {
     }
 
     private void collect(Component c, Locator loc, boolean includeHidden, List<Component> out) {
-        if (!includeHidden && !c.isShowing()) {
-            return; // nothing below a non-showing component is showing
+        if (!includeHidden && !view.onScreen(c)) {
+            return; // nothing below a component that is not on screen is on screen (hereditary)
         }
         if (matches(c, loc) && accepts(c, loc, includeHidden)) {
             out.add(c);
@@ -168,8 +170,8 @@ final class LocatorEngine {
         return loc.value().equals(ComponentView.className(c)) || loc.value().equals(c.getClass().getName());
     }
 
-    private static boolean accepts(Component c, Locator loc, boolean includeHidden) {
-        return (includeHidden || c.isShowing()) && (loc.role() == null || loc.role().equals(Roles.of(c)));
+    private boolean accepts(Component c, Locator loc, boolean includeHidden) {
+        return (includeHidden || view.onScreen(c)) && (loc.role() == null || loc.role().equals(Roles.of(c)));
     }
 
     /** The component at the child-index path below {@code root} ({@code root} itself for an empty path), or null. */

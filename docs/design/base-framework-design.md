@@ -175,7 +175,7 @@ Every branch ends in the handshake; only a successful `/ping` counts as attached
 - *The enable flag* is checked before anything is started (no thread, no port). The agent does nothing unless it is enabled: the system property `skillroy.agent.enabled=true`, the environment variable `SKILLROY_AGENT_ENABLED`, or `enabled=true` in the `EMBEDDED` properties. The `-javaagent` argument string and the options file it names cannot enable it, because `JAVA_TOOL_OPTIONS` may hand them to JVMs that never asked for the agent. In `ATTACH` mode `enabled=true` in the attach options or the options file is accepted: attaching is itself a deliberate act by a process of the same OS user.
 - *The production marker* can only be evaluated once the application is initialised. Until every `ProductionMarker` has passed, the agent serves read-only primitives only (mutating calls answer `NOT_READY`); the check runs when the target is ready and before any module's `onTargetReady`. A marker that matches, or throws, makes the agent refuse to serve: it records the reason in `skillroy.agent.error` and shuts down. With no marker registered the agent serves and logs a warning.
 
-Read-only mode disables mutating primitives and `STUB` hooks. Destructive primitives need `confirm:true`. Every wait is bounded. No primitive calls application code known to end the JVM. The agent never initialises AWT before the application does, and secret-looking values in JVM arguments, system properties and agent options are redacted before they leave the JVM.
+Read-only mode disables mutating primitives and `STUB` hooks. Destructive primitives need `confirm:true`. Every wait is bounded. No primitive calls application code known to end the JVM; a layer names such code's controls with `InputVeto`, and no route reaches them *(Phase 8, built 2026-10-19, EA; `phase8-contracts.md` §3.2)*. The agent never initialises AWT before the application does, and secret-looking values in JVM arguments, system properties and agent options are redacted before they leave the JVM.
 
 The security review that B13 asked for was run on 2026-10-02. It confirmed 34 findings (S1-S34: four of medium severity, thirty low). The hardening that closes them (H1-H3) was built and verified in Phase 1.x the same day; §2.3 and §6 outline it.
 
@@ -322,6 +322,7 @@ Modules are discovered by `ServiceLoader` from a module jar in a child-first loa
 | `CaptureMask` | which components show a secret: a capture blanks them grey and every reader of the tree withholds their text (one rule for pixels and text) | built (Phase 7, 2026-10-10, VS; P7 §3.6) |
 | `SurfaceSource` | areas of the tree that are not Swing-painted, as another module knows them (the web module's browser index), for a capture's `surfaces` and the hit-test's `surface` | built (Phase 7, 2026-10-10, VS; P7 §3.7) |
 | `LocatorResolver.describe` | the strategy values that name a component in the resolver's vocabulary, so that the hit-test proposes the domain locator first | built (Phase 7, 2026-10-10, VS; P7 §3.7) |
+| `InputVeto` | the components the agent must never deliver input to (a control whose action ends the JVM or cannot be undone in a test): asked with the route on every input route that resolves a target, for the component and its ancestors up to the window, inside the read and again inside every posted task and per routed pointer event; fails closed; never skipped by `force`; readers flag `vetoed` and the recorder never offers such a component | built (Phase 8, 2026-10-19, EA; `phase8-contracts.md` §3.2; the sample's `LendingInputVeto`) |
 
 `SyncPolicy` is the one per-domain contract on the controller side (§3.6); the module's part is to emit the topics it names.
 
@@ -537,7 +538,7 @@ A **tenant pack** is a `DomainPack` overlay for one deployment variant of the sa
 | Rung | What it does | Notes |
 |---|---|---|
 | `SEMANTIC` | the domain module's own input primitive (`<domain>.input`), not a `swing.click` rung: the input reaches the application the way its UI would hand it over, and the call returns the application's acknowledgement | fastest, UI-independent. For a plain text component the generic equivalent is `swing.type` in `SET` mode: set the text on the EDT, then fire the field's action |
-| `ACTION` | the first `ActionFirer` that accepts the component (a pack supplies one for custom widgets); otherwise `AbstractButton.doClick()` posted to the EDT; for a non-button component, a click as in `DISPATCH` | exercises widget logic without focus. `AUTO`, the default rung of `swing.click`, means `ACTION` |
+| `ACTION` | the first `ActionFirer` that accepts the component (a pack supplies one for custom widgets); otherwise `AbstractButton.doClick()` posted to the EDT; *(Phase 8, built 2026-10-19, EA; `phase8-contracts.md` §3.5)* an AWT `Button` gets one `ActionEvent` and an AWT `Checkbox` its state and one `ItemEvent`, dispatched inside the posted task (COMPONENT does the same once the focus arrived); for any other component, a click as in `DISPATCH` | exercises widget logic without focus. `AUTO`, the default rung of `swing.click`, means `ACTION` |
 | `COMPONENT` | on the EDT: optionally activate the component's window (`activateWindow`: `toFront()` + `requestFocus()`), then `requestFocusInWindow()`, wait for `hasFocus()` up to 500 ms, then `doClick()` | `doClick` holds the EDT for 68 ms by design (swing §F7). Works only in the focused window unless `activateWindow` is set |
 | `DISPATCH` | `MOUSE_PRESSED`, `MOUSE_RELEASED`, `MOUSE_CLICKED` delivered with `Component.dispatchEvent` at the component's centre, never posted to the event queue | for components that listen to mouse events and have no action to fire |
 | `ROBOT` | `java.awt.Robot` native input at screen coordinates | opt-in, not in Phase 1. Needs a non-headless JVM and XTEST (swing §F0); unusable in Windows session 0 or a locked session (swing §F23) |
@@ -559,9 +560,18 @@ What BS4 measured on an Xvfb without a WM, identically on Java 8 and Java 21: a 
 
 Defaults: `SEMANTIC` for data entry; `ACTION` for `swing.click`; `COMPONENT` with window activation where the scenario asks for it through `ui`; `ROBOT` only on request.
 
+**Input vetoes (Phase 8, built 2026-10-19, EA; `phase8-contracts.md` §3.1, §3.2).** A domain module registers an
+`InputVeto` for every control whose action ends the JVM or cannot be undone in a test. Every input route that resolves
+a target asks it, in this order of checks: clickable (not showing, collapsed, disabled: `INVALID_PARAMS`), then the
+veto (`INPUT_REJECTED vetoed`, never skipped by `force`), then the modal state; the default targets of `swing.type`
+and `swing.key` and ENTER's default button are asked too; every posted task asks again before it acts; the routed
+pointer asks per event. A veto on a panel or a window covers everything inside it. Not followed: key bindings,
+mnemonics and accelerators (veto the window, or the bound control), and `web.*` input into a browser inside a vetoed
+window (gap 126).
+
 **Keys.** `swing.key`, and `swing.type` in `DISPATCH` mode, send non-posted `Component.dispatchEvent(KeyEvent)` triples (pressed, typed, released) on the EDT. A key event *posted* to the event queue is retargeted by DKFM to the current focus owner and silently dropped when there is none; a non-posted event keeps its target (swing §F2). This is Jemmy's queue-dispatch model (swing §F3), and it is why OS-level key injection is unreliable against an unfocused Swing window.
 
-**Locators.** A locator names exactly one strategy, plus an optional role and index. Preference when authoring: a domain strategy from a `LocatorResolver` (in the sample, `{action: "DUE"}`), then `id` (the component's explicitly set name), `name`, `text`, `class`, and the child-index `path` last. Zero matches is `NOT_FOUND`; more than one without an index is `AMBIGUOUS`, with the candidates listed. Handles are weak references; a collected component yields `STALE_HANDLE`.
+**Locators.** A locator names exactly one strategy, plus an optional role and index. Preference when authoring: a domain strategy from a `LocatorResolver` (in the sample, `{action: "DUE"}`), then `id` (the component's explicitly set name), `name`, `text`, `class`, and the child-index `path` last. Zero matches is `NOT_FOUND`; more than one without an index is `AMBIGUOUS`, with the candidates listed. Handles are weak references; a collected component yields `STALE_HANDLE`. *(Phase 8, built 2026-10-19, EA; `phase8-contracts.md` §3.3)* Only components **on screen** match unless `includeHidden`: showing, with a non-empty effective area (the component's rectangle clipped by every ancestor up to its window, a `JViewport` or AWT `ScrollPane` not clipping its view, so a component scrolled out of view stays on screen); a collapsed component (a zero-size or clipped-away pane) does not match, is left out of snapshots and is `INVALID_PARAMS collapsed` when clicked.
 
 **Dialogs.** `swing.dialogs()` lists showing dialogs with modality, title, text (through `DialogTextExtractor`) and options. Dismissal order:
 
@@ -581,7 +591,11 @@ are pixel-identical on the Linux image (BS9). The Robot rung's facts as built: R
 `robot` and the controller's opt-in, constructed on a worker after AWT is confirmed, a press always paired with its
 release, a delivery probe that makes a silent drop visible (macOS without the Accessibility permission delivers
 nothing, BS9), `requireFocus` at the press, and every covering window of the JVM refusing the point; a `ROBOT`
-capture is a person's evidence only, blanked outside the JVM's windows.
+capture is a person's evidence only, blanked outside the JVM's windows. *(Phase 8, built 2026-10-19, EA;
+`phase8-contracts.md` §3.4)* The routed pointer's events are sourced from the innermost heavyweight component at the
+point that no `SurfaceSource` claims (else the window), so that a heavyweight container's own lightweight dispatcher
+retargets them to the components inside it: an application drawn inside an AWT `Panel` is reachable; a browser's
+surface keeps the window as the source.
 
 ### 3.8 Embedded web views: CDP and the in-process SPI
 
@@ -673,7 +687,7 @@ Rules for both (browser-spi §C0-§C5): no adapter creates or configures an engi
 | Tier | The model gets | The model answers with | Input path | Replayable |
 |---|---|---|---|---|
 | V1 "sees, acts by reference" | the text snapshot plus a `PAINT` capture, optionally annotated with refs | a component ref | the existing rungs (§3.7) | directly: the ref resolves to a locator |
-| V2 "acts by pixel inside the JVM" | a window capture | a pixel | `swing.hitTest`, then `swing.pointer` routed through the window: AWT's own dispatcher delivers the event to the component under the point (vision §F7) | when the hit-test finds a locatable component; otherwise see "where a pixel cannot be mapped" |
+| V2 "acts by pixel inside the JVM" | a window capture | a pixel | `swing.hitTest`, then `swing.pointer` routed through the window: AWT's own dispatcher delivers the event to the component under the point (vision §F7); *(Phase 8, built 2026-10-19, EA; `phase8-contracts.md` §3.4)* through the innermost unclaimed heavyweight at the point when there is one, whose own dispatcher reaches inside it | when the hit-test finds a locatable component; otherwise see "where a pixel cannot be mapped" |
 | V3 "acts like a person at the glass" | a `PAINT` capture of the target's windows (a capture of the glass is a person's evidence only, never a model's; Phase 7, D341) | a screen pixel | `swing.pointer` through `ROBOT` | timing and focus dependent; opt-in only |
 
 - V1 is the default for anything in the Swing tree.

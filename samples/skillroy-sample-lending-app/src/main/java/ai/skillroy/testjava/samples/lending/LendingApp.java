@@ -35,7 +35,8 @@ import java.util.logging.Logger;
  * ({@link LendingOptions#dbPassword()}) before anything is created; create and seed the database (servable, see
  * {@link LendingDb#createServable}, when a listener is wanted), load staff, catalogue and waiver rules, create the
  * printer, prompt service and engine, open the database listener when {@link LendingOptions#dbPort()} asks for one
- * ({@link LendingDbServer}), create and show the window on the event dispatch thread (unless headless), start the
+ * ({@link LendingDbServer}), create and show the window on the event dispatch thread (unless headless) and, with
+ * {@link LendingOptions#tools()}, the "Desk tools" window ({@link DeskTools}) after it, start the
  * engine thread, publish {@link #instance()}, then start the plugins. Without a window the desk still runs; prompts
  * are then answered only through {@link PromptService#answer}.
  *
@@ -56,6 +57,7 @@ public final class LendingApp {
     private final PromptService prompts;
     private final Engine engine;
     private volatile LendingFrame frame;
+    private volatile DeskTools tools;
     private volatile LendingDbServer dbServer;
     private final List<LendingPlugin> plugins = new ArrayList<LendingPlugin>();
     private final AtomicBoolean pluginsStopped = new AtomicBoolean();
@@ -123,6 +125,9 @@ public final class LendingApp {
             }
             if (options.ui()) {
                 app.createWindow();
+                if (options.tools()) {
+                    app.createTools(); // Phase 8 (phase8-contracts.md 12.1): the "Desk tools" window, after the frame
+                }
             }
             app.engine.start();
         } catch (Exception e) {
@@ -141,6 +146,20 @@ public final class LendingApp {
             prompts.setView(new SwingPromptView(f));
             f.setVisible(true);
             frame = f;
+        };
+        if (EventQueue.isDispatchThread()) {
+            create.run();
+        } else {
+            EventQueue.invokeAndWait(create);
+        }
+    }
+
+    /** Opens the "Desk tools" window on the event dispatch thread; it never takes the focus itself. */
+    private void createTools() throws InterruptedException, InvocationTargetException {
+        Runnable create = () -> {
+            DeskTools t = new DeskTools();
+            t.setVisible(true);
+            tools = t;
         };
         if (EventQueue.isDispatchThread()) {
             create.run();
@@ -200,6 +219,22 @@ public final class LendingApp {
         stopPlugins();
         prompts.setView(null);
         engine.stop();
+        final DeskTools t = tools;
+        if (t != null) {
+            Runnable dispose = t::dispose;
+            if (EventQueue.isDispatchThread()) {
+                dispose.run();
+            } else {
+                try {
+                    EventQueue.invokeAndWait(dispose);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                } catch (InvocationTargetException e) {
+                    LOG.log(Level.WARNING, "closing the desk tools failed", e.getCause());
+                }
+            }
+            tools = null;
+        }
         final LendingFrame f = frame;
         if (f != null) {
             Runnable close = () -> {
@@ -292,6 +327,14 @@ public final class LendingApp {
     /** @return the main window, or null when running without one */
     public LendingFrame frame() {
         return frame;
+    }
+
+    /**
+     * @return the "Desk tools" window ({@link LendingOptions#PROP_TOOLS}), or null when it was not asked for or the
+     *     desk runs without a window
+     */
+    public DeskTools tools() {
+        return tools;
     }
 
     /** @return the started plugins, in start order */

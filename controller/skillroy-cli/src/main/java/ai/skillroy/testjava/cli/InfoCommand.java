@@ -75,7 +75,10 @@ final class InfoCommand implements Command {
         }
     }
 
-    /** {@code swing 0.1.0 INSTALLED, data 0.1.0 FAILED (reason)} from {@code agent.info.modules}. */
+    /**
+     * {@code swing 0.1.0 INSTALLED {vetoWithheld=1}, data 0.1.0 FAILED (reason)} from {@code agent.info.modules}; a
+     * module's non-empty {@code info} (Phase 8, phase8-contracts.md 3.2 rule 4, A68) follows its state in braces.
+     */
     static String modules(Object modules) {
         if (!(modules instanceof List<?> list)) {
             return "";
@@ -89,6 +92,11 @@ final class InfoCommand implements Command {
                 }
                 if (module.get("state") != null) {
                     part.append(' ').append(module.get("state"));
+                }
+                if (module.get("info") instanceof Map<?, ?> info && !info.isEmpty()) {
+                    List<String> pairs = new ArrayList<>();
+                    info.forEach((k, v) -> pairs.add(k + "=" + v));
+                    part.append(" {").append(Text.oneLine(String.join(", ", pairs), 120)).append('}');
                 }
                 if (module.get("message") != null) {
                     part.append(" (").append(Text.oneLine(String.valueOf(module.get("message")), 120)).append(')');

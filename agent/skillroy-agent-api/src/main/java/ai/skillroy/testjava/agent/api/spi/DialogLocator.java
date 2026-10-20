@@ -26,7 +26,9 @@ package ai.skillroy.testjava.agent.api.spi;
  * reading, {@code swing.dismiss} presses buttons inside it, and while it {@link #blocksInput blocks input},
  * {@code swing.click}, {@code swing.type} and {@code swing.key} aimed at a component of the same window outside it
  * answer {@code MODAL_OPEN} unless forced. Roots that are not showing, that are windows themselves or that lie outside
- * the window asked about are ignored.
+ * the window asked about are ignored. A root without an effective visible area (zero-sized, or clipped away by an
+ * ancestor: collapsed, phase8-contracts.md 3.3) is not a dialog either: it blocks nothing and is not listed (the agent
+ * logs the first such root of each class); report the component that has the area.
  *
  * <p>Called on the EDT; must be fast, must not change the component tree, and must not block.
  */

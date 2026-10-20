@@ -21,6 +21,7 @@ import ai.skillroy.testjava.agent.api.spi.DialogInfo;
 import ai.skillroy.testjava.agent.api.spi.DialogTextExtractor;
 import ai.skillroy.testjava.protocol.RpcException;
 
+import java.awt.Button;
 import java.awt.Component;
 import java.awt.Container;
 import java.awt.Point;
@@ -47,6 +48,10 @@ import javax.swing.border.TitledBorder;
  * buttons that have text. A dialog window is passed to {@code extract(Window)}; the root of a dialog drawn inside a
  * window (amendment A27, see {@link InWindowDialogs}) to {@code extract(Component)}, and its generic title is an
  * internal frame's title or a titled border's title.
+ *
+ * <p>Phase 8 (phase8-contracts.md 3.2, 3.3, 3.5): an AWT {@code java.awt.Button} counts as a button (listed, found and
+ * pressed through the same ACTION plan); a collapsed component (no effective visible area) contributes no text and no
+ * button; a button entry carries {@code vetoed: true} when an {@code InputVeto} refuses input to it.
  *
  * <p>Must be used on the EDT. One instance per primitive call.
  */
@@ -98,6 +103,9 @@ final class DialogReader {
                     b.put("ref", view.ref(c));
                 }
                 b.put("text", label);
+                if (c != null && view.vetoed(c)) {
+                    b.put("vetoed", Boolean.TRUE);
+                }
                 buttons.add(b);
             }
             extractor = info.extractorId();
@@ -105,10 +113,13 @@ final class DialogReader {
             title = ownTitle;
             JOptionPane pane = optionPane(root);
             text = pane != null ? messageText(pane.getMessage(), view) : readingText(root, view);
-            for (AbstractButton button : textButtons(root)) {
+            for (Component button : textButtons(root)) {
                 Map<String, Object> b = new LinkedHashMap<String, Object>();
                 b.put("ref", view.ref(button));
                 b.put("text", view.text(button));
+                if (view.vetoed(button)) {
+                    b.put("vetoed", Boolean.TRUE);
+                }
                 buttons.add(b);
             }
             extractor = GENERIC;
@@ -136,7 +147,7 @@ final class DialogReader {
         if (info != null) {
             labels.addAll(info.buttons());
         } else {
-            for (AbstractButton b : textButtons(root)) {
+            for (Component b : textButtons(root)) {
                 labels.add(view.text(b));
             }
         }
@@ -199,7 +210,7 @@ final class DialogReader {
      */
     Component findButton(Component d, String label) {
         List<Component> candidates = new ArrayList<Component>();
-        collectButtonCandidates(d, candidates);
+        collectButtonCandidates(d, candidates, view.visibility());
         for (int pass = 0; pass < 2; pass++) {
             List<Component> hits = new ArrayList<Component>();
             for (Component c : candidates) {
@@ -236,36 +247,39 @@ final class DialogReader {
 
     private List<String> labelsOf(Component c) {
         List<String> labels = new ArrayList<String>(2);
-        if (c instanceof AbstractButton) {
+        if (c instanceof AbstractButton || c instanceof Button) {
             labels.add(view.text(c));
         }
         labels.add(view.name(c));
         return labels;
     }
 
-    private static void collectButtonCandidates(Component c, List<Component> out) {
-        if (!c.isShowing()) {
-            return;
+    private static void collectButtonCandidates(Component c, List<Component> out, Visibility vis) {
+        if (!vis.onScreenOf(c)) {
+            return; // not showing, or collapsed (phase8-contracts.md 3.3)
         }
         boolean leaf = !(c instanceof Container) || ((Container) c).getComponentCount() == 0;
-        if (c instanceof AbstractButton || (leaf && "unknown".equals(Roles.of(c)))) {
+        if (c instanceof AbstractButton || c instanceof Button || (leaf && "unknown".equals(Roles.of(c)))) {
             out.add(c);
         }
         if (c instanceof Container) {
             for (Component child : ((Container) c).getComponents()) {
-                collectButtonCandidates(child, out);
+                collectButtonCandidates(child, out, vis);
             }
         }
     }
 
-    /** Showing buttons with text, in reading order (a masked button shows none, D349). */
-    private List<AbstractButton> textButtons(Component root) {
+    /**
+     * Buttons on screen with text, Swing's and AWT's (phase8-contracts.md 3.5), in reading order (a masked button
+     * shows none, D349).
+     */
+    private List<Component> textButtons(Component root) {
         List<Component> all = new ArrayList<Component>();
-        collectShowing(root, all);
-        List<AbstractButton> out = new ArrayList<AbstractButton>();
+        collectShowing(root, all, view.visibility());
+        List<Component> out = new ArrayList<Component>();
         for (Component c : readingOrder(all)) {
-            if (c instanceof AbstractButton && view.text(c) != null) {
-                out.add((AbstractButton) c);
+            if ((c instanceof AbstractButton || c instanceof Button) && view.text(c) != null) {
+                out.add(c);
             }
         }
         return out;
@@ -279,7 +293,7 @@ final class DialogReader {
      */
     static String readingText(Component root, ComponentView view) {
         List<Component> all = new ArrayList<Component>();
-        collectShowing(root, all);
+        collectShowing(root, all, view != null ? view.visibility() : new Visibility());
         StringBuilder sb = new StringBuilder();
         for (Component c : readingOrder(all)) {
             String role = Roles.of(c);
@@ -343,14 +357,15 @@ final class DialogReader {
         return null;
     }
 
-    private static void collectShowing(Component c, List<Component> out) {
-        if (!c.isShowing()) {
+    /** The components on screen under {@code c} (showing and not collapsed, phase8-contracts.md 3.3), in tree order. */
+    private static void collectShowing(Component c, List<Component> out, Visibility vis) {
+        if (!vis.onScreenOf(c)) {
             return;
         }
         out.add(c);
         if (c instanceof Container) {
             for (Component child : ((Container) c).getComponents()) {
-                collectShowing(child, out);
+                collectShowing(child, out, vis);
             }
         }
     }

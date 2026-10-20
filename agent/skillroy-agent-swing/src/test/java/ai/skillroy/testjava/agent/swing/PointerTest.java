@@ -48,6 +48,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * nothing; a dispatched press is disarmed by a drag to (-1, -1) and released there, {@code balanced}) and the per-event
  * modal re-read ({@code MODAL_OPENED}, {@code dispatched n of m}). A recording component stands in for the window; that
  * no action fires on a real button is the display tests'.
+ *
+ * <p>Phase 8 (phase8-contracts.md 3.2 rule 6, 3.4, 13.1 row 2): the per-event veto through the {@code Plan.veto} seam
+ * (a refusal before the press dispatches nothing more, one after it withholds the rest and balances the press, reason
+ * {@code VETOED} with {@code vetoed {ref, veto, route}}, {@code force} or not), events from a non-window source, the
+ * exit to the previous source, and the balance into a heavyweight leaf (drag, exit, release with click count 0).
  */
 class PointerTest {
 
@@ -93,6 +98,11 @@ class PointerTest {
 
                 @Override
                 public void mouseWheelMoved(java.awt.event.MouseWheelEvent e) {
+                    seen.add(e);
+                }
+
+                @Override
+                public void mouseExited(MouseEvent e) {
                     seen.add(e);
                 }
             };
@@ -438,5 +448,163 @@ class PointerTest {
         });
         assertFalse(Pointer.cancel(st), "a PRESS is meant to stay down (routed only)");
         assertEquals(2, rec.seen.size());
+    }
+
+    // ------------------------------------------------------------------------------------- Phase 8: the veto
+
+    /** A veto seam that refuses the event of the given id (once reached), naming {@code named}. */
+    private static InputVetoes.EventVeto refusing(final int id, final java.awt.Component named) {
+        return new InputVetoes.EventVeto() {
+            @Override
+            public InputVetoes.Refusal check(MouseEvent e) {
+                return e.getID() == id ? new InputVetoes.Refusal(named, "closes the desk", "swing.pointer.routed")
+                        : null;
+            }
+        };
+    }
+
+    @Test
+    void aVetoOfThePressDispatchesNothingMoreThanTheMove() throws Exception {
+        final Recorder rec = new Recorder();
+        final List<MouseEvent> es = Pointer.events(request("action", "CLICK"), rec, new Point(10, 20), null,
+                new Point(0, 0), null, 9L, true);
+        final Pointer pointer = new Pointer(ctx, new Windows(), new RecentCaptures(), "Linux");
+        final Pointer.Plan plan = plan(rec, new AtomicBoolean(), es);
+        plan.veto = refusing(MouseEvent.MOUSE_PRESSED, rec);
+        final Pointer.State st = state(es.size(), false);
+        onEdt(() -> {
+            for (int i = 0; i < es.size(); i++) {
+                pointer.dispatch(plan, st, i, es.get(i), false);
+            }
+            return null;
+        });
+        assertEquals(Pointer.VETOED, st.reason);
+        assertEquals(1, st.sent, "dispatched 1 of 4: the move only");
+        assertEquals(1, rec.seen.size());
+        assertEquals(MouseEvent.MOUSE_MOVED, rec.seen.get(0).getID());
+        assertFalse(st.balanced, "no press was down");
+        assertEquals(0, st.done.getCount(), "the caller is woken at once");
+        assertEquals(ctx.handles.handleFor(rec, ComponentView.KIND), st.vetoed.get("ref"));
+        assertEquals("closes the desk", st.vetoed.get("veto"));
+        assertEquals("swing.pointer.routed", st.vetoed.get("route"));
+    }
+
+    @Test
+    void aVetoAfterThePressWithholdsTheRestAndBalancesThePress() throws Exception {
+        final Recorder rec = new Recorder();
+        final List<MouseEvent> es = Pointer.events(request("action", "CLICK"), rec, new Point(10, 20), null,
+                new Point(0, 0), null, 9L, true);
+        final Pointer pointer = new Pointer(ctx, new Windows(), new RecentCaptures(), "Linux");
+        final Pointer.Plan plan = plan(rec, new AtomicBoolean(), es);
+        plan.veto = refusing(MouseEvent.MOUSE_RELEASED, rec);
+        final Pointer.State st = state(es.size(), false);
+        onEdt(() -> {
+            for (int i = 0; i < es.size(); i++) {
+                pointer.dispatch(plan, st, i, es.get(i), false);
+            }
+            return null;
+        });
+        assertEquals(Pointer.VETOED, st.reason);
+        assertEquals(2, st.sent, "dispatched 2 of 4");
+        assertTrue(st.balanced);
+        assertEquals(4, rec.seen.size(), "move, press, then the balance: " + rec.seen);
+        assertEquals(MouseEvent.MOUSE_DRAGGED, rec.seen.get(2).getID());
+        assertEquals(new Point(-1, -1), rec.seen.get(2).getPoint());
+        assertEquals(MouseEvent.MOUSE_RELEASED, rec.seen.get(3).getID());
+        assertEquals(0, rec.seen.get(3).getClickCount());
+        for (MouseEvent e : rec.seen) {
+            assertFalse(e.getID() == MouseEvent.MOUSE_CLICKED, "no click after a veto");
+        }
+    }
+
+    @Test
+    void forceDoesNotSkipThePerEventVeto() throws Exception {
+        final Recorder rec = new Recorder();
+        final List<MouseEvent> es = Pointer.events(request("action", "CLICK", "force", true), rec, new Point(10, 20),
+                null, new Point(0, 0), null, 9L, true);
+        final Pointer pointer = new Pointer(ctx, new Windows(), new RecentCaptures(), "Linux");
+        final Pointer.Plan plan = plan(rec, new AtomicBoolean(true), es);
+        plan.veto = refusing(MouseEvent.MOUSE_PRESSED, rec);
+        final Pointer.State st = state(es.size(), false);
+        onEdt(() -> {
+            for (int i = 0; i < es.size(); i++) {
+                pointer.dispatch(plan, st, i, es.get(i), true);
+            }
+            return null;
+        });
+        assertEquals(Pointer.VETOED, st.reason, "force skips the modal re-read, never the veto");
+        assertEquals(1, st.sent);
+    }
+
+    @Test
+    void theBalanceIntoAHeavyweightLeafExitsBeforeTheRelease() throws Exception {
+        final Recorder rec = new Recorder();
+        final List<MouseEvent> es = Pointer.events(request("action", "CLICK"), rec, new Point(10, 20), null,
+                new Point(0, 0), null, 9L, true);
+        final Pointer pointer = new Pointer(ctx, new Windows(), new RecentCaptures(), "Linux");
+        final Pointer.Plan plan = plan(rec, new AtomicBoolean(), es);
+        plan.sourceLeaf = true;
+        plan.veto = refusing(MouseEvent.MOUSE_RELEASED, rec);
+        final Pointer.State st = state(es.size(), false);
+        onEdt(() -> {
+            for (int i = 0; i < es.size(); i++) {
+                pointer.dispatch(plan, st, i, es.get(i), false);
+            }
+            return null;
+        });
+        assertTrue(st.balanced);
+        assertEquals(5, rec.seen.size(), "move, press, drag, exit, release: " + rec.seen);
+        assertEquals(MouseEvent.MOUSE_DRAGGED, rec.seen.get(2).getID());
+        assertEquals(MouseEvent.MOUSE_EXITED, rec.seen.get(3).getID(), "the X peers disarm on exit (D514)");
+        assertEquals(new Point(-1, -1), rec.seen.get(3).getPoint());
+        assertEquals(MouseEvent.MOUSE_RELEASED, rec.seen.get(4).getID());
+        assertEquals(0, rec.seen.get(4).getClickCount());
+        for (MouseEvent e : rec.seen) {
+            assertFalse(e.getID() == MouseEvent.MOUSE_CLICKED, "no click");
+        }
+    }
+
+    @Test
+    void eventsFromANonWindowSourceCarryItsCoordinatesAndTheSameScreenPoint() {
+        Recorder source = new Recorder();
+        Point windowOrigin = new Point(300, 200);
+        Point inWindow = new Point(120, 70);
+        Point sourceOffset = new Point(100, 50);
+        Point local = new Point(inWindow.x - sourceOffset.x, inWindow.y - sourceOffset.y);
+        Point sourceOrigin = new Point(windowOrigin.x + sourceOffset.x, windowOrigin.y + sourceOffset.y);
+        List<MouseEvent> es = Pointer.events(request("action", "CLICK"), source, local, null, sourceOrigin, null, 9L,
+                true);
+        assertEquals(4, es.size());
+        for (MouseEvent e : es) {
+            assertTrue(e.getComponent() == source, "sourced from the heavyweight");
+            assertEquals(local, e.getPoint(), "in the source's coordinates");
+            assertEquals(windowOrigin.x + inWindow.x, e.getXOnScreen(), "xAbs unchanged");
+            assertEquals(windowOrigin.y + inWindow.y, e.getYOnScreen(), "yAbs unchanged");
+        }
+    }
+
+    @Test
+    void aSourceChangeStartsWithOneExitToThePreviousSourceAtItsLastPoint() throws Exception {
+        final Recorder previous = new Recorder();
+        final Recorder source = new Recorder();
+        final List<MouseEvent> es = new ArrayList<MouseEvent>();
+        es.add(Pointer.exit(previous, new Point(30, 40), 9L));
+        es.addAll(Pointer.events(request("action", "CLICK"), source, new Point(10, 20), null, new Point(0, 0), null,
+                9L, true));
+        final Pointer pointer = new Pointer(ctx, new Windows(), new RecentCaptures(), "Linux");
+        final Pointer.Plan plan = plan(source, new AtomicBoolean(), es);
+        final Pointer.State st = state(es.size(), false);
+        onEdt(() -> {
+            for (int i = 0; i < es.size(); i++) {
+                pointer.dispatch(plan, st, i, es.get(i), false);
+            }
+            return null;
+        });
+        assertEquals(5, st.sent, "one event more in dispatched.of: the exit");
+        assertEquals(1, previous.seen.size());
+        assertEquals(MouseEvent.MOUSE_EXITED, previous.seen.get(0).getID());
+        assertEquals(new Point(30, 40), previous.seen.get(0).getPoint(), "at its last routed point");
+        assertEquals(4, source.seen.size(), "the rest goes to the new source");
+        assertEquals(0, st.done.getCount());
     }
 }

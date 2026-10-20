@@ -66,6 +66,11 @@ final class FakeVisionAgent {
     boolean webRedacted;
     /** The browser surface is one a pack's mask names: its hit-test answers {@code masked: true} (L2-F2). */
     boolean webMasked;
+    /**
+     * Refs whose hit-test answers {@code vetoed: true} (Phase 8, phase8-contracts.md 3.2, D507); without one the hit
+     * carries no {@code vetoed} key at all, as a 0.1.0 agent's does.
+     */
+    final java.util.Set<String> vetoed = new java.util.HashSet<>();
     /** The frame's insets {left, top}: a {@code WINDOW} capture's {@code origin} (L1-F4). */
     int[] insets = {0, 0};
     /** The dialog's screen position (security fix S114: a dialog inside the frame's bounds moves no origin). */
@@ -460,6 +465,9 @@ final class FakeVisionAgent {
         r.put("enabled", true);
         r.put("listening", false);
         r.put("masked", hit.masked() || webMasked && "WEB".equals(hit.surface()));
+        if (!vetoed.isEmpty()) {
+            r.put("vetoed", vetoed.contains(hit.ref()));
+        }
         if (webBlockedBy != null && "WEB".equals(hit.surface())) {
             r.put("blockedBy", webBlockedBy);
         }

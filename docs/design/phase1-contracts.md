@@ -778,6 +778,10 @@ public interface AgentModule {
     default void onTargetReady(AgentContext ctx) throws Exception { }
     /** Reverse of install; must remove every listener it added to the host. Must not throw or block for long. */
     default void uninstall() { }
+    // A68 (Phase 8, built 2026-10-19, EA; P8 §3.2 rule 4): what an operator should see about the running module,
+    // shown as the `info` entry of its agent.info.modules[] record when non-empty (plain JSON values; a throw is
+    // logged once and the entry left out); the Swing module answers {vetoWithheld: n}
+    default Map<String, Object> info() { return Collections.emptyMap(); }
 }
 
 public interface AgentContext {
@@ -996,6 +1000,24 @@ public interface DialogLocator {
     java.util.List<java.awt.Component> dialogRoots(java.awt.Window window);
     /** True when the dialog blocks input to the rest of its window (the default). */
     default boolean blocksInput(java.awt.Component root) { return true; }
+    // A69 (Phase 8, built 2026-10-19, EA; P8 §3.3, D511): a root without an effective visible area is not a dialog:
+    // it blocks nothing and is not listed (logged once per root class); report the component that has the area
+}
+
+// A67 (Phase 8, built 2026-10-19, EA; P8 §3.2): components the agent must never deliver input to (a key whose action
+// ends the JVM, a control whose effect cannot be undone in a test). Asked on the EDT inside every input route's read
+// that resolves a target (twelve of the thirteen; the ROBOT click rung is refused before resolution), after the
+// clickable test and before the modal test, again inside every posted input task, and per event in the routed
+// pointer, for the component and each ancestor up to and including its window (at most 64 levels, nearest refusal
+// wins; deeper is refused); never skipped by force; a throwing veto refuses ("veto <SimpleClassName> failed", logged
+// once). The text is one line of at most 200 characters. The readers ask with ANY: a veto that refuses any route must
+// refuse ANY too. Refusal: INPUT_REJECTED {reason: "vetoed", veto, ref, vetoed, route, hit?}.
+public interface InputVeto {
+    String CLICK_ACTION = "swing.click.action", CLICK_COMPONENT = "swing.click.component",
+           CLICK_DISPATCH = "swing.click.dispatch", TYPE_SET = "swing.type.set", TYPE_DISPATCH = "swing.type.dispatch",
+           KEY = "swing.key", POINTER_ROUTED = "swing.pointer.routed", POINTER_ROBOT = "swing.pointer.robot",
+           DISMISS_BUTTON = "swing.dismiss.button", DISMISS_CLOSE = "swing.dismiss.close", ANY = "*";
+    String refuse(java.awt.Component component, String route);              // null = allow, else one line why
 }
 
 // A21 (1.x, built 2026-10-02)
@@ -1479,7 +1501,7 @@ without the key behaves exactly as in Phase 1.
 
 | Primitive | Params | Result `value` |
 |---|---|---|
-| `agent.info` | – | `{protocol, agentVersion, pid, startTimeMs, loadMode, instrumentation:bool, readOnly, ready, javaVersion, modules:[{id, version, state: INSTALLED\|FAILED\|UNINSTALLED, message?, readyMessage?}], options:{…token and nonce removed, secret values redacted…}, threads:{workers:{active,max}, callers:{active,max}, abandoned:{<primitive>: n}}}`. **(1.x, built 2026-10-02)** S30: `threads` is new. S14: `modules` also lists modules that could not be loaded |
+| `agent.info` | – | `{protocol, agentVersion, pid, startTimeMs, loadMode, instrumentation:bool, readOnly, ready, javaVersion, modules:[{id, version, state: INSTALLED\|FAILED\|UNINSTALLED, message?, readyMessage?}], options:{…token and nonce removed, secret values redacted…}, threads:{workers:{active,max}, callers:{active,max}, abandoned:{<primitive>: n}}}`. **(1.x, built 2026-10-02)** S30: `threads` is new. S14: `modules` also lists modules that could not be loaded. **(Phase 8, built 2026-10-19, EA; P8 §3.2 rule 4, A68)** a module record carries `info` (its `AgentModule.info()`) when that is non-empty, after `readyMessage`; the Swing module's is `{vetoWithheld: n}`, the calls whose posted input task an `InputVeto` withheld; `skillroy info` prints it after the state |
 | `agent.capabilities` | `reprobe?:bool` | `{capabilities:{id:{state,reason,strategy}}}`; spec timeout 60000 |
 | `agent.log` | `n?:int (100, at most 2000)` | `{lines:[…]}` |
 | `agent.disable` (destructive) | – | `{stopping:true}`; after replying: uninstall modules in reverse order, publish `agent.stopping`, stop the server, delete discovery files, clear the discovery system properties and restore the ones an operator had set (**S9, 1.x, built 2026-10-02**, §2.5). No thread of the core or of the generic modules remains (a domain module may keep one bounded daemon thread to finish removing a listener, §9.2; (Phase 4, built 2026-10-07; P4 §2.4: the web module's tap poller ends at uninstall, and a built-in web adapter's threads end for good at `detach()`, so that a late callback of the technology starts none)); a later attach starts a fresh agent with a new nonce and a new session id (**H2, 1.x, built 2026-10-02**) |
@@ -1538,7 +1560,11 @@ expose their content. **A61 (Phase 7, built 2026-10-10, VS; P7 §3.6):** neither
 rule for pixels and text): it has no `text` and no `value` in any output of the module (`swing.snapshot`,
 `swing.find`, `swing.dialogs`' texts, `swing.hitTest`'s nodes, a mark's label), and its node, like a password
 field's, carries `masked: true`; the role is unchanged. As built, a component inside a masked one is treated as masked
-too (the safe side; its pixels lie inside the blanked rectangle). `children` appears only when non-empty. Values the contract leaves to the module: a combo
+too (the safe side; its pixels lie inside the blanked rectangle). **A68, A69 (Phase 8, built 2026-10-19, EA; P8 §3.2 rule 7, §3.3):** a node carries
+`vetoed: true` when a registered `InputVeto` refuses input to the component or an ancestor on some route (asked with
+route `ANY`; its text is kept: a veto is safety, not privacy), and `collapsed: true` when it is showing but has no
+effective visible area (see Locator); both keys only when true, after `masked`, so a desk without vetoes or collapsed
+panes keeps every node shape. `children` appears only when non-empty. Values the contract leaves to the module: a combo
 box's `value` is its selected index, a list's its selected indices, a table's `{rowCount, columnCount, columns,
 selectedRows, cells}` capped at 50 x 50; HTML text is reduced to plain text; a widget whose own code throws yields a
 node without `text`/`value` instead of failing the call.
@@ -1548,7 +1574,12 @@ node without `text`/`value` instead of failing the call.
 count hidden children), or any strategy a `LocatorResolver` registered (for example `{action:"DUE"}`; the built-in
 keys cannot be registered). A string value matches exactly; `{contains:"…"}` and `{regex:"…"}` objects are accepted
 for `name` and `text` (a regex has a budget of 1000 ms per resolution); `{id}` matches exactly only. Only showing
-components match unless `includeHidden`. Zero matches -> `NOT_FOUND`; more than one without `index` -> `AMBIGUOUS`
+components match unless `includeHidden`. **A69 (Phase 8, built 2026-10-19, EA; P8 §3.3, D510):** only showing **and on screen** components
+match unless `includeHidden`: a component is on screen when its effective area is not empty, its own rectangle
+intersected, walking up, with the bounds of every ancestor up to and including its window, where a `JViewport` and an
+AWT `ScrollPane` do not clip their view (a component scrolled out of view stays on screen); a showing component that
+is not on screen is *collapsed* (a zero-width or zero-height ancestor or self, or wholly outside an ancestor's
+bounds), the rule is hereditary, and `swing.snapshot` leaves collapsed children out the same way. Zero matches -> `NOT_FOUND`; more than one without `index` -> `AMBIGUOUS`
 with the candidate list in `data`. Use `{id}` when a button's text hides its component name: the `name` rule puts
 the accessible name first.
 
@@ -1557,14 +1588,14 @@ the accessible name first.
 | `swing.windows` | – | `{windows:[{ref,type:frame\|dialog\|window,title,id?,name,class,visible,active,focused,modal,bounds}]}` |
 | `swing.snapshot` | `root?:ref, maxDepth?:int (40, capped at 89), maxNodes?:int (2000, capped at 50000), includeHidden?:bool` | `{seq, truncated, windows:[Node with children]}` |
 | `swing.find` | `by:Locator, root?:ref, all?:bool, includeHidden?:bool` | `{matches:[Node without children]}` (with `all`, zero matches is an empty list, not an error) |
-| `swing.click` (mutating) | `target:ref` or `by:Locator`, `rung?: AUTO\|ACTION\|COMPONENT\|DISPATCH\|ROBOT (AUTO)`, `focusTimeoutMs?:int (500)`, `activateWindow?:bool (false)`, `force?:bool (false)`. **A28 (1.x, built 2026-10-02):** `fallback?: "ACTION"` (any case; with rung `COMPONENT` only) | `{rung, requestedRung, fidelity: FULL\|DEGRADED, reason?, fired:true}` when the click fired; `{rung:"FOCUS_FAILED", fired:false, reason}` (no fidelity) when it did not. **A28 (1.x, built 2026-10-02):** `requestedRung` and `fidelity` are new, see "Click rungs" |
-| `swing.type` (mutating) | `target:ref` or `by`, `text`, `mode?: SET\|DISPATCH (SET)`, `clear?:bool (true)`, `enter?:bool`, `force?:bool (false)`. **A62 (Phase 7, built 2026-10-10, VS; P7 §3.5):** without `target` and `by` the text goes where `swing.key`'s key goes (the focus owner, else the active window, else the topmost modal dialog, else the first showing window; a window becomes its root pane); the modal check runs for an explicit target only. Gap 60: a dispatched `ENTER` submits the text field that most recently had the focus, so `enter` with `DISPATCH` and an omitted target may submit another field or none | `{mode, typed:int}` |
-| `swing.key` (mutating) | `key` (`KeyEvent.VK_` name without prefix, e.g. `ENTER`, `ESCAPE`, `F2`), `target?:ref\|by` (default: focus owner, else active window, else topmost modal dialog, else first showing window), `modifiers?:[SHIFT\|CTRL\|ALT\|META]`, `force?:bool (false)` | `{dispatchedTo:ref}` |
+| `swing.click` (mutating) | `target:ref` or `by:Locator`, `rung?: AUTO\|ACTION\|COMPONENT\|DISPATCH\|ROBOT (AUTO)`, `focusTimeoutMs?:int (500)`, `activateWindow?:bool (false)`, `force?:bool (false)`. **A28 (1.x, built 2026-10-02):** `fallback?: "ACTION"` (any case; with rung `COMPONENT` only) | `{rung, requestedRung, fidelity: FULL\|DEGRADED, reason?, fired:true}` when the click fired; `{rung:"FOCUS_FAILED", fired:false, reason}` (no fidelity) when it did not. **A28 (1.x, built 2026-10-02):** `requestedRung` and `fidelity` are new, see "Click rungs". **A68, A69 (Phase 8, built 2026-10-19, EA; P8 §3.2, §3.3):** a vetoed component is `INPUT_REJECTED vetoed` on every rung, `force` or not, and a collapsed one `INVALID_PARAMS collapsed` (see "Input vetoes", "Click rungs") |
+| `swing.type` (mutating) | `target:ref` or `by`, `text`, `mode?: SET\|DISPATCH (SET)`, `clear?:bool (true)`, `enter?:bool`, `force?:bool (false)`. **A62 (Phase 7, built 2026-10-10, VS; P7 §3.5):** without `target` and `by` the text goes where `swing.key`'s key goes (the focus owner, else the active window, else the topmost modal dialog, else the first showing window; a window becomes its root pane); the modal check runs for an explicit target only. Gap 60: a dispatched `ENTER` submits the text field that most recently had the focus, so `enter` with `DISPATCH` and an omitted target may submit another field or none. **A68, A69 (Phase 8, built 2026-10-19, EA; P8 §3.2, §3.3):** every target, explicit or default, is asked the input veto (with `enter` also the root pane's default button) and refused `INPUT_REJECTED vetoed`, `force` or not; a collapsed target is `INVALID_PARAMS collapsed` | `{mode, typed:int}` |
+| `swing.key` (mutating) | `key` (`KeyEvent.VK_` name without prefix, e.g. `ENTER`, `ESCAPE`, `F2`), `target?:ref\|by` (default: focus owner, else active window, else topmost modal dialog, else first showing window), `modifiers?:[SHIFT\|CTRL\|ALT\|META]`, `force?:bool (false)`. **A68, A69 (Phase 8, built 2026-10-19, EA; P8 §3.2, §3.3):** every target, explicit or default, is asked the input veto (with `ENTER`, whatever the modifiers, also the root pane's default button: `data.defaultButton`) and refused `INPUT_REJECTED vetoed`, `force` or not; a collapsed target is `INVALID_PARAMS collapsed` | `{dispatchedTo:ref}` |
 | `swing.dialogs` | – | `{dialogs:[{ref,title,modal,text,buttons:[{ref?,text}],extractor}]}`; modeless dialogs are listed too; `extractor` is `generic` when no registered extractor claims the dialog. **A27 (1.x, built 2026-10-02):** in-window dialogs follow the window dialogs, each with `inWindow: true` and `window`, see "Dialogs that are not windows"; window dialogs keep their shape (no `inWindow` key) |
-| `swing.dismiss` (mutating) | `dialog?:ref` (a showing `java.awt.Dialog`, or **A27 (1.x, built 2026-10-02)** the root of an in-window dialog; default: the topmost modal dialog window, else the in-window dialog when it is the only dialog showing), `button?:string` (button text or name, exact then case-insensitive), `close?:bool` | `{dismissedBy: BUTTON_ACTION\|CLOSE, button?}`. `button` goes through the ACTION click rung; several matches are `AMBIGUOUS`. `close` delivers a `WINDOW_CLOSING` event to the dialog (what the title-bar close box does, so the dialog's own close handling runs); `dispose()` and `setVisible(false)` are never called, because they leave application dialogs without an answer. With neither, a dialog with exactly one button has it pressed; otherwise `INVALID_PARAMS` with `data.buttons`. Without `dialog`: no dialog at all is `NOT_FOUND`; several dialogs of which none is a modal window is `AMBIGUOUS` with `data.dialogs` (window dialogs first, then in-window ones); a `dialog` ref that is neither kind is `INVALID_PARAMS` with `{param: "dialog", ref}` |
+| `swing.dismiss` (mutating) | `dialog?:ref` (a showing `java.awt.Dialog`, or **A27 (1.x, built 2026-10-02)** the root of an in-window dialog; default: the topmost modal dialog window, else the in-window dialog when it is the only dialog showing), `button?:string` (button text or name, exact then case-insensitive), `close?:bool` | `{dismissedBy: BUTTON_ACTION\|CLOSE, button?}`. `button` goes through the ACTION click rung; several matches are `AMBIGUOUS`. `close` delivers a `WINDOW_CLOSING` event to the dialog (what the title-bar close box does, so the dialog's own close handling runs); `dispose()` and `setVisible(false)` are never called, because they leave application dialogs without an answer. With neither, a dialog with exactly one button has it pressed; otherwise `INVALID_PARAMS` with `data.buttons`. Without `dialog`: no dialog at all is `NOT_FOUND`; several dialogs of which none is a modal window is `AMBIGUOUS` with `data.dialogs` (window dialogs first, then in-window ones); a `dialog` ref that is neither kind is `INVALID_PARAMS` with `{param: "dialog", ref}`. **A68, A71 (Phase 8, built 2026-10-19, EA; P8 §3.2, §3.5):** the button (route `swing.dismiss.button`) and, for `close`, the dialog window (`swing.dismiss.close`) are asked the input veto; an AWT `java.awt.Button` is a button; a button entry of `swing.dialogs` carries `vetoed: true` when vetoed, and a collapsed button is no button |
 | `swing.capture` | `target?:ref (active window, else topmost modal dialog, else first showing window)`, `mode?: PAINT (PAINT)` | `{format:"png", width, height, base64}`; anything larger than 4096 x 4096 is scaled down keeping the aspect ratio. (Phase 4, built 2026-10-07; P4 §2.5, §14.1: `PAINT` guards embedded-browser components (BS8: a JOGL canvas throws): when the target's `printAll` throws, the image is painted again part by part, a part whose `printAll` throws on its own becomes a crossed placeholder rectangle, the heavyweight descendants are printed on their own on top, and the result gains `skipped: [{ref, className, error}]` when it is not empty). **A61 (Phase 7, built 2026-10-10, VS; P7 §3.1, §3.4, §3.6):** `target` also takes a locator object and `by` is accepted; `mode?: PAINT\|ROBOT` (`ROBOT`: a person's glass capture, capability `swing.capture.robot`), `scope?: WINDOW\|COMPONENT\|REGION\|SCREEN`, `region?` (a rectangle or a region id, `REGION` only), `scale?` (0.25 to 4; the 4096 cap lowers it, a raster beyond an eighth of the heap headroom is `INVALID_PARAMS`), `redact?:bool (true)`, `annotateRefs?:bool (false)`; a window is painted from its root pane (no imitation decoration on the X toolkit; gap 76), a password field and every component a `CaptureMask` names are blanked grey; the result adds `captureId, seq, mode, scope, space, window?, origin, scale, windows, surfaces, marks?, marksTruncated?, carets, focus, redacted, redactedTruncated?, hash, stackingAssumed?, region?` and, for a glass capture, `glass, glassNote, unstable?` |
-| `swing.hitTest` | **A63 (Phase 7, built 2026-10-10, VS; P7 §3.2).** `point:{x,y}` with `space: {captureId}\|{window: ref}\|"SCREEN"`, or `target`/`by`; read-only, capability `swing.hittest` | `{window, windowRect, covering:[{ref,rect,ranked}], deepest, mouseTarget, mouseTargetInferred, wheelTarget, target, targetKind, targetNode? (the target form's own node; fix wave FC), local, relative, row?, locators, fires, region?, surface, browser?, surfaceLocal?, enabled, listening, masked, blockedBy?, stackingAssumed, seq}` |
-| `swing.pointer` (mutating) | **A63 (Phase 7, built 2026-10-10, VS; P7 §3.3, §3.4).** `action: MOVE\|PRESS\|RELEASE\|CLICK\|DOUBLE_CLICK\|DRAG\|WHEEL`; a point and `space`, or `target`/`by` with `region?`, `row?`, `at?:{fx,fy}`; `to?` (DRAG), `button?`, `modifiers?`, `clickCount?`, `wheel?:{notches}`, `steps?`, `via?: ROUTED\|ROBOT (ROUTED)`, `force?`, `expectTarget?`, `requireFocus?` (ROBOT); capability `swing.pointer.routed` (`via: ROBOT` checks `swing.pointer.robot`) | `{via, window, hit, fired, reason?, dispatched:{sent,of}, balanced, received, focusOwner, activated, stackingAssumed?, seq}` |
+| `swing.hitTest` | **A63 (Phase 7, built 2026-10-10, VS; P7 §3.2).** `point:{x,y}` with `space: {captureId}\|{window: ref}\|"SCREEN"`, or `target`/`by`; read-only, capability `swing.hittest` | `{window, windowRect, covering:[{ref,rect,ranked}], deepest, mouseTarget, mouseTargetInferred, wheelTarget, target, targetKind, targetNode? (the target form's own node; fix wave FC), local, relative, row?, locators, fires, region?, surface, browser?, surfaceLocal?, enabled, listening, masked, blockedBy?, stackingAssumed, seq}`. **A68, A70 (Phase 8, built 2026-10-19, EA; P8 §3.2, §3.4):** `source` (after `surface`: the routed event's source, the window or the innermost unclaimed heavyweight at the point; the mouse target is searched below it as its own dispatcher would) and `vetoed` (always, after `masked`); a collapsed target form is `INVALID_PARAMS collapsed` |
+| `swing.pointer` (mutating) | **A63 (Phase 7, built 2026-10-10, VS; P7 §3.3, §3.4).** `action: MOVE\|PRESS\|RELEASE\|CLICK\|DOUBLE_CLICK\|DRAG\|WHEEL`; a point and `space`, or `target`/`by` with `region?`, `row?`, `at?:{fx,fy}`; `to?` (DRAG), `button?`, `modifiers?`, `clickCount?`, `wheel?:{notches}`, `steps?`, `via?: ROUTED\|ROBOT (ROUTED)`, `force?`, `expectTarget?`, `requireFocus?` (ROBOT); capability `swing.pointer.routed` (`via: ROBOT` checks `swing.pointer.robot`) | `{via, window, hit, fired, reason?, dispatched:{sent,of}, balanced, received, focusOwner, activated, stackingAssumed?, seq}`. **A68-A70 (Phase 8, built 2026-10-19, EA; P8 §3.2-§3.4):** `source` after `window` (ROUTED); `hit` gains `vetoed`; `reason` may be `VETOED` with `vetoed: {ref, veto, route}` (a per-event refusal, the press balanced); a vetoed component is refused `INPUT_REJECTED vetoed` before anything is sent, `force` or not; the component form refuses a collapsed component (`INVALID_PARAMS collapsed`) and a point its component does not show (`INPUT_REJECTED {reason: "not visible", ref, point, param: at\|to}`) |
 | `swing.rendering` | **A63 (Phase 7, built 2026-10-10, VS; P7 §3.8).** – ; capability `swing.capture.paint` | `{jdk:{vendor,version,specification}, os:{name,version,arch}, lookAndFeel, antialiasing:{desktopHints,property}, screenScale, probeHash, keyed, renderKey}` |
 | `swing.edtState` | – | `{dispatchThreadAlive, edtBlocked, awtStarted, modalDialogs:[ref], windowCount, focusOwner?:ref}` (thread `CALLER`, never blocks on the EDT for more than 500 ms; `edtBlocked:true` if the marker does not run). It names no capability and answers without starting the toolkit: before the application has started AWT it reports `{dispatchThreadAlive:false, edtBlocked:false, awtStarted:false, modalDialogs:[], windowCount:0}`. `modalDialogs` lists dialog windows only, not in-window dialogs (A27) |
 | `swing.settle` | `timeoutMs?:int (5000, at most 120000), quietMs?:int (50)` | `{settled:bool, ms}`: two consecutive EDT marker round trips with no `window.opened`/`window.closed` in between and for `quietMs` after. It answers `settled:false` before the call budget runs out instead of letting the dispatcher report `TIMEOUT` |
@@ -1586,7 +1617,13 @@ has the focus, and the flag is ignored by the other rungs. **DISPATCH** = `MOUSE
 `MOUSE_CLICKED` delivered with
 `Component.dispatchEvent` at the component centre (never posted to the system queue). **ROBOT** = `UNAVAILABLE` in
 Phase 1 (`reason: "opt-in rung, not implemented"`; the call fails with `CAPABILITY_UNAVAILABLE`). **AUTO** = ACTION.
-Clicking a disabled or non-showing component is `INVALID_PARAMS` with the reason. In every rung `fired:true` means
+Clicking a disabled or non-showing component is `INVALID_PARAMS` with the reason. **A69, A71 (Phase 8, built 2026-10-19, EA; P8 §3.3, §3.5):**
+clicking a disabled, non-showing **or collapsed** component is `INVALID_PARAMS` (`reason: "collapsed"` with `by`, the
+component or ancestor that leaves it no visible area); ACTION, after the `ActionFirer`s, and COMPONENT, once the focus
+arrived, fire an AWT `java.awt.Button` with one `ActionEvent` (its action command) and an AWT `java.awt.Checkbox` as
+its X peer does (in a `CheckboxGroup` and selected: nothing; else the state flips, in a group to selected, and one
+`ItemEvent`), dispatched inside the posted task with no mouse event; DISPATCH stays a mouse click, whose effect on an
+AWT control depends on the toolkit's peer (the X peers act on it). In every rung `fired:true` means
 "posted": an exception thrown later on the event-dispatch thread, by an `ActionFirer` or by the application's
 listener, is logged and not reported.
 
@@ -1634,6 +1671,25 @@ of a window that never became focused says how many times the activation was re-
 result shapes, the fall-back and the listener clean-up are as A28. The display tests wait for a window to become
 the focused window through one helper that re-issues the same activation once a second (`DisplayTestBase`).
 
+**Input vetoes (A68, Phase 8, built 2026-10-19, EA; P8 §3.2, D501-D506).** A layer registers an `InputVeto` (§4) for every control whose
+action ends the JVM or cannot be undone in a test. Every input route that resolves a target asks it inside the read
+that resolves the target, after the clickable test (not showing, collapsed, disabled) and before the modal test, for
+the component and each ancestor up to its window: `swing.click` (all rungs; COMPONENT before the window activation
+and the focus request, the fall-back to ACTION again), `swing.type` and `swing.key` for every target, explicit or
+default (a window's root pane included; with ENTER also the root pane's default button), `swing.pointer` for the
+hit's target and deepest component, the component form's component and a drag's end (ROUTED and ROBOT, the latter
+before anything moves), `swing.dismiss` for the button and, with `close`, the dialog window. The refusal is
+`INPUT_REJECTED {reason: "vetoed", veto, ref, vetoed, route, hit?}`; no argument skips it, `force` included (`force`
+acts past a dialog, never past a veto). Every posted input task asks again immediately before it acts; a refusal
+there acts on nothing, is logged once per call and counted (`vetoWithheld` in the Swing module's `info`, shown by
+`agent.info.modules[]`), and is not reported: the call already answered "posted", so a step whose veto depends on
+application state passes with `fired: true` and only its sync or an expectation on the effect fails it. The routed
+pointer asks per event for the component AWT delivers it to (the pressed one while a press of the call is down) and
+stops a refused sequence as a modal dialog does (`reason: VETOED`, the press balanced). Readers flag `vetoed` (Node,
+hit-test, a dialog's button) and capture marks skip a vetoed component; snapshots do not prune it. Not followed: Swing
+key bindings, mnemonics and accelerators (veto the window or the bound control); `web.*` input into a browser inside
+a vetoed window (gap 126). With `allowFailedModules=true` a failed layer module serves without its veto.
+
 **Modal blocking.** `swing.click`, `swing.type` and `swing.key` with an explicit target whose window is blocked by
 a showing modal dialog fail with `MODAL_OPEN` (`data.dialog` = the dialog's ref, `data.title`, `data.ref` = the
 target) unless `force: true` is passed. Blocked means: a showing dialog with a modality type other than `MODELESS`
@@ -1679,6 +1735,12 @@ and skipped, and a `blocksInput` that throws counts as blocking. Then:
   `inWindow: true`; dialog windows are checked first, then the in-window dialogs, and of several blocking in-window
   dialogs the innermost (the last one reported) is named. The title in `MODAL_OPEN` is the extractor's, else the
   generic one.
+
+**A69, A71 (Phase 8, built 2026-10-19, EA; P8 §3.3, §3.5, D511, D515):** a reported root without an effective visible area (collapsed) is not a
+dialog: it blocks nothing, is not listed, and the first such root of each class is logged ("swing: in-window dialog
+root <class> has no visible area and blocks nothing"); collapsed components contribute no text and no button to a
+dialog's reading. An AWT `java.awt.Button` is a button of the generic reading, so `swing.dialogs` lists an AWT
+`Dialog`'s buttons and `swing.dismiss {button}` presses one through the same ACTION plan.
 
 AWT tap: one `AWTEventListener` for window and window-focus events, installed when AWT is first seen running. It
 publishes `window.opened` / `window.closed` with `{ref, type, title, modal}`. AWT raises `WINDOW_OPENED` only the
@@ -2789,6 +2851,14 @@ A deliberately awkward little desk application. It knows nothing about the frame
   no listener): also serve the database read-only on `127.0.0.1` (see "Database" below); `lending.dbPassword=<text>`
   (required when `lending.dbPort` is set, else ignored; built 2026-10-03): the password of the read-only account,
   secret by key (A17), so `jvm.properties`, `jvm.info` and `agent.info.options` report it as `<redacted>`.
+  **(Phase 8, built 2026-10-19, EA; P8 §12.1, D516)** `lending.tools=true|false` (default `false`; anything else
+  refuses to start): with a window, `LendingApp.launch` also opens, after the desk frame and on the event dispatch
+  thread, the "Desk tools" frame `DeskTools` (name `deskTools`, at (624, 400), 400 x 360, not owned by the desk frame,
+  `setAutoRequestFocus(false)`, `DO_NOTHING_ON_CLOSE` with the close box counted as a close request): a panel
+  `closeMenu` with "Close the desk" (the root pane's default button) and an `IconKey("CLOSE")`, "Print test slip", a
+  text field `toolsNote`, a frame set with a zero-width pane, a scroll pane whose "Reprint slip" lies scrolled out, an
+  AWT `Panel` "Scanner" (an AWT `Button`, an AWT `Checkbox` and a `JButton`) and "Open deposit box"; every control only
+  counts (`DeskTools.Counters`); `LendingApp.tools()` returns it or null. The main frame is unchanged.
 - **Engine thread** named `LendingEngine` (non-daemon: it is the application's own thread): a state machine that
   blocks in `Inbox.take()`. States (`LendingState`):
   `SIGNED_OFF` (awaits staff code) -> `PASSWORD` -> `IDLE` -> `LOAN` (items entered) -> `DEPOSIT` -> back to `IDLE`;
@@ -2943,7 +3013,10 @@ Registers: `ReadinessSource` (`lending.engine`), `ThreadPolicyProvider` (one dae
 2026-10-10, VS; P7 §12.2)** Also a `RegionResolver` (`LendingRegions`: the number pad's twelve keys), a
 `CaptureMask` (`LendingCaptureMask`: the entry field while it is masked, and the number pad while the entry field is
 masked, D358) and `LendingWidgets.describe` (`{action: <actionId>}` for an `IconKey`, `{name: <label>}` for a
-prompt's button): thirteen SPI registrations. `LendingModule.VERSION` is `0.2.0` ("change it whenever the module's
+prompt's button): thirteen SPI registrations. **(Phase 8, built 2026-10-19, EA; P8 §12.2)** The fourteenth SPI type is
+an `InputVeto` (`LendingInputVeto`: the "Desk tools" window's panel `closeMenu`, by name, on every route and `ANY`,
+"closes the desk (the application would end)"), and the `lending` section of `app.state` gains `tools` (the window's
+counters) only when that window exists; the version is written in step R. `LendingModule.VERSION` is `0.2.0` ("change it whenever the module's
 primitives or SPIs change"). How the desk is
 found: in EMBEDDED mode the `LendingApp` the host passed to `EmbeddedAgent.start`; in the other modes
 `LendingApp.instance()`, looked at only once a thread named `LendingEngine` exists, so that no application class is

@@ -358,6 +358,51 @@ class InWindowDialogDisplayTest extends DisplayTestBase {
     }
 
     /** Reports the roots it was given that are showing in the window asked about. */
+    /** A dialog root class of this test alone, so that its once-per-class log line is this test's to see. */
+    static final class CollapsedRoot extends JPanel {
+        private static final long serialVersionUID = 1L;
+    }
+
+    /**
+     * Phase 8 (phase8-contracts.md 3.3, D511, 13.2 item 6): a reported root without an effective visible area is not a
+     * dialog: it blocks nothing, is not listed, and the drop is logged once per root class.
+     */
+    @Test
+    void aCollapsedRootBlocksNothingAndIsLoggedOncePerClass() throws Exception {
+        final Desk desk = Desk.show(locator, 0);
+        expectError(ErrorCodes.MODAL_OPEN, () -> call("swing.click", "target", ref(desk.behind)));
+        final CollapsedRoot[] marker = new CollapsedRoot[1];
+        onEdt(() -> {
+            desk.glass.setVisible(false);
+            CollapsedRoot root = new CollapsedRoot();
+            root.setPreferredSize(new java.awt.Dimension(0, 0)); // a marker the locator reports: no area
+            JPanel content = (JPanel) desk.frame.getContentPane();
+            content.add(root);
+            content.revalidate();
+            marker[0] = root;
+            return null;
+        });
+        await("marker showing", WAIT_MS, () -> marker[0].isShowing());
+        settle();
+        assertEquals(0, (int) onEdt(() -> marker[0].getWidth()), "laid out without an area");
+        locator.roots.add(marker[0]);
+        int before = desk.behindClicks.get();
+        call("swing.click", "target", ref(desk.behind));
+        call("swing.click", "target", ref(desk.behind));
+        await("clicks delivered", WAIT_MS, () -> desk.behindClicks.get() == before + 2);
+        for (Object d : arr(call("swing.dialogs").get("dialogs"))) {
+            assertFalse(ref(marker[0]).equals(obj(d).get("ref")), "a collapsed root is not listed");
+        }
+        int lines = 0;
+        for (String w : ctx.log.warnings()) {
+            if (w.contains("in-window dialog root " + CollapsedRoot.class.getName()
+                    + " has no visible area and blocks nothing")) {
+                lines++;
+            }
+        }
+        assertEquals(1, lines, "logged once per root class: " + ctx.log.warnings());
+    }
+
     static final class TestLocator implements DialogLocator {
         final List<Component> roots = new CopyOnWriteArrayList<Component>();
         volatile boolean blocks = true;

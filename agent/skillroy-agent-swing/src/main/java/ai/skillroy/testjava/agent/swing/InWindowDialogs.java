@@ -24,6 +24,7 @@ import java.awt.Window;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.IdentityHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 import javax.swing.SwingUtilities;
@@ -35,10 +36,18 @@ import javax.swing.SwingUtilities;
  * {@code blocksInput} throws is taken to block (the default), so a broken locator can make input fail with
  * {@code MODAL_OPEN}, which {@code force} overrides, but never fail a read.
  *
+ * <p>Phase 8 (phase8-contracts.md 3.3, D511): a reported root without an effective visible area (collapsed) is not a
+ * dialog: it blocks nothing and is not listed. The first such root of each class is logged ("swing: in-window dialog
+ * root <class> has no visible area and blocks nothing"), so the loss is visible in the agent log.
+ *
  * <p>Must be used on the EDT. One instance per primitive call: the locators are looked up when it is made, so modules
  * that register later are seen by the next call.
  */
 final class InWindowDialogs {
+
+    /** Most root classes whose collapsed root is logged (once each). */
+    static final int MAX_LOGGED_CLASSES = 64;
+    private static final Set<String> LOGGED_COLLAPSED = new LinkedHashSet<String>();
 
     private final AgentContext ctx;
     private final List<DialogLocator> locators;
@@ -82,11 +91,31 @@ final class InWindowDialogs {
             for (Component root : new ArrayList<Component>(roots)) {
                 if (root != null && !(root instanceof Window) && root.isShowing()
                         && Windows.windowOf(root) == window && seen.add(root)) {
+                    if (Visibility.collapsedBy(root) != null) {
+                        collapsed(root);
+                        continue;
+                    }
                     out.add(new Found(root, window, locator));
                 }
             }
         }
         return out;
+    }
+
+    /** Logs a collapsed root, once per root class (D511). */
+    private void collapsed(Component root) {
+        String name = root.getClass().getName();
+        boolean first;
+        synchronized (LOGGED_COLLAPSED) {
+            first = LOGGED_COLLAPSED.size() < MAX_LOGGED_CLASSES && LOGGED_COLLAPSED.add(name);
+        }
+        if (first) {
+            try {
+                ctx.log().warn("swing: in-window dialog root " + name + " has no visible area and blocks nothing");
+            } catch (Throwable ignored) {
+                // the log must never be the reason a read fails
+            }
+        }
     }
 
     /** The in-window dialogs of every showing window, windows in creation order. */
