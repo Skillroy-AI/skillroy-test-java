@@ -492,6 +492,23 @@ class Phase8CompileTest {
         assertEquals("after", later.steps().get(2).facts().slot(), "a later capture may filter on an earlier one");
     }
 
+    /**
+     * phase8-contracts.md 8.7 with 7.3 (Phase 8 integration): under {@code ui: {strict: true}} the compiler rebuilds
+     * every step to apply a call's first rung; a {@code captureFacts} step, which has no call, keeps its {@code facts}.
+     */
+    @Test
+    void underAStrictUiACaptureFactsStepKeepsItsFacts() throws Exception {
+        Plan plan = PlanCompiler.compile(("scenario: t\npack: toy\nui: { strict: true }\nsteps:\n" + CAPTURE)
+                .getBytes(StandardCharsets.UTF_8), "t.yaml", pack);
+        Plan.Step s2 = plan.steps().get(1);
+        assertEquals("captureFacts", s2.verb());
+        assertTrue(s2.facts() != null, "the strict rebuild keeps the step's facts");
+        assertEquals("before", s2.facts().slot());
+        assertEquals(List.of("scans", "total"), List.copyOf(s2.facts().fields().keySet()));
+        String text = plan.toJsonText();
+        assertEquals(text, Plan.parse(text).toJsonText(), "byte-identical round trip");
+    }
+
     @Test
     void captureFactsIsReservedForAPack() {
         DomainPack shadowing = new DelegatingDomainPack(pack, "shadow", "1") {

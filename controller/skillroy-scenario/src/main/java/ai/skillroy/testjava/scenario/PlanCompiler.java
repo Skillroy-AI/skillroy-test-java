@@ -967,8 +967,9 @@ public final class PlanCompiler {
             if (step.modifiers().isEmpty() && !scenario.effectiveUi().strict()) {
                 return compiled;
             }
+            // A captureFacts step (phase8-contracts.md 8.7) has no call to modify; its facts are kept.
             return new Plan.Step(compiled.id(), compiled.verb(), compiled.line(), modified(step.verb(), step.line(),
-                    compiled.calls(), step.modifiers()), compiled.expect());
+                    compiled.calls(), step.modifiers()), compiled.expect(), compiled.facts());
         }
 
         private Plan.Step unmodifiedStep(String id, int index, Scenario.Step step) throws ScenarioException {
