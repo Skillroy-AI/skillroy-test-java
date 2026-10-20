@@ -48,7 +48,8 @@ import java.util.concurrent.TimeUnit;
  * <p><b>{@code web.pointer}</b> (mutating, capability {@code web.pointer}): one bounded EDT read of the browser's
  * component (showing, size, scale, the modal dialog that blocks its window: {@code MODAL_OPEN} unless {@code force}; a
  * browser without a component is not blocked), then {@code hit} at the point (a point outside the viewport is
- * {@code NOT_FOUND} and nothing is sent; a hit that cannot be read is left out of the result), then the events of
+ * {@code NOT_FOUND} and nothing is sent; a hit that cannot be read is left out of the result; Phase 8, D637: a masked
+ * browser is not hit-tested and its answer carries no {@code hit} unless {@code redact: false}), then the events of
  * {@link WebInput#plan}, each through {@link WebBrowser#dispatchPointer} and awaited before the next under the call's
  * budget; a dispatch is never retried. When an event after a press fails, one release of that button is sent (at most
  * {@value #BALANCE_MS} ms, its outcome not awaited further) so that no button is left held in the page, and the call
@@ -232,7 +233,10 @@ final class Pointing {
             y = c.y;
         }
         Map<String, Object> hit = null;
-        if (WebPrimitives.has(e.browser(), WebCapability.EVALUATE)) {
+        // Phase 8 (D637; phase8-contracts.md 5.2 (iv)): a masked browser's pointer carries no hit (the hit's name is
+        // page text), unless a person passed redact: false; the state read above is the one the mask test uses.
+        boolean masked = !WebPrimitives.unredacted(inv) && web.maskedNow(e, state, remaining(deadline) / 2);
+        if (!masked && WebPrimitives.has(e.browser(), WebCapability.EVALUATE)) {
             try {
                 hit = hitIn(e, null, x, y, Math.min(HIT_MS, remaining(deadline) / 2), "web.pointer").summary();
             } catch (RpcException ex) {

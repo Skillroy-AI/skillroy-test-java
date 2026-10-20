@@ -61,6 +61,11 @@ import java.util.regex.PatternSyntaxException;
  * {@code data {param, regex, reason: "regex too slow"}}; {@code "text too long"} for the subject), as the Swing
  * locator does. A summary's URL and title are cut at {@link WebLib#MAX_URL_CHARS} (S43).
  *
+ * <p>A masked browser (Phase 8, phase8-contracts.md 5.2 (ii), D550; its {@link Entry#masked} flag) is never matched by
+ * {@code by.url} or {@code by.title} (a regex on withheld text would reveal it), its title is never read for a match,
+ * and its summary in the error data says {@code url: ""}, no {@code title}, {@code masked: true}; {@code by.tag},
+ * {@code by.nativeId} and {@code browser: <ref>} still select it, so that a scenario can act on it.
+ *
  * <p>Thread-safe; runs on agent workers.
  */
 final class Selection {
@@ -173,6 +178,9 @@ final class Selection {
             if (nativeId != null && !nativeId.equals(safeNativeId(b))) {
                 continue;
             }
+            if ((url != null || title != null) && masked(e)) {
+                continue; // D550: no match on a masked browser's withheld URL or title
+            }
             if (url != null && !find(url, "by.url", safeUrl(b), regexDeadline)) {
                 continue;
             }
@@ -204,6 +212,25 @@ final class Selection {
             throw Errors.invalid(e.describe(param, BoundedRegex.BUDGET_MS), Errors.data("param", param, "regex",
                     pattern.pattern(), "reason", e.reason()));
         }
+    }
+
+    /**
+     * Whether the entry is masked for this selection (phase8-contracts.md 5.2): the {@link BrowserMasks} rule without an
+     * EDT read (nothing registered, a {@code BrowserMask} TRUE, a browser without a component), else the flag of the
+     * last rebuild or per-call read; refreshes {@link Entry#masked} so that the error data's summary agrees.
+     */
+    private boolean masked(Entry e) {
+        boolean registered;
+        try {
+            registered = walk.masksRegistered();
+        } catch (RuntimeException ex) {
+            registered = true;
+        }
+        Boolean decided = index.masks().decide(registered, e, e.component);
+        if (decided != null) {
+            e.masked = decided.booleanValue();
+        }
+        return e.masked;
     }
 
     /** The single browser whose component is showing (see the class comment). */
@@ -317,8 +344,9 @@ final class Selection {
 
     /**
      * The compact description of a browser used in error data, in the key order of {@code web.browsers}:
-     * {@code {ref, adapter, nativeId?, url, title?, closed, visibleInSwing, component?, capabilities, tag?}};
-     * {@code title} only when the selection read it (null: not read), {@code capabilities} without a page read.
+     * {@code {ref, adapter, nativeId?, url, masked?, title?, closed, visibleInSwing, component?, capabilities, tag?}};
+     * {@code title} only when the selection read it (null: not read), {@code capabilities} without a page read. A
+     * masked entry (Phase 8, D550) says {@code url: ""} and {@code masked: true} and never carries a title.
      */
     static Map<String, Object> summary(Entry e, String title) {
         WebBrowser b = e.browser();
@@ -329,8 +357,14 @@ final class Selection {
         if (nativeId != null) {
             m.put("nativeId", nativeId);
         }
-        m.put("url", WebLib.cut(safeUrl(b), WebLib.MAX_URL_CHARS));
-        if (title != null) {
+        boolean masked = e.masked;
+        if (masked) {
+            m.put("url", "");
+            m.put("masked", Boolean.TRUE);
+        } else {
+            m.put("url", WebLib.cut(safeUrl(b), WebLib.MAX_URL_CHARS));
+        }
+        if (title != null && !masked) {
             m.put("title", WebLib.cut(title, WebLib.MAX_URL_CHARS));
         }
         m.put("closed", Boolean.valueOf(isClosed(b)));

@@ -396,6 +396,75 @@ class BindingEncoderTest {
         assertEquals(1, e.maskFailures());
     }
 
+    /**
+     * Phase 8 (phase8-contracts.md 5.1, section 13.1 row 18): a {@code rule.fired} payload masked at the encoder as
+     * {@code rule.<name>} passes the ring's second pass, {@code event:rule.fired}, unchanged under an idempotent policy,
+     * so publishing it on the core's bus changes nothing.
+     */
+    @Test
+    void aRuleFiredPayloadIsUnchangedByTheRingsSecondPassUnderAnIdempotentPolicy() {
+        final java.util.List<String> sources = new java.util.ArrayList<String>();
+        MaskPolicy idempotent = new MaskPolicy() {
+            @Override
+            public Object mask(String sourceId, String column, Object value) {
+                sources.add(sourceId);
+                return "STAFF-7".equals(value) || "STAFF-*".equals(value) ? "STAFF-*" : value;
+            }
+        };
+        ctx.spi.register(MaskPolicy.class, idempotent);
+        Map<String, Object> creds = new LinkedHashMap<String, Object>();
+        creds.put("staff", "STAFF-7");
+        creds.put("password", "hunter2");
+        BindingEncoder e = new BindingEncoder(ctx, 16384);
+        Map<String, Object> payload = new LinkedHashMap<String, Object>();
+        payload.put("rule", "limit");
+        payload.put("class", "ai.skillroy.testjava.agent.byteman.Desk");
+        payload.put("method", "lend");
+        payload.putAll(e.encode("limit", new Object[] {"STAFF-7", 150, creds}));
+        Map<?, ?> bound = (Map<?, ?>) payload.get("bindings");
+        assertEquals("STAFF-*", bound.get("0"), "masked at the encoder");
+        assertEquals(BindingEncoder.REDACTED, ((Map<?, ?>) bound.get("2")).get("password"));
+        sources.clear();
+        Object again = secondPass(java.util.Arrays.asList(idempotent), "event:rule.fired", null, payload);
+        assertEquals(payload, again, "the second pass changes nothing");
+        for (String s : sources) {
+            assertEquals("event:rule.fired", s);
+        }
+    }
+
+    /**
+     * Phase 8 (phase8-contracts.md 5.1, section 13.1 row 18): what the core's ring pass does to a payload at publish,
+     * by the contract's rule (this module cannot see the core's package-private pass): every registered policy, in
+     * order, on every non-null scalar under {@code event:<topic>} and the dotted map keys (a list element adds no
+     * segment). Returns the payload as the pass would store it; the core's own EventBusTest proves the pass itself.
+     */
+    @SuppressWarnings("unchecked")
+    static Object secondPass(java.util.List<MaskPolicy> policies, String sourceId, String column, Object value) {
+        if (value instanceof Map) {
+            Map<String, Object> out = new java.util.LinkedHashMap<String, Object>();
+            for (Map.Entry<String, Object> e : ((Map<String, Object>) value).entrySet()) {
+                out.put(e.getKey(), secondPass(policies, sourceId, column == null ? e.getKey()
+                        : column + "." + e.getKey(), e.getValue()));
+            }
+            return out;
+        }
+        if (value instanceof java.util.List) {
+            java.util.List<Object> out = new java.util.ArrayList<Object>();
+            for (Object o : (java.util.List<Object>) value) {
+                out.add(secondPass(policies, sourceId, column, o));
+            }
+            return out;
+        }
+        Object v = value;
+        for (MaskPolicy p : policies) {
+            if (v == null) {
+                break;
+            }
+            v = p.mask(sourceId, column, v);
+        }
+        return v;
+    }
+
     @Test
     void theBudgetIsOnTheInput() {
         BindingEncoder e = new BindingEncoder(ctx, 16384);

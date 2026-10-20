@@ -22,7 +22,10 @@ import java.awt.Component;
 import java.awt.Dialog;
 import java.awt.GraphicsConfiguration;
 import java.awt.Window;
+import java.util.Collection;
+import java.util.IdentityHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * The EDT reads of one browser component for the input primitives ({@link SwingSeeds#state}, phase7-contracts.md
@@ -85,6 +88,18 @@ final class ComponentReads {
             }
         }
         return false;
+    }
+
+    /**
+     * {@link #masked} for each of the given objects, keyed by identity (phase8-contracts.md 5.2, the rebuild's one EDT
+     * read): an object that is not a component is masked (the safe side). EDT only.
+     */
+    static Map<Object, Boolean> maskedOf(Collection<?> components, List<CaptureMask> masks) {
+        Map<Object, Boolean> out = new IdentityHashMap<Object, Boolean>();
+        for (Object c : components) {
+            out.put(c, Boolean.valueOf(!(c instanceof Component) || masked((Component) c, masks)));
+        }
+        return out;
     }
 
     /** The window of a component (itself when it is one), or null. */

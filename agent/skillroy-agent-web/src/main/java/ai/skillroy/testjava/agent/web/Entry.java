@@ -52,6 +52,14 @@ final class Entry {
     volatile Object component;
     volatile boolean showing;
     /**
+     * Whether the browser is masked (phase8-contracts.md 5.2, D547): set at every rebuild (no mask registered: false;
+     * a {@code BrowserMask} TRUE: true; no component: true unless a {@code BrowserMask} releases it; a component: what
+     * the rebuild's one EDT read of the {@code CaptureMask}s answered, true when the read failed or had no time) and
+     * refreshed by every per-call read that judges the mask. The events, the selection's error data and the
+     * selection's {@code by: {url|title}} read it, so that no EDT read runs on an adapter's thread.
+     */
+    volatile boolean masked;
+    /**
      * True while a viewport override this module set with {@code web.resize} is in place: a component point is then
      * not converted (phase7-contracts.md section 4.8, {@code "viewport override"}).
      */

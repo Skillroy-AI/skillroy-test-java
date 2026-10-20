@@ -80,6 +80,56 @@ class LendingPrimitivesTest {
         return (List<Object>) value;
     }
 
+    /**
+     * Phase 8 (phase8-contracts.md 5.1, 12.2, section 13.1 row 21): a sign-on publishes {@code staff.signedOn {code,
+     * name}} after {@code state.changed} to {@code IDLE} from {@code PASSWORD} (assistant 100) or {@code SIGNED_OFF}
+     * (103, signed on by code alone); an unlock ({@code LOCKED} to {@code IDLE}) and the start of a loan ({@code IDLE}
+     * to {@code LOAN}) publish none. The module publishes the name as it is: the ring's pass masks it.
+     */
+    @Test
+    void aSignOnPublishesTheStaffMembersCodeAndNameAndAnUnlockOrALoanDoesNot() throws Exception {
+        long start = lending.ctx.events.lastSeq();
+        lending.send("Entry", "100");
+        assertEquals("IDLE", lending.send("Entry", "1111").payload().get("state"));
+        Event signedOn = lending.ctx.events.next(EngineEvents.STAFF_SIGNED_ON, start);
+        assertEquals(args("code", "100", "name", "Alice Archer"), signedOn.payload());
+        assertEquals(EngineEvents.SOURCE, signedOn.source());
+        Event toIdle = null;
+        for (Event e : lending.ctx.events.since(start, TopicFilter.parse("state.changed"), 100)) {
+            if ("IDLE".equals(e.payload().get("to")) && "PASSWORD".equals(e.payload().get("from"))) {
+                toIdle = e;
+            }
+        }
+        assertNotNull(toIdle);
+        assertTrue(toIdle.seq() < signedOn.seq(), "published after state.changed");
+
+        lending.send("Key.SIGN_OFF", null);
+        long auto = lending.ctx.events.lastSeq();
+        assertEquals("IDLE", lending.send("Entry", "103").payload().get("state"));
+        assertEquals(args("code", "103", "name", "Fay Fisher"),
+                lending.ctx.events.next(EngineEvents.STAFF_SIGNED_ON, auto).payload(), "from SIGNED_OFF");
+
+        // the rule on the listener itself, with a staff member signed on: only PASSWORD or SIGNED_OFF to IDLE
+        EngineEvents listener = new EngineEvents(lending.ctx, lending.app.engine());
+        long direct = lending.ctx.events.lastSeq();
+        listener.stateChanged(ai.skillroy.testjava.samples.lending.LendingState.LOCKED,
+                ai.skillroy.testjava.samples.lending.LendingState.IDLE);
+        listener.stateChanged(ai.skillroy.testjava.samples.lending.LendingState.IDLE,
+                ai.skillroy.testjava.samples.lending.LendingState.LOAN);
+        assertEquals(0, lending.ctx.events.since(direct, TopicFilter.parse(EngineEvents.STAFF_SIGNED_ON), 10).size(),
+                "an unlock and a loan publish none");
+        listener.stateChanged(ai.skillroy.testjava.samples.lending.LendingState.PASSWORD,
+                ai.skillroy.testjava.samples.lending.LendingState.IDLE);
+        listener.stateChanged(ai.skillroy.testjava.samples.lending.LendingState.SIGNED_OFF,
+                ai.skillroy.testjava.samples.lending.LendingState.IDLE);
+        assertEquals(2, lending.ctx.events.since(direct, TopicFilter.parse(EngineEvents.STAFF_SIGNED_ON), 10).size());
+        listener.deactivate();
+        long inert = lending.ctx.events.lastSeq();
+        listener.stateChanged(ai.skillroy.testjava.samples.lending.LendingState.PASSWORD,
+                ai.skillroy.testjava.samples.lending.LendingState.IDLE);
+        assertEquals(inert, lending.ctx.events.lastSeq(), "an inert listener publishes nothing");
+    }
+
     @Test
     void aBasicLoanThroughLendingInputPublishesTheDomainEvents() throws Exception {
         long start = lending.ctx.events.lastSeq();

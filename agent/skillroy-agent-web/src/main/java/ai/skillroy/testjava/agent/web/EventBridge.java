@@ -59,6 +59,12 @@ import java.util.function.BiConsumer;
  * {@code error}, a ready's {@code url} and a console {@code source} at {@link WebLib#MAX_URL_CHARS} (the source masked
  * over a margin first, as the text is).
  *
+ * <p>A masked browser's events withhold page data (Phase 8, phase8-contracts.md 5.2 (i), D549), read from its
+ * {@link Entry#masked} flag (a volatile read; no EDT read on the adapter's thread): {@code web.load {browser, url: "",
+ * frameKey?, kind, masked: true}} (no {@code error}), {@code web.ready {browser, url: "", signal, name?, masked:
+ * true}}, {@code web.console {browser, level, text: "", masked: true}} (no {@code source}, {@code line} or
+ * {@code truncated}); {@code web.closed} carries the ref only and is unchanged.
+ *
  * <p>The listener runs on the adapter's threads (with JCEF off-screen, possibly the EDT): it only builds a small map
  * and publishes, which never blocks; it never throws into the adapter. Thread-safe.
  */
@@ -169,14 +175,22 @@ final class EventBridge implements BrowserIndex.Listener {
         }
     }
 
-    /** Publishes {@code web.ready {browser, url, signal, name?}}; the URL cut at {@link WebLib#MAX_URL_CHARS}. */
+    /**
+     * Publishes {@code web.ready {browser, url, signal, name?}}; the URL cut at {@link WebLib#MAX_URL_CHARS}; for a
+     * masked browser {@code url: ""} and {@code masked: true} (D549: {@code signal} and {@code name} are what a step
+     * waits on, kept).
+     */
     void ready(Entry e, String url, String signal, String name) {
+        boolean masked = e.masked;
         Map<String, Object> payload = new LinkedHashMap<String, Object>();
         payload.put("browser", e.ref);
-        payload.put("url", url == null ? "" : WebLib.cut(url, WebLib.MAX_URL_CHARS));
+        payload.put("url", url == null || masked ? "" : WebLib.cut(url, WebLib.MAX_URL_CHARS));
         payload.put("signal", signal);
         if (name != null) {
             payload.put("name", name);
+        }
+        if (masked) {
+            payload.put("masked", Boolean.TRUE);
         }
         ctx.events().publish(WebTopics.READY, WebTopics.SOURCE, payload);
     }
@@ -208,15 +222,20 @@ final class EventBridge implements BrowserIndex.Listener {
             case LOAD_FINISHED:
             case LOAD_FAILED:
             case NAVIGATED:
+                boolean maskedLoad = e.masked;
                 Map<String, Object> load = new LinkedHashMap<String, Object>();
                 load.put("browser", e.ref);
-                load.put("url", event.url() == null ? "" : WebLib.cut(event.url(), WebLib.MAX_URL_CHARS));
+                load.put("url", event.url() == null || maskedLoad ? ""
+                        : WebLib.cut(event.url(), WebLib.MAX_URL_CHARS));
                 if (event.frameKey() != null) {
                     load.put("frameKey", event.frameKey());
                 }
                 load.put("kind", event.kind().name());
-                if (event.error() != null) {
+                if (event.error() != null && !maskedLoad) {
                     load.put("error", WebLib.cut(event.error(), WebLib.MAX_URL_CHARS));
+                }
+                if (maskedLoad) {
+                    load.put("masked", Boolean.TRUE);
                 }
                 ctx.events().publish(WebTopics.LOAD, WebTopics.SOURCE, load);
                 if (event.kind() == WebEvent.Kind.LOAD_FINISHED && event.frameKey() == null) {
@@ -228,6 +247,13 @@ final class EventBridge implements BrowserIndex.Listener {
                 Map<String, Object> console = new LinkedHashMap<String, Object>();
                 console.put("browser", e.ref);
                 console.put("level", event.level() == null ? "log" : event.level());
+                if (e.masked) {
+                    // D549: no text, no source, no line of a masked browser's page.
+                    console.put("text", "");
+                    console.put("masked", Boolean.TRUE);
+                    ctx.events().publish(WebTopics.CONSOLE, WebTopics.SOURCE, console);
+                    break;
+                }
                 // Masked before it is cut, so that a cut never leaves part of a secret: a value straddling the
                 // first cut lies beyond the second one.
                 String text = event.text() == null ? "" : event.text();

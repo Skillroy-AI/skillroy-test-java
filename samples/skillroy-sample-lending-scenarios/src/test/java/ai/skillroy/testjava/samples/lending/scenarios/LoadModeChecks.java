@@ -975,6 +975,90 @@ abstract class LoadModeChecks {
         assertEquals(2L, lendingState(client()).get("engineListeners"));
     }
 
+    // ------------------------------------------------------------------ Phase 8, slot 172 (EW)
+
+    /** The seeded name of the scenarios' assistant (seed A, staff 100): personal data in an event. */
+    static final String STAFF_NAME = "Alice Archer";
+
+    /**
+     * Phase 8 (phase8-contracts.md 5.1, gap 109; section 13.2 item 15): the staff member's name the lending module
+     * publishes in {@code staff.signedOn} reaches no reader: its {@code PasswordMask} masks the column {@code name}
+     * under {@code event:staff.signedOn} at publish, so {@code sync.await}, {@code evt.query} and the SSE stream (what
+     * {@code skillroy events --json} prints) all see {@code <personal>}, and a committed scenario's run outputs that
+     * carry events ({@code OutputScan}'s {@code EVENTS} scope: the name is on the status line, so a snapshot would hold
+     * it legitimately) hold it nowhere. Signed off after.
+     */
+    @Test
+    @Order(172)
+    void theStaffNameInAnEventReachesNoReader() throws Exception {
+        Map<String, Object> info = value(client().call("agent.info", Map.of(), CALL));
+        Map<?, ?> events = (Map<?, ?>) info.get("events");
+        assertNotNull(events, String.valueOf(info.keySet()));
+        assertTrue(((Number) events.get("maskPolicies")).longValue() >= 1, "the module's policy: " + events);
+        long since = client().call("lending.state", Map.of(), CALL).seqAfter();
+        List<Event> streamed = new java.util.concurrent.CopyOnWriteArrayList<>();
+        try (ai.skillroy.testjava.controller.EventStream stream = client().events(since, "staff.signedOn",
+                streamed::add)) {
+            send("Entry", "100");
+            assertEquals("IDLE", send("Entry", PASSWORD).payload().get("state"));
+            Event awaited = client().await("staff.signedOn", since, null, WAIT);
+            assertNotNull(awaited, "staff.signedOn after the sign-on");
+            assertEquals("100", awaited.payload().get("code"));
+            assertEquals("<personal>", awaited.payload().get("name"), "sync.await sees the masked payload");
+            Map<String, Object> queried = value(client().call("evt.query", Map.of("since", since, "topics",
+                    "staff.signedOn"), CALL));
+            List<?> found = (List<?>) queried.get("events");
+            assertEquals(1, found.size(), String.valueOf(queried));
+            assertEquals(Map.of("code", "100", "name", "<personal>"), ((Map<?, ?>) found.get(0)).get("payload"),
+                    "evt.query sees the masked payload");
+            awaitCondition("the SSE stream's staff.signedOn", WAIT, () -> !streamed.isEmpty());
+            assertEquals(Map.of("code", "100", "name", "<personal>"), streamed.get(0).payload(),
+                    "the SSE stream sees the masked payload");
+            assertFalse(String.valueOf(queried).contains(STAFF_NAME) || String.valueOf(streamed).contains(STAFF_NAME));
+        }
+        RpcResult off = client().call("lending.input", Map.of("source", "Key.SIGN_OFF"), CALL);
+        assertNotNull(client().await(READY_TOPICS, off.seqBefore(), null, WAIT));
+        assertSignedOff();
+
+        Path dir = ItEnv.runDir(mode().slug, "staff-signed-on");
+        Runs.Outcome outcome = Runs.run(client(), Runs.committed("basic-loan"), dir);
+        Runs.assertPassedWithoutSleeping(outcome);
+        assertEquals(List.of(), ai.skillroy.testjava.junit.OutputScan.leaks(dir, Set.of(STAFF_NAME),
+                ai.skillroy.testjava.junit.OutputScan.Scope.EVENTS), "the staff name in the run's event outputs");
+        assertSignedOff();
+
+        // A failing run carries the event itself: failure/events.json holds the ring's last events, staff.signedOn
+        // among them, masked; the name is in the snapshot and the application state legitimately (the status line),
+        // which is why the scan's EVENTS scope reads the event-carrying outputs only.
+        Path failed = ItEnv.runDir(mode().slug, "staff-signed-on-failed");
+        Runs.Outcome wrong = Runs.run(client(), Runs.negative("wrong-expectation.yaml"), failed);
+        assertEquals(Status.FAIL, wrong.result().status(), wrong.describe());
+        Map<String, Object> evidence = Json.parseObject(Files.readString(failed.resolve("failure/events.json"),
+                StandardCharsets.UTF_8));
+        List<Map<?, ?>> signedOn = new ArrayList<>();
+        for (Object e : (List<?>) evidence.get("events")) {
+            if (e instanceof Map<?, ?> event && "staff.signedOn".equals(event.get("topic"))) {
+                signedOn.add(event);
+            }
+        }
+        for (Map<?, ?> e : signedOn) {
+            assertEquals("<personal>", ((Map<?, ?>) e.get("payload")).get("name"), String.valueOf(e));
+        }
+        if (mode() != LendingTarget.Mode.JAVAAGENT_HOOKS) {
+            // (the hooks leg's catalogue hooks publish enough to push it out of the last 200 events)
+            assertFalse(signedOn.isEmpty(), "the masked event is in the failure evidence");
+        }
+        assertEquals(List.of(), ai.skillroy.testjava.junit.OutputScan.leaks(failed, Set.of(STAFF_NAME),
+                ai.skillroy.testjava.junit.OutputScan.Scope.EVENTS), "the staff name in the failed run's events");
+        List<ai.skillroy.testjava.junit.OutputScan.Hit> everywhere = ai.skillroy.testjava.junit.OutputScan.leaks(failed,
+                Set.of(STAFF_NAME), ai.skillroy.testjava.junit.OutputScan.Scope.ALL);
+        assertFalse(everywhere.isEmpty(), "the control: the status line's name is in the failure's UI evidence");
+        for (ai.skillroy.testjava.junit.OutputScan.Hit hit : everywhere) {
+            assertNotEquals("events.json", hit.file().getFileName().toString(), "never in the events: " + hit);
+        }
+        assertSignedOff();
+    }
+
     // ------------------------------------------------------------------ item 7
 
     @Test

@@ -25,6 +25,7 @@ import ai.skillroy.testjava.samples.lending.EngineStatus;
 import ai.skillroy.testjava.samples.lending.LendingInput;
 import ai.skillroy.testjava.samples.lending.LendingState;
 import ai.skillroy.testjava.samples.lending.Loan;
+import ai.skillroy.testjava.samples.lending.Staff;
 
 import java.util.ArrayList;
 import java.util.IdentityHashMap;
@@ -41,8 +42,11 @@ import java.util.concurrent.TimeUnit;
  *
  * <p>Events (source {@value #SOURCE}): {@code state.changed {from,to}}, {@code input.requested {state,prompt,
  * validInputs}}, {@code prompt.waiting {id,text,buttons}}, {@code prompt.answered {id,choice}},
- * {@code loan.posted {loanId,total}}, {@code slip.printed {loanId}}. {@code input.acked} is published by
- * {@code lending.input} itself, on the calling thread, so that it belongs to the call.
+ * {@code loan.posted {loanId,total}}, {@code slip.printed {loanId}}, and (Phase 8, phase8-contracts.md 5.1, 12.2)
+ * {@code staff.signedOn {code,name}} after {@code state.changed} to {@code IDLE} from {@code PASSWORD} or
+ * {@code SIGNED_OFF}: the sample's realistic personal value in an event, which {@link PasswordMask}'s event rule
+ * masks at publish. {@code input.acked} is published by {@code lending.input} itself, on the calling thread, so that it
+ * belongs to the call.
  *
  * <p><b>Threading and host safety.</b> Every callback runs on the engine thread while the engine waits for it: each
  * one does a little bookkeeping, publishes without blocking and returns. Nothing ever escapes a callback, not even an
@@ -56,6 +60,8 @@ final class EngineEvents implements EngineListener {
     static final String SOURCE = "lending";
     /** Topics the lending desk publishes besides the generic ones in {@link Topics}. */
     static final String LOAN_POSTED = "loan.posted";
+    /** Phase 8 (gap 109's proof): a staff member signed on, {@code {code, name}}; the name is personal data. */
+    static final String STAFF_SIGNED_ON = "staff.signedOn";
     static final String SLIP_PRINTED = "slip.printed";
     static final String PROMPT_ANSWERED = "prompt.answered";
 
@@ -179,9 +185,25 @@ final class EngineEvents implements EngineListener {
         try {
             if (active) {
                 publish(Topics.STATE_CHANGED, map("from", name(from), "to", name(to)));
+                staffSignedOn(from, to);
             }
         } catch (Throwable t) {
             swallow("stateChanged", t);
+        }
+    }
+
+    /**
+     * Phase 8 (phase8-contracts.md 5.1, 12.2): publishes {@code staff.signedOn {code, name}} when the state changes to
+     * {@code IDLE} from {@code PASSWORD} or {@code SIGNED_OFF} with a signed-on staff member (the engine publishes its
+     * status before the callback); an unlock ({@code LOCKED} to {@code IDLE}) and every other change publish nothing.
+     */
+    private void staffSignedOn(LendingState from, LendingState to) {
+        if (to != LendingState.IDLE || from != LendingState.PASSWORD && from != LendingState.SIGNED_OFF) {
+            return;
+        }
+        Staff staff = engine.status().staff();
+        if (staff != null) {
+            publish(STAFF_SIGNED_ON, map("code", staff.code(), "name", staff.name()));
         }
     }
 

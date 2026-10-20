@@ -42,9 +42,15 @@ import java.util.Objects;
  * @param frozenTargets what to do with a page target that does not answer the probe (default {@code FAIL}); applied
  *     by {@link CdpWebPath}, which can ask the agent to reload; {@link CdpAttach#connect} refuses a probe with a
  *     frozen target whatever the policy
+ * @param allowDefaultOverrides (Phase 8, phase8-contracts.md 5.3, D553, A80) whether an attach with a Playwright line
+ *     that has no {@code noDefaults} option (before 1.60) may connect anyway, Playwright's download, focus and media
+ *     overrides then applying to the application's own browser context (default false: the CDP path is not used on
+ *     such a line). The operator's choice, never a scenario's or a model's: {@link CdpWebPath} reads it from the
+ *     controller's system property {@code skillroy.cdp.allowDefaultOverrides}
  */
 public record CdpOptions(Duration probeDeadlinePerTarget, Duration connectDeadline, boolean noDefaults,
-                         boolean isLocal, Path artifactsDir, FrozenTargetPolicy frozenTargets) {
+                         boolean isLocal, Path artifactsDir, FrozenTargetPolicy frozenTargets,
+                         boolean allowDefaultOverrides) {
 
     /** The longest per-target probe deadline accepted. */
     public static final Duration MAX_PROBE_DEADLINE = Duration.ofSeconds(60);
@@ -53,7 +59,7 @@ public record CdpOptions(Duration probeDeadlinePerTarget, Duration connectDeadli
     public static final Duration MAX_CONNECT_DEADLINE = Duration.ofMinutes(10);
 
     private static final CdpOptions DEFAULTS = new CdpOptions(Duration.ofSeconds(2), Duration.ofSeconds(30), true,
-            true, null, FrozenTargetPolicy.FAIL);
+            true, null, FrozenTargetPolicy.FAIL, false);
 
     /**
      * @throws IllegalArgumentException if a deadline is null, shorter than 1 ms or longer than its maximum, or the
@@ -67,39 +73,64 @@ public record CdpOptions(Duration probeDeadlinePerTarget, Duration connectDeadli
         }
     }
 
-    /** 2 s per target, 30 s to connect, {@code noDefaults} and {@code isLocal}, no artifacts directory, FAIL. */
+    /**
+     * The six-component form of Phase 4 ({@code allowDefaultOverrides} false), kept for callers built against it.
+     *
+     * @throws IllegalArgumentException as the canonical constructor
+     */
+    public CdpOptions(Duration probeDeadlinePerTarget, Duration connectDeadline, boolean noDefaults, boolean isLocal,
+                      Path artifactsDir, FrozenTargetPolicy frozenTargets) {
+        this(probeDeadlinePerTarget, connectDeadline, noDefaults, isLocal, artifactsDir, frozenTargets, false);
+    }
+
+    /**
+     * 2 s per target, 30 s to connect, {@code noDefaults} and {@code isLocal}, no artifacts directory, FAIL, no default
+     * overrides accepted.
+     */
     public static CdpOptions defaults() {
         return DEFAULTS;
     }
 
     /** A copy with the given per-target probe deadline. */
     public CdpOptions withProbeDeadlinePerTarget(Duration deadline) {
-        return new CdpOptions(deadline, connectDeadline, noDefaults, isLocal, artifactsDir, frozenTargets);
+        return new CdpOptions(deadline, connectDeadline, noDefaults, isLocal, artifactsDir, frozenTargets,
+                allowDefaultOverrides);
     }
 
     /** A copy with the given connect deadline. */
     public CdpOptions withConnectDeadline(Duration deadline) {
-        return new CdpOptions(probeDeadlinePerTarget, deadline, noDefaults, isLocal, artifactsDir, frozenTargets);
+        return new CdpOptions(probeDeadlinePerTarget, deadline, noDefaults, isLocal, artifactsDir, frozenTargets,
+                allowDefaultOverrides);
     }
 
     /** A copy with the given {@code noDefaults}. */
     public CdpOptions withNoDefaults(boolean on) {
-        return new CdpOptions(probeDeadlinePerTarget, connectDeadline, on, isLocal, artifactsDir, frozenTargets);
+        return new CdpOptions(probeDeadlinePerTarget, connectDeadline, on, isLocal, artifactsDir, frozenTargets,
+                allowDefaultOverrides);
     }
 
     /** A copy with the given {@code isLocal}. */
     public CdpOptions withIsLocal(boolean on) {
-        return new CdpOptions(probeDeadlinePerTarget, connectDeadline, noDefaults, on, artifactsDir, frozenTargets);
+        return new CdpOptions(probeDeadlinePerTarget, connectDeadline, noDefaults, on, artifactsDir, frozenTargets,
+                allowDefaultOverrides);
     }
 
     /** A copy with the given artifacts directory (null for none). */
     public CdpOptions withArtifactsDir(Path dir) {
-        return new CdpOptions(probeDeadlinePerTarget, connectDeadline, noDefaults, isLocal, dir, frozenTargets);
+        return new CdpOptions(probeDeadlinePerTarget, connectDeadline, noDefaults, isLocal, dir, frozenTargets,
+                allowDefaultOverrides);
     }
 
     /** A copy with the given frozen-target policy. */
     public CdpOptions withFrozenTargets(FrozenTargetPolicy policy) {
-        return new CdpOptions(probeDeadlinePerTarget, connectDeadline, noDefaults, isLocal, artifactsDir, policy);
+        return new CdpOptions(probeDeadlinePerTarget, connectDeadline, noDefaults, isLocal, artifactsDir, policy,
+                allowDefaultOverrides);
+    }
+
+    /** A copy with the given {@code allowDefaultOverrides} (the operator's opt-in, D553). */
+    public CdpOptions withAllowDefaultOverrides(boolean allow) {
+        return new CdpOptions(probeDeadlinePerTarget, connectDeadline, noDefaults, isLocal, artifactsDir, frozenTargets,
+                allow);
     }
 
     private static void requireDeadline(String name, Duration value, Duration max) {

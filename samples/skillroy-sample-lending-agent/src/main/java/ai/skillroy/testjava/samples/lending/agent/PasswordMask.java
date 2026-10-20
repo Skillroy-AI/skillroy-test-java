@@ -31,17 +31,32 @@ import ai.skillroy.testjava.protocol.SecretKeys;
  * is no secret in it); every other value, whatever its type, is replaced. Other columns and other sources pass
  * unchanged.
  *
- * <p>Stateless; the data module may call it from any thread.
+ * <p>The event rule (Phase 8, phase8-contracts.md 5.1, 12.2): every event payload passes the registered policies at
+ * publish under the source id {@code event:<topic>}; in {@code staff.signedOn} the column {@value #NAME_COLUMN} (the
+ * staff member's name, personal data) becomes {@value #PERSONAL}; its {@code code} and every other topic pass
+ * unchanged. The rule checks the source id exactly, so that no row column called {@code name} is touched.
+ *
+ * <p>Stateless; the data module, and every thread that publishes an event, may call it.
  */
 final class PasswordMask implements MaskPolicy {
 
     /** The masked column. */
     static final String COLUMN = "password";
 
+    /** The event rule's source id: the ring's {@code event:} prefix and the topic. */
+    static final String EVENT_SOURCE = "event:" + EngineEvents.STAFF_SIGNED_ON;
+    /** The event rule's column. */
+    static final String NAME_COLUMN = "name";
+    /** What the event rule answers for a staff member's name. */
+    static final String PERSONAL = "<personal>";
+
     @Override
     public Object mask(String sourceId, String column, Object value) {
         if (value != null && LendingDataSource.ID.equals(sourceId) && COLUMN.equalsIgnoreCase(column)) {
             return SecretKeys.REDACTED;
+        }
+        if (value != null && EVENT_SOURCE.equals(sourceId) && NAME_COLUMN.equals(column)) {
+            return PERSONAL;
         }
         return value;
     }

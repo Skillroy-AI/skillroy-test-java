@@ -52,7 +52,8 @@ import java.util.function.BiConsumer;
  * {@value #TICK_BOUND_MS} ms; a round that finds the pool busy is skipped). A round calls the library's
  * {@code drain(maxChars)} in each tapped browser (at most {@value #DRAINS_PER_ROUND} calls per browser while it
  * answers {@code more: true}) and publishes each event as {@code web.tap {browser, name, detail?, truncated?}} followed
- * by {@code web.ready {browser, url, signal: TAP, name}}; dropped events (the page buffer holds 1000) are logged. The
+ * by {@code web.ready {browser, url, signal: TAP, name}} (a masked browser's, Phase 8 D549: {@code web.tap {browser,
+ * name, masked: true}} and the ready's {@code url: ""}); dropped events (the page buffer holds 1000) are logged. The
  * thread ends when the last tap is removed, when the tapped browsers left the index, or when the module is
  * uninstalled ({@link #shutdown}); it starts again with the next tap. One drainer per document: the agent's poller
  * is the only consumer of the in-process buffer. Every library call goes through the guard of
@@ -488,6 +489,14 @@ final class Taps {
         Map<String, Object> payload = new LinkedHashMap<String, Object>();
         payload.put("browser", e.ref);
         payload.put("name", eventName);
+        if (e.masked) {
+            // Phase 8 (phase8-contracts.md 5.2 (i), D549): a masked browser's tap keeps the name a step waits on (the
+            // pack's pattern) and withholds the detail (page data); a volatile read, no EDT read on the poller.
+            payload.put("masked", Boolean.TRUE);
+            ctx.events().publish(WebTopics.TAP, WebTopics.SOURCE, payload);
+            bridge.ready(e, url, "TAP", eventName);
+            return;
+        }
         boolean truncated = Boolean.TRUE.equals(ev.get("truncated"));
         if (ev.containsKey("detail") && ev.get("detail") != null) {
             Object detail = ev.get("detail");

@@ -125,8 +125,35 @@ final class SwingSeeds implements SeedWalk {
     }
 
     @Override
+    public Map<Object, Boolean> masked(final Collection<?> components, long budgetMs) throws Exception {
+        final List<ai.skillroy.testjava.agent.api.spi.CaptureMask> masks = masks();
+        if (components.isEmpty() || !AwtThreads.eventQueueAlive()) {
+            // No event-dispatch thread to ask the masks on: every component is masked (the safe side, D547).
+            Map<Object, Boolean> out = new IdentityHashMap<Object, Boolean>();
+            for (Object c : components) {
+                out.put(c, Boolean.TRUE);
+            }
+            return out;
+        }
+        return read(budgetMs, new Callable<Map<Object, Boolean>>() {
+            @Override
+            public Map<Object, Boolean> call() {
+                return ComponentReads.maskedOf(components, masks);
+            }
+        });
+    }
+
+    /**
+     * True when a {@code CaptureMask} (S111) or a {@code BrowserMask} (Phase 8, gap 110) is registered; a registry that
+     * cannot answer counts as one that holds a mask (the safe side).
+     */
+    @Override
     public boolean masksRegistered() {
-        return !masks().isEmpty();
+        try {
+            return !masks().isEmpty() || BrowserMasks.anyRegistered(ctx);
+        } catch (RuntimeException e) {
+            return true;
+        }
     }
 
     /** The registered {@code CaptureMask}s, in registration order (Phase 7 security fix S111). */

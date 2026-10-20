@@ -50,7 +50,11 @@ import java.util.concurrent.locks.ReentrantLock;
  *   <li>each present adapter's {@code browsers(seeds)}, with the {@link BrowserSeed#object() objects} of the seeds
  *       (not the wrappers); an adapter the budget no longer reaches keeps its previous browsers;</li>
  *   <li>the refs, the components' refs (kind {@code component}, so that they equal {@code swing.snapshot} refs) and
- *       whether each component is showing (one bounded EDT read).</li>
+ *       whether each component is showing (one bounded EDT read);</li>
+ *   <li>(Phase 8, phase8-contracts.md 5.2, D547) each entry's {@link Entry#masked} flag: while a {@code CaptureMask} or
+ *       a {@code BrowserMask} is registered, the {@link BrowserMasks} rule for every entry (no EDT read) and, for the
+ *       entries it leaves to their component, one bounded EDT read of the {@code CaptureMask}s for all of them together
+ *       ({@link SeedWalk#masked}); a read that fails or has no time masks every such entry.</li>
  * </ol>
  * A browser that left the index has its ref released (a later call naming it answers {@code STALE_HANDLE}) and its
  * subscription cancelled; {@code web.browsers.changed {added, removed}} is published when the set changed. A seed's
@@ -75,6 +79,7 @@ final class BrowserIndex {
 
     private final AgentContext ctx;
     private final SeedWalk walk;
+    private final BrowserMasks masks;
     private final ReentrantLock lock = new ReentrantLock();
     private final Map<String, String> notes = new HashMap<String, String>();
     private final Set<String> failingRegistries = new LinkedHashSet<String>();
@@ -83,10 +88,17 @@ final class BrowserIndex {
     private volatile List<WebEngineAdapter> adapters = Collections.emptyList();
     private volatile Snapshot snapshot = Snapshot.EMPTY;
     private boolean walkFailureLogged;
+    private boolean maskReadFailureLogged;
 
     BrowserIndex(AgentContext ctx, SeedWalk walk) {
         this.ctx = ctx;
         this.walk = walk;
+        this.masks = new BrowserMasks(ctx);
+    }
+
+    /** The {@code BrowserMask} rule the index and the per-call reads share (phase8-contracts.md 5.2). */
+    BrowserMasks masks() {
+        return masks;
     }
 
     void listener(Listener l) {
@@ -288,7 +300,55 @@ final class BrowserIndex {
             Object c = safeComponent(e);
             e.showing = c != null && Boolean.TRUE.equals(showing.get(c));
         }
+        computeMasked(entries, deadline);
         return new Snapshot(entries, byVendor, frozen, states, found, System.nanoTime(), true);
+    }
+
+    /**
+     * Sets every entry's {@link Entry#masked} flag (phase8-contracts.md 5.2, D547; see the class comment): no mask
+     * registered, nothing masked and nothing called; else the {@link BrowserMasks} rule per entry and one bounded EDT
+     * read for the components it leaves undecided, made only while the rebuild has time; a read that fails or has no
+     * time masks every component-bearing entry it was to judge (the safe side).
+     */
+    private void computeMasked(List<Entry> entries, long deadline) {
+        boolean registered;
+        try {
+            registered = walk.masksRegistered();
+        } catch (RuntimeException ex) {
+            registered = true;
+        }
+        List<Entry> pending = new ArrayList<Entry>();
+        List<Object> components = new ArrayList<Object>();
+        for (Entry e : entries) {
+            Object c = e.component;
+            Boolean decided = masks.decide(registered, e, c);
+            if (decided != null) {
+                e.masked = decided.booleanValue();
+            } else {
+                pending.add(e);
+                components.add(c);
+            }
+        }
+        if (pending.isEmpty()) {
+            return;
+        }
+        Map<Object, Boolean> read = null;
+        long remaining = remainingMs(deadline);
+        if (remaining > 0) {
+            try {
+                read = walk.masked(components, remaining);
+            } catch (Exception ex) {
+                if (!maskReadFailureLogged) {
+                    maskReadFailureLogged = true;
+                    ctx.log().warn("web: could not read whether a CaptureMask names the browsers' components (" + ex
+                            + "); they are masked until a read succeeds");
+                }
+            }
+        }
+        for (Entry e : pending) {
+            Boolean m = read == null ? null : read.get(e.component);
+            e.masked = m == null || m.booleanValue();
+        }
     }
 
     private static void keepPrevious(Snapshot before, WebEngineAdapter adapter, List<Entry> entries,

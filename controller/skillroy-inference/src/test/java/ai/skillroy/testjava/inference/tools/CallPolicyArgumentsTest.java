@@ -127,8 +127,35 @@ class CallPolicyArgumentsTest {
             assertNull(CallPolicy.arguments(read, Map.of("redact", true)), read);
             assertNull(CallPolicy.arguments(read, Map.of()), read);
         }
-        assertEquals(java.util.Set.of("web.bitmap", "web.dom.text", "web.ariaSnapshot", "web.hitTest"),
-                CallPolicy.MASKED_WEB_READS);
+        assertEquals(java.util.Set.of("web.bitmap", "web.dom.text", "web.ariaSnapshot", "web.hitTest", "web.pointer",
+                "web.dom.click", "web.dom.fill"), CallPolicy.MASKED_WEB_READS);
+    }
+
+    /**
+     * Phase 8 (phase8-contracts.md 5.2 (iv), D637): the answers of {@code web.pointer}, {@code web.dom.click} and
+     * {@code web.dom.fill} of a masked browser carry no page data unless {@code redact: false}, a person's argument:
+     * refused for a model or a client, as on the four reads.
+     */
+    @Test
+    void aMaskedBrowsersActionAnswersKeepTheirPageDataForAPersonOnly() {
+        Map<String, Map<String, Object>> calls = Map.of(
+                "web.pointer", Map.of("action", "CLICK", "point", Map.of("x", 1, "y", 1)),
+                "web.dom.click", Map.of("selector", "#go"),
+                "web.dom.fill", Map.of("selector", "#go", "text", "x"));
+        for (Map.Entry<String, Map<String, Object>> c : calls.entrySet()) {
+            String primitive = c.getKey();
+            Map<String, Object> unredacted = new java.util.LinkedHashMap<>(c.getValue());
+            unredacted.put("redact", false);
+            String why = CallPolicy.arguments(primitive, unredacted);
+            assertNotNull(why, primitive);
+            assertTrue(why.contains(primitive) && why.contains("redact: false"), why);
+            unredacted.put("redact", "false");
+            assertNotNull(CallPolicy.arguments(primitive, unredacted), primitive);
+            assertNull(CallPolicy.arguments(primitive, c.getValue()), primitive + " without redact is allowed");
+            Map<String, Object> redacted = new java.util.LinkedHashMap<>(c.getValue());
+            redacted.put("redact", true);
+            assertNull(CallPolicy.arguments(primitive, redacted), primitive);
+        }
     }
 
     @Test

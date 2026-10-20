@@ -58,10 +58,28 @@ interface SeedWalk {
     ComponentState state(Object component, long budgetMs) throws Exception;
 
     /**
-     * True when a pack registered a {@code CaptureMask} (Phase 7 security fix S111): only then does a web read ask
-     * {@link #state} whether its browser's component is masked. The default, for a walk that has no registry, is false.
+     * True when a pack registered a {@code CaptureMask} (Phase 7 security fix S111) or a {@code BrowserMask} (Phase 8,
+     * gap 110; phase8-contracts.md 5.2): only then does a web read ask {@link #state} whether its browser's component
+     * is masked, and only then is a browser without a component masked. The default, for a walk that has no registry,
+     * is false.
      */
     default boolean masksRegistered() {
         return false;
+    }
+
+    /**
+     * Whether a registered {@code CaptureMask} names each of the given components or one of its ancestors up to its
+     * window, or throws for one (phase8-contracts.md 5.2, D547): one bounded EDT read for all of them, made by an
+     * index rebuild only while {@link #masksRegistered()}. The map is keyed by identity; a component the read could not
+     * judge is masked (the safe side). The default, for a walk that has no registry, answers every component masked.
+     *
+     * @throws Exception when the bounded EDT read fails or times out (the rebuild then masks every component)
+     */
+    default Map<Object, Boolean> masked(Collection<?> components, long budgetMs) throws Exception {
+        Map<Object, Boolean> out = new java.util.IdentityHashMap<Object, Boolean>();
+        for (Object c : components) {
+            out.put(c, Boolean.TRUE);
+        }
+        return out;
     }
 }

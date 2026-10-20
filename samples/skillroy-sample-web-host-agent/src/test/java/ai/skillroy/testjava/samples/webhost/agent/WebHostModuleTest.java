@@ -20,6 +20,7 @@ package ai.skillroy.testjava.samples.webhost.agent;
 import ai.skillroy.testjava.agent.api.AgentModule;
 import ai.skillroy.testjava.agent.api.spi.CaptureMask;
 import ai.skillroy.testjava.agent.api.spi.ReadinessSource;
+import ai.skillroy.testjava.agent.api.spi.web.BrowserMask;
 import ai.skillroy.testjava.agent.api.spi.web.BrowserRegistryAdapter;
 import ai.skillroy.testjava.agent.api.spi.web.BrowserSeed;
 import ai.skillroy.testjava.samples.webhost.WebHostBrowsers;
@@ -83,7 +84,10 @@ class WebHostModuleTest {
         ctx.options.put(WebHostModule.OPTION_MASK, "back");
         module.install(ctx.context);
         assertEquals(0, ctx.spi.all(CaptureMask.class).size(), "only the value front registers a mask");
+        assertEquals(Collections.singletonList("WARN webhost: webhost.mask names an unknown value, ignored: back"),
+                ctx.log.lines, "Phase 8: an unknown value is logged and ignored");
         module.uninstall();
+        ctx.log.lines.clear();
 
         ctx.options.put(WebHostModule.OPTION_MASK, WebHostModule.MASK_FRONT);
         module.install(ctx.context);
@@ -115,6 +119,47 @@ class WebHostModuleTest {
     private static <C extends Component> C named(C component, String name) {
         component.setName(name);
         return component;
+    }
+
+    /**
+     * Phase 8 (phase8-contracts.md 5.2, 12.3, section 13.1 row 21): {@code webhost.mask} is a comma-separated list;
+     * {@code release-detached} registers a {@code BrowserMask} answering FALSE for the tag {@code detached} only,
+     * {@code tag-back} one answering TRUE for the tag {@code back} only; a list of two registers both; an unknown value
+     * is logged at WARN and ignored.
+     */
+    @Test
+    void theMaskOptionIsAListAndRegistersTheBrowserMasksItNames() {
+        ctx.options.put(WebHostModule.OPTION_MASK, "front, release-detached");
+        module.install(ctx.context);
+        assertEquals(1, ctx.spi.all(CaptureMask.class).size());
+        List<BrowserMask> released = ctx.spi.all(BrowserMask.class);
+        assertEquals(1, released.size());
+        assertTrue(released.get(0) instanceof DetachedRelease);
+        Object vendor = new Object();
+        assertEquals(Boolean.FALSE, released.get(0).masks("detached", vendor, false));
+        assertEquals(Boolean.FALSE, released.get(0).masks("detached", vendor, true));
+        assertEquals(null, released.get(0).masks("back", vendor, false));
+        assertEquals(null, released.get(0).masks("front", vendor, true));
+        assertEquals(null, released.get(0).masks(null, vendor, false));
+        assertEquals(Arrays.asList("INFO webhost: webhost.mask=front: the front card is masked",
+                "INFO webhost: webhost.mask=release-detached: the detached browser is released while it has no view"),
+                ctx.log.lines);
+        module.uninstall();
+        assertEquals(0, ctx.spi.count(), "both withdrawn with the module");
+        ctx.log.lines.clear();
+
+        ctx.options.put(WebHostModule.OPTION_MASK, "tag-back,glitter,tag-back");
+        module.install(ctx.context);
+        assertEquals(0, ctx.spi.all(CaptureMask.class).size(), "no CaptureMask: the back browser is named by its tag");
+        List<BrowserMask> named = ctx.spi.all(BrowserMask.class);
+        assertEquals(1, named.size(), "a value named twice registers once");
+        assertTrue(named.get(0) instanceof BackTagMask);
+        assertEquals(Boolean.TRUE, named.get(0).masks("back", vendor, true));
+        assertEquals(Boolean.TRUE, named.get(0).masks("back", vendor, false));
+        assertEquals(null, named.get(0).masks("front", vendor, true));
+        assertEquals(null, named.get(0).masks("detached", vendor, false));
+        assertEquals(Arrays.asList("INFO webhost: webhost.mask=tag-back: the back browser is masked by its tag",
+                "WARN webhost: webhost.mask names an unknown value, ignored: glitter"), ctx.log.lines);
     }
 
     @Test
