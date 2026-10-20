@@ -33,7 +33,10 @@ public interface SurfaceSource {
     /** The surfaces this module knows now; empty when none, never null. */
     List<Surface> surfaces();
 
-    /** One surface: the component that shows it, its kind and, for a web surface, the browser's ref. */
+    /**
+     * One surface: the component that shows it, its kind, for a web surface the browser's ref, and whether the module
+     * masks what it shows.
+     */
     final class Surface {
 
         /** The component the surface is painted into. */
@@ -42,17 +45,30 @@ public interface SurfaceSource {
         public final String kind;
         /** The browser's ref for a web surface, else null. */
         public final String browserRef;
+        /**
+         * True when the module masks what the surface shows (Phase 8 security fix S166: the web module's flag of a
+         * masked browser, whatever masks it): the capture then blanks the component whole and reports the surface
+         * {@code redacted}, and the hit-test reports a hit on it, or below it, {@code masked}, as for a component a
+         * {@code CaptureMask} names.
+         */
+        public final boolean masked;
 
-        /** A surface. */
+        /** A surface the module does not mask. */
         public Surface(Component component, String kind, String browserRef) {
+            this(component, kind, browserRef, false);
+        }
+
+        /** A surface (Phase 8 security fix S166). */
+        public Surface(Component component, String kind, String browserRef, boolean masked) {
             this.component = component;
             this.kind = kind;
             this.browserRef = browserRef;
+            this.masked = masked;
         }
 
         @Override
         public String toString() {
-            return "Surface{" + kind + ", " + browserRef + "}";
+            return "Surface{" + kind + ", " + browserRef + (masked ? ", masked" : "") + "}";
         }
     }
 }

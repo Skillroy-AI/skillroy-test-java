@@ -32,6 +32,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
+import java.util.function.BooleanSupplier;
 
 /**
  * The module's own bounded walk of the Swing tree (the Swing module's walk is in another module jar, which this one
@@ -53,14 +54,27 @@ final class SwingSeeds implements SeedWalk {
     private static final long MIN_WAIT_MS = 1;
 
     private final AgentContext ctx;
+    /** Whether an event-dispatch thread runs: {@link AwtThreads#eventQueueAlive()}, or the tests' answer. */
+    private final BooleanSupplier edt;
 
     SwingSeeds(AgentContext ctx) {
+        this(ctx, null);
+    }
+
+    /** A walk whose "does an event-dispatch thread run" answer is {@code edt}'s (null: {@link AwtThreads}). */
+    SwingSeeds(AgentContext ctx, BooleanSupplier edt) {
         this.ctx = ctx;
+        this.edt = edt;
+    }
+
+    private boolean eventQueueAlive() {
+        BooleanSupplier check = edt;
+        return check != null ? check.getAsBoolean() : AwtThreads.eventQueueAlive();
     }
 
     @Override
     public List<Object> components(long budgetMs) throws Exception {
-        if (!AwtThreads.eventQueueAlive()) {
+        if (!eventQueueAlive()) {
             return Collections.emptyList();
         }
         return read(budgetMs, new Callable<List<Object>>() {
@@ -93,7 +107,7 @@ final class SwingSeeds implements SeedWalk {
     @Override
     public Map<Object, Boolean> showing(final Collection<?> components, long budgetMs) throws Exception {
         final Map<Object, Boolean> out = new IdentityHashMap<Object, Boolean>();
-        if (components.isEmpty() || !AwtThreads.eventQueueAlive()) {
+        if (components.isEmpty() || !eventQueueAlive()) {
             for (Object c : components) {
                 out.put(c, Boolean.FALSE);
             }
@@ -110,10 +124,16 @@ final class SwingSeeds implements SeedWalk {
         });
     }
 
+    /**
+     * {@inheritDoc} Phase 8 security fix S167 (FE): a state that cannot be read (not a component, or no event-dispatch
+     * thread to read it on) is {@link ComponentState#UNKNOWN_MASKED} while a mask is registered, as {@link #masked}
+     * answers every component masked then (D-EW-10), so that a per-call judgement never lowers a browser's flag on a
+     * read that was not made.
+     */
     @Override
     public ComponentState state(final Object component, long budgetMs) throws Exception {
-        if (!(component instanceof Component) || !AwtThreads.eventQueueAlive()) {
-            return ComponentState.UNKNOWN;
+        if (!(component instanceof Component) || !eventQueueAlive()) {
+            return masksRegistered() ? ComponentState.UNKNOWN_MASKED : ComponentState.UNKNOWN;
         }
         final List<ai.skillroy.testjava.agent.api.spi.CaptureMask> masks = masks();
         return read(budgetMs, new Callable<ComponentState>() {
@@ -127,7 +147,7 @@ final class SwingSeeds implements SeedWalk {
     @Override
     public Map<Object, Boolean> masked(final Collection<?> components, long budgetMs) throws Exception {
         final List<ai.skillroy.testjava.agent.api.spi.CaptureMask> masks = masks();
-        if (components.isEmpty() || !AwtThreads.eventQueueAlive()) {
+        if (components.isEmpty() || !eventQueueAlive()) {
             // No event-dispatch thread to ask the masks on: every component is masked (the safe side, D547).
             Map<Object, Boolean> out = new IdentityHashMap<Object, Boolean>();
             for (Object c : components) {

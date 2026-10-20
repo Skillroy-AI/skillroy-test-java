@@ -1388,7 +1388,9 @@ pass and asserts them stored unchanged and uncopied (D-EW-18).
 **The rule (D545). Behaviour change.** While at least one `CaptureMask` or one `BrowserMask` is registered
 (`SeedWalk.masksRegistered()`, `SwingSeeds.java:128`, counts both), an open browser whose adapter reports no Swing
 component (`Entry.component == null` at the last rebuild **and** `WebBrowser.component()` null when asked again, as
-`refuseMasked` asks today, `WebPrimitives.java:1057`) is **masked** unless a `BrowserMask` releases it. When nothing is
+`refuseMasked` asks today, `WebPrimitives.java:1057`; (Phase 8 security fix, S168, FE) every per-call judgement asks
+`component()` in the call and judges what it answers, a view lost or replaced since the last rebuild included, the
+entry's component only when the adapter throws) is **masked** unless a `BrowserMask` releases it. When nothing is
 registered nothing changes (S111's rule: a pack that declared no secret has none; the web host's item 2 keeps listing
 `detached` with URL and title). When the browser gains a component, the `CaptureMask` rule on that component governs
 from the next rebuild. Today such an entry is never masked: `entryState` answers null without a component
@@ -1428,7 +1430,11 @@ it beside `BrowserRegistryAdapter` as the second type a domain pack implements.
 
 1. `registered = walk.masksRegistered()`; if false, `masked = false` for every entry and no mask is called.
 2. `named = union of every BrowserMask.masks(e.tag, e.vendor(), c != null)`: TRUE if any TRUE; FALSE if any FALSE and
-   none TRUE; null otherwise; a mask that throws counts TRUE, logged once per mask class per agent start.
+   none TRUE; null otherwise; a mask that throws counts TRUE, logged once per mask class per agent start. (Phase 8
+   security fix, S169, FE) `e.tag` is the tag a seed gives **now**: a rebuild in which every `BrowserRegistryAdapter`
+   answered assigns the tag it found, null included; after a registry threw, the entry keeps its tag but it is
+   unconfirmed, and the union counts TRUE for it (while a `BrowserMask` is registered) until a rebuild in which every
+   registry answered: a tag that may be stale can mask, never release.
 3. `named == TRUE` → `masked = true` (whatever the view).
 4. no component (`c == null`) → `masked = (named != FALSE)` (the view-less rule; no EDT read).
 5. a component → one bounded EDT read for **all** components of the rebuild together, `SeedWalk.masked(Collection<?>
@@ -1445,6 +1451,15 @@ an entry without a component (no EDT read) and keeps its EDT read for one with a
 on one route is masked on every route: the four reads, `web.browsers`, the events, the selection error data, the
 answers of the actions that stay allowed on it (iv), the session's snapshot text, the recorder and the tools (they
 follow the agent's flag, `UiSnapshotText.java:195-250`, `Recorder.java:173, 659, 697`, `VisionSessionTools.java:460`).
+(Phase 8 security fix, S166, FE) The Swing capture and hit-test follow it too: `SurfaceSource.Surface` gains `boolean
+masked` (a fourth constructor argument, the three-argument constructor kept: not masked; additive, D636), the web
+module's `WebSurfaces` fills it from `Entry.masked` (a volatile read on the EDT inside the Swing read, no vendor call),
+and the Swing module names a masked surface's component by the rule `browser-mask` (P7 §3.6's table): the capture
+blanks it whole, reports the surface `redacted: true` and lists it in `redacted` under that rule, marks nothing in it,
+and `swing.hitTest` answers `masked: true` for a target that is that component or lies below it (point and target
+form) and for a point whose deepest component lies in it; so the composite leaves it grey, and the recorder, V2's raw
+halves and the vision tools' `type` and `press` at a focused view refuse it, with no controller change, whatever
+masks the browser (a `BrowserMask` TRUE included).
 
 **Effects, S111's unchanged and three extended.**
 
@@ -1464,7 +1479,14 @@ follow the agent's flag, `UiSnapshotText.java:195-250`, `Recorder.java:173, 659,
   `source`, no `line`, no `truncated`); `web.tap {browser, name, masked: true}` (no `detail`, no `truncated`: `name`
   is the pattern a step waits on, `detail` is page data). `web.closed` and `web.browsers.changed` carry refs only and
   are unchanged. The `masked: true` key is additive; a step that waits on `web.ready {signal: LOAD}` or `web.tap
-  {name}` of a masked browser still completes.
+  {name}` of a masked browser still completes. (Phase 8 security fix, S170, FE. **Behaviour change.**) Under a glob
+  the event's own type is page data, so a masked browser's `web.tap` and its `web.ready {signal: TAP}` carry as `name`
+  the tap's own pattern that heard the event: the exact pattern it equals, else the first pattern with `*` that
+  matches it as the library's glob does (`WebLib.tapPatternOf`); an event no pattern of the tap matches now (a tap
+  replaced meanwhile) is not published. On both paths, on the receiving side (the Java side holds the patterns; no
+  library change, so an older library in a page behaves the same, D300). A step on a masked browser therefore waits on
+  the pattern it tapped: an exact name it tapped, or the glob itself; a glob tap awaited by an exact name never
+  completes there.
 - **(ii) Selection error data withholds a masked browser's URL and title (D550). Behaviour change.**
   `Selection.summary` (`Selection.java:323-353`) answers `url: ""`, no `title`, `masked: true` for a masked entry
   (`NOT_FOUND`'s `browsers` and `AMBIGUOUS`'s `candidates`; an S111 residual closed), and `by: {url: <regex>}` and `by:
@@ -1473,7 +1495,13 @@ follow the agent's flag, `UiSnapshotText.java:195-250`, `Recorder.java:173, 659,
   browser (`web.pointer`, `web.dom.click`, `web.dom.fill`, `web.evaluate`, `web.tap` stay allowed on it for any caller
   `CallPolicy` admits: a pack's verb, a person, or a model or client a person opted in to the raw `web_*` tools,
   `SessionPolicy.java:33-34`, `ToolProjection.java:158-161`; S111's standing residual, unchanged), and the answers of
-  `web.pointer`, `web.dom.click` and `web.dom.fill` carry no page data (iv).
+  `web.pointer`, `web.dom.click` and `web.dom.fill` carry no page data (iv). (Phase 8 security fix, S165, FE: S111's
+  residual narrowed: `web.dom.click`, `web.dom.fill` and `web.dispatchEvent` with a selector `target` are refused on a
+  masked browser unless `redact: false`, see (iv).) (Phase 8 security fix, S172, FE) A `by: {url|title}` selection
+  judges its candidates afresh before any regex runs (`BrowserIndex.rejudge`: the `BrowserMasks` rule on the component
+  the adapter reports now, and one bounded EDT read of the `CaptureMask`s for the ones with a view, only while a mask is
+  registered; a read that fails or has no time masks), and so does the error data before its summaries, so that a
+  browser that became masked since the last judgement is never matched by its withheld URL or title.
 - **(iv) Acting on a masked browser returns no page data (D637). Behaviour change.** Today `web.pointer` hit-tests
   the point before dispatching and returns the summary `{role, name, tag, id?}` (`Pointing.java:234-246`,
   `WebInput.java:440-445`): `name` is the accessible name, page text; `web.dom.click` returns `clicked: {role, name,
@@ -1495,6 +1523,28 @@ follow the agent's flag, `UiSnapshotText.java:195-250`, `Recorder.java:173, 659,
   all three itself today, `CdpWebPath.java:177-183`, `:836-890`). `redact: false` keeps today's answers, and
   `CallPolicy.MASKED_WEB_READS` gains the three primitives so that `redact: false` stays a person's argument there as
   well (`CallPolicy.java:69`).
+  **(Phase 8 security fix, S165, FE; it narrows S111's standing residual. Behaviour change.)** Stripping the answer
+  does not hide whether the caller's locator held: the page evaluates it (a role's accessible name as text or regex, a
+  CSS selector testing attributes and structure) and the kind of answer (`NOT_FOUND`, `INVALID_PARAMS` "not visible"
+  or "not fillable", `AMBIGUOUS`, success) is one bit on the masked page per call, an oracle. So **`web.dom.click`,
+  `web.dom.fill` and `web.dispatchEvent` with a selector `target` (any `target` but `"window"` and `"document"`) are
+  refused on a masked browser `INVALID_PARAMS {param: "redact", reason: "masked", browser}` before the page is
+  evaluated, unless `redact: false`**, with the four reads' test (`maskedNow`: one bounded EDT read, only while a mask is
+  registered); `web.dispatchEvent` declares `redact`, and `CallPolicy.MASKED_WEB_READS` gains it, so `redact: false`
+  stays a person's argument on every raw route (the session's raw primitive branch, the MCP server's raw tools, the
+  facade). `web.pointer` at a point stays allowed (it evaluates no locator and answers no hit), and so does a
+  `web.dispatchEvent` on the window or the document. A pack verb's compiled call that must act on a masked browser by
+  locator carries `redact: false`: the MCP server's plan policy checks a pack verb's calls with `never` only
+  (`PlanPolicy.packCall`), so it passes there, as the four reads' `redact: false` has since S111; the session facade
+  applies `CallPolicy.arguments` to every call it executes, a pack verb's included, so it is refused there (the
+  restrictive form, D-FE-1). A person's committed scenario acts on a masked browser by locator through a `call` step
+  with `redact: false` (`webClick`, `webFill` and `webDispatch` take no `redact`). D637's strip stays as the second
+  line: an answer of a browser judged masked while the action ran (the entry's flag, or the `BrowserMasks` rule as it
+  stands, no further EDT read) keeps `role` and `tag` only. On the CDP path a selector `web.dispatchEvent` of a masked
+  or unmapped page is handed to the agent like the other two. **Veto form (the owner's decision):** keep the three
+  actions allowed on a masked browser (the oracle recorded as S111's residual), or answer one indistinguishable outcome
+  (rejected here: the page's own reaction, its events and the application still tell the outcome, and a person's failing
+  step would pass), or accept a pack verb's `redact: false` on the session facade's verb route too.
 - **(iii) The CDP path hands what it cannot judge to the agent (D551).** `AgentBrowser.parse` (`AgentBrowser.java:
   50-63`) returns `AgentBrowser.Listing(List<AgentBrowser> browsers, boolean masksRegistered)`; `refreshBrowsers`
   (`CdpWebPath.java:1562`) keeps the flag on the `Session`; an answer without the field (an older agent) counts as
@@ -1505,13 +1555,31 @@ follow the agent's flag, `UiSnapshotText.java:195-250`, `Recorder.java:173, 659,
   agent entry is `masked`, or that has no agent entry, carry `url: ""`, no `detail` and `masked: true` as (i) does.
   `redact: false` bypasses the hand-off as today (`:1278-1281`). Pages the agent has mapped are handled as S111 built
   it: the agent reports the view-less `detached` browser masked, the path hands its reads over (the web host's
-  `detached` has `CDP_TARGET_ID`, `WebHostChecks.java:226-227`).
+  `detached` has `CDP_TARGET_ID`, `WebHostChecks.java:226-227`). (Phase 8 security fix, S179, FE; P4 §5.3 amended)
+  **The frozen-target refusal** is page data too: `open` reads the agent's `web.browsers` once (bounded at 5 s) before
+  it builds `FROZEN_TARGETS`, whose `detail.frozenTargets` names a target `{id, url, title}` only when the listing maps
+  it (by `cdpTargetId`) to a browser the agent does not mask, or to none while the agent reports no mask registered,
+  and `{id, url: "", masked: true}` otherwise (a masked page, an unmapped page while `masksRegistered` is true or
+  absent, a read that failed: fail closed); the message names the targets by count and id only ("2 page targets did
+  not answer Runtime.evaluate: <id>; <id>"), so that neither the `web.path` record's `reason` (under `auto`), the run's
+  failure, the JUnit XML, the CLI's `--json` nor a client's answer carries a masked page's URL or title.
 
 **What stays open, stated.** `web.evaluate` and `web.waitFlag` on a masked browser are not refused (script primitives:
 read-only mode refuses them and `CallPolicy` never offers them to a model or a client); a view gained between two
 rebuilds is seen at the next one (the per-call reads re-ask `component()`, so a read is never served stale on the
-unmasked side); JxBrowser's view-less browsers and its off-screen `bitmap` are specified from the adapter's code and
-unverified against the real library (gap 41, the wall).
+unmasked side; Phase 8 security fix, S168, FE: a view lost or replaced as well, every per-call judgement judging the
+component the adapter reports in the call); JxBrowser's view-less browsers and its off-screen `bitmap` are specified
+from the adapter's code and unverified against the real library (gap 41, the wall). (Phase 8 security fix, S172, FE)
+A browser that **becomes** masked while open (its view moved into a masked container, a mask registered, a mask's
+answer changed) keeps the flag of the last judgement until something judges it again: every per-call read and every
+`by: {url|title}` selection does, a rebuild does, and, while events flow, an event of an unmasked browser whose flags
+are older than `BrowserIndex.STALE_MS` (2 s) posts one re-judgement of every entry to an agent worker (at most one
+outstanding; the `BrowserMasks` rule and one bounded EDT read for the browsers with a view; no registry lookup, wait or
+EDT read on the publishing thread, which may be the adapter's or the EDT). The event that asks is published with the
+flag as it was, so such a browser's events carry page data for at most about 2 s after its first event following the
+change, plus the read; the SPI registry has no signal for a registration that could close this window. A pack's
+`CaptureMask` should therefore answer by a stable container (D-EW-12's statement for the CDP path's own events
+stands).
 
 **As built (Phase 8, EW, 2026-10-19).** As specified, with these completions. (a) Steps 1 to 4 live in one
 package-private class of the web module, `BrowserMasks`, which the index, the per-call reads and the selection share:
@@ -1524,7 +1592,11 @@ step 3, and every per-call judgement refreshes `Entry.masked` (D-EW-8). (c) The 
 `TRUE` afresh without an EDT read and reads the entry's flag for a component-bearing one; a masked entry's title is never
 read for `by.title` (D-EW-9). (d) `SeedWalk.masked`'s default (a walk without a registry) and `SwingSeeds` without an
 event-dispatch thread answer every component masked; a registry that cannot answer counts as one with masks
-(`masksRegistered` true) (D-EW-10). (e) `web.dom.fill`'s `filled` keeps `tag` only (it has no `role`; `type` and `id`
+(`masksRegistered` true) (D-EW-10). (Phase 8 security fix, S167, FE) So does every other `SwingSeeds` read the mask
+judgements use: `state` of something that is not a component, or of anything while no event-dispatch thread runs,
+answers a masked unknown state while a mask is registered (`ComponentState.UNKNOWN_MASKED`; `UNKNOWN` otherwise), and a
+per-call judgement counts a state read that answered nothing as masked, so no read that was not made lowers
+`Entry.masked`. (e) `web.dom.fill`'s `filled` keeps `tag` only (it has no `role`; `type` and `id`
 dropped), read literally from "role and tag only". (f) `web.pointer`, `web.dom.click` and `web.dom.fill` declare the
 parameter `redact` in their descriptors (a person's argument, now in `CallPolicy.MASKED_WEB_READS`), so that `/schema`
 names it as the four reads' descriptors do (D-EW-11). (g) The CDP path hands a `by: {url|title}` selection to the agent
@@ -1616,7 +1688,9 @@ and a `VirtualMachineError` still propagates as is.
 | Where | Thread | Bound |
 |---|---|---|
 | the ring pass (§5.1) | the publishing thread (EDT, application, adapter or worker), **outside the ring lock** | one lock-free SPI lookup; at most 10,000 scalars visited, each through every policy; the freeze's depth 184; then the character bound as today; a throwing policy logged once per class; one `nanoTime` pair per event feeding `slowPasses`/`maxPassMs` |
-| a masked browser's action answers (§5.2 (iv)) | the agent worker, after `libraryIn` returned or threw | one bounded EDT read of the component's state only while masks are registered (the read `web.pointer` already makes); `name` and `id` dropped, never emptied |
+| a masked browser's action answers (§5.2 (iv)) | the agent worker, after `libraryIn` returned or threw | one bounded EDT read of the component's state only while masks are registered (the read `web.pointer` already makes); `name` and `id` dropped, never emptied (Phase 8 security fix, S165, FE: for `web.dom.click`, `web.dom.fill` and a selector `web.dispatchEvent` that read is the refusal's, made before the page is evaluated; the strip afterwards reads the entry's flag and the `BrowserMasks` rule, no EDT read) |
+| the re-judgement an event asks for (§5.2, S172, FE) | an agent worker (`ThreadPolicy.WORKER`), posted by the publishing thread | at most one outstanding, at most once per `STALE_MS` (2 s) while events of unmasked browsers flow; the `BrowserMasks` rule per entry and one bounded EDT read for the browsers with a view, within `BUDGET_MS`; the publishing thread only compares a volatile time and posts |
+| a `by: {url\|title}` selection's re-judgement (§5.2 (ii), S172, FE) | the calling agent worker | one bounded EDT read for the candidates with a view, only while a mask is registered, within the selection's budget; the same before the error data's summaries |
 | `BrowserMask` (§5.2) | an agent worker, at rebuild and before a masked-read check; never the EDT | one call per registered mask per browser per rebuild; no method of the vendor object |
 | `SeedWalk.masked` (§5.2) | one bounded EDT read per rebuild, all components together, within the rebuild's budget (`BUDGET_MS`) | made only while masks are registered; a failed or skipped read masks |
 | a masked browser's events (§5.2) | the adapter's thread, the tap poller | a volatile read; no EDT read |
@@ -1630,8 +1704,14 @@ it; (4) a masked browser's `web.load`, `web.ready`, `web.console` and `web.tap` 
 never matches `by: {url|title}` and the selection error data withholds its URL and title; (6) the CDP path hands
 unmapped-page reads and `by: {url|title}` selections to the agent while masks are registered; (7) `web.pointer` of a
 masked browser carries no `hit`, and `web.dom.click`/`web.dom.fill` answer with `role` and `tag` only, the CDP path
-handing the three over for a masked or unmapped page while masks are registered. Nothing changes for a target with no
-`MaskPolicy`, no `CaptureMask`, no `BrowserMask` and no secret-looking event key, on Playwright 1.61+.
+handing the three over for a masked or unmapped page while masks are registered; (Phase 8 security fixes, FE) (8)
+`web.dom.click`, `web.dom.fill` and a selector `web.dispatchEvent` on a masked browser are refused `INVALID_PARAMS
+masked` unless `redact: false` (a person's: a committed scenario uses a `call` step; S165); (9) a masked browser's
+`web.tap` events carry the tap's own pattern as `name`, so a step there waits on the pattern it tapped (S170); (10) a
+tag lasts while a seed gives it, so a release by tag ends when the registry stops tagging (S169); (11) the Swing capture
+blanks a masked browser's view (rule `browser-mask`) and the hit-test reports it masked, whatever masks it (S166); (12)
+the CDP path's frozen-target refusal names a masked or unmapped page by id only (S179). Nothing changes for a target
+with no `MaskPolicy`, no `CaptureMask`, no `BrowserMask` and no secret-looking event key, on Playwright 1.61+.
 
 ---
 
@@ -3501,7 +3581,14 @@ place):
    hands unmapped-page reads, url/title selections and the three actions on a masked or unmapped page to the agent
    while masks are registered and counts an absent `masksRegistered` as true. `web.evaluate` and `web.waitFlag` on a
    masked browser stay S111's recorded residual (read-only mode refuses them; `CallPolicy` never offers them to a model
-   or a client).
+   or a client). (Phase 8 security fixes, FE) The actions that evaluate a caller's locator in the page
+   (`web.dom.click`, `web.dom.fill`, `web.dispatchEvent` with a selector target) are refused on a masked browser before
+   the page is evaluated unless `redact: false`, a person's argument (S165); the Swing capture blanks a masked
+   browser's view and its hit-test reports it masked (S166); a read that could not be made never lowers the flag (S167);
+   every per-call judgement judges the view the adapter reports in the call (S168); a tag that may be stale can mask,
+   never release (S169); a masked browser's tap events are named by the tap's own pattern (S170); a browser that becomes
+   masked while open is judged again by the next call, selection or rebuild and, while its events flow, within about
+   2 s (S172); the CDP path's frozen-target refusal never names a masked or unmapped page's URL or title (S179).
 5. **The CDP path attaches with the Playwright line it finds and never leaves a driver behind** (§5.3): the setters are
    gated by field presence, once per JVM; without `noDefaults` the path is not used unless the operator sets
    `skillroy.cdp.allowDefaultOverrides` (never a scenario's, a pack's or a model's choice: the overrides change the

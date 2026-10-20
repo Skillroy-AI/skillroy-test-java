@@ -1035,6 +1035,30 @@ class CdpWebPathCallTest {
     }
 
     /**
+     * Phase 8 security fix S165 (FE): {@code web.dispatchEvent} with a selector target on a page the agent reports
+     * masked, or on an unmapped page while masks are registered, is handed to the agent, which refuses it (whether the
+     * selector matched would reveal the page); a dispatch on the window evaluates no locator and stays on the path;
+     * {@code redact: false} (a person's) keeps it on the path. On the old code the path served all of them.
+     */
+    @Test
+    void aSelectorDispatchOnAMaskedPageIsHandedToTheAgent() throws Exception {
+        back.engine = a -> FakeWorld.ok(Map.of("dispatched", true));
+        agentBrowsers(true, "b-back");
+        Map<String, Object> bySelector = map("browser", "b-back", "name", "desk.reset", "target", "#go");
+        assertEquals("browser b-back is masked: the agent answers web.dispatchEvent",
+                unsupported("web.dispatchEvent", bySelector, null));
+        assertTrue(back.evaluated.isEmpty(), "nothing reached the masked page");
+        assertEquals(Map.of("dispatched", true), call("web.dispatchEvent", map("browser", "b-back", "name",
+                "desk.reset")).value(), "a dispatch on the window evaluates no locator");
+        Map<String, Object> unredacted = new LinkedHashMap<>(bySelector);
+        unredacted.put("redact", false);
+        assertEquals(Map.of("dispatched", true), call("web.dispatchEvent", unredacted).value());
+        agentBrowsers(false);
+        assertEquals(Map.of("dispatched", true), call("web.dispatchEvent", bySelector).value(),
+                "no masks: served");
+    }
+
+    /**
      * Phase 8 (5.2 (iii), D551): the path's own events of a page the agent reports masked carry {@code url: ""}, no
      * {@code detail} and {@code masked: true}; a step's {@code name} and {@code signal} stay.
      */
@@ -1055,10 +1079,16 @@ class CdpWebPathCallTest {
                 : FakeWorld.ok(Map.of("installed", 0L));
         seq = path.lastEventSeq();
         path.pollOnce();
-        assertEquals(Map.of("browser", "b-front", "name", "webhost.member", "masked", true),
+        // Phase 8 security fix S170 (FE): the name is the tap's own pattern (under a glob the page's event type is page
+        // data), on this path as on the agent's.
+        assertEquals(Map.of("browser", "b-front", "name", "webhost.*", "masked", true),
                 path.eventsSince(seq, "web.tap").get(0).payload());
-        assertEquals(Map.of("browser", "b-front", "url", "", "signal", "TAP", "name", "webhost.member", "masked",
+        assertEquals(Map.of("browser", "b-front", "url", "", "signal", "TAP", "name", "webhost.*", "masked",
                 true), path.eventsSince(seq, "web.ready").get(0).payload());
+        assertEquals(1, path.eventsSince(seq, "web.tap").size());
+        for (Event e : path.eventsSince(seq, "*")) {
+            assertFalse(String.valueOf(e.payload()).contains("webhost.member"), String.valueOf(e.payload()));
+        }
         for (Event e : path.eventsSince(0, "*")) {
             assertFalse(String.valueOf(e.payload()).contains("member's name"), String.valueOf(e.payload()));
         }

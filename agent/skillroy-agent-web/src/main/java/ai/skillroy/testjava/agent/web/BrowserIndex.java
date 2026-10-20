@@ -18,6 +18,7 @@ package ai.skillroy.testjava.agent.web;
 
 import ai.skillroy.testjava.agent.api.AgentContext;
 import ai.skillroy.testjava.agent.api.ProbeResult;
+import ai.skillroy.testjava.agent.api.ThreadPolicy;
 import ai.skillroy.testjava.agent.api.spi.web.BrowserRegistryAdapter;
 import ai.skillroy.testjava.agent.api.spi.web.BrowserSeed;
 import ai.skillroy.testjava.agent.api.spi.web.WebBrowser;
@@ -34,6 +35,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.ReentrantLock;
 
 /**
@@ -58,7 +60,11 @@ import java.util.concurrent.locks.ReentrantLock;
  * </ol>
  * A browser that left the index has its ref released (a later call naming it answers {@code STALE_HANDLE}) and its
  * subscription cancelled; {@code web.browsers.changed {added, removed}} is published when the set changed. A seed's
- * tag goes to the browser whose vendor object or component is that seed's object.
+ * tag goes to the browser whose vendor object or component is that seed's object, and lasts while the seed gives it
+ * (Phase 8 security fix S169, FE: a rebuild in which every registry answered drops a tag no seed gave; after a registry
+ * failed, a kept tag is unconfirmed and can mask, never release). The flags are judged again without a rebuild by the
+ * per-call reads and selections ({@link #rejudge}) and, while events flow, at most once per {@link #STALE_MS} on an
+ * agent worker ({@link #eventPublished}; S172).
  *
  * <p>Thread-safe: rebuilds are serialised (a caller that cannot get the lock within its budget uses the index as it
  * is); readers see an immutable {@link Snapshot}.
@@ -89,6 +95,12 @@ final class BrowserIndex {
     private volatile Snapshot snapshot = Snapshot.EMPTY;
     private boolean walkFailureLogged;
     private boolean maskReadFailureLogged;
+    /** When every entry's flag was last judged together (a rebuild or {@link #rejudgeAll}); {@code nanoTime}. */
+    private volatile long judgedNanos = System.nanoTime();
+    /** Set while a re-judgement {@link #eventPublished} posted has not finished (at most one outstanding). */
+    private final AtomicBoolean rejudging = new AtomicBoolean();
+    /** An event re-judges the flags when they are older than this (S172; {@link #STALE_MS}, tests lower it). */
+    volatile long rejudgeAfterMs = STALE_MS;
 
     BrowserIndex(AgentContext ctx, SeedWalk walk) {
         this.ctx = ctx;
@@ -213,7 +225,7 @@ final class BrowserIndex {
         }
         List<Object> seeds = new ArrayList<Object>();
         Map<Object, String> tags = new IdentityHashMap<Object, String>();
-        registrySeeds(seeds, tags);
+        boolean everyRegistryAnswered = registrySeeds(seeds, tags);
         long left = remainingMs(deadline);
         if (left > 0) {
             try {
@@ -278,8 +290,17 @@ final class BrowserIndex {
             if (tag == null && c != null) {
                 tag = tags.get(c);
             }
+            // Phase 8 security fix S169 (FE): a tag lasts while the seed gives it. A rebuild in which every registry
+            // answered assigns what it found, null included; after a registry failed, a tag kept from before is
+            // unconfirmed, and a BrowserMask union counts TRUE for it until every registry answers again.
             if (tag != null) {
                 e.tag = tag;
+                e.tagUnconfirmed = false;
+            } else if (everyRegistryAnswered) {
+                e.tag = null;
+                e.tagUnconfirmed = false;
+            } else if (e.tag != null) {
+                e.tagUnconfirmed = true;
             }
             e.componentRef = c == null ? null : ctx.handles().handleFor(c, "component");
             e.component = c;
@@ -311,6 +332,7 @@ final class BrowserIndex {
      * time masks every component-bearing entry it was to judge (the safe side).
      */
     private void computeMasked(List<Entry> entries, long deadline) {
+        judgedNanos = System.nanoTime();
         boolean registered;
         try {
             registered = walk.masksRegistered();
@@ -351,6 +373,89 @@ final class BrowserIndex {
         }
     }
 
+    /**
+     * Judges the given entries' {@link Entry#masked} flags afresh, without rebuilding the index (Phase 8 security fixes
+     * S168 and S172, FE; phase8-contracts.md 5.2): the {@link BrowserMasks} rule on the component each adapter reports
+     * now ({@link BrowserMasks#componentNow}) and, for the entries it leaves to their component, one bounded EDT read
+     * of the {@code CaptureMask}s for all of them together ({@link SeedWalk#masked}), made only while a mask is
+     * registered; a read that fails or has no time masks every entry it was to judge (the safe side). Never throws.
+     */
+    void rejudge(List<Entry> entries, long budgetMs) {
+        boolean registered;
+        try {
+            registered = walk.masksRegistered();
+        } catch (RuntimeException ex) {
+            registered = true;
+        }
+        List<Entry> pending = new ArrayList<Entry>();
+        List<Object> components = new ArrayList<Object>();
+        for (Entry e : entries) {
+            Object c = BrowserMasks.componentNow(e);
+            Boolean decided = masks.decide(registered, e, c);
+            if (decided != null) {
+                e.masked = decided.booleanValue();
+            } else {
+                pending.add(e);
+                components.add(c);
+            }
+        }
+        if (pending.isEmpty()) {
+            return;
+        }
+        Map<Object, Boolean> read = null;
+        if (budgetMs > 0) {
+            try {
+                read = walk.masked(components, budgetMs);
+            } catch (Exception ex) {
+                read = null;
+            }
+        }
+        for (int i = 0; i < pending.size(); i++) {
+            Boolean m = read == null ? null : read.get(components.get(i));
+            pending.get(i).masked = m == null || m.booleanValue();
+        }
+    }
+
+    /** {@link #rejudge} of every entry of the current index, bounded at {@link #BUDGET_MS}. Never throws. */
+    void rejudgeAll() {
+        long started = System.nanoTime();
+        try {
+            rejudge(snapshot.entries, BUDGET_MS);
+        } catch (RuntimeException ex) {
+            // the flags stay as they were; the next call or rebuild judges them
+        }
+        judgedNanos = started;
+    }
+
+    /**
+     * An event of the entry is being published (Phase 8 security fix S172, FE; phase8-contracts.md 5.2): when the
+     * entry is unmasked and the flags were last judged more than {@link #rejudgeAfterMs} ago, one re-judgement of every
+     * entry ({@link #rejudgeAll}) is posted to an agent worker, at most one outstanding, so that a browser that became
+     * masked while open (its view moved into a masked container, a mask registered or answering otherwise) stops
+     * sending page data within about that time; the event itself reads the flag as it is (no wait, no EDT read and no
+     * registry lookup on the publishing thread, which may be the adapter's or the EDT). Never throws.
+     */
+    void eventPublished(Entry e) {
+        if (e.masked || TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - judgedNanos) < rejudgeAfterMs
+                || !rejudging.compareAndSet(false, true)) {
+            return;
+        }
+        try {
+            ctx.threads().post(ThreadPolicy.WORKER, new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        rejudgeAll();
+                    } finally {
+                        rejudging.set(false);
+                    }
+                }
+            });
+        } catch (Throwable t) {
+            rejudging.set(false); // the core refused the task: the next event or call tries again
+        }
+    }
+
     private static void keepPrevious(Snapshot before, WebEngineAdapter adapter, List<Entry> entries,
                                      Map<Object, Entry> byVendor) {
         for (Entry e : before.entries) {
@@ -361,14 +466,16 @@ final class BrowserIndex {
         }
     }
 
-    private void registrySeeds(List<Object> seeds, Map<Object, String> tags) {
+    /** Adds every registry's seeds and tags; true when every registry (and the SPI registry) answered. */
+    private boolean registrySeeds(List<Object> seeds, Map<Object, String> tags) {
         List<BrowserRegistryAdapter> registries;
         try {
             registries = ctx.spi().all(BrowserRegistryAdapter.class);
         } catch (RuntimeException e) {
             ctx.log().warn("web: the SPI registry failed: " + e);
-            return;
+            return false;
         }
+        boolean all = true;
         for (BrowserRegistryAdapter registry : registries) {
             String name = registry.getClass().getName();
             try {
@@ -388,6 +495,7 @@ final class BrowserIndex {
                     failingRegistries.remove(name);
                 }
             } catch (Throwable t) {
+                all = false;
                 boolean first;
                 synchronized (failingRegistries) {
                     first = failingRegistries.add(name);
@@ -397,6 +505,7 @@ final class BrowserIndex {
                 }
             }
         }
+        return all;
     }
 
     private void logNotes(WebEngineAdapter adapter) {

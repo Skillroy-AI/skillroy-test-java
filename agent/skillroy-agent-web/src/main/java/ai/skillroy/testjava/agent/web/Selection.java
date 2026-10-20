@@ -64,7 +64,9 @@ import java.util.regex.PatternSyntaxException;
  * <p>A masked browser (Phase 8, phase8-contracts.md 5.2 (ii), D550; its {@link Entry#masked} flag) is never matched by
  * {@code by.url} or {@code by.title} (a regex on withheld text would reveal it), its title is never read for a match,
  * and its summary in the error data says {@code url: ""}, no {@code title}, {@code masked: true}; {@code by.tag},
- * {@code by.nativeId} and {@code browser: <ref>} still select it, so that a scenario can act on it.
+ * {@code by.nativeId} and {@code browser: <ref>} still select it, so that a scenario can act on it. The flags are
+ * judged afresh before a {@code by.url} or {@code by.title} match and before the error data is built (Phase 8 security
+ * fixes S168 and S172, FE: {@link BrowserIndex#rejudge}).
  *
  * <p>Thread-safe; runs on agent workers.
  */
@@ -150,10 +152,13 @@ final class Selection {
             return matches.get(0);
         }
         if (matches.isEmpty()) {
+            List<Entry> listed = open(s.entries);
+            rejudged(listed, deadline);
             Map<String, Object> data = Errors.data("by", Json.parse(Json.write(raw)), "browsers",
-                    summaries(open(s.entries), titles));
+                    summaries(listed, titles));
             throw Errors.notFound("no browser matches by " + Json.write(raw), data);
         }
+        rejudged(matches, deadline);
         Map<String, Object> data = Errors.data("by", Json.parse(Json.write(raw)), "candidates",
                 summaries(matches, titles));
         throw Errors.ambiguous(matches.size() + " browsers match by " + Json.write(raw)
@@ -166,7 +171,7 @@ final class Selection {
      */
     private List<Entry> match(BrowserIndex.Snapshot s, Pattern url, Pattern title, String tag, String nativeId,
                               long deadline, long regexDeadline, Map<Entry, String> titlesRead) {
-        List<Entry> candidates = new ArrayList<Entry>();
+        List<Entry> keyed = new ArrayList<Entry>();
         for (Entry e : s.entries) {
             WebBrowser b = e.browser();
             if (isClosed(b)) {
@@ -178,10 +183,20 @@ final class Selection {
             if (nativeId != null && !nativeId.equals(safeNativeId(b))) {
                 continue;
             }
-            if ((url != null || title != null) && masked(e)) {
-                continue; // D550: no match on a masked browser's withheld URL or title
+            keyed.add(e);
+        }
+        if (url != null || title != null) {
+            // D550: no match on a masked browser's withheld URL or title. Phase 8 security fix S172 (FE): judged afresh
+            // before any regex runs (one bounded EDT read for the browsers with a view, only while a mask is
+            // registered), so that a browser that became masked since the last judgement is never matched.
+            rejudged(keyed, deadline);
+        }
+        List<Entry> candidates = new ArrayList<Entry>();
+        for (Entry e : keyed) {
+            if ((url != null || title != null) && e.masked) {
+                continue;
             }
-            if (url != null && !find(url, "by.url", safeUrl(b), regexDeadline)) {
+            if (url != null && !find(url, "by.url", safeUrl(e.browser()), regexDeadline)) {
                 continue;
             }
             candidates.add(e);
@@ -215,22 +230,18 @@ final class Selection {
     }
 
     /**
-     * Whether the entry is masked for this selection (phase8-contracts.md 5.2): the {@link BrowserMasks} rule without an
-     * EDT read (nothing registered, a {@code BrowserMask} TRUE, a browser without a component), else the flag of the
-     * last rebuild or per-call read; refreshes {@link Entry#masked} so that the error data's summary agrees.
+     * Judges the entries' {@link Entry#masked} flags afresh for this selection (phase8-contracts.md 5.2; Phase 8 security
+     * fixes S168 and S172, FE): {@link BrowserIndex#rejudge}, the {@link BrowserMasks} rule on the component each adapter
+     * reports now and one bounded EDT read of the {@code CaptureMask}s for the ones with a view, made only while a mask
+     * is registered and the selection has time (a read that fails or has no time masks them). Used before a
+     * {@code by: {url|title}} match and before the error data's summaries, so that they agree.
      */
-    private boolean masked(Entry e) {
-        boolean registered;
-        try {
-            registered = walk.masksRegistered();
-        } catch (RuntimeException ex) {
-            registered = true;
+    private void rejudged(List<Entry> entries, long deadline) {
+        if (entries.isEmpty()) {
+            return;
         }
-        Boolean decided = index.masks().decide(registered, e, e.component);
-        if (decided != null) {
-            e.masked = decided.booleanValue();
-        }
-        return e.masked;
+        long left = TimeUnit.NANOSECONDS.toMillis(deadline - System.nanoTime());
+        index.rejudge(entries, Math.min(BrowserIndex.BUDGET_MS, Math.max(0, left)));
     }
 
     /** The single browser whose component is showing (see the class comment). */
@@ -252,9 +263,12 @@ final class Selection {
         }
         Map<Entry, String> none = Collections.emptyMap();
         if (showing.isEmpty()) {
+            List<Entry> listed = open(s.entries);
+            rejudged(listed, deadline);
             throw Errors.notFound("no browser is showing; name one with browser: <ref> or by: {...}",
-                    Errors.data("browsers", summaries(open(s.entries), none)));
+                    Errors.data("browsers", summaries(listed, none)));
         }
+        rejudged(showing, deadline);
         throw Errors.ambiguous(showing.size() + " browsers are showing; name one with browser: <ref> or by: {...}",
                 Errors.data("candidates", summaries(showing, none)));
     }

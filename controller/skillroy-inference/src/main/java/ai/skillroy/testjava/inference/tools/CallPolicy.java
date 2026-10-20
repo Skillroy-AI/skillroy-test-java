@@ -64,11 +64,13 @@ public final class CallPolicy {
     /**
      * The web primitives whose {@code redact: false} is a person's argument only: of a masked browser the four reads
      * answer {@code INVALID_PARAMS masked} unless {@code redact: false} (phase7-contracts.md 3.6, 4.8, 9.1; Phase 7
-     * security fix S111), and (Phase 8, phase8-contracts.md 5.2 (iv), D637) {@code web.pointer}, {@code web.dom.click}
-     * and {@code web.dom.fill} answer without page data (no hit, no accessible name or id) unless {@code redact: false}.
+     * security fix S111), (Phase 8, phase8-contracts.md 5.2 (iv), D637) {@code web.pointer} answers without page data
+     * (no hit) unless {@code redact: false}, and (Phase 8 security fix S165, FE) {@code web.dom.click}, {@code
+     * web.dom.fill} and {@code web.dispatchEvent} with a selector target are refused on a masked browser, before its page
+     * evaluates the locator, unless {@code redact: false}.
      */
     public static final Set<String> MASKED_WEB_READS = Set.of("web.bitmap", "web.dom.text", "web.ariaSnapshot",
-            "web.hitTest", "web.pointer", "web.dom.click", "web.dom.fill");
+            "web.hitTest", "web.pointer", "web.dom.click", "web.dom.fill", "web.dispatchEvent");
     /** The primitives whose {@code button: MIDDLE} pastes the system selection (Phase 7 security fix S110). */
     public static final Set<String> BUTTON_PRIMITIVES = Set.of("swing.pointer", "swing.click", "web.pointer");
     /**

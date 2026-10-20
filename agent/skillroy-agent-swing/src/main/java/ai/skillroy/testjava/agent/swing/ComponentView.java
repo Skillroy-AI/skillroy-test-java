@@ -84,6 +84,16 @@ final class ComponentView {
         return redaction;
     }
 
+    /**
+     * Hands the call's surfaces to the redaction rule, so that the component of a surface its module masks is masked
+     * like one a {@code CaptureMask} names (Phase 8 security fix S166, FE); the memoised answers are dropped. EDT only.
+     */
+    void maskedSurfaces(List<ai.skillroy.testjava.agent.api.spi.SurfaceSource.Surface> surfaces) {
+        redaction.maskedSurfaces(surfaces);
+        maskedCache.clear();
+        ruleCache.clear();
+    }
+
     /** The call's input vetoes (Phase 8, phase8-contracts.md 3.2): asked lazily, memoised per route. */
     InputVetoes vetoes() {
         if (vetoes == null) {

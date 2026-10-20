@@ -322,7 +322,7 @@ pixels after `scale` as before):
 | `marks` | with `annotateRefs`: `[{mark, ref, rect, label, role, row?, region?}]`: `mark` the number a drawn mark would carry (1 to n in reading order), `rect` the rectangle a mark stands on, in image coordinates (the component's, a table row's, a region's), `label` the text the marks list gives the model (role, name, text; nothing for a masked component, §3.6), `row` the model row index for a table row, `region` the region id for a `RegionResolver` region; the pixels are untouched |
 | `carets` | `[{ref, rect}]`: for every showing, focused `JTextComponent` in the image whose caret is visible, the caret's rectangle (`modelToView` of the dot, widened to the caret's width; a selection has no caret entry), in image coordinates, computed in the same EDT read; the host's caret is never hidden (BS11 RESULT condition 1 and "Proposal" 2) |
 | `focus` | `{owner: ref \| null, ownerLocator: <locator> \| null, ownerRect: {x, y, w, h} \| null, window: ref \| null, active: boolean}`: the focus owner, the first locator of §3.2's order that matches it alone (so that a baseline can record it across agent starts; bounded, §2.4), its rectangle in image coordinates (what a comparison blanks on a focus mismatch, §6.7), the focused window and whether the captured window (or, for `SCREEN`, the active window) is active (BS11 condition 2: under Aqua losing the focus repaints the focus ring, 9,625 pixels); (Phase 7 security fix, S146, built 2026-10-11, SG) `ownerLocator` is never a `{text, role}` candidate: the first unique candidate of §3.2's order without it (a nameless text field is named by `{class, index}` or `{path}`), since a text field's text is its content, which a baseline's or an anchor's `focus.owner` would carry into a committed bindings file, past the step's mask and even when the owner lies outside the image (the hit-test's own `locators` keep the candidate) |
-| `redacted` | `[{ref, rect, rule}]`: the rectangles blanked, `rule` `password-field` or `capture-mask` (§3.6); `redactedTruncated: true` when more than 64 were blanked |
+| `redacted` | `[{ref, rect, rule}]`: the rectangles blanked, `rule` `password-field` or `capture-mask` (§3.6), or (Phase 8 security fix, S166, FE) `browser-mask`: the component of a surface its `SurfaceSource` reports `masked` (a masked embedded browser's view), blanked whole; `redactedTruncated: true` when more than 64 were blanked |
 | `hash` | `sha256:<hex>` over the decoded raster the image in `base64` holds, the content: the width and the height as 4-byte big-endian integers, then every pixel's `getRGB` value (alpha included, `0xFF` for an opaque image) as a 4-byte big-endian integer, rows top to bottom (never the PNG bytes: the same raster encodes to different bytes on Java 8 and Java 25, BS11 RESULT condition 4); the controller's `ImageCompare.rasterHash` computes the same bytes and both modules' tests share one vector |
 | `stackingAssumed` | `SCREEN` only: true |
 | `region` | `REGION` with a region id: `{id, rect}` |
@@ -912,7 +912,10 @@ default java.util.Map<String, String> describe(java.awt.Component component) { r
 
 A region id is `[A-Za-z0-9][A-Za-z0-9:._-]{0,63}`; the agent refuses another (`INVALID_PARAMS`). The web module
 registers one `SurfaceSource` built from its browser index (§4.8); a pack may register another for a technology of its
-own. The resolver precedence when several `RegionResolver`s support a component: registration order, the first that
+own. (Phase 8 security fix, S166, FE; P8 §5.2.) `Surface` gains `public final boolean masked` and a four-argument
+constructor (the three-argument one kept: not masked): the web module reports a masked browser's surface masked, and the
+Swing module then blanks the surface's component whole (§3.6's rule `browser-mask`) and its hit-test reports a target
+on or below it `masked`, as for a component a `CaptureMask` names. The resolver precedence when several `RegionResolver`s support a component: registration order, the first that
 answers. These three files land as VS's first commit (§2.1), so that VW's `SurfaceSource` registration builds against them; `WebPointerEvent` is VW's.
 
 ### 3.8 `swing.rendering` (read; capability `swing.capture.paint`; A63)
@@ -1127,7 +1130,14 @@ whether or not the selection had an owner (measured on JCEF 2026-10-12: the clic
 answered in 22 ms on a Java 25 target and 95 ms on a Java 8 one, the page answering at once and counting `pointerdown`,
 `mousedown` and `mouseup`, trusted). The page's own handlers still see the event (with `defaultPrevented`); a page that
 cannot take the listener (no `EVALUATE`, or the evaluation fails) gets the click as before; an iframe's own window is not
-reached, so a middle click inside an iframe may still paste. The CDP path's own pointer is unchanged.
+reached, so a middle click inside an iframe may still paste. The CDP path's own pointer is unchanged. (Phase 8 security
+fix, S171, FE.) **Best effort**: the listener is added through the page's own `window.addEventListener`, so a page that
+replaced it, or registered an earlier capture listener of its own that stops the event's propagation, keeps the paste
+(an evaluation made after the page ran cannot reach the pristine built-ins); the listener removes itself on a
+**trusted** middle `mouseup` only (`isTrusted` cannot be forged), so a page's own synthetic middle `mouseup` no longer
+consumes it; and the expression is self-bounding as S131 requires of every raw page evaluation (one `try` around it,
+the constant `1` its only answer), so a page that makes `addEventListener` throw no longer chooses the size of what
+crosses the channel.
 
 ### 4.4 Capabilities
 

@@ -63,7 +63,10 @@ import java.util.function.BiConsumer;
  * {@link Entry#masked} flag (a volatile read; no EDT read on the adapter's thread): {@code web.load {browser, url: "",
  * frameKey?, kind, masked: true}} (no {@code error}), {@code web.ready {browser, url: "", signal, name?, masked:
  * true}}, {@code web.console {browser, level, text: "", masked: true}} (no {@code source}, {@code line} or
- * {@code truncated}); {@code web.closed} carries the ref only and is unchanged.
+ * {@code truncated}); {@code web.closed} carries the ref only and is unchanged. An event of an unmasked browser whose
+ * flag is older than {@link BrowserIndex#STALE_MS} asks the index to judge the flags again on an agent worker (Phase 8
+ * security fix S172, FE): the event itself reads the flag as it is, so a browser that became masked while open sends
+ * page data for at most about that long after its next event.
  *
  * <p>The listener runs on the adapter's threads (with JCEF off-screen, possibly the EDT): it only builds a small map
  * and publishes, which never blocks; it never throws into the adapter. Thread-safe.
@@ -77,6 +80,7 @@ final class EventBridge implements BrowserIndex.Listener {
     /** Set by {@link #close()}; guarded by this. */
     private boolean closed;
     private volatile Taps taps;
+    private volatile BrowserIndex index;
 
     EventBridge(AgentContext ctx, Secrets secrets) {
         this.ctx = ctx;
@@ -85,6 +89,26 @@ final class EventBridge implements BrowserIndex.Listener {
 
     void taps(Taps t) {
         this.taps = t;
+    }
+
+    /** The index whose flags an event may ask to have judged again (Phase 8 security fix S172, FE). */
+    void index(BrowserIndex i) {
+        this.index = i;
+    }
+
+    /**
+     * An event of the browser is about to be published: lets the index judge the flags again on a worker when they are
+     * stale ({@link BrowserIndex#eventPublished}; S172); never blocks, never throws.
+     */
+    void published(Entry e) {
+        BrowserIndex i = index;
+        if (i != null) {
+            try {
+                i.eventPublished(e);
+            } catch (Throwable t) {
+                // never into the publishing thread
+            }
+        }
     }
 
     @Override
@@ -181,6 +205,7 @@ final class EventBridge implements BrowserIndex.Listener {
      * waits on, kept).
      */
     void ready(Entry e, String url, String signal, String name) {
+        published(e);
         boolean masked = e.masked;
         Map<String, Object> payload = new LinkedHashMap<String, Object>();
         payload.put("browser", e.ref);
@@ -218,6 +243,7 @@ final class EventBridge implements BrowserIndex.Listener {
     }
 
     private void onEvent(Entry e, WebEvent event) {
+        published(e);
         switch (event.kind()) {
             case LOAD_FINISHED:
             case LOAD_FAILED:

@@ -128,20 +128,22 @@ class CallPolicyArgumentsTest {
             assertNull(CallPolicy.arguments(read, Map.of()), read);
         }
         assertEquals(java.util.Set.of("web.bitmap", "web.dom.text", "web.ariaSnapshot", "web.hitTest", "web.pointer",
-                "web.dom.click", "web.dom.fill"), CallPolicy.MASKED_WEB_READS);
+                "web.dom.click", "web.dom.fill", "web.dispatchEvent"), CallPolicy.MASKED_WEB_READS);
     }
 
     /**
-     * Phase 8 (phase8-contracts.md 5.2 (iv), D637): the answers of {@code web.pointer}, {@code web.dom.click} and
-     * {@code web.dom.fill} of a masked browser carry no page data unless {@code redact: false}, a person's argument:
-     * refused for a model or a client, as on the four reads.
+     * Phase 8 (phase8-contracts.md 5.2 (iv), D637): the answer of {@code web.pointer} of a masked browser carries no page
+     * data unless {@code redact: false}, a person's argument; and (Phase 8 security fix S165, FE) {@code web.dom.click},
+     * {@code web.dom.fill} and {@code web.dispatchEvent} with a selector target are refused on a masked browser unless
+     * {@code redact: false}: refused for a model or a client, as on the four reads.
      */
     @Test
     void aMaskedBrowsersActionAnswersKeepTheirPageDataForAPersonOnly() {
         Map<String, Map<String, Object>> calls = Map.of(
                 "web.pointer", Map.of("action", "CLICK", "point", Map.of("x", 1, "y", 1)),
                 "web.dom.click", Map.of("selector", "#go"),
-                "web.dom.fill", Map.of("selector", "#go", "text", "x"));
+                "web.dom.fill", Map.of("selector", "#go", "text", "x"),
+                "web.dispatchEvent", Map.of("name", "desk.reset", "target", "#go"));
         for (Map.Entry<String, Map<String, Object>> c : calls.entrySet()) {
             String primitive = c.getKey();
             Map<String, Object> unredacted = new java.util.LinkedHashMap<>(c.getValue());

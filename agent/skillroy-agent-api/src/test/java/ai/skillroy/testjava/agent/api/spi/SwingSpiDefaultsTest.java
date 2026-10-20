@@ -26,6 +26,7 @@ import java.util.List;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -108,5 +109,16 @@ class SwingSpiDefaultsTest {
         assertSame(c, s.component);
         assertEquals("WEB", s.kind);
         assertEquals("b1", s.browserRef);
+        assertFalse(s.masked, "the older constructor: not masked");
+    }
+
+    /** Phase 8 security fix S166: the surface carries the module's mask flag (additive, D636). */
+    @Test
+    void aSurfaceCarriesTheModulesMaskFlag() {
+        Component c = new Component() {
+        };
+        SurfaceSource.Surface s = new SurfaceSource.Surface(c, "WEB", "b1", true);
+        assertTrue(s.masked);
+        assertEquals("Surface{WEB, b1, masked}", s.toString());
     }
 }

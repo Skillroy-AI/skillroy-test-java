@@ -71,15 +71,22 @@ final class Pointing {
     /** The balancing release after a failed sequence waits at most this long. */
     static final long BALANCE_MS = 1000;
     /**
+     * Gap 104's one-shot listener (see {@link #noPrimaryPaste}). Phase 8 security fix S171 (FE): self-bounding as S131
+     * requires of every raw page evaluation (whatever the page makes {@code addEventListener} or {@code setTimeout} do,
+     * the answer is the constant 1: a page never chooses the size of what crosses the channel), and the listener
+     * removes itself on a trusted middle {@code mouseup} only ({@code isTrusted} cannot be forged by a page), so that a
+     * page's own synthetic middle {@code mouseup} cannot consume it before the agent's click.
+     */
+    static final String NO_PRIMARY_PASTE = "(function(){try{var w=window,h=function(e){if(e.button===1){"
+            + "e.preventDefault();if(e.isTrusted){w.removeEventListener('mouseup',h,true);}}};"
+            + "w.addEventListener('mouseup',h,true);try{setTimeout(function(){w.removeEventListener('mouseup',h,true);"
+            + "},5000);}catch(x){}}catch(x){}return 1;})()";
+    /**
      * The read of the page's inner size for a component point: {@code [innerWidth, innerHeight]} when both are numbers,
      * else null. Phase 7 security fix S131 (P4 4.6): the answer is built from {@code typeof} and two numbers only, so a
      * page that redefines {@code innerWidth} (a replaceable attribute) chooses the value, never the size of what crosses
      * the channel; it is still parsed through the channel check.
      */
-    /** Gap 104's one-shot listener (see {@link #noPrimaryPaste}). */
-    static final String NO_PRIMARY_PASTE = "(function(){var w=window,h=function(e){if(e.button===1){e.preventDefault();"
-            + "w.removeEventListener('mouseup',h,true);}};w.addEventListener('mouseup',h,true);setTimeout(function(){"
-            + "w.removeEventListener('mouseup',h,true);},5000);return 1;})()";
     static final String INNER_SIZE = "(function(){var w,h;try{w=window.innerWidth;h=window.innerHeight;}catch(e){"
             + "return null;}return typeof w===\"number\"&&typeof h===\"number\"?[w,h]:null;})()";
 
@@ -291,8 +298,10 @@ final class Pointing {
      * Gap 104: before a middle button's release, a one-shot capture listener on the main frame's window cancels the
      * default action of the next middle {@code mouseup} (removed after it, or after 5 s): on Linux that default is the
      * paste of the X11 PRIMARY selection, which in an off-screen Chromium page blocks the page's renderer for tens of
-     * seconds; the page's own handlers still see the event. Best effort within the bound: a page that cannot take the
-     * listener gets the click as before. An iframe's own window is not reached.
+     * seconds; the page's own handlers still see the event. Best effort within the bound (Phase 8 security fix S171,
+     * FE): a page that cannot take the listener, or that interferes with it (it replaced {@code addEventListener}, or an
+     * earlier capture listener of its own stops the event's propagation), keeps the paste; an evaluation made after the
+     * page ran cannot reach the pristine built-ins. An iframe's own window is not reached.
      */
     private static void noPrimaryPaste(final Entry e, long budgetMs) {
         final long budget = Math.max(1, budgetMs);

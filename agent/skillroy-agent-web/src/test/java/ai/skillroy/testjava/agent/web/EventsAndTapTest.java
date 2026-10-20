@@ -152,8 +152,9 @@ class EventsAndTapTest {
                 public CompletableFuture<String> answer(WebEval eval) {
                     if (eval.expression().contains(".drain(")) {
                         List<Object> events = once.compareAndSet(false, true)
-                                ? Arrays.<Object>asList(Harness.args("name", "desk.member", "detail",
-                                Harness.args("name", "secret member"))) : Collections.emptyList();
+                                ? Arrays.<Object>asList(Harness.args("name", "desk.member-secret", "detail",
+                                Harness.args("name", "secret member")), Harness.args("name", "desk.exact"),
+                                Harness.args("name", "other.secret")) : Collections.emptyList();
                         return CompletableFuture.completedFuture(Harness.guarded(Harness.args("events", events,
                                 "dropped", Long.valueOf(0))));
                     }
@@ -162,14 +163,22 @@ class EventsAndTapTest {
                 }
             };
             seq = h.ctx.events.lastSeq();
-            h.ctx.map("web.tap", Harness.args("patterns", Arrays.asList("desk.*")));
+            h.ctx.map("web.tap", Harness.args("patterns", Arrays.asList("desk.*", "desk.exact")));
             Event tapped = h.ctx.events.awaitTopic("web.tap", seq, null, BOUND_MS);
             assertNotNull(tapped);
-            assertEquals(Harness.args("browser", ref, "name", "desk.member", "masked", Boolean.TRUE),
-                    tapped.payload(), "the name a step waits on stays, the detail is withheld");
+            // Phase 8 security fix S170 (FE): the name is the tap's own pattern (under a glob the event's type is page
+            // data), the detail withheld; an exact pattern's event keeps its name; one no pattern matches is dropped.
+            assertEquals(Harness.args("browser", ref, "name", "desk.*", "masked", Boolean.TRUE),
+                    tapped.payload(), "the glob that heard it, never the page's event name; the detail is withheld");
             Event tapReady = h.ctx.events.awaitTopic("web.ready", seq, null, BOUND_MS);
-            assertEquals(Harness.args("browser", ref, "url", "", "signal", "TAP", "name", "desk.member", "masked",
+            assertEquals(Harness.args("browser", ref, "url", "", "signal", "TAP", "name", "desk.*", "masked",
                     Boolean.TRUE), tapReady.payload());
+            Event exact = h.ctx.events.awaitTopic("web.tap", tapped.seq(), null, BOUND_MS);
+            assertNotNull(exact);
+            assertEquals(Harness.args("browser", ref, "name", "desk.exact", "masked", Boolean.TRUE), exact.payload(),
+                    "an exact pattern's event keeps its name: it equals the pattern");
+            assertEquals(2, h.ctx.events.since(seq, ai.skillroy.testjava.protocol.TopicFilter.parse("web.tap"), 100)
+                    .size(), "an event no pattern of the tap matches is not published");
             assertEquals(stateReads, h.walk.stateReads.get(), "no EDT read for an event");
             for (Event e : h.ctx.events.since(start, ai.skillroy.testjava.protocol.TopicFilter.parse("web.*"),
                     1000)) {
