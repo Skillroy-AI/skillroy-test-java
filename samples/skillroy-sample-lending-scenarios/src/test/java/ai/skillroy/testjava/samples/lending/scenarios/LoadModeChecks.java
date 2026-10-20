@@ -1146,9 +1146,11 @@ abstract class LoadModeChecks {
         List<String> names = tests.stream().map(DynamicTest::getDisplayName).toList();
         List<String> all = new ArrayList<>(List.of("basic-loan", "basic-loan-ui", ScenarioB.ID, ScenarioA.ID,
                 ScenarioC.ID, ScenarioE.ID, ScenarioD.ID, "loan-table-visual-check", "vision-live-only",
-                "sign-on-by-number-pad", "keypad-image"));
+                "sign-on-by-number-pad", "keypad-image",
+                // phase8-contracts.md 12.4, 13.2 item 32 (ES; this branch's truth, D641)
+                "semantic-input-warnings", "sign-on-any", "scan-checked", "device-scan"));
         List<String> ids = all.stream().filter(id -> !id.equals("loan-table-visual-check")
-                && !id.equals("vision-live-only")).toList();
+                && !id.equals("vision-live-only") && !id.equals("device-scan")).toList();
         assertEquals(all.stream().sorted().toList(), names.subList(0, all.size()).stream().sorted().toList(),
                 String.valueOf(names));
         assertEquals("skillroy: zero model calls", names.get(all.size()), "the stream ends with the ledger check");
@@ -1174,6 +1176,11 @@ abstract class LoadModeChecks {
             List<Map<String, Object>> live = Runs.runLog(ItEnv.runDir(mode().slug, "junit-glue")
                     .resolve("vision-live-only"));
             assertEquals("SKIPPED", live.get(live.size() - 1).get("status"));
+            // phase8-contracts.md 13.2 item 32 (ES): device-scan falls back to SEMANTIC without the scanner driver.
+            List<Map<String, Object>> device = Runs.runLog(ItEnv.runDir(mode().slug, "junit-glue")
+                    .resolve("device-scan"));
+            assertEquals("DEGRADED", device.get(device.size() - 1).get("status"));
+            assertEquals(1, device.stream().filter(r -> "fidelity".equals(r.get("type"))).count());
             assertSignedOff();
         }));
         return checked.stream();
@@ -1281,6 +1288,202 @@ abstract class LoadModeChecks {
             assertNotEquals("events.json", hit.file().getFileName().toString(), "never in the events: " + hit);
         }
         assertSignedOff();
+    }
+
+    // ------------------------------------------------------------------ phase8-contracts.md 13.2 items 26-29 (ES)
+
+    /** The records of one type in a run's {@code run.jsonl}. */
+    private static List<Map<String, Object>> records(Path dir, String type) throws IOException {
+        return Runs.runLog(dir).stream().filter(r -> type.equals(r.get("type"))).toList();
+    }
+
+    /**
+     * Items 26 and 27 (phase8-contracts.md 7.1, 7.2, 7.4): {@code semantic-input-warnings} passes with two
+     * {@code warning} records the steps accepted ({@code VALUE_COERCED} with the barcode the desk took,
+     * {@code VALUE_DROPPED}), two lines in {@code RunResult.warnings} and the JUnit XML; the negative
+     * {@code warning-not-accepted} fails naming {@code VALUE_COERCED} with the hint; the two compile-error negatives are
+     * refused with their messages; every {@code ack} wait of {@code basic-loan}'s run carries {@code match: {inputId}},
+     * whose {@code input.acked} carries the id and never the value; and a queued input's later acknowledgement never
+     * ends another input's correlated wait (observed when the desk's engine loses the race, see the method below).
+     */
+    @Test
+    @Order(173)
+    void semanticInputWarningsAndCorrelatedAcknowledgements() throws Exception {
+        Runs.Outcome warned = Runs.run(client(), Runs.committed("semantic-input-warnings"),
+                ItEnv.runDir(mode().slug, "semantic-input-warnings"));
+        assertEquals(Status.PASS, warned.result().status(), warned.describe());
+        List<Map<String, Object>> warnings = records(warned.dir(), "warning");
+        assertEquals(List.of("VALUE_COERCED", "VALUE_DROPPED"), warnings.stream().map(w -> w.get("code")).toList());
+        assertTrue(warnings.stream().allMatch(w -> Boolean.TRUE.equals(w.get("accepted"))), String.valueOf(warnings));
+        assertEquals(Map.of("taken", "5000000000017"), warnings.get(0).get("data"), "the barcode the desk took");
+        assertEquals(2, warned.result().warnings().size(), String.valueOf(warned.result().warnings()));
+        String xml = new JunitXmlReporter().render("semantic", List.of(warned.result()), null);
+        assertTrue(xml.contains("  warning s2: scan: lending.input VALUE_COERCED"), xml);
+        assertSignedOff();
+
+        Runs.Outcome refused = Runs.run(client(), Runs.negative("warning-not-accepted.yaml"),
+                ItEnv.runDir(mode().slug, "warning-not-accepted"));
+        assertEquals(Status.FAIL, refused.result().status(), refused.describe());
+        assertEquals(FailureKind.ASSERTION, refused.result().failureKind());
+        assertTrue(refused.result().message().contains("reported VALUE_COERCED") && refused.result().message()
+                .contains("accept: [VALUE_COERCED]"), refused.result().message());
+        assertSignedOff();
+        for (String file : List.of("accept-unknown-code.yaml", "min-rung-without-ladder.yaml")) {
+            ai.skillroy.testjava.scenario.ScenarioException e = assertThrows(
+                    ai.skillroy.testjava.scenario.ScenarioException.class, () -> Runs.negative(file), file);
+            assertTrue(e.getMessage().contains(PlansUpToDateTest.COMPILE_ERRORS.get(file)), e.getMessage());
+        }
+
+        // Item 27: the pack's acknowledgements are correlated by inputId in every committed scenario.
+        Runs.Outcome loan = Runs.run(client(), Runs.committed("basic-loan"), ItEnv.runDir(mode().slug,
+                "basic-loan-correlated"));
+        Runs.assertPassedWithoutSleeping(loan);
+        List<Map<String, Object>> acks = records(loan.dir(), "sync").stream().filter(r -> "ack".equals(r.get("wait")))
+                .toList();
+        assertFalse(acks.isEmpty());
+        for (Map<String, Object> ack : acks) {
+            assertTrue(ack.get("match") instanceof Map<?, ?> m && m.keySet().equals(Set.of("inputId"))
+                    && String.valueOf(m.get("inputId")).startsWith("lending-"), String.valueOf(ack));
+        }
+        List<Map<String, Object>> inputs = Runs.calls(loan.dir(), "lending.input");
+        for (Map<String, Object> call : inputs) {
+            Map<?, ?> value = (Map<?, ?>) call.get("value");
+            assertTrue(value.get("inputId") instanceof String && "CONSUMED".equals(value.get("consumed")),
+                    String.valueOf(value));
+        }
+        long since = ((Number) ((Map<?, ?>) inputs.get(0).get("seq")).get("before")).longValue();
+        Event acked = client().await("input.acked", since, null, Duration.ofSeconds(5));
+        assertNotNull(acked);
+        assertEquals(Set.of("source", "inputId"), acked.payload().keySet(), "never the value: " + acked);
+        assertEquals(((Map<?, ?>) inputs.get(0).get("value")).get("inputId"), acked.payload().get("inputId"));
+        assertSignedOff();
+        aQueuedInputsLateAcknowledgementNeverEndsAnotherInputsWait();
+    }
+
+    /**
+     * Item 27's race: a {@code lending.input} with {@code ackTimeoutMs: 0} returns {@code QUEUED}; a second input sent
+     * at once, before the engine took the first, is pre-checked against the state the first will leave and dropped
+     * when the engine takes it after the first; its correlated ACK wait then ends SYNC_TIMEOUT naming its own inputId,
+     * although the first input's acknowledgement came after it started. Whether the second input passes its pre-check
+     * depends on the engine thread taking the first input later than the call that posts the second checks the desk's
+     * state, which a remote caller cannot arrange: the attempts are bounded, and a leg on which the engine always wins
+     * the race says so in the timing log (the deterministic proofs are {@code LendingPrimitivesTest} and
+     * {@code CorrelatedAckTest}).
+     */
+    private void aQueuedInputsLateAcknowledgementNeverEndsAnotherInputsWait() throws Exception {
+        Path dir = ItEnv.runDir(mode().slug, "correlated-ack-session");
+        boolean observed = false;
+        int attempts = 0;
+        try (ai.skillroy.testjava.scenario.ExecutorSession session = ai.skillroy.testjava.scenario.ExecutorSession
+                .open(Runs.PACK, client(), ai.skillroy.testjava.scenario.SessionOptions.defaults(dir)
+                        .withBind(Runs.bind(SampleCredentials.Env.SEED_A)))) {
+            ai.skillroy.testjava.scenario.Origin person = ai.skillroy.testjava.scenario.Origin.person("load-mode-it");
+            while (!observed && attempts < 10) {
+                attempts++;
+                send("Entry", "100");
+                send("Entry", PASSWORD);
+                RpcResult first = client().call("lending.input", Map.of("source", "Key.SIGN_OFF", "ackTimeoutMs", 0L),
+                        CALL);
+                ai.skillroy.testjava.scenario.StepOutcome second = session.execute(
+                        new ai.skillroy.testjava.scenario.pack.PlannedCall("lending.input", Map.of("source", "Key.QTY",
+                                "value", "2", "ackTimeoutMs", 0L), ai.skillroy.testjava.scenario.pack.Sync.ACK, 3000),
+                        person);
+                if (second.failureKind() == FailureKind.SYNC_TIMEOUT) {
+                    observed = true;
+                    String id = String.valueOf(((Map<?, ?>) second.lastResult().value()).get("inputId"));
+                    assertEquals("QUEUED", ((Map<?, ?>) second.lastResult().value()).get("consumed"));
+                    assertTrue(second.message().contains("matching {\"inputId\":\"" + id + "\"}"), second.message());
+                    assertNotEquals(id, value(first).get("inputId"));
+                }
+                Map<String, Object> state = value(client().call("lending.state", Map.of(), CALL));
+                if ("IDLE".equals(state.get("name"))) {
+                    send("Key.SIGN_OFF", null);
+                }
+                assertSignedOff();
+            }
+        }
+        ItEnv.timing("java=" + java + " mode=" + mode().slug + " correlatedAckRaceObserved=" + observed
+                + " attempts=" + attempts);
+    }
+
+    /**
+     * Item 28 (phase8-contracts.md 7.5): {@code sign-on-any} passes through the branches {@code auto} and
+     * {@code password}; {@code scan-checked} passes with the induction check's {@code prompt} record expected and
+     * answered by {@code lending.scanChecked}; {@code sign-on-any-password-required} fails naming the pack's
+     * {@code lending.PASSWORD_REQUIRED}, recovery signs off, and the next scenario runs.
+     */
+    @Test
+    @Order(174)
+    void compositesOwnTheirNestedQuestions() throws Exception {
+        Runs.Outcome any = Runs.run(client(), Runs.committed("sign-on-any"), ItEnv.runDir(mode().slug,
+                "sign-on-any"));
+        Runs.assertPassedWithoutSleeping(any);
+        List<String> branches = Runs.calls(any.dir(), "lending.signOn").stream().map(c -> String.valueOf(((Map<?, ?>)
+                ((Map<?, ?>) c.get("value")).get("composite")).get("branch"))).toList();
+        assertEquals(List.of("auto", "password"), branches);
+        assertSignedOff();
+
+        Runs.Outcome checked = Runs.run(client(), Runs.committed("scan-checked"), ItEnv.runDir(mode().slug,
+                "scan-checked"));
+        Runs.assertPassedWithoutSleeping(checked);
+        List<Map<String, Object>> prompts = records(checked.dir(), "prompt").stream().filter(r -> r.get("event")
+                != null).toList();
+        assertEquals(1, prompts.size(), String.valueOf(prompts));
+        assertEquals(Boolean.TRUE, prompts.get(0).get("expected"));
+        assertEquals("lending.scanChecked", prompts.get(0).get("answeredBy"));
+        assertEquals("induction-check", ((Map<?, ?>) ((Map<?, ?>) prompts.get(0).get("event")).get("payload"))
+                .get("id"));
+        assertSignedOff();
+
+        Runs.Outcome required = Runs.run(client(), Runs.negative("sign-on-any-password-required.yaml"),
+                ItEnv.runDir(mode().slug, "sign-on-any-password-required"));
+        assertEquals(Status.FAIL, required.result().status(), required.describe());
+        assertEquals(FailureKind.ASSERTION, required.result().failureKind());
+        assertTrue(required.result().message().contains("lending.PASSWORD_REQUIRED"), required.result().message());
+        assertSignedOff();
+        Runs.assertPassedWithoutSleeping(Runs.run(client(), Runs.committed("basic-loan"), ItEnv.runDir(mode().slug,
+                "basic-loan-after-password-required")));
+        assertSignedOff();
+    }
+
+    /**
+     * Item 29 (phase8-contracts.md 7.6), the desk without its scanner driver: {@code device-scan} is DEGRADED with a
+     * {@code rung} record on SEMANTIC, one {@code fidelity} record and one degraded line; {@code scanner/
+     * device-scan-physical} ends ERROR / PRECONDITION_FAILED naming {@code lending.scanner.physical} with its
+     * {@code rungs} record and no step call sent; {@code device.list} shows the scanner's ladder.
+     */
+    @Test
+    @Order(175)
+    void aLadderFallsBackAndARequiredRungIsRefusedBeforeAnythingRuns() throws Exception {
+        Runs.Outcome scan = Runs.run(client(), Runs.committed("device-scan"), ItEnv.runDir(mode().slug,
+                "device-scan"));
+        assertEquals(Status.DEGRADED, scan.result().status(), scan.describe());
+        List<Map<String, Object>> rungs = records(scan.dir(), "rung");
+        assertEquals(1, rungs.size());
+        assertEquals("SEMANTIC", rungs.get(0).get("rung"));
+        assertEquals(1, records(scan.dir(), "fidelity").size());
+        assertEquals(List.of("s2: deviceScan fell back from PHYSICAL to SEMANTIC (scanner driver not enabled)"),
+                scan.result().degradedFidelity());
+        assertSignedOff();
+
+        Runs.Outcome physical = Runs.run(client(), Runs.committed("device-scan-physical"), ItEnv.runDir(mode().slug,
+                "device-scan-physical"));
+        assertEquals(Status.ERROR, physical.result().status(), physical.describe());
+        assertEquals(FailureKind.PRECONDITION_FAILED, physical.result().failureKind());
+        assertTrue(physical.result().message().contains("lending.scanner.physical is UNAVAILABLE"),
+                physical.result().message());
+        assertEquals(1, records(physical.dir(), "rungs").size());
+        assertTrue(records(physical.dir(), "call").stream().allMatch(c -> "trace.mark".equals(c.get("primitive"))),
+                "no step call sent");
+        assertSignedOff();
+
+        Map<String, Object> devices = value(client().call("device.list", Map.of(), CALL));
+        Map<?, ?> scanner = ((List<?>) devices.get("devices")).stream().map(d -> (Map<?, ?>) d)
+                .filter(d -> "scanner".equals(d.get("id"))).findFirst().orElseThrow();
+        assertEquals(Map.of("scan", List.of("PHYSICAL", "SEMANTIC")), scanner.get("rungs"));
+        Map<?, ?> printer = ((List<?>) devices.get("devices")).stream().map(d -> (Map<?, ?>) d)
+                .filter(d -> "printer".equals(d.get("id"))).findFirst().orElseThrow();
+        assertFalse(printer.containsKey("rungs"), "the printer's entry is unchanged");
     }
 
     // ------------------------------------------------------------------ item 7

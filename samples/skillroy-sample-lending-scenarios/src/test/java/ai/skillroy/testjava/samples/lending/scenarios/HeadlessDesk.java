@@ -450,9 +450,12 @@ final class HeadlessDesk implements AgentConnection {
                     + name(status.state()) + "; valid: " + status.validInputs() + ")", map("source", s, "state",
                     name(status.state()), "validInputs", new ArrayList<>(status.validInputs()), "prompt",
                     status.prompt(), "awaitingInput", status.awaitingInput(), "modalPrompt",
-                    prompt(engine.prompts().current())));
+                    prompt(engine.prompts().current()), "reason", "notAccepted"));
         }
         LendingInput input = new LendingInput(s, value);
+        // phase8-contracts.md 7.4 (ES): the input's id (the caller's, or one minted as the module does) in the result
+        // and in its acknowledgement; the value never.
+        String inputId = p.get("inputId") instanceof String given ? given : "lending-" + INPUT_IDS.incrementAndGet();
         CountDownLatch latch = new CountDownLatch(1);
         synchronized (acks) {
             acks.put(input, latch);
@@ -461,17 +464,23 @@ final class HeadlessDesk implements AgentConnection {
             synchronized (acks) {
                 acks.remove(input);
             }
-            throw new RpcException(ErrorCodes.INPUT_REJECTED, "the desk's inbox is full", map("source", s));
+            throw new RpcException(ErrorCodes.INPUT_REJECTED, "the desk's inbox is full", map("source", s,
+                    "reason", "inboxFull"));
         }
         boolean acked = latch.await(Math.max(0L, ackMs), TimeUnit.MILLISECONDS);
         synchronized (acks) {
             acks.remove(input);
         }
         if (acked) {
-            publish(Topics.INPUT_ACKED, map("source", s));
+            publish(Topics.INPUT_ACKED, map("source", s, "inputId", inputId));
         }
-        return map("accepted", true, "acked", acked, "ackMs", 0L);
+        return map("accepted", true, "acked", acked, "ackMs", 0L, "inputId", inputId, "consumed",
+                acked ? "CONSUMED" : "QUEUED");
     }
+
+    /** The ids {@link #input} mints, as the lending module's {@code lending-<n>}. */
+    private static final java.util.concurrent.atomic.AtomicLong INPUT_IDS
+            = new java.util.concurrent.atomic.AtomicLong();
 
     /**
      * {@code sync.await}, as the agent's core primitive answers it: the first event after {@code since} whose topic

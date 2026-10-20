@@ -288,6 +288,10 @@ public final class TelemetryAttributes {
     public static final String REQUESTED = "skillroy.requested";
     /** The fidelity rung that ran. */
     public static final String ACTUAL = "skillroy.actual";
+    /** A call's warning code ({@code warning} event; phase8-contracts.md 7.1): a base or a pack code. */
+    public static final String WARNING_CODE = "skillroy.warning.code";
+    /** Whether the step accepted the warning ({@code warning} event). */
+    public static final String ACCEPTED = "skillroy.accepted";
     /** A resolver's id ({@code resolve} event). */
     public static final String RESOLVER = "skillroy.resolver";
     /** Candidates a resolver offered (a count). */
@@ -383,7 +387,9 @@ public final class TelemetryAttributes {
             DURATION_MS, MCP_METHOD_NAME, MCP_SESSION_ID,
             // record events
             COUNT, MATCHER, HELD, CHANNEL, ROW_COUNT, EXPECTED, DECISION, REQUESTED, ACTUAL, CANDIDATES, REJECTED,
-            VERIFIERS_PASSED, CONFIDENCE, APPROVAL, REUSED, HASH, AGREED, SKIPPED, GATEWAY, MODE);
+            VERIFIERS_PASSED, CONFIDENCE, APPROVAL, REUSED, HASH, AGREED, SKIPPED, GATEWAY, MODE,
+            // phase8-contracts.md 7.1 (ES): a warning's code and whether a step accepted it
+            WARNING_CODE, ACCEPTED);
 
     /**
      * The span names {@code minimal} writes without their ids (phase6-contracts.md 10.3: {@code scenario},

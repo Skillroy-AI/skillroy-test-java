@@ -292,6 +292,42 @@ class RunCommandTest {
                 + " COMPONENT to ACTION (r)", RunCommand.describe(both, null));
     }
 
+    /** phase8-contracts.md 7.1 (ES): a warning fails a step that does not accept it and is listed either way. */
+    @Test
+    void warningsArePrintedAndCarriedInTheJson() throws Exception {
+        agent.warnings.put("test.poke", List.of(new ai.skillroy.testjava.protocol.CallWarning("VALUE_DROPPED",
+                "nothing to poke", null)));
+        String line = "s1: poke: test.poke VALUE_DROPPED (nothing to poke)";
+        Path unaccepted = Scenarios.write(scenarios, "warned.yaml", """
+                scenario: warned
+                pack: clitest
+                steps:
+                  - poke: {}
+                """);
+        String failed = run(unaccepted.toString()).expectExit(Exit.FAILED).out();
+        assertTrue(failed.contains("ASSERTION at s1 (line 4): poke: test.poke reported VALUE_DROPPED: nothing to poke"
+                + " (a step accepts it with accept: [VALUE_DROPPED])"), failed);
+        assertTrue(failed.contains("\n  warning: " + line), failed);
+        Path accepted = Scenarios.write(scenarios, "accepted.yaml", """
+                scenario: accepted
+                pack: clitest
+                steps:
+                  - poke: {}
+                    accept: [VALUE_DROPPED]
+                """);
+        String passed = run(accepted.toString()).expectExit(Exit.OK).out();
+        assertTrue(passed.startsWith("PASS      accepted  ("), passed);
+        assertTrue(passed.contains("\n  warning: " + line), passed);
+        JsonView result = JsonView.of(cast(JsonView.of(Json.parseObject(run(accepted.toString(), "--json")
+                .expectExit(Exit.OK).out())).list("results").get(0)));
+        assertEquals(List.of(line), result.list("warnings"));
+        assertEquals(List.of(line), JsonView.of(cast(result.list("steps").get(0))).list("warnings"));
+        agent.warnings.clear();
+        JsonView none = JsonView.of(cast(JsonView.of(Json.parseObject(run(accepted.toString(), "--json")
+                .expectExit(Exit.OK).out())).list("results").get(0)));
+        assertEquals(List.of(), none.list("warnings"), "the key is always there, as degradedFidelity is");
+    }
+
     @Test
     void jsonOutputSummarisesTheRun() {
         CliHarness.Outcome outcome = run(file("pass.yaml"), file("wrong.yaml"), "--json", "--out",

@@ -24,5 +24,11 @@
  * admitted by a budget and never pre-empted ({@link ai.skillroy.testjava.agent.api.ThreadPolicy#APP_QUIESCENT}); a
  * {@link ai.skillroy.testjava.agent.api.Lane} is a named, bounded group of agent threads a module declares
  * ({@link ai.skillroy.testjava.agent.api.ThreadPolicy#LANE}).
+ *
+ * <p>Semantic input (Phase 8, phase8-contracts.md 7): {@link ai.skillroy.testjava.agent.api.Invocation#warn} raises a
+ * warning a scenario step must accept or fail on, carried in the result's envelope; the four-argument
+ * {@link ai.skillroy.testjava.agent.api.EventBus#publish(String, String, java.util.Map, String)} stamps a late event
+ * (an application's acknowledgement of an earlier input) with its originating call's correlation id; and
+ * {@link ai.skillroy.testjava.agent.api.spi.DeviceAdapter#rungs} names an action's rung ladder.
  */
 package ai.skillroy.testjava.agent.api;

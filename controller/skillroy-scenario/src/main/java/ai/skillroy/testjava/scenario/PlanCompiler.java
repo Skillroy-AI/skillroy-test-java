@@ -16,6 +16,7 @@
 
 package ai.skillroy.testjava.scenario;
 
+import ai.skillroy.testjava.protocol.CallWarning;
 import ai.skillroy.testjava.protocol.JsonException;
 import ai.skillroy.testjava.protocol.RpcException;
 import ai.skillroy.testjava.protocol.TopicFilter;
@@ -26,6 +27,7 @@ import ai.skillroy.testjava.scenario.pack.CompileContext;
 import ai.skillroy.testjava.scenario.pack.DomainPack;
 import ai.skillroy.testjava.scenario.pack.FactProvider;
 import ai.skillroy.testjava.scenario.pack.PlannedCall;
+import ai.skillroy.testjava.scenario.pack.Rung;
 import ai.skillroy.testjava.scenario.pack.StepLibrary;
 import ai.skillroy.testjava.scenario.pack.Sync;
 import ai.skillroy.testjava.scenario.pack.SyncPolicy;
@@ -123,10 +125,18 @@ public final class PlanCompiler {
 
     /**
      * Verb names a pack verb may not take: the four Phase 7 base verbs (reserved since decision B16, built in Phase 7,
-     * phase7-contracts.md 8.1) and the base verb {@code call} (phase5-contracts.md 13.1), which an exported session step
-     * relies on.
+     * phase7-contracts.md 8.1), the base verb {@code call} (phase5-contracts.md 13.1), which an exported session step
+     * relies on, and the step modifiers {@code accept} and {@code minRung} (phase8-contracts.md 7.3), which a step
+     * holds beside its one verb key.
      */
-    public static final Set<String> RESERVED_VERBS = Set.of("aiAct", "aiExpect", "pointer", "expectImage", "call");
+    public static final Set<String> RESERVED_VERBS = Set.of("aiAct", "aiExpect", "pointer", "expectImage", "call",
+            "accept", "minRung");
+
+    /**
+     * The verbs that compile to no call and so take no step modifier (phase8-contracts.md 7.3): a modifier is applied
+     * per call, and on such a step it would be silently dropped, its unknown-code check never run.
+     */
+    static final Set<String> NO_CALL_VERBS = Set.of("expect", "aiAct", "aiExpect", "captureFacts");
 
     private PlanCompiler() {
     }
@@ -316,6 +326,8 @@ public final class PlanCompiler {
         private final List<String> notes = new ArrayList<>();
         /** Whether the pack declares an SQL allow-list (null until a slot names llm-sql). */
         private Boolean allowList;
+        /** The pack's own warning codes (phase8-contracts.md 7.3), checked at construction. */
+        private final Set<String> warningCodes;
 
         Compilation(Scenario scenario, DomainPack pack) throws ScenarioException {
             this.scenario = scenario;
@@ -344,6 +356,7 @@ public final class PlanCompiler {
                             + " (reserved verbs: " + new TreeSet<>(RESERVED_VERBS) + ")");
                 }
             }
+            this.warningCodes = warningCodes(pack);
             List<FactProvider> facts = pack.facts();
             if (facts != null) {
                 for (FactProvider fact : facts) {
@@ -385,6 +398,96 @@ public final class PlanCompiler {
 
         private ScenarioException error(int line, String reason) {
             return new ScenarioException(scenario.id(), line, reason);
+        }
+
+        /**
+         * The pack's warning codes (phase8-contracts.md 7.3, amendment A87): each a pack code whose part before the dot
+         * is the pack's own id.
+         */
+        private Set<String> warningCodes(DomainPack pack) throws ScenarioException {
+            Set<String> codes;
+            try {
+                codes = pack.warningCodes();
+            } catch (RuntimeException e) {
+                throw error(0, "pack '" + pack.id() + "': its warning codes cannot be read: " + e);
+            }
+            if (codes == null || codes.isEmpty()) {
+                return Set.of();
+            }
+            for (String code : codes) {
+                if (!CallWarning.isPackCodeShape(code) || !code.startsWith(pack.id() + ".")) {
+                    throw error(0, "pack '" + pack.id() + "' declares the warning code '" + code + "'; a pack's"
+                            + " code is '" + pack.id() + ".<NAME>' (" + CallWarning.PACK_CODE.pattern() + ")");
+                }
+            }
+            return Set.copyOf(codes);
+        }
+
+        /**
+         * A warning code a call may accept (phase8-contracts.md 7.3): a base code but the two never-acceptable ones, or
+         * a code the pack declares; null when it may, else the refusal.
+         */
+        private String unacceptable(String code) {
+            if (CallWarning.NEVER_ACCEPTABLE.contains(code)) {
+                return code + " is never acceptable (a malformed or overfull warning channel fails closed)";
+            }
+            if (CallWarning.BASE_CODES.contains(code) || warningCodes.contains(code)) {
+                return null;
+            }
+            List<String> base = new ArrayList<>(CallWarning.BASE_CODES);
+            base.removeAll(CallWarning.NEVER_ACCEPTABLE);
+            return "unknown warning code " + code + "; the base codes are " + base + "; pack '" + pack.id() + "'"
+                    + (warningCodes.isEmpty() ? " declares none" : " declares " + new TreeSet<>(warningCodes));
+        }
+
+        /**
+         * The step's modifiers applied to its calls (phase8-contracts.md 7.3, decisions D579, D581, D587): every call
+         * accepts the step's {@code accept} besides its own; every call that declares a ladder gets the step's
+         * {@code minRung} (which must name one of its rungs), or under {@code ui: {strict: true}} its first rung; a
+         * step none of whose calls declares a ladder refuses {@code minRung}.
+         */
+        private List<Plan.Call> modified(String verb, int line, List<Plan.Call> calls, Map<String, Object> modifiers)
+                throws ScenarioException {
+            @SuppressWarnings("unchecked")
+            List<String> accept = (List<String>) modifiers.getOrDefault(ScenarioLoader.ACCEPT, List.of());
+            String minRung = (String) modifiers.get(ScenarioLoader.MIN_RUNG);
+            for (String code : accept) {
+                String refusal = unacceptable(code);
+                if (refusal != null) {
+                    throw error(line, "accept: " + refusal);
+                }
+            }
+            if (calls.isEmpty() && !modifiers.isEmpty()) {
+                throw error(line, "'" + modifiers.keySet().iterator().next() + "' is not allowed on " + verb
+                        + ": it has no calls");
+            }
+            if (minRung != null && calls.stream().allMatch(c -> c.rungs().isEmpty())) {
+                throw error(line, "minRung: no call of '" + verb + "' declares a rung ladder");
+            }
+            boolean strict = scenario.effectiveUi().strict();
+            List<Plan.Call> out = new ArrayList<>(calls.size());
+            for (Plan.Call call : calls) {
+                Set<String> codes = call.accept();
+                if (!accept.isEmpty()) {
+                    codes = new TreeSet<>(call.accept());
+                    codes.addAll(accept);
+                }
+                String required = call.minRung();
+                if (!call.rungs().isEmpty()) {
+                    if (minRung != null) {
+                        if (call.rungs().stream().noneMatch(r -> r.name().equals(minRung))) {
+                            throw error(line, "minRung " + minRung + " is not a rung of " + call.primitive()
+                                    + "'s ladder " + Rung.names(call.rungs()));
+                        }
+                        required = minRung;
+                    } else if (required == null && strict) {
+                        required = call.rungs().get(0).name();
+                    }
+                }
+                out.add(codes == call.accept() && Objects.equals(required, call.minRung()) ? call
+                        : call.withModifiers(codes, required));
+            }
+            return out;
         }
 
         Plan run() throws ScenarioException {
@@ -853,8 +956,21 @@ public final class PlanCompiler {
         // ------------------------------------------------------------------ steps
 
         private Plan.Step step(String id, int index, Scenario.Step step) throws ScenarioException {
+            Plan.Step compiled = unmodifiedStep(id, index, step);
+            if (step.modifiers().isEmpty() && !scenario.effectiveUi().strict()) {
+                return compiled;
+            }
+            return new Plan.Step(compiled.id(), compiled.verb(), compiled.line(), modified(step.verb(), step.line(),
+                    compiled.calls(), step.modifiers()), compiled.expect());
+        }
+
+        private Plan.Step unmodifiedStep(String id, int index, Scenario.Step step) throws ScenarioException {
             String verb = step.verb();
             int line = step.line();
+            if (!step.modifiers().isEmpty() && NO_CALL_VERBS.contains(verb)) {
+                throw error(line, "'" + step.modifiers().keySet().iterator().next() + "' is not allowed on " + verb
+                        + ": it has no calls");
+            }
             if (BaseSteps.VISION_VERBS.contains(verb)) {
                 return visionStep(id, index, step);
             }
@@ -880,7 +996,7 @@ public final class PlanCompiler {
             if (meta != null) {
                 throw error(line, "verb '" + verb + "': " + noMeta(meta));
             }
-            Context ctx = new Context(line);
+            Context ctx = new Context(line, (String) step.modifiers().get(ScenarioLoader.MIN_RUNG));
             List<PlannedCall> planned;
             try {
                 planned = chosen.compile(verb, args, ctx);
@@ -1037,7 +1153,16 @@ public final class PlanCompiler {
             boolean handlesPrompt = marked || "swing.dismiss".equals(call.primitive())
                     || ("sync.await".equals(call.primitive()) && awaitsPrompt(args.get("topics")));
             AwaitSpec await = call.await() == null ? null : await(call, line, where);
-            return new Plan.Call(call.primitive(), args, sync, timeoutMs, await, handlesPrompt, call.capture());
+            // phase8-contracts.md 7.3: a verb may pre-accept only a code the executor could accept.
+            for (String code : call.accept()) {
+                String refusal = unacceptable(code);
+                if (refusal != null) {
+                    throw new ScenarioException(scenario.id(), line, where + ": call " + call.primitive()
+                            + " pre-accepts " + refusal);
+                }
+            }
+            return new Plan.Call(call.primitive(), args, sync, timeoutMs, await, handlesPrompt, call.capture(), null,
+                    call.accept(), call.rungs(), call.minRung());
         }
 
         /**
@@ -1396,12 +1521,24 @@ public final class PlanCompiler {
         private final class Context implements CompileContext {
 
             private final int line;
+            /** The step's own {@code minRung} modifier, or null (phase8-contracts.md 7.3). */
+            private final String minRung;
             private final List<PlannedCall> cleanups = new ArrayList<>();
             private final Set<PlannedCall> handlers = Collections.newSetFromMap(new IdentityHashMap<>());
             private boolean closed;
 
             Context(int line) {
+                this(line, null);
+            }
+
+            Context(int line, String minRung) {
                 this.line = line;
+                this.minRung = minRung;
+            }
+
+            @Override
+            public String minRung() {
+                return minRung;
             }
 
             @Override

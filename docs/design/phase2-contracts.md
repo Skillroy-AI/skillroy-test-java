@@ -317,6 +317,10 @@ as built 2026-10-02, the pack loader's test is the public `DomainPacks.reservedI
 that declares an id with it is refused ERROR / ENVIRONMENT at the merge (`CapabilityMerge`), and a contributed id that two
 contributors answer is refused naming both.
 
+*(Phase 8, built 2026-10-19, ES; P8 §7.3.)* `accept` and `minRung` join the reserved verb names: a step holds one verb
+key plus the reserved modifiers `accept` and `minRung`, and a pack that declares a verb of either name is refused when
+the compiler is constructed.
+
 ### 3.4 A slot captured from an event
 
 The base verb `waitFor` and the `await` of `call`, `click`, `type` and `press` (A32) accept `capture`:
@@ -733,6 +737,12 @@ public interface StepLibrary {
 `credential` (§13.3); in Phase 1 a verb saw only its own arguments. `PreflightContext` lets a pre-flight that reads
 the database work when the environment serves that source over JDBC. `mcpTools()` of the design overview is not
 added in Phase 2.
+
+*(Phase 8, built 2026-10-19, ES; P8 §7.3, §7.6.)* `PlannedCall` gains three components after `literalArgs` beside
+`capture`: `accept` (the warning codes the call accepts), `rungs` (its ladder of `Rung(name, capability)`, best first)
+and `minRung` (the rung the step requires), with `withAccept`, `withRungs`, `withMinRung` and every older constructor
+kept; `CompileContext.minRung()` gives a verb the step's own modifier. `signOn` and its `interactiveSignOn` binding
+(§13.2, §13.3) are unchanged; the sample's new `signOnAny` composite signs on an auto-sign-on member as well.
 
 ### 6.2 Queries and values
 
@@ -2857,6 +2867,11 @@ Numbers are those of the table "Open SPI and DSL gaps" in `../TODO.md`.
 | 24 | Scenario-level preconditions on application configuration | deferred; a query that nothing satisfies already reports an unsuitable environment as `RESOLUTION_FAILED`; `PreflightContext` (§6.1) gives a pre-flight the data channel |
 | 28 | Pack-defined artifact kinds | deferred |
 | 26 | Oracle cross-check outcomes | Phase 3, with `crossCheck` (Phase 3, built 2026-10-03: a guarded cross-check that cannot run makes `DEGRADED` the best outcome, P3 §6.2, D38) |
+
+*(Phase 8, built 2026-10-19, ES; P8 §7, §16.2.)* Rows 18 (semantic-input result: the warning channel, `InputResult`,
+the step modifier `accept`), 19 (conditional calls: the composite-primitive rule with `CompositeResult` and the
+prompt reconciliation; `when` stays open as gap 142) and 22 (rung ladders: `rungs`, `minRung`, the run-start check)
+are closed by Phase 8.
 
 ---
 

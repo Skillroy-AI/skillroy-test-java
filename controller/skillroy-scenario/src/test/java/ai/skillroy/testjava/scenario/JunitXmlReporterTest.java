@@ -213,6 +213,20 @@ class JunitXmlReporterTest {
         assertEquals(List.of(), DEGRADED.degradedFidelity(), "the shape before A29 has none");
     }
 
+    /** phase8-contracts.md 7.1 (ES): the system-out lists every warning beside the degraded lines. */
+    @Test
+    void warningsAreListedInTheSystemOut() throws Exception {
+        String line = "s1: scan: lending.input VALUE_COERCED (the desk took 4005)";
+        RunResult warned = new RunResult("warned", Status.PASS, null, null, null, Map.of(),
+                List.of(new StepResult("s1", "scan", 3, Status.PASS, null, List.of(), Duration.ZERO, List.of(),
+                        List.of(line))), List.of(), Duration.ZERO, List.of(), null, null, List.of(), List.of(line));
+        Document doc = parse(new JunitXmlReporter().render("s", List.of(warned), null));
+        assertTrue(child(testcase(doc, "warned"), "system-out").getTextContent().contains("  warning " + line));
+        assertFalse(new JunitXmlReporter().render("s", List.of(PASS), null).contains("  warning "),
+                "no warning, no line");
+        assertEquals(List.of(), PASS.warnings(), "the shape before Phase 8 has none");
+    }
+
     private static void assertAttributesAndTextFree(Element element, String secret) {
         for (int i = 0; i < element.getAttributes().getLength(); i++) {
             assertFalse(element.getAttributes().item(i).getNodeValue().contains(secret));

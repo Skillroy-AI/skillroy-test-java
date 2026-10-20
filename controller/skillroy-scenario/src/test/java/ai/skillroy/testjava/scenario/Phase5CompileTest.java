@@ -179,7 +179,9 @@ class Phase5CompileTest {
 
     @Test
     void callIsReservedForTheBaseVerb() {
-        assertEquals(Set.of("aiAct", "aiExpect", "pointer", "expectImage", "call"), PlanCompiler.RESERVED_VERBS);
+        // Phase 8 (phase8-contracts.md 7.3, ES): the step modifiers accept and minRung are reserved too.
+        assertEquals(Set.of("aiAct", "aiExpect", "pointer", "expectImage", "call", "accept", "minRung"),
+                PlanCompiler.RESERVED_VERBS);
         DomainPack shadowing = new Delegating(pack) {
             @Override
             public StepLibrary steps() {

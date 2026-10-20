@@ -38,9 +38,15 @@ import java.util.List;
  *     never looks for unexpected prompts
  * @param ackTimeout how long to wait for the ack topic; null means the call's own timeout
  * @param readyTimeout how long to wait for a ready topic; null means the call's own timeout
+ * @param ackByInputId true when the pack's acknowledgements are correlated by input (phase8-contracts.md 7.4, gap
+ *     107): for every {@link Sync#ACK} and {@link Sync#READY} call the executor reads the result's {@code inputId}
+ *     and waits for the ack topic with {@code match: {inputId: <it>}}, so that an acknowledgement of an earlier input
+ *     never completes the wait; a result without an {@code inputId} is then {@code ERROR / ENVIRONMENT}, nothing
+ *     awaited. The module must mint the id, return it and put it in the acknowledgement's payload. False (the
+ *     five-argument constructor) is the uncorrelated wait of Phases 1 to 7
  */
 public record SyncPolicy(String ackTopic, List<String> readyTopics, List<String> promptTopics,
-                         Duration ackTimeout, Duration readyTimeout) {
+                         Duration ackTimeout, Duration readyTimeout, boolean ackByInputId) {
 
     /**
      * @throws IllegalArgumentException if a timeout is zero or negative, or a topic list holds a null or blank entry
@@ -53,6 +59,21 @@ public record SyncPolicy(String ackTopic, List<String> readyTopics, List<String>
         promptTopics = promptTopics == null ? List.of(Topics.PROMPT_WAITING) : copy(promptTopics, "promptTopics");
         requirePositive(ackTimeout, "ackTimeout");
         requirePositive(readyTimeout, "readyTimeout");
+    }
+
+    /**
+     * An uncorrelated policy (the shape before Phase 8).
+     *
+     * @throws IllegalArgumentException as the canonical constructor
+     */
+    public SyncPolicy(String ackTopic, List<String> readyTopics, List<String> promptTopics, Duration ackTimeout,
+                      Duration readyTimeout) {
+        this(ackTopic, readyTopics, promptTopics, ackTimeout, readyTimeout, false);
+    }
+
+    /** This policy with acknowledgements correlated by input, or not (phase8-contracts.md 7.4). */
+    public SyncPolicy withAckByInputId(boolean correlated) {
+        return new SyncPolicy(ackTopic, readyTopics, promptTopics, ackTimeout, readyTimeout, correlated);
     }
 
     private static List<String> copy(List<String> topics, String what) {

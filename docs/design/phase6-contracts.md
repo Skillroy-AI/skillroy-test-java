@@ -2075,6 +2075,10 @@ is an error of its own; `rule.check` reports a denied rule class in `errors` and
 `HookEngine.deny()`). **Residual** (gap 140): a denied subtype loaded after a `^` or `INTERFACE` submit receives
 Byteman's trigger at its load; closing it needs a guard transformer behind Byteman's, a cost on every class load.
 
+*(Phase 8, built 2026-10-19, ES; P8 §7.7, D576.)* `rule.check`'s `warnings: [string]` stays information in its value: the
+warning channel of a call is the result's envelope (`RpcResult.warnings`, `CallWarning` objects), never a key of a
+value, so `rule.check` neither raises one nor is read as one.
+
 ### 7.4 Loading Byteman
 
 **Only under `rule.submit`**, after the dispatcher's read-only and confirm gates have passed, on an agent worker,

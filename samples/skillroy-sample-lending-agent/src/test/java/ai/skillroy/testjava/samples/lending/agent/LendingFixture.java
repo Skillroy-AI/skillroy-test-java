@@ -91,6 +91,11 @@ final class LendingFixture implements AutoCloseable {
         return new LendingFixture(LendingOptions.defaults().seed(Seed.A).dbPort(0).dbPassword(readerPassword));
     }
 
+    /** A desk (seed A) launched with its scanner driver ({@code lending.scannerDriver=true}; P8 12.1, ES). */
+    static LendingFixture startWithScannerDriver() throws Exception {
+        return new LendingFixture(LendingOptions.defaults().seed(Seed.A).scannerDriver(true));
+    }
+
     /**
      * Polls the module's readiness source the way the agent core does (it has no event to wait on: the engine gives
      * no notification before the module's listener is attached), bounded by {@code timeoutMs}.

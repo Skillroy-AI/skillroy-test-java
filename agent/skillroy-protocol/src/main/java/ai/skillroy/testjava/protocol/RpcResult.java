@@ -28,7 +28,11 @@ import java.util.Objects;
  * events the call published and the bus sequence numbers around it, so that a caller can wait "since
  * {@code seqBefore}" and never miss a consequence of its own call.
  *
- * <p>Wire shape: {@code {"value":…,"events":[…],"seq":{"before":…,"after":…},"durationMs":…,"thread":…}}.
+ * <p>Wire shape: {@code {"value":…,"events":[…],"seq":{"before":…,"after":…},"durationMs":…,"thread":…}}, plus
+ * {@code "warnings":[…]} only when the call raised a warning (phase8-contracts.md 7.1, amendment A83): the envelope's
+ * warning channel ({@link CallWarning}), never a key of the primitive's value. A result without warnings is written
+ * exactly as before Phase 8, and {@link #fromJson} reads the member leniently (absent is empty), so that neither side
+ * of a 0.1.0 pairing fails on it.
  *
  * <p>Immutable ({@code value} is deep-copied as described for {@link Event}); safe to share between threads.
  */
@@ -42,6 +46,7 @@ public final class RpcResult {
     private final long seqAfter;
     private final long durationMs;
     private final String thread;
+    private final List<CallWarning> warnings;
 
     /**
      * @param value the primitive's JSON-able result, may be null
@@ -52,6 +57,19 @@ public final class RpcResult {
      * @throws JsonException if {@code value} holds NaN or Infinity or nests deeper than 184 (a cycle, for instance)
      */
     public RpcResult(Object value, List<Event> events, long seqBefore, long seqAfter, long durationMs, String thread) {
+        this(value, events, seqBefore, seqAfter, durationMs, thread, null);
+    }
+
+    /**
+     * The result with the call's warnings (phase8-contracts.md 7.1).
+     *
+     * @param warnings the call's warnings in the order raised; null means none (at most
+     *     {@link CallWarning#MAX_PER_RESULT} plus one {@link CallWarning#TOO_MANY_WARNINGS} are kept, the rest folded
+     *     into that one)
+     * @throws JsonException as the six-argument constructor
+     */
+    public RpcResult(Object value, List<Event> events, long seqBefore, long seqAfter, long durationMs, String thread,
+                     List<CallWarning> warnings) {
         this.value = Coerce.freeze(value);
         List<Event> copy = new ArrayList<Event>();
         if (events != null) {
@@ -64,6 +82,7 @@ public final class RpcResult {
         this.seqAfter = seqAfter;
         this.durationMs = durationMs;
         this.thread = thread;
+        this.warnings = CallWarning.fold(warnings);
     }
 
     /** Unmodifiable when it is a map or list; may be null. */
@@ -92,7 +111,15 @@ public final class RpcResult {
         return thread;
     }
 
-    /** The wire shape described on the class, all keys always present. A new map on each call. */
+    /** The call's warnings in the order raised (phase8-contracts.md 7.1); unmodifiable, never null, usually empty. */
+    public List<CallWarning> warnings() {
+        return warnings;
+    }
+
+    /**
+     * The wire shape described on the class: the six keys always present, {@code warnings} only when non-empty. A new
+     * map on each call.
+     */
     public Map<String, Object> toJson() {
         Map<String, Object> json = new LinkedHashMap<String, Object>();
         json.put("value", value);
@@ -107,12 +134,21 @@ public final class RpcResult {
         json.put("seq", seq);
         json.put("durationMs", Long.valueOf(durationMs));
         json.put("thread", thread);
+        if (!warnings.isEmpty()) {
+            List<Object> warningsJson = new ArrayList<Object>(warnings.size());
+            for (CallWarning warning : warnings) {
+                warningsJson.add(warning.toJson());
+            }
+            json.put("warnings", warningsJson);
+        }
         return json;
     }
 
     /**
      * Reads the wire shape. {@code seq.before} and {@code seq.after} are required; a missing {@code value} is null,
-     * missing {@code events} is empty, missing {@code durationMs} is 0.
+     * missing {@code events} is empty, missing {@code durationMs} is 0, missing {@code warnings} is empty; the
+     * {@code warnings} member is read leniently ({@link CallWarning#readAll}: a malformed element is
+     * {@code INVALID_WARNING}, more than sixteen end in one {@code TOO_MANY_WARNINGS}, never an exception).
      *
      * @throws JsonException on a missing required field or a field of the wrong type
      */
@@ -140,7 +176,8 @@ public final class RpcResult {
                 Wire.requireLong(seq, "before", TYPE + ".seq"),
                 Wire.requireLong(seq, "after", TYPE + ".seq"),
                 Wire.optLong(json, "durationMs", 0L, TYPE),
-                Wire.optString(json, "thread", TYPE));
+                Wire.optString(json, "thread", TYPE),
+                CallWarning.readAll(json.get("warnings")));
     }
 
     @Override
@@ -154,13 +191,13 @@ public final class RpcResult {
         RpcResult other = (RpcResult) o;
         return Objects.equals(value, other.value) && events.equals(other.events) && seqBefore == other.seqBefore
                 && seqAfter == other.seqAfter && durationMs == other.durationMs
-                && Objects.equals(thread, other.thread);
+                && Objects.equals(thread, other.thread) && warnings.equals(other.warnings);
     }
 
     @Override
     public int hashCode() {
         return Objects.hash(value, events, Long.valueOf(seqBefore), Long.valueOf(seqAfter), Long.valueOf(durationMs),
-                thread);
+                thread, warnings);
     }
 
     @Override

@@ -72,7 +72,13 @@ final class LendingTarget implements AutoCloseable {
          * {@code -Dlending.tools=true} (the "Desk tools" window) and the agent option {@code robot=true}, so that the
          * Robot route's veto refusal is proven end to end; no golden is compared on this leg.
          */
-        JAVAAGENT_TOOLS("javaagent-tools", LoadMode.JAVAAGENT);
+        JAVAAGENT_TOOLS("javaagent-tools", LoadMode.JAVAAGENT),
+        /**
+         * The scanner leg (phase8-contracts.md 13.2 item 30, ES): {@code -javaagent} on a desk launched with
+         * {@code -Dlending.scannerDriver=true}, so that the scanner device's PHYSICAL rung is there; no other leg sets
+         * it, so the goldens hold {@code lending.scanner.physical} {@code UNAVAILABLE}.
+         */
+        JAVAAGENT_SCANNER("javaagent-scanner", LoadMode.JAVAAGENT);
 
         final String slug;
         final LoadMode loadMode;
@@ -91,6 +97,8 @@ final class LendingTarget implements AutoCloseable {
     static final String HOOKS_LEG_MODULES = "skillroy-agent-hooks,skillroy-agent-byteman";
     /** The agent option of the Robot path (phase7-contracts.md 3.4, A65): the operator's consent. */
     static final String ROBOT_OPTION = "robot";
+    /** The desk's launch property of its scanner driver (phase8-contracts.md 12.1). */
+    static final String SCANNER_DRIVER = "lending.scannerDriver";
     /** The agent option naming the user's Byteman jar (phase6-contracts.md 3.7, 7.4). */
     static final String BYTEMAN_JAR = "byteman.jar";
     /**
@@ -208,6 +216,9 @@ final class LendingTarget implements AutoCloseable {
         if (mode == Mode.JAVAAGENT_TOOLS) {
             builder.jvmArg("-Dlending.tools=true"); // Phase 8: the "Desk tools" window (phase8-contracts.md 12.1)
         }
+        if (mode == Mode.JAVAAGENT_SCANNER) {
+            builder.jvmArg("-D" + SCANNER_DRIVER + "=true");
+        }
         String dbPassword = databaseListener ? generatePassword() : null;
         if (databaseListener) {
             builder.jvmArg("-Dlending.dbPort=0").jvmArg("-Dlending.dbPassword=" + dbPassword);
@@ -218,7 +229,8 @@ final class LendingTarget implements AutoCloseable {
                 : mode == Mode.JAVAAGENT_TOOLS ? Map.of("discoveryDir", dir.toString(), ROBOT_OPTION, "true")
                 : Map.of("discoveryDir", dir.toString());
         switch (mode) {
-            case JAVAAGENT, JAVAAGENT_HOOKS, JAVAAGENT_ROBOT, JAVAAGENT_TOOLS -> builder.javaAgent(home, agentOptions);
+            case JAVAAGENT, JAVAAGENT_HOOKS, JAVAAGENT_ROBOT, JAVAAGENT_TOOLS, JAVAAGENT_SCANNER ->
+                    builder.javaAgent(home, agentOptions);
             case JAVA_TOOL_OPTIONS -> builder.javaAgent(home, agentOptions).viaJavaToolOptions(true);
             case ATTACH -> {
                 // Launched without the agent; it is attached once the JVM runs.

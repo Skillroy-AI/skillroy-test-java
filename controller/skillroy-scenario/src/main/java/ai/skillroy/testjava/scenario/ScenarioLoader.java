@@ -18,6 +18,8 @@ package ai.skillroy.testjava.scenario;
 
 import ai.skillroy.testjava.data.yaml.StrictYaml;
 import ai.skillroy.testjava.data.yaml.YamlException;
+import ai.skillroy.testjava.protocol.CallWarning;
+import ai.skillroy.testjava.protocol.RungResult;
 import ai.skillroy.testjava.scenario.resolve.CredentialSpec;
 import ai.skillroy.testjava.scenario.resolve.Strategy;
 import ai.skillroy.testjava.scenario.web.FrozenTargetPolicy;
@@ -32,6 +34,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -72,6 +75,16 @@ public final class ScenarioLoader {
     static final Pattern ID = Pattern.compile("[a-z0-9-]+");
     private static final Pattern SLOT = Pattern.compile("[A-Za-z_][A-Za-z0-9_]*");
     private static final Pattern VERB = Pattern.compile("[A-Za-z][A-Za-z0-9_]*");
+
+    /** The step modifier of the warning codes a step accepts (phase8-contracts.md 7.3). */
+    static final String ACCEPT = "accept";
+    /** The step modifier of the rung a step requires (phase8-contracts.md 7.3, 7.6). */
+    static final String MIN_RUNG = "minRung";
+    /** The reserved modifier keys a step may hold beside its one verb key (phase8-contracts.md 7.3). */
+    static final Set<String> MODIFIERS = Set.of(ACCEPT, MIN_RUNG);
+    /** At most this many codes in a step's {@code accept}. */
+    static final int MAX_ACCEPT = 32;
+    private static final String PLUS_MODIFIERS = " plus the modifiers accept, minRung";
     private static final Set<String> KEY_SET = Set.copyOf(KEYS);
 
     private ScenarioLoader() {
@@ -480,19 +493,72 @@ public final class ScenarioLoader {
             List<Scenario.Step> out = new ArrayList<>();
             for (Object item : list) {
                 int line = doc.lineOf(item);
-                if (!(item instanceof Map<?, ?> step) || step.size() != 1) {
-                    throw errorAt(line != 0 ? line : doc.keyLine(root, "steps"), "step " + (out.size() + 1)
-                            + " must be a single-key mapping verb: args, found " + describe(item)
+                int at = line != 0 ? line : doc.keyLine(root, "steps");
+                // phase8-contracts.md 7.3: exactly one verb key plus the reserved modifiers accept and minRung.
+                List<Object> verbs = new ArrayList<>();
+                if (item instanceof Map<?, ?> step) {
+                    for (Object key : step.keySet()) {
+                        if (!MODIFIERS.contains(key)) {
+                            verbs.add(key);
+                        }
+                    }
+                    if (verbs.isEmpty() && !step.isEmpty()) {
+                        Object modifier = step.keySet().iterator().next();
+                        throw errorAt(at, "step " + (out.size() + 1) + ": '" + modifier + "' is a reserved modifier,"
+                                + " not a verb; a step is a single-key mapping verb: args" + PLUS_MODIFIERS);
+                    }
+                }
+                if (!(item instanceof Map<?, ?> step) || verbs.size() != 1) {
+                    throw errorAt(at, "step " + (out.size() + 1) + " must be a single-key mapping verb: args"
+                            + PLUS_MODIFIERS + ", found " + describe(item)
                             + (item instanceof Map<?, ?> m ? " with keys " + m.keySet() : ""));
                 }
-                Map.Entry<?, ?> only = step.entrySet().iterator().next();
-                String verb = (String) only.getKey();
+                String verb = (String) verbs.get(0);
                 if (!VERB.matcher(verb).matches()) {
                     throw errorAt(line, "verb '" + verb + "' must match [A-Za-z][A-Za-z0-9_]*");
                 }
-                out.add(new Scenario.Step(verb, only.getValue(), line));
+                out.add(new Scenario.Step(verb, step.get(verb), line, modifiers(step, verb, at)));
             }
             return Collections.unmodifiableList(out);
+        }
+
+        /**
+         * The step's modifiers, checked (phase8-contracts.md 7.3): {@code accept} a list of 1 to 32 distinct warning
+         * codes, {@code minRung} a rung name.
+         */
+        private Map<String, Object> modifiers(Map<?, ?> step, String verb, int line) throws ScenarioException {
+            if (step.size() == 1) {
+                return Map.of();
+            }
+            Map<String, Object> out = new LinkedHashMap<>();
+            if (step.containsKey(ACCEPT)) {
+                int at = lineIn(step, ACCEPT, line);
+                if (!(step.get(ACCEPT) instanceof List<?> codes) || codes.isEmpty() || codes.size() > MAX_ACCEPT) {
+                    throw errorAt(at, "step " + verb + ": 'accept' must be a list of 1 to " + MAX_ACCEPT
+                            + " warning codes, found " + describe(step.get(ACCEPT)));
+                }
+                Set<String> seen = new LinkedHashSet<>();
+                for (Object code : codes) {
+                    if (!(code instanceof String text) || !CallWarning.isValidCode(text)) {
+                        throw errorAt(at, "step " + verb + ": 'accept' holds " + describe(code) + ", which is not a"
+                                + " warning code (" + CallWarning.BASE_CODE.pattern() + " or "
+                                + CallWarning.PACK_CODE.pattern() + ")");
+                    }
+                    if (!seen.add(text)) {
+                        throw errorAt(at, "step " + verb + ": 'accept' names " + text + " twice");
+                    }
+                }
+                out.put(ACCEPT, List.copyOf(seen));
+            }
+            if (step.containsKey(MIN_RUNG)) {
+                int at = lineIn(step, MIN_RUNG, line);
+                if (!(step.get(MIN_RUNG) instanceof String rung) || !RungResult.isName(rung)) {
+                    throw errorAt(at, "step " + verb + ": 'minRung' must be a rung name matching "
+                            + RungResult.NAME.pattern() + ", found " + describe(step.get(MIN_RUNG)));
+                }
+                out.put(MIN_RUNG, rung);
+            }
+            return out;
         }
 
         List<Scenario.Verify> verify() throws ScenarioException {

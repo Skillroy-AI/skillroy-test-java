@@ -2442,6 +2442,51 @@ a pack names a verb `accept` or `minRung`; a scenario sets `ui.strict` and uses 
 `warnings: [string]` in its value (`agent/skillroy-agent-byteman/.../Engine.java:254`) stays information: the channel
 is the envelope, never a value key (D576).
 
+**As built (Phase 8, ES), 2026-10-19.** Where §7 was silent or the build chose among readings (the report's
+`D-ES-n`):
+
+- **7.1 wire (D-ES-1).** `CallWarning` also has `NEVER_ACCEPTABLE` (the two reader codes), `isValidCode`,
+  `isPackCodeShape` and `tooMany(n)`. Data that cannot be written as JSON becomes `{"truncated": true}` like an
+  oversized one; `fromJson` also turns an element with a non-string `message` or a non-object `data` into
+  `INVALID_WARNING`; `readAll` of a value that is not a list gives one `INVALID_WARNING`; a `TOO_MANY_WARNINGS`
+  element beyond the 16th adds its own `dropped`, so a folded list folds to itself (the 7-argument `RpcResult`
+  folds the same way).
+- **7.1 agent (D-ES-3).** The agent's log has no FINE level: a `warn` after the call returned is dropped and logged
+  once per call at INFO, naming the code and the primitive, never the message or data. The dispatcher's margin before
+  redaction is 4096 characters; data whose text exceeds four times 2048 plus that margin is `{"truncated": true}`
+  before redaction.
+- **7.1 reports (D-ES-9, D-ES-10, D-ES-11).** A cleanup call's warnings and rungs are records only (`cleanup: true`),
+  never lines of `RunResult.warnings`. The run-end record, the journal's step record and the MCP scenario-run reply
+  carry `warnings` only when non-empty; `run --json` always carries `warnings` (an empty list, as
+  `degradedFidelity`), and the text output prints the `warning:` lines for every status. Telemetry: the `warning`
+  event carries `skillroy.warning.code` and `skillroy.accepted` (both kept by `minimal`); `rung` and `rungs` reuse
+  `skillroy.requested`, `skillroy.actual` and `skillroy.ok`.
+- **7.2 (D-ES-2).** `InputResult.inputId(value)` is null also for a string that does not match `INPUT_ID_PATTERN` (a
+  malformed id counts as none, the fail-closed path of 7.4); extra constants `ACCEPTED`, `INPUT_IDS`, `TAKEN`,
+  `STATE_CONSUMED`, `STATE_QUEUED`, `VETOED`, `NOT_VISIBLE` and a reader `queued(value)`. The sample refuses a
+  caller's malformed `inputId` with `INVALID_PARAMS {param: inputId, reason: malformed}`, and reports caveats only
+  for an input the desk consumed within the call (`ANSWERED_NESTED` when the desk took it under another prompt line
+  than the one it showed at the post).
+- **7.3 (D-ES-8).** Every verb that compiles to no call refuses both modifiers, not only the four named; codes a verb
+  pre-accepts (`withAccept`) are checked at compile time like a step's ("pre-accepts …"). The reader's refusal below
+  7 reads "call P: 'accept' needs a version 7 plan" (after the reader's "invalid plan: " prefix).
+- **7.4 (D-ES-14).** A `SYNC_TIMEOUT` names the match as JSON (`matching {"inputId":"lending-42"}`), the form the
+  existing `EVENT` wait message uses. The sample's pending table, when full, evicts the oldest entry and releases its
+  waiter as not taken (one acknowledgement per input still holds: an evicted input is never acknowledged late).
+- **7.5 (D-ES-5, D-ES-7, D-ES-13).** The secret-echo check compares the text of every scalar leaf (numbers too) with
+  every leaf of a structured secret; its detail key is `parameter` (`parameters` for the too-large failure), never
+  `secretParam`, which the run mask would hide as a secret-looking key. Listed `seq`s outside the window are one
+  `prompt {step, primitive, ignoredSeqs}` record, apart from the per-event records. A composite that runs out of
+  time is the agent's `TIMEOUT` error; the sample's composites list a `question.seq` for `input.requested` from the
+  listener's last request.
+- **7.6 (D-ES-4, D-ES-6, D-ES-12).** `RungResult.of` returns a mutable map, so a primitive adds its own keys; readers
+  `rung(value)`, `minRung(value)`, `isName`. A `Rung` capability is null or a non-blank id of at most 128 characters
+  without whitespace; `Rung.check` is shared by `PlannedCall` and `Plan.Call`. The executor reads a forwarded
+  `minRung` at the call's top level or in `args.minRung` (where `device.act` carries an action's arguments). A device
+  action has no `Invocation`: the sample's scanner raises no warning, waits a fixed 5 s, publishes a late
+  acknowledgement without a correlation id, refuses a `minRung` outside its ladder with `INVALID_PARAMS`, and
+  reports a malformed frame with only its `length` (never the barcode).
+
 ---
 
 ## 8. Expectations: list filters, captured facts, matchers, the events root, list-valued matches, plan version 7

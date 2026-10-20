@@ -2429,7 +2429,7 @@ Numbers are those of `../TODO.md`, "Open SPI and DSL gaps".
 | # | Gap | In Phase 4 |
 |---|---|---|
 | 21 | Event expectations (`sync.await` matches top-level values by text only) | partly: `await:` on the web verbs matches `name` and top-level `detail` fields by text (A32 rules); the `events` fact root and negated waits stay open |
-| 22 | Rung ladders for pack verbs | unchanged; the web verbs record `path` and `fidelity: DOM`, which is the same need expressed per verb; a general ladder stays open |
+| 22 | Rung ladders for pack verbs | unchanged; the web verbs record `path` and `fidelity: DOM`, which is the same need expressed per verb; a general ladder stays open *(Phase 8, built 2026-10-19, ES; P8 §7.6: closed: a call declares its ladder (`rungs`, `minRung`); a web verb may declare one the same way later, its `path` and `fidelity: DOM` unchanged)* |
 | 28 | Pack-defined artifact kinds | unchanged; the web evidence is base evidence, not a pack artifact |
 | 31 | `swing.events` and other catalogued primitives not yet in a contract | unchanged |
 

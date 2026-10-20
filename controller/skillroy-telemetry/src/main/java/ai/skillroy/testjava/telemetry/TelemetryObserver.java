@@ -428,6 +428,18 @@ final class TelemetryObserver implements RunObserver, ExportStatus {
             case "capture" -> target.addEvent("capture", new Attrs()
                     .str(TelemetryAttributes.SLOT, text(f.get("slot")))
                     .bool(TelemetryAttributes.OK, !Boolean.FALSE.equals(f.get("ok"))).build());
+            // phase8-contracts.md 7.1, 7.6 (ES): a call's warning, a ladder call's rung, the run-start rung check;
+            // events of the step span (no new span), never a message or data.
+            case "warning" -> target.addEvent("warning", new Attrs()
+                    .str(TelemetryAttributes.WARNING_CODE, text(f.get("code")))
+                    .bool(TelemetryAttributes.ACCEPTED, bool(f.get("accepted"))).build());
+            case "rung" -> target.addEvent("rung", new Attrs()
+                    .str(TelemetryAttributes.REQUESTED, text(f.get("minRung")))
+                    .str(TelemetryAttributes.ACTUAL, text(f.get("rung")))
+                    .bool(TelemetryAttributes.OK, bool(f.get("ok"))).build());
+            case "rungs" -> target.addEvent("rungs", new Attrs()
+                    .str(TelemetryAttributes.REQUESTED, text(f.get("minRung")))
+                    .bool(TelemetryAttributes.OK, bool(f.get("ok"))).build());
             default -> {
             }
         }

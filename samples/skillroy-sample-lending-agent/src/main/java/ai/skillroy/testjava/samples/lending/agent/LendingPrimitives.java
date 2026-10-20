@@ -23,9 +23,9 @@ import ai.skillroy.testjava.agent.api.PrimitiveSpec;
 import ai.skillroy.testjava.agent.api.Primitives;
 import ai.skillroy.testjava.agent.api.ThreadPolicy;
 import ai.skillroy.testjava.protocol.ErrorCodes;
+import ai.skillroy.testjava.protocol.InputResult;
 import ai.skillroy.testjava.protocol.JsonView;
 import ai.skillroy.testjava.protocol.RpcException;
-import ai.skillroy.testjava.protocol.Topics;
 import ai.skillroy.testjava.samples.lending.AccessControl;
 import ai.skillroy.testjava.samples.lending.AccessDecision;
 import ai.skillroy.testjava.samples.lending.Catalogue;
@@ -83,9 +83,12 @@ final class LendingPrimitives {
     /** {@value #ENGINE_VIEW}'s quiescent budget. */
     static final long ENGINE_VIEW_BUDGET_MS = 20L;
 
-    /** Every primitive name, which is also its capability id. */
+    /**
+     * Every primitive name, which is also its capability id; the composites' names ({@link LendingComposites}) are
+     * among them (phase8-contracts.md 12.2).
+     */
     static final String[] NAMES = {INPUT, STATE, LOAN, PROMPT, PROMPT_ANSWER, SLIP, ACCESS_CHECK, DEPOSIT, LIMITS,
-        WAIVER_EVALUATE, ENGINE_VIEW};
+        WAIVER_EVALUATE, ENGINE_VIEW, LendingComposites.SIGN_ON, LendingComposites.SCAN_CHECKED};
 
     /** Default and largest acknowledgement wait of {@code lending.input}. */
     static final long DEFAULT_ACK_MS = 5000L;
@@ -129,12 +132,18 @@ final class LendingPrimitives {
                 .thread(ThreadPolicy.APP).timeoutMs(5000).capability(DEPOSIT).build(), this::deposit));
         list.add(Primitives.of(PrimitiveSpec.builder(INPUT)
                 .description("Posts one input to the desk (Entry, Barcode or Key.<ACTION>) after checking that "
-                        + "the current state accepts its source, then waits for the engine to accept it.")
+                        + "the current state accepts its source, then waits for the engine to accept it: "
+                        + "{accepted, acked, ackMs, inputId, consumed: CONSUMED|QUEUED, taken?, answeredBy?}, with "
+                        + "the warnings VALUE_COERCED (the desk trims the value), VALUE_DROPPED (an empty entry) and "
+                        + "ANSWERED_NESTED (another question took it). The acknowledgement event input.acked "
+                        + "{source, inputId} follows the input, also when the desk takes it later.")
                 .param("source", "string", true, "Entry, Barcode, Key.DUE, Key.DEPOSIT, Key.RETURN, Key.CANCEL, "
                         + "Key.SIGN_OFF or Key.QTY")
                 .param("value", "string|number", false, "entry text, barcode, or key value (DEPOSIT amount, QTY)")
                 .param("ackTimeoutMs", "integer", false, "how long to wait for the engine to accept the input "
-                        + "(default 5000, at most 60000)")
+                        + "(default 5000, at most 60000; 0 returns at once)")
+                .param("inputId", "string", false, "the input's id, echoed in the result and the acknowledgement "
+                        + "(default: one the module mints)")
                 .thread(ThreadPolicy.APP).timeoutMs(15000).capability(INPUT).mutating().build(), this::input));
         list.add(Primitives.of(PrimitiveSpec.builder(LIMITS)
                 .description("The system maximum return the desk loaded at start-up and enforces: {maxReturn} as a "
@@ -223,44 +232,42 @@ final class LendingPrimitives {
         if (ackTimeoutMs < 0 || ackTimeoutMs > MAX_ACK_MS) {
             throw invalid("ackTimeoutMs", "must be between 0 and " + MAX_ACK_MS);
         }
+        String requestedId = InputPosting.requestedId(args.raw().get("inputId"));
         LendingApp app = app();
         Engine engine = app.engine();
         EngineStatus status = engine.status();
         if (!status.validInputs().contains(source)) {
-            Map<String, Object> data = EngineEvents.map("source", source, "state", stateName(status),
-                    "validInputs", new ArrayList<String>(status.validInputs()), "prompt", status.prompt(),
-                    "awaitingInput", Boolean.valueOf(status.awaitingInput()),
-                    "modalPrompt", LendingJson.prompt(app.prompts().current()));
-            throw new RpcException(ErrorCodes.INPUT_REJECTED, "the desk does not accept " + source + " now ("
-                    + (status.awaitingInput() ? "state " + stateName(status)
-                    : "busy" + (app.prompts().current() != null ? " with a prompt open" : "") + ", state "
-                    + stateName(status)) + "; valid: " + status.validInputs() + ")", data);
+            throw notAccepted(app, status, source);
         }
         EngineEvents events = slot.events();
         if (events == null) {
             throw new RpcException(ErrorCodes.NOT_READY, "the lending module's engine listener is not attached");
         }
-        LendingInput input = new LendingInput(source, value);
-        EngineEvents.AckWait wait = events.expectAck(input);
-        long t0 = System.nanoTime();
-        if (!app.inbox().offer(input)) {
-            events.forget(input);
-            throw new RpcException(ErrorCodes.INPUT_REJECTED, "the desk's inbox is full",
-                    EngineEvents.map("source", source, "inboxSize", Long.valueOf(app.inbox().size())));
-        }
         long budget = Math.max(0L, inv.remainingMs() - 250L);
-        boolean acked;
-        try {
-            acked = wait.await(Math.min(ackTimeoutMs, budget));
-        } finally {
-            events.forget(input);
-        }
-        long ackMs = (System.nanoTime() - t0) / 1000000L;
-        if (acked) {
-            ctx.events().publish(Topics.INPUT_ACKED, EngineEvents.SOURCE, EngineEvents.map("source", source));
-        }
-        return EngineEvents.map("accepted", Boolean.TRUE, "acked", Boolean.valueOf(acked), "ackMs",
-                Long.valueOf(ackMs));
+        InputPosting.Posted posted = InputPosting.post(ctx, events, app, new LendingInput(source, value),
+                requestedId, inv.correlationId(), InputPosting.inbox(app), Math.min(ackTimeoutMs, budget));
+        Map<String, Object> result = EngineEvents.map("accepted", Boolean.TRUE, "acked",
+                Boolean.valueOf(posted.acked), "ackMs", Long.valueOf(posted.ackMs), InputResult.INPUT_ID,
+                posted.inputId, InputResult.CONSUMED, posted.consumed());
+        // phase8-contracts.md 7.2: refused = an error before the input was handed over; a caveat = a warning.
+        InputPosting.caveats(inv, posted, "value", result);
+        return result;
+    }
+
+    /**
+     * The {@code INPUT_REJECTED} answer of an input the desk's state does not accept now: {@code data.reason} is
+     * {@code notAccepted} (phase8-contracts.md 7.2), beside the state, the valid inputs and the open prompt.
+     */
+    static RpcException notAccepted(LendingApp app, EngineStatus status, String source) {
+        Map<String, Object> data = EngineEvents.map("source", source, "state", stateName(status),
+                "validInputs", new ArrayList<String>(status.validInputs()), "prompt", status.prompt(),
+                "awaitingInput", Boolean.valueOf(status.awaitingInput()),
+                "modalPrompt", LendingJson.prompt(app.prompts().current()), InputResult.REASON,
+                InputResult.NOT_ACCEPTED);
+        return new RpcException(ErrorCodes.INPUT_REJECTED, "the desk does not accept " + source + " now ("
+                + (status.awaitingInput() ? "state " + stateName(status)
+                : "busy" + (app.prompts().current() != null ? " with a prompt open" : "") + ", state "
+                + stateName(status)) + "; valid: " + status.validInputs() + ")", data);
     }
 
     private Object state(Invocation inv) {
@@ -414,7 +421,7 @@ final class LendingPrimitives {
         return app;
     }
 
-    private static String stateName(EngineStatus status) {
+    static String stateName(EngineStatus status) {
         return status.state() == null ? null : status.state().name();
     }
 

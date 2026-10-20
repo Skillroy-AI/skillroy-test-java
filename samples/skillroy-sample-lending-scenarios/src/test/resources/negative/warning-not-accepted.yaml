@@ -1,0 +1,14 @@
+# Negative (phase8-contracts.md 7.1): the trimmed scan of semantic-input-warnings without accept. lending.input
+# reports VALUE_COERCED, which the step does not accept: FAIL / ASSERTION naming VALUE_COERCED, with the hint how a
+# step accepts it.
+scenario: warning-not-accepted
+pack: lending
+requires: [lending.input, lending.state, lending.loan]
+launchProperties: { lending.seed: A }
+resolve:
+  assistant: { fixture: { code: "100" }, credential: { realm: staff, key: code } }
+steps:
+  - signOn: { staff: $assistant }
+  - scan: { barcode: " 5000000000017 " }
+on_prompt: { unexpected: fail }
+timeouts: { step: 30s }

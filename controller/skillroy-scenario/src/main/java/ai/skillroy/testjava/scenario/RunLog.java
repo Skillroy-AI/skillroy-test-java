@@ -48,7 +48,11 @@ import java.util.Set;
  * (phase6-contracts.md 5.3, 6.4) {@code hooks} (step 0b's install of the pack's hook catalogue: {@code {mode,
  * skipped}}, {@code {mode, alreadyInstalled, catalogue, armed}} or {@code {mode, catalogue, installed, unavailable,
  * armed, touched, ms, otherAgents}}; {@code ok: false} and the error when refused) and {@code capabilities} (the
- * archived matrix: {@code {hash, ids, file}}). A {@code call} record of a {@code web.*} primitive carries
+ * archived matrix: {@code {hash, ids, file}}), and from Phase 8 (phase8-contracts.md 7.1, 7.6) {@code warning} (one
+ * per warning a call reported: {@code {step, index, primitive, code, message?, data?, accepted, source}}, a cleanup
+ * call's with {@code cleanup: true}), {@code rung} (one per ladder call: {@code {step, index, primitive, rungs,
+ * minRung?, rung, fidelity, ok}}) and {@code rungs} (the run-start check of a call with {@code minRung}). A
+ * {@code call} record of a {@code web.*} primitive carries
  * {@code path}. Every record passes through the run's {@link SecretMask} first
  * (amendment A25, phase2-contracts.md 11.4), and carries no image's bytes: a capture's {@code base64} (a {@code call},
  * {@code sync}, {@code cleanup} or {@code trace.mark} record's value, an abort's detail) is written as
@@ -76,7 +80,9 @@ final class RunLog implements AutoCloseable {
 
     /** The record types an observer receives as {@code scenarioRecord} (phase6-contracts.md 10.2, 10.4). */
     static final Set<String> OBSERVED = Set.of("requires", "launchProperties", "preflight", "hooks", "capabilities",
-            "recover", "cleanup", "expect", "db", "prompt", "fidelity", "capture");
+            "recover", "cleanup", "expect", "db", "prompt", "fidelity", "capture",
+            // phase8-contracts.md 7.1, 7.6 (ES): a call's warnings, a ladder call's rung, the run-start rung check.
+            "warning", "rung", "rungs");
 
     private final Clock clock;
     private final long startMs;

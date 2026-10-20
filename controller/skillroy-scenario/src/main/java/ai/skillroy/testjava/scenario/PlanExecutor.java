@@ -630,6 +630,8 @@ public final class PlanExecutor {
             StepLibrary library = pack.steps();
             Set<String> verbs = library == null ? null : library.verbs();
             runner.packVerbs = verbs == null ? Set.of() : Set.copyOf(verbs);
+            Set<String> codes = pack.warningCodes();
+            runner.warningCodes = codes == null ? Set.of() : Set.copyOf(codes);
         }
 
         /**
@@ -673,6 +675,7 @@ public final class PlanExecutor {
             try {
                 mask = secretMask();
                 log.mask(mask);
+                runner.minLengthInText = mask.minLengthInText();
                 return executeLogged();
             } finally {
                 // Also when an Error from pack code passes through: the web path, the file and the channels close.
@@ -851,12 +854,15 @@ public final class PlanExecutor {
             RunResult result = masked(new RunResult(plan.scenarioId(), status, failure == null ? null : failure.kind,
                     failure == null ? null : failure.stepId, message,
                     safeDetail(detail), steps, skipped, duration, runner.degradedFidelity, options.bind().mode(),
-                    options.bind().envId(), modelCalls));
+                    options.bind().envId(), modelCalls, runner.warnings));
             Map<String, Object> end = RunLog.fields("status", status.name(), "failureKind",
                     result.failureKind() == null ? null : result.failureKind().name(), "failedStepId",
                     result.failedStepId(), "message", result.message(), "skippedExpectations", skipped);
             if (!runner.degradedFidelity.isEmpty()) {
                 end.put("degradedFidelity", runner.degradedFidelity);
+            }
+            if (!runner.warnings.isEmpty()) {
+                end.put("warnings", runner.warnings);
             }
             end.put("durationMs", duration.toMillis());
             log.write("run-end", end);
@@ -897,14 +903,14 @@ public final class PlanExecutor {
             for (StepResult step : result.steps()) {
                 maskedSteps.add(new StepResult(step.id(), step.verb(), step.line(), step.status(),
                         mask.apply(step.message()), texts(step.skippedExpectations()), step.duration(),
-                        texts(step.degradedFidelity())));
+                        texts(step.degradedFidelity()), texts(step.warnings())));
             }
             @SuppressWarnings("unchecked")
             Map<String, Object> maskedDetail = (Map<String, Object>) mask.apply(result.detail());
             return new RunResult(result.scenarioId(), result.status(), result.failureKind(), result.failedStepId(),
                     mask.apply(result.message()), maskedDetail, maskedSteps, texts(result.skippedExpectations()),
                     result.duration(), texts(result.degradedFidelity()), result.mode(), result.envId(),
-                    result.modelCalls());
+                    result.modelCalls(), texts(result.warnings()));
         }
 
         private List<String> texts(List<String> values) {
@@ -1094,6 +1100,56 @@ public final class PlanExecutor {
             if (!unmet.isEmpty()) {
                 throw new Abort(Status.ERROR, FailureKind.PRECONDITION_FAILED, null,
                         "unmet requirements: " + String.join("; ", unmet), RunLog.fields("unmet", unmet));
+            }
+            checkRungs();
+        }
+
+        /**
+         * phase8-contracts.md 7.6 (D588): for every step call with a {@code minRung}, at least one rung from the first
+         * to {@code minRung} must have no capability or one that is OK in the merged matrix; otherwise the run ends
+         * ERROR / PRECONDITION_FAILED before bind and before any side effect. One {@code rungs} record per such call;
+         * cleanup calls are not pre-checked.
+         */
+        private void checkRungs() throws Abort {
+            for (Plan.Step step : plan.steps()) {
+                for (int i = 0; i < step.calls().size(); i++) {
+                    Plan.Call call = step.calls().get(i);
+                    if (call.minRung() == null) {
+                        continue;
+                    }
+                    List<Object> states = new ArrayList<>();
+                    boolean ok = false;
+                    String blocked = null;
+                    for (ai.skillroy.testjava.scenario.pack.Rung rung : call.rungs()) {
+                        ai.skillroy.testjava.protocol.Capability capability = rung.capability() == null ? null
+                                : caps.get(rung.capability());
+                        String state = rung.capability() == null ? null : capability == null ? "MISSING"
+                                : capability.state().name();
+                        String reason = capability == null ? null : capability.reason();
+                        Map<String, Object> entry = RunLog.fields("name", rung.name(), "capability",
+                                rung.capability(), "state", state);
+                        if (reason != null) {
+                            entry.put("reason", reason);
+                        }
+                        states.add(entry);
+                        boolean reachable = rung.capability() == null || caps.isOk(rung.capability());
+                        ok |= reachable;
+                        if (!reachable && blocked == null) {
+                            blocked = rung.capability() + " is " + state + (reason == null ? "" : " (" + reason + ")");
+                        }
+                        if (rung.name().equals(call.minRung())) {
+                            break;
+                        }
+                    }
+                    log.write("rungs", RunLog.fields("step", step.id(), "index", i + 1, "primitive",
+                            call.primitive(), "minRung", call.minRung(), "ok", ok, "states", states));
+                    if (!ok) {
+                        throw new Abort(Status.ERROR, FailureKind.PRECONDITION_FAILED, step.id(), "step "
+                                + step.id() + " (" + step.verb() + ") needs rung " + call.minRung() + " or better: "
+                                + blocked, RunLog.fields("primitive", call.primitive(), "minRung", call.minRung(),
+                                "states", states));
+                    }
+                }
             }
         }
 
@@ -1744,6 +1800,7 @@ public final class PlanExecutor {
             long t0 = options.clock().millis();
             List<String> stepSkipped = new ArrayList<>();
             runner.stepFidelity = new ArrayList<>();
+            runner.stepWarnings = new ArrayList<>();
             Status status = Status.ERROR;
             String message = null;
             try {
@@ -1765,11 +1822,12 @@ public final class PlanExecutor {
                 throw e;
             } finally {
                 StepResult result = new StepResult(id, verb, line, status, message, stepSkipped, since(t0),
-                        runner.stepFidelity);
+                        runner.stepFidelity, runner.stepWarnings);
                 steps.add(result);
                 if (observing) {
                     observer.stepEnded(new StepResult(id, verb, line, status, mask.apply(message),
-                            texts(stepSkipped), result.duration(), texts(result.degradedFidelity())));
+                            texts(stepSkipped), result.duration(), texts(result.degradedFidelity()),
+                            texts(result.warnings())));
                 }
             }
         }
@@ -2539,7 +2597,10 @@ public final class PlanExecutor {
                         noteSeq(result.seqAfter());
                     }
                     observed.result(result, webCall ? servedBy[0] : AgentWebPath.ID);
-                    runner.applySync(call, await, agentSince, pathSince, "cleanup");
+                    // phase8-contracts.md 7.1, 7.6: a cleanup call's warnings and rung are logged only.
+                    runner.noteCleanupWarnings(calls.indexOf(call) + 1, call, result);
+                    runner.noteCleanupRung(calls.indexOf(call) + 1, call, result.value());
+                    runner.applySync(call, await, agentSince, pathSince, "cleanup", result.value());
                     Map<String, Object> record = RunLog.fields("primitive", call.primitive());
                     if (webCall) {
                         record.put("path", servedBy[0]);

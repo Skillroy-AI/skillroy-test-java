@@ -16,7 +16,9 @@
 
 package ai.skillroy.testjava.agent.core;
 
+import ai.skillroy.testjava.agent.core.fixture.CoreTestModule;
 import ai.skillroy.testjava.agent.core.fixture.TestState;
+import ai.skillroy.testjava.protocol.CallWarning;
 import ai.skillroy.testjava.protocol.ErrorCodes;
 import ai.skillroy.testjava.protocol.Json;
 import ai.skillroy.testjava.protocol.Protocol;
@@ -31,7 +33,10 @@ import org.junit.jupiter.api.io.TempDir;
 import java.awt.EventQueue;
 import java.awt.Frame;
 import java.awt.GraphicsEnvironment;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
@@ -447,5 +452,121 @@ class DispatchTest {
         Map<String, Object> ok = (Map<String, Object>) agent.runtime.call("trace.mark", map("label", "x"))
                 .get("result");
         assertTrue(((Map<?, ?>) ok.get("value")).containsKey("seq"));
+    }
+
+    // ---- phase8-contracts.md 7.1 (ES): the warning channel ----
+
+    /** Restarts the agent with coretest's semantic-input fixture ({@code coretest.semanticInput=on}). */
+    private void restartWithWarnings() throws Exception {
+        agent.close();
+        agent = AgentHarness.start(Files.createDirectories(tmp.resolve("warnings")), "coretest.semanticInput", "on");
+        AgentHarness.await("target ready", 30000, () -> agent.runtime.isReady());
+    }
+
+    private static Map<String, Object> warning(String code, String message, Map<String, Object> data) {
+        Map<String, Object> w = map("code", code);
+        if (message != null) {
+            w.put("message", message);
+        }
+        if (data != null) {
+            w.put("data", data);
+        }
+        return w;
+    }
+
+    @Test
+    void warningsAreCollectedInOrderIntoTheResultsEnvelope() throws Exception {
+        restartWithWarnings();
+        Map<String, Object> result = agent.result("test.warn", map("warnings", Arrays.asList(
+                warning("VALUE_COERCED", "taken as 4005", map("taken", "4005")),
+                warning("lending.PASSWORD_REQUIRED", null, null))));
+        RpcResult parsed = RpcResult.fromJson(result);
+        assertEquals(map("raised", Long.valueOf(2)), parsed.value(), "the value stays the primitive's own");
+        assertEquals(2, parsed.warnings().size());
+        assertEquals("VALUE_COERCED", parsed.warnings().get(0).code());
+        assertEquals("taken as 4005", parsed.warnings().get(0).message());
+        assertEquals(map("taken", "4005"), parsed.warnings().get(0).data());
+        assertEquals("lending.PASSWORD_REQUIRED", parsed.warnings().get(1).code());
+        assertFalse(agent.result("test.warn", map("warnings", new ArrayList<Object>())).containsKey("warnings"),
+                "no warning, no member: the result's JSON is as before");
+        assertFalse(agent.result("test.echo", null).containsKey("warnings"));
+    }
+
+    @Test
+    void theSeventeenthAndLaterBecomeOneTooManyWarnings() throws Exception {
+        restartWithWarnings();
+        List<Object> twenty = new ArrayList<Object>();
+        for (int i = 0; i < 20; i++) {
+            twenty.add(warning("VALUE_DROPPED", "w" + i, null));
+        }
+        RpcResult parsed = RpcResult.fromJson(agent.result("test.warn", map("warnings", twenty)));
+        assertEquals(17, parsed.warnings().size());
+        assertEquals("w15", parsed.warnings().get(15).message());
+        assertEquals(CallWarning.TOO_MANY_WARNINGS, parsed.warnings().get(16).code());
+        assertEquals(Long.valueOf(4), parsed.warnings().get(16).data().get("dropped"));
+    }
+
+    @Test
+    void aSecretParametersValueIsRedactedFromMessageAndData() throws Exception {
+        restartWithWarnings();
+        String secret = "s3cret-Value9";
+        RpcResult parsed = RpcResult.fromJson(agent.result("test.warn", withMeta(map("secret", secret, "warnings",
+                Arrays.asList(warning("VALUE_COERCED", "typed " + secret + " here", map("taken", secret, "nested",
+                        map("list", Arrays.asList("a", secret + "!")))))), "secretParams",
+                Arrays.asList("secret"))));
+        CallWarning w = parsed.warnings().get(0);
+        assertEquals("typed <redacted> here", w.message());
+        assertEquals("<redacted>", w.data().get("taken"));
+        assertFalse(Json.write(parsed.toJson()).contains(secret));
+        RpcResult shortSecret = RpcResult.fromJson(agent.result("test.warn", withMeta(map("secret", "1234",
+                "warnings", Arrays.asList(warning("VALUE_DROPPED", "pin 1234 dropped, 12345 kept", null))),
+                "secretParams", Arrays.asList("secret"))));
+        assertEquals("pin <redacted> dropped, 12345 kept", shortSecret.warnings().get(0).message(),
+                "a short secret is replaced as a whole token (A34)");
+    }
+
+    @Test
+    void aSecretStraddlingTheCutIsRedactedBeforeTheMessageIsCut() throws Exception {
+        restartWithWarnings();
+        String secret = "Kq7wZp2xLm4v";   // twelve characters
+        StringBuilder message = new StringBuilder();
+        for (int i = 0; i < 495; i++) {
+            message.append('x');
+        }
+        message.append(secret).append("tail");
+        RpcResult parsed = RpcResult.fromJson(agent.result("test.warn", withMeta(map("secret", secret, "warnings",
+                Arrays.asList(warning("VALUE_COERCED", message.toString(), null))), "secretParams",
+                Arrays.asList("secret"))));
+        String cut = parsed.warnings().get(0).message();
+        assertEquals(CallWarning.MAX_MESSAGE, cut.length());
+        for (int i = 0; i + 8 <= secret.length(); i++) {
+            assertFalse(cut.contains(secret.substring(i, i + 8)), "no 8-character piece of the secret survives");
+        }
+        assertTrue(cut.endsWith("<reda"), cut.substring(480));
+        assertFalse(cut.contains(secret.substring(0, 5)), "not even the first characters straddle the cut");
+    }
+
+    @Test
+    void aMalformedCodeIsAModuleBugThrownToThePrimitive() throws Exception {
+        restartWithWarnings();
+        Map<String, Object> error = agent.error("test.warn", map("warnings", Arrays.asList(warning("lower", "m",
+                null))));
+        assertEquals((long) ErrorCodes.INTERNAL_ERROR, code(error));
+        assertTrue(String.valueOf(error.get("message")).contains("IllegalArgumentException"),
+                String.valueOf(error.get("message")));
+    }
+
+    @Test
+    void aWarningRaisedAfterTheCallReturnedIsDroppedAndLoggedOnce() throws Exception {
+        restartWithWarnings();
+        CoreTestModule.lateWarnRelease = new CountDownLatch(1);
+        CoreTestModule.lateWarnDone = new CountDownLatch(1);
+        RpcResult parsed = RpcResult.fromJson(agent.result("test.warn", map("late", Boolean.TRUE)));
+        assertTrue(parsed.warnings().isEmpty());
+        CoreTestModule.lateWarnRelease.countDown();
+        assertTrue(CoreTestModule.lateWarnDone.await(30, TimeUnit.SECONDS));
+        String log = String.valueOf(agent.runtime.context().log().tail(200));
+        assertTrue(log.contains("a warning (VALUE_DROPPED) raised after test.warn returned was dropped"), log);
+        assertFalse(log.contains("too late"), "the message is not logged");
     }
 }

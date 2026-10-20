@@ -87,6 +87,21 @@ class LendingStepsTest {
         public void markHandlesPrompt(PlannedCall call) {
             handlers.add(call);
         }
+
+        /** The step's {@code minRung} modifier (phase8-contracts.md 7.3, ES). */
+        String minRung;
+        /** The scenario's {@code ui} settings (ES). */
+        ai.skillroy.testjava.scenario.UiSettings ui = ai.skillroy.testjava.scenario.UiSettings.DEFAULT;
+
+        @Override
+        public String minRung() {
+            return minRung;
+        }
+
+        @Override
+        public ai.skillroy.testjava.scenario.UiSettings ui() {
+            return ui;
+        }
     }
 
     private final Ctx ctx = new Ctx();
@@ -107,7 +122,8 @@ class LendingStepsTest {
     @Test
     void theVerbsAreTheContractsList() {
         assertEquals(List.of("signOn", "signOff", "scan", "key", "enter", "quantity", "deposit", "expectPrompt",
-                "answerPrompt", "authorise"), new ArrayList<>(LendingSteps.INSTANCE.verbs()));
+                "answerPrompt", "authorise", "signOnAny", "scanChecked", "deviceScan"),
+                new ArrayList<>(LendingSteps.INSTANCE.verbs()), "Phase 8 adds the last three (ES)");
     }
 
     @Test
@@ -268,5 +284,56 @@ class LendingStepsTest {
     void unknownVerbsAreNotPackVerbs() {
         Set<String> verbs = LendingSteps.INSTANCE.verbs();
         assertTrue(!verbs.contains("click") && !verbs.contains("expect"), "base verbs stay with the base library");
+    }
+
+    // ------------------------------------------------------------------ phase8-contracts.md 7.5, 7.6, 12.3 (ES)
+
+    @Test
+    void signOnAnySendsThePasswordOnlyForASlotWithACredential() throws Exception {
+        assertEquals(List.of(new PlannedCall("lending.signOn", Map.of("staff", "$assistant.code", "password",
+                "$assistant.password"), Sync.READY, 0)), compile("signOnAny", Map.of("staff", "$assistant")));
+        assertEquals(List.of(new PlannedCall("lending.signOn", Map.of("staff", "$clerk.code"), Sync.READY, 0)),
+                compile("signOnAny", Map.of("staff", "$clerk")), "a slot without a credential: no password");
+        assertEquals(List.of(input("Key.SIGN_OFF", null), input("Key.SIGN_OFF", null)), ctx.cleanups,
+                "signOn's cleanup");
+        assertTrue(ctx.handlers.isEmpty(), "the composite's own prompts are reconciled by the executor");
+        assertTrue(compile("signOnAny", Map.of("staff", "$clerk")).get(0).accept().isEmpty(),
+                "the verb pre-accepts nothing");
+        for (Object bad : List.of("100", "$nobody", "$assistant.code")) {
+            assertThrows(ScenarioException.class, () -> compile("signOnAny", Map.of("staff", bad)), "" + bad);
+        }
+    }
+
+    @Test
+    void scanCheckedSendsTheBarcodeAndTheAnswer() throws Exception {
+        assertEquals(List.of(new PlannedCall("lending.scanChecked", Map.of("barcode", "$item.barcode", "inducted",
+                true), Sync.READY, 0)), compile("scanChecked", Map.of("item", "$item", "inducted", true)));
+        assertEquals(List.of(new PlannedCall("lending.scanChecked", Map.of("barcode", "5000000000086", "inducted",
+                false), Sync.READY, 0)), compile("scanChecked", Map.of("barcode", "5000000000086", "inducted",
+                false)));
+        assertThrows(ScenarioException.class, () -> compile("scanChecked", Map.of("barcode", "1")));
+        assertThrows(ScenarioException.class, () -> compile("scanChecked", Map.of("barcode", "1", "inducted",
+                "yes")));
+        assertThrows(ScenarioException.class, () -> compile("scanChecked", Map.of("inducted", true)));
+    }
+
+    @Test
+    void deviceScanActsThroughTheScannerWithItsLadderAndForwardsMinRung() throws Exception {
+        PlannedCall plain = compile("deviceScan", Map.of("barcode", "5000000000017")).get(0);
+        assertEquals("device.act", plain.primitive());
+        assertEquals(Map.of("id", "scanner", "action", "scan", "args", Map.of("barcode", "5000000000017")),
+                plain.args());
+        assertEquals(Sync.READY, plain.sync());
+        assertEquals(List.of("PHYSICAL", "SEMANTIC"), plain.rungs().stream().map(r -> r.name()).toList());
+        assertEquals("lending.scanner.physical", plain.rungs().get(0).capability());
+        assertEquals(null, plain.rungs().get(1).capability());
+        ctx.minRung = "PHYSICAL";
+        assertEquals(Map.of("barcode", "$item.barcode", "minRung", "PHYSICAL"), compile("deviceScan",
+                Map.of("item", "$item")).get(0).args().get("args"), "the step's own minRung is forwarded");
+        ctx.minRung = null;
+        ctx.ui = new ai.skillroy.testjava.scenario.UiSettings("ACTION", true);
+        assertEquals("PHYSICAL", ((Map<?, ?>) compile("deviceScan", Map.of("barcode", "1")).get(0).args()
+                .get("args")).get("minRung"), "under strict the first rung");
+        assertThrows(ScenarioException.class, () -> compile("deviceScan", Map.of()));
     }
 }

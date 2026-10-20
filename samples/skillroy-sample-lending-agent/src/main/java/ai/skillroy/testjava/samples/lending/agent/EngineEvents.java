@@ -30,7 +30,6 @@ import ai.skillroy.testjava.samples.lending.Loan;
 import ai.skillroy.testjava.samples.lending.Staff;
 
 import java.util.ArrayList;
-import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -47,8 +46,15 @@ import java.util.concurrent.TimeUnit;
  * {@code loan.posted {loanId,total}}, {@code slip.printed {loanId}}, and (Phase 8, phase8-contracts.md 5.1, 12.2)
  * {@code staff.signedOn {code,name}} after {@code state.changed} to {@code IDLE} from {@code PASSWORD} or
  * {@code SIGNED_OFF}: the sample's realistic personal value in an event, which {@link PasswordMask}'s event rule
- * masks at publish. {@code input.acked} is published by {@code lending.input} itself, on the calling thread, so that it
- * belongs to the call.
+ * masks at publish. {@code input.acked {source, inputId}} (never the value) is published by the call that posted the
+ * input, on the calling thread, when the engine took the input within the call, so that it belongs to the call; when
+ * the engine takes it after the call returned, this listener publishes it from the engine thread with the originating
+ * call's correlation id (phase8-contracts.md 7.4: exactly one acknowledgement per input).
+ *
+ * <p>The pending table ({@link #expectAck}): every posted input, by identity, with its {@code inputId}, source, the
+ * desk's prompt line when it was posted, the call's correlation id and when it was posted; kept after the call
+ * returned so that a late acknowledgement can still be published, at most {@value #MAX_PENDING} entries (the oldest
+ * dropped when a new one is added to a full table), every entry cleared by {@link #deactivate()}.
  *
  * <p><b>Threading and host safety.</b> Every callback runs on the engine thread while the engine waits for it: each
  * one does a little bookkeeping, publishes without blocking and returns. Nothing ever escapes a callback, not even an
@@ -67,15 +73,46 @@ final class EngineEvents implements EngineListener {
     static final String SLIP_PRINTED = "slip.printed";
     static final String PROMPT_ANSWERED = "prompt.answered";
 
-    /** One {@code lending.input} waiting for its input to be accepted by the engine. */
+    /** The most inputs the pending table keeps (phase8-contracts.md 7.4). */
+    static final int MAX_PENDING = 256;
+
+    /** One posted input waiting for the engine to take it (the pending table's entry). */
     static final class AckWait {
+        final String inputId;
+        final String source;
+        /** The desk's prompt line when the input was posted (the question the call addressed). */
+        final String promptLine;
+        /** The posting call's correlation id, for a late acknowledgement; may be null. */
+        final String correlationId;
+        final long createdNanos;
         private final CountDownLatch done = new CountDownLatch(1);
         private volatile boolean acked;
+        /** The desk's prompt line when the engine took the input, or null before. */
+        private volatile String takenPromptLine;
+        /** True once the posting call returned without the acknowledgement; guarded by the pending table. */
+        private boolean returned;
+
+        AckWait(String inputId, String source, String promptLine, String correlationId) {
+            this.inputId = inputId;
+            this.source = source;
+            this.promptLine = promptLine;
+            this.correlationId = correlationId;
+            this.createdNanos = System.nanoTime();
+        }
 
         /** Waits up to {@code timeoutMs}; true if the engine accepted the input. */
         boolean await(long timeoutMs) throws InterruptedException {
             done.await(Math.max(0L, timeoutMs), TimeUnit.MILLISECONDS);
             return acked;
+        }
+
+        boolean acked() {
+            return acked;
+        }
+
+        /** The prompt line when the engine took the input; null when it has not (yet). */
+        String takenPromptLine() {
+            return takenPromptLine;
         }
 
         void complete(boolean accepted) {
@@ -84,15 +121,40 @@ final class EngineEvents implements EngineListener {
         }
     }
 
+    /** A pending table key: the input by identity (the engine hands the very same object to inputAccepted). */
+    private static final class Key {
+        private final LendingInput input;
+
+        Key(LendingInput input) {
+            this.input = input;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            return o instanceof Key && ((Key) o).input == input;
+        }
+
+        @Override
+        public int hashCode() {
+            return System.identityHashCode(input);
+        }
+    }
+
     private final AgentContext ctx;
     private final Engine engine;
     private volatile boolean active = true;
     /** The module's quiescent point, once found (phase8-contracts.md 4.1). */
     private volatile QuiescentPoint point;
-    /** Inputs offered by lending.input, by identity: the engine hands the very same object to inputAccepted. */
-    private final Map<LendingInput, AckWait> pending = new IdentityHashMap<LendingInput, AckWait>();
+    /** Posted inputs by identity, oldest first; at most {@link #MAX_PENDING}. Guarded by itself. */
+    private final LinkedHashMap<Key, AckWait> pending = new LinkedHashMap<Key, AckWait>();
     private final Object requestedLock = new Object();
     private long requestedCount;
+    /** The seq of the last {@code input.requested} and its prompt line; guarded by {@link #requestedLock}. */
+    private long lastRequestedSeq;
+    private String lastRequestedLine;
+    /** The last prompt shown {id, text, seq}, or null; guarded by {@link #requestedLock}. */
+    private Map<String, Object> lastPrompt;
+    private long lastPromptSeq;
 
     EngineEvents(AgentContext ctx, Engine engine) {
         this.ctx = ctx;
@@ -120,25 +182,74 @@ final class EngineEvents implements EngineListener {
         }
     }
 
-    /** Registers an input before it is offered, so that its acknowledgement cannot be missed. */
-    AckWait expectAck(LendingInput input) {
-        AckWait wait = new AckWait();
+    /**
+     * Registers an input before it is offered, so that its acknowledgement cannot be missed. A full table drops its
+     * oldest entry (released as "not acknowledged").
+     *
+     * @param inputId the input's id (phase8-contracts.md 7.4)
+     * @param promptLine the desk's prompt line now, the question the input addresses
+     * @param correlationId the posting call's correlation id, or null
+     */
+    AckWait expectAck(LendingInput input, String inputId, String promptLine, String correlationId) {
+        AckWait wait = new AckWait(inputId, input.source(), promptLine, correlationId);
         if (!active) {
             wait.complete(false);
             return wait;
         }
+        AckWait dropped = null;
         synchronized (pending) {
-            pending.put(input, wait);
+            if (pending.size() >= MAX_PENDING) {
+                Map.Entry<Key, AckWait> oldest = pending.entrySet().iterator().next();
+                dropped = oldest.getValue();
+                pending.remove(oldest.getKey());
+            }
+            pending.put(new Key(input), wait);
+        }
+        if (dropped != null) {
+            dropped.complete(false);
         }
         return wait;
     }
 
-    /** Drops the wait of an input that was refused or whose wait ended. */
+    /** Drops the entry of an input that was refused before it was handed over. */
     void forget(LendingInput input) {
         synchronized (pending) {
-            pending.remove(input);
+            pending.remove(new Key(input));
         }
     }
+
+    /**
+     * The posting call returns (phase8-contracts.md 7.4): true when the engine took the input within the call (the
+     * call publishes {@code input.acked} itself, on its own thread); otherwise the entry stays in the table, marked
+     * so that {@link #inputAccepted} publishes the acknowledgement later, and the answer is false. Atomic with
+     * {@link #inputAccepted}, so that exactly one acknowledgement is published per input.
+     */
+    boolean callReturned(LendingInput input, AckWait wait) {
+        synchronized (pending) {
+            if (wait.acked()) {
+                return true;
+            }
+            if (pending.get(new Key(input)) == wait) {
+                wait.returned = true;
+            }
+            return false;
+        }
+    }
+
+    /** The number of entries in the pending table (tests). */
+    int pendingCount() {
+        synchronized (pending) {
+            return pending.size();
+        }
+    }
+
+    /** A fresh input id, {@code lending-<n>}, unique within the module's life in the agent. */
+    static String mintInputId() {
+        return "lending-" + INPUT_IDS.incrementAndGet();
+    }
+
+    private static final java.util.concurrent.atomic.AtomicLong INPUT_IDS
+            = new java.util.concurrent.atomic.AtomicLong();
 
     /** Number of {@code inputRequested} callbacks so far. */
     long requestedCount() {
@@ -161,6 +272,53 @@ final class EngineEvents implements EngineListener {
                 }
                 requestedLock.wait(remaining);
             }
+        }
+    }
+
+    /**
+     * Waits until the engine has called {@code inputRequested} more than {@code seenRequested} times in total, or has
+     * shown a prompt whose {@code prompt.waiting} event is later than {@code seenPromptSeq}, or the timeout passes
+     * (phase8-contracts.md 7.5: a composite's bounded wait for the desk's next question). Not called on the engine
+     * thread.
+     */
+    void awaitChange(long seenRequested, long seenPromptSeq, long timeoutMs) throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(Math.max(0L, timeoutMs));
+        synchronized (requestedLock) {
+            while (requestedCount <= seenRequested && lastPromptSeq <= seenPromptSeq) {
+                long remaining = TimeUnit.NANOSECONDS.toMillis(deadline - System.nanoTime());
+                if (remaining <= 0) {
+                    return;
+                }
+                requestedLock.wait(remaining);
+            }
+        }
+    }
+
+    /** The last prompt the desk showed, {@code {id, text, seq}} ({@code seq} of its event), or null. */
+    Map<String, Object> lastPrompt() {
+        synchronized (requestedLock) {
+            return lastPrompt == null ? null : new LinkedHashMap<String, Object>(lastPrompt);
+        }
+    }
+
+    /** The seq of the last {@code prompt.waiting} this listener published, 0 before the first. */
+    long lastPromptSeq() {
+        synchronized (requestedLock) {
+            return lastPromptSeq;
+        }
+    }
+
+    /** The seq of the last {@code input.requested} this listener published, 0 before the first. */
+    long lastRequestedSeq() {
+        synchronized (requestedLock) {
+            return lastRequestedSeq;
+        }
+    }
+
+    /** The prompt line of the last {@code input.requested}, or null. */
+    String lastRequestedLine() {
+        synchronized (requestedLock) {
+            return lastRequestedLine;
         }
     }
 
@@ -213,9 +371,10 @@ final class EngineEvents implements EngineListener {
 
     @Override
     public void inputRequested(LendingState state, String prompt) {
+        long seq = 0L;
         try {
             if (active) {
-                publish(Topics.INPUT_REQUESTED, map("state", name(state), "prompt", prompt, "validInputs",
+                seq = publish(Topics.INPUT_REQUESTED, map("state", name(state), "prompt", prompt, "validInputs",
                         new ArrayList<String>(engine.status().validInputs())));
             }
         } catch (Throwable t) {
@@ -224,6 +383,10 @@ final class EngineEvents implements EngineListener {
             try {
                 synchronized (requestedLock) {
                     requestedCount++;
+                    if (seq > 0) {
+                        lastRequestedSeq = seq;
+                        lastRequestedLine = prompt;
+                    }
                     requestedLock.notifyAll();
                 }
             } catch (Throwable t) {
@@ -270,11 +433,22 @@ final class EngineEvents implements EngineListener {
     public void inputAccepted(LendingInput input) {
         try {
             AckWait wait;
+            boolean late;
             synchronized (pending) {
-                wait = pending.remove(input);
+                wait = pending.remove(new Key(input));
+                late = wait != null && wait.returned;
+                if (wait != null) {
+                    // The engine published its status before this callback: the question the input answers.
+                    wait.takenPromptLine = engine.status().prompt();
+                }
             }
             if (wait != null) {
                 wait.complete(active);
+                if (late && active) {
+                    // phase8-contracts.md 7.4: taken after its call returned; published from the seam, never blocks.
+                    ctx.events().publish(Topics.INPUT_ACKED, SOURCE, map("source", wait.source, "inputId",
+                            wait.inputId), wait.correlationId);
+                }
             }
         } catch (Throwable t) {
             swallow("inputAccepted", t);
@@ -285,8 +459,15 @@ final class EngineEvents implements EngineListener {
     public void promptShown(String id, String text, List<String> buttons) {
         try {
             if (active) {
-                publish(Topics.PROMPT_WAITING, map("id", id, "text", text, "buttons",
+                long seq = publish(Topics.PROMPT_WAITING, map("id", id, "text", text, "buttons",
                         buttons == null ? new ArrayList<String>() : new ArrayList<String>(buttons)));
+                synchronized (requestedLock) {
+                    if (seq > 0) {
+                        lastPromptSeq = seq;
+                        lastPrompt = map("id", id, "text", text, "seq", Long.valueOf(seq));
+                    }
+                    requestedLock.notifyAll();
+                }
             }
         } catch (Throwable t) {
             swallow("promptShown", t);
@@ -329,8 +510,8 @@ final class EngineEvents implements EngineListener {
         }
     }
 
-    private void publish(String topic, Map<String, Object> payload) {
-        ctx.events().publish(topic, SOURCE, payload);
+    private long publish(String topic, Map<String, Object> payload) {
+        return ctx.events().publish(topic, SOURCE, payload);
     }
 
     private void swallow(String callback, Throwable t) {

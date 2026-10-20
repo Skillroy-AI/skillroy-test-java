@@ -554,6 +554,21 @@ class ExecutorPhase3Test {
         assertTrue(BaseFacts.ROOTS.contains("devices"));
     }
 
+    /** phase8-contracts.md 7.6 (ES): the root mirrors a device's rung ladders, and only when it has one. */
+    @Test
+    void theDevicesRootMirrorsALadderOnlyWhenTheListHasOne() throws Exception {
+        devices(Map.of("printer", Map.of(), "scanner", Map.of("driver", true)), Map.of("devices", List.of(
+                Map.of("id", "printer", "kind", "PRINTER", "actions", List.of("print")),
+                Map.of("id", "scanner", "kind", "scanner", "actions", List.of("scan"), "rungs",
+                        Map.of("scan", List.of("PHYSICAL", "SEMANTIC"))))));
+        RunResult result = run(DEVICES.formatted("{ \"devices[id=scanner].rungs.scan[0]\": PHYSICAL,"
+                + " \"devices[id=scanner].rungs.scan\": [PHYSICAL, SEMANTIC], \"devices[id=printer].kind\": PRINTER }"));
+        assertEquals(Status.PASS, result.status(), result.message());
+        RunResult none = run(DEVICES.formatted("{ \"devices[id=printer].rungs\": { size: 0 } }"));
+        assertEquals(Status.FAIL, none.status(), none.message());
+        assertTrue(none.message().contains("no field 'rungs'"), none.message());
+    }
+
     @Test
     void anEmptyListFailsTheExpectationAndAStateErrorFailsTheFactRead() throws Exception {
         options = options.withStepTimeout(Duration.ofMillis(300));

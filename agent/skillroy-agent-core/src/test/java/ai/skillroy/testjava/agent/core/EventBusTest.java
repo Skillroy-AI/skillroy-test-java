@@ -719,4 +719,32 @@ class EventBusTest {
         assertEquals(0L, bus.masks().maskFailures());
         assertEquals(0L, bus.masks().policies());
     }
+
+    // ---- phase8-contracts.md 7.4 (ES): a late event with its originating call's correlation id ----
+
+    @Test
+    void theFourArgumentPublishStampsTheGivenCorrelationId() {
+        RingEventBus bus = new RingEventBus(16, log);
+        long late = bus.publish("input.acked", "lending", payload("inputId", "lending-7"), "s1/step-2/1");
+        assertEquals("s1/step-2/1", bus.since(late - 1, null, 1).get(0).correlationId(),
+                "an application thread without a call stamps the id it is given");
+        long none = bus.publish("input.acked", "lending", payload("inputId", "lending-8"), null);
+        assertNull(bus.since(none - 1, null, 1).get(0).correlationId(), "null: the thread's current one (none)");
+
+        CallScope scope = new CallScope("call-1", "00-trace-01");
+        CallScope previous = CallScope.bind(scope);
+        try {
+            long inCall = bus.publish("input.acked", "lending", payload("inputId", "lending-9"), null);
+            Event e = bus.since(inCall - 1, null, 1).get(0);
+            assertEquals("call-1", e.correlationId(), "null inside a call: the call's id, as the 3-argument form");
+            assertEquals("00-trace-01", e.traceparent());
+            long other = bus.publish("input.acked", "lending", payload("inputId", "lending-10"), "s1/step-1/1");
+            Event o = bus.since(other - 1, null, 1).get(0);
+            assertEquals("s1/step-1/1", o.correlationId());
+            assertNull(o.traceparent(), "another call's event carries no traceparent of this one");
+        } finally {
+            CallScope.restore(previous);
+        }
+        assertEquals(2, scope.close().size(), "both events published on the call's thread belong to its result");
+    }
 }

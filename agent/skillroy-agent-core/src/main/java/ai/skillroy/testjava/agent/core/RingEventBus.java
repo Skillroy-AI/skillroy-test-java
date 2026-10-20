@@ -111,14 +111,26 @@ final class RingEventBus implements EventBus {
 
     @Override
     public long publish(String topic, String source, Map<String, Object> payload) {
+        return publish(topic, source, payload, null);
+    }
+
+    /**
+     * phase8-contracts.md 7.4 (amendment A84): stamps {@code givenCorrelationId}, or the calling thread's current one
+     * when it is null; the traceparent of the thread's call only when the event belongs to that call. The same pass,
+     * bound and ring as the three-argument form; recorded for the thread's call as that form is.
+     */
+    @Override
+    public long publish(String topic, String source, Map<String, Object> payload, String givenCorrelationId) {
         try {
             if (topic == null || topic.isEmpty()) {
                 log.warn("event without topic dropped (source " + source + ")");
                 return -1L;
             }
             CallScope scope = CallScope.current();
-            String correlationId = scope == null ? null : scope.correlationId;
-            String traceparent = scope == null ? null : scope.traceparent;
+            String correlationId = givenCorrelationId != null ? givenCorrelationId
+                    : scope == null ? null : scope.correlationId;
+            String traceparent = scope == null || (givenCorrelationId != null
+                    && !givenCorrelationId.equals(scope.correlationId)) ? null : scope.traceparent;
             // Validates and freezes the payload outside the lock; the ring copy only re-wraps it.
             Event proto = new Event(0L, System.currentTimeMillis(), topic, source, correlationId, traceparent, payload);
             // The mask pass (phase8-contracts.md 5.1): after the freeze, before the bound, outside the lock.

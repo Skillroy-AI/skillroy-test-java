@@ -37,6 +37,7 @@ import ai.skillroy.testjava.scenario.resolve.StoredTable;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Domain pack {@value #ID}: the controller half of the sample lending desk (contract section 9.3), next to the agent
@@ -134,7 +135,14 @@ public final class LendingPack implements DomainPack {
     /** The desk's keypad actions: what {@code key: {action}} accepts and what {@code ActionKey} may answer. */
     public static final List<String> KEY_ACTIONS = List.of("DUE", "DEPOSIT", "RETURN", "CANCEL", "SIGN_OFF", "QTY");
 
-    private static final SyncPolicy SYNC = new SyncPolicy(ACK_TOPIC, READY_TOPICS, PROMPT_TOPICS, null, null);
+    /**
+     * The step protocol's topics; acknowledgements correlated by input (phase8-contracts.md 7.4, gap 107): every
+     * {@code ACK} and {@code READY} call waits for the {@code input.acked} of its own {@code inputId}.
+     */
+    private static final SyncPolicy SYNC = new SyncPolicy(ACK_TOPIC, READY_TOPICS, PROMPT_TOPICS, null, null, true);
+
+    /** The pack's warning code (phase8-contracts.md 7.3): a sign-on that needs a password the call did not have. */
+    public static final String PASSWORD_REQUIRED = "lending.PASSWORD_REQUIRED";
     private static final List<FactProvider> FACTS = LendingFacts.all();
     private static final List<PreflightCheck> PREFLIGHT = List.of(new DatabaseCheck());
     private static final ResolutionCatalogue CATALOGUE = catalogue();
@@ -171,6 +179,15 @@ public final class LendingPack implements DomainPack {
     @Override
     public SyncPolicy syncPolicy() {
         return SYNC;
+    }
+
+    /**
+     * phase8-contracts.md 7.3: {@value #PASSWORD_REQUIRED}, which {@code lending.signOn} raises when a staff member
+     * needs a password the call did not have (a step accepts it with {@code accept: [lending.PASSWORD_REQUIRED]}).
+     */
+    @Override
+    public Set<String> warningCodes() {
+        return Set.of(PASSWORD_REQUIRED);
     }
 
     @Override

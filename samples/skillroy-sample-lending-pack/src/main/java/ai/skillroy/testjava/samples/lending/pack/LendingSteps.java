@@ -16,11 +16,13 @@
 
 package ai.skillroy.testjava.samples.lending.pack;
 
+import ai.skillroy.testjava.protocol.RungResult;
 import ai.skillroy.testjava.scenario.Durations;
 import ai.skillroy.testjava.scenario.ScenarioException;
 import ai.skillroy.testjava.scenario.pack.AwaitSpec;
 import ai.skillroy.testjava.scenario.pack.CompileContext;
 import ai.skillroy.testjava.scenario.pack.PlannedCall;
+import ai.skillroy.testjava.scenario.pack.Rung;
 import ai.skillroy.testjava.scenario.pack.StepLibrary;
 import ai.skillroy.testjava.scenario.pack.Sync;
 
@@ -64,6 +66,14 @@ import java.util.Set;
  *       prompt), then {@code lending.input} Entry with the staff code and Entry with the password, each READY.
  *       {@code staff} is a {@code $slot} reference whose slot declares a {@code credential}. If the desk refuses,
  *       its {@code authorisation-failed} prompt is unexpected and fails the step.</li>
+ *   <li>Phase 8 (phase8-contracts.md 7.5, 7.6, 12.3): {@code signOnAny: {staff}}: the composite
+ *       {@code lending.signOn {staff: $x.code, password?: $x.password}} (the password only when the slot declares a
+ *       credential), READY, with {@code signOn}'s cleanup; it signs on an auto-sign-on member and a member with a
+ *       password alike, and reports the branch. {@code scanChecked: {item|barcode, inducted}}: the composite
+ *       {@code lending.scanChecked}, READY, which answers the desk's induction check itself. {@code deviceScan:
+ *       {item|barcode}}: {@code device.act {id: scanner, action: scan, args: {barcode, minRung?}}} with the ladder
+ *       {@code [PHYSICAL (lending.scanner.physical), SEMANTIC]}, READY; the step's {@code minRung} (or PHYSICAL under
+ *       {@code ui: {strict: true}}) is forwarded to the device, which echoes it.</li>
  * </ul>
  *
  * <p>Every READY call waits for {@code input.acked} and then for the desk to wait again
@@ -90,7 +100,13 @@ final class LendingSteps implements StepLibrary {
 
     private static final Set<String> VERBS = Collections.unmodifiableSet(new LinkedHashSet<>(List.of(
             "signOn", "signOff", "scan", "key", "enter", "quantity", "deposit", "expectPrompt", "answerPrompt",
-            "authorise")));
+            "authorise", "signOnAny", "scanChecked", "deviceScan")));
+
+    static final String SIGN_ON = "lending.signOn";
+    static final String SCAN_CHECKED = "lending.scanChecked";
+    /** The scanner device's ladder (phase8-contracts.md 7.6): the driver's path first, the inbox's shortcut. */
+    static final List<Rung> SCANNER_LADDER = List.of(new Rung(RungResult.PHYSICAL, "lending.scanner.physical"),
+            Rung.of(RungResult.SEMANTIC));
 
     private LendingSteps() {
     }
@@ -136,6 +152,9 @@ final class LendingSteps implements StepLibrary {
             case "expectPrompt" -> expectPrompt(args, ctx);
             case "answerPrompt" -> answerPrompt(args, ctx);
             case "authorise" -> authorise(args, ctx);
+            case "signOnAny" -> signOnAny(args, ctx);
+            case "scanChecked" -> scanChecked(args);
+            case "deviceScan" -> deviceScan(args, ctx);
             default -> throw new ScenarioException("unknown lending verb '" + verb + "'; lending verbs: " + VERBS);
         };
     }
@@ -145,6 +164,83 @@ final class LendingSteps implements StepLibrary {
         String ref = staffSlot("signOn", a.get("staff"), ctx);
         ctx.addCleanup(input("Key.SIGN_OFF", null));
         return List.of(input("Entry", ref + ".code"), input("Entry", ref + ".password"));
+    }
+
+    /**
+     * phase8-contracts.md 7.5: {@code lending.signOn {staff: $x.code, password: $x.password}}, the password only when
+     * the slot declares a credential (it then comes from the credential join, a secret parameter), READY.
+     */
+    private static List<PlannedCall> signOnAny(Object args, CompileContext ctx) throws ScenarioException {
+        Map<String, Object> a = map("signOnAny", args, List.of("staff"));
+        Object staff = a.get("staff");
+        String name = staff instanceof String ref && ref.startsWith("$") && !ref.startsWith("$$")
+                ? ref.substring(1) : null;
+        if (name == null || !name.matches("[A-Za-z_][A-Za-z0-9_]*")) {
+            throw new ScenarioException("signOnAny: 'staff' must be a $slot reference, found " + staff);
+        }
+        CompileContext.SlotInfo slot = ctx.slot(name);
+        if (slot == null) {
+            throw new ScenarioException("signOnAny: 'staff' names $" + name + ", which is not a slot of the"
+                    + " scenario");
+        }
+        Map<String, Object> params = new LinkedHashMap<>();
+        params.put("staff", "$" + name + ".code");
+        if (slot.credential() != null) {
+            params.put("password", "$" + name + ".password");
+        }
+        ctx.addCleanup(input("Key.SIGN_OFF", null));
+        return List.of(new PlannedCall(SIGN_ON, params, Sync.READY, 0));
+    }
+
+    /** phase8-contracts.md 7.5: {@code lending.scanChecked {barcode, inducted}}, READY. */
+    private static List<PlannedCall> scanChecked(Object args) throws ScenarioException {
+        Map<String, Object> a = map("scanChecked", args, List.of("item", "barcode", "inducted"));
+        if (!(a.get("inducted") instanceof Boolean inducted)) {
+            throw new ScenarioException("scanChecked: 'inducted' must be true or false, found " + a.get("inducted"));
+        }
+        Map<String, Object> params = new LinkedHashMap<>();
+        params.put("barcode", barcodeOf("scanChecked", a));
+        params.put("inducted", inducted);
+        return List.of(new PlannedCall(SCAN_CHECKED, params, Sync.READY, 0));
+    }
+
+    /**
+     * phase8-contracts.md 7.6: {@code device.act {id: scanner, action: scan, args: {barcode, minRung?}}} with the
+     * scanner's ladder, READY; {@code minRung} forwarded from the step's own (or the first rung under
+     * {@code ui: {strict: true}}), so that the device refuses to act below it and echoes it.
+     */
+    private static List<PlannedCall> deviceScan(Object args, CompileContext ctx) throws ScenarioException {
+        Map<String, Object> a = map("deviceScan", args, List.of("item", "barcode"));
+        Map<String, Object> scan = new LinkedHashMap<>();
+        scan.put("barcode", barcodeOf("deviceScan", a));
+        String minRung = ctx.minRung() != null ? ctx.minRung()
+                : ctx.ui().strict() ? SCANNER_LADDER.get(0).name() : null;
+        if (minRung != null) {
+            scan.put("minRung", minRung);
+        }
+        Map<String, Object> params = new LinkedHashMap<>();
+        params.put("id", "scanner");
+        params.put("action", "scan");
+        params.put("args", scan);
+        return List.of(new PlannedCall("device.act", params, Sync.READY, 0).withRungs(SCANNER_LADDER));
+    }
+
+    /** {@code item} (a {@code $slot} or a mapping with {@code barcode}) or {@code barcode}, exactly one. */
+    private static String barcodeOf(String verb, Map<String, Object> a) throws ScenarioException {
+        if (a.containsKey("item") == a.containsKey("barcode")) {
+            throw new ScenarioException(verb + ": give exactly one of 'item' (a $slot reference or a mapping with"
+                    + " barcode) or 'barcode'");
+        }
+        if (a.containsKey("barcode")) {
+            return text(verb, "barcode", a.get("barcode"), true);
+        }
+        if (a.get("item") instanceof String ref && ref.startsWith("$") && !ref.startsWith("$$")) {
+            return ref + ".barcode";
+        }
+        if (a.get("item") instanceof Map<?, ?> m && m.containsKey("barcode")) {
+            return text(verb, "item.barcode", m.get("barcode"), true);
+        }
+        throw new ScenarioException(verb + ": 'item' must be a $slot reference or a mapping with barcode");
     }
 
     private static List<PlannedCall> authorise(Object args, CompileContext ctx) throws ScenarioException {

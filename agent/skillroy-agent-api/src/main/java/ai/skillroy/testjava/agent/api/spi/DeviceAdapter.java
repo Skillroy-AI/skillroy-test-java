@@ -18,6 +18,8 @@ package ai.skillroy.testjava.agent.api.spi;
 
 import ai.skillroy.testjava.protocol.JsonView;
 
+import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -47,4 +49,20 @@ public interface DeviceAdapter {
 
     /** Performs an action; returns a JSON-able result. Throw RpcException(INVALID_PARAMS) for an unknown action. */
     Object act(String action, JsonView args) throws Exception;
+
+    /**
+     * The rung ladder of an action, best first (phase8-contracts.md 7.6, amendment A85): for an action that has a
+     * physical path and a shortcut, the names of its rungs ({@code RungResult.PHYSICAL}: through the device's own
+     * path, a simulator or the application's driver code, where the real device hands data over;
+     * {@code RungResult.SEMANTIC}: a shortcut into the application), each matching {@code RungResult.NAME}. An action
+     * with a ladder reports the rung that acted in its result ({@code RungResult}'s keys), refuses to act below a
+     * {@code minRung} argument ({@code CAPABILITY_UNAVAILABLE} with {@code data {rung, minRung, capability?}}) and
+     * echoes {@code minRung} when it received one. {@code device.list} shows a non-empty ladder as
+     * {@code rungs: {<action>: [..]}}; one that throws is logged and read as empty.
+     *
+     * <p>The default is empty: the action has no ladder.
+     */
+    default List<String> rungs(String action) {
+        return Collections.emptyList();
+    }
 }

@@ -536,6 +536,10 @@ final class RunCommand implements Command {
                 text.append("\n  UI at failure:\n").append(Text.indent(ui.stripTrailing(), "    "));
             }
         }
+        // phase8-contracts.md 7.1: every warning the steps' calls reported, whatever the verdict.
+        for (String warning : result.warnings()) {
+            text.append("\n  warning: ").append(warning);
+        }
         if (dir != null && result.status() != Status.PASS && result.status() != Status.SKIPPED) {
             text.append("\n  evidence: ").append(dir);
         }
@@ -566,6 +570,7 @@ final class RunCommand implements Command {
         json.put("durationMs", result.duration().toMillis());
         json.put("skippedExpectations", result.skippedExpectations());
         json.put("degradedFidelity", result.degradedFidelity());
+        json.put("warnings", result.warnings());
         // phase3-contracts.md 9: the records the bind emitted, also when it failed; the skipped lines of a bind
         // that completed.
         json.put("crossChecks", new ArrayList<Object>(ran.crossChecks()));
@@ -583,6 +588,7 @@ final class RunCommand implements Command {
             s.put("status", step.status().name());
             s.put("message", step.message());
             s.put("degradedFidelity", step.degradedFidelity());
+            s.put("warnings", step.warnings());
             s.put("durationMs", step.duration().toMillis());
             steps.add(s);
         }

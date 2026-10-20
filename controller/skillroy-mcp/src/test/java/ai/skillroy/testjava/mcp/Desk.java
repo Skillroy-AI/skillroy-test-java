@@ -132,7 +132,10 @@ final class Desk {
             state.put("mode", "LOAN");
             state.put("last", String.valueOf(params.get("value")));
             agent.publish("input.requested", Map.of("state", "LOAN", "pin", SECRET));
-            return Map.of("accepted", true, "echo", "entered " + params.get("value") + " as " + SECRET);
+            // Phase 8 (phase8-contracts.md 7.5): a result that echoes the call's own secret parameter fails its
+            // step; the planted secret stays in the answer of every other input, for the masks to catch.
+            return SECRET.equals(params.get("value")) ? Map.of("accepted", true)
+                    : Map.of("accepted", true, "echo", "entered " + params.get("value") + " as " + SECRET);
         });
         agent.on("desk.lend", params -> Map.of("lent", params.get("item"), "params", new LinkedHashMap<>(params)));
         agent.value("desk.poke", Map.of("poked", true));

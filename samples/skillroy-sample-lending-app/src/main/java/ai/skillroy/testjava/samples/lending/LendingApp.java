@@ -56,6 +56,8 @@ public final class LendingApp {
     private final SlipPrinter printer;
     private final PromptService prompts;
     private final Engine engine;
+    /** The scanner driver, or null without one (Phase 8, 12.1). */
+    private final ScannerDriver scannerDriver;
     private volatile LendingFrame frame;
     private volatile DeskTools tools;
     private volatile LendingDbServer dbServer;
@@ -74,6 +76,7 @@ public final class LendingApp {
         this.printer = printer;
         this.prompts = prompts;
         this.engine = engine;
+        this.scannerDriver = options.scannerDriver() ? new ScannerDriver(engine.inbox()) : null;
         this.shutdownHook = new Thread(this::stopPlugins, "LendingShutdown");
     }
 
@@ -324,6 +327,14 @@ public final class LendingApp {
     /** @return the engine's inbox, where every input source posts */
     public Inbox inbox() {
         return engine.inbox();
+    }
+
+    /**
+     * @return the desk's barcode scanner driver, or null when the desk runs without one (the default; launched with
+     *     {@value LendingOptions#PROP_SCANNER_DRIVER}{@code =true} it has one; phase8-contracts.md 12.1)
+     */
+    public ScannerDriver scannerDriver() {
+        return scannerDriver;
     }
 
     /** @return the main window, or null when running without one */

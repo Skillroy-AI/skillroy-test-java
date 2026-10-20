@@ -302,6 +302,10 @@ final class ToolCalls {
         }
         json.put("events", events);
         json.put("degradedFidelity", outcome.degradedFidelity());
+        if (!outcome.warnings().isEmpty()) {
+            // phase8-contracts.md 7.1: only when non-empty, so that a reply without warnings is as before.
+            json.put("warnings", outcome.warnings());
+        }
         json.put("seqBefore", outcome.seqBefore());
         json.put("seqAfter", outcome.seqAfter());
         json.put("durationMs", outcome.duration().toMillis());
@@ -855,6 +859,10 @@ final class ToolCalls {
         json.put("durationMs", result.duration().toMillis());
         json.put("skippedExpectations", result.skippedExpectations());
         json.put("degradedFidelity", result.degradedFidelity());
+        if (!result.warnings().isEmpty()) {
+            // phase8-contracts.md 7.1: a client's own scenario may accept warnings; only when non-empty.
+            json.put("warnings", result.warnings());
+        }
         json.put("detail", result.detail());
         List<Object> steps = new ArrayList<>();
         for (StepResult step : result.steps()) {

@@ -20,6 +20,7 @@ import ai.skillroy.testjava.protocol.JsonView;
 
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 
 /**
  * One call of a primitive: its arguments plus the call metadata the dispatcher extracted from {@code params._meta}.
@@ -54,5 +55,28 @@ public interface Invocation {
      */
     default List<String> secretParams() {
         return Collections.emptyList();
+    }
+
+    /**
+     * Raises a warning on this call (phase8-contracts.md 7.1, amendment A84): the call did what it was asked, with a
+     * caveat a scenario step must accept ({@code accept: [CODE]}) or fail on. The warning travels in the result's
+     * envelope ({@code RpcResult.warnings}), never in the value. Use it for an input the application took with a
+     * caveat ({@code VALUE_COERCED} with the value it took, {@code VALUE_DROPPED}, {@code ANSWERED_NESTED}) or for a
+     * pack code {@code <packId>.<NAME>} the pack declares; an input refused before it was handed over is
+     * {@code INPUT_REJECTED}, never a warning (amendment A33).
+     *
+     * <p>The dispatcher's invocation checks the code's shape here ({@code CallWarning.BASE_CODE} or
+     * {@code CallWarning.PACK_CODE}: an {@link IllegalArgumentException} is a module bug, found in its tests), keeps
+     * the warnings in call order (thread-safe, never blocking), replaces the seventeenth and later by one
+     * {@code TOO_MANY_WARNINGS}, drops one raised after {@link Primitive#invoke} returned, redacts the values of the
+     * call's {@link #secretParams()} from the message and the data, and only then cuts the message at 500 characters
+     * and the data at 2048. Never put a secret value in either. The default (an invocation made outside the
+     * dispatcher) records nothing.
+     *
+     * @param code a base code or a pack code
+     * @param message one line for a person, or null
+     * @param data a small JSON-able object, or null
+     */
+    default void warn(String code, String message, Map<String, Object> data) {
     }
 }

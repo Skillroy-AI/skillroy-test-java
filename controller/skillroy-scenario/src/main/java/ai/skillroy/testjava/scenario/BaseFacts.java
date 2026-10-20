@@ -385,7 +385,9 @@ public final class BaseFacts {
 
     /**
      * {@code device.list}, then {@code device.state {id}} for every listed device in id order: a list of
-     * {@code {id, kind, actions, state}} sorted by id. An entry without an id is left out.
+     * {@code {id, kind, actions, state}} sorted by id, plus the entry's {@code rungs: {<action>: [..]}} when
+     * {@code device.list} lists a ladder for the device (phase8-contracts.md 7.6, ES: the root mirrors it, so that a
+     * scenario asserts {@code devices[id=scanner].rungs.scan[0]}). An entry without an id is left out.
      *
      * @throws Exception a JSON-RPC error of either primitive (the fact read fails), or a lost agent
      */
@@ -409,6 +411,9 @@ public final class BaseFacts {
             Object actions = e.getValue().get("actions");
             entry.put("actions", actions instanceof List<?> list ? list : List.of());
             entry.put("state", state);
+            if (e.getValue().get("rungs") instanceof Map<?, ?> rungs) {
+                entry.put("rungs", rungs);
+            }
             out.add(entry);
         }
         return out;

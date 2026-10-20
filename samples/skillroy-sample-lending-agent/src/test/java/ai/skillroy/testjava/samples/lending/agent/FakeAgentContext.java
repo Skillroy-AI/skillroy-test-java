@@ -145,12 +145,27 @@ final class FakeAgentContext implements AgentContext {
 
     /** Invokes a primitive the way the dispatcher does: under its thread policy, bounded by its timeout. */
     Object call(String name, Map<String, Object> args) throws Exception {
+        return call(name, args, java.util.Collections.<String>emptyList());
+    }
+
+    /**
+     * The warnings the primitives raised through {@code Invocation.warn}, in order, each {@code {code, message,
+     * data}} (phase8-contracts.md 7.1, ES); a test clears it.
+     */
+    final List<Map<String, Object>> warnings = java.util.Collections.synchronizedList(
+            new ArrayList<Map<String, Object>>());
+
+    /**
+     * {@link #call(String, Map)} with the parameters the caller marked secret ({@code Invocation.secretParams()},
+     * amendment A34; phase8-contracts.md 7.2, ES).
+     */
+    Object call(String name, Map<String, Object> args, final List<String> secretParams) throws Exception {
         final Primitive p = primitives.find(name);
         if (p == null) {
             throw new IllegalStateException("no primitive " + name);
         }
         final PrimitiveSpec spec = p.spec();
-        final Invocation inv = invocation(args, spec.timeoutMs());
+        final Invocation inv = invocation(args, spec.timeoutMs(), secretParams);
         Callable<Object> body = new Callable<Object>() {
             @Override
             public Object call() throws Exception {
@@ -178,8 +193,29 @@ final class FakeAgentContext implements AgentContext {
     }
 
     Invocation invocation(final Map<String, Object> args, final long remainingMs) {
+        return invocation(args, remainingMs, java.util.Collections.<String>emptyList());
+    }
+
+    Invocation invocation(final Map<String, Object> args, final long remainingMs, final List<String> secretParams) {
         final AgentContext ctx = this;
         return new Invocation() {
+            @Override
+            public List<String> secretParams() {
+                return secretParams;
+            }
+
+            @Override
+            public void warn(String code, String message, Map<String, Object> data) {
+                if (!ai.skillroy.testjava.protocol.CallWarning.isValidCode(code)) {
+                    throw new IllegalArgumentException("not a warning code: " + code);
+                }
+                Map<String, Object> warning = new LinkedHashMap<String, Object>();
+                warning.put("code", code);
+                warning.put("message", message);
+                warning.put("data", data);
+                warnings.add(warning);
+            }
+
             @Override
             public JsonView args() {
                 return JsonView.of(args);
@@ -369,11 +405,22 @@ final class FakeAgentContext implements AgentContext {
 
         @Override
         public synchronized long publish(String topic, String source, Map<String, Object> payload) {
+            return publish(topic, source, payload, null);
+        }
+
+        /** phase8-contracts.md 7.4 (ES): the given correlation id is stamped, as the core's bus does. */
+        @Override
+        public synchronized long publish(String topic, String source, Map<String, Object> payload,
+                                         String correlationId) {
             seq++;
-            events.add(new Event(seq, System.currentTimeMillis(), topic, source, null, null, payload));
+            events.add(new Event(seq, System.currentTimeMillis(), topic, source, correlationId, null, payload));
+            publishers.add(Thread.currentThread().getName());
             notifyAll();
             return seq;
         }
+
+        /** The name of the thread that published each event, in order (ES). */
+        final List<String> publishers = new ArrayList<String>();
 
         @Override
         public synchronized long lastSeq() {

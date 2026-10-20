@@ -758,6 +758,22 @@ refused in well under a second).
 package gains `WebInput`, the parameter, plan and result shapes that the agent's and the CDP path's `web.pointer` and
 `web.hitTest` share (D409), and the script library `web-lib.js` its version 2 with `hit` (A66).
 
+**A83, A86 the warning channel and the result conventions (Phase 8, built 2026-10-19, ES; P8 §7.1, §7.2, §7.5,
+§7.6).** `RpcResult` gains a seventh, optional member `warnings`: a list of `CallWarning` objects `{code, message?,
+data?}`, written **only when non-empty** (so every earlier result's JSON text is unchanged) and read leniently
+(absent is empty; a malformed element reads as `INVALID_WARNING`, more than sixteen end in one `TOO_MANY_WARNINGS
+{dropped: n}`, never an exception); the 6-argument constructor stays. `CallWarning` (immutable) carries a base code
+(`INPUT_QUEUED`, `VALUE_COERCED`, `VALUE_DROPPED`, `ANSWERED_NESTED`, `INVALID_WARNING`, `TOO_MANY_WARNINGS`, shape
+`[A-Z][A-Z0-9_]{0,63}`) or a pack code `<packId>.<NAME>`, a message of one printable line cut at 500 characters and
+data frozen and bounded at 2048 characters (`{truncated: true}` beyond, or when unrepresentable); the bounds apply
+after redaction. The result conventions are constants and readers in the same package: `InputResult` (`accepted`,
+`inputId` matching `[A-Za-z0-9._:-]{1,64}`, `consumed` `CONSUMED|QUEUED`, `taken`, `answeredBy`; the
+`INPUT_REJECTED` data key `reason` with the standard values `notAccepted`, `inboxFull`, `vetoed`, `not visible`),
+`RungResult` (`rung`, `requestedRung`, `fidelity`, `reason`, `minRung`; the names `PHYSICAL`, `SEMANTIC`) and
+`CompositeResult` (the nested `composite {branch, answered[]}` object, `problems` and `answeredSeqs`). A33 is
+unchanged: refused before it was handed over is an error, handed over with a caveat is a warning. The protocol stays
+0.2.
+
 ---
 
 ## 4. `skillroy-agent-api` (package `ai.skillroy.testjava.agent.api`, SPIs in `…agent.api.spi`)
@@ -1155,6 +1171,16 @@ group, and a thread created by host code that an SPI implementation calls inheri
 host infrastructure that starts threads on the calling thread; where that cannot be avoided, the call goes through
 `ThreadPolicy.APP` so that it runs on a host thread. The context class loader of every agent thread is the host
 loader (§1; after `agent.disable` no live thread has the agent loader as its context loader, proven in a child JVM).
+
+**A84, A85 (Phase 8, built 2026-10-19, ES; P8 §7.1, §7.4, §7.6).** Three default methods, so that every module built
+against 0.1.0 compiles unchanged: `Invocation.warn(code, message, data)` (the default records nothing; the
+dispatcher's invocation checks the code's shape, an `IllegalArgumentException` being a module bug, and keeps the
+warnings in call order: see §5), `EventBus.publish(topic, source, payload, correlationId)` (the default ignores the id
+and calls the three-argument form; the core stamps the given id, null meaning the thread's own, so that an
+application's late acknowledgement of an input carries the originating call's correlation id) and
+`DeviceAdapter.rungs(action)` (the default is empty: the action has no rung ladder; a ladder action reports the rung
+that acted by `RungResult`'s keys, refuses to act below a `minRung` argument with `CAPABILITY_UNAVAILABLE {rung,
+minRung, capability?}` and echoes `minRung`).
 
 ---
 
@@ -1625,6 +1651,19 @@ agent keeps its token and nonce and ignores the ones in the new options file, so
 stop requested on the event-dispatch thread or on a forbidden thread returns at once even while another thread's
 start or stop is in progress, and is carried out in the background afterwards; while a start is in progress every
 caller of `stop()` is treated that way (§2.3).
+
+(Phase 8, built 2026-10-19, ES; P8 §7.1, §7.4, §7.6, A84, A85.) **Warnings.** The dispatcher's invocation collects
+the warnings a primitive raises (`Invocation.warn`) in call order, thread-safe and never blocking; the seventeenth and
+later only count and become one `TOO_MANY_WARNINGS`; a warning raised after the primitive returned is dropped and
+logged once (by its code). When the call returns, the dispatcher cuts each raw message at 500 plus 4,096 characters,
+**redacts the values of the call's `_meta.secretParams`** from the message and the data with the routine of "Secret
+redaction" (A34), and only then builds each `CallWarning`, which cuts the message at 500 and bounds the data at
+2,048, so that no secret straddling the cut survives as a prefix; the warnings go into the result's `warnings`.
+**Events.** `RingEventBus.publish(topic, source, payload, correlationId)` stamps the given id (null: the thread's
+current one, as the three-argument form) and the thread's traceparent only when the event belongs to the thread's
+call; the payload passes the same mask pass and bounds. **Devices.** `device.list` adds `rungs: {<action>: [..]}` to a
+device's entry only when one of its actions has a non-empty ladder; a `rungs` that throws is logged and read as
+empty, so an older adapter's entry is byte-identical.
 
 ---
 
@@ -2361,6 +2400,15 @@ No top-level key is added: `inference` is a plan field the compiler writes (P5 �
 `row`, `clip`, `guard`, `via` and `at` belong to the Phase 7 verbs `pointer` and `expectImage`, never to `by`: P1 §6's
 locator grammar gains nothing.
 
+(Phase 8, built 2026-10-19, ES; P8 §7.3, A87.) **Step modifiers.** A step is a mapping with exactly one verb key and
+any of the reserved modifier keys `accept` (a list of 1 to 32 distinct warning codes the step accepts: base codes but
+`INVALID_WARNING`/`TOO_MANY_WARNINGS`, and the pack's own `warningCodes()`) and `minRung` (a rung name the step's
+ladder calls must reach): `- scan: {barcode: " 4005 "}` / `  accept: [VALUE_COERCED]`. Two verb keys, none, a
+malformed modifier or a modifier alone ("'accept' is a reserved modifier, not a verb") are load errors; an unknown
+code, `minRung` on a step none of whose calls declares a ladder, and either modifier on `expect`, `aiAct`,
+`aiExpect`, `captureFacts` or any verb that compiles to no call are compile errors. Under `ui: {strict: true}` a ladder
+call without a step `minRung` requires its first rung.
+
 ### 8.2 Plan
 
 `PlanCompiler.compile(Path yaml, DomainPack pack)` is deterministic: the same YAML and pack version produce a
@@ -2415,6 +2463,10 @@ acknowledgement at all: such a verb uses `EVENT` with the pack's ready topics in
 
 *(Phase 7, built 2026-10-10, VC; P7 §8.2.)* `plan.json` is version 6 (`images`, a `swing.pointer` call's `guard`, the
 `visual` and `image` checks, `inference: run`); the reader accepts 1 to 6.
+
+(Phase 8, built 2026-10-19, ES; P8 §7.3, §7.6, A87; the version is §8's, EX.) A call gains `accept` (the codes it
+accepts, sorted), `rungs` (`[{name, capability}]`, best first, 2 to 8 distinct names) and `minRung` (one of them),
+each written only when present and refused below plan version 7 ("call P: 'accept' needs a version 7 plan").
 
 ### 8.3 Domain pack SPI (package `ai.skillroy.testjava.scenario.pack`, discovered by `ServiceLoader<DomainPack>`)
 
@@ -2585,6 +2637,17 @@ describes the run's steps only (a session counts from its own start mark). `METH
 `expectImage` join them and stay reserved for a pack; `UI_VERBS` gains `pointer` (`fired: false` fails the step, A29).
 `DomainPack.screenLegend()` (default null) is the pack's legend of its icon-only controls for a model that looks at the
 screen; `DelegatingDomainPack` forwards it.
+
+(Phase 8, built 2026-10-19, ES; P8 §7.3, §7.4, §7.6, A87.) `SyncPolicy` gains a sixth component `ackByInputId` (the
+five-argument constructor keeps false; `withAckByInputId`): when true, `ACK` and `READY` are **correlated**: the
+executor reads the call's result `inputId` and waits for the ack topic with `match: {inputId: <it>}` (READY's ready
+wait stays "since `seq.before`"); a result without one is ERROR / ENVIRONMENT "the pack's acknowledgements are
+correlated by inputId; P returned none", nothing awaited. `PlannedCall` gains `accept`, `rungs` and `minRung`
+(`withAccept`, `withRungs`, `withMinRung`; every older constructor kept; a verb may pre-accept a code its primitive
+documents as harmless), `record Rung(name, capability)` is new, `CompileContext.minRung()` gives a verb the step's own
+modifier, and `DomainPack.warningCodes()` (default empty, forwarded by `DelegatingDomainPack`) declares the pack's
+codes `<packId>.<NAME>`, checked when the compiler is constructed. `accept` and `minRung` join the reserved verb
+names (`RESERVED_VERBS`).
 
 ### 8.4 Expectations
 
@@ -2860,6 +2923,24 @@ controller-side contributors' capabilities are merged into the matrix (`Capabili
 `agentHash` and `contributed`. An anchored `pointer` call's guard is compared before it is sent; failure files
 `failure/image-<label>-expected.png`, `-actual.png`, `-diff.png`; in `approve` a baseline candidate is written to
 `candidates/image-<label>.png`, approved at its step, and the bindings file is written a second time after the steps.
+
+(Phase 8, built 2026-10-19, ES; P8 §7.7, A88.) **The result checks of a call, in this order** after its `call` record:
+the secret-echo check (a result whose value or warnings hold the value of one of the call's secret parameters, by
+equality, or as a substring from `minLengthInText` characters on, is ERROR / ENVIRONMENT naming the parameter, never
+the value; bounded at 10,000 scalars and depth 32, beyond which it fails closed); the warnings (each a `warning
+{step, index, primitive, code, message?, data?, accepted, source}` record and a line in `StepResult.warnings` and
+`RunResult.warnings`; `INPUT_QUEUED` derived for a `consumed: QUEUED` result whose sync waits for no acknowledgement of
+that input; an unaccepted one is FAIL / ASSERTION "V: P reported CODE: message (a step accepts it with accept:
+[CODE])", an undeclared or never-acceptable code can never be accepted; a cleanup call's are logged only); the
+composite shape (a violation is ERROR / ENVIRONMENT); the rung checks of a ladder call (a `rung` record; missing,
+undeclared or below `minRung`, or a forwarded `minRung` without its echo, is FAIL / ASSERTION; a lower rung is one
+`fidelity` record, de-duplicated with the primitive's own `DEGRADED`); the fidelity note; the base verbs' checks; the
+sync (correlated under `ackByInputId`); the capture; the prompt check, in which a prompt event whose `seq` a composite
+lists inside the call's window is expected with `answeredBy` and a listed `seq` outside it is reported as
+`ignoredSeqs`. **At run start**, after `requires`, every call with `minRung` must reach a rung from the first to
+`minRung` with no capability or an `OK` one, else ERROR / PRECONDITION_FAILED naming the step, the rung and the
+capability's reason, before bind and any side effect, with one `rungs` record per such call. The JUnit XML's
+`<system-out>` lists `warning <line>` beside the `degraded` lines; `run-end` carries `warnings` when there are some.
 
 ### 8.6 `skillroy-junit` and `skillroy-cli`
 
@@ -3235,6 +3316,21 @@ worker thread is created on first use, so there is no moment at which the applic
 exist. A31: the pack's tests let the fake `await` throw `AgentRpcException`, and recovery stops at such an error
 instead of trying again.
 
+(Phase 8, built 2026-10-19, ES; P8 §7, §12.1, §12.2, A89.) `lending.input` gains the optional parameter `inputId`
+(echoed; else the module mints `lending-<n>`) and answers `{accepted, acked, ackMs, inputId, consumed:
+CONSUMED|QUEUED, taken?, answeredBy?}` with the warnings `VALUE_COERCED` (the desk trims the value; `taken`, never for
+a secret parameter), `VALUE_DROPPED` (an empty `Entry` or `Barcode`) and `ANSWERED_NESTED` (another prompt line took
+the input); its `INPUT_REJECTED` data carry `reason: notAccepted | inboxFull`. **`input.acked` is `{source,
+inputId}`, never the value: published by the call on its own thread when the engine took the input within the call,
+and otherwise by the engine listener from the engine thread, with the call's correlation id, when the engine takes it
+later** (a pending table of at most 256 inputs, cleared on detach; exactly one acknowledgement per input). New: the
+composites `lending.signOn {staff, password?}` (branches `auto`, `password`, `passwordRequired` with the pack code
+`lending.PASSWORD_REQUIRED`, `refused`) and `lending.scanChecked {barcode, inducted}` (branches `induction`, `plain`,
+`refused`), each with the capability of its name; the device `scanner` (action `scan {barcode, minRung?, inputId?}`,
+ladder `[PHYSICAL, SEMANTIC]`, `PHYSICAL` through the desk's scanner driver of `-Dlending.scannerDriver=true`) with
+the capability `lending.scanner.physical` (`OK` with the driver, else `UNAVAILABLE("scanner driver not enabled: launch
+the desk with -Dlending.scannerDriver=true")`). The module's version is written in step R.
+
 ### 9.3 Domain pack and scenarios
 
 `samples/skillroy-sample-lending-pack` (`DomainPack` `lending`, version `0.1.0`; **(Phase 2, built 2026-10-02)**
@@ -3295,6 +3391,16 @@ fall-back relied on the focus not returning after a dialog, which depends on the
 `PlansUpToDateTest` accepts the `swing.settle` call (sync `NONE`) that follows an awaited UI call, and checks the
 exact click arguments of the UI scenario (three COMPONENT clicks with window activation and the ACTION fall-back,
 seven awaited UI steps, one explicit wait) and of each new negative scenario.
+
+(Phase 8, built 2026-10-19, ES; P8 §7, §12.3, §12.4.) The pack's `SyncPolicy` correlates acknowledgements by input
+(`ackByInputId`), its `warningCodes()` is `{lending.PASSWORD_REQUIRED}`, and it gains the verbs `signOnAny: {staff}`
+(`lending.signOn {staff: $x.code, password: $x.password}`, the password only when the slot declares a credential,
+READY, with `signOn`'s cleanup), `scanChecked: {item|barcode, inducted}` (`lending.scanChecked`, READY) and
+`deviceScan: {item|barcode}` (`device.act {id: scanner, action: scan, args: {barcode, minRung?}}` with the ladder
+`[PHYSICAL (lending.scanner.physical), SEMANTIC]`, READY; the step's `minRung`, or PHYSICAL under `strict`, forwarded).
+"Use an assistant without `auto_sign_on`" still holds for `signOn`; `signOnAny` takes either. The Phase 8 scenarios
+`semantic-input-warnings`, `sign-on-any`, `scan-checked`, `device-scan` and `scanner/device-scan-physical` and four
+negatives show the conventions (P8 §12.4).
 
 ---
 
@@ -3425,3 +3531,7 @@ timestamp happened to equal the password (`"t":1111`), which is why check 18 sea
 (Phase 4, built 2026-10-07; P4 §12.2: this section is unchanged, except that the load-mode checks now find the module
 `web` installed in every agent beside `swing`, `data` and `lending`; the acceptance of the embedded web views,
 `WebHostEndToEndIT` against the web host sample under the Maven profile `jcef`, is P4 §12.2.)
+
+(Phase 8, built 2026-10-19, ES; P8 §13.2 items 26-31.) The semantic-input items of Phase 8 run in every load mode of
+this section on both target Javas (`LoadModeChecks` slots 173 to 175) and on a scanner leg launched with the desk's
+scanner driver (`ScannerChecks`).

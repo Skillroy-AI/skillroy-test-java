@@ -171,6 +171,10 @@ takes precedence, as for every base root (P1 §8.3). Reading the root costs one 
 that does not name it pays nothing. `device.list` exists on every agent, so the root needs no guard; a device the
 target lacks is an empty filter match and fails the expectation as any other.
 
+*(Phase 8, built 2026-10-19, ES; P8 §7.6, A85.)* A device whose actions have a rung ladder carries `rungs: {<action>:
+[..]}` in `device.list`, and the root mirrors it: `"devices[id=scanner].rungs.scan[0]": PHYSICAL`. A device without a
+ladder has no `rungs` key, so its entry is as before.
+
 ### 3.5 Captures from print events
 
 Nothing new in the grammar: the Phase 2 `capture` (P2 §3.4) on `waitFor` applies to a print event. The pattern,

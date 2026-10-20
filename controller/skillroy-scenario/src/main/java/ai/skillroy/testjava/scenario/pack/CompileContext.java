@@ -82,6 +82,17 @@ public interface CompileContext {
     }
 
     /**
+     * The step's own {@code minRung} modifier (phase8-contracts.md 7.3, 7.6), or null when the step has none. The
+     * compiler sets it on every call of the step that declares a ladder ({@link PlannedCall#withRungs}); a verb may
+     * also forward it as its primitive's {@code minRung} parameter, so that the primitive refuses to act below it
+     * (and echoes it). Under {@code ui: {strict: true}} without a step {@code minRung} a ladder verb forwards its own
+     * first rung ({@link #ui()}).
+     */
+    default String minRung() {
+        return null;
+    }
+
+    /**
      * What the scenario declares for a slot, or null when there is no such slot (phase2-contracts.md 6.1). Never a
      * value. Lets a verb reject, at compile time, an argument whose slot lacks what the verb needs (a sign-on whose
      * slot has no {@code credential}).
