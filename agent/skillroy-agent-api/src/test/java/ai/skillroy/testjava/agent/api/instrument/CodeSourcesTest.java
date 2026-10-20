@@ -68,6 +68,43 @@ class CodeSourcesTest {
         assertEquals("test-classes", ours, "the test classes come from a directory, named by its last segment only");
     }
 
+    /**
+     * Phase 8 security fix S178 (security review L7-F1, L7-S1): a Windows native path keeps its backslashes in a
+     * {@code jar:file:C:\…!/} location (Java 8's {@code URLClassPath} defines the class with that URL as written) and
+     * in a {@code file} location made with the multi-argument constructor, and a whole path percent-encoded
+     * ({@code %2F} on any OS, {@code %5C} from a Windows {@code URI}) is cut only after it is decoded: each is named by
+     * the jar's file name, never by its directories. All of these construct on any OS.
+     */
+    @Test
+    void aWindowsPathOrAnEncodedSeparatorLeavesNoDirectoryInTheName() throws Exception {
+        URL jarNative = new URL("jar:file:C:\\Users\\x\\AppData\\Local\\Desk\\plugins\\desk-plugin-2.1.jar!/");
+        assertEquals("desk-plugin-2.1.jar", CodeSources.name(jarNative.getProtocol(), jarNative.getHost(),
+                jarNative.getPath()));
+        URL jarThreeArgs = new URL("jar", "", "file:C:\\Users\\x\\plugins\\desk.jar!/");
+        assertEquals("desk.jar", CodeSources.name(jarThreeArgs.getProtocol(), jarThreeArgs.getHost(),
+                jarThreeArgs.getPath()));
+        URL fileThreeArgs = new URL("file", "", "C:\\Users\\x\\lib\\desk.jar");
+        assertEquals("desk.jar", CodeSources.name(fileThreeArgs.getProtocol(), fileThreeArgs.getHost(),
+                fileThreeArgs.getPath()));
+        URL encodedSlash = new URL("file:%2Fhome%2Fx%2Flib%2Fdesk.jar");
+        assertEquals("desk.jar", CodeSources.name(encodedSlash.getProtocol(), encodedSlash.getHost(),
+                encodedSlash.getPath()));
+        URL encodedBackslash = new URL("file:/C:%5CUsers%5Cx%5Clib%5Cdesk.jar");
+        assertEquals("desk.jar", CodeSources.name(encodedBackslash.getProtocol(), encodedBackslash.getHost(),
+                encodedBackslash.getPath()));
+        assertEquals("plugins", CodeSources.name("file", "", "C:\\Users\\x\\plugins\\"), "a directory: its last"
+                + " segment, as for '/'");
+        assertEquals("lib.jar", CodeSources.name("file", "", "%2Fhome%2Fx%2Flib.jar%2F"));
+        assertEquals("b.jar", CodeSources.name("file", "", "/opt/a\\b.jar"), "a POSIX name with a backslash: the"
+                + " text after it (P8 6.2)");
+        assertEquals("app.jar!/BOOT-INF/lib/lib.jar", CodeSources.name("jar", "",
+                "file:C:\\opt\\app.jar!/BOOT-INF/lib/lib.jar!/"), "entries inside the archive are kept whole");
+
+        ProtectionDomain domain = new ProtectionDomain(new CodeSource(jarNative, (Certificate[]) null), null);
+        Class<?> defined = new TestLoader().define(Victim.class.getName(), bytesOf(Victim.class), domain);
+        assertEquals("desk-plugin-2.1.jar", CodeSources.of(defined), "a defined class with that location");
+    }
+
     @Test
     void controlCharactersBecomeSpacesAfterDecoding() {
         assertEquals("a b.jar", CodeSources.name("file", "", "/x/a%0Ab.jar"));

@@ -67,6 +67,10 @@ class HooksTest {
     /** What the fake engine holds: the installed catalogue {id, hash}, or null. */
     private Map<String, Object> installed;
     private List<String> stubs = List.of();
+    /** The catalogue deny the fake engine holds (add-only), as its hook.health reports it. */
+    private final List<String> heldDeny = new ArrayList<>();
+    /** True for a 0.1.0 agent: its hook.health has no top-level deny, and its install ignores catalogue.deny. */
+    private boolean oldAgent;
 
     static HookEntry entry(String id, String className, String fallback) {
         return new HookEntry(id, HookMode.CAPTURE, true, new HookTarget(className, "limit",
@@ -98,11 +102,17 @@ class HooksTest {
             if (installed != null) {
                 answer.put("catalogue", installed);
             }
+            if (!oldAgent) {
+                // phase8-contracts.md 6.6: always present on a new agent
+                answer.put("deny", Map.of("catalogue", List.copyOf(heldDeny), "from", List.of(), "option", List.of(),
+                        "modules", 0L));
+            }
             return answer;
         });
         agent.on("hook.install", params -> {
             installs.add(params);
             Map<?, ?> catalogue = (Map<?, ?>) params.get("catalogue");
+            hold(catalogue);
             installed = Map.of("id", catalogue.get("id"), "hash", catalogue.get("hash"), "installedAt", 1L);
             agent.capability("hook.toy.applied", CapabilityState.OK, null);
             return Map.of("catalogue", Map.of("id", catalogue.get("id"), "hash", catalogue.get("hash"),
@@ -338,11 +348,28 @@ class HooksTest {
         return HookCatalogue.builder(base).deny(List.of(patterns)).build();
     }
 
-    /** The fake engine echoes the deny it was sent (a Phase 8 agent), or nothing at all (a 0.1.0 agent). */
+    /** A new agent holds the deny it was sent (add-only); a 0.1.0 agent ignores it. */
+    private void hold(Map<?, ?> catalogue) {
+        if (!oldAgent && catalogue.get("deny") instanceof List<?> deny) {
+            for (Object pattern : deny) {
+                if (!heldDeny.contains(String.valueOf(pattern))) {
+                    heldDeny.add(String.valueOf(pattern));
+                }
+            }
+            heldDeny.sort(null);
+        }
+    }
+
+    /**
+     * The fake engine echoes the deny it was sent (a Phase 8 agent), or nothing at all (a 0.1.0 agent, whose
+     * {@code hook.health} has no top-level {@code deny} either).
+     */
     private void echoingEngine(boolean echo) {
+        oldAgent = !echo;
         agent.on("hook.install", params -> {
             installs.add(params);
             Map<?, ?> catalogue = (Map<?, ?>) params.get("catalogue");
+            hold(catalogue);
             List<?> specs = (List<?>) params.get("specs");
             if (!specs.isEmpty()) {
                 installed = Map.of("id", catalogue.get("id"), "hash", catalogue.get("hash"), "installedAt", 1L);
@@ -389,7 +416,9 @@ class HooksTest {
         assertEquals(List.of(DENIED, "org.example.toy.Clock"), old.detail().get("missing"));
         assertNull(old.detail().get("answered"));
         assertEquals(false, old.record().get("ok"));
-        // a partial echo is a refusal too
+        // a partial echo is a refusal too (a new agent: its hook.health carries the deny, so the install is sent and
+        // its answer checked)
+        oldAgent = false;
         agent.on("hook.install", params -> {
             installs.add(params);
             return Map.of("catalogue", Map.of("id", "toy", "hash", "h", "deny", List.of(DENIED)), "hooks", List.of(),
@@ -400,6 +429,7 @@ class HooksTest {
         assertEquals(List.of("org.example.toy.Clock"), partial.detail().get("missing"));
         assertEquals(List.of(DENIED), partial.detail().get("answered"));
         // the alreadyInstalled path: step 0's hook.health must carry deny.catalogue
+        oldAgent = true;
         installed = Map.of("id", "toy", "hash", pack.hooks.hash(), "installedAt", 1L);
         HookInstaller.Refused already = assertThrows(HookInstaller.Refused.class, () -> install(HooksMode.AUTO,
                 true));
@@ -413,6 +443,40 @@ class HooksTest {
         HookInstaller.Result ok = install(HooksMode.AUTO, true);
         assertTrue(ok.alreadyInstalled());
         assertEquals(List.of(DENIED, "org.example.toy.Clock"), ok.record().get("deny"));
+    }
+
+    /**
+     * Fix wave of the Phase 8 review (L2-F4): an agent whose step-0 {@code hook.health} has no top-level {@code deny}
+     * (a 0.1.0 agent, which ignores {@code catalogue.deny}) is refused before {@code hook.install}, so it never
+     * retransforms the classes the pack denies; the same text, detail and record as the answer's echo check, on a
+     * first install and on a replace. A catalogue without a deny still installs on such an agent. Before the fix the
+     * install was sent and the refusal came after it.
+     */
+    @Test
+    void anAgentWhoseHealthHasNoDenyIsRefusedBeforeTheInstall() throws Exception {
+        oldAgent = true;
+        pack.hooks = denying(catalogue("toy", 1), DENIED);
+        HookInstaller.Refused first = assertThrows(HookInstaller.Refused.class, () -> install(HooksMode.AUTO, true));
+        assertEquals(FailureKind.ENVIRONMENT, first.kind());
+        assertEquals("the agent does not honour the catalogue's deny list (" + DENIED + "); upgrade the agent",
+                first.getMessage());
+        assertEquals(List.of(DENIED), first.detail().get("missing"));
+        assertTrue(first.detail().containsKey("answered") && first.detail().get("answered") == null,
+                String.valueOf(first.detail()));
+        assertEquals(false, first.record().get("ok"));
+        assertEquals(Map.of("id", "toy", "version", 1L, "hash", pack.hooks.hash()), first.record().get("catalogue"));
+        assertEquals(List.of(DENIED), first.record().get("deny"));
+        assertTrue(agent.callsTo("hook.install").isEmpty(), "nothing sent, nothing retransformed");
+        assertTrue(installs.isEmpty());
+
+        pack.hooks = catalogue("toy", 1);
+        assertFalse(install(HooksMode.AUTO, true).skipped(), "no deny: the old agent installs as before");
+        assertEquals(1, installs.size());
+        pack.hooks = denying(catalogue("toy", 2), DENIED);
+        HookInstaller.Refused replace = assertThrows(HookInstaller.Refused.class, () -> install(HooksMode.AUTO,
+                true));
+        assertEquals(List.of(DENIED), replace.detail().get("missing"));
+        assertEquals(1, installs.size(), "no replace sent either");
     }
 
     @Test

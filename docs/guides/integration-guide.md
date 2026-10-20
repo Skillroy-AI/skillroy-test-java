@@ -837,7 +837,12 @@ its `seq.before`, so waiting "since `seq.before`" never misses a consequence of 
 the publishing thread and must not block. (Phase 8, P8 §5.1) Every payload is masked before it is stored: a value under a
 secret-looking key becomes `<redacted>`, and the registered `MaskPolicy`s see every scalar as `event:<topic>`; mask
 personal values before you publish all the same, and prove it with `skillroy-junit`'s `OutputScan` (`Scope.EVENTS`)
-over a run.
+over a run. *(Phase 8 security fix S152.)* A planted value that is not digits only is found wherever a non-letter,
+non-digit bounds it (so `{name=Smith}`, `(Smith)` and a name with a space inside a sentence are found); a digits-only
+value is found only as a whole string or a separated token, so plant a word or a name, not a number, when the output
+may hold it in Java's map form or `key=value` text. `Scope.EVENTS` reads the `events`-root and `hooks`-root
+expectations, checks and observations, `warning` and `run-end` records besides the call, prompt, capture and step
+records.
 
 *(Phase 8, built 2026-10-19, ES; P8 §7.4.)* An event that belongs to an earlier call but is published later, from the
 application's own callback (a late acknowledgement of an input), uses `publish(topic, source, payload, correlationId)`
@@ -1318,7 +1323,12 @@ deny: [<your package>.Inbox, <your package>.licensed.**]               # class p
 | `file:/opt/it-target/desk-app.jar` (an unversioned IT copy) | `desk-app.jar` |
 | `file:/build/desk/target/classes/` (a class directory) | `classes` |
 | `jar:file:/opt/app.jar!/BOOT-INF/lib/lib.jar!/` (a nested jar) | `app.jar!/BOOT-INF/lib/lib.jar` |
+| `jar:file:C:\Users\x\plugins\desk-plugin.jar!/` (a Windows plugin loader's URL, Phase 8 security fix S178) | `desk-plugin.jar` |
 | the bootstrap loader, a generated proxy | `(none)` |
+
+The name is percent-decoded before it is cut, and both `/` and `\` end a directory, so a Windows native path or an
+encoded separator never leaves a directory in it (a POSIX jar whose file name holds a backslash is named by the text
+after it).
 
 A qualifier is a filter, like `loader`: a copy of the name from another jar is left alone, not a failure of the hook
 (`class from another code source: <names>` when no copy matches). `deny:` takes class patterns (`a.b.C` with its nested

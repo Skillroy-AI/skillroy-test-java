@@ -1346,9 +1346,11 @@ primitive, or one of the named `SCRIPT_PRIMITIVES` of an older agent's catalogue
 `readOnlyHint: true`; `web_wait_flag` is offered by a read-only server only with `--allow-evaluate`, D98 unchanged)**, `destructiveHint` from `destructive`, `idempotentHint` false, `openWorldHint` false; its input
 schema is the descriptor's `paramsSchema` (less `_meta`) or the verb's `argsSchema`; its description is the
 descriptor's, prefixed with the thread and timeout. Results are text content: the call's `value` as pretty JSON,
-masked, cut at 25000 characters with `[truncated: N more]` (control-channel F19); a result that holds an image (a
-capture, a bitmap) is written to `<out>/mcp/<id>.png` and returned as a resource link (Phase 6 security fix S58, A57,
-built 2026-10-09, SR; D159: a link to the PNG only under `images: true`, else to a text resource naming the file, §9.4).
+masked, cut at 25000 characters with `[truncated: N more]` (control-channel F19; `skillroy_catalogue` is never
+cut: it keeps within the bound by withholding schemas, fix wave of the Phase 8 review, FD, P8 §9.1.4); a result that
+holds an image (a capture, a bitmap) is written to `<out>/mcp/<id>.png` and returned as a resource link (Phase 6
+security fix S58, A57, built 2026-10-09, SR; D159: a link to the PNG only under `images: true`, else to a text
+resource naming the file, §9.4).
 (Phase 6 security fix, pass 2, P2-L6-F3, built 2026-10-09, SC) This holds for **any tool's result that holds an image,
 at any depth**, not a step's value only and not only to eight levels: a fact (`skillroy_facts`), an event's payload
 (`skillroy_events`), a resolution, a check's `actual`, an observed value, a step's `detail` and events, a run's summary

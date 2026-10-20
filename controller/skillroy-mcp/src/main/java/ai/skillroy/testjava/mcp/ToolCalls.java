@@ -371,13 +371,47 @@ final class ToolCalls {
 
     // ------------------------------------------------------------------------------------------------ workflow
 
-    /** {@code skillroy_catalogue}: verbs with schemas, query kinds with their arguments, oracles, capabilities. */
+    /** Where a client reads a verb's schema the catalogue withheld: the scenario schema's resource (never cut). */
+    static final String SCHEMA_RESOURCE = SkillroyMcpServer.SCHEME + "schema/scenario";
+    /** A withheld verb's {@code note}. */
+    static final String SCHEMA_WITHHELD = "argsSchema withheld: answer bound; see " + SCHEMA_RESOURCE;
+
+    /**
+     * {@code skillroy_catalogue}: the pack, the capability matrix and the data-query sources first (bounded and the
+     * part a client needs to write {@code requires:} and guards), then the verbs with schemas, the renamed primitives,
+     * the withheld verbs, the query kinds with their arguments and the oracles.
+     *
+     * <p>Fix wave (Phase 8 review, FD, L1-F2): the answer stays valid JSON within {@link Masking#MAX_RESULT}. When
+     * the masked answer is longer, the verbs' {@code argsSchema} are withheld from the last verb back (each
+     * {@code null} with {@link #SCHEMA_WITHHELD} as its {@code note}), then the queries' {@code args} and the oracles'
+     * {@code input}, until it fits, and {@code withheld} says how many and why; if that is not enough, the pack, the
+     * matrix and the sources alone; if even they do not fit, the pack with the note. A cut answer is never sent.
+     */
     Reply catalogue() {
         DomainPack pack = pack();
         Map<String, Object> json = new LinkedHashMap<>();
         json.put("pack", Map.of("id", pack.id(), "version", String.valueOf(pack.version())));
         json.put("mutating", server.mutating());
-        List<Object> verbs = new ArrayList<>();
+        Map<String, Object> caps = new LinkedHashMap<>();
+        // phase7-contracts.md 9.4, 8.5: the session's merged matrix, each entry with its source (agent or
+        // controller:<contributor>).
+        ai.skillroy.testjava.controller.CapabilityMatrix merged = session().capabilities();
+        for (Map.Entry<String, Capability> e : merged.all().entrySet()) {
+            Map<String, Object> entry = new LinkedHashMap<>(e.getValue().toJson());
+            entry.put("source", merged.source(e.getKey()));
+            caps.put(e.getKey(), entry);
+        }
+        json.put("capabilities", caps);
+        List<Object> sources = new ArrayList<>();
+        for (SqlAllowList list : server.dataQueryLists().values()) {
+            Map<String, Object> s = new LinkedHashMap<>();
+            s.put("source", list.source());
+            s.put("dialect", list.dialect().name());
+            s.put("tables", list.tables().stream().map(SqlAllowList.AllowedTable::name).toList());
+            sources.add(s);
+        }
+        json.put("dataQuerySources", sources);
+        List<Map<String, Object>> verbs = new ArrayList<>();
         StepLibrary steps = pack.steps();
         for (String verb : new TreeSet<>(steps.verbs())) {
             Map<String, Object> v = new LinkedHashMap<>();
@@ -411,7 +445,7 @@ final class ToolCalls {
         } catch (RuntimeException e) {
             catalogue = ResolutionCatalogue.EMPTY;
         }
-        List<Object> queries = new ArrayList<>();
+        List<Map<String, Object>> queries = new ArrayList<>();
         for (String kind : new TreeSet<>(catalogue.kinds())) {
             QueryType<?, ?> type = catalogue.query(kind);
             Map<String, Object> q = new LinkedHashMap<>();
@@ -424,7 +458,7 @@ final class ToolCalls {
             queries.add(q);
         }
         json.put("queries", queries);
-        List<Object> oracles = new ArrayList<>();
+        List<Map<String, Object>> oracles = new ArrayList<>();
         for (String fn : new TreeSet<>(catalogue.oracleFns())) {
             Oracle<?, ?> oracle = catalogue.oracle(fn);
             Map<String, Object> o = new LinkedHashMap<>();
@@ -438,26 +472,78 @@ final class ToolCalls {
             oracles.add(o);
         }
         json.put("oracles", oracles);
-        Map<String, Object> caps = new LinkedHashMap<>();
-        // phase7-contracts.md 9.4, 8.5: the session's merged matrix, each entry with its source (agent or
-        // controller:<contributor>).
-        ai.skillroy.testjava.controller.CapabilityMatrix merged = session().capabilities();
-        for (Map.Entry<String, Capability> e : merged.all().entrySet()) {
-            Map<String, Object> entry = new LinkedHashMap<>(e.getValue().toJson());
-            entry.put("source", merged.source(e.getKey()));
-            caps.put(e.getKey(), entry);
+        return bounded(json, verbs, queries, oracles);
+    }
+
+    /**
+     * The catalogue's answer within {@link Masking#MAX_RESULT} as valid JSON (L1-F2): the schemas withheld from the
+     * end, verbs first, until the masked text fits; the pack and a note when nothing else does.
+     */
+    private Reply bounded(Map<String, Object> json, List<Map<String, Object>> verbs,
+                          List<Map<String, Object>> queries, List<Map<String, Object>> oracles) {
+        Reply reply = reply(json, false, List.of());
+        if (fits(reply)) {
+            return reply;
         }
-        json.put("capabilities", caps);
-        List<Object> sources = new ArrayList<>();
-        for (SqlAllowList list : server.dataQueryLists().values()) {
-            Map<String, Object> s = new LinkedHashMap<>();
-            s.put("source", list.source());
-            s.put("dialect", list.dialect().name());
-            s.put("tables", list.tables().stream().map(SqlAllowList.AllowedTable::name).toList());
-            sources.add(s);
+        int schemas = 0;
+        Map<String, Object> note = new LinkedHashMap<>();
+        note.put("reason", "the full catalogue is longer than the answer bound of " + Masking.MAX_RESULT
+                + " characters; each withheld schema is in " + SCHEMA_RESOURCE);
+        Map<String, Object> answer = new LinkedHashMap<>();
+        json.forEach((key, value) -> {
+            answer.put(key, value);
+            if (key.equals("mutating")) {
+                answer.put("withheld", note);
+            }
+        });
+        List<Map<String, Object>> holders = new ArrayList<>();
+        for (int i = verbs.size() - 1; i >= 0; i--) {
+            holders.add(verbs.get(i));
         }
-        json.put("dataQuerySources", sources);
-        return reply(json, false, List.of());
+        for (int i = queries.size() - 1; i >= 0; i--) {
+            holders.add(queries.get(i));
+        }
+        for (int i = oracles.size() - 1; i >= 0; i--) {
+            holders.add(oracles.get(i));
+        }
+        for (Map<String, Object> holder : holders) {
+            String key = holder.containsKey("verb") ? "argsSchema" : holder.containsKey("kind") ? "args" : "input";
+            if (holder.get(key) == null) {
+                continue;
+            }
+            holder.put(key, null);
+            holder.put("note", key.equals("argsSchema") ? SCHEMA_WITHHELD : key + " withheld: answer bound");
+            schemas++;
+            note.put("schemas", schemas);
+            reply = reply(answer, false, List.of());
+            if (fits(reply)) {
+                return reply;
+            }
+        }
+        Map<String, Object> matrix = new LinkedHashMap<>();
+        matrix.put("pack", json.get("pack"));
+        matrix.put("mutating", json.get("mutating"));
+        matrix.put("withheld", Map.of("reason", "the catalogue is longer than the answer bound of "
+                + Masking.MAX_RESULT + " characters even without its schemas; the verbs, queries and oracles are"
+                + " withheld: read the verbs in " + SCHEMA_RESOURCE));
+        matrix.put("capabilities", json.get("capabilities"));
+        matrix.put("dataQuerySources", json.get("dataQuerySources"));
+        reply = reply(matrix, false, List.of());
+        if (fits(reply)) {
+            return reply;
+        }
+        Map<String, Object> minimal = new LinkedHashMap<>();
+        minimal.put("pack", json.get("pack"));
+        minimal.put("mutating", json.get("mutating"));
+        minimal.put("withheld", Map.of("reason", "the catalogue is longer than the answer bound of "
+                + Masking.MAX_RESULT + " characters even without its schemas; read the capability matrix with"
+                + " skillroy_facts {root: caps} and the verbs in " + SCHEMA_RESOURCE));
+        return reply(minimal, false, List.of());
+    }
+
+    /** True when the answer was not cut ({@link Masking#cut} appends its marker past the bound). */
+    private static boolean fits(Reply reply) {
+        return reply.text() == null || reply.text().length() <= Masking.MAX_RESULT;
     }
 
     /**

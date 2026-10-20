@@ -55,19 +55,28 @@ import java.util.stream.Stream;
  *       tag before a closing tag) whose content is a JSON object or array, as a prompt part, a recording and a log hold
  *       the target's state and events, is parsed, and its strings are read the same way, so that a number in it is
  *       not taken for a planted value;</li>
- *   <li>what remains is split on whitespace, quotes (double, single, backtick), commas, colons and backslashes, and a
- *       planted value is found when it is the whole string or one of the tokens (a token's trailing full stops
- *       dropped: a sentence may end with it). So {@code "1111",} inside JSON text and {@code \"1111\"} inside escaped
- *       JSON text are found, while {@code durationMs=1029} is one token.</li>
+ *   <li>what remains is searched. A planted value of digits only is found when it is the whole string or one of the
+ *       tokens of a split on whitespace, quotes (double, single, backtick), commas, colons and backslashes (a token's
+ *       trailing full stops dropped: a sentence may end with it): so {@code "1111",} inside JSON text and
+ *       {@code \"1111\"} inside escaped JSON text are found, while {@code durationMs=1029} is one token. Any other
+ *       planted value is found wherever it occurs bounded by the text's edge or a character that is not a letter or a
+ *       digit on each side where the value itself begins or ends with one, runs of whitespace counting as one space
+ *       in the text and in the value (Phase 8 security fix, S152): so {@code name=Smith}, {@code (Smith)},
+ *       {@code <b>Smith</b>}, {@code {name=Smith, code=100}} and {@code Signed on: Alice Archer} are found, and
+ *       {@code Smithson} is not.</li>
  * </ol>
- * Nesting is read to a bounded depth ({@link #MAX_DEPTH}); deeper text is split as it stands.
+ * Nesting is read to a bounded depth ({@link #MAX_DEPTH}); deeper text is searched as it stands. An XML file's
+ * attribute values and text have the five predefined entities and numeric character references decoded first.
  *
  * <p>The directory form takes a {@link Scope}. {@link Scope#ALL} reads every regular file under the directory (names
  * included). {@link Scope#EVENTS} reads only what carries event payloads: the records of type {@code call},
- * {@code prompt}, {@code capture} and {@code step} of a {@code run.jsonl} and of a session's {@code journal.jsonl}
- * (a line that does not parse is read whole), every {@code failure/events.json} and every {@code *.xml} (JUnit
- * reports); the scope exists because a personal value in an event may legitimately be on screen too (a status line in
- * a snapshot), so a whole-run scan would find the snapshot, not the leak.
+ * {@code prompt}, {@code capture}, {@code step}, {@code warning} and {@code run-end} of a {@code run.jsonl} and of a
+ * session's {@code journal.jsonl}, and the {@code expect}, {@code check} and {@code observe} records whose
+ * {@code path} starts at the fact root {@code events} or {@code hooks} (Phase 8 security fix, S152: the records the
+ * {@code events} root's expectations and checks write; a {@code ui} or {@code app} one stays out), a line that does
+ * not parse read whole; every {@code failure/events.json} and every {@code *.xml} (JUnit reports). The scope exists
+ * because a personal value in an event may legitimately be on screen too (a status line in a snapshot), so a
+ * whole-run scan would find the snapshot, not the leak.
  *
  * <p>Stateless; safe from any thread.
  */
@@ -79,7 +88,9 @@ public final class OutputScan {
         ALL,
         /**
          * The event-carrying records and files: {@code run.jsonl} and {@code journal.jsonl} records of type
-         * {@code call}, {@code prompt}, {@code capture} or {@code step}; {@code failure/events.json}; {@code *.xml}.
+         * {@code call}, {@code prompt}, {@code capture}, {@code step}, {@code warning} or {@code run-end}, and of type
+         * {@code expect}, {@code check} or {@code observe} on a path rooted at {@code events} or {@code hooks};
+         * {@code failure/events.json}; {@code *.xml}.
          */
         EVENTS
     }
@@ -108,8 +119,22 @@ public final class OutputScan {
     private static final Pattern XML_ATTRIBUTE = Pattern.compile("=\"([^\"]*)\"");
     /** The characters of context a hit shows on each side. */
     private static final int CONTEXT = 40;
-    /** The record types {@link Scope#EVENTS} reads in a record file. */
-    private static final Set<String> EVENT_RECORDS = Set.of("call", "prompt", "capture", "step");
+    /** The record types {@link Scope#EVENTS} reads in a record file, whatever they hold. */
+    private static final Set<String> EVENT_RECORDS = Set.of("call", "prompt", "capture", "step", "warning",
+            "run-end");
+    /** The record types {@link Scope#EVENTS} reads when their {@code path} starts at an {@link #EVENT_ROOTS} root. */
+    private static final Set<String> PATH_RECORDS = Set.of("expect", "check", "observe");
+    /** The fact roots whose values are published payloads (the {@code events} root, the hooks' fires). */
+    private static final Set<String> EVENT_ROOTS = Set.of("events", "hooks");
+    /** A path's root: its leading name. */
+    private static final Pattern ROOT = Pattern.compile("\\s*([A-Za-z_][A-Za-z0-9_-]*)");
+    /** A run of whitespace, one space for the boundary search. */
+    private static final Pattern WHITESPACE = Pattern.compile("\\s+");
+    /** A planted value searched by tokens only: digits (a duration or a sequence number may hold them). */
+    private static final Pattern DIGITS = Pattern.compile("[0-9]+");
+    /** An XML entity: the five predefined ones and numeric character references. */
+    private static final Pattern XML_ENTITY = Pattern.compile(
+            "&(lt|gt|amp|quot|apos|#[0-9]{1,7}|#x[0-9A-Fa-f]{1,6});");
     /** The record files: the run's log and a session's journal. */
     private static final Set<String> RECORD_FILES = Set.of("run.jsonl", "journal.jsonl");
     private static final byte[] PNG_SIGNATURE = {(byte) 0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'};
@@ -156,8 +181,7 @@ public final class OutputScan {
                     List<String> strings = new ArrayList<>();
                     if (recordsOnly) {
                         Object record = parsed(lines[i]);
-                        if (record instanceof Map<?, ?> map && !EVENT_RECORDS.contains(String.valueOf(map.get(
-                                "type")))) {
+                        if (record instanceof Map<?, ?> map && !eventRecord(map)) {
                             continue;
                         }
                     }
@@ -210,6 +234,19 @@ public final class OutputScan {
     private record Found(String token, String context) {
     }
 
+    /** True for a record {@link Scope#EVENTS} reads (see the class comment). */
+    private static boolean eventRecord(Map<?, ?> record) {
+        String type = String.valueOf(record.get("type"));
+        if (EVENT_RECORDS.contains(type)) {
+            return true;
+        }
+        if (!PATH_RECORDS.contains(type) || !(record.get("path") instanceof String path)) {
+            return false;
+        }
+        Matcher root = ROOT.matcher(path);
+        return root.lookingAt() && EVENT_ROOTS.contains(root.group(1));
+    }
+
     private static boolean eventFile(Path file, String name) {
         if (RECORD_FILES.contains(name) || name.endsWith(".xml")) {
             return true;
@@ -253,9 +290,9 @@ public final class OutputScan {
         } else if (name.endsWith(".xml")) {
             Matcher attribute = XML_ATTRIBUTE.matcher(text);
             while (attribute.find()) {
-                strings.add(attribute.group(1));
+                strings.add(unescapeXml(attribute.group(1)));
             }
-            strings.add(text.replaceAll("<[^>]*>", " "));
+            strings.add(unescapeXml(text.replaceAll("<[^>]*>", " ")));
         } else {
             strings.add(text);
         }
@@ -332,6 +369,37 @@ public final class OutputScan {
         }
         rest.append(string, from, string.length());
         String text = rest.toString();
+        Set<String> tokens = null;
+        String collapsed = null;
+        for (String value : planted) {
+            if (value.isEmpty()) {
+                continue;
+            }
+            if (DIGITS.matcher(value).matches()) {
+                if (tokens == null) {
+                    tokens = tokens(string, text);
+                }
+                if (tokens.contains(value)) {
+                    int at = Math.max(0, text.indexOf(value));
+                    hits.add(new Found(value, context(text, at, value.length())));
+                }
+                continue;
+            }
+            if (collapsed == null) {
+                collapsed = WHITESPACE.matcher(text).replaceAll(" ");
+            }
+            String wanted = WHITESPACE.matcher(value).replaceAll(" ");
+            int at = boundedIndex(collapsed, wanted);
+            if (at >= 0) {
+                hits.add(new Found(value, context(collapsed, at, wanted.length())));
+            } else if (string.strip().equals(value)) {
+                hits.add(new Found(value, context(text, Math.max(0, text.indexOf(value)), value.length())));
+            }
+        }
+    }
+
+    /** The whole string and the tokens of {@code text} (each also without its trailing full stops). */
+    private static Set<String> tokens(String string, String text) {
         Set<String> tokens = new HashSet<>();
         tokens.add(string.strip());
         for (String token : SEPARATORS.split(text)) {
@@ -342,13 +410,71 @@ public final class OutputScan {
             }
             tokens.add(token.substring(0, end));
         }
-        for (String value : planted) {
-            if (!value.isEmpty() && tokens.contains(value)) {
-                int at = Math.max(0, text.indexOf(value));
-                hits.add(new Found(value, text.substring(Math.max(0, at - CONTEXT), Math.min(text.length(),
-                        at + value.length() + CONTEXT))));
+        return tokens;
+    }
+
+    /**
+     * The first index of {@code value} in {@code text} that is bounded on each side where the value begins or ends
+     * with a letter or a digit: there the text's edge or a character that is neither; -1 when there is none.
+     */
+    static int boundedIndex(String text, String value) {
+        boolean left = wordChar(value.codePointAt(0));
+        boolean right = wordChar(value.codePointBefore(value.length()));
+        int from = 0;
+        while (from <= text.length() - value.length()) {
+            int at = text.indexOf(value, from);
+            if (at < 0) {
+                return -1;
             }
+            int end = at + value.length();
+            boolean leftOk = !left || at == 0 || !wordChar(text.codePointBefore(at));
+            boolean rightOk = !right || end == text.length() || !wordChar(text.codePointAt(end));
+            if (leftOk && rightOk) {
+                return at;
+            }
+            from = at + 1;
         }
+        return -1;
+    }
+
+    private static boolean wordChar(int codePoint) {
+        return Character.isLetterOrDigit(codePoint);
+    }
+
+    private static String context(String text, int at, int length) {
+        return text.substring(Math.max(0, at - CONTEXT), Math.min(text.length(), at + length + CONTEXT));
+    }
+
+    /** The five predefined XML entities and numeric character references decoded; anything else kept. */
+    static String unescapeXml(String text) {
+        if (text.indexOf('&') < 0) {
+            return text;
+        }
+        Matcher m = XML_ENTITY.matcher(text);
+        StringBuilder out = new StringBuilder(text.length());
+        while (m.find()) {
+            String entity = m.group(1);
+            String replacement = switch (entity) {
+                case "lt" -> "<";
+                case "gt" -> ">";
+                case "amp" -> "&";
+                case "quot" -> "\"";
+                case "apos" -> "'";
+                default -> {
+                    int code;
+                    try {
+                        code = entity.startsWith("#x") ? Integer.parseInt(entity.substring(2), 16)
+                                : Integer.parseInt(entity.substring(1));
+                    } catch (NumberFormatException e) {
+                        code = -1;
+                    }
+                    yield Character.isValidCodePoint(code) ? new String(Character.toChars(code)) : m.group();
+                }
+            };
+            m.appendReplacement(out, Matcher.quoteReplacement(replacement));
+        }
+        m.appendTail(out);
+        return out.toString();
     }
 
     /** The value of a text that is a JSON object or array, or null for any other text. */

@@ -596,18 +596,24 @@ abstract class InferenceChecks {
             McpSchema.ReadResourceResult profile = readOnly.readResource(new McpSchema.ReadResourceRequest(
                     "skillroy://env/profile"));
             assertTrue(((McpSchema.TextResourceContents) profile.contents().get(0)).text().contains("lending"));
-            // phase8-contracts.md 9.1.4, 13.2 item 42: the session's merged matrix holds the pack's capability with
-            // its source. As built (EP): skillroy_catalogue lists that matrix, but the lending pack's catalogue is
-            // longer than the server's 25,000-character answer bound, so its cut text is no JSON to read; the same
-            // matrix is read through the caps root here (SuiteCacheOverMcpTest shows the catalogue's entry on a
-            // small pack).
-            String entry = "[id=" + ai.skillroy.testjava.samples.lending.pack.LendingPack.CAP_RETURNS_CEILING + "]";
+            // phase8-contracts.md 9.1.4, 13.2 item 42: skillroy_catalogue lists the pack's capability with its
+            // source. Fix wave (Phase 8 review, FD, L1-F2): the catalogue answers valid JSON within the server's
+            // 25,000-character bound (the matrix first, verb schemas withheld from the end when it is longer), so the
+            // item is asserted as written; the caps root agrees.
+            String catalogueText = text(readOnly.callTool(new McpSchema.CallToolRequest("skillroy_catalogue",
+                    Map.of())));
+            assertTrue(catalogueText.length() <= 25_000 && !catalogueText.contains("[truncated:"),
+                    "within the bound, never cut: " + catalogueText.length());
+            Map<String, Object> catalogue = Json.parseObject(catalogueText);
+            String ceiling = ai.skillroy.testjava.samples.lending.pack.LendingPack.CAP_RETURNS_CEILING;
+            Map<?, ?> listed = (Map<?, ?>) ((Map<?, ?>) catalogue.get("capabilities")).get(ceiling);
+            assertNotNull(listed, String.valueOf(((Map<?, ?>) catalogue.get("capabilities")).keySet()));
+            assertEquals("pack:lending", listed.get("source"), String.valueOf(listed));
+            assertEquals("OK", listed.get("state"), String.valueOf(listed));
+            String entry = "[id=" + ceiling + "]";
             Map<String, Object> ceilingSource = Json.parseObject(text(readOnly.callTool(new McpSchema.CallToolRequest(
                     "skillroy_facts", Map.of("root", "caps", "path", entry + ".source")))));
             assertEquals("pack:lending", ceilingSource.get("value"), String.valueOf(ceilingSource));
-            Map<String, Object> ceilingState = Json.parseObject(text(readOnly.callTool(new McpSchema.CallToolRequest(
-                    "skillroy_facts", Map.of("root", "caps", "path", entry + ".state")))));
-            assertEquals("OK", ceilingState.get("value"), String.valueOf(ceilingState));
         }
         assertSignedOffAndQuiet(-1);
         Path out = runDir("mcp-mutating");
