@@ -40,7 +40,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * {@code org.jboss.byteman} class is defined, nothing of the sys jar is loaded, Byteman's {@code loaded} property is
  * not set, and the answer says the type check was skipped. A confirmed {@code rule.submit} that the class bound refuses
  * loads nothing either: the bound runs before the load (fix wave, L2-F5), and so does one whose class or interface is
- * the JDK's (Phase 6 security fix, pass 2, P2-L2-F1). A test class of its own (a fresh JVM): the
+ * the JDK's (Phase 6 security fix, pass 2, P2-L2-F1), and one on a class the agent option {@code hooks.deny} denies
+ * (phase8-contracts.md 6.7: the deny before the count and before the load). A test class of its own (a fresh JVM): the
  * Byteman jar is on the test class path, so anything that touched it would show.
  */
 class CheckLoadsNothingTest {
@@ -65,6 +66,8 @@ class CheckLoadsNothingTest {
         FakeAgentContext ctx = new FakeAgentContext(inst);
         ctx.options.put(Settings.BYTEMAN_JAR, System.getProperty("skillroy.test.bytemanJar"));
         ctx.options.put(Settings.MAX_CLASSES, "1");
+        String branch = BranchDesk.class.getName();
+        ctx.options.put(Settings.DENY, branch);
         BytemanModule module = new BytemanModule(new File(System.getProperty("skillroy.test.sysJar")), null);
         module.install(ctx);
         @SuppressWarnings("unchecked")
@@ -99,6 +102,29 @@ class CheckLoadsNothingTest {
             assertTrue(String.valueOf(jdk.error().data().get("errors")).contains("class is the JDK's"),
                     String.valueOf(jdk.error().data()));
         }
+        // Phase 8 (phase8-contracts.md 6.7): rule.check lists the deny in errors; a confirmed rule.submit refused by
+        // the deny loads nothing, appends nothing and sets no property; rule.list shows the deny in force.
+        String onBranch = RuleLintTest.rule("branch", "ceiling", "fired($0)").replace("CLASS " + RuleLintTest.TOY,
+                "CLASS " + branch);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> deniedCheck = (Map<String, Object>) ctx.call("rule.check", args("rule", onBranch));
+        assertEquals(false, deniedCheck.get("ok"));
+        assertEquals(java.util.Collections.singletonList(branch + ": denied by the agent option hooks.deny: "
+                + branch), deniedCheck.get("errors"));
+        RpcException denied = ctx.fails("rule.submit", args("rule", onBranch));
+        assertEquals(ErrorCodes.RULE_REJECTED, denied.error().code());
+        assertEquals("the rule was refused: " + branch + ": denied by the agent option hooks.deny: " + branch,
+                denied.error().message());
+        assertTrue(String.valueOf(denied.error().data().get("errors")).contains("denied by the agent option"),
+                String.valueOf(denied.error().data()));
+        @SuppressWarnings("unchecked")
+        Map<String, Object> afterDeny = (Map<String, Object>) ctx.call("rule.list", args());
+        assertEquals(false, afterDeny.get("loaded"), "nothing appended, no premain");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> deny = (Map<String, Object>) afterDeny.get("deny");
+        assertEquals(java.util.Collections.singletonList(branch), deny.get("option"));
+        assertEquals(0L, deny.get("modules"));
+        assertFalse(deny.containsKey("catalogue"), "no hooks module loaded");
         assertFalse(ctx.log.all().contains("byteman: appended"), ctx.log.all());
         assertEquals(new ArrayList<String>(), loaded(inst, "org.jboss.byteman."), "no Byteman class is defined");
         assertEquals(new ArrayList<String>(), loaded(inst, "ai.skillroy.testjava.agent.byteman.sys."),

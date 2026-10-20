@@ -62,7 +62,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * {@code sign.on.checked} enabled once to show that the password argument is never captured; after check 14 (165), the
  * restore of every class with its byte verification; at 166 to 168 (BW, item 7), Byteman on the desk; in checks 16 and 17, the re-attach with the same options; before
  * check 19 (205), the target's log: one CDS line on Java 25 (none on Java 8) and nothing of Byte Buddy,
- * {@code sun.misc.Unsafe} or an agent stack trace.
+ * {@code sun.misc.Unsafe} or an agent stack trace. Phase 8 (phase8-contracts.md 6, 13.2 items 19 to 22): the code
+ * sources in the probe, the install's {@code touched} lines and {@code hook.health.classes} (65, 68), a qualifier on
+ * another jar refused and a third-party class reported by its jar (68), the catalogue's deny of the desk's input queue
+ * (65's echo, 69), held after {@code hook.remove {}} (165) and honoured by Byteman before it loads (166).
  */
 abstract class HookChecks extends LoadModeChecks {
 
@@ -71,6 +74,10 @@ abstract class HookChecks extends LoadModeChecks {
     /** The VM's one line after a bootstrap append on Java 9+ with class data sharing on (BS3 RESULT 9 fact 8). */
     static final String CDS_LINE = "Sharing is only supported for boot loader classes because bootstrap classpath"
             + " has been appended";
+    /** The desk's code source in the image: the IT copy of the application jar (phase8-contracts.md 6.12). */
+    static final String APP_JAR = "skillroy-sample-lending-app.jar";
+    /** The desk's input queue, which the pack's catalogue denies (phase8-contracts.md 12.3). */
+    static final String INBOX = APP + "Inbox";
 
     /** The pack's catalogue as {@code hook.install} takes it. */
     static Map<String, Object> installParams(HookCatalogue catalogue, boolean replace) {
@@ -145,6 +152,10 @@ abstract class HookChecks extends LoadModeChecks {
         assertEquals(Map.of("access.checked", "OK", "limit.applied", "OK", "line.amount", "OK", "waiver.evaluated",
                 "OK"), states, String.valueOf(probe));
         assertEquals(List.of(), probe.get("otherAgents"));
+        // Phase 8 (13.2 item 19): every answer names the copy's code source, the IT copy of the application jar
+        for (Object p : (List<?>) probe.get("hooks")) {
+            assertEquals(List.of(APP_JAR), ((Map<?, ?>) p).get("codeSources"), String.valueOf(p));
+        }
 
         long t0 = System.nanoTime();
         Map<String, Object> installed = value(client().call("hook.install", params, CALL.withTimeoutMs(70_000L)));
@@ -163,6 +174,11 @@ abstract class HookChecks extends LoadModeChecks {
         }
         assertEquals(List.of(APP + "AccessControl", APP + "Deposits", APP + "WaiverEngine"),
                 touched.stream().sorted().toList(), "each class once: " + touched);
+        for (Object t : (List<?>) installed.get("touched")) {
+            assertEquals(APP_JAR, ((Map<?, ?>) t).get("codeSource"), String.valueOf(t));
+        }
+        assertEquals(List.of(INBOX), ((Map<?, ?>) installed.get("catalogue")).get("deny"),
+                "the install echoes the catalogue's deny (phase8-contracts.md 6.6)");
         CapabilityMatrix after = client().capabilities();
         for (String id : HOOKS) {
             Capability capability = after.get("hook." + id);
@@ -291,6 +307,74 @@ abstract class HookChecks extends LoadModeChecks {
         assertSignedOff();
     }
 
+    // ------------------------------------------------------------------ 68, 69: code sources and the deny (Phase 8)
+
+    /** A one-descriptor OBSERVE spec as {@code hook.probe} takes it. */
+    static Map<String, Object> spec(String id, String className, String method, String descriptor, String codeSource) {
+        Map<String, Object> target = new LinkedHashMap<>();
+        target.put("class", className);
+        target.put("method", method);
+        target.put("descriptors", List.of(descriptor));
+        if (codeSource != null) {
+            target.put("codeSource", codeSource);
+        }
+        return Map.of("id", id, "mode", "OBSERVE", "target", target);
+    }
+
+    private Map<?, ?> probeOne(Map<String, Object> spec) throws Exception {
+        Map<String, Object> answer = value(client().call("hook.probe", Map.of("specs", List.of(spec)), CALL));
+        return (Map<?, ?>) ((List<?>) answer.get("hooks")).get(0);
+    }
+
+    /**
+     * phase8-contracts.md 13.2 item 20: {@code limit.applied} qualified with {@code hsqldb\.jar} is refused, naming the
+     * desk's jar; a spec on a loaded HSQLDB class reports {@code codeSources: ["hsqldb.jar"]} whatever its state;
+     * {@code hook.health.classes} lists the three touched classes with the application jar and their hook ids.
+     */
+    @Test
+    @Order(68)
+    void aClassIsOwnedByItsCodeSource() throws Exception {
+        Map<?, ?> other = probeOne(spec("limit.applied", APP + "AccessControl", "returnLimit",
+                "(Ljava/lang/String;)Ljava/math/BigDecimal;", "hsqldb\\.jar"));
+        assertEquals("UNAVAILABLE", other.get("state"), String.valueOf(other));
+        assertEquals("class from another code source: " + APP_JAR, other.get("reason"));
+        assertEquals(List.of(APP_JAR), other.get("codeSources"));
+        Map<?, ?> driver = probeOne(spec("hsqldb.driver", "org.hsqldb.jdbc.JDBCDriver", "connect",
+                "(Ljava/lang/String;Ljava/util/Properties;)Ljava/sql/Connection;", null));
+        assertEquals(List.of("hsqldb.jar"), driver.get("codeSources"), String.valueOf(driver));
+        Map<String, Object> health = value(client().call("hook.health", Map.of(), CALL));
+        Map<String, Object> classes = new TreeMap<>();
+        for (Object c : (List<?>) health.get("classes")) {
+            Map<?, ?> line = (Map<?, ?>) c;
+            assertEquals(APP_JAR, line.get("codeSource"), String.valueOf(line));
+            assertFalse(line.containsKey("deniedNow"), String.valueOf(line));
+            classes.put(String.valueOf(line.get("class")), line.get("hooks"));
+        }
+        assertEquals(Map.of(APP + "AccessControl", List.of("access.checked", "limit.applied"), APP + "Deposits",
+                List.of("line.amount"), APP + "WaiverEngine", List.of("waiver.evaluated")), classes,
+                String.valueOf(health.get("classes")));
+    }
+
+    /**
+     * phase8-contracts.md 13.2 item 21: a spec on {@code Inbox.offer} is refused by the catalogue's deny before
+     * anything of the class is read; {@code hook.health.deny} holds the pattern, delivered by catalogue
+     * {@code lending}.
+     */
+    @Test
+    @Order(69)
+    void theCatalogueDeniesTheInbox() throws Exception {
+        Map<?, ?> denied = probeOne(spec("inbox.offered", INBOX, "offer",
+                "(Lai/skillroy/testjava/samples/lending/LendingInput;)Z", null));
+        assertEquals("UNAVAILABLE", denied.get("state"), String.valueOf(denied));
+        assertEquals("denied by the catalogue lending: " + INBOX, denied.get("reason"));
+        assertFalse(denied.containsKey("codeSources"), "nothing of a denied class is read: " + denied);
+        Map<?, ?> deny = (Map<?, ?>) value(client().call("hook.health", Map.of(), CALL)).get("deny");
+        assertEquals(List.of(INBOX), deny.get("catalogue"), String.valueOf(deny));
+        assertEquals(List.of("lending"), deny.get("from"));
+        assertEquals(List.of(), deny.get("option"));
+        assertEquals(0L, ((Number) deny.get("modules")).longValue());
+    }
+
     // ------------------------------------------------------------------ 165: the restore
 
     /**
@@ -319,7 +403,11 @@ abstract class HookChecks extends LoadModeChecks {
         CapabilityMatrix after = client().capabilities();
         assertTrue(after.all().keySet().stream().noneMatch(id -> id.startsWith("hook.") && !id.equals("hook.engine")),
                 String.valueOf(after.all().keySet()));
-        assertEquals(Map.of(), value(client().call("hook.health", Map.of(), CALL)).get("hooks"));
+        Map<String, Object> health = value(client().call("hook.health", Map.of(), CALL));
+        assertEquals(Map.of(), health.get("hooks"));
+        // Phase 8 (13.2 item 22): the held deny survives hook.remove {} (add-only for the agent instance, D564)
+        assertEquals(List.of(INBOX), ((Map<?, ?>) health.get("deny")).get("catalogue"), String.valueOf(health));
+        assertEquals(List.of(), health.get("classes"));
     }
 
     // ------------------------------------------------------------------ item 7: Byteman (BW), orders 166 to 169
@@ -413,6 +501,21 @@ abstract class HookChecks extends LoadModeChecks {
                         "RULE stop")), CALL.withConfirm(true)));
         assertEquals(ErrorCodes.RULE_REJECTED, kill.error().code(), String.valueOf(kill.error()));
         assertEquals(Boolean.FALSE, value(client().call("rule.list", Map.of(), CALL)).get("loaded"));
+        // Phase 8 (13.2 item 22): before Byteman is loaded, a rule on the catalogue's denied class is refused by both
+        // primitives, and nothing is appended (the deny before the count and before the load, D569)
+        String inboxRule = "RULE inbox watched\nCLASS " + INBOX + "\nMETHOD offer\nAT ENTRY\nIF true\nDO fired($0)"
+                + "\nENDRULE\n";
+        String reason = INBOX + ": denied by the catalogue lending: " + INBOX;
+        Map<String, Object> deniedCheck = value(client().call("rule.check", Map.of("rule", inboxRule), CALL));
+        assertEquals(Boolean.FALSE, deniedCheck.get("ok"), String.valueOf(deniedCheck));
+        assertEquals(List.of(reason), deniedCheck.get("errors"));
+        AgentRpcException denied = assertThrows(AgentRpcException.class, () -> client().call("rule.submit",
+                Map.of("rule", inboxRule), CALL.withConfirm(true)));
+        assertEquals(ErrorCodes.RULE_REJECTED, denied.error().code(), String.valueOf(denied.error()));
+        assertEquals("the rule was refused: " + reason, denied.error().message());
+        Map<String, Object> listed = value(client().call("rule.list", Map.of(), CALL));
+        assertEquals(Boolean.FALSE, listed.get("loaded"), "nothing appended, no premain: " + listed);
+        assertEquals(List.of(INBOX), ((Map<?, ?>) listed.get("deny")).get("catalogue"), String.valueOf(listed));
     }
 
     /**

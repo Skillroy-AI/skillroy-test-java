@@ -52,12 +52,18 @@ import java.util.Set;
  * taken from the manager at once (spike BS14).
  *
  * <ul>
- *   <li>{@code rule.check {rule}}: read-only; the lint, then Byteman's {@code RuleCheck} only when Byteman is loaded
- *       and the rule's class is the system loader's; never loads Byteman or a target class.</li>
+ *   <li>{@code rule.check {rule}}: read-only; the lint, the class deny by name (phase8-contracts.md 6.7), then
+ *       Byteman's {@code RuleCheck} only when Byteman is loaded and the rule's class is the system loader's; never
+ *       loads Byteman or a target class.</li>
  *   <li>{@code rule.submit {rule, checkOnly?}}: mutating and destructive (every submit needs {@code confirm}).</li>
  *   <li>{@code rule.unload {name}}: neither, never gated: it restores, and verifies the bytes.</li>
- *   <li>{@code rule.list {}}: read-only; the module's own rules only.</li>
+ *   <li>{@code rule.list {}}: read-only; the module's own rules only, and the class deny in force ({@code deny}:
+ *       the option {@code hooks.deny}, the number of domain modules' {@code ClassDeny}s and, with the hooks module,
+ *       its held catalogue list).</li>
  * </ul>
+ *
+ * <p>The agent option {@code hooks.deny} is read here too (phase8-contracts.md 6.5): an invalid pattern fails the
+ * install naming the key. A rule on a denied class is refused before the count and before Byteman loads.
  */
 public final class BytemanModule implements AgentModule {
 
@@ -170,8 +176,9 @@ public final class BytemanModule implements AgentModule {
     static List<Primitive> primitives(final Engine engine) {
         List<Primitive> list = new ArrayList<Primitive>();
         list.add(Primitives.of(PrimitiveSpec.builder("rule.check")
-                .description("Lints a Byteman rule and, when Byteman is loaded and the rule's class is loaded by the"
-                        + " system loader, type-checks it with Byteman's RuleCheck; never loads Byteman or a class.")
+                .description("Lints a Byteman rule, refuses a denied class (phase8-contracts.md 6.7) and, when Byteman"
+                        + " is loaded and the rule's class is loaded by the system loader, type-checks it with"
+                        + " Byteman's RuleCheck; never loads Byteman or a class.")
                 .param("rule", "string", true, "the rule text: one RULE … ENDRULE")
                 .thread(ThreadPolicy.WORKER).timeoutMs(30000).capability(CAPABILITY).build(),
                 new Primitives.Body() {
@@ -182,7 +189,8 @@ public final class BytemanModule implements AgentModule {
                 }));
         list.add(Primitives.of(PrimitiveSpec.builder("rule.submit")
                 .description("Submits a Byteman rule (loads Byteman in process on the first call; no listener): the"
-                        + " lint, the class bound, the type check, then Byteman; every submit needs confirm.")
+                        + " lint, the class deny and the class bound, the type check, then Byteman; every submit"
+                        + " needs confirm.")
                 .param("rule", "string", true, "the rule text: one RULE … ENDRULE")
                 .param("checkOnly", "boolean", false, "rule.check under this primitive's gates")
                 .thread(ThreadPolicy.WORKER).timeoutMs(30000).capability(CAPABILITY).mutating().destructive()
@@ -212,7 +220,8 @@ public final class BytemanModule implements AgentModule {
                     }
                 }));
         list.add(Primitives.of(PrimitiveSpec.builder("rule.list")
-                .description("The rules this module installed, with Byteman's status per class.")
+                .description("The rules this module installed, with Byteman's status per class, and the class deny"
+                        + " in force (deny: {option, modules, catalogue?}).")
                 .thread(ThreadPolicy.WORKER).timeoutMs(10000).capability(CAPABILITY).build(),
                 new Primitives.Body() {
                     @Override

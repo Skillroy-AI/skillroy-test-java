@@ -40,7 +40,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * {@code skillroy hooks status|install|remove} against the fake agent (phase6-contracts.md 6.2, 13.1 item 8): the
  * armed stubs and the other agents printed, the install's record and its refusals, the restore's verification and
- * {@code HOOK_VERIFY_FAILED}; and {@code --hooks} parsed by {@code run}, {@code session} and {@code mcp}.
+ * {@code HOOK_VERIFY_FAILED}; and {@code --hooks} parsed by {@code run}, {@code session} and {@code mcp}. Phase 8
+ * (phase8-contracts.md 6.10, section 13.1 row 27): the two deny lines, the class table with its code sources, the
+ * pack table's {@code CODE SOURCE} column, {@code --json}, and the {@code unknown} line against an old agent.
  */
 class HooksCommandTest {
 
@@ -116,6 +118,53 @@ class HooksCommandTest {
         Map<?, ?> catalogue = (Map<?, ?>) json.get("catalogue");
         assertEquals(2, ((List<?>) catalogue.get("hooks")).size());
         assertEquals(1, ((List<?>) catalogue.get("warnings")).size());
+    }
+
+    @Test
+    void statusPrintsTheDenyTheClassesAndTheCodeSources() {
+        String old = cli("hooks", "status").expectExit(Exit.OK).out();
+        assertTrue(old.contains("deny (target): unknown (the agent reports no deny list)"), old);
+        assertTrue(old.contains("deny (pack catalogue clitest): none"), old);
+        assertTrue(old.contains("CODE SOURCE"), "the pack table's column: " + old);
+        assertTrue(old.lines().anyMatch(l -> l.startsWith("counter.read") && l.trim().endsWith("-")),
+                "no qualifier: -\n" + old);
+        assertFalse(old.contains("no class touched"), "an old agent reports no classes: no class table\n" + old);
+        agent.handlers.put("hook.health", p -> {
+            Map<String, Object> answer = new LinkedHashMap<>();
+            answer.put("hooks", Map.of("counter.read", Map.of("state", "FIRING", "count", 3L, "armed", false,
+                    "deniedNow", true)));
+            answer.put("stubs", List.of());
+            answer.put("otherAgents", List.of());
+            answer.put("classes", List.of(Map.of("class", "org.example.cli.Counter", "loader", "system",
+                    "codeSource", "cli-app-1.2.jar", "bytes", 900L, "methods", 4L, "hooks", List.of("counter.read"),
+                    "deniedNow", "denied by the catalogue clitest: org.example.cli.Counter")));
+            answer.put("deny", Map.of("catalogue", List.of("org.example.cli.Counter"), "from", List.of("clitest"),
+                    "option", List.of("org.example.cli.Clock", "x.Y"), "modules", 1L));
+            return answer;
+        });
+        String out = cli("hooks", "status").expectExit(Exit.OK).out();
+        assertTrue(out.contains("deny (target): option org.example.cli.Clock, x.Y; catalogue clitest"
+                + " org.example.cli.Counter; modules 1"), out);
+        assertTrue(out.contains("CLASS") && out.contains("LOADER") && out.contains("HOOKS"), out);
+        assertTrue(out.lines().anyMatch(l -> l.startsWith("org.example.cli.Counter") && l.contains("system")
+                && l.contains("cli-app-1.2.jar") && l.contains("counter.read DENIED: denied by the catalogue"
+                + " clitest: org.example.cli.Counter")), out);
+        Map<String, Object> json = Json.parseObject(cli("hooks", "status", "--json").expectExit(Exit.OK).out());
+        Map<?, ?> health = (Map<?, ?>) json.get("health");
+        assertEquals(List.of("org.example.cli.Counter"), ((Map<?, ?>) health.get("deny")).get("catalogue"));
+        assertEquals(1, ((List<?>) health.get("classes")).size());
+        Map<?, ?> catalogue = (Map<?, ?>) json.get("catalogue");
+        assertEquals(List.of(), catalogue.get("deny"));
+        Map<String, Object> rule = new LinkedHashMap<>();
+        rule.put("name", "org.example.cli");
+        rule.put("codeSource", null);
+        assertEquals(List.of(rule), catalogue.get("packages"));
+        agent.handlers.put("hook.health", p -> Map.of("hooks", Map.of(), "stubs", List.of(), "otherAgents",
+                List.of(), "classes", List.of(), "deny", Map.of("catalogue", List.of(), "from", List.of(), "option",
+                        List.of(), "modules", 0L)));
+        String empty = cli("hooks", "status").expectExit(Exit.OK).out();
+        assertTrue(empty.contains("deny (target): option none; catalogue none; modules 0"), empty);
+        assertTrue(empty.contains("no class touched"), empty);
     }
 
     @Test

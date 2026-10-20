@@ -21,6 +21,7 @@ import ai.skillroy.testjava.protocol.hook.HookProbe;
 import ai.skillroy.testjava.protocol.hook.HookSpec;
 import ai.skillroy.testjava.protocol.hook.HookStatus;
 
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
@@ -73,4 +74,15 @@ public interface HookEngine {
 
     /** {@code {id, hash, installedAt}} of the installed catalogue, or an empty map. */
     Map<String, Object> catalogue();
+
+    /**
+     * The catalogue deny patterns the engine holds (phase8-contracts.md section 6.6, D564, D575): every pattern a
+     * {@code hook.install}'s {@code catalogue.deny} delivered, sorted, add-only for the engine instance's life. A
+     * module's {@link #install} carries no catalogue and so no deny. Empty by default; the hooks module overrides it.
+     *
+     * @return unmodifiable, never null
+     */
+    default List<String> deny() {
+        return Collections.emptyList();
+    }
 }

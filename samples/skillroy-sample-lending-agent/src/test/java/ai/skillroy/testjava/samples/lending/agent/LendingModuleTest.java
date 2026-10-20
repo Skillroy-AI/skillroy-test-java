@@ -180,6 +180,50 @@ class LendingModuleTest {
     }
 
     /**
+     * phase8-contracts.md 6.5 source 3, 12.2 (D573; section 13.1 row 28): the agent option {@code lending.hooks.deny}
+     * registers the module's {@code ClassDeny}, answering its reason; an invalid value fails the install naming the
+     * key; without the option nothing is registered (the type loop of the test above is unchanged).
+     */
+    @Test
+    void theHooksDenyOptionRegistersTheModulesClassDeny() throws Exception {
+        String property = ai.skillroy.testjava.protocol.Protocol.PROP_PREFIX + LendingClassDeny.OPTION;
+        FakeAgentContext without = new FakeAgentContext(null, LoadMode.JAVAAGENT);
+        LendingModule plain = new LendingModule();
+        plain.install(without);
+        assertTrue(without.spi.all(ai.skillroy.testjava.agent.api.spi.hook.ClassDeny.class).isEmpty(),
+                "nothing registered without the option");
+        plain.uninstall();
+        System.setProperty(property, " ai.skillroy.testjava.samples.lending.Inbox , ai.skillroy.testjava.samples"
+                + ".lending.Ticket* ");
+        try {
+            FakeAgentContext ctx = new FakeAgentContext(null, LoadMode.JAVAAGENT);
+            LendingModule module = new LendingModule();
+            module.install(ctx);
+            try {
+                java.util.List<ai.skillroy.testjava.agent.api.spi.hook.ClassDeny> denies = ctx.spi.all(
+                        ai.skillroy.testjava.agent.api.spi.hook.ClassDeny.class);
+                assertEquals(1, denies.size());
+                assertTrue(denies.get(0) instanceof LendingClassDeny);
+                assertEquals("the lending module denies ai.skillroy.testjava.samples.lending.Inbox",
+                        denies.get(0).refuse("ai.skillroy.testjava.samples.lending.Inbox"));
+                assertEquals("the lending module denies ai.skillroy.testjava.samples.lending.Ticket*",
+                        denies.get(0).refuse("ai.skillroy.testjava.samples.lending.TicketPrinter"));
+                assertNull(denies.get(0).refuse("ai.skillroy.testjava.samples.lending.AccessControl"));
+            } finally {
+                module.uninstall();
+            }
+            assertEquals(0, ctx.spi.count(), "unregistered with the rest");
+            System.setProperty(property, "ai.skillroy..lending");
+            FakeAgentContext bad = new FakeAgentContext(null, LoadMode.JAVAAGENT);
+            IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+                    () -> new LendingModule().install(bad));
+            assertEquals("option lending.hooks.deny: pattern 0 an empty segment", e.getMessage());
+        } finally {
+            System.clearProperty(property);
+        }
+    }
+
+    /**
      * Amendment A21: the module adds the desk's PIN keys to the keys the core redacts. The shared rule does not know
      * them, so without the module a {@code lending.pin} would be shown; the core's own use of the pattern
      * ({@code jvm.properties}, {@code jvm.info}) is proven end to end in every load mode.

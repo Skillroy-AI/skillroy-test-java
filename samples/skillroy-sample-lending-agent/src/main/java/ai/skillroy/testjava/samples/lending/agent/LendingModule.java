@@ -35,6 +35,7 @@ import ai.skillroy.testjava.agent.api.spi.NameEnricher;
 import ai.skillroy.testjava.agent.api.spi.ReadinessSource;
 import ai.skillroy.testjava.agent.api.spi.RedactionKeys;
 import ai.skillroy.testjava.agent.api.spi.ThreadPolicyProvider;
+import ai.skillroy.testjava.agent.api.spi.hook.ClassDeny;
 import ai.skillroy.testjava.protocol.CapabilityState;
 import ai.skillroy.testjava.samples.lending.DeskTools;
 import ai.skillroy.testjava.samples.lending.Engine;
@@ -135,6 +136,11 @@ public final class LendingModule implements AgentModule {
     @Override
     public void install(AgentContext context) {
         ctx = context;
+        // Phase 8 (phase8-contracts.md 6.5, 12.2, D573): the module's own class deny, only behind its agent option.
+        LendingClassDeny classDeny = LendingClassDeny.fromOption(context.option(LendingClassDeny.OPTION));
+        if (classDeny != null) {
+            register(ClassDeny.class, classDeny);
+        }
         access = new LendingAccess(context.hostContext());
         slot = new ListenerSlot(context);
         worker = new LendingWorker(access);

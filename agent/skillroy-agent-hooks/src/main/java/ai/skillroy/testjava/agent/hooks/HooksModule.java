@@ -22,6 +22,7 @@ import ai.skillroy.testjava.agent.api.AgentModule;
 import ai.skillroy.testjava.agent.api.Primitive;
 import ai.skillroy.testjava.agent.api.Probe;
 import ai.skillroy.testjava.agent.api.ProbeResult;
+import ai.skillroy.testjava.agent.api.spi.hook.ClassDeny;
 import ai.skillroy.testjava.agent.api.spi.hook.HookEngine;
 import ai.skillroy.testjava.protocol.CapabilityState;
 
@@ -34,7 +35,8 @@ import java.util.Properties;
  * relocated Byte Buddy, shipped as {@code optional/skillroy-agent-hooks.jar} and loaded only when the agent option
  * {@code optionalModules} names it (D114), so the default path loads no third-party class.
  *
- * <p><b>Install</b> registers the six {@code hook.*} primitives, the {@link HookEngine} SPI and the capability
+ * <p><b>Install</b> registers the six {@code hook.*} primitives, the {@link HookEngine} SPI, the engine as the
+ * catalogue's {@link ClassDeny} (phase8-contracts.md section 6.5) and the capability
  * {@code hook.engine}: set UNAVAILABLE at once without an {@code Instrumentation}, otherwise declared with the probe of
  * section 3.2, so that it reads "not probed yet" until the target is ready. It appends nothing, registers no
  * transformer and starts no thread: the first {@code hook.install} does the rest. A {@code hooks.*} option out of its
@@ -75,6 +77,9 @@ public final class HooksModule implements AgentModule {
             ctx.primitives().register(p);
         }
         ctx.spi().register(HookEngine.class, e);
+        // The catalogue's source of the class deny (phase8-contracts.md section 6.5 item 2): the engine itself, so
+        // that the Byteman module asks the held list through the shared registry and tells it apart by type.
+        ctx.spi().register(ClassDeny.class, e);
         if (ctx.instrumentation() == null) {
             ctx.capabilities().set(ENGINE, CapabilityState.UNAVAILABLE, "no Instrumentation in " + ctx.loadMode()
                     + " mode", null);
@@ -88,7 +93,8 @@ public final class HooksModule implements AgentModule {
         }
         this.engine = e;
         ctx.log().info("hooks: installed " + HookPrimitives.NAMES.size() + " primitives and the HookEngine SPI; "
-                + "spy jar " + options.spyJar + "; nothing appended, no transformer registered");
+                + "spy jar " + options.spyJar + "; " + options.deny.size() + " deny patterns from " + HookOptions.DENY
+                + "; nothing appended, no transformer registered");
     }
 
     /** Uninstalls: the detach of section 3.5 under {@code hooks.detachBudgetMs}. Never throws. */

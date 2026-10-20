@@ -41,7 +41,11 @@ import java.util.TreeMap;
  * <ul>
  *   <li>{@code status}: the agent's {@code hook.health} (states, counts, the armed stubs, the spy's counters, the
  *       installed catalogue, the other bytecode agents, decision D180), beside the pack's catalogue (id, version,
- *       hash, the entries, the warnings of phase6-contracts.md 5.1) and whether they match; exit 0.</li>
+ *       hash, the entries, the warnings of phase6-contracts.md 5.1) and whether they match; exit 0. Phase 8
+ *       (phase8-contracts.md 6.10): the class deny in force on the target and the pack's deny list, the touched
+ *       classes with their code sources ({@code CLASS LOADER CODE SOURCE HOOKS}), and each catalogue entry's
+ *       baked {@code CODE SOURCE}; against an agent that reports no deny list the deny line reads
+ *       {@code unknown}.</li>
  *   <li>{@code install}: {@code HookInstaller} with mode {@code ON}; prints the {@code hooks} record; exit 0 when the
  *       install ran (hooks unavailable with their fallbacks included), 1 when it was refused (PRECONDITION_FAILED,
  *       another catalogue installed, {@code HOOK_CONFLICT}), 3 when the agent cannot be reached.</li>
@@ -163,6 +167,11 @@ final class HooksCommand implements Command {
         }
         text.append("other agents: ").append(otherAgents.isEmpty() ? "none" : String.join(", ", otherAgents))
                 .append('\n');
+        text.append(targetDeny(health)).append('\n');
+        if (pack != null && !catalogue.id().isEmpty()) {
+            text.append("deny (pack catalogue ").append(catalogue.id()).append("): ").append(list(catalogue.deny()))
+                    .append('\n');
+        }
         List<List<String>> rows = new ArrayList<>();
         if (health.get("hooks") instanceof Map<?, ?> hooks) {
             new TreeMap<>(stringKeys(hooks)).forEach((id, h) -> {
@@ -174,9 +183,28 @@ final class HooksCommand implements Command {
         }
         text.append(rows.isEmpty() ? "no hook installed\n" : Text.table(List.of("HOOK", "STATE", "COUNT", "STUB",
                 "REASON"), rows));
+        if (health.get("classes") instanceof List<?> classes) {
+            List<List<String>> lines = new ArrayList<>();
+            for (Object c : classes) {
+                Map<?, ?> line = c instanceof Map<?, ?> m ? m : Map.of();
+                List<String> ids = new ArrayList<>();
+                if (line.get("hooks") instanceof List<?> hooks) {
+                    hooks.forEach(h -> ids.add(String.valueOf(h)));
+                }
+                String hooksText = String.join(", ", ids);
+                if (line.get("deniedNow") != null) {
+                    hooksText = (hooksText.isEmpty() ? "" : hooksText + " ") + "DENIED: "
+                            + Text.oneLine(String.valueOf(line.get("deniedNow")), 120);
+                }
+                lines.add(List.of(String.valueOf(line.get("class")), String.valueOf(line.get("loader")),
+                        String.valueOf(line.get("codeSource")), hooksText));
+            }
+            text.append(lines.isEmpty() ? "no class touched\n" : Text.table(List.of("CLASS", "LOADER", "CODE SOURCE",
+                    "HOOKS"), lines));
+        }
         if (pack == null) {
             text.append("pack: none (give --pack, or put one pack on the class path)\n");
-        } else if (catalogue.isEmpty()) {
+        } else if (catalogue.isEmpty() && catalogue.deny().isEmpty()) {
             text.append("pack ").append(pack.id()).append(": no hook catalogue\n");
         } else {
             text.append("pack ").append(pack.id()).append(" catalogue: ").append(catalogue.id()).append(" v")
@@ -185,9 +213,11 @@ final class HooksCommand implements Command {
             List<List<String>> entries = new ArrayList<>();
             for (HookEntry entry : catalogue.hooks()) {
                 entries.add(List.of(entry.id(), entry.mode().name(), entry.enabled() ? "on" : "off",
-                        entry.target().className() + "." + entry.target().method()));
+                        entry.target().className() + "." + entry.target().method(),
+                        entry.target().codeSource() == null ? "-" : entry.target().codeSource()));
             }
-            text.append(Text.table(List.of("HOOK", "MODE", "ENABLED", "TARGET"), entries));
+            text.append(entries.isEmpty() ? "no hook entry\n" : Text.table(List.of("HOOK", "MODE", "ENABLED",
+                    "TARGET", "CODE SOURCE"), entries));
             for (String warning : catalogue.warnings()) {
                 text.append("warning: ").append(warning).append('\n');
             }
@@ -278,6 +308,32 @@ final class HooksCommand implements Command {
         return Exit.OK;
     }
 
+    /**
+     * {@code deny (target): option <p, q | none>; catalogue <id> <p | none>; modules <n>} from {@code hook.health.deny}
+     * (phase8-contracts.md 6.10), or {@code unknown} when the agent reports no deny list (an agent that predates it).
+     */
+    static String targetDeny(Map<?, ?> health) {
+        if (!(health.get("deny") instanceof Map<?, ?> deny)) {
+            return "deny (target): unknown (the agent reports no deny list)";
+        }
+        List<String> from = strings(deny.get("from"));
+        return "deny (target): option " + list(strings(deny.get("option"))) + "; catalogue "
+                + (from.isEmpty() ? "" : String.join(", ", from) + " ") + list(strings(deny.get("catalogue")))
+                + "; modules " + deny.get("modules");
+    }
+
+    private static String list(List<String> items) {
+        return items.isEmpty() ? "none" : String.join(", ", items);
+    }
+
+    private static List<String> strings(Object value) {
+        List<String> out = new ArrayList<>();
+        if (value instanceof List<?> list) {
+            list.forEach(v -> out.add(String.valueOf(v)));
+        }
+        return out;
+    }
+
     private static Map<String, Object> catalogueJson(DomainPack pack, HookCatalogue catalogue) {
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("pack", pack == null ? null : pack.id());
@@ -294,6 +350,15 @@ final class HooksCommand implements Command {
             entries.add(e);
         }
         out.put("hooks", entries);
+        out.put("deny", new ArrayList<Object>(catalogue.deny()));
+        List<Object> packages = new ArrayList<>();
+        for (HookCatalogue.PackageRule rule : catalogue.packageRules()) {
+            Map<String, Object> p = new LinkedHashMap<>();
+            p.put("name", rule.name());
+            p.put("codeSource", rule.codeSource());
+            packages.add(p);
+        }
+        out.put("packages", packages);
         out.put("warnings", catalogue.warnings());
         return out;
     }

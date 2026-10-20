@@ -43,7 +43,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * Pack 0.5.0 (phase6-contracts.md 6.3, 11.3, 13.1 item 6): the hook catalogue resource read and valid, the pack's
  * settings and the public surface an overlay builds on (the settings-driven {@code SystemLimit} resolver, the staff
- * resolver with another statement, the allow-list of another limit column).
+ * resolver with another statement, the allow-list of another limit column). Catalogue version 2
+ * (phase8-contracts.md 6.8, 12.3, section 13.1 row 28): the qualified package rule every enabled entry inherits, and
+ * the deny of the desk's input queue.
  */
 class LendingHooksAndSettingsTest {
 
@@ -54,8 +56,23 @@ class LendingHooksAndSettingsTest {
         HookCatalogue catalogue = pack.hooks();
         assertSame(catalogue, pack.hooks(), "read once");
         assertEquals("lending", catalogue.id());
-        assertEquals(1, catalogue.version());
-        assertEquals(List.of("ai.skillroy.testjava.samples.lending"), catalogue.packages());
+        assertEquals(2, catalogue.version());
+        assertEquals(List.of("ai.skillroy.testjava.samples.lending"), catalogue.packages(), "still the one name");
+        String qualifier = "skillroy-sample-lending-app(-[^/]*)?\\.jar";
+        assertEquals(List.of(new HookCatalogue.PackageRule("ai.skillroy.testjava.samples.lending", qualifier)),
+                catalogue.packageRules());
+        assertEquals(List.of("ai.skillroy.testjava.samples.lending.Inbox"), catalogue.deny());
+        assertEquals("ai.skillroy.testjava.samples.lending.Inbox",
+                catalogue.denied("ai.skillroy.testjava.samples.lending.Inbox"));
+        assertEquals(List.of("ai.skillroy.testjava.samples.lending.Inbox"), catalogue.descriptor().get("deny"));
+        for (HookSpec spec : catalogue.toSpecs()) {
+            assertEquals(qualifier, spec.target().codeSource(), "every enabled entry inherits it: " + spec.id());
+        }
+        java.util.regex.Pattern anchored = java.util.regex.Pattern.compile(qualifier);
+        assertTrue(anchored.matcher("skillroy-sample-lending-app.jar").matches(), "the IT copy");
+        assertTrue(anchored.matcher("skillroy-sample-lending-app-0.2.0-SNAPSHOT.jar").matches(), "a versioned jar");
+        assertFalse(anchored.matcher("classes").matches(), "a class directory");
+        assertFalse(anchored.matcher("skillroy-sample-lending-agent.jar").matches(), "the agent module's jar");
         assertEquals(List.of("limit.applied", "access.checked", "waiver.evaluated", "sign.on.checked", "line.amount"),
                 catalogue.hooks().stream().map(HookEntry::id).toList());
         assertEquals(List.of("limit.applied", "access.checked", "waiver.evaluated", "line.amount"),
@@ -78,6 +95,9 @@ class LendingHooksAndSettingsTest {
             assertEquals(spec, HookSpec.fromJson(spec.toJson()), "round trip of " + spec.id());
         }
         assertTrue(catalogue.hash().matches("sha256:[0-9a-f]{64}"), catalogue.hash());
+        // version 2's hash, pinned (phase8-contracts.md 2.4): the qualifier baked into every entry and the deny both
+        // enter it; version 1's was sha256:62651ba44da7b6dadd5647c6a56d522514d7e5527a087e1cd76b03c9ef4569c5
+        assertEquals("sha256:b4395bf3297d97083015babd26d92aa4102faf3c9937eee441864524d8381cb8", catalogue.hash());
         // The one warning: sign.on.checked captures passwordMatches' result without secretResult (a boolean: the
         // author's knowing choice), never its password argument.
         assertEquals(1, catalogue.warnings().size(), String.valueOf(catalogue.warnings()));

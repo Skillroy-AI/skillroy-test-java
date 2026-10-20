@@ -21,7 +21,9 @@
  * ({@link ai.skillroy.testjava.agent.api.instrument.ByteVerification}) and the retransformation batches
  * ({@link ai.skillroy.testjava.agent.api.instrument.RetransformBatches}); and the provenance rule of every jar the
  * agent loads from an operator's path outside its home ({@link ai.skillroy.testjava.agent.api.instrument.JarTrust},
- * Phase 6 security fix, pass 2, P2-L1-F5: the {@code modules} paths, {@code hooks.spyJar}, {@code byteman.jar}). API
- * of the agent only in the sense that modules may use it; the controller never sees it. Java 8, JDK only.
+ * Phase 6 security fix, pass 2, P2-L1-F5: the {@code modules} paths, {@code hooks.spyJar}, {@code byteman.jar}); and
+ * the code-source name of a loaded class ({@link ai.skillroy.testjava.agent.api.instrument.CodeSources},
+ * phase8-contracts.md section 6.2: the jar's file name, never a directory, read through a location's field getters
+ * only). API of the agent only in the sense that modules may use it; the controller never sees it. Java 8, JDK only.
  */
 package ai.skillroy.testjava.agent.api.instrument;

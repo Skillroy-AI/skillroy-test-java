@@ -55,8 +55,9 @@ final class HookPrimitives {
     static List<Primitive> all(final HookEngineImpl engine) {
         List<Primitive> out = new ArrayList<Primitive>();
         out.add(Primitives.of(PrimitiveSpec.builder("hook.probe")
-                .description("Probes hook specs (phase6-contracts.md 3.3): whether each could be installed, and why "
-                        + "not; never installs. Answers {hooks: [HookProbe], spy, otherAgents}.")
+                .description("Probes hook specs (phase6-contracts.md 3.3, phase8-contracts.md 6.4): whether each "
+                        + "could be installed, and why not (a denied class, another code source); never installs. "
+                        + "Answers {hooks: [HookProbe], spy, otherAgents}.")
                 .param("specs", "array", true, "HookSpec objects, at most 64")
                 .thread(ThreadPolicy.WORKER).timeoutMs(10000).capability(HooksModule.ENGINE).build(),
                 new Primitives.Body() {
@@ -67,9 +68,10 @@ final class HookPrimitives {
                 }));
         out.add(Primitives.of(PrimitiveSpec.builder("hook.install")
                 .description("Installs a catalogue's hook specs (phase6-contracts.md 3.2, 4.2), idempotent by "
-                        + "catalogue hash; HOOK_CONFLICT for another catalogue unless replace.")
-                .param("specs", "array", true, "HookSpec objects, at most 64")
-                .param("catalogue", "object", true, "{id, version?, hash, application?}")
+                        + "catalogue hash; HOOK_CONFLICT for another catalogue unless replace. The catalogue's deny "
+                        + "patterns are held add-only and echoed as catalogue.deny (phase8-contracts.md 6.6).")
+                .param("specs", "array", true, "HookSpec objects, at most 64 (none: the call delivers a deny only)")
+                .param("catalogue", "object", true, "{id, version?, hash, application?, deny?: [class pattern]}")
                 .param("replace", "boolean", false, "remove an installed catalogue first (default false)")
                 .thread(ThreadPolicy.WORKER).timeoutMs(60000).capability(HooksModule.ENGINE).build(),
                 new Primitives.Body() {
@@ -113,7 +115,8 @@ final class HookPrimitives {
                 }));
         out.add(Primitives.of(PrimitiveSpec.builder("hook.health")
                 .description("The health of the installed hooks (phase6-contracts.md 3.6), the armed stubs, the "
-                        + "spy's counters, the installed catalogue and the other agents.")
+                        + "spy's counters, the installed catalogue, the other agents, the touched classes with their "
+                        + "code sources and the class deny in force (phase8-contracts.md 6.4, 6.6).")
                 .param("ids", "array", false, "hook ids (absent or empty: every hook)")
                 .thread(ThreadPolicy.WORKER).timeoutMs(10000).build(),
                 new Primitives.Body() {

@@ -61,6 +61,9 @@ import static org.junit.jupiter.api.Assertions.fail;
  * and hold exactly the agent's port; after {@code agent.disable} and a re-attach the module reuses the parked
  * {@code Retransformer}; a cut-short uninstall (the test seam) leaves a rule the next instance refuses by name while
  * the rule keeps running its action with no {@code rule.fired}; after the last disable no agent thread is left.
+ * Phase 8 (phase8-contracts.md 6.5, 6.7; section 13.2 item 23): the agent option {@code hooks.deny} without the hooks
+ * module refuses a rule on the denied class before Byteman loads, and an invalid pattern fails the module naming the
+ * key.
  */
 class BytemanIT {
 
@@ -376,5 +379,42 @@ class BytemanIT {
                 ((Number) error(agent, "rule.submit", confirmed(limit)).get("code")).longValue());
         assertEquals(Boolean.TRUE, agent.value("rule.check", map("rule", limit)).get("ok"));
         assertEquals(Boolean.FALSE, agent.value("rule.list", null).get("loaded"), "a read-only agent loads nothing");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void theDenyOptionRefusesARuleBeforeBytemanLoadsAndABadPatternFailsTheModule() throws Exception {
+        ChildJvm child = launch("hooks.deny=" + TOY);
+        ChildJvm.Agent agent = new ChildJvm.Agent(child.awaitDiscovery(discoveryDir));
+        child.awaitOutput("parked");
+        assertEquals("OK", engine(agent).get("state"));
+        String limit = rule("limit", "EXIT", "true", "fired($0, $!)");
+        String reason = TOY + ": denied by the agent option hooks.deny: " + TOY;
+        Map<String, Object> check = agent.value("rule.check", map("rule", limit));
+        assertEquals(Boolean.FALSE, check.get("ok"), String.valueOf(check));
+        assertEquals(Collections.singletonList(reason), check.get("errors"));
+        Map<String, Object> refused = error(agent, "rule.submit", confirmed(limit));
+        assertEquals((long) ErrorCodes.RULE_REJECTED, ((Number) refused.get("code")).longValue());
+        assertEquals("the rule was refused: " + reason, refused.get("message"));
+        Map<String, Object> listed = agent.value("rule.list", null);
+        assertEquals(Boolean.FALSE, listed.get("loaded"), "nothing appended, no premain: " + listed);
+        Map<String, Object> deny = (Map<String, Object>) listed.get("deny");
+        assertEquals(Collections.singletonList(TOY), deny.get("option"), String.valueOf(listed));
+        assertEquals(0L, ((Number) deny.get("modules")).longValue());
+        assertFalse(deny.containsKey("catalogue"), "no hooks module: no catalogue list");
+        assertEquals("150.00", command(child, "CEILING STAFF-7", "ceiling").split(":")[1], "the toy is untouched");
+        assertFalse(child.output().contains("org.jboss.byteman"), child.output());
+
+        ChildJvm bad = launch("hooks.deny=a..b");
+        ChildJvm.Agent second = new ChildJvm.Agent(bad.awaitDiscovery(discoveryDir));
+        Map<String, Object> failed = null;
+        for (Object module : (List<Object>) second.value("agent.info", null).get("modules")) {
+            if ("byteman".equals(((Map<String, Object>) module).get("id"))) {
+                failed = (Map<String, Object>) module;
+            }
+        }
+        assertNotNull(failed, "the byteman module's record");
+        assertEquals("FAILED", failed.get("state"), String.valueOf(failed));
+        assertTrue(String.valueOf(failed.get("message")).contains("hooks.deny"), String.valueOf(failed));
     }
 }

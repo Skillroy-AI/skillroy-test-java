@@ -1713,6 +1713,13 @@ reported (D154's rule: a path may hold a user name).
 `WORKER`), cached in the ledger entry at its creation (`Ledger.Entry.codeSource`, final), never on an application thread,
 never at transform time.
 
+**As built (Phase 8, EH, 2026-10-19).** `CodeSources` as specified; a malformed escape (`%` not followed by two
+hexadecimal digits) and a run of escapes that is not valid UTF-8 are kept as written (strict decoding); `of(null)` is
+`NONE`; a name with no part and no host is `<protocol>:`. `CodeSourcesTest` proves the field-getter rule with a stream
+handler armed only after the class was defined: the JDK's `defineClass` itself calls `CodeSource.getLocation()
+.toString()` for the `-verbose:class` source text, so a handler that throws from the start cannot be the location of
+a defined class.
+
 ### 6.3 The wire (`skillroy-protocol`, `…protocol.hook`; P6 §4.1 amended)
 
 - **`HookTarget`** gains `codeSource?: string` (D557): a Java regular expression matched against the **whole**
@@ -1762,6 +1769,14 @@ which the installer maps to ERROR / ENVIRONMENT with an upgrade hint (§6.9; D56
 installer's check of §6.9 make that fail closed too (the safety rule of §2.1; D565). Mixed versions stay unsupported
 (guide §4.4).
 
+**As built (Phase 8, EH, 2026-10-19).** Public members beyond the list above, so that one rule serves both sides
+(D-EH-8): `HookTarget.MAX_CODE_SOURCE_LENGTH` (200), `HookTarget.codeSourceViolation(String)` (the check
+`HookSpec.violation()` and the catalogue reader's `packages` map apply), `HookTarget.withCodeSource(String)`;
+`HookProbe.MAX_CODE_SOURCES` (16; the constructor keeps the first 16). `ClassPattern.violation(null)` is "empty"; a
+glob segment is checked as an identifier with each `*` read as an identifier character (`9*` is "segment '9*' is not
+an identifier", `*9` is a glob); a control character in a refused pattern is printed as `\uXXXX`; `equals` and
+`hashCode` are the pattern text's.
+
 ### 6.4 The probe amended (P6 §3.3 items 2 and 3; D558, D563)
 
 Between item 2 (the fixed deny by name) and item 3 ("loaded?") a new **item 2b, the class deny**: the sources of §6.5
@@ -1795,6 +1810,14 @@ top-level `classes: [{class, loader, codeSource, bytes, methods, hooks: [id…],
 sorted by class then loader, at most `hooks.maxClasses` lines (the ledger's bound); an answer-map key, `HookHealth`
 untouched. This is what `skillroy hooks status` reads (D180: it calls nothing but `hook.health`). The run's `hooks`
 record keeps its shape; a code-source refusal's reason reaches `unavailable[].reason` as every reason does.
+
+**As built (Phase 8, EH, 2026-10-19).** The refusal's names are the copies' distinct code-source names **sorted**
+(`getAllLoadedClasses` answers in the JVM's order; D-EH-10), at most four, then " and <n> more". The qualifier's budget
+is **one** `BoundedRegex.BUDGET_MS` per spec per call, shared by its copies through a deadline, so that the time under
+the engine's lock does not grow with the number of copies (D-EH-9). `loaders` and `loaderIds` keep every copy by name
+and loader, `codeSources` is aligned with them, and items 4 to 7 run over the kept copies; a ledger entry takes the
+copy's name from the probe (`Probes.Match.codeSource`), never reading it again. The package-private reader seam is
+`Probes.reader` (`HookEngineImpl.probes()` for the tests).
 
 ### 6.5 `ClassDeny` and the three sources (D562, D563)
 
@@ -1835,6 +1858,17 @@ Name-only (no loader argument): the row asks for "refused by name", and the Byte
 found. Evaluated on agent workers under the engine's lock (hooks) or the module's lock (Byteman) only; a `ClassDeny`
 that blocks holds that lock, which is why the SPI says "never blocking" and why it is reviewed module code.
 
+**As built (Phase 8, EH, 2026-10-19).** **The catalogue's `ClassDeny` is the engine itself**: `HooksModule.install`
+registers the `HookEngineImpl` under `ClassDeny` beside `HookEngine`, and its `refuse` answers `denied by the catalogue
+<id>: <pattern>`; every reader tells it apart from a domain module's by `instanceof HookEngine`, an `agent-api` type both
+module loaders share, so the Byteman module uses that reason as it is and wraps every other in `denied by a module: `
+(D-EH-1). **The order is the numbered list above**, whatever the registration order: the option, then the catalogue,
+then the other modules in registration order (D-EH-2; §6.4's "every registered `ClassDeny` in registration order"
+would put a domain module installed before the hooks module ahead of the catalogue). A `VirtualMachineError` thrown by
+a `ClassDeny` is rethrown (`InputVeto`'s rule), any other throw refuses. `hooks.deny` keeps the first of equal
+patterns, `<i>` counts the non-empty items from 0, and more than 64 is `option hooks.deny: more than 64 patterns (<n>)`
+(D-EH-13). The sample's `LendingClassDeny` reads `lending.hooks.deny` with the same rule through `ctx.option`.
+
 ### 6.6 `hook.install`'s `catalogue.deny`, the held list, `hook.health.deny` (D564)
 
 `hook.install {specs, catalogue: {id, version?, hash, application?, deny?: [pattern…]}, replace?}`. Validation, before
@@ -1868,6 +1902,16 @@ default; the hooks engine overrides it). The four-argument `install` is unchange
 catalogue and so no deny; a deny reaches the engine through `hook.install` only (D575). The rule of §2.3 holds: a default
 method, no abstract change.
 
+**As built (Phase 8, EH, 2026-10-19).** Texts: a `deny` that is not a list is `catalogue.deny must be a list of class
+patterns` (`data.param catalogue.deny`), an item that is not a string `deny pattern <i>: not a string`, more than 64
+`at most 64 deny patterns per catalogue`; the 256 check runs under the lock, beside the merge (the held list can only be
+read there). The held list is an immutable snapshot (patterns compiled once) replaced under the lock and read without
+it by the probe and by the Byteman module's threads. `from` lists the delivering catalogue ids in the order of their
+first delivery. `hook.health.classes[].hooks` names the installed hooks and the residue hooks whose classes include the
+entry; `classes[].deniedNow` is the reason through the engine's `wire` redaction. **`rule.list.deny`** is `{catalogue?,
+option, modules}`: `catalogue` from `HookEngine.deny()` when the hooks module is loaded, **never `from`**, which the SPI
+does not carry (D575; D-EH-3).
+
 ### 6.7 The Byteman module (P6 §7.3 amended; D569)
 
 `ClassBound` takes a deny view (`interface Deny { String refuse(String className); }`, package-private) that `Engine`
@@ -1888,6 +1932,10 @@ hooks module's catalogue registration counts when that module is loaded, and a d
   `INTERFACE` submit receives Byteman's trigger at its load; closing it needs a guard transformer behind Byteman's, a
   cost on every class load (BS3 fact 20), not taken now. The guide (§9.6), `threat-model.md` §8 and `SECURITY.md` (d)
   say so (§16.1).
+
+**As built (Phase 8, EH, 2026-10-19).** `rule.check` of a denied rule class reports the deny in `errors` and skips the
+type check (D-EH-14). The deny view reads `ctx.spi().all(ClassDeny.class)` once per call, as specified; a throwing
+module `ClassDeny` is logged once per implementation class.
 
 ### 6.8 The catalogue (`skillroy-scenario`, `…scenario.hooks`; P6 §5.1, §11.2 amended)
 
@@ -1949,6 +1997,15 @@ hooks: [{hash, enabled}…], deny: [sorted]}` with `deny` written **only when no
 its hash byte for byte, and a baked qualifier changes the entry hash as any target change does. **`descriptor()`**
 gains `deny` when non-empty (what `hook.install` carries).
 
+**As built (Phase 8, EH, 2026-10-19).** `HookEntry.withTarget(HookTarget)` is new (the bake). **The builder bakes only
+the entries it did not take from the base** (`builder(base)` marks the base's entries baked, `add` and `replace` unmark
+them), so a base entry that the base left without a qualifier is not re-baked when an overlay adds a qualified rule
+over its package (D570's "re-baking would change base entries' hashes"; D-EH-4). **An overlay's plain `packages` name
+never drops a base qualifier**; only its map form replaces one (D-EH-5). An item's line is the key's for `deny` (the
+strict reader keeps no line of a scalar list item). The overlay refuses a union beyond 64 patterns at its `deny` line.
+`build()` returns `EMPTY` only when the id, the entries, the rules and the deny are all empty, so a deny-only
+catalogue built in Java is a catalogue (`isEmpty()` stays "no entry").
+
 ### 6.9 The installer (`HookInstaller`, P6 §5.3 amended; D565, D566, D567)
 
 - **Something to install:** a catalogue with an enabled entry **or a non-empty deny**. A deny-only catalogue is sent as
@@ -1973,6 +2030,13 @@ gains `deny` when non-empty (what `hook.install` carries).
   [id…]` when step 0's health marks installed hooks so, and the lines above. `touched` stays a count.
 - Everything else of P6 §5.3 (step 0's armed-stub rule, replace, fallbacks, the matrix re-read) is unchanged.
 
+**As built (Phase 8, EH, 2026-10-19).** **`denyNotDelivered` is an object** `{patterns: [...], agentOption: "unknown" |
+[...]}` (the passage above says both `denyNotDelivered: [patterns]` and `denyNotDelivered.agentOption`; D-EH-6). The
+`rule.list` read happens when any `rule.*` id is in the matrix, whatever its state; a failed read is `unknown`
+(D-EH-11). Under `off` the catalogue is read for the record only, and a catalogue that cannot be read records nothing.
+The record's `deny` and `deniedNow` come after its other keys, so a record without them is byte-identical to today's;
+the echo's ERROR record carries the catalogue reference and both keys.
+
 ### 6.10 `skillroy hooks status` (P6 §6.2 amended)
 
 Text: after "other agents": `deny (target): option <p, q | none>; catalogue <id> <p | none>; modules <n>` and `deny
@@ -1982,6 +2046,10 @@ table becomes `HOOK MODE ENABLED TARGET CODE SOURCE` (`-` without a qualifier); 
 `--json`: `health` raw (it carries `deny` and `classes`); `catalogue` gains `deny: [...]` and `packages: [{name,
 codeSource}]`, and each entry's spec JSON already holds its baked `target.codeSource`. Against an old agent the deny
 lines read `unknown (the agent reports no deny list)`. Exit codes unchanged.
+
+**As built (Phase 8, EH, 2026-10-19).** The class table is printed only when `hook.health` carries `classes` (an old
+agent reports none, and then no table); the catalogue line of `deny (target)` names the `from` ids before the
+patterns; a deny-only pack catalogue prints "no hook entry" in place of its empty table (D-EH-15).
 
 ### 6.11 Bounds, threads and the failure paths in one table
 
@@ -3632,6 +3700,16 @@ package that writes the test (§2.5).
 | 49 | `skillroy-mcp` (EP) | `ScenarioRunPolicyTest` (or a new `SuiteCacheOverMcpTest` on the MCP `FakeAgent` with a session): two `skillroy_scenario_run` calls → one evaluation of the test pack's `SUITE` check, the second run's record `cached: true`, the session's open counted as the first; `skillroy_catalogue` lists the pack's id with `source: pack:<id>` |
 | 50 | the sample (headless) (EP) | `LendingPackTest`: `capabilities()` = `[lending.returns.ceiling]` with its description and `SCENARIO` scope, `lending.database` `SUITE`, version `0.7.0` (step R); on `FakeDesk`: `OK` with the row, `UNAVAILABLE` naming the row's name without it, the `DataException` reason; `LendingBranchOverlayTest`: the branch pack reads `return_ceiling`; `PackCapabilityHeadlessTest` (new, on `HeadlessDesk`, both environments): scenario A's committed plan ends `PASS` in `live` with the `capabilities` record's `pack` entry `OK`, and with a test overlay (`OverlayPack`-style) whose `lending.maxReturnSetting` names a missing row ends `PRECONDITION_FAILED` naming `lending.returns.ceiling: UNAVAILABLE (no system maximum return configured (desk_setting <name>))` before bind, with `data.query` the only call after `agent.capabilities`, no `preflight`, `bind`, `cleanup` or `recover` record; `PreflightSuiteHeadlessTest` (new): a `ScenarioTests.dynamicTests` stream of three committed seed-A scenarios on one `HeadlessDesk` → `lending.database` evaluated once (`cached` false then true), a second desk (a new session) → evaluated again; `PlansUpToDateTest`, `BranchPlansUpToDateTest`, `BindingsUpToDateTest` (red on EP's branch for scenario A's two plans and three bindings files until step R, the one named window, D641), `ScenarioSchemaCommittedTest` (every committed and negative file validates against the enum) green after integration |
 
+**As built (Phase 8, EH, 2026-10-19), rows 22-28.** Row 24's "class from another code source" uses a fixture of its
+own, `fixture.hooks.TwoJars`, defined a second time by `ChildFirstLoader` from a temporary jar (`two-jars-1.4.jar`),
+not `Returns`: other test classes of the shared JVM leave child-loader copies of `Returns` loaded, which would widen
+the copy set (D-EH-7); its pathological qualifier is `(.*a){20}`, because the JDK 25 regex engine memoises the classic
+`(a|aa)+` and `(a+)+` and answers them at once. Row 22 pins `LIMIT`'s v0.1.0 spec hash and row 26 the sample-shaped
+corpus hash, each computed by the code before the change; row 28 pins `lending.yaml` version 2's hash. Row 27 asserts
+the `CODE SOURCE` column with `-` (the CLI test pack's catalogue has no qualifier and stays unchanged). The agent
+answers a spec whose `codeSource` is not a regular expression `INVALID_PARAMS` `specs[0].target.codeSource` (a
+`ProbeItemsTest` case).
+
 ### 13.2 End to end (the Linux image; `ci/run-in-linux.sh … -Dskillroy.headless=false`; Java 8 and Java 25 targets; no key)
 
 Where each item lives. `LoadModeChecks` (every load mode of `LendingEndToEndIT`, both target Javas through the matrix's
@@ -3830,6 +3908,8 @@ named per item host the agent-level half of a proof.
 24. **`BranchEndToEndIT`** (EH). unchanged assertions; it now runs with the inherited qualifier on `ReturnCeilings`.
 25. **The per-target-Java CLI check** (EH). (`PerTargetJavaChecks`, the assembled launcher) may add `skillroy hooks status` on the
    hooks target and assert the `CODE SOURCE` column; optional (the scripted `HooksCommandTest` proves the printing).
+   **As built (Phase 8, EH, 2026-10-19):** not taken (optional); items 19-24 run in `HookChecks` (orders 65, 68, 69,
+   165, 166), `BytemanIT` and `BranchEndToEndIT` on the Java 25 and the Java 8 target.
 
 26. **Warnings and acceptance** (ES). (`@Order(173)`): `semantic-input-warnings` PASS in every mode with two `warning`
    records (`VALUE_COERCED` with `taken` the trimmed barcode, `VALUE_DROPPED`), `RunResult.warnings` of two lines, the

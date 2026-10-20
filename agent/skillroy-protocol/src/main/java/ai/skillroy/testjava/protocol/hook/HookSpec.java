@@ -33,9 +33,9 @@ import java.util.regex.Pattern;
 
 /**
  * One hook as the agent receives it (phase6-contracts.md section 4.1): JSON {@code {id, mode, target{class, method,
- * descriptors[], loader?}, emits?, capture?{args[], self, result}, secretArgs?[], secretResult?, note?}}. A pack
- * author's or a person's, never a model's (section 4.2): the controller's hook catalogue carries it to the agent's
- * {@code hook.probe} and {@code hook.install}.
+ * descriptors[], loader?, codeSource?}, emits?, capture?{args[], self, result}, secretArgs?[], secretResult?,
+ * note?}}. A pack author's or a person's, never a model's (section 4.2): the controller's hook catalogue carries it to
+ * the agent's {@code hook.probe} and {@code hook.install}.
  *
  * <p>{@link #fromJson} refuses the shape errors (an unknown key, a missing id, mode, class, method or descriptors, an
  * empty descriptor list, a negative {@code secretArgs} or {@code capture.args} index); {@link #violation()} checks the
@@ -161,8 +161,9 @@ public final class HookSpec {
      * The first name-rule violation of section 3.3 item 1 (and of sections 4.3 and 4.6), or null when there is none:
      * the id's pattern and length and the reserved ids, the class as a binary name, the method as an identifier or
      * {@link #CONSTRUCTOR} (a constructor is not a violation: the agent answers it with a per-hook state; a static
-     * initialiser is one), each descriptor as a JVM method descriptor, the topic's {@code hook.} prefix, and the note's
-     * length.
+     * initialiser is one), each descriptor as a JVM method descriptor, the target's {@code codeSource} as a regular
+     * expression of at most 200 characters (phase8-contracts.md section 6.3), the topic's {@code hook.} prefix, and the
+     * note's length.
      */
     public Violation violation() {
         if (id.length() > MAX_ID_LENGTH) {
@@ -188,6 +189,10 @@ public final class HookSpec {
             if (!DESCRIPTOR.matcher(descriptor).matches()) {
                 return new Violation("target.descriptors[" + i + "]", "not a JVM method descriptor: " + descriptor);
             }
+        }
+        String codeSource = HookTarget.codeSourceViolation(target.codeSource());
+        if (codeSource != null) {
+            return new Violation("target.codeSource", codeSource);
         }
         if (emits != null && (!emits.startsWith(TOPIC_PREFIX) || emits.length() == TOPIC_PREFIX.length())) {
             return new Violation("emits", "a hook's topic must start with '" + TOPIC_PREFIX + "': " + emits);

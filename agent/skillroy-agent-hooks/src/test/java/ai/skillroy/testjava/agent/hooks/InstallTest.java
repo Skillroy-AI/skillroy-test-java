@@ -37,6 +37,7 @@ import org.junit.jupiter.api.Test;
 import java.lang.reflect.Method;
 import java.math.BigDecimal;
 import java.net.URL;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -47,13 +48,17 @@ import static ai.skillroy.testjava.agent.hooks.Harness.spec;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * {@code hook.install} (phase6-contracts.md sections 3.2 and 4.2): a class defined by two loaders, idempotency by
  * catalogue hash, {@code HOOK_CONFLICT} and {@code replace}, the ledger's bound, a method hooked twice, the
- * {@code hooks.installed} event, and the SPI through {@code AgentContext.hooks()}.
+ * {@code hooks.installed} event, and the SPI through {@code AgentContext.hooks()}. Phase 8 (phase8-contracts.md
+ * sections 6.4 and 6.6, section 13.1 row 24): {@code touched[].codeSource}, {@code hook.health.classes}, the
+ * catalogue's deny validated, merged before the conflict check, held add-only and echoed, and a hook installed before
+ * its class was denied flagged, not removed.
  */
 class InstallTest {
 
@@ -246,5 +251,155 @@ class InstallTest {
         assertEquals(CapabilityState.OK, removed.get(0).state());
         assertFalse(Harness.slotHeld());
         assertTrue(engine.catalogue().isEmpty());
+    }
+
+    // ---- Phase 8 (phase8-contracts.md sections 6.4 and 6.6) ----
+
+    private static final String DEPOSIT_RULE = "ai.skillroy.testjava.fixture.hooks.DepositRule";
+
+    private Map<String, Object> installWithDeny(String id, String hash, List<String> deny, boolean replace,
+                                                HookSpec... specs) throws Exception {
+        Map<String, Object> catalogue = map("id", id, "hash", hash);
+        if (deny != null) {
+            catalogue.put("deny", deny);
+        }
+        return harness.ctx.map("hook.install", map("specs", Harness.json(specs), "catalogue", catalogue,
+                "replace", replace));
+    }
+
+    private RpcException refusedWithDeny(String id, List<?> deny) {
+        return harness.ctx.error("hook.install", map("specs", Collections.emptyList(), "catalogue",
+                map("id", id, "hash", "sha256:" + id, "deny", deny)));
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<Object> echo(Map<String, Object> answer) {
+        return (List<Object>) ((Map<String, Object>) answer.get("catalogue")).get("deny");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void theTouchedLinesAndTheHealthsClassesCarryTheCodeSource() throws Exception {
+        new DepositRule();
+        harness = new Harness();
+        Map<String, Object> result = harness.install("toys", spec("deposit.computed", HookMode.OBSERVE,
+                DepositRule.class, "depositFor"), spec("deposit.waived", HookMode.OBSERVE, DepositRule.class,
+                "waives"));
+        Map<String, Object> line = (Map<String, Object>) ((List<Object>) result.get("touched")).get(0);
+        assertEquals(Arrays.asList("class", "loader", "codeSource", "bytes", "methods", "ms"),
+                new ArrayList<String>(line.keySet()));
+        assertEquals("test-classes", line.get("codeSource"));
+        assertEquals(Collections.emptyList(), echo(result), "a new agent holding nothing echoes an empty list");
+        Map<String, Object> health = harness.ctx.map("hook.health", map());
+        List<Object> classes = (List<Object>) health.get("classes");
+        assertEquals(1, classes.size(), String.valueOf(classes));
+        Map<String, Object> entry = (Map<String, Object>) classes.get(0);
+        assertEquals(DEPOSIT_RULE, entry.get("class"));
+        assertEquals("system", entry.get("loader"));
+        assertEquals("test-classes", entry.get("codeSource"));
+        assertEquals(Arrays.asList("deposit.computed", "deposit.waived"), entry.get("hooks"));
+        assertTrue(((Number) entry.get("bytes")).longValue() > 0);
+        assertFalse(entry.containsKey("deniedNow"));
+        Map<String, Object> deny = (Map<String, Object>) health.get("deny");
+        assertEquals(Collections.emptyList(), deny.get("catalogue"));
+        assertEquals(Collections.emptyList(), deny.get("from"));
+        assertEquals(Collections.emptyList(), deny.get("option"));
+        assertEquals(0L, ((Number) deny.get("modules")).longValue(), "the engine's own registration is not counted");
+        harness.ctx.call("hook.remove", map());
+        assertEquals(Collections.emptyList(), harness.ctx.map("hook.health", map()).get("classes"));
+    }
+
+    @Test
+    void theCataloguesDenyIsValidated() throws Exception {
+        harness = new Harness();
+        RpcException bad = refusedWithDeny("desk", Arrays.asList("a.b.C", "a..b"));
+        assertEquals(ErrorCodes.INVALID_PARAMS, bad.error().code());
+        assertEquals("catalogue.deny[1]", bad.error().data().get("param"));
+        assertEquals("deny pattern 1: an empty segment", bad.getMessage());
+        RpcException notString = refusedWithDeny("desk", Arrays.asList("a.b.C", 7));
+        assertEquals("catalogue.deny[1]", notString.error().data().get("param"));
+        RpcException notList = harness.ctx.error("hook.install", map("specs", Collections.emptyList(), "catalogue",
+                map("id", "desk", "hash", "sha256:aa", "deny", "a.b.C")));
+        assertEquals("catalogue.deny", notList.error().data().get("param"));
+        List<String> many = new ArrayList<String>();
+        for (int i = 0; i < 65; i++) {
+            many.add("a.b.C" + i);
+        }
+        RpcException tooMany = refusedWithDeny("desk", many);
+        assertEquals(ErrorCodes.INVALID_PARAMS, tooMany.error().code());
+        assertEquals("catalogue.deny", tooMany.error().data().get("param"));
+        assertTrue(harness.engine().deny().isEmpty(), "nothing of a refused call is held");
+        for (int c = 0; c < 4; c++) {
+            List<String> sixtyFour = new ArrayList<String>();
+            for (int i = 0; i < 64; i++) {
+                sixtyFour.add("p" + c + ".C" + i);
+            }
+            assertEquals(64 * (c + 1), echo(installWithDeny("cat" + c, "sha256:c" + c, sixtyFour, false)).size());
+        }
+        RpcException full = refusedWithDeny("cat4", Arrays.asList("p0.C0", "p9.Z"));
+        assertEquals(ErrorCodes.INVALID_PARAMS, full.error().code());
+        assertEquals("catalogue.deny", full.error().data().get("param"));
+        assertEquals("the engine holds 256 deny patterns; restart the target", full.getMessage());
+        assertEquals(256, harness.engine().deny().size());
+        assertEquals(256, echo(installWithDeny("cat4", "sha256:c4", Arrays.asList("p0.C0"), false)).size(),
+                "a pattern already held adds nothing");
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void theDenyIsMergedBeforeTheConflictCheckHeldAddOnlyAndEchoed() throws Exception {
+        DepositRule rule = new DepositRule();
+        new Returns();
+        harness = new Harness();
+        HookSpec deposit = spec("deposit.computed", HookMode.OBSERVE, DepositRule.class, "depositFor");
+        HookSpec returns = spec("returns.count", HookMode.OBSERVE, Returns.class, "count");
+        Map<String, Object> first = installWithDeny("desk", "sha256:aa", Arrays.asList("x.Late", "a.b.*"), false,
+                deposit);
+        assertEquals(Arrays.asList("a.b.*", "x.Late"), echo(first), "the held patterns, sorted");
+        Map<String, Object> again = installWithDeny("desk", "sha256:aa", Arrays.asList("x.Late", "a.b.*"), false,
+                deposit);
+        assertEquals(Boolean.TRUE, ((Map<String, Object>) again.get("catalogue")).get("alreadyInstalled"));
+        assertEquals(Arrays.asList("a.b.*", "x.Late"), echo(again), "echoed on the alreadyInstalled path too");
+
+        // another catalogue denying the hooked class: HOOK_CONFLICT, but the engine is tightened
+        RpcException conflict = harness.ctx.error("hook.install", map("specs", Collections.emptyList(),
+                "catalogue", map("id", "branch", "hash", "sha256:bb", "deny", Arrays.asList(DEPOSIT_RULE))));
+        assertEquals(ErrorCodes.HOOK_CONFLICT, conflict.error().code());
+        assertTrue(harness.engine().deny().contains(DEPOSIT_RULE), "a refused catalogue still tightened the engine");
+        assertEquals(Arrays.asList("a.b.*", DEPOSIT_RULE, "x.Late"), harness.engine().deny());
+
+        // the hook installed before the deny keeps firing and is flagged, not removed (D568)
+        long before = harness.engine().hooks.get("deposit.computed").count.get();
+        rule.depositFor("T1");
+        assertEquals(before + 1, harness.engine().hooks.get("deposit.computed").count.get(), "still firing");
+        Map<String, Object> health = harness.ctx.map("hook.health", map());
+        Map<String, Object> hook = (Map<String, Object>) ((Map<String, Object>) health.get("hooks"))
+                .get("deposit.computed");
+        assertEquals(Boolean.TRUE, hook.get("deniedNow"), String.valueOf(hook));
+        Map<String, Object> line = (Map<String, Object>) ((List<Object>) health.get("classes")).get(0);
+        assertEquals("denied by the catalogue branch: " + DEPOSIT_RULE, line.get("deniedNow"));
+        Map<String, Object> deny = (Map<String, Object>) health.get("deny");
+        assertEquals(Arrays.asList("a.b.*", DEPOSIT_RULE, "x.Late"), deny.get("catalogue"));
+        assertEquals(Arrays.asList("desk", "branch"), deny.get("from"));
+
+        // the call's own specs are checked against the merged list
+        Map<String, Object> replaced = installWithDeny("desk", "sha256:cc", Arrays.asList(
+                Returns.class.getName()), true, deposit, returns);
+        List<Object> statuses = (List<Object>) replaced.get("hooks");
+        assertEquals("denied by the catalogue branch: " + DEPOSIT_RULE,
+                ((Map<String, Object>) statuses.get(0)).get("reason"));
+        assertEquals("denied by the catalogue desk: " + Returns.class.getName(),
+                ((Map<String, Object>) statuses.get(1)).get("reason"));
+        assertEquals(Arrays.asList("a.b.*", DEPOSIT_RULE, Returns.class.getName(), "x.Late"), echo(replaced),
+                "replace: true unions, never replaces");
+        assertTrue(harness.engine().hooks.isEmpty(), "nothing installs");
+        assertNull(harness.ctx.map("hook.health", map()).get("catalogue"), "no catalogue recorded");
+
+        harness.ctx.call("hook.remove", map());
+        assertEquals(4, harness.engine().deny().size(), "held after hook.remove {}");
+        Map<String, Object> zero = installWithDeny("only", "sha256:dd", Arrays.asList("z.Z"), false);
+        assertEquals(Collections.emptyList(), zero.get("hooks"), "a zero-spec install delivers a deny only");
+        assertEquals(5, echo(zero).size());
+        assertEquals(harness.engine().deny(), harness.ctx.hooks().deny(), "HookEngine.deny() through the SPI");
     }
 }

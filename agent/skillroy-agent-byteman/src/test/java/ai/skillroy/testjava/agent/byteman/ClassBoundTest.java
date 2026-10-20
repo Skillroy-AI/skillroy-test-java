@@ -35,7 +35,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * The class bound of a rule (phase6-contracts.md 7.3, D124): matched by name, by supertype for {@code ^}, by interface
  * for {@code INTERFACE}; refused above {@code hooks.maxClasses}, above the byte and method bounds, when not modifiable,
- * and for a class of the JDK's or the agent's loaders.
+ * and for a class of the JDK's or the agent's loaders. Phase 8 (phase8-contracts.md 6.7, section 13.1 row 25): the
+ * class deny refuses a rule's name before the count, on every path, and a denied matched subtype.
  */
 class ClassBoundTest {
 
@@ -167,5 +168,64 @@ class ClassBoundTest {
         }
         assertNull(bound.problem(DepositDesk.class), "the application's system loader is fine");
         assertTrue(ClassBound.chainOf(ClassLoader.getSystemClassLoader()).isEmpty());
+    }
+
+    // ---- Phase 8 (phase8-contracts.md 6.7) ----
+
+    /** A deny view refusing the names it holds, with the reason the engine would give. */
+    private static ClassBound.Deny denying(final String... names) {
+        return new ClassBound.Deny() {
+            @Override
+            public String refuse(String className) {
+                return Arrays.asList(names).contains(className)
+                        ? "denied by the agent option hooks.deny: " + className : null;
+            }
+        };
+    }
+
+    @Test
+    void aDeniedNameIsRefusedBeforeTheCountAndTheClassListIsNeverRead() {
+        final int[] reads = {0};
+        ClassBound.Jvm counting = new ClassBound.Jvm() {
+            @Override
+            public Class<?>[] loadedClasses() {
+                reads[0]++;
+                return new Class<?>[] {DepositDesk.class, BranchDesk.class};
+            }
+
+            @Override
+            public boolean isModifiable(Class<?> c) {
+                return true;
+            }
+        };
+        String ceilings = "ai.skillroy.testjava.fixture.byteman.Ceilings";
+        ClassBound bound = new ClassBound(counting, Settings.defaults(), none(), denying(DESK, ceilings));
+        for (String line : Arrays.asList("CLASS " + DESK, "CLASS ^" + DESK, "INTERFACE " + ceilings)) {
+            ClassBound.Result r = bound.check(rule(line));
+            String name = line.substring(line.indexOf(' ') + 1).replace("^", "");
+            assertEquals(Collections.singletonList(name + ": denied by the agent option hooks.deny: " + name),
+                    r.errors, line);
+            assertTrue(r.matched.isEmpty(), "refused before anything is matched");
+        }
+        assertEquals(0, reads[0], "the class list is never read for a denied name");
+        assertTrue(new ClassBound(counting, Settings.defaults(), none(), denying("x.Other")).check(
+                rule("CLASS " + DESK)).ok());
+        assertEquals(1, reads[0]);
+    }
+
+    @Test
+    void aDeniedMatchedSubtypeOfAnAllowedRuleIsRefused() {
+        String branch = BranchDesk.class.getName();
+        ClassBound bound = new ClassBound(jvm(true, DepositDesk.class, BranchDesk.class), Settings.defaults(), none(),
+                denying(branch));
+        ClassBound.Result r = bound.check(rule("CLASS ^" + DESK));
+        assertEquals(Arrays.<Class<?>>asList(DepositDesk.class, BranchDesk.class), r.matched);
+        assertEquals(Collections.singletonList(branch + ": denied by the agent option hooks.deny: " + branch),
+                r.errors);
+        assertEquals("denied by the agent option hooks.deny: " + branch, bound.problem(BranchDesk.class));
+        assertNull(bound.problem(DepositDesk.class));
+        ClassBound.Result byInterface = bound.check(rule("INTERFACE ai.skillroy.testjava.fixture.byteman.Ceilings"));
+        assertEquals(Collections.singletonList(branch + ": denied by the agent option hooks.deny: " + branch),
+                byInterface.errors);
     }
 }

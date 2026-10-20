@@ -40,7 +40,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * The hook catalogue's reader, hash, builder and overlay (phase6-contracts.md 5.1, 11.2, 13.1 item 5): a catalogue of
  * the sample's shape read and its defaults, a corpus of malformed ones each refused at its line, the warnings, the
- * hash's sensitivity, {@code builder(base).replace/add/disable} and an overlay resource.
+ * hash's sensitivity, {@code builder(base).replace/add/disable} and an overlay resource. Phase 8
+ * (phase8-contracts.md 6.8, section 13.1 row 26): the map form of {@code packages} with its inherited qualifier, the
+ * {@code deny} list, their errors at their lines, the disabled-denied warning, the overlay's unions, and the hash
+ * pinned unchanged without the new keys.
  */
 class HookCataloguesTest {
 
@@ -368,5 +371,194 @@ class HookCataloguesTest {
         IllegalArgumentException e = assertThrows(IllegalArgumentException.class, () -> HooksMode.parse("yes"));
         assertTrue(e.getMessage().contains("auto, on or off"), e.getMessage());
         assertEquals("auto", HooksMode.AUTO.label());
+    }
+
+    // ---- Phase 8 (phase8-contracts.md 6.8) ----
+
+    /** The hash of {@link #SAMPLE} as v0.1.0 computed it: a catalogue without the new keys keeps it byte for byte. */
+    static final String SAMPLE_HASH = "sha256:3debb6ad019de06c5a29c3e879b59a1408360a8c4c2d3425c003bffe8732e66d";
+
+    private static final String QUALIFIER = "desk-app(-[^/]*)?\\.jar";
+
+    @Test
+    void theHashIsUnchangedWithoutTheNewKeysAndChangedByAQualifierAndByADeny() throws Exception {
+        HookCatalogue base = read(SAMPLE);
+        assertEquals(SAMPLE_HASH, base.hash());
+        assertEquals(List.of(), base.deny());
+        assertEquals(List.of(new HookCatalogue.PackageRule("org.example.desk", null)), base.packageRules());
+        assertFalse(base.descriptor().containsKey("deny"));
+        for (HookEntry entry : base.hooks()) {
+            assertNull(entry.target().codeSource(), "the plain form bakes nothing: " + entry.id());
+        }
+        HookCatalogue qualified = read(SAMPLE.replace("packages: [org.example.desk]",
+                "packages: [{ name: org.example.desk, codeSource: '" + QUALIFIER + "' }]"));
+        assertNotEquals(SAMPLE_HASH, qualified.hash(), "a baked qualifier changes the entry hashes");
+        HookCatalogue denying = read(SAMPLE + "deny: [com.vendor.Other]\n");
+        assertNotEquals(SAMPLE_HASH, denying.hash(), "a deny enters the hash");
+        assertEquals(List.of("com.vendor.Other"), denying.descriptor().get("deny"));
+        assertEquals(denying.hash(), read(SAMPLE + "deny: [com.vendor.Other, com.vendor.Other]\n").hash());
+    }
+
+    @Test
+    void thePackagesMapFormIsInheritedByTheLongestNameAndAnEntrysOwnQualifierWins() throws Exception {
+        HookCatalogue catalogue = read(SAMPLE.replace("packages: [org.example.desk]", """
+                packages:
+                  - { name: org.example.desk, codeSource: 'desk-app(-[^/]*)?\\.jar' }
+                  - { name: org.example.desk.access, codeSource: 'desk-access\\.jar' }
+                  - com.vendor
+                """).replace("      method: returnLimit\n", "      method: returnLimit\n      codeSource: own\\.jar\n")
+                .replace("class: org.example.desk.AccessControl\n      method: check",
+                        "class: org.example.desk.access.Gate\n      method: check"));
+        assertEquals(List.of("org.example.desk", "org.example.desk.access", "com.vendor"), catalogue.packages(),
+                "packages() stays the names");
+        assertEquals(List.of(new HookCatalogue.PackageRule("org.example.desk", "desk-app(-[^/]*)?\\.jar"),
+                new HookCatalogue.PackageRule("org.example.desk.access", "desk-access\\.jar"),
+                new HookCatalogue.PackageRule("com.vendor", null)), catalogue.packageRules());
+        assertEquals("own\\.jar", catalogue.entry("limit.applied").target().codeSource(), "its own wins");
+        assertEquals("desk-access\\.jar", catalogue.entry("access.checked").target().codeSource(),
+                "the longest name's qualifier");
+        assertEquals("desk-app(-[^/]*)?\\.jar", catalogue.entry("line.amount").target().codeSource());
+        assertNull(catalogue.entry("vendor.call").target().codeSource(), "a plain rule bakes nothing");
+        assertEquals("desk-access\\.jar", catalogue.toSpecs().get(1).target().codeSource(),
+                "the spec the agent receives carries the baked value");
+        assertTrue(catalogue.entry("vendor.call").enabled(), "enabled's default is unchanged: under packages");
+    }
+
+    @Test
+    void theDenyIsReadAndADisabledDeniedEntryIsAWarning() throws Exception {
+        HookCatalogue catalogue = read(SAMPLE + "deny: [com.vendor.*, org.example.desk.Audit]\n");
+        assertEquals(List.of("com.vendor.*", "org.example.desk.Audit"), catalogue.deny());
+        assertEquals("com.vendor.*", catalogue.denied("com.vendor.Lib"));
+        assertEquals("org.example.desk.Audit", catalogue.denied("org.example.desk.Audit$Line"));
+        assertNull(catalogue.denied("org.example.desk.AccessControl"));
+        assertTrue(catalogue.warnings().contains("hook vendor.call is off and its class com.vendor.Lib is denied by"
+                + " the catalogue (com.vendor.*): it can never be enabled"), String.valueOf(catalogue.warnings()));
+        // line.amount is enabled by default (under packages): refused at its class line
+        ScenarioException enabled = assertThrows(ScenarioException.class, () -> read(SAMPLE
+                + "deny: [org.example.desk.Money]\n"));
+        assertTrue(enabled.getMessage().contains("hook line.amount targets org.example.desk.Money, which the"
+                + " catalogue denies (org.example.desk.Money)"), enabled.getMessage());
+        assertEquals(37, enabled.line(), enabled.getMessage());
+        HookCatalogue off = read(SAMPLE.replace("    emits: hook.line.amount\n", "    emits: hook.line.amount\n"
+                + "    enabled: false\n") + "deny: [org.example.desk.Money]\n");
+        assertTrue(off.warnings().contains("hook line.amount is off and its class org.example.desk.Money is denied"
+                + " by the catalogue (org.example.desk.Money): it can never be enabled"), String.valueOf(off.warnings()));
+    }
+
+    @Test
+    void theNewKeysAreRefusedWithTheirLine() {
+        String base = entry(0, null);
+        String nine = "      descriptors: [\"(Ljava/lang/String;)Ljava/math/BigDecimal;\"]\n";
+        assertRefused(base.replace(nine, nine + "      codeSource: \"desk(\"\n"), 10, "not a regular expression");
+        assertRefused(base.replace(nine, nine + "      codeSource: " + "x".repeat(201) + "\n"), 10,
+                "codeSource longer than 200 characters");
+        assertRefused(base + "packages:\n  - { name: org.example.desk, jar: x }\n", 15, "unknown key 'jar'");
+        assertRefused(base + "packages:\n  - { codeSource: x }\n", 15, "a packages entry needs a name");
+        assertRefused(base + "packages:\n  - { name: org..desk }\n", 15, "a packages entry needs a name");
+        assertRefused(base + "packages:\n  - { name: org.example.desk, codeSource: 'desk(' }\n", 15,
+                "package org.example.desk: not a regular expression");
+        assertRefused(base + "deny: [org.example..desk]\n", 14, "deny pattern 'org.example..desk': an empty segment");
+        assertRefused(base + "deny: org.example.desk\n", 14, "deny must be a list of class patterns");
+        assertRefused(base + "deny: [7]\n", 14, "deny must be a list of class patterns");
+        assertRefused(base + "packages: [org.example.desk]\ndeny: [org.example.desk.AccessControl]\n", 7,
+                "hook limit.applied targets org.example.desk.AccessControl, which the catalogue denies"
+                        + " (org.example.desk.AccessControl)");
+        StringBuilder many = new StringBuilder(base).append("deny:\n");
+        for (int i = 0; i < 65; i++) {
+            many.append("  - a.b.C").append(i).append('\n');
+        }
+        assertRefused(many.toString(), 14, "at most 64");
+    }
+
+    private static void assertRefused(String text, int line, String reason) {
+        ScenarioException e = assertThrows(ScenarioException.class, () -> read(text), text);
+        assertTrue(e.getMessage().contains(reason), e.getMessage() + " should say " + reason);
+        assertEquals(line, e.line(), e.getMessage() + "\n" + text);
+    }
+
+    @Test
+    void anOverlayUnionsTheRulesAndTheDenyAndChecksTheBaseEntries() throws Exception {
+        HookCatalogue base = read(SAMPLE.replace("packages: [org.example.desk]",
+                "packages: [{ name: org.example.desk, codeSource: 'desk-app\\.jar' }]") + "deny: [com.vendor.Lib]\n");
+        assertEquals("desk-app\\.jar", base.entry("access.checked").target().codeSource());
+        HookCatalogue overlaid = HookCatalogues.overlay(base, new StringReader("""
+                catalogue: desk-branch
+                version: 2
+                hooks:
+                  - id: limit.applied
+                    mode: CAPTURE
+                    target:
+                      class: org.example.desk.Ceilings
+                      method: applicable
+                      descriptors: ["(Ljava/lang/String;)Ljava/math/BigDecimal;"]
+                    capture: { args: [0], result: true }
+                    fallbacks:
+                      - seam: desk.limits
+                packages: [{ name: org.example.desk, codeSource: 'branch-desk\\.jar' }]
+                deny: [org.example.desk.Audit]
+                """), "desk-branch.yaml");
+        assertEquals(List.of("com.vendor.Lib", "org.example.desk.Audit"), overlaid.deny(), "the union");
+        assertEquals("branch-desk\\.jar", overlaid.entry("limit.applied").target().codeSource(),
+                "the overlay's qualifier for its own entry");
+        assertEquals("desk-app\\.jar", overlaid.entry("access.checked").target().codeSource(),
+                "a base entry keeps the value baked when the base was read");
+        assertEquals(base.entry("access.checked").toSpec().hash(), overlaid.entry("access.checked").toSpec().hash());
+        assertEquals(List.of(new HookCatalogue.PackageRule("org.example.desk", "branch-desk\\.jar")),
+                overlaid.packageRules());
+        String deniesABaseEntry = """
+                catalogue: desk-branch
+                version: 2
+                hooks: []
+                deny: [org.example.desk.AccessControl]
+                """;
+        ScenarioException refused = assertThrows(ScenarioException.class, () -> HookCatalogues.overlay(base,
+                new StringReader(deniesABaseEntry), "x.yaml"));
+        assertTrue(refused.getMessage().contains("hook limit.applied of catalogue desk targets"
+                + " org.example.desk.AccessControl, which this overlay denies (org.example.desk.AccessControl); add it"
+                + " to disable"), refused.getMessage());
+        assertEquals(4, refused.line(), refused.getMessage());
+        HookCatalogue disabled = HookCatalogues.overlay(base, new StringReader(deniesABaseEntry
+                + "disable: [limit.applied, access.checked]\n"), "x.yaml");
+        assertFalse(disabled.entry("limit.applied").enabled());
+        assertTrue(disabled.warnings().stream().anyMatch(w -> w.contains("hook access.checked is off")),
+                String.valueOf(disabled.warnings()));
+        ScenarioException plainOverlay = assertThrows(ScenarioException.class, () -> HookCatalogues.overlay(base,
+                new StringReader("catalogue: x\nversion: 1\nhooks: []\ndeny: com.vendor\n"), "x.yaml"));
+        assertTrue(plainOverlay.getMessage().contains("deny must be a list"), plainOverlay.getMessage());
+        HookCatalogue keep = HookCatalogues.overlay(base, new StringReader(
+                "catalogue: x\nversion: 1\nhooks: []\npackages: [org.example.desk]\n"), "x.yaml");
+        assertEquals(base.packageRules(), keep.packageRules(), "a plain name never drops a base qualifier");
+    }
+
+    @Test
+    void theBuilderAddsRulesAndDenyBakesAndRefuses() {
+        HookEntry entry = new HookEntry("gate.opened", HookMode.OBSERVE, true, new HookTarget(
+                "org.example.desk.Gate", "open", List.of("()V"), null), null, List.of(), false, null,
+                List.of(new HookEntry.Fallback.Seam("desk.state")), null);
+        HookCatalogue built = HookCatalogue.builder("desk", 1)
+                .packages(List.of("org.example.desk"))
+                .packageRules(List.of(new HookCatalogue.PackageRule("org.example.desk", "desk\\.jar")))
+                .deny(List.of("org.example.desk.Audit", "org.example.desk.Audit"))
+                .add(entry).build();
+        assertEquals(List.of(new HookCatalogue.PackageRule("org.example.desk", "desk\\.jar")),
+                built.packageRules(), "the same name replaces its qualifier");
+        assertEquals(List.of("org.example.desk.Audit"), built.deny());
+        assertEquals("desk\\.jar", built.entry("gate.opened").target().codeSource(), "baked at build()");
+        assertEquals("desk\\.jar", HookCatalogue.builder("desk", 1)
+                .packageRules(List.of(new HookCatalogue.PackageRule("org.example.desk", "desk\\.jar")))
+                .packages(List.of("org.example.desk")).add(entry).build().entry("gate.opened").target().codeSource(),
+                "packages() keeps a qualified name as it is");
+        IllegalStateException denied = assertThrows(IllegalStateException.class, () -> HookCatalogue.builder(
+                "desk", 1).deny(List.of("org.example.desk.*")).add(entry).build());
+        assertEquals("hook gate.opened targets org.example.desk.Gate, which the catalogue denies (org.example.desk.*)",
+                denied.getMessage());
+        assertThrows(IllegalStateException.class, () -> HookCatalogue.builder("desk", 1).deny(List.of("a..b"))
+                .build());
+        assertThrows(IllegalStateException.class, () -> HookCatalogue.builder("desk", 1).packageRules(List.of(
+                new HookCatalogue.PackageRule("org.example.desk", "desk("))).build());
+        HookCatalogue denyOnly = HookCatalogue.builder("desk", 1).deny(List.of("org.example.desk.Audit")).build();
+        assertTrue(denyOnly.isEmpty() && denyOnly.enabled().isEmpty());
+        assertEquals(List.of("org.example.desk.Audit"), denyOnly.descriptor().get("deny"));
+        assertNotEquals(HookCatalogue.builder("desk", 1).build(), denyOnly, "equals includes the deny");
     }
 }

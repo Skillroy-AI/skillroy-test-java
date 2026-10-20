@@ -315,6 +315,7 @@ intact; from 1025 the load is refused with an `IOException` on the attaching sid
 | `hooks.maxClasses` | `64` | **(Phase 6, HK; P6 §3.7.)** the most classes the hooks' ledger holds; 1 to 1024 |
 | `hooks.detachBudgetMs` | `8000` | **(Phase 6, HK; P6 §3.5, §3.7.)** the restore budget of the hooks module's uninstall; 1000 to 9000 |
 | `hooks.capture.maxBytes` | `16384` | **(Phase 6, HK; P6 §4.3.)** the input budget of one `CAPTURE` event's encoding, also its output bound; 1024 to 1 MiB |
+| `hooks.deny` | – | **A81 (Phase 8, built 2026-10-19, EH; P8 §6.5.)** comma-separated class patterns (`…protocol.hook.ClassPattern`: `a.b.C` with its nested classes, `a.b.*`, `a.b.**`, a glob in the last segment), trimmed, empty items dropped, at most 64: the first source of the class deny, read at install by the hooks module and by the Byteman module alike, so one key rules whichever is loaded; a denied class is refused by name before anything of it is read (`hook.probe`, `hook.install`, `rule.check`, `rule.submit`). An invalid pattern or more than 64 fails the module's install with a `FAILED` record naming the key (`option hooks.deny: pattern <i> <violation>`). A 0.1.0 agent ignores the option silently; `rule.list.deny.option` and `hook.health.deny.option` show whether it is in force. The sample's own `lending.hooks.deny` registers the lending module's `ClassDeny` (§9.2) |
 | `mainClassGuard` | – | JAVAAGENT only: start only if the system property `sun.java.command` names this launch target (lets `JAVA_TOOL_OPTIONS` inject the agent into one JVM of a process tree). **S17 (1.x, built 2026-10-02):** the guard must match the whole launch target (the main class, or the jar path for `-jar`): the command, trimmed, equals the trimmed value or continues with white space directly after it. A value that is only a prefix of a longer main-class name does not match |
 | `robot` | `false` | **A65 (Phase 7, built 2026-10-10, VS; P7 §3.4, 3.9).** `true` is the operator's consent on the host that the Swing module may take the real pointer through `java.awt.Robot` (`swing.pointer {via: ROBOT}`, a person's `swing.capture {mode: ROBOT}`): validated like `readOnly` (`true` or `false`), reported by `agent.info.options`, read by the Swing module from `ctx.options()` and never through `ctx.option(…)`'s live fallback. Without it the capabilities `swing.pointer.robot` and `swing.capture.robot` are `UNAVAILABLE("robot: not enabled (agent option robot=true)")` and no Robot class is loaded (`HostSafetyIT`); with it the Robot is constructed once, by the capability probe on an agent worker after the module confirmed that the application started AWT (A4). It is one half of the double opt-in: the controller's half is a person's `--allow-robot` (P7 §9.2, §9.3) |
 | `readOnly` | `false` | reject primitives whose spec is `mutating` **or `script`** (Phase 6 security fix S42, A44, built 2026-10-09, SR; P6 D156: a `script` primitive evaluates a caller's expression in the target, `web.evaluate` and `web.waitFlag`) |
@@ -1121,6 +1122,13 @@ public interface MaskPolicy { Object mask(String sourceId, String column, Object
 // remove, health, catalogue}, registered by the optional hooks module, found with spi().first or AgentContext.hooks();
 // package …agent.api.instrument (shared by the hooks and Byteman modules): ClassFileRefs, ByteVerification,
 // RetransformBatches.
+// A82 (Phase 8, built 2026-10-19, EH; P8 §6.2, §6.5, §6.6) …agent.api.spi.hook gains ClassDeny {String refuse(String
+// className)}: null to allow, else a reason; a throw refuses; agent workers only, cheap, never blocking. A domain module
+// registers one in install; the hooks module registers its engine as the catalogue's. Asked at every hook.probe,
+// hook.install, rule.check and rule.submit after the agent option hooks.deny: the first refusal wins. HookEngine gains
+// default List<String> deny() (the held catalogue patterns; empty by default). …agent.api.instrument gains
+// CodeSources {of(Class), name(protocol, host, path); NONE, UNREADABLE, MAX_LENGTH}: a class's code-source name (the
+// jar's file name and inner entries, never a directory) read through the location's getProtocol/getHost/getPath only.
 
 // (Phase 4, built 2026-10-07; P4 §3: package …agent.api.spi.web adds WebEngineAdapter, one per embedded-browser
 // technology, which turns seeds into WebBrowser handles, and the technology-neutral BrowserRegistryAdapter,
@@ -3157,7 +3165,10 @@ same name, OK while the desk runs and the point is offered) answers the `IdleVie
 version becomes `0.3.0` in step R. How the desk is
 found: in EMBEDDED mode the `LendingApp` the host passed to `EmbeddedAgent.start`; in the other modes
 `LendingApp.instance()`, looked at only once a thread named `LendingEngine` exists, so that no application class is
-loaded before the application's own `main`.
+loaded before the application's own `main`. **(Phase 8, built 2026-10-19, EH; P8 §6.5, §12.2, D573)** With the agent
+option `lending.hooks.deny` (comma-separated class patterns) the module also registers `LendingClassDeny`, a domain
+module's `ClassDeny` answering `the lending module denies <pattern>` (an invalid value fails the install naming the
+key); no launch sets it, and without it nothing more is registered.
 
 **When the engine listener is attached, and readiness.** The application allows a listener to be added or removed
 only while its engine waits for input. The readiness source attaches the listener at the first poll that finds the
@@ -3252,6 +3263,12 @@ are written in quotes in the YAML.
 `recover` is bounded (at most 20 actions and 60 s); every action is followed by a wait for the desk's own event,
 never by a pause. When `lending.prompt.answer` reports `listening: false` it does not wait for an event the module
 could not have published.
+
+**(Phase 8, built 2026-10-19, EH; P8 §6.8, §12.3)** The pack's hook catalogue `lending.yaml` is `version: 2`: its one
+`packages` rule carries the code-source qualifier `skillroy-sample-lending-app(-[^/]*)?\.jar` that every enabled entry
+inherits (the IT copy and a versioned jar match it, a class directory does not, so a desk run from `target/classes`
+with the hooks module answers every catalogue hook `UNAVAILABLE("class from another code source: classes")`), and
+`deny: [ai.skillroy.testjava.samples.lending.Inbox]` refuses the desk's input queue, which every input source posts to.
 
 `samples/skillroy-sample-lending-scenarios`: `scenarios/basic-loan.yaml` (engine-level inputs: sign on, scan two
 garden spades, `DUE`, a deposit of 10.00 against 7.00 due) and `scenarios/basic-loan-ui.yaml` (the same loan driven

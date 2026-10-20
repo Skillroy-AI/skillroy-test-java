@@ -46,6 +46,12 @@ import java.util.Set;
  * (every load of it then throws {@code NoClassDefFoundError} into the host, and on Java 25 the class cannot be
  * restored), and a JDK class can only extend or implement JDK types, so the {@code ^} and {@code INTERFACE} paths are
  * closed with it. A rule on an application class the target has not loaded yet stays accepted.
+ *
+ * <p>The class deny (phase8-contracts.md section 6.7, D569): after the name lookup and <b>before the count and before
+ * the load</b>, the rule's {@code CLASS} or {@code INTERFACE} name that the {@link Deny} view refuses is an error and the
+ * check ends there (so a confirmed {@code rule.submit} on a denied name appends nothing and runs no {@code premain});
+ * and a matched loaded class the view refuses (a {@code ^} or {@code INTERFACE} rule reaching a denied subtype) is an
+ * error of its own. A denied subtype loaded after the submit is the residual of section 6.7 (gap 140).
  */
 final class ClassBound {
 
@@ -54,6 +60,15 @@ final class ClassBound {
         Class<?>[] loadedClasses();
 
         boolean isModifiable(Class<?> c);
+    }
+
+    /**
+     * The class deny as the bound sees it (phase8-contracts.md section 6.7): the agent option {@code hooks.deny}, the
+     * hooks module's held catalogue list and every domain module's {@code ClassDeny}, built per call by the engine.
+     */
+    interface Deny {
+        /** Null to allow, else the reason ({@code denied by ...}). */
+        String refuse(String className);
     }
 
     /** What the bound found. */
@@ -75,12 +90,19 @@ final class ClassBound {
     private final Settings settings;
     private final Set<ClassLoader> agentLoaders;
     private final Set<ClassLoader> jdkLoaders;
+    private final Deny deny;
 
     ClassBound(Jvm jvm, Settings settings, Set<ClassLoader> agentLoaders) {
+        this(jvm, settings, agentLoaders, null);
+    }
+
+    /** @param deny the class deny view, or null for none */
+    ClassBound(Jvm jvm, Settings settings, Set<ClassLoader> agentLoaders, Deny deny) {
         this.jvm = jvm;
         this.settings = settings;
         this.agentLoaders = agentLoaders;
         this.jdkLoaders = jdkLoaders();
+        this.deny = deny;
     }
 
     /** The loaders between {@code start} and the host's system loader (exclusive): the agent's own. */
@@ -122,6 +144,12 @@ final class ClassBound {
         String named = nameProblem(target);
         if (named != null) {
             errors.add(target + ": " + named);
+            return new Result(matched, errors);
+        }
+        // the class deny by name: before the count and before the load (phase8-contracts.md 6.7)
+        String denied = denied(target);
+        if (denied != null) {
+            errors.add(target + ": " + denied);
             return new Result(matched, errors);
         }
         for (Class<?> c : jvm.loadedClasses()) {
@@ -186,12 +214,21 @@ final class ClassBound {
         return null;
     }
 
+    /** The deny view's reason for {@code className}, or null (no view, or allowed). */
+    String denied(String className) {
+        return deny == null || className == null ? null : deny.refuse(className);
+    }
+
     /** Why {@code c} may not be retransformed, or null. */
     String problem(Class<?> c) {
         ClassLoader loader = c.getClassLoader();
         if (loader == null || jdkLoaders.contains(loader) || agentLoaders.contains(loader)
                 || loader.getClass().getName().startsWith("ai.skillroy.testjava.agent.")) {
             return "class is the agent's own or the JDK's";
+        }
+        String denied = denied(c.getName());
+        if (denied != null) {
+            return denied;
         }
         if (!jvm.isModifiable(c)) {
             return "class is not modifiable";
