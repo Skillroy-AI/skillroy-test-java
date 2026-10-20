@@ -37,5 +37,23 @@ public enum ThreadPolicy {
      * WORKER if its spec is not {@code mutating}, and answers {@code NOT_READY} ("application thread not available
      * yet") if it is. {@code ThreadBroker.call} and {@code post} under APP run on WORKER in that case.
      */
-    APP
+    APP,
+    /**
+     * Runs on the application's own thread at its next quiescent point, through the first
+     * {@code ThreadPolicyProvider}'s {@link ai.skillroy.testjava.agent.api.spi.ThreadPolicyProvider#quiescentPoint()
+     * quiescentPoint()}; never falls back to another thread (phase8-contracts.md 4.1, D519). Admitted by the spec's
+     * {@link PrimitiveSpec#quiescentBudgetMs() budget} and never pre-empted: the agent never interrupts the
+     * application's thread. Without a point the call answers {@code CAPABILITY_UNAVAILABLE}, while the provider is
+     * not {@code available()} {@code NOT_READY}, for reads and mutating calls alike. {@code ThreadBroker.call} under
+     * this policy is {@code callQuiescent(task, 50, timeoutMs)}; {@code post} refuses it (a posted task has no caller
+     * whose time bounds it).
+     */
+    APP_QUIESCENT,
+    /**
+     * Runs on a named lane of agent threads that the primitive's module declared with
+     * {@link ThreadBroker#declareLane}; the spec names it ({@link PrimitiveSpec.Builder#lane(String)}). A lane the
+     * module has not declared, or has retired, answers {@code CAPABILITY_UNAVAILABLE} (phase8-contracts.md 4.2,
+     * D526). {@code post} refuses it (no lane name in {@code post}).
+     */
+    LANE
 }

@@ -40,6 +40,8 @@ public final class PrimitiveDescriptor {
     private final boolean mutating;
     private final boolean destructive;
     private final boolean script;
+    private final long quiescentBudgetMs;
+    private final String lane;
 
     /**
      * @param name primitive name, not null
@@ -69,6 +71,23 @@ public final class PrimitiveDescriptor {
     public PrimitiveDescriptor(String name, String description, Map<String, Object> paramsSchema,
                                Map<String, Object> resultSchema, String thread, long timeoutMs, String capabilityId,
                                boolean mutating, boolean destructive, boolean script) {
+        this(name, description, paramsSchema, resultSchema, thread, timeoutMs, capabilityId, mutating, destructive,
+                script, 0L, null);
+    }
+
+    /**
+     * As the ten-argument constructor, with the two thread keys of Phase 8 (phase8-contracts.md 4.1, 4.2; D519,
+     * D526), each written by {@link #toJson()} only when set.
+     *
+     * @param quiescentBudgetMs the budget of a primitive whose thread is {@code APP_QUIESCENT}; 0 (or less) for any
+     *     other primitive
+     * @param lane the lane of a primitive whose thread is {@code LANE}, or null
+     * @throws JsonException if a schema holds NaN or Infinity or nests deeper than 184
+     */
+    public PrimitiveDescriptor(String name, String description, Map<String, Object> paramsSchema,
+                               Map<String, Object> resultSchema, String thread, long timeoutMs, String capabilityId,
+                               boolean mutating, boolean destructive, boolean script, long quiescentBudgetMs,
+                               String lane) {
         this.name = Objects.requireNonNull(name, "name");
         this.description = description;
         this.paramsSchema = Coerce.freezeMap(paramsSchema);
@@ -79,6 +98,8 @@ public final class PrimitiveDescriptor {
         this.mutating = mutating;
         this.destructive = destructive;
         this.script = script;
+        this.quiescentBudgetMs = quiescentBudgetMs;
+        this.lane = lane;
     }
 
     public String name() {
@@ -129,9 +150,24 @@ public final class PrimitiveDescriptor {
     }
 
     /**
+     * The most a task of an {@code APP_QUIESCENT} primitive may hold the application's thread, in ms; 0 for a primitive
+     * under any other policy and for a catalogue entry of an agent older than Phase 8 (phase8-contracts.md 4.1).
+     */
+    public long quiescentBudgetMs() {
+        return quiescentBudgetMs;
+    }
+
+    /** The lane a {@code LANE} primitive runs on, or null (phase8-contracts.md 4.2). */
+    public String lane() {
+        return lane;
+    }
+
+    /**
      * {@code {"name","description","paramsSchema","resultSchema","thread","timeoutMs","capabilityId","mutating",
      * "destructive"}}, all keys always present (null values written as null), then {@code "script": true} only when
-     * the flag is set, so that the entry of a primitive without it reads as before (D156). A new map on each call.
+     * the flag is set, so that the entry of a primitive without it reads as before (D156); then
+     * {@code "quiescentBudgetMs"} only when positive and {@code "lane"} only when set (Phase 8, D519, D526), likewise.
+     * A new map on each call.
      */
     public Map<String, Object> toJson() {
         Map<String, Object> json = new LinkedHashMap<String, Object>();
@@ -147,13 +183,19 @@ public final class PrimitiveDescriptor {
         if (script) {
             json.put("script", Boolean.TRUE);
         }
+        if (quiescentBudgetMs > 0) {
+            json.put("quiescentBudgetMs", Long.valueOf(quiescentBudgetMs));
+        }
+        if (lane != null) {
+            json.put("lane", lane);
+        }
         return json;
     }
 
     /**
      * Reads the shape written by {@link #toJson()}. Only {@code name} is required; absent fields take null, 0 or
-     * false ({@code script} included: an older agent's catalogue has no such key), so that a catalogue from a newer
-     * agent with fewer or extra fields still reads.
+     * false ({@code script}, {@code quiescentBudgetMs} and {@code lane} included: an older agent's catalogue has no
+     * such key), so that a catalogue from a newer agent with fewer or extra fields still reads.
      *
      * @throws JsonException on a missing name or a field of the wrong type
      */
@@ -169,7 +211,9 @@ public final class PrimitiveDescriptor {
                 Wire.optString(json, "capabilityId", TYPE),
                 Wire.optBool(json, "mutating", false, TYPE),
                 Wire.optBool(json, "destructive", false, TYPE),
-                Wire.optBool(json, "script", false, TYPE));
+                Wire.optBool(json, "script", false, TYPE),
+                Wire.optLong(json, "quiescentBudgetMs", 0L, TYPE),
+                Wire.optString(json, "lane", TYPE));
     }
 
     @Override
@@ -185,13 +229,15 @@ public final class PrimitiveDescriptor {
                 && Objects.equals(paramsSchema, other.paramsSchema) && Objects.equals(resultSchema, other.resultSchema)
                 && Objects.equals(thread, other.thread) && timeoutMs == other.timeoutMs
                 && Objects.equals(capabilityId, other.capabilityId) && mutating == other.mutating
-                && destructive == other.destructive && script == other.script;
+                && destructive == other.destructive && script == other.script
+                && quiescentBudgetMs == other.quiescentBudgetMs && Objects.equals(lane, other.lane);
     }
 
     @Override
     public int hashCode() {
         return Objects.hash(name, description, paramsSchema, resultSchema, thread, Long.valueOf(timeoutMs),
-                capabilityId, Boolean.valueOf(mutating), Boolean.valueOf(destructive), Boolean.valueOf(script));
+                capabilityId, Boolean.valueOf(mutating), Boolean.valueOf(destructive), Boolean.valueOf(script),
+                Long.valueOf(quiescentBudgetMs), lane);
     }
 
     @Override

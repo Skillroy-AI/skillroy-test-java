@@ -183,6 +183,111 @@ class PrimitiveSpecTest {
         assertThrows(NullPointerException.class, () -> Primitives.of(spec, null));
     }
 
+    /** phase8-contracts.md 4.1: the budget belongs to APP_QUIESCENT only, 1..1000, default 50. */
+    @Test
+    void aQuiescentBudgetBelongsToAppQuiescentOnly() {
+        PrimitiveSpec plain = PrimitiveSpec.builder("lending.engine.view").thread(ThreadPolicy.APP_QUIESCENT).build();
+        assertEquals(ThreadPolicy.APP_QUIESCENT, plain.thread());
+        assertEquals(50L, plain.quiescentBudgetMs(), "the default budget");
+        assertEquals(20L, PrimitiveSpec.builder("lending.engine.view").thread(ThreadPolicy.APP_QUIESCENT)
+                .quiescentBudgetMs(20).build().quiescentBudgetMs());
+        assertEquals(1000L, PrimitiveSpec.builder("a.b").quiescentBudgetMs(1000).thread(ThreadPolicy.APP_QUIESCENT)
+                .build().quiescentBudgetMs(), "the order of the builder calls does not matter");
+        for (ThreadPolicy other : new ThreadPolicy[] {ThreadPolicy.CALLER, ThreadPolicy.EDT_SYNC,
+            ThreadPolicy.EDT_ASYNC, ThreadPolicy.WORKER, ThreadPolicy.APP}) {
+            assertEquals(0L, PrimitiveSpec.builder("a.b").thread(other).build().quiescentBudgetMs(), other.name());
+            IllegalStateException e = assertThrows(IllegalStateException.class,
+                    () -> PrimitiveSpec.builder("a.b").thread(other).quiescentBudgetMs(20).build());
+            assertTrue(e.getMessage().contains("APP_QUIESCENT"), e.getMessage());
+        }
+        assertThrows(IllegalStateException.class,
+                () -> PrimitiveSpec.builder("a.b").quiescentBudgetMs(20).build(), "the default policy is CALLER");
+        assertThrows(IllegalArgumentException.class, () -> PrimitiveSpec.builder("a.b").quiescentBudgetMs(0));
+        assertThrows(IllegalArgumentException.class, () -> PrimitiveSpec.builder("a.b").quiescentBudgetMs(-1));
+        assertThrows(IllegalArgumentException.class, () -> PrimitiveSpec.builder("a.b").quiescentBudgetMs(1001));
+    }
+
+    /** phase8-contracts.md 4.2, D526: lane(name) sets LANE and the name; LANE needs a name, a name needs LANE. */
+    @Test
+    void aLaneBelongsToLaneOnly() {
+        PrimitiveSpec spec = PrimitiveSpec.builder("lending.report.rows").lane("lending.reads").build();
+        assertEquals(ThreadPolicy.LANE, spec.thread());
+        assertEquals("lending.reads", spec.lane());
+        assertEquals(0L, spec.quiescentBudgetMs());
+        assertNull(PrimitiveSpec.builder("a.b").thread(ThreadPolicy.WORKER).build().lane());
+        IllegalStateException noName = assertThrows(IllegalStateException.class,
+                () -> PrimitiveSpec.builder("a.b").thread(ThreadPolicy.LANE).build());
+        assertTrue(noName.getMessage().contains("lane(name)"), noName.getMessage());
+        assertThrows(IllegalStateException.class,
+                () -> PrimitiveSpec.builder("a.b").lane("test.reads").thread(ThreadPolicy.WORKER).build(),
+                "a lane name under another policy");
+        assertThrows(IllegalStateException.class,
+                () -> PrimitiveSpec.builder("a.b").lane("test.reads").quiescentBudgetMs(10).build());
+        assertEquals("test.reads", PrimitiveSpec.builder("a.b").lane("test.reads").thread(ThreadPolicy.LANE).build()
+                .lane());
+        for (String bad : new String[] {null, "", "reads", "Test.reads", "test.", ".reads", "test..reads", "1test.r",
+            "test.re_ads", "test.reads\n", "t\u00e9st.reads",
+            "test." + "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefgh"}) {
+            assertThrows(IllegalArgumentException.class, () -> PrimitiveSpec.builder("a.b").lane(bad),
+                    String.valueOf(bad));
+        }
+        for (String good : new String[] {"a.b", "lending.reads", "my-module.slow-reads", "a1.b2.c3",
+            "test." + "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefg"}) {
+            assertEquals(good, PrimitiveSpec.builder("a.b").lane(good).build().lane(), good);
+        }
+    }
+
+    /**
+     * phase8-contracts.md 4.1, 4.2, 4.7: the descriptor keys {@code quiescentBudgetMs} and {@code lane} are written
+     * only when set, so that every other entry reads as before, and read back leniently (an older catalogue has
+     * neither).
+     */
+    @Test
+    void theThreadKeysAreWrittenOnlyWhenSetAndReadBackLeniently() {
+        PrimitiveSpec quiescent = PrimitiveSpec.builder("lending.engine.view").thread(ThreadPolicy.APP_QUIESCENT)
+                .quiescentBudgetMs(20).timeoutMs(2000).build();
+        String json = Json.write(quiescent.describe().toJson());
+        assertTrue(json.endsWith("\"thread\":\"APP_QUIESCENT\",\"timeoutMs\":2000,\"capabilityId\":null,"
+                + "\"mutating\":false,\"destructive\":false,\"quiescentBudgetMs\":20}"), json);
+        assertEquals(quiescent.describe(), PrimitiveDescriptor.fromJson(Json.parseObject(json)));
+        assertEquals(20L, PrimitiveDescriptor.fromJson(Json.parseObject(json)).quiescentBudgetMs());
+
+        PrimitiveSpec lane = PrimitiveSpec.builder("lending.report.rows").lane("lending.reads").build();
+        String laneJson = Json.write(lane.describe().toJson());
+        assertTrue(laneJson.endsWith("\"thread\":\"LANE\",\"timeoutMs\":10000,\"capabilityId\":null,"
+                + "\"mutating\":false,\"destructive\":false,\"lane\":\"lending.reads\"}"), laneJson);
+        PrimitiveDescriptor back = PrimitiveDescriptor.fromJson(Json.parseObject(laneJson));
+        assertEquals(lane.describe(), back);
+        assertEquals("lending.reads", back.lane());
+        assertEquals(0L, back.quiescentBudgetMs());
+
+        PrimitiveSpec worker = PrimitiveSpec.builder("data.query").thread(ThreadPolicy.WORKER).build();
+        String workerJson = Json.write(worker.describe().toJson());
+        assertFalse(workerJson.contains("quiescentBudgetMs") || workerJson.contains("\"lane\""), workerJson);
+        PrimitiveDescriptor old = PrimitiveDescriptor.fromJson(Json.parseObject(workerJson));
+        assertEquals(0L, old.quiescentBudgetMs());
+        assertNull(old.lane());
+        assertEquals(worker.describe(), old);
+        assertEquals(worker.describe(), new PrimitiveDescriptor("data.query", "", worker.paramsSchema(), null,
+                "WORKER", 10000L, null, false, false, false), "the older constructors leave both keys unset");
+    }
+
+    @Test
+    void theThreadKeysTakePartInEquality() {
+        PrimitiveSpec.Builder quiescent = PrimitiveSpec.builder("a.b").thread(ThreadPolicy.APP_QUIESCENT);
+        PrimitiveSpec a = quiescent.quiescentBudgetMs(20).build();
+        PrimitiveSpec b = quiescent.quiescentBudgetMs(30).build();
+        PrimitiveSpec c = quiescent.quiescentBudgetMs(20).build();
+        assertNotEquals(a, b);
+        assertEquals(a, c);
+        assertEquals(a.hashCode(), c.hashCode());
+        PrimitiveSpec x = PrimitiveSpec.builder("a.b").lane("test.one").build();
+        PrimitiveSpec y = PrimitiveSpec.builder("a.b").lane("test.two").build();
+        assertNotEquals(x, y);
+        assertEquals(x, PrimitiveSpec.builder("a.b").lane("test.one").build());
+        assertNotEquals(x.describe(), y.describe());
+    }
+
     /** Minimal Invocation for exercising primitives without an agent. */
     private static final class FakeInvocation implements Invocation {
         private final String correlationId;

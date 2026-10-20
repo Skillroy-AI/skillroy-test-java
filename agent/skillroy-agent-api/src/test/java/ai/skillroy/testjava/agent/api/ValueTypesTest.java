@@ -126,7 +126,8 @@ class ValueTypesTest {
 
     @Test
     void threadPolicyNamesAreStable() {
-        assertEquals(Arrays.asList("CALLER", "EDT_SYNC", "EDT_ASYNC", "WORKER", "APP"),
+        // phase8-contracts.md 2.3, D524: appended, never reordered.
+        assertEquals(Arrays.asList("CALLER", "EDT_SYNC", "EDT_ASYNC", "WORKER", "APP", "APP_QUIESCENT", "LANE"),
                 Arrays.asList(names(ThreadPolicy.values())));
     }
 

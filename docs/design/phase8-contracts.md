@@ -784,6 +784,20 @@ point does not already hold, never waits for agent work (`ThreadBroker.call*` an
 from it, `FORBIDDEN_THREAD`; `EventBus.await` is forbidden to it and not checked); `AgentLog` and `EventBus.publish` are
 allowed; its result is JSON-able as any primitive's.
 
+**As built (Phase 8, ET).** `QuiescentPoint` publishes its bounds as `MAX_ALLOWANCE_MS` (1000), `MAX_CAPACITY` (16),
+`MAX_TIMEOUT_MS` (120,000) and `DEFAULT_BUDGET_MS` (50, the spec's default). One task runs at a time per point: a
+`runOne` called while another call of it is running a task (another thread, or the task itself) returns false at once.
+A null task is an `IllegalArgumentException`. `stats().refused` counts the `await` calls refused at once (a full queue,
+a closed point, the application's own thread), `notReady` the tasks withdrawn unrun (no point in time, too little of the
+call's time left, the point closed, an interrupted wait). The `TIMEOUT` of an admitted task carries `{reason: "quiescent
+task still running", budgetMs, waitedMs}`. An `await` whose waiting thread is interrupted withdraws its task when it is
+still queued and rethrows the `InterruptedException`. The point's monitor guards the queue and the statistics only and is
+never held while a task runs; the exactly-once-or-never decision is one compare-and-set on the task's state, whose
+terminal value carries the outcome, so a caller that lost the race reads the result without waiting again.
+`PrimitiveDescriptor` gains a twelve-argument constructor (the nine- and ten-argument ones kept, both keys unset);
+`quiescentBudgetMs` is written when positive and `lane` when non-null, both take part in `equals`, and both are read with
+the descriptor's usual optional readers (a value of the wrong type is a `JsonException`, as for `script`).
+
 ### 4.2 Named lanes: `ThreadBroker.declareLane`, `ThreadPolicy.LANE`, `DataSourceProvider.lane()` (gap 9; D524 to D528)
 
 **Decision (D525).** A **lane** is a named, bounded group of agent-owned daemon threads with a bounded FIFO, declared
@@ -841,6 +855,14 @@ source (§4.8 defect 4; map B §2.1 found it). `data.sources` entries gain `lane
 `APP` is **not** bounded in Phase 8 (a bound of 8 calls in flight would add a `BUSY` path for every existing `APP`
 primitive, a behaviour change for the sake of a case no target has shown); the guide's sentence that `data.query` runs
 on `APP` is corrected (it runs on `WORKER`, `DataModule.java:161`; §4.8 defect 3). Recorded as Q13 and gap 136.
+
+**As built (Phase 8, ET).** `Lane` carries its bounds as constants (`MAX_THREADS` 4, `MAX_QUEUE` 16, `MAX_LANES` 8,
+`MAX_NAME_LENGTH` 64, `NAME_PATTERN`) and a static `isValidName(String)`. `PrimitiveSpec.Builder.lane(name)` refuses a
+name outside the grammar at once (`IllegalArgumentException`), so that a spec can only name a lane that can be
+declared; `declareLane` answers `IllegalArgumentException` for a name, thread count or queue outside its bounds and
+keeps `IllegalStateException` for the ninth lane, a duplicate and a declaration while the agent closes.
+`ThreadBroker.call(LANE, …)` is refused as `post(LANE, …)` is (it names no lane; `callOnLane` does). The core test
+fixture's `test.where.lane` names the lane `coretest.where`.
 
 ### 4.3 Query cancellation: `QueryControl`, `enforcesTimeout()` (gap 11; D529, D530)
 
@@ -914,6 +936,8 @@ five-argument form requires a Phase 8 agent (on a 0.1.0 agent the four-argument 
 to `open()` and answers `CAPABILITY_UNAVAILABLE`); the guide says so and names the rule of §4.4 (mixed versions are
 unsupported).
 
+**As built (Phase 8, ET).** `QueryControl` carries `MAX_ACTIONS` (4) and `ACTION_TIMEOUT_MS` (2000) as constants.
+
 ### 4.4 Column names for a positional source, and `columns(table)` (gaps 12, 117; D531, D532)
 
 **Decision (D531).** When a provider of the statement-API form leaves a column unnamed, `data.query` names it from
@@ -980,6 +1004,28 @@ record it); only its refusal message gains a hint when the source reported no co
 `DataSourceProvider` should answer `columns(table)` (gap 117)". A message, never a pass; a count-only pass is rejected
 (the list has no total column order, `AllowedTable.columns` and `otherColumns` are separate; a count cannot see a
 renamed column). `null` keeps meaning "unknown" and the check keeps refusing.
+
+**As built (Phase 8, ET).** `SqlTokens` is a token stream over one dialect reading (`WORD`, `SEMICOLON`, `STRING`,
+`IDENTIFIER`, `OTHER`, an unterminated literal or comment ending the stream); the dialect features and the four
+readings moved with it, and `StatementGuard`'s rules read its tokens unchanged (`StatementGuardTest` untouched and green;
+a differential run of the old and the new guard over 4.5 million generated and corpus statements found no difference in
+any answer). `SelectLabels` answers null for a statement the guard rejects (it runs the guard itself) and reads each
+dialect reading; the readings are combined conservatively: a reading that meets an unterminated literal or comment, or
+brackets that do not balance, does not count (the statement is not valid in that dialect); an item holding a backtick or
+a square bracket that the reading does not take as a quote does not count in that reading (the dialect that quotes with
+it decides); the readings that count must split the list alike (else the list is null) and agree on an entry (else the
+entry is null). Square brackets and braces nest with parentheses, so the commas of `ARRAY[1, 2]` and `{fn f(a, b)}` stay
+inside their item, and the depth bound of 32 counts all three. `DISTINCT ON (…)` is skipped; `IS [NOT] DISTINCT FROM`
+and `WITHIN GROUP` do not end the list; `WHERE`, `GROUP`, `HAVING`, `ORDER`, `LIMIT`, `OFFSET`, `FETCH`, `WINDOW`,
+`INTO`, `FOR` and the set operations end it as `FROM` does. An alias after `AS` is any identifier but a reserved word; an
+alias without `AS` must follow a token that ends an expression (`)`, a literal, a quoted identifier, a number, a name, or
+`END`/`NULL`/`TRUE`/`FALSE`/the `CURRENT_*` words), must not be a soft keyword (a type name, an interval unit, an ordering
+or frame word) and must not follow one that leads (`AT`, `ZONE`, `TO`, …), and a square-bracket identifier is an alias
+only after `AS` (`x [y]` is also PostgreSQL's subscript). A string literal is never a label, after `AS` included
+(`AS 'x'`, which MySQL and SQL Server read as an alias, gives null). Labels keep the case they are written in.
+`starTable` takes at most three name parts, refuses a quoted part holding a `.`, and refuses a reading whose rest after
+`WHERE`, `ORDER`, `FETCH`, `LIMIT` or `OFFSET` holds a set operation, `JOIN`, `GROUP`, `HAVING`, `WINDOW`, `INTO`, `FOR`
+or a row-pattern or pivot word at the top level; `MAX_ITEMS` (1000) and `MAX_DEPTH` (32) are public constants.
 
 ### 4.5 Procedures retired honestly (gap 119; D533)
 

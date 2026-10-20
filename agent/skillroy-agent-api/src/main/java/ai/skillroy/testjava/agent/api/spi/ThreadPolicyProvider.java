@@ -16,12 +16,14 @@
 
 package ai.skillroy.testjava.agent.api.spi;
 
+import ai.skillroy.testjava.agent.api.QuiescentPoint;
+
 import java.util.concurrent.Callable;
 
 /**
  * Supplies the application thread domain calls must run on, and names threads the agent must never block or run on.
- * Backs {@code ThreadPolicy.APP} and the FORBIDDEN_THREAD check, because many applications confine domain state to
- * one thread of their own.
+ * Backs {@code ThreadPolicy.APP}, {@code ThreadPolicy.APP_QUIESCENT} (through {@link #quiescentPoint()}) and the
+ * FORBIDDEN_THREAD check, because many applications confine domain state to one thread of their own.
  *
  * <p>Called from agent threads; implementations must be thread-safe.
  */
@@ -48,5 +50,19 @@ public interface ThreadPolicyProvider {
      */
     default boolean available() {
         return true;
+    }
+
+    /**
+     * The application thread's quiescent point, through which {@code ThreadPolicy.APP_QUIESCENT} work runs on that
+     * thread at its idle moments (phase8-contracts.md 4.1, D519); null (the default): the provider offers no
+     * quiescent point. Return the same instance on every call; must be cheap and must not block; a throw counts as
+     * null (logged once per provider by class name). The provider creates one point and calls
+     * {@link QuiescentPoint#runOne(long)} from the application's idle callback (an application listener, or the
+     * {@code EventSink} of an {@code OBSERVE} hook on the application's idle method), and closes it in its module's
+     * {@code uninstall}; the agent closes it too, before the module's {@code uninstall} returns the thread to the
+     * application.
+     */
+    default QuiescentPoint quiescentPoint() {
+        return null;
     }
 }

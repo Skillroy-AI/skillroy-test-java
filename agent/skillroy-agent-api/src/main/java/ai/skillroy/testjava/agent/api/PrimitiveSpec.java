@@ -84,6 +84,20 @@ public final class PrimitiveSpec {
         return thread;
     }
 
+    /**
+     * The most a task of this primitive may hold the application's thread, in ms, for a spec whose thread is
+     * {@link ThreadPolicy#APP_QUIESCENT} (1 to 1000, default {@value QuiescentPoint#DEFAULT_BUDGET_MS}); 0 for every
+     * other policy (phase8-contracts.md 4.1).
+     */
+    public long quiescentBudgetMs() {
+        return descriptor.quiescentBudgetMs();
+    }
+
+    /** The lane of a spec whose thread is {@link ThreadPolicy#LANE}; null for every other policy (4.2, D526). */
+    public String lane() {
+        return descriptor.lane();
+    }
+
     /** Default timeout of a call; a caller may override it per call through {@code _meta.timeoutMs}. */
     public long timeoutMs() {
         return descriptor.timeoutMs();
@@ -151,6 +165,8 @@ public final class PrimitiveSpec {
         private boolean mutating;
         private boolean destructive;
         private boolean script;
+        private long quiescentBudgetMs;
+        private String lane;
 
         private Builder(String name) {
             if (name == null || !NAME.matcher(name).matches()) {
@@ -217,9 +233,48 @@ public final class PrimitiveSpec {
             return this;
         }
 
-        /** Default CALLER. */
+        /**
+         * Default CALLER. {@link ThreadPolicy#LANE} needs a lane name, given with {@link #lane(String)} (which also
+         * sets the policy).
+         */
         public Builder thread(ThreadPolicy policy) {
             this.thread = Objects.requireNonNull(policy, "policy");
+            return this;
+        }
+
+        /**
+         * The budget of an {@link ThreadPolicy#APP_QUIESCENT} spec: the most one task may hold the application's
+         * thread; the call is admitted only at a quiescent point with at least this much time free and refused when
+         * it exceeds the point's allowance (phase8-contracts.md 4.1). Default
+         * {@value QuiescentPoint#DEFAULT_BUDGET_MS} for such a spec. Legal only with that policy: {@link #build()}
+         * throws {@code IllegalStateException} when the budget is set under another.
+         *
+         * @throws IllegalArgumentException outside 1 to {@value QuiescentPoint#MAX_ALLOWANCE_MS}
+         */
+        public Builder quiescentBudgetMs(long ms) {
+            if (ms < 1 || ms > QuiescentPoint.MAX_ALLOWANCE_MS) {
+                throw new IllegalArgumentException("quiescentBudgetMs must be 1.." + QuiescentPoint.MAX_ALLOWANCE_MS
+                        + ": " + ms);
+            }
+            this.quiescentBudgetMs = ms;
+            return this;
+        }
+
+        /**
+         * Runs the primitive on the named lane its module declares ({@code ThreadBroker.declareLane}): sets the policy
+         * to {@link ThreadPolicy#LANE} and the lane's name (phase8-contracts.md 4.2, D526). {@link #build()} throws
+         * {@code IllegalStateException} when the policy is changed to another afterwards.
+         *
+         * @throws IllegalArgumentException if the name does not follow {@link Lane#NAME_PATTERN} or is longer than
+         *     {@value Lane#MAX_NAME_LENGTH} characters
+         */
+        public Builder lane(String name) {
+            if (!Lane.isValidName(name)) {
+                throw new IllegalArgumentException("invalid lane name '" + name + "': expected "
+                        + Lane.NAME_PATTERN + ", at most " + Lane.MAX_NAME_LENGTH + " characters");
+            }
+            this.lane = name;
+            this.thread = ThreadPolicy.LANE;
             return this;
         }
 
@@ -264,8 +319,26 @@ public final class PrimitiveSpec {
             return this;
         }
 
-        /** An immutable spec; later builder changes do not affect it. */
+        /**
+         * An immutable spec; later builder changes do not affect it.
+         *
+         * @throws IllegalStateException for {@link ThreadPolicy#LANE} without a lane name, a lane name under another
+         *     policy, or a quiescent budget under a policy other than {@link ThreadPolicy#APP_QUIESCENT}
+         */
         public PrimitiveSpec build() {
+            if (thread == ThreadPolicy.LANE && lane == null) {
+                throw new IllegalStateException("primitive " + name + ": a LANE spec needs lane(name)");
+            }
+            if (lane != null && thread != ThreadPolicy.LANE) {
+                throw new IllegalStateException("primitive " + name + ": lane '" + lane + "' is set but the thread is "
+                        + thread);
+            }
+            if (quiescentBudgetMs > 0 && thread != ThreadPolicy.APP_QUIESCENT) {
+                throw new IllegalStateException("primitive " + name + ": quiescentBudgetMs is legal only with"
+                        + " APP_QUIESCENT, not " + thread);
+            }
+            long budget = thread != ThreadPolicy.APP_QUIESCENT ? 0L
+                    : quiescentBudgetMs > 0 ? quiescentBudgetMs : QuiescentPoint.DEFAULT_BUDGET_MS;
             Map<String, Object> params;
             if (paramsSchema != null) {
                 params = paramsSchema;
@@ -276,7 +349,7 @@ public final class PrimitiveSpec {
                 params.put("required", required);
             }
             PrimitiveDescriptor descriptor = new PrimitiveDescriptor(name, description, params, resultSchema,
-                    thread.name(), timeoutMs, capabilityId, mutating, destructive, script);
+                    thread.name(), timeoutMs, capabilityId, mutating, destructive, script, budget, lane);
             return new PrimitiveSpec(thread, descriptor);
         }
 

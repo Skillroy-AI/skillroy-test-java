@@ -16,6 +16,9 @@
 
 package ai.skillroy.testjava.agent.api;
 
+import ai.skillroy.testjava.agent.api.spi.DataSourceProvider;
+import ai.skillroy.testjava.agent.api.spi.QueryControl;
+import ai.skillroy.testjava.agent.api.spi.QueryResult;
 import ai.skillroy.testjava.agent.api.spi.ThreadPolicyProvider;
 import ai.skillroy.testjava.agent.api.spi.hook.HookEngine;
 import ai.skillroy.testjava.protocol.hook.HookHealth;
@@ -187,6 +190,126 @@ class DefaultMethodsTest {
         assertFalse(ctx.isSecretKey(null));
         assertEquals("password=hunter2", ctx.redactText("password=hunter2"), "the default leaves text as it is");
         assertNull(ctx.redactText(null));
+    }
+
+    /** phase8-contracts.md 4.1: a provider offers no quiescent point unless it says so. */
+    @Test
+    void aThreadPolicyProviderOffersNoQuiescentPointByDefault() {
+        ThreadPolicyProvider provider = new ThreadPolicyProvider() {
+            @Override
+            public String id() {
+                return "p";
+            }
+
+            @Override
+            public boolean isForbidden(Thread thread) {
+                return false;
+            }
+
+            @Override
+            public <T> T callOnAppThread(Callable<T> task, long timeoutMs) throws Exception {
+                return task.call();
+            }
+        };
+        assertNull(provider.quiescentPoint());
+    }
+
+    /**
+     * phase8-contracts.md 4.2 to 4.4: a 0.1.0 data source has no lane, no column names, does not enforce the timeout,
+     * and is served through the five-argument query, which delegates to its four-argument one.
+     */
+    @Test
+    void aDataSourceProvidersPhase8MembersDefaultToTheOldBehaviour() throws Exception {
+        final List<Object> seen = new java.util.ArrayList<Object>();
+        final QueryResult answer = new QueryResult(null, null, null, false);
+        DataSourceProvider provider = new DataSourceProvider() {
+            @Override
+            public String id() {
+                return "positional";
+            }
+
+            @Override
+            public String describe() {
+                return "answers by position";
+            }
+
+            @Override
+            public QueryResult query(String sql, List<Object> params, int maxRows, long timeoutMs) {
+                seen.add(sql);
+                seen.add(params);
+                seen.add(Integer.valueOf(maxRows));
+                seen.add(Long.valueOf(timeoutMs));
+                return answer;
+            }
+        };
+        assertNull(provider.lane());
+        assertNull(provider.columns("staff"));
+        assertFalse(provider.enforcesTimeout());
+        QueryControl control = new QueryControl() {
+            @Override
+            public long remainingMs() {
+                return 1;
+            }
+
+            @Override
+            public boolean cancelled() {
+                return false;
+            }
+
+            @Override
+            public AutoCloseable onCancel(Runnable action) {
+                throw new AssertionError("the default never registers an action");
+            }
+        };
+        List<Object> params = Collections.<Object>singletonList("A1");
+        assertSame(answer, provider.query("SELECT code FROM item WHERE code = ?", params, 5, 750L, control));
+        assertEquals(java.util.Arrays.asList("SELECT code FROM item WHERE code = ?", params, Integer.valueOf(5),
+                Long.valueOf(750L)), seen);
+        DataSourceProvider neither = new DataSourceProvider() {
+            @Override
+            public String id() {
+                return "jdbc";
+            }
+
+            @Override
+            public String describe() {
+                return "JDBC only";
+            }
+        };
+        assertNull(neither.query("SELECT 1", params, 1, 10L, control), "no statement form: open() is used");
+    }
+
+    /**
+     * phase8-contracts.md 4.1, 4.2: a broker written for 0.1.0 (a test fake) compiles unchanged; its Phase 8 members
+     * throw until the agent's own broker implements them.
+     */
+    @Test
+    void aBrokersPhase8MembersThrowByDefault() {
+        final ThreadBroker broker = new ThreadBroker() {
+            @Override
+            public <T> T call(ThreadPolicy policy, Callable<T> task, long timeoutMs) throws Exception {
+                return task.call();
+            }
+
+            @Override
+            public void post(ThreadPolicy policy, Runnable task) {
+                task.run();
+            }
+
+            @Override
+            public boolean isForbiddenThread(Thread thread) {
+                return false;
+            }
+        };
+        final Callable<String> task = new Callable<String>() {
+            @Override
+            public String call() {
+                throw new AssertionError("the default never runs the task");
+            }
+        };
+        assertThrows(UnsupportedOperationException.class, () -> broker.callQuiescent(task, 50L, 1000L));
+        assertThrows(UnsupportedOperationException.class, () -> broker.declareLane("test.reads", 1, 0));
+        assertThrows(UnsupportedOperationException.class, () -> broker.callOnLane("test.reads", task, 1000L));
     }
 
     /** A context whose only real member is {@link AgentContext#options()}. */
