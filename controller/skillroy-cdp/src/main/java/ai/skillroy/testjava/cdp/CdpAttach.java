@@ -420,11 +420,17 @@ public final class CdpAttach implements AutoCloseable {
         return new Connected(created, attached, contexts.get(0));
     }
 
+    /**
+     * The {@code FROZEN_TARGETS} failure of the frozen targets: the message names them by count and id only, never by a
+     * page's URL or title (Phase 8 security fix S179, FE: the message reaches the {@code web.path} record and the run's
+     * failure before anything asks which pages are masked); the targets ride along for the detail, which
+     * {@code CdpWebPath.openFailure} builds with the agent's masks.
+     */
     static CdpException frozen(List<TargetProbe.Target> frozen) {
-        StringBuilder sb = new StringBuilder("page targets did not answer Runtime.evaluate: ");
+        StringBuilder sb = new StringBuilder().append(frozen.size()).append(frozen.size() == 1 ? " page target" :
+                " page targets").append(" did not answer Runtime.evaluate: ");
         for (int i = 0; i < frozen.size(); i++) {
-            TargetProbe.Target t = frozen.get(i);
-            sb.append(i == 0 ? "" : "; ").append(t.id()).append(' ').append(t.url());
+            sb.append(i == 0 ? "" : "; ").append(frozen.get(i).id());
         }
         return new CdpException(CdpException.Kind.FROZEN_TARGETS, sb.toString(), frozen);
     }

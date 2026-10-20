@@ -402,9 +402,12 @@ class MaskedBrowserTest {
     }
 
     /**
-     * (i) D637: the actions that stay allowed on a masked browser answer without page data: {@code web.pointer} without
-     * {@code hit}, {@code web.dom.click}/{@code web.dom.fill} with {@code role} and {@code tag} only, the
-     * {@code AMBIGUOUS} candidates likewise with {@code count} kept; {@code redact: false} keeps today's answers.
+     * (i) D637: {@code web.pointer} on a masked browser answers without its {@code hit}; {@code redact: false} keeps it.
+     * Phase 8 security fix S165 (FE): {@code web.dom.click}, {@code web.dom.fill} and {@code web.dispatchEvent} with a
+     * selector target are refused {@code INVALID_PARAMS {param: redact, reason: masked}} before the page evaluates the
+     * locator (whether it matched would reveal the page), the page untouched; {@code redact: false} (a person's) acts
+     * and answers in full; a dispatch on the window evaluates no locator and stays allowed. A browser judged masked while
+     * the action ran still answers {@code role} and {@code tag} only (D637's strip, now the second line).
      */
     @Test
     void actingOnAMaskedBrowserReturnsNoPageData() throws Exception {
@@ -420,7 +423,7 @@ class MaskedBrowserTest {
             Map<String, Object> click = h.ctx.map("web.dom.click", Harness.args("selector", "#count"));
             assertEquals("count", ((Map<?, ?>) click.get("clicked")).get("name"), "the control");
 
-            h.ctx.spi.register(CaptureMask.class, naming(view));
+            h.ctx.spi().register(CaptureMask.class, naming(view));
             Map<String, Object> masked = h.ctx.map("web.pointer", new java.util.LinkedHashMap<String, Object>(
                     pointer));
             assertFalse(masked.containsKey("hit"), String.valueOf(masked));
@@ -429,34 +432,299 @@ class MaskedBrowserTest {
             keep.put("redact", Boolean.FALSE);
             assertTrue(h.ctx.map("web.pointer", keep).containsKey("hit"), "redact: false keeps the hit");
 
-            Map<String, Object> clicked = h.ctx.map("web.dom.click", Harness.args("selector", "#count"));
-            assertEquals(Harness.args("role", "button", "tag", "button"), clicked.get("clicked"));
-            assertEquals(Long.valueOf(1), clicked.get("matched"));
-            Map<String, Object> filled = h.ctx.map("web.dom.fill", Harness.args("selector", "#count", "text", "x"));
-            assertEquals(Harness.args("tag", "input"), filled.get("filled"));
-            assertEquals(Long.valueOf(1), filled.get("typed"));
+            assertLocatorActionsRefused(h, Harness.args());
             Map<String, Object> unredacted = h.ctx.map("web.dom.click", Harness.args("selector", "#count", "redact",
                     Boolean.FALSE));
             assertEquals("count", ((Map<?, ?>) unredacted.get("clicked")).get("id"), "redact: false keeps the id");
+            assertEquals(Long.valueOf(1), h.ctx.map("web.dom.fill", Harness.args("selector", "#count", "text", "x",
+                    "redact", Boolean.FALSE)).get("typed"), "a person's redact: false fills");
+            assertEquals(Boolean.TRUE, h.ctx.map("web.dispatchEvent", Harness.args("name", "desk.reset")).get(
+                    "dispatched"), "a dispatch on the window evaluates no locator: allowed");
+        }
+    }
 
+    /**
+     * The three locator actions of a masked browser, each refused before the page is evaluated (S165): {@code
+     * extra} is added to every call's arguments (a selection).
+     */
+    private void assertLocatorActionsRefused(Harness h, Map<String, Object> extra) {
+        java.util.Map<String, Map<String, Object>> calls = new java.util.LinkedHashMap<String, Map<String, Object>>();
+        calls.put("web.dom.click", Harness.args("selector", "#count"));
+        calls.put("web.dom.fill", Harness.args("selector", "#count", "text", "x"));
+        calls.put("web.dispatchEvent", Harness.args("name", "desk.reset", "target", "#count"));
+        for (Map.Entry<String, Map<String, Object>> c : calls.entrySet()) {
+            Map<String, Object> args = new java.util.LinkedHashMap<String, Object>(c.getValue());
+            args.putAll(extra);
+            int before = browser.evals.size();
+            RpcException refused = h.ctx.error(c.getKey(), args);
+            assertEquals(ErrorCodes.INVALID_PARAMS, refused.error().code(), c.getKey());
+            assertEquals("masked", refused.error().data().get("reason"), c.getKey());
+            assertEquals("redact", refused.error().data().get("param"), c.getKey());
+            assertEquals(before, browser.evals.size(), c.getKey() + ": the page never evaluates the locator");
+        }
+    }
+
+    /**
+     * D637's strip as the second line (S165): a browser that a pack's mask names while the action runs (here a
+     * {@code BrowserMask} registered while the page answers, after the refusal's check found no mask) answers {@code
+     * role} and {@code tag} only, and the {@code AMBIGUOUS} candidates likewise with {@code count} kept.
+     */
+    @Test
+    void aBrowserMaskedWhileTheActionRanAnswersWithoutPageData() throws Exception {
+        try (final Harness h = harness()) {
+            final Object vendor = browser.vendorObject();
+            final AutoCloseable[] registration = new AutoCloseable[1];
             final Map<String, Object> ambiguous = Harness.args("__error", "AMBIGUOUS", "data", Harness.args(
                     "candidates", Arrays.asList(Harness.args("role", "button", "name", "Count", "tag", "button",
                             "id", "count"), Harness.args("role", "heading", "name", "Kit main", "tag", "h1")),
                     "count", Long.valueOf(25)));
+            final boolean[] answerAmbiguous = {false};
             browser.responder = new ScriptedBrowser.Responder() {
                 @Override
                 public CompletableFuture<String> answer(WebEval eval) {
-                    return CompletableFuture.completedFuture(Harness.guarded(ambiguous));
+                    if (registration[0] == null) {
+                        registration[0] = h.ctx.spi.register(BrowserMask.class, new BrowserMask() {
+                            @Override
+                            public Boolean masks(String tag, Object vendorObject, boolean hasView) {
+                                return vendorObject == vendor ? Boolean.TRUE : null;
+                            }
+                        });
+                    }
+                    return answerAmbiguous[0] ? CompletableFuture.completedFuture(Harness.guarded(ambiguous))
+                            : browser.byDocument(eval);
                 }
             };
+            Map<String, Object> clicked = h.ctx.map("web.dom.click", Harness.args("selector", "#count"));
+            assertEquals(Harness.args("role", "button", "tag", "button"), clicked.get("clicked"));
+            assertEquals(Long.valueOf(1), clicked.get("matched"));
+
+            registration[0].close();
+            registration[0] = null;
+            answerAmbiguous[0] = true;
             RpcException amb = h.ctx.error("web.dom.click", Harness.args("selector", "*"));
             assertEquals(ErrorCodes.AMBIGUOUS, amb.error().code());
             assertEquals(Long.valueOf(25), amb.error().data().get("count"));
             assertEquals(Arrays.asList(Harness.args("role", "button", "tag", "button"), Harness.args("role",
                     "heading", "tag", "h1")), amb.error().data().get("candidates"));
             assertFalse(String.valueOf(amb.error().data()).contains("Kit main"), String.valueOf(amb.error()));
-            RpcException kept = h.ctx.error("web.dom.click", Harness.args("selector", "*", "redact", Boolean.FALSE));
-            assertTrue(String.valueOf(kept.error().data()).contains("Kit main"), "redact: false keeps them");
+        }
+    }
+
+    // ------------------------------------------------------------------------------------- Phase 8 security fixes (FE)
+
+    /** The first {@code web.console} event after {@code seq}. */
+    private static Map<String, Object> console(Harness h, long seq) throws Exception {
+        ai.skillroy.testjava.protocol.Event e = h.ctx.events.awaitTopic("web.console", seq, null, 5000);
+        assertTrue(e != null, "a console event");
+        return e.payload();
+    }
+
+    /** The browser's ref, read by its vendor object from {@code web.browsers}. */
+    private String refOf(Harness h, ScriptedBrowser b) throws Exception {
+        return BrowserIndexTest.ref(h, b);
+    }
+
+    /**
+     * S165 on a view-less browser, the case the stopped run's sceptic probed in a page: selected by its tag, the three
+     * locator actions are refused before its page evaluates the locator; nothing registered, they act as before.
+     */
+    @Test
+    void theLocatorActionsOfAMaskedViewlessBrowserAreRefusedBeforeItsPageIsEvaluated() throws Exception {
+        try (Harness h = viewlessHarness("detached")) {
+            browser = viewless;
+            h.ctx.call("web.dom.click", Harness.args("by", Harness.args("tag", "detached"), "selector", "#count"));
+            h.ctx.spi.register(CaptureMask.class, naming(new JPanel()));
+            assertLocatorActionsRefused(h, Harness.args("by", Harness.args("tag", "detached")));
+        }
+    }
+
+    /**
+     * S167: without a running event-dispatch thread (the production walk told so) a masked browser stays masked on every
+     * route: the walk's state answers masked while a mask is registered, so no per-call judgement lowers the flag
+     * ({@code web.browsers}, the reads, the actions, the events, {@code by: {url}}). Fails on the old code, where the
+     * unread state said "not masked".
+     */
+    @Test
+    void withoutAnEventDispatchThreadAMaskedBrowserStaysMasked() throws Exception {
+        adapter = new ScriptedAdapter("scripted");
+        browser = adapter.add(new ScriptedBrowser("scripted"));
+        browser.load(KitPages.main());
+        browser.url = "data:member-4711";
+        holder = new JPanel();
+        view = new JPanel();
+        holder.add(view);
+        browser.component = view;
+        try (Harness h = Harness.withoutEventDispatchThread(adapter).install().ready()) {
+            h.ctx.spi.register(CaptureMask.class, naming(holder));
+            Map<?, ?> entry = first(listed(h));
+            assertEquals(Boolean.TRUE, entry.get("masked"), String.valueOf(entry));
+            assertEquals("", entry.get("url"));
+            String ref = (String) entry.get("ref");
+            int before = browser.evals.size();
+            assertEquals("masked", h.ctx.error("web.dom.text", Harness.args("browser", ref)).error().data()
+                    .get("reason"));
+            assertLocatorActionsRefused(h, Harness.args("browser", ref));
+            assertEquals(before, browser.evals.size(), "the page is never evaluated");
+            long seq = h.ctx.events.lastSeq();
+            browser.fire(ai.skillroy.testjava.agent.api.spi.web.WebEvent.console("log", "member 4711", "app.js", 3));
+            assertEquals(Harness.args("browser", ref, "level", "log", "text", "", "masked", Boolean.TRUE),
+                    console(h, seq));
+            RpcException byUrl = h.ctx.error("web.reload", Harness.args("by", Harness.args("url", "4711")));
+            assertEquals(ErrorCodes.NOT_FOUND, byUrl.error().code(), "never selected by its withheld URL");
+            assertFalse(String.valueOf(byUrl.error().data().get("browsers")).contains("4711"),
+                    "the summary withholds the URL: " + byUrl.error());
+        }
+    }
+
+    /**
+     * S168: a view lost, or replaced by one inside the masked container, since the last rebuild is judged as the adapter
+     * reports it now: the read is refused and the events stay masked (on the old code the stale view, now outside the
+     * masked container, was judged and the read served). A {@code browser: <ref>} selection never rebuilds.
+     */
+    @Test
+    void aViewLostOrReplacedSinceTheLastRebuildIsJudgedAsItIsNow() throws Exception {
+        try (Harness h = harness()) {
+            h.ctx.spi.register(CaptureMask.class, naming(holder));
+            String ref = refOf(h, browser);
+            assertListedMasked(first(listed(h)));
+            Map<String, Object> byRef = Harness.args("browser", ref);
+
+            holder.remove(view);
+            browser.component = null;
+            assertEquals("masked", h.ctx.error("web.dom.text", byRef).error().data().get("reason"),
+                    "lost: no view now, masked by the view-less rule");
+            long seq = h.ctx.events.lastSeq();
+            browser.fire(ai.skillroy.testjava.agent.api.spi.web.WebEvent.console("log", "member text", null, 0));
+            assertEquals("", console(h, seq).get("text"), "the events stay masked");
+
+            browser.component = view;
+            listed(h); // the old view, outside the holder, at a rebuild: unmasked
+            h.ctx.call("web.dom.text", byRef);
+            JPanel replacement = new JPanel();
+            holder.add(replacement);
+            browser.component = replacement;
+            assertEquals("masked", h.ctx.error("web.dom.text", byRef).error().data().get("reason"),
+                    "replaced by a view inside the masked holder, before any rebuild");
+        }
+    }
+
+    /** A registry whose seed a test changes: the object with a tag, the object untagged, or a failure. */
+    private static final class Registry implements BrowserRegistryAdapter {
+        final Object vendor;
+        volatile String tag;
+        volatile boolean fails;
+
+        Registry(Object vendor, String tag) {
+            this.vendor = vendor;
+            this.tag = tag;
+        }
+
+        @Override
+        public Collection<BrowserSeed> seeds() {
+            if (fails) {
+                throw new IllegalStateException("the registry is unavailable");
+            }
+            return Collections.singletonList(BrowserSeed.of(vendor, tag));
+        }
+    }
+
+    /**
+     * S169: a release by tag lasts while the seed gives the tag. The registry stops tagging the view-less browser: the
+     * next rebuild drops the tag and the browser is masked; the registry fails: the tag is kept, but it can no longer
+     * release (on the old code both kept the release and served the page).
+     */
+    @Test
+    void aReleaseByTagLastsWhileTheSeedGivesTheTag() throws Exception {
+        adapter = new ScriptedAdapter("scripted");
+        viewless = adapter.add(new ScriptedBrowser("scripted"));
+        viewless.load(KitPages.main());
+        viewless.url = "data:detached-url";
+        viewless.component = null;
+        try (Harness h = new Harness(adapter).install()) {
+            Registry registry = new Registry(viewless.vendorObject(), "detached");
+            h.ctx.spi.register(BrowserRegistryAdapter.class, registry);
+            h.ready();
+            h.ctx.spi.register(CaptureMask.class, naming(new JPanel()));
+            h.ctx.spi.register(BrowserMask.class, byTag("detached", Boolean.FALSE));
+            Map<?, ?> released = first(listed(h));
+            assertFalse(released.containsKey("masked"), "released by its tag: " + released);
+            String ref = (String) released.get("ref");
+            h.ctx.call("web.dom.text", Harness.args("browser", ref));
+
+            registry.tag = null;
+            Map<?, ?> untagged = first(listed(h));
+            assertFalse(untagged.containsKey("tag"), "no seed gives the tag any more: " + untagged);
+            assertEquals(Boolean.TRUE, untagged.get("masked"), String.valueOf(untagged));
+            assertEquals("", untagged.get("url"));
+            assertEquals("masked", h.ctx.error("web.dom.text", Harness.args("browser", ref)).error().data()
+                    .get("reason"));
+
+            registry.tag = "detached";
+            assertFalse(first(listed(h)).containsKey("masked"), "tagged again: released again");
+            registry.fails = true;
+            Map<?, ?> unconfirmed = first(listed(h));
+            assertEquals("detached", unconfirmed.get("tag"), "the tag is kept while the registry fails");
+            assertEquals(Boolean.TRUE, unconfirmed.get("masked"), String.valueOf(unconfirmed));
+            assertEquals("", unconfirmed.get("url"));
+            assertEquals("masked", h.ctx.error("web.dom.text", Harness.args("browser", ref)).error().data()
+                    .get("reason"), "a kept tag can mask, never release");
+            registry.fails = false;
+            assertFalse(first(listed(h)).containsKey("masked"), "confirmed again once every registry answers");
+        }
+    }
+
+    /**
+     * S172: a browser that becomes masked while open (a mask registered after the last judgement) is judged afresh by a
+     * {@code by: {url}} selection before its regex runs: never selected by its withheld URL, even by a primitive that
+     * judges no mask itself ({@code web.reload}), and the error data withholds the URL (on the old code the stale flag
+     * let it match).
+     */
+    @Test
+    void aBrowserThatBecomesMaskedIsNeverSelectedByItsWithheldUrl() throws Exception {
+        try (Harness h = harness()) {
+            browser.url = "data:member-4711";
+            h.ctx.call("web.reload", Harness.args("by", Harness.args("url", "4711")));
+            h.ctx.spi.register(CaptureMask.class, naming(holder));
+            RpcException refused = h.ctx.error("web.reload", Harness.args("by", Harness.args("url", "4711")));
+            assertEquals(ErrorCodes.NOT_FOUND, refused.error().code());
+            assertFalse(String.valueOf(refused.error().data().get("browsers")).contains("4711"),
+                    "the summary withholds the URL: " + refused.error());
+        }
+    }
+
+    /**
+     * S172: a browser that becomes masked while open (its view moved into a masked container, with no call meanwhile)
+     * stops sending page data once its events have asked the index to judge the flags again (here at once: the
+     * module's re-judgement threshold lowered from {@link BrowserIndex#STALE_MS}); the event that asked carries the
+     * flag as it was (the window the contract states). On the old code nothing judged it again.
+     */
+    @Test
+    void aBrowserThatBecomesMaskedStopsSendingPageDataWithoutACall() throws Exception {
+        try (Harness h = harness()) {
+            String ref = refOf(h, browser);
+            JPanel masked = new JPanel();
+            h.ctx.spi.register(CaptureMask.class, naming(masked));
+            listed(h);
+            long seq = h.ctx.events.lastSeq();
+            browser.fire(ai.skillroy.testjava.agent.api.spi.web.WebEvent.console("log", "before", null, 0));
+            assertEquals("before", console(h, seq).get("text"), "the control: unmasked");
+
+            holder.remove(view);
+            masked.add(view);
+            h.module.indexForTest().rejudgeAfterMs = 0;
+            int reads = h.walk.maskedReads.get();
+            seq = h.ctx.events.lastSeq();
+            browser.fire(ai.skillroy.testjava.agent.api.spi.web.WebEvent.console("log", "first", null, 0));
+            console(h, seq);
+            long deadline = System.currentTimeMillis() + 5000;
+            while (h.walk.maskedReads.get() == reads && System.currentTimeMillis() < deadline) {
+                Thread.sleep(5);
+            }
+            assertTrue(h.walk.maskedReads.get() > reads, "the event asked for one re-judgement on a worker");
+            seq = h.ctx.events.lastSeq();
+            browser.fire(ai.skillroy.testjava.agent.api.spi.web.WebEvent.console("log", "member 4711", null, 0));
+            assertEquals(Harness.args("browser", ref, "level", "log", "text", "", "masked", Boolean.TRUE),
+                    console(h, seq));
         }
     }
 }

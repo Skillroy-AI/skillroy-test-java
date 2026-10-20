@@ -491,6 +491,60 @@ public final class WebLib {
     }
 
     /**
+     * The name a tapped event of a masked browser is published under (Phase 8 security fix S170, FE;
+     * phase8-contracts.md 5.2 (i)): the tap's own pattern, never the page's event type, which under a glob is page data.
+     * The exact pattern (one without {@code *}) equal to {@code type} when there is one, else the first pattern with
+     * {@code *} that matches {@code type} as the library's glob does ({@code *} any run of characters, everything else
+     * literal), else null (the event matches no pattern of the tap as it is now: it is not published). Both web paths
+     * use it, on the receiving side, so that a page with an older library behaves the same (D300).
+     *
+     * @param patterns the tap's patterns as the call gave them (null: none known)
+     * @param type the event's type as the page's library recorded it
+     */
+    public static String tapPatternOf(List<String> patterns, String type) {
+        if (patterns == null || type == null) {
+            return null;
+        }
+        for (String p : patterns) {
+            if (p != null && p.indexOf('*') < 0 && p.equals(type)) {
+                return p;
+            }
+        }
+        for (String p : patterns) {
+            if (p != null && p.indexOf('*') >= 0 && globMatches(p, type)) {
+                return p;
+            }
+        }
+        return null;
+    }
+
+    /** True when {@code text} matches {@code glob} whole: {@code *} any run of characters, every other one itself. */
+    static boolean globMatches(String glob, String text) {
+        int g = 0;
+        int t = 0;
+        int star = -1;
+        int mark = 0;
+        while (t < text.length()) {
+            if (g < glob.length() && glob.charAt(g) == '*') {
+                star = g++;
+                mark = t;
+            } else if (g < glob.length() && glob.charAt(g) == text.charAt(t)) {
+                g++;
+                t++;
+            } else if (star >= 0) {
+                g = star + 1;
+                t = ++mark;
+            } else {
+                return false;
+            }
+        }
+        while (g < glob.length() && glob.charAt(g) == '*') {
+            g++;
+        }
+        return g == glob.length();
+    }
+
+    /**
      * The source of an init script that installs the library in every new document and arms the tap there for the
      * given event-name patterns on {@code "window"} or {@code "document"} ({@code null} means {@code "window"}). An
      * exact name is heard by a capturing listener on the target (every event of that name whose path reaches it); a

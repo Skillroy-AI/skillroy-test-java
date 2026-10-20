@@ -175,6 +175,7 @@ public final class WebModule implements AgentModule {
         this.bridge = new EventBridge(context, secrets);
         this.taps = new Taps(context, bridge);
         bridge.taps(taps);
+        bridge.index(index);
         index.listener(new BrowserIndex.Listener() {
             @Override
             public void entered(Entry entry) {
@@ -430,6 +431,9 @@ public final class WebModule implements AgentModule {
             if (index != null) {
                 index.listener(null);
                 index.hook(null);
+                if (bridge != null) {
+                    bridge.index(null);
+                }
                 index.clear();
             }
         } catch (Throwable t) {

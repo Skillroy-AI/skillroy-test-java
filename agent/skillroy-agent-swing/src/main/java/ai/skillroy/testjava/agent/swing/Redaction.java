@@ -18,6 +18,7 @@ package ai.skillroy.testjava.agent.swing;
 
 import ai.skillroy.testjava.agent.api.AgentContext;
 import ai.skillroy.testjava.agent.api.spi.CaptureMask;
+import ai.skillroy.testjava.agent.api.spi.SurfaceSource;
 
 import java.awt.Color;
 import java.awt.Component;
@@ -38,7 +39,9 @@ import javax.swing.JPasswordField;
  * <p>As built (Phase 7, VS): a component that lies inside a masked component is treated as masked too (its pixels are
  * inside the blanked rectangle anyway, and a pack that masks a container expects its content hidden); the safe side.
  * Phase 7 security fix: masks combine by union ({@link #blanked}, S123), and a rectangle a mask's {@code regions}
- * blank withholds the text under it ({@code ComponentView.masked}, S122).
+ * blank withholds the text under it ({@code ComponentView.masked}, S122). Phase 8 security fix S166 (FE): the component
+ * of a surface its module masks ({@code SurfaceSource.Surface.masked}, a masked embedded browser) is named too, rule
+ * {@link #BROWSER_MASK}, blanked whole, once the capture or the hit-test handed the call's surfaces in.
  *
  * <p>A mask that throws is logged once per mask instance (one instance lives for one agent start) and the component is
  * treated as masked, the safe side. One instance serves one primitive call: it takes the registered masks at
@@ -52,6 +55,11 @@ final class Redaction {
     static final String PASSWORD_FIELD = "password-field";
     /** {@code redacted[].rule} of a registered mask. */
     static final String CAPTURE_MASK = "capture-mask";
+    /**
+     * {@code redacted[].rule} of a surface its module masks (Phase 8 security fix S166, FE: a {@code SurfaceSource}'s
+     * {@code Surface.masked}, the web module's flag of a masked browser): the surface's component is blanked whole.
+     */
+    static final String BROWSER_MASK = "browser-mask";
 
     /** Masks that have thrown once already (logged once per instance, never again). */
     private static final Map<CaptureMask, Boolean> LOGGED =
@@ -59,6 +67,8 @@ final class Redaction {
 
     private final AgentContext ctx;
     private final List<CaptureMask> masks;
+    /** The components of the surfaces their modules mask (S166), by identity; set by the capture and the hit-test. */
+    private final Map<Component, Boolean> maskedSurfaces = new java.util.IdentityHashMap<Component, Boolean>();
 
     Redaction(AgentContext ctx) {
         this.ctx = ctx;
@@ -77,6 +87,9 @@ final class Redaction {
         if (c instanceof JPasswordField) {
             return PASSWORD_FIELD;
         }
+        if (maskedSurfaces.containsKey(c)) {
+            return BROWSER_MASK;
+        }
         for (CaptureMask mask : masks) {
             try {
                 if (mask.masks(c)) {
@@ -88,6 +101,22 @@ final class Redaction {
             }
         }
         return null;
+    }
+
+    /**
+     * The surfaces the call read ({@code SurfaceSource}s): the component of each one its module masks is named by
+     * {@link #BROWSER_MASK} from now on (Phase 8 security fix S166, FE). The capture and the hit-test call it before they
+     * ask any rule; EDT only.
+     */
+    void maskedSurfaces(List<SurfaceSource.Surface> surfaces) {
+        if (surfaces == null) {
+            return;
+        }
+        for (SurfaceSource.Surface s : surfaces) {
+            if (s != null && s.masked && s.component != null) {
+                maskedSurfaces.put(s.component, Boolean.TRUE);
+            }
+        }
     }
 
     /** True when a {@link CaptureMask} is registered (the built-in rule alone gives no {@code regions}). */
@@ -107,7 +136,7 @@ final class Redaction {
     List<Rectangle> blanked(Component c, String rule) {
         List<Rectangle> out = new ArrayList<Rectangle>();
         Rectangle whole = new Rectangle(0, 0, c.getWidth(), c.getHeight());
-        if (c instanceof JPasswordField) {
+        if (c instanceof JPasswordField || BROWSER_MASK.equals(rule)) {
             out.add(whole);
             return out;
         }

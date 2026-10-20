@@ -540,6 +540,9 @@ final class Capture {
             this.annotate = annotate;
             this.image = new Rectangle(0, 0, g.width, g.height);
             this.known = spis.surfaces();
+            // Phase 8 security fix S166 (FE): a surface its module masks (a masked embedded browser) is blanked whole and
+            // reported redacted, its component and what lies below it masked, as a CaptureMask's component is.
+            view.maskedSurfaces(known);
         }
 
         void run() {

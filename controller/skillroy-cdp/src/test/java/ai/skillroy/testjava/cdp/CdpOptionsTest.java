@@ -136,7 +136,9 @@ class CdpOptionsTest {
         TargetProbe.Target t = new TargetProbe.Target("T", "page", "u", "ti", "w", false, 1, "e");
         WebPathOpenException frozen = CdpWebPath.openFailure(CdpAttach.frozen(List.of(t)), endpoint);
         assertEquals(WebPathOpenException.Kind.FROZEN_TARGETS, frozen.kind());
-        assertEquals(List.of(Map.of("id", "T", "url", "u", "title", "ti")), frozen.detail().get("frozenTargets"));
-        assertEquals("page targets did not answer Runtime.evaluate: T u", frozen.getMessage());
+        // Phase 8 security fix S179 (FE): without the agent's listing the page is withheld (fail closed), and the
+        // message names the target by id only.
+        assertEquals(List.of(Map.of("id", "T", "url", "", "masked", true)), frozen.detail().get("frozenTargets"));
+        assertEquals("1 page target did not answer Runtime.evaluate: T", frozen.getMessage());
     }
 }

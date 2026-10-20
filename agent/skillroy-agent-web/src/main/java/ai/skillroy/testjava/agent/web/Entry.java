@@ -42,7 +42,17 @@ final class Entry {
     /** Set once {@code web.closed} was published for this browser. */
     final AtomicBoolean closedPublished = new AtomicBoolean();
     private volatile WebBrowser browser;
+    /**
+     * The seed's tag as the last rebuild found it: a rebuild in which every {@code BrowserRegistryAdapter} answered
+     * assigns the tag it found, null included (Phase 8 security fix S169, FE: a tag lasts while the seed gives it).
+     */
     volatile String tag;
+    /**
+     * True when {@link #tag} was kept from an earlier rebuild because a registry failed at the last one (S169): a
+     * {@code BrowserMask} union then counts TRUE for the entry until a rebuild in which every registry answered, so
+     * that a tag that may be stale can mask and never release.
+     */
+    volatile boolean tagUnconfirmed;
     volatile String componentRef;
     /**
      * The component the adapter reported at the last rebuild (a {@code java.awt.Component}, typed {@code Object} so

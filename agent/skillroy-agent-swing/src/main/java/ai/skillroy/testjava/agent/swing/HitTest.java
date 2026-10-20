@@ -147,6 +147,8 @@ final class HitTest {
 
         hit.deepest = SwingUtilities.getDeepestComponentAt(window, p.x, p.y);
         List<SurfaceSource.Surface> surfaces = spis.surfaces();
+        // Phase 8 security fix S166 (FE): a surface its module masks masks its component and what lies below it.
+        view.maskedSurfaces(surfaces);
         hit.source = sourceAt(window, p, surfaces);
         hit.mouseTarget = mouseTarget(window, hit.source, p);
         if (given != null) {
@@ -160,7 +162,9 @@ final class HitTest {
             hit.targetKind = "DEEPEST";
         }
         Component target = hit.target;
-        hit.masked = target != null && view.masked(target);
+        // S166: also when the point lies on a masked surface whose component is not the target (a listening ancestor)
+        SurfaceSource.Surface under = hit.deepest == null ? null : spis.claiming(surfaces, hit.deepest);
+        hit.masked = target != null && (view.masked(target) || under != null && under.masked);
         hit.vetoed = target != null && (view.vetoed(target) || view.vetoed(hit.deepest));
         hit.enabled = target != null && target.isEnabled();
 

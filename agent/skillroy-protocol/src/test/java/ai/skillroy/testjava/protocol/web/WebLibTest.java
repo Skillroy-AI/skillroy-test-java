@@ -71,6 +71,29 @@ class WebLibTest {
 
     // ---- the resource ----
 
+    /**
+     * Phase 8 security fix S170 (FE): a masked browser's tap event is published under the tap's own pattern: the exact
+     * one it equals, else the first glob that matches it as the library's glob does ({@code *} any run, everything
+     * else literal, the whole name), else none.
+     */
+    @Test
+    void aMaskedTapEventIsNamedByTheTapsOwnPattern() {
+        List<String> patterns = Arrays.asList("desk.*", "desk.loan", "*.closed", "a.b?c");
+        assertEquals("desk.loan", WebLib.tapPatternOf(patterns, "desk.loan"), "the exact pattern first");
+        assertEquals("desk.*", WebLib.tapPatternOf(patterns, "desk.member-4711"));
+        assertEquals("desk.*", WebLib.tapPatternOf(patterns, "desk."), "a star matches an empty run");
+        assertEquals("*.closed", WebLib.tapPatternOf(patterns, "slip.closed"));
+        assertNull(WebLib.tapPatternOf(patterns, "deskXloan"), "a dot is literal");
+        assertNull(WebLib.tapPatternOf(patterns, "a.bxc"), "so is a question mark");
+        assertEquals("a.b?c", WebLib.tapPatternOf(patterns, "a.b?c"));
+        assertNull(WebLib.tapPatternOf(patterns, "other.4711"), "no pattern: none");
+        assertNull(WebLib.tapPatternOf(patterns, "xdesk.loan"), "the whole name");
+        assertNull(WebLib.tapPatternOf(null, "desk.loan"));
+        assertTrue(WebLib.globMatches("*a*b*", "xxaybzz"));
+        assertFalse(WebLib.globMatches("*a*b", "xxaybzz"));
+        assertTrue(WebLib.globMatches("**", ""));
+    }
+
     @Test
     void sourceIsTheResourceText() throws IOException {
         String text = new String(resourceBytes(), StandardCharsets.UTF_8);

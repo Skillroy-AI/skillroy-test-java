@@ -92,7 +92,9 @@ import java.util.stream.Stream;
  * browser's (a stale {@code DevToolsActivePort} file, a port another process holds), none of its pages is probed and
  * the reason is "the endpoint at &lt;host:port&gt; serves none of the target's browsers" (no target id reported: no
  * check). It probes the endpoint ({@link TargetProbe}, 2 s per page target), applies the frozen-target policy ({@code
- * FAIL}: {@link WebPathOpenException} {@code FROZEN_TARGETS} with {@code detail.frozenTargets [{id, url, title}]};
+ * FAIL}: {@link WebPathOpenException} {@code FROZEN_TARGETS} with {@code detail.frozenTargets [{id, url, title}]}, a
+ * page the agent masks or cannot map while masks are registered named {@code {id, url: "", masked: true}} after one
+ * {@code web.browsers} read, the message naming the targets by id and count only (Phase 8 security fix S179);
  * {@code RELOAD}: for each frozen target the agent's browser with that {@code cdpTargetId} (failing that, the one
  * browser without a target id that has the target's URL, or the only one left) is reloaded with {@code web.reload}, a
  * {@code web.recover} record is written, the agent's {@code web.ready} of that browser is awaited for at most 10 s,
@@ -312,13 +314,16 @@ public final class CdpWebPath implements WebPath {
         final String targetId;
         final String target;
         final AutoCloseable initScript;
+        /** The call's patterns: a masked page's events are published under them (Phase 8 security fix S170). */
+        final List<String> patterns;
         volatile String ref;
 
-        Tap(String targetId, String ref, String target, AutoCloseable initScript) {
+        Tap(String targetId, String ref, String target, AutoCloseable initScript, List<String> patterns) {
             this.targetId = targetId;
             this.ref = ref;
             this.target = target;
             this.initScript = initScript;
+            this.patterns = List.copyOf(patterns);
         }
     }
 
@@ -425,7 +430,7 @@ public final class CdpWebPath implements WebPath {
             return notServing(endpoint);
         }
         if (!probe.unresponsive().isEmpty()) {
-            throw openFailure(CdpAttach.frozen(probe.unresponsive()), endpoint);
+            throw frozenFailure(agent, probe.unresponsive(), endpoint);
         }
         // Playwright records a live trace into its artifacts directory and never deletes a directory it was given:
         // a private one of this path, deleted at shutdown, never the run's output directory (where a filled value in
@@ -705,7 +710,39 @@ public final class CdpWebPath implements WebPath {
         return Collections.unmodifiableMap(info);
     }
 
+    /**
+     * The {@code FROZEN_TARGETS} refusal of {@link #open} (Phase 8 security fix S179, FE; phase4-contracts.md 5.3,
+     * phase8-contracts.md 5.2 (iii)): the agent's {@code web.browsers} is read once (bounded) before the refusal is
+     * built, so that a frozen page the agent masks, or cannot map while masks are registered, is never named by its
+     * URL or title ({@link #openFailure(CdpException, CdpEndpoint, AgentBrowser.Listing)}).
+     */
+    static WebPathOpenException frozenFailure(AgentConnection agent, List<TargetProbe.Target> frozen,
+                                              CdpEndpoint endpoint) throws AgentLostException {
+        AgentBrowser.Listing listing;
+        try {
+            listing = AgentBrowser.parse(agent.call("web.browsers", Map.of(), query(AGENT_QUERY_MS)).value());
+        } catch (AgentRpcException e) {
+            listing = null;
+        }
+        return openFailure(CdpAttach.frozen(frozen), endpoint, listing);
+    }
+
+    /** {@link #openFailure(CdpException, CdpEndpoint, AgentBrowser.Listing)} without an agent listing (fail closed). */
     static WebPathOpenException openFailure(CdpException e, CdpEndpoint endpoint) {
+        return openFailure(e, endpoint, null);
+    }
+
+    /**
+     * The {@link WebPathOpenException} of a {@link CdpException}, with {@code detail.endpoint} and, for {@code
+     * FROZEN_TARGETS}, {@code detail.frozenTargets}: per frozen target {@code {id, url, title}} only when the agent's
+     * listing maps it to a browser it does not mask, or maps it to none while no mask is registered; else
+     * {@code {id, url: "", masked: true}} (Phase 8 security fix S179, FE: a masked page's URL and title never reach
+     * the {@code web.path} record, the run's failure, the JUnit XML or a client; no listing, or one whose read failed,
+     * fails closed). The message names the targets by id and count only ({@link CdpAttach#frozen}).
+     *
+     * @param listing the agent's {@code web.browsers} as read for the refusal, or null when there is none
+     */
+    static WebPathOpenException openFailure(CdpException e, CdpEndpoint endpoint, AgentBrowser.Listing listing) {
         Map<String, Object> detail = new LinkedHashMap<>();
         detail.put("endpoint", endpoint.toString());
         WebPathOpenException.Kind kind = switch (e.kind()) {
@@ -717,13 +754,41 @@ public final class CdpWebPath implements WebPath {
         if (kind == WebPathOpenException.Kind.FROZEN_TARGETS) {
             List<Object> frozen = new ArrayList<>();
             for (TargetProbe.Target t : e.targets()) {
-                frozen.add(t.summary());
+                frozen.add(frozenEntry(t, listing));
             }
             detail.put("frozenTargets", frozen);
         }
         WebPathOpenException failure = new WebPathOpenException(kind, e.getMessage(), detail);
         failure.initCause(e);
         return failure;
+    }
+
+    /**
+     * How a frozen target is named in the refusal's detail (S179): {@code {id, url, title}} when the listing maps it
+     * (by {@code cdpTargetId}) to a browser the agent does not mask, or to none while the agent has no mask registered;
+     * {@code {id, url: "", masked: true}} otherwise (a masked browser's page, an unmapped page while masks are
+     * registered or the flag is absent, or no listing at all).
+     */
+    static Map<String, Object> frozenEntry(TargetProbe.Target t, AgentBrowser.Listing listing) {
+        boolean withheld = true;
+        if (listing != null) {
+            AgentBrowser mapped = null;
+            for (AgentBrowser b : listing.browsers()) {
+                if (t.id().equals(b.cdpTargetId())) {
+                    mapped = b;
+                    break;
+                }
+            }
+            withheld = mapped != null ? mapped.masked() : listing.masksRegistered();
+        }
+        if (!withheld) {
+            return t.summary();
+        }
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("id", t.id());
+        m.put("url", "");
+        m.put("masked", true);
+        return m;
     }
 
     /** Asks the agent to reload the browser of each frozen target once, recording {@code web.recover} lines. */
@@ -904,7 +969,8 @@ public final class CdpWebPath implements WebPath {
                     Selection sel = select(s, p, deadline);
                     return onPw(s, primitive, sel, budgetMs, deadline, () -> {
                         Place at = place(s, sel, frameKey);
-                        // Phase 8 (D637): a masked or unmapped page's answer carries page data: the agent's.
+                        // Phase 8 (D637; security fix S165, FE): a masked or unmapped page's locator is the agent's,
+                        // which refuses it (whether it matched would reveal the page).
                         refuseMasked(s, primitive, p, at, deadline);
                         waitActionable(at.frame(), p, deadline);
                         return Shapes.library(primitive, at.frame().evaluate(script), refOf(s, at));
@@ -926,10 +992,16 @@ public final class CdpWebPath implements WebPath {
                     lib.put("detail", p.get("detail"));
                 }
                 String script = Scripts.call("dispatch", lib);
+                boolean locates = target != null && !target.equals("window") && !target.equals("document");
                 return () -> {
                     Selection sel = select(s, p, deadline);
                     return onPw(s, primitive, sel, budgetMs, deadline, () -> {
                         Place at = place(s, sel, frameKey);
+                        if (locates) {
+                            // Phase 8 security fix S165 (FE): a selector target is a predicate the page evaluates; on
+                            // a masked or unmapped page it is the agent's, which refuses it.
+                            refuseMasked(s, primitive, p, at, deadline);
+                        }
                         return Shapes.library(primitive, at.frame().evaluate(script), refOf(s, at));
                     });
                 };
@@ -1015,7 +1087,7 @@ public final class CdpWebPath implements WebPath {
                 Tap tap = null;
                 if (!patterns.isEmpty()) {
                     tap = new Tap(at.targetId(), refOf(s, at), on, at.page().addInitScript(WebLib.tapInstaller(patterns,
-                            on)));
+                            on)), patterns);
                     s.taps.put(at.page(), tap);
                 }
                 return new Object[] {value, tap};
@@ -1333,11 +1405,12 @@ public final class CdpWebPath implements WebPath {
      * Phase 7 security fix S111 (P7 3.6, 4.8; D404's method) and Phase 8 (phase8-contracts.md 5.2 (iii), (iv), D551,
      * D637): the agent's {@code web.browsers} read once more, and a browser it reports {@code masked} (a pack's mask
      * names it, or it has no view while a mask is registered) is handed to the agent ({@code UNSUPPORTED}), which
-     * refuses the read {@code INVALID_PARAMS masked} or answers the action without page data, unless {@code redact:
-     * false} (a person's argument, which {@code CallPolicy} refuses for a model or a client); so is a page the agent
-     * has no entry for while it reports masks registered (an absent {@code masksRegistered} counts as true). A
-     * {@code web.browsers} that fails hands the call to the agent too. Used by the four reads and the three actions
-     * that stay allowed on a masked browser; call only on the Playwright thread.
+     * refuses the read {@code INVALID_PARAMS masked}, refuses a locator action (security fix S165, FE) or answers
+     * {@code web.pointer} without page data, unless {@code redact: false} (a person's argument, which {@code CallPolicy}
+     * refuses for a model or a client); so is a page the agent has no entry for while it reports masks registered (an
+     * absent {@code masksRegistered} counts as true). A {@code web.browsers} that fails hands the call to the agent too.
+     * Used by the four reads, {@code web.pointer} and the three locator actions ({@code web.dom.click},
+     * {@code web.dom.fill}, {@code web.dispatchEvent} with a selector target); call only on the Playwright thread.
      */
     private static void refuseMasked(Session s, String primitive, Map<String, Object> p, Place at, long deadline)
             throws WebPathException, AgentLostException {
@@ -1924,15 +1997,22 @@ public final class CdpWebPath implements WebPath {
                 String name = WebLib.cut(raw, WebLib.MAX_URL_CHARS);
                 Map<String, Object> tap = new LinkedHashMap<>();
                 tap.put("browser", ref);
-                tap.put("name", name);
                 if (masked) {
-                    // Phase 8 (D551, D549's shape): the name a step waits on stays, the detail is withheld.
+                    // Phase 8 (D551, D549's shape): the detail is withheld; the name is the tap's own pattern (security
+                    // fix S170, FE: under a glob the event's type is page data), and an event no pattern of the tap
+                    // matches is not published.
+                    String pattern = WebLib.tapPatternOf(d.tap().patterns, name);
+                    if (pattern == null) {
+                        continue;
+                    }
+                    tap.put("name", pattern);
                     tap.put("masked", true);
                     events.append("web.tap", tap, null);
-                    events.append("web.ready", Shapes.data("browser", ref, "url", "", "signal", "TAP", "name", name,
+                    events.append("web.ready", Shapes.data("browser", ref, "url", "", "signal", "TAP", "name", pattern,
                             "masked", true), null);
                     continue;
                 }
+                tap.put("name", name);
                 boolean truncated = Boolean.TRUE.equals(event.get("truncated"));
                 if (event.containsKey("detail")) {
                     Object detail = event.get("detail");

@@ -724,7 +724,11 @@ adapter reports no Swing component for (a pre-loaded or never-shown page) is **m
 title, its reads refused, its events without page data. A layer that masks anything and must read such a page registers
 a `BrowserMask` answering `FALSE` for it (the release form: `tag == "detached" ? Boolean.FALSE : null`); one that must
 mask a browser no `CaptureMask` can name answers `TRUE` by tag or by vendor object (compared by identity, never called).
-A `FALSE` never overrides a `CaptureMask` that names the browser's component once it has one.
+A `FALSE` never overrides a `CaptureMask` that names the browser's component once it has one. (Phase 8 security fixes,
+FE.) A tag lasts while the seed gives it: when the registry stops tagging a browser, a release by that tag ends at the
+next rebuild, and while a registry fails a kept tag can mask, never release (S169). Answer a `CaptureMask` by a stable
+container: a browser that becomes masked while open (its view moved into the masked container) is judged again by the
+next call or selection, or within about 2 s of its events (S172).
 
 ### 6.9 The in-process data channel
 
@@ -1472,7 +1476,14 @@ and `skillroy-cdp` is present, else the agent. `web.cdp.status` reports the port
   browser without a view is masked while any mask is registered; a masked browser's `web.load`, `web.ready`,
   `web.console` and `web.tap` withhold page data (`name` and `signal` stay, so waits still complete), `by: {url|title}`
   never selects it (select it by `tag`), and `web.pointer`, `web.dom.click` and `web.dom.fill` on it answer without page
-  data (`redact: false` is a person's argument). The CDP path hands what it cannot judge to the agent.
+  data (`redact: false` is a person's argument). The CDP path hands what it cannot judge to the agent. (Phase 8 security
+  fixes, FE.) Acting on a masked browser **by locator** (`web.dom.click`, `web.dom.fill`, a `web.dispatchEvent` with a
+  selector `target`) is refused unless `redact: false`: whether a locator matched would reveal the page (S165); a
+  person's scenario that must do it uses a `call` step with `redact: false`, a pack's verb compiles `redact: false`
+  into its call (accepted on the MCP server's verb route, refused on a session's facade), and a model or a client acts
+  there with `web.pointer` at a point. A masked browser's `web.tap` events carry the tap's own pattern as `name` (the
+  glob that heard the event, under a glob), so a step there taps the exact names it waits on, or waits on the glob
+  (S170). A masked browser's view is grey in every capture and masked in the hit-test, whatever masks it (S166).
 - Navigation is the application's: scenarios drive the application, which drives its web views.
 
 ### 10.5 Adding an adapter for another engine

@@ -53,7 +53,8 @@ import java.util.function.BiConsumer;
  * {@code drain(maxChars)} in each tapped browser (at most {@value #DRAINS_PER_ROUND} calls per browser while it
  * answers {@code more: true}) and publishes each event as {@code web.tap {browser, name, detail?, truncated?}} followed
  * by {@code web.ready {browser, url, signal: TAP, name}} (a masked browser's, Phase 8 D549: {@code web.tap {browser,
- * name, masked: true}} and the ready's {@code url: ""}); dropped events (the page buffer holds 1000) are logged. The
+ * name, masked: true}} and the ready's {@code url: ""}, its {@code name} the tap's pattern that heard the event, S170);
+ * dropped events (the page buffer holds 1000) are logged. The
  * thread ends when the last tap is removed, when the tapped browsers left the index, or when the module is
  * uninstalled ({@link #shutdown}); it starts again with the next tap. One drainer per document: the agent's poller
  * is the only consumer of the in-process buffer. Every library call goes through the guard of
@@ -129,7 +130,7 @@ final class Taps {
         Map<String, Object> out = new LinkedHashMap<String, Object>();
         if (patterns.isEmpty()) {
             if (previous != null) {
-                drain(e, Math.min(DRAIN_BOUND_MS, budgetMs / 2));
+                drain(e, Math.min(DRAIN_BOUND_MS, budgetMs / 2), previous.patterns);
             }
             Object value = evaluate(e, tapCall(Collections.<String>emptyList(), on), budgetMs);
             out.put("installed", Long.valueOf(installedOf(value)));
@@ -335,12 +336,17 @@ final class Taps {
                 bridge.closed(e);
                 continue;
             }
-            drain(e, DRAIN_BOUND_MS);
+            drain(e, DRAIN_BOUND_MS, null);
         }
     }
 
-    /** Drains one browser's buffer and publishes its events; never throws. */
-    private void drain(Entry e, long boundMs) {
+    /**
+     * Drains one browser's buffer and publishes its events; never throws.
+     *
+     * @param known the patterns the drained events were tapped under (a tap being removed), or null: the browser's tap
+     *     as it is now
+     */
+    private void drain(Entry e, long boundMs, List<String> known) {
         for (int i = 0; i < DRAINS_PER_ROUND; i++) {
             Object value;
             try {
@@ -356,7 +362,7 @@ final class Taps {
             } catch (RuntimeException ex) {
                 return;
             }
-            if (!published(e, value)) {
+            if (!published(e, value, known)) {
                 return;
             }
         }
@@ -430,7 +436,7 @@ final class Taps {
             @Override
             public void run() {
                 try {
-                    published(e, parseBounded(e, json));
+                    published(e, parseBounded(e, json), null);
                 } catch (RpcException ex) {
                     if (oversized(ex)) {
                         endOversizedLater(e);
@@ -455,7 +461,7 @@ final class Taps {
      * Publishes the events of a drain's value and logs what the page dropped; true when the page has more
      * ({@code more: true}).
      */
-    private boolean published(Entry e, Object value) {
+    private boolean published(Entry e, Object value, List<String> known) {
         if (!(value instanceof Map)) {
             return false;
         }
@@ -463,8 +469,15 @@ final class Taps {
         Object events = m.get("events");
         if (events instanceof List && !((List<?>) events).isEmpty()) {
             String url = WebLib.cut(Selection.safeUrl(e.browser()), WebLib.MAX_URL_CHARS);
+            List<String> patterns = known;
+            if (patterns == null) {
+                synchronized (this) {
+                    Tap tap = taps.get(e);
+                    patterns = tap == null ? null : tap.patterns;
+                }
+            }
             for (Object ev : (List<?>) events) {
-                publish(e, ev, url);
+                publish(e, ev, url, patterns);
             }
         }
         Object dropped = m.get("dropped");
@@ -475,7 +488,7 @@ final class Taps {
         return Boolean.TRUE.equals(m.get("more"));
     }
 
-    private void publish(Entry e, Object event, String url) {
+    private void publish(Entry e, Object event, String url, List<String> patterns) {
         if (!(event instanceof Map)) {
             return;
         }
@@ -486,17 +499,25 @@ final class Taps {
         }
         // S43: the detail and the name are bounded here, whatever the page's library did.
         String eventName = WebLib.cut((String) name, WebLib.MAX_URL_CHARS);
+        bridge.published(e);
         Map<String, Object> payload = new LinkedHashMap<String, Object>();
         payload.put("browser", e.ref);
-        payload.put("name", eventName);
         if (e.masked) {
-            // Phase 8 (phase8-contracts.md 5.2 (i), D549): a masked browser's tap keeps the name a step waits on (the
-            // pack's pattern) and withholds the detail (page data); a volatile read, no EDT read on the poller.
+            // Phase 8 (phase8-contracts.md 5.2 (i), D549): a masked browser's tap withholds the detail (page data); a
+            // volatile read, no EDT read on the poller. Its name is the tap's own pattern (security fix S170, FE): the
+            // exact one the event equals, else the glob that heard it, since under a glob the event's type is page
+            // data; an event no pattern of the tap matches now (a tap replaced or removed meanwhile) is not published.
+            String pattern = WebLib.tapPatternOf(patterns, eventName);
+            if (pattern == null) {
+                return;
+            }
+            payload.put("name", pattern);
             payload.put("masked", Boolean.TRUE);
             ctx.events().publish(WebTopics.TAP, WebTopics.SOURCE, payload);
-            bridge.ready(e, url, "TAP", eventName);
+            bridge.ready(e, url, "TAP", pattern);
             return;
         }
+        payload.put("name", eventName);
         boolean truncated = Boolean.TRUE.equals(ev.get("truncated"));
         if (ev.containsKey("detail") && ev.get("detail") != null) {
             Object detail = ev.get("detail");

@@ -675,7 +675,14 @@ title is not read) and the selection error data's summaries say `url: ""`, no `t
 page data: `web.pointer` carries no `hit` (the page is not hit-tested), `web.dom.click`'s `clicked`, `web.dom.fill`'s
 `filled` and an `AMBIGUOUS` answer's `candidates` keep `role` and `tag` only (`name`, `id` and `type` dropped, `count`
 kept). The three actions declare `redact` (a person's argument, `CallPolicy.MASKED_WEB_READS`): `false` keeps today's
-answers. `web.evaluate` and `web.waitFlag` stay S111's recorded residual.
+answers. `web.evaluate` and `web.waitFlag` stay S111's recorded residual. (Phase 8 security fixes, FE; P8 §5.2.)
+`web.dom.click`, `web.dom.fill` and `web.dispatchEvent` with a selector `target` are refused on a masked browser
+`INVALID_PARAMS {param: "redact", reason: "masked", browser}` before the page evaluates the locator, unless `redact:
+false` (`web.dispatchEvent` declares `redact` and joins `MASKED_WEB_READS`), since whether a locator matched would
+reveal the page (S165); a masked browser's `web.tap` and `web.ready {signal: TAP}` carry the tap's own pattern as `name`
+(S170); a tag lasts while a seed gives it (S169); every per-call judgement judges the view the adapter reports in the
+call (S168) and counts a state it could not read as masked (S167); a `by: {url|title}` selection judges its
+candidates afresh (S172).
 
 ### 4.3 Events
 
@@ -1412,7 +1419,11 @@ carry `url: ""`, no `detail` and `masked: true`.
 ### 5.3 Frozen targets
 
 A target that does not answer the probe within `probeDeadlinePerTarget` is **frozen**. `FrozenTargetPolicy.FAIL`
-(default) ends the attach with `CdpException(FROZEN_TARGETS)` naming each frozen target (id, url, title); the executor
+(default) ends the attach with `CdpException(FROZEN_TARGETS)` naming each frozen target (id, url, title) (Phase 8
+security fix, S179, FE: the message names them by count and id only, and `detail.frozenTargets` gives `{id, url,
+title}` only for a target the agent's `web.browsers`, read once before the refusal is built, maps to a browser it does
+not mask, or maps to none while it reports no mask registered; every other target is `{id, url: "", masked: true}`,
+a failed read included; P8 §5.2 (iii)); the executor
 reports `ERROR` / `ENVIRONMENT` with that list in the detail and does not try the agent path for the scenario (the
 scenario asked for CDP, §7.2). (As built 2026-10-07: `open()` throws it as `WebPathOpenException(FROZEN_TARGETS)`
 with `detail.frozenTargets`; that is the outcome under `web.path: cdp`, while under `auto` the run takes the agent

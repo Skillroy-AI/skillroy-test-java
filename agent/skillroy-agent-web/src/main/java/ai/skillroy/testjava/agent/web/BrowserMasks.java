@@ -85,7 +85,8 @@ final class BrowserMasks {
 
     /**
      * Step 2, the union of every registered {@code BrowserMask} for the entry: TRUE, FALSE or null (no opinion). A mask
-     * that throws, a registry that throws and a vendor object that cannot be read count TRUE (the safe side).
+     * that throws, a registry that throws and a vendor object that cannot be read count TRUE (the safe side), and so
+     * does an entry whose tag a failed {@code BrowserRegistryAdapter} left unconfirmed (S169).
      */
     Boolean named(Entry e, boolean hasView) {
         List<BrowserMask> masks;
@@ -97,6 +98,10 @@ final class BrowserMasks {
         }
         if (masks == null || masks.isEmpty()) {
             return null;
+        }
+        if (e.tagUnconfirmed) {
+            // S169 (FE): a tag kept after a registry failed may be stale: it can mask, never release.
+            return Boolean.TRUE;
         }
         Object vendor;
         try {
@@ -127,6 +132,19 @@ final class BrowserMasks {
             }
         }
         return released ? Boolean.FALSE : null;
+    }
+
+    /**
+     * The browser's component as its adapter reports it in the call, for a per-call judgement (Phase 8 security fix
+     * S168, FE: a view lost or replaced since the last rebuild is judged as it is now, never by the stale component);
+     * the entry's component of the last rebuild only when the adapter throws.
+     */
+    static Object componentNow(Entry e) {
+        try {
+            return e.browser().component();
+        } catch (RuntimeException ex) {
+            return e.component;
+        }
     }
 
     /** Logs a failing mask once per class, by the exception's class name only (its message may quote page data). */

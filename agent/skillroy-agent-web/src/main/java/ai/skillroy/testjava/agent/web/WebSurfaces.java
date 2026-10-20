@@ -26,8 +26,8 @@ import java.util.List;
 
 /**
  * The web module's {@link SurfaceSource} (phase7-contracts.md sections 3.7 and 4.8, D336): one
- * {@code Surface(component, "WEB", browserRef)} per indexed browser whose component, as the last index rebuild found
- * it, lies in a window. Answered from the index alone, never by asking a browser or an adapter (no vendor call): the
+ * {@code Surface(component, "WEB", browserRef, masked)} per indexed browser whose component, as the last index rebuild
+ * found it, lies in a window ({@code masked}: the entry's flag, Phase 8 security fix S166). Answered from the index alone, never by asking a browser or an adapter (no vendor call): the
  * Swing module calls it on the EDT inside its capture's or its hit-test's read, so it reads one volatile snapshot,
  * walks each component's parents and takes no lock. A browser the module saw close is left out.
  *
@@ -94,7 +94,10 @@ final class WebSurfaces implements SurfaceSource {
             if (c == null || e.closedPublished.get() || !where.inWindow(c)) {
                 continue;
             }
-            out.add(new Surface((Component) c, WEB, e.ref));
+            // Phase 8 security fix S166 (FE): the browser's mask flag goes with its surface, so that the Swing capture
+            // blanks a masked browser's view and its hit-test reports it masked, whatever masks it (a BrowserMask, the
+            // view-less rule, a CaptureMask); a volatile read, no vendor call.
+            out.add(new Surface((Component) c, WEB, e.ref, e.masked));
         }
         return out;
     }

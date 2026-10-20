@@ -587,6 +587,51 @@ class CaptureTest {
     }
 
     /**
+     * Phase 8 security fix S166 (FE; phase8-contracts.md 5.2, phase7-contracts.md 3.6): a surface its module masks (the
+     * web module's flag of a masked browser, a {@code BrowserMask} TRUE among them, whatever {@code CaptureMask}s say)
+     * is blanked whole, reported {@code redacted: true} and listed in {@code redacted} under the rule
+     * {@code browser-mask}; nothing inside it is marked. The control: the same surface unmasked keeps its pixels.
+     */
+    @Test
+    void aSurfaceItsModuleMasksIsBlankedWholeAndReportedRedacted() throws Exception {
+        JPanel frame = panel(GREEN, 0, 0, 200, 150);
+        JPanel browser = panel(Color.BLUE, 20, 30, 120, 80);
+        JButton inside = new JButton("Renew the loan");
+        inside.setBounds(5, 5, 100, 20);
+        browser.add(inside);
+        frame.add(browser);
+        final boolean[] masked = {false};
+        ctx.spi.register(SurfaceSource.class, () -> Collections.singletonList(new SurfaceSource.Surface(browser,
+                "WEB", "b1", masked[0])));
+        windows.source(() -> Collections.singletonList(
+                new Windows.Layer(frame, frame, new Rectangle(100, 100, 200, 150), new Point(0, 0), true)));
+        Capture.Request r = req(Capture.Scope.SCREEN);
+        r.annotate = true;
+        Capture.Shot open = take(null, r);
+        assertEquals(Color.BLUE, at(open.image, 60, 100), "the control: an unmasked surface keeps its pixels");
+        assertEquals(Boolean.FALSE, webSurface(open).get("redacted"));
+        assertEquals(list(), open.fields.get("redacted"));
+
+        masked[0] = true;
+        Capture.Shot shot = take(null, r);
+        for (int y = 30; y < 110; y += 7) {
+            for (int x = 20; x < 140; x += 7) {
+                assertEquals(GREY, shot.image.getRGB(x, y), "grey at " + x + "," + y);
+            }
+        }
+        assertEquals(GREEN, at(shot.image, 10, 10), "outside the surface nothing changes");
+        Map<String, Object> surface = webSurface(shot);
+        assertEquals(Boolean.TRUE, surface.get("redacted"), String.valueOf(surface));
+        List<Object> redacted = arr(shot.fields.get("redacted"));
+        assertEquals(1, redacted.size(), String.valueOf(redacted));
+        assertEquals("browser-mask", obj(redacted.get(0)).get("rule"));
+        assertEquals(map("x", 20L, "y", 30L, "w", 120L, "h", 80L), obj(redacted.get(0)).get("rect"));
+        for (Object m : arr(shot.fields.get("marks"))) {
+            assertFalse(String.valueOf(obj(m).get("label")).contains("Renew"), "nothing inside is marked: " + m);
+        }
+    }
+
+    /**
      * Security fix S129 (L4-F1; the L4 sceptic's probe case B): a browser in a {@code CardLayout} card that is not
      * shown keeps its own {@code isVisible()}, but is no surface: a surface is listed only for a component that is
      * showing (visible at every level up to its window).

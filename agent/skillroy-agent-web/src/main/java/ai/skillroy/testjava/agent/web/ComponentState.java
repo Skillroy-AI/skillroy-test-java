@@ -30,6 +30,11 @@ final class ComponentState {
 
     /** The state of something that is not a component, or of any object while no event-dispatch thread runs. */
     static final ComponentState UNKNOWN = new ComponentState(false, 0, 0, 1.0, null, null);
+    /**
+     * {@link #UNKNOWN} while a mask is registered: a state that could not be read is masked (Phase 8 security fix,
+     * S167, FE; phase8-contracts.md 5.2 as built (d)), so that no per-call judgement on it lowers {@code Entry.masked}.
+     */
+    static final ComponentState UNKNOWN_MASKED = new ComponentState(false, 0, 0, 1.0, null, null, true);
 
     final boolean showing;
     final int width;

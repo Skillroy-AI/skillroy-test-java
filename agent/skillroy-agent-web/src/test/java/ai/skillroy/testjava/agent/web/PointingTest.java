@@ -231,6 +231,45 @@ class PointingTest {
         }
     }
 
+    /**
+     * Gap 104's listener, Phase 8 security fix S171 (FE): the expression is self-bounding as S131 requires of every raw
+     * page evaluation (one {@code try} around everything, the constant 1 as its only answer), and the listener removes
+     * itself on a trusted middle {@code mouseup} only. A person's middle click evaluates it once before the sequence;
+     * a page whose evaluation of it fails with a long text changes nothing of the click's answer.
+     */
+    @Test
+    void theMiddleClickListenerIsSelfBoundingAndLeavesOnATrustedEventOnly() throws Exception {
+        String e = Pointing.NO_PRIMARY_PASTE;
+        assertTrue(e.startsWith("(function(){try{"), e);
+        assertTrue(e.endsWith("}catch(x){}return 1;})()"), e);
+        assertEquals(1, e.split("return ", -1).length - 1, "the constant is the expression's only answer: " + e);
+        assertTrue(e.contains("if(e.isTrusted){w.removeEventListener('mouseup',h,true);}"), e);
+        try (Harness h = harness(true)) {
+            final String longText = new String(new char[200000]).replace('\0', 'x');
+            browser.responder = new ScriptedBrowser.Responder() {
+                @Override
+                public CompletableFuture<String> answer(WebEval eval) {
+                    if (Pointing.NO_PRIMARY_PASTE.equals(eval.expression())) {
+                        CompletableFuture<String> f = new CompletableFuture<String>();
+                        f.completeExceptionally(new ai.skillroy.testjava.agent.api.spi.web.WebScriptException(
+                                longText, ""));
+                        return f;
+                    }
+                    return browser.byDocument(eval);
+                }
+            };
+            Map<String, Object> click = h.ctx.map("web.pointer", Harness.args("action", "CLICK", "point",
+                    point(10, 10), "button", "MIDDLE"));
+            assertEquals(Arrays.asList("mouseMoved", "mousePressed", "mouseReleased"), click.get("dispatched"));
+            assertFalse(String.valueOf(click).contains("xxxx"), "nothing of the page's text in the answer");
+            int listeners = 0;
+            for (WebEval eval : browser.evals) {
+                listeners += Pointing.NO_PRIMARY_PASTE.equals(eval.expression()) ? 1 : 0;
+            }
+            assertEquals(1, listeners, "evaluated once, before the sequence");
+        }
+    }
+
     @Test
     void theOtherActionsSendTheirPlan() throws Exception {
         try (Harness h = harness(true)) {

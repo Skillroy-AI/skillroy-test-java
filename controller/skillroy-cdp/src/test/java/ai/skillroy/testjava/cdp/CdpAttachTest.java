@@ -86,7 +86,8 @@ class CdpAttachTest {
                 }));
         assertEquals(CdpException.Kind.FROZEN_TARGETS, e.kind());
         assertEquals(List.of("B"), e.targets().stream().map(TargetProbe.Target::id).toList());
-        assertEquals("page targets did not answer Runtime.evaluate: B data:,pB", e.getMessage());
+        assertEquals("1 page target did not answer Runtime.evaluate: B", e.getMessage(),
+                "by id only, never the page's URL (Phase 8 security fix S179)");
         for (var policy : ai.skillroy.testjava.scenario.web.FrozenTargetPolicy.values()) {
             assertEquals(CdpException.Kind.FROZEN_TARGETS, assertThrows(CdpException.class,
                     () -> CdpAttach.connect(ENDPOINT, CdpOptions.defaults().withFrozenTargets(policy), probe,

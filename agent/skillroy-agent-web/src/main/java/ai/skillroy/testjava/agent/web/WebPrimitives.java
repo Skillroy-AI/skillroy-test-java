@@ -96,12 +96,20 @@ final class WebPrimitives {
             + "it, or it has no view while a mask is registered), which is otherwise refused INVALID_PARAMS "
             + "{reason: masked} (default true; a person's argument)";
     /**
-     * The {@code redact} parameter of the three actions that stay allowed on a masked browser (Phase 8, D637;
-     * phase8-contracts.md 5.2 (iv)): their answers carry no page data unless it is false.
+     * The {@code redact} parameter of {@code web.pointer}, which stays allowed on a masked browser (Phase 8, D637;
+     * phase8-contracts.md 5.2 (iv)): its answer carries no page data unless it is false.
      */
-    private static final String REDACT_ACTION_DOC = "false keeps the page data of the answer (the hit, the clicked or "
-            + "filled element's name and id, the ambiguous candidates' names and ids) on a masked browser, which "
-            + "otherwise answers role and tag only (default true; a person's argument)";
+    private static final String REDACT_ACTION_DOC = "false keeps the page data of the answer (the hit) on a masked "
+            + "browser, which otherwise answers without it (default true; a person's argument)";
+    /**
+     * The {@code redact} parameter of the three actions that evaluate the caller's locator in the page (Phase 8
+     * security fix S165, FE; phase8-contracts.md 5.2 (iv)): on a masked browser they are refused before the page is
+     * evaluated, since whether a locator matched would reveal the page, unless it is false.
+     */
+    private static final String REDACT_LOCATOR_DOC = "false acts on a masked browser (a pack's CaptureMask or "
+            + "BrowserMask names it, or it has no view while a mask is registered), which is otherwise refused "
+            + "INVALID_PARAMS {reason: masked} before its page evaluates the locator (whether a locator matched would "
+            + "reveal the page; web.pointer at a point stays allowed) (default true; a person's argument)";
 
     private final AgentContext ctx;
     private final BrowserIndex index;
@@ -188,6 +196,7 @@ final class WebPrimitives {
                 .param("name", "string", true, "the event's name")
                 .param("detail", ANY_JSON, false, "the event's detail")
                 .param("target", "string", false, "CSS selector of the target element; default window")
+                .param("redact", "boolean", false, REDACT_LOCATOR_DOC)
                 .thread(ThreadPolicy.WORKER).timeoutMs(10000).capability(WebCapabilities.EVALUATE).mutating()
                 .build(), new Primitives.Body() {
                     @Override
@@ -199,7 +208,7 @@ final class WebPrimitives {
                 .description("Clicks an element with el.click() after a visibility check (a DOM click, not a "
                         + "pointer click: no pointer or mouse events are synthesised). One of selector, or role "
                         + "and name (and index)."), true))
-                .param("redact", "boolean", false, REDACT_ACTION_DOC)
+                .param("redact", "boolean", false, REDACT_LOCATOR_DOC)
                 .thread(ThreadPolicy.WORKER).timeoutMs(10000).capability(WebCapabilities.EVALUATE).mutating()
                 .build(), new Primitives.Body() {
                     @Override
@@ -214,7 +223,7 @@ final class WebPrimitives {
                 .param("text", "string", true, "the text to fill (name it in _meta.secretParams when secret)")
                 .param("clear", "boolean", false, "replace the current value (default true)")
                 .param("enter", "boolean", false, "press Enter afterwards (default false)")
-                .param("redact", "boolean", false, REDACT_ACTION_DOC)
+                .param("redact", "boolean", false, REDACT_LOCATOR_DOC)
                 .thread(ThreadPolicy.WORKER).timeoutMs(10000).capability(WebCapabilities.EVALUATE).mutating()
                 .build(), new Primitives.Body() {
                     @Override
@@ -384,8 +393,10 @@ final class WebPrimitives {
         Map<Entry, String> ids = awaitTargetIds(targets, remaining(readDeadline));
         List<Object> out = new ArrayList<Object>();
         for (Entry e : listed) {
-            ComponentState state = entryState(e, deadline, registered);
-            boolean masked = masked(registered, e, state);
+            // S168 (FE): the component the adapter reports in this call, not the one of the last rebuild.
+            Object component = BrowserMasks.componentNow(e);
+            ComponentState state = entryState(e, component, deadline, registered);
+            boolean masked = masked(registered, e, component, state);
             Map<String, Object> m = describe(e, masked ? null : titles.get(e), ids.get(e),
                     remaining(deadline) > PER_BROWSER_READ_MS / 2, masked);
             Map<String, Object> blocked = blockedBy(state);
@@ -432,8 +443,7 @@ final class WebPrimitives {
      * component, a closed browser, no time left, or the read failed); {@link #UNREAD} when the read failed or there was
      * no time while a pack registered a {@code CaptureMask}, so that the entry is withheld as masked (the safe side).
      */
-    private ComponentState entryState(Entry e, long deadline, boolean registered) {
-        Object component = e.component;
+    private ComponentState entryState(Entry e, Object component, long deadline, boolean registered) {
         long left = remaining(deadline);
         if (component == null || Selection.isClosed(e.browser())) {
             return null;
@@ -456,9 +466,11 @@ final class WebPrimitives {
      * masked while no mask is registered; a {@code BrowserMask} TRUE masks; a browser without a component is masked
      * unless a {@code BrowserMask} releases it (no EDT read); a component is judged by this call's state read, or by the
      * entry's flag when there was none (a closed browser). The answer refreshes {@link Entry#masked}.
+     *
+     * @param component the component the adapter reports in this call (S168, FE)
      */
-    private boolean masked(boolean registered, Entry e, ComponentState state) {
-        Boolean decided = index.masks().decide(registered, e, e.component);
+    private boolean masked(boolean registered, Entry e, Object component, ComponentState state) {
+        Boolean decided = index.masks().decide(registered, e, component);
         boolean masked = decided != null ? decided.booleanValue() : state != null ? state.masked : e.masked;
         e.masked = masked;
         return masked;
@@ -468,8 +480,11 @@ final class WebPrimitives {
      * Whether the entry is masked now, for a call that has a browser selected (phase8-contracts.md 5.2, steps 1 to 5):
      * the {@link BrowserMasks} rule on the component the adapter reports now, and for a component one bounded EDT read
      * of the {@code CaptureMask}s ({@code state} when the caller already read it, else a read of at most
-     * {@code budgetMs}); a read that fails counts as masked. Made only while a mask is registered; refreshes
-     * {@link Entry#masked}.
+     * {@code budgetMs}); a read that fails, or that could not be made (no event-dispatch thread: the walk answers a
+     * masked state, S167), counts as masked. The component is the one the adapter reports in this call (Phase 8
+     * security fix S168, FE: a view lost or replaced since the last rebuild is judged as it is now; the entry's only when
+     * the adapter throws); {@code state} must be a read of that component. Made only while a mask is registered;
+     * refreshes {@link Entry#masked}.
      */
     boolean maskedNow(Entry e, ComponentState state, long budgetMs) {
         boolean registered = masksRegistered();
@@ -477,7 +492,7 @@ final class WebPrimitives {
             e.masked = false;
             return false;
         }
-        Object component = e.component != null ? e.component : safeComponent(e.browser());
+        Object component = BrowserMasks.componentNow(e);
         Boolean decided = index.masks().decide(true, e, component);
         boolean masked;
         if (decided != null) {
@@ -487,7 +502,7 @@ final class WebPrimitives {
         } else {
             try {
                 ComponentState read = walk.state(component, Math.max(1, Math.min(Pointing.STATE_MS, budgetMs)));
-                masked = read != null && read.masked;
+                masked = read == null || read.masked;
             } catch (Exception ex) {
                 masked = true;
             }
@@ -734,6 +749,7 @@ final class WebPrimitives {
         Map<String, Object> options = locator(inv.args());
         Entry e = select(inv);
         require(e, WebCapability.EVALUATE, "web.dom.click", WebCapabilities.EVALUATE);
+        refuseLocatorOnMasked(inv, e, "web.dom.click");
         return withoutPageData(inv, e, "web.dom.click", "domClick", options);
     }
 
@@ -746,6 +762,7 @@ final class WebPrimitives {
         options.put("enter", Boolean.valueOf(a.bool("enter", false)));
         Entry e = select(inv);
         require(e, WebCapability.EVALUATE, "web.dom.fill", WebCapabilities.EVALUATE);
+        refuseLocatorOnMasked(inv, e, "web.dom.fill");
         return withoutPageData(inv, e, "web.dom.fill", "domFill", options);
     }
 
@@ -753,21 +770,41 @@ final class WebPrimitives {
     private static final List<String> ELEMENT_KEYS_KEPT = java.util.Arrays.asList("role", "tag");
 
     /**
-     * Calls {@code web.dom.click} or {@code web.dom.fill}'s library function and, on a masked browser, drops the page
+     * Phase 8 security fix S165 (FE; phase8-contracts.md 5.2 (iv)): {@code web.dom.click}, {@code web.dom.fill} and
+     * {@code web.dispatchEvent} with a selector {@code target} evaluate the caller's locator in the page, and the kind
+     * of their answer ({@code NOT_FOUND}, {@code INVALID_PARAMS} "not visible" or "not fillable", {@code AMBIGUOUS},
+     * success) says whether it held: an oracle on the page a mask withholds. On a masked browser they are refused
+     * {@code INVALID_PARAMS {param: "redact", reason: "masked", browser}} before the page is evaluated, as the four reads
+     * are ({@link #maskedNow}: one bounded EDT read, only while a mask is registered), unless the call says
+     * {@code redact: false} (a person's argument, which {@code CallPolicy} refuses for a model or a client).
+     */
+    private void refuseLocatorOnMasked(Invocation inv, Entry e, String primitive) {
+        if (unredacted(inv) || !masksRegistered()) {
+            return;
+        }
+        if (maskedNow(e, null, Await.budget(inv) / 2)) {
+            throw Errors.invalid("browser " + e.ref + " is masked (a pack's mask names it, or it has no view while a "
+                    + "mask is registered), so " + primitive + " does not evaluate a locator in its page on this route: "
+                    + "whether it matched would reveal the page (a person may pass redact: false; web.pointer at a point "
+                    + "stays allowed)", Errors.data("param", "redact", "reason", "masked", "browser", e.ref));
+        }
+    }
+
+    /**
+     * Calls {@code web.dom.click} or {@code web.dom.fill}'s library function and, on a browser judged masked meanwhile
+     * (the refusal of {@link #refuseLocatorOnMasked} ran before; the entry's flag, no further EDT read), drops the page
      * data of the answer after it returned or threw (Phase 8, D637; phase8-contracts.md 5.2 (iv)): the result's
      * {@code clicked}/{@code filled} and the {@code AMBIGUOUS} error's {@code candidates} keep {@code role} and
-     * {@code tag} only ({@code name} and {@code id} dropped, never emptied; {@code count} kept). The masked test is
-     * {@link #maskedNow} (one bounded EDT read, only while masks are registered), skipped when the call says
-     * {@code redact: false} (a person's argument). The action itself is never refused for a mask (S111).
+     * {@code tag} only ({@code name} and {@code id} dropped, never emptied; {@code count} kept); skipped when the call
+     * says {@code redact: false} (a person's argument).
      */
     private Object withoutPageData(Invocation inv, Entry e, String primitive, String function,
                                    Map<String, Object> options) {
-        long deadline = deadline(inv);
         Object value;
         try {
             value = library(inv, e, primitive, false, function, options);
         } catch (RpcException ex) {
-            if (ex.error().code() == ErrorCodes.AMBIGUOUS && maskedAnswer(inv, e, deadline)) {
+            if (ex.error().code() == ErrorCodes.AMBIGUOUS && maskedAnswer(inv, e)) {
                 Map<String, Object> data = new LinkedHashMap<String, Object>();
                 if (ex.error().data() != null) {
                     data.putAll(ex.error().data());
@@ -784,7 +821,7 @@ final class WebPrimitives {
             }
             throw ex;
         }
-        if (value instanceof Map && maskedAnswer(inv, e, deadline)) {
+        if (value instanceof Map && maskedAnswer(inv, e)) {
             Map<String, Object> out = new LinkedHashMap<String, Object>();
             for (Map.Entry<?, ?> entry : ((Map<?, ?>) value).entrySet()) {
                 String key = String.valueOf(entry.getKey());
@@ -801,9 +838,17 @@ final class WebPrimitives {
         return value;
     }
 
-    /** True when an action's answer must carry no page data: a masked browser and no {@code redact: false}. */
-    private boolean maskedAnswer(Invocation inv, Entry e, long deadline) {
-        return !unredacted(inv) && maskedNow(e, null, remaining(deadline) / 2);
+    /**
+     * True when an action's answer must carry no page data: no {@code redact: false}, a mask registered, and the
+     * browser masked by the entry's flag (set by the refusal's judgement just before, or by a rebuild or a re-judgement
+     * since) or by the {@link BrowserMasks} rule as it stands now (a {@code BrowserMask} TRUE, a browser without a view);
+     * no EDT read.
+     */
+    private boolean maskedAnswer(Invocation inv, Entry e) {
+        if (unredacted(inv) || !masksRegistered()) {
+            return false;
+        }
+        return e.masked || Boolean.TRUE.equals(index.masks().decide(true, e, BrowserMasks.componentNow(e)));
     }
 
     /** The entries of {@code m} whose keys are in {@code keys}, in {@code m}'s order. */
@@ -878,6 +923,10 @@ final class WebPrimitives {
         }
         Entry e = select(inv);
         require(e, WebCapability.EVALUATE, "web.dispatchEvent", WebCapabilities.EVALUATE);
+        if (target != null && !"window".equals(target) && !"document".equals(target)) {
+            // S165 (FE): a selector target is a predicate the page evaluates; the window and the document are not.
+            refuseLocatorOnMasked(inv, e, "web.dispatchEvent");
+        }
         return library(inv, e, "web.dispatchEvent", false, "dispatch", options);
     }
 
@@ -1206,14 +1255,6 @@ final class WebPrimitives {
         Object value = inv.args().raw().get("redact");
         return Boolean.FALSE.equals(value) || value instanceof String
                 && "false".equalsIgnoreCase(((String) value).trim());
-    }
-
-    private static Object safeComponent(WebBrowser b) {
-        try {
-            return b.component();
-        } catch (RuntimeException ex) {
-            return null;
-        }
     }
 
     /** CAPABILITY_UNAVAILABLE when the selected browser lacks the flag the primitive needs. */
