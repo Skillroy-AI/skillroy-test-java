@@ -67,6 +67,8 @@ import java.util.regex.Pattern;
 public final class CoreTestModule implements AgentModule {
 
     static final String FORBIDDEN_PREFIX = "coretest-forbidden";
+    /** The lane {@code test.where.lane} names (phase8-contracts.md 4.2). */
+    static final String WHERE_LANE = "coretest.where";
     /** Handles of capabilities declared through {@code test.capability}. */
     static final Map<String, AutoCloseable> HANDLES = new ConcurrentHashMap<String, AutoCloseable>();
 
@@ -136,7 +138,10 @@ public final class CoreTestModule implements AgentModule {
                 }));
         for (final ThreadPolicy policy : ThreadPolicy.values()) {
             String name = "test.where." + lowerCamel(policy.name());
-            ctx.primitives().register(Primitives.of(PrimitiveSpec.builder(name).thread(policy).build(),
+            // phase8-contracts.md 4.2: a LANE spec names its lane (the fixture's lane, "coretest.where").
+            PrimitiveSpec.Builder where = policy == ThreadPolicy.LANE ? PrimitiveSpec.builder(name).lane(WHERE_LANE)
+                    : PrimitiveSpec.builder(name).thread(policy);
+            ctx.primitives().register(Primitives.of(where.build(),
                     new Primitives.Body() {
                         @Override
                         public Object invoke(Invocation inv) {

@@ -38,7 +38,8 @@ import java.util.Set;
  * this check and still have effects the check cannot see, for example a function that writes or a sequence that
  * advances, and a database dialect this check does not model can read the text differently.
  *
- * <p>Rules, applied by a small tokenizer (never by a pattern over the raw text):
+ * <p>Rules, applied by a small tokenizer ({@link SqlTokens}, which {@link SelectLabels} reads statements with too;
+ * never by a pattern over the raw text):
  * <ol>
  *   <li>Leading whitespace and comments ({@code -- line} and {@code /* block *}{@code /}) are skipped; nothing else
  *       may be left out. A statement that is empty after that is rejected.</li>
@@ -112,26 +113,6 @@ public final class StatementGuard {
     private static final Set<String> FUNCTION_WORDS =
             Collections.unmodifiableSet(new HashSet<String>(Arrays.asList("TRUNCATE", "INSERT")));
 
-    // Lexical features of a dialect reading.
-    private static final int BACKSLASH_ESCAPES = 1;      // \x escapes inside '...' and "..." (MySQL)
-    private static final int E_STRINGS = 1 << 1;         // E'...' takes backslash escapes (PostgreSQL)
-    private static final int BACKTICK_IDENTIFIERS = 1 << 2;
-    private static final int BRACKET_IDENTIFIERS = 1 << 3;
-    private static final int DOLLAR_QUOTES = 1 << 4;     // $$...$$ and $tag$...$tag$
-    private static final int NESTED_COMMENTS = 1 << 5;
-    private static final int HASH_COMMENTS = 1 << 6;
-    private static final int DASH_COMMENT_NEEDS_SPACE = 1 << 7;
-    private static final int EXECUTABLE_COMMENTS = 1 << 8; // /*! ... */ and /*M! ... */ are code
-
-    private static final Dialect STANDARD = new Dialect(null, 0);
-    private static final Dialect[] DIALECTS = {
-        STANDARD,
-        new Dialect("MySQL", BACKSLASH_ESCAPES | BACKTICK_IDENTIFIERS | HASH_COMMENTS | DASH_COMMENT_NEEDS_SPACE
-                | EXECUTABLE_COMMENTS),
-        new Dialect("PostgreSQL", E_STRINGS | DOLLAR_QUOTES | NESTED_COMMENTS),
-        new Dialect("SQL Server", BRACKET_IDENTIFIERS | NESTED_COMMENTS),
-    };
-
     private StatementGuard() {
     }
 
@@ -144,9 +125,9 @@ public final class StatementGuard {
      */
     public static String check(String sql) {
         int[] semicolon = {-1};
-        String reason = scan(sql, STANDARD, semicolon);
-        for (int i = 1; reason == null && i < DIALECTS.length; i++) {
-            reason = scan(sql, DIALECTS[i], new int[] {-1});
+        String reason = scan(sql, SqlTokens.STANDARD, semicolon);
+        for (int i = 1; reason == null && i < SqlTokens.DIALECTS.length; i++) {
+            reason = scan(sql, SqlTokens.DIALECTS[i], new int[] {-1});
         }
         if (reason != null) {
             Map<String, Object> data = new LinkedHashMap<String, Object>();
@@ -159,80 +140,44 @@ public final class StatementGuard {
     }
 
     /**
-     * Scans {@code sql} under one dialect reading.
+     * Scans {@code sql} under one dialect reading, over the tokens of {@link SqlTokens}.
      *
      * @param semicolon receives the offset of the terminating {@code ;}, if there is one
      * @return the rejection reason, or null
      */
-    private static String scan(String sql, Dialect d, int[] semicolon) {
+    private static String scan(String sql, SqlTokens.Dialect d, int[] semicolon) {
         if (sql == null) {
             return "empty statement";
         }
-        final boolean standard = d == STANDARD;
+        final boolean standard = d == SqlTokens.STANDARD;
         final int n = sql.length();
         // The last words read without another code token between them (S36's sequences).
         final String[] recent = new String[4];
         boolean first = true;
-        boolean inExecutableComment = false;
-        int i = 0;
-        while (i < n) {
-            char c = sql.charAt(i);
-            char next = i + 1 < n ? sql.charAt(i + 1) : '\0';
-            if (isSpace(c)) {
-                i++;
-                continue;
-            }
-            // Comments.
-            if (c == '-' && next == '-' && (!d.has(DASH_COMMENT_NEEDS_SPACE) || i + 2 >= n
-                    || isSpaceOrControl(sql.charAt(i + 2)))) {
-                i = lineEnd(sql, i + 2);
-                continue;
-            }
-            if (c == '#' && d.has(HASH_COMMENTS)) {
-                i = lineEnd(sql, i + 1);
-                continue;
-            }
-            if (c == '/' && next == '*') {
-                int body = executableCommentBody(sql, i, d);
-                if (body >= 0) {
-                    inExecutableComment = true;
-                    i = body;
-                    continue;
+        SqlTokens tokens = new SqlTokens(sql, d);
+        for (int kind = tokens.next(); kind != SqlTokens.END; kind = tokens.next()) {
+            int i = tokens.start();
+            if (kind == SqlTokens.UNTERMINATED_COMMENT) {
+                if (standard) {
+                    return "unterminated comment starting at offset " + i;
                 }
-                int end = blockCommentEnd(sql, i, d.has(NESTED_COMMENTS));
-                if (end < 0) {
-                    if (standard) {
-                        return "unterminated comment starting at offset " + i;
-                    }
-                    break;
-                }
-                i = end;
-                continue;
+                break;
             }
-            if (inExecutableComment && c == '*' && next == '/') {
-                inExecutableComment = false;
-                i += 2;
-                continue;
-            }
-            // Code tokens.
-            if (c == ';') {
+            if (kind == SqlTokens.SEMICOLON) {
                 if (first && standard) {
                     return "empty statement";
                 }
                 for (int j = i + 1; j < n; j++) {
-                    if (!isSpace(sql.charAt(j))) {
+                    if (!SqlTokens.isSpace(sql.charAt(j))) {
                         return reason("only one statement is allowed: text follows the ';' at offset " + i, d);
                     }
                 }
                 semicolon[0] = i;
                 return null;
             }
-            if (isWordStart(c)) {
-                int end = i + 1;
-                while (end < n && isWordPart(sql.charAt(end))) {
-                    end++;
-                }
-                String word = asciiUpper(sql.substring(i, end));
+            if (kind == SqlTokens.WORD) {
+                int end = tokens.end();
+                String word = SqlTokens.asciiUpper(sql.substring(i, end));
                 if (first) {
                     if (!"SELECT".equals(word) && !"WITH".equals(word)) {
                         return reason("the statement must start with SELECT or WITH, not '"
@@ -249,45 +194,20 @@ public final class StatementGuard {
                     return reason("'" + sequence + "' (a locking read) is not allowed in a read-only query", d);
                 }
                 first = false;
-                i = end;
                 continue;
             }
+            // A literal, a quoted identifier or another character.
             if (first && standard) {
                 return "the statement must start with SELECT or WITH, not '" + abbreviate(sql.substring(i)) + "'";
             }
             first = false;
             Arrays.fill(recent, null);
-            int end;
-            String what;
-            if (c == '\'') {
-                end = quotedEnd(sql, i, '\'', d.has(BACKSLASH_ESCAPES) || isEscapeString(sql, i, d));
-                what = "string literal";
-            } else if (c == '"') {
-                end = quotedEnd(sql, i, '"', d.has(BACKSLASH_ESCAPES));
-                what = "quoted identifier";
-            } else if (c == '`' && d.has(BACKTICK_IDENTIFIERS)) {
-                end = quotedEnd(sql, i, '`', false);
-                what = "quoted identifier";
-            } else if (c == '[' && d.has(BRACKET_IDENTIFIERS)) {
-                end = quotedEnd(sql, i, ']', false);
-                what = "quoted identifier";
-            } else if (c == '$' && d.has(DOLLAR_QUOTES) && dollarTagEnd(sql, i) > 0) {
-                int tagEnd = dollarTagEnd(sql, i);
-                String tag = sql.substring(i, tagEnd);
-                int close = sql.indexOf(tag, tagEnd);
-                end = close < 0 ? -1 : close + tag.length();
-                what = "dollar-quoted string";
-            } else {
-                i++;
-                continue;
-            }
-            if (end < 0) {
+            if (tokens.unterminated()) {
                 if (standard) {
-                    return "unterminated " + what + " starting at offset " + i;
+                    return "unterminated " + tokens.what() + " starting at offset " + i;
                 }
                 break;
             }
-            i = end;
         }
         return first && standard ? "empty statement" : null;
     }
@@ -311,127 +231,17 @@ public final class StatementGuard {
         return null;
     }
 
-    private static String reason(String text, Dialect d) {
+    private static String reason(String text, SqlTokens.Dialect d) {
         return d.name == null ? text : text + " (reading the statement with " + d.name + " quoting rules)";
-    }
-
-    /** Offset just past the closing quote, or -1. {@code close} doubled is an escaped quote. */
-    private static int quotedEnd(String sql, int open, char close, boolean backslashEscapes) {
-        int n = sql.length();
-        int j = open + 1;
-        while (j < n) {
-            char c = sql.charAt(j);
-            if (backslashEscapes && c == '\\') {
-                j += 2;
-                continue;
-            }
-            if (c == close) {
-                if (j + 1 < n && sql.charAt(j + 1) == close) {
-                    j += 2;
-                    continue;
-                }
-                return j + 1;
-            }
-            j++;
-        }
-        return -1;
-    }
-
-    /** PostgreSQL E'...': the quote directly follows a lone E. */
-    private static boolean isEscapeString(String sql, int quote, Dialect d) {
-        if (!d.has(E_STRINGS) || quote < 1) {
-            return false;
-        }
-        char e = sql.charAt(quote - 1);
-        return (e == 'E' || e == 'e') && (quote < 2 || !isWordPart(sql.charAt(quote - 2)));
-    }
-
-    /** Offset just past an opening {@code $tag$} at {@code i} (the tag may be empty), or -1. */
-    private static int dollarTagEnd(String sql, int i) {
-        if (i > 0 && isWordPart(sql.charAt(i - 1))) {
-            return -1;
-        }
-        int n = sql.length();
-        int j = i + 1;
-        if (j < n && sql.charAt(j) == '$') {
-            return j + 1;
-        }
-        if (j >= n || !(Character.isLetter(sql.charAt(j)) || sql.charAt(j) == '_')) {
-            return -1;
-        }
-        while (j < n && (Character.isLetterOrDigit(sql.charAt(j)) || sql.charAt(j) == '_')) {
-            j++;
-        }
-        return j < n && sql.charAt(j) == '$' ? j + 1 : -1;
-    }
-
-    /** For a MySQL executable comment at {@code i}, the offset of its body; otherwise -1. */
-    private static int executableCommentBody(String sql, int i, Dialect d) {
-        if (!d.has(EXECUTABLE_COMMENTS)) {
-            return -1;
-        }
-        int j = i + 2;
-        if (j < sql.length() && sql.charAt(j) == 'M') {
-            j++;
-        }
-        if (j >= sql.length() || sql.charAt(j) != '!') {
-            return -1;
-        }
-        j++;
-        while (j < sql.length() && sql.charAt(j) >= '0' && sql.charAt(j) <= '9') {
-            j++;
-        }
-        return j;
-    }
-
-    /** Offset just past the comment that opens at {@code i}, or -1 if it is not closed. */
-    private static int blockCommentEnd(String sql, int i, boolean nested) {
-        int n = sql.length();
-        int depth = 1;
-        int j = i + 2;
-        while (j + 1 < n) {
-            char c = sql.charAt(j);
-            char next = sql.charAt(j + 1);
-            if (nested && c == '/' && next == '*') {
-                depth++;
-                j += 2;
-            } else if (c == '*' && next == '/') {
-                if (--depth == 0) {
-                    return j + 2;
-                }
-                j += 2;
-            } else {
-                j++;
-            }
-        }
-        return -1;
     }
 
     /** True if the first character at or after {@code from} that is not whitespace is an opening parenthesis. */
     private static boolean opensParenthesis(String sql, int from) {
         int j = from;
-        while (j < sql.length() && isSpace(sql.charAt(j))) {
+        while (j < sql.length() && SqlTokens.isSpace(sql.charAt(j))) {
             j++;
         }
         return j < sql.length() && sql.charAt(j) == '(';
-    }
-
-    private static int lineEnd(String sql, int from) {
-        int n = sql.length();
-        int j = from;
-        while (j < n && sql.charAt(j) != '\n' && sql.charAt(j) != '\r') {
-            j++;
-        }
-        return j;
-    }
-
-    private static boolean isSpace(char c) {
-        return Character.isWhitespace(c) || Character.isSpaceChar(c);
-    }
-
-    /** What MySQL accepts after "--" to start a comment: ASCII whitespace or control characters only. */
-    private static boolean isSpaceOrControl(char c) {
-        return c <= ' ' || c == 0x7F;
     }
 
     /**
@@ -446,41 +256,7 @@ public final class StatementGuard {
         return k == 0 ? word : word.substring(k);
     }
 
-    private static boolean isWordStart(char c) {
-        return Character.isLetterOrDigit(c) || c == '_';
-    }
-
-    private static boolean isWordPart(char c) {
-        return Character.isLetterOrDigit(c) || c == '_' || c == '$';
-    }
-
-    /** Upper-cases ASCII letters only, so that no locale or Unicode case folding can turn a word into a keyword. */
-    private static String asciiUpper(String word) {
-        char[] chars = word.toCharArray();
-        for (int k = 0; k < chars.length; k++) {
-            if (chars[k] >= 'a' && chars[k] <= 'z') {
-                chars[k] = (char) (chars[k] - ('a' - 'A'));
-            }
-        }
-        return new String(chars);
-    }
-
     private static String abbreviate(String text) {
         return text.length() <= 30 ? text : text.substring(0, 30) + "...";
-    }
-
-    /** One way of reading quotes and comments. */
-    private static final class Dialect {
-        final String name;
-        final int features;
-
-        Dialect(String name, int features) {
-            this.name = name;
-            this.features = features;
-        }
-
-        boolean has(int feature) {
-            return (features & feature) != 0;
-        }
     }
 }

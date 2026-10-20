@@ -18,5 +18,11 @@
  * The contract between the agent core and agent modules: modules, primitives and the registries, thread broker and
  * event bus a module uses while installed. Modules compile against this package only, never against the core.
  * JDK 8 API only.
+ *
+ * <p>Threads beyond the agent's workers (Phase 8, phase8-contracts.md 4.1, 4.2): a {@link
+ * ai.skillroy.testjava.agent.api.QuiescentPoint} lets the application's own thread run agent tasks at its idle moments,
+ * admitted by a budget and never pre-empted ({@link ai.skillroy.testjava.agent.api.ThreadPolicy#APP_QUIESCENT}); a
+ * {@link ai.skillroy.testjava.agent.api.Lane} is a named, bounded group of agent threads a module declares
+ * ({@link ai.skillroy.testjava.agent.api.ThreadPolicy#LANE}).
  */
 package ai.skillroy.testjava.agent.api;

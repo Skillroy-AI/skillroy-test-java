@@ -116,9 +116,22 @@ final class CoreThreadBroker implements ThreadBroker {
                 return null;
             case APP:
                 return onApp(task, timeoutMs);
+            case APP_QUIESCENT:
+            case LANE:
+                // phase8-contracts.md 4.1, 4.2, 4.8 defect 5: every policy is named, none falls through to a worker;
+                // this broker runs no quiescent point and no lane yet.
+                throw unsupported(policy);
             default:
                 throw new IllegalArgumentException("unknown thread policy " + policy);
         }
+    }
+
+    /** CAPABILITY_UNAVAILABLE for a Phase 8 policy this broker does not run. */
+    private static RpcException unsupported(ThreadPolicy policy) {
+        String reason = policy == ThreadPolicy.LANE ? "unknown lane" : "no quiescent point offered";
+        Map<String, Object> data = new LinkedHashMap<String, Object>();
+        data.put("reason", reason);
+        return new RpcException(ErrorCodes.CAPABILITY_UNAVAILABLE, policy + ": " + reason, data);
     }
 
     /** A runnable that runs the task and logs (never throws) its failure under the task's call scope. */
@@ -171,6 +184,15 @@ final class CoreThreadBroker implements ThreadBroker {
                         });
                     }
                     break;
+                case APP_QUIESCENT:
+                case LANE:
+                    // phase8-contracts.md 4.1, 4.2, 4.8 defect 5: refused, never run on a worker: a posted task has no
+                    // caller whose time bounds it, and post names no lane.
+                    log.warn("a task posted under " + policy + " is refused: use ThreadBroker.call"
+                            + (policy == ThreadPolicy.LANE ? "OnLane" : "Quiescent"));
+                    break;
+                case CALLER:
+                case WORKER:
                 default:
                     workers.execute(logged);
                     break;

@@ -23,5 +23,9 @@
  * cannot see) and, for an embedded-browser technology the agent does not know, a
  * {@link ai.skillroy.testjava.agent.api.spi.web.WebEngineAdapter}. Implementations are registered with
  * {@code AgentContext.spi()} during {@code AgentModule.install}.
+ *
+ * <p>A data source's read is stoppable through the {@link ai.skillroy.testjava.agent.api.spi.QueryControl} the agent
+ * hands it, may run on a lane its module declared, and may name a table's columns for a source that answers by
+ * position (Phase 8, phase8-contracts.md 4.2 to 4.4).
  */
 package ai.skillroy.testjava.agent.api.spi;
