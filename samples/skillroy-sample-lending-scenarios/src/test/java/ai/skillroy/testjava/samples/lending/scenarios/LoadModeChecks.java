@@ -901,6 +901,219 @@ abstract class LoadModeChecks {
                 "the archive is the agent's matrix plus the contributed ids");
     }
 
+    // ------------------------------------------------------------------ Phase 8, ET (slots 158, 159, 171)
+
+    /** The seven-way cross join over the desk's items: it ends only when it is stopped (phase8-contracts.md 13.2). */
+    static final String RUNAWAY = "SELECT COUNT(*) FROM item a, item b, item c, item d, item e, item f, item g"
+            + " WHERE a.deposit + b.deposit + c.deposit + d.deposit + e.deposit + f.deposit + g.deposit < 0";
+
+    /**
+     * phase8-contracts.md 13.2 item 11 (gap 10; slot 158): {@code lending.engine.view} runs on the engine thread at its
+     * idle point and reads what no published snapshot holds; while a prompt is open no idle point comes and it is
+     * {@code NOT_READY} within its 5 s, the reads answering as before; after the answer it runs again. ATTACH (the
+     * engine exists before the agent) and EMBEDDED (the plugin start) are among the modes.
+     */
+    @Test
+    @Order(158)
+    void theQuiescentViewRunsOnTheEngineThreadAtItsIdlePoint() throws Exception {
+        Map<String, Object> before = quiescentInfo();
+        assertNotNull(before, "the lending worker offers a quiescent point");
+        assertEquals("lending", before.get("provider"));
+        assertEquals(50L, ((Number) before.get("allowanceMs")).longValue());
+        send("Entry", "100");
+        assertEquals("IDLE", send("Entry", "1111").payload().get("state"));
+        sendKey("Key.QTY");
+        RpcResult quantity = client().call("lending.engine.view", Map.of(), CallOptions.defaults());
+        assertEquals("LendingEngine", quantity.thread(), "the envelope names the application's own thread");
+        assertEquals("QUANTITY", value(quantity).get("step"), "the quantity sub-step");
+        send("Entry", "3");
+        RpcResult view = client().call("lending.engine.view", Map.of(), CallOptions.defaults());
+        assertEquals("LendingEngine", view.thread());
+        assertEquals("3", value(view).get("pendingQty"), "in no published snapshot");
+        assertEquals("NONE", value(view).get("step"));
+        assertEquals("IDLE", value(view).get("state"));
+
+        RpcResult scan = client().call("lending.input", Map.of("source", "Barcode", "value", "5000000000086"), CALL);
+        assertNotNull(client().await("prompt.waiting", scan.seqBefore(), null, WAIT), "the induction check");
+        long start = System.nanoTime();
+        AgentRpcException notReady = assertThrows(AgentRpcException.class,
+                () -> client().call("lending.engine.view", Map.of(), CallOptions.defaults()));
+        long tookMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+        assertEquals(ErrorCodes.NOT_READY, notReady.error().code(), String.valueOf(notReady.error()));
+        assertTrue(String.valueOf(notReady.error().data().get("reason")).startsWith("no quiescent point within"),
+                String.valueOf(notReady.error().data()));
+        assertTrue(tookMs < 8000, "within its 5 s: " + tookMs);
+        assertNotNull(value(client().call("swing.snapshot", Map.of(), CALL)).get("windows"),
+                "the snapshot answers during the prompt");
+        Map<String, Object> during = lendingState(client());
+        assertEquals("IDLE", during.get("name"), "and app.state too (the item is not on the loan yet)");
+        assertNotNull(during.get("modalPrompt"), String.valueOf(during));
+        RpcResult answered = client().call("lending.prompt.answer", Map.of("choice", "Yes"), CALL);
+        assertNotNull(client().await("input.requested", answered.seqBefore(), null, WAIT));
+        Map<String, Object> again = value(client().call("lending.engine.view", Map.of(), CallOptions.defaults()));
+        assertEquals("LOAN", again.get("state"));
+        assertEquals(1L, ((Number) again.get("lineCount")).longValue());
+        Map<String, Object> after = quiescentInfo();
+        assertEquals(((Number) before.get("ran")).longValue() + 3, ((Number) after.get("ran")).longValue(),
+                String.valueOf(after));
+        assertEquals(((Number) before.get("notReady")).longValue() + 1, ((Number) after.get("notReady")).longValue());
+        assertEquals(List.of(), after.get("penalised"));
+        assertEquals("IDLE", sendKey("Key.CANCEL").payload().get("state"));
+        assertEquals("SIGNED_OFF", sendKey("Key.SIGN_OFF").payload().get("state"));
+        assertSignedOff();
+    }
+
+    /**
+     * phase8-contracts.md 13.2 item 12 (gaps 9, 11; slot 159): a runaway report on {@code lending-report} runs on its
+     * lane and is cancelled when its caller's time runs out, while the desk's other primitives and the JDBC source
+     * answer at once; the JDBC form on {@code lending} is cancelled the same way (HSQLDB honours
+     * {@code Statement.cancel()}) and the next read of it answers (no BUSY).
+     */
+    @Test
+    @Order(159)
+    void aSlowReportRunsOnItsLaneAndIsCancelledWhileTheDeskAnswers() throws Exception {
+        java.util.concurrent.atomic.AtomicReference<Object> outcome = new java.util.concurrent.atomic.AtomicReference<>();
+        Thread report = new Thread(() -> {
+            try {
+                outcome.set(client().call("data.query", Map.of("source", "lending-report", "sql", RUNAWAY),
+                        CallOptions.defaults().withTimeoutMs(1000L)));
+            } catch (Throwable t) {
+                outcome.set(t);
+            }
+        }, "skillroy-it-runaway-report");
+        long start = System.nanoTime();
+        report.start();
+        awaitCondition("the report running on its lane", Duration.ofSeconds(10),
+                () -> laneJson().get("active") instanceof Number n && n.longValue() == 1L);
+        long t0 = System.nanoTime();
+        value(client().call("lending.state", Map.of(), CALL));
+        lendingState(client());
+        Map<String, Object> other = value(client().call("data.query", Map.of("source", "lending", "sql",
+                "SELECT code FROM item WHERE code = ?", "params", List.of("YRD-001")), CALL));
+        long othersMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - t0);
+        assertEquals(1L, ((Number) other.get("rowCount")).longValue());
+        report.join(30000);
+        long tookMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+        ItEnv.timing("java=" + java + " mode=" + mode().slug + " laneTimeoutMs=" + tookMs + " othersMs=" + othersMs);
+        assertTrue(othersMs < 3000, "the desk answered while the report ran: " + othersMs);
+        assertTrue(outcome.get() instanceof AgentRpcException, String.valueOf(outcome.get()));
+        AgentRpcException timeout = (AgentRpcException) outcome.get();
+        assertEquals(ErrorCodes.TIMEOUT, timeout.error().code(), String.valueOf(timeout.error()));
+        Map<String, Object> data = timeout.error().data();
+        assertEquals("lending-report", data.get("source"), String.valueOf(data));
+        assertEquals("lending.reads", data.get("lane"));
+        assertEquals(Boolean.TRUE, data.get("cancelled"), String.valueOf(data));
+        assertEquals(Boolean.FALSE, data.get("stillRunning"), String.valueOf(data));
+        assertEquals(Boolean.TRUE, data.get("enforcesTimeout"));
+        assertTrue(tookMs < 3000, "within about the call's time: " + tookMs);
+        Map<String, Object> lane = laneJson();
+        assertEquals("lending", lane.get("owner"));
+        assertEquals(1L, ((Number) lane.get("threads")).longValue());
+        assertEquals(2L, ((Number) lane.get("queue")).longValue());
+        awaitCondition("the lane idle again", Duration.ofSeconds(10), () -> {
+            Map<String, Object> now = laneJson();
+            return Long.valueOf(0).equals(now.get("active")) && Long.valueOf(0).equals(now.get("abandoned"));
+        });
+        Map<String, Object> second = value(client().call("data.query", Map.of("source", "lending-report", "sql",
+                "SELECT code FROM item WHERE code = ?", "params", List.of("YRD-001")), CALL));
+        assertEquals(1L, ((Number) second.get("rowCount")).longValue(), "a second read on the lane answers");
+
+        // 1000 ms, not the contract's 1500: the module waits the call's time less 250 ms, and the JDBC read's query
+        // timeout is that budget in whole seconds (at least 1), so with 1500 ms HSQLDB's own 1 s timeout would end the
+        // statement (an SQL error, 40502) before the module gives up at 1250 ms; with 1000 ms the module cancels first.
+        AgentRpcException jdbc = assertThrows(AgentRpcException.class, () -> client().call("data.query",
+                Map.of("source", "lending", "sql", RUNAWAY), CallOptions.defaults().withTimeoutMs(1000L)));
+        assertEquals(ErrorCodes.TIMEOUT, jdbc.error().code(), String.valueOf(jdbc.error()));
+        assertEquals(Boolean.TRUE, jdbc.error().data().get("cancelled"), String.valueOf(jdbc.error().data()));
+        assertEquals(Boolean.FALSE, jdbc.error().data().get("stillRunning"), String.valueOf(jdbc.error().data()));
+        Map<String, Object> next = value(client().call("data.query", Map.of("source", "lending", "sql",
+                "SELECT code FROM item WHERE code = ?", "params", List.of("YRD-001")), CALL));
+        assertEquals(1L, ((Number) next.get("rowCount")).longValue(), "no BUSY after a cancelled JDBC read");
+        assertSignedOff();
+    }
+
+    /**
+     * phase8-contracts.md 13.2 item 13 (gaps 12, 117; slot 171): the positional source is read by name (the labels of
+     * the statement), the password masked by the module's name-keyed policy, its star form answers the table's
+     * columns, the controller's allow-list check passes over the live agent, and the positional scenario holds a
+     * {@code rows: 1} and a {@code rows: 0} check under {@link PositionalOverlayPack}.
+     */
+    @Test
+    @Order(171)
+    void aPositionalSourceIsReadByNameAndPassesTheAllowListCheck() throws Exception {
+        Set<String> passwords = new HashSet<>(SampleCredentials.SEED_A.values());
+        RpcResult staff = client().call("data.query", Map.of("source", "lending-report", "sql",
+                "SELECT code, password, name FROM staff ORDER BY code"), CALL);
+        Map<String, Object> rows = value(staff);
+        assertEquals(List.of("code", "password", "name"), ((List<?>) rows.get("columns")).stream()
+                .map(c -> ((Map<?, ?>) c).get("name")).toList());
+        for (Object row : (List<?>) rows.get("rows")) {
+            assertEquals(SecretKeys.REDACTED, ((List<?>) row).get(1), String.valueOf(row));
+        }
+        assertEquals(List.of(), ai.skillroy.testjava.junit.OutputScan.leaksIn(Json.write(staff.toJson()), passwords),
+                "no seeded password anywhere in the reply");
+        Map<String, Object> star = value(client().call("data.query", Map.of("source", "lending-report", "sql",
+                "SELECT * FROM staff WHERE 1 = 0"), CALL));
+        assertEquals(List.of("CODE", "NAME", "PASSWORD", "ACTIVE", "AUTO_SIGN_ON"), ((List<?>) star.get("columns"))
+                .stream().map(c -> ((Map<?, ?>) c).get("name")).toList(), "the table's columns, no row");
+        assertEquals(0L, ((Number) star.get("rowCount")).longValue());
+
+        List<ai.skillroy.testjava.data.RowMask> masks = Runs.PACK.rowMasks();
+        ai.skillroy.testjava.scenario.resolve.SqlAllowList list = ai.skillroy.testjava.samples.lending.pack
+                .LendingAllowList.LIST;
+        try (ai.skillroy.testjava.data.DataChannels channels = ai.skillroy.testjava.data.DataChannels.of(client(),
+                ai.skillroy.testjava.data.Credentials.empty(), masks)) {
+            ai.skillroy.testjava.inference.sql.AllowListCheck.check(new ai.skillroy.testjava.scenario.resolve
+                    .SqlAllowList("lending-report", list.dialect(), list.tables(), List.of(), list.functions()),
+                    channels, masks, Duration.ofSeconds(30));
+        }
+
+        PositionalOverlayPack overlay = PositionalOverlayPack.lending();
+        Runs.Outcome positional = Runs.run(overlay, client(), ai.skillroy.testjava.scenario.PlanCompiler.compile(
+                PositionalOverlayPack.scenarioBytes(), "positional-loan.yaml", overlay),
+                ItEnv.runDir(mode().slug, "positional-loan"), Runs.bind(SampleCredentials.Env.SEED_A));
+        assertEquals(Status.PASS, positional.result().status(), positional.describe());
+        List<Map<String, Object>> db = Runs.runLog(positional.dir()).stream().filter(r -> "db".equals(r.get("type")))
+                .toList();
+        assertEquals(List.of(1L, 1L, 0L), db.stream().map(r -> ((Number) r.get("rowCount")).longValue()).toList(),
+                String.valueOf(db));
+        assertTrue(db.stream().allMatch(r -> Boolean.TRUE.equals(r.get("ok")) && "lending-report".equals(
+                r.get("source")) && "agent".equals(r.get("channel"))), String.valueOf(db));
+        assertSignedOff();
+    }
+
+    /** One raw key through {@code lending.input} and the desk's next wait (the check-50 pattern, no value). */
+    private Event sendKey(String source) throws Exception {
+        RpcResult result = client().call("lending.input", Map.of("source", source), CALL);
+        assertEquals(Boolean.TRUE, value(result).get("acked"), source);
+        Event done = client().await(READY_TOPICS, result.seqBefore(), null, WAIT);
+        assertNotNull(done, "no input.requested or prompt.waiting after " + source);
+        return done;
+    }
+
+    /** {@code agent.info.threads.quiescent}. */
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> quiescentInfo() throws Exception {
+        Map<String, Object> threads = (Map<String, Object>) value(client().call("agent.info", Map.of(), CALL))
+                .get("threads");
+        return (Map<String, Object>) threads.get("quiescent");
+    }
+
+    /** {@code agent.info.threads.lanes["lending.reads"]}. */
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> laneJson() {
+        try {
+            Map<String, Object> threads = (Map<String, Object>) value(client().call("agent.info", Map.of(), CALL))
+                    .get("threads");
+            Map<String, Object> lanes = (Map<String, Object>) threads.get("lanes");
+            Map<String, Object> lane = (Map<String, Object>) lanes.get("lending.reads");
+            assertNotNull(lane, String.valueOf(lanes));
+            return lane;
+        } catch (Exception e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
     // ------------------------------------------------------------------ JUnit glue
 
     /**

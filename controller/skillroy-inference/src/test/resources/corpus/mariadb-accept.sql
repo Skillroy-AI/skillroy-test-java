@@ -135,10 +135,6 @@ SELECT l.id FROM loan l ORDER BY l.borrower DESC
 SELECT x.loan_id, x.line_no FROM loan_line x WHERE x.loan_id = ? AND x.qty >= ? AND x.item_code <> ?
 => SELECT x.loan_id, x.line_no FROM loan_line x WHERE x.loan_id = ? AND x.qty >= ? AND x.item_code <> ? ORDER BY x.loan_id, x.line_no LIMIT 200
 
-@@ CALL of the allow-listed procedure
-CALL open_loan_count(?)
-=> CALL open_loan_count (?)
-
 @@ a subquery on DUAL
 SELECT i.code FROM item i WHERE i.deposit > (SELECT 30 FROM DUAL)
 => SELECT i.code FROM item i WHERE i.deposit > (SELECT 30 FROM DUAL) ORDER BY i.code LIMIT 200

@@ -158,3 +158,6 @@ SELECT x.loan_id FROM loan_line x NATURAL JOIN loan l
 
 @@ UNSUPPORTED GROUPING SETS
 SELECT l.status, l.staff_code, COUNT(*) AS n FROM loan l GROUP BY GROUPING SETS ((l.status), (l.staff_code))
+
+@@ PROCEDURE CALL of a procedure: no data channel runs a procedure call (gap 119; BS6 admitted this one)
+CALL open_loan_count(?)

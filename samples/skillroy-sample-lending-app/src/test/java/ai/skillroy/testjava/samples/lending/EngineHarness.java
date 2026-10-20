@@ -56,6 +56,12 @@ final class EngineHarness implements AutoCloseable {
     }
 
     private EngineHarness(Seed seed, Edition edition, long idleLockMillis, boolean servable) throws SQLException {
+        this(seed, edition, idleLockMillis, servable, Engine.DEFAULT_IDLE_TICK_MILLIS, null);
+    }
+
+    /** @param idle a listener added before the engine starts (phase8-contracts.md 12.1), or null */
+    private EngineHarness(Seed seed, Edition edition, long idleLockMillis, boolean servable, long idleTickMillis,
+                          EngineListener idle) throws SQLException {
         String name = "engine_" + COUNTER.incrementAndGet();
         db = servable ? LendingDb.createServable(name, seed, edition, LocalDate.now(CLOCK))
             : LendingDb.create(name, seed, edition, LocalDate.now(CLOCK));
@@ -66,7 +72,11 @@ final class EngineHarness implements AutoCloseable {
         printer = new SlipPrinter(db.settings().get("slip_header"));
         prompts.setView(view);
         engine = new Engine(db, catalogue, access, waiverRules, prompts, printer, CLOCK, idleLockMillis, edition);
+        engine.idleTickMillis(idleTickMillis);
         engine.addListener(rec);
+        if (idle != null) {
+            engine.addListener(idle);
+        }
         engine.start();
         rec.await(0, e -> e.kind == Recorder.Kind.REQUESTED);
     }
@@ -82,6 +92,14 @@ final class EngineHarness implements AutoCloseable {
 
     static EngineHarness start(Seed seed, long idleLockMillis) throws SQLException {
         return new EngineHarness(seed, idleLockMillis, false);
+    }
+
+    /**
+     * A desk with this idle lock and idle tick and {@code idle} listening from the start (phase8-contracts.md 12.1).
+     */
+    static EngineHarness start(Seed seed, long idleLockMillis, long idleTickMillis, EngineListener idle)
+            throws SQLException {
+        return new EngineHarness(seed, Edition.STANDARD, idleLockMillis, false, idleTickMillis, idle);
     }
 
     /** A desk whose database {@link LendingDbServer} may serve ({@link LendingDb#createServable}). */

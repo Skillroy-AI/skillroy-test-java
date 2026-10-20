@@ -151,12 +151,20 @@ final class FakeAgentContext implements AgentContext {
         }
         final PrimitiveSpec spec = p.spec();
         final Invocation inv = invocation(args, spec.timeoutMs());
-        return threads.call(spec.thread(), new Callable<Object>() {
+        Callable<Object> body = new Callable<Object>() {
             @Override
             public Object call() throws Exception {
                 return p.invoke(inv);
             }
-        }, spec.timeoutMs());
+        };
+        if (spec.thread() == ThreadPolicy.APP_QUIESCENT) {
+            // phase8-contracts.md 4.1: at the provider's quiescent point, admitted by the spec's budget.
+            return threads.callQuiescent(body, spec.quiescentBudgetMs(), spec.timeoutMs());
+        }
+        if (spec.thread() == ThreadPolicy.LANE) {
+            return threads.callOnLane(spec.lane(), body, spec.timeoutMs());
+        }
+        return threads.call(spec.thread(), body, spec.timeoutMs());
     }
 
     /** Invokes and expects an {@link RpcException}. */
@@ -474,6 +482,89 @@ final class FakeAgentContext implements AgentContext {
                 }
             }
             return false;
+        }
+
+        /** Lanes declared through this broker (phase8-contracts.md 4.2), by name. */
+        final Map<String, java.util.concurrent.ExecutorService> lanes =
+                new java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.ExecutorService>();
+
+        /**
+         * At the first provider's quiescent point, as the core does it (minus the overrun penalty): the point's own
+         * admission, refusals and timeout (phase8-contracts.md 4.1).
+         */
+        @Override
+        public <T> T callQuiescent(Callable<T> task, long budgetMs, long timeoutMs) throws Exception {
+            ThreadPolicyProvider provider = spi.first(ThreadPolicyProvider.class);
+            ai.skillroy.testjava.agent.api.QuiescentPoint point = provider == null ? null
+                    : provider.quiescentPoint();
+            if (point == null) {
+                throw new RpcException(ErrorCodes.CAPABILITY_UNAVAILABLE, "no quiescent point offered");
+            }
+            return point.await(task, budgetMs, timeoutMs);
+        }
+
+        @Override
+        public ai.skillroy.testjava.agent.api.Lane declareLane(final String name, final int threads,
+                                                                final int queue) {
+            final java.util.concurrent.atomic.AtomicInteger number = new java.util.concurrent.atomic.AtomicInteger();
+            if (lanes.containsKey(name)) {
+                throw new IllegalStateException("lane " + name + " is already declared");
+            }
+            lanes.put(name, java.util.concurrent.Executors.newFixedThreadPool(threads,
+                    new java.util.concurrent.ThreadFactory() {
+                        @Override
+                        public Thread newThread(Runnable r) {
+                            Thread t = new Thread(r, "skillroy-lane-" + name + "-" + number.incrementAndGet());
+                            t.setDaemon(true);
+                            return t;
+                        }
+                    }));
+            return new ai.skillroy.testjava.agent.api.Lane() {
+                @Override
+                public String name() {
+                    return name;
+                }
+
+                @Override
+                public int threads() {
+                    return threads;
+                }
+
+                @Override
+                public int queue() {
+                    return queue;
+                }
+
+                @Override
+                public void close() {
+                    java.util.concurrent.ExecutorService pool = lanes.remove(name);
+                    if (pool != null) {
+                        pool.shutdownNow();
+                    }
+                }
+            };
+        }
+
+        /** On the lane's threads, bounded, the task interrupted on expiry (phase8-contracts.md 4.2). */
+        @Override
+        public <T> T callOnLane(String lane, Callable<T> task, long timeoutMs) throws Exception {
+            java.util.concurrent.ExecutorService pool = lanes.get(lane);
+            if (pool == null) {
+                throw new RpcException(ErrorCodes.CAPABILITY_UNAVAILABLE, "unknown lane: " + lane);
+            }
+            java.util.concurrent.Future<T> future = pool.submit(task);
+            try {
+                return future.get(timeoutMs, TimeUnit.MILLISECONDS);
+            } catch (java.util.concurrent.TimeoutException e) {
+                future.cancel(true);
+                throw new RpcException(ErrorCodes.TIMEOUT, "timed out after " + timeoutMs + " ms");
+            } catch (java.util.concurrent.ExecutionException e) {
+                Throwable cause = e.getCause();
+                if (cause instanceof Exception) {
+                    throw (Exception) cause;
+                }
+                throw e;
+            }
         }
     }
 

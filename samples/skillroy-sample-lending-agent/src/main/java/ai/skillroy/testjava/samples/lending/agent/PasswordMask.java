@@ -21,7 +21,9 @@ import ai.skillroy.testjava.protocol.SecretKeys;
 
 /**
  * The module's {@link MaskPolicy} (Phase 2 contract section 13.2): in rows that {@code data.query} reads from source
- * {@value LendingDataSource#ID}, the value of a column named {@value #COLUMN} (compared ignoring case) becomes
+ * {@value LendingDataSource#ID} or {@value LendingRowsSource#ID} (Phase 8, phase8-contracts.md 4.4: the positional
+ * source's columns carry the statement's labels), the value of a column named {@value #COLUMN} (compared ignoring
+ * case) becomes
  * {@value SecretKeys#REDACTED}. Why: the desk's {@code staff} table holds its sample passwords in clear text, and no
  * row a test framework reads (a resolver's row sample, a stored-row check's evidence) may carry one out of the JVM.
  *
@@ -40,7 +42,8 @@ final class PasswordMask implements MaskPolicy {
 
     @Override
     public Object mask(String sourceId, String column, Object value) {
-        if (value != null && LendingDataSource.ID.equals(sourceId) && COLUMN.equalsIgnoreCase(column)) {
+        if (value != null && (LendingDataSource.ID.equals(sourceId) || LendingRowsSource.ID.equals(sourceId))
+                && COLUMN.equalsIgnoreCase(column)) {
             return SecretKeys.REDACTED;
         }
         return value;

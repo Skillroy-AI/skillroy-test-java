@@ -53,6 +53,27 @@ public final class TestState {
             new ArrayList<List<String>>());
     /** What coretest's {@code test.leak.slow} waits for, ignoring interrupts (amendment A34, a timed-out call). */
     public static volatile CountDownLatch leakRelease = new CountDownLatch(1);
+    /** Phase 8 (phase8-contracts.md 4.1): coretest's quiescent point, when {@code coretest.quiescent=true}. */
+    public static volatile ai.skillroy.testjava.agent.api.QuiescentPoint point;
+    /** Whether coretest's point was already closed when its uninstall began (null: no point, or not uninstalled). */
+    public static volatile Boolean pointClosedAtUninstall;
+    /** While true, coretest's engine thread offers no quiescent point. */
+    public static volatile boolean enginePaused;
+    /** What coretest's engine thread says is free at each point ({@code runOne}'s argument). */
+    public static volatile long engineAvailableMs = Long.MAX_VALUE;
+    /** True once coretest's engine thread saw its interrupt flag set (the agent must never interrupt it). */
+    public static volatile boolean engineInterrupted;
+    /** Bodies of coretest's quiescent primitives that ran, and how long each sleeps. */
+    public static final AtomicInteger QUIESCENT_RUNS = new AtomicInteger();
+    public static volatile long quiescentSleepMs;
+    /** What coretest's quiescent view does inside its task: "", "call", "callQuiescent", "await", "post". */
+    public static volatile String quiescentNested = "";
+    /** What the nested step answered: an error code, or "ran" / "posted". */
+    public static final List<Object> NESTED = Collections.synchronizedList(new ArrayList<Object>());
+    /** Bodies of coretest's lane primitives that ran, and the latch they wait for (ignoring interrupts). */
+    public static final AtomicInteger LANE_RUNS = new AtomicInteger();
+    public static volatile CountDownLatch laneRelease = new CountDownLatch(1);
+
     /** The class loaders the jar fixture modules were installed from. */
     public static final List<ClassLoader> JAR_LOADERS = Collections.synchronizedList(new ArrayList<ClassLoader>());
 
@@ -79,5 +100,16 @@ public final class TestState {
         appAvailable = true;
         STUCK_RUNNING.set(0);
         JAR_LOADERS.clear();
+        point = null;
+        pointClosedAtUninstall = null;
+        enginePaused = false;
+        engineAvailableMs = Long.MAX_VALUE;
+        engineInterrupted = false;
+        QUIESCENT_RUNS.set(0);
+        quiescentSleepMs = 0L;
+        quiescentNested = "";
+        NESTED.clear();
+        LANE_RUNS.set(0);
+        laneRelease = new CountDownLatch(1);
     }
 }

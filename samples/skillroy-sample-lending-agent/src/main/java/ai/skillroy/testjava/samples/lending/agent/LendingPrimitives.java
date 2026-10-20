@@ -31,6 +31,7 @@ import ai.skillroy.testjava.samples.lending.AccessDecision;
 import ai.skillroy.testjava.samples.lending.Catalogue;
 import ai.skillroy.testjava.samples.lending.Engine;
 import ai.skillroy.testjava.samples.lending.EngineStatus;
+import ai.skillroy.testjava.samples.lending.IdleView;
 import ai.skillroy.testjava.samples.lending.Item;
 import ai.skillroy.testjava.samples.lending.LendingApp;
 import ai.skillroy.testjava.samples.lending.LendingInput;
@@ -77,10 +78,14 @@ final class LendingPrimitives {
     static final String DEPOSIT = "lending.deposit";
     static final String LIMITS = "lending.limits";
     static final String WAIVER_EVALUATE = "lending.waiver.evaluate";
+    /** The engine's own state at its idle point (phase8-contracts.md 4.1, 12.2). */
+    static final String ENGINE_VIEW = "lending.engine.view";
+    /** {@value #ENGINE_VIEW}'s quiescent budget. */
+    static final long ENGINE_VIEW_BUDGET_MS = 20L;
 
     /** Every primitive name, which is also its capability id. */
     static final String[] NAMES = {INPUT, STATE, LOAN, PROMPT, PROMPT_ANSWER, SLIP, ACCESS_CHECK, DEPOSIT, LIMITS,
-        WAIVER_EVALUATE};
+        WAIVER_EVALUATE, ENGINE_VIEW};
 
     /** Default and largest acknowledgement wait of {@code lending.input}. */
     static final long DEFAULT_ACK_MS = 5000L;
@@ -170,7 +175,42 @@ final class LendingPrimitives {
                         + "business date)")
                 .thread(ThreadPolicy.APP).timeoutMs(5000).capability(WAIVER_EVALUATE).build(),
                 this::waiverEvaluate));
+        list.add(engineView());
         return list;
+    }
+
+    /**
+     * {@value #ENGINE_VIEW} (phase8-contracts.md 4.1, 12.2): {@code ThreadPolicy.APP_QUIESCENT} with a budget of
+     * {@value #ENGINE_VIEW_BUDGET_MS} ms, so that its body runs on the engine thread itself at the engine's idle point
+     * (the module's quiescent point, driven by {@code EngineEvents.idle}) and reads what no published snapshot holds:
+     * {@code Engine.idleView()} as JSON. It looks at nothing else and attaches no listener (it runs inside an engine
+     * callback). {@code NOT_READY} while no idle point comes in its time, a prompt open for example.
+     */
+    private Primitive engineView() {
+        return Primitives.of(PrimitiveSpec.builder(ENGINE_VIEW)
+                .description("The desk engine's own state at its idle point, read on the engine thread: {state, step, "
+                        + "pendingQty, returnMode, lockedFrom, lineCount, idleLockRemainingMs}. NOT_READY while the "
+                        + "engine offers no idle point within the call's time (a prompt is open, an input runs).")
+                .thread(ThreadPolicy.APP_QUIESCENT).quiescentBudgetMs(ENGINE_VIEW_BUDGET_MS).timeoutMs(5000)
+                .capability(ENGINE_VIEW).build(), new Primitives.Body() {
+                    @Override
+                    public Object invoke(Invocation inv) {
+                        return idleViewJson(access.requireApp().engine().idleView());
+                    }
+                });
+    }
+
+    /** {@code IdleView} as JSON: the quantity as a plain decimal string, the states by name. */
+    private static Map<String, Object> idleViewJson(IdleView view) {
+        Map<String, Object> m = new LinkedHashMap<String, Object>();
+        m.put("state", view.state() == null ? null : view.state().name());
+        m.put("step", view.step());
+        m.put("pendingQty", view.pendingQty() == null ? null : view.pendingQty().toPlainString());
+        m.put("returnMode", Boolean.valueOf(view.returnMode()));
+        m.put("lockedFrom", view.lockedFrom() == null ? null : view.lockedFrom().name());
+        m.put("lineCount", Long.valueOf(view.lineCount()));
+        m.put("idleLockRemainingMs", view.idleLockRemainingMs());
+        return m;
     }
 
     // ------------------------------------------------------------------ bodies

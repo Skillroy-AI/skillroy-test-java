@@ -208,10 +208,7 @@ public final class SchemaCatalogue {
                     out.append('\n');
                 }
             }
-            if (!list.procedures().isEmpty()) {
-                out.append("\nProcedures you may call, with ? parameters only: ")
-                        .append(String.join(", ", list.procedures())).append('\n');
-            }
+            // phase8-contracts.md 4.5 (gap 119): no procedures line; no data channel runs a procedure call.
             if (!list.functions().isEmpty()) {
                 out.append("\nFunctions allowed beyond the built-in set: ").append(String.join(", ", list.functions()))
                         .append('\n');

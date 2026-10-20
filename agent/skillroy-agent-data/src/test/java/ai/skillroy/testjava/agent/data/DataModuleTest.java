@@ -122,8 +122,11 @@ class DataModuleTest {
         });
 
         Object value = ctx.call("data.sources", Collections.<String, Object>emptyMap());
-        assertEquals("{\"sources\":[{\"id\":\"main\",\"describe\":\"the main database\"},"
-                + "{\"id\":\"archive\",\"describe\":null},{\"id\":\"broken\",\"describe\":null}]}", Json.write(value));
+        // Phase 8 (phase8-contracts.md 4.2, 4.3): every entry carries lane and enforcesTimeout.
+        assertEquals("{\"sources\":[{\"id\":\"main\",\"describe\":\"the main database\",\"lane\":null,"
+                + "\"enforcesTimeout\":false},{\"id\":\"archive\",\"describe\":null,\"lane\":null,"
+                + "\"enforcesTimeout\":false},{\"id\":\"broken\",\"describe\":null,\"lane\":null,"
+                + "\"enforcesTimeout\":false}]}", Json.write(value));
         assertTrue(ctx.log.all().contains("failed in describe()"), ctx.log.all());
         assertTrue(ctx.log.all().contains("failed in id()"), ctx.log.all());
     }

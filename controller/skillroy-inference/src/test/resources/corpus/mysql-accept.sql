@@ -151,10 +151,6 @@ SELECT COUNT(*) AS loans FROM loan l JOIN staff s ON s.code = l.staff_code AND s
 SELECT x.loan_id, x.line_no FROM loan_line x WHERE x.qty BETWEEN ? AND ? AND x.item_code IN ('DRL-01', 'SAW-01')
 => SELECT x.loan_id, x.line_no FROM loan_line x WHERE x.qty BETWEEN ? AND ? AND x.item_code IN ('DRL-01', 'SAW-01') ORDER BY x.loan_id, x.line_no LIMIT 200
 
-@@ CALL of the allow-listed procedure
-CALL open_loan_count(?)
-=> CALL open_loan_count (?)
-
 @@ a subquery on DUAL
 SELECT l.id FROM loan l WHERE l.due < (SELECT CURDATE() FROM DUAL)
 => SELECT l.id FROM loan l WHERE l.due < (SELECT CURDATE() FROM DUAL) ORDER BY l.id LIMIT 200

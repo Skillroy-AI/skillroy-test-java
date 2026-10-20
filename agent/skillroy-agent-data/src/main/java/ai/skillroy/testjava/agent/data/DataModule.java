@@ -41,7 +41,7 @@ import java.util.function.Predicate;
  *
  * <p>Registers two primitives, both on an agent worker thread ({@link ThreadPolicy#WORKER}):
  * <ul>
- *   <li>{@code data.sources} {@code {}} -> {@code {sources:[{id, describe}]}};</li>
+ *   <li>{@code data.sources} {@code {}} -> {@code {sources:[{id, describe, lane, enforcesTimeout}]}};</li>
  *   <li>{@code data.query} {@code {source, sql, params?, maxRows? (200, at most 200)}} ->
  *       {@code {columns:[{name,type}], rows:[[...]], rowCount, truncated}}, timeout 10000 ms, capability
  *       {@code data.query}. The statement must pass {@link StatementGuard}; the provider's {@code query()} form is
@@ -52,6 +52,12 @@ import java.util.function.Predicate;
  * </ul>
  * and declares the capability {@code data.query}: OK while at least one {@code DataSourceProvider} is registered,
  * otherwise UNAVAILABLE.
+ *
+ * <p>Phase 8 (phase8-contracts.md 4.2 to 4.4): {@code data.query} keeps {@code WORKER} and its spec; its body hands
+ * the provider's work to the source's lane or a nested worker task, waits the call's remaining time less 250 ms,
+ * cancels a read it gave up on (the provider's registered actions, or the JDBC statement while it is open) and answers
+ * its own {@code TIMEOUT} inside that reserve; columns a positional source leaves unnamed take the statement's own
+ * labels (see {@link DataQuery}). {@code uninstall} cancels the reads still running first.
  *
  * <p>The module adds nothing to the host (no listeners, no threads) and touches no application object until a
  * provider is called. Discovered through {@code META-INF/services}; the core calls install and uninstall one at a time.
@@ -67,7 +73,11 @@ public final class DataModule implements AgentModule {
     /** Name of the query primitive, and id of its capability. */
     public static final String QUERY = "data.query";
 
+    /** How long {@code uninstall} waits for the cancel actions of the reads still running (its share of 10 s). */
+    static final long UNINSTALL_CANCEL_MS = 3000L;
+
     private volatile PrimitiveRegistry registry;
+    private volatile DataQuery queries;
     /** Replaces the providers' own {@code exposesErrorText()} answer (tests only); null in production. */
     private final Predicate<DataSourceProvider> errorTextOptIn;
 
@@ -97,7 +107,7 @@ public final class DataModule implements AgentModule {
      */
     @Override
     public void install(AgentContext ctx) throws Exception {
-        DataQuery queries = new DataQuery(ctx.spi(), ctx.log(), errorTextOptIn);
+        final DataQuery queries = new DataQuery(ctx.spi(), ctx.log(), ctx.threads(), errorTextOptIn);
         PrimitiveRegistry primitives = ctx.primitives();
         List<String> registered = new ArrayList<String>();
         try {
@@ -116,11 +126,21 @@ public final class DataModule implements AgentModule {
             throw e;
         }
         registry = primitives;
+        this.queries = queries;
     }
 
-    /** Unregisters the primitives. The module added nothing to the host, so there is nothing else to remove. */
+    /**
+     * Cancels the reads still running (their actions started as on a timeout, waited for at most
+     * {@link #UNINSTALL_CANCEL_MS}), then unregisters the primitives. The module added nothing to the host, so there is
+     * nothing else to remove.
+     */
     @Override
     public void uninstall() {
+        DataQuery running = queries;
+        queries = null;
+        if (running != null) {
+            running.cancelAll(UNINSTALL_CANCEL_MS);
+        }
         PrimitiveRegistry primitives = registry;
         registry = null;
         if (primitives != null) {
@@ -131,9 +151,10 @@ public final class DataModule implements AgentModule {
 
     static PrimitiveSpec sourcesSpec() {
         return PrimitiveSpec.builder(SOURCES)
-                .description("Lists the registered data sources: {sources:[{id, describe}]}.")
+                .description("Lists the registered data sources: {sources:[{id, describe, lane, enforcesTimeout}]}.")
                 .resultSchema(object(
-                        "sources", array(object("id", type("string"), "describe", type("string|null")))))
+                        "sources", array(object("id", type("string"), "describe", type("string|null"),
+                                "lane", type("string|null"), "enforcesTimeout", type("boolean")))))
                 .thread(ThreadPolicy.WORKER)
                 .timeoutMs(5000)
                 .build();

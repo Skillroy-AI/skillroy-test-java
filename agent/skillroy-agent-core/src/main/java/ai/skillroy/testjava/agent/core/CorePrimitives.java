@@ -87,8 +87,12 @@ final class CorePrimitives {
                 new Primitives.Body() {
                     @Override
                     public Object invoke(Invocation inv) {
-                        if (inv.args().bool("reprobe", false) && runtime.isReady()) {
-                            ctx.capabilities.probeAll();
+                        if (inv.args().bool("reprobe", false)) {
+                            // phase8-contracts.md 4.1, D521: a reprobe clears the quiescent overrun penalties.
+                            ctx.threads.clearQuiescentPenalties();
+                            if (runtime.isReady()) {
+                                ctx.capabilities.probeAll();
+                            }
                         }
                         return ctx.capabilities.toJson();
                     }

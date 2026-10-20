@@ -638,7 +638,10 @@ package ai.skillroy.testjava.scenario.resolve;
 
 /** What a model may read, and how the guard checks a statement. A pack declares one per data source. */
 public record SqlAllowList(String source /* the DataChannel source id */, SqlDialect dialect,
-                           List<AllowedTable> tables, List<String> procedures /* empty: no CALL */,
+                           List<AllowedTable> tables, List<String> procedures /* empty: no CALL. A76 (Phase 8,
+                               built 2026-10-19, ET; P8 4.5): reserved for gap 13's prepared reads, must be empty;
+                               a list that names one is refused where it is put to use (the contributor at load, the
+                               MCP server at start); Builder.procedure is @Deprecated */,
                            List<String> functions /* allowed function names beyond the built-in set; empty: none */) {
     public record AllowedTable(String name, List<AllowedColumn> columns, List<String> key /* the tie-breaker columns */,
                                String description /* for the catalogue; nullable */,
@@ -682,6 +685,14 @@ slot `ENVIRONMENT` as a pack defect with the check's message, before any model c
 half (`AllowListCheck.rowMasks`) when it is loaded (a `ContributionException`, `ENVIRONMENT`); the MCP server runs the
 whole check at its start. That a key column is non-nullable needs the source's metadata, which a data channel does not
 expose: it is not checked (the sample's `AllowListOnRealSchemaTest` checks it on the sample's schema).
+**(A75, A76; Phase 8, built 2026-10-19, ET; P8 §4.4, §4.5)** The logic and the statement text are unchanged (scenario
+D's bindings record them); a refusal over a source that reported no column, or only names of the form `c<digits>`,
+gains the hint "source X reports no column names for table T (a provider that answers by position); its
+`DataSourceProvider` should answer `columns(table)` (gap 117)", a message and never a pass (a provider that does
+answer `columns(table)` names the star statement's columns, so the check passes over such a source). A list that names
+procedures is refused before the check, at the contributor's load and at the MCP server's start: "the SQL allow-list of
+source s names procedures [p]; no data channel runs a procedure call (gap 119; the field is reserved for a prepared
+read, gap 13)".
 
 **The prompt catalogue** (`…inference.prompt.SchemaCatalogue`) is the frozen text the model sees about the schema,
 built once per bind (and cached per source and fingerprint across the scenarios of one run): per table, its name,
@@ -704,7 +715,7 @@ order:
 | # | Rule | Reason code |
 |---|---|---|
 | 1 | **The guard's own lexical pass runs first**, before the parser (the parser drops comments silently, among them MySQL's executable `/*! … */` comments, which the server runs): plain comments are stripped; a hint (`/*+`), an executable, a nested or an unterminated comment is refused; parentheses nested more than 32 deep are refused (the parser's time and stack grow with depth: 640 levels overflow a 1 MB stack within the size limit of rule 9). Then the text parses in the dialect's parser preset as exactly one statement; a parse failure, and an `UnsupportedStatement` the parser returns for what it does not know, is a violation, never a pass-through (the statement is not run unparsed) | `COMMENT`, `SIZE`, `PARSE` |
-| 2 | It is a `SELECT` (a plain select or a select with `WITH`); not `INSERT`/`UPDATE`/`DELETE`/`MERGE`, also inside a `WITH` (PostgreSQL allows `WITH d AS (DELETE … RETURNING)`), no DDL, no `INTO` of any kind (`DML`); no `CALL`/`EXEC` unless the procedure is allow-listed, then exactly `CALL p(?, …)` with parameters only, on every dialect, which the channel runs through the JDBC escape `{call …}` (T-SQL has no `CALL` of its own); no set operations (`UNION` and the like) in Phase 5; no locking of any form: table hints, isolation clauses (`WITH UR` and kin), every `FOR` clause, `LOCK IN SHARE MODE`; constructs outside the guard's grammar are refused as `UNSUPPORTED`: `CONNECT BY`, `PIVOT`, `LATERAL`, `APPLY`, `DISTINCT ON`, recursive CTEs, `GROUPING SETS`, query hints | `NOT_SELECT`, `DML`, `DDL`, `PROCEDURE`, `SET_OPERATION`, `LOCKING`, `UNSUPPORTED` |
+| 2 | It is a `SELECT` (a plain select or a select with `WITH`); not `INSERT`/`UPDATE`/`DELETE`/`MERGE`, also inside a `WITH` (PostgreSQL allows `WITH d AS (DELETE … RETURNING)`), no DDL, no `INTO` of any kind (`DML`); no `CALL`/`EXEC` unless the procedure is allow-listed, then exactly `CALL p(?, …)` with parameters only, on every dialect, which the channel runs through the JDBC escape `{call …}` (T-SQL has no `CALL` of its own) **(A76; Phase 8, built 2026-10-19, ET; P8 §4.5: specified, never built; no `CALL` or `EXEC` on any channel: the guard refuses every one as `PROCEDURE`, "no data channel runs a procedure call (gap 119)"; the guard's corpora now diverge from BS6's frozen spike on `CALL`, the spike's accept entry moved to the reject corpora)**; no set operations (`UNION` and the like) in Phase 5; no locking of any form: table hints, isolation clauses (`WITH UR` and kin), every `FOR` clause, `LOCK IN SHARE MODE`; constructs outside the guard's grammar are refused as `UNSUPPORTED`: `CONNECT BY`, `PIVOT`, `LATERAL`, `APPLY`, `DISTINCT ON`, recursive CTEs, `GROUPING SETS`, query hints | `NOT_SELECT`, `DML`, `DDL`, `PROCEDURE`, `SET_OPERATION`, `LOCKING`, `UNSUPPORTED` |
 | 3 | Every table (in `FROM`, joins, subqueries, CTEs) is on the allow-list of the one source, **by its unqualified name**: a qualified name (`schema.table`) and a database link (`table@link`; the parser's table name drops the link, so the guard checks the raw name) are refused; a quoted name must spell the declared name as the dialect folds case; aliases resolve; a CTE's name shadows nothing on the allow-list; `DUAL` is a keyless one-row table on Oracle, MySQL and MariaDB | `TABLE` |
 | 4 | Every column reference resolves (through aliases, CTE columns and derived-table columns) to an allow-listed column of its table; **the allow-list carries every column name of each allow-listed table** (`AllowedTable.otherColumns`, the names the model may not read), so that an unqualified reference in a subquery cannot bind, in the guard's view, to an allowed outer column while the database binds it to a hidden inner one: a reference that could bind to more than one table is refused unless qualified; `SELECT *` and `t.*` are refused; a `personal` column may appear in `WHERE`, `JOIN … ON`, `GROUP BY`, `HAVING` and `ORDER BY` but not in the select list, and the flag follows a value through CTEs, derived tables and scalar subqueries | `COLUMN`, `STAR`, `PERSONAL` |
 | 5 | Functions: the built-in set (`COUNT`, `SUM`, `MIN`, `MAX`, `AVG`, `COALESCE`, `NULLIF`, `CASE`, `CAST` to a scalar type only (no catalogue types such as PostgreSQL's `::regclass`), `LOWER`, `UPPER`, `TRIM`, `LENGTH`, `SUBSTRING`, `ABS`, `ROUND`, `CURRENT_DATE`, `CURRENT_TIMESTAMP`, `EXTRACT`), the dialect's default date functions (a fixed list per dialect in the guard, for example `DATEADD`/`DATEDIFF` on SQL Server and HSQLDB, `DATE_ADD`/`DATE_SUB` on MySQL and MariaDB, `ADD_DAYS`/`DAYS` on DB2, `ADD_MONTHS`/`TRUNC` on Oracle) and the allow-list's `functions`; a bare word is read as a function only from a fixed list (`SYSDATE`, `CURRENT_DATE`, …), so that a hidden column cannot be read under a function's name; window and ordered-set forms (`OVER`, `WITHIN GROUP`, `FILTER`, `KEEP`) are refused even for allowed names; anything else is refused (no `SLEEP`, no `LOAD_FILE`, no dialect side effects) | `FUNCTION` |
@@ -731,7 +742,8 @@ spike's `parser-limits.sql` with the guard's outcome for each. Per dialect, in t
 MySQL, MariaDB and PostgreSQL are served; DB2 is served, with the prompt catalogue telling the model to write
 `ADD_DAYS`/`DAYS()` or singular durations (plural durations such as `- 7 DAYS` are refused as `PARSE`); Oracle is
 served for 12c and newer (11g stays unavailable: no `FETCH FIRST`, and `ROWNUM` is refused); SQL Server is served with
-`CALL` through the JDBC escape; `GENERIC` only for a database that accepts `FETCH FIRST`. A dialect without a passing
+`CALL` through the JDBC escape **(A76; Phase 8, built 2026-10-19, ET: corrected, no `CALL` is served on any dialect,
+P8 §4.5)**; `GENERIC` only for a database that accepts `FETCH FIRST`. A dialect without a passing
 corpus is refused by the allow-list builder with "no BS6 corpus" rather than served loosely (design §3.9, ai-inference
 Risk2). Before a dialect other than HSQLDB serves a production target, its accept corpus should also run on a real
 server of that dialect (an open item of the spike; the base runs HSQLDB only).
@@ -2760,7 +2772,7 @@ Numbers are those of `../TODO.md`, "Open SPI and DSL gaps".
 
 | # | Gap | In Phase 5 |
 |---|---|---|
-| 13 | Session-scoped data reads | unchanged; a tier (b) statement is one guarded `SELECT`, and a `CALL` only to an allow-listed procedure |
+| 13 | Session-scoped data reads | unchanged; a tier (b) statement is one guarded `SELECT`, and a `CALL` only to an allow-listed procedure. **Corrected (A76; Phase 8, built 2026-10-19, ET; P8 §4.5)**: a tier (b) statement is one guarded `SELECT`; no `CALL` runs on any channel; admission of a procedure call is gap 13's "prepared read", deferred |
 | 26 | Oracle cross-check outcomes, the calibrated-oracle case | the export marks and lists observed expectations (D86); no run-time status |
 | 29 | A pack-contributed CLI subcommand | unchanged; the MCP server projects a pack's verbs, which is the need the gap recorded in another form |
 

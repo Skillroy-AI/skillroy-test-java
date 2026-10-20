@@ -67,8 +67,10 @@ import net.sf.jsqlparser.util.deparser.StatementDeParser;
  *
  * <p>Served dialects ({@link #served}): the eight of {@code SqlDialect}, each with a passing BS6 corpus; a dialect
  * without one is refused with "no BS6 corpus" rather than served loosely. DB2: plural labeled durations
- * ({@code - 7 DAYS}) do not parse ({@code PARSE}); Oracle: 12c or newer ({@code FETCH FIRST}); SQL Server: {@code CALL}
- * through the JDBC escape; GENERIC: only a database that accepts {@code FETCH FIRST n ROWS ONLY}.
+ * ({@code - 7 DAYS}) do not parse ({@code PARSE}); Oracle: 12c or newer ({@code FETCH FIRST}); GENERIC: only a
+ * database that accepts {@code FETCH FIRST n ROWS ONLY}. A {@code CALL} or {@code EXEC} is refused in every dialect
+ * ({@code PROCEDURE}, "no data channel runs a procedure call (gap 119)"; phase8-contracts.md 4.5): the procedure call
+ * BS6 admitted was never run by either data channel, and its corpora diverge from BS6's frozen spike on that point.
  *
  * <p>Thread-safe: {@link #guard} may be called from several threads. One parser thread per guard (a daemon, the
  * parser's time-out needs it), stopped by {@link #close()}.
@@ -77,6 +79,8 @@ public final class SqlGuard implements AutoCloseable {
 
     /** The most rows a guarded statement returns (rule 8). */
     public static final int ROW_CAP = 200;
+    /** The fragment of the {@code PROCEDURE} refusal of every {@code CALL} and {@code EXEC} (P8 4.5, gap 119). */
+    public static final String PROCEDURE_RETIRED = "no data channel runs a procedure call (gap 119)";
     /** The longest statement text the guard reads (rule 9). */
     public static final int MAX_TEXT = 4000;
 
@@ -248,47 +252,14 @@ public final class SqlGuard implements AutoCloseable {
         return new GuardViolation(Reason.NOT_SELECT, word + " is not a SELECT");
     }
 
-    private GuardedStatement call(Execute ex) throws GuardViolation {
-        String name = ex.getName();
-        if (ex.getExecType() != Execute.ExecType.CALL) {
-            throw new GuardViolation(Reason.PROCEDURE, ex.getExecType() + " " + name
-                    + " (only CALL of an allow-listed procedure)");
-        }
-        boolean listed = false;
-        for (String p : allow.procedures()) {
-            listed |= p.equalsIgnoreCase(unquoteParts(name));
-        }
-        if (!listed) {
-            throw new GuardViolation(Reason.PROCEDURE, name + " is not an allow-listed procedure");
-        }
-        int parameters = 0;
-        ExpressionList<?> args = ex.getExprList();
-        if (args != null) {
-            for (Expression a : args) {
-                if (!(a instanceof JdbcParameter jp) || jp.isUseFixedIndex()) {
-                    throw new GuardViolation(Reason.PROCEDURE, "argument " + a + " of " + name + " is not ?");
-                }
-                parameters++;
-            }
-        }
-        String sql = outputFilter.apply(deparse(ex));
-        try {
-            if (!SqlText.strip(sql, profile).equals(sql) || !deparse(parseOne(sql)).equals(sql)) {
-                throw new GuardViolation(Reason.REWRITE, "the deparsed CALL does not read back as itself");
-            }
-        } catch (GuardViolation v) {
-            throw v.reason() == Reason.REWRITE ? v : new GuardViolation(Reason.REWRITE, "the deparsed CALL fails "
-                    + v.reason() + ": " + v.fragment());
-        }
-        return new GuardedStatement(sql, parameters, List.of(), List.of(), List.of());
-    }
-
-    private static String unquoteParts(String dotted) {
-        List<String> parts = new ArrayList<>();
-        for (String part : dotted.split("\\.")) {
-            parts.add(DialectProfile.unquote(part.trim()));
-        }
-        return String.join(".", parts);
+    /**
+     * Every {@code CALL} and {@code EXEC} is refused (phase8-contracts.md 4.5, gap 119, D533): no data channel runs a
+     * procedure call (both refuse it at {@code StatementGuard} rule 1), so the guard says why where a model or an MCP
+     * client hears it, instead of the channel's {@code GUARD} failure later. {@code SqlAllowList.procedures} is
+     * reserved for gap 13's prepared reads and must be empty.
+     */
+    private static GuardedStatement call(Execute ex) throws GuardViolation {
+        throw new GuardViolation(Reason.PROCEDURE, PROCEDURE_RETIRED);
     }
 
     // ---------------------------------------------------------------------------------------------- the select

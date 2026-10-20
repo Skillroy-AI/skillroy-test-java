@@ -798,6 +798,21 @@ terminal value carries the outcome, so a caller that lost the race reads the res
 `quiescentBudgetMs` is written when positive and `lane` when non-null, both take part in `equals`, and both are read with
 the descriptor's usual optional readers (a value of the wrong type is a `JsonException`, as for `script`).
 
+**As built (Phase 8, ET, the body).** The gates, the wrapper and the penalties live in `CoreThreadBroker`
+(`quiescentGate`, `runQuiescent`, `QuiescentTask`): the dispatcher asks `quiescentGate(primitive, budget)` and runs
+`runQuiescent(primitive, task, budget, timeout)`; `callQuiescent` and `call(APP_QUIESCENT, …)` (budget 50) pass the same
+gates without the penalty, which is per primitive. The wrapper marks its thread as running a quiescent task, so a nested
+`call`, `callQuiescent` or `callOnLane` from it is `FORBIDDEN_THREAD` even when the provider does not forbid that thread;
+it measures `ranMs` itself, logs the first overrun of each primitive, records `lastOverrun {primitive, budgetMs, ranMs}`
+(when only a module's own `await` overran, `agent.info` shows the point's `lastOverrun` with `primitive: null`) and
+penalises above twice the budget; `penalised` lists the primitives in name order. `agent.capabilities {reprobe: true}`
+clears the penalties whether or not the target is ready (the probes still run only when it is; the one hunk in
+`CorePrimitives`, in `agent.capabilities`; `agent.info.threads` comes from `AgentRuntime.threadsJson`, so no hunk there).
+Besides the core's close of the first provider's point on close and `agent.disable`, `ModuleContext.closeQuiescentPoints()`
+closes the point of every provider a module registered before that module's `uninstall` runs, after a failed install
+too, and `rollback()` does it again (idempotent). The core test fixture's provider offers a point (allowance 100 ms,
+capacity 4) only with `coretest.quiescent=true`, driven every 2 ms by a `coretest-forbidden-engine` thread.
+
 ### 4.2 Named lanes: `ThreadBroker.declareLane`, `ThreadPolicy.LANE`, `DataSourceProvider.lane()` (gap 9; D524 to D528)
 
 **Decision (D525).** A **lane** is a named, bounded group of agent-owned daemon threads with a bounded FIFO, declared
@@ -863,6 +878,21 @@ declared; `declareLane` answers `IllegalArgumentException` for a name, thread co
 keeps `IllegalStateException` for the ninth lane, a duplicate and a declaration while the agent closes.
 `ThreadBroker.call(LANE, …)` is refused as `post(LANE, …)` is (it names no lane; `callOnLane` does). The core test
 fixture's `test.where.lane` names the lane `coretest.where`.
+
+**As built (Phase 8, ET, the body).** `Lanes` (core) holds the registry. A lane is a `ThreadPoolExecutor` whose core
+size is its bound with `allowCoreThreadTimeOut(true)` and 30 s keep-alive (a pool of core size 0, as
+`DaemonThreads.boundedPool` builds, would start a second thread only once its queue is full), the agent's
+`DaemonThreads` factory (`skillroy-lane-<name>-<n>`, the agent's group, the host's loader), an `ArrayBlockingQueue(queue)`
+or a `SynchronousQueue` for 0, and the abort policy. A task is withdrawn by a compare-and-set from its queued state and
+removed from the queue, so it runs exactly once or never; a running one is interrupted under the task's own monitor
+(the interrupt flag is cleared when the task ends, so it never reaches the lane's next task) and counted abandoned until
+it ends ("the abandoned task on lane n ended after m ms"); "lane stuck" answers while the abandoned tasks number at
+least the lane's threads, with the oldest one's `runningForMs`. A retired name is remembered (the newest 64) so that a
+call names it `"lane closed"` rather than `"unknown lane"`; declaring it again forgets that. The core's own
+`declareLane` gives the owner `core`; a module's scoped broker (`ModuleContext.threads()`, the same object for the
+module's life) gives its module id and retires its lanes in `rollback()`. On close the core refuses declarations from the
+start of the close and retires every lane after the modules' `uninstall`, waiting at most 500 ms per lane for its
+threads. `BUSY "lane full"` carries `threads` and `queue` as numbers.
 
 ### 4.3 Query cancellation: `QueryControl`, `enforcesTimeout()` (gap 11; D529, D530)
 
@@ -937,6 +967,21 @@ to `open()` and answers `CAPABILITY_UNAVAILABLE`); the guide says so and names t
 unsupported).
 
 **As built (Phase 8, ET).** `QueryControl` carries `MAX_ACTIONS` (4) and `ACTION_TIMEOUT_MS` (2000) as constants.
+
+**As built (Phase 8, ET, the body).** The read is one task (`DataQuery.Read`) on the source's lane or a nested
+`WORKER` call, bounded by the budget (`remainingMs - 250`, at least 1), which is also the `timeoutMs` the provider's
+`query()` receives (a 0.1.0 test that pinned the call's whole remaining time now sees the budget); it runs the
+provider's form, `columns(table)` and the conversion of the rows (so a large object is read on the read's own thread),
+and maps every failure but an interrupt as before Phase 8; the masks run on the dispatching worker. A `TIMEOUT` from the
+hand-off counts as the module's expiry only while the read has not ended (a provider's own `TIMEOUT` passes through).
+The cancel batch is started with `ThreadBroker.post(WORKER, …)`, not `call` (a `call` would hold the dispatching worker
+for the batch, or, bounded to the answer's wait, interrupt the batch and with it the action it waits on); each action
+runs through `call(WORKER, action, 2000)`. The answer waits at most `min(200 ms, the dispatcher's remaining time - 50 ms)`,
+at least 1 ms. `cancelled` is true once an action returned without throwing, or the JDBC action found the statement
+open and its `cancel()` returned; `cancelPending` while an action of the batch had not ended at the answer. The fifth
+registration (closed ones included) is refused. `DataModule.uninstall` cancels the live reads and waits for their batches
+at most 3,000 ms in all (`UNINSTALL_CANCEL_MS`) before it unregisters the primitives. The `TIMEOUT` message is
+"data.query on source 's' timed out after t ms".
 
 ### 4.4 Column names for a positional source, and `columns(table)` (gaps 12, 117; D531, D532)
 
@@ -1027,6 +1072,14 @@ only after `AS` (`x [y]` is also PostgreSQL's subscript). A string literal is ne
 `WHERE`, `ORDER`, `FETCH`, `LIMIT` or `OFFSET` holds a set operation, `JOIN`, `GROUP`, `HAVING`, `WINDOW`, `INTO`, `FOR`
 or a row-pattern or pivot word at the top level; `MAX_ITEMS` (1000) and `MAX_DEPTH` (32) are public constants.
 
+**As built (Phase 8, ET, the body).** `Table.fromQueryResult(result, maxRows, derivedLabels, starColumns, mismatch)`
+(the two-argument form kept): the select list is the candidate when it could be read, else, when the provider named no
+column, the `columns(table)` list; a candidate whose size differs from a non-zero width taken from the names or the rows
+is not used, and neither is one whose size differs from the final width (types alone can set it); each such case writes
+one `data: source 's': … names n column(s), the result has m; not used for naming` line. `columns(table)` is asked on the
+read's lane or worker task only for the star form whose result named no column; a null, empty or partly unnamed list,
+and a throw (logged by class), count as none.
+
 ### 4.5 Procedures retired honestly (gap 119; D533)
 
 **Decision (D533).** No data channel runs a procedure call, and the contracts stop saying one does. As built:
@@ -1060,6 +1113,16 @@ the channel runs through the JDBC escape `{call …}`" was never built. Phase 8:
    flag is a hint on two drivers, a rollback undoes neither an autonomous transaction nor an outside effect, and a lone
    `CALL` serves none of the second domain's cases (row 13: its procedures fill session tables a later `SELECT` reads).
    Nothing in a target JVM changes; `replay` is unaffected; the threat model's "SELECT only" row becomes literally true.
+
+**As built (Phase 8, ET).** `SqlGuard.call` throws `PROCEDURE` with the fragment `SqlGuard.PROCEDURE_RETIRED` for every
+`Execute` (`CALL` and T-SQL `EXEC`/`EXECUTE`), whatever the list names. The refusal text is one helper,
+`AllowListCheck.proceduresRefusal(list)`, used by `InferenceContributor.resolvers` (a `ContributionException`, before
+the dialect check) and by `SkillroyMcpServer.checkAllowLists`, which applies it to every list before anything else,
+also when the target offers no `data.query` (prefixed "pack <id>: "). The eight accept corpora's `CALL` entries are the
+reject corpora's last entry, "PROCEDURE CALL of a procedure: no data channel runs a procedure call (gap 119; BS6
+admitted this one)"; `spikes/BS6/RESULT.md` gains the successor note. The regenerated inference fixture is
+`21b501e3114ec44612ff43c702a7d0873ae7421bc661bd80f426a95060654dbf.json` (the old file deleted; it differs only by the
+fingerprint and the catalogue's procedures line).
 
 ### 4.6 Thread rules and bounds (this section's rows for §2.4)
 
@@ -3258,6 +3321,18 @@ class in `LendingEndToEndIT` (§13.2). Versions and every regeneration are step 
   (null when disabled).
 - Nothing else: no main-frame change, no table or seed change, no page.
 
+**As built (Phase 8, ET).** `Engine.idleTickMillis(long)` sets the tick before `start()` (`LendingApp.launch` passes
+`LendingOptions.idleTickMillis()`; a negative value or a malformed property is an `IllegalArgumentException`).
+`IdleView.step()` is the sub-step's name (`NONE`, `QUANTITY`, `SUPERVISOR_CODE`, `SUPERVISOR_PASSWORD`),
+`pendingQty()` a `BigDecimal` or null, `idleLockRemainingMs()` a `Long`, null when no idle lock applies. After `Key.QTY`
+then `Entry 3` the sub-step has ended: the view shows `pendingQty` 3 and step `NONE`; after `Key.QTY` alone it shows
+`QUANTITY` (§13.2 item 11 checks both). Because the engine now reads its listener list while it waits (for `idle`),
+`addListener`, `removeListener`, `listenerCount` and the engine's snapshot of the list hold the list's monitor; the rule
+"add only while the engine waits for input" stands, and no callback runs under the monitor. `readRows` asks the driver
+for `maxRows + 1` rows and returns at most `maxRows`; `ReadHandle` is `LendingDb.ReadHandle`, whose `cancel()` answers
+whether an open statement was cancelled; `columnsOf("schema.table")` names the schema, a bare name `PUBLIC`, compared
+without regard to case.
+
 ### 12.2 The agent module (`skillroy-sample-lending-agent`, Java 8; version `0.2.0` → `0.3.0` in step R)
 
 | Addition | Section | What |
@@ -3284,6 +3359,15 @@ conflicts to the values above at merge; no branch carries the test red. The modu
 (`lending.engine.view`, `lending.signOn`, `lending.scanChecked`, `lending.scanner.physical`), all in the five goldens;
 `LendingPrimitives.NAMES` grows by three. `LendingModule.VERSION`'s Javadoc keeps its rule ("whenever the module's
 primitives or SPIs change"); the one bump is 0.3.0.
+
+**As built (Phase 8, ET).** `LendingRowsSource` names its lane only after the module's `declareLane` succeeded (an agent
+without lanes, a test broker for example, leaves `lane()` null and the reads on a worker; the module logs it). Its
+cancel action wraps a `SQLException` from `ReadHandle.cancel()` in an `IllegalStateException` that carries the
+exception's class only. `EngineEvents.idle` finds the module's point once through `ctx.spi()` (the `LendingWorker` among
+the registered providers), so `ListenerSlot` is unchanged. `lending.engine.view`'s capability probe answers the
+strategy `quiescent point` (in the goldens from step R). `lending.engine.view`'s body reads only
+`Engine.idleView()` and never touches the listener slot (it runs inside an engine callback, where listeners may not be
+added).
 
 ### 12.3 The pack (`skillroy-sample-lending-pack`; version `0.6.0` → `0.7.0` in step R), the overlay, the web host
 
@@ -3546,6 +3630,19 @@ named per item host the agent-level half of a proof.
    checks both held (fails today with "returned 0 columns").
 14. **Goldens** (ET). After step R the five goldens hold `lending.engine.view` `OK` in every leg; nothing else moved for ET.
 
+   **As built (Phase 8, ET).** Items 11 to 13 are `LoadModeChecks` slots 158, 159 and 171. The runaway statement is a
+   seven-way cross join over the desk's `item` table (the desk has 13 items, so `TestDb`'s four-way join would end in
+   milliseconds; 13^7 combinations end only when stopped). Item 11 also reads the view after `Key.QTY` alone (step
+   `QUANTITY`), so `ran` grows by three; the desk is left signed off by `Key.CANCEL` and `Key.SIGN_OFF`. Item 12 starts
+   the report on a test thread and asks `lending.state`, `app.state` and `data.query` on `lending` once
+   `agent.info.threads.lanes["lending.reads"].active` is 1; the measured times go to `timings.txt`
+   (`laneTimeoutMs`, `othersMs`). The JDBC half on `lending` runs with 1000 ms, not 1500: the module waits the call's
+   time less 250 ms and the JDBC read's query timeout is that budget in whole seconds (at least 1), so with 1500 ms
+   HSQLDB's own 1 s timeout ends the statement first (`INTERNAL_ERROR`, SQL state 40502) and nothing is cancelled; with
+   1000 ms the module cancels at 750 ms. During item 11's prompt the desk's state is still `IDLE` (the item is added
+   once the question is answered). Item 13's allow-list check and the positional scenario's run use the pack's row
+   masks and the seed A credentials.
+
 15. **The staff name in an event reaches no reader** (EW). (`LoadModeChecks`, new check at `@Order(172)`, every load mode of
    `LendingEndToEndIT` (JavaAgent, JavaToolOptions, Attach, Embedded, JavaAgentHooks through `HookChecks`'s inheritance),
    both target Javas): `agent.info` → `events.maskPolicies >= 1`; sign on through raw `lending.input` calls (the
@@ -3803,11 +3900,11 @@ per document; where two packages mark one section, both rows stand and the build
 | §6 "Modal blocking" | a new paragraph "Input vetoes" before it: every route, `force` never skips, the in-task re-ask, the pointer per event (A68) (EA) |
 | §6 A27 | a collapsed in-window dialog root blocks nothing and is logged once per root class (A69; the `DialogLocator` Javadoc says the same where the layer author reads it); `swing.dismiss {button}` presses an AWT `Button` (A71) (EA) |
 | §9.1 | `lending.tools` (the tools window); §9.2 the module's fourteenth SPI (step R writes the version) (EA) |
-| §4 `skillroy-agent-api` (the `ThreadPolicy`/`ThreadBroker`/`ThreadPolicyProvider` block `P1:856-938`; the SPI table; `DataSourceProvider`/`QueryResult` `P1:1005-1020`) | `APP_QUIESCENT`, `LANE`; `QuiescentPoint`, `Lane`, `QueryControl`; `ThreadPolicyProvider.quiescentPoint`; `ThreadBroker.callQuiescent`, `declareLane`, `callOnLane`, the refused `post`s; `DataSourceProvider.query/5`, `enforcesTimeout`, `lane`, `columns`; the `QueryResult` names sentence (A72 to A75); the "never on a forbidden thread" sentence with its one exemption (ET) |
-| §5 dispatch, S30, `agent.info` (`P1:1355-1412`, `:1482`) | the `APP_QUIESCENT` gates, `LANE` dispatch, the S30 policy list, `threads.quiescent` and `threads.lanes` (ET) |
-| §6 `skillroy-agent-data` (`P1:1704-1727`, `:1764-1765`) | the hand-off and the module's own `TIMEOUT`, the per-source gate, `data.sources` keys, the naming and width rule in place of "reported as `c1..cn`", `columns(table)`, `maxRows: 0` true for the provider form (ET) |
-| §9.1 the desk (`P1:2792-2793`) | the engine polls with the idle tick; `EngineListener.idle`; `lending.idleTickMillis`; `IdleView`, `readRows`, `columnsOf` (ET) |
-| §9.2 the module (`P1:2936-2947`, `:3012`) | fourteen registrations (`lending-report`), the point, `lending.engine.view`, the lane; version 0.3.0 (step R) (ET) |
+| §4 `skillroy-agent-api` (the `ThreadPolicy`/`ThreadBroker`/`ThreadPolicyProvider` block `P1:856-938`; the SPI table; `DataSourceProvider`/`QueryResult` `P1:1005-1020`) | `APP_QUIESCENT`, `LANE`; `QuiescentPoint`, `Lane`, `QueryControl`; `ThreadPolicyProvider.quiescentPoint`; `ThreadBroker.callQuiescent`, `declareLane`, `callOnLane`, the refused `post`s; `DataSourceProvider.query/5`, `enforcesTimeout`, `lane`, `columns`; the `QueryResult` names sentence (A72 to A75); the "never on a forbidden thread" sentence with its one exemption (ET; built 2026-10-19) |
+| §5 dispatch, S30, `agent.info` (`P1:1355-1412`, `:1482`) | the `APP_QUIESCENT` gates, `LANE` dispatch, the S30 policy list, `threads.quiescent` and `threads.lanes` (ET; built 2026-10-19) |
+| §6 `skillroy-agent-data` (`P1:1704-1727`, `:1764-1765`) | the hand-off and the module's own `TIMEOUT`, the per-source gate, `data.sources` keys, the naming and width rule in place of "reported as `c1..cn`", `columns(table)`, `maxRows: 0` true for the provider form (ET; built 2026-10-19) |
+| §9.1 the desk (`P1:2792-2793`) | the engine polls with the idle tick; `EngineListener.idle`; `lending.idleTickMillis`; `IdleView`, `readRows`, `columnsOf` (ET; built 2026-10-19) |
+| §9.2 the module (`P1:2936-2947`, `:3012`) | fourteen registrations (`lending-report`), the point, `lending.engine.view`, the lane; version 0.3.0 (step R) (ET; built 2026-10-19) |
 | §4 `skillroy-agent-api` (the SPI table, `MaskPolicy`'s block, `:1034-1039`) | the events route and the thread rule (A77); `BrowserMask` in the web SPI (A79) (EW) |
 | §5 dispatch, events and the ring (`:1385`, `:1414-1470`, A34's events bullet `:1458-1461`) | the ring pass at publish (A78): A34's "as published" becomes "as published, after the key rule and the registered policies, never by value"; `agent.info.events` (EW) |
 | §2.4 options | `eventRing`/`eventRingChars` unchanged; a note that the bound runs after the pass (EW) |
@@ -3842,8 +3939,8 @@ per document; where two packages mark one section, both rows stand and the build
 
 | Section | Change |
 |---|---|
-| §2.2 `ReadOnlyJdbc` row (`P2:154`) | the statement-sink overload (ET) |
-| §7.2 rows Execution and Timeout (`P2:1194-1196`), §7.4 closing sentence (`P2:1314-1316`), §15 rows 9-12 (`P2:2827-2830`) | the agent channel's `TIMEOUT` data; the zero-row sentence corrected ("a positional source can be checked, its width taken from the statement when no row comes back"); rows 9-12 "taken by Phase 8 (P8 §4)" (ET) |
+| §2.2 `ReadOnlyJdbc` row (`P2:154`) | the statement-sink overload (ET; built 2026-10-19) |
+| §7.2 rows Execution and Timeout (`P2:1194-1196`), §7.4 closing sentence (`P2:1314-1316`), §15 rows 9-12 (`P2:2827-2830`) | the agent channel's `TIMEOUT` data; the zero-row sentence corrected ("a positional source can be checked, its width taken from the statement when no row comes back"); rows 9-12 "taken by Phase 8 (P8 §4)" (ET; built 2026-10-19) |
 | §3.4 captured slots, §7.3 controller masks, §11.4 never written (`:1912`) | a slot captures the masked value; §11.4 gains "a personal value a registered `MaskPolicy` masks, in any event" and the `event:` route in the masks' list (EW) |
 | §13.2 the sample's `PasswordMask` | the second rule (EW) |
 | §3.4, §6.1 `PlannedCall.capture` | the three new components beside it; §13.2/§13.3 `interactiveSignOn` unchanged for `signOn`; the deferred rows 18, 19, 22 closed (P2 §15) (ES) |
@@ -3860,7 +3957,7 @@ per document; where two packages mark one section, both rows stand and the build
 
 | Section | Change |
 |---|---|
-| §12 row 12 (`P3:979`) | taken (ET) |
+| §12 row 12 (`P3:979`) | taken (ET; built 2026-10-19) |
 | §3.4 `devices` root | `rungs` mirrored (ES) |
 
 **`phase4-contracts.md` (P4)**
@@ -3880,7 +3977,7 @@ per document; where two packages mark one section, both rows stand and the build
 
 | Section | Change |
 |---|---|
-| §5.2 record comment (`P5:640-641`) and the D100 paragraph (`P5:669-686`); §5.3 rule 2 and the SQL Server sentence (`P5:707, 733-734`); §16.2 row 13 (`P5:2763`) | `procedures` reserved and required empty; the hint; "no `CALL` or `EXEC` on any channel (gap 119, P8 §4.5)"; the BS6 divergence; row 13 corrected (ET) |
+| §5.2 record comment (`P5:640-641`) and the D100 paragraph (`P5:669-686`); §5.3 rule 2 and the SQL Server sentence (`P5:707, 733-734`); §16.2 row 13 (`P5:2763`) | `procedures` reserved and required empty; the hint; "no `CALL` or `EXEC` on any channel (gap 119, P8 §4.5)"; the BS6 divergence; row 13 corrected (ET; built 2026-10-19) |
 | §9.4 resources (`:1503-1523`) | `events/recent` is masked by the agent too (EW) |
 | §12.1-12.3 sessions, journal, export | `StepOutcome.warnings`; a raw call with modifiers refused; journal call keys; the model view's `warnings` only when non-empty; §13.2 plan 7 (EX) (ES) |
 | §12.2 (checks on secrets) | the captured-facts rule under `expectationsOnMaskedValues` (P8 §8.7) (EX) |
@@ -3933,7 +4030,7 @@ per document; where two packages mark one section, both rows stand and the build
 | §2.6 SPI table | `InputVeto` row (EA) |
 | §3.7 | the ladder's ACTION row (AWT controls), a paragraph "Input vetoes", "Locators" (on screen), the routing sentence of the pointer (innermost heavyweight) (EA) |
 | §3.10 | the routing sentence (EA) |
-| §2.6 SPI table (`ThreadPolicyProvider`, `DataSourceProvider` rows), §3.9 (`design:658-663`) | the new members; "SQL `SELECT` only; a procedure call is refused (P8 §4.5)"; lanes and the quiescent point in one sentence each (ET) |
+| §2.6 SPI table (`ThreadPolicyProvider`, `DataSourceProvider` rows), §3.9 (`design:658-663`) | the new members; "SQL `SELECT` only; a procedure call is refused (P8 §4.5)"; lanes and the quiescent point in one sentence each (ET; built 2026-10-19) |
 | §2.5 events, §2.6 SPI table, §3.8 attach block and version-pin bullet (`:599-606`), §1.3 table (`:117`), §6 provisioning (`:942`) | the ring pass; `BrowserMask`; the gate as built with the floor; "a pack pins older only when a spike shows the newest cannot attach, and then reads §10.3's floor" (EW) |
 | §2.6 "Hook policy" | the bullet "third-party classes are off by default" gains: ownership by code source (`target.codeSource`, qualified `packages`), and a per-catalogue deny honoured by both modules (EH) |
 | §2.5 | acknowledgements correlated by `inputId`; the warning channel in the step protocol (ES) |
@@ -3953,7 +4050,7 @@ per document; where two packages mark one section, both rows stand and the build
 | §6.2 | row `InputVeto` ("every control whose action ends the JVM or cannot be undone; EDT; fast, lock-free; `LendingInputVeto`; P8 §3.2") (EA) |
 | §6.7 | the veto (route `ANY` rule; "veto the window or the bound control"; "a veto on a window or panel does not cover `web.*` input into a browser inside it; a layer that must keep page input out vetoes nothing more for that, gap 126"; "a veto that depends on application state and refuses inside the posted task leaves the step `fired: true`: the step's `sync` or an expectation on the effect fails it"), the visible-area rule, heavyweight containers, AWT controls on ACTION (EA) |
 | §7 rule 4 | "register an `InputVeto` for every such control; key bindings are not followed: veto the window or the bound control; a window veto does not cover `web.*` input into a browser inside it (gap 126)" (EA) |
-| §6.2 (`ThreadPolicyProvider`, `DataSourceProvider` rows), §6.3, §6.4, §6.9, §6.11 (parity), §11.3, §15.2 (rows 9-11, 13 kept) | the idle-point runner and its thread rules; lanes and "never `APP` for a slow read" with the `data.query`-on-`WORKER` correction; cancellation, `enforcesTimeout`, labels, `columns(table)`, the version-skew sentence; "procedures are not served"; the rows of 9, 10, 11 removed (ET) |
+| §6.2 (`ThreadPolicyProvider`, `DataSourceProvider` rows), §6.3, §6.4, §6.9, §6.11 (parity), §11.3, §15.2 (rows 9-11, 13 kept) | the idle-point runner and its thread rules; lanes and "never `APP` for a slow read" with the `data.query`-on-`WORKER` correction; cancellation, `enforcesTimeout`, labels, `columns(table)`, the version-skew sentence; "procedures are not served"; the rows of 9, 10, 11 removed (ET; built 2026-10-19) |
 | §6.2 SPI map, §6.8 browsers, §6.11 masking, §6.13 events, §7 rule 9, §10.3, §10.4, §15.2 | the rows and sentences of §5.1-§5.3; the `sourceId.startsWith("event:")` migration note; the view-less rule and the release form; the floor; gaps 109, 110, 121 removed from §15.2 (EW) |
 | §6.2 | a row `ClassDeny` (what: refuse a class by name before any bytecode change; when: a hot path, a licensed or timing-sensitive class; thread: agent workers, cheap, never blocks; sample: `LendingClassDeny` behind an option; contract: P8 §6.5) (EH) |
 | §9.2 | the `packages` map form and `target.codeSource` with the name forms of §6.2's table (the IT copy, a versioned jar, a class directory, a nested jar) and the anchored match; `deny:`; "bump `version` on every change" unchanged (EH) |
@@ -3989,7 +4086,7 @@ only its "(Phase 8, built …)" marks and the delta review's findings)
 | Section | Change | Written into |
 |---|---|---|
 | §5 | a vetoed component is never acted on, for any origin, on any route, `force` included (the recorder and the raw pointer refuse it as they refuse a masked one, the text snapshot flags it); §6 a row "the input veto" (the layer's code decides; the agent fails closed; twelve of the thirteen routes resolve a target); §8 the AWT peers on Windows/macOS; §7 a window veto not covering `web.*` input into a browser inside it (EA) | §5's Phase 8 paragraph, §6's "the input veto" row, §7's and §8's Phase 8 bullets |
-| rows "the agent against the host application" and "the data channels" (`:211, :217`) | "a thread the application forbids is never used, **except a task the core submits through a `QuiescentPoint` at the point the provider itself runs it, admitted by budget and never interrupted**, a nested call refused"; "SELECT only (a procedure call is refused on every path, P8 §4.5); provider reads on bounded lanes, cancellable, the cancel actions on an agent task of their own" (ET) | §6's two rows and the "lanes and cancellation" row |
+| rows "the agent against the host application" and "the data channels" (`:211, :217`) | "a thread the application forbids is never used, **except a task the core submits through a `QuiescentPoint` at the point the provider itself runs it, admitted by budget and never interrupted**, a nested call refused"; "SELECT only (a procedure call is refused on every path, P8 §4.5); provider reads on bounded lanes, cancellable, the cancel actions on an agent task of their own" (ET; built 2026-10-19) | §6's two rows and the "lanes and cancellation" row |
 | §6 row "the pack ↔ the base" (`:222`), the web row (`:218`), §7 (`:251-258`) | event payloads bounded and masked by the base from each policy's registration on; a view-less browser masked by default, its action answers without page data; the CDP path's own events as a residual (EW) | §6's "the pack ↔ the base" row (the event sentence merged into it) and "a browser without a view" row, §7's Phase 8 bullet |
 | §2 actor A13 (`:49`) | "(Phase 8) the new records `warning`, `rung`, `rungs`, `capture {source: facts}`, `capabilities.pack` (with `error`), `preflight.cached`, the `hooks` record's `deny` keys and `web.path`'s `connectOptions`: patterns, ids, versions and masked values, never a directory or a credential" (EW) | §2, A13's row |
 | §6 | the row "the hook engine against the application's bytecode" gains "ownership by code source; a per-catalogue deny by name, honoured by Byteman before it loads, add-only per agent instance"; the Byteman row gains the deny (EH) | §6's two rows |

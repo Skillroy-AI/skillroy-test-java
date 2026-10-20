@@ -163,3 +163,6 @@ SELECT l.id FROM loan l TABLESAMPLE SYSTEM (10)
 
 @@ FUNCTION a window function
 SELECT l.id, rank() OVER (PARTITION BY l.staff_code ORDER BY l.due) AS r FROM loan l
+
+@@ PROCEDURE CALL of a procedure: no data channel runs a procedure call (gap 119; BS6 admitted this one)
+CALL open_loan_count(?)

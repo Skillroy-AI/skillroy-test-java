@@ -240,6 +240,128 @@ public final class LendingDb implements AutoCloseable {
         return connect(url(), adminUser, adminPassword);
     }
 
+    /**
+     * The desk's report reader, which answers by position (phase8-contracts.md 12.1): runs one read-only statement on
+     * a connection of its own ({@link #openReadOnlyConnection()}) with a query timeout and returns at most
+     * {@code maxRows} rows as arrays of cell values, with no column names. While it runs, {@link ReadHandle#cancel()}
+     * from another thread cancels the statement (the call then ends with the driver's {@code SQLException}); the
+     * connection is closed on every path. Any thread.
+     *
+     * @param sql one SELECT or WITH statement (the reader runs what it is given; its callers check statements)
+     * @param params positional parameters, bound with {@code setObject}
+     * @param maxRows the most rows to return, at least 0
+     * @param timeoutSeconds the statement's query timeout, raised to 1 if lower
+     * @param handle where the open statement is registered for {@link ReadHandle#cancel()}; may be null
+     */
+    public List<Object[]> readRows(String sql, List<?> params, int maxRows, int timeoutSeconds, ReadHandle handle)
+            throws SQLException {
+        if (maxRows < 0) {
+            throw new IllegalArgumentException("maxRows must not be negative");
+        }
+        List<Object[]> rows = new ArrayList<Object[]>();
+        try (Connection c = openReadOnlyConnection();
+             PreparedStatement ps = c.prepareStatement(sql, ResultSet.TYPE_FORWARD_ONLY, ResultSet.CONCUR_READ_ONLY)) {
+            if (handle != null) {
+                handle.attach(ps);
+            }
+            try {
+                ps.setQueryTimeout(Math.max(1, timeoutSeconds));
+                ps.setMaxRows(maxRows == Integer.MAX_VALUE ? 0 : maxRows + 1);
+                for (int i = 0; params != null && i < params.size(); i++) {
+                    ps.setObject(i + 1, params.get(i));
+                }
+                try (ResultSet rs = ps.executeQuery()) {
+                    int width = rs.getMetaData().getColumnCount();
+                    while (rows.size() < maxRows && rs.next()) {
+                        Object[] row = new Object[width];
+                        for (int i = 0; i < width; i++) {
+                            row[i] = rs.getObject(i + 1);
+                        }
+                        rows.add(row);
+                    }
+                }
+            } finally {
+                if (handle != null) {
+                    handle.detach(ps);
+                }
+            }
+        }
+        return rows;
+    }
+
+    /**
+     * The column names of {@code table} in their declared order, from {@code INFORMATION_SCHEMA.COLUMNS} by
+     * {@code ORDINAL_POSITION} (phase8-contracts.md 12.1), or null for a table the database does not have. The name
+     * is compared as HSQLDB folds unquoted names (without regard to case); a {@code schema.table} name names its
+     * schema, a bare name the schema {@code PUBLIC}.
+     */
+    public List<String> columnsOf(String table) throws SQLException {
+        if (table == null || table.trim().isEmpty()) {
+            return null;
+        }
+        String schema = "PUBLIC";
+        String name = table.trim();
+        int dot = name.lastIndexOf('.');
+        if (dot > 0) {
+            schema = name.substring(0, dot);
+            name = name.substring(dot + 1);
+        }
+        List<String> columns = new ArrayList<String>();
+        try (Connection c = openReadOnlyConnection();
+             PreparedStatement ps = c.prepareStatement("SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS"
+                 + " WHERE UPPER(TABLE_SCHEMA) = UPPER(?) AND UPPER(TABLE_NAME) = UPPER(?)"
+                 + " ORDER BY ORDINAL_POSITION")) {
+            ps.setString(1, schema);
+            ps.setString(2, name);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    columns.add(rs.getString(1));
+                }
+            }
+        }
+        return columns.isEmpty() ? null : columns;
+    }
+
+    /**
+     * What a caller of {@link #readRows} holds to cancel the read while its statement runs (phase8-contracts.md
+     * 12.1): {@link #cancel()} calls {@code Statement.cancel()} while, and only while, the statement is open; once the
+     * read has ended it does nothing. Thread-safe.
+     */
+    public static final class ReadHandle {
+        private Statement open;
+        private boolean cancelled;
+
+        synchronized void attach(Statement statement) {
+            open = statement;
+        }
+
+        synchronized void detach(Statement statement) {
+            if (open == statement) {
+                open = null;
+            }
+        }
+
+        /**
+         * Cancels the statement if it is open now.
+         *
+         * @return true when an open statement was cancelled, false when none was open
+         * @throws SQLException from the driver's {@code cancel()}
+         */
+        public synchronized boolean cancel() throws SQLException {
+            if (open == null) {
+                return false;
+            }
+            open.cancel();
+            cancelled = true;
+            return true;
+        }
+
+        /** @return true once {@link #cancel()} cancelled a statement */
+        public synchronized boolean cancelled() {
+            return cancelled;
+        }
+    }
+
     /** @return true for a database made by {@link #createServable}, which {@link LendingDbServer} may serve */
     public boolean isServable() {
         return servable;

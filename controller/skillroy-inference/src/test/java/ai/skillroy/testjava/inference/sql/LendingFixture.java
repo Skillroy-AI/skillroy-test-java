@@ -84,7 +84,6 @@ public final class LendingFixture {
                 "opened DATE", "due DATE", "status VARCHAR sample");
         table(b, "loan_line", List.of("loan_id", "line_no"), List.of(), "loan_id INTEGER", "line_no INTEGER",
                 "item_code VARCHAR", "qty INTEGER", "deposit_paid DECIMAL", "returned DATE");
-        b.procedure("open_loan_count");
         for (String f : FUNCTIONS.get(dialect)) {
             b.function(f);
         }

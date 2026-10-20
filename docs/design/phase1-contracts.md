@@ -862,6 +862,13 @@ public enum ThreadPolicy {
                 // A19 (1.x, built 2026-10-02): while the first provider reports available() == false (or its
                 // available() throws), a primitive that is not mutating runs on WORKER and a mutating one answers
                 // NOT_READY ("application thread not available yet"); ThreadBroker.call and post under APP run on WORKER
+    // A72 (Phase 8, built 2026-10-19, ET; P8 4.1): appended, after APP
+    APP_QUIESCENT, // the application's own thread at its next quiescent point, through the first provider's
+                   // quiescentPoint(), admitted by the spec's quiescentBudgetMs (1..1000, default 50); never falls
+                   // back to another thread, never interrupted; the one exemption to the forbidden-thread rule
+    // A73 (Phase 8, built 2026-10-19, ET; P8 4.2): appended, last
+    LANE           // a lane of agent-owned daemon threads a module declared (ThreadBroker.declareLane); the spec
+                   // names it (PrimitiveSpec.Builder.lane); pinned order CALLER..APP, APP_QUIESCENT, LANE
 }
 
 public interface ThreadBroker {
@@ -871,7 +878,27 @@ public interface ThreadBroker {
     <T> T call(ThreadPolicy policy, Callable<T> task, long timeoutMs) throws Exception;
     void post(ThreadPolicy policy, Runnable task);
     boolean isForbiddenThread(Thread thread);
+    // A72, A73 (Phase 8, built 2026-10-19, ET; P8 4.1, 4.2): defaults that throw UnsupportedOperationException, so
+    // a broker written for 0.1.0 compiles unchanged; the agent's broker implements them. call(APP_QUIESCENT, t, ms) is
+    // callQuiescent(t, 50, ms); call(LANE, ...) and post(APP_QUIESCENT|LANE, ...) are refused (post: one warn line,
+    // the task never runs). "A task never runs on a thread a provider forbids" holds except a task the core submitted
+    // through a QuiescentPoint, at the point the provider itself runs it; from inside such a task a nested call,
+    // callQuiescent, callOnLane or QuiescentPoint.await answers FORBIDDEN_THREAD.
+    default <T> T callQuiescent(Callable<T> task, long budgetMs, long timeoutMs) throws Exception;
+    default Lane declareLane(String name, int threads, int queue);   // name ^[a-z][a-z0-9-]*(\.[a-z0-9-]+)+$, <= 64;
+                                       // threads 1..4, queue 0..16, <= 8 lanes per agent; retired with the module
+    default <T> T callOnLane(String lane, Callable<T> task, long timeoutMs) throws Exception;
 }
+// A72 (Phase 8, built 2026-10-19, ET; P8 4.1): the base-owned queue of the application's idle point
+public final class QuiescentPoint implements AutoCloseable {
+    public QuiescentPoint(long allowanceMs, int capacity);          // 1..1000 ms, 1..16
+    public <T> T await(Callable<T> task, long budgetMs, long timeoutMs) throws Exception;   // agent threads only
+    public boolean runOne(long availableMs);   // the application's thread at its idle point; never blocks or throws
+    public void close();                       // withdraws every queued task; idempotent
+    public long allowanceMs(); public int capacity(); public boolean isClosed(); public Map<String,Object> stats();
+}
+// A73 (Phase 8, built 2026-10-19, ET; P8 4.2): a module only holds the handle the core gives it
+public interface Lane extends AutoCloseable { String name(); int threads(); int queue(); void close(); }
 
 public interface EventBus {
     /** Publishes with the calling thread's current correlation id (set by the dispatcher), or none. */
@@ -935,6 +962,9 @@ public interface ThreadPolicyProvider {
     <T> T callOnAppThread(Callable<T> task, long timeoutMs) throws Exception;
     // A19 (1.x, built 2026-10-02): false while the application thread does not exist yet; a throw counts as false
     default boolean available() { return true; }
+    // A72 (Phase 8, built 2026-10-19, ET; P8 4.1): the point the provider drives from the application's idle callback
+    // (runOne); the same instance on every call, cheap, non-blocking; null = none; a throw counts as null
+    default QuiescentPoint quiescentPoint() { return null; }
 }
 
 /** The app{...} section of a UI snapshot: current state name, prompt, anything a scenario asserts on. Cheap, no side effects. */
@@ -1011,9 +1041,27 @@ public interface DataSourceProvider {
     default QueryResult query(String sql, List<Object> params, int maxRows, long timeoutMs) throws Exception { return null; }
     // S22 (1.x, built 2026-10-02): true = data.query may return this source's driver error text (read per call)
     default boolean exposesErrorText() { return false; }
+    // A74 (Phase 8, built 2026-10-19, ET; P8 4.3): data.query calls this form; a 0.1.0 provider is served through it
+    default QueryResult query(String sql, List<Object> params, int maxRows, long timeoutMs, QueryControl control)
+            throws Exception { return query(sql, params, maxRows, timeoutMs); }
+    default boolean enforcesTimeout() { return false; }   // query() itself ends within timeoutMs + 1 s
+    // A73 (Phase 8, built 2026-10-19, ET; P8 4.2): the module's declared lane for this source's reads; null = a worker
+    default String lane() { return null; }
+    // A75 (Phase 8, built 2026-10-19, ET; P8 4.4): the table's columns in declared order, for SELECT * FROM <table>
+    default List<String> columns(String table) { return null; }
+}
+// A74 (Phase 8, built 2026-10-19, ET; P8 4.3): a provider-executed read's cancellation handle
+public interface QueryControl {
+    long remainingMs();                        // the call's time less the module's 250 ms reserve
+    boolean cancelled();                       // the caller's time ran out, or the agent is closing
+    AutoCloseable onCancel(Runnable action);   // at most 4; run once, off the dispatching worker, 2 s each
 }
 public final class QueryResult {               // immutable
     /** columnNames may be null when the source cannot name its columns: data.query then reports c1..cn.
+     *  A75 (Phase 8, built 2026-10-19, ET; P8 4.4): a column the provider leaves unnamed takes the label of the
+     *  statement's top-level select item (SelectLabels), else for SELECT * FROM <table> the provider's
+     *  columns(table) entry, else c<i>; the provider's own names win; the width counts the names, the types and every
+     *  returned row (and, with no row, the select list or the columns(table) list).
      *  columnTypes may be null. rows hold JSON-able values or java.sql/java.math/java.util.Date values. */
     public QueryResult(List<String> columnNames, List<String> columnTypes, List<List<Object>> rows, boolean truncated);
     /* getters */
@@ -1367,6 +1415,23 @@ a call that timed out was abandoned while its thread went on, so a primitive tha
 - `agent.info` reports `threads: {workers: {active, max}, callers: {active, max}, abandoned: {<primitive>: n}}`;
 - `BUSY` is not `TIMEOUT`: the controller treats it like any other JSON-RPC error of a step call (`ERROR` /
   `ENVIRONMENT`, §8.5). The optional JDBC watchdog of the verified fix was not built.
+- **(A72, A73; Phase 8, built 2026-10-19, ET; P8 §4.1, §4.2)** the gate's policy list is `CALLER`, `WORKER`, `APP`,
+  `APP_QUIESCENT` and `LANE`. An `APP_QUIESCENT` primitive passes, after the capability gates and in place of the A19
+  branch, the quiescent gates in order, each with `data.primitive`: no provider, or its `quiescentPoint()` null,
+  throwing or closed: `CAPABILITY_UNAVAILABLE {reason: "no quiescent point offered"}`; the provider's `available()`
+  false: `NOT_READY {reason: "application thread not available yet"}` for reads and mutating calls alike (no `WORKER`
+  fall-back); a budget above the point's allowance: `CAPABILITY_UNAVAILABLE {reason: "quiescent budget exceeds the
+  allowance", budgetMs, allowanceMs}`; a primitive penalised for an overrun of more than twice its budget:
+  `CAPABILITY_UNAVAILABLE {reason: "quiescent task overran its budget", budgetMs, ranMs}` until `agent.capabilities
+  {reprobe: true}`; then the S30 gate. It runs at the first provider's point (`QuiescentPoint.await`); a task still
+  running at the deadline is the dispatcher's `TIMEOUT` and the S30 gate applies; the application thread is never
+  interrupted. A `LANE` primitive runs on its spec's lane (`callOnLane`); an undeclared or retired lane is
+  `CAPABILITY_UNAVAILABLE {reason: "unknown lane" | "lane closed", lane}`. `agent.info.threads` gains `quiescent`
+  (`{provider, allowanceMs, capacity, queued, ran, notReady, refused, overruns, lastOverrun: {primitive, budgetMs,
+  ranMs} | null, penalised: [...]}` when the first provider offers a point, else null) and `lanes`
+  (`{<name>: {owner, threads, queue, active, queued, abandoned}}`). On close and `agent.disable` the core closes the
+  first provider's point before any module's `uninstall`, and retires every lane after the modules' `uninstall` and
+  before the pools shut down; a module's lanes are retired with it (`ModuleContext`).
 
 **Agent log (S2; 1.x, built 2026-10-02).** The log ring (2,000 lines) bounds every line: a message is cut at 1,000
 characters, an exception message and a cause's at 300, a thread name at 100, a stack frame at 200, and the finished
@@ -1705,7 +1770,7 @@ one probe after the module confirmed AWT (`OK("robot")`, `UNAVAILABLE("headless"
 
 | Primitive | Params | Result `value` |
 |---|---|---|
-| `data.sources` | – | `{sources:[{id,describe}]}` (thread `WORKER`, timeout 5000); of two providers with the same id the first registered wins |
+| `data.sources` | – | `{sources:[{id,describe}]}` (thread `WORKER`, timeout 5000); of two providers with the same id the first registered wins. **(A73, A74; Phase 8, built 2026-10-19, ET)** each entry also carries `lane` (null or the name) and `enforcesTimeout` |
 | `data.query` | `source:string, sql:string, params?:[…], maxRows?:int (200, max 200)`; spec timeout 10000 | `{columns:[{name,type}], rows:[[…]], rowCount, truncated}` |
 
 `data.query` runs on `WORKER`. The provider's `query(sql, params, maxRows + 1, timeoutMs)` is tried first; if it
@@ -1725,6 +1790,22 @@ back to a pool goes back without one. Before the fix only a manual-commit connec
 `SET`s leave the JDBC auto-commit flag on. `maxRows: 0` returns the columns only; a value above 200 is capped.
 Capability `data.query` is OK when at least one `DataSourceProvider` is registered at probe time; a provider
 registered later needs `agent.capabilities {reprobe:true}`.
+
+**The hand-off, the module's own timeout and the per-source gate (A73, A74; Phase 8, built 2026-10-19, ET; P8 §4.2,
+§4.3).** `data.query` keeps `WORKER` and its spec. Its body hands the provider's work (`query()`, or `open()` and the
+JDBC read, and `columns(table)`) to the source's lane (`DataSourceProvider.lane()`) through `callOnLane`, or, without
+one, to a nested `WORKER` task, and waits the call's remaining time less 250 ms (at least 1 ms). The provider gets
+the five-argument `query()` with a `QueryControl` (its `remainingMs` that budget) and that budget as `timeoutMs`; the
+JDBC form registers the open statement's `cancel()` through `ReadOnlyJdbc`'s statement sink (`setQueryTimeout` keeps
+`remainingMs / 1000`, at least 1). On expiry the module marks the control cancelled, starts the registered actions
+(at most 4, in order, 2 s each) as one posted worker task off the dispatching worker, waits at most 200 ms (and at
+most what the dispatcher has left, less 50 ms) for them and the read together, and answers its own `TIMEOUT` inside
+the reserve: `data {primitive: "data.query", timeoutMs, source, lane, waitedMs, cancelled, cancelPending (only when
+true), stillRunning, enforcesTimeout}`. So the dispatcher never abandons a `data.query` call. Without a lane, while an
+earlier read of the same source still runs after its call ended, a new read of that source answers `BUSY {reason:
+"an earlier read of the source still runs", source, runningForMs}` until it ends (logged "the read of source s ended
+after n ms"); with a lane the lane's own `BUSY` applies. `uninstall` cancels the reads still running the same way
+first. `lane()` and `enforcesTimeout()` are asked once per call; a throw counts as the default.
 
 **Statement guard, as built** (stricter than first specified; a safety net, not the security boundary: the
 boundary is the data source the provider hands out). A small tokenizer, never a pattern over the raw text, requires:
@@ -1762,7 +1843,16 @@ timestamps and `java.time` values -> ISO-8601 strings; text, character large obj
 `toString()` are capped at 10000 characters; binary values become `base64:<first 1024 bytes>`; a cut value ends
 with a `...[truncated: N chars|bytes]` marker. Then each `MaskPolicy` is applied; a `MaskPolicy` that throws fails the whole call with
 `INTERNAL_ERROR` and the value appears neither in the error nor in the log. Columns a source cannot name are
-reported as `c1..cn`. Errors: an unknown source is `NOT_FOUND` with `data {source, known}`; an SQL error is
+reported as `c1..cn`. **(A75; Phase 8, built 2026-10-19, ET; P8 §4.4: this sentence is replaced for the provider form
+by the naming and width rule)** a column the provider leaves unnamed takes the label its top-level select item gives
+(`SelectLabels.of`: the alias, or a bare column's name, quotes removed), else, for `SELECT * FROM <table> …`
+(`SelectLabels.starTable`) with no provider name, the provider's `columns(table)` entry (asked at most once per call,
+on the read's lane or worker task; null, a list with an unnamed entry or a throw count as none), else `c<i>`; the
+provider's own names always win; the width is the largest of the names, the types and every row the provider
+returned (kept or not), and, when it returned no row, the select list's or the `columns(table)` list's size, so a
+positional zero-row result has its columns and `maxRows: 0` returns them for this form too; a list whose size differs
+from a width taken from names or rows is not used (one `data:` log line with both counts). The masks see the final
+names. The JDBC form keeps the driver's labels. Errors: an unknown source is `NOT_FOUND` with `data {source, known}`; an SQL error is
 `INTERNAL_ERROR` with `data {source, sqlState, errorCode, exception}` and, under the rule below, either `message` or
 `messageWithheld: true`. The `params` list itself is never logged or returned.
 
@@ -2795,7 +2885,19 @@ A deliberately awkward little desk application. It knows nothing about the frame
   `RETURN` (return mode, toggled from `IDLE`); `LOCKED` after the idle timeout. Quantity entry and the supervisor
   code and password steps are sub-steps: they keep the state and change only the prompt line and the valid inputs.
   After start-up (create, seed and the one-off load of reference data run on the launching thread) all database work
-  happens on this thread.
+  happens on this thread. **(Phase 8, built 2026-10-19, ET; P8 §12.1, D535)** While it waits for input the engine
+  polls the inbox in steps of at most the idle tick (`lending.idleTickMillis`, default 100; 0 = only the call right
+  after `inputRequested`) instead of blocking in `take()`, and calls `EngineListener.idle(state, availableMs)` (a
+  default no-op) right after `inputRequested` and once per tick until an input is taken, never while an input is
+  processed or a prompt is open; `availableMs` is the time left until the idle lock fires (`Long.MAX_VALUE` when none
+  applies), and the lock's timing is unchanged (its deadline is set when a wait starts and again after a dropped
+  input). Inside an `idle` callback, and only there, `Engine.idleView()` returns the engine-confined `IdleView {state,
+  step, pendingQty, returnMode, lockedFrom, lineCount, idleLockRemainingMs}` (else `IllegalStateException`). Since the
+  engine reads its listener list during waits too, additions, removals and its snapshot of the list hold the list's
+  monitor. `LendingDb.readRows(sql, params, maxRows, timeoutSeconds, ReadHandle)` is the desk's report reader, which
+  answers by position (a read-only connection of its own, a query timeout, rows as `Object[]`, no names;
+  `ReadHandle.cancel()` cancels the statement while it is open), and `LendingDb.columnsOf(table)` lists a table's
+  columns by `ORDINAL_POSITION` (null for an unknown table).
 - **Inputs**: `LendingInput(source, value)`. Sources: `Entry` (value = the entry-field text, submitted with the
   Enter key), `Barcode` (value = the scanned code), `Key.<ACTION>` for the keypad actions (`KeyAction`) `DUE`,
   `DEPOSIT`, `RETURN`, `CANCEL`, `SIGN_OFF`, `QTY`; `DEPOSIT` and `QTY` may carry a value. An input that is not valid
@@ -2944,7 +3046,16 @@ Registers: `ReadinessSource` (`lending.engine`), `ThreadPolicyProvider` (one dae
 `CaptureMask` (`LendingCaptureMask`: the entry field while it is masked, and the number pad while the entry field is
 masked, D358) and `LendingWidgets.describe` (`{action: <actionId>}` for an `IconKey`, `{name: <label>}` for a
 prompt's button): thirteen SPI registrations. `LendingModule.VERSION` is `0.2.0` ("change it whenever the module's
-primitives or SPIs change"). How the desk is
+primitives or SPIs change"). **(Phase 8, built 2026-10-19, ET; P8 §12.2)** A second `DataSourceProvider`
+`lending-report` (`LendingRowsSource`: the desk's report reader, which answers by position; the five-argument
+`query()` with the `ReadHandle`'s `cancel` registered with the `QueryControl`, no column names, `enforcesTimeout()`
+true, `columns(table)` from `LendingDb.columnsOf`) on the lane `lending.reads` (1 thread, a queue of 2) the module
+declares in `install` and retires in `uninstall`: fourteen SPI registrations (sixteen across fourteen types when
+every Phase 8 package has landed); `PasswordMask` covers both source ids. The worker offers one `QuiescentPoint(50,
+4)`, which the engine listener drives from `idle` (inert after detach) and which `uninstall` closes before the worker
+stops; the primitive `lending.engine.view` (`APP_QUIESCENT`, budget 20 ms, timeout 5000, read-only; capability of the
+same name, OK while the desk runs and the point is offered) answers the `IdleView` read on the engine thread. The
+version becomes `0.3.0` in step R. How the desk is
 found: in EMBEDDED mode the `LendingApp` the host passed to `EmbeddedAgent.start`; in the other modes
 `LendingApp.instance()`, looked at only once a thread named `LendingEngine` exists, so that no application class is
 loaded before the application's own `main`.

@@ -203,3 +203,6 @@ SELECT l.id FROM loan l NATURAL JOIN loan_line x
 
 @@ PERSONAL a personal column renamed in a derived table
 SELECT d.title FROM (SELECT s.code, s.name AS title FROM staff s) d
+
+@@ PROCEDURE CALL of a procedure: no data channel runs a procedure call (gap 119; BS6 admitted this one)
+CALL open_loan_count(?)

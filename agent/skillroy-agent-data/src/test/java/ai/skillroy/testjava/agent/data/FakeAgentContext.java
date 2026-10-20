@@ -29,7 +29,6 @@ import ai.skillroy.testjava.agent.api.Probe;
 import ai.skillroy.testjava.agent.api.ProbeResult;
 import ai.skillroy.testjava.agent.api.SpiRegistry;
 import ai.skillroy.testjava.agent.api.ThreadBroker;
-import ai.skillroy.testjava.agent.api.ThreadPolicy;
 import ai.skillroy.testjava.protocol.Capability;
 import ai.skillroy.testjava.protocol.CapabilityState;
 import ai.skillroy.testjava.protocol.JsonView;
@@ -43,11 +42,12 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
-import java.util.concurrent.Callable;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
- * In-memory AgentContext for module tests: real registries, a recording log, no event bus or handles.
+ * In-memory AgentContext for module tests: real registries, a recording log, no event bus or handles, and a broker
+ * with real worker threads and lanes ({@link TestBroker}, Phase 8), so that {@code data.query}'s hand-off, its timeout
+ * and its cancel actions run as they do in the agent.
  */
 final class FakeAgentContext implements AgentContext {
 
@@ -58,6 +58,8 @@ final class FakeAgentContext implements AgentContext {
 
     /** Remaining time each invocation reports. */
     volatile long remainingMs = 10000L;
+    /** The broker {@link #threads()} answers. */
+    final TestBroker broker = new TestBroker();
 
     @Override
     public Instrumentation instrumentation() {
@@ -101,22 +103,7 @@ final class FakeAgentContext implements AgentContext {
 
     @Override
     public ThreadBroker threads() {
-        return new ThreadBroker() {
-            @Override
-            public <T> T call(ThreadPolicy policy, Callable<T> task, long timeoutMs) throws Exception {
-                return task.call();
-            }
-
-            @Override
-            public void post(ThreadPolicy policy, Runnable task) {
-                task.run();
-            }
-
-            @Override
-            public boolean isForbiddenThread(Thread thread) {
-                return false;
-            }
-        };
+        return broker;
     }
 
     @Override

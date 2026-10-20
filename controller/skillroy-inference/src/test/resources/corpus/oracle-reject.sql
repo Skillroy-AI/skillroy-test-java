@@ -146,3 +146,6 @@ SELECT s.code FROM staff s START WITH s.code = 'S01' CONNECT BY PRIOR s.code = s
 
 @@ TABLE a database link (JSqlParser's Table.getName() returns "item" for it)
 SELECT i.code FROM item@remote_desk i
+
+@@ PROCEDURE CALL of a procedure: no data channel runs a procedure call (gap 119; BS6 admitted this one)
+CALL open_loan_count(?)

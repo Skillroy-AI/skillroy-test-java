@@ -81,23 +81,25 @@ class LendingModuleTest {
         try {
             for (Class<?> type : Arrays.<Class<?>>asList(ReadinessSource.class, ThreadPolicyProvider.class,
                     AppStateProvider.class, NameEnricher.class, LocatorResolver.class, ActionFirer.class,
-                    DialogTextExtractor.class, DataSourceProvider.class, MaskPolicy.class, DeviceAdapter.class,
+                    DialogTextExtractor.class, MaskPolicy.class, DeviceAdapter.class,
                     RedactionKeys.class, ai.skillroy.testjava.agent.api.spi.RegionResolver.class,
                     ai.skillroy.testjava.agent.api.spi.CaptureMask.class)) {
                 assertEquals(1, ctx.spi.all(type).size(), type.getSimpleName());
             }
-            assertEquals(13, ctx.spi.count(), "the eleven SPIs of Phase 6 and the two of Phase 7");
+            // Phase 8 (phase8-contracts.md 12.2; ET's branch truth, D641): the report reader is a second source.
+            assertEquals(2, ctx.spi.all(DataSourceProvider.class).size(), "lending and lending-report");
+            assertEquals(14, ctx.spi.count(), "the eleven SPIs of Phase 6, the two of Phase 7 and lending-report");
             assertTrue(ctx.spi.first(ai.skillroy.testjava.agent.api.spi.RegionResolver.class)
                     instanceof LendingRegions);
             assertTrue(ctx.spi.first(ai.skillroy.testjava.agent.api.spi.CaptureMask.class)
                     instanceof LendingCaptureMask);
-            assertEquals(Arrays.asList("lending.access.check", "lending.deposit", "lending.input", "lending.limits",
-                    "lending.loan", "lending.prompt", "lending.prompt.answer", "lending.slip", "lending.state",
-                    "lending.waiver.evaluate"), names(ctx));
-            assertEquals(Arrays.asList("lending.access.check", "lending.deposit", "lending.input", "lending.limits",
-                    "lending.loan", "lending.loan.authorisations", "lending.prompt", "lending.prompt.answer",
-                    "lending.slip", "lending.sql", "lending.state", "lending.waiver.evaluate"),
-                    new java.util.ArrayList<String>(ctx.capabilities.probes().keySet()));
+            assertEquals(Arrays.asList("lending.access.check", "lending.deposit", "lending.engine.view",
+                    "lending.input", "lending.limits", "lending.loan", "lending.prompt", "lending.prompt.answer",
+                    "lending.slip", "lending.state", "lending.waiver.evaluate"), names(ctx));
+            assertEquals(Arrays.asList("lending.access.check", "lending.deposit", "lending.engine.view",
+                    "lending.input", "lending.limits", "lending.loan", "lending.loan.authorisations",
+                    "lending.prompt", "lending.prompt.answer", "lending.slip", "lending.sql", "lending.state",
+                    "lending.waiver.evaluate"), new java.util.ArrayList<String>(ctx.capabilities.probes().keySet()));
             assertTrue(ctx.spi.first(ThreadPolicyProvider.class) instanceof LendingWorker);
             assertTrue(ctx.primitives.find("lending.input").spec().mutating());
             assertTrue(ctx.primitives.find("lending.prompt.answer").spec().mutating());
@@ -133,6 +135,45 @@ class LendingModuleTest {
         assertTrue(ctx.primitives.list().isEmpty(), "every primitive unregistered");
         assertEquals(Collections.emptyMap(), ctx.capabilities.snapshot(), "every capability withdrawn (A18)");
         assertTrue(ctx.capabilities.probes().isEmpty(), "and no probe left to run");
+    }
+
+    /**
+     * phase8-contracts.md 12.2 (ET): the report reader's source and its lane, declared at install and retired at
+     * uninstall; the worker's quiescent point, offered and closed; {@code lending.engine.view}'s spec.
+     */
+    @Test
+    void theReportReaderItsLaneAndTheQuiescentPointLiveAndDieWithTheModule() throws Exception {
+        FakeAgentContext ctx = new FakeAgentContext(null, LoadMode.JAVAAGENT);
+        LendingModule module = new LendingModule();
+        module.install(ctx);
+        LendingWorker worker;
+        try {
+            assertEquals(Collections.singleton(LendingRowsSource.LANE), ctx.threads.lanes.keySet());
+            DataSourceProvider report = ctx.spi.all(DataSourceProvider.class).get(1);
+            assertTrue(report instanceof LendingRowsSource);
+            assertEquals("lending-report", report.id());
+            assertEquals("the desk's report reader, which answers by position", report.describe());
+            assertEquals(LendingRowsSource.LANE, report.lane());
+            assertTrue(report.enforcesTimeout());
+            assertNull(report.open(), "the statement-API form only");
+            assertNull(report.columns("staff"), "nothing to read while the desk does not run");
+            worker = (LendingWorker) ctx.spi.first(ThreadPolicyProvider.class);
+            assertSame(worker.quiescentPoint(), worker.quiescentPoint(), "the same point on every call");
+            assertEquals(LendingWorker.POINT_ALLOWANCE_MS, worker.quiescentPoint().allowanceMs());
+            assertEquals(LendingWorker.POINT_CAPACITY, worker.quiescentPoint().capacity());
+            ai.skillroy.testjava.agent.api.PrimitiveSpec view = ctx.primitives.find("lending.engine.view").spec();
+            assertEquals("APP_QUIESCENT", view.describe().thread());
+            assertEquals(20L, view.quiescentBudgetMs());
+            assertEquals(5000L, view.timeoutMs());
+            assertFalse(view.mutating());
+            assertEquals("lending.engine.view", view.capabilityId());
+            ctx.probeAll();
+            assertEquals(CapabilityState.UNAVAILABLE, ctx.capabilities.get("lending.engine.view").state());
+        } finally {
+            module.uninstall();
+        }
+        assertTrue(ctx.threads.lanes.isEmpty(), "the lane is retired with the module");
+        assertTrue(worker.quiescentPoint().isClosed(), "the point is closed before the worker stops");
     }
 
     /**

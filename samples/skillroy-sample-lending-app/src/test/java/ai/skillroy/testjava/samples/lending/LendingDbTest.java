@@ -252,6 +252,79 @@ class LendingDbTest {
         assertEquals(Seed.B, Seed.parse(" b "));
     }
 
+    /** phase8-contracts.md 12.1: the report reader answers by position, without names. */
+    @Test
+    void theReportReaderAnswersByPosition() throws Exception {
+        try (LendingDb db = create(Seed.A)) {
+            List<Object[]> rows = db.readRows("SELECT code, name FROM staff WHERE code >= ? ORDER BY code",
+                java.util.Arrays.asList("100"), 2, 5, null);
+            assertEquals(2, rows.size(), "at most maxRows");
+            assertEquals("100", rows.get(0)[0]);
+            assertEquals(2, rows.get(0).length);
+            assertEquals(0, db.readRows("SELECT code FROM staff", Collections.emptyList(), 0, 5, null).size());
+            assertEquals(13L, ((Number) db.readRows("SELECT COUNT(*) FROM item", Collections.emptyList(), 10, 5,
+                null).get(0)[0]).longValue());
+            assertThrows(IllegalArgumentException.class, () -> db.readRows("SELECT 1 FROM item",
+                Collections.emptyList(), -1, 5, null));
+        }
+    }
+
+    /** phase8-contracts.md 12.1 (gap 117): a table's columns in their declared order. */
+    @Test
+    void columnsOfATableComeInTheirDeclaredOrder() throws Exception {
+        try (LendingDb db = create(Seed.A)) {
+            assertEquals(java.util.Arrays.asList("CODE", "NAME", "PASSWORD", "ACTIVE", "AUTO_SIGN_ON"),
+                db.columnsOf("staff"));
+            assertEquals(db.columnsOf("staff"), db.columnsOf("PUBLIC.STAFF"));
+            assertEquals(db.columnsOf("staff"), db.columnsOf("Staff"));
+            assertEquals(null, db.columnsOf("no_such_table"));
+            assertEquals(null, db.columnsOf("OTHER.staff"));
+            assertEquals(null, db.columnsOf(" "));
+        }
+    }
+
+    /** phase8-contracts.md 12.1: ReadHandle.cancel ends a running statement, and does nothing once it has ended. */
+    @Test
+    void aReadHandleCancelsARunningStatement() throws Exception {
+        try (final LendingDb db = create(Seed.A)) {
+            final LendingDb.ReadHandle handle = new LendingDb.ReadHandle();
+            final java.util.concurrent.atomic.AtomicReference<Object> outcome =
+                new java.util.concurrent.atomic.AtomicReference<Object>();
+            // A seven-way cross join over the desk's items: it ends only when it is stopped.
+            Thread reader = new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        outcome.set(db.readRows("SELECT COUNT(*) FROM item a, item b, item c, item d, item e,"
+                            + " item f, item g WHERE a.deposit + b.deposit + c.deposit + d.deposit + e.deposit"
+                            + " + f.deposit + g.deposit < 0", Collections.emptyList(), 1, 60, handle));
+                    } catch (Throwable t) {
+                        outcome.set(t);
+                    }
+                }
+            }, "lending-test-report-reader");
+            reader.setDaemon(true);
+            reader.start();
+            long deadline = System.nanoTime() + 10_000_000_000L;
+            boolean cancelled = false;
+            Thread.sleep(300);
+            while (!cancelled && System.nanoTime() < deadline) {
+                cancelled = handle.cancel();
+                if (!cancelled) {
+                    Thread.sleep(20);
+                }
+            }
+            assertTrue(cancelled, "the statement was open while it ran");
+            reader.join(30000);
+            assertFalse(reader.isAlive(), "the cancel ended the statement");
+            assertTrue(outcome.get() instanceof SQLException, String.valueOf(outcome.get()));
+            assertTrue(handle.cancelled());
+            assertFalse(handle.cancel(), "nothing to cancel once the read has ended");
+            assertEquals(1, db.readRows("SELECT code FROM item WHERE code = ?", java.util.Arrays.asList("YRD-001"), 5,
+                5, handle).size(), "the database still answers");
+        }
+    }
+
     private static void assertDisjoint(List<String> a, List<String> b) {
         Set<String> common = new HashSet<String>(a);
         common.retainAll(b);

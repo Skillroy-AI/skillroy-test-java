@@ -110,6 +110,8 @@ public final class LendingApp {
             PromptService prompts = new PromptService();
             Engine engine = new Engine(db, catalogue, access, waiverRules, prompts, printer, options.clock(),
                 options.idleLockMillis(), options.edition());
+            // phase8-contracts.md 12.1 (D535): the idle callback's tick, lending.idleTickMillis.
+            engine.idleTickMillis(options.idleTickMillis());
             app = new LendingApp(options, db, access, catalogue, waiverRules, printer, prompts, engine);
         } catch (Exception e) {
             db.close();

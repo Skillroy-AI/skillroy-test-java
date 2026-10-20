@@ -36,8 +36,11 @@ public final class QueryResult {
     private final boolean truncated;
 
     /**
-     * @param columnNames may be null when the source cannot name its columns: {@code data.query} then reports
-     *     c1..cn
+     * @param columnNames may be null (or hold null or empty entries) when the source cannot name its columns:
+     *     {@code data.query} then names column <i>i</i> with the label the statement's top-level select list gives it
+     *     (the alias, or a bare column's name), else, for {@code SELECT * FROM <table>}, with the provider's
+     *     {@link DataSourceProvider#columns(String)}, else {@code c<i>}; the provider's own names always win, and the
+     *     result's width counts the names, the types and every returned row (phase8-contracts.md 4.4)
      * @param columnTypes type names of the columns, may be null
      * @param rows hold JSON-able values or java.sql/java.math/java.util.Date values; null cells are allowed, null
      *     rows are not; null means no rows

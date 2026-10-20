@@ -22,6 +22,7 @@ import java.sql.ResultSet;
 import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
 import java.sql.SQLFeatureNotSupportedException;
+import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.IdentityHashMap;
@@ -116,6 +117,24 @@ public final class ReadOnlyJdbc {
     public static Rows executeLenient(Connection c, String sql, List<Object> params, int maxRows,
                                       int timeoutSeconds, Consumer<String> warn)
             throws SQLException, InterruptedException {
+        return executeLenient(c, sql, params, maxRows, timeoutSeconds, warn, null);
+    }
+
+    /**
+     * {@link #executeLenient(Connection, String, List, int, int, Consumer)} with a statement sink (phase8-contracts.md
+     * 4.3, D530): {@code statementSink} receives the prepared statement right after {@code prepareStatement}, before
+     * anything is bound or run, and {@code null} once the statement is closed, so that a caller on another thread can
+     * {@code cancel()} the statement only while it is open (never a later statement of a pooled connection). A
+     * statement cancelled while it runs ends {@code executeQuery} with the driver's {@code SQLException}, and the
+     * connection is restored as on every other path. The sink runs on the calling thread; what it throws is reported to
+     * {@code warn} by class name and does not change the outcome.
+     *
+     * @param statementSink receives the open statement, then null; may be null (no sink)
+     * @throws IllegalArgumentException if {@code maxRows} is negative or {@code params} is null
+     */
+    public static Rows executeLenient(Connection c, String sql, List<Object> params, int maxRows,
+                                      int timeoutSeconds, Consumer<String> warn, Consumer<Statement> statementSink)
+            throws SQLException, InterruptedException {
         if (maxRows < 0) {
             throw new IllegalArgumentException("maxRows must not be negative");
         }
@@ -137,6 +156,7 @@ public final class ReadOnlyJdbc {
             ResultSet resultSet = null;
             try {
                 statement = c.prepareStatement(sql, ResultSet.TYPE_FORWARD_ONLY, ResultSet.CONCUR_READ_ONLY);
+                hand(statementSink, statement, out);
                 try {
                     statement.setQueryTimeout(Math.max(1, timeoutSeconds));
                 } catch (SQLFeatureNotSupportedException unsupported) {
@@ -155,6 +175,9 @@ public final class ReadOnlyJdbc {
             } finally {
                 closeQuietly(resultSet, "result set", out);
                 closeQuietly(statement, "statement", out);
+                if (statement != null) {
+                    hand(statementSink, null, out);
+                }
             }
         } finally {
             restore(c, restoreAutoCommit, restoreWritable, out);
@@ -249,6 +272,18 @@ public final class ReadOnlyJdbc {
             } catch (SQLException | RuntimeException e) {
                 warn(warn, "could not restore the connection's read-only flag: " + describe(e));
             }
+        }
+    }
+
+    /** Hands the statement (or null) to the sink, if any; a failing sink is reported, never thrown. */
+    private static void hand(Consumer<Statement> sink, Statement statement, Consumer<String> warn) {
+        if (sink == null) {
+            return;
+        }
+        try {
+            sink.accept(statement);
+        } catch (RuntimeException e) {
+            warn(warn, "the statement sink failed: " + e.getClass().getName());
         }
     }
 

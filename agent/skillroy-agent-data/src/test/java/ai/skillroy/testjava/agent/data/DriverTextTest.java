@@ -288,7 +288,11 @@ class DriverTextTest {
                 case "query":
                     throw JdbcSpy.sqlException(TEXT, "22018");
                 case "open":
+                case "lane":
+                case "columns":
                     return null;
+                case "enforcesTimeout":
+                    return Boolean.FALSE;
                 case "hashCode":
                     return Integer.valueOf(System.identityHashCode(proxy));
                 case "equals":

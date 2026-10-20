@@ -976,7 +976,7 @@ Numbers are those of `../TODO.md`, "Open SPI and DSL gaps".
 |---|---|---|
 | 26 | Oracle cross-check outcomes | **Closed**: a guarded cross-check that cannot run makes the outcome `DEGRADED` (§6.2); the other case (a calibrated oracle) is Phase 5's (Phase 5, built 2026-10-08; P5 §12.3, D86: answered by the journal export, which marks observed expectations for the reviewer) |
 | 20 | Expectations relative to an earlier step | unchanged (partly closed in Phase 2); a captured print event is the pattern of §3.5 |
-| 12 | Positional sources | unchanged; aggregates also read columns by position |
+| 12 | Positional sources | unchanged; aggregates also read columns by position. **Taken by Phase 8 (P8 §4.4; built 2026-10-19, ET)**: the agent names a positional source's columns from the statement, and a zero-row answer has its width |
 | 21 | Event expectations | unchanged; the two consecutive `waitFor`s of scenario B work without it |
 | 28 | Pack-defined artifact kinds | unchanged; the slip is read as a fact, not captured as an artifact |
 

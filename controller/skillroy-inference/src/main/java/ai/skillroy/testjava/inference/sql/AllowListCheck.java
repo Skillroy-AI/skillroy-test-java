@@ -55,6 +55,11 @@ import java.util.Set;
  * rule). Whether a key column is nullable needs the source's metadata, which a data channel does not expose: it is not
  * checked here (the sample's own test checks it on its schema).
  *
+ * <p>Phase 8 (phase8-contracts.md 4.4, 4.5): the logic and the statement text are unchanged; a refusal over a source
+ * that reported no column, or only names of the form {@code c<digits>} (a provider that answers by position), says
+ * that the source's {@code DataSourceProvider} should answer {@code columns(table)} (gap 117), a message and never a
+ * pass; and {@link #proceduresRefusal} words the refusal of a list that names procedures (gap 119).
+ *
  * <p>Stateless; safe from any thread.
  */
 public final class AllowListCheck {
@@ -125,12 +130,39 @@ public final class AllowListCheck {
                         + " table " + table.name() + (missing.isEmpty() ? "" : ": columns it names neither as"
                         + " readable nor as other columns: " + missing) + (unknown.isEmpty() ? "" : (missing.isEmpty()
                         ? ": " : "; ") + "names the table does not have: " + unknown) + " (otherColumns must name"
-                        + " every column a model may not read, so that the guard resolves every reference)");
+                        + " every column a model may not read, so that the guard resolves every reference)"
+                        + (positional(rows) ? "; source " + list.source() + " reports no column names for table "
+                        + table.name() + " (a provider that answers by position); its DataSourceProvider should"
+                        + " answer columns(table) (gap 117)" : ""));
             }
             for (AllowedColumn column : table.columns()) {
                 maskCheck(list.source(), table, column, reported.get(fold(column.name())), rowMasks);
             }
         }
+    }
+
+    /**
+     * The refusal of a list that names procedures (phase8-contracts.md 4.5, gap 119, D533), or null when it names
+     * none: no data channel runs a procedure call, and the field is reserved for gap 13's prepared reads. Where a list
+     * is put to use (the inference contributor at load, the MCP server at start), this text refuses it.
+     */
+    public static String proceduresRefusal(SqlAllowList list) {
+        Objects.requireNonNull(list, "list");
+        if (list.procedures().isEmpty()) {
+            return null;
+        }
+        return "the SQL allow-list of source " + list.source() + " names procedures " + list.procedures()
+                + "; no data channel runs a procedure call (gap 119; the field is reserved for a prepared read, gap 13)";
+    }
+
+    /** True when the source reported no column, or only names of the form {@code c<digits>} (gap 117). */
+    private static boolean positional(Rows rows) {
+        for (Rows.Column column : rows.columns()) {
+            if (!column.name().matches("c[0-9]+")) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /**

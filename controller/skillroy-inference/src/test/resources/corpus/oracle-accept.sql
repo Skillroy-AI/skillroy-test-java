@@ -144,7 +144,3 @@ SELECT i.code FROM item i ORDER BY i.code FETCH FIRST 250 ROWS ONLY
 @@ personal column in WHERE and ORDER BY only
 SELECT l.id FROM loan l WHERE UPPER(l.borrower) LIKE ? ORDER BY l.borrower
 => SELECT l.id FROM loan l WHERE UPPER(l.borrower) LIKE ? ORDER BY l.borrower, l.id FETCH FIRST 200 ROWS ONLY
-
-@@ CALL of the allow-listed procedure
-CALL open_loan_count(?)
-=> CALL open_loan_count (?)
