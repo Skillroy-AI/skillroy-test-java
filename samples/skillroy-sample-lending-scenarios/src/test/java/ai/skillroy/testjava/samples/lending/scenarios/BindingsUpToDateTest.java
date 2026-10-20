@@ -18,6 +18,7 @@ package ai.skillroy.testjava.samples.lending.scenarios;
 
 import ai.skillroy.testjava.data.Credentials;
 import ai.skillroy.testjava.data.yaml.StrictYaml;
+import ai.skillroy.testjava.junit.OutputScan;
 import ai.skillroy.testjava.samples.lending.scenarios.SampleCredentials.Env;
 import ai.skillroy.testjava.scenario.BindingsFile;
 import ai.skillroy.testjava.scenario.Plan;
@@ -221,7 +222,7 @@ class BindingsUpToDateTest {
     }
 
     /**
-     * phase7-contracts.md 13.1 item 9 (the fix wave of the Phase 7 review, FB, L3-F8): {@link SecretScan} over every
+     * phase7-contracts.md 13.1 item 9 (the fix wave of the Phase 7 review, FB, L3-F8): {@link OutputScan} over every
      * committed file the AI layer or an approval wrote, in the normal build: every bindings file of both seeds (the
      * Phase 7 {@code keypad-image} files among them), the branch variant's, the committed plans, and the session
      * exports under {@code scenarios/exported/} (YAML, plan, bindings); no sample staff password of either seed is a
@@ -245,12 +246,12 @@ class BindingsUpToDateTest {
         int pngs = 0;
         for (Path file : files) {
             String name = file.getFileName().toString();
-            assertEquals(List.of(), SecretScan.leaks(name, passwords), file + ": a password in the name");
+            assertEquals(List.of(), OutputScan.leaks(name, passwords), file + ": a password in the name");
             if (name.endsWith(".png")) {
                 pngs++;
                 continue;
             }
-            assertEquals(List.of(), SecretScan.leaks(file, passwords), file + " holds a staff password as a value");
+            assertEquals(List.of(), OutputScan.leaks(file, passwords), file + " holds a staff password as a value");
             scanned++;
         }
         assertTrue(files.stream().anyMatch(f -> f.endsWith(Path.of("seed-b", KEYPAD_IMAGE + BindingsFile.SUFFIX))),
@@ -333,7 +334,7 @@ class BindingsUpToDateTest {
             if (date.find()) {
                 fail(committed + " holds a date: " + date.group());
             }
-            assertEquals(List.of(), SecretScan.leaks(committed, Set.copyOf(SampleCredentials.staff(env).values())),
+            assertEquals(List.of(), OutputScan.leaks(committed, Set.copyOf(SampleCredentials.staff(env).values())),
                     "no password as a value");
             planHashes.add(file.planHash());
             resolveHashes.add(file.resolveHash());

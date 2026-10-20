@@ -32,6 +32,7 @@ import ai.skillroy.testjava.inference.session.SessionService;
 import ai.skillroy.testjava.inference.session.Turn;
 import ai.skillroy.testjava.inference.spi.InferenceGateway;
 import ai.skillroy.testjava.inference.spi.Usage;
+import ai.skillroy.testjava.junit.OutputScan;
 import ai.skillroy.testjava.protocol.Json;
 import ai.skillroy.testjava.samples.lending.scenarios.SampleCredentials.Env;
 import ai.skillroy.testjava.scenario.Approver;
@@ -480,7 +481,7 @@ class InferenceLiveIT {
     // ------------------------------------------------------------------------------------------------ last
 
     /**
-     * The secret scan of 15.2 item 8 over every file the checks above wrote ({@link SecretScan}): no staff password of
+     * The secret scan of 15.2 item 8 over every file the checks above wrote ({@link OutputScan}): no staff password of
      * seed A and not the desk's PIN as a value. The credentials files this class wrote itself
      * ({@value Credentials#FILE_NAME}) are left out by name, since they hold the passwords by design, and so are
      * captures and archives ({@code .png}, {@code .zip}), as {@link InferenceChecks} leaves them out.
@@ -503,7 +504,7 @@ class InferenceLiveIT {
                         continue;
                     }
                     scanned++;
-                    for (String hit : SecretScan.leaks(file, secrets)) {
+                    for (String hit : OutputScan.leaks(file, secrets)) {
                         leaks.add(file + ": " + hit);
                     }
                 }

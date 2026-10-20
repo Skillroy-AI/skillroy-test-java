@@ -16,6 +16,7 @@
 
 package ai.skillroy.testjava.samples.lending.scenarios;
 
+import ai.skillroy.testjava.junit.OutputScan;
 import ai.skillroy.testjava.protocol.Json;
 import ai.skillroy.testjava.samples.lending.scenarios.SampleCredentials.Env;
 import com.sun.net.httpserver.HttpServer;
@@ -162,7 +163,7 @@ class TelemetryEndToEndIT {
                 .findFirst().orElseThrow().get("attributes");
         assertEquals(target.pid(), ((Number) rootAttributes.get("skillroy.target.pid")).longValue());
         assertEquals("JAVAAGENT", rootAttributes.get("skillroy.target.load_mode"));
-        assertEquals(List.of(), SecretScan.leaks(spans, passwords()), "no span holds a password");
+        assertEquals(List.of(), OutputScan.leaks(spans, passwords()), "no span holds a password");
     }
 
     @Test

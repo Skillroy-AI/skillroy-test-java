@@ -52,6 +52,12 @@ import java.util.concurrent.locks.ReentrantLock;
  * call that named secret parameters (contract amendment A34): the payload is what the call did, not what the core
  * writes about it, and waits, queries, captures and subscriptions must see the values the target published. Only the
  * correlation id and traceparent of the call are stamped on it.
+ *
+ * <p>Since Phase 8 (phase8-contracts.md 5.1, gap 109, D539) the payload first passes the {@link EventMasks}: every
+ * registered {@code MaskPolicy} as {@code event:<topic>} and the core's secret-key rule, on the publishing thread,
+ * after the freeze and before the character bound, outside the lock. The masked payload is the one object that is
+ * stored, delivered, returned by {@link #since} and {@link #await}, matched by {@link #payloadMatches} and recorded for
+ * the call; with nothing to mask it is the frozen payload itself. A34's by-value rule stays out of events.
  */
 final class RingEventBus implements EventBus {
 
@@ -65,6 +71,7 @@ final class RingEventBus implements EventBus {
     private final long[] sizes;
     private final long maxChars;
     private final AgentLog log;
+    private final EventMasks masks;
     private final ReentrantLock lock = new ReentrantLock();
     private final Condition published = lock.newCondition();
     private final List<Subscription> subscriptions = new CopyOnWriteArrayList<Subscription>();
@@ -78,7 +85,17 @@ final class RingEventBus implements EventBus {
         this(capacity, DEFAULT_MAX_CHARS, log);
     }
 
+    /** A bus without the mask pass ({@link EventMasks#NONE}): the payload is stored as published (tests). */
     RingEventBus(int capacity, long maxChars, AgentLog log) {
+        this(capacity, maxChars, log, EventMasks.NONE);
+    }
+
+    /**
+     * The agent's bus: every payload passes {@code masks} before it is stored (phase8-contracts.md 5.1).
+     *
+     * @param masks the pass (null: {@link EventMasks#NONE})
+     */
+    RingEventBus(int capacity, long maxChars, AgentLog log, EventMasks masks) {
         if (capacity < 1) {
             throw new IllegalArgumentException("event ring size must be positive: " + capacity);
         }
@@ -89,6 +106,7 @@ final class RingEventBus implements EventBus {
         this.sizes = new long[capacity];
         this.maxChars = maxChars;
         this.log = log;
+        this.masks = masks == null ? EventMasks.NONE : masks;
     }
 
     @Override
@@ -103,6 +121,11 @@ final class RingEventBus implements EventBus {
             String traceparent = scope == null ? null : scope.traceparent;
             // Validates and freezes the payload outside the lock; the ring copy only re-wraps it.
             Event proto = new Event(0L, System.currentTimeMillis(), topic, source, correlationId, traceparent, payload);
+            // The mask pass (phase8-contracts.md 5.1): after the freeze, before the bound, outside the lock.
+            Map<String, Object> masked = masks.apply(topic, proto.payload());
+            if (masked != proto.payload()) {
+                proto = new Event(0L, proto.ts(), topic, source, correlationId, traceparent, masked);
+            }
             long size = TextBounds.size(proto.payload(), maxChars);
             if (size > maxChars) {
                 proto = bounded(proto, topic, source, correlationId, traceparent);
@@ -289,6 +312,11 @@ final class RingEventBus implements EventBus {
     /** Ring capacity. */
     int capacity() {
         return ring.length;
+    }
+
+    /** The mask pass every payload takes ({@code agent.info.events}). */
+    EventMasks masks() {
+        return masks;
     }
 
     private final class Subscription {

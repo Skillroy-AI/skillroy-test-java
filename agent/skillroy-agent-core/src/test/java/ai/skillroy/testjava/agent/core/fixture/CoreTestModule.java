@@ -26,6 +26,7 @@ import ai.skillroy.testjava.agent.api.ProbeResult;
 import ai.skillroy.testjava.agent.api.ThreadPolicy;
 import ai.skillroy.testjava.agent.api.spi.AppStateProvider;
 import ai.skillroy.testjava.agent.api.spi.DeviceAdapter;
+import ai.skillroy.testjava.agent.api.spi.MaskPolicy;
 import ai.skillroy.testjava.agent.api.spi.ProductionMarker;
 import ai.skillroy.testjava.agent.api.spi.ReadinessSource;
 import ai.skillroy.testjava.agent.api.spi.RedactionKeys;
@@ -57,9 +58,10 @@ import java.util.regex.Pattern;
 /**
  * The in-process test module ("coretest"): test primitives for every dispatch path and thread policy, plus SPIs
  * switched on by options ({@code coretest.readiness=manual}, {@code coretest.production=<reason>},
- * {@code coretest.appThread=true}, {@code coretest.redactionKeys=<regex>}). {@code coretest.slowInstall=true} and
- * {@code coretest.slowReady=true} make {@code install} and {@code onTargetReady} wait for {@link TestState#gate}
- * ({@code coretest.slowInstall=stubborn}: ignoring interrupts).
+ * {@code coretest.appThread=true}, {@code coretest.redactionKeys=<regex>}, {@code coretest.eventMask=on|throw}).
+ * {@code coretest.slowInstall=true} and {@code coretest.slowReady=true} make {@code install} and
+ * {@code onTargetReady} wait for {@link TestState#gate} ({@code coretest.slowInstall=stubborn}: ignoring
+ * interrupts).
  *
  * <p>It registers a ProductionMarker that passes, so that the default fixture set (which contains FAILED modules)
  * still becomes ready under the production gate of finding S14; {@code coretest.noMarker=true} leaves it out.
@@ -67,6 +69,11 @@ import java.util.regex.Pattern;
 public final class CoreTestModule implements AgentModule {
 
     static final String FORBIDDEN_PREFIX = "coretest-forbidden";
+    /** The topic of {@code coretest.eventMask}'s planted events and what its policy answers (Phase 8, 5.1). */
+    public static final String MASKED_TOPIC = "test.masked";
+    public static final String PERSONAL = "<personal>";
+    public static final String PLANTED_NAME = "Planted Person";
+    public static final String PLANTED_PASSWORD = "planted-pw-4711";
     /** Handles of capabilities declared through {@code test.capability}. */
     static final Map<String, AutoCloseable> HANDLES = new ConcurrentHashMap<String, AutoCloseable>();
 
@@ -458,6 +465,10 @@ public final class CoreTestModule implements AgentModule {
                 }
             });
         }
+        String eventMask = ctx.options().get("coretest.eventMask");
+        if (eventMask != null) {
+            registerEventMask(ctx, eventMask);
+        }
         if ("true".equals(ctx.options().get("coretest.appThread"))) {
             ctx.spi().register(ThreadPolicyProvider.class, new ThreadPolicyProvider() {
                 @Override
@@ -532,6 +543,52 @@ public final class CoreTestModule implements AgentModule {
                 return Collections.<String, Object>singletonMap("printed", args.str("text", ""));
             }
         });
+    }
+
+    /**
+     * Phase 8 (phase8-contracts.md 5.1, gap 109), switched on by {@code coretest.eventMask=on|throw}: a
+     * {@code MaskPolicy} that answers {@link #PERSONAL} for the columns {@code name} and {@code person.name} of the
+     * topic {@link #MASKED_TOPIC} only ({@code throw}: it throws there instead), one {@link #MASKED_TOPIC} event
+     * published from {@code install}'s own context after the registration, and the primitive
+     * {@code test.publish.masked} that publishes the same planted payload through {@code inv.context()} (the core's
+     * context, not this module's).
+     */
+    private static void registerEventMask(AgentContext ctx, final String mode) {
+        ctx.spi().register(MaskPolicy.class, new MaskPolicy() {
+            @Override
+            public Object mask(String sourceId, String column, Object value) {
+                if (("event:" + MASKED_TOPIC).equals(sourceId)
+                        && ("name".equals(column) || "person.name".equals(column))) {
+                    if ("throw".equals(mode)) {
+                        throw new IllegalStateException("cannot mask " + value);
+                    }
+                    return PERSONAL;
+                }
+                return value;
+            }
+        });
+        ctx.events().publish(MASKED_TOPIC, "coretest", planted("install"));
+        ctx.primitives().register(Primitives.of(PrimitiveSpec.builder("test.publish.masked").build(),
+                new Primitives.Body() {
+                    @Override
+                    public Object invoke(Invocation inv) {
+                        return Long.valueOf(inv.context().events().publish(MASKED_TOPIC, "coretest",
+                                planted("invocation")));
+                    }
+                }));
+    }
+
+    /** The planted payload of {@link #MASKED_TOPIC}: a name under a plain and a dotted column, a secret key. */
+    static Map<String, Object> planted(String via) {
+        Map<String, Object> person = new LinkedHashMap<String, Object>();
+        person.put("name", PLANTED_NAME);
+        person.put("code", "S1");
+        Map<String, Object> payload = new LinkedHashMap<String, Object>();
+        payload.put("via", via);
+        payload.put("name", PLANTED_NAME);
+        payload.put("person", person);
+        payload.put("password", PLANTED_PASSWORD);
+        return payload;
     }
 
     /** A primitive that waits for {@link TestState#stuck} and ignores interrupts, as host code blocked on a monitor. */

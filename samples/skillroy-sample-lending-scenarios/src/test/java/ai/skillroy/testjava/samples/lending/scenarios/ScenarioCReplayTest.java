@@ -16,6 +16,7 @@
 
 package ai.skillroy.testjava.samples.lending.scenarios;
 
+import ai.skillroy.testjava.junit.OutputScan;
 import ai.skillroy.testjava.samples.lending.scenarios.SampleCredentials.Env;
 import ai.skillroy.testjava.scenario.BindOptions;
 import ai.skillroy.testjava.scenario.Plan;
@@ -67,7 +68,7 @@ class ScenarioCReplayTest {
             }
             assertTrue(files.stream().anyMatch(f -> f.getFileName().toString().equals("run.jsonl")), "the run wrote");
             for (Path file : files) {
-                assertEquals(List.of(), SecretScan.leaks(file, passwords), file + " holds a staff password");
+                assertEquals(List.of(), OutputScan.leaks(file, passwords), file + " holds a staff password");
                 assertFalse(Files.readString(file).contains(HeadlessDesk.readerPassword()), file
                         + " holds the JDBC password");
             }

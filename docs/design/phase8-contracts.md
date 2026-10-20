@@ -1182,6 +1182,28 @@ directory form (D544 as revised); `SecretScanTest` moves with it as `OutputScanT
 exists because a personal value in an event may legitimately be on screen too (the desk's status line shows the signed-on
 staff member's name, `LendingFrame.java:184`), so a whole-run scan would find the snapshot, not the leak.
 
+**As built (Phase 8, EW, step 1, 2026-10-19).** `EventMasks` (package-private, `agent-core`), the bus's fourth
+constructor argument and `agent.info.events` as specified, with these completions. (a) The scalar bound counts the
+scalars handed to a policy, so it applies only while a policy is registered: without one no scalar is visited and
+nothing is cut (the key rule alone walks the keys, as the freeze did), which keeps "nothing changes for a target with
+no `MaskPolicy`" true for a payload of more than 10,000 scalars (D-EW-3). (b) A policy's failure is logged with the
+exception's class name only (its message may quote the value, and the agent log is served by `agent.log`); a throw or
+a return that cannot be stored ends that scalar's chain as `<redacted>` (the hook encoder's precedent); NaN, the
+infinities and a `Number` of an application class count as not storable (the freeze would drop the event, or call
+application code on the publishing thread); a `null` return ends the chain and is kept (D-EW-4). (c) The key rule's
+secret-looking keys are the protocol's (`password`, `passwd`, `pwd`, `secret`, `token`, `credential`, `licence`,
+`apiKey`, `privateKey`, …); `pin` above is secret only through the `redact` option or a `RedactionKeys`; a key test that
+throws counts as secret, and a value that is already `<redacted>` under a secret key is left as is (no copy: the hook
+and rule payloads pass the second time unchanged). (d) `OutputScan` keeps `leaks(String, Set)` beside `leaksIn` (the
+same method), so that the one caller of the name form (`BindingsUpToDateTest:248`) and any package that follows the
+sentence above change only the class name (D-EW-1). (e) `Scope.EVENTS` reads records by their `type` field (the field
+`run.jsonl` and the journal write) and reads a session's `journal.jsonl` beside `run.jsonl`, since `step` records exist
+only there; a line of either file that does not parse is read whole (D-EW-2). (f) The per-file form decodes UTF-8 with
+replacement where `SecretScan` threw on a malformed byte (a binary file cannot hide an ASCII value), and a PNG is
+recognised by its name or its signature (D-EW-6). (g) The end-to-end fixture is `CoreTestModule` behind the option
+`coretest.eventMask=on|throw` (a new discovered fixture module would change the module lists the lifecycle tests pin),
+exercised by the new `EventMaskingTest` (D-EW-5).
+
 ### 5.2 The view-less browser and the `BrowserMask` SPI (gap 110; D545 to D551)
 
 **The rule (D545). Behaviour change.** While at least one `CaptureMask` or one `BrowserMask` is registered

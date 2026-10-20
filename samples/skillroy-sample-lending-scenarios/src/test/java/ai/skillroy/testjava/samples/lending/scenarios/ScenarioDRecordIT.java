@@ -18,6 +18,7 @@ package ai.skillroy.testjava.samples.lending.scenarios;
 
 import ai.skillroy.testjava.data.Credentials;
 import ai.skillroy.testjava.inference.recorded.Recording;
+import ai.skillroy.testjava.junit.OutputScan;
 import ai.skillroy.testjava.protocol.Json;
 import ai.skillroy.testjava.samples.lending.LendingDb;
 import ai.skillroy.testjava.samples.lending.Seed;
@@ -81,7 +82,7 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
  *       directory with the channel rewritten to the agent's (as the end-to-end check writes it); its answer is checked
  *       the same way, and the file as {@code BindingsUpToDateTest} checks every committed one (canonical form, no date
  *       outside an approval's label);</li>
- *   <li>the two recordings and the two bindings files pass the secret scan ({@link SecretScan}) for both seeds' staff
+ *   <li>the two recordings and the two bindings files pass the secret scan ({@link OutputScan}) for both seeds' staff
  *       passwords, the desk's PIN and the read-only account's password;</li>
  *   <li>only then are they committed: the two recordings move into the module's recordings directory, replacing its
  *       recordings of purpose {@code resolve}, the two bindings files replace the committed ones, and the label read
@@ -174,7 +175,7 @@ class ScenarioDRecordIT {
         secrets.add(READER_PASSWORD);
         List<String> leaks = new ArrayList<>();
         for (Path file : Stream.concat(recordings.values().stream(), bindings.values().stream()).toList()) {
-            for (String hit : SecretScan.leaks(file, secrets)) {
+            for (String hit : OutputScan.leaks(file, secrets)) {
                 leaks.add(file.getFileName() + ": " + hit);
             }
         }

@@ -20,6 +20,7 @@ import ai.skillroy.testjava.inference.planner.AuthoringResult;
 import ai.skillroy.testjava.inference.planner.Planner;
 import ai.skillroy.testjava.inference.planner.PlannerRequest;
 import ai.skillroy.testjava.inference.tools.ToolProjection;
+import ai.skillroy.testjava.junit.OutputScan;
 import ai.skillroy.testjava.mcp.PlanPolicy;
 import ai.skillroy.testjava.protocol.Json;
 import ai.skillroy.testjava.protocol.PrimitiveDescriptor;
@@ -267,7 +268,7 @@ class AuthorEnvelopeTest {
         for (Path file : List.of(ScenarioC.envelopeFixture(), ScenarioC.authoredYaml(), ScenarioC.authoring(),
                 ScenarioC.yaml(), ScenarioC.plan())) {
             assertTrue(Files.isRegularFile(file), file.toString());
-            assertEquals(List.of(), SecretScan.leaks(file, passwords), file + " holds a password as a value");
+            assertEquals(List.of(), OutputScan.leaks(file, passwords), file + " holds a password as a value");
         }
     }
 

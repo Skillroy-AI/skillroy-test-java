@@ -16,6 +16,8 @@
 
 package ai.skillroy.testjava.agent.core;
 
+import ai.skillroy.testjava.agent.api.EventBus;
+import ai.skillroy.testjava.agent.api.spi.MaskPolicy;
 import ai.skillroy.testjava.agent.core.fixture.TestState;
 import ai.skillroy.testjava.protocol.Event;
 import ai.skillroy.testjava.protocol.TopicFilter;
@@ -179,5 +181,72 @@ class ConcurrencyTest {
         assertNull(System.getProperty(ai.skillroy.testjava.protocol.Protocol.PROP_PREFIX + "port"));
         AgentHarness.await("agent threads gone", 30000, () -> AgentHarness.skillroyThreads().isEmpty());
         assertEquals(0, tmp.toFile().list().length, "discovery and token files removed");
+    }
+
+    /**
+     * Phase 8 (phase8-contracts.md 5.1, 13.1 row 15): publishers on several threads with a registered policy, some
+     * publishing through the module context and some through calls: every stored event is masked, every seq is its
+     * own, no failure is counted.
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    void concurrentPublishersWithAPolicyAllStoreMaskedPayloads() throws Exception {
+        final EventBus bus = agent.runtime.context().events();
+        AutoCloseable registration = agent.runtime.context().spi().register(MaskPolicy.class, new MaskPolicy() {
+            @Override
+            public Object mask(String sourceId, String column, Object value) {
+                return sourceId.startsWith("event:test.") && ("name".equals(column) || "detail.name".equals(column)
+                        || "i".equals(column)) ? "<masked>" : value;
+            }
+        });
+        try {
+            List<Future<Integer>> futures = new ArrayList<Future<Integer>>();
+            for (int i = 0; i < CLIENTS; i++) {
+                final int client = i;
+                futures.add(clients.submit(new Callable<Integer>() {
+                    @Override
+                    public Integer call() throws Exception {
+                        int published = 0;
+                        for (int n = 0; n < CALLS; n++) {
+                            if (client % 2 == 0) {
+                                Map<String, Object> payload = map("name", "client-" + client, "n",
+                                        Long.valueOf(n), "detail", map("name", "nested-" + n));
+                                assertTrue(bus.publish("test.concurrent", "t", payload) > 0);
+                                published++;
+                            } else {
+                                agent.value("test.publish", map("n", Long.valueOf(2), "topic", "test.burst"));
+                                published += 2;
+                            }
+                        }
+                        return Integer.valueOf(published);
+                    }
+                }));
+            }
+            int total = 0;
+            for (Future<Integer> f : futures) {
+                total += f.get(120, TimeUnit.SECONDS).intValue();
+            }
+            List<Event> all = bus.since(0, TopicFilter.parse("test.concurrent,test.burst"), 100000);
+            assertEquals(total, all.size());
+            long previous = 0;
+            for (Event event : all) {
+                assertTrue(event.seq() > previous, "sequence numbers strictly increase");
+                previous = event.seq();
+                if ("test.burst".equals(event.topic())) {
+                    assertEquals("<masked>", event.payload().get("i"));
+                } else {
+                    assertEquals("<masked>", event.payload().get("name"));
+                    assertEquals("<masked>", ((Map<String, Object>) event.payload().get("detail")).get("name"));
+                    assertTrue(event.payload().get("n") instanceof Long, "the rest is kept");
+                }
+            }
+            Map<String, Object> events = (Map<String, Object>) agent.valueMap("agent.info", null).get("events");
+            assertEquals(Long.valueOf(1), events.get("maskPolicies"));
+            assertEquals(Long.valueOf(0), events.get("maskFailures"));
+        } finally {
+            registration.close();
+        }
+        assertEquals(Long.valueOf(0), ((Map<String, Object>) agent.valueMap("agent.info", null).get("events"))
+                .get("maskPolicies"), "withdrawn with its handle");
     }
 }

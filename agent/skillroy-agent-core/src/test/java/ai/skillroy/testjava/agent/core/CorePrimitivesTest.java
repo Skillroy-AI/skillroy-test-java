@@ -72,7 +72,7 @@ class CorePrimitivesTest {
     void agentInfo() throws Exception {
         Map<String, Object> info = agent.valueMap("agent.info", null);
         assertEquals(Arrays.asList("protocol", "agentVersion", "pid", "startTimeMs", "loadMode", "instrumentation",
-                "readOnly", "ready", "javaVersion", "modules", "threads", "options"),
+                "readOnly", "ready", "javaVersion", "modules", "threads", "events", "options"),
                 new ArrayList<Object>(info.keySet()));
         assertEquals(Protocol.VERSION, info.get("protocol"));
         assertTrue(String.valueOf(info.get("agentVersion")).matches("\\d+\\.\\d+\\.\\d+.*"), "filtered version");
@@ -85,6 +85,14 @@ class CorePrimitivesTest {
         assertEquals("120000", options.get("readyTimeoutMs"));
         assertFalse(options.containsKey("token"));
         assertFalse(options.containsKey("nonce"));
+        // Phase 8 (phase8-contracts.md 5.1, D543): the mask pass's counters; coretest registers no MaskPolicy here.
+        Map<String, Object> events = (Map<String, Object>) info.get("events");
+        assertEquals(Arrays.asList("maskPolicies", "maskFailures", "overBudget", "slowPasses", "maxPassMs"),
+                new ArrayList<Object>(events.keySet()));
+        assertEquals(Long.valueOf(0), events.get("maskPolicies"));
+        assertEquals(Long.valueOf(0), events.get("maskFailures"));
+        assertEquals(Long.valueOf(0), events.get("overBudget"));
+        assertTrue(((Number) events.get("maxPassMs")).longValue() >= 0);
     }
 
     @Test

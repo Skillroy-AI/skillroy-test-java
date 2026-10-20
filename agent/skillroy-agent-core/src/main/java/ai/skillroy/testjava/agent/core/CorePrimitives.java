@@ -244,6 +244,7 @@ final class CorePrimitives {
         out.put("javaVersion", System.getProperty("java.version"));
         out.put("modules", runtime.modulesJson());
         out.put("threads", runtime.threadsJson());
+        out.put("events", ctx.events.masks().toJson());
         Map<String, Object> options = new LinkedHashMap<String, Object>();
         for (Map.Entry<String, String> option : ctx.options().entrySet()) {
             String key = option.getKey();
