@@ -28,6 +28,13 @@ package ai.skillroy.testjava.agent.api.spi;
  * columns it masks, and must not mask a field that a wait or the controller matches on (a prompt's {@code id}, an
  * acknowledgement's {@code inputId}, {@code web.tap}'s {@code name}, {@code web.ready}'s {@code signal}).
  *
+ * <p>Compare column names without regard to case: a JDBC driver reports a column's label as its database folds it,
+ * while a positional source's label keeps the statement's spelling (and {@code columns(table)} the provider's). On a
+ * positional source {@code data.query} asks a policy again under a derived label's upper- and lower-case forms, and
+ * a column the select list leaves unnamed under each name its item references ({@code (password)},
+ * {@code LOWER(password)}), keeping the first answer that alters the value; while a policy is registered it withholds
+ * the cells of a column no name can be given (phase8-contracts.md 4.4; Phase 8 security fixes S160, S163).
+ *
  * <p>Called on agent worker threads, or, for a {@code CAPTURE} hook or a Byteman rule's bindings, on the application
  * thread that called the hooked method; possibly concurrently. Also called on the thread that publishes an event,
  * which may be the EDT, an application thread, an adapter's thread or an agent worker, once per scalar of every

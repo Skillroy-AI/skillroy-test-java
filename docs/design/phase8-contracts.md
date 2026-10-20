@@ -882,8 +882,25 @@ through a `QuiescentPoint`, at the point the provider itself runs it". The core 
 the penalties) or the agent restarts. A module that cannot keep its budget is thereby found at the first run, not
 after it has held the application's thread a hundred times.
 
+**Fix wave (Phase 8 review, FB, 2026-10-19): a module's own quiescent tasks (L2-F3, as its sceptic narrowed it).** A
+module's `callQuiescent` and `call(APP_QUIESCENT, …)` through its context's broker (`ModuleContext.Threads`, which
+passes
+the module id to the core's package-private `callQuiescent(module, …)` and `call(module, …)`) are measured and penalised
+like a primitive under the key `module:<id>`: above twice the budget, every later such call of that module answers
+`CAPABILITY_UNAVAILABLE {reason: "quiescent task overran its budget", module, budgetMs, ranMs}` (message "module <id>:
+quiescent task overran its budget") until `agent.capabilities {reprobe: true}`; another module's calls are not
+refused; the overrun is logged once per module ("a quiescent task of module <id> held the application's thread …").
+The core's own calls without a module context (`CoreThreadBroker.callQuiescent`) stay unpenalised and share one log
+line.
+Residual, stated: a module that reaches the point directly (`ThreadPolicyProvider.quiescentPoint().await`, the route
+D639
+guards) is seen only by the point's own `lastOverrun`; the penalty finds an honest module that cannot keep its budget,
+it
+is not a boundary.
+
 **Reporting.** `agent.info.threads.quiescent` = `{provider, allowanceMs, capacity, queued, ran, notReady, refused,
-overruns, lastOverrun: {primitive, budgetMs, ranMs} | null, penalised: [<primitive>…]}` when the first provider offers
+overruns, lastOverrun: {primitive, budgetMs, ranMs} | null, penalised: [<primitive> | module:<id> …]}` (the module keys
+since the fix wave, L2-F3) when the first provider offers
 a point, else `null` (additive key beside `workers`, `callers`, `abandoned`; `AgentRuntime.threadsJson`).
 
 **Lifecycle.** On `agent.disable` and on close the core calls `close()` on the first provider's point (idempotent with
@@ -917,7 +934,8 @@ the descriptor's usual optional readers (a value of the wrong type is a `JsonExc
 **As built (Phase 8, ET, the body).** The gates, the wrapper and the penalties live in `CoreThreadBroker`
 (`quiescentGate`, `runQuiescent`, `QuiescentTask`): the dispatcher asks `quiescentGate(primitive, budget)` and runs
 `runQuiescent(primitive, task, budget, timeout)`; `callQuiescent` and `call(APP_QUIESCENT, …)` (budget 50) pass the same
-gates without the penalty, which is per primitive. The wrapper marks its thread as running a quiescent task, so a nested
+gates without the penalty, which is per primitive (superseded for a module's context by the fix wave above, L2-F3: per
+module). The wrapper marks its thread as running a quiescent task, so a nested
 `call`, `callQuiescent` or `callOnLane` from it is `FORBIDDEN_THREAD` even when the provider does not forbid that thread;
 it measures `ranMs` itself, logs the first overrun of each primitive, records `lastOverrun {primitive, budgetMs, ranMs}`
 (when only a module's own `await` overran, `agent.info` shows the point's `lastOverrun` with `primitive: null`) and
@@ -1028,7 +1046,8 @@ public interface QueryControl {
      *  abort): on an agent thread of its own (a nested worker task), never the dispatching worker, an application
      *  thread or the EDT, bounded (2 s, then abandoned there and logged by class name). Registered after cancellation:
      *  run at once on the registering thread. At most 4 per read (IllegalStateException beyond). Closing the handle
-     *  unregisters the action. */
+     *  unregisters the action: once close() returns, the action will not start; an action already running when
+     *  close() is called is waited for, at most until its 2 s run out (never on the thread running it). */
     AutoCloseable onCancel(Runnable action);
 }
 // DataSourceProvider, two default methods (A74)
@@ -1052,7 +1071,13 @@ the reserve**, with `cancelled` (a boolean: true when an action returned without
 cancelled), `cancelPending: true` (written only when an action was still running at the answer; a new key, §2.1),
 `stillRunning` (the read had not ended when the answer was written) and `enforcesTimeout` (the provider's answer). The
 per-source gate (or the lane's own `BUSY`) keeps at most one cancel batch per source in flight. A read or action that
-ends after the answer is logged ("the read of source s ended after n ms") and clears the per-source gate. Why not on
+ends after the answer is logged ("the read of source s ended after n ms") and clears the per-source gate. **Fix wave
+(Phase 8 security fix, S159, FB):** an action whose handle the provider closed never starts after that `close()`
+returned, also when the batch had already taken it (each registration keeps `closed` and `running` under its own
+monitor; the batch skips a closed one); `close()` waits for a run already started until it ends or its 2 s run out,
+except on the thread running it. The action can still run between the end of the read and the close of its handle, so
+the SPI tells a provider to gate an application-level abort on its own read state (the sample's `ReadHandle` does). Why
+not on
 the dispatching worker (the fragment's form): up to four actions of 2 s plus 500 ms is 8.5 s of work started 250 ms
 before the dispatcher's deadline, so any cancel action slower than about 250 ms (a driver whose `cancel()` makes a
 network round trip) would let the dispatcher abandon the call by primitive name and bring back §4.8 defect 4, and a
@@ -1061,14 +1086,29 @@ synchronous action holding the only thread cannot also be "abandoned after 2 s".
 **The JDBC form (D530).** `proto/sql/ReadOnlyJdbc` gains an overload `executeLenient(Connection, String,
 List<Object>, int maxRows, int timeoutSeconds, Consumer<String> warn, Consumer<Statement> statementSink)` (Java 8;
 the six-argument form delegates with a null sink): the sink receives the `PreparedStatement` right after
-`prepareStatement` and **null after the statement is closed**, so a caller can cancel only while the statement is open
-(never a later statement on a pooled connection). `data/JdbcExecutor.execute` registers `control.onCancel(() -> { s =
+`prepareStatement` and **null before the statement is closed** (Phase 8 security fix, S161, FB: was "after"; the sink
+may hold the hand-over until a `cancel()` it let run has returned), so a caller can cancel only while the statement is
+open (never a later statement on a pooled connection). `data/JdbcExecutor.execute` registers `control.onCancel(() -> { s
+=
 current; if (s != null) s.cancel(); })` through that sink; a `SQLException` or `SQLFeatureNotSupportedException` from
 `cancel()` is logged by class name and counted as not cancelled. `setQueryTimeout` keeps today's seconds
 (`remainingMs / 1000`, at least 1; `DataQueryJdbcTest.queryTimeoutComesFromTheRemainingTime` stays as it is: the cancel
 now covers what the rounding leaves). `open()` is unchanged and still has no timeout: the provider bounds any pool wait
 (stated in the SPI's Javadoc; `open(QueryControl)` is gap 135). The controller's `JdbcDataChannel` may adopt the sink
 later (gap 137; not required).
+
+**Fix wave (Phase 8 security fix, S161, FB).** The JDBC action and the read share one slot. The action takes the open
+statement and marks the slot `cancelling` under the slot's monitor and calls `cancel()` outside it (a `cancel()` that
+blocks never holds the read; the sceptic's liveness condition); the read hands null back before the close only once no
+`cancel()` runs, waiting at most `ACTION_TIMEOUT_MS`. The read publishes the statement first and then asks
+`control.cancelled()` (the batch sets it before it reads the slot, so one side always sees the other): a statement
+prepared after the agent gave up (a slow `open()`, a server-side prepare) is never run. The sink then throws
+`java.util.concurrent.CancellationException`, which `ReadOnlyJdbc` lets through after handing the sink null, closing the
+statement and restoring the connection ("a sink that throws `CancellationException` when handed the open statement stops
+the call before anything is bound or run"; any other sink failure is still only reported), and `JdbcExecutor` throws a
+`SQLException` with SQL state `57014` ("the read was cancelled before its statement ran"), as it does when the read was
+cancelled before `prepareStatement`. The module has answered its `TIMEOUT` by then, so a caller sees that answer; on
+agent close the read ends with that failure (`INTERNAL_ERROR`, `sqlState: "57014"`).
 
 **Agent close.** `DataModule.uninstall` keeps the set of live controls, sets each cancelled, starts its actions the
 same way (one nested worker task per control) and waits for them within its own share of `UNINSTALL_TIMEOUT_MS`
@@ -1090,11 +1130,23 @@ unsupported).
 provider's form, `columns(table)` and the conversion of the rows (so a large object is read on the read's own thread),
 and maps every failure but an interrupt as before Phase 8; the masks run on the dispatching worker. A `TIMEOUT` from the
 hand-off counts as the module's expiry only while the read has not ended (a provider's own `TIMEOUT` passes through).
+**Fix wave (Phase 8 review, FB, 2026-10-19; L1-F5 as restated):** the read records whether it threw a `TIMEOUT` itself;
+a `TIMEOUT` from the hand-off is the module's expiry exactly when it did not (ended or not), so a read that ends on the
+broker's interrupt before the module looks still gets the module's own `TIMEOUT` (with `stillRunning: false`), never the
+dispatcher's; the provider's own `TIMEOUT` passes through as it was thrown.
 The cancel batch is started with `ThreadBroker.post(WORKER, …)`, not `call` (a `call` would hold the dispatching worker
 for the batch, or, bounded to the answer's wait, interrupt the batch and with it the action it waits on); each action
-runs through `call(WORKER, action, 2000)`. The answer waits at most `min(200 ms, the dispatcher's remaining time - 50 ms)`,
-at least 1 ms. `cancelled` is true once an action returned without throwing, or the JDBC action found the statement
-open and its `cancel()` returned; `cancelPending` while an action of the batch had not ended at the answer. The fifth
+runs through `call(WORKER, action, 2000)`. **Fix wave (Phase 8 review, FB, 2026-10-19; L1-F4):** the worker pool has no
+queue, so a full pool rejects the posted batch at once and the broker only logs it; the batch counts its actions as
+pending only once it started, and a batch that had not started when the answer is written adds `cancelNotStarted: true`
+to the `TIMEOUT` data (in `cancelPending`'s place; `cancelled: false`) and one warn line "data: the cancel actions of
+the
+read of source 's' did not start: no agent worker was free"; no action runs for that read. `DataModule.uninstall` has
+the same blind spot and stays bounded: it spends its 3,000 ms wait and no action runs for such a read. The answer
+waits at most `min(200 ms, the dispatcher's remaining time - 50 ms)`, at least 1 ms (`DataQuery.answerWaitMs`, tested
+without a clock since the fix wave, L3-F2). `cancelled` is true once an action returned without throwing, or the JDBC
+action found the statement open and its `cancel()` returned; `cancelPending` while an action of the batch had not ended
+at the answer. The fifth
 registration (closed ones included) is refused. `DataModule.uninstall` cancels the live reads and waits for their batches
 at most 3,000 ms in all (`UNINSTALL_CANCEL_MS`) before it unregisters the primitives. The `TIMEOUT` message is
 "data.query on source 's' timed out after t ms".
@@ -1117,8 +1169,14 @@ D100 check) benefits without a new parameter. The provider's own names always wi
  *  parentheses nested beyond 32. */
 public static List<String> of(String sql);
 /** For SELECT * FROM <table> [[AS] alias] [WHERE …] [ORDER BY …] [FETCH/LIMIT …] (one table, no join, no set
- *  operation): the table as written, quotes removed, a schema part kept; else null. */
+ *  operation): the table as written, a schema part kept, an unquoted part as written and a quoted part in double
+ *  quotes (an inner " doubled; `x` and [x] as "x"), S162; else null. */
 public static String starTable(String sql);
+/** Phase 8 security fix S160 (FB): one entry per top-level select item, split as of() splits the list: the names the
+ *  item references (each the last part of a possibly qualified name; a qualifier and a function's name left out); a
+ *  null entry when the item reads columns it does not name (a SELECT * or t.* inside it) or holds a name no reading
+ *  can spell; null for the whole list exactly when of() is null. */
+public static List<List<String>> references(String sql);
 ```
 
 It reuses `StatementGuard`'s lexical rules through a package-private `SqlTokens` (the tokenizer moved out of
@@ -1145,14 +1203,47 @@ the entry, or the list, is null. Linear in the text, bounded depth.
    (`password AS p`) defeats a name-keyed mask on a JDBC source today (`PasswordMask` Javadoc); a derived label gives a
    positional source exactly that behaviour, no weaker. The JDBC form is unchanged (the driver's labels).
 
+**Fix wave (Phase 8 security fixes S160, S163, S164, FB; with the code review's L1-F3 and the security L3 sceptic's
+cases).** Rules 1-4 as written did not give the parity they state: every label-less form of a positional source
+returned a masked column in clear (a `t.*` item, a `*` over a join, a sub-query, `WITH` or a set operation, all of
+which make the whole list null; a parenthesised, `COLLATE`'d or cast column, a null entry in a readable list; a list
+dropped for its size, such as an alias spelled like a clause word, `code window`; a short `columns(table)` answer), a
+mask comparing names exactly missed the statement's spelling, and one short or ragged row of the data dropped every
+label. The rules now read (the masked cell, not a refused read, is the sceptic's choice: since §5.1 a `MaskPolicy` also
+serves event payloads, so "refuse while a mask is registered" would refuse every unaliased expression on every
+positional source of a layer that masks one event field):
+
+1. a column's name is as in rule 1; its **mask names**, the names `DataQuery.mask` asks each policy under in turn,
+   keeping the first answer that alters the value: the provider's name (as given); a derived label, then its upper-
+   and lower-case forms (a driver folds an unquoted name where the statement keeps its spelling, S163); a
+   `columns(table)` entry (as given); for `c<i+1>` from a readable list's null entry, `c<i+1>` and then each name the
+   item references (`SelectLabels.references`) in the same three spellings (`(password)`, `password COLLATE x`,
+   `LOWER(password)`, `CAST(password AS …)`, a scalar sub-query naming it), so an item that references no name
+   (`COUNT(*)`, a literal, `?`, `CURRENT_DATE`) keeps its value as on a JDBC source;
+2. width (S164): the candidate list (the derived list when it could be read, else, when the provider named no column,
+   the `columns(table)` list) is used when no name list, type list or returned row is wider than it, and then sets the
+   width (a shorter row is padded at the end and keeps the labels); otherwise the width is the widest of those;
+3. a candidate a result is wider than is not used for naming (the one `data:` log line stays);
+4. **withheld:** while at least one `MaskPolicy` is registered, a column with no mask names (one the provider did not
+   name and no candidate names: the whole list unreadable and no star names, or the candidate not used for its width;
+   or one whose item reads columns it does not name, a `SELECT *` inside it) has every non-null cell replaced by
+   `<redacted>` (`SecretKeys.REDACTED`, the marker the controller already treats as masked) without asking the policies,
+   and the
+   answer is served; one `data:` info line names the source and the count, never the statement. Without a policy such a
+   column is served as before (`c<i>`). This is stronger than a JDBC source (which labels `SELECT password FROM s UNION
+   …` from the first branch); the rename residual (`password AS p`) stays as stated. Veto form (recorded in the fix
+   report): refuse such a read with `INVALID_PARAMS` instead (the reviewers' first proposal).
+
 **`DataSourceProvider.columns(String table)` (gap 117; D532; A75).**
 
 ```java
 /** The column names of {@code table} in the table's declared order, or null (the default) when the provider cannot
  *  tell. data.query asks it only for a statement of the form SELECT * FROM <table> … (SelectLabels.starTable) whose
  *  query() result named no column, and names that result's columns with it; the controller's allow-list check (D100)
- *  reads those names. {@code table} is the table as the statement spells it, quotes removed, a schema part kept; the
- *  provider compares it as its database folds names, and must answer the same relation query() reads. All or nothing:
+ *  reads those names. {@code table} is the table as the statement spells it, a schema part kept: an unquoted part as
+ *  written, which the provider folds as its database folds unquoted names, a quoted part in double quotes, which it
+ *  compares exactly (Phase 8 security fix S162, FB; was "quotes removed", which made "staff" and staff one name); the
+ *  provider must answer the same relation query() reads. All or nothing:
  *  a list with a null or empty entry counts as null. Called on the source's lane or the read's worker task, at most
  *  once per data.query call, within that call's budget; must not block and must not start host infrastructure
  *  (S34). A throw counts as null; the agent logs the exception's class only (S22). */
@@ -1184,7 +1275,8 @@ alias without `AS` must follow a token that ends an expression (`)`, a literal, 
 or frame word) and must not follow one that leads (`AT`, `ZONE`, `TO`, …), and a square-bracket identifier is an alias
 only after `AS` (`x [y]` is also PostgreSQL's subscript). A string literal is never a label, after `AS` included
 (`AS 'x'`, which MySQL and SQL Server read as an alias, gives null). Labels keep the case they are written in.
-`starTable` takes at most three name parts, refuses a quoted part holding a `.`, and refuses a reading whose rest after
+`starTable` takes at most three name parts, refuses a quoted part holding a `.` (so a provider splits the answer at
+every `.`; since S162 a quoted part comes in double quotes), and refuses a reading whose rest after
 `WHERE`, `ORDER`, `FETCH`, `LIMIT` or `OFFSET` holds a set operation, `JOIN`, `GROUP`, `HAVING`, `WINDOW`, `INTO`, `FOR`
 or a row-pattern or pivot word at the top level; `MAX_ITEMS` (1000) and `MAX_DEPTH` (32) are public constants.
 
@@ -1192,8 +1284,11 @@ or a row-pattern or pivot word at the top level; `MAX_ITEMS` (1000) and `MAX_DEP
 (the two-argument form kept): the select list is the candidate when it could be read, else, when the provider named no
 column, the `columns(table)` list; a candidate whose size differs from a non-zero width taken from the names or the rows
 is not used, and neither is one whose size differs from the final width (types alone can set it); each such case writes
-one `data: source 's': … names n column(s), the result has m; not used for naming` line. `columns(table)` is asked on the
-read's lane or worker task only for the star form whose result named no column; a null, empty or partly unnamed list,
+one `data: source 's': … names n column(s), the result has m; not used for naming` line. (Superseded by the fix wave
+above, S164: a candidate is not used only when the names, the types or a row are wider than it; `Table.fromQueryResult`
+now also returns each column's mask names, `Table.Named`, and the line keeps its words with the widest count.)
+`columns(table)` is asked on the read's lane or worker task only for the star form whose result named no column; a null,
+empty or partly unnamed list,
 and a throw (logged by class), count as none.
 
 ### 4.5 Procedures retired honestly (gap 119; D533)
@@ -2903,7 +2998,11 @@ public final class PayloadMatch {
 ```
 
 Semantics per entry (all must hold): a scalar or null value is today's rule, `String.valueOf(expected)` equal to
-`String.valueOf(payload.get(key))` (numbers by text: `2` and `2.0` stay unequal, as today); **`{has: <scalar>}`**: the
+`String.valueOf(payload.get(key))` (numbers by text: `2` and `2.0` stay unequal, as today), and **a scalar never equals
+a map, collection or array payload value; its text is not built** (Phase 8 security fix, S158, FB: `String.valueOf` of a
+nested value walked the whole subtree under the ring lock that publishers, the EDT included, wait on; a scalar written
+to
+equal such a value's `toString` text no longer matches, none is committed); **`{has: <scalar>}`**: the
 payload value is a list and some element's `String.valueOf` text equals the scalar's text (a map or list element never
 equals; a non-list payload value never matches; no substring meaning; `{has: null}` is invalid); any other map or list
 value, a `has` object with another key beside it, or an empty object is **invalid** (`problem`). Keys: the controller's
@@ -3753,7 +3852,7 @@ without regard to case.
 | `LendingInputVeto implements InputVeto` | §3.2 | registered in `install` (one line after `CaptureMask`); refuses a component whose `getName()` is `closeMenu` with `"closes the desk (the application would end)"` for every route and `ANY`; null otherwise (names only: no application class is touched). `AppState.appState()` adds `tools: {closeRequests, testSlips, slipsVisible, slipsHidden, reprints, scans, lidOpen, lidChanges, rereads, depositBoxOpens}` **only when the window exists** (absent on every other target: the committed `app.state` shapes are unchanged) |
 | `LendingWorker.quiescentPoint()` | §4.1 | one `QuiescentPoint(50, 4)`; `EngineEvents.idle(state, availableMs)` calls `point.runOne(availableMs)` while active (inert after `deactivate()`); `LendingModule.uninstall` closes the point before `worker.shutdown()` |
 | the primitive `lending.engine.view` | §4.1 | `APP_QUIESCENT`, budget 20 ms, timeout 5000, read-only: the `IdleView` as JSON; capability `lending.engine.view`, probed: desk running and a point offered (`RunningProbe` plus the point); `LendingPrimitives.NAMES` grows by one; not in the `lending` `app.state` section |
-| `LendingRowsSource implements DataSourceProvider`, id **`lending-report`** | §4.2-§4.4 | describe "the desk's report reader, which answers by position"; the five-argument `query()` over `LendingDb.readRows` with `control.onCancel(handle::cancel)`, `columnNames` null, `enforcesTimeout()` true, `lane()` = `lending.reads`, `columns(table)` from `columnsOf`; the lane declared in `install` (`threads 1, queue 2`) and retired in `uninstall`; always registered (D536: a second read path over the same read-only connection adds no exposure) |
+| `LendingRowsSource implements DataSourceProvider`, id **`lending-report`** | §4.2-§4.4 | describe "the desk's report reader, which answers by position"; the five-argument `query()` over `LendingDb.readRows` with `control.onCancel(handle::cancel)`, `columnNames` null, `enforcesTimeout()` true, `lane()` = `lending.reads`, `columns(table)` from `columnsOf`; the lane declared in `install` (`threads 1, queue 2`) and retired in `uninstall`; always registered (D536: a second read path over the same read-only connection adds no exposure; true since the fix wave's §4.4 rules, S160: before them its label-less forms returned `staff.password` in clear) |
 | `PasswordMask`'s rules | §4.4, §5.1 | the row rule covers both source ids `lending` and `lending-report` (one line, ET); a second rule answers `<personal>` for `sourceId` `event:staff.signedOn` and column `name` (EW); the class name is unchanged |
 | `EngineEvents.stateChanged` publishes **`staff.signedOn {code, name}`** | §5.1 | after `state.changed`, when the state changes to `IDLE` from `PASSWORD` or `SIGNED_OFF` and `engine.status().staff()` is non-null (seed A's `100` is `Alice Archer`: the sample's realistic personal value in an event); topic constant `STAFF_SIGNED_ON` beside `LOAN_POSTED` |
 | `LendingClassDeny implements ClassDeny` | §6.5 | registered only when the agent option `lending.hooks.deny` names patterns (comma-separated `ClassPattern`s; invalid → `IllegalArgumentException("option lending.hooks.deny: …")`, the module's FAILED record), answering `the lending module denies <pattern>`; no launch sets it (a unit demonstration of source 3, behind an option) |

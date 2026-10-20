@@ -53,6 +53,8 @@ class DataModuleTest {
         assertTrue(found.get(0) instanceof DataModule);
         assertEquals("data", found.get(0).id());
         assertEquals(DataModule.VERSION, found.get(0).version());
+        // Review fix L3-F3: the contract's own number (D534, P8 2.4), pinned so a stale literal cannot come back.
+        assertEquals("0.2.0", DataModule.VERSION);
         assertTrue(found.get(0).requires().isEmpty());
     }
 

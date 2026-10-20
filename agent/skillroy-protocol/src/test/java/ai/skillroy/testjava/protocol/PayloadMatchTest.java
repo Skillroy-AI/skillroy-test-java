@@ -18,10 +18,13 @@ package ai.skillroy.testjava.protocol;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -100,6 +103,42 @@ class PayloadMatchTest {
         assertTrue(PayloadMatch.matches(payload, map("validInputs", has("Key.DEPOSIT"), "number", 2L)),
                 "has beside a scalar entry");
         assertFalse(PayloadMatch.matches(payload, map("validInputs", has("Key.DEPOSIT"), "number", 3L)));
+    }
+
+    /**
+     * Security fix S158 (security L2-S1): a scalar never equals a map, collection or array payload value, and the
+     * value's text is never built (the agent matches under its event ring's lock, which publishers wait on).
+     */
+    @Test
+    void aScalarNeverEqualsANestedPayloadValueAndItsTextIsNeverBuilt() {
+        final AtomicInteger built = new AtomicInteger();
+        Map<String, Object> nested = new LinkedHashMap<String, Object>() {
+            private static final long serialVersionUID = 1L;
+
+            @Override
+            public String toString() {
+                built.incrementAndGet();
+                throw new IllegalStateException("the whole subtree as text");
+            }
+        };
+        nested.put("k", "v");
+        List<Object> list = new ArrayList<Object>() {
+            private static final long serialVersionUID = 1L;
+
+            @Override
+            public String toString() {
+                built.incrementAndGet();
+                return "[a]";
+            }
+        };
+        list.add("a");
+        Map<String, Object> payload = map("map", nested, "list", list, "array", new String[] {"a"});
+        assertFalse(PayloadMatch.matches(payload, map("map", "{k=v}")));
+        assertFalse(PayloadMatch.matches(payload, map("list", "[a]")), "not the list's text either");
+        assertFalse(PayloadMatch.matches(payload, map("array", "a")));
+        assertFalse(PayloadMatch.matches(payload, map("map", null)), "a map is not null");
+        assertEquals(0, built.get(), "no nested value was turned into text");
+        assertTrue(PayloadMatch.matches(payload, map("list", has("a"))), "has still reads the list");
     }
 
     @Test

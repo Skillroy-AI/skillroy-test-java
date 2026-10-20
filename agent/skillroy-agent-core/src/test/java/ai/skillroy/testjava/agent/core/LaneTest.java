@@ -146,9 +146,11 @@ class LaneTest {
         AgentHarness.await("the first runs", 10000, () -> active(broker, "t.small") == 1);
         final AtomicInteger ranLate = new AtomicInteger();
         final AtomicReference<Object> second = new AtomicReference<Object>();
+        // Review fix L3-F4: the queued caller has 3 s, so the BUSY probe below has seconds to be sent while it is
+        // still queued; its TIMEOUT is awaited before the lane's first task is released.
         Thread queued = background(() -> {
             try {
-                second.set(broker.callOnLane("t.small", () -> ranLate.incrementAndGet(), 300));
+                second.set(broker.callOnLane("t.small", () -> ranLate.incrementAndGet(), 3000));
             } catch (Exception e) {
                 second.set(e);
             }
@@ -166,9 +168,9 @@ class LaneTest {
         assertEquals(ErrorCodes.TIMEOUT, ((RpcException) second.get()).error().code());
         hold.countDown();
         first.join(10000);
-        Thread.sleep(200);
-        assertEquals(0, ranLate.get(), "a task withdrawn at its caller's deadline never runs");
+        // The lane is one thread in front of a FIFO queue: a withdrawn task left there would run before this one.
         assertEquals("ok", broker.callOnLane("t.small", () -> "ok", 5000));
+        assertEquals(0, ranLate.get(), "a task withdrawn at its caller's deadline never runs");
     }
 
     @Test

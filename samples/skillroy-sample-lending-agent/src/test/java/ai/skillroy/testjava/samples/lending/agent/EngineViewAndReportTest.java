@@ -237,6 +237,99 @@ class EngineViewAndReportTest {
         }
     }
 
+    /**
+     * Phase 8 security fix S160 (code review L1-F3; security L3-F2 and its sceptic), S162 and S163 on the desk: no
+     * label-less form returns a seeded password through the positional source, which answers each statement; the
+     * named forms keep their other columns.
+     */
+    @Test
+    void noLabelLessFormOnTheReportReaderReturnsAStaffPassword() throws Exception {
+        lending = LendingFixture.start();
+        List<String> passwords = seededPasswords();
+        DataModule data = new DataModule();
+        data.install(lending.ctx);
+        try {
+            for (String sql : Arrays.asList(
+                    "SELECT s.* FROM staff s",
+                    "SELECT staff.* FROM staff",
+                    "SELECT * FROM staff s JOIN staff_role r ON r.staff_code = s.code",
+                    "SELECT * FROM (SELECT * FROM staff) x",
+                    "WITH t AS (SELECT * FROM staff) SELECT * FROM t",
+                    "SELECT password FROM staff UNION SELECT name FROM staff",
+                    "SELECT * FROM staff, role",
+                    "SELECT code, s.* FROM staff s",
+                    "SELECT (password) FROM staff ORDER BY code",
+                    "SELECT code, password COLLATE SQL_TEXT FROM staff ORDER BY code",
+                    "SELECT code, LOWER(password) FROM staff",
+                    "SELECT code window, password FROM staff",
+                    "SELECT code limit, password FROM staff",
+                    "SELECT code, (SELECT p.password FROM staff p WHERE p.code = s.code) FROM staff s",
+                    "SELECT * FROM \"STAFF\"",
+                    "SELECT * FROM PUBLIC.\"STAFF\" WHERE 1 = 1")) {
+                Map<String, Object> result = map(lending.ctx.call("data.query", args("source", "lending-report",
+                        "sql", sql)));
+                assertFalse(list(result.get("rows")).isEmpty(), "the source answers: " + sql);
+                String text = String.valueOf(result);
+                for (String password : passwords) {
+                    assertFalse(text.contains(password), "a seeded password left the module: " + sql + " " + text);
+                }
+            }
+            Map<String, Object> star = map(lending.ctx.call("data.query", args("source", "lending-report", "sql",
+                    "SELECT * FROM \"STAFF\" ORDER BY code")));
+            assertEquals("CODE", map(list(star.get("columns")).get(0)).get("name"), "the quoted star form is named");
+            assertEquals("100", list(list(star.get("rows")).get(0)).get(0), "and its other columns as read");
+            Map<String, Object> named = map(lending.ctx.call("data.query", args("source", "lending-report", "sql",
+                    "SELECT code, (password), name FROM staff ORDER BY code")));
+            assertEquals(Arrays.asList("100", "<redacted>", "Alice Archer"), list(named.get("rows")).get(0),
+                    "an unnamed item is masked by the names it reads; the named items as read");
+        } finally {
+            data.uninstall();
+        }
+    }
+
+    /**
+     * S163 on the desk: a policy that compares names exactly as the JDBC source labels them (upper case) masks the
+     * positional source's derived labels too.
+     */
+    @Test
+    void anExactCasePolicyMasksTheReportReaderAsItMasksTheJdbcSource() throws Exception {
+        lending = LendingFixture.start();
+        lending.ctx.spi.register(ai.skillroy.testjava.agent.api.spi.MaskPolicy.class,
+                (sourceId, column, value) -> sourceId.startsWith("lending") && "NAME".equals(column) && value != null
+                        ? "<personal>" : value);
+        DataModule data = new DataModule();
+        data.install(lending.ctx);
+        try {
+            for (String source : Arrays.asList("lending", "lending-report")) {
+                for (String sql : Arrays.asList("SELECT code, name FROM staff ORDER BY code",
+                        "SELECT s.code, s.name FROM staff s ORDER BY s.code", "SELECT * FROM staff ORDER BY code")) {
+                    Map<String, Object> result = map(lending.ctx.call("data.query", args("source", source, "sql",
+                            sql)));
+                    assertFalse(String.valueOf(result).contains("Alice Archer"), source + ": " + sql + " " + result);
+                }
+            }
+        } finally {
+            data.uninstall();
+        }
+    }
+
+    private List<String> seededPasswords() throws Exception {
+        List<String> passwords = new ArrayList<String>();
+        Connection c = lending.app.db().openReadOnlyConnection();
+        try {
+            Statement st = c.createStatement();
+            ResultSet rs = st.executeQuery("SELECT password FROM staff ORDER BY code");
+            while (rs.next()) {
+                passwords.add(rs.getString(1));
+            }
+            st.close();
+        } finally {
+            c.close();
+        }
+        assertEquals(7, passwords.size());
+        return passwords;
+    }
+
     /** A runaway report on the lane: stopped by its ReadHandle when the caller's time runs out. */
     @Test
     void aSlowReportIsCancelledOnItsLane() throws Exception {

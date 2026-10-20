@@ -210,7 +210,10 @@ class ProviderQueryFormTest {
         query("star", "SELECT * FROM staff a JOIN loan b ON a.code = b.staff");
         assertEquals(Collections.singletonList("staff"), provider.asked, "only the star form of one table");
         query("star", "SELECT * FROM \"PUBLIC\".\"STAFF\" s ORDER BY code");
-        assertEquals(Arrays.asList("staff", "PUBLIC.STAFF"), provider.asked, "as spelled, quotes removed");
+        query("star", "SELECT * FROM \"staff\"");
+        // Security fix S162: a quoted part keeps its quotes, so the provider can tell "staff" from staff.
+        assertEquals(Arrays.asList("staff", "\"PUBLIC\".\"STAFF\"", "\"staff\""), provider.asked,
+                "as spelled, a quoted part in double quotes");
 
         CountingProvider named = new CountingProvider("named", Arrays.asList("x"), new QueryResult(
                 Arrays.asList("CODE"), null, Collections.singletonList(Arrays.<Object>asList("100")), false));
@@ -321,7 +324,139 @@ class ProviderQueryFormTest {
         Map<String, Object> value = (Map<String, Object>) query("anon",
                 "SELECT TRIM(code), TRIM(name) FROM person WHERE code = '200'");
         assertEquals("[[\"200\",\"masked\"]]", Json.write(value.get("rows")));
-        assertEquals(Arrays.asList("anon/c1", "anon/c2"), columns);
+        // Security fix S160: an unnamed item is asked under its synthetic name first, then, while that leaves the
+        // value as it is, under each name it references in each spelling; the first answer that alters it is kept.
+        assertEquals(Arrays.asList("anon/c1", "anon/code", "anon/CODE", "anon/c2"), columns);
+    }
+
+    /** A PasswordMask-shaped policy: by column name, ignoring case. */
+    private void maskPasswords() {
+        ctx.spi.register(MaskPolicy.class,
+                (sourceId, column, value) -> "password".equalsIgnoreCase(column) ? "<redacted>" : value);
+    }
+
+    /**
+     * Security fix S160 (code review L1-F3; security L3-F2 and its sceptic): no label-less form of a positional source
+     * returns a masked column in clear. Whole-list forms (a {@code t.*} item, a join, a sub-query or WITH in FROM, a
+     * set operation) and lists the result is wider than (an alias spelled like a clause word, a short
+     * {@code columns(table)} answer) have their cells withheld; an unnamed item is asked under the names it reads.
+     */
+    @Test
+    void noLabelLessFormReturnsAMaskedColumnInClear() throws Exception {
+        maskPasswords();
+        ctx.spi.register(DataSourceProvider.class, new FixedProvider("staffByPosition", new QueryResult(null, null,
+                Collections.singletonList(Arrays.<Object>asList("100", "planted-secret-1", "Ada")), false)));
+        for (String sql : Arrays.asList(
+                "SELECT s.* FROM staff s",
+                "SELECT staff.* FROM staff",
+                "SELECT * FROM staff s JOIN loan l ON l.staff_code = s.code",
+                "SELECT * FROM (SELECT * FROM staff) x",
+                "WITH t AS (SELECT * FROM staff) SELECT * FROM t",
+                "SELECT code, password, name FROM staff UNION SELECT code, password, name FROM staff",
+                "SELECT * FROM staff, loan",
+                "SELECT * FROM staff NATURAL JOIN staff_role",
+                "SELECT code, s.* FROM staff s",
+                "SELECT code, (password), name FROM staff",
+                "SELECT code, password COLLATE SQL_TEXT, name FROM staff",
+                "SELECT code, LOWER(password), name FROM staff",
+                "SELECT code, CAST(password AS VARCHAR(20)), name FROM staff",
+                "SELECT code, password::text, name FROM staff",
+                "SELECT code, password AS 'shown', name FROM staff",
+                "SELECT code window, password FROM staff",
+                "SELECT code limit, password FROM staff",
+                "SELECT code, NEXT VALUE FOR s, name FROM staff",
+                "SELECT code, (SELECT p.password FROM staff p WHERE p.code = s.code), name FROM staff s",
+                "SELECT code, (SELECT * FROM secret p WHERE p.code = s.code), name FROM staff s")) {
+            String json = Json.write(query("staffByPosition", sql));
+            assertFalse(json.contains("planted-secret"), sql + ": " + json);
+        }
+        // A short columns(table) answer for the star form (security L3-F2 (c)).
+        ctx.spi.register(DataSourceProvider.class, new CountingProvider("shortStar", Arrays.asList("code"),
+                new QueryResult(null, null, Collections.singletonList(Arrays.<Object>asList("100", "planted-secret-2")),
+                        false)));
+        String json = Json.write(query("shortStar", "SELECT * FROM staff"));
+        assertFalse(json.contains("planted-secret"), json);
+    }
+
+    @Test
+    void aColumnNoNameCanBeGivenIsWithheldOnlyWhileAMaskIsRegistered() throws Exception {
+        List<List<Object>> rows = new ArrayList<List<Object>>();
+        rows.add(Arrays.<Object>asList("100", "pw-1", null));
+        ctx.spi.register(DataSourceProvider.class, new FixedProvider("star", new QueryResult(null, null, rows,
+                false)));
+        assertEquals("[[\"100\",\"pw-1\",null]]",
+                Json.write(((Map<?, ?>) query("star", "SELECT s.* FROM staff s")).get("rows")), "no mask: as read");
+        final List<String> asked = Collections.synchronizedList(new ArrayList<String>());
+        ctx.spi.register(MaskPolicy.class, (sourceId, column, value) -> {
+            asked.add(column);
+            return value;
+        });
+        Map<?, ?> value = (Map<?, ?>) query("star", "SELECT s.* FROM staff s");
+        assertEquals("[{\"name\":\"c1\",\"type\":null},{\"name\":\"c2\",\"type\":null},"
+                + "{\"name\":\"c3\",\"type\":null}]", Json.write(value.get("columns")));
+        assertEquals("[[\"<redacted>\",\"<redacted>\",null]]", Json.write(value.get("rows")),
+                "withheld, a null cell stays null");
+        assertTrue(asked.isEmpty(), "a withheld cell is not offered to the policies: " + asked);
+        assertTrue(ctx.log.all().contains("data: source 'star': 3 column(s) could not be named from the statement;"
+                + " their cells are withheld from the answer"), ctx.log.all());
+    }
+
+    @Test
+    void anUnnamedItemThatReadsNoColumnKeepsItsValueUnderAMask() throws Exception {
+        maskPasswords();
+        ctx.spi.register(DataSourceProvider.class, new FixedProvider("counts", new QueryResult(null, null,
+                Collections.singletonList(Arrays.<Object>asList(3L, "x", 7L)), false)));
+        assertEquals("{\"columns\":[{\"name\":\"c1\",\"type\":null},{\"name\":\"c2\",\"type\":null},"
+                + "{\"name\":\"c3\",\"type\":null}],\"rows\":[[3,\"x\",7]],\"rowCount\":1,\"truncated\":false}",
+                Json.write(query("counts", "SELECT COUNT(*), 'x', ? + 6 FROM loan", "params", Arrays.asList(1L))));
+    }
+
+    /**
+     * Security fix S164 (the security L3 sceptic's L3-S2): a row shorter than the select list keeps the labels (it is
+     * padded at the end); a row wider than the list withholds every column, whatever the data.
+     */
+    @Test
+    void shortRowsKeepTheLabelsAndARowWiderThanTheListWithholdsTheColumns() throws Exception {
+        maskPasswords();
+        String sql = "SELECT code, password, note FROM staff WHERE code = ?";
+        ctx.spi.register(DataSourceProvider.class, new FixedProvider("short", new QueryResult(null, null,
+                Collections.singletonList(Arrays.<Object>asList("S1", "pw-1")), false)));
+        Map<?, ?> value = (Map<?, ?>) query("short", sql, "params", Arrays.asList("S1"));
+        assertEquals("[{\"name\":\"code\",\"type\":null},{\"name\":\"password\",\"type\":null},"
+                + "{\"name\":\"note\",\"type\":null}]", Json.write(value.get("columns")));
+        assertEquals("[[\"S1\",\"<redacted>\",null]]", Json.write(value.get("rows")));
+        List<List<Object>> ragged = new ArrayList<List<Object>>();
+        ragged.add(Arrays.<Object>asList("S1", "pw-1", null));
+        ragged.add(Arrays.<Object>asList("S2", "pw-2", "n", "x"));
+        ctx.spi.register(DataSourceProvider.class, new FixedProvider("ragged", new QueryResult(null, null, ragged,
+                false)));
+        String json = Json.write(query("ragged", sql, "params", Arrays.asList("S1")));
+        assertFalse(json.contains("pw-"), json);
+        assertTrue(json.contains("\"rows\":[[\"<redacted>\",\"<redacted>\",null,null],[\"<redacted>\",\"<redacted>\","
+                + "\"<redacted>\",\"<redacted>\"]]"), json);
+    }
+
+    /**
+     * Security fix S163 (the security L3 sceptic's L3-S1): a policy that compares names exactly, written against a
+     * driver that folds unquoted names, still sees a positional source's derived label in its spelling.
+     */
+    @Test
+    void anExactCasePolicySeesTheDerivedLabelInEverySpelling() throws Exception {
+        ctx.spi.register(MaskPolicy.class, (sourceId, column, value) -> "PASSWORD".equals(column) ? "<upper>" : value);
+        ctx.spi.register(MaskPolicy.class, (sourceId, column, value) -> "name".equals(column) ? "<lower>" : value);
+        ctx.spi.register(DataSourceProvider.class, new FixedProvider("case", new QueryResult(null, null,
+                Collections.singletonList(Arrays.<Object>asList("100", "planted-secret-3", "Ada")), false)));
+        for (String sql : Arrays.asList("SELECT code, password, name FROM staff",
+                "SELECT s.code, s.Password, s.NAME FROM staff s", "SELECT CODE, (password), UPPER(Name) FROM staff")) {
+            Map<?, ?> value = (Map<?, ?>) query("case", sql);
+            assertEquals("[[\"100\",\"<upper>\",\"<lower>\"]]", Json.write(value.get("rows")), sql);
+        }
+        // The provider's own names are asked as given.
+        ctx.spi.register(DataSourceProvider.class, new FixedProvider("named", new QueryResult(
+                Arrays.asList("code", "password"), null,
+                Collections.singletonList(Arrays.<Object>asList("100", "as-the-provider-spells-it")), false)));
+        assertEquals("[[\"100\",\"as-the-provider-spells-it\"]]",
+                Json.write(((Map<?, ?>) query("named", "SELECT code, password FROM staff")).get("rows")));
     }
 
     @Test

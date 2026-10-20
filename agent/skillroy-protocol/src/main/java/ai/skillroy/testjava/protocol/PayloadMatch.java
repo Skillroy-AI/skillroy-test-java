@@ -29,7 +29,8 @@ import java.util.Map;
  * <ul>
  *   <li>a scalar or null value holds when its text equals the text of the payload's value for that key
  *       ({@code String.valueOf} on both sides, so {@code 2} and {@code 2.0} differ and a missing key reads as
- *       {@code "null"}): the rule since Phase 1;</li>
+ *       {@code "null"}): the rule since Phase 1; a payload value that is a map, a collection or an array never
+ *       equals a scalar, and its text is never built (Phase 8 security fix, S158, FB);</li>
  *   <li>{@code {has: <scalar>}} holds when the payload's value is a list and some element of it is a scalar whose
  *       text equals the scalar's text (a map or list element never equals; a payload value that is not a list never
  *       holds; no substring meaning).</li>
@@ -38,9 +39,9 @@ import java.util.Map;
  * whose value is not a scalar, or an object with any other key. An invalid entry never holds; callers refuse an
  * invalid match with {@link #problem} before they wait.
  *
- * <p>Linear in the match's entries and one list's length, text comparison only: the agent evaluates it under its event
- * ring's lock, so it uses no regular expression, parses nothing and follows no nested path. Stateless; safe from any
- * thread.
+ * <p>Linear in the match's entries and one list's length, text comparison only, and only of scalars: the agent
+ * evaluates it under its event ring's lock, so it uses no regular expression, parses nothing, follows no nested path
+ * and never turns a map, a collection or an array into text. Stateless; safe from any thread.
  */
 public final class PayloadMatch {
 
@@ -87,7 +88,8 @@ public final class PayloadMatch {
             }
             return false;
         }
-        if (!isScalar(expected)) {
+        if (!isScalar(expected) || !isScalar(actual)) {
+            // S158: a nested payload value never equals a scalar; its text (the whole subtree) is not built.
             return false;
         }
         return String.valueOf(expected).equals(String.valueOf(actual));

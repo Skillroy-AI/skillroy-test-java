@@ -223,7 +223,8 @@ final class ModuleContext implements AgentContext {
 
         @Override
         public <T> T call(ThreadPolicy policy, Callable<T> task, long timeoutMs) throws Exception {
-            return core.threads.call(policy, task, timeoutMs);
+            // A module's call(APP_QUIESCENT, …) is penalised under its own id (L2-F3).
+            return core.threads.call(moduleId, policy, task, timeoutMs);
         }
 
         @Override
@@ -238,7 +239,8 @@ final class ModuleContext implements AgentContext {
 
         @Override
         public <T> T callQuiescent(Callable<T> task, long budgetMs, long timeoutMs) throws Exception {
-            return core.threads.callQuiescent(task, budgetMs, timeoutMs);
+            // The overrun penalty and its log line are keyed by this module (L2-F3).
+            return core.threads.callQuiescent(moduleId, task, budgetMs, timeoutMs);
         }
 
         @Override

@@ -42,7 +42,8 @@ import java.util.concurrent.atomic.AtomicReference;
  * <p><b>Admitted by a budget, never pre-empted.</b> The application's thread is never interrupted by the agent, so
  * "bounded" means admission and measurement: a task runs only when its budget fits both the time the application says
  * is free and the time its caller has left; a task that runs longer than its budget is counted ({@code overruns}),
- * and the agent penalises a primitive whose task ran past twice its budget.
+ * and the agent penalises a primitive whose task ran past twice its budget, and a module whose own
+ * {@code callQuiescent} task did (Phase 8 review fix L2-F3).
  *
  * <p><b>Exactly once or never.</b> A queued task is either run by {@link #runOne(long)} or withdrawn (its caller's time
  * ran out, too little of it was left at the point, or the point closed), decided by one atomic step; a withdrawn task

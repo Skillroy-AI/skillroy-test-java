@@ -25,7 +25,8 @@ import java.sql.Connection;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.List;
-import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
 /**
@@ -68,24 +69,33 @@ final class JdbcExecutor {
      * {@code SQLFeatureNotSupportedException}) from {@code cancel()} is logged by class name and counts as not
      * cancelled.
      *
+     * <p>Phase 8 security fix, S161, FB: the action and the read share one slot. The action marks the slot
+     * {@code cancelling} and takes the statement under its monitor, and calls {@code cancel()} outside it (a
+     * {@code cancel()} that blocks never holds the read); the read hands the statement back before it is closed only
+     * once no {@code cancel()} runs, waiting at most {@link Control#ACTION_TIMEOUT_MS}. The read publishes the statement
+     * first and then asks {@code control.cancelled()} (the batch sets it before it reads the slot), so a statement
+     * prepared after the agent gave up is never run: the read throws a {@code SQLException} with SQL state
+     * {@value #CANCELLED_STATE} before anything is bound, as it does when the read was cancelled before the statement
+     * was prepared.
+     *
      * @param control the read's control, or null (no cancellation)
      */
     static Rows execute(Connection connection, String sql, List<Object> params, int maxRows, int timeoutSeconds,
-                        final AgentLog log, Control control) throws SQLException, InterruptedException {
+                        final AgentLog log, final Control control) throws SQLException, InterruptedException {
         Consumer<String> warn = new Consumer<String>() {
             @Override
             public void accept(String line) {
                 log.warn("data: " + line);
             }
         };
-        final AtomicReference<Statement> current = new AtomicReference<Statement>();
+        final Slot slot = new Slot();
         AutoCloseable registration = null;
         try {
             if (control != null) {
                 registration = control.onCancelInternal(new Control.Action() {
                     @Override
                     public boolean cancel() {
-                        Statement statement = current.get();
+                        Statement statement = slot.take();
                         if (statement == null) {
                             return false;
                         }
@@ -95,6 +105,8 @@ final class JdbcExecutor {
                         } catch (SQLException e) {
                             log.warn("data: Statement.cancel() failed: " + e.getClass().getName());
                             return false;
+                        } finally {
+                            slot.cancelled();
                         }
                     }
 
@@ -103,16 +115,30 @@ final class JdbcExecutor {
                         return "Statement.cancel";
                     }
                 });
+                if (control.cancelled()) {
+                    throw cancelledBeforeRun();
+                }
             }
-            return ReadOnlyJdbc.executeLenient(connection, sql, params, maxRows, timeoutSeconds, warn,
-                    new Consumer<Statement>() {
-                        @Override
-                        public void accept(Statement statement) {
-                            current.set(statement);
-                        }
-                    });
+            try {
+                return ReadOnlyJdbc.executeLenient(connection, sql, params, maxRows, timeoutSeconds, warn,
+                        new Consumer<Statement>() {
+                            @Override
+                            public void accept(Statement statement) {
+                                if (statement == null) {
+                                    slot.release();
+                                    return;
+                                }
+                                slot.publish(statement);
+                                if (control != null && control.cancelled()) {
+                                    throw new CancellationException("the read was cancelled");
+                                }
+                            }
+                        });
+            } catch (CancellationException e) {
+                throw cancelledBeforeRun();
+            }
         } finally {
-            current.set(null);
+            slot.release();
             if (registration != null) {
                 try {
                     registration.close();
@@ -124,6 +150,64 @@ final class JdbcExecutor {
                 connection.close();
             } catch (Exception e) {
                 log.warn("data: could not close the connection: " + Failures.describe(e));
+            }
+        }
+    }
+
+    /** SQL state of the failure a read cancelled before its statement ran ends with (SQL's "query cancelled"). */
+    static final String CANCELLED_STATE = "57014";
+
+    private static SQLException cancelledBeforeRun() {
+        return new SQLException("the read was cancelled before its statement ran", CANCELLED_STATE);
+    }
+
+    /**
+     * The statement a cancel action may cancel (S161): set by the read after {@code prepareStatement}, cleared before
+     * it is closed; {@code cancelling} while an action's {@code cancel()} runs outside the monitor.
+     */
+    private static final class Slot {
+        private Statement current;
+        private boolean cancelling;
+
+        synchronized void publish(Statement statement) {
+            current = statement;
+        }
+
+        /** The action: the open statement, marked as being cancelled, or null. */
+        synchronized Statement take() {
+            if (current != null) {
+                cancelling = true;
+            }
+            return current;
+        }
+
+        /** The action's {@code cancel()} returned. */
+        synchronized void cancelled() {
+            cancelling = false;
+            notifyAll();
+        }
+
+        /** The read: waits while a {@code cancel()} runs, at most ACTION_TIMEOUT_MS, then clears the statement. */
+        void release() {
+            boolean interrupted = false;
+            synchronized (this) {
+                long until = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(Control.ACTION_TIMEOUT_MS);
+                while (cancelling) {
+                    long left = until - System.nanoTime();
+                    if (left <= 0L) {
+                        break;
+                    }
+                    try {
+                        TimeUnit.NANOSECONDS.timedWait(this, left);
+                    } catch (InterruptedException e) {
+                        // The read's thread is interrupted once its caller gave up; the wait stays bounded.
+                        interrupted = true;
+                    }
+                }
+                current = null;
+            }
+            if (interrupted) {
+                Thread.currentThread().interrupt();
             }
         }
     }

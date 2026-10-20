@@ -30,6 +30,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -375,7 +376,7 @@ class ReadOnlyJdbcTest {
     }
 
     @Test
-    void theStatementSinkGetsTheStatementOnceItIsPreparedAndNullOnceItIsClosed() throws Exception {
+    void theStatementSinkGetsTheStatementOnceItIsPreparedAndNullBeforeItIsClosed() throws Exception {
         final JdbcSpy spy = new JdbcSpy();
         final List<String> seen = Collections.synchronizedList(new ArrayList<String>());
         Rows rows = ReadOnlyJdbc.executeLenient(spy.wrap(db.open()), "SELECT code FROM person", NO_PARAMS, 10, 5, warn,
@@ -387,8 +388,11 @@ class ReadOnlyJdbcTest {
         assertTrue(seen.get(0).startsWith("statement@") && seen.get(1).startsWith("null@"), seen.toString());
         assertEquals(spy.indexOf("Connection.prepareStatement") + 1, handed, "right after prepareStatement");
         assertTrue(handed <= spy.indexOf("PreparedStatement.setQueryTimeout"), spy.toString());
-        assertTrue(cleared > spy.indexOf("PreparedStatement.close"), "null only after the close: " + spy);
-        assertTrue(cleared <= spy.indexOf("Connection.rollback"), "and before the connection is restored");
+        // Phase 8 security fix S161: null before the result set and the statement are closed, so that the sink can let
+        // a cancel() in flight return first.
+        assertTrue(cleared <= spy.indexOf("ResultSet.close") && cleared <= spy.indexOf("PreparedStatement.close"),
+                "null before the close: " + spy);
+        assertTrue(cleared > spy.indexOf("PreparedStatement.executeQuery"), "and after the statement ran: " + spy);
         // A failing sink does not change the outcome.
         Rows again = ReadOnlyJdbc.executeLenient(db.open(), "SELECT code FROM person", NO_PARAMS, 10, 5, warn,
                 statement -> {
@@ -397,6 +401,30 @@ class ReadOnlyJdbcTest {
         assertEquals(3, again.rowCount());
         assertTrue(warnings.contains("the statement sink failed: java.lang.IllegalStateException"),
                 warnings.toString());
+    }
+
+    /**
+     * S161: a sink that refuses the open statement with a CancellationException (its caller gave up) stops the call
+     * before anything is bound or run; the sink still gets null, the statement is closed and the connection restored.
+     */
+    @Test
+    void aSinkThatRefusesTheOpenStatementStopsTheCallBeforeItRuns() throws Exception {
+        final JdbcSpy spy = new JdbcSpy();
+        final List<String> seen = Collections.synchronizedList(new ArrayList<String>());
+        assertThrows(CancellationException.class, () -> ReadOnlyJdbc.executeLenient(spy.wrap(db.open()),
+                "SELECT code FROM person WHERE code = ?", Arrays.<Object>asList("100"), 10, 5, warn, statement -> {
+                    seen.add(statement == null ? "null" : "statement");
+                    if (statement != null) {
+                        throw new CancellationException("given up");
+                    }
+                }));
+        assertEquals(Arrays.asList("statement", "null"), seen);
+        assertEquals(0, spy.count("PreparedStatement.setQueryTimeout"), spy.toString());
+        assertEquals(0, spy.count("PreparedStatement.setObject"), spy.toString());
+        assertEquals(0, spy.count("PreparedStatement.executeQuery"), spy.toString());
+        assertEquals(1, spy.count("PreparedStatement.close"), spy.toString());
+        assertTrue(spy.calls.contains("Connection.rollback") && spy.calls.contains("Connection.setAutoCommit[true]"),
+                "restored: " + spy);
     }
 
     @Test

@@ -149,6 +149,9 @@ class EngineIdleTest {
             Thread.sleep(200);
             assertEquals(1, idle.idleCount(), idle.events.toString());
             h.signOn("100", "1111");
+            // Review fix L3-S1: wait for the third call, then a short pause for the "only once" half (a negative
+            // check after a sleep cannot fail spuriously).
+            awaitIdleCalls(idle, 3);
             Thread.sleep(100);
             assertEquals(3, idle.idleCount(), "one per wait: " + idle.events);
             assertEquals(Collections.<String>emptyList(), idle.violations);
@@ -166,7 +169,12 @@ class EngineIdleTest {
             h.signOn("100", "1111");
             int mark = idle.available.size();
             Thread.sleep(400);
-            List<Long> idleInIdle = new ArrayList<Long>(idle.available.subList(mark, idle.available.size()));
+            List<Long> idleInIdle;
+            // A copy under the list's own lock: the engine thread appends meanwhile (found in the fix wave's reactor
+            // run, FB: a ConcurrentModificationException from the unsynchronised sub-list).
+            synchronized (idle.available) {
+                idleInIdle = new ArrayList<Long>(idle.available.subList(mark, idle.available.size()));
+            }
             assertTrue(idleInIdle.size() >= 4, idleInIdle.toString());
             for (int i = 0; i < idleInIdle.size(); i++) {
                 assertTrue(idleInIdle.get(i) <= 3000 && idleInIdle.get(i) > 2000, idleInIdle.toString());

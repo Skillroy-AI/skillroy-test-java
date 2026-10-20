@@ -181,9 +181,13 @@ class SelectLabelsTest {
         return Stream.of(
             Arguments.of("SELECT * FROM staff", "staff"),
             Arguments.of("select * from app.staff s where s.code = ?", "app.staff"),
-            Arguments.of("SELECT * FROM \"App\".\"Staff\" AS st ORDER BY code", "App.Staff"),
-            Arguments.of("SELECT * FROM `staff` LIMIT 5", "staff"),
-            Arguments.of("SELECT * FROM [dbo].[staff]", "dbo.staff"),
+            // Security fix S162: a quoted part keeps its quotes, in double quotes, an inner quote doubled.
+            Arguments.of("SELECT * FROM \"App\".\"Staff\" AS st ORDER BY code", "\"App\".\"Staff\""),
+            Arguments.of("SELECT * FROM `staff` LIMIT 5", "\"staff\""),
+            Arguments.of("SELECT * FROM [dbo].[staff]", "\"dbo\".\"staff\""),
+            Arguments.of("SELECT * FROM \"staff\"", "\"staff\""),
+            Arguments.of("SELECT * FROM PUBLIC.\"staff\" s WHERE s.code = ?", "PUBLIC.\"staff\""),
+            Arguments.of("SELECT * FROM \"sta\"\"ff\"", "\"sta\"\"ff\""),
             Arguments.of("SELECT * FROM lending.app.staff FETCH FIRST 5 ROWS ONLY", "lending.app.staff"),
             Arguments.of("SELECT * FROM staff OFFSET 2 ROWS", "staff"),
             Arguments.of("/* c */ SELECT * FROM staff;", "staff"),
@@ -225,6 +229,43 @@ class SelectLabelsTest {
         assertEquals(expected, SelectLabels.starTable(sql), String.valueOf(sql));
     }
 
+    static Stream<Arguments> referenceForms() {
+        return Stream.of(
+            Arguments.of("SELECT code, password FROM staff", Arrays.asList(names("code"), names("password"))),
+            Arguments.of("SELECT s.code, (password), password COLLATE SQL_TEXT FROM staff s",
+                    Arrays.asList(names("code"), names("password"), names("password", "SQL_TEXT"))),
+            Arguments.of("SELECT LOWER(password), COUNT(*), 'x', ?, CURRENT_DATE, 1 FROM staff",
+                    Arrays.asList(names("password"), names(), names(), names(), names(), names())),
+            Arguments.of("SELECT CAST(password AS TEXT), password::text FROM staff",
+                    Arrays.asList(names("password", "TEXT"), names("password", "text"))),
+            Arguments.of("SELECT password AS p, password AS 'q' FROM staff",
+                    Arrays.asList(names("password", "p"), names("password"))),
+            Arguments.of("SELECT (SELECT p.password FROM pw p WHERE p.code = s.code) FROM staff s",
+                    Arrays.asList(names("password", "pw", "p", "code"))),
+            Arguments.of("SELECT x.y.z, a * b, \"Quoted\" FROM t",
+                    Arrays.asList(names("z"), names("a", "b"), names("Quoted"))),
+            Arguments.of("SELECT code, (SELECT * FROM pw WHERE pw.code = s.code) FROM staff s",
+                    Arrays.asList(names("code"), null)),
+            Arguments.of("SELECT (SELECT TOP 1 * FROM pw) FROM staff", Collections.singletonList(null)),
+            Arguments.of("SELECT (SELECT pw.* FROM pw) FROM staff", Collections.singletonList(null)),
+            Arguments.of("SELECT * FROM staff", null),
+            Arguments.of("SELECT s.* FROM staff s", null),
+            Arguments.of("SELECT a FROM t UNION SELECT b FROM u", null),
+            Arguments.of("DELETE FROM t", null),
+            Arguments.of(null, null));
+    }
+
+    private static List<String> names(String... names) {
+        return Arrays.asList(names);
+    }
+
+    /** Security fix S160: the names each select item references, split as {@code of} splits the list. */
+    @ParameterizedTest
+    @MethodSource("referenceForms")
+    void readsTheNamesEachItemReferences(String sql, List<List<String>> expected) {
+        assertEquals(expected, SelectLabels.references(sql), String.valueOf(sql));
+    }
+
     @Test
     void neverThrowsOnTheGuardsOwnCorpus() throws Exception {
         List<String> inputs = new ArrayList<String>();
@@ -240,8 +281,11 @@ class SelectLabelsTest {
         for (String sql : inputs) {
             List<String> labels = SelectLabels.of(sql);
             SelectLabels.starTable(sql);
+            List<List<String>> references = SelectLabels.references(sql);
+            assertEquals(labels == null, references == null, "references with labels only: " + sql);
             if (labels != null) {
                 assertNotNull(StatementGuard.check(sql), "labels only for an accepted statement: " + sql);
+                assertEquals(labels.size(), references.size(), sql);
             }
         }
         assertEquals(Arrays.asList("x_kill"), SelectLabels.of("SELECT 1 x_kill"));
@@ -260,7 +304,10 @@ class SelectLabelsTest {
             String sql = text.toString();
             List<String> labels = SelectLabels.of(sql);
             SelectLabels.starTable(sql);
+            List<List<String>> references = SelectLabels.references(sql);
+            assertEquals(labels == null, references == null, sql);
             if (labels != null) {
+                assertEquals(labels.size(), references.size(), sql);
                 read++;
                 for (String label : labels) {
                     assertTrue(label == null || !label.isEmpty(), sql);

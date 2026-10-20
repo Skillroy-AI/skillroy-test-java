@@ -109,9 +109,13 @@ public interface DataSourceProvider {
      * The column names of {@code table} in the table's declared order, or null (the default) when the provider cannot
      * tell. data.query asks it only for a statement of the form SELECT * FROM &lt;table&gt; … (SelectLabels.starTable)
      * whose query() result named no column, and names that result's columns with it; the controller's allow-list
-     * check (D100) reads those names. {@code table} is the table as the statement spells it, quotes removed, a schema
-     * part kept; the provider compares it as its database folds names, and must answer the same relation query()
-     * reads. All or nothing: a list with a null or empty entry counts as null. Called on the source's lane or the
+     * check (D100) reads those names. {@code table} is the table as the statement spells it, a schema part kept, its
+     * parts joined with {@code .}: an unquoted part as written, which the provider folds as its database folds
+     * unquoted names, and a part the statement quotes in double quotes (an inner {@code "} doubled; {@code `x`} and
+     * {@code [x]} come as {@code "x"}), which the provider compares exactly; no part holds a {@code .} (Phase 8
+     * security fix, S162, FB). The provider must answer the same relation query() reads; a list of another width than
+     * the result is not used, and while a mask is registered the result's cells are then withheld (S160). All or
+     * nothing: a list with a null or empty entry counts as null. Called on the source's lane or the
      * read's worker task, at most once per data.query call, within that call's budget; must not block and must not
      * start host infrastructure (S34). A throw counts as null; the agent logs the exception's class only (S22).
      * (phase8-contracts.md 4.4, gap 117, D532.)

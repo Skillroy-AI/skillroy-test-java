@@ -29,6 +29,7 @@ import java.sql.SQLFeatureNotSupportedException;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -232,5 +233,82 @@ class JdbcExecutorTest {
         assertEquals(Boolean.FALSE, flagAfter.get());
         assertEquals(3, nextCalls.get());
         assertTrue(spy.allClosed(), spy.toString());
+    }
+
+    /**
+     * Security fix S161 (L3-F3): the agent gives up while the driver prepares the statement (a server-side prepare,
+     * the sceptic's probe); its batch runs while no statement exists, and the statement prepared afterwards is never
+     * run.
+     */
+    @Test
+    void aStatementPreparedAfterTheReadWasCancelledNeverRuns() throws Exception {
+        final TestBroker broker = new TestBroker();
+        final Control control = new Control(System.nanoTime() + TimeUnit.SECONDS.toNanos(30), log);
+        JdbcSpy spy = new JdbcSpy().before("Connection.prepareStatement", () -> {
+            control.cancel();
+            control.startActions(broker);
+            try {
+                control.awaitActions(System.nanoTime() + TimeUnit.SECONDS.toNanos(5));
+            } catch (InterruptedException e) {
+                throw new IllegalStateException(e);
+            }
+        });
+        SQLException e = assertThrows(SQLException.class, () -> JdbcExecutor.execute(spy.wrap(db.open()),
+                "SELECT code FROM person", NO_PARAMS, 10, 5, log, control));
+        assertEquals("57014", e.getSQLState(), e.toString());
+        assertEquals(1, spy.count("Connection.prepareStatement"), spy.toString());
+        assertEquals(0, spy.count("PreparedStatement.executeQuery"), "never run: " + spy);
+        assertEquals(0, spy.count("PreparedStatement.setQueryTimeout"), "nothing bound: " + spy);
+        assertTrue(spy.allClosed(), spy.toString());
+        assertTrue(spy.calls.contains("Connection.rollback"), "the connection is restored: " + spy);
+        assertFalse(control.cancelledByAction(), "there was nothing to cancel when the batch ran");
+    }
+
+    /** S161, the reviewer's probe: the read was given up on before {@code open()} returned. */
+    @Test
+    void aReadCancelledBeforeItsStatementWasPreparedPreparesNone() throws Exception {
+        Control control = new Control(System.nanoTime() + TimeUnit.SECONDS.toNanos(30), log);
+        control.cancel();
+        JdbcSpy spy = new JdbcSpy();
+        SQLException e = assertThrows(SQLException.class, () -> JdbcExecutor.execute(spy.wrap(db.open()),
+                "SELECT code FROM person", NO_PARAMS, 10, 5, log, control));
+        assertEquals("57014", e.getSQLState(), e.toString());
+        assertEquals(0, spy.count("Connection.prepareStatement"), spy.toString());
+        assertEquals(1, spy.count("Connection.close"), "the connection is still closed: " + spy);
+    }
+
+    /**
+     * S161, the second half: a {@code cancel()} in flight when the read ends is let return before the statement is
+     * closed (the sink hands null back first and waits for it), so no cancel lands on a closed statement whose
+     * connection went back to its pool.
+     */
+    @Test
+    void theStatementIsClosedOnlyOnceACancelInFlightHasReturned() throws Exception {
+        final TestBroker broker = new TestBroker();
+        final Control control = new Control(System.nanoTime() + TimeUnit.SECONDS.toNanos(30), log);
+        final CountDownLatch cancelling = new CountDownLatch(1);
+        final JdbcSpy spy = new JdbcSpy();
+        spy.before("PreparedStatement.cancel", () -> {
+            cancelling.countDown();
+            QueryControlTest.sleepIgnoringInterrupts(300);
+            spy.calls.add("cancel returns");
+        });
+        spy.before("PreparedStatement.executeQuery", () -> {
+            control.cancel();
+            control.startActions(broker);
+            try {
+                assertTrue(cancelling.await(5, TimeUnit.SECONDS), "the action reached cancel()");
+            } catch (InterruptedException e) {
+                throw new IllegalStateException(e);
+            }
+        });
+        Rows rows = JdbcExecutor.execute(spy.wrap(db.open()), "SELECT code FROM person", NO_PARAMS, 10, 5, log,
+                control);
+        assertEquals(3, rows.rowCount());
+        int returned = spy.indexOf("cancel returns");
+        assertTrue(returned >= 0, spy.toString());
+        assertTrue(spy.indexOf("PreparedStatement.close") > returned, "closed after the cancel returned: " + spy);
+        assertTrue(spy.allClosed(), spy.toString());
+        assertTrue(control.cancelledByAction() || log.all().contains("Statement.cancel() failed"), log.all());
     }
 }

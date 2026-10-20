@@ -290,6 +290,9 @@ class CorePrimitivesTest {
                 map("scan", Arrays.asList("PHYSICAL", "SEMANTIC"))), byId.get("scanner"));
         assertEquals(map("id", "badge", "kind", "badge", "actions", Arrays.asList("read")), byId.get("badge"),
                 "a throwing rungs reads as empty");
-        assertTrue(String.valueOf(agent.runtime.context().log().tail(200)).contains(".rungs(read) failed"));
+        String log = String.valueOf(agent.runtime.context().log().tail(200));
+        assertTrue(log.contains(".rungs(read) failed: java.lang.IllegalStateException"), log);
+        // Security L8-F6: the exception's class only, never its message (it may quote the application's text).
+        assertFalse(log.contains("no ladder today"), log);
     }
 }
