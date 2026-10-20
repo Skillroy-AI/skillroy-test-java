@@ -16,6 +16,7 @@
 
 package ai.skillroy.testjava.agent.swing;
 
+import ai.skillroy.testjava.agent.api.spi.InputVeto;
 import ai.skillroy.testjava.protocol.Capability;
 import ai.skillroy.testjava.protocol.CapabilityState;
 import ai.skillroy.testjava.protocol.ErrorCodes;
@@ -28,6 +29,7 @@ import java.awt.Point;
 import java.awt.Rectangle;
 import java.awt.Window;
 import java.awt.event.InputEvent;
+import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
@@ -39,6 +41,7 @@ import javax.imageio.ImageIO;
 import javax.swing.JButton;
 import javax.swing.JDialog;
 import javax.swing.JFrame;
+import javax.swing.JPanel;
 import javax.swing.JWindow;
 import javax.swing.SwingUtilities;
 
@@ -78,6 +81,8 @@ class RobotPathDisplayTest extends DisplayTestBase {
         volatile boolean deliverPresses = true;
         volatile Point pressOffset = new Point(0, 0);
         volatile Runnable duringGrab;
+        /** Where the last release happened (screen). */
+        volatile Point releasedAt;
         private volatile Point at = new Point(900, 700);
 
         @Override
@@ -101,6 +106,7 @@ class RobotPathDisplayTest extends DisplayTestBase {
         @Override
         public void mouseRelease(int buttons) {
             calls.add("release");
+            releasedAt = new Point(at);
             if (deliverPresses) {
                 Point p = new Point(at.x + pressOffset.x, at.y + pressOffset.y);
                 post(MouseEvent.MOUSE_RELEASED, p, 0, 1, MouseEvent.BUTTON1);
@@ -500,6 +506,94 @@ class RobotPathDisplayTest extends DisplayTestBase {
                 "ROBOT", "requireFocus", false));
         assertEquals("covered", covered.error().data().get("reason"));
         assertFalse(os.calls.contains("press"), "no press: " + os.calls);
+    }
+
+    /**
+     * Phase 8 security fix (S156, FA): the Robot presses on whichever window is really on top, so the components of a
+     * covering window at the point are asked too: an owner that gap 101 exempts from the covering rule, vetoed as a
+     * whole ("veto the window"), refuses a press on its active owned dialog's point, with and without {@code force};
+     * nothing moves.
+     */
+    @Test
+    void aVetoedOwnerUnderTheActiveDialogsPointRefusesTheRobotForceOrNot() throws Exception {
+        final JDialog[] dialog = new JDialog[1];
+        onEdt(() -> {
+            dialog[0] = new JDialog(ui.frame, "Prompt", false);
+            JButton yes = new JButton("Yes");
+            yes.setName("promptYes");
+            dialog[0].getContentPane().add(yes);
+            dialog[0].setBounds(200, 150, 200, 80);
+            dialog[0].setVisible(true);
+            return null;
+        });
+        activate("the prompt is the focused window", dialog[0]);
+        settle();
+        rctx.spi.register(InputVeto.class, (c, route) -> c == ui.frame ? "the main window ends the desk" : null);
+        for (boolean force : new boolean[] {false, true}) {
+            RpcException e = expectError(ErrorCodes.INPUT_REJECTED, () -> robot("by", map("id", "promptYes"),
+                    "action", "CLICK", "via", "ROBOT", "force", force));
+            assertEquals("vetoed", e.error().data().get("reason"), String.valueOf(e.error().data()));
+            assertEquals(rref(ui.frame), e.error().data().get("vetoed"), "the covering owner's veto refused");
+            assertEquals(InputVeto.POINTER_ROBOT, e.error().data().get("route"));
+        }
+        assertTrue(os.calls.isEmpty(), "nothing moved, not even the delivery probe: " + os.calls);
+    }
+
+    /**
+     * Phase 8 security fix (S155, FA): a Robot drag's release is asked again after the press, before the release: a
+     * press that shows a vetoed component under the drag's end (a drop zone, a popup) sends the release to the press
+     * point instead, and the call answers {@code VETOED} naming that component.
+     */
+    @Test
+    void aRobotDragsReleaseIsAskedAgainAfterThePress() throws Exception {
+        final JFrame[] frame = new JFrame[1];
+        final JPanel[] zone = new JPanel[1];
+        final JButton[] source = new JButton[1];
+        onEdt(() -> {
+            JFrame f = new JFrame("Drag fixture");
+            f.setAutoRequestFocus(false);
+            JPanel content = new JPanel(null);
+            final JPanel z = new JPanel();
+            z.setName("vetoedZone");
+            z.setBounds(20, 120, 200, 60);
+            z.setVisible(false);
+            JButton b = new JButton("Drag me");
+            b.setName("dragSource");
+            b.setBounds(20, 20, 140, 30);
+            b.addMouseListener(new MouseAdapter() {
+                @Override
+                public void mousePressed(MouseEvent e) {
+                    z.setVisible(true); // the application shows a drop zone while the button is down
+                }
+            });
+            content.add(z);
+            content.add(b);
+            f.setContentPane(content);
+            f.setBounds(660, 100, 320, 260);
+            f.setVisible(true);
+            frame[0] = f;
+            zone[0] = z;
+            source[0] = b;
+            return null;
+        });
+        await("the drag fixture shows", WAIT_MS, () -> source[0].isShowing());
+        settle();
+        rctx.spi.register(InputVeto.class, (c, route) -> "vetoedZone".equals(c.getName())
+                ? "a drop here cannot be undone" : null);
+        Point from = onEdt(() -> HitTest.centre(source[0]));
+        Point to = onEdt(() -> HitTest.centre(zone[0]));
+        Point fromOnScreen = onEdt(() -> {
+            Point o = frame[0].getLocationOnScreen();
+            return new Point(o.x + from.x, o.y + from.y);
+        });
+        Map<String, Object> r = robot("point", map("x", (long) from.x, "y", (long) from.y), "space",
+                map("window", rref(frame[0])), "to", map("x", (long) to.x, "y", (long) to.y), "action", "DRAG",
+                "via", "ROBOT", "requireFocus", false);
+        assertEquals(Boolean.FALSE, r.get("fired"), r.toString());
+        assertEquals("VETOED", r.get("reason"), r.toString());
+        assertEquals(rref(zone[0]), obj(r.get("vetoed")).get("ref"));
+        assertEquals(InputVeto.POINTER_ROBOT, obj(r.get("vetoed")).get("route"));
+        assertEquals(fromOnScreen, os.releasedAt, "released at the press point, not on the vetoed zone");
     }
 
     /**

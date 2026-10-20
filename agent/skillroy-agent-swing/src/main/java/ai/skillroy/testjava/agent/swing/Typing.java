@@ -25,14 +25,15 @@ import java.awt.Dialog;
 import java.awt.KeyboardFocusManager;
 import java.awt.Window;
 import java.awt.event.KeyEvent;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.concurrent.atomic.AtomicLong;
 import javax.swing.JRootPane;
 import javax.swing.JTextField;
 import javax.swing.RootPaneContainer;
-import javax.swing.SwingUtilities;
 import javax.swing.text.JTextComponent;
 
 /**
@@ -45,11 +46,14 @@ import javax.swing.text.JTextComponent;
  *
  * <p>Phase 8 (phase8-contracts.md 3.2, D502): every delivery target, explicit or default (a window's root pane
  * included), is asked the input veto after the clickable test and before the modal test, never skipped by
- * {@code force}; with ENTER ({@code swing.key ENTER} with or without modifiers, {@code swing.type enter}) the target's
- * root pane's default button too, since Swing's window-wide binding presses it (the Basic look and feel binds
- * {@code ctrl ENTER} as well as {@code ENTER}). Every posted task (the SET task, the
+ * {@code force}; with ENTER ({@code swing.key ENTER} with or without modifiers, {@code swing.type enter}, and a
+ * {@code '\n'} in DISPATCH text, which {@link Keys#type} sends as the same ENTER key stroke) the default button of
+ * every root pane from the target up to its window too ({@link #defaultButtons}: a {@code JInternalFrame}'s and the
+ * window's, since Swing's window-wide bindings of both see the key), since Swing's window-wide binding presses it (the
+ * Basic look and feel binds {@code ctrl ENTER} as well as {@code ENTER}). Every posted task (the SET task, the
  * prepare task, each character's task, the ENTER task, the key's task) asks again immediately before it acts
- * ({@link InputVetoes.Withheld}).
+ * ({@link InputVetoes.Withheld}); a {@code '\n'} character's task asks the default buttons too (fix wave of the Phase 8
+ * review, FA, L1-F1, L2-F1, L2-S1).
  *
  * <p>Thread-safe. The public-to-package methods run on an agent thread and hop to the EDT themselves.
  */
@@ -90,6 +94,9 @@ final class Typing {
                     "too long"));
         }
         final String route = SET.equals(mode) ? InputVeto.TYPE_SET : InputVeto.TYPE_DISPATCH;
+        // fix wave of the Phase 8 review (FA, L1-F1, L2-F1): a '\n' in DISPATCH text is the ENTER key stroke
+        // (Keys.type sends KEY_PRESSED VK_ENTER for it), so it asks the default buttons as enter does
+        final boolean asksDefault = enter || (DISPATCH.equals(mode) && text.indexOf('\n') >= 0);
         final InputVetoes.Withheld task = new InputVetoes.Withheld(ctx, withheld);
         final Component c = Edt.read(ctx, inv.remainingMs(), new Callable<Component>() {
             @Override
@@ -110,7 +117,7 @@ final class Typing {
                     }
                 }
                 Clicks.requireClickable(view, found);
-                requireKeyTargetsNotVetoed(view, found, route, enter);
+                requireKeyTargetsNotVetoed(view, found, route, asksDefault);
                 if (target != null && !force) {
                     windows.requireNotBlocked(view, found);
                 }
@@ -131,7 +138,7 @@ final class Typing {
             Edt.post(ctx, inv.remainingMs(), "swing.type SET", new Edt.Action() {
                 @Override
                 public void run() {
-                    if (!task.allows(route, tc, enter ? defaultButton(tc) : null)) {
+                    if (!task.allows(route, keyTargets(tc, enter))) {
                         return;
                     }
                     tc.setText(clear ? text : tc.getText() + text);
@@ -167,7 +174,7 @@ final class Typing {
                 Edt.post(ctx, inv.remainingMs(), "swing.type DISPATCH", new Edt.Action() {
                     @Override
                     public void run() {
-                        if (task.allows(route, c)) {
+                        if (task.allows(route, keyTargets(c, ch == '\n'))) {
                             Keys.type(c, ch);
                         }
                     }
@@ -177,7 +184,7 @@ final class Typing {
                 Edt.post(ctx, inv.remainingMs(), "swing.type DISPATCH enter", new Edt.Action() {
                     @Override
                     public void run() {
-                        if (task.allows(route, c, defaultButton(c))) {
+                        if (task.allows(route, keyTargets(c, true))) {
                             Keys.press(c, KeyEvent.VK_ENTER, 0);
                         }
                     }
@@ -236,7 +243,7 @@ final class Typing {
         Edt.post(ctx, inv.remainingMs(), "swing.key " + code, new Edt.Action() {
             @Override
             public void run() {
-                if (task.allows(InputVeto.KEY, c, enter ? defaultButton(c) : null)) {
+                if (task.allows(InputVeto.KEY, keyTargets(c, enter))) {
                     Keys.press(c, code, modifiers);
                 }
             }
@@ -247,31 +254,62 @@ final class Typing {
     }
 
     /**
-     * The input veto for a key's delivery target and, with ENTER, its root pane's default button (D502): Swing's
-     * {@code WHEN_IN_FOCUSED_WINDOW} binding presses that button whatever the target. EDT only.
+     * The input veto for a key's delivery target and, with ENTER, the default buttons of the root panes from the
+     * target up to its window (D502; {@link #defaultButtons}): Swing's {@code WHEN_IN_FOCUSED_WINDOW} bindings press
+     * such a button whatever the target. EDT only.
      *
-     * @throws ai.skillroy.testjava.protocol.RpcException INPUT_REJECTED {@code vetoed}; for the default button with
-     *     {@code data.defaultButton} its ref
+     * @throws ai.skillroy.testjava.protocol.RpcException INPUT_REJECTED {@code vetoed}; for a default button with
+     *     {@code data.defaultButton} the ref of the button whose veto refused
      */
     static void requireKeyTargetsNotVetoed(ComponentView view, Component target, String route, boolean enter) {
         Clicks.requireNotVetoed(view, target, route);
         if (!enter) {
             return;
         }
-        Component button = defaultButton(target);
-        if (button == null) {
-            return;
-        }
-        InputVetoes.Refusal r = view.vetoes().check(button, route);
-        if (r != null) {
-            throw Errors.vetoedDefaultButton(view, target, button, r);
+        for (Component button : defaultButtons(target)) {
+            InputVetoes.Refusal r = view.vetoes().check(button, route);
+            if (r != null) {
+                throw Errors.vetoedDefaultButton(view, target, button, r);
+            }
         }
     }
 
-    /** The default button of the component's root pane, or null. EDT only. */
-    static Component defaultButton(Component c) {
-        JRootPane root = c == null ? null : SwingUtilities.getRootPane(c);
-        return root == null ? null : root.getDefaultButton();
+    /**
+     * The default buttons an ENTER delivered to the component can press, nearest first, each once (fix wave of the
+     * Phase 8 review, FA, L2-S1): the default button of every {@code JRootPane} on the walk from the component (a
+     * {@code RootPaneContainer} window's own root pane included) up to its window, by {@link InputVetoes#next} (so a
+     * heavyweight popup's owner too, as Swing passes it the popup's window-wide bindings), at most
+     * {@link InputVetoes#MAX_DEPTH} steps. A {@code JInternalFrame}'s root pane registers its ENTER under the internal
+     * frame and only while it has a default button, and Swing then offers the key to the window's bindings as well, so
+     * the enclosing window's default button is asked although a nearer root pane exists (the safe side: Swing presses
+     * the nearest one that holds a button). EDT only.
+     */
+    static List<Component> defaultButtons(Component c) {
+        List<Component> out = new ArrayList<Component>(2);
+        int depth = 0;
+        for (Component p = c; p != null && depth < InputVetoes.MAX_DEPTH; p = InputVetoes.next(p), depth++) {
+            JRootPane root = p instanceof JRootPane ? (JRootPane) p
+                    : p instanceof RootPaneContainer ? ((RootPaneContainer) p).getRootPane() : null;
+            Component button = root == null ? null : root.getDefaultButton();
+            if (button != null && !out.contains(button)) {
+                out.add(button);
+            }
+        }
+        return out;
+    }
+
+    /** The components a key task asks the veto about: the target, and with ENTER its {@link #defaultButtons}. */
+    static Component[] keyTargets(Component c, boolean enter) {
+        if (!enter) {
+            return new Component[] {c};
+        }
+        List<Component> buttons = defaultButtons(c);
+        Component[] out = new Component[buttons.size() + 1];
+        out[0] = c;
+        for (int i = 0; i < buttons.size(); i++) {
+            out[i + 1] = buttons.get(i);
+        }
+        return out;
     }
 
     /**

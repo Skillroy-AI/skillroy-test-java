@@ -29,7 +29,13 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import javax.swing.JButton;
+import javax.swing.JDesktopPane;
+import javax.swing.JInternalFrame;
+import javax.swing.JMenuItem;
 import javax.swing.JPanel;
+import javax.swing.JPopupMenu;
+import javax.swing.JRootPane;
+import javax.swing.JTextField;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -48,7 +54,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * refusal wins and names the component that refused, at most 64 levels, deeper refused), memoisation (one ask per
  * component and route), the text sanitising (control characters, the 200 cut, an empty text), a throwing veto
  * refusing with the fixed text and logged once, a {@code VirtualMachineError} rethrown, the in-task re-ask counted
- * and logged once per call, and the error's shape.
+ * and logged once per call, and the error's shape. The fix wave of the Phase 8 review (FA) adds: a popup's items asked
+ * with its invoker's chain (L2-F2), a cycle through an invoker refused at the depth bound, ENTER asking the default
+ * button of every root pane up to the window (L2-S1), and a throwing veto's log line naming the exception's class only
+ * (security review L8-F6).
  */
 class InputVetoesTest {
 
@@ -313,5 +322,135 @@ class InputVetoesTest {
         assertEquals(1, logged, "logged once per call");
         new InputVetoes.Withheld(ctx, counter).allows(InputVeto.TYPE_DISPATCH, t[2]);
         assertEquals(2L, counter.get(), "another call counts again");
+    }
+
+    /** A frame-less stand-in for a menu: root > menu > opener, and a popup whose invoker is the opener. */
+    private static Object[] popupTree() {
+        JPanel root = named("root");
+        JPanel menu = named("menu");
+        JButton opener = new JButton("Desk");
+        opener.setName("opener");
+        menu.add(opener);
+        root.add(menu);
+        JPopupMenu popup = new JPopupMenu();
+        popup.setName("popup");
+        JMenuItem item = new JMenuItem("Close the desk");
+        item.setName("item");
+        popup.add(item);
+        popup.setInvoker(opener);
+        return new Object[] {root, menu, opener, popup, item};
+    }
+
+    /**
+     * Fix wave of the Phase 8 review (FA, L2-F2): a popup's item is asked with its invoker's chain, so a veto on the
+     * invoker's panel covers it (refusing on the route and flagged for the readers); without an invoker the popup's
+     * own parent chain is asked, as before.
+     */
+    @Test
+    void aPopupsItemsAreAskedWithTheChainOfTheComponentThatOpenedIt() throws Exception {
+        final Object[] t = onEdt(InputVetoesTest::popupTree);
+        final Component menu = (Component) t[1];
+        final JPopupMenu popup = (JPopupMenu) t[3];
+        final Component item = (Component) t[4];
+        ctx.spi.register(InputVeto.class, new ByName().refuse("menu", "closes the desk"));
+        InputVetoes.Refusal r = onEdt(() -> new InputVetoes(ctx).check(item, InputVeto.CLICK_ACTION));
+        assertNotNull(r, "the item of a popup the vetoed panel's button opened is refused");
+        assertSame(menu, r.component, "vetoed names the invoker's ancestor that refused");
+        assertTrue(onEdt(() -> new ComponentView(ctx).vetoed(item)), "the readers flag it");
+        onEdt(() -> {
+            popup.setInvoker(null);
+            return null;
+        });
+        assertNull(onEdt(() -> new InputVetoes(ctx).check(item, InputVeto.CLICK_ACTION)),
+                "a popup without an invoker is asked with its own parents");
+    }
+
+    /** Fix wave (FA, L2-F2): an invoker inside its own popup is a cycle, refused at the depth bound (fail closed). */
+    @Test
+    void anInvokerInsideItsOwnPopupIsRefusedAtTheDepthBound() throws Exception {
+        final Object[] t = onEdt(InputVetoesTest::popupTree);
+        final JPopupMenu popup = (JPopupMenu) t[3];
+        final Component item = (Component) t[4];
+        final ByName veto = new ByName();
+        ctx.spi.register(InputVeto.class, veto);
+        onEdt(() -> {
+            popup.setInvoker(item);
+            return null;
+        });
+        InputVetoes.Refusal r = onEdt(() -> new InputVetoes(ctx).check(item, InputVeto.ANY));
+        assertNotNull(r, "a cycle cannot be asked to its end: refused");
+        assertTrue(r.text.contains("more than 64 levels"), r.text);
+        assertEquals(0, veto.total(), "nothing is asked for it");
+    }
+
+    /**
+     * Fix wave of the Phase 8 review (FA, L2-S1): ENTER into a field of a {@code JInternalFrame} without a default
+     * button presses the enclosing window's default button, so that button is asked too; a vetoed one refuses with
+     * {@code defaultButton} naming it; without ENTER nothing but the target is asked.
+     */
+    @Test
+    void enterAsksTheDefaultButtonOfEveryRootPaneUpToTheWindow() throws Exception {
+        final Component[] t = onEdt(() -> {
+            JRootPane outer = new JRootPane();
+            JPanel content = named("content");
+            content.setLayout(null);
+            outer.setContentPane(content);
+            JPanel close = named("closeMenu");
+            JButton closeDesk = new JButton("Close the desk");
+            closeDesk.setName("closeDesk");
+            close.add(closeDesk);
+            content.add(close);
+            outer.setDefaultButton(closeDesk);
+            JDesktopPane desk = new JDesktopPane();
+            content.add(desk);
+            JInternalFrame inner = new JInternalFrame("A dialog drawn in the window");
+            JTextField field = new JTextField(8);
+            field.setName("innerField");
+            inner.getContentPane().add(field);
+            desk.add(inner);
+            return new Component[] {outer, close, closeDesk, inner, field};
+        });
+        ctx.spi.register(InputVeto.class, new ByName().refuse("closeMenu", "closes the desk"));
+        RpcException e = assertThrows(RpcException.class, () -> onEdt(() -> {
+            Typing.requireKeyTargetsNotVetoed(new ComponentView(ctx), t[4], InputVeto.KEY, true);
+            return null;
+        }));
+        assertEquals(ErrorCodes.INPUT_REJECTED, e.error().code());
+        Map<String, Object> data = e.error().data();
+        assertEquals("vetoed", data.get("reason"));
+        assertEquals(ctx.handles.handleFor(t[4], ComponentView.KIND), data.get("ref"), "ref is the key's target");
+        assertEquals(ctx.handles.handleFor(t[2], ComponentView.KIND), data.get("defaultButton"),
+                "the enclosing root pane's default button, past the internal frame's root pane without one");
+        assertEquals(ctx.handles.handleFor(t[1], ComponentView.KIND), data.get("vetoed"));
+        onEdt(() -> {
+            Typing.requireKeyTargetsNotVetoed(new ComponentView(ctx), t[4], InputVeto.KEY, false);
+            return null;
+        });
+    }
+
+    /**
+     * Security review L8-F6, fixed by the fix wave (FA): a throwing veto's log line names the veto's and the
+     * exception's classes only, never the exception's message (it may quote the application's text, and the agent
+     * log is served by {@code agent.log}).
+     */
+    @Test
+    void aThrowingVetosLogLineNamesTheExceptionsClassOnly() throws Exception {
+        final Component[] t = tree();
+        ctx.spi.register(InputVeto.class, new InputVeto() {
+            @Override
+            public String refuse(Component component, String route) {
+                throw new NumberFormatException("For input string: \"planted field text 4711\"");
+            }
+        });
+        assertNotNull(onEdt(() -> new InputVetoes(ctx).check(t[3], InputVeto.CLICK_ACTION)));
+        String line = null;
+        for (String w : ctx.log.warnings()) {
+            if (w.contains("InputVeto")) {
+                line = w;
+            }
+        }
+        assertNotNull(line, String.valueOf(ctx.log.warnings()));
+        assertTrue(line.contains("java.lang.NumberFormatException"), line);
+        assertFalse(line.contains("planted field text"), "the exception's message stays out of the log: " + line);
     }
 }

@@ -163,6 +163,35 @@ class RobotPathTest {
         assertEquals(Arrays.asList("move 10,20", "press " + B1, "release " + B1, "move 500,400"), dragging.calls);
     }
 
+    /**
+     * Phase 8 security fix (S155, FA): a drag's release is asked again after the moves; allowed, it lands on the end
+     * point; refused, or failing, the pointer moves back to the press point and the release lands there, before the
+     * pointer is restored.
+     */
+    @Test
+    void aDragsReleaseIsAskedAgainAndGoesToThePressPointUnlessAllowed() {
+        Pointer.Request drag = request("action", "DRAG", "to", map("fx", 1.0, "fy", 1.0), "steps", 2L);
+        FakePort allowed = new FakePort();
+        RobotPath.act(allowed, drag, new Point(10, 20), new Point(50, 20), () -> true);
+        assertEquals(Arrays.asList("move 10,20", "press " + B1, "move 30,20", "move 50,20", "release " + B1,
+                "move 500,400"), allowed.calls);
+        FakePort refused = new FakePort();
+        RobotPath.act(refused, drag, new Point(10, 20), new Point(50, 20), () -> false);
+        assertEquals(Arrays.asList("move 10,20", "press " + B1, "move 30,20", "move 50,20", "move 10,20",
+                "release " + B1, "move 500,400"), refused.calls, "moved back to the press point, released there");
+        FakePort failing = new FakePort();
+        assertThrows(IllegalStateException.class, () -> RobotPath.act(failing, drag, new Point(10, 20),
+                new Point(50, 20), () -> {
+                    throw new IllegalStateException("the read failed");
+                }));
+        assertEquals(Arrays.asList("move 10,20", "press " + B1, "move 30,20", "move 50,20", "move 10,20",
+                "release " + B1, "move 500,400"), failing.calls, "a failed question never releases on the end");
+        FakePort click = new FakePort();
+        RobotPath.act(click, request("action", "CLICK"), new Point(10, 20), null, () -> false);
+        assertEquals(Arrays.asList("move 10,20", "press " + B1, "release " + B1, "move 500,400"), click.calls,
+                "only a drag asks");
+    }
+
     @Test
     void aWheelTurnsOneNotchAtATime() {
         FakePort port = new FakePort();

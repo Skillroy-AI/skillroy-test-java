@@ -19,9 +19,10 @@ package ai.skillroy.testjava.agent.api.spi;
 /**
  * Components the agent must never deliver input to: a key whose action ends the JVM, a control whose effect cannot be
  * undone in a test (Phase 8, phase8-contracts.md 3.2, A67). Asked on the EDT inside a primitive's bounded read and
- * again inside each posted input task, for the component and each of its ancestors up to and including its window;
- * must be fast, lock-free, must not block and must not change the component tree. A veto that throws refuses (the
- * safe side).
+ * again inside each posted input task, for the component and each of its ancestors up to and including its window
+ * (the items of a popup menu, a combo's list or a context menu with the chain of the component that opened the popup,
+ * whether it is drawn inside the window or as a window of its own); must be fast, lock-free, must not block and must
+ * not change the component tree. A veto that throws refuses (the safe side).
  *
  * <p>The agent asks on every input route that resolves a target, after its argument checks (not showing, collapsed,
  * disabled) and before the modal check; no argument skips a refusal, {@code force} included. The first refusal
@@ -36,9 +37,10 @@ package ai.skillroy.testjava.agent.api.spi;
  * enforced, but invisible until it acts.
  *
  * <p>Not covered: Swing's key bindings, mnemonics and menu accelerators can route a key delivered to one component to
- * an action another component owns; only the delivery target's chain and ENTER's default button are asked, so veto
- * the window, or the bound control. A veto on a window or panel does not cover {@code web.*} input into a browser
- * inside it (gap 126).
+ * an action another component owns; only the delivery target's chain and ENTER's default buttons (every root pane's up
+ * to the window) are asked, so veto the window, or the bound control; a menu item's own veto does not cover the
+ * keyboard of an open menu, so veto the window there. A veto on a window or panel does not cover {@code web.*} input
+ * into a browser inside it (gap 126).
  */
 public interface InputVeto {
 
