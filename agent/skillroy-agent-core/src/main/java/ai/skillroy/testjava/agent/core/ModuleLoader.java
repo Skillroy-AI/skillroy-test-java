@@ -99,7 +99,11 @@ final class ModuleLoader {
             return "INSTALLED".equals(state);
         }
 
-        /** The {@code agent.info} entry: {@code {id, version, state, message?}}. */
+        /**
+         * The {@code agent.info} entry: {@code {id, version, state, message?, readyMessage?, info?}}; {@code info} is
+         * the installed module's {@link AgentModule#info()} when it is not empty (Phase 8, phase8-contracts.md 3.2
+         * rule 4, A68).
+         */
         Map<String, Object> toJson() {
             Map<String, Object> json = new LinkedHashMap<String, Object>();
             json.put("id", id);
@@ -111,8 +115,45 @@ final class ModuleLoader {
             if (readyMessage != null) {
                 json.put("readyMessage", readyMessage);
             }
+            Map<String, Object> info = info();
+            if (info != null && !info.isEmpty()) {
+                json.put("info", info);
+            }
             return json;
         }
+
+        /**
+         * A copy of an installed module's {@link AgentModule#info()}, or null: a module that throws is logged once and
+         * its entry left out ({@code VirtualMachineError}s other than {@code StackOverflowError} propagate).
+         */
+        private Map<String, Object> info() {
+            if (module == null || !installed()) {
+                return null;
+            }
+            try {
+                Map<String, Object> raw = module.info();
+                return raw == null ? null : new LinkedHashMap<String, Object>(raw);
+            } catch (Throwable t) {
+                if (t instanceof VirtualMachineError && !(t instanceof StackOverflowError)) {
+                    throw (VirtualMachineError) t;
+                }
+                AgentLog l = log;
+                if (!infoFailureLogged && l != null) {
+                    infoFailureLogged = true;
+                    try {
+                        l.warn("module " + id + ": info() failed and is left out of agent.info: " + t.getClass()
+                                .getName());
+                    } catch (Throwable ignored) {
+                        // the log must never be the reason agent.info fails
+                    }
+                }
+                return null;
+            }
+        }
+
+        /** Where a failing {@link AgentModule#info()} is logged (once); set for the records of discovered modules. */
+        volatile AgentLog log;
+        private volatile boolean infoFailureLogged;
     }
 
     private final AgentLog log;
@@ -315,7 +356,9 @@ final class ModuleLoader {
             putFirst(failed, byId);
             return;
         }
-        putFirst(new Record(id, version, module, origin), byId);
+        Record record = new Record(id, version, module, origin);
+        record.log = log;
+        putFirst(record, byId);
     }
 
     /** A FAILED record without a module, for a loading problem (finding S14). */

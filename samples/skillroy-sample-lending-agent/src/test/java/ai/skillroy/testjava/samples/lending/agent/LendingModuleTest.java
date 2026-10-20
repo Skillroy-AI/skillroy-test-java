@@ -83,10 +83,13 @@ class LendingModuleTest {
                     AppStateProvider.class, NameEnricher.class, LocatorResolver.class, ActionFirer.class,
                     DialogTextExtractor.class, DataSourceProvider.class, MaskPolicy.class, DeviceAdapter.class,
                     RedactionKeys.class, ai.skillroy.testjava.agent.api.spi.RegionResolver.class,
-                    ai.skillroy.testjava.agent.api.spi.CaptureMask.class)) {
+                    ai.skillroy.testjava.agent.api.spi.CaptureMask.class,
+                    ai.skillroy.testjava.agent.api.spi.InputVeto.class)) {
                 assertEquals(1, ctx.spi.all(type).size(), type.getSimpleName());
             }
-            assertEquals(13, ctx.spi.count(), "the eleven SPIs of Phase 6 and the two of Phase 7");
+            assertEquals(14, ctx.spi.count(), "the eleven SPIs of Phase 6, the two of Phase 7 and Phase 8's InputVeto");
+            assertTrue(ctx.spi.first(ai.skillroy.testjava.agent.api.spi.InputVeto.class)
+                    instanceof LendingInputVeto);
             assertTrue(ctx.spi.first(ai.skillroy.testjava.agent.api.spi.RegionResolver.class)
                     instanceof LendingRegions);
             assertTrue(ctx.spi.first(ai.skillroy.testjava.agent.api.spi.CaptureMask.class)

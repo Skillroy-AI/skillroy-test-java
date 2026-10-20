@@ -536,6 +536,7 @@ marked there; the design's table is design §2.6.
 | `DialogLocator` | dialogs drawn inside another window (glass pane, internal frame); whether they block input | in-window dialogs | EDT | – (P1 §4, A27) | P1 §4 |
 | `RegionResolver` | stable region ids inside a custom-painted component (a key pad's keys) | vision steps and pointer steps on painted surfaces | EDT | `LendingRegions` | P7 §3.7 |
 | `CaptureMask` | which components show a secret: blanked in captures, text withheld from every reader | every component that can show a secret, and every control that feeds one | EDT; fast, lock-free | `LendingCaptureMask` | P7 §3.6 |
+| `InputVeto` | the components the agent must never deliver input to, on any route, `force` included; readers flag them `vetoed` | every control whose action ends the JVM or cannot be undone in a test (Phase 8, built 2026-10-19, EA) | EDT; fast, lock-free; never changes the tree | `LendingInputVeto` | P8 §3.2 |
 | `MaskPolicy` | masks values `data.query` returns, `CAPTURE` hook values and Byteman bindings, and (Phase 8) every event payload at publish, `event:<topic>` | personal or secret columns and event fields | agent workers, the hooked thread, or the thread that publishes an event; never blocks, never waits on the EDT | `PasswordMask` | P1 §4; P6 §4.3; P8 §5.1 |
 | `RedactionKeys` | the application's own secret-looking keys in JVM arguments, properties, options | always worth one | any; thread-safe | `LendingSecrets` | P1 §4 (A21) |
 | `DataSourceProvider` | an in-process, credential-free read channel (`data.query`) | resolvers and stored-row checks against the application's own data | agent workers | `LendingDataSource` | P1 §4, §6 |
@@ -633,6 +634,33 @@ The snapshot names a Swing node by the first non-empty of `NameEnricher`, the ac
 Prefer a locator in the application's vocabulary, then an explicitly set name, then name, text and class, with the
 child-index `path` last (design §3.7, "Locators"). The click rungs (`ACTION` by default, `COMPONENT` with window
 activation on request, `DISPATCH`) are the base's; the scenario key `ui` chooses (B12, A28, A29).
+
+**Input vetoes, the visible area, heavyweight containers, AWT controls (Phase 8, built 2026-10-19, EA; P8 §3).**
+
+- Register an `InputVeto` for every control whose action ends the JVM or cannot be undone in a test (§7 rule 4).
+  `refuse(component, route)` answers null to allow, else one line why (cut at 200 characters); it is asked on the EDT
+  for the component and each ancestor up to its window, so one answer for a panel or a window vetoes everything in it.
+  A veto that discriminates routes **must answer the route `ANY` with a refusal whenever it refuses any route**: the
+  readers ask `ANY` to flag `vetoed: true`, so that the recorder and a model are never offered the component; a veto
+  that answers `ANY` with null is still enforced, but invisible until it acts. Keep it fast and lock-free: it runs
+  inside the agent's bounded EDT read, and a throwing veto refuses (fail closed, logged once).
+- Key bindings, mnemonics and menu accelerators are not followed: a key delivered to one component may fire an action
+  another component owns (only the delivery target's chain and ENTER's default button are asked), so **veto the
+  window, or the bound control**. **A veto on a window or panel does not cover `web.*` input into a browser inside
+  it**; a layer that must keep page input out vetoes nothing more for that in Phase 8 (gap 126).
+- A veto that depends on application state and refuses inside the posted task leaves the step `fired: true` (the
+  call already answered "posted"; the refusal is logged and counted in the Swing module's `vetoWithheld`, which
+  `skillroy info` shows): the step's `sync` or an expectation on the effect is what fails it.
+- "On screen" is more than `isShowing()`: a component whose effective area is empty (a zero-width pane of a frame set,
+  a component clipped away by its parent, one not yet laid out) is *collapsed*: locators skip it, snapshots leave it
+  out, a click on it is `INVALID_PARAMS collapsed`, and an in-window dialog root without an area blocks nothing (report
+  the component that has the area). A component scrolled out of a `JViewport` stays on screen; a custom scroller that
+  moves its child without a viewport makes a scrolled-out child collapsed (gap 130).
+- The routed pointer reaches components inside a heavyweight container (an application drawn inside one AWT `Panel`):
+  its events are sourced from the innermost heavyweight at the point that no `SurfaceSource` claims.
+- AWT `Button` and `Checkbox` are fired semantically on the `ACTION` and `COMPONENT` rungs (one `ActionEvent` or
+  `ItemEvent`); `DISPATCH` stays a mouse click, whose effect on an AWT control depends on the toolkit's peer (the X
+  peers act on it, Windows' are not known to). Other AWT controls have no semantic rung (gap 129).
 
 ### 6.8 Embedded browsers the Swing tree cannot see
 
@@ -743,7 +771,11 @@ framework must survive without harming the host).
    base's (B4, B26 Q1; `CLAUDE.md`).
 4. **Never route an action or an assertion through application code that can end the JVM** (an application test API's
    shutdown or restart, an exit on error): no primitive calls application code known to end the JVM (design §2.2 step
-   7). Recovery returns the application to idle; it does not restart it (design §3.6, `recover`).
+   7). Recovery returns the application to idle; it does not restart it (design §3.6, `recover`). **(Phase 8, built
+   2026-10-19, EA; P8 §3.2)** Register an `InputVeto` for every such control, so that no route of the base (a click on
+   any rung, a key, typing, the pointer, a dialog's dismissal) reaches it, `force` included; key bindings are not
+   followed: veto the window or the bound control; a window veto does not cover `web.*` input into a browser inside it
+   (gap 126).
 5. **Chain seams, never replace them** (§6.5), and restore them on detach.
 6. **Keep hooks optional and small.** Zero hooks on the default path; the first fallback of every hook is a public seam;
    never retransform very large classes (the engine refuses above 256 KiB of class file or 2,000 methods); scope a

@@ -51,6 +51,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * table and a list, {@code fires}, and the masked-text rule in the dialog reader. The point-to-component half (the
  * deepest component, the mouse target, the covering windows, the blocker) needs real windows and is the display
  * tests'.
+ *
+ * <p>Phase 8 (phase8-contracts.md 3.4, 13.1 row 2): the routed source search over a fake tree whose root is a
+ * container (no {@code Window} can be built headless): the innermost heavyweight on the path at the point (a stand-in
+ * that reports itself displayable and not lightweight), the claimed-surface exception keeping the root, and the mouse
+ * target searched below the stand-in as its own dispatcher would (children that report themselves lightweight).
  */
 class HitTestLocatorsTest {
 
@@ -243,5 +248,119 @@ class HitTestLocatorsTest {
         ctx.spi.register(CaptureMask.class, c -> c == code);
         String text = onEdt(() -> DialogReader.messageText(message, new ComponentView(ctx)));
         assertTrue(text == null || !text.contains("4711"), "the masked field's text is withheld: " + text);
+    }
+
+    // ------------------------------------------------------------------------- Phase 8: heavyweight routing
+
+    /** A heavyweight container stand-in: displayable and not lightweight without a peer. */
+    static final class Heavy extends java.awt.Panel {
+        private static final long serialVersionUID = 1L;
+
+        Heavy() {
+            super(null);
+        }
+
+        @Override
+        public boolean isDisplayable() {
+            return true;
+        }
+
+        @Override
+        public boolean isLightweight() {
+            return false;
+        }
+    }
+
+    /** A heavyweight leaf stand-in (an AWT {@code Canvas}). */
+    static final class HeavyLeaf extends java.awt.Canvas {
+        private static final long serialVersionUID = 1L;
+
+        @Override
+        public boolean isDisplayable() {
+            return true;
+        }
+
+        @Override
+        public boolean isLightweight() {
+            return false;
+        }
+    }
+
+    /** A lightweight button stand-in (unshown Swing components report false headless). */
+    static final class Light extends JButton {
+        private static final long serialVersionUID = 1L;
+
+        Light(String text) {
+            super(text);
+        }
+
+        @Override
+        public boolean isLightweight() {
+            return true;
+        }
+    }
+
+    @Test
+    void theSourceIsTheInnermostHeavyweightOnThePathAtThePoint() throws Exception {
+        onEdt(() -> {
+            JPanel root = new JPanel(null);
+            root.setBounds(0, 0, 400, 300);
+            Heavy scanner = new Heavy();
+            scanner.setBounds(100, 50, 200, 100);
+            Light reread = new Light("Re-read member card");
+            reread.setBounds(10, 10, 80, 30);
+            scanner.add(reread);
+            JButton outside = new JButton("Open deposit box");
+            outside.setBounds(10, 200, 100, 30);
+            root.add(scanner);
+            root.add(outside);
+            assertTrue(HitTest.sourceAt(root, new Point(120, 70), null) == scanner, "inside the heavyweight");
+            assertTrue(HitTest.sourceAt(root, new Point(20, 210), null) == root, "a Swing button outside it");
+            assertTrue(HitTest.sourceAt(root, new Point(390, 290), null) == root, "nothing heavy at the point");
+            assertTrue(HitTest.mouseTarget(root, scanner, new Point(120, 70)) == reread,
+                    "the mouse target is searched below the heavyweight, as its dispatcher would");
+            assertNull(HitTest.mouseTarget(root, 120, 70),
+                    "the root's dispatcher alone finds nothing inside a heavyweight");
+            return null;
+        });
+    }
+
+    @Test
+    void aClaimedSurfaceKeepsTheRootAsTheSource() throws Exception {
+        onEdt(() -> {
+            JPanel root = new JPanel(null);
+            root.setBounds(0, 0, 400, 300);
+            Heavy browser = new Heavy();
+            browser.setBounds(0, 0, 200, 200);
+            HeavyLeaf canvas = new HeavyLeaf();
+            canvas.setBounds(0, 0, 200, 200);
+            browser.add(canvas);
+            root.add(browser);
+            assertTrue(HitTest.sourceAt(root, new Point(50, 50), null) == canvas, "unclaimed: the innermost one");
+            List<ai.skillroy.testjava.agent.api.spi.SurfaceSource.Surface> claimed = Collections.singletonList(
+                    new ai.skillroy.testjava.agent.api.spi.SurfaceSource.Surface(browser, "WEB", "b1"));
+            assertTrue(HitTest.sourceAt(root, new Point(50, 50), claimed) == root,
+                    "a component on the path claimed by a SurfaceSource keeps the root (D513 rule 2)");
+            return null;
+        });
+    }
+
+    @Test
+    void aHeavyweightLeafIsItsOwnMouseTargetWhenItListensOrIsAnAwtControl() throws Exception {
+        onEdt(() -> {
+            JPanel root = new JPanel(null);
+            root.setBounds(0, 0, 400, 300);
+            HeavyLeaf silent = new HeavyLeaf();
+            silent.setBounds(0, 0, 100, 100);
+            root.add(silent);
+            assertTrue(HitTest.sourceAt(root, new Point(10, 10), null) == silent);
+            assertNull(HitTest.mouseTarget(root, silent, new Point(10, 10)), "a silent canvas takes nothing");
+            silent.addMouseListener(new java.awt.event.MouseAdapter() { });
+            assertTrue(HitTest.mouseTarget(root, silent, new Point(10, 10)) == silent, "a listening canvas does");
+            assertFalse(HitTest.peerActs(new java.awt.Panel()), "a panel's peer acts on nothing");
+            assertTrue(HitTest.heavyweightLeaf(silent));
+            assertFalse(HitTest.heavyweightLeaf(new Heavy()), "a container is no leaf");
+            return null;
+        });
     }
 }

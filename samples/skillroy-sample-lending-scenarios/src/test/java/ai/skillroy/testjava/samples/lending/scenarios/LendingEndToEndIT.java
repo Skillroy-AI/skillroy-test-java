@@ -266,4 +266,18 @@ class LendingEndToEndIT {
             return Env.SEED_B;
         }
     }
+
+    /**
+     * The tools leg (phase8-contracts.md 13.2 items 1 to 10): the desk with its "Desk tools" window
+     * ({@code lending.tools=true}) and the agent option {@code robot=true}, once per target Java: the input veto on
+     * every route, the visible area, heavyweight routing and AWT controls end to end ({@link InputSafetyChecks}).
+     */
+    @Nested
+    @Order(18)
+    class JavaAgentTools extends InputSafetyChecks {
+        @Override
+        LendingTarget.Mode mode() {
+            return LendingTarget.Mode.JAVAAGENT_TOOLS;
+        }
+    }
 }

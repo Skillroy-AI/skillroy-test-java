@@ -21,6 +21,7 @@ import ai.skillroy.testjava.agent.api.Invocation;
 import ai.skillroy.testjava.agent.api.Primitive;
 import ai.skillroy.testjava.agent.api.PrimitiveSpec;
 import ai.skillroy.testjava.agent.api.Primitives;
+import ai.skillroy.testjava.agent.api.spi.InputVeto;
 import ai.skillroy.testjava.protocol.Capability;
 import ai.skillroy.testjava.protocol.CapabilityState;
 import ai.skillroy.testjava.protocol.JsonView;
@@ -39,6 +40,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.Callable;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * The {@code swing.*} primitives of contract section 6. Every primitive runs on the {@code CALLER} thread and makes
@@ -51,7 +53,12 @@ import java.util.concurrent.Callable;
  * {@code swing.dialogs} and {@code swing.dismiss} also cover the dialogs registered {@code DialogLocator}s report
  * inside windows (amendment A27).
  *
- * <p>Thread-safe: no mutable state of its own; SPIs are looked up per call.
+ * <p>Phase 8 (phase8-contracts.md 3.1-3.5): every input primitive that resolves a target asks the registered
+ * {@code InputVeto}s after its clickable test and before its modal test ({@code INPUT_REJECTED vetoed}, never skipped
+ * by {@code force}) and again inside every posted task ({@code vetoWithheld} counts the calls withheld there); a
+ * collapsed component is {@code INVALID_PARAMS collapsed}; readers flag {@code vetoed} and {@code collapsed}.
+ *
+ * <p>Thread-safe: no mutable state of its own but the {@code vetoWithheld} counter; SPIs are looked up per call.
  */
 final class SwingPrimitives {
 
@@ -79,13 +86,15 @@ final class SwingPrimitives {
     private final RecentCaptures captures = new RecentCaptures();
     private final Pointer pointer;
     private final RobotPath robot;
+    /** Calls whose posted input task an input veto withheld (phase8-contracts.md 3.2 rule 4, D503). */
+    private final AtomicLong vetoWithheld = new AtomicLong();
 
     SwingPrimitives(AgentContext ctx, Windows windows, WindowTap tap, AwtState awt, RobotFactory robotFactory) {
         this.ctx = ctx;
         this.windows = windows;
         this.tap = tap;
-        this.clicks = new Clicks(ctx, windows);
-        this.typing = new Typing(ctx, windows);
+        this.clicks = new Clicks(ctx, windows, vetoWithheld);
+        this.typing = new Typing(ctx, windows, vetoWithheld);
         this.watch = new EdtWatch(ctx, tap, awt);
         this.pointer = new Pointer(ctx, windows, captures);
         this.robot = new RobotPath(ctx, windows, pointer, captures, robotFactory);
@@ -107,6 +116,11 @@ final class SwingPrimitives {
     /** The capture geometries kept (for tests). */
     RecentCaptures captures() {
         return captures;
+    }
+
+    /** The calls whose posted input task an input veto withheld ({@code vetoWithheld} of the module's info). */
+    long vetoWithheld() {
+        return vetoWithheld.get();
     }
 
     /** Every primitive of the module, in name order. */
@@ -150,7 +164,9 @@ final class SwingPrimitives {
                         + "(unavailable). AUTO = ACTION. A click that fired reports rung, requestedRung and fidelity "
                         + "(FULL on the rung asked for). Fails with MODAL_OPEN when a modal dialog blocks the "
                         + "component's window or a blocking in-window dialog does not contain it, unless force. "
-                        + "Returns once the click is posted; follow with swing.settle.")
+                        + "A component the application's agent module vetoes is refused INPUT_REJECTED 'vetoed' on "
+                        + "every rung, force or not, and a collapsed one (no visible area) INVALID_PARAMS "
+                        + "'collapsed'. Returns once the click is posted; follow with swing.settle.")
                 .param("target", "string|object", false, "ref of the component (or a locator object)")
                 .param("by", "object", false, "locator of the component (instead of target)")
                 .param("rung", "string", false, "AUTO (default), ACTION, COMPONENT, DISPATCH or ROBOT")
@@ -185,7 +201,8 @@ final class SwingPrimitives {
                         + "when it is the only dialog showing): 'button' presses the button with that text (exact, "
                         + "then case-insensitive) through the ACTION rung; 'close' delivers WINDOW_CLOSING like the "
                         + "title-bar close box (dialog windows only). Never disposes or hides the dialog itself. "
-                        + "Without either, a dialog with exactly one button has it pressed.")
+                        + "Without either, a dialog with exactly one button has it pressed. A vetoed button or dialog "
+                        + "is refused INPUT_REJECTED 'vetoed'.")
                 .param("dialog", "string", false, "ref of the dialog (a java.awt.Dialog, or the root of an in-window "
                         + "dialog a DialogLocator reports); default the topmost modal dialog")
                 .param("button", "string", false, "text of the button to press")
@@ -210,7 +227,9 @@ final class SwingPrimitives {
                 }));
         list.add(Primitives.of(PrimitiveSpec.builder("swing.find")
                 .description("Finds components by locator. Without 'all', exactly one must match (NOT_FOUND, "
-                        + "AMBIGUOUS with candidates); with 'all', every match is returned.")
+                        + "AMBIGUOUS with candidates); with 'all', every match is returned. Only components on screen "
+                        + "(showing and not collapsed) match unless includeHidden; nodes carry vetoed and collapsed "
+                        + "when true.")
                 .param("by", "object", true, "locator: exactly one of {ref}, {id}, {name}, {text}, {class}, {path} "
                         + "(child indexes like \"0/2/1\") or a registered strategy, plus optional role and index; "
                         + "name and text accept a string (exact) or {contains} / {regex}")
@@ -229,7 +248,9 @@ final class SwingPrimitives {
                         + "deliver a mouse event to (inferred), the wheel target, the point inside it, locator "
                         + "candidates each checked to match exactly that component, the table or list row, whether "
                         + "an ActionFirer fires it, its RegionResolver region, the surface (SWING, WEB, HEAVYWEIGHT, "
-                        + "NONE), the windows of the JVM covering the point and the modal blocker. Read-only.")
+                        + "NONE), the routed event's source (the window or the innermost heavyweight at the point), "
+                        + "whether an input veto refuses the component (vetoed), the windows of the JVM covering the "
+                        + "point and the modal blocker. Read-only.")
                 .param("point", "object", false, "{x, y} in 'space'")
                 .param("space", "object|string", false, "{captureId}, {window: ref} or SCREEN")
                 .param("target", "string|object", false, "instead of a point: ref of the component (or a locator)")
@@ -247,7 +268,8 @@ final class SwingPrimitives {
                         + "modal dialog blocks is replaced by that dialog's focus component (a window is replaced "
                         + "by its root pane, where window-wide key bindings live). An explicit target in a window "
                         + "a modal dialog blocks, or outside a blocking in-window dialog, fails with MODAL_OPEN "
-                        + "unless force.")
+                        + "unless force. A vetoed target (and, with ENTER, a vetoed default button) is refused "
+                        + "INPUT_REJECTED 'vetoed', force or not.")
                 .param("key", "string", true, "KeyEvent.VK_ name without the prefix, e.g. ENTER, ESCAPE, F2, A")
                 .param("target", "string|object", false, "ref of the target component (or a locator object)")
                 .param("by", "object", false, "locator of the target component (instead of target)")
@@ -268,7 +290,11 @@ final class SwingPrimitives {
                         + "dispatched press is disarmed and released (balanced). ROBOT: the real pointer through "
                         + "java.awt.Robot (needs the agent option robot and the controller's opt-in; PRESS and "
                         + "RELEASE refused; requireFocus). Address by point and space, or by component (target/by) "
-                        + "with region, row and at fractions. Returns fired, received, dispatched, focusOwner.")
+                        + "with region, row and at fractions; the component form refuses a collapsed component and "
+                        + "a point its component does not show (INPUT_REJECTED 'not visible'). A vetoed component is "
+                        + "refused INPUT_REJECTED 'vetoed' before anything is sent, and per event (reason VETOED), "
+                        + "force or not. Events are sourced from the innermost heavyweight at the point. Returns "
+                        + "fired, received, source, dispatched, focusOwner.")
                 .param("action", "string", true, "MOVE, PRESS, RELEASE, CLICK, DOUBLE_CLICK, DRAG or WHEEL")
                 .param("point", "object", false, "{x, y} in 'space'")
                 .param("space", "object|string", false, "{captureId}, {window: ref} or SCREEN")
@@ -326,7 +352,8 @@ final class SwingPrimitives {
                 }));
         list.add(Primitives.of(PrimitiveSpec.builder("swing.snapshot")
                 .description("The component tree of every showing window (or of one root) as Nodes with stable "
-                        + "refs, plus the event sequence number at snapshot time.")
+                        + "refs, plus the event sequence number at snapshot time. Collapsed components (no visible "
+                        + "area) are left out unless includeHidden; nodes carry vetoed and collapsed when true.")
                 .param("root", "string", false, "ref of the window or component to snapshot")
                 .param("maxDepth", "integer", false, "levels below each root (default " + DEFAULT_DEPTH
                         + ", at most " + MAX_DEPTH + ")")
@@ -343,8 +370,9 @@ final class SwingPrimitives {
                         + "if 'enter'); DISPATCH delivers key events per character with dispatchEvent (then ENTER "
                         + "if 'enter'). Without target and by, the text goes where swing.key's key goes (the focus "
                         + "owner first). Fails with MODAL_OPEN when a modal dialog blocks an explicit target's window "
-                        + "or a blocking in-window dialog does not contain it, unless force. Returns once the input "
-                        + "is posted; follow with swing.settle.")
+                        + "or a blocking in-window dialog does not contain it, unless force. A vetoed target (and, "
+                        + "with enter, a vetoed default button) is refused INPUT_REJECTED 'vetoed', force or not. "
+                        + "Returns once the input is posted; follow with swing.settle.")
                 .param("target", "string|object", false, "ref of the component (or a locator object)")
                 .param("by", "object", false, "locator of the component (instead of target)")
                 .param("text", "string", true, "the text to type")
@@ -585,10 +613,7 @@ final class SwingPrimitives {
         if (c == null) {
             throw Errors.notFound("nothing to capture: no window is showing", Errors.data());
         }
-        if (!c.isShowing()) {
-            throw Errors.invalid(view.describe(c) + " is not showing", Errors.data("ref", view.ref(c),
-                    "reason", "not showing"));
-        }
+        Clicks.requireOnScreen(view, c); // not showing, or collapsed (phase8-contracts.md 3.3)
         return c;
     }
 
@@ -641,6 +666,7 @@ final class SwingPrimitives {
                         throw Errors.invalid(view.describe(c) + " is not showing", Errors.data("ref", view.ref(c),
                                 "reason", "not showing"));
                     }
+                    Clicks.requireOnScreen(view, c); // collapsed (phase8-contracts.md 3.3)
                     Point centre = c instanceof Window ? new Point(c.getWidth() / 2, c.getHeight() / 2)
                             : HitTest.centre(c);
                     return HitTest.at(view, windows, spis, w, centre, c, false, seq).json;
@@ -776,6 +802,7 @@ final class SwingPrimitives {
         String ref = a.str("dialog");
         final Component given = ref == null ? null : ctx.handles().resolve(ref, Component.class);
         final String[] pressed = new String[1];
+        final InputVetoes.Withheld task = new InputVetoes.Withheld(ctx, vetoWithheld);
         Edt.Action plan = Edt.read(ctx, inv.remainingMs(), new Callable<Edt.Action>() {
             @Override
             public Edt.Action call() {
@@ -788,12 +815,13 @@ final class SwingPrimitives {
                     }
                     // only dialogs: delivering WINDOW_CLOSING to a frame may run the application's exit handling
                     final Window w = (Window) d;
-                    return new Edt.Action() {
+                    Clicks.requireNotVetoed(view, w, InputVeto.DISMISS_CLOSE);
+                    return InputVetoes.guarded(task, InputVeto.DISMISS_CLOSE, new Edt.Action() {
                         @Override
                         public void run() {
                             w.dispatchEvent(new WindowEvent(w, WindowEvent.WINDOW_CLOSING));
                         }
-                    };
+                    }, w);
                 }
                 DialogReader reader = new DialogReader(view);
                 Component b;
@@ -809,8 +837,9 @@ final class SwingPrimitives {
                     b = reader.findButton(d, labels.get(0));
                 }
                 Clicks.requireClickable(view, b);
+                Clicks.requireNotVetoed(view, b, InputVeto.DISMISS_BUTTON);
                 pressed[0] = button != null ? labelFor(view, b, button) : reader.buttonLabels(d).get(0);
-                return Clicks.actionPlan(ctx, b);
+                return InputVetoes.guarded(task, InputVeto.DISMISS_BUTTON, Clicks.actionPlan(ctx, b), b);
             }
         });
         Edt.post(ctx, inv.remainingMs(), "swing.dismiss", plan);

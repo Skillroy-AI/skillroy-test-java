@@ -26,6 +26,7 @@ import ai.skillroy.testjava.agent.api.spi.AppStateProvider;
 import ai.skillroy.testjava.agent.api.spi.DataSourceProvider;
 import ai.skillroy.testjava.agent.api.spi.DeviceAdapter;
 import ai.skillroy.testjava.agent.api.spi.DialogTextExtractor;
+import ai.skillroy.testjava.agent.api.spi.InputVeto;
 import ai.skillroy.testjava.agent.api.spi.LocatorResolver;
 import ai.skillroy.testjava.agent.api.spi.CaptureMask;
 import ai.skillroy.testjava.agent.api.spi.MaskPolicy;
@@ -35,6 +36,7 @@ import ai.skillroy.testjava.agent.api.spi.ReadinessSource;
 import ai.skillroy.testjava.agent.api.spi.RedactionKeys;
 import ai.skillroy.testjava.agent.api.spi.ThreadPolicyProvider;
 import ai.skillroy.testjava.protocol.CapabilityState;
+import ai.skillroy.testjava.samples.lending.DeskTools;
 import ai.skillroy.testjava.samples.lending.Engine;
 import ai.skillroy.testjava.samples.lending.EngineStatus;
 import ai.skillroy.testjava.samples.lending.LendingApp;
@@ -67,6 +69,7 @@ import java.util.Map;
  *   <li>a {@link RegionResolver} for the number pad's twelve keys ({@link LendingRegions}) and a
  *       {@link CaptureMask} for the entry field and the number pad while a secret is expected
  *       ({@link LendingCaptureMask}) (Phase 7);</li>
+ *   <li>an {@link InputVeto} for the "Desk tools" window's close panel ({@link LendingInputVeto}) (Phase 8);</li>
  *   <li>a {@link DataSourceProvider} {@code lending} and a {@link DeviceAdapter} {@code printer};</li>
  *   <li>a {@link MaskPolicy} that hides the {@code password} column of source {@code lending}
  *       ({@link PasswordMask});</li>
@@ -146,6 +149,7 @@ public final class LendingModule implements AgentModule {
         register(RedactionKeys.class, new LendingSecrets());
         register(RegionResolver.class, new LendingRegions());
         register(CaptureMask.class, new LendingCaptureMask());
+        register(InputVeto.class, new LendingInputVeto()); // Phase 8 (phase8-contracts.md 3.2, 12.2)
         for (Primitive p : new LendingPrimitives(context, access, slot).all()) {
             context.primitives().register(p);
             primitiveNames.add(p.spec().name());
@@ -276,7 +280,10 @@ public final class LendingModule implements AgentModule {
      * desk picked for {@code lending.dbPort=0}; it changes from launch to launch, so it is no fingerprint component),
      * and the desk's business date ({@code today}, ISO-8601, from the engine's clock: the date {@code DUE} evaluates
      * the waiver rules on, which a resolver whose query depends on the date reads here; it changes every day, so it
-     * is no fingerprint component either).
+     * is no fingerprint component either). Phase 8 (phase8-contracts.md 12.2): {@code tools} with the "Desk tools"
+     * window's counters ({@code closeRequests, testSlips, slipsVisible, slipsHidden, reprints, scans, lidOpen,
+     * lidChanges, rereads, depositBoxOpens}) only when the window exists, so the section is unchanged on every other
+     * target.
      */
     private final class AppState implements AppStateProvider {
         @Override
@@ -308,6 +315,11 @@ public final class LendingModule implements AgentModule {
             LendingDbServer server = app.dbServer();
             m.put("dbPort", server == null ? null : Long.valueOf(server.port()));
             m.put("today", LendingWaivers.businessDate(app).toString());
+            // Phase 8 (phase8-contracts.md 12.2): the "Desk tools" window's counters, only when the window exists
+            DeskTools tools = app.tools();
+            if (tools != null) {
+                m.put("tools", tools.counters().toMap());
+            }
             return m;
         }
     }

@@ -751,8 +751,8 @@ final class Capture {
             // the caret is geometry a comparison blanks: reported for a masked field too (P7 13.2 item 1)
             caret(root, c);
             if (!masked) {
-                if (annotate) {
-                    mark(root, c);
+                if (annotate && !view.vetoed(c)) {
+                    mark(root, c); // a vetoed component is offered no mark (phase8-contracts.md 3.2, D506)
                 }
             } else if (whole || !redact) {
                 return; // nothing below a blanked component is visible, marked or typed into
@@ -927,6 +927,8 @@ final class Capture {
             Rectangle r = local == null ? new Rectangle(0, 0, c.getWidth(), c.getHeight()) : new Rectangle(local);
             if (c instanceof JComponent) {
                 r = r.intersection(((JComponent) c).getVisibleRect());
+            } else {
+                r = r.intersection(view.area(c)); // the effective area (phase8-contracts.md 3.3)
             }
             if (r.isEmpty()) {
                 return null;

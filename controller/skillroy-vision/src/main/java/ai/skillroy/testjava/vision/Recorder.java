@@ -65,6 +65,11 @@ public final class Recorder {
             "regex", "ignoreCase", "within");
     /** The refusal of an input into a masked component (D358). */
     public static final String MASKED = "the component takes a secret; ask the person to sign on";
+    /**
+     * The refusal of an input into a component the application's agent module vetoes (Phase 8, phase8-contracts.md
+     * 3.2, D507): the hit-test, the snapshot or the focus owner's hit says {@code vetoed: true}.
+     */
+    public static final String VETOED = "the application's agent module refuses input to that component";
     /** The refusal of a credential on a model's behalf (D342). */
     public static final String CREDENTIAL = "a credential is never used on a model's behalf; the person signs on first";
     /** The refusal of typing while a credential is in flight (D342). */
@@ -172,6 +177,11 @@ public final class Recorder {
         // a pack masked is never hit-tested and none of its text enters a step, the journal or the export.
         if (Boolean.TRUE.equals(hit.get("masked"))) {
             return Recorded.refused(MASKED);
+        }
+        // Phase 8 (D507): a vetoed component becomes no step, journal line or export, on every gesture; a hit without
+        // the key (a 0.1.0 agent) is not refused for it (the agent is the enforcer)
+        if (Boolean.TRUE.equals(hit.get("vetoed"))) {
+            return Recorded.refused(VETOED);
         }
         if ("WEB".equals(surface)) {
             return web(grounded, x, y, gesture, mark);
@@ -659,6 +669,9 @@ public final class Recorder {
         if (Boolean.TRUE.equals(hit.get("masked"))) {
             return Recorded.refused(MASKED);
         }
+        if (Boolean.TRUE.equals(hit.get("vetoed"))) {
+            return Recorded.refused(VETOED); // Phase 8 (D507): a vetoed focus owner
+        }
         Map<String, Object> locator = locator(hit);
         if (locator == null) {
             return Recorded.refused("the component with the focus has no locator that names it alone; click into a"
@@ -696,6 +709,9 @@ public final class Recorder {
         }
         if (focus.hit != null && Boolean.TRUE.equals(focus.hit.get("masked"))) {
             return Recorded.refused(MASKED);
+        }
+        if (focus.hit != null && Boolean.TRUE.equals(focus.hit.get("vetoed"))) {
+            return Recorded.refused(VETOED); // Phase 8 (D507): a vetoed focus owner
         }
         Map<String, Object> args = new LinkedHashMap<>();
         args.put("key", key);

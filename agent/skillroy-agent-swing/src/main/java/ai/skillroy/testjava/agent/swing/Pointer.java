@@ -18,6 +18,7 @@ package ai.skillroy.testjava.agent.swing;
 
 import ai.skillroy.testjava.agent.api.AgentContext;
 import ai.skillroy.testjava.agent.api.Invocation;
+import ai.skillroy.testjava.agent.api.spi.InputVeto;
 import ai.skillroy.testjava.protocol.ErrorCodes;
 import ai.skillroy.testjava.protocol.JsonView;
 import ai.skillroy.testjava.protocol.RpcException;
@@ -33,6 +34,7 @@ import java.awt.event.AWTEventListener;
 import java.awt.event.InputEvent;
 import java.awt.event.MouseEvent;
 import java.awt.event.MouseWheelEvent;
+import java.lang.ref.WeakReference;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -45,6 +47,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
+import javax.swing.JComponent;
 import javax.swing.JList;
 import javax.swing.JTable;
 import javax.swing.SwingUtilities;
@@ -68,7 +71,18 @@ import javax.swing.SwingUtilities;
  * <p><b>ROBOT</b> (behind the double opt-in): the real pointer through {@link RobotPort} on an agent worker; see
  * {@link RobotPath}.
  *
- * <p>Thread-safe: the last routed position per window is kept weakly under its own lock.
+ * <p>Phase 8 (phase8-contracts.md 3.2-3.4): the pre-check asks the input veto ({@code INPUT_REJECTED vetoed}) for the
+ * hit's target and deepest component, the addressed component of the component form and a drag's end, before the
+ * modal test; every event task asks it again, after the {@code cancelled} and modal tests, for the component AWT will
+ * deliver the event to (the pressed one while a press of the call is down), and a refusal stops the sequence with
+ * {@code reason: VETOED} and the press balanced, {@code force} or not (D505). The component form refuses a collapsed
+ * component and a point its component does not show ({@code INPUT_REJECTED "not visible"}, D512). The events' source
+ * is the innermost unclaimed heavyweight at the point, else the window ({@code source}, D513); a call whose source
+ * differs from the window's last routed source starts with one {@code MOUSE_EXITED} to that source at its last point,
+ * and the balance into a heavyweight leaf adds one {@code MOUSE_EXITED} before the release (D514).
+ *
+ * <p>Thread-safe: the last routed position per source and the last source per window are kept weakly under one
+ * lock.
  */
 final class Pointer {
 
@@ -92,6 +106,8 @@ final class Pointer {
     /** {@code fired: false} reasons. */
     static final String EDT_BUSY = "EDT_BUSY";
     static final String MODAL_OPENED = "MODAL_OPENED";
+    /** An input veto refused an event of the sequence (phase8-contracts.md 3.2 rule 6). */
+    static final String VETOED = "VETOED";
 
     /** A unique {@code when} per call, so that the call's listener recognises its own (retargeted) events. */
     private static final AtomicLong WHEN = new AtomicLong();
@@ -100,7 +116,11 @@ final class Pointer {
     private final Windows windows;
     private final RecentCaptures recent;
     private final boolean popupOnPress;
-    private final Map<Window, Point> lastRouted = new WeakHashMap<Window, Point>();
+    /** The last routed position per source (a window or a heavyweight), in its coordinates. */
+    private final Map<Component, Point> lastRouted = new WeakHashMap<Component, Point>();
+    /** The last routed source per window (D514). Guarded by {@link #lastRouted}. */
+    private final Map<Window, WeakReference<Component>> lastSource =
+            new WeakHashMap<Window, WeakReference<Component>>();
 
     Pointer(AgentContext ctx, Windows windows, RecentCaptures recent) {
         this(ctx, windows, recent, System.getProperty("os.name", ""));
@@ -278,6 +298,8 @@ final class Pointer {
         Point p;
         Point to;
         boolean screenSpace;
+        /** The component form's component (asked the veto too), or null for the point form. */
+        Component component;
     }
 
     /** Resolves the address on the EDT (section 3.3, "Addressing"). */
@@ -298,10 +320,8 @@ final class Pointer {
             return t;
         }
         Component c = r.target.resolve(view);
-        if (!c.isShowing()) {
-            throw Errors.invalid(view.describe(c) + " is not showing", Errors.data("ref", view.ref(c), "reason",
-                    "not showing"));
-        }
+        Clicks.requireOnScreen(view, c);
+        t.component = c;
         Rectangle rect = new Rectangle(0, 0, c.getWidth(), c.getHeight());
         if (r.region != null) {
             rect = spis.rectOf(c, r.region);
@@ -318,11 +338,27 @@ final class Pointer {
         }
         Window w = c instanceof Window ? (Window) c : Windows.windowOf(c);
         t.window = w;
-        t.p = SwingUtilities.convertPoint(c, at(rect, r.fx, r.fy), w);
+        Point local = at(rect, r.fx, r.fy);
+        requireShown(view, c, local, "at");
+        t.p = SwingUtilities.convertPoint(c, local, w);
         if (r.tfx != null) {
-            t.to = SwingUtilities.convertPoint(c, at(rect, r.tfx.doubleValue(), r.tfy.doubleValue()), w);
+            Point localTo = at(rect, r.tfx.doubleValue(), r.tfy.doubleValue());
+            requireShown(view, c, localTo, "to");
+            t.to = SwingUtilities.convertPoint(c, localTo, w);
         }
         return t;
+    }
+
+    /**
+     * {@code INPUT_REJECTED "not visible"} unless the point (in the component's own coordinates) lies in the part of
+     * the component that shows: its strict visible rectangle ({@code JComponent.getVisibleRect()}, which a viewport
+     * clips), else its effective area (phase8-contracts.md 3.3, D512). EDT only.
+     */
+    static void requireShown(ComponentView view, Component c, Point local, String param) {
+        Rectangle shown = c instanceof JComponent ? ((JComponent) c).getVisibleRect() : view.area(c);
+        if (!shown.contains(local)) {
+            throw Errors.notVisible(view, c, local, param);
+        }
     }
 
     /** The point of a rectangle at fractions of its size, kept inside it. */
@@ -363,10 +399,18 @@ final class Pointer {
     /** What the pre-check decided: the hit, the events and the call's state. */
     static final class Plan {
         Window window;
-        /** The events' source: the window (a stand-in component in headless tests). */
+        /**
+         * The events' source: the window or the innermost unclaimed heavyweight at the point (D513; a stand-in
+         * component in headless tests). A call's first event may go to the previous source (the exit, D514): every
+         * event is dispatched to its own source.
+         */
         Component source;
+        /** Whether the source is a heavyweight leaf (its balance adds an exit, D514). */
+        boolean sourceLeaf;
         /** Whether a modal dialog blocks the source now (the per-event re-read, D352). */
         BooleanSupplier blocked;
+        /** The per-event input veto (D505), or null when no veto is registered. */
+        InputVetoes.EventVeto veto;
         HitTest.Hit hit;
         boolean wasFocused;
         final List<MouseEvent> events = new ArrayList<MouseEvent>();
@@ -386,6 +430,8 @@ final class Pointer {
         boolean balanced;
         int pressMods;
         int button;
+        /** With {@link #VETOED}: {@code {ref, veto, route}} of the refusal. */
+        Map<String, Object> vetoed;
         final CountDownLatch done = new CountDownLatch(1);
 
         State(int of, boolean pressIntended) {
@@ -405,10 +451,18 @@ final class Pointer {
                 Target t = address(view, spis, r);
                 HitTest.Hit hit = HitTest.at(view, windows, spis, t.window, t.p, null, t.screenSpace,
                         ctx.events().lastSeq());
+                requireNotVetoed(view, hit, InputVeto.POINTER_ROUTED, t.component,
+                        t.to == null ? null : HitTest.targetsAt(spis, t.window, t.to));
                 precheck(view, r, hit, false);
                 Plan p = new Plan();
                 p.window = t.window;
-                p.source = t.window;
+                // D513: the innermost unclaimed heavyweight at the press point; a drag keeps it (the implicit grab)
+                Component source = hit.source != null ? hit.source : t.window;
+                p.source = source;
+                p.sourceLeaf = source != t.window && HitTest.heavyweightLeaf(source);
+                if (view.vetoes().any()) {
+                    p.veto = new RoutedVeto();
+                }
                 final Window w = t.window;
                 p.blocked = new BooleanSupplier() {
                     @Override
@@ -418,12 +472,23 @@ final class Pointer {
                 };
                 p.hit = hit;
                 p.wasFocused = t.window.isFocused();
-                Point origin = t.window.getLocationOnScreen();
+                Point local = source == t.window ? t.p : SwingUtilities.convertPoint(t.window, t.p, source);
+                Point localTo = t.to == null ? null : source == t.window ? t.to
+                        : SwingUtilities.convertPoint(t.window, t.to, source);
+                Point origin = source.getLocationOnScreen();
                 Point last;
+                Component previous;
+                Point previousLast;
                 synchronized (lastRouted) {
-                    last = lastRouted.get(t.window);
+                    last = lastRouted.get(source);
+                    WeakReference<Component> ref = lastSource.get(t.window);
+                    previous = ref == null ? null : ref.get();
+                    previousLast = previous == null ? null : lastRouted.get(previous);
                 }
-                p.events.addAll(events(r, t.window, t.p, t.to, origin, last, tag, popupOnPress));
+                if (previous != null && previous != source && previousLast != null && previous.isShowing()) {
+                    p.events.add(exit(previous, previousLast, tag)); // the native leave, approximated (D514)
+                }
+                p.events.addAll(events(r, source, local, localTo, origin, last, tag, popupOnPress));
                 return p;
             }
         });
@@ -448,6 +513,9 @@ final class Pointer {
                 if (source == window && !HitTest.listens(window)) {
                     return; // the window itself only receives when it listens
                 }
+                if (source == plan.source && !plan.sourceLeaf && !HitTest.listens(source)) {
+                    return; // a heavyweight container receives itself only when it listens; a leaf always (D514)
+                }
                 if (receivedId == MouseEvent.MOUSE_WHEEL || received.get() == null) {
                     received.set(source); // the wheel's last receiver is the ancestor that handled it
                 }
@@ -464,19 +532,25 @@ final class Pointer {
             Map<String, Object> m = new LinkedHashMap<String, Object>();
             m.put("via", ROUTED);
             m.put("window", ref(window));
+            m.put("source", ref(plan.source));
             m.put("hit", hitSubset(plan.hit));
             int sent;
             String reason;
             boolean balanced;
+            Map<String, Object> vetoed;
             synchronized (st) {
                 sent = st.sent;
                 reason = st.reason;
                 balanced = st.balanced || promise;
+                vetoed = st.vetoed;
             }
             boolean fired = reason == null && sent == st.of;
             m.put("fired", Boolean.valueOf(fired));
             if (!fired) {
                 m.put("reason", reason != null ? reason : EDT_BUSY);
+                if (VETOED.equals(reason) && vetoed != null) {
+                    m.put("vetoed", vetoed);
+                }
             }
             Map<String, Object> dispatched = new LinkedHashMap<String, Object>();
             dispatched.put("sent", Long.valueOf(sent));
@@ -537,7 +611,7 @@ final class Pointer {
                         balance = needsBalance(st);
                     }
                     if (balance) {
-                        balance(plan.source, st, when);
+                        balance(plan.source, plan.sourceLeaf, st, when);
                     }
                 }
             });
@@ -565,32 +639,55 @@ final class Pointer {
         }
     }
 
-    /** One event task (EDT): the two checks, then the event, or the balance (D352). Package-private for tests. */
+    /**
+     * One event task (EDT): the {@code cancelled} and modal checks, then the per-event veto (D505, never skipped by
+     * {@code force}; asked outside the state's lock, since it is layer code), then the event, or the balance (D352).
+     * Every event is dispatched to its own source. Package-private for tests.
+     */
     void dispatch(Plan plan, State st, int index, MouseEvent e, boolean force) {
         boolean balance;
         boolean act = false;
         boolean finish = false;
+        boolean ask;
         synchronized (st) {
             if (st.stopped) {
                 balance = needsBalance(st);
+                ask = false;
             } else if (!force && plan.blocked.getAsBoolean()) {
                 st.stopped = true;
                 st.reason = MODAL_OPENED;
                 balance = needsBalance(st);
                 finish = true;
+                ask = false;
             } else {
                 balance = false;
-                act = true;
-                st.started++;
-                if (e.getID() == MouseEvent.MOUSE_PRESSED) {
-                    st.pressDown = true;
-                } else if (e.getID() == MouseEvent.MOUSE_RELEASED) {
-                    st.pressDown = false;
+                ask = true;
+            }
+        }
+        if (ask) {
+            InputVetoes.Refusal refusal = plan.veto == null ? null : plan.veto.check(e);
+            synchronized (st) {
+                if (st.stopped) {
+                    balance = needsBalance(st); // cancelled while the veto was asked
+                } else if (refusal != null) {
+                    st.stopped = true;
+                    st.reason = VETOED;
+                    st.vetoed = vetoedJson(refusal);
+                    balance = needsBalance(st);
+                    finish = true;
+                } else {
+                    act = true;
+                    st.started++;
+                    if (e.getID() == MouseEvent.MOUSE_PRESSED) {
+                        st.pressDown = true;
+                    } else if (e.getID() == MouseEvent.MOUSE_RELEASED) {
+                        st.pressDown = false;
+                    }
                 }
             }
         }
         if (balance) {
-            balance(plan.source, st, e.getWhen());
+            balance(plan.source, plan.sourceLeaf, st, e.getWhen());
         }
         if (finish) {
             st.done.countDown();
@@ -598,17 +695,56 @@ final class Pointer {
         if (!act) {
             return;
         }
-        plan.source.dispatchEvent(e);
+        Component target = e.getComponent() != null ? e.getComponent() : plan.source;
+        target.dispatchEvent(e);
         synchronized (st) {
             st.sent++;
         }
         if (plan.window != null) {
             synchronized (lastRouted) {
-                lastRouted.put(plan.window, new Point(e.getX(), e.getY()));
+                lastRouted.put(target, new Point(e.getX(), e.getY()));
+                if (target == plan.source) {
+                    lastSource.put(plan.window, new WeakReference<Component>(plan.source));
+                }
             }
         }
         if (index == st.of - 1) {
             st.done.countDown();
+        }
+    }
+
+    /** {@code {ref, veto, route}} of a per-event refusal (the result's {@code vetoed}). */
+    private Map<String, Object> vetoedJson(InputVetoes.Refusal r) {
+        Map<String, Object> m = new LinkedHashMap<String, Object>();
+        m.put("ref", r.component == null ? null : ref(r.component));
+        m.put("veto", r.text);
+        m.put("route", r.route);
+        return m;
+    }
+
+    /**
+     * The production per-event veto (D505): the component AWT will deliver the event to (while a press of this call
+     * is down, the component the press went to; otherwise the one under the event's point in its source), asked with
+     * a fresh evaluator per event, so that a veto that depends on state the press changed is seen. EDT only.
+     */
+    private final class RoutedVeto implements InputVetoes.EventVeto {
+        private Component pressed;
+
+        @Override
+        public InputVetoes.Refusal check(MouseEvent e) {
+            int id = e.getID();
+            Component at;
+            if (pressed != null && (id == MouseEvent.MOUSE_DRAGGED || id == MouseEvent.MOUSE_RELEASED)) {
+                at = pressed;
+            } else {
+                at = HitTest.deliveryTarget(e.getComponent(), e.getX(), e.getY());
+            }
+            if (id == MouseEvent.MOUSE_PRESSED) {
+                pressed = at;
+            } else if (id == MouseEvent.MOUSE_RELEASED) {
+                pressed = null;
+            }
+            return new InputVetoes(ctx).check(at, InputVeto.POINTER_ROUTED);
         }
     }
 
@@ -623,10 +759,11 @@ final class Pointer {
     }
 
     /**
-     * The disarming balance (D352): a routed {@code MOUSE_DRAGGED} to the window point (-1, -1), outside every
-     * component, then a {@code MOUSE_RELEASED} there with click count 0 and no click. EDT only.
+     * The disarming balance (D352): a routed {@code MOUSE_DRAGGED} to the source's point (-1, -1), outside every
+     * component, then (into a heavyweight leaf, D514: the X peers disarm on exit) one {@code MOUSE_EXITED} there, then
+     * a {@code MOUSE_RELEASED} there with click count 0 and no click. EDT only.
      */
-    private void balance(Component w, State st, long when) {
+    private void balance(Component w, boolean leaf, State st, long when) {
         Point origin;
         try {
             origin = w.getLocationOnScreen();
@@ -635,13 +772,30 @@ final class Pointer {
         }
         w.dispatchEvent(new MouseEvent(w, MouseEvent.MOUSE_DRAGGED, when, st.pressMods, -1, -1, origin.x - 1,
                 origin.y - 1, 0, false, MouseEvent.NOBUTTON));
+        if (leaf) {
+            w.dispatchEvent(new MouseEvent(w, MouseEvent.MOUSE_EXITED, when, st.pressMods, -1, -1, origin.x - 1,
+                    origin.y - 1, 0, false, MouseEvent.NOBUTTON));
+        }
         w.dispatchEvent(new MouseEvent(w, MouseEvent.MOUSE_RELEASED, when, st.pressMods
                 & ~InputEvent.getMaskForButton(st.button), -1, -1, origin.x - 1, origin.y - 1, 0, false, st.button));
-        if (w instanceof Window) {
-            synchronized (lastRouted) {
-                lastRouted.put((Window) w, new Point(-1, -1));
-            }
+        synchronized (lastRouted) {
+            lastRouted.put(w, new Point(-1, -1));
         }
+    }
+
+    /**
+     * The {@code MOUSE_EXITED} a call whose source changed starts with (D514): to the previous source at its last
+     * routed point, approximating the native leave. EDT only.
+     */
+    static MouseEvent exit(Component previous, Point last, long when) {
+        Point origin;
+        try {
+            origin = previous.getLocationOnScreen();
+        } catch (RuntimeException e) {
+            origin = new Point(0, 0);
+        }
+        return new MouseEvent(previous, MouseEvent.MOUSE_EXITED, when, 0, last.x, last.y, origin.x + last.x,
+                origin.y + last.y, 0, false, MouseEvent.NOBUTTON);
     }
 
     /**
@@ -759,10 +913,43 @@ final class Pointer {
         }
     }
 
-    /** The pointer result's {@code hit}: the pre-check's target, targetKind, deepest, enabled, masked, covering. */
+    /**
+     * The input veto of the pointer routes (phase8-contracts.md 3.2 rule 2, D502), before the modal test: the hit's
+     * target and deepest component, the component form's component and, for a drag, the target and deepest component
+     * at its end ({@code atTo}); never skipped by {@code force}. {@code ref} is the hit's target (else the window).
+     * EDT only.
+     *
+     * @throws RpcException INPUT_REJECTED {@code vetoed} with the hit subset
+     */
+    static void requireNotVetoed(ComponentView view, HitTest.Hit hit, String route, Component addressed,
+                                 Component[] atTo) {
+        InputVetoes vetoes = view.vetoes();
+        if (!vetoes.any()) {
+            return;
+        }
+        List<Component> asked = new ArrayList<Component>(5);
+        asked.add(hit.target);
+        asked.add(hit.deepest);
+        asked.add(addressed);
+        if (atTo != null) {
+            asked.addAll(java.util.Arrays.asList(atTo));
+        }
+        for (Component c : asked) {
+            InputVetoes.Refusal r = vetoes.check(c, route);
+            if (r != null) {
+                throw Errors.vetoed(view, hit.target != null ? hit.target : hit.window, r, hitSubset(hit));
+            }
+        }
+    }
+
+    /**
+     * The pointer result's {@code hit}: the pre-check's target, targetKind, deepest, enabled, masked, vetoed,
+     * covering.
+     */
     static Map<String, Object> hitSubset(HitTest.Hit hit) {
         Map<String, Object> m = new LinkedHashMap<String, Object>();
-        for (String key : new String[] {"target", "targetKind", "deepest", "enabled", "masked", "covering"}) {
+        for (String key : new String[] {"target", "targetKind", "deepest", "enabled", "masked", "vetoed",
+            "covering"}) {
             m.put(key, hit.json.get(key));
         }
         return m;

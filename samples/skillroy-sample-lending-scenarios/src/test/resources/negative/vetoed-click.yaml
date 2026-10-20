@@ -1,0 +1,13 @@
+# Phase 8 (phase8-contracts.md 3.2, 12.4): a step whose input the application's agent module vetoes fails as
+# ASSERTION, acts on nothing, and recover runs; the veto's text is in the failure. Runs on the tools leg, a desk
+# launched with lending.tools=true (the "Desk tools" window, whose close panel the lending module vetoes).
+scenario: vetoed-click
+pack: lending
+requires: [lending.input, swing.click.action]
+launchProperties: { lending.seed: A, lending.tools: "true" }
+resolve:
+  assistant: { fixture: { code: "100" }, credential: { realm: staff, key: code } }
+steps:
+  - signOn: { staff: $assistant }
+  - click: { by: { id: closeDesk } }
+timeouts: { step: 30s }

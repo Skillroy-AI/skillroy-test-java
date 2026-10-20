@@ -19,6 +19,8 @@ package ai.skillroy.testjava.agent.swing;
 import ai.skillroy.testjava.protocol.ErrorCodes;
 import ai.skillroy.testjava.protocol.RpcException;
 
+import java.awt.Component;
+import java.awt.Point;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -67,6 +69,57 @@ final class Errors {
     static RpcException modalOpenInWindow(String message, String dialogRef, String title, String targetRef) {
         return new RpcException(ErrorCodes.MODAL_OPEN, message, data("dialog", dialogRef, "title", title, "ref",
                 targetRef, "inWindow", Boolean.TRUE));
+    }
+
+    /**
+     * {@code INPUT_REJECTED} for a vetoed input (Phase 8, phase8-contracts.md 3.2 rule 5, D504): message
+     * {@code "<describe(aimed)> takes no input from the agent (<route>): <text>"}, data {@code {reason: "vetoed", veto,
+     * ref, vetoed, route, hit?}}; {@code ref} is the component the call aimed at, {@code vetoed} the one whose veto
+     * refused (itself or an ancestor).
+     *
+     * @param hit the pointer routes' hit subset, or null
+     */
+    static RpcException vetoed(ComponentView view, Component aimed, InputVetoes.Refusal r, Map<String, Object> hit) {
+        Map<String, Object> data = data("reason", "vetoed", "veto", r.text, "ref", view.ref(aimed), "vetoed",
+                view.ref(r.component), "route", r.route);
+        if (hit != null) {
+            data.put("hit", hit);
+        }
+        return new RpcException(ErrorCodes.INPUT_REJECTED, view.describe(aimed) + " takes no input from the agent ("
+                + r.route + "): " + r.text, data);
+    }
+
+    /**
+     * {@link #vetoed} for ENTER's default button (phase8-contracts.md 3.2 rule 2): {@code ref} is the key's target,
+     * {@code vetoed} the component whose veto refused (the button or an ancestor), {@code defaultButton} the button.
+     */
+    static RpcException vetoedDefaultButton(ComponentView view, Component target, Component button,
+                                            InputVetoes.Refusal r) {
+        Map<String, Object> data = data("reason", "vetoed", "veto", r.text, "ref", view.ref(target), "vetoed",
+                view.ref(r.component), "route", r.route, "defaultButton", view.ref(button));
+        return new RpcException(ErrorCodes.INPUT_REJECTED, view.describe(target) + " takes no input from the agent ("
+                + r.route + "): ENTER would press the default button " + view.describe(button) + ": " + r.text, data);
+    }
+
+    /**
+     * {@code INVALID_PARAMS} for a collapsed component (Phase 8, phase8-contracts.md 3.3, D510): data
+     * {@code {ref, reason: "collapsed", by}}, {@code by} the component or ancestor that leaves it no visible area.
+     */
+    static RpcException collapsed(ComponentView view, Component c, Component by) {
+        return invalid(view.describe(c) + " is collapsed: " + view.describe(by) + " leaves it no visible area",
+                data("ref", view.ref(c), "reason", "collapsed", "by", view.ref(by)));
+    }
+
+    /**
+     * {@code INPUT_REJECTED} for a point of the pointer's component form that the component does not show (Phase 8,
+     * phase8-contracts.md 3.3, D512): data {@code {reason: "not visible", ref, point: {x, y}, param}}, the point in the
+     * component's own coordinates.
+     */
+    static RpcException notVisible(ComponentView view, Component c, Point local, String param) {
+        Map<String, Object> point = data("x", Long.valueOf(local.x), "y", Long.valueOf(local.y));
+        return new RpcException(ErrorCodes.INPUT_REJECTED, view.describe(c) + " does not show the point (" + local.x
+                + ", " + local.y + "): it is scrolled out of view or clipped", data("reason", "not visible", "ref",
+                view.ref(c), "point", point, "param", param));
     }
 
     /** An insertion-ordered map from alternating keys and values. */

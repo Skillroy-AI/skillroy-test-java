@@ -444,7 +444,7 @@ public final class VisionSessionTools implements SessionTools {
      * V2's live-only raw pointer at a pixel of the last capture, closed by {@code expectTarget} (D305). Phase 7 security
      * fix S112: grounded with the stale-capture rule (6.4) as every pointer action is, and refused with
      * {@link Recorder#MASKED} before anything is sent when the hit is masked (D358) or lies on a page the capture kept
-     * grey.
+     * grey; Phase 8 (D507): refused with {@link Recorder#VETOED} when the hit is vetoed.
      */
     private Outcome rawPointer(Content.ToolUse use, int x, int y, String action)
             throws AgentLostException, InterruptedException, AgentRpcException {
@@ -460,6 +460,9 @@ public final class VisionSessionTools implements SessionTools {
         if (Boolean.TRUE.equals(hit.get("masked")) || "WEB".equals(hit.get("surface"))
                 && Recorder.redactedPage(grounded.capture(), hit)) {
             return error(use, Recorder.MASKED);
+        }
+        if (Boolean.TRUE.equals(hit.get("vetoed"))) {
+            return error(use, Recorder.VETOED); // Phase 8 (phase8-contracts.md 3.2, D507): nothing is sent
         }
         Map<String, Object> args = new LinkedHashMap<>();
         args.put("point", Map.of("x", (long) x, "y", (long) y));

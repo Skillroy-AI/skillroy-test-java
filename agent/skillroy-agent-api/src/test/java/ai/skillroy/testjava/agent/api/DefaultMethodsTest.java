@@ -312,6 +312,32 @@ class DefaultMethodsTest {
         assertThrows(UnsupportedOperationException.class, () -> broker.callOnLane("test.reads", task, 1000L));
     }
 
+    /**
+     * phase8-contracts.md 3.2 rule 4 (A68): a module written for 0.1.0 compiles unchanged and reports no {@code info}
+     * entry; the default map is empty and read-only.
+     */
+    @Test
+    void aModuleReportsNoInfoByDefault() {
+        AgentModule module = new AgentModule() {
+            @Override
+            public String id() {
+                return "m";
+            }
+
+            @Override
+            public String version() {
+                return "1";
+            }
+
+            @Override
+            public void install(AgentContext ctx) {
+            }
+        };
+        assertTrue(module.info().isEmpty());
+        assertThrows(UnsupportedOperationException.class, () -> module.info().put("x", "y"),
+                "the default map is read-only");
+    }
+
     /** A context whose only real member is {@link AgentContext#options()}. */
     private static AgentContext context(final Map<String, String> options) {
         return context(options, null);

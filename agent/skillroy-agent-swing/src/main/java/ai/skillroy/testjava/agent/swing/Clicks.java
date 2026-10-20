@@ -19,12 +19,17 @@ package ai.skillroy.testjava.agent.swing;
 import ai.skillroy.testjava.agent.api.AgentContext;
 import ai.skillroy.testjava.agent.api.Invocation;
 import ai.skillroy.testjava.agent.api.spi.ActionFirer;
+import ai.skillroy.testjava.agent.api.spi.InputVeto;
 
+import java.awt.Button;
+import java.awt.Checkbox;
 import java.awt.Component;
 import java.awt.Window;
+import java.awt.event.ActionEvent;
 import java.awt.event.FocusAdapter;
 import java.awt.event.FocusEvent;
 import java.awt.event.InputEvent;
+import java.awt.event.ItemEvent;
 import java.awt.event.MouseEvent;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
@@ -39,6 +44,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import javax.swing.AbstractButton;
 
@@ -58,6 +64,13 @@ import javax.swing.AbstractButton;
  * not arrive and reports {@code {rung: "ACTION", requestedRung: "COMPONENT", fidelity: "DEGRADED", reason:
  * "FOCUS_FAILED: ...", fired: true}}; without the fallback such a click reports
  * {@code {rung: "FOCUS_FAILED", fired: false, reason}} and nothing is clicked.
+ *
+ * <p>Phase 8 (phase8-contracts.md 3.1, 3.2, 3.3, 3.5): every rung checks, in the EDT read that resolves the target,
+ * clickable (not showing, then collapsed, then disabled: {@code INVALID_PARAMS}), then the input veto
+ * ({@code INPUT_REJECTED vetoed}, never skipped by {@code force}; COMPONENT asks before the window activation and the
+ * focus request), then the modal state; every posted click asks the veto again immediately before it acts (a refusal
+ * there acts on nothing and is logged and counted, {@link InputVetoes.Withheld}). ACTION and COMPONENT fire an AWT
+ * {@code Button} or {@code Checkbox} semantically ({@link #semantic}).
  *
  * <p>Thread-safe. {@link #click} runs on an agent thread and hops to the EDT itself; it never holds the EDT while it
  * waits for focus, and every listener it adds is removed by a task it posts afterwards.
@@ -105,10 +118,17 @@ final class Clicks {
 
     private final AgentContext ctx;
     private final Windows windows;
+    /** The module's count of calls whose posted task a veto withheld ({@code vetoWithheld}, D503). */
+    private final AtomicLong withheld;
 
     Clicks(AgentContext ctx, Windows windows) {
+        this(ctx, windows, new AtomicLong());
+    }
+
+    Clicks(AgentContext ctx, Windows windows, AtomicLong withheld) {
         this.ctx = ctx;
         this.windows = windows;
+        this.withheld = withheld;
     }
 
     /**
@@ -130,16 +150,19 @@ final class Clicks {
         final boolean dispatch = DISPATCH.equals(rung);
         final boolean f = force;
         final TargetSpec t = target;
+        final String route = dispatch ? InputVeto.CLICK_DISPATCH : InputVeto.CLICK_ACTION;
+        final InputVetoes.Withheld task = new InputVetoes.Withheld(ctx, withheld);
         final Edt.Action plan = Edt.read(ctx, inv.remainingMs(), new Callable<Edt.Action>() {
             @Override
             public Edt.Action call() {
                 ComponentView view = new ComponentView(ctx);
                 final Component c = t.resolve(view);
                 requireClickable(view, c);
+                requireNotVetoed(view, c, route);
                 if (!f) {
                     windows.requireNotBlocked(view, c);
                 }
-                return dispatch ? mouseClickAction(c) : actionPlan(ctx, c);
+                return InputVetoes.guarded(task, route, dispatch ? mouseClickAction(c) : actionPlan(ctx, c), c);
             }
         });
         Edt.post(ctx, inv.remainingMs(), "swing.click " + rung, plan);
@@ -167,6 +190,8 @@ final class Clicks {
                         ComponentView view = new ComponentView(ctx);
                         Component c = target.resolve(view);
                         requireClickable(view, c);
+                        // before the activation and the focus request: they run the application's focus listeners
+                        requireNotVetoed(view, c, InputVeto.CLICK_COMPONENT);
                         if (!force) {
                             windows.requireNotBlocked(view, c);
                         }
@@ -262,16 +287,19 @@ final class Clicks {
                 }
             }
             final Component c = listenedTo.get();
-            Edt.post(ctx, inv.remainingMs(), "swing.click COMPONENT", new Edt.Action() {
-                @Override
-                public void run() {
-                    if (c instanceof AbstractButton) {
-                        ((AbstractButton) c).doClick();
-                    } else {
-                        mouseClick(c);
-                    }
-                }
-            });
+            final InputVetoes.Withheld task = new InputVetoes.Withheld(ctx, withheld);
+            Edt.post(ctx, inv.remainingMs(), "swing.click COMPONENT", InputVetoes.guarded(task,
+                    InputVeto.CLICK_COMPONENT, new Edt.Action() {
+                        @Override
+                        public void run() throws Exception {
+                            Edt.Action semantic = semantic(c);
+                            if (semantic != null) {
+                                semantic.run(); // focus, then the semantic click (D515)
+                            } else {
+                                mouseClick(c);
+                            }
+                        }
+                    }, c));
             return fired(COMPONENT, requested);
         } finally {
             removeLater(wait, windowWait, activated);
@@ -289,15 +317,17 @@ final class Clicks {
         if (!fallback || c == null) {
             return notFired(reason);
         }
+        final InputVetoes.Withheld task = new InputVetoes.Withheld(ctx, withheld);
         Edt.Action plan = Edt.read(ctx, inv.remainingMs(), new Callable<Edt.Action>() {
             @Override
             public Edt.Action call() {
                 ComponentView view = new ComponentView(ctx);
                 requireClickable(view, c);
+                requireNotVetoed(view, c, InputVeto.CLICK_ACTION);
                 if (!force) {
                     windows.requireNotBlocked(view, c);
                 }
-                return actionPlan(ctx, c);
+                return InputVetoes.guarded(task, InputVeto.CLICK_ACTION, actionPlan(ctx, c), c);
             }
         });
         Edt.post(ctx, inv.remainingMs(), "swing.click ACTION (fall-back from COMPONENT)", plan);
@@ -393,8 +423,10 @@ final class Clicks {
     }
 
     /**
-     * The ACTION rung for a component, chosen on the EDT: the first {@link ActionFirer} that can fire it, else
-     * {@code AbstractButton.doClick()}, else a dispatched mouse click.
+     * The ACTION rung for a component, chosen on the EDT: the first {@link ActionFirer} that can fire it, else the
+     * semantic click ({@link #semantic}: {@code AbstractButton.doClick()}, an AWT {@code Button}'s
+     * {@code ActionEvent}, an AWT {@code Checkbox}'s state and {@code ItemEvent}), else a dispatched mouse click. The
+     * caller wraps it in the in-task veto re-ask ({@link InputVetoes#guarded}).
      */
     static Edt.Action actionPlan(AgentContext ctx, final Component c) {
         for (final ActionFirer firer : ctx.spi().all(ActionFirer.class)) {
@@ -414,6 +446,18 @@ final class Clicks {
                 };
             }
         }
+        Edt.Action semantic = semantic(c);
+        return semantic != null ? semantic : mouseClickAction(c);
+    }
+
+    /**
+     * The semantic click of a component (Phase 8, phase8-contracts.md 3.5, D515), run inside the posted task:
+     * {@code AbstractButton.doClick()}; an AWT {@code Button} gets one {@code ActionEvent} with its action command
+     * dispatched to it (no mouse event, so its peer fires nothing beside it); an AWT {@code Checkbox} changes as the X
+     * peer changes it (in a {@code CheckboxGroup} and already selected: nothing, no event; else its state flips, in a
+     * group to selected) and gets one {@code ItemEvent}; anything else null (the caller dispatches a mouse click).
+     */
+    static Edt.Action semantic(final Component c) {
         if (c instanceof AbstractButton) {
             return new Edt.Action() {
                 @Override
@@ -422,7 +466,33 @@ final class Clicks {
                 }
             };
         }
-        return mouseClickAction(c);
+        if (c instanceof Button) {
+            return new Edt.Action() {
+                @Override
+                public void run() {
+                    Button b = (Button) c;
+                    b.dispatchEvent(new ActionEvent(b, ActionEvent.ACTION_PERFORMED, b.getActionCommand(),
+                            System.currentTimeMillis(), 0));
+                }
+            };
+        }
+        if (c instanceof Checkbox) {
+            return new Edt.Action() {
+                @Override
+                public void run() {
+                    Checkbox box = (Checkbox) c;
+                    boolean grouped = box.getCheckboxGroup() != null;
+                    if (grouped && box.getState()) {
+                        return; // a selected radio stays selected; no event (the call still reports fired)
+                    }
+                    boolean now = grouped || !box.getState();
+                    box.setState(now);
+                    box.dispatchEvent(new ItemEvent(box, ItemEvent.ITEM_STATE_CHANGED, box.getLabel(),
+                            now ? ItemEvent.SELECTED : ItemEvent.DESELECTED));
+                }
+            };
+        }
+        return null;
     }
 
     private static Edt.Action mouseClickAction(final Component c) {
@@ -448,15 +518,41 @@ final class Clicks {
         c.dispatchEvent(new MouseEvent(c, MouseEvent.MOUSE_CLICKED, when, 0, x, y, 1, false, MouseEvent.BUTTON1));
     }
 
-    /** INVALID_PARAMS unless the component is showing and enabled. EDT only. */
+    /**
+     * INVALID_PARAMS unless the component is showing, on screen (not collapsed, phase8-contracts.md 3.3) and enabled,
+     * checked in that order. EDT only.
+     */
     static void requireClickable(ComponentView view, Component c) {
+        requireOnScreen(view, c);
+        if (!c.isEnabled()) {
+            throw Errors.invalid(view.describe(c) + " is disabled", Errors.data("ref", view.ref(c), "reason",
+                    "disabled"));
+        }
+    }
+
+    /**
+     * INVALID_PARAMS unless the component is showing ({@code reason: "not showing"}) and has an effective visible area
+     * ({@code reason: "collapsed"} with {@code by}, phase8-contracts.md 3.3, D510). EDT only.
+     */
+    static void requireOnScreen(ComponentView view, Component c) {
         if (!c.isShowing()) {
             throw Errors.invalid(view.describe(c) + " is not showing", Errors.data("ref", view.ref(c), "reason",
                     "not showing"));
         }
-        if (!c.isEnabled()) {
-            throw Errors.invalid(view.describe(c) + " is disabled", Errors.data("ref", view.ref(c), "reason",
-                    "disabled"));
+        Component by = view.collapsedBy(c);
+        if (by != null) {
+            throw Errors.collapsed(view, c, by);
+        }
+    }
+
+    /**
+     * INPUT_REJECTED {@code vetoed} when a registered {@code InputVeto} refuses the component or an ancestor on the
+     * route (phase8-contracts.md 3.2, D502); never skipped by {@code force}. EDT only.
+     */
+    static void requireNotVetoed(ComponentView view, Component c, String route) {
+        InputVetoes.Refusal r = view.vetoes().check(c, route);
+        if (r != null) {
+            throw Errors.vetoed(view, c, r, null);
         }
     }
 

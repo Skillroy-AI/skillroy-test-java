@@ -514,6 +514,34 @@ by an agent option (no code for simple cases; gap 127, on top of the SPI); a `ST
 (the hooks module is optional and off by default); reusing `masked` (conflates privacy with safety and would refuse
 a person's own steps).
 
+**As built (Phase 8, EA, 2026-10-19).** The evaluator is the package-private `InputVetoes` (`agent-swing`): one per
+call's read (held lazily by `ComponentView.vetoes()`, memoised per route and component, the chain result of an
+ancestor reused), a fresh one per posted task (`InputVetoes.Withheld`, `InputVetoes.guarded`) and per routed event.
+Choices beyond the text above, each recorded for the integrator: (a) **ENTER with any modifier** asks the default
+button, not only an ENTER without CTRL, ALT or META (rule 2): the Basic look and feel binds `ctrl ENTER` to the root
+pane's default button as well as `ENTER` (`RootPane.defaultButtonWindowKeyBindings`), so the narrower rule would let
+`swing.key {key: ENTER, modifiers: [CTRL]}` press a vetoed default button; a refusal through the default button is the
+rule-5 error with `ref` the key's target, `vetoed` the component whose veto refused (the button or an ancestor, by the
+ancestor rule) and the added key **`defaultButton`** (the button's ref), message "… takes no input from the agent
+(<route>): ENTER would press the default button <describe(button)>: <text>"; `swing.type {enter: true}` asks the
+default button in both modes (SET's `postActionEvent` does not press it, the safe side). (b) **Deeper than 64
+levels is refused** (rule 1's bound): a component whose chain from itself to its window holds more than 64
+components is refused on every route with the agent's own text ("the component lies more than 64 levels below its
+window; the input veto cannot be asked for every ancestor"), and the readers flag it `vetoed`, rather than asking 64
+levels and allowing what lies above them (a window veto must not be escaped by depth; the snapshot's own depth cap is
+89). (c) The hit-test's **`vetoed` is true when the target or the deepest component is vetoed** (both chains, the
+pre-check's question, rule 2), so the recorder never offers a hit whose replay the pre-check would refuse. (d) The
+routed pointer's per-event check (rule 6) runs in two phases: the `cancelled` and modal tests under the call's state
+lock, then the veto outside it (it is layer code; the caller's `cancel` never waits for it), then the state is
+re-read (a cancellation meanwhile wins); the call's first event, an exit to the previous source (§3.4 rule 3), is
+asked too; every event is dispatched to its own source. (e) An in-task refusal is counted and logged **once per call**
+(`vetoWithheld` counts calls, not tasks: a `swing.type DISPATCH` whose veto switches on withholds all its remaining
+character tasks for one count and one warning). (f) `AgentModule.info()` is shown by `ModuleLoader.Record.toJson`
+(`agent-core`) after `readyMessage`, only for an installed module and only when non-empty; a module whose `info()`
+throws is logged once (the exception's class only) and its entry left out; the Swing module answers
+`{vetoWithheld: n}` from install on (never empty once installed), without taking the module's lock; `skillroy info`
+prints a module's `info` after its state, in braces (`swing 0.2.0 INSTALLED {vetoWithheld=0}`).
+
 ### 3.3 The effective visible area: "on screen" is more than `isShowing()` (gap 116; D510 to D512)
 
 **Definition (D510).** A component is **on screen** when it is showing and its **effective area** is not empty.
@@ -563,6 +591,22 @@ and baselines are unchanged, verified by §13.2 item 6. A custom scroller that m
 counts a scrolled-out child as collapsed (gap 130, documented).
 
 No new parameter, capability, protocol or plan change. Bounds: EDT only, O(depth) per check, O(nodes) per walk.
+
+**As built (Phase 8, EA, 2026-10-19).** `Visibility` (package-private, `agent-swing`) computes a component's area from
+its parent's (`childArea`: empty when the child's own rectangle or the parent's area is empty; the child's own
+rectangle when the parent is a `JViewport` or an AWT `ScrollPane`; else the intersection), memoised per instance
+(`ComponentView` holds one per call, so a walk is O(1) per node); the static `area`/`collapsedBy`/`onScreen` use a
+fresh instance (O(depth)); `area` and `collapsedBy` are geometry only (no `isShowing()`, so the headless test reaches
+them), `onScreen` adds `isShowing()`; a window's area is its own rectangle and a window is never collapsed itself. The
+culprit `by` is chosen as: an ancestor's culprit when the parent is collapsed (hereditary; so a button inside the
+zero-width pane names the pane), else the component itself when it has no size, else the parent (whose area does not
+meet the component). Node `collapsed` is set for a showing component only (a non-showing one is hidden, not
+collapsed). The component form's point check (D512) reports `point` in the component's own coordinates. The table's
+`swing.dismiss` row holds: a collapsed button is no candidate, so `swing.dismiss {button}` answers `NOT_FOUND` (and a
+dialog whose only button is collapsed has no button), not `INVALID_PARAMS collapsed` (`CollapsedPaneDisplayTest`).
+The once-per-root-class log of D511 is bounded at 64 classes per agent class loader. The desk is unchanged by the
+rule: the four load-mode legs' `LoadModeChecks.keypadKeysAreNamedByTheirActionId` and the Phase 7 `VisionSwingChecks`
+items pass (the `JavaAgent` leg on a Java 25 target in the image, 2026-10-19; the matrix runs the rest).
 
 ### 3.4 The routed pointer into heavyweight containers (gap 115; D513, D514)
 
@@ -620,6 +664,19 @@ which is why §3.5 exists. Alternatives rejected: dispatching to the deepest com
 and drags); Robot for heavyweight areas (the double opt-in); posting with the heavyweight as source (D293's reasons);
 a documented limit (the second domain draws its whole UI inside one `Panel`, row 115).
 
+**As built (Phase 8, EA, 2026-10-19).** `HitTest.sourceAt(Container, Point, List<Surface>)` walks the whole path from
+the deepest component to the root, so a claimed component above the innermost heavyweight keeps the root as well;
+`HitTest.mouseTarget(root, source, point)` is rule 6's search, `HitTest.deliveryTarget(source, x, y)` the per-event
+veto's question (the source's mouse target, else the deepest component, else the source), `HitTest.targetsAt` the
+drag end's target and deepest component for the veto. **An AWT control is its own source**: by rule 1 the innermost
+heavyweight on the path at an AWT `Button` or `Checkbox` is the control itself (a heavyweight leaf, rules 4 and 5), so
+`source` names the control there and the enclosing `Panel` only for a lightweight inside it (§13.2 item 7 is read so).
+The last routed position is kept per source and the last source per window under one lock, both weakly; the exit of
+rule 3 is the call's first event (counted in `dispatched.of`) and is sent whenever the previous source is still
+showing and has a last point. Verified in the image on Java 25 and Java 8 test JVMs (`HeavyweightRoutingDisplayTest`:
+an AWT `Button`, a `Checkbox` and a listening `Canvas` inside a `Panel` fire through their X peers on a routed click; a
+cancelled press into the AWT `Button` fires nothing) and on Java 25 and Java 8 targets (the tools leg, §13.2 item 7).
+
 ### 3.5 AWT `Button` and `Checkbox` on the ACTION and COMPONENT rungs (gap 122; D515)
 
 **Decision (D515).** A package-private `Clicks.semantic(Component c)` returning an `Edt.Action` or null, used by
@@ -646,6 +703,11 @@ Roles are already right (`Roles.java:110-114`). AWT `List`, `Choice`, `TextField
 out (gap 129). **Behaviour change:** a layer that relied on the X peer's reaction to the dispatched click now gets
 the semantic event (one event either way; a listener reading `getModifiers()` sees 0); a listener that opens a modal
 dialog runs its loop inside the posted task, as `doClick` does today.
+
+**As built (Phase 8, EA, 2026-10-19).** `Clicks.semantic` serves `actionPlan` (after the `ActionFirer`s, before the
+mouse click) and the COMPONENT rung's final click; the in-task veto wraps the whole plan (`InputVetoes.guarded`), so
+the order is the in-task veto, then the firer or the semantic action. On the Linux image a `DISPATCH` click on an AWT
+`Button` fires its action through the X peer on Java 25 and Java 8 targets (the tools leg logs it; not asserted).
 
 ### 3.6 Capabilities, options, errors, events, versions
 
@@ -3278,6 +3340,17 @@ class in `LendingEndToEndIT` (§13.2). Versions and every regeneration are step 
 
   `DeskTools` is built only with a display (the AWT constructors throw `HeadlessException`; the desk already guards
   `options.ui()`); `LendingPlugin` is not used.
+
+  **As built (Phase 8, EA, 2026-10-19).** `lending.tools` accepts `true` or `false` (any case, trimmed; empty is the
+  default); anything else refuses to start (`IllegalArgumentException` naming the property, as the desk's other
+  properties do). `DeskTools` lays its content out with explicit bounds (null layout; the same geometry on every JDK
+  and font): `closeMenu` (8, 8, 384 x 64; `FlowLayout` holding `closeDesk` and the `CLOSE` key at 56 x 28),
+  `printTestSlip`, `toolsNote`, `openDepositBox` on one row at y 78, the frame set at y 112 (`visiblePane` 180 wide,
+  `collapsedPane` 0 wide, each with a "Print slip" button), `toolsScroll` (8, 154, 200 x 124, the view 170 x 400 with
+  `reprintSlip` at y 300) and the AWT `Panel` `scanner` (216, 154, 176 x 124, `FlowLayout`). `DeskTools.Counters`
+  holds atomic counters and `lidOpen` (set from the checkbox's item events); `toMap()` is the `tools` section's shape.
+  `LendingApp.shutdown` disposes the window. `DeskToolsDisplayTest` (green in the image on Java 25 and Java 8 test
+  JVMs) and `LendingOptionsTest` cover it.
 - **The idle callback and the idle tick** (§4.1; D535): `EngineListener.idle(LendingState state, long availableMs)`, a
   default no-op, called on the engine thread while it waits for input, right after `inputRequested` and then every
   `idleTickMillis` until an input is taken, never while an input is processed or a prompt is open; `availableMs` is the
@@ -3562,6 +3635,22 @@ named per item host the agent-level half of a proof.
     point, and a drag ending on one, refused with `os.calls` empty, as `:393-404`). End to end: item 2's
     `via: ROBOT` call, and `swing.pointer {by: {id: printTestSlip}, via: ROBOT, requireFocus: false}` fires on this
     leg (`testSlips` +1), proving the leg's Robot works.
+
+    **As built (Phase 8, EA, 2026-10-19), items 1-10** (`InputSafetyChecks`, `LendingEndToEndIT$JavaAgentTools`,
+    `@Order(18)`; green on Java 25 and Java 8 targets in the image, 11 checks each; slot 157 is
+    `LoadModeChecks.theToolsKeyIsAbsentOffTheToolsLeg`). Read so: (i) **covering**: the desk frame spans the 1024 x 768
+    display and is the active window, so the agent ranks it above the tools window (P7 §3.2) and every routed or Robot
+    pointer call into the tools window is refused `covered` unless forced; the calls that must act (item 7's clicks and
+    move, item 2's capture-point and drag calls, item 10's Robot click) pass `force: true`, which skips the covering
+    and modal rules only; the veto refusals of item 2 are asserted with and without it. (ii) Item 3: `vetoed` names the
+    `closeMenu` panel (the ancestor rule, as in item 2) and the added `data.defaultButton` names `closeDesk` (§3.2's
+    as-built note (a)); `swing.key ENTER` with `CTRL` is refused too. (iii) Item 7: `source` is the scanner panel's ref
+    for `rereadCard` and the control itself for `scanButton` and `lidOpen` (heavyweight leaves are their own source,
+    §3.4's as-built note); the move-then-click check compares with a repeated click at the same point (`of` one
+    larger). (iv) Item 8's COMPONENT half runs after the negative scenario, and item 10's Robot click after it (the
+    tools window is then active and raised). (v) Item 9: the failure message is the agent's (D504), so it names
+    `INPUT_REJECTED` and the veto's text; the token `vetoed` is the failure detail's `data.reason`, `data.vetoed` the
+    panel; `OutputScan` finds the staff password in no output of the run.
 
 11. **The quiescent view (gap 10; slot 158)** (ET). After sign-on, `Key.QTY` then `Entry 3`: `lending.engine.view` answers
    `pendingQty: "3"`, `step` the quantity sub-step, and the envelope's `thread` is `LendingEngine`; with the induction

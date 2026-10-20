@@ -25,8 +25,8 @@ import java.util.Map;
 /**
  * Builds the Node tree of {@code swing.snapshot} in pre-order with two limits: {@code maxDepth} levels below each root
  * and {@code maxNodes} nodes in total (roots included). Hitting either sets {@link #truncated()}. Children that are
- * not showing are left out unless {@code includeHidden}. A node's {@code children} key is present only when it has
- * included children.
+ * not on screen (not showing, or collapsed: no effective visible area, Phase 8, phase8-contracts.md 3.3) are left out
+ * unless {@code includeHidden}. A node's {@code children} key is present only when it has included children.
  *
  * <p>Must be used on the EDT. One instance per snapshot.
  */
@@ -65,7 +65,7 @@ final class SnapshotWalker {
         if (c instanceof Container) {
             List<Object> children = new ArrayList<Object>();
             for (Component child : ((Container) c).getComponents()) {
-                if (!includeHidden && !child.isShowing()) {
+                if (!includeHidden && !view.onScreen(child)) {
                     continue;
                 }
                 if (depth >= maxDepth) {
