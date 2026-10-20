@@ -144,7 +144,8 @@ import java.util.stream.Stream;
  * with {@code evt.query}. A prompt is expected if the call that saw it dealt with it (a wait on a prompt topic that
  * returned it, or a prompt-answering call made after it was published), or a later call of the same step or a call of
  * the next step with calls handles prompts ({@code handlesPrompt}); otherwise the prompt policy decides
- * ({@code on_prompt: {unexpected: fail}} selects {@link PromptPolicy#FAIL}, anything else the pack's policy).
+ * ({@code on_prompt: {unexpected: fail}} selects {@link PromptPolicy#FAIL}; {@code pack}, or no key, the pack's policy;
+ * no other value loads or reads, phase8-contracts.md 9.2).
  *
  * <p>Error mapping: a JSON-RPC error from a step call is ERROR/ENVIRONMENT, except INPUT_REJECTED, NOT_FOUND,
  * AMBIGUOUS and MODAL_OPEN (FAIL/ASSERTION; for MODAL_OPEN the detail carries the dialog's title and text) and TIMEOUT
@@ -211,6 +212,12 @@ import java.util.stream.Stream;
  * {@link VisualCheck} is skipped unconditionally; an {@link ImageCheck} and an anchored {@code pointer} call's guard
  * run through {@code ImageSteps} against the bindings file's baselines and anchors, which {@code approve} writes a
  * second time after the steps.
+ *
+ * <p>Phase 8 (phase8-contracts.md 9.1, 9.3): after the contributors' merge the running pack's capabilities are
+ * evaluated into the matrix ({@link PackCapabilities}, source {@code pack:<packId>}, honoured in {@code replay}),
+ * before it is archived and {@code requires} is checked; the pre-flight runs through {@link Preflight}, a
+ * {@code SUITE} check or capability answered from {@link RunOptions#suite()} when the connection names its agent
+ * session.
  *
  * <p>Not thread-safe: one executor runs one plan at a time on the calling thread; it starts no threads (a web path
  * may run threads of its own).
@@ -580,6 +587,8 @@ public final class PlanExecutor {
         private CapabilityMatrix agentCaps;
         /** The ids the controller-side contributors added (phase7-contracts.md 8.5). */
         private List<String> contributed = List.of();
+        /** The pack's evaluated capabilities, sorted by id (phase8-contracts.md 9.1.4); empty when it declares none. */
+        private List<PackCapabilities.Entry> packEntries = List.of();
         /** True for a {@code run} plan in {@code replay}: nothing was executed (phase7-contracts.md 8.6). */
         private boolean notExecuted;
         /** The run's baselines and anchors (phase7-contracts.md 8.7); built after the bind. */
@@ -1190,7 +1199,7 @@ public final class PlanExecutor {
          * matrix after step 0b and before {@code requires}, with no host features; {@code replay} forces every
          * contributed id {@code UNAVAILABLE (replay)}. A refused merge ends the run ERROR / ENVIRONMENT.
          */
-        private void mergeContributed() throws Abort {
+        private void mergeContributed() throws Abort, AgentLostException {
             agentCaps = caps;
             CapabilityMerge.Loaded loaded = CapabilityMerge.load(webPathLoader);
             try {
@@ -1211,23 +1220,36 @@ public final class PlanExecutor {
          * phase8-contracts.md 9.1.3, 9.1.5 (gap 106, decisions D610 to D612): the running pack's capabilities, every
          * declared id, evaluated with {@link #preflightContext()} into the matrix after the contributors' merge and
          * before it is archived and {@code requires} is checked, a {@code SUITE} one answered from
-         * {@link RunOptions#suite()} under {@code agent.agentSession()}. As built (Phase 8, EP step 1): the seam only; a
-         * pack that declares none changes nothing, and the evaluation is not built yet, so a pack that declares any
-         * ends the run (an internal error) until it lands.
+         * {@link RunOptions#suite()} under {@code agent.agentSession()}. A pack that declares none changes nothing. A
+         * declaration error is recorded as {@code capabilities {ok: false, error}} and ends the run ERROR /
+         * ENVIRONMENT, as a refused contributor does; an interrupted evaluation ends it ERROR / ENVIRONMENT
+         * "interrupted". The reads an evaluation sends come before {@code requires} (allowed: reads only, nothing
+         * before the start mark is mutating, phase1-contracts.md 8.5).
          */
-        private void mergePackCapabilities() {
-            List<ai.skillroy.testjava.scenario.pack.PackCapability> declared = pack.capabilities();
-            if (declared == null || declared.isEmpty()) {
-                return;
+        private void mergePackCapabilities() throws Abort, AgentLostException {
+            PackCapabilities.Result result;
+            try {
+                result = PackCapabilities.evaluate(caps, pack, preflightContext(), options.suite(),
+                        agent.agentSession(), mask);
+            } catch (CapabilityMerge.Refused e) {
+                log.write("capabilities", RunLog.fields("ok", false, "error", e.getMessage()));
+                throw new Abort(Status.ERROR, FailureKind.ENVIRONMENT, null, e.getMessage(),
+                        RunLog.fields("capabilities", "refused"));
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new Abort(Status.ERROR, FailureKind.ENVIRONMENT, null, "interrupted",
+                        RunLog.fields("capabilities", "interrupted"));
             }
-            throw new UnsupportedOperationException("pack capabilities are not built yet (phase8-contracts.md 9.1)");
+            caps = result.merged();
+            packEntries = result.entries();
         }
 
         /**
          * The matrix as the run uses it, archived (phase6-contracts.md 6.4, decision D130): {@code capabilities.json}
          * beside {@code run.jsonl} (with an output directory) and the record {@code capabilities {hash, ids, file,
          * agentHash, contributed}} (phase7-contracts.md 8.5: {@code agentHash} is the agent's matrix after step 0b, what
-         * the "one matrix per target" check compares; {@code hash} and the file are the merged matrix's).
+         * the "one matrix per target" check compares; {@code hash} and the file are the merged matrix's), with
+         * {@code pack} when the pack declares capabilities (phase8-contracts.md 9.1.4).
          */
         private void archiveCapabilities() {
             Path dir = outDir;
@@ -1241,8 +1263,17 @@ public final class PlanExecutor {
                     log.write("capabilities", RunLog.fields("ok", false, "error", e.toString()));
                 }
             }
-            log.write("capabilities", RunLog.fields("hash", caps.hash(), "ids", (long) caps.all().size(), "file",
-                    file, "agentHash", (agentCaps == null ? caps : agentCaps).hash(), "contributed", contributed));
+            Map<String, Object> record = RunLog.fields("hash", caps.hash(), "ids", (long) caps.all().size(), "file",
+                    file, "agentHash", (agentCaps == null ? caps : agentCaps).hash(), "contributed", contributed);
+            if (!packEntries.isEmpty()) {
+                // phase8-contracts.md 9.1.4: absent when the pack declares none (the record as before Phase 8).
+                List<Object> entries = new ArrayList<>();
+                for (PackCapabilities.Entry entry : packEntries) {
+                    entries.add(entry.toJson());
+                }
+                record.put("pack", entries);
+            }
+            log.write("capabilities", record);
         }
 
         private void checkLaunchProperties() throws Abort, AgentLostException {
@@ -1496,29 +1527,28 @@ public final class PlanExecutor {
             };
         }
 
+        /**
+         * Step 2 (phase2-contracts.md 11.2; phase8-contracts.md 9.3.3): the pack's pre-flight through {@link Preflight},
+         * a {@code SUITE} check answered from {@link RunOptions#suite()} under the connection's agent session; one
+         * {@code preflight} record per check; the first failure ends the run ERROR / ENVIRONMENT.
+         */
         private void runPreflight() throws Abort, AgentLostException {
-            List<PreflightCheck> checks = pack.preflight();
-            if (checks == null) {
-                return;
+            Preflight.Outcome outcome = Preflight.run(pack, preflightContext(), options.suite(), agent.agentSession());
+            for (Preflight.Record record : outcome.records()) {
+                log.write("preflight", record.fields());
             }
-            PreflightCheck.PreflightContext ctx = preflightContext();
-            for (PreflightCheck check : checks) {
-                String reason;
-                try {
-                    reason = check.check(ctx);
-                } catch (AgentLostException e) {
-                    throw e;
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    reason = "interrupted";
-                } catch (Exception e) {
-                    reason = "failed: " + e;
+            if (outcome.failure() != null) {
+                Preflight.Record failed = outcome.failed();
+                if (failed == null) {
+                    // The checks could not be read: a pack failure before any check ran.
+                    throw new Abort(Status.ERROR, FailureKind.ENVIRONMENT, null, outcome.failure(),
+                            RunLog.fields("reason", outcome.failure()));
                 }
-                log.write("preflight", RunLog.fields("id", check.id(), "ok", reason == null, "reason", reason));
-                if (reason != null) {
-                    throw new Abort(Status.ERROR, FailureKind.ENVIRONMENT, null, "pre-flight check " + check.id()
-                            + ": " + reason, RunLog.fields("preflight", check.id(), "reason", reason));
+                Map<String, Object> detail = RunLog.fields("preflight", failed.id(), "reason", failed.reason());
+                if (failed.cached()) {
+                    detail.put("cached", true);
                 }
+                throw new Abort(Status.ERROR, FailureKind.ENVIRONMENT, null, outcome.failure(), detail);
             }
         }
 

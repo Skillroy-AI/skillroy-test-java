@@ -273,6 +273,14 @@ final class FakeAgent implements AgentConnection {
         return lost;
     }
 
+    /** The agent session {@link #agentSession()} answers (phase8-contracts.md 9.3.2); null (the default) = none. */
+    volatile String session;
+
+    @Override
+    public String agentSession() {
+        return session;
+    }
+
     @Override
     public synchronized void close() {
         closed = true;

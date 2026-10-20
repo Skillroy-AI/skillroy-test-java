@@ -182,13 +182,14 @@ public final class ScenarioSchema {
         properties.put("scenario", pattern("^[a-z0-9-]+$"));
         properties.put("pack", constant(pack.id()));
         properties.put("tags", array(Schemas.type("string")));
-        properties.put("requires", array(requiresItem(descriptors)));
+        properties.put("requires", array(requiresItem(descriptors, pack)));
         properties.put("launchProperties", withAdditional(Schemas.type("object"), ref("scalar")));
         properties.put("resolve", withAdditional(Schemas.type("object"), ref("slot")));
         properties.put("oracle", oracles(catalogue));
         properties.put("steps", array(ref("step")));
         properties.put("verify", array(ref("checks")));
-        properties.put("on_prompt", object(props("unexpected", Schemas.type("string")), List.of()));
+        // phase8-contracts.md 9.2 (gap 111): fail, or pack (the pack's policy, the default); nothing else loads.
+        properties.put("on_prompt", object(props("unexpected", enumOf(List.of("fail", "pack"))), List.of()));
         properties.put("artifacts", array(Schemas.type("string")));
         properties.put("timeouts", object(props("step", ref("duration"), "bind", ref("duration")), List.of()));
         properties.put("ui", object(props("clickRung", Schemas.type("string"), "strict", Schemas.type("boolean")),
@@ -446,17 +447,52 @@ public final class ScenarioSchema {
         return schema;
     }
 
-    private static Map<String, Object> requiresItem(List<PrimitiveDescriptor> descriptors) {
+    private static Map<String, Object> requiresItem(List<PrimitiveDescriptor> descriptors, DomainPack pack) {
         Set<String> ids = new TreeSet<>();
         for (PrimitiveDescriptor descriptor : descriptors) {
             if (descriptor != null && descriptor.capabilityId() != null && !descriptor.capabilityId().isBlank()) {
                 ids.add(descriptor.capabilityId());
             }
         }
+        Map<String, String> contributed = packCapabilities(pack);
+        List<String> named = new ArrayList<>();
+        for (Map.Entry<String, String> e : contributed.entrySet()) {
+            named.add(e.getValue() == null ? e.getKey() : e.getKey() + " (" + e.getValue() + ")");
+        }
         Map<String, Object> item = Schemas.type("string");
         item.put("description", "a capability id, or alternatives \"a | b\""
-                + (ids.isEmpty() ? "" : "; the target's primitives name: " + String.join(", ", ids)));
+                + (ids.isEmpty() ? "" : "; the target's primitives name: " + String.join(", ", ids))
+                + (named.isEmpty() ? "" : "; the pack contributes: " + String.join(", ", named)));
         return item;
+    }
+
+    /**
+     * The pack's capabilities for {@code requires}' description (phase8-contracts.md 9.1.4), by id, each with its
+     * description or null: so that a planner can write {@code requires:} and guards with them. A pack whose
+     * capabilities cannot be read, and an entry without an id, add nothing here (every run refuses such a pack).
+     */
+    private static Map<String, String> packCapabilities(DomainPack pack) {
+        Map<String, String> out = new java.util.TreeMap<>();
+        List<ai.skillroy.testjava.scenario.pack.PackCapability> declared;
+        try {
+            declared = pack.capabilities();
+        } catch (RuntimeException e) {
+            return out;
+        }
+        for (ai.skillroy.testjava.scenario.pack.PackCapability capability : declared == null
+                ? List.<ai.skillroy.testjava.scenario.pack.PackCapability>of() : declared) {
+            try {
+                String id = capability == null ? null : capability.id();
+                if (id != null && !id.isBlank()) {
+                    String description = capability.description();
+                    out.putIfAbsent(id, description == null || description.isBlank() ? null
+                            : description.strip());
+                }
+            } catch (RuntimeException e) {
+                // A broken entry is the run's refusal to report, not the schema's.
+            }
+        }
+        return out;
     }
 
     private static Map<String, Object> duration() {

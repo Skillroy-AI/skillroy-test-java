@@ -53,7 +53,11 @@ public interface DomainPack {
     /** Fact roots for expectation paths; a root here hides a base root of the same name. */
     List<FactProvider> facts();
 
-    /** Applied to prompts no step expected, unless the scenario says {@code on_prompt: {unexpected: fail}}. */
+    /**
+     * Applied to prompts no step expected, unless the scenario says {@code on_prompt: {unexpected: fail}};
+     * {@code on_prompt: {unexpected: pack}} names this policy explicitly, and no other value loads
+     * (phase8-contracts.md 9.2).
+     */
     default PromptPolicy promptPolicy() {
         return PromptPolicy.FAIL;
     }

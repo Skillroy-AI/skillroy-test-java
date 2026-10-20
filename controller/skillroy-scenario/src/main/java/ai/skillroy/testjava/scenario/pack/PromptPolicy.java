@@ -27,7 +27,9 @@ import ai.skillroy.testjava.protocol.Event;
  * topic that returned it, or a prompt-answering call made after the prompt was published), or when a later call of
  * the same step, or a call of the next step that has calls, handles prompts (see
  * {@link CompileContext#markHandlesPrompt}). The scenario key {@code on_prompt: {unexpected: fail}} selects
- * {@link #FAIL}; any other value, and the absence of the key, selects {@link DomainPack#promptPolicy()}.
+ * {@link #FAIL}; {@code on_prompt: {unexpected: pack}}, and the absence of the key, select
+ * {@link DomainPack#promptPolicy()}; any other value is refused when the scenario is loaded and when a plan is read
+ * (phase8-contracts.md 9.2, gap 111; before Phase 8 any other value silently selected the pack's policy).
  *
  * <p>Called on the executor's thread; it may call the agent (to answer the prompt), and must be bounded.
  */

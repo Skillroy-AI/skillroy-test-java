@@ -317,4 +317,60 @@ class ScenarioSchemaTest {
         assertFalse(problems("scenario: t\nsteps:\n  - enter: { value: a }\n    minRung: [X]\n").isEmpty());
         assertFalse(problems("scenario: t\nsteps:\n  - enter: { value: a }\n    other: 1\n").isEmpty());
     }
+
+    /**
+     * phase8-contracts.md 13.1 row 43 (9.1.4, 9.2): {@code on_prompt.unexpected} is the enum {@code [fail, pack]}, and
+     * {@code requires}' description lists the pack's capabilities with their descriptions.
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    void onPromptIsAnEnumAndRequiresListsThePacksCapabilities() throws Exception {
+        Map<String, Object> schema = ScenarioSchema.generate(pack, List.of(new PrimitiveDescriptor("toy.poke", null,
+                null, null, null, 5000, "toy.poke", true, false)));
+        Map<String, Object> properties = (Map<String, Object>) schema.get("properties");
+        Map<String, Object> onPrompt = (Map<String, Object>) ((Map<String, Object>) ((Map<String, Object>) properties
+                .get("on_prompt")).get("properties")).get("unexpected");
+        assertEquals(List.of("fail", "pack"), onPrompt.get("enum"));
+        assertEquals(List.of(), problems("scenario: t\nsteps: []\non_prompt: { unexpected: pack }\n"));
+        assertEquals("$.on_prompt.unexpected", only("scenario: t\nsteps: []\non_prompt: { unexpected: lenient }\n")
+                .path());
+        String requires = (String) ((Map<String, Object>) ((Map<String, Object>) properties.get("requires"))
+                .get("items")).get("description");
+        assertEquals("a capability id, or alternatives \"a | b\"; the target's primitives name: toy.poke", requires,
+                "a pack without capabilities adds nothing");
+
+        pack.capabilities = List.of(capability("toy.env.ready", "the toy environment is ready"),
+                capability("toy.a.setting", null));
+        schema = ScenarioSchema.generate(pack, List.of());
+        properties = (Map<String, Object>) schema.get("properties");
+        requires = (String) ((Map<String, Object>) ((Map<String, Object>) properties.get("requires")).get("items"))
+                .get("description");
+        assertEquals("a capability id, or alternatives \"a | b\"; the pack contributes: toy.a.setting,"
+                + " toy.env.ready (the toy environment is ready)", requires);
+        pack.capabilitiesFailure = new IllegalStateException("broken");
+        properties = (Map<String, Object>) ScenarioSchema.generate(pack, List.of()).get("properties");
+        assertEquals("a capability id, or alternatives \"a | b\"", ((Map<String, Object>) ((Map<String, Object>)
+                properties.get("requires")).get("items")).get("description"), "a broken pack adds nothing here");
+    }
+
+    private static ai.skillroy.testjava.scenario.pack.PackCapability capability(String id, String description) {
+        return new ai.skillroy.testjava.scenario.pack.PackCapability() {
+            @Override
+            public String id() {
+                return id;
+            }
+
+            @Override
+            public String description() {
+                return description;
+            }
+
+            @Override
+            public ai.skillroy.testjava.protocol.Capability evaluate(
+                    ai.skillroy.testjava.scenario.pack.PreflightCheck.PreflightContext ctx) {
+                return new ai.skillroy.testjava.protocol.Capability(id, ai.skillroy.testjava.protocol.CapabilityState
+                        .OK, null, null);
+            }
+        };
+    }
 }

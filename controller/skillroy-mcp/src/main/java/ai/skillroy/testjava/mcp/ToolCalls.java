@@ -832,9 +832,10 @@ final class ToolCalls {
         BindOptions bind = session().options().bind().withMode(bindMode).withWriteBindings(false);
         // Phase 6 security fix, pass 2, P2-L6-F1: the run's step 0b runs under the server's --hooks switch (the
         // session's), never the run default AUTO, so that a client cannot install or replace hooks through a run.
+        // phase8-contracts.md 9.3.3: the server's suite cache, shared with the session's open.
         RunOptions options = RunOptions.defaults().withOutputDir(dir).withBind(bind).withClock(server.clock())
                 .withExpectationsOnMaskedValues(true).withObserver(session().observer())
-                .withHooks(session().options().hooks());
+                .withHooks(session().options().hooks()).withSuite(server.suite());
         PlanExecutor executor = new PlanExecutor(pack(), server.agent(), options,
                 session().options().webPathLoader());
         PlanExecutor.Resolved ran;

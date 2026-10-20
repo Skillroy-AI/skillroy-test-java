@@ -48,6 +48,7 @@ import ai.skillroy.testjava.scenario.BindingsFile;
 import ai.skillroy.testjava.scenario.BindingsFormatException;
 import ai.skillroy.testjava.scenario.FailureKind;
 import ai.skillroy.testjava.scenario.Plan;
+import ai.skillroy.testjava.scenario.Preflight;
 import ai.skillroy.testjava.scenario.pack.DomainPack;
 import ai.skillroy.testjava.scenario.pack.PackSettings;
 import ai.skillroy.testjava.scenario.pack.PreflightCheck;
@@ -784,17 +785,12 @@ public final class ReResolver {
             }
         }
 
-        /** The pack's pre-flight, once (8.2 step 1): null when every check passes, else the first failure. */
+        /**
+         * The pack's pre-flight, once (8.2 step 1) through {@link Preflight} (phase8-contracts.md 9.3.3; no suite
+         * cache: the job runs it once already): null when every check passes, else the first failure, masked. An
+         * interrupted check ends the job as before.
+         */
         private String preflight() throws AgentLostException, InterruptedException {
-            List<PreflightCheck> checks;
-            try {
-                checks = pack.preflight();
-            } catch (RuntimeException e) {
-                return "pack " + pack.id() + ": its pre-flight checks cannot be read: " + e;
-            }
-            if (checks == null || checks.isEmpty()) {
-                return null;
-            }
             List<ai.skillroy.testjava.data.RowMask> rowMasks;
             try {
                 rowMasks = pack.rowMasks();
@@ -825,20 +821,12 @@ public final class ReResolver {
                         return settings == null ? PackSettings.EMPTY : settings;
                     }
                 };
-                for (PreflightCheck check : checks) {
-                    String reason;
-                    try {
-                        reason = check.check(ctx);
-                    } catch (AgentLostException | InterruptedException e) {
-                        throw e;
-                    } catch (Exception e) {
-                        reason = "failed: " + e;
-                    }
-                    if (reason != null) {
-                        return "pre-flight check " + check.id() + ": " + mask.apply(reason);
-                    }
+                String failure = Preflight.run(pack, ctx, null, null).failure();
+                if (failure != null && Thread.interrupted()) {
+                    // As before Phase 8: an interrupted check ends the job rather than failing its scenarios.
+                    throw new InterruptedException(failure);
                 }
-                return null;
+                return failure == null ? null : mask.apply(failure);
             } finally {
                 data.close();
             }

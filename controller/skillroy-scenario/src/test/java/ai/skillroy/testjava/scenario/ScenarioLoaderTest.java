@@ -222,6 +222,24 @@ class ScenarioLoaderTest {
                 .contains("on_prompt.expected"));
         assertTrue(fails("scenario: a\nsteps: []\non_prompt: { unexpected: 3 }\n").getMessage()
                 .contains("on_prompt.unexpected"));
+        // phase8-contracts.md 9.2 (gap 111): fail or pack, nothing else; refused at the key's line.
+        ScenarioException named = fails("scenario: a\nsteps: []\non_prompt:\n  unexpected: failWithBundle\n");
+        assertEquals(4, named.line(), named.getMessage());
+        assertTrue(named.getMessage().contains("'on_prompt.unexpected' must be fail or pack (or leave on_prompt out"
+                + " for the pack's policy), found \"failWithBundle\""), named.getMessage());
+        assertTrue(fails("scenario: a\nsteps: []\non_prompt: { unexpected: lenient }\n").getMessage()
+                .contains("must be fail or pack"));
+        assertTrue(fails("scenario: a\nsteps: []\non_prompt: { unexpected: '  ' }\n").getMessage()
+                .contains("must be fail or pack"));
+        try {
+            assertEquals(Map.of("unexpected", "fail"), load("scenario: a\nsteps: []\non_prompt: { unexpected: ' FAIL '"
+                    + " }\n").onPrompt(), "accepted ignoring case and blanks, kept in lower case");
+            assertEquals(Map.of("unexpected", "pack"), load("scenario: a\nsteps: []\non_prompt: { unexpected: Pack }\n")
+                    .onPrompt());
+            assertEquals(Map.of(), load("scenario: a\nsteps: []\n").onPrompt());
+        } catch (ScenarioException e) {
+            throw new AssertionError(e);
+        }
         assertTrue(fails("scenario: a\nsteps: []\nrequires: toy.input\n").getMessage().contains("list"));
         assertTrue(fails("scenario: a\nsteps: []\ntags: [1, {}]\n").getMessage().contains("tags"));
         assertTrue(fails("scenario: a\nsteps: []\nlaunchProperties: { a: [1] }\n").getMessage()

@@ -102,5 +102,61 @@ class LendingBranchOverlayTest {
         assertSame(base.storedTables(), branch.storedTables());
         assertSame(base.rowMasks(), branch.rowMasks());
         assertEquals(base.promptPolicy(), branch.promptPolicy());
+        assertSame(base.capabilities(), branch.capabilities(), "the pack's capabilities are the base's");
+    }
+
+    /**
+     * phase8-contracts.md 12.3, 13.1 row 50: the base's {@code lending.returns.ceiling}, evaluated with the branch
+     * pack's settings, reads the branch's row {@code return_ceiling} (an overlay changes what an evaluation reads
+     * without replacing it).
+     */
+    @Test
+    void theReturnsCeilingReadsTheBranchsRow() throws Exception {
+        List<List<Object>> asked = new java.util.ArrayList<>();
+        ai.skillroy.testjava.data.DataChannel data = new ai.skillroy.testjava.data.DataChannel() {
+            @Override
+            public boolean serves(String source) {
+                return true;
+            }
+
+            @Override
+            public ai.skillroy.testjava.protocol.sql.Rows query(String source, String sql, List<Object> params,
+                                                               int maxRows, java.time.Duration timeout) {
+                asked.add(params);
+                return ai.skillroy.testjava.protocol.sql.Rows.of(List.of(new ai.skillroy.testjava.protocol.sql.Rows
+                        .Column("VALUE", "VARCHAR")), List.of(List.of("75.00")), false);
+            }
+
+            @Override
+            public String kind(String source) {
+                return "agent";
+            }
+        };
+        ai.skillroy.testjava.scenario.pack.PreflightCheck.PreflightContext ctx =
+                new ai.skillroy.testjava.scenario.pack.PreflightCheck.PreflightContext() {
+                    @Override
+                    public ai.skillroy.testjava.controller.AgentConnection agent() {
+                        return null;
+                    }
+
+                    @Override
+                    public ai.skillroy.testjava.data.DataChannel data() {
+                        return data;
+                    }
+
+                    @Override
+                    public String envId() {
+                        return "branch-a";
+                    }
+
+                    @Override
+                    public ai.skillroy.testjava.scenario.pack.PackSettings settings() {
+                        return branch.settings();
+                    }
+                };
+        ai.skillroy.testjava.protocol.Capability answer = branch.capabilities().get(0).evaluate(ctx);
+        assertEquals(LendingPack.CAP_RETURNS_CEILING, answer.id());
+        assertEquals(ai.skillroy.testjava.protocol.CapabilityState.OK, answer.state());
+        assertEquals(List.of(List.of("return_ceiling")), asked);
     }
 }

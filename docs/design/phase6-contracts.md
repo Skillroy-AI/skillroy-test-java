@@ -1800,6 +1800,12 @@ is written also without an output directory (`file: null`) and before the `requi
 source; the `capabilities` record gains `agentHash`, the hash of the agent's matrix after step 0b, which is what the
 "one matrix per target" check compares (D130 kept on the agent's), and `contributed`; a session merges with
 `SessionOptions.host` at open and writes `capabilities.json` once.
+
+*(Phase 8, built 2026-10-19, EP; P8 §9.1.4.)* `capabilities.json` holds the running pack's own capabilities too (the
+ids `DomainPack.capabilities()` declares, evaluated after the contributors' merge; wire shape, masked, no source), and
+the `capabilities` record gains `pack`, the evaluated ids sorted `{id, state, reason, strategy, scope, cached,
+error?}`, only when the pack declares any (a pack without them writes the record as before). `agentHash` stays the
+agent's matrix after step 0b, so the "one matrix per target" check is unchanged.
 ### 6.5 Hooks and the fingerprint (D128)
 
 Hooks **never enter the environment fingerprint**: not the catalogue's version, id or hash, not the matrix. Bindings

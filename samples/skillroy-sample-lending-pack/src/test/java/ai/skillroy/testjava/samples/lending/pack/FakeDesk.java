@@ -185,6 +185,14 @@ final class FakeDesk implements AgentConnection {
         return Map.of();
     }
 
+    /** The agent session {@link #agentSession()} answers (phase8-contracts.md 9.3.2); null (the default) = none. */
+    String session;
+
+    @Override
+    public String agentSession() {
+        return session;
+    }
+
     @Override
     public void close() {
     }

@@ -590,6 +590,12 @@ public final class ScenarioLoader {
             return Collections.unmodifiableList(out);
         }
 
+        /**
+         * {@code on_prompt: {unexpected: fail | pack}} (phase8-contracts.md 9.2, gap 111, decision D615): {@code fail}
+         * makes every unexpected prompt fail the scenario, {@code pack} is the explicit spelling of the default (the
+         * pack's {@code promptPolicy()}); either is accepted ignoring case and surrounding blanks and kept in lower
+         * case. Any other value is refused at the key's line (before Phase 8 it silently selected the pack's policy).
+         */
         Map<String, Object> onPrompt() throws ScenarioException {
             Object value = root.get("on_prompt");
             if (value == null) {
@@ -604,12 +610,18 @@ public final class ScenarioLoader {
                             + "'; allowed: unexpected");
                 }
                 if (!(e.getValue() instanceof String s) || s.isBlank()) {
-                    throw errorAt(doc.keyLine(map, "unexpected"), "'on_prompt.unexpected' must be 'fail' or the"
-                            + " name of a pack policy, found " + describe(e.getValue()));
+                    throw errorAt(doc.keyLine(map, "unexpected"), "'on_prompt.unexpected' must be fail or pack (or"
+                            + " leave on_prompt out for the pack's policy), found " + describe(e.getValue()));
                 }
             }
+            String unexpected = ((String) map.get("unexpected")).strip().toLowerCase(java.util.Locale.ROOT);
+            if (!Plan.ON_PROMPT_VALUES.contains(unexpected)) {
+                throw errorAt(doc.keyLine(map, "unexpected"), "'on_prompt.unexpected' must be fail or pack (or"
+                        + " leave on_prompt out for the pack's policy), found \"" + ((String) map.get("unexpected"))
+                        .strip() + "\"");
+            }
             Map<String, Object> out = new LinkedHashMap<>();
-            out.put("unexpected", ((String) map.get("unexpected")).strip());
+            out.put("unexpected", unexpected);
             return Collections.unmodifiableMap(out);
         }
 

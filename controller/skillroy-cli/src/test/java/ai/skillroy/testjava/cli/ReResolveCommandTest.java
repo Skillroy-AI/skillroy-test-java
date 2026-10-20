@@ -156,6 +156,37 @@ class ReResolveCommandTest {
         assertEquals(1L, Json.parseObject(Files.readString(out.resolve("re-resolve-report.json"))).get("exitCode"));
     }
 
+    /**
+     * phase8-contracts.md 9.1.5 (the fix D622), 13.1 row 48: {@code requires} is checked against the agent's matrix
+     * with the contributors' and the pack's capabilities merged; a pack id that is {@code UNAVAILABLE} fails the
+     * scenario {@code REQUIRES} naming the reason; a pack's declaration error ends the job FAILED.
+     */
+    @Test
+    void requiresIsCheckedAgainstTheMergedMatrix() throws Exception {
+        CliTestPack.reset();
+        try {
+            Scenarios.write(scenarios, "gateway.yaml", FANCY.replace("scenario: fancy-oracle", "scenario: needs-gateway")
+                    .replace("requires: [test.fancy]", "requires: [inference.gateway]"));
+            Scenarios.write(scenarios, "env.yaml", FANCY.replace("scenario: fancy-oracle", "scenario: needs-env")
+                    .replace("requires: [test.fancy]", "requires: [" + CliTestPack.ENV_READY + "]"));
+            CliTestPack.envUnavailable = "the test backend is down";
+            Path out = tmp.resolve("merged");
+            CliHarness.Outcome outcome = cli(job(out, "nightly")).expectExit(Exit.FAILED);
+            assertTrue(outcome.out().contains("NEW       needs-gateway (written)"),
+                    "a contributed id is no longer missing: " + outcome.out());
+            assertTrue(outcome.out().contains("FAILED    needs-env: PRECONDITION_FAILED REQUIRES: unmet requirements: "
+                    + CliTestPack.ENV_READY + ": UNAVAILABLE (the test backend is down)"), outcome.out());
+            assertEquals(1, CliTestPack.ENV_EVALUATIONS.get(), "evaluated once for the job");
+
+            CliTestPack.declareTwice = true;
+            CliHarness.Outcome refused = cli(job(tmp.resolve("refused"), "nightly")).expectExit(Exit.FAILED);
+            assertTrue(refused.err().contains("the pack's capabilities cannot be merged: pack clitest declares the"
+                    + " capability '" + CliTestPack.ENV_READY + "' twice"), refused.err());
+        } finally {
+            CliTestPack.reset();
+        }
+    }
+
     @Test
     void theBudgetTheGatewayTheEnvironmentAndTheRootAreRequired() throws Exception {
         String bindingsRoot = tmp.resolve("module/bindings").toString();

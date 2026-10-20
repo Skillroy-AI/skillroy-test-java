@@ -16,9 +16,13 @@
 
 package ai.skillroy.testjava.cli;
 
+import ai.skillroy.testjava.controller.AgentConnection;
+import ai.skillroy.testjava.controller.AgentLostException;
 import ai.skillroy.testjava.controller.CapabilityMatrix;
 import ai.skillroy.testjava.data.Credentials;
 import ai.skillroy.testjava.data.CredentialsException;
+import ai.skillroy.testjava.data.DataChannels;
+import ai.skillroy.testjava.data.RowMask;
 import ai.skillroy.testjava.data.SecretMask;
 import ai.skillroy.testjava.inference.job.JobOptions;
 import ai.skillroy.testjava.inference.job.ReResolveException;
@@ -26,6 +30,9 @@ import ai.skillroy.testjava.inference.job.ReResolveReport;
 import ai.skillroy.testjava.inference.job.ReResolver;
 import ai.skillroy.testjava.protocol.Json;
 import ai.skillroy.testjava.scenario.BindOptions;
+import ai.skillroy.testjava.scenario.CapabilityContributor;
+import ai.skillroy.testjava.scenario.CapabilityMerge;
+import ai.skillroy.testjava.scenario.PackCapabilities;
 import ai.skillroy.testjava.scenario.Plan;
 import ai.skillroy.testjava.scenario.ScenarioException;
 import ai.skillroy.testjava.scenario.observe.RunObserver;
@@ -52,7 +59,8 @@ import java.util.function.UnaryOperator;
 /**
  * {@code skillroy re-resolve} (phase5-contracts.md 8.1, 8.2): the nightly job. It loads and compiles every scenario,
  * loads the credentials and the inference settings, refuses to start without a job budget ({@code --budget-job} or
- * {@code budget.jobUsd}) or with gateway {@code none} (exit 64), connects, checks each plan's {@code requires} and
+ * {@code budget.jobUsd}) or with gateway {@code none} (exit 64), connects, checks each plan's {@code requires} (against
+ * the agent's matrix with the contributors' and the pack's capabilities merged, phase8-contracts.md 9.1.5) and
  * launch properties on the target (a plan that fails them is not bound and is reported {@code FAILED} with its
  * reason), and runs {@link ReResolver#run}: every scenario bound in {@code re-resolve} mode, the model's calls in
  * batches, round by round, the pack's pre-flight once, the bindings files written {@code APPROVED} by
@@ -195,6 +203,11 @@ final class ReResolveCommand implements Command {
                 if (caps == null) {
                     caps = new CapabilityMatrix(Map.of());
                 }
+                DomainPack pack = inputs.isEmpty() ? null : inputs.get(0).pack();
+                if (pack != null) {
+                    caps = merged(caps, pack, packs.loader(), inference, target.client(), credentials,
+                            settings.envId(), mask);
+                }
                 List<Plan> plans = new ArrayList<>();
                 Map<String, ReResolveReport.ScenarioReport> refused = new LinkedHashMap<>();
                 for (Input input : inputs) {
@@ -210,7 +223,6 @@ final class ReResolveCommand implements Command {
                                 unmet.kind(), unmet.code(), mask.apply(unmet.message())));
                     }
                 }
-                DomainPack pack = inputs.isEmpty() ? null : inputs.get(0).pack();
                 BindOptions options = BindOptions.defaults().withMode(BindMode.RE_RESOLVE)
                         .withEnvId(settings.envId()).withBindingsRoot(settings.root()).withCredentials(credentials)
                         .withInference(inference);
@@ -242,6 +254,43 @@ final class ReResolveCommand implements Command {
         } finally {
             TelemetryArgs.finish(observer, json ? cli.err() : cli.out());
             Thread.currentThread().setContextClassLoader(previous);
+        }
+    }
+
+    /**
+     * The matrix the job's {@code requires} check reads (phase8-contracts.md 9.1.5, the fix D622): the agent's, with the
+     * controller-side contributors' capabilities merged under the job's inference settings ({@code re-resolve}, no
+     * host features) and the pack's own capabilities evaluated with the job's data channels, environment id and the
+     * pack's settings, no suite cache; step 0b stays absent here (gap 148). Before Phase 8 the check read the agent's
+     * matrix alone, so a scenario requiring {@code inference.sql} read "missing".
+     *
+     * @throws CliException FAILED when the merge is refused (a contributor's or the pack's declarations)
+     */
+    private static CapabilityMatrix merged(CapabilityMatrix agent, DomainPack pack, ClassLoader loader,
+                                           InferenceSettings inference, AgentConnection client,
+                                           Credentials credentials, String envId, SecretMask mask)
+            throws CliException, AgentLostException, InterruptedException {
+        CapabilityMatrix merged;
+        try {
+            merged = CapabilityMerge.merge(agent, CapabilityMerge.load(loader).contributors(),
+                    new CapabilityContributor.CapabilityContext(inference, BindMode.RE_RESOLVE, agent, Set.of(), pack))
+                    .merged();
+        } catch (CapabilityMerge.Refused e) {
+            throw new CliException(Exit.FAILED, "the controller's capabilities cannot be merged: "
+                    + mask.apply(e.getMessage()), e);
+        }
+        List<RowMask> masks;
+        try {
+            masks = pack.rowMasks();
+        } catch (RuntimeException e) {
+            masks = List.of();
+        }
+        try (DataChannels data = DataChannels.of(client, credentials, masks == null ? List.of() : masks)) {
+            return PackCapabilities.evaluate(merged, pack, Preconditions.context(pack, client, data, envId), null,
+                    null, mask).merged();
+        } catch (CapabilityMerge.Refused e) {
+            throw new CliException(Exit.FAILED, "the pack's capabilities cannot be merged: "
+                    + mask.apply(e.getMessage()), e);
         }
     }
 

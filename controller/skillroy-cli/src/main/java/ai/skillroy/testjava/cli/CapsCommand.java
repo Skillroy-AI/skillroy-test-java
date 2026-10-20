@@ -16,11 +16,17 @@
 
 package ai.skillroy.testjava.cli;
 
+import ai.skillroy.testjava.controller.AgentConnection;
 import ai.skillroy.testjava.controller.CapabilityMatrix;
+import ai.skillroy.testjava.data.Credentials;
+import ai.skillroy.testjava.data.DataChannels;
+import ai.skillroy.testjava.data.RowMask;
 import ai.skillroy.testjava.protocol.Capability;
 import ai.skillroy.testjava.protocol.Json;
+import ai.skillroy.testjava.scenario.BindOptions;
 import ai.skillroy.testjava.scenario.CapabilityContributor;
 import ai.skillroy.testjava.scenario.CapabilityMerge;
+import ai.skillroy.testjava.scenario.PackCapabilities;
 import ai.skillroy.testjava.scenario.pack.DomainPack;
 import ai.skillroy.testjava.scenario.resolve.BindMode;
 import ai.skillroy.testjava.scenario.resolve.InferenceSettings;
@@ -41,6 +47,9 @@ import java.util.TreeMap;
  * found through the packs' loader add their {@code inference.*} capabilities under those settings, merged as a
  * {@code live} run merges them (no host features: {@code inference.vision} answers {@code no vision session}); the
  * agent's alone otherwise.
+ *
+ * <p>Phase 8 (phase8-contracts.md 9.1.5): with {@code --pack} the single loaded pack's capabilities are evaluated and
+ * shown too, with the source {@code pack:<packId>}; {@code --reprobe} is unchanged (agent side only).
  */
 final class CapsCommand implements Command {
 
@@ -49,7 +58,9 @@ final class CapsCommand implements Command {
             it is not OK, the strategy in use and its source (agent). --reprobe asks the agent to run its probes
             again first (agent.capabilities {reprobe:true}); otherwise the current matrix is read
             (GET /capabilities). With --pack or --inference the controller's capabilities (inference.gateway,
-            inference.sql, inference.vision; source controller:<module>) are merged in as a live run sees them.""",
+            inference.sql, inference.vision; source controller:<module>) are merged in as a live run sees them;
+            with --pack the pack's own capabilities too (source pack:<pack id>), evaluated in the environment
+            'default' with every data source read through the agent.""",
             capsOptions(), 0, 0);
 
     private static List<OptionSpec> capsOptions() {
@@ -93,7 +104,7 @@ final class CapsCommand implements Command {
                 matrix = new CapabilityMatrix(Map.of());
             }
             if (!args.values(Packs.OPTION).isEmpty() || InferenceArgs.given(args)) {
-                matrix = merged(matrix, args, cli);
+                matrix = merged(matrix, args, cli, target.client());
             }
             CapabilityMatrix shown = matrix;
             Map<String, Capability> sorted = new TreeMap<>(matrix.all());
@@ -124,23 +135,44 @@ final class CapsCommand implements Command {
     /**
      * The agent's matrix with the contributors' capabilities (phase7-contracts.md 8.5): the contributors and the pack
      * found through the {@code --pack} jars (or the CLI's class path), the inference settings of the options, mode
-     * {@code live}, no host features.
+     * {@code live}, no host features. With {@code --pack} and a single pack, that pack's own capabilities too
+     * (phase8-contracts.md 9.1.5, source {@code pack:<packId>}): evaluated with no credentials (every source through
+     * the agent's {@code data.query}), the environment {@code default}, the pack's settings and no suite cache; a
+     * source served over JDBC only then shows {@code UNAVAILABLE} with the channel's error (gap 149).
      *
-     * @throws CliException FAILED when the merge is refused (an agent id with the controller's prefix, a conflict)
+     * @throws CliException FAILED when the merge is refused (an agent id with the controller's prefix, a conflict, a
+     *     pack's declaration error)
      */
-    private static CapabilityMatrix merged(CapabilityMatrix agent, ParsedArgs args, Cli cli) throws Exception {
+    private static CapabilityMatrix merged(CapabilityMatrix agent, ParsedArgs args, Cli cli, AgentConnection client)
+            throws Exception {
         InferenceSettings settings = InferenceArgs.load(args, BindMode.LIVE, null);
         ClassLoader previous = Thread.currentThread().getContextClassLoader();
         try (Packs packs = Packs.load(args.values(Packs.OPTION), cli.classLoader())) {
             Thread.currentThread().setContextClassLoader(packs.loader());
             DomainPack pack = packs.all().size() == 1 ? packs.all().get(0) : null;
+            CapabilityMatrix merged;
             try {
-                return CapabilityMerge.merge(agent, CapabilityMerge.load(packs.loader()).contributors(),
+                merged = CapabilityMerge.merge(agent, CapabilityMerge.load(packs.loader()).contributors(),
                         new CapabilityContributor.CapabilityContext(settings, BindMode.LIVE, agent, Set.of(), pack))
                         .merged();
             } catch (CapabilityMerge.Refused e) {
                 throw new CliException(Exit.FAILED, "the controller's capabilities cannot be merged: "
                         + e.getMessage(), e);
+            }
+            if (pack == null || args.values(Packs.OPTION).isEmpty()) {
+                return merged;
+            }
+            List<RowMask> masks;
+            try {
+                masks = pack.rowMasks();
+            } catch (RuntimeException e) {
+                masks = List.of();
+            }
+            try (DataChannels data = DataChannels.of(client, Credentials.empty(), masks == null ? List.of() : masks)) {
+                return PackCapabilities.evaluate(merged, pack, Preconditions.context(pack, client, data,
+                        BindOptions.DEFAULT_ENV), null, null).merged();
+            } catch (CapabilityMerge.Refused e) {
+                throw new CliException(Exit.FAILED, "the pack's capabilities cannot be merged: " + e.getMessage(), e);
             }
         } finally {
             Thread.currentThread().setContextClassLoader(previous);

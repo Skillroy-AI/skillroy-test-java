@@ -412,6 +412,20 @@ final class FakeAgentConnection implements AgentConnection {
         return Map.of("protocol", Protocol.VERSION);
     }
 
+    /** The agent session {@link #agentSession()} answers (phase8-contracts.md 9.3.2); null (the default) = none. */
+    private volatile String agentSession;
+
+    /** Sets the agent session this connection answers; null = none, nothing is cached for it. */
+    FakeAgentConnection session(String session) {
+        this.agentSession = session;
+        return this;
+    }
+
+    @Override
+    public String agentSession() {
+        return agentSession;
+    }
+
     @Override
     public synchronized void close() {
         closed = true;

@@ -1191,7 +1191,13 @@ JUnit `environment` test).
 
 1. Loads and compiles every scenario; those that need no bindings are listed and skipped. Connects, checks `requires`
    and launch properties, runs the pre-flight once (as `resolve` does, P2 §12.1). Refuses to start without a job
-   budget or with gateway `none` (exit 64).
+   budget or with gateway `none` (exit 64). *(Phase 8, built 2026-10-19, EP; P8 §9.1.5, the fix D622.)* "checks
+   `requires`" is now against the merged matrix: the agent's, with the controller-side contributors' capabilities
+   (the job's inference settings, mode `re-resolve`, no host features) and the pack's own capabilities (the job's data
+   channels, environment id and the pack's settings, no suite cache); before Phase 8 it read the agent's matrix alone,
+   so a scenario requiring `inference.gateway` read "missing" there. A pack whose capabilities are refused ends the
+   job `FAILED` (exit 1) naming it. Step 0b stays absent (gap 148). "Runs the pre-flight once" stays true, through
+   the shared `Preflight`.
 2. **Rounds.** Every scenario is bound in `RE_RESOLVE` mode, which behaves as `live` (P2 §8.3 steps 3-6) with one
    difference: a tier (b) call is not made inline. The resolver of §5.4 implements `BatchableResolver` (below); when a
    scenario's ladder reaches it, the job takes the prepared request, **parks** the scenario at that slot and goes on with

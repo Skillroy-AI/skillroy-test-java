@@ -25,6 +25,7 @@ import ai.skillroy.testjava.scenario.BindOutcome;
 import ai.skillroy.testjava.scenario.CrossCheckOutcome;
 import ai.skillroy.testjava.scenario.PlanExecutor;
 import ai.skillroy.testjava.scenario.RunOptions;
+import ai.skillroy.testjava.scenario.SuiteCache;
 import ai.skillroy.testjava.scenario.RunResult;
 import ai.skillroy.testjava.scenario.ScenarioException;
 import ai.skillroy.testjava.scenario.Status;
@@ -147,9 +148,10 @@ final class ResolveCommand implements Command {
             List<Object> results = new ArrayList<>();
             List<CostLedger.Entry> calls = new ArrayList<>();
             try (target) {
+                // phase8-contracts.md 9.3.3: one suite cache per invocation (a SUITE check once for the scenarios).
                 RunOptions options = RunOptions.defaults().withTargetRestarted(RunCommand.restartProbe(target))
                         .withBind(BindArgs.options(settings, credentials, approver, inference,
-                                !args.flag(InferenceArgs.NO_REUSE_BINDINGS)));
+                                !args.flag(InferenceArgs.NO_REUSE_BINDINGS))).withSuite(SuiteCache.create());
                 for (RunCommand.Loaded input : loaded) {
                     String id = input.plan().scenarioId();
                     Map<String, Object> entry = new LinkedHashMap<>();

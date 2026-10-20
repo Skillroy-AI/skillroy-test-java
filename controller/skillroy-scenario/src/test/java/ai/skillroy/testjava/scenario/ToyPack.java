@@ -27,6 +27,7 @@ import ai.skillroy.testjava.scenario.pack.CompileContext;
 import ai.skillroy.testjava.scenario.pack.DomainPack;
 import ai.skillroy.testjava.scenario.hooks.HookCatalogue;
 import ai.skillroy.testjava.scenario.pack.FactProvider;
+import ai.skillroy.testjava.scenario.pack.PackCapability;
 import ai.skillroy.testjava.scenario.pack.PackSettings;
 import ai.skillroy.testjava.scenario.pack.PlannedCall;
 import ai.skillroy.testjava.scenario.pack.PreflightCheck;
@@ -79,6 +80,10 @@ public final class ToyPack implements DomainPack {
     PackSettings settings = PackSettings.EMPTY;
     /** The pack's own warning codes (phase8-contracts.md 7.3, ES). */
     Set<String> warningCodes = Set.of();
+    /** The pack's capabilities (phase8-contracts.md 9.1); null is answered as null. */
+    List<PackCapability> capabilities = List.of();
+    /** Thrown by {@link #capabilities()} when set (phase8-contracts.md 9.1.2 rule 1). */
+    RuntimeException capabilitiesFailure;
 
     @Override
     public String id() {
@@ -153,6 +158,14 @@ public final class ToyPack implements DomainPack {
     @Override
     public Set<String> warningCodes() {
         return warningCodes;
+    }
+
+    @Override
+    public List<PackCapability> capabilities() {
+        if (capabilitiesFailure != null) {
+            throw capabilitiesFailure;
+        }
+        return capabilities;
     }
 
     @Override

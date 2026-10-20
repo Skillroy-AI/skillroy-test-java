@@ -29,6 +29,8 @@ import ai.skillroy.testjava.protocol.Json;
 import ai.skillroy.testjava.protocol.RpcResult;
 import ai.skillroy.testjava.scenario.FailureKind;
 import ai.skillroy.testjava.scenario.Plan;
+import ai.skillroy.testjava.scenario.Preflight;
+import ai.skillroy.testjava.scenario.SuiteCache;
 import ai.skillroy.testjava.scenario.pack.DomainPack;
 import ai.skillroy.testjava.scenario.pack.PackSettings;
 import ai.skillroy.testjava.scenario.pack.PreflightCheck;
@@ -101,63 +103,55 @@ final class Preconditions {
     }
 
     /**
-     * Runs the pack's pre-flight checks as a run does; the reason of the first that fails, or null.
+     * Runs the pack's pre-flight checks as a run does (phase8-contracts.md 9.3.3, through {@link Preflight}); the
+     * failure of the first that fails, or null.
      *
+     * @param suite the command's suite cache, shared with its executors; null = none
+     * @param agentSession the connection's agent session ({@code AgentConnection.agentSession()}); null = nothing is
+     *     cached
      * @throws AgentLostException if the agent is gone
      */
-    static String preflight(DomainPack pack, AgentConnection agent, Credentials credentials, String envId)
-            throws AgentLostException {
-        List<PreflightCheck> checks;
+    static String preflight(DomainPack pack, AgentConnection agent, Credentials credentials, String envId,
+                            SuiteCache suite, String agentSession) throws AgentLostException {
         List<RowMask> masks;
         try {
-            checks = pack.preflight();
             masks = pack.rowMasks();
         } catch (RuntimeException e) {
             return "pack " + pack.id() + ": its pre-flight checks cannot be read: " + e;
         }
-        if (checks == null || checks.isEmpty()) {
-            return null;
-        }
         try (DataChannels data = DataChannels.of(agent, credentials, masks == null ? List.of() : masks)) {
-            PreflightCheck.PreflightContext ctx = new PreflightCheck.PreflightContext() {
-                @Override
-                public AgentConnection agent() {
-                    return agent;
-                }
-
-                @Override
-                public DataChannel data() {
-                    return data;
-                }
-
-                @Override
-                public String envId() {
-                    return envId;
-                }
-
-                @Override
-                public PackSettings settings() {
-                    PackSettings settings = pack.settings();
-                    return settings == null ? PackSettings.EMPTY : settings;
-                }
-            };
-            for (PreflightCheck check : checks) {
-                String reason;
-                try {
-                    reason = check.check(ctx);
-                } catch (AgentLostException e) {
-                    throw e;
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    reason = "interrupted";
-                } catch (Exception e) {
-                    reason = "failed: " + e;
-                }
-                if (reason != null) {
-                    return "pre-flight check " + check.id() + ": " + reason;
-                }
-            }
+            return Preflight.run(pack, context(pack, agent, data, envId), suite, agentSession).failure();
         }
-        return null;
+    }
+
+    /**
+     * What a command's pre-flight checks and the pack's capabilities read (phase2-contracts.md 6.1;
+     * phase8-contracts.md 9.1.3): the command's connection and data channels, the environment id and the pack's
+     * settings; no bind mode, no inference settings, no gateway.
+     */
+    static PreflightCheck.PreflightContext context(DomainPack pack, AgentConnection agent, DataChannel data,
+                                                  String envId) {
+        return new PreflightCheck.PreflightContext() {
+            @Override
+            public AgentConnection agent() {
+                return agent;
+            }
+
+            @Override
+            public DataChannel data() {
+                return data;
+            }
+
+            @Override
+            public String envId() {
+                return envId;
+            }
+
+            @Override
+            public PackSettings settings() {
+                PackSettings settings = pack.settings();
+                return settings == null ? PackSettings.EMPTY : settings;
+            }
+        };
     }
 }

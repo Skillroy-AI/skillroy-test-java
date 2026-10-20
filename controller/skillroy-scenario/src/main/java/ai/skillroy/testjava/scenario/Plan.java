@@ -114,7 +114,8 @@ import java.util.regex.Pattern;
  * @param cleanup calls run at the end of a run whose start mark was written, in reverse order
  * @param launchProperties system properties the target must have been launched with
  * @param artifacts evidence kinds to keep even on success
- * @param onPrompt {@code {"unexpected": "fail" | <pack policy name>}}
+ * @param onPrompt {@code {"unexpected": "fail" | "pack"}}, or empty for the pack's policy (phase8-contracts.md 9.2: no
+ *     other value is read)
  * @param stepTimeoutMs the step timeout in milliseconds
  * @param ui the scenario's {@code ui} settings, or null when it has none
  * @param inference {@code none}, or {@code bind} when a slot's strategy needs a model at bind time ({@code run} is
@@ -184,6 +185,13 @@ public record Plan(int planVersion, String scenarioId, String pack, String packV
 
     /** The longest bind budget: 10 minutes. */
     public static final long MAX_BIND_TIMEOUT_MS = 600_000L;
+
+    /**
+     * The values {@code onPrompt.unexpected} may hold (phase8-contracts.md 9.2, gap 111, decision D615): {@code fail}
+     * (every unexpected prompt fails the scenario) or {@code pack} (the pack's policy, the default spelled out); a
+     * reader rule whatever the plan version, so that no plan carries a value that silently means the pack's policy.
+     */
+    static final Set<String> ON_PROMPT_VALUES = Set.of("fail", "pack");
 
     private static final Set<String> TOP_KEYS_V1 = Set.of("planVersion", "scenarioId", "pack", "packVersion",
             "sourceHash", "requires", "slots", "steps", "verify", "cleanup", "launchProperties", "artifacts",
@@ -1231,12 +1239,27 @@ public record Plan(int planVersion, String scenarioId, String pack, String packV
                         + ", which the plan does not have");
             }
         }
+        checkOnPrompt(r, r.object(json, "onPrompt"));
         return new Plan(VERSION, scenarioId, r.str(json, "pack"), r.str(json, "packVersion"),
                 r.str(json, "sourceHash"), r.strings(json, "requires"), slots, steps, verify, cleanup,
                 launchProperties, r.strings(json, "artifacts"), r.object(json, "onPrompt"),
                 r.positive(json, "stepTimeoutMs"), json.get("ui") == null ? null : r.ui(r.object(json, "ui")),
                 inference, oracles, graph, bindTimeoutMs, json.containsKey("web") ? r.web(r.object(json, "web"))
                         : null, images);
+    }
+
+    /**
+     * The reader's {@code onPrompt} rule (phase8-contracts.md 9.2, gap 111, decision D615), whatever the plan version:
+     * the key {@code unexpected} only, holding {@code fail} or {@code pack} (ignoring case and surrounding blanks, as
+     * the loader reads them); an empty object is the pack's policy.
+     */
+    private static void checkOnPrompt(PlanReader r, Map<String, Object> onPrompt) throws ScenarioException {
+        for (Map.Entry<String, Object> e : onPrompt.entrySet()) {
+            if (!"unexpected".equals(e.getKey()) || !(e.getValue() instanceof String value)
+                    || !ON_PROMPT_VALUES.contains(value.strip().toLowerCase(Locale.ROOT))) {
+                throw r.error("onPrompt.unexpected must be fail or pack, found " + Json.write(onPrompt));
+            }
+        }
     }
 
     private static Set<String> stepIds(List<Step> steps) {

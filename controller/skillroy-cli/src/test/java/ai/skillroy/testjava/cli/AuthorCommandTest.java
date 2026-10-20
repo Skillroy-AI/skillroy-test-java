@@ -220,6 +220,25 @@ class AuthorCommandTest {
     }
 
     /**
+     * phase8-contracts.md 9.3.3, 13.1 row 48: {@code author} owns one suite cache, shared by the pre-flight up front
+     * and the {@code --run} executor, so that the pack's {@code SUITE} check runs once for the command.
+     */
+    @Test
+    void theUpFrontPreflightAndTheRunShareOneSuiteAnswer() throws Exception {
+        CliTestPack.reset();
+        try {
+            answer(1, envelope(document("poke-shared"), false, "0.10"));
+            CliHarness.Outcome outcome = author("--brief", BRIEF, "--id", "poke-shared", "--out", out.toString(),
+                    "--claude-command", claude.toString(), "--run").expectExit(Exit.OK);
+            assertTrue(outcome.out().contains("check: run once live: PASS      poke-shared"), outcome.out());
+            assertEquals(1, CliTestPack.BACKEND_RUNS.get(), "the run's SUITE check was answered from the command's"
+                    + " cache");
+        } finally {
+            CliTestPack.reset();
+        }
+    }
+
+    /**
      * Phase 6 security fix S60: {@code --keep-work} keeps the planner's private working directory, where its server's
      * output went ({@code --out <work>/mcp}), and prints its path.
      */

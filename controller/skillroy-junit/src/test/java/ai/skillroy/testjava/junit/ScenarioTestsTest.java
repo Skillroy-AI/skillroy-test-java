@@ -386,4 +386,68 @@ class ScenarioTestsTest {
                 Duration.ZERO, List.of(), null, null, List.of(), List.of(line)), RunOptions.DegradedAs.SKIPPED),
                 "an accepted warning leaves a PASS");
     }
+
+    // ------------------------------------------------------------------------------------------------ the suite
+
+    /** A SUITE pre-flight check that counts its runs (phase8-contracts.md 13.1 row 47). */
+    private static ai.skillroy.testjava.scenario.pack.PreflightCheck suiteCheck(AtomicInteger runs) {
+        return new ai.skillroy.testjava.scenario.pack.PreflightCheck() {
+            @Override
+            public String id() {
+                return "mini.desk";
+            }
+
+            @Override
+            public ai.skillroy.testjava.scenario.pack.CheckScope scope() {
+                return ai.skillroy.testjava.scenario.pack.CheckScope.SUITE;
+            }
+
+            @Override
+            public String check(AgentConnection agent) {
+                runs.incrementAndGet();
+                return null;
+            }
+        };
+    }
+
+    private static void runAll(Stream<DynamicTest> tests) throws Throwable {
+        for (DynamicTest test : tests.toList()) {
+            test.getExecutable().execute();
+        }
+    }
+
+    /**
+     * phase8-contracts.md 9.3.3, 13.1 row 47: the stream is the suite. One stream of three scenarios evaluates a
+     * {@code SUITE} check once; two streams twice; options without a cache, or none, still once per stream; a
+     * caller's cache shared by two streams once.
+     */
+    @Test
+    void aStreamIsASuiteForSuiteScopedChecks(@TempDir Path dir) throws Throwable {
+        String pass = Files.readString(Path.of(ScenarioTestsTest.class.getResource("/junit-scenarios/a-pass.yaml")
+                .toURI()));
+        for (String id : List.of("one", "two", "three")) {
+            Files.writeString(dir.resolve(id + ".yaml"), pass.replace("scenario: mini-pass", "scenario: suite-" + id));
+        }
+        ScenarioSource source = ScenarioSource.directory(dir);
+        AtomicInteger runs = new AtomicInteger();
+        MiniPack pack = new MiniPack();
+        pack.preflight = List.of(suiteCheck(runs));
+        agent.session = "mini-session-1";
+
+        runAll(ScenarioTests.dynamicTests(source, () -> agent, RunOptions.defaults(), pack));
+        assertEquals(1, runs.get(), "one stream of three scenarios: one evaluation");
+        runAll(ScenarioTests.dynamicTests(source, () -> agent, RunOptions.defaults(), pack));
+        assertEquals(2, runs.get(), "a second stream is a second suite");
+        runAll(ScenarioTests.dynamicTests(source, () -> agent, null, pack));
+        assertEquals(3, runs.get(), "the options of the system properties: one per stream as well");
+
+        ai.skillroy.testjava.scenario.SuiteCache shared = ai.skillroy.testjava.scenario.SuiteCache.create();
+        runAll(ScenarioTests.dynamicTests(source, () -> agent, RunOptions.defaults().withSuite(shared), pack));
+        runAll(ScenarioTests.dynamicTests(source, () -> agent, RunOptions.defaults().withSuite(shared), pack));
+        assertEquals(4, runs.get(), "a caller's cache shared by two streams: one evaluation");
+
+        agent.session = null;
+        runAll(ScenarioTests.dynamicTests(source, () -> agent, RunOptions.defaults(), pack));
+        assertEquals(7, runs.get(), "a connection without a session is never cached for");
+    }
 }

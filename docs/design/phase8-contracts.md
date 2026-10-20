@@ -3277,6 +3277,74 @@ policy); the per-scenario `PlanExecutor`. **Behaviour changes**: (a) an `on_prom
 and the CLI own a suite cache (visible only through `SUITE` items); (e) `re-resolve` checks `requires` against the
 merged matrix (§9.1.5).
 
+### 9.7 As built (Phase 8, EP, 2026-10-19)
+
+Built as §9.1-§9.6 specify, with these completions and corrections (the build's decisions `D-EP-n`, numbered by the
+orchestrator):
+
+- **`PackCapabilities`** (§9.1.5). `Entry` has a seventh component, `error` (the masked `toString` of a failed
+  evaluation's exception, cut at `MAX_ERROR_LENGTH` = 500; null otherwise), with the contract's six-argument
+  constructor kept; `toJson()` writes `error` only when set. `Result` adds `ids()` and `toJson()`. Beside the contract's
+  five-argument `evaluate`, an overload takes the host's `SecretMask`: the error text is masked **before** it is cut and
+  logged at WARNING, so that the cut never splits a known secret (the run, the session and `re-resolve` pass theirs;
+  `caps --pack` has none). `NO_ANSWER` = `"no answer"`. A capability whose `id()` throws refuses the host as "its
+  capabilities cannot be read"; one whose `scope()` answers null or throws counts as `SCENARIO` (the restrictive
+  default), as a pre-flight check's does. A `SUITE` capability keeps its answer, `UNAVAILABLE` and a failed
+  evaluation's included, and an entry answered from the cache repeats the stored `error`; an `InterruptedException` is
+  never kept. An id another pack already contributed (`pack:` source) would read "declared by <pack> and by pack <id>"
+  (no host merges two packs today).
+- **The run** (§9.1.5). `mergeContributed` throws `AgentLostException` too; an interrupted evaluation ends the run
+  `ERROR / ENVIRONMENT "interrupted"` with detail `{capabilities: interrupted}`; a refusal keeps the contributor
+  refusal's shape (`capabilities {ok: false, error}`, detail `{capabilities: refused}`). **The session** (§9.1.5) creates
+  its data channels before the merge and closes them on every failure path of `open`; its journal key is
+  `session-start.options.pack`; a refusal or an interruption is `SessionOpenException(ENVIRONMENT)`.
+- **`Preflight`** (§9.3.3). `Outcome.failed()` (the failed check's record, null when every check passed or the checks
+  could not be read) and `CACHED_SUFFIX`; a run's failure detail is `{preflight, reason}` plus `cached: true` when
+  answered from the cache. **Behaviour change:** a pack whose `preflight()` throws is now `ERROR / ENVIRONMENT "pack <id>:
+  its pre-flight checks cannot be read: <e>"` in a run as well (before Phase 8 a run ended "internal error: <class>"
+  there, while the session and the CLI already used the text). `ReResolver` keeps its behaviour on an interrupted
+  check (the job ends with `InterruptedException`).
+- **The hosts** (§9.3.3). `skillroy caps` evaluates the pack's capabilities only with `--pack` (with `--inference`
+  alone none, even when one pack is on the class path). The MCP server uses the session options' own cache when the
+  caller gave one, else its own (`server.suite()`); both reach the session's open and every `skillroy_scenario_run`.
+  `Preconditions.context(pack, agent, data, envId)` is the CLI's one context (pre-flight, `caps --pack`, `re-resolve`).
+- **`on_prompt`** (§9.2). The plan reader accepts `fail` and `pack` ignoring case and surrounding blanks, as the
+  loader reads them (the compiler always writes the lower-case form); its message is `invalid plan:
+  onPrompt.unexpected must be fail or pack, found <the onPrompt object>`.
+- **The sample** (§12.3). `LendingPack.CAP_RETURNS_CEILING`; the class `ReturnsCeiling` reads
+  `LendingResolvers.SYSTEM_LIMIT_SQL` with one row and 10 s; a failed read's reason is `the lending database could not be
+  read (<kind>): <message>` (the kind only, without the RPC code the pre-flight check's text adds). The sample's
+  hand-written delegating test packs (`ResolutionChecks.FailingPreflight`, `OverlayPack`) forward `capabilities()`:
+  without it scenario A, which requires the id, would stop at `requires` in the pre-flight case (item 37).
+  `HeadlessDesk` numbers its sessions `headless-desk-<n>` (deterministic in a JVM, never random); `DeskConnection`
+  answers one per instance.
+- **Tests** (§13.1 rows 42-50). Row 42: the calls before `requires` are `data.sources` and `data.query` (the agent's
+  data channel asks once which sources it serves), not `data.query` alone; the contributor conflict, unreachable
+  through a run (a contributed id starts with `inference.`, a pack's with `<packId>.`), is proven on
+  `PackCapabilities.evaluate` with a hand-built matrix. Row 48: the CLI test pack's id is `clitest`, so its capability is
+  **`clitest.env.ready`** with `SOURCE pack:clitest` (the contract's `cli.env.ready` would be refused by §9.1.2 rule 3);
+  the CLI cases are in the new `Phase8CommandsTest` (`run`, `resolve`, `caps`) and in `AuthorCommandTest` and
+  `ReResolveCommandTest`, not in `RunCommandTest`; the `re-resolve` case requires `inference.gateway` (`OK` under the
+  recorded gateway; `inference.sql` is `UNAVAILABLE("no allow-list")` for that pack). Row 49 is the new
+  `SuiteCacheOverMcpTest`. Row 50: `PackCapabilityHeadlessTest` compiles scenario A from its YAML (its committed plan is
+  regenerated in step R); on the headless desk every read goes over the controller-side JDBC channel, so the overlay
+  case sends **nothing** to the desk after the matrix (no `data.query` either) and writes a `pack` note record (the
+  overlay's composite version); `PreflightSuiteHeadlessTest` streams scenario A, `return-refunds-deposit` and
+  `return-within-limit-observed` (no launch properties, which the headless desk cannot answer). `ScenarioSchemaCommittedTest`'s
+  keyword check looks for the keywords as keys (`"maximum":`): `requires`' description now quotes the capability's
+  description, prose that says "maximum".
+- **End to end** (§13.2 items 36-42). Item 36 (slot 177): `contributed` is the three `inference.*` ids of the
+  contributors on the scenarios module's class path (as slot 156 asserts), not `[]`; slot 156's "the archive is the
+  agent's matrix plus the contributed ids" also excludes the pack's id. Items 37 and 41: `beforeRequires()` is
+  `capabilities, data.sources, data.query` (the hooks leg: `capabilities, hook.health, capabilities, data.sources,
+  data.query`); the hooks leg runs no `ResolutionChecks`, so slot 177 also runs an unmet-`requires` probe through
+  `Recording` in every leg, asserting that the pack's reads come last and only the matrix and step 0b's hook calls before
+  them. Item 38: without the driver, scenario A now stops at its `requires` (`lending.returns.ceiling: UNAVAILABLE (the
+  lending database could not be read (UNAVAILABLE): …)`, since its capability reads the same JDBC source first), and
+  `basic-loan`, run beside it in the invocation, shows the pre-flight failure `ok: false, cached: false` and
+  `ENVIRONMENT` as before; with the driver, `basic-loan` (first by name) evaluates the `SUITE` check and scenario A's
+  record is `cached: true`.
+
 ---
 
 ## 10. Protocol amendments, capability ids, topics, errors, options and SPIs
@@ -4122,6 +4190,9 @@ named per item host the agent-level half of a proof.
    `beforeRequires()` there is `capabilities, hook.health, capabilities, data.query`; scenario E unchanged.
 42. **`InferenceChecks`' MCP subprocess item** (EP): `skillroy_catalogue` lists `lending.returns.ceiling` with
    `source: pack:lending`.
+
+   As built (Phase 8, EP): items 36-42 and §13.1 rows 42-50 with the corrections of §9.7 (the calls before `requires`
+   include `data.sources`; slot 177's `contributed`; item 38 without the driver; the CLI pack's id `clitest`).
 
 ### 13.3 Not verified in this phase, and why
 

@@ -21,9 +21,13 @@ import ai.skillroy.testjava.data.AgentDataChannel;
 import ai.skillroy.testjava.data.DataChannel;
 import ai.skillroy.testjava.data.DataException;
 import ai.skillroy.testjava.data.RowMask;
+import ai.skillroy.testjava.protocol.Capability;
+import ai.skillroy.testjava.protocol.CapabilityState;
 import ai.skillroy.testjava.protocol.sql.Rows;
+import ai.skillroy.testjava.scenario.pack.CheckScope;
 import ai.skillroy.testjava.scenario.pack.DomainPack;
 import ai.skillroy.testjava.scenario.pack.FactProvider;
+import ai.skillroy.testjava.scenario.pack.PackCapability;
 import ai.skillroy.testjava.scenario.pack.PackSettings;
 import ai.skillroy.testjava.scenario.pack.PreflightCheck;
 import ai.skillroy.testjava.scenario.pack.StepLibrary;
@@ -66,7 +70,10 @@ import java.util.Set;
  *       builds the value with the tier (a) resolvers' own reads.</li>
  *   <li>Pre-flight: {@value #PREFLIGHT_DATABASE}, the lending database answers a read on source {@code lending},
  *       through whichever channel serves it (the agent's {@code data.query}, or JDBC when the environment's
- *       credentials name the source).</li>
+ *       credentials name the source); scope {@code SUITE} (phase8-contracts.md 9.3).</li>
+ *   <li>Capabilities (phase8-contracts.md 9.1, 9.4): {@value #CAP_RETURNS_CEILING}, the desk has a system maximum
+ *       return configured, evaluated from the {@code desk_setting} row {@link #MAX_RETURN_SETTING} names; source
+ *       {@code pack:lending}.</li>
  *   <li>Recovery: answer any open prompt with its first button, cancel any open loan, sign off
  *       ({@link LendingRecovery}).</li>
  *   <li>Hooks (phase6-contracts.md 6.3): the catalogue {@code META-INF/skillroy/hooks/lending.yaml}, read by the
@@ -89,7 +96,8 @@ public final class LendingPack implements DomainPack {
      * allow-list and the verbs' argument schemas of phase5-contracts.md 14.1. {@code 0.5.0}: the hook catalogue,
      * {@link #settings()} and the public surface an overlay needs (phase6-contracts.md 6.3, 11.3). {@code 0.6.0}:
      * {@link #screenLegend()} and the {@code inductionRequired} argument of {@code LendableItem} (gap 49;
-     * phase7-contracts.md 12.3).
+     * phase7-contracts.md 12.3). {@code 0.7.0}: {@code capabilities()}, {@code warningCodes()}, {@code ackByInputId},
+     * the three verbs and the suite-scoped database check (phase8-contracts.md 7, 9).
      */
     public static final String VERSION = "0.6.0";
     /**
@@ -132,6 +140,12 @@ public final class LendingPack implements DomainPack {
     public static final List<String> PROMPT_TOPICS = List.of("prompt.waiting");
     /** Id of the pre-flight check. */
     public static final String PREFLIGHT_DATABASE = "lending.database";
+    /**
+     * The pack's capability (phase8-contracts.md 9.1, 9.4, 12.3; gap 24): the desk has a system maximum return
+     * configured, the {@code desk_setting} row named by {@link #MAX_RETURN_SETTING}. Scenario A requires it; source
+     * {@code pack:lending}; never in a capability golden (the agent's matrix does not hold it).
+     */
+    public static final String CAP_RETURNS_CEILING = "lending.returns.ceiling";
     /** The desk's keypad actions: what {@code key: {action}} accepts and what {@code ActionKey} may answer. */
     public static final List<String> KEY_ACTIONS = List.of("DUE", "DEPOSIT", "RETURN", "CANCEL", "SIGN_OFF", "QTY");
 
@@ -145,6 +159,7 @@ public final class LendingPack implements DomainPack {
     public static final String PASSWORD_REQUIRED = "lending.PASSWORD_REQUIRED";
     private static final List<FactProvider> FACTS = LendingFacts.all();
     private static final List<PreflightCheck> PREFLIGHT = List.of(new DatabaseCheck());
+    private static final List<PackCapability> CAPABILITIES = List.of(new ReturnsCeiling());
     private static final ResolutionCatalogue CATALOGUE = catalogue();
     private static final EnvFingerprinter FINGERPRINTER = new LendingFingerprinter();
     private static final List<RowMask> ROW_MASKS = List.of(LendingTables.PASSWORD_MASK);
@@ -198,6 +213,12 @@ public final class LendingPack implements DomainPack {
     @Override
     public List<PreflightCheck> preflight() {
         return PREFLIGHT;
+    }
+
+    /** {@value #CAP_RETURNS_CEILING} (phase8-contracts.md 9.1, 12.3); the same list on every call. */
+    @Override
+    public List<PackCapability> capabilities() {
+        return CAPABILITIES;
     }
 
     @Override
@@ -279,7 +300,9 @@ public final class LendingPack implements DomainPack {
 
     /**
      * The lending database answers a read: at least one staff member. It reads through the pre-flight's data channel
-     * (phase2-contracts.md 6.1), so it also passes where the environment serves source {@code lending} over JDBC.
+     * (phase2-contracts.md 6.1), so it also passes where the environment serves source {@code lending} over JDBC. Its
+     * scope is {@code SUITE} (phase8-contracts.md 9.3, 12.3): whether the database answers is a fact of the suite's
+     * environment, so a host with a suite cache checks it once per suite, environment and agent start.
      */
     static final class DatabaseCheck implements PreflightCheck {
 
@@ -289,6 +312,11 @@ public final class LendingPack implements DomainPack {
         @Override
         public String id() {
             return PREFLIGHT_DATABASE;
+        }
+
+        @Override
+        public CheckScope scope() {
+            return CheckScope.SUITE;
         }
 
         /** The Phase 1 entry: reads through the agent's {@code data.query}. */
@@ -314,6 +342,49 @@ public final class LendingPack implements DomainPack {
                 return null;
             }
             return "the lending database has no staff: " + rows.rowCount() + " row(s)";
+        }
+    }
+
+    /**
+     * {@value #CAP_RETURNS_CEILING} (phase8-contracts.md 9.1, 12.3, decision D620): reads the {@code desk_setting} row
+     * named by the pack setting {@link #MAX_RETURN_SETTING} (an overlay renames it, as the branch edition does) through
+     * the host's data channel on source {@code lending}; {@code OK} when exactly one row holds a decimal, else
+     * {@code UNAVAILABLE} naming the row; a read that fails is {@code UNAVAILABLE} with the channel's kind and message
+     * (which never carries a row value). Read-only, one statement of one row, bounded by its timeout; honoured in
+     * {@code replay}. Scope {@code SCENARIO}: evaluated in every run.
+     */
+    static final class ReturnsCeiling implements PackCapability {
+
+        static final Duration TIMEOUT = Duration.ofSeconds(10);
+
+        @Override
+        public String id() {
+            return CAP_RETURNS_CEILING;
+        }
+
+        @Override
+        public String description() {
+            return "the desk has a system maximum return configured";
+        }
+
+        @Override
+        public Capability evaluate(PreflightCheck.PreflightContext ctx) throws Exception {
+            PackSettings settings = ctx.settings();
+            String name = (settings == null ? SETTINGS : settings).get(MAX_RETURN_SETTING,
+                    DEFAULT_MAX_RETURN_SETTING);
+            Rows rows;
+            try {
+                rows = ctx.data().query(LendingResolvers.SOURCE, LendingResolvers.SYSTEM_LIMIT_SQL, List.of(name), 1,
+                        TIMEOUT);
+            } catch (DataException e) {
+                return new Capability(CAP_RETURNS_CEILING, CapabilityState.UNAVAILABLE, "the lending database could"
+                        + " not be read (" + e.kind() + "): " + e.getMessage(), null);
+            }
+            if (rows.rowCount() == 1 && LendingResolvers.decimal(rows.get(0, 0)) != null) {
+                return new Capability(CAP_RETURNS_CEILING, CapabilityState.OK, null, null);
+            }
+            return new Capability(CAP_RETURNS_CEILING, CapabilityState.UNAVAILABLE, "no system maximum return"
+                    + " configured (desk_setting " + name + ")", null);
         }
     }
 }

@@ -114,8 +114,12 @@ class ScenarioSchemaCommittedTest {
             assertFalse(String.valueOf(steps.get(verb).get("description")).startsWith("free-form"), verb);
         }
         String text = Json.write(schema);
-        for (String forbidden : List.of("minimum", "maximum", "minLength", "maxLength", "maxItems", "\"format\"",
-                "http://", "#/definitions")) {
+        // The keywords as keys (phase8-contracts.md 9.1.4: requires' description now quotes the pack's capability
+        // descriptions, prose that may use the word "maximum"); the two values as written.
+        for (String keyword : List.of("minimum", "maximum", "minLength", "maxLength", "maxItems", "format")) {
+            assertFalse(text.contains("\"" + keyword + "\":"), keyword);
+        }
+        for (String forbidden : List.of("http://", "#/definitions")) {
             assertFalse(text.contains(forbidden), forbidden);
         }
         assertFalse(text.contains("\"minItems\":2"), "minItems 0 or 1 only");
