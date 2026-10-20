@@ -26,6 +26,7 @@ import ai.skillroy.testjava.scenario.resolve.SqlAllowList;
 import ai.skillroy.testjava.scenario.resolve.StoredTable;
 
 import java.util.List;
+import java.util.Set;
 
 /**
  * The controller half of a domain: verbs, sync topics, fact roots, prompt handling, pre-flight checks and recovery.
@@ -151,5 +152,27 @@ public interface DomainPack {
      */
     default String screenLegend() {
         return null;
+    }
+
+    /**
+     * The pack's capabilities (phase8-contracts.md 9.1, gap 106, decision D609): environment facts only the pack
+     * knows, each {@code <packId>.<name>}, evaluated by the host after the controller-side contributors' merge and
+     * merged into the run's matrix with the source {@code pack:<packId>}, so that a scenario names them in
+     * {@code requires:} or a guard. At most 64. Empty by default. Read once per host (a run, a session's open, a
+     * command); nothing of it enters {@code plan.json}.
+     */
+    default List<PackCapability> capabilities() {
+        return List.of();
+    }
+
+    /**
+     * The pack's own warning codes (phase8-contracts.md 7.1, 7.3, gap 18, amendment A87): each
+     * {@code <packId>.<NAME>} with this pack's id before the dot (the protocol's {@code CallWarning.PACK_CODE}),
+     * checked once when the compiler is constructed. A step may accept only a base code or a code declared here; a
+     * pack code a primitive reports that the pack does not declare is never acceptable. An overlay overrides it to add
+     * its own. Empty by default.
+     */
+    default Set<String> warningCodes() {
+        return Set.of();
     }
 }

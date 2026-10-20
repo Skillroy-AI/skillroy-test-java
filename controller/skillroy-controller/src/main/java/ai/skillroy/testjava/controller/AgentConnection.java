@@ -79,6 +79,16 @@ public interface AgentConnection extends AutoCloseable {
         return false;
     }
 
+    /**
+     * The agent start this connection is bound to (the {@code sessionId} its {@code /ping} reply carries, as last
+     * verified); null when unknown (the default). Never I/O. A {@code SUITE}-scoped pre-flight check or pack
+     * capability is cached under it (phase8-contracts.md 9.3.2, decision D617, amendment A98); null is never cached
+     * for. Not a secret. A connection that wraps another forwards it.
+     */
+    default String agentSession() {
+        return null;
+    }
+
     /** Releases the connection (and any event streams it opened). Idempotent; never throws. */
     @Override
     void close();

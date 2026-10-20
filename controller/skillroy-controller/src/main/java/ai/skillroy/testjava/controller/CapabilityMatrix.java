@@ -51,8 +51,17 @@ public final class CapabilityMatrix {
     /** The prefix of {@link #source(String)} for an entry a controller-side contributor added. */
     public static final String SOURCE_CONTROLLER_PREFIX = "controller:";
 
+    /**
+     * The prefix of {@link #source(String)} for an entry the running domain pack contributed
+     * ({@code pack:<packId>}; phase8-contracts.md 9.1.4, decision D613).
+     */
+    public static final String SOURCE_PACK_PREFIX = "pack:";
+
     private final Map<String, Capability> byId;
-    /** The source of each contributed entry (phase7-contracts.md 8.5); an id not in it is the agent's. */
+    /**
+     * The source of each contributed entry (phase7-contracts.md 8.5; phase8-contracts.md 9.1.4); an id not in it is
+     * the agent's.
+     */
     private final Map<String, String> sources;
 
     /**
@@ -86,12 +95,13 @@ public final class CapabilityMatrix {
 
     /**
      * This matrix with the capabilities a controller-side module contributes (phase7-contracts.md 8.5, decision
-     * D326), each remembered with {@code source} for {@link #source(String)}; the wire shape ({@link #toJson()},
-     * {@link #hash()}) carries no source. The caller decides conflicts first: an id this matrix already holds is
-     * refused here.
+     * D326) or the running pack contributes (phase8-contracts.md 9.1.4, decision D613), each remembered with
+     * {@code source} for {@link #source(String)}; the wire shape ({@link #toJson()}, {@link #hash()}) carries no
+     * source. The caller decides conflicts first: an id this matrix already holds is refused here.
      *
      * @param contributed capabilities keyed by id; null means none
-     * @param source the source to remember, {@code controller:<contributor id>}
+     * @param source the source to remember, {@code controller:<contributor id>} ({@link #SOURCE_CONTROLLER_PREFIX})
+     *     or {@code pack:<packId>} ({@link #SOURCE_PACK_PREFIX})
      * @throws IllegalArgumentException if a key differs from its capability's id, an id is already in this matrix, or
      *     the source is blank
      */
@@ -114,8 +124,9 @@ public final class CapabilityMatrix {
     }
 
     /**
-     * Where an entry came from (phase7-contracts.md 8.5): {@link #SOURCE_AGENT}, or the source it was added with by
-     * {@link #with} ({@code controller:<contributor id>}); null for an id the matrix does not hold.
+     * Where an entry came from (phase7-contracts.md 8.5; phase8-contracts.md 9.1.4): {@link #SOURCE_AGENT}, or the
+     * source it was added with by {@link #with} ({@code controller:<contributor id>} or {@code pack:<packId>}); null
+     * for an id the matrix does not hold.
      */
     public String source(String id) {
         if (!byId.containsKey(id)) {
@@ -125,8 +136,8 @@ public final class CapabilityMatrix {
     }
 
     /**
-     * The matrix as the agent declared it: this one without the entries {@link #with} added (phase7-contracts.md
-     * 8.5); itself when nothing was contributed.
+     * The matrix as the agent declared it: this one without the entries {@link #with} added, the contributors' and the
+     * pack's (phase7-contracts.md 8.5; phase8-contracts.md 9.1.4); itself when nothing was contributed.
      */
     public CapabilityMatrix agentOnly() {
         if (sources.isEmpty()) {

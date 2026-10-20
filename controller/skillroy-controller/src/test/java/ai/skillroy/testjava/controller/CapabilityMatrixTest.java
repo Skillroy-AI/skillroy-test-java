@@ -168,4 +168,32 @@ class CapabilityMatrixTest {
         assertThrows(IllegalArgumentException.class, () -> agent.with(Map.of(), " "), "a source is needed");
         assertTrue(agent.agentOnly() == agent);
     }
+
+    /**
+     * phase8-contracts.md 9.1.4 (D613): the running pack's entries join with the source {@code pack:<packId>} after
+     * the contributors'; the wire shape carries no source; {@code agentOnly} drops them with the contributors'.
+     */
+    @Test
+    void packEntriesCarryThePackSourceAndLeaveTheWireShape() {
+        assertEquals("pack:", CapabilityMatrix.SOURCE_PACK_PREFIX);
+        CapabilityMatrix agent = matrix(new Capability("swing.tree", CapabilityState.OK, null, null));
+        CapabilityMatrix contributed = agent.with(Map.of("inference.sql", new Capability("inference.sql",
+                CapabilityState.OK, null, null)), CapabilityMatrix.SOURCE_CONTROLLER_PREFIX + "sql");
+        CapabilityMatrix merged = contributed.with(Map.of("toy.env.ready", new Capability("toy.env.ready",
+                CapabilityState.UNAVAILABLE, "no ceiling configured", null)), CapabilityMatrix.SOURCE_PACK_PREFIX
+                + "toy");
+        assertEquals("pack:toy", merged.source("toy.env.ready"));
+        assertEquals("controller:sql", merged.source("inference.sql"));
+        assertEquals(CapabilityMatrix.SOURCE_AGENT, merged.source("swing.tree"));
+        assertEquals(List.of("toy.env.ready: UNAVAILABLE (no ceiling configured)"), merged.unmet(List.of(
+                "toy.env.ready")));
+        assertFalse(merged.toJson().toString().contains("pack:"), "no source on the wire");
+        assertEquals(matrix(new Capability("swing.tree", CapabilityState.OK, null, null), new Capability(
+                "inference.sql", CapabilityState.OK, null, null), new Capability("toy.env.ready",
+                CapabilityState.UNAVAILABLE, "no ceiling configured", null)).hash(), merged.hash());
+        assertEquals(agent, merged.agentOnly());
+        assertNull(merged.agentOnly().source("toy.env.ready"));
+        assertThrows(IllegalArgumentException.class, () -> merged.with(Map.of("swing.tree", new Capability(
+                "swing.tree", CapabilityState.OK, null, null)), "pack:toy"), "an agent id the pack also declares");
+    }
 }

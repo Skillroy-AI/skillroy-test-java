@@ -26,6 +26,7 @@ import ai.skillroy.testjava.scenario.resolve.StoredTable;
 
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 /**
@@ -163,6 +164,18 @@ public abstract class DelegatingDomainPack implements DomainPack {
     @Override
     public String screenLegend() {
         return base.screenLegend();
+    }
+
+    /** The base's capabilities (phase8-contracts.md 9.1): an overlay overrides to add or replace its own. */
+    @Override
+    public List<PackCapability> capabilities() {
+        return base.capabilities();
+    }
+
+    /** The base's warning codes (phase8-contracts.md 7.3): an overlay overrides to add its own. */
+    @Override
+    public Set<String> warningCodes() {
+        return base.warningCodes();
     }
 
     @Override
