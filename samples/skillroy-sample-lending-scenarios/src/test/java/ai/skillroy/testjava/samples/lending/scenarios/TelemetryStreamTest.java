@@ -17,6 +17,7 @@
 
 package ai.skillroy.testjava.samples.lending.scenarios;
 
+import ai.skillroy.testjava.junit.OutputScan;
 import ai.skillroy.testjava.protocol.Json;
 import ai.skillroy.testjava.samples.lending.scenarios.SampleCredentials.Env;
 import org.junit.jupiter.api.Test;
@@ -80,6 +81,6 @@ class TelemetryStreamTest {
         assertEquals(1, lines.stream().map(l -> l.get("traceId")).distinct().count(), "one trace per stream");
         Set<String> secrets = new HashSet<>(SampleCredentials.staff(Env.SEED_A).values());
         secrets.add(HeadlessDesk.readerPassword());
-        assertEquals(List.of(), SecretScan.leaks(file, secrets), "no span holds a password");
+        assertEquals(List.of(), OutputScan.leaks(file, secrets), "no span holds a password");
     }
 }

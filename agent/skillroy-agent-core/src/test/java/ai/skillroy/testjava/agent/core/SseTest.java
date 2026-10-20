@@ -16,6 +16,7 @@
 
 package ai.skillroy.testjava.agent.core;
 
+import ai.skillroy.testjava.agent.core.fixture.CoreTestModule;
 import ai.skillroy.testjava.agent.core.fixture.TestState;
 import ai.skillroy.testjava.protocol.Json;
 import org.junit.jupiter.api.AfterEach;
@@ -34,6 +35,7 @@ import java.util.Map;
 
 import static ai.skillroy.testjava.agent.core.AgentHarness.map;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 
@@ -339,5 +341,32 @@ class SseTest {
             // A reset connection is also an end.
         }
         agent = null;
+    }
+
+    /**
+     * Phase 8 (phase8-contracts.md 5.1, 13.1 row 15): the stream is a subscription, so it carries the masked payload,
+     * of an event published from {@code install}'s context and of one published through {@code inv.context()}.
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    void theStreamCarriesTheMaskedPayload() throws Exception {
+        TestState.reset();
+        agent = AgentHarness.start(tmp, "coretest.eventMask", "on");
+        AgentHarness.await("target ready", 30000, () -> agent.runtime.isReady());
+        BufferedReader reader = connect("?since=0&topics=" + CoreTestModule.MASKED_TOPIC, null);
+        Message installed = nextEvent(reader);
+        agent.value("test.publish.masked", null);
+        Message invoked = nextEvent(reader);
+        for (Message m : new Message[] {installed, invoked}) {
+            assertEquals(CoreTestModule.MASKED_TOPIC, m.event);
+            assertFalse(m.data.contains(CoreTestModule.PLANTED_NAME), m.data);
+            assertFalse(m.data.contains(CoreTestModule.PLANTED_PASSWORD), m.data);
+            Map<String, Object> payload = (Map<String, Object>) Json.parseObject(m.data).get("payload");
+            assertEquals(CoreTestModule.PERSONAL, payload.get("name"));
+            assertEquals(CoreTestModule.PERSONAL, ((Map<String, Object>) payload.get("person")).get("name"));
+            assertEquals("<redacted>", payload.get("password"));
+        }
+        assertEquals("install", ((Map<?, ?>) Json.parseObject(installed.data).get("payload")).get("via"));
+        assertEquals("invocation", ((Map<?, ?>) Json.parseObject(invoked.data).get("payload")).get("via"));
     }
 }

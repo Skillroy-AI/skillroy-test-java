@@ -235,10 +235,11 @@ public final class AgentRuntime implements AutoCloseable {
                 hostLoader);
         String givenToken = options.get("token");
         this.tokenGenerated = givenToken == null || givenToken.isEmpty();
-        RingEventBus bus = new RingEventBus(Integer.parseInt(options.get("eventRing")),
-                Long.parseLong(options.get("eventRingChars")), log);
         CoreSpiRegistry spi = new CoreSpiRegistry();
         this.redactor = Redactor.withExtraKeys(options.get("redact"), spi, log);
+        // Every payload passes every registered MaskPolicy and the key rule before it is stored (P8 5.1, D539).
+        RingEventBus bus = new RingEventBus(Integer.parseInt(options.get("eventRing")),
+                Long.parseLong(options.get("eventRingChars")), log, new EventMasks(spi, redactor, log));
         CoreThreadBroker broker = new CoreThreadBroker(workers, spi, log);
         CoreCapabilityRegistry capabilities = new CoreCapabilityRegistry(log);
         this.ctx = new CoreContext(this, inst, loadMode, options, hostLoader, hostContext,

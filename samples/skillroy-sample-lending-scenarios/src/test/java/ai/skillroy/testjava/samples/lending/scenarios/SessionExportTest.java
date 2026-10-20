@@ -23,6 +23,7 @@ import ai.skillroy.testjava.inference.recorded.Recording;
 import ai.skillroy.testjava.inference.recorded.RecordingGateway;
 import ai.skillroy.testjava.inference.scripted.ScriptedGateway;
 import ai.skillroy.testjava.inference.session.Turn;
+import ai.skillroy.testjava.junit.OutputScan;
 import ai.skillroy.testjava.protocol.Json;
 import ai.skillroy.testjava.samples.lending.scenarios.SampleCredentials.Env;
 import ai.skillroy.testjava.scenario.BindOptions;
@@ -175,7 +176,7 @@ class SessionExportTest {
         for (Path file : outputs) {
             String text = Files.readString(file);
             assertFalse(text.contains(HeadlessDesk.readerPassword()), file + " holds the JDBC password");
-            assertEquals(List.of(), SecretScan.leaks(file, passwords), file + " holds a staff password as a value");
+            assertEquals(List.of(), OutputScan.leaks(file, passwords), file + " holds a staff password as a value");
         }
     }
 

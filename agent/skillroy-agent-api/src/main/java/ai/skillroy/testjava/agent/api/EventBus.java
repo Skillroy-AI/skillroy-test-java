@@ -26,13 +26,19 @@ import java.util.Map;
  * The agent's ordered event log: a bounded ring buffer with a strictly increasing sequence number, read by SSE,
  * {@code evt.query} and {@code sync.await}. Lets scenarios wait on what the application did instead of sleeping.
  *
+ * <p>Every payload is masked before it is stored (phase8-contracts.md section 5.1): each registered
+ * {@link ai.skillroy.testjava.agent.api.spi.MaskPolicy} sees each scalar as {@code event:<topic>}, and a map entry
+ * whose key {@link AgentContext#isSecretKey} calls secret is {@code <redacted>}. What every reader sees, waits and
+ * matches included, is the masked payload. Mask before you publish; the bus's pass is the backstop.
+ *
  * <p>Implementations are thread-safe; {@link #publish} may be called from any thread, including the EDT and
  * application threads, and never blocks on subscribers.
  */
 public interface EventBus {
 
     /**
-     * Publishes with the calling thread's current correlation id (set by the dispatcher), or none.
+     * Publishes with the calling thread's current correlation id (set by the dispatcher), or none. The payload is
+     * masked before it is stored (see the class comment); the call never fails because of a mask.
      *
      * @return the new event's sequence number
      */

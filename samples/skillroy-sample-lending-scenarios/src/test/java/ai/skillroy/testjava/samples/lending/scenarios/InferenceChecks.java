@@ -32,6 +32,7 @@ import ai.skillroy.testjava.inference.triage.Triage;
 import ai.skillroy.testjava.inference.triage.TriageLabel;
 import ai.skillroy.testjava.inference.triage.TriageOptions;
 import ai.skillroy.testjava.inference.triage.TriageResult;
+import ai.skillroy.testjava.junit.OutputScan;
 import ai.skillroy.testjava.junit.ScenarioSource;
 import ai.skillroy.testjava.junit.ScenarioTests;
 import ai.skillroy.testjava.protocol.Json;
@@ -725,7 +726,7 @@ abstract class InferenceChecks {
 
     /**
      * Item 8, last, over the outputs of every check above: no file they wrote holds a staff password of this seed or
-     * the desk's PIN as a value ({@link SecretScan}: strings of JSON, the JSON in labelled blocks and in escaped JSON
+     * the desk's PIN as a value ({@link OutputScan}: strings of JSON, the JSON in labelled blocks and in escaped JSON
      * text, the tokens of the rest): the journals of the sessions and of the MCP server, {@code inference.jsonl} files,
      * the exports, {@code triage.json}, {@code triage.md}, the triage's ledgers and recordings, the nightly job's
      * reports, the runs' outputs, the launcher's output. The credentials files the checks wrote themselves (for the
@@ -754,7 +755,7 @@ abstract class InferenceChecks {
                             : name.endsWith(".yaml") ? "yaml" : name.matches("[0-9a-f]{64}\\.json") ? "recording"
                             : name);
                     scanned.add(output.getFileName().toString());
-                    for (String hit : SecretScan.leaks(file, secrets)) {
+                    for (String hit : OutputScan.leaks(file, secrets)) {
                         leaks.add(file + ": " + hit);
                     }
                 }

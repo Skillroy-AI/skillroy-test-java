@@ -38,6 +38,7 @@ import ai.skillroy.testjava.inference.spi.ModelClass;
 import ai.skillroy.testjava.inference.spi.ModelRequest;
 import ai.skillroy.testjava.inference.spi.ModelResponse;
 import ai.skillroy.testjava.inference.spi.ProviderTool;
+import ai.skillroy.testjava.junit.OutputScan;
 import ai.skillroy.testjava.samples.lending.scenarios.SampleCredentials.Env;
 import ai.skillroy.testjava.scenario.BindOptions;
 import ai.skillroy.testjava.scenario.BindingsFile;
@@ -553,7 +554,7 @@ class VisionLiveIT {
     // ------------------------------------------------------------------------------------------------ last
 
     /**
-     * The secret scan ({@link SecretScan}: no staff password of seed A, not the desk's PIN) over every text file the
+     * The secret scan ({@link OutputScan}: no staff password of seed A, not the desk's PIN) over every text file the
      * items wrote, captures and archives left out by name as {@link InferenceChecks} leaves them out (bytes), and the
      * key check over every file, captures included.
      */
@@ -580,7 +581,7 @@ class VisionLiveIT {
                         continue;
                     }
                     scanned++;
-                    for (String hit : SecretScan.leaks(file, secrets)) {
+                    for (String hit : OutputScan.leaks(file, secrets)) {
                         leaks.add(file + ": " + hit);
                     }
                 }
