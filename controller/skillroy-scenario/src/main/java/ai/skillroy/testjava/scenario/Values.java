@@ -212,6 +212,34 @@ final class Values {
         return String.format("\\u%04x", (int) c);
     }
 
+    /**
+     * The kind of a value for a message that must not quote it (Phase 8 security fix S176): {@code "a string"},
+     * {@code "a number"}, {@code "true"}, {@code "false"}, {@code "null"}, {@code "a mapping"}, {@code "a list"}, else
+     * {@code "a value"}. A path that stops at a target's value, and a {@code size} or a matcher that cannot take one,
+     * names its kind only: a short numeric credential written bare would pass every mask's rule for short secrets.
+     */
+    static String kind(Object value) {
+        if (value == null) {
+            return "null";
+        }
+        if (value instanceof String) {
+            return "a string";
+        }
+        if (value instanceof Number) {
+            return "a number";
+        }
+        if (value instanceof Boolean b) {
+            return b.toString();
+        }
+        if (value instanceof Map) {
+            return "a mapping";
+        }
+        if (value instanceof List) {
+            return "a list";
+        }
+        return "a value";
+    }
+
     /** Text for messages, capped at {@code max} characters. */
     static String brief(Object value, int max) {
         String text = value instanceof String s ? "\"" + s + "\"" : safeWrite(value);

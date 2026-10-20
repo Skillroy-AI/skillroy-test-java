@@ -202,6 +202,13 @@ class EventsAndTapTest {
             assertEquals("<redacted>", console.get(1).payload().get("text"));
             assertEquals("login password=<redacted>&user=bob {\"token\":\"<redacted>\"} apiKey: <redacted>",
                     console.get(2).payload().get("text"));
+            // Phase 8 security fix S175: a JSON text inside a JSON text, an object value and a list value.
+            seq = h.ctx.events.lastSeq();
+            browser.fire(WebEvent.console("log", "{\"body\":\"{\\\"token\\\":\\\"key-only-77\\\"}\"} {\"secret\":"
+                    + " {\"v\": \"key-only-78\"}} {\"credentials\": [\"key-only-79\"]}", null, 0));
+            Event shapes = h.ctx.events.awaitTopic("web.console", seq, null, BOUND_MS);
+            assertEquals("{\"body\":\"{\\\"token\\\":\\\"<redacted>\\\"}\"} {\"secret\": \"<redacted>\"}"
+                    + " {\"credentials\": \"<redacted>\"}", shapes.payload().get("text"));
             assertFalse(h.ctx.log.all().toString().contains("hunter2"), "the fill text is never logged");
             StringBuilder big = new StringBuilder();
             for (int i = 0; i < 500; i++) {

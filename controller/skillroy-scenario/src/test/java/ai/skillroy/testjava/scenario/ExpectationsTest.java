@@ -371,12 +371,61 @@ class ExpectationsTest {
         assertEquals(List.of(1L, 2L), ExpectationPath.parse("r.object[json].inner[json].a").resolve(root).value(),
                 "two [json] segments in one path");
         String notJson = ExpectationPath.parse("r.text[json]").resolve(root).problem();
-        assertTrue(notJson.startsWith("r.text is not JSON: "), notJson);
-        assertEquals("r.number is not a string (7)", ExpectationPath.parse("r.number[json]").resolve(root).problem());
+        assertEquals("r.text is not JSON (at offset 0)", notJson, "S176: the offset, never the character");
+        assertEquals("r.number is not a string (a number)", ExpectationPath.parse("r.number[json]").resolve(root)
+                .problem(), "S176: the kind, never the value");
         assertEquals("r.long is longer than 1048576 characters", ExpectationPath.parse("r.long[json]").resolve(root)
                 .problem());
         assertTrue(ExpectationPath.parse("r.missing[json]").resolve(root).problem().contains("no field 'missing'"));
         assertTrue(ExpectationPath.parse("r[ json ]").segments().get(0) instanceof ExpectationPath.JsonText);
+    }
+
+    // ------------------------------------------------- Phase 8 security fixes S149, S154, S173, S174 (FC): outcomes
+
+    @Test
+    void aPathResolvesIsMissingIsAmbiguousIsUndecidableOrMeetsASecret() {
+        assertEquals(ExpectationPath.State.RESOLVED, resolve("loan.lines[code=CLN-9]").state());
+        assertEquals(ExpectationPath.State.MISSING, resolve("loan.lines[code=NONE].qty").state());
+        assertEquals(ExpectationPath.State.AMBIGUOUS, resolve("loan.lines[code~^YRD].qty").state(), "two is not none");
+        Map<String, Object> root = new LinkedHashMap<>();
+        root.put("big", "\"" + "x".repeat(SafeRegex.MAX_SUBJECT) + "\"");
+        root.put("deep", "[".repeat(250) + "]".repeat(250));
+        root.put("text", "qty: 2");
+        root.put("items", List.of(Map.of("note", "x".repeat(50_000))));
+        assertEquals(ExpectationPath.State.UNDECIDABLE, ExpectationPath.parse("r.big[json]").resolve(root).state());
+        ExpectationPath.Resolution deep = ExpectationPath.parse("r.deep[json]").resolve(root);
+        assertEquals(ExpectationPath.State.UNDECIDABLE, deep.state(), deep.problem());
+        assertEquals("r.deep nests deeper than 200", deep.problem());
+        assertEquals(ExpectationPath.State.MISSING, ExpectationPath.parse("r.text[json]").resolve(root).state(),
+                "a text that is not JSON is simply not there");
+        assertEquals(ExpectationPath.State.UNDECIDABLE, ExpectationPath.parse("r.items[*note~(.|\\s)*y]")
+                .resolve(root).state(), "a regex the recursion catch stops");
+        for (Object matcher : List.of(Map.of("exists", false), Map.of("not", Map.of("exists", true)),
+                Map.of("anyOf", List.of(Map.of("exists", false))), Map.of("not", Map.of("not", Map.of("exists",
+                        false))))) {
+            Matchers.Outcome undecided = Matchers.evaluate(Matchers.normalise(matcher),
+                    ExpectationPath.Resolution.undecidable("stopped"));
+            assertFalse(undecided.holds(), String.valueOf(matcher));
+            assertTrue(undecided.undecided(), String.valueOf(matcher));
+            Matchers.Outcome ambiguous = Matchers.evaluate(Matchers.normalise(matcher),
+                    resolve("loan.lines[code~^YRD]"));
+            assertFalse(ambiguous.holds(), String.valueOf(matcher));
+            assertFalse(ambiguous.undecided(), "an ambiguous path is a failure, not an error");
+        }
+        FactView view = FactView.of(ai.skillroy.testjava.data.SecretMask.of(List.of("pw-100-secret")));
+        Object viewed = view.apply(Map.of("users", List.of(Map.of("code", "pw-100-secret", "name", "a"),
+                Map.of("code", "u-2", "name", "b")), "body", "{\"user\":\"desk\",\"password\":\"open-77\"}"));
+        ExpectationPath.Resolution secret = ExpectationPath.parse("s.users[code~^pw].name").resolveViewed(viewed,
+                view);
+        assertEquals(ExpectationPath.State.SECRET, secret.state());
+        assertEquals(ExpectationPath.State.SECRET, ExpectationPath.parse("s.users[*code=u-2]").resolveViewed(viewed,
+                view).state(), "any element's field holding the marker, whatever the filter compares");
+        assertTrue(Matchers.evaluate(Map.of("exists", false), secret).reason().startsWith(Matchers.HOLDS_A_SECRET));
+        assertEquals("<redacted>", ExpectationPath.parse("s.body[json].password").resolveViewed(viewed, view).value(),
+                "S174: the parsed value meets the key rule");
+        assertEquals("desk", ExpectationPath.parse("s.body[json].user").resolveViewed(viewed, view).value());
+        assertTrue(FactView.holdsMarker(List.of(Map.of("a", "x <redacted> y"))));
+        assertFalse(FactView.holdsMarker(List.of(Map.of("a", "x"), 3L, true)));
     }
 
     // ------------------------------------------------------------------------------- size on a filtered list (8.3)

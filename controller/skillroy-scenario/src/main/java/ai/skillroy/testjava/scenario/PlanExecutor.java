@@ -520,8 +520,16 @@ public final class PlanExecutor {
         void run(List<String> stepSkipped) throws Abort, AgentLostException, InterruptedException;
     }
 
-    /** The outcome of one attempt at one expectation. */
-    private record Attempt(boolean holds, boolean resolved, Object actual, String reason, String fetchError) {
+    /**
+     * The outcome of one attempt at one expectation; {@code undecided} when a bound stopped it (Phase 8 security fix
+     * S149): it never holds, and at the step's timeout it ends {@code ERROR / ENVIRONMENT}.
+     */
+    private record Attempt(boolean holds, boolean resolved, Object actual, String reason, String fetchError,
+                           boolean undecided) {
+
+        Attempt(boolean holds, boolean resolved, Object actual, String reason, String fetchError) {
+            this(holds, resolved, actual, reason, fetchError, false);
+        }
     }
 
     /** The state of one run. */
@@ -1773,7 +1781,7 @@ public final class PlanExecutor {
                     cache.put(root, fact);
                 }
                 return fact;
-            }, this::secret);
+            }, options.expectationsOnMaskedValues() ? () -> FactView.of(mask) : null);
             runner.bindings = runner.bindings.withCaptured(step.facts().slot(), value);
             log.write("capture", RunLog.fields("step", step.id(), "slot", step.facts().slot(), "value", value,
                     "source", "facts"));
@@ -2068,6 +2076,12 @@ public final class PlanExecutor {
                 }
                 detail.putAll(RunLog.fields("reason", attempt.reason(), "attempts", attempts, "timeoutMs",
                         stepTimeoutMs, "failures", failures));
+                if (attempt.undecided()) {
+                    // Phase 8 security fix S149: a bound stopped the check; it is not a failure of the rows.
+                    throw new Abort(Status.ERROR, FailureKind.ENVIRONMENT, stepId, "db check could not be decided:"
+                            + " db." + row.source().table() + " " + Values.safeWrite(row.params()) + ": "
+                            + attempt.reason(), detail);
+                }
                 throw new Abort(Status.FAIL, FailureKind.ASSERTION, stepId, "db check failed: db."
                         + row.source().table() + " " + Values.safeWrite(row.params()) + ": " + attempt.reason(),
                         detail);
@@ -2082,8 +2096,17 @@ public final class PlanExecutor {
                 throw new Abort(Status.ERROR, FailureKind.ENVIRONMENT, stepId, "fact '" + bound.path().root()
                         + "' could not be read: " + attempt.fetchError(), detail);
             }
+            if (attempt.undecided()) {
+                // Phase 8 security fix S149: a regex or a [json] a bound stopped decides nothing, under a negation
+                // too; as the events root's loss (D602), the expectation is an error, not a pass or a failure.
+                throw new Abort(Status.ERROR, FailureKind.ENVIRONMENT, stepId, "expectation could not be decided: "
+                        + bound.path().text() + " " + Values.brief(bound.matcher(), Matchers.MAX_QUOTED_MATCHER)
+                        + ": " + attempt.reason(), detail);
+            }
+            // S150: the matcher quoted cut; a substituted operand may hold a captured list.
             throw new Abort(Status.FAIL, FailureKind.ASSERTION, stepId, "expectation failed: " + bound.path().text()
-                    + " " + Values.safeWrite(bound.matcher()) + ": " + attempt.reason(), detail);
+                    + " " + Values.brief(bound.matcher(), Matchers.MAX_QUOTED_MATCHER) + ": " + attempt.reason(),
+                    detail);
         }
 
         private String skippedText(Check check) {
@@ -2235,7 +2258,7 @@ public final class PlanExecutor {
                     ? new Matchers.Outcome(false, Matchers.HOLDS_A_SECRET)
                     : Matchers.evaluate(row.rows(), true, (long) result.rowCount(), null);
             if (!count.holds()) {
-                return new Attempt(false, true, found, "row count: " + count.reason(), null);
+                return new Attempt(false, true, found, "row count: " + count.reason(), null, count.undecided());
             }
             for (int r = 0; r < result.rowCount(); r++) {
                 for (Map.Entry<String, Object> e : row.expect().entrySet()) {
@@ -2259,12 +2282,13 @@ public final class PlanExecutor {
                         found.put("row", first);
                         found.put("column", e.getKey());
                         return new Attempt(false, true, found, "row " + (r + 1) + " column " + e.getKey() + ": "
-                                + outcome.reason(), null);
+                                + outcome.reason(), null, outcome.undecided());
                     }
                 }
             }
             Map<String, Object> failedAggregates = new LinkedHashMap<>();
             String firstReason = null;
+            boolean undecided = false;
             for (Map.Entry<String, Object> e : row.aggregates().entrySet()) {
                 RowCheck.Aggregate aggregate = RowCheck.Aggregate.parse(e.getKey());
                 int index = -1;
@@ -2293,6 +2317,7 @@ public final class PlanExecutor {
                         : Matchers.evaluate(e.getValue(), true, value, null);
                 if (!outcome.holds()) {
                     failedAggregates.put(e.getKey(), RunLog.fields("expected", e.getValue(), "actual", value));
+                    undecided |= outcome.undecided();
                     if (firstReason == null) {
                         firstReason = e.getKey() + ": " + outcome.reason();
                     }
@@ -2300,7 +2325,7 @@ public final class PlanExecutor {
             }
             if (!failedAggregates.isEmpty()) {
                 found.put("aggregates", failedAggregates);
-                return new Attempt(false, true, found, "aggregate " + firstReason, null);
+                return new Attempt(false, true, found, "aggregate " + firstReason, null, undecided);
             }
             return new Attempt(true, true, found, null, null);
         }
@@ -2318,15 +2343,37 @@ public final class PlanExecutor {
                 return new Attempt(false, false, null, "fact '" + root + "' could not be read: " + fact[1],
                         (String) fact[1]);
             }
-            ExpectationPath.Resolution resolution = bound.path().resolve(fact[0]);
-            Object secret = resolution.resolved() ? secret(resolution.value()) : null;
-            if (secret != null) {
-                return new Attempt(false, true, secret, Matchers.HOLDS_A_SECRET, null);
+            ExpectationPath.Resolution resolution;
+            if (options.expectationsOnMaskedValues()) {
+                // Phase 8 security fix S173: on the fact's view, one per root and attempt; a value that holds the
+                // view's marker holds a secret, as a value the mask changes did (phase5-contracts.md 12.2).
+                Object[] viewed = cache.get(VIEW_PREFIX + root);
+                if (viewed == null) {
+                    try {
+                        viewed = new Object[] {FactView.of(mask).apply(fact[0])};
+                    } catch (IllegalArgumentException e) {
+                        viewed = new Object[] {null, e.getMessage()};
+                    }
+                    cache.put(VIEW_PREFIX + root, viewed);
+                }
+                if (viewed.length == 2) {
+                    return new Attempt(false, false, null, "fact '" + root + "' could not be read: " + viewed[1],
+                            (String) viewed[1]);
+                }
+                resolution = bound.path().resolveViewed(viewed[0], FactView.of(mask));
+                if (resolution.resolved() && FactView.holdsMarker(resolution.value())) {
+                    return new Attempt(false, true, resolution.value(), Matchers.HOLDS_A_SECRET, null);
+                }
+            } else {
+                resolution = bound.path().resolve(fact[0]);
             }
-            Matchers.Outcome outcome = Matchers.evaluate(bound.matcher(), resolution.resolved(), resolution.value(),
-                    resolution.problem());
-            return new Attempt(outcome.holds(), resolution.resolved(), resolution.value(), outcome.reason(), null);
+            Matchers.Outcome outcome = Matchers.evaluate(bound.matcher(), resolution);
+            return new Attempt(outcome.holds(), resolution.resolved(), resolution.value(), outcome.reason(), null,
+                    outcome.undecided());
         }
+
+        /** The attempt cache's key of a root's view (never a root name: a name starts with a letter or {@code _}). */
+        private static final String VIEW_PREFIX = "#view:";
 
         /**
          * With {@link RunOptions#expectationsOnMaskedValues()}, a value the run's mask changes holds a secret and

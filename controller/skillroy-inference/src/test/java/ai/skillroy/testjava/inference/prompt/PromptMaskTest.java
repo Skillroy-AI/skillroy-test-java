@@ -95,6 +95,25 @@ class PromptMaskTest {
         assertThrows(java.util.regex.PatternSyntaxException.class, () -> mask.withKeys(List.of("(")));
     }
 
+    /**
+     * Phase 8 security fix S175 (FC): the text key rule also hides a JSON text inside a JSON text (escaped quotes), an
+     * object value and a list value, each whole; a value the run does not know (the key alone names it) never shows,
+     * in a text and in a whole value read through {@link PromptMask#jsonLike}.
+     */
+    @Test
+    void byKeyInEscapedJsonAndInObjectAndListValues() {
+        String unknown = "not-known-to-the-run";
+        String escaped = "{\"body\":\"{\\\"user\\\":\\\"desk\\\",\\\"token\\\":\\\"" + unknown + "\\\"}\"}";
+        assertEquals("{\"body\":\"{\\\"user\\\":\\\"desk\\\",\\\"token\\\":\\\"<redacted>\\\"}\"}",
+                mask.text(escaped));
+        assertEquals("{\"token\": \"<redacted>\", \"user\": \"desk\"}",
+                mask.text("{\"token\": {\"value\": \"" + unknown + "\"}, \"user\": \"desk\"}"));
+        assertEquals("{\"credentials\": \"<redacted>\"}", mask.text("{\"credentials\": [\"" + unknown + "\"]}"));
+        Object whole = mask.jsonLike(Map.of("topic", "web.tap", "payload", Map.of("detail", escaped)));
+        assertFalse(Json.write(whole).contains(unknown), Json.write(whole));
+        assertEquals("login password=<redacted> ok", mask.text("login password=hunter-two ok"), "unchanged");
+    }
+
     @Test
     void byColumnOnlyTheAllowListedOnesAndPersonalValuesHidden() {
         RowMask upper = (source, column, v) -> column.equalsIgnoreCase("title") && v instanceof String s

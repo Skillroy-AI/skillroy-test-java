@@ -272,6 +272,21 @@ final class RunLog implements AutoCloseable {
         return copy;
     }
 
+    /** A value as a record keeps it: cut by {@link #cut}, and whether anything was cut. */
+    record Cut(Object value, boolean truncated) {
+    }
+
+    /**
+     * The value with every list cut to {@value #MAX_ACTUAL_ELEMENTS} elements at any depth, as {@link #cutActual} cuts
+     * an {@code actual} (D608); the rule of every record that keeps a fact's value: a session's {@code check} and
+     * {@code observe} entries and a session {@code expect} step's detail (Phase 8 security fix S150).
+     */
+    static Cut cut(Object value) {
+        boolean[] cut = {false};
+        Object kept = cutLists(value, 0, cut);
+        return cut[0] ? new Cut(kept, true) : new Cut(value, false);
+    }
+
     /** A copy with every list longer than the bound cut to its first elements; maps and lists copied as needed. */
     private static Object cutLists(Object value, int depth, boolean[] cut) {
         if (depth > MAX_DEPTH) {

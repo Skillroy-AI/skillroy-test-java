@@ -538,18 +538,24 @@ public final class StepJournal {
      *
      * @param path the path
      * @param matcher the matcher as given
-     * @param actual the value found, masked
+     * @param actual the value found, masked, cut to 200 elements per list (Phase 8 security fix S150, D608's rule)
      * @param held whether it held
      * @param reason why not, or null
+     * @param actualTruncated true when {@code actual} was cut (written as {@code actualTruncated: true} after it)
      */
-    public record CheckEntry(String path, Object matcher, Object actual, boolean held, String reason)
-            implements Entry {
+    public record CheckEntry(String path, Object matcher, Object actual, boolean held, String reason,
+                             boolean actualTruncated) implements Entry {
 
         /** Freezes. */
         public CheckEntry {
             Objects.requireNonNull(path, "path");
             matcher = Plan.freeze(matcher);
             actual = Plan.freeze(actual);
+        }
+
+        /** An entry whose {@code actual} is whole. */
+        public CheckEntry(String path, Object matcher, Object actual, boolean held, String reason) {
+            this(path, matcher, actual, held, reason, false);
         }
 
         @Override
@@ -559,13 +565,19 @@ public final class StepJournal {
 
         @Override
         public Map<String, Object> toJson() {
-            return RunLog.fields("type", type(), "path", path, "matcher", matcher, "actual", actual, "held", held,
-                    "reason", reason);
+            Map<String, Object> json = RunLog.fields("type", type(), "path", path, "matcher", matcher, "actual",
+                    actual);
+            if (actualTruncated) {
+                json.put("actualTruncated", true);
+            }
+            json.putAll(RunLog.fields("held", held, "reason", reason));
+            return json;
         }
 
         static CheckEntry fromJson(Map<String, Object> json) {
             return new CheckEntry(text(json, "path"), json.get("matcher"), json.get("actual"),
-                    Boolean.TRUE.equals(json.get("held")), text(json, "reason"));
+                    Boolean.TRUE.equals(json.get("held")), text(json, "reason"),
+                    Boolean.TRUE.equals(json.get("actualTruncated")));
         }
     }
 
@@ -573,14 +585,21 @@ public final class StepJournal {
      * {@code observe}: the value at a path, for an expectation the export marks as observed.
      *
      * @param path the path
-     * @param value the value, masked
+     * @param value the value, masked, cut to 200 elements per list (Phase 8 security fix S150, D608's rule)
+     * @param valueTruncated true when {@code value} was cut (written as {@code valueTruncated: true}); an export never
+     *     writes a cut value as a literal
      */
-    public record ObserveEntry(String path, Object value) implements Entry {
+    public record ObserveEntry(String path, Object value, boolean valueTruncated) implements Entry {
 
         /** Freezes. */
         public ObserveEntry {
             Objects.requireNonNull(path, "path");
             value = Plan.freeze(value);
+        }
+
+        /** An entry whose value is whole. */
+        public ObserveEntry(String path, Object value) {
+            this(path, value, false);
         }
 
         @Override
@@ -590,11 +609,16 @@ public final class StepJournal {
 
         @Override
         public Map<String, Object> toJson() {
-            return RunLog.fields("type", type(), "path", path, "value", value);
+            Map<String, Object> json = RunLog.fields("type", type(), "path", path, "value", value);
+            if (valueTruncated) {
+                json.put("valueTruncated", true);
+            }
+            return json;
         }
 
         static ObserveEntry fromJson(Map<String, Object> json) {
-            return new ObserveEntry(text(json, "path"), json.get("value"));
+            return new ObserveEntry(text(json, "path"), json.get("value"),
+                    Boolean.TRUE.equals(json.get("valueTruncated")));
         }
     }
 

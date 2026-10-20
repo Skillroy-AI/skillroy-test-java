@@ -257,6 +257,12 @@ final class JournalExport {
                                 + " the journal; it is not exported");
                         continue;
                     }
+                    if (o.valueTruncated()) {
+                        // Phase 8 security fix S150: a value the journal cut is not the value; no literal of it.
+                        notes.add("the value observed at " + o.path() + " after step " + stepNumber + " was cut in"
+                                + " the journal (more than 200 elements in a list); it is not exported");
+                        continue;
+                    }
                     Object matcher = observedMatcher(o.value());
                     expect(new Expect(o.path(), matcher, "observed in session " + start.id() + " at step "
                             + stepNumber + ", not derived", "s" + stepNumber));

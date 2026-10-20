@@ -21,6 +21,7 @@ import ai.skillroy.testjava.agent.api.Invocation;
 import ai.skillroy.testjava.agent.api.SpiRegistry;
 import ai.skillroy.testjava.agent.api.spi.RedactionKeys;
 import ai.skillroy.testjava.protocol.SecretKeys;
+import ai.skillroy.testjava.protocol.text.SecretPairs;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
@@ -32,7 +33,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
 
@@ -49,7 +49,8 @@ import java.util.regex.PatternSyntaxException;
  *       not); the whole text equal to a value becomes {@code <redacted>}.</li>
  *   <li><b>By key.</b> In {@code key=value}, {@code key: value} and {@code "key": "value"} pairs whose key is secret
  *       ({@link SecretKeys#looksSecret}, the {@code redact} option's pattern, and every registered
- *       {@link RedactionKeys}), the value is replaced by {@code <redacted>}.</li>
+ *       {@link RedactionKeys}), the value is replaced by {@code <redacted>}: a quoted value, an object or a list
+ *       whole, also in a JSON text inside a JSON text ({@link SecretPairs}, Phase 8 security fix S175).</li>
  * </ul>
  * Limits: a value is only known while it is remembered, so a page that logs a secret more than a minute after the
  * call that filled it is masked by key only (and by the controller's mask in {@code run.jsonl}); a secret split
@@ -65,13 +66,6 @@ final class Secrets {
     static final int MAX_VALUES = 256;
     /** The shortest value replaced wherever it occurs inside a longer text (the core's rule). */
     static final int MIN_SUBSTRING = 8;
-
-    /**
-     * A key and its value: {@code key=value}, {@code key: value}, {@code "key": "value"}. Group 1 the key (optionally
-     * quoted), 2 the separator, 3 the value (quoted, or up to white space, ',', ';', '&amp;' or a quote).
-     */
-    private static final Pattern PAIR = Pattern.compile("([\"']?[A-Za-z0-9_.\\-]+[\"']?)(\\s*[=:]\\s*)"
-            + "(\"(?:[^\"\\\\]|\\\\.)*\"|'(?:[^'\\\\]|\\\\.)*'|[^\\s,;&\"']+)");
 
     private final Map<String, Long> values = new LinkedHashMap<String, Long>();
     private final SpiRegistry spi;
@@ -233,41 +227,21 @@ final class Secrets {
         return sb.append(text, copied, text.length()).toString();
     }
 
+    /**
+     * The key rule: the shared rule of {@link SecretPairs} with this module's keys ({@link #isSecretKey}). Phase 8
+     * security fix S175 (FC; a hunk of the web area's file): a JSON text inside a JSON text (escaped quotes) and an
+     * object or a list value are hidden too.
+     */
     private String byKey(String text) {
         if (text.indexOf('=') < 0 && text.indexOf(':') < 0) {
             return text;
         }
-        Matcher m = PAIR.matcher(text);
-        StringBuffer sb = null;
-        while (m.find()) {
-            String key = unquote(m.group(1));
-            if (!isSecretKey(key)) {
-                continue;
+        return SecretPairs.redact(text, new SecretPairs.KeyTest() {
+            @Override
+            public boolean secret(String key) {
+                return isSecretKey(key);
             }
-            if (sb == null) {
-                sb = new StringBuffer(text.length());
-            }
-            String value = m.group(3);
-            String hidden = value.startsWith("\"") ? "\"" + SecretKeys.REDACTED + "\""
-                    : value.startsWith("'") ? "'" + SecretKeys.REDACTED + "'" : SecretKeys.REDACTED;
-            m.appendReplacement(sb, Matcher.quoteReplacement(m.group(1) + m.group(2) + hidden));
-        }
-        if (sb == null) {
-            return text;
-        }
-        m.appendTail(sb);
-        return sb.toString();
-    }
-
-    private static String unquote(String key) {
-        String k = key;
-        if (k.startsWith("\"") || k.startsWith("'")) {
-            k = k.substring(1);
-        }
-        if (k.endsWith("\"") || k.endsWith("'")) {
-            k = k.substring(0, k.length() - 1);
-        }
-        return k;
+        });
     }
 
     /** The key rule of the core's redactor: the default keys, the {@code redact} option, the registered keys. */

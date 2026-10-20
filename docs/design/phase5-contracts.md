@@ -978,6 +978,13 @@ Rules.
   P2 §4) is replaced wherever it appears in a text or a value, as `SecretMask` does for run outputs.
 - *By key.* Any JSON-like key that `SecretKeys.looksSecret` matches, or that a module's redaction keys match, has its
   value replaced; the same for `key: value` and `key=value` runs inside text (the shapes the agent's redaction covers).
+  *(Phase 8 security fix, S175, FC.)* Inside a text the rule is the shared `SecretPairs` of `skillroy-protocol` (the
+  agent's `web.console` rule uses the same): a key quoted with an escaped quote (`\"token\":`, a JSON text inside a
+  JSON text, one to three levels deep) is a key, a quoted value ends where its own level's quote closes it, and an
+  object or a list value is replaced whole, to its matching bracket; the value of a double-quoted key becomes a quoted
+  `"<redacted>"` of the key's quote form, so that a JSON text stays JSON; a value that is the marker already is kept as it
+  is (the rule is idempotent, on what its earlier form wrote too). Text that held an object value under a secret key
+  now reads `credential: <redacted>` where it read `credential: <redacted> staff, key: code}`.
 - *By column.* A row that goes into a prompt (a sample in the catalogue, a row sample in a triage request, a `db`
   fact in a session) keeps only allow-listed columns of its source, with `personal` columns replaced by `<personal>`
   and the pack's `RowMask` applied first. A source with no allow-list contributes no row to any prompt.
@@ -1903,8 +1910,17 @@ credential character by character). A plan run judges its expectations (`expect`
 checks (row count, columns, aggregates) by the same rule when its `RunOptions` say
 `withExpectationsOnMaskedValues(true)`, so that a run's PASS or FAIL answers no question about a secret either; the
 default is false (a scenario a person committed is evaluated on the values as read), and the hosts that run a plan a
-model or a client wrote (the MCP server's `skillroy_scenario_run`, `author --run`) set it. *(Phase 8, built 2026-10-19,
-EX; P8 §8.7, D605.)* The rule extends to captured facts: under `withExpectationsOnMaskedValues(true)` a value a
+model or a client wrote (the MCP server's `skillroy_scenario_run`, `author --run`) set it. *(Phase 8 security fixes,
+S173, S174, S153, FC; P8 §8.3, §8.5.)* Where this rule applies (a session's `check`, `expect` step, `observe`, `fact`
+and `captureFacts`; a run under `withExpectationsOnMaskedValues(true)`) a path is resolved **on the fact as the mask
+leaves it**: the fact's JSON form through the session's or the run's `SecretMask` and then the model-facing key rule
+(a secret-named map key's value and a secret-keyed pair inside a text become `<redacted>`), uncut, and every value
+`[json]` parses goes through it again, so that no filter, regex, index, `[json]` or `size` ever reads a value the mask
+changes: a filter whose field holds `<redacted>` on any element compares nothing ("the value holds a secret"), and a
+value that holds `<redacted>` anywhere is a secret (the marker counts as one). The answer, the reason and the time of a
+check are then the same for a right guess at a secret and a wrong one. A session's check normalises its matcher before
+it substitutes `$slot` values, as the compiler and a run do, so a captured map shaped like a matcher stays a value.
+*(Phase 8, built 2026-10-19, EX; P8 §8.7, D605.)* The rule extends to captured facts: under `withExpectationsOnMaskedValues(true)` a value a
 `captureFacts` step captures that the run's mask changes fails the step `FAIL / ASSERTION` ("captureFacts slot.field:
 the value holds a secret …"), so that a captured secret never becomes a matcher operand or a call argument; a session's
 `captureFacts` runs under the session's mask always. `readOnly` refuses any

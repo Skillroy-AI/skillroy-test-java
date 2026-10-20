@@ -198,7 +198,13 @@ event payload a model can read through `skillroy_check`, `fact`, `events/recent`
 publish by the registered policies, from each policy's registration on, and by the secret-key rule from the bus's
 construction (P8 §5.1), and a captured fact the mask changes fails a model- or client-written step before it can become
 an operand or
-an argument (P8 §8.7). A model never sets a step modifier (`accept`, `minRung`): sessions refuse raw calls that carry
+an argument (P8 §8.7). *(Phase 8 security fixes, S173, S174, S176, S177, FC.)* A model's or a client's check, read or
+capture follows its path on the fact **as the mask leaves it** (the session's or the run's secret values, then the
+model-facing key rule, uncut, applied again to every value `[json]` parses), so that a filter, a regex, an index, a
+`[json]` or a `size` never reads a secret: a filter over a field holding `<redacted>` compares nothing, a value holding
+the marker is a secret, and the answer, its reason and its time are the same for a right guess at a credential and a
+wrong one; a path's or a size's reason names a value's kind and never the value, so a short numeric credential is not
+written bare. A model never sets a step modifier (`accept`, `minRung`): sessions refuse raw calls that carry
 one (P8 §7.3); and `on_prompt.unexpected` takes `fail` or `pack` only, so a model-written scenario can no longer select
 the pack's policy under a misleading name (P8 §9.2). A warning's text and a composite's `answered` list reach a model
 masked, with a parameter's name and never its value (P8 §7.1, §7.5).
@@ -349,5 +355,5 @@ What Phase 8 adds to the judgement above, each with its mechanism and where the 
 | the view-less browser | a browser the agent has no component for could never be named by a `CaptureMask` and was served unmasked | masked while any mask is registered; `BrowserMask` to name or release by tag or vendor object; page data withheld from its events, its selections and the answers of the actions that stay allowed on it | §5.2, §11 rule 4 |
 | hook ownership and the class deny | a package shared with a third-party jar cannot say "our classes only", and a class the pack knows must never be touched cannot be refused by name | `target.codeSource` on the code-source name read from the location's fields only; a deny by name from three sources before anything reads the class, add-only, echoed by the agent, honoured by Byteman before it loads | §6, §11 rule 6 |
 | results that carry a caveat, an acknowledgement, a branch or a rung | a module's result is trusted code's output; the executor checks it for consistency and never trusts it with a secret | the warning channel in the envelope, `inputId` correlation, `CompositeResult` reconciliation, the secret-echo check, the ladder's `minRung` refusal and echo | §7, §11 rules 7, 8 |
-| more target content under the controller's parsers | counts and events are evidence a verdict rests on, so a read that cannot be exact must refuse | bounded filters, matchers and `[json]`; the `events` root failing on loss; `actual` cut | §8, §11 rule 9 |
+| more target content under the controller's parsers | counts and events are evidence a verdict rests on, so a read that cannot be exact must refuse | bounded filters, matchers and `[json]`; the `events` root failing on loss; `actual` cut; *(Phase 8 security fixes, FC)* a regex or a `[json]` a bound stops decides nothing (`ERROR`, never a pass under a negation, S149), an event cut at publish fails the read (S151), a single filter matching twice holds no `exists` form (S154), a slot at most 64 KiB of JSON and a session's journal cut as `run.jsonl` is (S150), and where the masked-value rule applies the path is followed on the masked fact, the marker counting as a secret (S173, S174) | §8, §11 rule 9 |
 | pack capabilities in `replay` | an environment fact only the pack knows must guard CI too, without a model | pack code at run start reading through the guarded channel with no gateway in its context; honoured in `replay`; the ledger check unchanged (built 2026-10-19, EP: `PackCapabilities`, every host; an evaluation's error text masked before it is cut at 500 characters, so a cut never splits a known secret; the `SuiteCache` in memory per host, keyed by the verified `/ping` session, a connection without one never cached for) | §9.1, §9.3, §11 rule 10 |

@@ -728,7 +728,9 @@ an extension of A34) are remembered from the call's start until 60 s after its b
 remembered value of eight or more characters is replaced wherever it occurs, a shorter one where it stands as a token
 of its own (the core's rule), and a text equal to a value becomes `<redacted>`. *By key:* in `key=value`,
 `key: value` and `"key": "value"` pairs whose key looks secret (`SecretKeys.looksSecret`, the `redact` option's
-pattern, every registered `RedactionKeys`) the value is replaced. Limits: a secret logged more than about a minute
+pattern, every registered `RedactionKeys`) the value is replaced (*Phase 8 security fix, S175, FC*: through the shared
+`SecretPairs` rule of `skillroy-protocol`, so a JSON text inside a JSON text, with escaped quotes, and an object or a
+list value are hidden too, the value whole). Limits: a secret logged more than about a minute
 after its call is masked by key only (and by the controller's mask in `run.jsonl`); a secret split across messages or
 transformed by the page is not recognised.
 

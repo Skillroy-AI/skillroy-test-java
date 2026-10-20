@@ -2717,7 +2717,10 @@ unresolved path only an `exists`/`not` form inside can hold) and `{containsWhere
 fields; some element of a list is a map on which every field's matcher holds, a field it lacks evaluated as
 unresolved); `containsWhere` is refused in a stored-row check (a cell is a scalar). Every `matches` of one top-level
 evaluation, nested ones included, shares one budget: S24's "one budget per matcher evaluation" now holds literally,
-and a later `matches` of a spent evaluation fails at once ("regex budget spent").
+and a later `matches` of a spent evaluation fails at once ("regex budget spent"). *(Phase 8 security fixes, S154,
+S176, FC.)* A single filter that matches several elements makes the path ambiguous, on which no matcher holds,
+`{exists: false}` included ("zero" stays "does not resolve"; count "none" with the list form and `{size: 0}`); a path's
+reason names the kind of the value it stopped at (`a number`, `a string`, …), never the value.
 
 Numeric equality: numbers compare as decimals, and a number equals a string holding the same decimal value, so
 `2 == "2.00"`. A string with a superfluous leading zero is text, not a number: `"0100"` never equals `"100"`, so
@@ -2732,7 +2735,10 @@ checked every 1024 character reads: one budget per matcher evaluation, and one p
 elements of a filtered list. A regex that runs longer, or that recurses too deeply (a `StackOverflowError`, reported
 as "the regex recurses too deeply…"), is stopped, and a subject over 1 Mi characters is rejected, never truncated;
 the expectation then does not hold and its message says why. It is retried like any other, so the step ends at its
-timeout as an ordinary `FAIL` / `ASSERTION`. **The same bound applies to the web module's `by.url` and `by.title`
+timeout as an ordinary `FAIL` / `ASSERTION`. *(Phase 8 security fix, S149, FC; P8 §8.3, §8.4: a stop is no longer a
+failed outcome, which `not` and `exists: false` turned into a hold.)* A regex the bound stops, and a `[json]` text over
+1 Mi characters or nested deeper than 200, is **undecided**: no matcher holds on it, under any number of `not`s, and
+the step ends at its timeout as `ERROR` / `ENVIRONMENT` "expectation could not be decided: …". **The same bound applies to the web module's `by.url` and `by.title`
 and to the CDP path's selection (Phase 6 security fix S46, A48, built 2026-10-09, SR)**: one budget of 1000 ms per
 selection (never more than the call has left), checked every 1024 character reads, a `StackOverflowError` caught, a
 subject over 1 Mi characters refused before the search, through the shared Java 8 class
