@@ -57,10 +57,16 @@ import java.util.regex.Pattern;
  *     observer travels here, as a run's does on {@code RunOptions}, decision D162 of the build); null means
  *     {@link RunObserver#NONE}. The session wraps it ({@code RunObservers.safe}) and never closes it. The twelfth
  *     component, after {@code hooks}
+ * @param suite the host's cache of {@code SUITE}-scoped pre-flight answers and pack capabilities
+ *     (phase8-contracts.md 9.3, decisions D616, D618), read by {@link ExecutorSession#open} for its pre-flight and its
+ *     pack capabilities; null (the default) means none. The cache is its owner's (the MCP server keeps one per server
+ *     and sets it here before {@code open}); the session never clears it. The fifteenth component, after
+ *     {@code host}
  */
 public record SessionOptions(Path outputDir, Duration stepTimeout, Clock clock, BindOptions bind, boolean readOnly,
                              boolean recoverOnClose, WebSettings web, UiSettings ui, ClassLoader webPathLoader,
-                             String id, HooksMode hooks, RunObserver observer, boolean robot, Set<String> host) {
+                             String id, HooksMode hooks, RunObserver observer, boolean robot, Set<String> host,
+                             SuiteCache suite) {
 
     /** The step timeout when none is given. */
     public static final Duration DEFAULT_STEP_TIMEOUT = Duration.ofSeconds(10);
@@ -91,6 +97,18 @@ public record SessionOptions(Path outputDir, Duration stepTimeout, Clock clock, 
     }
 
     /**
+     * Options without a suite cache (the Phase 7 shape): every {@code SUITE} item runs at every open.
+     *
+     * @throws IllegalArgumentException as the canonical constructor
+     */
+    public SessionOptions(Path outputDir, Duration stepTimeout, Clock clock, BindOptions bind, boolean readOnly,
+                          boolean recoverOnClose, WebSettings web, UiSettings ui, ClassLoader webPathLoader,
+                          String id, HooksMode hooks, RunObserver observer, boolean robot, Set<String> host) {
+        this(outputDir, stepTimeout, clock, bind, readOnly, recoverOnClose, web, ui, webPathLoader, id, hooks,
+                observer, robot, host, null);
+    }
+
+    /**
      * Options without the robot opt-in and without host features (the Phase 6 shape).
      *
      * @throws IllegalArgumentException as the canonical constructor
@@ -117,73 +135,73 @@ public record SessionOptions(Path outputDir, Duration stepTimeout, Clock clock, 
     /** Options writing the journal into {@code outputDir}, with every other component's default. */
     public static SessionOptions defaults(Path outputDir) {
         return new SessionOptions(outputDir, null, null, null, false, false, null, null, null, null, HooksMode.AUTO,
-                RunObserver.NONE, false, Set.of());
+                RunObserver.NONE, false, Set.of(), null);
     }
 
     /** A copy with another step timeout (null: 10 s). */
     public SessionOptions withStepTimeout(Duration timeout) {
         return new SessionOptions(outputDir, timeout, clock, bind, readOnly, recoverOnClose, web, ui, webPathLoader,
-                id, hooks, observer, robot, host);
+                id, hooks, observer, robot, host, suite);
     }
 
     /** A copy with another clock. */
     public SessionOptions withClock(Clock newClock) {
         return new SessionOptions(outputDir, stepTimeout, newClock, bind, readOnly, recoverOnClose, web, ui,
-                webPathLoader, id, hooks, observer, robot, host);
+                webPathLoader, id, hooks, observer, robot, host, suite);
     }
 
     /** A copy with other bind options (put in {@code live} mode). */
     public SessionOptions withBind(BindOptions newBind) {
         return new SessionOptions(outputDir, stepTimeout, clock, newBind, readOnly, recoverOnClose, web, ui,
-                webPathLoader, id, hooks, observer, robot, host);
+                webPathLoader, id, hooks, observer, robot, host, suite);
     }
 
     /** A copy that is or is not read-only. */
     public SessionOptions withReadOnly(boolean on) {
         return new SessionOptions(outputDir, stepTimeout, clock, bind, on, recoverOnClose, web, ui, webPathLoader,
-                id, hooks, observer, robot, host);
+                id, hooks, observer, robot, host, suite);
     }
 
     /** A copy that does or does not recover when it closes after a mutating call. */
     public SessionOptions withRecoverOnClose(boolean on) {
         return new SessionOptions(outputDir, stepTimeout, clock, bind, readOnly, on, web, ui, webPathLoader, id, hooks,
-                observer, robot, host);
+                observer, robot, host, suite);
     }
 
     /** A copy with other web settings (null: the default, and no {@code web} key in an export). */
     public SessionOptions withWeb(WebSettings settings) {
         return new SessionOptions(outputDir, stepTimeout, clock, bind, readOnly, recoverOnClose, settings, ui,
-                webPathLoader, id, hooks, observer, robot, host);
+                webPathLoader, id, hooks, observer, robot, host, suite);
     }
 
     /** A copy with other UI settings (null: the default, and no {@code ui} key in an export). */
     public SessionOptions withUi(UiSettings settings) {
         return new SessionOptions(outputDir, stepTimeout, clock, bind, readOnly, recoverOnClose, web, settings,
-                webPathLoader, id, hooks, observer, robot, host);
+                webPathLoader, id, hooks, observer, robot, host, suite);
     }
 
     /** A copy that finds web paths through {@code loader}. */
     public SessionOptions withWebPathLoader(ClassLoader loader) {
         return new SessionOptions(outputDir, stepTimeout, clock, bind, readOnly, recoverOnClose, web, ui, loader,
-                id, hooks, observer, robot, host);
+                id, hooks, observer, robot, host, suite);
     }
 
     /** A copy with this session id (null: generated). */
     public SessionOptions withId(String newId) {
         return new SessionOptions(outputDir, stepTimeout, clock, bind, readOnly, recoverOnClose, web, ui,
-                webPathLoader, newId, hooks, observer, robot, host);
+                webPathLoader, newId, hooks, observer, robot, host, suite);
     }
 
     /** A copy with this hooks switch (null: {@link HooksMode#AUTO}); phase6-contracts.md 6.1. */
     public SessionOptions withHooks(HooksMode mode) {
         return new SessionOptions(outputDir, stepTimeout, clock, bind, readOnly, recoverOnClose, web, ui,
-                webPathLoader, id, mode, observer, robot, host);
+                webPathLoader, id, mode, observer, robot, host, suite);
     }
 
     /** A copy with this observer (null: {@link RunObserver#NONE}); the session never closes it. */
     public SessionOptions withObserver(RunObserver newObserver) {
         return new SessionOptions(outputDir, stepTimeout, clock, bind, readOnly, recoverOnClose, web, ui,
-                webPathLoader, id, hooks, newObserver, robot, host);
+                webPathLoader, id, hooks, newObserver, robot, host, suite);
     }
 
     /**
@@ -192,7 +210,7 @@ public record SessionOptions(Path outputDir, Duration stepTimeout, Clock clock, 
      */
     public SessionOptions withRobot(boolean on) {
         return new SessionOptions(outputDir, stepTimeout, clock, bind, readOnly, recoverOnClose, web, ui,
-                webPathLoader, id, hooks, observer, on, host);
+                webPathLoader, id, hooks, observer, on, host, suite);
     }
 
     /**
@@ -201,7 +219,16 @@ public record SessionOptions(Path outputDir, Duration stepTimeout, Clock clock, 
      */
     public SessionOptions withHost(Set<String> features) {
         return new SessionOptions(outputDir, stepTimeout, clock, bind, readOnly, recoverOnClose, web, ui,
-                webPathLoader, id, hooks, observer, robot, features);
+                webPathLoader, id, hooks, observer, robot, features, suite);
+    }
+
+    /**
+     * A copy with this suite cache (phase8-contracts.md 9.3.4; null: none, every {@code SUITE} item runs at every
+     * open). The cache stays its owner's.
+     */
+    public SessionOptions withSuite(SuiteCache cache) {
+        return new SessionOptions(outputDir, stepTimeout, clock, bind, readOnly, recoverOnClose, web, ui,
+                webPathLoader, id, hooks, observer, robot, host, cache);
     }
 
     /** The web settings that apply: {@link #web()}, or the default. */

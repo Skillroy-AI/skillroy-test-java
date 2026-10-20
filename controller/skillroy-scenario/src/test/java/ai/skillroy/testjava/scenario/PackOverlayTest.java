@@ -49,6 +49,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -245,7 +246,8 @@ class PackOverlayTest {
                 case "version" -> "2.0.0";
                 case "hooks" -> HookCatalogue.EMPTY;
                 case "settings" -> PackSettings.EMPTY;
-                case "facts", "preflight", "storedTables", "rowMasks", "sqlAllowLists" -> List.of();
+                case "facts", "preflight", "storedTables", "rowMasks", "sqlAllowLists", "capabilities" -> List.of();
+                case "warningCodes" -> Set.of();
                 case "resolution" -> ResolutionCatalogue.EMPTY;
                 case "toString" -> "proxy";
                 case "hashCode" -> 1;
@@ -270,6 +272,10 @@ class PackOverlayTest {
         }
         assertTrue(expected.containsAll(List.of("hooks", "settings", "assistAnswerPrimitive", "recover")),
                 String.valueOf(expected));
+        // phase8-contracts.md 9.1.1, 7.3: the pack's capabilities and warning codes are forwarded too.
+        assertTrue(expected.containsAll(List.of("capabilities", "warningCodes")), String.valueOf(expected));
+        assertEquals(List.of(), overlay.capabilities());
+        assertEquals(Set.of(), overlay.warningCodes());
         assertEquals("base", overlay.id());
         assertEquals("2.0.0+base-x@0.0.1", overlay.version());
         assertThrows(IllegalArgumentException.class, () -> new DelegatingDomainPack(base, "Bad Id", "1") {

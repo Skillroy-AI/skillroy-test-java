@@ -310,6 +310,35 @@ class AgentClientTest {
         assertTrue(body.getMessage().contains("body reports session"), body.getMessage());
     }
 
+    /**
+     * phase8-contracts.md 9.3.2 (D617): the agent session is the one the handshake verified, answered without a
+     * request, the same after later pings, and kept when a ping finds another session (the client latches instead);
+     * a connection without the method answers null.
+     */
+    @Test
+    void theAgentSessionIsTheVerifiedOneAndCostsNoRequest() throws Exception {
+        try (AgentClient client = AgentClient.connect(agent.endpoint())) {
+            int seen = agent.requests.size();
+            assertEquals(agent.sessionId, client.agentSession());
+            assertEquals(seen, agent.requests.size(), "no I/O");
+            client.ping();
+            assertEquals(agent.sessionId, client.agentSession(), "unchanged by a later ping");
+            String first = agent.sessionId;
+            agent.sessionId = Auth.newSessionId();
+            assertThrows(AgentLostException.class, client::ping);
+            assertTrue(client.isLost());
+            assertEquals(first, client.agentSession(), "one client, one agent start");
+        }
+        AgentConnection plain = (AgentConnection) java.lang.reflect.Proxy.newProxyInstance(
+                getClass().getClassLoader(), new Class<?>[] {AgentConnection.class}, (proxy, method, args) -> {
+                    if (method.isDefault()) {
+                        return java.lang.reflect.InvocationHandler.invokeDefault(proxy, method, args);
+                    }
+                    throw new AssertionError(method.getName() + " was called");
+                });
+        assertNull(plain.agentSession(), "the default: unknown, and no other member is asked");
+    }
+
     /** H2: a reply whose MAC is missing or wrong latches the client; nothing in the body is used. */
     @Test
     void aReplyWithoutAValidMacLatchesTheClient() throws Exception {

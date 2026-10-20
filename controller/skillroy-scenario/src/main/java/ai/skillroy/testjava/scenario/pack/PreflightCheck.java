@@ -50,6 +50,16 @@ public interface PreflightCheck {
         return check(ctx.agent());
     }
 
+    /**
+     * How often the check runs (phase8-contracts.md 9.3.1, gap 112, decision D616): {@link CheckScope#SCENARIO} (the
+     * default, the restrictive one) in every run; {@link CheckScope#SUITE} once per suite, environment and agent start,
+     * its answer, ok or the failure reason, kept by the host's suite cache, so that a check that failed fails every
+     * later scenario of the suite without running again. Keep {@code SCENARIO} for anything that may recover.
+     */
+    default CheckScope scope() {
+        return CheckScope.SCENARIO;
+    }
+
     /** What a pre-flight check may use. Valid only during the call it was passed to. */
     interface PreflightContext {
 

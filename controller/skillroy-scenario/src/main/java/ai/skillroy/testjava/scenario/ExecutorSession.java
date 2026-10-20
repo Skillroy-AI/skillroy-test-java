@@ -294,6 +294,7 @@ public final class ExecutorSession implements AutoCloseable {
             throw new SessionOpenException(FailureKind.ENVIRONMENT, mask.apply(e.getMessage()), null);
         }
         caps = merge.merged();
+        caps = mergePackCapabilities(pack, caps);
         archiveCapabilities(effective.outputDir(), caps, mask);
         Map<String, PrimitiveDescriptor> primitives = new TreeMap<>();
         List<PrimitiveDescriptor> schema = agent.schema();
@@ -371,6 +372,21 @@ public final class ExecutorSession implements AutoCloseable {
         } catch (IOException | RuntimeException e) {
             // Best effort: the session opens all the same.
         }
+    }
+
+    /**
+     * phase8-contracts.md 9.1.5 (gap 106): the pack's capabilities evaluated into the session's matrix after its
+     * contributors' merge, with the session's data channels, environment id and settings and
+     * {@link SessionOptions#suite()}, before {@code capabilities.json} is written. As built (Phase 8, EP step 1): the
+     * seam only; a pack that declares none changes nothing, and the evaluation is not built yet, so a pack that
+     * declares any cannot open a session until it lands.
+     */
+    private static CapabilityMatrix mergePackCapabilities(DomainPack pack, CapabilityMatrix caps) {
+        List<ai.skillroy.testjava.scenario.pack.PackCapability> declared = pack.capabilities();
+        if (declared == null || declared.isEmpty()) {
+            return caps;
+        }
+        throw new UnsupportedOperationException("pack capabilities are not built yet (phase8-contracts.md 9.1)");
     }
 
     private static List<ai.skillroy.testjava.data.RowMask> rowMasks(DomainPack pack) {
@@ -2237,6 +2253,12 @@ public final class ExecutorSession implements AutoCloseable {
         @Override
         public boolean isLost() {
             return agent.isLost();
+        }
+
+        /** The session's connection's (phase8-contracts.md 9.3.2): no I/O. */
+        @Override
+        public String agentSession() {
+            return agent.agentSession();
         }
 
         /** The session's connection is the caller's: never closed here. */

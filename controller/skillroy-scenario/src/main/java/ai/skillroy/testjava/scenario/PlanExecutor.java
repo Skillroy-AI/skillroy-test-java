@@ -1139,6 +1139,23 @@ public final class PlanExecutor {
                 throw new Abort(Status.ERROR, FailureKind.ENVIRONMENT, null, e.getMessage(),
                         RunLog.fields("capabilities", "refused"));
             }
+            mergePackCapabilities();
+        }
+
+        /**
+         * phase8-contracts.md 9.1.3, 9.1.5 (gap 106, decisions D610 to D612): the running pack's capabilities, every
+         * declared id, evaluated with {@link #preflightContext()} into the matrix after the contributors' merge and
+         * before it is archived and {@code requires} is checked, a {@code SUITE} one answered from
+         * {@link RunOptions#suite()} under {@code agent.agentSession()}. As built (Phase 8, EP step 1): the seam only; a
+         * pack that declares none changes nothing, and the evaluation is not built yet, so a pack that declares any
+         * ends the run (an internal error) until it lands.
+         */
+        private void mergePackCapabilities() {
+            List<ai.skillroy.testjava.scenario.pack.PackCapability> declared = pack.capabilities();
+            if (declared == null || declared.isEmpty()) {
+                return;
+            }
+            throw new UnsupportedOperationException("pack capabilities are not built yet (phase8-contracts.md 9.1)");
         }
 
         /**
@@ -1329,6 +1346,12 @@ public final class PlanExecutor {
                 return agent.isLost();
             }
 
+            /** The run's connection's (phase8-contracts.md 9.3.2): no I/O. */
+            @Override
+            public String agentSession() {
+                return agent.agentSession();
+            }
+
             /** The connection is the caller's: never closed here. */
             @Override
             public void close() {
@@ -1378,12 +1401,13 @@ public final class PlanExecutor {
             }
         }
 
-        private void runPreflight() throws Abort, AgentLostException {
-            List<PreflightCheck> checks = pack.preflight();
-            if (checks == null) {
-                return;
-            }
-            PreflightCheck.PreflightContext ctx = new PreflightCheck.PreflightContext() {
+        /**
+         * What the pack's pre-flight checks and its capabilities read (phase2-contracts.md 6.1; phase8-contracts.md
+         * 9.1.3): the run's connection, its data channels, its environment id and the running pack's settings; no bind
+         * mode, no inference settings, no gateway.
+         */
+        private PreflightCheck.PreflightContext preflightContext() {
+            return new PreflightCheck.PreflightContext() {
                 @Override
                 public AgentConnection agent() {
                     return agent;
@@ -1405,6 +1429,14 @@ public final class PlanExecutor {
                     return settings == null ? PackSettings.EMPTY : settings;
                 }
             };
+        }
+
+        private void runPreflight() throws Abort, AgentLostException {
+            List<PreflightCheck> checks = pack.preflight();
+            if (checks == null) {
+                return;
+            }
+            PreflightCheck.PreflightContext ctx = preflightContext();
             for (PreflightCheck check : checks) {
                 String reason;
                 try {

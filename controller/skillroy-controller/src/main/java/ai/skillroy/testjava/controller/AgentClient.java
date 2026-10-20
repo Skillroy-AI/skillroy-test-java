@@ -223,6 +223,21 @@ public final class AgentClient implements AgentConnection {
         return lostReason.get() != null;
     }
 
+    /**
+     * {@inheritDoc}
+     *
+     * <p>The session id the first {@code /ping} of the connect handshake verified (the endpoint's, when it names one,
+     * must be that one); every later ping must report the same session or the client latches lost, so one client is
+     * bound to one agent start and the answer never changes. Null until a ping has been verified. No I/O
+     * (phase8-contracts.md 9.3.2, decision D617).
+     */
+    @Override
+    public String agentSession() {
+        // lastPing is written after sessionId by every verified ping (both volatile): a non-null lastPing means the
+        // session id was verified.
+        return lastPing == null ? null : sessionId;
+    }
+
     @Override
     public RpcResult call(String method, Map<String, Object> params) throws AgentRpcException, AgentLostException {
         return call(method, params, CallOptions.defaults());
