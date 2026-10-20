@@ -45,9 +45,11 @@ import java.util.Objects;
  *
  * <p>Records, each starting with {@code type}: {@code session-start {id, pack, packVersion, envId, env: {fingerprint,
  * components}, readOnly, options, startedAt, primitives}}, {@code step {stepId, origin, verb?, args?, calls:
- * [{primitive, args, sync, timeoutMs, await?, capture?}], outcome: {status, kind?, message?, detail?, executed,
- * seqBefore, seqAfter, durationMs, degradedFidelity}, snapshotHash?, provenance?}} (provenance: phase7-contracts.md
- * 9.2), {@code resolve {slot, kind, args, strategy,
+ * [{primitive, args, sync, timeoutMs, await?, capture?, accept?, rungs?, minRung?}], outcome: {status, kind?,
+ * message?, detail?, executed, seqBefore, seqAfter, durationMs, degradedFidelity, warnings?}, snapshotHash?,
+ * provenance?}} (provenance: phase7-contracts.md 9.2; a call's {@code accept}, {@code rungs} (the rung names) and
+ * {@code minRung} and the outcome's {@code warnings} only when present, information: phase8-contracts.md 7.1, 7.3),
+ * {@code resolve {slot, kind, args, strategy,
  * verify, credential?, resolution, origin?}} (origin: Phase 7 security fix, S113), {@code oracle {name, fn, args, inputsHash, value}}, {@code check {path, matcher,
  * actual, held, reason}}, {@code observe {path, value}}, {@code note {origin, text}}, {@code budget {scope, spentUsd,
  * limitUsd, exhausted}}, {@code session-end {reason, steps, cost}}. A step's {@code args} are as given (references in

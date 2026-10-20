@@ -299,8 +299,9 @@ final class Dispatcher {
                        List<String> secretNames) {
         CallScope scope = new CallScope(correlationId, traceparent, secrets);
         long start = System.nanoTime();
-        final Invocation invocation = new CallInvocation(args, correlationId, traceparent, ctx,
-                start + TimeUnit.MILLISECONDS.toNanos(timeoutMs), secretNames);
+        final CallInvocation invocation = new CallInvocation(args, correlationId, traceparent, ctx,
+                start + TimeUnit.MILLISECONDS.toNanos(timeoutMs), secretNames,
+                new CallWarnings(ctx.log, method));
         final Call call = new Call(start);
         final CoreThreadBroker.Guarded<Object> task = new CoreThreadBroker.Guarded<Object>(new Callable<Object>() {
             @Override
@@ -318,10 +319,13 @@ final class Dispatcher {
             List<Event> events = scope.close();
             long seqAfter = ctx.events.lastSeq();
             long durationMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
-            // Built inside the try: a value that is not JSON-able becomes INTERNAL_ERROR.
-            return new RpcResult(value, events, seqBefore, seqAfter, durationMs, task.threadName()).toJson();
+            // Built inside the try: a value that is not JSON-able becomes INTERNAL_ERROR. The call's warnings
+            // (phase8-contracts.md 7.1): the secret parameters redacted from each, then bounded.
+            return new RpcResult(value, events, seqBefore, seqAfter, durationMs, task.threadName(),
+                    invocation.warnings.build(secrets)).toJson();
         } catch (CoreThreadBroker.BrokerTimeout timeout) {
             scope.close();
+            invocation.warnings.close();
             String thread = task.threadName();
             if (thread != null && !task.finished()) {
                 abandon(method, call, thread, secrets);
@@ -494,15 +498,24 @@ final class Dispatcher {
         private final AgentContext context;
         private final long deadlineNanos;
         private final List<String> secretNames;
+        /** The call's warnings (phase8-contracts.md 7.1). */
+        final CallWarnings warnings;
 
         CallInvocation(JsonView args, String correlationId, String traceparent, AgentContext context,
-                       long deadlineNanos, List<String> secretNames) {
+                       long deadlineNanos, List<String> secretNames, CallWarnings warnings) {
             this.args = args;
             this.correlationId = correlationId;
             this.traceparent = traceparent;
             this.context = context;
             this.deadlineNanos = deadlineNanos;
             this.secretNames = secretNames;
+            this.warnings = warnings;
+        }
+
+        /** phase8-contracts.md 7.1: checked, kept raw in call order, redacted and bounded when the call returns. */
+        @Override
+        public void warn(String code, String message, Map<String, Object> data) {
+            warnings.add(code, message, data);
         }
 
         @Override

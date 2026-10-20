@@ -604,4 +604,65 @@ class ExecutorSessionTest {
         assertEquals(Status.ERROR, refused.status());
         assertTrue(refused.message().contains("CONFIRM_REQUIRED"), refused.message());
     }
+
+    // ------------------------------------------------------------------------------------------------ Phase 8 (ES)
+
+    /**
+     * phase8-contracts.md 7.3 (D579): a raw call that carries {@code accept}, {@code rungs} or {@code minRung} is
+     * refused before anything is sent, for every origin; a verb's own calls may carry them and are honoured.
+     */
+    @Test
+    void aRawCallCarryingAStepsModifiersIsRefusedBeforeAnythingIsSent() throws Exception {
+        try (ExecutorSession session = fx.open()) {
+            PlannedCall raw = new PlannedCall("toy.poke", Map.of(), Sync.NONE, 0);
+            for (PlannedCall carrying : List.of(raw.withAccept(java.util.Set.of("VALUE_COERCED")),
+                    raw.withRungs(List.of(ai.skillroy.testjava.scenario.pack.Rung.of("PHYSICAL"),
+                            ai.skillroy.testjava.scenario.pack.Rung.of("SEMANTIC"))),
+                    raw.withRungs(List.of(ai.skillroy.testjava.scenario.pack.Rung.of("PHYSICAL"),
+                            ai.skillroy.testjava.scenario.pack.Rung.of("SEMANTIC"))).withMinRung("PHYSICAL"))) {
+                for (Origin origin : List.of(PERSON, MODEL)) {
+                    StepOutcome outcome = session.execute(carrying, origin);
+                    assertEquals(Status.ERROR, outcome.status());
+                    assertEquals(FailureKind.ENVIRONMENT, outcome.failureKind());
+                    assertEquals("a raw call carries accept, rungs or minRung; they belong to a scenario step or a"
+                            + " pack verb", outcome.message());
+                    assertEquals(0, outcome.executed());
+                }
+            }
+            assertTrue(fx.agent.callsTo("toy.poke").isEmpty(), "nothing was sent");
+        }
+    }
+
+    /**
+     * phase8-contracts.md 7.1: a session step accepts only what its verb's own calls pre-accept; every warning line is
+     * in the outcome (masked) and in the journal's outcome.
+     */
+    @Test
+    void aSessionStepCarriesItsWarningsAndAcceptsOnlyWhatItsVerbPreAccepts() throws Exception {
+        fx.agent.on("toy.read", params -> FakeAgentConnection.Warned.of(Map.of("x", 1L),
+                new ai.skillroy.testjava.protocol.CallWarning("VALUE_COERCED", "took " + TestCredentials.PW_200,
+                        null)));
+        try (ExecutorSession session = fx.open()) {
+            fx.pack.custom = List.of(PlannedCall.of("toy.read", Map.of(), Sync.NONE));
+            StepOutcome failed = session.execute("custom", Map.of(), PERSON);
+            assertEquals(Status.FAIL, failed.status());
+            assertEquals(FailureKind.ASSERTION, failed.failureKind());
+            assertEquals(List.of("s1: custom: toy.read VALUE_COERCED (took <redacted>)"), failed.warnings());
+            assertTrue(failed.message().contains("reported VALUE_COERCED"), failed.message());
+
+            fx.pack.custom = List.of(PlannedCall.of("toy.read", Map.of(), Sync.NONE).withAccept(
+                    java.util.Set.of("VALUE_COERCED")));
+            StepOutcome accepted = session.execute("custom", Map.of(), MODEL);
+            assertEquals(Status.PASS, accepted.status(), accepted.message());
+            assertEquals(1, accepted.warnings().size());
+            assertEquals(java.util.Set.of("VALUE_COERCED"), accepted.calls().get(0).accept(),
+                    "the outcome's calls keep their accept");
+            assertTrue(journalText().contains("\"warnings\":[\"s2: custom: toy.read VALUE_COERCED (took"
+                    + " <redacted>)\"]"), journalText());
+            assertTrue(journalText().contains("\"accept\":[\"VALUE_COERCED\"]"), "the journal's call keys");
+            assertFalse(journalText().contains(TestCredentials.PW_200));
+            StepOutcome plain = session.execute("poke", Map.of(), PERSON);
+            assertTrue(plain.warnings().isEmpty());
+        }
+    }
 }

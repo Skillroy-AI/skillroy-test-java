@@ -81,22 +81,26 @@ class LendingModuleTest {
         try {
             for (Class<?> type : Arrays.<Class<?>>asList(ReadinessSource.class, ThreadPolicyProvider.class,
                     AppStateProvider.class, NameEnricher.class, LocatorResolver.class, ActionFirer.class,
-                    DialogTextExtractor.class, DataSourceProvider.class, MaskPolicy.class, DeviceAdapter.class,
+                    DialogTextExtractor.class, DataSourceProvider.class, MaskPolicy.class,
                     RedactionKeys.class, ai.skillroy.testjava.agent.api.spi.RegionResolver.class,
                     ai.skillroy.testjava.agent.api.spi.CaptureMask.class)) {
                 assertEquals(1, ctx.spi.all(type).size(), type.getSimpleName());
             }
-            assertEquals(13, ctx.spi.count(), "the eleven SPIs of Phase 6 and the two of Phase 7");
+            // phase8-contracts.md 12.2 (ES, this branch's truth under D641): the printer and the scanner.
+            assertEquals(2, ctx.spi.all(DeviceAdapter.class).size(), "DeviceAdapter");
+            assertTrue(ctx.spi.all(DeviceAdapter.class).get(1) instanceof ScannerDevice);
+            assertEquals(14, ctx.spi.count(), "the eleven SPIs of Phase 6, the two of Phase 7 and the scanner");
             assertTrue(ctx.spi.first(ai.skillroy.testjava.agent.api.spi.RegionResolver.class)
                     instanceof LendingRegions);
             assertTrue(ctx.spi.first(ai.skillroy.testjava.agent.api.spi.CaptureMask.class)
                     instanceof LendingCaptureMask);
             assertEquals(Arrays.asList("lending.access.check", "lending.deposit", "lending.input", "lending.limits",
-                    "lending.loan", "lending.prompt", "lending.prompt.answer", "lending.slip", "lending.state",
-                    "lending.waiver.evaluate"), names(ctx));
+                    "lending.loan", "lending.prompt", "lending.prompt.answer", "lending.scanChecked", "lending.signOn",
+                    "lending.slip", "lending.state", "lending.waiver.evaluate"), names(ctx));
             assertEquals(Arrays.asList("lending.access.check", "lending.deposit", "lending.input", "lending.limits",
                     "lending.loan", "lending.loan.authorisations", "lending.prompt", "lending.prompt.answer",
-                    "lending.slip", "lending.sql", "lending.state", "lending.waiver.evaluate"),
+                    "lending.scanChecked", "lending.scanner.physical", "lending.signOn", "lending.slip",
+                    "lending.sql", "lending.state", "lending.waiver.evaluate"),
                     new java.util.ArrayList<String>(ctx.capabilities.probes().keySet()));
             assertTrue(ctx.spi.first(ThreadPolicyProvider.class) instanceof LendingWorker);
             assertTrue(ctx.primitives.find("lending.input").spec().mutating());
@@ -425,10 +429,11 @@ class LendingModuleTest {
         LendingFixture lending = LendingFixture.start();
         try {
             EngineEvents events = lending.module.slot().events();
-            EngineEvents.AckWait wait = events.expectAck(LendingInput.entry("100"));
+            EngineEvents.AckWait wait = events.expectAck(LendingInput.entry("100"), "lending-t1", null, null);
             events.deactivate();
             assertFalse(wait.await(10000), "released at once, as not acknowledged");
-            assertFalse(events.expectAck(LendingInput.entry("100")).await(10000));
+            assertEquals(0, events.pendingCount(), "the pending table is cleared on detach");
+            assertFalse(events.expectAck(LendingInput.entry("100"), "lending-t2", null, null).await(10000));
         } finally {
             lending.close();
         }

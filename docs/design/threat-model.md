@@ -72,7 +72,8 @@ evidence) and, in Phase 6, may export spans to a telemetry backend.
   masks; an unreadable code source refuses under a qualifier; a lost event window fails the read) and bounds what it
   cannot judge (an overrunning quiescent task is penalised, not pre-empted). A module's result is trusted code's output:
   the executor's secret-echo check, its composite-shape validation and its rung checks are consistency controls, not a
-  trust boundary (P8 §7.5-§7.7, §11).
+  trust boundary (P8 §7.5-§7.7, §11); **(Phase 8, built 2026-10-19, ES)** a warning's message and data are redacted
+  of the call's secret parameters in the agent and reach a model or a run's evidence masked as every result does.
 - **Hook and rule events as evidence.** An `OBSERVE`, `CAPTURE` or `rule.fired` event says that the hooked method ran
   with those values only if no code in the JVM called `Spy.enter`/`Spy.exit` or `RuleHelper.fired` itself (A12): the
   statics are public because an advice must reach them from every loader. A hook expectation is therefore evidence

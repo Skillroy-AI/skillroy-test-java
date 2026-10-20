@@ -123,6 +123,31 @@ final class LendingStepSchemas {
                     + " password, which comes from credentials.yaml, each time waiting until the desk is ready"
                     + " again. If the desk refuses, its authorisation-failed prompt fails the step.",
                     props("staff", staff("The supervisor who authorises")), List.of("staff"));
+            // phase8-contracts.md 7.5, 7.6 (ES): the composites and the scanner device.
+            case "signOnAny" -> object("Signs a staff member on whichever way the desk asks: an auto-sign-on"
+                    + " member at once, a member with a password with the password from credentials.yaml (only when"
+                    + " the slot declares a credential), in one call that reports the branch it took (auto,"
+                    + " password, passwordRequired with the warning lending.PASSWORD_REQUIRED, refused). A scenario"
+                    + " that passes signs off again at its end.",
+                    props("staff", anySlot()), List.of("staff"));
+            case "scanChecked" -> object("Scans an item and answers the desk's induction check itself when it asks"
+                    + " one (Yes when inducted, No otherwise), then waits until the desk is ready again. Another"
+                    + " question the desk asks stays open and fails the step unless expected. Give exactly one of"
+                    + " item and barcode.",
+                    props("item", item(),
+                            "barcode", described(type("string"), "The barcode to send, quoted, or a $reference to"
+                                    + " one."),
+                            "inducted", described(type("boolean"), "Whether the borrower completed the safety"
+                                    + " induction.")),
+                    List.of("inducted"));
+            case "deviceScan" -> object("Scans an item with the desk's barcode scanner device: through the scanner"
+                    + " driver when the desk runs one (rung PHYSICAL), else straight into the desk (rung SEMANTIC,"
+                    + " a lower fidelity that makes the run DEGRADED). A step requires the physical path with"
+                    + " minRung: PHYSICAL. Give exactly one of item and barcode.",
+                    props("item", item(),
+                            "barcode", described(type("string"), "The barcode to send, quoted, or a $reference to"
+                                    + " one.")),
+                    List.of());
             default -> null;
         };
     }
@@ -135,6 +160,15 @@ final class LendingStepSchemas {
         schema.put("pattern", SLOT_REFERENCE);
         return described(schema, what + ": a $reference to a slot that declares a credential (credential: {realm:"
                 + " staff, key: code}), such as $assistant; never a staff member or a password written out.");
+    }
+
+    /** {@code signOnAny.staff}: a {@code $slot} reference, with or without a credential. */
+    private static Map<String, Object> anySlot() {
+        Map<String, Object> schema = type("string");
+        schema.put("pattern", SLOT_REFERENCE);
+        return described(schema, "The staff member to sign on: a $reference to a slot with their code, such as"
+                + " $assistant; when the slot declares a credential (credential: {realm: staff, key: code}) the"
+                + " password comes from credentials.yaml; never a password written out.");
     }
 
     /** {@code scan.item}: an item as the item queries answer it, with at least its barcode, or a reference. */

@@ -238,4 +238,30 @@ class CorePrimitivesTest {
         assertEquals((long) ErrorCodes.INVALID_PARAMS, code(badAction));
         assertEquals(Arrays.asList("cut", "print"), data(badAction).get("actions"));
     }
+
+    /**
+     * phase8-contracts.md 7.6 (ES): {@code device.list} adds {@code rungs} to a device only when an action has a
+     * ladder; an old adapter's entry is unchanged ({@link #appStateAndDevices}) and a throwing {@code rungs} is logged
+     * and read as empty.
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    void deviceListShowsAnActionsRungLadderOnlyWhenThereIsOne() throws Exception {
+        agent.close();
+        agent = AgentHarness.start(java.nio.file.Files.createDirectories(tmp.resolve("rungs")),
+                "coretest.semanticInput", "on");
+        AgentHarness.await("target ready", 30000, () -> agent.runtime.isReady());
+        List<Object> devices = (List<Object>) agent.valueMap("device.list", null).get("devices");
+        Map<String, Object> byId = new java.util.LinkedHashMap<String, Object>();
+        for (Object device : devices) {
+            byId.put((String) ((Map<String, Object>) device).get("id"), device);
+        }
+        assertEquals(map("id", "printer", "kind", "printer", "actions", Arrays.asList("cut", "print")),
+                byId.get("printer"), "no ladder, no key: the entry as before");
+        assertEquals(map("id", "scanner", "kind", "scanner", "actions", Arrays.asList("reset", "scan"), "rungs",
+                map("scan", Arrays.asList("PHYSICAL", "SEMANTIC"))), byId.get("scanner"));
+        assertEquals(map("id", "badge", "kind", "badge", "actions", Arrays.asList("read")), byId.get("badge"),
+                "a throwing rungs reads as empty");
+        assertTrue(String.valueOf(agent.runtime.context().log().tail(200)).contains(".rungs(read) failed"));
+    }
 }

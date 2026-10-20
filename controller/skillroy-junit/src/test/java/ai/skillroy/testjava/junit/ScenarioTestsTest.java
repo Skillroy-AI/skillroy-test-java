@@ -361,4 +361,29 @@ class ScenarioTestsTest {
             }
         }
     }
+
+    /** phase8-contracts.md 7.1 (ES): the glue's summary lists the run's warnings, in a failure and a DEGRADED one. */
+    @Test
+    void theSummaryListsTheWarnings() {
+        String line = "s1: scan: lending.input VALUE_COERCED (the desk took 4005)";
+        ai.skillroy.testjava.scenario.RunResult failed = new ai.skillroy.testjava.scenario.RunResult("warned",
+                ai.skillroy.testjava.scenario.Status.FAIL, FailureKind.ASSERTION, "s1", "scan: lending.input"
+                + " reported VALUE_COERCED", java.util.Map.of(), List.of(), List.of(), Duration.ZERO, List.of(), null,
+                null, List.of(), List.of(line));
+        assertTrue(ScenarioTests.describe(failed).contains("\nwarning: " + line), ScenarioTests.describe(failed));
+        AssertionFailedError error = assertThrows(AssertionFailedError.class, () -> ScenarioTests.report(failed,
+                RunOptions.DegradedAs.SKIPPED));
+        assertTrue(error.getMessage().contains("warning: " + line));
+        ai.skillroy.testjava.scenario.RunResult degraded = new ai.skillroy.testjava.scenario.RunResult("warned",
+                ai.skillroy.testjava.scenario.Status.DEGRADED, null, null, null, java.util.Map.of(), List.of(),
+                List.of(), Duration.ZERO, List.of("s2: deviceScan fell back from PHYSICAL to SEMANTIC (x)"), null,
+                null, List.of(), List.of(line));
+        TestAbortedException aborted = assertThrows(TestAbortedException.class, () -> ScenarioTests.report(degraded,
+                RunOptions.DegradedAs.SKIPPED));
+        assertTrue(aborted.getMessage().endsWith("\nwarning: " + line), aborted.getMessage());
+        assertDoesNotThrow(() -> ScenarioTests.report(new ai.skillroy.testjava.scenario.RunResult("ok",
+                ai.skillroy.testjava.scenario.Status.PASS, null, null, null, java.util.Map.of(), List.of(), List.of(),
+                Duration.ZERO, List.of(), null, null, List.of(), List.of(line)), RunOptions.DegradedAs.SKIPPED),
+                "an accepted warning leaves a PASS");
+    }
 }

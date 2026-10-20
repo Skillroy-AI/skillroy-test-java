@@ -1,0 +1,24 @@
+# The scanner device's physical rung required (phase8-contracts.md 7.6): minRung: PHYSICAL makes the run refuse at
+# its start, before anything is sent, on a desk without the scanner driver (PRECONDITION_FAILED naming
+# lending.scanner.physical), and pass on a desk launched with -Dlending.scannerDriver=true; the devices fact root
+# shows the scanner's ladder. In a sub-directory of its own: the JUnit glue's directory source does not descend
+# into it, since only the scanner leg runs it to a pass.
+# Seed A fixtures: assistant 100 (its password comes from credentials.yaml); YRD-001, barcode 5000000000017.
+scenario: device-scan-physical
+pack: lending
+tags: [semantic-input, scanner]
+requires: [lending.input, lending.state, lending.loan]
+launchProperties: { lending.seed: A }
+resolve:
+  assistant: { fixture: { code: "100" }, credential: { realm: staff, key: code } }
+  item:      { fixture: { code: YRD-001, barcode: "5000000000017" } }
+steps:
+  - signOn: { staff: $assistant }
+  - deviceScan: { item: $item }
+    minRung: PHYSICAL
+  - expect: { "devices[id=scanner].rungs.scan[0]": PHYSICAL, "loan.lines[code=$item.code].qty": 1 }
+  - key: { action: CANCEL }
+verify:
+  - { "state.name": IDLE }
+on_prompt: { unexpected: fail }
+timeouts: { step: 30s }

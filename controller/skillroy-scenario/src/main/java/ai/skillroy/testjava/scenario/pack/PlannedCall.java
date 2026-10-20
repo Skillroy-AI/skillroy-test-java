@@ -18,7 +18,10 @@ package ai.skillroy.testjava.scenario.pack;
 
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.TreeSet;
 
 /**
  * One primitive call a verb compiles to; it becomes one entry of a step's {@code calls} in {@code plan.json}.
@@ -40,14 +43,29 @@ import java.util.Map;
  *     reference substitution, so that every string reaches the agent exactly as given (a {@code $slot.field} in it is
  *     text, never a slot's value); the MCP server's {@code data_query} builds its call so, the guarded statement being
  *     what runs. False everywhere else, as before (the constructors without the component); a plan has no such call
+ * @param accept the warning codes the call accepts (phase8-contracts.md 7.1, 7.3): a warning of such a code is
+ *     recorded and leaves the verdict alone; any other fails the step. A verb may pre-accept a code its primitive
+ *     documents as harmless ({@link #withAccept}); the compiler adds the step's {@code accept} modifier. Empty by
+ *     default; sorted
+ * @param rungs the call's rung ladder, best first, 2 to 8 rungs with distinct names (phase8-contracts.md 7.6); empty
+ *     for a call without one
+ * @param minRung the rung the step requires (a name of {@code rungs}), or null; the compiler sets it from the step's
+ *     {@code minRung} modifier or, under {@code ui: {strict: true}}, to the first rung
  */
 public record PlannedCall(String primitive, Map<String, Object> args, Sync sync, long timeoutMs, AwaitSpec await,
-                          CaptureSpec capture, boolean literalArgs) {
+                          CaptureSpec capture, boolean literalArgs, Set<String> accept, List<Rung> rungs,
+                          String minRung) {
+
+    /** The fewest and the most rungs of a ladder. */
+    public static final int MIN_RUNGS = 2;
+    public static final int MAX_RUNGS = 8;
 
     /**
      * @throws IllegalArgumentException if {@code primitive} is null or blank, {@code sync} is {@link Sync#EVENT}
-     *     without an {@code await}, {@code await} is given with another sync, or {@code capture} is given on a call
-     *     that neither has sync {@link Sync#EVENT} nor is {@code sync.await}
+     *     without an {@code await}, {@code await} is given with another sync, {@code capture} is given on a call
+     *     that neither has sync {@link Sync#EVENT} nor is {@code sync.await}, an {@code accept} code is not a warning
+     *     code ({@code CallWarning.isValidCode}), the ladder has fewer than 2 or more than 8 rungs or a name twice,
+     *     or {@code minRung} is not a rung of the ladder
      */
     public PlannedCall {
         if (primitive == null || primitive.isBlank()) {
@@ -66,6 +84,19 @@ public record PlannedCall(String primitive, Map<String, Object> args, Sync sync,
             throw new IllegalArgumentException("call " + primitive + ": capture needs sync EVENT or the primitive"
                     + " sync.await, found sync " + sync);
         }
+        accept = accept == null || accept.isEmpty() ? Set.of() : Collections.unmodifiableSet(new TreeSet<>(accept));
+        rungs = rungs == null || rungs.isEmpty() ? List.of() : List.copyOf(rungs);
+        Rung.check("call " + primitive, accept, rungs, minRung);
+    }
+
+    /**
+     * A call without warnings accepted, ladder or required rung (the shape before Phase 8).
+     *
+     * @throws IllegalArgumentException as the canonical constructor
+     */
+    public PlannedCall(String primitive, Map<String, Object> args, Sync sync, long timeoutMs, AwaitSpec await,
+                       CaptureSpec capture, boolean literalArgs) {
+        this(primitive, args, sync, timeoutMs, await, capture, literalArgs, Set.of(), List.of(), null);
     }
 
     /**
@@ -113,13 +144,45 @@ public record PlannedCall(String primitive, Map<String, Object> args, Sync sync,
      * @throws IllegalArgumentException if the call neither has sync {@link Sync#EVENT} nor is {@code sync.await}
      */
     public PlannedCall withCapture(CaptureSpec newCapture) {
-        return new PlannedCall(primitive, args, sync, timeoutMs, await, newCapture, literalArgs);
+        return new PlannedCall(primitive, args, sync, timeoutMs, await, newCapture, literalArgs, accept, rungs,
+                minRung);
     }
 
     /**
      * This call with literal arguments ({@link #literalArgs()}): a session runs it without reference substitution.
      */
     public PlannedCall withLiteralArgs() {
-        return new PlannedCall(primitive, args, sync, timeoutMs, await, capture, true);
+        return new PlannedCall(primitive, args, sync, timeoutMs, await, capture, true, accept, rungs, minRung);
+    }
+
+    /**
+     * This call accepting the warning codes {@code codes} (phase8-contracts.md 7.3): a verb pre-accepts a code its
+     * primitive documents as harmless; the compiler adds the step's own {@code accept} to every call of the step.
+     *
+     * @throws IllegalArgumentException if a code is not a warning code
+     */
+    public PlannedCall withAccept(Set<String> codes) {
+        return new PlannedCall(primitive, args, sync, timeoutMs, await, capture, literalArgs, codes, rungs, minRung);
+    }
+
+    /**
+     * This call with a rung ladder, best first (phase8-contracts.md 7.6): its primitive must report the rung that
+     * acted ({@code RungResult}); the executor checks it.
+     *
+     * @throws IllegalArgumentException if the ladder has fewer than 2 or more than 8 rungs or a name twice, or the
+     *     call's {@code minRung} is not one of them
+     */
+    public PlannedCall withRungs(List<Rung> ladder) {
+        return new PlannedCall(primitive, args, sync, timeoutMs, await, capture, literalArgs, accept, ladder,
+                minRung);
+    }
+
+    /**
+     * This call requiring the rung {@code rung} or a better one (phase8-contracts.md 7.6); null requires none.
+     *
+     * @throws IllegalArgumentException if {@code rung} is not a rung of the call's ladder
+     */
+    public PlannedCall withMinRung(String rung) {
+        return new PlannedCall(primitive, args, sync, timeoutMs, await, capture, literalArgs, accept, rungs, rung);
     }
 }

@@ -40,6 +40,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.Callable;
@@ -474,6 +475,9 @@ public final class CoreTestModule implements AgentModule {
         if (eventMask != null) {
             registerEventMask(ctx, eventMask);
         }
+        if ("on".equals(ctx.options().get("coretest.semanticInput"))) {
+            registerSemanticInput(ctx);
+        }
         if ("true".equals(ctx.options().get("coretest.appThread"))) {
             ctx.spi().register(ThreadPolicyProvider.class, new ThreadPolicyProvider() {
                 @Override
@@ -581,6 +585,120 @@ public final class CoreTestModule implements AgentModule {
                                 planted("invocation")));
                     }
                 }));
+    }
+
+    /** What {@code test.warn}'s late warning waits for, and the latch it counts down once it raised it (Phase 8). */
+    public static volatile CountDownLatch lateWarnRelease = new CountDownLatch(1);
+    public static volatile CountDownLatch lateWarnDone = new CountDownLatch(1);
+
+    /**
+     * Phase 8 (phase8-contracts.md 7.1, 7.6), switched on by {@code coretest.semanticInput=on}: the primitive
+     * {@code test.warn {warnings: [{code, message?, data?}], secret?, late?}} that raises each listed warning through
+     * {@code Invocation.warn} (and, with {@code late: true}, one more from its own thread after
+     * {@link #lateWarnRelease}), and two devices: {@code scanner} whose action {@code scan} has the ladder
+     * {@code [PHYSICAL, SEMANTIC]}, and {@code badge} whose {@code rungs} throws.
+     */
+    private static void registerSemanticInput(AgentContext ctx) {
+        ctx.primitives().register(Primitives.of(PrimitiveSpec.builder("test.warn")
+                .param("warnings", "array", false, null).param("secret", "string", false, null)
+                .param("late", "boolean", false, null).build(),
+                new Primitives.Body() {
+                    @Override
+                    @SuppressWarnings("unchecked")
+                    public Object invoke(final Invocation inv) {
+                        Object raw = inv.args().raw().get("warnings");
+                        int n = 0;
+                        if (raw instanceof List) {
+                            for (Object item : (List<?>) raw) {
+                                Map<String, Object> w = (Map<String, Object>) item;
+                                inv.warn((String) w.get("code"), (String) w.get("message"),
+                                        (Map<String, Object>) w.get("data"));
+                                n++;
+                            }
+                        }
+                        if (inv.args().bool("late", false)) {
+                            Thread late = new Thread(new Runnable() {
+                                @Override
+                                public void run() {
+                                    try {
+                                        lateWarnRelease.await(30, TimeUnit.SECONDS);
+                                        inv.warn("VALUE_DROPPED", "too late", null);
+                                    } catch (InterruptedException e) {
+                                        Thread.currentThread().interrupt();
+                                    } finally {
+                                        lateWarnDone.countDown();
+                                    }
+                                }
+                            }, "coretest-late-warn");
+                            late.setDaemon(true);
+                            late.start();
+                        }
+                        return Collections.<String, Object>singletonMap("raised", Long.valueOf(n));
+                    }
+                }));
+        ctx.spi().register(DeviceAdapter.class, new DeviceAdapter() {
+            @Override
+            public String id() {
+                return "scanner";
+            }
+
+            @Override
+            public String kind() {
+                return "scanner";
+            }
+
+            @Override
+            public Map<String, Object> state() {
+                return Collections.<String, Object>emptyMap();
+            }
+
+            @Override
+            public Set<String> actions() {
+                return new LinkedHashSet<String>(Arrays.asList("scan", "reset"));
+            }
+
+            @Override
+            public List<String> rungs(String action) {
+                return "scan".equals(action) ? Arrays.asList("PHYSICAL", "SEMANTIC")
+                        : Collections.<String>emptyList();
+            }
+
+            @Override
+            public Object act(String action, JsonView args) {
+                return Collections.<String, Object>singletonMap("rung", "SEMANTIC");
+            }
+        });
+        ctx.spi().register(DeviceAdapter.class, new DeviceAdapter() {
+            @Override
+            public String id() {
+                return "badge";
+            }
+
+            @Override
+            public String kind() {
+                return "badge";
+            }
+
+            @Override
+            public Map<String, Object> state() {
+                return Collections.<String, Object>emptyMap();
+            }
+
+            @Override
+            public Set<String> actions() {
+                return Collections.singleton("read");
+            }
+
+            @Override
+            public List<String> rungs(String action) {
+                throw new IllegalStateException("no ladder today");
+            }
+
+            @Override
+            public Object act(String action, JsonView args) {
+                return null;
+            }
+        });
     }
 
     /** The planted payload of {@link #MASKED_TOPIC}: a name under a plain and a dotted column, a secret key. */

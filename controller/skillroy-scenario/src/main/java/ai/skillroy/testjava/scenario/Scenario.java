@@ -188,11 +188,24 @@ public record Scenario(String id, String pack, List<String> tags, List<String> r
     /**
      * One entry of {@code steps:}.
      *
-     * @param verb the map's single key
+     * @param verb the map's single verb key
      * @param args the YAML value of the verb
      * @param line source line of the step
+     * @param modifiers the step's reserved modifier keys (phase8-contracts.md 7.3: {@code accept}, a list of warning
+     *     codes, and {@code minRung}, a rung name), as the loader checked them; empty for a step without any
      */
-    public record Step(String verb, Object args, int line) {
+    public record Step(String verb, Object args, int line, Map<String, Object> modifiers) {
+
+        /** Copies the modifiers; null is none. */
+        public Step {
+            modifiers = modifiers == null || modifiers.isEmpty() ? Map.of()
+                    : java.util.Collections.unmodifiableMap(new java.util.LinkedHashMap<>(modifiers));
+        }
+
+        /** A step without modifiers (the shape before Phase 8). */
+        public Step(String verb, Object args, int line) {
+            this(verb, args, line, Map.of());
+        }
     }
 
     /**

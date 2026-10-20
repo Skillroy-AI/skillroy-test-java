@@ -1,0 +1,174 @@
+{
+  "planVersion": 7,
+  "scenarioId": "sign-on-any",
+  "pack": "lending",
+  "packVersion": "0.6.0",
+  "sourceHash": "sha256:ff946bc888fe9bcc424aee245c940fcad9d34dd690c2b15265616d96cd00bec4",
+  "inference": "none",
+  "requires": [
+    "lending.signOn",
+    "lending.input",
+    "lending.state"
+  ],
+  "slots": [
+    {
+      "name": "auto",
+      "kind": "fixture",
+      "value": {
+        "code": "103"
+      }
+    },
+    {
+      "name": "assistant",
+      "kind": "fixture",
+      "value": {
+        "code": "100"
+      },
+      "credential": {
+        "realm": "staff",
+        "key": "code"
+      }
+    }
+  ],
+  "oracles": [],
+  "resolutionGraph": [
+    "auto",
+    "assistant"
+  ],
+  "steps": [
+    {
+      "id": "s1",
+      "verb": "signOnAny",
+      "source": {
+        "line": 16
+      },
+      "calls": [
+        {
+          "primitive": "lending.signOn",
+          "args": {
+            "staff": "$auto.code"
+          },
+          "sync": "READY",
+          "timeoutMs": 30000
+        }
+      ],
+      "expect": []
+    },
+    {
+      "id": "s2",
+      "verb": "expect",
+      "source": {
+        "line": 17
+      },
+      "calls": [],
+      "expect": [
+        {
+          "path": "state.name",
+          "matcher": {
+            "equals": "IDLE"
+          }
+        },
+        {
+          "path": "state.staff.code",
+          "matcher": {
+            "equals": "$auto.code"
+          }
+        }
+      ]
+    },
+    {
+      "id": "s3",
+      "verb": "signOff",
+      "source": {
+        "line": 18
+      },
+      "calls": [
+        {
+          "primitive": "lending.input",
+          "args": {
+            "source": "Key.SIGN_OFF"
+          },
+          "sync": "READY",
+          "timeoutMs": 30000
+        }
+      ],
+      "expect": []
+    },
+    {
+      "id": "s4",
+      "verb": "signOnAny",
+      "source": {
+        "line": 19
+      },
+      "calls": [
+        {
+          "primitive": "lending.signOn",
+          "args": {
+            "password": "$assistant.password",
+            "staff": "$assistant.code"
+          },
+          "sync": "READY",
+          "timeoutMs": 30000
+        }
+      ],
+      "expect": []
+    },
+    {
+      "id": "s5",
+      "verb": "expect",
+      "source": {
+        "line": 20
+      },
+      "calls": [],
+      "expect": [
+        {
+          "path": "state.name",
+          "matcher": {
+            "equals": "IDLE"
+          }
+        },
+        {
+          "path": "state.staff.code",
+          "matcher": {
+            "equals": "$assistant.code"
+          }
+        }
+      ]
+    }
+  ],
+  "verify": [
+    {
+      "path": "state.name",
+      "matcher": {
+        "equals": "IDLE"
+      }
+    }
+  ],
+  "cleanup": [
+    {
+      "primitive": "lending.input",
+      "args": {
+        "source": "Key.SIGN_OFF"
+      },
+      "sync": "READY",
+      "timeoutMs": 30000
+    },
+    {
+      "primitive": "lending.input",
+      "args": {
+        "source": "Key.SIGN_OFF"
+      },
+      "sync": "READY",
+      "timeoutMs": 30000
+    }
+  ],
+  "launchProperties": {
+    "lending.seed": "A"
+  },
+  "artifacts": [],
+  "onPrompt": {
+    "unexpected": "fail"
+  },
+  "stepTimeoutMs": 30000,
+  "bindTimeoutMs": 60000
+}

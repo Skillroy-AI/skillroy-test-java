@@ -374,7 +374,8 @@ public final class ScenarioTests {
             case PASS -> {
             }
             case DEGRADED -> {
-                String message = result.scenarioId() + " DEGRADED: " + result.degradedSummary();
+                String message = result.scenarioId() + " DEGRADED: " + result.degradedSummary()
+                        + warningLines(result);
                 switch (degradedAs) {
                     case SKIPPED -> Assumptions.abort(message);
                     case FAILURE -> Assertions.fail(message);
@@ -389,6 +390,15 @@ public final class ScenarioTests {
             case SKIPPED -> Assumptions.abort(result.scenarioId() + " SKIPPED: " + result.message());
             default -> throw new IllegalStateException("unknown status " + result.status());
         }
+    }
+
+    /** {@code "\nwarning: <line>"} per warning of the run (phase8-contracts.md 7.1); empty without any. */
+    static String warningLines(RunResult result) {
+        StringBuilder text = new StringBuilder();
+        for (String warning : result.warnings()) {
+            text.append("\nwarning: ").append(warning);
+        }
+        return text.toString();
     }
 
     /** The failure message: verdict, step, message, detail (without the snapshot), step log and UI text. */
@@ -417,6 +427,8 @@ public final class ScenarioTests {
         if (!result.degradedFidelity().isEmpty()) {
             text.append("\ndegraded fidelity: ").append(String.join("; ", result.degradedFidelity()));
         }
+        // phase8-contracts.md 7.1: the warnings the steps' calls reported, accepted or not.
+        text.append(warningLines(result));
         if (snapshot instanceof String ui && !ui.isEmpty()) {
             text.append("\nUI at failure:\n").append(ui);
         }

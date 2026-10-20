@@ -1,0 +1,25 @@
+# The composite scan (phase8-contracts.md 7.5): the extension ladder needs the borrower's safety induction, and the
+# desk asks for it with the induction-check prompt while the scan is processed; scanChecked answers it itself (Yes:
+# the borrower is inducted) and lists the prompt's event, so that the step's prompt check expects it
+# (answeredBy lending.scanChecked); a garden spade then scans plainly.
+# Seed A fixtures: assistant 100 (its password comes from credentials.yaml); LAD-001 (induction required) and YRD-001.
+scenario: scan-checked
+pack: lending
+tags: [semantic-input]
+requires: [lending.scanChecked, lending.input, lending.state, lending.loan]
+launchProperties: { lending.seed: A }
+resolve:
+  assistant: { fixture: { code: "100" }, credential: { realm: staff, key: code } }
+  ladder:    { fixture: { code: LAD-001, barcode: "5000000000086" } }
+  item:      { fixture: { code: YRD-001, barcode: "5000000000017" } }
+steps:
+  - signOn: { staff: $assistant }
+  - scanChecked: { item: $ladder, inducted: true }
+  - expect: { "loan.lines[code=$ladder.code].qty": 1 }
+  - scanChecked: { item: $item, inducted: true }
+  - expect: { "loan.lines[code=$item.code].qty": 1 }
+  - key: { action: CANCEL }
+verify:
+  - { "state.name": IDLE }
+on_prompt: { unexpected: fail }
+timeouts: { step: 30s }

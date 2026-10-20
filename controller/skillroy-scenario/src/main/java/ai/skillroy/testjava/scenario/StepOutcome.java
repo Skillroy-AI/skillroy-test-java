@@ -47,11 +47,13 @@ import java.util.Objects;
  * @param seqAfter the highest agent sequence number seen when it ended
  * @param degradedFidelity the calls that ran at a lower fidelity than requested
  * @param duration how long the step took
+ * @param warnings one line per warning the step's calls reported (phase8-contracts.md 7.1), masked, accepted or not
+ *     (a session step accepts only what its verb's own calls pre-accept); empty when none
  */
 public record StepOutcome(String stepId, String verb, List<PlannedCall> calls, int executed, Status status,
                           FailureKind failureKind, String message, Map<String, Object> detail, RpcResult lastResult,
                           List<Event> events, long seqBefore, long seqAfter, List<String> degradedFidelity,
-                          Duration duration) {
+                          Duration duration, List<String> warnings) {
 
     /** Copies the lists and freezes the detail. */
     @SuppressWarnings("unchecked")
@@ -63,6 +65,16 @@ public record StepOutcome(String stepId, String verb, List<PlannedCall> calls, i
         events = events == null ? List.of() : List.copyOf(events);
         degradedFidelity = degradedFidelity == null ? List.of() : List.copyOf(degradedFidelity);
         duration = duration == null ? Duration.ZERO : duration;
+        warnings = warnings == null ? List.of() : List.copyOf(warnings);
+    }
+
+    /** An outcome without warnings (the shape before Phase 8). */
+    public StepOutcome(String stepId, String verb, List<PlannedCall> calls, int executed, Status status,
+                       FailureKind failureKind, String message, Map<String, Object> detail, RpcResult lastResult,
+                       List<Event> events, long seqBefore, long seqAfter, List<String> degradedFidelity,
+                       Duration duration) {
+        this(stepId, verb, calls, executed, status, failureKind, message, detail, lastResult, events, seqBefore,
+                seqAfter, degradedFidelity, duration, List.of());
     }
 
     /** True for PASS and DEGRADED: the step did what it was asked. */

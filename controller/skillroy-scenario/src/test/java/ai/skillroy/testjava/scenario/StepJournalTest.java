@@ -380,6 +380,45 @@ class StepJournalTest {
         assertTrue(uncompiled.getMessage().contains("unknown verb 'prod'"), uncompiled.getMessage());
     }
 
+    // ------------------------------------------------------------------------------------------------ Phase 8 (ES)
+
+    /**
+     * phase8-contracts.md 7.3: a verb's call that carries {@code accept}, {@code rungs} and {@code minRung} is
+     * journaled with them (information), read back from the file unchanged, and exported as the verb, which
+     * recompiles to the same calls.
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    void aCallsAcceptRungsAndMinRungAreJournaledReadBackAndRecompiledFromTheVerb() throws Exception {
+        fx.agent.value("toy.scan", Map.of("rung", "PHYSICAL"));
+        fx.pack.custom = List.of(new PlannedCall("toy.scan", Map.of(), Sync.NONE, 0)
+                .withAccept(java.util.Set.of("VALUE_DROPPED"))
+                .withRungs(List.of(new ai.skillroy.testjava.scenario.pack.Rung("PHYSICAL", "toy.scanner.physical"),
+                        ai.skillroy.testjava.scenario.pack.Rung.of("SEMANTIC"))).withMinRung("PHYSICAL"));
+        ExecutorSession session = fx.open();
+        StepOutcome outcome = session.execute("custom", Map.of(), PERSON);
+        assertEquals(Status.PASS, outcome.status(), outcome.message());
+        session.close();
+        StepJournal.StepEntry entry = (StepJournal.StepEntry) session.journal().entries().stream()
+                .filter(e -> e instanceof StepJournal.StepEntry).findFirst().orElseThrow();
+        Map<String, Object> call = entry.calls().get(0);
+        assertEquals(List.of("VALUE_DROPPED"), call.get("accept"));
+        assertEquals(List.of("PHYSICAL", "SEMANTIC"), call.get("rungs"));
+        assertEquals("PHYSICAL", call.get("minRung"));
+        StepJournal read = StepJournal.read(session.journal().file(), fx.pack);
+        StepJournal.StepEntry readEntry = (StepJournal.StepEntry) read.entries().stream()
+                .filter(e -> e instanceof StepJournal.StepEntry).findFirst().orElseThrow();
+        assertEquals(entry.calls(), readEntry.calls(), "the call keys round trip");
+        ExportResult exported = session.journal().export(ExportOptions.of("ladder"));
+        assertEquals(List.of(Map.of("custom", Map.of())), steps(yamlOf(exported)), "the export writes the verb");
+        assertFalse(exported.yaml().contains("minRung"));
+        Plan recompiled = PlanCompiler.compile(exported.yaml().getBytes(StandardCharsets.UTF_8), "ladder.yaml",
+                fx.pack);
+        Plan.Call again = recompiled.steps().get(0).calls().get(0);
+        assertEquals(java.util.Set.of("VALUE_DROPPED"), again.accept());
+        assertEquals("PHYSICAL", again.minRung(), "recompiles to the same calls");
+    }
+
     // ------------------------------------------------------------------------------------------------ read back
 
     @Test

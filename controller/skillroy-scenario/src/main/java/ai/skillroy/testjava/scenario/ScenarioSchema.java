@@ -171,6 +171,9 @@ public final class ScenarioSchema {
         for (Map.Entry<String, Object> verb : verbs.entrySet()) {
             Map<String, Object> props = new LinkedHashMap<>();
             props.put(verb.getKey(), verb.getValue());
+            // phase8-contracts.md 7.3: the reserved step modifiers beside the one verb key.
+            props.put(ScenarioLoader.ACCEPT, array(Schemas.type("string"), true));
+            props.put(ScenarioLoader.MIN_RUNG, Schemas.type("string"));
             steps.add(object(props, List.of(verb.getKey())));
         }
         defs.put("step", oneOf(steps));

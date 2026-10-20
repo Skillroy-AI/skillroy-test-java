@@ -62,14 +62,18 @@ import java.util.regex.Pattern;
  * @param mode the bind mode of the run (phase2-contracts.md 11.1); null for a result built without one
  * @param envId the environment id of the run; null for a result built without one
  * @param modelCalls the cost ledger entries recorded during the run; always empty in Phase 2
+ * @param warnings one line per warning a step call reported (phase8-contracts.md 7.1), accepted or not, for example
+ *     {@code "s2: scan: lending.input VALUE_COERCED (the desk took 4005)"}; empty when none. An accepted warning leaves
+ *     the verdict alone; an unaccepted one failed its step
  */
 public record RunResult(String scenarioId, Status status, FailureKind failureKind, String failedStepId,
                         String message, Map<String, Object> detail, List<StepResult> steps,
                         List<String> skippedExpectations, Duration duration, List<String> degradedFidelity,
-                        BindMode mode, String envId, List<CostLedger.Entry> modelCalls) {
+                        BindMode mode, String envId, List<CostLedger.Entry> modelCalls, List<String> warnings) {
 
-    /** Copies the collections; a null {@code degradedFidelity} or {@code modelCalls} is empty. */
+    /** Copies the collections; a null {@code degradedFidelity}, {@code modelCalls} or {@code warnings} is empty. */
     public RunResult {
+        warnings = warnings == null ? List.of() : List.copyOf(warnings);
         modelCalls = modelCalls == null ? List.of() : List.copyOf(modelCalls);
         Objects.requireNonNull(scenarioId, "scenarioId");
         Objects.requireNonNull(status, "status");
@@ -79,6 +83,15 @@ public record RunResult(String scenarioId, Status status, FailureKind failureKin
         steps = List.copyOf(steps);
         skippedExpectations = List.copyOf(skippedExpectations);
         degradedFidelity = degradedFidelity == null ? List.of() : List.copyOf(degradedFidelity);
+    }
+
+    /** A result without warnings (the shape before Phase 8). */
+    public RunResult(String scenarioId, Status status, FailureKind failureKind, String failedStepId, String message,
+                     Map<String, Object> detail, List<StepResult> steps, List<String> skippedExpectations,
+                     Duration duration, List<String> degradedFidelity, BindMode mode, String envId,
+                     List<CostLedger.Entry> modelCalls) {
+        this(scenarioId, status, failureKind, failedStepId, message, detail, steps, skippedExpectations, duration,
+                degradedFidelity, mode, envId, modelCalls, List.of());
     }
 
     /** A result without the Phase 2 components (the shape of amendment A29). */

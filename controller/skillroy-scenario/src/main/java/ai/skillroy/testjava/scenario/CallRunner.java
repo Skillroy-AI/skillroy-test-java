@@ -20,14 +20,20 @@ import ai.skillroy.testjava.controller.AgentConnection;
 import ai.skillroy.testjava.controller.AgentLostException;
 import ai.skillroy.testjava.controller.AgentRpcException;
 import ai.skillroy.testjava.controller.CallOptions;
+import ai.skillroy.testjava.data.SecretMask;
+import ai.skillroy.testjava.protocol.CallWarning;
+import ai.skillroy.testjava.protocol.CompositeResult;
 import ai.skillroy.testjava.protocol.ErrorCodes;
 import ai.skillroy.testjava.protocol.Event;
+import ai.skillroy.testjava.protocol.InputResult;
 import ai.skillroy.testjava.protocol.JsonException;
 import ai.skillroy.testjava.protocol.RpcError;
 import ai.skillroy.testjava.protocol.RpcResult;
+import ai.skillroy.testjava.protocol.RungResult;
 import ai.skillroy.testjava.protocol.SecretKeys;
 import ai.skillroy.testjava.protocol.TopicFilter;
 import ai.skillroy.testjava.scenario.pack.AwaitSpec;
+import ai.skillroy.testjava.scenario.pack.Rung;
 import ai.skillroy.testjava.scenario.pack.PromptDecision;
 import ai.skillroy.testjava.scenario.pack.PromptPolicy;
 import ai.skillroy.testjava.scenario.pack.SyncPolicy;
@@ -60,6 +66,14 @@ import java.util.function.Supplier;
  * {@code prompt} records of {@code run.jsonl}. From Phase 6 (phase6-contracts.md 10.2) it also tells its owner's
  * {@link #observer} where each call starts and ends (its sync and prompt check included) and every wait it did, and
  * sends the observer's open call span as the call's {@code _meta.traceparent}.
+ *
+ * <p>From Phase 8 (phase8-contracts.md 7.7, decision D592) a successful call's result is checked in a fixed order
+ * after its {@code call} record: the secret-echo check (a result never carries a secret parameter's value, 7.5), the
+ * warnings (7.1, with the derived {@code INPUT_QUEUED} of 7.2), the composite shape (7.5), the rung checks of a ladder
+ * call (7.6), the fidelity note (de-duplicated with the ladder's), the base verbs' checks, the sync (correlated by
+ * {@code inputId} under {@link SyncPolicy#ackByInputId()}, 7.4), the capture, and the prompt check, which expects a
+ * prompt a composite lists by {@code seq} inside the call's window. The first failure wins; every record of an
+ * earlier stage is written first. It writes the {@code warning}, {@code rung} records too.
  *
  * <p>Its fields are the protocol's state, which its owner reads and sets between calls: the sequence numbers every
  * wait starts from, the prompt cursor, whether the agent was lost and whether a secret parameter was sent. Not
@@ -98,6 +112,17 @@ final class CallRunner {
     SyncPolicy sync = new SyncPolicy(null, null, null, null, null);
     /** The prompt policy that decides on an unexpected prompt. */
     PromptPolicy promptPolicy = PromptPolicy.FAIL;
+    /** The pack's own warning codes (phase8-contracts.md 7.3), which a call may accept; set by the owner. */
+    Set<String> warningCodes = Set.of();
+    /**
+     * The run mask's {@code minLengthInText} (amendment A25, B19): the secret-echo check matches a secret inside a
+     * longer text from this length on, and by equality only below it (phase8-contracts.md 7.5); set by the owner.
+     */
+    int minLengthInText = SecretMask.MIN_SUBSTRING;
+    /** Every warning a step call reported, as one line each, in order (phase8-contracts.md 7.1). */
+    final List<String> warnings = new ArrayList<>();
+    /** The same, for the current step only; the owner replaces the list when a step starts. */
+    List<String> stepWarnings = new ArrayList<>();
     /** The pack's verbs: a base UI or web verb a pack overrides gets no base-verb checks. */
     Set<String> packVerbs = Set.of();
     /** The slot values call arguments resolve against; a capture replaces them. */
@@ -388,7 +413,14 @@ final class CallRunner {
             lastActionSeq = agentSince;
             lastActionPathSeq = pathSince;
         }
-        noteFidelity(step, call, result.value());
+        // phase8-contracts.md 7.7 (D592): the result checks in their fixed order, the first failure winning.
+        checkSecretEcho(call, params, secretParams, result, stepId);
+        checkWarnings(step, callIndex, call, result, await);
+        checkComposite(call, params, secretParams, result.value(), stepId);
+        boolean ladderRecorded = checkRungs(step, callIndex, call, params, result.value());
+        if (!ladderRecorded) {
+            noteFidelity(step, call, result.value());
+        }
         if (baseUi) {
             checkFired(step, call, result.value());
         }
@@ -398,11 +430,357 @@ final class CallRunner {
         if (baseWeb && "web.waitFlag".equals(call.primitive())) {
             checkWaitFlag(step, call, params, result.value());
         }
-        Event ended = applySync(call, await, agentSince, pathSince, stepId);
+        Event ended = applySync(call, await, agentSince, pathSince, stepId, result.value());
         if (call.capture() != null) {
             capture(step, call, isAwait ? awaitedEvent(result.value()) : ended);
         }
-        checkPrompts(step, callIndex, nextStepHandlesPrompt, handledUpTo(call, result, agentSince, fromPath));
+        List<Long> answered = agentServed && !fromPath ? CompositeResult.answeredSeqs(result.value()) : List.of();
+        checkPrompts(step, callIndex, nextStepHandlesPrompt, handledUpTo(call, result, agentSince, fromPath),
+                new Answered(call.primitive(), answered, result.seqBefore(), result.seqAfter()));
+    }
+
+    // ---------------------------------------------------------------- result checks (phase8-contracts.md 7)
+
+    /** The most scalars and the deepest nesting the secret-echo walk reads (phase8-contracts.md 7.5). */
+    static final int ECHO_MAX_SCALARS = 10_000;
+    static final int ECHO_MAX_DEPTH = 32;
+
+    /**
+     * phase8-contracts.md 7.5 (D585): a call with secret parameters must not return one of their values. The walk
+     * reads the result's value and its warnings' messages and data: a scalar equal to a secret's value, or a string
+     * containing one at least {@link #minLengthInText} long, fails the step ERROR / ENVIRONMENT; the detail names the
+     * parameter, never the value. Bounded: at most {@link #ECHO_MAX_SCALARS} scalars and depth
+     * {@link #ECHO_MAX_DEPTH}, beyond which the check fails closed.
+     */
+    private void checkSecretEcho(Plan.Call call, Map<String, Object> params, List<String> secretParams,
+                                 RpcResult result, String stepId) throws Abort {
+        if (secretParams.isEmpty()) {
+            return;
+        }
+        Map<String, Set<String>> secrets = new LinkedHashMap<>();
+        for (String name : secretParams) {
+            Set<String> values = new java.util.LinkedHashSet<>();
+            secretLeaves(params.get(name), values, 0);
+            if (!values.isEmpty()) {
+                secrets.put(name, values);
+            }
+        }
+        if (secrets.isEmpty()) {
+            return;
+        }
+        EchoWalk walk = new EchoWalk(secrets, minLengthInText);
+        walk.visit(result.value(), 0);
+        for (CallWarning warning : result.warnings()) {
+            walk.visit(warning.message(), 1);
+            walk.visit(warning.data(), 1);
+        }
+        if (walk.tooLarge) {
+            throw new Abort(Status.ERROR, FailureKind.ENVIRONMENT, stepId, call.primitive() + " returned a result too"
+                    + " large to check for secrets (more than " + ECHO_MAX_SCALARS + " scalars or deeper than "
+                    + ECHO_MAX_DEPTH + ")", RunLog.fields("primitive", call.primitive(), "parameters",
+                    secretParams));
+        }
+        if (walk.echoed != null) {
+            throw new Abort(Status.ERROR, FailureKind.ENVIRONMENT, stepId, call.primitive() + " returned the value of"
+                    + " its secret parameter '" + walk.echoed + "'", RunLog.fields("primitive", call.primitive(),
+                    // Not "secretParam": a secret-looking key would have the run mask hide the parameter's name.
+                    "parameter", walk.echoed));
+        }
+    }
+
+    /** The texts of a secret parameter's value: a string's, a number's, every such leaf below a structure. */
+    private static void secretLeaves(Object value, Set<String> out, int depth) {
+        if (value == null || value instanceof Boolean || depth > ECHO_MAX_DEPTH) {
+            return;
+        }
+        if (value instanceof Map<?, ?> map) {
+            for (Object v : map.values()) {
+                secretLeaves(v, out, depth + 1);
+            }
+        } else if (value instanceof List<?> list) {
+            for (Object v : list) {
+                secretLeaves(v, out, depth + 1);
+            }
+        } else {
+            String text = Values.stringOf(value);
+            if (text != null && !text.isEmpty()) {
+                out.add(text);
+            }
+        }
+    }
+
+    /** One bounded walk of the secret-echo check. */
+    private static final class EchoWalk {
+        private final Map<String, Set<String>> secrets;
+        private final int minLengthInText;
+        private int scalars;
+        boolean tooLarge;
+        String echoed;
+
+        EchoWalk(Map<String, Set<String>> secrets, int minLengthInText) {
+            this.secrets = secrets;
+            this.minLengthInText = minLengthInText;
+        }
+
+        void visit(Object value, int depth) {
+            if (echoed != null || tooLarge || value == null || value instanceof Boolean) {
+                return;
+            }
+            if (depth > ECHO_MAX_DEPTH) {
+                tooLarge = true;
+                return;
+            }
+            if (value instanceof Map<?, ?> map) {
+                for (Object v : map.values()) {
+                    visit(v, depth + 1);
+                }
+                return;
+            }
+            if (value instanceof List<?> list) {
+                for (Object v : list) {
+                    visit(v, depth + 1);
+                }
+                return;
+            }
+            if (++scalars > ECHO_MAX_SCALARS) {
+                tooLarge = true;
+                return;
+            }
+            String text = Values.stringOf(value);
+            if (text == null) {
+                return;
+            }
+            for (Map.Entry<String, Set<String>> e : secrets.entrySet()) {
+                for (String secret : e.getValue()) {
+                    if (text.equals(secret) || (value instanceof String && secret.length() >= minLengthInText
+                            && text.contains(secret))) {
+                        echoed = e.getKey();
+                        return;
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * phase8-contracts.md 7.1, 7.2 (D577, D578, D580): the call's warnings, the agent's plus the derived
+     * {@code INPUT_QUEUED}, each recorded ({@code warning}) and listed ({@link #warnings}, {@link #stepWarnings});
+     * then, when one is not accepted, the step fails FAIL / ASSERTION naming the first.
+     */
+    private void checkWarnings(Plan.Step step, int callIndex, Plan.Call call, RpcResult result, AwaitSpec await)
+            throws Abort {
+        List<Sourced> all = warningsOf(call, result, await);
+        if (all.isEmpty()) {
+            return;
+        }
+        List<String> unaccepted = new ArrayList<>();
+        List<Object> json = new ArrayList<>();
+        Sourced first = null;
+        for (Sourced sourced : all) {
+            CallWarning warning = sourced.warning();
+            boolean accepted = accepted(call, warning.code());
+            writeWarning(step.id(), callIndex + 1, call.primitive(), warning, accepted, sourced.source(), false);
+            String line = step.id() + ": " + step.verb() + ": " + call.primitive() + " " + warning.code()
+                    + (warning.message() == null ? "" : " (" + warning.message() + ")");
+            line = Values.printableLine(line);
+            warnings.add(line);
+            stepWarnings.add(line);
+            json.add(warning.toJson());
+            if (!accepted) {
+                unaccepted.add(warning.code());
+                if (first == null) {
+                    first = sourced;
+                }
+            }
+        }
+        if (first == null) {
+            return;
+        }
+        CallWarning warning = first.warning();
+        String code = warning.code();
+        String text = warning.message() == null ? "" : ": " + warning.message();
+        String message;
+        if (CallWarning.NEVER_ACCEPTABLE.contains(code)) {
+            message = step.verb() + ": " + call.primitive() + " reported " + code + text + " (never acceptable)";
+        } else if (!acceptable(code)) {
+            message = step.verb() + ": " + call.primitive() + " reported the undeclared warning " + code + text;
+        } else {
+            message = step.verb() + ": " + call.primitive() + " reported " + code + text + " (a step accepts it with"
+                    + " accept: [" + code + "])";
+        }
+        throw new Abort(Status.FAIL, FailureKind.ASSERTION, step.id(), Values.printableLine(message),
+                RunLog.fields("primitive", call.primitive(), "warnings", json, "unaccepted", unaccepted));
+    }
+
+    /**
+     * A cleanup call's warnings (phase8-contracts.md 7.1): recorded with {@code step: null, cleanup: true}, never
+     * changing the verdict and never in the result lists.
+     */
+    void noteCleanupWarnings(int index, Plan.Call call, RpcResult result) {
+        for (Sourced sourced : warningsOf(call, result, call.await())) {
+            writeWarning(null, index, call.primitive(), sourced.warning(), accepted(call, sourced.warning().code()),
+                    sourced.source(), true);
+        }
+    }
+
+    /** A warning with where it came from: the agent's channel or the executor's derivation. */
+    private record Sourced(CallWarning warning, String source) {
+    }
+
+    private List<Sourced> warningsOf(Plan.Call call, RpcResult result, AwaitSpec await) {
+        List<Sourced> out = new ArrayList<>();
+        for (CallWarning warning : result.warnings()) {
+            out.add(new Sourced(warning, "agent"));
+        }
+        if (InputResult.queued(result.value()) && !correlated(call, await)) {
+            String id = InputResult.inputId(result.value());
+            out.add(new Sourced(new CallWarning(CallWarning.INPUT_QUEUED, "input " + (id == null ? "(no inputId)"
+                    : id) + " was queued and nothing waits for its acknowledgement", id == null ? null
+                    : RunLog.fields(InputResult.INPUT_ID, id)), "executor"));
+        }
+        return out;
+    }
+
+    /**
+     * phase8-contracts.md 7.2: the call's sync waits for that input's own acknowledgement: {@code ACK} or
+     * {@code READY} under {@link SyncPolicy#ackByInputId()} (with an ack topic), or {@code EVENT} whose resolved match
+     * has the key {@code inputId}.
+     */
+    private boolean correlated(Plan.Call call, AwaitSpec await) {
+        return switch (call.sync()) {
+            case ACK, READY -> sync.ackByInputId() && sync.ackTopic() != null;
+            case EVENT -> await != null && await.match() != null && await.match().containsKey(InputResult.INPUT_ID);
+            default -> false;
+        };
+    }
+
+    private void writeWarning(String stepId, int index, String primitive, CallWarning warning, boolean accepted,
+                              String source, boolean cleanup) {
+        Map<String, Object> record = RunLog.fields("step", stepId, "index", index, "primitive", primitive, "code",
+                warning.code());
+        if (warning.message() != null) {
+            record.put("message", warning.message());
+        }
+        if (warning.data() != null) {
+            record.put("data", warning.data());
+        }
+        record.put("accepted", accepted);
+        record.put("source", source);
+        if (cleanup) {
+            record.put("cleanup", true);
+        }
+        log.write("warning", record);
+    }
+
+    /** True when the call accepts the code and the code can be accepted at all. */
+    private boolean accepted(Plan.Call call, String code) {
+        return call.accept().contains(code) && acceptable(code);
+    }
+
+    /** A base code but the two never-acceptable ones, or a code the pack declares. */
+    private boolean acceptable(String code) {
+        return (CallWarning.BASE_CODES.contains(code) && !CallWarning.NEVER_ACCEPTABLE.contains(code))
+                || warningCodes.contains(code);
+    }
+
+    /**
+     * phase8-contracts.md 7.5 (D584): a result with a {@code composite} key follows the convention
+     * ({@link CompositeResult#problems}); a violation is ERROR / ENVIRONMENT naming it.
+     */
+    private void checkComposite(Plan.Call call, Map<String, Object> params, List<String> secretParams, Object value,
+                                String stepId) throws Abort {
+        List<String> problems = CompositeResult.problems(value, params.keySet(), secretParams);
+        if (!problems.isEmpty()) {
+            throw new Abort(Status.ERROR, FailureKind.ENVIRONMENT, stepId, call.primitive() + " returned a composite"
+                    + " result that breaks the convention: " + problems.get(0), RunLog.fields("primitive",
+                    call.primitive(), "problems", problems));
+        }
+    }
+
+    /**
+     * phase8-contracts.md 7.6 (D588, D589): a ladder call's reported rung is checked against its ladder: missing,
+     * undeclared, below {@code minRung}, or a forwarded {@code minRung} without its echo, is FAIL / ASSERTION; a rung
+     * below the first is one {@code fidelity} record {@code DEGRADED} and a {@link #degradedFidelity} line. Every
+     * ladder call writes one {@code rung} record, before a failure is thrown.
+     *
+     * @return true when the ladder check recorded the call's fidelity ({@link #noteFidelity} then skips it)
+     */
+    private boolean checkRungs(Plan.Step step, int callIndex, Plan.Call call, Map<String, Object> params,
+                               Object value) throws Abort {
+        List<Rung> ladder = call.rungs();
+        if (ladder.isEmpty()) {
+            return false;
+        }
+        List<String> names = ladder.stream().map(Rung::name).toList();
+        String rung = RungResult.rung(value);
+        int at = rung == null ? -1 : names.indexOf(rung);
+        String forwarded = forwardedMinRung(params);
+        String echo = RungResult.minRung(value);
+        String failure = null;
+        String where = step.verb() + ": " + call.primitive();
+        if (rung == null) {
+            failure = where + " reported no rung; its ladder is " + names;
+        } else if (at < 0) {
+            failure = where + " reported rung " + Values.printableLine(rung) + ", not one of " + names;
+        } else if (call.minRung() != null && at > names.indexOf(call.minRung())) {
+            failure = where + " acted on rung " + rung + " below the required " + call.minRung();
+        } else if (forwarded != null && !forwarded.equals(echo)) {
+            failure = where + " did not apply minRung " + forwarded;
+        }
+        Map<String, Object> record = RunLog.fields("step", step.id(), "index", callIndex + 1, "primitive",
+                call.primitive(), "rungs", names);
+        if (call.minRung() != null) {
+            record.put("minRung", call.minRung());
+        }
+        record.putAll(RunLog.fields("rung", rung, "fidelity", at == 0 ? RungResult.FULL : RungResult.DEGRADED,
+                "ok", failure == null));
+        log.write("rung", record);
+        if (failure != null) {
+            throw new Abort(Status.FAIL, FailureKind.ASSERTION, step.id(), failure, RunLog.fields("primitive",
+                    call.primitive(), "rungs", names, "minRung", call.minRung(), "value", value));
+        }
+        if (at == 0) {
+            return false;
+        }
+        Object reason = value instanceof Map<?, ?> v && v.get(RungResult.REASON) != null ? v.get(RungResult.REASON)
+                : "a lower rung of the ladder";
+        String entry = Values.printableLine(step.id() + ": " + step.verb() + " fell back from " + names.get(0) + " to "
+                + rung + " (" + reason + ")");
+        degradedFidelity.add(entry);
+        stepFidelity.add(entry);
+        log.write("fidelity", RunLog.fields("step", step.id(), "primitive", call.primitive(), "fidelity",
+                "DEGRADED", "requestedRung", names.get(0), "rung", rung, "reason", reason));
+        return true;
+    }
+
+    /**
+     * A cleanup call's ladder (phase8-contracts.md 7.6): its {@code rung} record only, never a verdict or a fidelity
+     * line.
+     */
+    void noteCleanupRung(int index, Plan.Call call, Object value) {
+        if (call.rungs().isEmpty()) {
+            return;
+        }
+        List<String> names = call.rungs().stream().map(Rung::name).toList();
+        String rung = RungResult.rung(value);
+        int at = rung == null ? -1 : names.indexOf(rung);
+        log.write("rung", RunLog.fields("step", null, "index", index, "primitive", call.primitive(), "rungs", names,
+                "rung", rung, "fidelity", at == 0 ? RungResult.FULL : RungResult.DEGRADED, "ok", at >= 0,
+                "cleanup", true));
+    }
+
+    /**
+     * The {@code minRung} the call forwards to its primitive: a top-level parameter, or one inside the {@code args} of
+     * a {@code device.act}-shaped call; null when it forwards none.
+     */
+    private static String forwardedMinRung(Map<String, Object> params) {
+        if (params.get(RungResult.MIN_RUNG) instanceof String rung) {
+            return rung;
+        }
+        if (params.get("args") instanceof Map<?, ?> args && args.get(RungResult.MIN_RUNG) instanceof String rung) {
+            return rung;
+        }
+        return null;
     }
 
     /**
@@ -682,17 +1060,19 @@ final class CallRunner {
      * @param since the agent's sequence number before the call ({@code seq.before} of an agent call)
      * @param pathSince the web path's sequence number before the call (used when the wait reads the path's
      *     events, phase4-contracts.md 6.3)
+     * @param value the call's result value, from which an acknowledgement correlated by input reads the
+     *     {@code inputId} (phase8-contracts.md 7.4); null for a call that returned none
      * @return the event that ended an EVENT wait, else null
      */
-    Event applySync(Plan.Call call, AwaitSpec await, long since, long pathSince, String stepId)
+    Event applySync(Plan.Call call, AwaitSpec await, long since, long pathSince, String stepId, Object value)
             throws Abort, AgentLostException {
         switch (call.sync()) {
             case NONE -> {
             }
             case ACK -> {
                 if (sync.ackTopic() != null) {
-                    awaitTopic("ack", sync.ackTopic(), null, since, pathSince, timeout(sync.ackTimeout(), call),
-                            call, stepId);
+                    awaitTopic("ack", sync.ackTopic(), ackMatch(call, value, stepId), since, pathSince,
+                            timeout(sync.ackTimeout(), call), call, stepId);
                 } else {
                     log.write("sync", RunLog.fields("step", stepId, "primitive", call.primitive(), "mode", "ACK",
                             "ok", true, "note", "the pack has no ack topic"));
@@ -700,8 +1080,8 @@ final class CallRunner {
             }
             case READY -> {
                 if (sync.ackTopic() != null) {
-                    awaitTopic("ack", sync.ackTopic(), null, since, pathSince, timeout(sync.ackTimeout(), call),
-                            call, stepId);
+                    awaitTopic("ack", sync.ackTopic(), ackMatch(call, value, stepId), since, pathSince,
+                            timeout(sync.ackTimeout(), call), call, stepId);
                 }
                 if (!sync.readyTopics().isEmpty()) {
                     awaitTopic("ready", String.join(",", sync.readyTopics()), null, since, pathSince,
@@ -716,6 +1096,24 @@ final class CallRunner {
             default -> throw new IllegalStateException("unknown sync " + call.sync());
         }
         return null;
+    }
+
+    /**
+     * phase8-contracts.md 7.4 (D582): the ack wait's match. Null (any acknowledgement since {@code seq.before}, as
+     * before Phase 8) unless the pack's acknowledgements are correlated by input; then {@code {inputId: <the
+     * result's>}}, and a result without one is ERROR / ENVIRONMENT, nothing awaited.
+     */
+    private Map<String, Object> ackMatch(Plan.Call call, Object value, String stepId) throws Abort {
+        if (!sync.ackByInputId()) {
+            return null;
+        }
+        String id = InputResult.inputId(value);
+        if (id == null) {
+            throw new Abort(Status.ERROR, FailureKind.ENVIRONMENT, stepId, "the pack's acknowledgements are correlated"
+                    + " by inputId; " + call.primitive() + " returned none", RunLog.fields("primitive",
+                    call.primitive(), "sync", call.sync().name(), "ackTopic", sync.ackTopic()));
+        }
+        return RunLog.fields(InputResult.INPUT_ID, id);
     }
 
     private long timeout(Duration configured, Plan.Call call) {
@@ -856,13 +1254,34 @@ final class CallRunner {
 
     // ---------------------------------------------------------------- prompts
 
-    private void checkPrompts(Plan.Step step, int callIndex, BooleanSupplier nextStepHandlesPrompt, long handledUpTo)
-            throws Abort, AgentLostException {
+    /**
+     * The prompts a composite answered (phase8-contracts.md 7.5, D586): the {@code seq}s its result lists and the
+     * call's window {@code (seqBefore, seqAfter]}; a listed prompt event inside the window is expected.
+     */
+    private record Answered(String primitive, List<Long> seqs, long seqBefore, long seqAfter) {
+
+        boolean covers(long seq) {
+            return seq > seqBefore && seq <= seqAfter && seqs.contains(seq);
+        }
+
+        List<Long> outside() {
+            return seqs.stream().filter(seq -> seq <= seqBefore || seq > seqAfter).toList();
+        }
+    }
+
+    private void checkPrompts(Plan.Step step, int callIndex, BooleanSupplier nextStepHandlesPrompt, long handledUpTo,
+                              Answered answered) throws Abort, AgentLostException {
         List<String> topics = sync.promptTopics();
         if (topics.isEmpty()) {
             return;
         }
         String stepId = step.id();
+        List<Long> ignored = answered.outside();
+        if (!ignored.isEmpty()) {
+            // A composite cannot vouch for a prompt outside its own call's window.
+            log.write("prompt", RunLog.fields("step", stepId, "primitive", answered.primitive(), "ignoredSeqs",
+                    ignored));
+        }
         TopicFilter filter = TopicFilter.of(topics);
         for (int round = 0; round < 10; round++) {
             Map<String, Object> params = RunLog.fields("since", promptCursor, "topics", String.join(",", topics),
@@ -883,6 +1302,11 @@ final class CallRunner {
                 promptCursor = event.seq();
                 noteSeq(event.seq());
                 if (!filter.matches(event.topic())) {
+                    continue;
+                }
+                if (answered.covers(event.seq())) {
+                    log.write("prompt", RunLog.fields("step", stepId, "event", event.toJson(), "expected", true,
+                            "answeredBy", answered.primitive()));
                     continue;
                 }
                 boolean expected = event.seq() <= handledUpTo

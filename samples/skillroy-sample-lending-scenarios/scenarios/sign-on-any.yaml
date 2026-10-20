@@ -1,0 +1,24 @@
+# The composite sign-on (phase8-contracts.md 7.5): one verb signs on whichever way the desk asks. Fay, an
+# auto-sign-on staff member, is signed on at once (branch auto; her slot declares no credential, so no password is
+# sent); after she signs off, assistant 100 is asked for a password, which the composite answers from
+# credentials.yaml (branch password). The composite lists every question it answered; the staff code is asserted
+# after each sign-on.
+# Seed A fixtures: staff 103 (auto sign-on), assistant 100 (its password comes from credentials.yaml).
+scenario: sign-on-any
+pack: lending
+tags: [semantic-input]
+requires: [lending.signOn, lending.input, lending.state]
+launchProperties: { lending.seed: A }
+resolve:
+  auto:      { fixture: { code: "103" } }
+  assistant: { fixture: { code: "100" }, credential: { realm: staff, key: code } }
+steps:
+  - signOnAny: { staff: $auto }
+  - expect: { "state.name": IDLE, "state.staff.code": $auto.code }
+  - signOff: {}
+  - signOnAny: { staff: $assistant }
+  - expect: { "state.name": IDLE, "state.staff.code": $assistant.code }
+verify:
+  - { "state.name": IDLE }
+on_prompt: { unexpected: fail }
+timeouts: { step: 30s }

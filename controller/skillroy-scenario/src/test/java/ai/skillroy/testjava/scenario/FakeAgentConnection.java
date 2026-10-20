@@ -289,7 +289,21 @@ final class FakeAgentConnection implements AgentConnection {
                 events.add(event);
             }
         }
-        return new RpcResult(value, events, before, seq, 1, "fake-worker");
+        // phase8-contracts.md 7.1 (ES): a handler answers a value with warnings in the envelope through Warned.
+        List<ai.skillroy.testjava.protocol.CallWarning> warned = List.of();
+        if (value instanceof Warned w) {
+            value = w.value();
+            warned = w.warnings();
+        }
+        return new RpcResult(value, events, before, seq, 1, "fake-worker", warned);
+    }
+
+    /** A handler's answer that carries warnings in the result's envelope (phase8-contracts.md 7.1, ES). */
+    record Warned(Object value, List<ai.skillroy.testjava.protocol.CallWarning> warnings) {
+
+        static Warned of(Object value, ai.skillroy.testjava.protocol.CallWarning... warnings) {
+            return new Warned(value, List.of(warnings));
+        }
     }
 
     /**

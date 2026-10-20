@@ -312,6 +312,115 @@ class DefaultMethodsTest {
         assertThrows(UnsupportedOperationException.class, () -> broker.callOnLane("test.reads", task, 1000L));
     }
 
+    /**
+     * phase8-contracts.md 7.1, 7.4, 7.6 (ES): an invocation, a bus and a device written for 0.1.0 compile unchanged;
+     * {@code warn} records nothing, the four-argument {@code publish} is the three-argument one, and an action has no
+     * rung ladder.
+     */
+    @Test
+    void theSemanticInputMembersDefaultToTheOldBehaviour() throws Exception {
+        Invocation invocation = new Invocation() {
+            @Override
+            public JsonView args() {
+                return JsonView.of(null);
+            }
+
+            @Override
+            public String correlationId() {
+                return "c-1";
+            }
+
+            @Override
+            public String traceparent() {
+                return null;
+            }
+
+            @Override
+            public AgentContext context() {
+                return null;
+            }
+
+            @Override
+            public long remainingMs() {
+                return 0;
+            }
+        };
+        invocation.warn("VALUE_COERCED", "taken as 4005", Collections.<String, Object>singletonMap("taken", "4005"));
+        invocation.warn("not a code", null, null);   // the default checks nothing and records nothing
+
+        final List<String> published = new java.util.ArrayList<String>();
+        EventBus bus = new EventBus() {
+            @Override
+            public long publish(String topic, String source, Map<String, Object> payload) {
+                published.add(topic + "/" + source + "/" + payload);
+                return 7L;
+            }
+
+            @Override
+            public long lastSeq() {
+                return 0;
+            }
+
+            @Override
+            public List<ai.skillroy.testjava.protocol.Event> since(long seqExclusive,
+                    ai.skillroy.testjava.protocol.TopicFilter filter, int limit) {
+                return Collections.emptyList();
+            }
+
+            @Override
+            public ai.skillroy.testjava.protocol.Event await(long seqExclusive,
+                    ai.skillroy.testjava.protocol.TopicFilter filter, Map<String, Object> payloadMatch,
+                    long timeoutMs) {
+                return null;
+            }
+
+            @Override
+            public AutoCloseable subscribe(ai.skillroy.testjava.protocol.TopicFilter filter, EventSink sink) {
+                return null;
+            }
+
+            @Override
+            public long oldestSeq() {
+                return 0;
+            }
+        };
+        assertEquals(7L, bus.publish("input.acked", "lending", Collections.<String, Object>singletonMap("inputId",
+                "lending-1"), "c-1"));
+        assertEquals(Collections.singletonList("input.acked/lending/{inputId=lending-1}"), published,
+                "the default delegates to the three-argument form and drops the id");
+
+        ai.skillroy.testjava.agent.api.spi.DeviceAdapter device
+                = new ai.skillroy.testjava.agent.api.spi.DeviceAdapter() {
+            @Override
+            public String id() {
+                return "d";
+            }
+
+            @Override
+            public String kind() {
+                return "printer";
+            }
+
+            @Override
+            public Map<String, Object> state() {
+                return Collections.emptyMap();
+            }
+
+            @Override
+            public java.util.Set<String> actions() {
+                return Collections.singleton("print");
+            }
+
+            @Override
+            public Object act(String action, JsonView args) {
+                return null;
+            }
+        };
+        assertTrue(device.rungs("print").isEmpty());
+        assertTrue(device.rungs(null).isEmpty());
+        assertThrows(UnsupportedOperationException.class, () -> device.rungs("print").add("PHYSICAL"));
+    }
+
     /** A context whose only real member is {@link AgentContext#options()}. */
     private static AgentContext context(final Map<String, String> options) {
         return context(options, null);

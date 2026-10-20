@@ -1,0 +1,22 @@
+# A scan through the desk's scanner device, whose action has a rung ladder (phase8-contracts.md 7.6): through the
+# scanner driver when the desk runs one (rung PHYSICAL, full fidelity), else straight into the desk (rung SEMANTIC).
+# On a desk without the driver the run is DEGRADED, with one fidelity record; on a desk launched with
+# -Dlending.scannerDriver=true it passes at full fidelity.
+# Seed A fixtures: assistant 100 (its password comes from credentials.yaml); YRD-001, barcode 5000000000017.
+scenario: device-scan
+pack: lending
+tags: [semantic-input]
+requires: [lending.input, lending.state, lending.loan]
+launchProperties: { lending.seed: A }
+resolve:
+  assistant: { fixture: { code: "100" }, credential: { realm: staff, key: code } }
+  item:      { fixture: { code: YRD-001, barcode: "5000000000017" } }
+steps:
+  - signOn: { staff: $assistant }
+  - deviceScan: { item: $item }
+  - expect: { "loan.lines[code=$item.code].qty": 1 }
+  - key: { action: CANCEL }
+verify:
+  - { "state.name": IDLE }
+on_prompt: { unexpected: fail }
+timeouts: { step: 30s }

@@ -103,6 +103,8 @@ final class FakeAgent implements AutoCloseable {
     volatile boolean rejectAll;
     volatile String mainCommand = "com.example.FakeMain";
     final Map<String, Handler> handlers = new ConcurrentHashMap<>();
+    /** The warnings each method's result carries in its envelope (phase8-contracts.md 7.1, ES); none by default. */
+    final Map<String, List<ai.skillroy.testjava.protocol.CallWarning>> warnings = new ConcurrentHashMap<>();
     final List<Request> requests = new CopyOnWriteArrayList<>();
     final Map<String, Capability> capabilities = new ConcurrentHashMap<>();
     final List<PrimitiveDescriptor> schema = new CopyOnWriteArrayList<>();
@@ -496,7 +498,8 @@ final class FakeAgent implements AutoCloseable {
             }
             long before = lastSeq();
             Object value = handler.handle(JsonView.of(params));
-            response.put("result", new RpcResult(value, List.of(), before, lastSeq(), 3, "fake-worker").toJson());
+            response.put("result", new RpcResult(value, List.of(), before, lastSeq(), 3, "fake-worker",
+                    warnings.get(method)).toJson());
         } catch (RpcException e) {
             response.put("error", e.error().toJson());
         } catch (Exception e) {

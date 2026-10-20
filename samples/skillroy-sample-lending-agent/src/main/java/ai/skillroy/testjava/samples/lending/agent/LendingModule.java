@@ -67,13 +67,17 @@ import java.util.Map;
  *   <li>a {@link RegionResolver} for the number pad's twelve keys ({@link LendingRegions}) and a
  *       {@link CaptureMask} for the entry field and the number pad while a secret is expected
  *       ({@link LendingCaptureMask}) (Phase 7);</li>
- *   <li>a {@link DataSourceProvider} {@code lending} and a {@link DeviceAdapter} {@code printer};</li>
+ *   <li>a {@link DataSourceProvider} {@code lending} and the {@link DeviceAdapter}s {@code printer} and, from Phase 8,
+ *       {@code scanner} ({@link ScannerDevice}: the ladder device of phase8-contracts.md 7.6, with the capability
+ *       {@code lending.scanner.physical});</li>
  *   <li>a {@link MaskPolicy} that hides the {@code password} column of source {@code lending}
  *       ({@link PasswordMask});</li>
  *   <li>a {@link RedactionKeys} for the desk's own secret keys ({@code lending.pin}, see {@link LendingSecrets});</li>
  *   <li>the primitives {@code lending.input}, {@code lending.state}, {@code lending.loan}, {@code lending.prompt},
  *       {@code lending.prompt.answer}, {@code lending.slip}, {@code lending.access.check}, {@code lending.deposit},
- *       {@code lending.limits} and {@code lending.waiver.evaluate}, each with a capability of the same name, plus
+ *       {@code lending.limits} and {@code lending.waiver.evaluate}, and from Phase 8 the composites
+ *       {@code lending.signOn} and {@code lending.scanChecked} ({@link LendingComposites}), each with a capability of
+ *       the same name, plus
  *       the capabilities {@code lending.sql} and {@code lending.loan.authorisations}, all probed against the running
  *       desk.</li>
  * </ul>
@@ -143,6 +147,7 @@ public final class LendingModule implements AgentModule {
         register(DataSourceProvider.class, new LendingDataSource(access));
         register(MaskPolicy.class, new PasswordMask());
         register(DeviceAdapter.class, new PrinterDevice(access));
+        register(DeviceAdapter.class, new ScannerDevice(context, access, slot));
         register(RedactionKeys.class, new LendingSecrets());
         register(RegionResolver.class, new LendingRegions());
         register(CaptureMask.class, new LendingCaptureMask());
@@ -150,9 +155,16 @@ public final class LendingModule implements AgentModule {
             context.primitives().register(p);
             primitiveNames.add(p.spec().name());
         }
-        for (String name : LendingPrimitives.NAMES) {
-            declare(name, LendingPrimitives.INPUT.equals(name) ? new InputProbe() : new RunningProbe("snapshot"));
+        // phase8-contracts.md 7.5: the composites, which post inputs as lending.input does.
+        for (Primitive p : new LendingComposites(context, access, slot).all()) {
+            context.primitives().register(p);
+            primitiveNames.add(p.spec().name());
         }
+        for (String name : LendingPrimitives.NAMES) {
+            declare(name, LendingPrimitives.INPUT.equals(name) || LendingComposites.NAMES.contains(name)
+                    ? new InputProbe() : new RunningProbe("snapshot"));
+        }
+        declare(ScannerDevice.CAP_PHYSICAL, new ScannerProbe());
         declare(CAP_AUTHORISATIONS, new RunningProbe("loan snapshot"));
         declare(CAP_SQL, new SqlProbe());
     }
@@ -349,6 +361,23 @@ public final class LendingModule implements AgentModule {
             return ProbeResult.unavailable(open == null ? "the engine listener is not attached yet"
                     : "the desk has a prompt open (" + open.id() + ") and takes no input; the engine listener "
                     + "is attached once the prompt is answered (lending.prompt.answer)");
+        }
+    }
+
+    /**
+     * {@code lending.scanner.physical} (phase8-contracts.md 7.6): OK while the desk runs with its scanner driver, else
+     * UNAVAILABLE naming the launch property.
+     */
+    private final class ScannerProbe implements Probe {
+        @Override
+        public ProbeResult run(AgentContext context) {
+            ProbeResult running = new RunningProbe("scanner driver").run(context);
+            if (running.state() != CapabilityState.OK) {
+                return running;
+            }
+            LendingApp app = access.app();
+            return app != null && app.scannerDriver() != null ? running
+                    : ProbeResult.unavailable(ScannerDevice.NO_DRIVER);
         }
     }
 

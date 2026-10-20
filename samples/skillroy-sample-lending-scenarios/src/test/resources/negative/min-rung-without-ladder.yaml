@@ -1,0 +1,13 @@
+# Negative (phase8-contracts.md 7.3): minRung on a step none of whose calls declares a rung ladder (scan is a plain
+# lending.input): a compile error.
+scenario: min-rung-without-ladder
+pack: lending
+requires: [lending.input]
+launchProperties: { lending.seed: A }
+resolve:
+  assistant: { fixture: { code: "100" }, credential: { realm: staff, key: code } }
+steps:
+  - signOn: { staff: $assistant }
+  - scan: { barcode: "5000000000017" }
+    minRung: PHYSICAL
+on_prompt: { unexpected: fail }

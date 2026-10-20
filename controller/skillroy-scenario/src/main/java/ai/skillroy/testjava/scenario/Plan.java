@@ -603,9 +603,14 @@ public record Plan(int planVersion, String scenarioId, String pack, String packV
      * @param guard the image guard of an anchored {@code swing.pointer} call (phase7-contracts.md 6.7, 8.2, decision
      *     D357; plan version 6), or null: the executor compares the anchor of the current render key before it sends
      *     the call
+     * @param accept the warning codes the call accepts (phase8-contracts.md 7.1, 7.3; plan version 7), sorted; empty
+     *     for none
+     * @param rungs the call's rung ladder, best first (phase8-contracts.md 7.6; plan version 7); empty for none
+     * @param minRung the rung the step requires, one of {@code rungs}, or null (plan version 7)
      */
     public record Call(String primitive, Map<String, Object> args, Sync sync, long timeoutMs, AwaitSpec await,
-                       boolean handlesPrompt, CaptureSpec capture, Guard guard) {
+                       boolean handlesPrompt, CaptureSpec capture, Guard guard, Set<String> accept,
+                       List<ai.skillroy.testjava.scenario.pack.Rung> rungs, String minRung) {
 
         /**
          * Freezes the args and the await match.
@@ -639,6 +644,16 @@ public record Plan(int planVersion, String scenarioId, String pack, String packV
             if (guard != null && !"swing.pointer".equals(primitive)) {
                 throw new IllegalArgumentException("call " + primitive + ": a guard is allowed on swing.pointer only");
             }
+            accept = accept == null || accept.isEmpty() ? Set.of()
+                    : java.util.Collections.unmodifiableSet(new java.util.TreeSet<>(accept));
+            rungs = rungs == null || rungs.isEmpty() ? List.of() : List.copyOf(rungs);
+            ai.skillroy.testjava.scenario.pack.Rung.check("call " + primitive, accept, rungs, minRung);
+        }
+
+        /** A call without accepted warnings, ladder or required rung (the Phase 7 shape). */
+        public Call(String primitive, Map<String, Object> args, Sync sync, long timeoutMs, AwaitSpec await,
+                    boolean handlesPrompt, CaptureSpec capture, Guard guard) {
+            this(primitive, args, sync, timeoutMs, await, handlesPrompt, capture, guard, Set.of(), List.of(), null);
         }
 
         /** A call without a guard (the Phase 2 shape). */
@@ -660,7 +675,14 @@ public record Plan(int planVersion, String scenarioId, String pack, String packV
 
         /** This call with another guard (null: none). */
         public Call withGuard(Guard newGuard) {
-            return new Call(primitive, args, sync, timeoutMs, await, handlesPrompt, capture, newGuard);
+            return new Call(primitive, args, sync, timeoutMs, await, handlesPrompt, capture, newGuard, accept, rungs,
+                    minRung);
+        }
+
+        /** This call with the step's modifiers applied (phase8-contracts.md 7.3). */
+        Call withModifiers(Set<String> newAccept, String newMinRung) {
+            return new Call(primitive, args, sync, timeoutMs, await, handlesPrompt, capture, guard, newAccept, rungs,
+                    newMinRung);
         }
 
         /**
@@ -694,6 +716,23 @@ public record Plan(int planVersion, String scenarioId, String pack, String packV
                 Map<String, Object> guardJson = new LinkedHashMap<>();
                 guardJson.put("label", guard.label());
                 json.put("guard", guardJson);
+            }
+            // phase8-contracts.md 7.3, 7.6: written only when set, so that a plan without them reads as before.
+            if (!accept.isEmpty()) {
+                json.put("accept", new ArrayList<>(accept));
+            }
+            if (!rungs.isEmpty()) {
+                List<Object> ladder = new ArrayList<>();
+                for (ai.skillroy.testjava.scenario.pack.Rung rung : rungs) {
+                    Map<String, Object> rungJson = new LinkedHashMap<>();
+                    rungJson.put("name", rung.name());
+                    rungJson.put("capability", rung.capability());
+                    ladder.add(rungJson);
+                }
+                json.put("rungs", ladder);
+            }
+            if (minRung != null) {
+                json.put("minRung", minRung);
             }
             return json;
         }
@@ -1561,8 +1600,76 @@ public record Plan(int planVersion, String scenarioId, String pack, String packV
                 }
             }
             syncAwaitMatch(primitive, object(json, "args"));
-            return new Call(primitive, object(json, "args"), sync, positive(json, "timeoutMs"), await,
-                    Boolean.TRUE.equals(handles), capture, guard);
+            Set<String> accept = callAccept(primitive, json);
+            List<ai.skillroy.testjava.scenario.pack.Rung> rungs = callRungs(primitive, json);
+            String minRung = null;
+            if (json.get("minRung") != null) {
+                if (version < 7) {
+                    throw error("call " + primitive + ": 'minRung' needs a version 7 plan");
+                }
+                minRung = str(json, "minRung");
+            }
+            try {
+                return new Call(primitive, object(json, "args"), sync, positive(json, "timeoutMs"), await,
+                        Boolean.TRUE.equals(handles), capture, guard, accept, rungs, minRung);
+            } catch (IllegalArgumentException e) {
+                throw error(e.getMessage());
+            }
+        }
+
+        /** A call's {@code accept} (phase8-contracts.md 7.3; version 7): a list of distinct warning codes. */
+        private Set<String> callAccept(String primitive, Map<String, Object> json) throws ScenarioException {
+            if (json.get("accept") == null) {
+                return Set.of();
+            }
+            if (version < 7) {
+                throw error("call " + primitive + ": 'accept' needs a version 7 plan");
+            }
+            if (!(json.get("accept") instanceof List<?> codes) || codes.isEmpty()) {
+                throw error("call " + primitive + ": 'accept' must be a non-empty list of warning codes");
+            }
+            Set<String> out = new LinkedHashSet<>();
+            for (Object code : codes) {
+                if (!(code instanceof String text) || !ai.skillroy.testjava.protocol.CallWarning.isValidCode(text)
+                        || !out.add(text)) {
+                    throw error("call " + primitive + ": 'accept' holds " + code + ", which is not a distinct warning"
+                            + " code");
+                }
+            }
+            return out;
+        }
+
+        /** A call's {@code rungs} (phase8-contracts.md 7.6; version 7): a list of {@code {name, capability}}. */
+        private List<ai.skillroy.testjava.scenario.pack.Rung> callRungs(String primitive, Map<String, Object> json)
+                throws ScenarioException {
+            if (json.get("rungs") == null) {
+                return List.of();
+            }
+            if (version < 7) {
+                throw error("call " + primitive + ": 'rungs' needs a version 7 plan");
+            }
+            if (!(json.get("rungs") instanceof List<?> raw)) {
+                throw error("call " + primitive + ": 'rungs' must be a list of {name, capability}");
+            }
+            List<ai.skillroy.testjava.scenario.pack.Rung> out = new ArrayList<>();
+            for (Object item : raw) {
+                if (!(item instanceof Map<?, ?> m)) {
+                    throw error("call " + primitive + ": 'rungs' must be a list of {name, capability}");
+                }
+                @SuppressWarnings("unchecked")
+                Map<String, Object> rung = (Map<String, Object>) m;
+                keys(rung, Set.of("name", "capability"), "call " + primitive + " rung");
+                Object capability = rung.get("capability");
+                if (capability != null && !(capability instanceof String)) {
+                    throw error("call " + primitive + ": a rung's 'capability' must be a string or null");
+                }
+                try {
+                    out.add(new ai.skillroy.testjava.scenario.pack.Rung(str(rung, "name"), (String) capability));
+                } catch (IllegalArgumentException e) {
+                    throw error("call " + primitive + ": " + e.getMessage());
+                }
+            }
+            return out;
         }
 
         /**

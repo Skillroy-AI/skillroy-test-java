@@ -69,8 +69,9 @@ class ScenarioSchemaCommittedTest {
     void everyCommittedScenarioIsValidAgainstThePacksSchema() throws Exception {
         Map<String, Object> schema = ScenarioSchema.generate(pack, List.of());
         List<Path> files = everyScenario();
-        assertEquals(22, files.size(), "the eleven committed scenarios (scenario E and the four of phase7-contracts.md"
-                + " 12.4 with them) and the eleven negative ones");
+        assertEquals(31, files.size(), "the eleven committed scenarios (scenario E and the four of phase7-contracts.md"
+                + " 12.4 with them) and the eleven negative ones, with ES's five committed (scanner/'s one among them)"
+                + " and four negative ones of phase8-contracts.md 12.4 (this branch's truth, D641)");
         for (Path yaml : files) {
             assertEquals(List.of(), ScenarioSchema.validate(schema, document(yaml)), yaml.getFileName().toString());
         }
@@ -89,7 +90,9 @@ class ScenarioSchemaCommittedTest {
         assertTrue(PlansUpToDateTest.committedScenarios().contains(ScenarioC.yaml()));
         List<String> glue = ScenarioSource.directory(ScenarioC.yaml().getParent()).entries().stream()
                 .map(ScenarioSource.Entry::name).toList();
-        assertEquals(PlansUpToDateTest.committedScenarios().stream().map(p -> p.getFileName().toString()).toList(),
+        // phase8-contracts.md 12.4 (ES): scanner/'s scenario is committed but outside the glue's directory source.
+        assertEquals(PlansUpToDateTest.committedScenarios().stream().filter(p -> p.getParent().equals(
+                ScenarioC.yaml().getParent())).map(p -> p.getFileName().toString()).toList(),
                 glue, "the glue runs the committed YAML files, and nothing else of the directory");
     }
 
@@ -125,11 +128,16 @@ class ScenarioSchemaCommittedTest {
         StepLibrary library = pack.steps();
         Set<String> used = new TreeSet<>();
         for (Path yaml : everyScenario()) {
+            if (PlansUpToDateTest.COMPILE_ERRORS.containsKey(yaml.getFileName().toString())) {
+                continue;   // phase8-contracts.md 12.4, D642: a compile error by design
+            }
             PlanCompiler.compile(yaml, pack);
             List<?> steps = (List<?>) ((Map<?, ?>) document(yaml)).get("steps");
             for (int i = 0; i < steps.size(); i++) {
                 Map<?, ?> step = (Map<?, ?>) steps.get(i);
-                String verb = String.valueOf(step.keySet().iterator().next());
+                // phase8-contracts.md 7.3: the one key that is not a step modifier.
+                String verb = String.valueOf(step.keySet().stream().filter(k -> !"accept".equals(k)
+                        && !"minRung".equals(k)).findFirst().orElseThrow());
                 if (!library.verbs().contains(verb)) {
                     continue;
                 }
@@ -138,8 +146,9 @@ class ScenarioSchemaCommittedTest {
                 used.add(verb);
             }
         }
-        assertEquals(Set.of("authorise", "deposit", "expectPrompt", "key", "quantity", "scan", "signOff", "signOn"),
-                used, "the lending verbs the sample's scenarios use");
+        assertEquals(Set.of("authorise", "deposit", "enter", "expectPrompt", "key", "quantity", "scan", "signOff",
+                "signOn", "signOnAny", "scanChecked", "deviceScan"), used, "the lending verbs the sample's scenarios"
+                + " use");
     }
 
     @Test

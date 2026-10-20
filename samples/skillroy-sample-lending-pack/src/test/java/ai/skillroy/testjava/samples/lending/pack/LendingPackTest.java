@@ -80,7 +80,10 @@ class LendingPackTest {
         assertEquals("lending", pack.id());
         assertEquals("0.6.0", pack.version());
         assertEquals(new SyncPolicy("input.acked", List.of("input.requested", "prompt.waiting"),
-                List.of("prompt.waiting"), null, null), pack.syncPolicy());
+                List.of("prompt.waiting"), null, null, true), pack.syncPolicy(),
+                "acknowledgements correlated by inputId (phase8-contracts.md 7.4)");
+        assertEquals(java.util.Set.of("lending.PASSWORD_REQUIRED"), pack.warningCodes(),
+                "the pack's warning code (phase8-contracts.md 7.3)");
         assertSame(PromptPolicy.FAIL, pack.promptPolicy());
         assertEquals(List.of("loan", "state", "slip", "prompt"), pack.facts().stream().map(FactProvider::root)
                 .toList());

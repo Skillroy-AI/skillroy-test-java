@@ -434,6 +434,10 @@ final class CorePrimitives {
                 Set<String> actions = adapter.actions();
                 json.put("actions", actions == null ? new ArrayList<Object>()
                         : new ArrayList<Object>(new TreeSet<String>(actions)));
+                Map<String, Object> rungs = rungsOf(adapter, actions);
+                if (!rungs.isEmpty()) {
+                    json.put("rungs", rungs);
+                }
                 devices.add(json);
             } catch (Throwable t) {
                 ctx.log.warn("DeviceAdapter " + adapter.getClass().getName() + " failed", t);
@@ -441,6 +445,40 @@ final class CorePrimitives {
         }
         Map<String, Object> out = new LinkedHashMap<String, Object>();
         out.put("devices", devices);
+        return out;
+    }
+
+    /**
+     * phase8-contracts.md 7.6 (amendment A85): {@code {<action>: [rung, ...]}} of the actions whose ladder is not
+     * empty, in action order; an adapter whose {@code rungs} throws is logged and read as empty, a null or blank rung
+     * name is left out.
+     */
+    private Map<String, Object> rungsOf(DeviceAdapter adapter, Set<String> actions) {
+        Map<String, Object> out = new LinkedHashMap<String, Object>();
+        if (actions == null) {
+            return out;
+        }
+        for (String action : new TreeSet<String>(actions)) {
+            List<String> ladder;
+            try {
+                ladder = adapter.rungs(action);
+            } catch (Throwable t) {
+                ctx.log.warn("DeviceAdapter " + adapter.getClass().getName() + ".rungs(" + action + ") failed", t);
+                continue;
+            }
+            if (ladder == null || ladder.isEmpty()) {
+                continue;
+            }
+            List<Object> names = new ArrayList<Object>();
+            for (String name : ladder) {
+                if (name != null && !name.trim().isEmpty()) {
+                    names.add(name);
+                }
+            }
+            if (!names.isEmpty()) {
+                out.put(action, names);
+            }
+        }
         return out;
     }
 

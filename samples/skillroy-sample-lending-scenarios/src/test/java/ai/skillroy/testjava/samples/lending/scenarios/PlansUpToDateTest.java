@@ -57,10 +57,21 @@ class PlansUpToDateTest {
         return Path.of(System.getProperty("skillroy.it.moduleDir", ".")).toAbsolutePath().normalize();
     }
 
+    /**
+     * The committed scenarios: {@code scenarios/*.yaml} and, from Phase 8 (phase8-contracts.md 12.4, ES),
+     * {@code scenarios/scanner/*.yaml}, a sub-directory the JUnit glue's directory source does not descend into (only
+     * the scanner leg runs its scenario to a pass); their plans are all in {@code plan/}. Sorted by file name.
+     */
     static List<Path> committedScenarios() throws IOException {
-        try (Stream<Path> files = Files.list(moduleDir().resolve("scenarios"))) {
-            return files.filter(p -> p.getFileName().toString().endsWith(".yaml")).sorted().toList();
+        List<Path> out = new ArrayList<>();
+        Path scenarios = moduleDir().resolve("scenarios");
+        for (Path dir : List.of(scenarios, scenarios.resolve("scanner"))) {
+            try (Stream<Path> files = Files.list(dir)) {
+                files.filter(p -> p.getFileName().toString().endsWith(".yaml")).forEach(out::add);
+            }
         }
+        out.sort(java.util.Comparator.comparing(p -> p.getFileName().toString()));
+        return List.copyOf(out);
     }
 
     static Path planFor(Path yaml) throws Exception {
@@ -72,11 +83,14 @@ class PlansUpToDateTest {
     void everyCommittedPlanMatchesItsScenario() throws Exception {
         List<Path> scenarios = committedScenarios();
         assertEquals(List.of("basic-loan-ui.yaml", "basic-loan.yaml", "borrow-2-waive-1-slip.yaml",
-                "keypad-image.yaml", "loan-table-visual-check.yaml", "return-over-limit-needs-supervisor.yaml",
-                "return-refunds-deposit.yaml", "return-within-limit-observed.yaml", "sign-on-by-number-pad.yaml",
-                "supervisor-return-llm-sql.yaml", "vision-live-only.yaml"),
+                "device-scan-physical.yaml", "device-scan.yaml", "keypad-image.yaml", "loan-table-visual-check.yaml",
+                "return-over-limit-needs-supervisor.yaml", "return-refunds-deposit.yaml",
+                "return-within-limit-observed.yaml", "scan-checked.yaml", "semantic-input-warnings.yaml",
+                "sign-on-any.yaml", "sign-on-by-number-pad.yaml", "supervisor-return-llm-sql.yaml",
+                "vision-live-only.yaml"),
                 scenarios.stream().map(p -> p.getFileName().toString()).toList(), "the Phase 7 scenarios with the"
-                + " earlier ones (phase7-contracts.md 12.4)");
+                + " earlier ones (phase7-contracts.md 12.4) and ES's of phase8-contracts.md 12.4, scanner/'s one"
+                + " among them (this branch's truth, D641)");
         // skillroy author writes <out>/plan/<id>.plan.json; a scenario it wrote into scenarios/ has its plan moved here
         // with the others, so that a plan's default bindings root (D31: beside its directory) is bindings/.
         assertFalse(Files.exists(moduleDir().resolve("scenarios").resolve("plan")), "the committed plans are in plan/");
@@ -113,7 +127,9 @@ class PlansUpToDateTest {
 
     /** The seed-A scenarios (their staff number and fixtures are seed A's): they name the seed they run on. */
     static final List<String> SEED_A = List.of("basic-loan", "basic-loan-ui", "sign-on-by-number-pad",
-            "loan-table-visual-check", "vision-live-only");
+            "loan-table-visual-check", "vision-live-only",
+            // phase8-contracts.md 12.4 (ES)
+            "semantic-input-warnings", "sign-on-any", "scan-checked", "device-scan", "device-scan-physical");
 
     /**
      * Every call is followed by an event wait or the UI settle, or is itself a wait: a {@code sync.await}, or the
@@ -245,16 +261,35 @@ class PlansUpToDateTest {
         assertEquals(0, frame.maxDiffPixels());
     }
 
+    /** The negatives that are compile errors, each with a fragment of its message (phase8-contracts.md 12.4, D642). */
+    static final Map<String, String> COMPILE_ERRORS = Map.of(
+            "accept-unknown-code.yaml", "accept: unknown warning code lending.VALUE_TRIMMED; the base codes are"
+                    + " [INPUT_QUEUED, VALUE_COERCED, VALUE_DROPPED, ANSWERED_NESTED]; pack 'lending' declares"
+                    + " [lending.PASSWORD_REQUIRED]",
+            "min-rung-without-ladder.yaml", "minRung: no call of 'scan' declares a rung ladder");
+
     @Test
     void theNegativeScenariosCompile() throws Exception {
         Path dir = moduleDir().resolve("src/test/resources/negative");
         try (Stream<Path> files = Files.list(dir)) {
             List<Path> yamls = files.filter(p -> p.getFileName().toString().endsWith(".yaml")).sorted().toList();
-            assertEquals(List.of("click-fallback-degraded.yaml", "click-strict-fails.yaml", "guarded-unavailable.yaml",
-                    "missing-capability.yaml", "modal-open-step.yaml", "no-item-in-range.yaml", "no-rule-of-kind.yaml",
-                    "prompt-left-open.yaml", "return-within-limit.yaml", "waiver-guard-fails.yaml",
-                    "wrong-expectation.yaml"), yamls.stream().map(p -> p.getFileName().toString()).toList());
+            assertEquals(List.of("accept-unknown-code.yaml", "click-fallback-degraded.yaml", "click-strict-fails.yaml",
+                    "guarded-unavailable.yaml", "min-rung-without-ladder.yaml", "missing-capability.yaml",
+                    "modal-open-step.yaml", "no-item-in-range.yaml", "no-rule-of-kind.yaml", "prompt-left-open.yaml",
+                    "return-within-limit.yaml", "sign-on-any-password-required.yaml", "waiver-guard-fails.yaml",
+                    "warning-not-accepted.yaml", "wrong-expectation.yaml"),
+                    yamls.stream().map(p -> p.getFileName().toString()).toList(), "ES's four of phase8-contracts.md"
+                    + " 12.4 among them (this branch's truth, D641)");
             for (Path yaml : yamls) {
+                String refusal = COMPILE_ERRORS.get(yaml.getFileName().toString());
+                if (refusal != null) {
+                    // phase8-contracts.md 12.4, D642: these two negatives are compile errors, with the message named.
+                    ai.skillroy.testjava.scenario.ScenarioException e = org.junit.jupiter.api.Assertions.assertThrows(
+                            ai.skillroy.testjava.scenario.ScenarioException.class, () -> PlanCompiler.compile(yaml,
+                                    new LendingPack()), yaml.getFileName().toString());
+                    assertTrue(e.getMessage().contains(refusal), e.getMessage());
+                    continue;
+                }
                 Plan plan = PlanCompiler.compile(yaml, new LendingPack());
                 assertEquals(yaml.getFileName().toString(), plan.scenarioId() + ".yaml");
             }
@@ -275,6 +310,11 @@ class PlansUpToDateTest {
      * Phase 2 (3.1 rule 5, 13.4): every sample scenario's staff slot takes its password from {@code credentials.yaml};
      * no fixture holds one, and no plan does.
      */
+    /** The slots of a plan that declare a credential. */
+    private static List<String> credentialSlots(Plan plan) {
+        return plan.slots().stream().filter(slot -> slot.credential() != null).map(Plan.Slot::name).toList();
+    }
+
     @Test
     void noScenarioOrPlanHoldsAPassword() throws Exception {
         List<Path> files = new ArrayList<>(committedScenarios());
@@ -285,7 +325,19 @@ class PlansUpToDateTest {
         }
         for (Path file : files) {
             String text = Files.readString(file);
-            assertFalse(text.contains("password:") || text.contains("\"password\""), file + " holds a password");
+            assertFalse(text.contains("password:"), file + " holds a password");
+            // phase8-contracts.md 12.4, D642: a plan's "password" key is allowed only as exactly a $<slot>.password
+            // reference to a slot that declares a credential (signOnAny's call argument); never a literal.
+            java.util.regex.Matcher keys = java.util.regex.Pattern.compile("\"password\"\\s*:\\s*(\"(?:[^\"\\\\]"
+                    + "|\\\\.)*\")?").matcher(text);
+            while (keys.find()) {
+                String value = keys.group(1);
+                java.util.regex.Matcher ref = value == null ? null
+                        : java.util.regex.Pattern.compile("\"\\$([A-Za-z_][A-Za-z0-9_]*)\\.password\"").matcher(value);
+                assertTrue(ref != null && ref.matches() && file.toString().endsWith(".plan.json")
+                        && credentialSlots(Plan.read(file)).contains(ref.group(1)), file + " holds a password: "
+                        + keys.group());
+            }
         }
         for (Path yaml : committedScenarios()) {
             Plan plan = Plan.read(planFor(yaml));

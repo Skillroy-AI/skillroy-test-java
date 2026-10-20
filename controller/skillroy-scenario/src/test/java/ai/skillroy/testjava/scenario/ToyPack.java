@@ -77,6 +77,8 @@ public final class ToyPack implements DomainPack {
     HookCatalogue hooks;
     /** The pack's settings (Phase 6). */
     PackSettings settings = PackSettings.EMPTY;
+    /** The pack's own warning codes (phase8-contracts.md 7.3, ES). */
+    Set<String> warningCodes = Set.of();
 
     @Override
     public String id() {
@@ -146,6 +148,11 @@ public final class ToyPack implements DomainPack {
     @Override
     public List<SqlAllowList> sqlAllowLists() {
         return sqlAllowLists;
+    }
+
+    @Override
+    public Set<String> warningCodes() {
+        return warningCodes;
     }
 
     @Override

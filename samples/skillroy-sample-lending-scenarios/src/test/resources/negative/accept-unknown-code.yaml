@@ -1,0 +1,13 @@
+# Negative (phase8-contracts.md 7.3): a step accepts a warning code that is neither a base code nor one the pack
+# declares: a compile error naming the code, the base codes and the pack's own.
+scenario: accept-unknown-code
+pack: lending
+requires: [lending.input]
+launchProperties: { lending.seed: A }
+resolve:
+  assistant: { fixture: { code: "100" }, credential: { realm: staff, key: code } }
+steps:
+  - signOn: { staff: $assistant }
+  - scan: { barcode: " 5000000000017 " }
+    accept: [lending.VALUE_TRIMMED]
+on_prompt: { unexpected: fail }

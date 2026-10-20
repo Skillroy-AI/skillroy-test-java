@@ -1,0 +1,162 @@
+{
+  "planVersion": 7,
+  "scenarioId": "device-scan",
+  "pack": "lending",
+  "packVersion": "0.6.0",
+  "sourceHash": "sha256:6b0be89cd5d959b4e054d09c85ec7389e6995e40107e5c6e265fc85ac2bc4e58",
+  "inference": "none",
+  "requires": [
+    "lending.input",
+    "lending.state",
+    "lending.loan"
+  ],
+  "slots": [
+    {
+      "name": "assistant",
+      "kind": "fixture",
+      "value": {
+        "code": "100"
+      },
+      "credential": {
+        "realm": "staff",
+        "key": "code"
+      }
+    },
+    {
+      "name": "item",
+      "kind": "fixture",
+      "value": {
+        "code": "YRD-001",
+        "barcode": "5000000000017"
+      }
+    }
+  ],
+  "oracles": [],
+  "resolutionGraph": [
+    "assistant",
+    "item"
+  ],
+  "steps": [
+    {
+      "id": "s1",
+      "verb": "signOn",
+      "source": {
+        "line": 15
+      },
+      "calls": [
+        {
+          "primitive": "lending.input",
+          "args": {
+            "source": "Entry",
+            "value": "$assistant.code"
+          },
+          "sync": "READY",
+          "timeoutMs": 30000
+        },
+        {
+          "primitive": "lending.input",
+          "args": {
+            "source": "Entry",
+            "value": "$assistant.password"
+          },
+          "sync": "READY",
+          "timeoutMs": 30000
+        }
+      ],
+      "expect": []
+    },
+    {
+      "id": "s2",
+      "verb": "deviceScan",
+      "source": {
+        "line": 16
+      },
+      "calls": [
+        {
+          "primitive": "device.act",
+          "args": {
+            "action": "scan",
+            "args": {
+              "barcode": "$item.barcode"
+            },
+            "id": "scanner"
+          },
+          "sync": "READY",
+          "timeoutMs": 30000,
+          "rungs": [
+            {
+              "name": "PHYSICAL",
+              "capability": "lending.scanner.physical"
+            },
+            {
+              "name": "SEMANTIC",
+              "capability": null
+            }
+          ]
+        }
+      ],
+      "expect": []
+    },
+    {
+      "id": "s3",
+      "verb": "expect",
+      "source": {
+        "line": 17
+      },
+      "calls": [],
+      "expect": [
+        {
+          "path": "loan.lines[code=$item.code].qty",
+          "matcher": {
+            "equals": 1
+          }
+        }
+      ]
+    },
+    {
+      "id": "s4",
+      "verb": "key",
+      "source": {
+        "line": 18
+      },
+      "calls": [
+        {
+          "primitive": "lending.input",
+          "args": {
+            "source": "Key.CANCEL"
+          },
+          "sync": "READY",
+          "timeoutMs": 30000
+        }
+      ],
+      "expect": []
+    }
+  ],
+  "verify": [
+    {
+      "path": "state.name",
+      "matcher": {
+        "equals": "IDLE"
+      }
+    }
+  ],
+  "cleanup": [
+    {
+      "primitive": "lending.input",
+      "args": {
+        "source": "Key.SIGN_OFF"
+      },
+      "sync": "READY",
+      "timeoutMs": 30000
+    }
+  ],
+  "launchProperties": {
+    "lending.seed": "A"
+  },
+  "artifacts": [],
+  "onPrompt": {
+    "unexpected": "fail"
+  },
+  "stepTimeoutMs": 30000,
+  "bindTimeoutMs": 60000
+}

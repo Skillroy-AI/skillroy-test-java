@@ -1417,6 +1417,11 @@ public final class SessionService implements AutoCloseable {
             j.put("detail", o.detail());
         }
         j.put("executed", (long) o.executed());
+        if (!o.warnings().isEmpty()) {
+            // phase8-contracts.md 7.1: the warnings (masked) only when non-empty, so that the recorded sessions stay
+            // valid.
+            j.put("warnings", o.warnings());
+        }
         List<Object> topics = new ArrayList<>();
         for (Event e : o.events()) {
             topics.add(e.topic());

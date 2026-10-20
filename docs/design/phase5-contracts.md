@@ -1919,6 +1919,14 @@ MCP server's verb tools and the session service, §9.3, §12.4).
 `capabilities()` (the merged matrix), `secretsInFlight()` and `expectImage(step, origin)`; `SessionOptions` gains
 `robot` and `host`; the robot gates and the credential rule (D342) hold for every origin but a person's.
 
+(Phase 8, built 2026-10-19, ES; P8 §7.1, §7.3.) `StepOutcome` gains a last component `warnings` (one masked line per
+warning the step's calls reported; the older constructor kept, empty): a session step accepts only what its verb's
+own calls pre-accept, so an unaccepted warning is the step's FAIL / ASSERTION outcome, which a model or a client sees
+with the code; the outcome's calls keep their `accept`, `rungs` and `minRung`. A raw `execute(PlannedCall, …)` whose
+call carries `accept`, `rungs` or `minRung` is refused before anything is sent: ERROR / ENVIRONMENT "a raw call carries
+accept, rungs or minRung; they belong to a scenario step or a pack verb". The verbs' own compiled calls may carry all
+three and are honoured.
+
 ### 12.3 `StepJournal` and the export
 
 **The journal file**, `<outputDir>/journal.jsonl`, is written as the session runs (append-only, masked), one record per
@@ -1999,6 +2007,10 @@ step carries the optional `provenance` its acting call handed in (tier, via, cap
 cost stays in the ledger, found by the request id. The export writes a vision-derived step as its verb step with one
 masked comment (no hash, handle or mark), the report's "Vision-derived steps" and "Live-only" sections, and the anchors'
 `images` section in its bindings file.
+
+(Phase 8, built 2026-10-19, ES; P8 §7.3.) A journal step's `calls[]` carry `accept`, `rungs` (the names) and `minRung`
+when present, and its `outcome` carries `warnings` when there are some; both are information: the export writes verbs
+and their arguments, which recompile to the same calls.
 
 ### 12.4 The session service (`…inference.session`)
 
@@ -2119,6 +2131,11 @@ batch's results; `act` consulted for its names; `endTurn` `QUESTION`/`LIMIT`; `v
 primitive branch under `CallPolicy.arguments(…, false)` (refused, never stripped). The vocabulary's `$reference`
 sentence names a non-secret field of a resolved slot only (D342), and never a credential slot as a whole (P7 §9.2 rule 1,
 gap 94, 2026-10-11).
+
+(Phase 8, built 2026-10-19, ES; P8 §7.1.) The model's view of a step (`SessionService.step`) and the MCP server's step
+reply (`ToolCalls.stepJson`) gain a key `warnings` (the step's masked lines) **only when non-empty**, so that a step
+without warnings, and the recorded sessions, read as before; a client's own scenario run through
+`skillroy_scenario_run` may accept warnings in its YAML, and its reply carries `warnings` the same way.
 
 ---
 

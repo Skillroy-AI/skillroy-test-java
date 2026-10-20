@@ -183,6 +183,25 @@ class ToolCallTest {
         }
     }
 
+    /**
+     * phase8-contracts.md 7.1 (ES): a step reply carries {@code warnings} only when the step's calls reported one, so
+     * that a reply without warnings is as before; a session step accepts nothing its verb does not pre-accept.
+     */
+    @Test
+    void aStepReplyCarriesWarningsOnlyWhenThereAreSome() throws Exception {
+        try (McpFixture fx = new McpFixture(dir).startMutating()) {
+            Map<String, Object> plain = McpFixture.json(fx.call("desk_poke", Map.of()));
+            assertFalse(plain.containsKey("warnings"), plain.toString());
+            fx.desk.agent.warnings.put("desk.poke", List.of(new ai.skillroy.testjava.protocol.CallWarning(
+                    "VALUE_DROPPED", "nothing to poke", null)));
+            McpSchema.CallToolResult warned = fx.call("desk_poke", Map.of());
+            assertTrue(warned.isError(), "an unaccepted warning fails the step");
+            Map<String, Object> json = McpFixture.json(warned);
+            assertEquals("FAIL", json.get("status"));
+            assertEquals(List.of("s2: poke: desk.poke VALUE_DROPPED (nothing to poke)"), json.get("warnings"));
+        }
+    }
+
     @Test
     void aLongAnswerIsCutAt25000Characters() throws Exception {
         try (McpFixture fx = new McpFixture(dir).startReadOnly()) {

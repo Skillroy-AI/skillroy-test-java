@@ -266,4 +266,17 @@ class LendingEndToEndIT {
             return Env.SEED_B;
         }
     }
+
+    /**
+     * The scanner leg (phase8-contracts.md 13.2 item 30, ES): {@code -javaagent} on a desk launched with its scanner
+     * driver, once per target Java.
+     */
+    @Nested
+    @Order(19)
+    class JavaAgentScanner extends ScannerChecks {
+        @Override
+        LendingTarget.Mode mode() {
+            return LendingTarget.Mode.JAVAAGENT_SCANNER;
+        }
+    }
 }

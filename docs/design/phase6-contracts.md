@@ -1987,6 +1987,10 @@ As built (Phase 6, BW, 2026-10-09):
   a map's value or key text) passes `ctx.redactText` after its cut and before the policies, as §4.3 now says for a
   captured string.
 
+*(Phase 8, built 2026-10-19, ES; P8 §7.7, D576.)* `rule.check`'s `warnings: [string]` stays information in its value: the
+warning channel of a call is the result's envelope (`RpcResult.warnings`, `CallWarning` objects), never a key of a
+value, so `rule.check` neither raises one nor is read as one.
+
 ### 7.4 Loading Byteman
 
 **Only under `rule.submit`**, after the dispatcher's read-only and confirm gates have passed, on an agent worker,

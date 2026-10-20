@@ -44,6 +44,22 @@ public interface EventBus {
      */
     long publish(String topic, String source, Map<String, Object> payload);
 
+    /**
+     * Publishes with the given correlation id (phase8-contracts.md 7.4, amendment A84): for an event a module
+     * publishes later, outside the call it belongs to (an application's late acknowledgement of an input, from the
+     * application's own thread), so that telemetry links it to the originating call; read the id with
+     * {@link Invocation#correlationId()} while the call runs. Null means the calling thread's current one, as the
+     * three-argument form. The payload is masked as for that form; the call never blocks and never fails because of
+     * a mask.
+     *
+     * <p>The default ignores {@code correlationId} and calls {@link #publish(String, String, Map)}.
+     *
+     * @return the new event's sequence number
+     */
+    default long publish(String topic, String source, Map<String, Object> payload, String correlationId) {
+        return publish(topic, source, payload);
+    }
+
     /** Sequence number of the newest event, or 0 if none has been published. */
     long lastSeq();
 

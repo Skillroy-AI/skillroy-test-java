@@ -88,7 +88,11 @@ class LendingPrimitivesTest {
         assertEquals(Boolean.TRUE, first.get("acked"));
         assertTrue(((Long) first.get("ackMs")).longValue() >= 0);
         Event acked = lending.ctx.events.next("input.acked", start);
-        assertEquals(Collections.singletonMap("source", "Entry"), acked.payload(), "the value is never published");
+        // phase8-contracts.md 7.4: {source, inputId}, never the value.
+        assertEquals(args("source", "Entry", "inputId", first.get("inputId")), acked.payload(),
+                "the value is never published");
+        assertTrue(((String) first.get("inputId")).startsWith("lending-"), String.valueOf(first.get("inputId")));
+        assertEquals("CONSUMED", first.get("consumed"));
         Event password = lending.ctx.events.next("input.requested", start);
         assertEquals("PASSWORD", password.payload().get("state"));
         assertEquals("Enter password", password.payload().get("prompt"));
@@ -146,6 +150,7 @@ class LendingPrimitivesTest {
         long before = lending.ctx.events.lastSeq();
         RpcException e = lending.ctx.fails("lending.input", args("source", "Key.DUE"));
         assertEquals(ErrorCodes.INPUT_REJECTED, e.error().code());
+        assertEquals("notAccepted", e.error().data().get("reason"), "phase8-contracts.md 7.2's standard reason");
         assertEquals("SIGNED_OFF", e.error().data().get("state"));
         assertEquals(Collections.singletonList("Entry"), e.error().data().get("validInputs"));
         assertEquals(0, lending.app.inbox().size(), "nothing was queued");
@@ -483,7 +488,189 @@ class LendingPrimitivesTest {
         }
         assertEquals(Boolean.TRUE, result.get("accepted"));
         assertEquals(Boolean.FALSE, result.get("acked"), "QTY is not valid in SIGNED_OFF and is dropped");
+        assertEquals("QUEUED", result.get("consumed"), "phase8-contracts.md 7.2: taken and not consumed");
         assertNull(lending.ctx.events.await(before, TopicFilter.parse("input.acked"), args("source", "Key.QTY"), 0));
         assertFalse(lending.ctx.events.topics().isEmpty());
+    }
+
+    // ------------------------------------------------------------------ phase8-contracts.md 7.2, 7.4 (ES)
+
+    /**
+     * Holds the engine thread in its next {@code inputRequested} callback (after the module's listener published the
+     * event), so that an input posted meanwhile stays queued until the test releases it.
+     */
+    private static final class Gate implements ai.skillroy.testjava.samples.lending.EngineListener {
+        volatile boolean armed;
+        final java.util.concurrent.CountDownLatch blocked = new java.util.concurrent.CountDownLatch(1);
+        final java.util.concurrent.CountDownLatch release = new java.util.concurrent.CountDownLatch(1);
+
+        @Override
+        public void inputRequested(ai.skillroy.testjava.samples.lending.LendingState state, String prompt) {
+            if (armed) {
+                armed = false;
+                blocked.countDown();
+                try {
+                    release.await(30, java.util.concurrent.TimeUnit.SECONDS);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+        }
+    }
+
+    /** Arms a gate, sends {@code source}/{@code value} and returns once the engine is held in its next wait. */
+    private Gate holdAfter(String source, String value) throws Exception {
+        Gate gate = new Gate();
+        lending.app.engine().addListener(gate);
+        gate.armed = true;
+        lending.send(source, value);
+        assertTrue(gate.blocked.await(10, java.util.concurrent.TimeUnit.SECONDS), "the engine is held");
+        return gate;
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> warning(int index) {
+        return (Map<String, Object>) lending.ctx.warnings.get(index);
+    }
+
+    @Test
+    void aLateAcknowledgementIsPublishedOnceByTheEngineThreadUnderTheCallsCorrelationId() throws Exception {
+        Gate gate = holdAfter("Entry", "100");
+        long before = lending.ctx.events.lastSeq();
+        Map<String, Object> queued = map(lending.ctx.call("lending.input", args("source", "Entry", "value", "1111",
+                "ackTimeoutMs", 0L)));
+        assertEquals("QUEUED", queued.get("consumed"), "ackTimeoutMs 0 returns at once");
+        assertEquals(Boolean.FALSE, queued.get("acked"));
+        String id = (String) queued.get("inputId");
+        assertNull(lending.ctx.events.await(before, TopicFilter.parse("input.acked"), null, 0), "not yet");
+        gate.release.countDown();
+        Event late = lending.ctx.events.next("input.acked", before);
+        assertEquals(args("source", "Entry", "inputId", id), late.payload());
+        assertEquals("c-test", late.correlationId(), "the originating call's correlation id");
+        List<String> publishers;
+        synchronized (lending.ctx.events) {
+            publishers = new ArrayList<String>(lending.ctx.events.publishers);
+        }
+        assertEquals(ai.skillroy.testjava.samples.lending.Engine.THREAD_NAME, publishers.get((int) late.seq() - 1),
+                "published from the application's own callback");
+        lending.ctx.events.next("input.requested", late.seq());
+        assertNull(lending.ctx.events.await(late.seq(), TopicFilter.parse("input.acked"), null, 300),
+                "exactly one acknowledgement per input");
+        assertEquals(0, lending.module.slot().events().pendingCount(), "the entry left the table when taken");
+    }
+
+    @Test
+    void aCallerSuppliedInputIdIsEchoedAndAMalformedOneRefused() throws Exception {
+        long before = lending.ctx.events.lastSeq();
+        Map<String, Object> result = map(lending.ctx.call("lending.input", args("source", "Entry", "value", "100",
+                "inputId", "L12.1")));
+        assertEquals("L12.1", result.get("inputId"));
+        assertEquals("L12.1", lending.ctx.events.next("input.acked", before).payload().get("inputId"));
+        RpcException bad = lending.ctx.fails("lending.input", args("source", "Entry", "value", "1111", "inputId",
+                "has space"));
+        assertEquals(ErrorCodes.INVALID_PARAMS, bad.error().code());
+        assertEquals("inputId", bad.error().data().get("param"));
+    }
+
+    @Test
+    void aTrimmedValueIsCoercedWithWhatTheDeskTookAndABlankEntryDropped() throws Exception {
+        lending.signOn();
+        lending.ctx.warnings.clear();
+        long before = lending.ctx.events.lastSeq();
+        Map<String, Object> coerced = map(lending.ctx.call("lending.input", args("source", "Barcode", "value",
+                " 5000000000017 ")));
+        assertEquals("5000000000017", coerced.get("taken"));
+        assertEquals(1, lending.ctx.warnings.size());
+        assertEquals("VALUE_COERCED", warning(0).get("code"));
+        assertEquals(args("taken", "5000000000017"), warning(0).get("data"));
+        lending.ctx.events.next("input.requested", before);
+        Map<String, Object> loan = map(lending.ctx.call("lending.loan", args()));
+        assertEquals(1, list(loan.get("lines")).size(), "the desk took the trimmed barcode");
+
+        lending.ctx.warnings.clear();
+        long beforeBlank = lending.ctx.events.lastSeq();
+        Map<String, Object> dropped = map(lending.ctx.call("lending.input", args("source", "Entry", "value",
+                "   ")));
+        assertFalse(dropped.containsKey("taken"));
+        assertEquals("VALUE_DROPPED", warning(0).get("code"));
+        lending.ctx.events.next("input.requested", beforeBlank);
+        lending.ctx.warnings.clear();
+        map(lending.ctx.call("lending.input", args("source", "Key.CANCEL")));
+        assertTrue(lending.ctx.warnings.isEmpty(), "a key without a value has no caveat");
+    }
+
+    @Test
+    void aSecretValueIsNeverInTakenOrAMessage() throws Exception {
+        lending.send("Entry", "100");
+        lending.ctx.warnings.clear();
+        Map<String, Object> result = map(lending.ctx.call("lending.input", args("source", "Entry", "value",
+                " 1111 "), Collections.singletonList("value")));
+        assertFalse(result.containsKey("taken"), "never the value of a secret parameter");
+        assertEquals("VALUE_COERCED", warning(0).get("code"));
+        assertFalse(String.valueOf(lending.ctx.warnings).contains("1111"), String.valueOf(lending.ctx.warnings));
+        assertNull(warning(0).get("data"));
+    }
+
+    @Test
+    void anInputTakenByAnotherQuestionIsAnsweredNested() throws Exception {
+        lending.signOn();
+        lending.send("Barcode", "5000000000017");
+        Gate gate = holdAfter("Barcode", "5000000000017");
+        Map<String, Object> qty = map(lending.ctx.call("lending.input", args("source", "Key.QTY", "ackTimeoutMs",
+                0L)));
+        assertEquals("QUEUED", qty.get("consumed"));
+        lending.ctx.warnings.clear();
+        java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newSingleThreadExecutor();
+        try {
+            java.util.concurrent.Future<Object> entry = pool.submit(new java.util.concurrent.Callable<Object>() {
+                @Override
+                public Object call() throws Exception {
+                    return lending.ctx.call("lending.input", args("source", "Entry", "value", "3"));
+                }
+            });
+            long deadline = System.currentTimeMillis() + 10000;
+            while (lending.app.inbox().size() < 2 && System.currentTimeMillis() < deadline) {
+                Thread.yield();
+            }
+            assertEquals(2, lending.app.inbox().size(), "both inputs queued while the engine is held");
+            gate.release.countDown();
+            Map<String, Object> result = map(entry.get(10, java.util.concurrent.TimeUnit.SECONDS));
+            assertEquals(args("kind", "question", "text", "Enter quantity"), result.get("answeredBy"));
+            assertEquals("ANSWERED_NESTED", warning(0).get("code"));
+            assertTrue(String.valueOf(warning(0).get("message")).contains("Enter quantity"));
+        } finally {
+            pool.shutdownNow();
+        }
+    }
+
+    @Test
+    void theInboxFullIsRejectedWithItsReason() throws Exception {
+        Gate gate = holdAfter("Entry", "100");
+        try {
+            for (int i = 0; i < ai.skillroy.testjava.samples.lending.Inbox.CAPACITY; i++) {
+                assertTrue(lending.app.inbox().offer(ai.skillroy.testjava.samples.lending.LendingInput.key(
+                        ai.skillroy.testjava.samples.lending.KeyAction.DUE)));
+            }
+            RpcException full = lending.ctx.fails("lending.input", args("source", "Entry", "value", "1111"));
+            assertEquals(ErrorCodes.INPUT_REJECTED, full.error().code());
+            assertEquals("inboxFull", full.error().data().get("reason"));
+        } finally {
+            gate.release.countDown();
+        }
+    }
+
+    @Test
+    void thePendingTableIsBoundedAndClearedOnDeactivate() throws Exception {
+        EngineEvents events = lending.module.slot().events();
+        List<EngineEvents.AckWait> waits = new ArrayList<EngineEvents.AckWait>();
+        for (int i = 0; i < EngineEvents.MAX_PENDING + 4; i++) {
+            waits.add(events.expectAck(ai.skillroy.testjava.samples.lending.LendingInput.entry("x" + i),
+                    "t-" + i, null, null));
+        }
+        assertEquals(EngineEvents.MAX_PENDING, events.pendingCount());
+        assertFalse(waits.get(0).await(1000), "the oldest is dropped, released as not acknowledged");
+        events.deactivate();
+        assertEquals(0, events.pendingCount());
+        assertFalse(waits.get(EngineEvents.MAX_PENDING + 3).await(1000));
     }
 }

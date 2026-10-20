@@ -1,0 +1,25 @@
+# Semantic input with caveats the steps accept (phase8-contracts.md 7.1, 7.2): the desk trims a scanned barcode, so
+# lending.input reports VALUE_COERCED with the barcode it took, and it ignores an entry of spaces, so lending.input
+# reports VALUE_DROPPED; each step accepts its warning, the run passes and run.jsonl holds both warning records.
+# Seed A fixtures: assistant 100 (its password comes from credentials.yaml); YRD-001, barcode 5000000000017.
+scenario: semantic-input-warnings
+pack: lending
+tags: [semantic-input]
+requires: [lending.input, lending.state, lending.loan]
+launchProperties: { lending.seed: A }
+resolve:
+  assistant: { fixture: { code: "100" }, credential: { realm: staff, key: code } }
+  item:      { fixture: { code: YRD-001, barcode: "5000000000017" } }
+steps:
+  - signOn: { staff: $assistant }
+  - scan: { barcode: " 5000000000017 " }
+    accept: [VALUE_COERCED]
+  - expect: { "loan.lines[code=$item.code].qty": 1 }
+  - enter: { value: "   " }
+    accept: [VALUE_DROPPED]
+  - expect: { "loan.lines[code=$item.code].qty": 1 }
+  - key: { action: CANCEL }
+verify:
+  - { "state.name": IDLE }
+on_prompt: { unexpected: fail }
+timeouts: { step: 30s }

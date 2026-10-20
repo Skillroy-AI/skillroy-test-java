@@ -288,6 +288,14 @@ The executor must also know which ready topics are application prompts, so that 
 
 Each call in a plan carries a `sync` level chosen by the pack verb that emitted it: `NONE` (return when the call returns), `ACK` (await the ack topic), `READY` (ack, then the first ready topic), `SETTLE` (then `swing.settle`) or `EVENT` (await the event the call itself names, with a payload match). `EVENT` exists because an application's acknowledgement can mean only "consumed", not "accepted", and some primitives publish no acknowledgement at all. Every wait starts from the call's `seq.before`. Phase 1.x lets the base UI verbs `click`, `type` and `press` name such an event themselves (`await:`), followed by a settle (A32, built 2026-10-02).
 
+(Phase 8, built 2026-10-19, ES; P8 §7.1, §7.4.) **Acknowledgements are correlated by input** when the pack says so
+(`SyncPolicy.ackByInputId`, which the sample sets): the module mints an `inputId` per input, returns it and puts it in
+the acknowledgement's payload, publishing an acknowledgement that comes after the call from the application's own
+callback; `ACK` and `READY` then wait for the ack topic with `match: {inputId}`, so an earlier input's late
+acknowledgement never completes a later call's wait. **The step protocol carries warnings**: a call that did what it
+was asked with a caveat (the input queued, its value coerced or dropped, another question answered by it, a pack's own
+code) says so in its result's envelope, and the step accepts the code (`accept: [CODE]`) or fails.
+
 ### 2.6 Extension SPI and hook policy
 
 ```java
@@ -530,6 +538,9 @@ A **tenant pack** is a `DomainPack` overlay for one deployment variant of the sa
 
 **Closed in Phase 2 (built 2026-10-02).** Rows read over the controller-side JDBC channel (§3.9) never pass through the agent-side `MaskPolicy`, so the pack supplies the same rule as `DomainPack.rowMasks()`: the JDBC channel applies it to every value it returns, and the binder to every row sample of a provenance; `skillroy-inference` is to apply it too before any row can reach a prompt (Phase 5). The full list of open SPI and DSL gaps is in `../TODO.md`.
 
+(Phase 8, built 2026-10-19, ES; P8 §7.3, §7.4.) `DomainPack` gains `Set<String> warningCodes()` (default empty): the
+pack's own warning codes `<packId>.<NAME>`, which a step may accept; `SyncPolicy` gains `ackByInputId` (above, §2.5).
+
 ### 3.7 Swing driving
 
 **Input ladder.** Every input primitive reports the rung that fired.
@@ -582,6 +593,14 @@ are pixel-identical on the Linux image (BS9). The Robot rung's facts as built: R
 release, a delivery probe that makes a silent drop visible (macOS without the Accessibility permission delivers
 nothing, BS9), `requireFocus` at the press, and every covering window of the JVM refusing the point; a `ROBOT`
 capture is a person's evidence only, blanked outside the JVM's windows.
+
+(Phase 8, built 2026-10-19, ES; P8 §7.6.) "Every input primitive reports the rung that fired" is a checked convention for
+a pack's own ladders: a pack verb's call declares its ladder (`rungs`, best first) and a step may require a rung
+(`minRung`); the primitive chooses the rung when it acts, refuses to act below a forwarded `minRung` and echoes it, and
+the executor fails a missing, undeclared or too low rung, records a lower one as `DEGRADED`, and refuses at run start a
+required rung that no `OK` capability reaches. For devices the names are `PHYSICAL` (through the device's own path: a
+simulator or the application's driver code, where the real device hands data over) and `SEMANTIC` (the shortcut of the
+table above).
 
 ### 3.8 Embedded web views: CDP and the in-process SPI
 
@@ -663,6 +682,11 @@ Rules for both (browser-spi §C0-§C5): no adapter creates or configures an engi
 **SqlGuard** validates every model-written statement before it runs: exactly one SELECT; tables and columns on the pack's allow-list; no DML or DDL; `CALL` only for allow-listed procedures; a deterministic `ORDER BY` with tie-breaker; `LIMIT` at most 200. JSqlParser's dialect coverage is `needs spike` BS6; where a dialect does not parse, the query type stays on tier (a).
 
 **Pre-flight.** A pack declares environment checks (backend reachable, site open, device usable). They run before the first scenario, so an unusable environment fails as `ENVIRONMENT`, not inside a scenario.
+
+(Phase 8, built 2026-10-19, ES; P8 §7.6.) A device action with a physical path and a shortcut declares its ladder
+(`DeviceAdapter.rungs(action)`, shown by `device.list` and the `devices` root) and reports the rung that acted in its
+result; the sample's scanner reaches the desk through the application's own scanner driver when it runs, and through
+the inbox otherwise.
 
 ### 3.10 Vision and human-like input (bolt-on)
 

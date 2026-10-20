@@ -63,6 +63,8 @@ public final class FakeAgent implements AgentConnection {
     private final List<Call> calls = new ArrayList<>();
     private final List<Event> bus = new ArrayList<>();
     private final Map<String, Handler> handlers = new HashMap<>();
+    /** The warnings each method's result carries in its envelope (phase8-contracts.md 7.1, ES); none by default. */
+    public final Map<String, List<ai.skillroy.testjava.protocol.CallWarning>> warnings = new HashMap<>();
     private final Map<String, Capability> capabilities = new TreeMap<>();
     private final List<PrimitiveDescriptor> schema = new ArrayList<>();
     private long seq;
@@ -159,7 +161,7 @@ public final class FakeAgent implements AgentConnection {
                 events.add(event);
             }
         }
-        return new RpcResult(value, events, before, seq, 1, "fake-worker");
+        return new RpcResult(value, events, before, seq, 1, "fake-worker", warnings.get(method));
     }
 
     @Override

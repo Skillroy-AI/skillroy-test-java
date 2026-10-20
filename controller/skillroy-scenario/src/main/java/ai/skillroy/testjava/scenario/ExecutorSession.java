@@ -330,6 +330,7 @@ public final class ExecutorSession implements AutoCloseable {
             runner.observer = RunObservers.safe(effective.observer());
             log.observe(runner.observer);
             runner.bindings = Bindings.empty();
+            runner.minLengthInText = mask.minLengthInText();
             configure(runner, pack);
             mark(runner, id);
             StepJournal journal;
@@ -468,6 +469,14 @@ public final class ExecutorSession implements AutoCloseable {
         }
         runner.promptPolicy = prompts == null ? PromptPolicy.FAIL : prompts;
         runner.packVerbs = verbs;
+        Set<String> codes;
+        try {
+            codes = pack.warningCodes();
+        } catch (RuntimeException e) {
+            codes = null;
+        }
+        // phase8-contracts.md 7.1: a session step accepts only what its verb's own calls pre-accept.
+        runner.warningCodes = codes == null ? Set.of() : Set.copyOf(codes);
     }
 
     /** Fixes the sequence number the session starts from, as a run's start mark does. */
@@ -559,6 +568,10 @@ public final class ExecutorSession implements AutoCloseable {
         requireOpen();
         this.provenance = provenance;
         String stepId = nextStepId();
+        if (!call.accept().isEmpty() || !call.rungs().isEmpty() || call.minRung() != null) {
+            // phase8-contracts.md 7.3 (D579): a model or a client never sets a modifier; a verb's are the pack's.
+            return refused(stepId, null, call.args(), List.of(), origin, RAW_MODIFIERS);
+        }
         PlannedCall given = confirms(origin) ? call : withoutConfirmation(call);
         Plan.Step step;
         try {
@@ -738,6 +751,7 @@ public final class ExecutorSession implements AutoCloseable {
         observeStepStart(stepId, verb, origin);
         runner.currentStep = stepId;
         runner.stepFidelity = new ArrayList<>();
+        runner.stepWarnings = new ArrayList<>();
         runner.stepEvents = new ArrayList<>();
         runner.lastResult = null;
         Map<String, Object> capturedBefore = new LinkedHashMap<>(runner.bindings.captured());
@@ -835,11 +849,16 @@ public final class ExecutorSession implements AutoCloseable {
         List<PlannedCall> planned = new ArrayList<>();
         for (Plan.Call call : step.calls()) {
             planned.add(new PlannedCall(call.primitive(), call.args(), call.sync(), call.timeoutMs(), call.await(),
-                    call.capture()));
+                    call.capture(), false, call.accept(), call.rungs(), call.minRung()));
+        }
+        List<String> stepWarnings = executed == 0 || runner.stepWarnings == null ? List.of() : runner.stepWarnings;
+        List<String> maskedWarnings = new ArrayList<>();
+        for (String line : stepWarnings) {
+            maskedWarnings.add(mask.apply(line));
         }
         StepOutcome outcome = new StepOutcome(stepId, verb, planned, executed, status, kind,
                 message == null ? null : mask.apply(message), maskedDetail, last, events, seqBefore,
-                runner.lastSeenSeq, maskedFidelity, duration);
+                runner.lastSeenSeq, maskedFidelity, duration, maskedWarnings);
         Map<String, Object> outcomeJson = new LinkedHashMap<>();
         outcomeJson.put("status", status.name());
         if (kind != null) {
@@ -856,6 +875,9 @@ public final class ExecutorSession implements AutoCloseable {
         outcomeJson.put("seqAfter", runner.lastSeenSeq);
         outcomeJson.put("durationMs", duration.toMillis());
         outcomeJson.put("degradedFidelity", maskedFidelity);
+        if (!maskedWarnings.isEmpty()) {
+            outcomeJson.put("warnings", maskedWarnings);
+        }
         observeStepStart(stepId, verb, origin);
         Map<String, Object> stepProvenance = provenance(provenance);
         provenance = null;
@@ -903,6 +925,17 @@ public final class ExecutorSession implements AutoCloseable {
             if (call.capture() != null) {
                 record.put("capture", RunLog.fields("slot", call.capture().slot(), "fields",
                         new LinkedHashMap<>(call.capture().fields())));
+            }
+            // phase8-contracts.md 7.3: information only; the export writes verbs, which recompile to the same calls.
+            if (!call.accept().isEmpty()) {
+                record.put("accept", new ArrayList<>(call.accept()));
+            }
+            if (!call.rungs().isEmpty()) {
+                record.put("rungs", call.rungs().stream().map(ai.skillroy.testjava.scenario.pack.Rung::name)
+                        .toList());
+            }
+            if (call.minRung() != null) {
+                record.put("minRung", call.minRung());
             }
             records.add(record);
         }
@@ -2122,13 +2155,17 @@ public final class ExecutorSession implements AutoCloseable {
         return copy;
     }
 
+    /** The refusal of a raw call that carries a step's modifiers (phase8-contracts.md 7.3, D579). */
+    static final String RAW_MODIFIERS = "a raw call carries accept, rungs or minRung; they belong to a scenario step"
+            + " or a pack verb";
+
     /** A raw call of an origin that is not a person's, without {@code confirm} and {@code _meta}. */
     private static PlannedCall withoutConfirmation(PlannedCall call) {
         if (!holdsConfirmation(call.args())) {
             return call;
         }
         return new PlannedCall(call.primitive(), stripped(call.args()), call.sync(), call.timeoutMs(), call.await(),
-                call.capture(), call.literalArgs());
+                call.capture(), call.literalArgs(), call.accept(), call.rungs(), call.minRung());
     }
 
     /**
@@ -2141,7 +2178,7 @@ public final class ExecutorSession implements AutoCloseable {
             return call;
         }
         return new PlannedCall(call.primitive(), (Map<String, Object>) References.escaped(call.args()), call.sync(),
-                call.timeoutMs(), call.await(), call.capture(), true);
+                call.timeoutMs(), call.await(), call.capture(), true, call.accept(), call.rungs(), call.minRung());
     }
 
     /** A call a verb compiled to, for an origin that is not a person's: without {@code confirm} and {@code _meta}. */
@@ -2150,7 +2187,7 @@ public final class ExecutorSession implements AutoCloseable {
             return call;
         }
         return new Plan.Call(call.primitive(), stripped(call.args()), call.sync(), call.timeoutMs(), call.await(),
-                call.handlesPrompt(), call.capture());
+                call.handlesPrompt(), call.capture(), call.guard(), call.accept(), call.rungs(), call.minRung());
     }
 
     /**

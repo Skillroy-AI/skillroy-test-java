@@ -609,6 +609,23 @@ primitive the module adds (§6.14).
 - An input typed or clicked in the window produces no acknowledgement through the seam; UI steps therefore wait for the
   ready topic, or name the event they wait for (`await:` on `click`, `type`, `press`; A32).
 
+*(Phase 8, built 2026-10-19, ES; P8 §7.1, §7.2, §7.4.)* **What the input primitive answers.** Adopt the semantic-input
+result convention (`InputResult`): `accepted`, an `inputId` the module mints (opaque, `[A-Za-z0-9._:-]{1,64}`, unique
+within the agent's life; echo one the caller supplies), `consumed: CONSUMED` (the application consumed the input
+before the call returned) or `QUEUED` (it took it and has not consumed it yet), `taken` with the value the application
+consumed when it differs from the one sent (never for a secret parameter, `Invocation.secretParams()`), `answeredBy`
+when another question consumed it. Report the caveats as warnings (`inv.warn`, §6.14): `VALUE_COERCED` with `taken`,
+`VALUE_DROPPED`, `ANSWERED_NESTED` with `answeredBy`, or a code of your pack `<packId>.<NAME>` that the pack declares;
+the executor derives `INPUT_QUEUED` itself. `INPUT_REJECTED` keeps meaning "refused before it was handed over", with
+`data.reason` `notAccepted` or `inboxFull`; a caveat is never an error and an error never a warning. **Acknowledge by
+input**: put the `inputId` in the acknowledgement's payload (never the value), publish an acknowledgement that comes
+after the call from the application's own callback (keep the input in a bounded pending table, at most 256, cleared
+on detach; exactly one acknowledgement per input; the four-argument `publish` of §6.13 with the call's correlation id),
+and let the pack set `SyncPolicy.ackByInputId` (§8.2). For an acknowledgement that is not the pack's ack topic, or a pack
+that cannot opt in, the **EVENT pattern**: the verb mints a deterministic literal at compile time (`"L" +
+ctx.sourceLine() + "." + <position>`), passes it as the primitive's `inputId` parameter and awaits `EVENT` on the
+acknowledgement topic with `match: {inputId: <the literal>}`; only literals or `$slot` values can be matched.
+
 ### 6.6 Application state for the snapshot
 
 `AppStateProvider.appState()` returns a JSON-able map: cheap, no side effects, under `APP`. Put there what scenarios
@@ -663,6 +680,14 @@ inject where the real device hands data to the application; output devices repor
 and as rendered text where a simulator gives it. Prefer the application's own device simulators in CI (design §3.9). The
 sample's printer: `PrinterDevice`, with the slips as a fact root.
 
+*(Phase 8, built 2026-10-19, ES; P8 §7.6.)* An action with a physical path and a shortcut declares its ladder,
+`DeviceAdapter.rungs(action)` (best first; `PHYSICAL`, `SEMANTIC`, or names of your own matching `[A-Z][A-Z0-9_]{0,31}`):
+`device.list` and the `devices` root show it. Such an action reports the rung that acted (`RungResult`: `rung`,
+`requestedRung`, `fidelity`, `reason`), refuses to act below a `minRung` argument (`CAPABILITY_UNAVAILABLE {rung,
+minRung, capability?}`, before anything reaches the application) and echoes `minRung` in its result when it received
+one: the executor fails closed without the echo. The sample's scanner: `ScannerDevice`, `PHYSICAL` through the desk's
+scanner driver, `SEMANTIC` through its inbox, with the capability `lending.scanner.physical`.
+
 ### 6.11 Masking and redaction
 
 Four mechanisms, each for one route out of the JVM:
@@ -697,6 +722,10 @@ bounded by characters, `eventRingChars`). A call's result carries the events pub
 its `seq.before`, so waiting "since `seq.before`" never misses a consequence of the call (P1 §3). Event sinks run on
 the publishing thread and must not block.
 
+*(Phase 8, built 2026-10-19, ES; P8 §7.4.)* An event that belongs to an earlier call but is published later, from the
+application's own callback (a late acknowledgement of an input), uses `publish(topic, source, payload, correlationId)`
+with the call's `Invocation.correlationId()` kept for it, so that telemetry links it to that call; it never blocks.
+
 ### 6.14 Primitives of the module's own
 
 `Primitives.of(PrimitiveSpec.builder("<product>.<verb>")…build(), body)` and `ctx.primitives()`. A spec declares its
@@ -706,6 +735,20 @@ primitives. Typical set, after the sample: an input seam, a state read, the curr
 answer to it, a decision-code check for verifiers (`lending.access.check`), dry runs of the application's own rules for
 cross-checks (`lending.waiver.evaluate`). `skillroy schema` lists what a target offers; `skillroy call <primitive>`
 calls one by hand.
+
+*(Phase 8, built 2026-10-19, ES; P8 §7.1, §7.5.)* **Warnings.** `inv.warn(code, message, data)` reports a caveat of a
+call that did what it was asked; it travels in the result's envelope, never in the value. A code is a base code or
+`<packId>.<NAME>` your pack declares; a malformed one throws to your primitive (a module bug). At most sixteen per
+call; never put a secret value in the message or the data (the dispatcher redacts the call's secret parameters, the
+executor's secret-echo check fails a result that still carries one). **Composites.** Logic that depends on which
+question the application asks next belongs in **one primitive that owns its nested questions** (plans stay linear): it
+is `mutating`, bounded (every wait within `inv.remainingMs()` less a margin, never on the EDT or a forbidden thread),
+takes every nested answer as a parameter (a secret one through the credential join), never answers a question it does
+not own (it returns and leaves the question to the step's prompt check), and reports with `CompositeResult`: `composite
+{branch, answered: [{question: {topic, id?, text?, seq?}, by: <parameter name>, choice?, inputId?}]}`, plus `inputId`,
+`inputIds` and `consumed`. List the `seq` of every prompt event you answered: the executor expects exactly those that
+fall inside the call's window. Check a result with `CompositeResult.problems` in your module tests. The sample:
+`lending.signOn`, `lending.scanChecked` (`LendingComposites`).
 
 ---
 
@@ -805,6 +848,19 @@ Verb guidance from the sample: the sign-on verb takes a `$slot` whose slot decla
 reaches the call from `credentials.yaml` at bind time and the call carries `_meta.secretParams` (A34; P2 §13.3); a verb
 that answers a prompt is marked as handling it; a verb that opens a session adds the cleanup call that closes it.
 
+*(Phase 8, built 2026-10-19, ES; P8 §7.3, §7.4, §7.6.)* `SyncPolicy` has a sixth component, `ackByInputId`: when it is
+true, every `ACK` and `READY` acknowledgement wait matches `{inputId: <the result's inputId>}`, so the acknowledgement
+of an earlier, queued input never ends a later wait, and a call result without an `inputId` is an `ERROR` /
+`ENVIRONMENT` ("the pack's acknowledgements are correlated by inputId; P returned none"). Turn it on once your module
+puts the id in its acknowledgement (§6.5); the sample's pack does. A planned call carries `accept` (warning codes the
+step tolerates), `rungs` (the call's ladder, `Rung(name, capability)`, two to eight, best first) and `minRung` (the
+lowest rung the step allows). A verb whose call has a ladder declares it (`PlannedCall.withRungs`) and forwards
+`ctx.minRung()` to the primitive (the sample's `deviceScan` passes it in `args.minRung`); a verb that answers a
+question the application may or may not ask compiles to one composite primitive's call (`signOnAny`, `scanChecked`),
+never to a conditional step. A verb whose call always tolerates a caveat pre-accepts it on the call
+(`PlannedCall.withAccept`; the compiler checks the codes as it checks a step's `accept`). Declare your pack's warning codes, `ScenarioPack.warningCodes()` (`<packId>.<NAME>`;
+the compiler refuses a code that does not start with the pack's id).
+
 ### 8.3 Facts, prompts, pre-flight, recovery
 
 - A `FactProvider` names a root (`root()`) and fetches its current value (`fetch(agent)`); expectations address it with
@@ -817,6 +873,12 @@ that answers a prompt is marked as handling it; a verb that opens a session adds
   failure, not one per scenario.
 - `recover(agent)` must be bounded and event-driven: the sample answers any open prompt, cancels an open transaction and
   signs off, at most 20 actions and 60 s (P1 §9.3).
+
+*(Phase 8, built 2026-10-19, ES; P8 §7.5.)* A prompt a composite primitive answered is not unexpected: the executor
+reads the `seq` of every question the result lists as answered and expects the prompt events with those `seq`s inside
+the call's window, without asking the `PromptPolicy` (`prompt {expected: true, answeredBy}`); a listed `seq` outside
+the window vouches for nothing and is logged (`ignoredSeqs`). An unlisted prompt goes to the policy as before, so a
+composite cannot hide a prompt it did not list.
 
 ### 8.4 Resolution: queries, resolvers, verifiers, oracles, cross-checks
 
@@ -908,6 +970,26 @@ no timestamps or absolute paths (design §3.2; P1 §8.2). **Commit the plan besi
 fail the build when it is stale: `skillroy compile --check` exits 1 for a missing or different plan; the sample's
 `PlansUpToDateTest` does the same in a test. `$slot` references are resolved at bind time, never at compile time.
 
+*(Phase 8, built 2026-10-19, ES; P8 §7.3, §7.6.)* **Step modifiers.** Beside its one verb key a step may carry
+`accept: [CODE, …]` (warning codes the step tolerates: base codes, or codes the pack declares; `INVALID_WARNING` and
+`TOO_MANY_WARNINGS` never) and `minRung: NAME` (the lowest rung of the verb's ladder the step allows). Both are reserved
+words, never verbs; a step whose verb compiles to no call (`expect`, `aiAct`, …) refuses them, and `minRung` on a verb
+without a ladder, or naming no rung of it, is a compile error. A plan with them is written as version 7, the call
+carrying `accept` (sorted), `rungs` (`[{name, capability}]`) and `minRung`; an older reader refuses them. Without
+`accept`, a warning fails the step (`FAIL` / `ASSERTION`: "V: P reported CODE: …"); `INPUT_QUEUED` is the executor's
+own, derived from `consumed: QUEUED` when acknowledgements are not correlated. From the sample's
+`scenarios/semantic-input-warnings.yaml` and `scenarios/scanner/device-scan-physical.yaml`:
+
+```yaml
+steps:
+  - scan: { barcode: " 5000000000017 " }
+    accept: [VALUE_COERCED]          # the desk trims the barcode; the step says it does not care
+  - enter: { value: "   " }
+    accept: [VALUE_DROPPED]          # the desk ignores an entry of spaces
+  - deviceScan: { item: $item }
+    minRung: PHYSICAL                # refused at run start on a desk without the scanner driver
+```
+
 ### 8.7 Credentials and bindings; the bind modes
 
 - **`credentials.yaml`**, one per environment, **never committed**, read by the controller only, owner-only (mode 600
@@ -938,6 +1020,15 @@ fail the build when it is stale: `skillroy compile --check` exits 1 for a missin
   `TARGET_RESTARTED`, `AGENT_LOST`, `ENVIRONMENT` are `ERROR`; `MODAL_OPEN` and `INPUT_REJECTED` from a step call are
   `FAIL` / `ASSERTION`; a click that fell back to a lower rung makes the run `DEGRADED`; a plan that needs a model while
   steps run is `SKIPPED` in `replay` (P7 §8.6).
+
+*(Phase 8, built 2026-10-19, ES; P8 §7.6, §7.7.)* The executor checks a call's result in a fixed order: secret echo
+(a value of a secret parameter anywhere in the result is an `ERROR` / `ENVIRONMENT`, the parameter named, never the
+value), warnings (one the step did not accept is `FAIL` / `ASSERTION`; an accepted one is a `warning` record and a
+line in the summary), composite problems, the rung, then the base checks. A call that reports a lower rung of its ladder
+than the first makes the run `DEGRADED` with a `fidelity` record; a rung below the step's `minRung`, a rung missing or
+not on the ladder, or a `minRung` the device did not echo is `FAIL` / `ASSERTION`. At run start, a step with `minRung`
+whose rungs from the first to `minRung` all have a capability that is not `OK` is `PRECONDITION_FAILED` before
+anything runs (the `rungs` record).
 
 ### 8.9 Image baselines and render keys
 
@@ -1354,15 +1445,13 @@ From TODO "Open SPI and DSL gaps" (read the row for the proposed shape):
 | 10 | no thread policy that runs a bounded task at the application's next idle point |
 | 11 | a query's timeout is advisory; no cancellation |
 | 13 | no session-scoped data reads (a procedure call then a select on one connection) |
-| 18 | no standard result fields for "queued but not consumed" or "coerced" inputs |
-| 19 | plans are linear: no "only if the next ready event matches" step |
 | 21 | event expectations are limited (no negated wait, no match inside a string) |
-| 22 | pack verbs cannot declare rung ladders |
 | 24 | a scenario cannot require an application setting beyond launch properties |
 | 35, 39, 43, 44 | a view-less browser without a seed is invisible; hidden JCEF has no bitmap; JCEF before 2024-01; windowed JCEF on Java 8 |
 | 50 | a class behind a strict-delegation loader cannot be hooked |
 | 77, 78, 81 | no Robot key input; HiDPI unverified; no key input into a page through `web.pointer` |
 | 83, 84 | one baseline per rendering; redaction hides a rectangle, not a value |
+| 142 | no conditional planned call (`when`): a flow that cannot be one composite primitive (two packs' primitives, a base verb in the branch) has no conditional step |
 
 ### 15.3 Not verified
 

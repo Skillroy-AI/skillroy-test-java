@@ -391,6 +391,37 @@ class SessionServiceTest {
         assertTrue(String.valueOf(result.content()).contains("out on loan"), String.valueOf(result.content()));
     }
 
+    /**
+     * phase8-contracts.md 7.1 (ES): the model's view of a step gains {@code warnings} (masked) only when the step's
+     * calls reported one, so that the recorded sessions stay valid; an unaccepted one is the step's FAIL the model
+     * sees with the code.
+     */
+    @Test
+    void theModelSeesAStepsWarningsOnlyWhenThereAreSome() throws Exception {
+        agent.warnings.put("desk.lend", List.of(new ai.skillroy.testjava.protocol.CallWarning("VALUE_DROPPED",
+                "the quantity was ignored", null)));
+        ScriptedGateway gateway = ScriptedGateway.sequence(List.of(
+                tools("r1", use("t1", "lending_lend", Map.of("item", "GAR-02"))),
+                tools("r2", use("t2", "skillroy_facts", mapOf("root", "loan", "path", null))),
+                done("r3", "done")));
+        service(gateway, SessionPolicy.acting(), "1.00").ask("lend the aerator");
+        String warned = String.valueOf(((Content.ToolResult) gateway.requests().get(1).messages().get(2).parts()
+                .get(0)).content());
+        assertTrue(warned.contains("\"warnings\": ["), warned);
+        assertTrue(warned.contains("desk.lend VALUE_DROPPED (the quantity was ignored)"), warned);
+        assertTrue(warned.contains("\"status\": \"FAIL\""), warned);
+
+        agent.warnings.clear();
+        ScriptedGateway again = ScriptedGateway.sequence(List.of(
+                tools("r4", use("t4", "lending_lend", Map.of("item", "GAR-02"))),
+                done("r5", "done")));
+        service(again, SessionPolicy.acting(), "1.00").ask("lend the aerator again");
+        String plain = String.valueOf(((Content.ToolResult) again.requests().get(1).messages().get(2).parts()
+                .get(0)).content());
+        assertTrue(plain.contains("\"status\""), plain);
+        assertFalse(plain.contains("\"warnings\""), "no warning, no key: " + plain);
+    }
+
     @Test
     void theActionLimitEndsTheTurn() throws Exception {
         ScriptedGateway gateway = ScriptedGateway.sequence(List.of(

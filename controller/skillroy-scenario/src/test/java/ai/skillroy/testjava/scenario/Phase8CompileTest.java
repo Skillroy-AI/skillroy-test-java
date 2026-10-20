@@ -337,6 +337,49 @@ class Phase8CompileTest {
         assertNull(Matchers.version7Matcher(Map.of("equals", 1L)));
     }
 
+    // ------------------------------------------------------------------------------------------------ section 7 (ES)
+
+    @Test
+    void aCallsAcceptRungsAndMinRungAreWrittenAtVersion7AndRefusedBelow() throws Exception {
+        pack.custom = List.of(new ai.skillroy.testjava.scenario.pack.PlannedCall("toy.scan", Map.of("barcode", "1"),
+                ai.skillroy.testjava.scenario.pack.Sync.NONE, 0).withRungs(List.of(
+                new ai.skillroy.testjava.scenario.pack.Rung("PHYSICAL", "toy.scanner.physical"),
+                ai.skillroy.testjava.scenario.pack.Rung.of("SEMANTIC"))));
+        Plan plan = compile("  - custom: {}\n    accept: [VALUE_DROPPED, VALUE_COERCED]\n    minRung: PHYSICAL\n");
+        String text = plan.toJsonText();
+        Map<String, Object> call = firstCall(parse(text));
+        assertEquals(List.of("VALUE_COERCED", "VALUE_DROPPED"), call.get("accept"), "sorted");
+        Map<String, Object> semantic = new LinkedHashMap<>();
+        semantic.put("name", "SEMANTIC");
+        semantic.put("capability", null);
+        assertEquals(List.of(Map.of("name", "PHYSICAL", "capability", "toy.scanner.physical"), semantic),
+                call.get("rungs"));
+        assertEquals("PHYSICAL", call.get("minRung"));
+        Plan back = Plan.parse(text);
+        assertEquals(text, back.toJsonText(), "round trip byte-identical");
+        assertEquals(plan.steps().get(0).calls().get(0), back.steps().get(0).calls().get(0));
+        assertFalse(compile("  - poke: {}\n").toJsonText().contains("\"accept\""), "absent when empty");
+
+        String old = v6(text);
+        assertEquals("invalid plan: call toy.scan: 'accept' needs a version 7 plan", reason(old));
+        Map<String, Object> json = parse(old);
+        firstCall(json).remove("accept");
+        assertEquals("invalid plan: call toy.scan: 'rungs' needs a version 7 plan", reason(json));
+        firstCall(json).remove("rungs");
+        assertEquals("invalid plan: call toy.scan: 'minRung' needs a version 7 plan", reason(json));
+
+        Map<String, Object> bad = parse(text);
+        firstCall(bad).put("minRung", "ROBOT");
+        assertTrue(reason(bad).contains("minRung ROBOT is not a rung of its ladder [PHYSICAL, SEMANTIC]"));
+        bad = parse(text);
+        firstCall(bad).put("accept", new ArrayList<>(List.of("lower")));
+        assertTrue(reason(bad).contains("'accept' holds lower, which is not a distinct warning code"));
+        bad = parse(text);
+        firstCall(bad).put("rungs", new ArrayList<>(List.of(Map.of("name", "ONLY", "capability", "x"))));
+        firstCall(bad).remove("minRung");
+        assertTrue(reason(bad).contains("a rung ladder has 2 to 8 rungs, found 1"), reason(bad));
+    }
+
     // ------------------------------------------------------------------------------------------------ JSON helpers
 
     private interface Edit {

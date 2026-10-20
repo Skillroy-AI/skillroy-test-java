@@ -36,16 +36,26 @@ import java.util.Objects;
  * @param duration wall time of the step, as measured by the run's clock
  * @param degradedFidelity the degraded-fidelity entries of this step's calls (see
  *     {@link RunResult#degradedFidelity()}); empty when none
+ * @param warnings the warnings this step's calls reported (phase8-contracts.md 7.1; see {@link RunResult#warnings()}),
+ *     accepted or not; empty when none
  */
 public record StepResult(String id, String verb, int line, Status status, String message,
-                         List<String> skippedExpectations, Duration duration, List<String> degradedFidelity) {
+                         List<String> skippedExpectations, Duration duration, List<String> degradedFidelity,
+                         List<String> warnings) {
 
-    /** Copies the lists; a null {@code degradedFidelity} is empty. */
+    /** Copies the lists; a null {@code degradedFidelity} or {@code warnings} is empty. */
     public StepResult {
         Objects.requireNonNull(id, "id");
         Objects.requireNonNull(status, "status");
         skippedExpectations = List.copyOf(skippedExpectations);
         degradedFidelity = degradedFidelity == null ? List.of() : List.copyOf(degradedFidelity);
+        warnings = warnings == null ? List.of() : List.copyOf(warnings);
+    }
+
+    /** A step result without warnings (the shape before Phase 8). */
+    public StepResult(String id, String verb, int line, Status status, String message,
+                      List<String> skippedExpectations, Duration duration, List<String> degradedFidelity) {
+        this(id, verb, line, status, message, skippedExpectations, duration, degradedFidelity, List.of());
     }
 
     /** A step result without degraded-fidelity entries (the shape before amendment A29). */

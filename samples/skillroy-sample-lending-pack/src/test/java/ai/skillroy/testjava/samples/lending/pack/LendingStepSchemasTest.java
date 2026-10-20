@@ -86,13 +86,21 @@ class LendingStepSchemasTest {
                         verb + "." + property.getKey() + " says what it means");
             }
         }
-        assertEquals(Map.of("signOn", List.of("staff"), "signOff", List.of(), "scan", List.of("item", "barcode",
-                "times"), "key", List.of("action", "value"), "enter", List.of("value"), "quantity", List.of("n"),
-                "deposit", List.of("amount"), "expectPrompt", List.of("id", "text", "within"), "answerPrompt",
-                List.of("choice", "id"), "authorise", List.of("staff")), keys, "the keys each verb's compile reads");
-        assertEquals(Map.of("signOn", List.of("staff"), "signOff", List.of(), "scan", List.of(), "key",
-                List.of("action"), "enter", List.of("value"), "quantity", List.of("n"), "deposit", List.of(),
-                "expectPrompt", List.of(), "answerPrompt", List.of("choice"), "authorise", List.of("staff")),
+        assertEquals(Map.ofEntries(Map.entry("signOn", List.of("staff")), Map.entry("signOff", List.of()),
+                Map.entry("scan", List.of("item", "barcode", "times")), Map.entry("key", List.of("action", "value")),
+                Map.entry("enter", List.of("value")), Map.entry("quantity", List.of("n")),
+                Map.entry("deposit", List.of("amount")), Map.entry("expectPrompt", List.of("id", "text", "within")),
+                Map.entry("answerPrompt", List.of("choice", "id")), Map.entry("authorise", List.of("staff")),
+                // Phase 8 (ES): the composites and the scanner device.
+                Map.entry("signOnAny", List.of("staff")), Map.entry("scanChecked", List.of("item", "barcode",
+                        "inducted")), Map.entry("deviceScan", List.of("item", "barcode"))), keys,
+                "the keys each verb's compile reads");
+        assertEquals(Map.ofEntries(Map.entry("signOn", List.of("staff")), Map.entry("signOff", List.of()),
+                Map.entry("scan", List.of()), Map.entry("key", List.of("action")), Map.entry("enter",
+                        List.of("value")), Map.entry("quantity", List.of("n")), Map.entry("deposit", List.of()),
+                Map.entry("expectPrompt", List.of()), Map.entry("answerPrompt", List.of("choice")),
+                Map.entry("authorise", List.of("staff")), Map.entry("signOnAny", List.of("staff")),
+                Map.entry("scanChecked", List.of("inducted")), Map.entry("deviceScan", List.of())),
                 required, "the keys each verb's compile requires");
         assertNull(LendingSteps.INSTANCE.argsSchema("teleport"), "not a lending verb");
         assertNull(LendingSteps.INSTANCE.argsSchema("click"), "a base verb is the base library's");
@@ -297,5 +305,39 @@ class LendingStepSchemasTest {
         Map<?, ?> amount = (Map<?, ?>) ((Map<?, ?>) schema("deposit").get("properties")).get("amount");
         assertEquals(List.of(Map.of("type", "string"), Map.of("type", "number")), amount.get("anyOf"),
                 "money as the queries' arguments take it: a decimal string or a number");
+    }
+
+    /** phase8-contracts.md 12.3 (ES): the three Phase 8 verbs' forms, valid and compiling, and their mistakes. */
+    @Test
+    void thePhase8VerbsSchemasAcceptWhatTheyCompileAndRefuseTheirMistakes() {
+        Object[][] valid = {
+            {"signOnAny", Map.of("staff", "$assistant")},
+            {"signOnAny", Map.of("staff", "$clerk")},
+            {"scanChecked", Map.of("item", "$item", "inducted", true)},
+            {"scanChecked", Map.of("barcode", "5000000000086", "inducted", false)},
+            {"deviceScan", Map.of("barcode", "5000000000017")},
+            {"deviceScan", Map.of("item", "$item")},
+        };
+        for (Object[] example : valid) {
+            String verb = (String) example[0];
+            assertEquals(List.of(), validate(verb, example[1]), verb + " " + example[1]);
+            assertTrue(compiles(verb, example[1]), verb + " " + example[1] + " compiles");
+        }
+        Object[][] invalid = {
+            {"signOnAny", Map.of("staff", "100"), "$.staff"},
+            {"signOnAny", Map.of(), "$"},
+            {"scanChecked", Map.of("barcode", "1"), "$"},
+            {"scanChecked", Map.of("barcode", "1", "inducted", "yes"), "$.inducted"},
+            {"deviceScan", Map.of("barcode", "1", "minRung", "PHYSICAL"), "$.minRung"},
+        };
+        for (Object[] example : invalid) {
+            String verb = (String) example[0];
+            List<ScenarioSchema.Problem> problems = validate(verb, example[1]);
+            if (problems.isEmpty()) {
+                fail(verb + " " + example[1] + " is valid against the schema");
+            }
+            assertEquals(example[2], problems.get(0).path(), verb + " " + example[1] + ": " + problems);
+            assertFalse(compiles(verb, example[1]), verb + " " + example[1] + " compiles");
+        }
     }
 }

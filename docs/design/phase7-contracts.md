@@ -2018,6 +2018,9 @@ and never evaluated), and an image check with **more than 64 masks** (`ImageMask
 the `ImageCheck` constructor enforces the 64 too, so every construction path has the bound (S119). A plan the compiler
 wrote holds none of these, so no committed plan changes.
 
+*(Phase 8, built 2026-10-19, ES; P8 §2.2, §7.3.)* The rule of this section is applied once more for plan version 7 (§8's,
+EX): among its new call keys are `accept`, `rungs` and `minRung`, each refused below 7.
+
 ### 8.3 `region` beside `by`
 
 Stated in §8.1: a sibling argument of `by`/`target` on `pointer` and `expectImage`, passed to the primitive as `region`

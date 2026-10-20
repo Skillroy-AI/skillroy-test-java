@@ -91,7 +91,9 @@ class SecretMaskTest {
         agent.on("toy.input", params -> {
             agent.publish("input.acked", Map.of("source", params.get("source")));
             agent.publish("input.requested", Map.of("state", "LOAN", "echo", String.valueOf(params.get("value"))));
-            return Map.of("accepted", true, "echo", String.valueOf(params.get("value")));
+            // Phase 8 (phase8-contracts.md 7.5): a result that echoes a secret parameter fails its step ERROR /
+            // ENVIRONMENT before anything else, so the echo for the mask to catch is in the event's payload only.
+            return Map.of("accepted", true);
         });
         agent.on("swing.type", params -> {
             throw new AgentRpcException("swing.type", new RpcError(ErrorCodes.INPUT_REJECTED, "rejected input '"

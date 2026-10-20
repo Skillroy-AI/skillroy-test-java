@@ -297,4 +297,24 @@ class ScenarioSchemaTest {
                 "label required");
         assertFalse(problems("scenario: t\nsteps:\n  - pointer: { by: { id: x }, via: MAGIC }\n").isEmpty());
     }
+
+    /** phase8-contracts.md 7.3 (ES): every verb object takes the two step modifiers, and nothing else beside it. */
+    @Test
+    void everyVerbTakesTheTwoModifiers() throws Exception {
+        assertEquals(List.of(), problems("""
+                scenario: t
+                steps:
+                  - enter: { value: a }
+                    accept: [VALUE_COERCED]
+                  - poke: {}
+                    minRung: PHYSICAL
+                  - mark: done
+                    accept: [VALUE_DROPPED]
+                    minRung: SEMANTIC
+                """));
+        assertFalse(problems("scenario: t\nsteps:\n  - enter: { value: a }\n    accept: []\n").isEmpty(),
+                "accept holds at least one code");
+        assertFalse(problems("scenario: t\nsteps:\n  - enter: { value: a }\n    minRung: [X]\n").isEmpty());
+        assertFalse(problems("scenario: t\nsteps:\n  - enter: { value: a }\n    other: 1\n").isEmpty());
+    }
 }

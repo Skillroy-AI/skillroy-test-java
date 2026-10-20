@@ -267,6 +267,10 @@ public final class JunitXmlReporter {
             for (String fidelity : step.degradedFidelity()) {
                 log.append("  degraded ").append(fidelity).append('\n');
             }
+            // phase8-contracts.md 7.1: every warning a step's calls reported, accepted or not.
+            for (String warning : step.warnings()) {
+                log.append("  warning ").append(warning).append('\n');
+            }
         }
         if (result.message() != null) {
             log.append(result.message()).append('\n');

@@ -46,6 +46,8 @@ import java.util.concurrent.TimeUnit;
  *   <tr><td>{@value #PROP_DB_PASSWORD}</td><td>none</td><td>the password of the read-only account
  *       {@value LendingDb#READER_USER}: required when {@value #PROP_DB_PORT} is set (the desk refuses to start
  *       without it, naming this property), not used otherwise. A secret: the desk never logs it</td></tr>
+ *   <tr><td>{@value #PROP_SCANNER_DRIVER}</td><td>false</td><td>{@code true} runs the desk's barcode scanner driver
+ *       ({@link ScannerDriver}; phase8-contracts.md 12.1): a training desk has none</td></tr>
  * </table>
  */
 public final class LendingOptions {
@@ -58,6 +60,8 @@ public final class LendingOptions {
     public static final String PROP_TITLE = "lending.title";
     public static final String PROP_DB_PORT = "lending.dbPort";
     public static final String PROP_DB_PASSWORD = "lending.dbPassword";
+    /** {@code true} or {@code false} (the default): the desk runs its barcode scanner driver (Phase 8, 12.1). */
+    public static final String PROP_SCANNER_DRIVER = "lending.scannerDriver";
     /** {@link #dbPort()} when the database is not served on a port (the default). */
     public static final int NO_DB_PORT = -1;
 
@@ -70,6 +74,7 @@ public final class LendingOptions {
     private int dbPort = NO_DB_PORT;
     private String dbPassword;
     private Boolean ui;
+    private boolean scannerDriver;
     private Clock clock = Clock.systemDefaultZone();
 
     /** @return the defaults (seed A, no plugins, no idle lock, default title, database {@code lending}) */
@@ -130,7 +135,26 @@ public final class LendingOptions {
             o.dbPort(value);
         }
         o.dbPassword(props.getProperty(PROP_DB_PASSWORD));
+        String driver = props.getProperty(PROP_SCANNER_DRIVER);
+        if (driver != null && !driver.trim().isEmpty()) {
+            String flag = driver.trim().toLowerCase(java.util.Locale.ROOT);
+            if (!flag.equals("true") && !flag.equals("false")) {
+                throw new IllegalArgumentException(PROP_SCANNER_DRIVER + " must be true or false: " + driver);
+            }
+            o.scannerDriver(flag.equals("true"));
+        }
         return o;
+    }
+
+    /** @param enabled true to run the desk's barcode scanner driver ({@link ScannerDriver}); false by default */
+    public LendingOptions scannerDriver(boolean enabled) {
+        this.scannerDriver = enabled;
+        return this;
+    }
+
+    /** @return whether the desk runs its barcode scanner driver */
+    public boolean scannerDriver() {
+        return scannerDriver;
     }
 
     public LendingOptions seed(Seed value) {

@@ -113,9 +113,12 @@ final class FakeDesk implements AgentConnection {
                     case "Key.SIGN_OFF" -> "SIGNED_OFF";
                     default -> state;
                 };
-                publish("input.acked");
+                // phase8-contracts.md 7.4: the input's id in the result and in its acknowledgement.
+                String inputId = params.get("inputId") instanceof String given ? given : "fake-" + (seq + 1);
+                publish("input.acked", Map.of("source", source, "inputId", inputId));
                 publish("input.requested");
-                yield Map.of("accepted", true, "acked", true, "ackMs", 1L);
+                yield Map.of("accepted", true, "acked", true, "ackMs", 1L, "inputId", inputId, "consumed",
+                        "CONSUMED");
             }
             case "lending.slip" -> Map.of("slips", slips);
             case "data.query" -> {
@@ -140,8 +143,12 @@ final class FakeDesk implements AgentConnection {
     }
 
     private void publish(String topic) {
+        publish(topic, Map.of());
+    }
+
+    private void publish(String topic, Map<String, Object> payload) {
         seq++;
-        events.add(new Event(seq, 0, topic, "lending", null, null, Map.of()));
+        events.add(new Event(seq, 0, topic, "lending", null, null, payload));
     }
 
     private static AgentRpcException error(String method, int code, String message) {
