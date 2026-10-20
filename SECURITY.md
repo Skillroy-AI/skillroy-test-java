@@ -211,8 +211,8 @@ Read these before you run the agent on a shared host.
 - **The CDP path's gate for an older Playwright is proved through a seam** (P8 §11 (h), §5.3). Below Playwright 1.60 the
   CDP path is not used unless the operator sets `skillroy.cdp.allowDefaultOverrides` (never a scenario's, a pack's or a
   model's choice: the overrides change the application's own browser context); only 1.63.0 was run.
-- **A client's raw `sync.await` can confirm a guess at a short unmasked secret** (S180; provisional until the owner's
-  sign-off, B40; P8 §11 (i)). A client's raw `sync.await` (a base read every MCP server offers), or a pack verb whose
+- **A client's raw `sync.await` can confirm a guess at a short unmasked secret** (S180; accepted by the owner, B40,
+  2026-10-20; P8 §11 (i)). A client's raw `sync.await` (a base read every MCP server offers), or a pack verb whose
   argument flows into a `match`, compares an event's raw payload on the agent by equality: where a module publishes a short
   secret unmasked, a client can confirm guesses at it, one call per guess. Mask such a payload with a `MaskPolicy` or
   publish it under a secret-looking key. The fix, rewriting such a match where a session sends the call, is gap 151.
@@ -276,7 +276,7 @@ deny-list, semantic input, the `events` root and captured facts, and pack capabi
 surfaces on every lens and was code-reviewed and security-reviewed on 2026-10-19/20: a delta review over everything
 changed since the record B31 signed (`docs/design/phase8-contracts.md` §15; eight lenses with a sceptic each; findings
 S149-S180: 32 confirmed, 3 high, 8 medium, 21 low). Every finding of medium or above and 20 of the 21 lows are fixed,
-S157 (these Phase 8 sentences were missing) by the documentation pass; the other, S180, is proposed for the owner's
-acceptance with the release note above, marked provisional. **The owner's sign-off of the delta review (B40 in
-`docs/DECISIONS.md`) is open**: until it is given, Phase 8's boundary is reviewed and fixed, not signed off, and the
-limitations above are the build's own statement of what the veto, the masks and the new readers cannot do.
+S157 (these Phase 8 sentences were missing) by the documentation pass; the other, S180, is accepted by the owner with
+the release note above. The owner signed the delta review off on 2026-10-20 (B40 in `docs/DECISIONS.md`), so Phase 8's
+boundary is reviewed, fixed and signed off; the limitations above are the build's own statement of what the veto, the
+masks and the new readers cannot do.

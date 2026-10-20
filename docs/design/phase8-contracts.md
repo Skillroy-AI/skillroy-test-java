@@ -15,10 +15,12 @@ S173, S174), 8 medium and 21 low**. **Fixed 2026-10-20:** one fix wave of five f
 from `f67402c`) fixed all 16 code-review findings and every security finding but two, contract first, each with a test
 that fails on the old code, marked "Fix wave (Phase 8 review, <TAG>, …)" or "(Phase 8 security fix, S<nnn>, <TAG>)":
 S157 (the missing `SECURITY.md` sentences) was closed by the documentation pass (`SECURITY.md`, 2026-10-20), and S180 (a client's raw `sync.await` match on
-an unmasked payload confirming guesses at a short secret) is proposed for acceptance with a release note, its fix
-recorded as gap 151; the five session stand-in recordings were regenerated once more after S175's shared key rule
-(`bdafc52`). The decisions of the build, the integration and step R are D643-D767 and those of the fix wave D768-D810
-(§17); **B38, B39 (these decisions) and B40 (the delta review's sign-off) are open for the owner** (`../DECISIONS.md`).
+an unmasked payload confirming guesses at a short secret) is accepted by the owner with a release note (B40,
+2026-10-20), its fix recorded as gap 151; the five session stand-in recordings were regenerated once more after S175's
+shared key rule (`bdafc52`). The decisions of the build, the integration and step R are D643-D767 and those of the fix
+wave D768-D810 (§17); built on the then provisional B38 and B39, **the answers of §18 (B38) and all these decisions
+(B39) were confirmed by the owner on 2026-10-20, every row and every decision, no veto, and the delta review was signed
+off by the owner the same day (B40)** (`../DECISIONS.md`).
 Written after the nine reader maps of 2026-10-19 (kept in the session
 notes, not in this repository; `map A §n` to `map I §n` below), which verified every claim of the second domain's wave
 1 against the code at `fcfb8dc` (every `.java` file of `main` equals the tag `v0.1.0`, the released base), and assembled
@@ -37,10 +39,11 @@ next free number after P7's A61-A66 (none of A67 onwards was used by the Phase 7
 fix wave needed another (A100 is the next free number); gaps continue from **126** (§16.2: 126-150 are opened here,
 151-155 by the build's and the fix wave's open items); the security delta review's findings are **S149-S180** (§15);
 the plan version becomes **7** (§8.2); the bindings file version stays **2**, the script library's version **2**, the
-fingerprint format **1**; the protocol stays **0.2** (§2.1, D624). The questions of §18 are answered provisionally by
-the orchestrator and recorded as decision **B38** (`../DECISIONS.md`); the build's, the integration's and the fix wave's
-decisions are **B39**; the security delta review's sign-off, over everything changed since `223c5fb` (the tree B31
-covers), is **B40** (§15). The second domain compiles against `v0.1.0`: nothing here breaks a pack or a module built
+fingerprint format **1**; the protocol stays **0.2** (§2.1, D624). The questions of §18 were answered by the orchestrator
+on 2026-10-19 and recorded as decision **B38** (`../DECISIONS.md`), confirmed by the owner on 2026-10-20; the build's,
+the integration's and the fix wave's decisions are **B39**, confirmed by the owner the same day; the security delta
+review's sign-off, over everything changed since `223c5fb` (the tree B31 covers), is **B40** (§15), given by the owner
+on 2026-10-20. The second domain compiles against `v0.1.0`: nothing here breaks a pack or a module built
 against that tag (§2.3), and the sample is extended behind launch properties and agent options only (§12).
 
 What Phase 8 is for, in one paragraph. Phases 1 to 7 built the base and released it as 0.1.0; a second domain pack and
@@ -129,8 +132,8 @@ specified):
   extended), **the sample** (§12: desk, agent module 0.3.0, pack 0.7.0, hook catalogue version 2, thirteen new scenario
   files: six committed (five top-level and `scanner/`'s one), one test-only positional scenario and six negatives, with
   six new plans; as built, scenario D gains scenario A's `requires` entry, D766), **tests and acceptance** (§13),
-  **exit criteria** (§14) and **the security delta review** (§15, B40: run and fixed, S157 by the documentation pass, S180 proposed for acceptance; open for the
-  owner's signature).
+  **exit criteria** (§14) and **the security delta review** (§15, B40: run and fixed, S157 by the documentation pass,
+  S180 accepted; signed off by the owner on 2026-10-20).
 
 **Non-goals.** Named so that their seams are respected, not built:
 
@@ -150,7 +153,7 @@ specified):
 | The conditional planned call (`when`); session step modifiers; a composite's branch as a fact | gaps 142-144 (D584): the composite rule of §7.5 covers the second domain; `when` is M-L across sessions, export and cleanup | later, low |
 | Quantifiers `some`/`every` over list elements; the `events` root on a non-agent web path; projection in expectation paths; a `json:` matcher; an `expectNoEvent` verb | gaps 145-147 (D598, D603, D601, D607): `size`, `containsWhere` and `[json]` cover the stated needs; negation is a count | later, low |
 | Step 0b in `re-resolve` and `caps`; credentials for `caps --pack`; a TTL on a `SUITE` answer; named pack prompt policies (`promptPolicies()`) | gaps 148-150 and D615: `pack` is the explicit spelling of the default and an unknown name is already refused, so names can come later without a break | later, low |
-| (As built) a client's raw `sync.await` match on an unmasked payload; a masked opener's popups; the moment between the Robot route's release question and the release; a root pane off ENTER's walk; a browser masked while it is open | gaps 151-155, opened by the build's and the fix wave's open items (§16.2): the call boundary, `InputVetoes.next`, the static refusal (D771's veto form), a window walk (D769's) and a registration signal are the seams; S180 is gap 151's residual, proposed for acceptance | later, low |
+| (As built) a client's raw `sync.await` match on an unmasked payload; a masked opener's popups; the moment between the Robot route's release question and the release; a root pane off ENTER's walk; a browser masked while it is open | gaps 151-155, opened by the build's and the fix wave's open items (§16.2): the call boundary, `InputVetoes.next`, the static refusal (D771's veto form), a window walk (D769's) and a registration signal are the seams; S180 is gap 151's residual, accepted by the owner (B40, 2026-10-20) | later, low |
 | A `0.3` protocol minor; a new error code; a new base event topic; a new core capability id | never in this phase (D624, D523, D594): every change is additive and the major is in every bindings fingerprint; the three safety-relevant parameters are acknowledged by an echo instead (§2.1) | – |
 | Windows, macOS and Wayland peers for routed AWT events; a Playwright line other than 1.63.0; JxBrowser's view-less browsers; `Statement.cancel()` on drivers other than HSQLDB; a `SecurityManager` target; a real application server's code-source URLs | specified where the maps and the JDK's sources reach; verified nowhere here (§13.3) | when a host exists |
 
@@ -4073,9 +4076,10 @@ at publish (`truncated: true`, a long console line included; Phase 8 security fi
 that a bound stops makes its expectation `ERROR`, never a pass (S149); (g) a pack capability's evaluation and a
 pre-flight check run pack code on the controller with no host timeout (the data channel's per-query bound is the
 bound); (h) the CDP path's gate for an older Playwright is proved through a seam: only 1.63.0 was run; *as built*
-(i), S180's release note (FC, proposed for acceptance): a client's raw `sync.await` (a base read on every MCP server)
-compares an event's raw payload by equality, so where a module publishes a short secret unmasked a client can confirm
-guesses at it, one call per guess; mask such a payload with a `MaskPolicy` or a secret-looking key (gap 151).
+(i), S180's release note (FC; accepted by the owner, B40, 2026-10-20): a client's raw `sync.await` (a base read on
+every MCP server) compares an event's raw payload by equality, so where a module publishes a short secret unmasked a
+client can confirm guesses at it, one call per guess; mask such a payload with a `MaskPolicy` or a secret-looking key
+(gap 151).
 
 ---
 
@@ -4766,8 +4770,8 @@ here, per section, each a line of `threat-model.md` §8 and of `SECURITY.md`:
 
 ## 14. Exit criteria
 
-Design §8's roadmap has no row for this phase yet (rows 0-7); the build's documentation pass adds **row 8** with
-these criteria, item by item:
+The roadmap's **row 8** (design §8, added with these criteria by the build's documentation pass on 2026-10-20), item by
+item:
 
 | Criterion | Met by |
 |---|---|
@@ -4781,7 +4785,7 @@ these criteria, item by item:
 | counts, deltas, membership and the agent's events are expectations, and a lost event window is a refusal, not a wrong pass | §13.2 items 32-34; §13.1 rows 35-41 |
 | an environment fact only the pack knows guards a scenario in every mode, `replay` included, and a suite fact is checked once per suite | §13.2 items 36-42; §13.1 rows 42-50 |
 | the regeneration once per cause (plan 7 at the skeleton; pack 0.7.0, module 0.3.0, the goldens, the recordings in step R) and the matrix green on all nine legs (arm64 twice, amd64 once, the `jcef` profile, the Robot, tools, scanner and small-ring legs once per Java) | step R (§2.8); `../TODO.md`'s Phase 8 matrix tables |
-| the security delta review is run, everything medium or above fixed, and the owner signs it off | §15 (B40) |
+| the security delta review is run, everything medium or above fixed, and the owner signs it off | **met** (2026-10-20): §15, run and fixed 2026-10-20 (S149-S180; S157 by the documentation pass, S180 accepted by the owner with its release note), signed off by the owner, B40 |
 | `replay` makes zero model calls, asserted, and nothing in the phase needed a key | unchanged; `InferenceChecks` and every `replay` run's ledger check |
 
 ---
@@ -4798,8 +4802,8 @@ when the token's user is a model or an MCP client; the operator's environment is
 **S149** onwards; every finding of medium or above **fixed** (contract first, a test that fails on the old code, then
 the code), nothing of medium or above accepted as a known risk; a low may be accepted in writing with a release note;
 the record (`record.json`, `dispositions.md`) in the session notes; the summary in `../TODO.md`; **the owner's
-signature is B40**, and the orchestrator does not sign. What each lens looks at in this phase (from the fragments'
-security notes):
+signature is B40**, and the orchestrator does not sign (the owner signed on 2026-10-20). What each lens looks at in
+this phase (from the fragments' security notes):
 
 | Lens | Phase 8 surface |
 |---|---|
@@ -4833,12 +4837,15 @@ or already fixed. **Everything medium or above is fixed, and every low but two:*
 sentences (a)-(h) and §16.1's "Run outputs" change) was closed by the documentation pass (2026-10-20), and **S180** (low, latent; opened by
 FC's report: a client's raw `sync.await`, or a pack verb whose argument flows into a `match`, compares the raw payload
 on the agent by equality, so it can confirm guesses at a short secret in a payload the agent did not mask, and a
-refusal of a literal the mask changes would itself be the oracle) is proposed for acceptance with a release note, its
-sound fix (rewriting such an entry, or the marker, into one that never matches, at the session's raw-call and
-verb-argument boundary before the call is sent) recorded as gap 151. **S149-S180: 3 high, 8 medium and 21 low.** The
-fix wave's decisions are D768-D810 (§17), with the veto forms its fixers recorded for the owner; the record
+refusal of a literal the mask changes would itself be the oracle) is accepted by the owner with a release note (B40,
+2026-10-20), its sound fix (rewriting such an entry, or the marker, into one that never matches, at the session's
+raw-call and verb-argument boundary before the call is sent) recorded as gap 151. **S149-S180: 3 high, 8 medium and 21
+low.** The fix wave's decisions are D768-D810 (§17), with the veto forms its fixers recorded for the owner; the record
 (`record.json`, `dispositions.md`, the lens files and the five fix reports) is in the session notes, its summary in
-`../TODO.md`; the owner's signature is B40.
+`../TODO.md`. The owner signed the review off on 2026-10-20 (B40 in `../DECISIONS.md`), with S180 accepted as proposed
+and its fix left to gap 151 (later, low); no outside reader has read the record, which stays recommended, not a gate
+(B26 Q12). The owner did not ask for an amendment number for S166's additive `SurfaceSource.Surface.masked` field
+(§5.2), so its security-fix mark stands without one and A100 stays the next free number.
 
 The delta review's "not verified" list (§13.3) joins `threat-model.md` §8, `README.md` and `SECURITY.md` by the
 build's documentation package; the release checklist's item 6 repeats it. B39 holds the build's, the integration's,
@@ -5135,7 +5142,7 @@ twenty-five stay **open** as written; neither the build nor the fix wave closed 
 
 | # | Gap | Why it matters | Proposed shape | Phase |
 |---|---|---|---|---|
-| 126 | `web.*` input into a browser component an `InputVeto` names | the guide advises vetoing a window, and a window may hold a browser: `swing.pointer` into the canvas is then refused (§3.4 rule 2) while `web.pointer`, `web.dom.click`/`fill` and `web.dispatchEvent` act on the page inside it for any caller `CallPolicy` admits (a pack's verb; a person; a model or client a person opted in to the raw `web_*` tools); the recorder is not the route (D507 refuses the hit first) | the cheap half: `ComponentState` gains `vetoed` beside `masked`, filled by the same chain walk `web.pointer` already makes for the modal check (`ComponentReads.stateOf`) through `InputVeto.refuse(c, "web.pointer")` while an `InputVeto` is registered, `web.pointer` refusing `INPUT_REJECTED {reason: "vetoed", …}` on the agent path, `force` never skipping it; the rest (`web.dom.*`, `web.dispatchEvent`, which read no component, and the CDP path, handed to the agent while vetoes are registered through a `web.browsers.vetoesRegistered` field) is a new EDT read on three routes and a hand-off: the owner's scope decision (Q3) | later; **medium** (EA) |
+| 126 | `web.*` input into a browser component an `InputVeto` names | the guide advises vetoing a window, and a window may hold a browser: `swing.pointer` into the canvas is then refused (§3.4 rule 2) while `web.pointer`, `web.dom.click`/`fill` and `web.dispatchEvent` act on the page inside it for any caller `CallPolicy` admits (a pack's verb; a person; a model or client a person opted in to the raw `web_*` tools); the recorder is not the route (D507 refuses the hit first) | the cheap half: `ComponentState` gains `vetoed` beside `masked`, filled by the same chain walk `web.pointer` already makes for the modal check (`ComponentReads.stateOf`) through `InputVeto.refuse(c, "web.pointer")` while an `InputVeto` is registered, `web.pointer` refusing `INPUT_REJECTED {reason: "vetoed", …}` on the agent path, `force` never skipping it; the rest (`web.dom.*`, `web.dispatchEvent`, which read no component, and the CDP path, handed to the agent while vetoes are registered through a `web.browsers.vetoesRegistered` field) is a new EDT read on three routes and a hand-off: the owner's scope decision (Q3; its veto forms, cheap and full, not taken: B38 confirmed by the owner 2026-10-20) | later; **medium** (EA) |
 | 127 | An option-configured veto | a layer without an agent module cannot veto | agent option `inputVeto=<id1,id2,…>` naming component ids, built in beside the SPI | later; low (EA) |
 | 128 | Key bindings, mnemonics and accelerators | a key dispatched to one component may fire another's action | follow `WHEN_IN_FOCUSED_WINDOW` bindings and the menu bar's accelerators for the key before delivery; until then "veto the window" | later; low (EA) |
 | 129 | AWT `List`, `Choice`, `TextField`, `Scrollbar`, `MenuItem` | no semantic rung for them | `Clicks.semantic` cases; `swing.type SET` on a `TextComponent` | later; low (EA) |
@@ -5166,7 +5173,7 @@ documentation pass of 2026-10-20; the tag names the report that opened the gap; 
 
 | # | Gap | Why it matters | Proposed shape | Phase |
 |---|---|---|---|---|
-| 151 | A client's raw `sync.await`, or a pack verb whose argument flows into a `match`, compares the raw payload of an event the agent did not mask, by equality | an MCP client or a model that can call `sync.await` (a base read on every MCP server) can confirm guesses at a short secret in such a payload, one call per guess; a refusal of a literal the mask changes would itself be the oracle; the residual is S180 (low, latent), proposed for acceptance with a release note (§15) | rewrite such an entry, or the marker, into one that never matches, at the session's raw-call and verb-argument boundary (§7's `CallRunner`) before the call is sent | later; low (FC) |
+| 151 | A client's raw `sync.await`, or a pack verb whose argument flows into a `match`, compares the raw payload of an event the agent did not mask, by equality | an MCP client or a model that can call `sync.await` (a base read on every MCP server) can confirm guesses at a short secret in such a payload, one call per guess; a refusal of a literal the mask changes would itself be the oracle; the residual is S180 (low, latent), accepted by the owner with a release note (B40, 2026-10-20; §15) | rewrite such an entry, or the marker, into one that never matches, at the session's raw-call and verb-argument boundary (§7's `CallRunner`) before the call is sent | later; low (FC) |
 | 152 | The privacy chain (`ComponentView.masked`) walks parents only: a masked combo's popup list and the items of a masked window's heavyweight popup are not masked | the veto's walk had the same gap and the fix wave closed it there (D768); a mask's walk still misses a popup drawn as its own window | the veto's successor `InputVetoes.next` (a popup to its invoker, a popup window to its owner) for the mask's walk too | later; low (FA) |
 | 153 | The Robot route's release question is not atomic with the native release | a popup or a drop zone the application shows after the question (a submenu's open delay, a timer, a native drag's own window) receives the release (D771) | D771's veto form (a): a static refusal of a Robot `DRAG` while a veto is registered when the press target is a menu element, has a component popup menu or the button is `RIGHT` | if asked; low (FA) |
 | 154 | A `JRootPane` placed off the key target's walk and outside a `JInternalFrame` is not asked for ENTER | such a root pane registers its default button under the window, so ENTER presses it without the veto being asked (D769) | D769's veto form: walk the window for every `JRootPane` whose top ancestor is the window (a walk of the whole window per ENTER) | if asked; low (FA) |
@@ -5205,7 +5212,8 @@ editor's, taken while harmonising; D636-D642 are the reviser's, taken on 2026-10
 finding in parentheses; rows amended by the review carry "(revised: <finding>)"). The build's, the integration's and
 step R's decisions, D643-D767, and those of the fix wave that closed the code review and the security delta review,
 D768-D810, follow the table below in tables of their own, numbered by the orchestrator at the documentation pass of
-2026-10-20 (B39); a row below that one of them amends or widens carries a mark in italics.
+2026-10-20 (B39); a row below that one of them amends or widens carries a mark in italics. The owner confirmed all of
+them on 2026-10-20 without a veto: D501-D642 as the answers of §18 (B38), D643-D810 as B39.
 
 | # | Decision | Alternatives rejected | Reason |
 |---|---|---|---|
@@ -5367,14 +5375,14 @@ D718-D738, EX D739-D748, EP D749-D760 (the bodies); EI D761-D765; step R D766-D7
 contract and every code comment that cited a decision by its tag now cites the number, and the last column keeps the
 tag and the package's own number for the reader of the reports (the session notes' `phase8/docs/id-map.md` has the
 whole map). The section in parentheses after each decision says where it is built. Together they are decision **B39**
-(`../DECISIONS.md`), provisional until the owner answers, as B38 is; the decisions of the code review's fix wave and of
-the security delta review's fixes (§15) are D768-D810, in the table after this one, and join B39. No decision of B1-B37
-is reversed by any of them. Where a decision differs from the contract's own sentence, the passage carries an "As
-built" note, and an amended row of D501-D642 a mark: D663 widens D502 (ENTER with any modifier asks the default button,
-§3.2), D672 settles §3.3's table against item 6 (a collapsed dismiss button is `NOT_FOUND`), D685 changes §13.2 item 12
-(1000 ms), D690 corrects §5.2's per-call formula, D695 §5.4's thread, D698 §13.2 item 17, D702 and D706 settle passages
-where §6 said two things, D739 changes §12.4's capture point, D750, D751, D753, D759 and D760 are among §9.7's deviations, and D766 amends D620
-(scenario D's `requires`).
+(`../DECISIONS.md`, provisional while the work ran on them, as B38 was, and confirmed by the owner on 2026-10-20); the
+decisions of the code review's fix wave and of the security delta review's fixes (§15) are D768-D810, in the table
+after this one, and join B39. No decision of B1-B37 is reversed by any of them. Where a decision differs from the
+contract's own sentence, the passage carries an "As built" note, and an amended row of D501-D642 a mark: D663 widens
+D502 (ENTER with any modifier asks the default button, §3.2), D672 settles §3.3's table against item 6 (a collapsed
+dismiss button is `NOT_FOUND`), D685 changes §13.2 item 12 (1000 ms), D690 corrects §5.2's per-call formula, D695 §5.4's
+thread, D698 §13.2 item 17, D702 and D706 settle passages where §6 said two things, D739 changes §12.4's capture point,
+D750, D751, D753, D759 and D760 are among §9.7's deviations, and D766 amends D620 (scenario D's `requires`).
 
 | # | Decision | Alternatives rejected | Reason | Tag |
 |---|---|---|---|---|
@@ -5517,21 +5525,21 @@ their reports as a tag and a number (FA 1 to 8, FB 1 to 11, FC 1 to 8, FD 1 to 8
 them at the documentation pass of 2026-10-20 in the order FA, FB, FC, FD, FE and by that number within a tag: **FA
 D768-D775, FB D776-D786, FC D787-D794, FD D795-D802, FE D803-D810**. Every `D-<tag>-<n>` of this contract now cites the
 number, and the last column keeps the tag, the fixer's own number and the review's finding (`Ln-Fm` and `Ln-Sm` of the
-code review, `S<nnn>` of the security record). They join decision **B39** (`../DECISIONS.md`); the veto forms the
-fixers recorded for the owner are named in the "Alternatives" column. No decision of B1-B37 is reversed by any of
-them. Several amend or widen an earlier row, and that row carries a mark: D768 widens D501 (a popup's chain runs through
-its opener), D769 widens D502 and D663 (the default button of every root pane on the walk), D770 and D771 widen D505 (a
-press's release asked again on the routed and the Robot route), D772 widens D502 (the Robot route asks every covering
-window), D776-D780 amend D531 and D532 (unnamed columns masked by the names their items read or withheld, the width,
-the case, a quoted star table), D781 and D782 amend D530 and D529 (a statement prepared after cancellation never runs,
-a closed handle's action never starts), D783 amends D638 (`cancelNotStarted`), D785 amends D521 (the penalty keyed by
-module), D786 amends D606, D787-D790 amend D599, D601, D602 and D605 (paths followed on the masked view, three outcomes,
-a cut event fails the `events` read), D791 amends D597, D792 widens D608 (the cut in the session), D795 supersedes
-D759, D796-D798 amend D544 (`OutputScan`'s search and scope), D799 amends D556 (the code-source name), D800 amends
-D565 (the deny's echo asked before the install as well), D801 and D802 amend D734 (item 27 able to fail), D803 amends
-D637 (a locator action on a masked browser is refused) and D808 amends D549 (a masked browser's tap events carry the
-tap's pattern). The fix that needed no decision of its own (the `'\n'` in `DISPATCH` text, L1-F1 = L2-F1) is marked in
-§3.2 rule 2.
+code review, `S<nnn>` of the security record). They join decision **B39** (`../DECISIONS.md`, confirmed by the owner
+on 2026-10-20); the veto forms the fixers recorded for the owner, none of them taken, are named in the "Alternatives"
+column. No decision of B1-B37 is reversed by any of them. Several amend or widen an earlier row, and that row carries
+a mark: D768 widens D501 (a popup's chain runs through its opener), D769 widens D502 and D663 (the default button of
+every root pane on the walk), D770 and D771 widen D505 (a press's release asked again on the routed and the Robot
+route), D772 widens D502 (the Robot route asks every covering window), D776-D780 amend D531 and D532 (unnamed columns
+masked by the names their items read or withheld, the width, the case, a quoted star table), D781 and D782 amend D530
+and D529 (a statement prepared after cancellation never runs, a closed handle's action never starts), D783 amends D638
+(`cancelNotStarted`), D785 amends D521 (the penalty keyed by module), D786 amends D606, D787-D790 amend D599, D601, D602
+and D605 (paths followed on the masked view, three outcomes, a cut event fails the `events` read), D791 amends D597,
+D792 widens D608 (the cut in the session), D795 supersedes D759, D796-D798 amend D544 (`OutputScan`'s search and scope),
+D799 amends D556 (the code-source name), D800 amends D565 (the deny's echo asked before the install as well), D801 and
+D802 amend D734 (item 27 able to fail), D803 amends D637 (a locator action on a masked browser is refused) and D808
+amends D549 (a masked browser's tap events carry the tap's pattern). The fix that needed no decision of its own (the
+`'\n'` in `DISPATCH` text, L1-F1 = L2-F1) is marked in §3.2 rule 2.
 
 | # | Decision | Alternatives rejected | Reason | Tag |
 |---|---|---|---|---|
@@ -5581,14 +5589,15 @@ tap's pattern). The fix that needed no decision of its own (the `'\n'` in `DISPA
 
 ---
 
-## 18. Questions for the owner: answered provisionally 2026-10-19 (B38)
+## 18. Questions for the owner: answered provisionally 2026-10-19, confirmed 2026-10-20 (B38)
 
 Answered by the orchestrator on 2026-10-19 in the manner of P7 §18, so that the build can start; written into the
-sections named; recorded as **B38** in `../DECISIONS.md` and provisional until the owner answers (`B38 ok`, or vetoes in
-the forms of the last column; any id not mentioned keeps what is recorded). Q1-Q57 are the seven fragments' questions in
-section order (EA Q1-Q9, ET Q10-Q17, EW Q18-Q24, EH Q25-Q32, ES Q33-Q41, EX Q42-Q48, EP Q49-Q57); Q58-Q61 are the
+sections named; recorded as **B38** in `../DECISIONS.md`, provisional while the build ran on it, and **confirmed by the
+owner on 2026-10-20**, every row (`B38 ok`, no veto), the eight that rested on the owner's knowledge among them, as
+assumed. The column "A veto means" records the form a veto would have taken. Q1-Q57 are the seven fragments' questions
+in section order (EA Q1-Q9, ET Q10-Q17, EW Q18-Q24, EH Q25-Q32, ES Q33-Q41, EX Q42-Q48, EP Q49-Q57); Q58-Q61 are the
 editor's; Q62-Q64 are the reviser's, opened by the contract review of 2026-10-19 and answered provisionally the same
-way. Items that rest on knowledge only the owner has are marked **(owner's knowledge)**: Q9, Q16, Q23, Q31, Q41, Q45,
+way. Items that rest on knowledge only the owner has were marked **(owner's knowledge)**: Q9, Q16, Q23, Q31, Q41, Q45,
 Q53 and Q56.
 
 | # | Question | Answer | Written into | A veto means |

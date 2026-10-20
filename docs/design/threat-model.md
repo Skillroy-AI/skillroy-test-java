@@ -12,7 +12,8 @@ marked "Phase 7 security fix" below): the delta review was run and fixed and sig
 the §2 notes on A4 and A13, the §5 paragraph, the §6 rows and the §7 and §8 bullets); **built 2026-10-19**, every
 "(Phase 8)" row and line as built (a package's tag where it marked one), and **completed 2026-10-20 by the code
 review's fix wave and the delta review's fixes** (findings S149-S180, `phase8-contracts.md` §15, marked "Phase 8
-security fix" or "fix wave" below; S180 is proposed for acceptance; the owner's sign-off is B40). It says who the adversaries are, where the
+security fix" or "fix wave" below; the delta review was run and fixed and signed off by the owner on 2026-10-20, B40,
+with S180 accepted). It says who the adversaries are, where the
 trust boundaries run, what the framework trusts on purpose, and what is out of scope, so that a reviewer's "who can
 reach it" and a release reader's "what does this protect me from" rest on one text. Where this document and a
 contract disagree, the contract has the detail and this document the judgement; change this one first when the
@@ -268,7 +269,7 @@ masked, with a parameter's name and never its value (P8 §7.1, §7.5).
   release, so a popup or drop zone the application shows after it is not seen on that route (Phase 8 security fix,
   S155, FA; gap 153); a masked window's or combo's popups drawn as windows of their own, which the mask's walk does
   not reach (gap 152); a client's raw `sync.await` comparing an event's unmasked payload by equality, which can confirm
-  guesses at a short secret a module published unmasked (S180, low, proposed for acceptance, B40; gap 151); `web.*`
+  guesses at a short secret a module published unmasked (S180, low, accepted by the owner, B40, 2026-10-20; gap 151); `web.*`
   input into a browser component a veto
   names (gap 126, medium: a veto on a window or panel does not cover page input into a browser inside it, and a layer
   that must keep page input out vetoes nothing more for that); the CDP path's own events, which never pass the agent's

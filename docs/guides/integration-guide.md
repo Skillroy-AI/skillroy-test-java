@@ -1736,7 +1736,7 @@ the rows Phase 8 opened that a layer is likely to meet are added, tagged; P8 §1
 | 140 *(Phase 8, EH)* | a denied subtype loaded after a `^`/`INTERFACE` Byteman submit still receives the trigger (§9.6) |
 | 142 *(Phase 8, ES)* | no conditional planned call (`when`): a flow that cannot be one composite primitive (two packs' primitives, a base verb in the branch) has no conditional step |
 | 146 *(Phase 8, EX)* | the `events` root reads the agent's bus only: a CDP path's own events are not in it (§6.13) |
-| 151 *(Phase 8, FC)* | a client's raw `sync.await` compares an event's unmasked payload by equality: mask a short secret before you publish it (S180, `SECURITY.md`) |
+| 151 *(Phase 8, FC)* | a client's raw `sync.await` compares an event's unmasked payload by equality: mask a short secret before you publish it (S180, accepted, B40; `SECURITY.md`) |
 | 152, 153, 154 *(Phase 8, FA)* | a masked window's or combo's popups are not masked; the Robot route does not see what the application shows after its release question; a root pane off ENTER's walk is not asked (§6.7) |
 | 155 *(Phase 8, FE)* | a browser that becomes masked while it is open sends page data for up to about 2 s after its next event (§6.8) |
 

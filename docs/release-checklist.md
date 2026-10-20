@@ -11,7 +11,9 @@ Tick each item in the release's own record (the release note or its pull request
 2. **The security review.** The first public release: the repeat review's record (both passes) and the owner's
    sign-off, B28 in `DECISIONS.md`, given on 2026-10-10; and the Phase 7 delta review's record (S101-S148, run and fixed
    2026-10-10/11) with the owner's sign-off, B31 in `DECISIONS.md`, given on 2026-10-11. Every later
-   release: a delta review of what changed since the last signed record.
+   release: a delta review of what changed since the last signed record (the first after 0.1.0: the Phase 8 delta
+   review's record, S149-S180, run and fixed 2026-10-20, with the owner's sign-off, B40 in `DECISIONS.md`, given on
+   2026-10-20).
    Every confirmed finding is fixed, or, if low, accepted in writing by the owner with a release note.
 3. **Was the record read by someone outside the project?** Record "done" (by whom) or "waived by the owner"; recommended,
    not a gate (B26 Q12).
@@ -38,6 +40,8 @@ Tick each item in the release's own record (the release note or its pull request
     merge commits without one, `a50d25b`, `c38372e` and `902ae10`, were accepted by the owner on 2026-10-11.)
 11. **The release note** names every accepted or deferred low finding with its release-note text (the eight of B28
     for the first release: the five of B26 Q22 and S77's residual, S84 and S94 of pass 2; and S142 and S144
-    of the Phase 7 delta review, accepted by the owner in B31 on 2026-10-11, ten in all), the behaviour changes of the
-    fixes that a user can see (`DECISIONS.md` B27 and B30), the "not verified" list, and the outcome of item 3.
+    of the Phase 7 delta review, accepted by the owner in B31 on 2026-10-11, ten in all; and, from the first release
+    after 0.1.0, S180 of the Phase 8 delta review, accepted by the owner in B40 on 2026-10-20, eleven in all), the
+    behaviour changes of the fixes that a user can see (`DECISIONS.md` B27 and B30; from the first release after 0.1.0,
+    B39's (a) to (n) too), the "not verified" list, and the outcome of item 3.
 12. **Neutrality**: the private deny-list check of the sibling repository passes on the release commit.
