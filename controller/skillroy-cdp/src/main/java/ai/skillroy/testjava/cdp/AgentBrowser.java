@@ -35,9 +35,11 @@ import java.util.Map;
  * @param tag the pack's tag of the browser, or null
  * @param blocked whether the agent reported a modal dialog blocking the browser's window ({@code blockedBy}, Phase 7:
  *     the CDP path then hands {@code web.pointer} to the agent, which answers {@code MODAL_OPEN})
- * @param masked whether the agent reported that a pack's {@code CaptureMask} names the browser's component
- *     ({@code masked: true}, Phase 7 security fix S111: the CDP path then hands the four masked reads to the agent,
- *     which refuses them)
+ * @param masked whether the agent reported the browser masked ({@code masked: true}: Phase 7 security fix S111, a
+ *     pack's {@code CaptureMask} names its component; Phase 8, phase8-contracts.md 5.2, a {@code BrowserMask} names it
+ *     or it has no view while a mask is registered): the CDP path then hands the four masked reads and the three
+ *     actions to the agent, which refuses the reads and answers the actions without page data, and withholds the page
+ *     data of its own events of the browser
  */
 record AgentBrowser(String ref, String nativeId, String url, String title, boolean closed, boolean visibleInSwing,
                     String cdpTargetId, String tag, boolean blocked, boolean masked) {
@@ -54,10 +56,25 @@ record AgentBrowser(String ref, String nativeId, String url, String title, boole
         this(ref, nativeId, url, title, closed, visibleInSwing, cdpTargetId, tag, blocked, false);
     }
 
-    /** The entries of a {@code web.browsers} value ({@code {browsers: [...]}}); entries without a ref are skipped. */
-    static List<AgentBrowser> parse(Object value) {
+    /**
+     * A {@code web.browsers} value as the CDP path reads it (Phase 8, phase8-contracts.md 5.2 (iii), D548, D551).
+     *
+     * @param browsers the entries, entries without a ref skipped
+     * @param masksRegistered the answer's {@code masksRegistered}: whether the agent had a {@code CaptureMask} or a
+     *     {@code BrowserMask} registered; an answer without the field (an older agent) counts as true (fail closed:
+     *     a page the path cannot map may then be a masked view-less browser)
+     */
+    record Listing(List<AgentBrowser> browsers, boolean masksRegistered) {
+    }
+
+    /**
+     * The entries of a {@code web.browsers} value ({@code {browsers: [...], masksRegistered}}) and its
+     * {@code masksRegistered} flag (absent or not a boolean: true); entries without a ref are skipped.
+     */
+    static Listing parse(Object value) {
+        boolean masks = !(value instanceof Map<?, ?> v) || !Boolean.FALSE.equals(v.get("masksRegistered"));
         if (!(value instanceof Map<?, ?> m) || !(m.get("browsers") instanceof List<?> list)) {
-            return List.of();
+            return new Listing(List.of(), masks);
         }
         List<AgentBrowser> out = new ArrayList<>();
         for (Object item : list) {
@@ -69,7 +86,7 @@ record AgentBrowser(String ref, String nativeId, String url, String title, boole
                     Boolean.TRUE.equals(b.get("visibleInSwing")), text(b.get("cdpTargetId")), text(b.get("tag")),
                     b.get("blockedBy") != null, Boolean.TRUE.equals(b.get("masked"))));
         }
-        return Collections.unmodifiableList(out);
+        return new Listing(Collections.unmodifiableList(out), masks);
     }
 
     private static String text(Object value) {

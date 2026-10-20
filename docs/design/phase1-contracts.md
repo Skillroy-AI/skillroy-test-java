@@ -321,7 +321,7 @@ intact; from 1025 the load is refused with an `IOException` on the attaching sid
 | `discoveryDir` | `${java.io.tmpdir}/skillroy-<user>` | where discovery and token files are written; a per-user directory, see §2.5. **S8/S19 (1.x, built 2026-10-02):** when the option is absent and the default is occupied by another user, the fall-back `<user.home>/.skillroy/run` is used (§2.5); a directory named explicitly is never substituted |
 | `readyTimeoutMs` | `120000` | how long to wait for `ReadinessSource`s before reporting `target.ready` UNAVAILABLE (the agent keeps polling, §5); at most one day |
 | `eventRing` | `10000` | event ring-buffer size; at most 1000000 |
-| `eventRingChars` | `67108864` | **(Phase 6 security fix S43, A45, built 2026-10-09, SR.)** the ring is bounded by the total characters of its events' payloads as well as by `eventRing` (64 Mi characters by default; 1 Mi to 1 Gi): the oldest events leave first, and an event whose own payload exceeds the bound is published with `truncated: true` and each of its strings cut to 1/64 of the bound (or, when still over, with the payload `{truncated: true}` alone). A payload's size is the sum of its keys' and strings' characters and 8 for every other value |
+| `eventRingChars` | `67108864` | **(Phase 8, built 2026-10-19, EW; P8 §5.1.)** Unchanged; the character bound runs after the ring's mask pass (A78), so a stored event always honours it and a policy always sees whole values. **(Phase 6 security fix S43, A45, built 2026-10-09, SR.)** the ring is bounded by the total characters of its events' payloads as well as by `eventRing` (64 Mi characters by default; 1 Mi to 1 Gi): the oldest events leave first, and an event whose own payload exceeds the bound is published with `truncated: true` and each of its strings cut to 1/64 of the bound (or, when still over, with the payload `{truncated: true}` alone). A payload's size is the sum of its keys' and strings' characters and 8 for every other value |
 | `httpThreads` | `32` | the most threads the control server's pool may have (2 to 1024), see §5. **H1 (1.x, built 2026-10-02):** with one thread per connection it is also the most connections that can be open; the `WORKER` and `CALLER` pools are sized from it (S30, §5) |
 | `httpIdleTimeoutMs` | `120000` | **H1 (1.x, built 2026-10-02).** How long an authenticated kept-alive connection may wait idle for its next request head before the agent closes it (§5 "Control server"). Validated at start to 100 to 3600000 ms (one hour at most, because an idle connection holds one of the `httpThreads` threads; `AgentRuntime`, confirmed against the code 2026-10-02). The default is deliberately longer than the controller's HTTP client keep-alive (30 s), so that the client, not the agent, retires an idle connection and a request never meets a connection the agent has just closed |
 | `redact` | – | a regular expression (case-insensitive) naming further secret keys, see "Secret redaction" in §5; validated and read at start |
@@ -1037,6 +1037,15 @@ public interface MaskPolicy { Object mask(String sourceId, String column, Object
 // amended: called on agent worker threads, or, for a CAPTURE hook or a Byteman rule's bindings, on the application
 // thread that called the hooked method; it must be thread-safe, cheap, and must never block or take a lock of the
 // application. A policy that throws there counts as a hook failure and the value becomes <redacted>.
+// (Phase 8, built 2026-10-19, EW; P8 §5.1, A77) also applied at publish to every scalar of every event payload, as
+// mask("event:<topic>", <the map keys from the root joined with ".", a list element adding no segment>, value); null
+// is never passed, a return that is not null, a String, a Number or a Boolean becomes <redacted>. The third thread
+// rule: also called on the thread that publishes an event (the EDT, an application thread, an adapter's thread or an
+// agent worker), once per scalar of every event; it must not block, must not wait on the EDT, must take no
+// application lock and must be fast. A policy that throws there turns the scalar into <redacted>, is counted in
+// agent.info.events.maskFailures and is logged once per class; publishing never fails because of it. A policy written
+// for rows that ignores sourceId now also masks event fields of the same column name: check
+// sourceId.startsWith("event:").
 
 // (Phase 6, built 2026-10-09, HK; P6 §3.6, D118, D153) package …agent.api.spi.hook: HookEngine {probe, install, stub,
 // remove, health, catalogue}, registered by the optional hooks module, found with spi().first or AgentContext.hooks();
@@ -1047,6 +1056,13 @@ public interface MaskPolicy { Object mask(String sourceId, String column, Object
 // technology, which turns seeds into WebBrowser handles, and the technology-neutral BrowserRegistryAdapter,
 // Collection<BrowserSeed> seeds(), for browsers the Swing-tree scan cannot see; a domain module registers either
 // with AgentContext.spi() during install)
+
+// (Phase 8, A79, built 2026-10-19, EW; P8 §5.2) package …agent.api.spi.web adds BrowserMask, the second type a domain
+// pack implements: Boolean masks(String tag, Object vendorObject, boolean hasView), TRUE masks a browser on every route
+// whatever its view, FALSE releases it from the view-less rule (never overriding a CaptureMask that names its
+// component), null no opinion; union, a throwing mask masks; called on an agent worker, never on the EDT, and must call
+// no method of the vendor object. While any CaptureMask or BrowserMask is registered a browser without a view is masked
+// unless a BrowserMask releases it
 
 // (Phase 7, A66, built 2026-10-10, VW; P7 §4.1) package …agent.api.spi.web adds the value type WebPointerEvent (one
 // pointer event in CSS pixels of the main frame's viewport: MOVE, PRESS, RELEASE, WHEEL; button, click count,
@@ -1382,7 +1398,7 @@ cleaned the same way.
 |---|---|
 | `GET /ping?nonce=<n>` | `{"nonce":<n>,"clientNonce":<n>,"agentNonce":…,"sessionId":…,"protocol":"0.2","pid":…,"startTimeMs":…,"loadMode":…,"ready":bool,"readOnly":bool}`. An optional `protocol=<version>` parameter with a different major is answered with HTTP 400 (with a MAC, and `Connection: close`). **H2 (1.x, built 2026-10-02):** `clientNonce` (the client's nonce; `nonce` keeps carrying it too) and `sessionId` are new, and `protocol` is `"0.2"` |
 | `POST /rpc` | JSON-RPC 2.0, single or batch (batch elements run sequentially in order). Always HTTP 200 for well-formed HTTP; errors are JSON-RPC errors. Requests without `id` are notifications: executed, no response element; a single notification, or a batch made only of notifications, answers HTTP 204 with no body. **H3 (1.x, built 2026-10-02):** a batch has at most `Protocol.MAX_BATCH` (100) elements; a longer one is answered with a single `INVALID_REQUEST` error (`id` null, `data {elements, maxBatch}`, message "a batch may hold at most 100 elements; none was run") and none of its elements runs |
-| `GET /events?since=<seq>&topics=<globs>` | SSE, close-delimited (no `Content-Length`, no chunking). Each event: `id: <seq>`, `event: <topic>`, `data: <event JSON>`. Comment heartbeat `: hb` after 15 s without a write. Resume point = `Last-Event-ID` header if present, else `since` (400 when it is not an integer), else "from now"; a resume point beyond the last sequence number also means "from now". If the resume point is older than the ring, the stream first sends `event: gap` with `id: <to>` and `data: {"from":<requested+1>,"to":<oldest-1>}`. A gap frame can also occur mid-stream, when a slow client falls behind the ring. **S25 (1.x, built 2026-10-02):** the client accepts a line of at most 4 MiB and an event of at most 4 Mi characters of data; a peer that sends more has left the protocol and the client ends the stream (§7) |
+| `GET /events?since=<seq>&topics=<globs>` | SSE, close-delimited (no `Content-Length`, no chunking). Each event: `id: <seq>`, `event: <topic>`, `data: <event JSON>`. Comment heartbeat `: hb` after 15 s without a write. Resume point = `Last-Event-ID` header if present, else `since` (400 when it is not an integer), else "from now"; a resume point beyond the last sequence number also means "from now". If the resume point is older than the ring, the stream first sends `event: gap` with `id: <to>` and `data: {"from":<requested+1>,"to":<oldest-1>}`. A gap frame can also occur mid-stream, when a slow client falls behind the ring. **S25 (1.x, built 2026-10-02):** the client accepts a line of at most 4 MiB and an event of at most 4 Mi characters of data; a peer that sends more has left the protocol and the client ends the stream (§7). **A78 (Phase 8, built 2026-10-19, EW; P8 §5.1):** the stream carries each event as the ring stores it, masked at publish |
 | `GET /schema` | `{"protocol":"0.2","primitives":[PrimitiveDescriptor…]}` sorted by name (`protocol` is `Protocol.VERSION`) |
 | `GET /capabilities` | `{"capabilities":{id:{"state":…,"reason":…,"strategy":…}}}` |
 
@@ -1458,7 +1474,16 @@ when it is an object or an array; booleans, nulls and empty strings are not secr
 - **not** in events: the payload of an event published under the call's scope, by the application or a module,
   reaches the ring, every subscription and the result's `events` as published (the build of 2026-10-02 rewrote those
   payloads too, which could turn a value equal to a short secret into `<redacted>` for every reader; the review of
-  2026-10-03 removed that, because what the call does is not what the core writes about it);
+  2026-10-03 removed that, because what the call does is not what the core writes about it); **A78 (Phase 8, built
+  2026-10-19, EW; P8 §5.1):** "as published, after the key rule and the registered policies, never by value; from a
+  policy's registration on": the bus applies, on the publishing thread, outside the ring lock and before the character
+  bound, the core's secret-key rule to every map key of every event (a secret-looking key's whole value becomes
+  `<redacted>`, whether or not a policy is registered) and every registered `MaskPolicy` to every scalar under
+  `event:<topic>` and the dotted column, at most 10,000 scalars per event (the rest `<redacted>`, the payload gaining
+  `truncated: true`); the masked payload is the one object the ring stores, every subscription and the SSE stream
+  receive, `since`, `await` and the payload match read and the call's `events` record; nothing of `Event`'s wire
+  changes, and the envelope is never masked. Events published before a policy is registered are not masked by it (on
+  attach, the module-install window is masked by key only, gap 139);
 - in the error the call answers with: its message and every string or number in its `data`, however deep (an
   `RpcException` of the primitive, `INTERNAL_ERROR`'s `data.message` and stack frames, `TIMEOUT`'s data, any other
   error); an `INVALID_PARAMS` on a named param names the key and never its value.
@@ -1479,7 +1504,7 @@ without the key behaves exactly as in Phase 1.
 
 | Primitive | Params | Result `value` |
 |---|---|---|
-| `agent.info` | – | `{protocol, agentVersion, pid, startTimeMs, loadMode, instrumentation:bool, readOnly, ready, javaVersion, modules:[{id, version, state: INSTALLED\|FAILED\|UNINSTALLED, message?, readyMessage?}], options:{…token and nonce removed, secret values redacted…}, threads:{workers:{active,max}, callers:{active,max}, abandoned:{<primitive>: n}}}`. **(1.x, built 2026-10-02)** S30: `threads` is new. S14: `modules` also lists modules that could not be loaded |
+| `agent.info` | – | `{protocol, agentVersion, pid, startTimeMs, loadMode, instrumentation:bool, readOnly, ready, javaVersion, modules:[{id, version, state: INSTALLED\|FAILED\|UNINSTALLED, message?, readyMessage?}], options:{…token and nonce removed, secret values redacted…}, threads:{workers:{active,max}, callers:{active,max}, abandoned:{<primitive>: n}}}`. **(1.x, built 2026-10-02)** S30: `threads` is new. S14: `modules` also lists modules that could not be loaded. **A78 (Phase 8, built 2026-10-19, EW; P8 §5.1, D543):** `events: {maskPolicies, maskFailures, overBudget, slowPasses, maxPassMs}`, after `threads`: the `MaskPolicy`s registered now, and since start the policy failures, the payloads cut at the 10,000-scalar budget, the passes over 50 ms on the publishing thread and the longest pass |
 | `agent.capabilities` | `reprobe?:bool` | `{capabilities:{id:{state,reason,strategy}}}`; spec timeout 60000 |
 | `agent.log` | `n?:int (100, at most 2000)` | `{lines:[…]}` |
 | `agent.disable` (destructive) | – | `{stopping:true}`; after replying: uninstall modules in reverse order, publish `agent.stopping`, stop the server, delete discovery files, clear the discovery system properties and restore the ones an operator had set (**S9, 1.x, built 2026-10-02**, §2.5). No thread of the core or of the generic modules remains (a domain module may keep one bounded daemon thread to finish removing a listener, §9.2; (Phase 4, built 2026-10-07; P4 §2.4: the web module's tap poller ends at uninstall, and a built-in web adapter's threads end for good at `detach()`, so that a late callback of the technology starts none)); a later attach starts a fresh agent with a new nonce and a new session id (**H2, 1.x, built 2026-10-02**) |
@@ -2608,7 +2633,7 @@ removed):
 |---|---|
 | `run.jsonl` | one JSON object per line, flushed per line, each with `type` and `t` (ms since run start). Types: `run-start`, `pack`, `requires`, `launchProperties`, `preflight`, `bind`, `call` (params, result, duration; **(Phase 2, built 2026-10-02)** A34: also `secretParams`, the names a step call carried in `_meta.secretParams`, omitted when empty; (Phase 4, built 2026-10-07; P4 §8.2: a `web.*` call also carries `path`, `cdp` or `agent`, after `primitive`; the web record types are P4 §8.2)), `sync`, `prompt`, `expect`, `evidence`, `artifact`, `cleanup`, `recover`, `fidelity` (**A29, 1.x, built 2026-10-02**), `run-end`. The Phase 2 record types are P2 §11.3. (Phase 6 security fix, pass 2, P2-L6-F2, built 2026-10-09, SC) No record carries an image's bytes: a `call` record's `value` (and `params`), a `sync`, `cleanup` or `trace.mark` record's value and an abort's detail that hold an image, a map with `format: png` and `base64`, are written with the bytes elided (`base64: "<png: N bytes>"`, the other entries kept), in the line and in the telemetry observer's copy alike; the pixels go to `artifacts/capture.png` and `failure/capture.png` only (P5 §9.4, `…scenario.Images`); the `failure/` JSON and text files likewise |
 | `bindings.json` | `{scenarioId, planHash, resolutions:{slot:{strategy, value}}}`, the Phase 1 subset of the design's shape. **(Phase 2, built 2026-10-02)** written when the bind ends and again at run end, in the shape of P2 §11.3 (with `resolveHash`, `mode`, `envId`, `env`, `oracles`, `captured`, and per slot its credential reference, never a joined field) |
-| `failure/` (failures during steps or verify; never after the agent is lost) | `snapshot.json`, `app-state.json`, `dialogs.json`, `events.json` (the last 200 events) and `capture.png` (when `swing.capture.paint` is OK). The UI as indented text is also in `RunResult.detail.snapshot`. (Phase 4, built 2026-10-07; P4 §6.4: for a target with an indexed browser also `web-browsers.json` and, for each browser visible in Swing, at most four, `web-<ref>-aria.json` and `web-<ref>.png`, or `web-<ref>-error.txt` for a failed read; `web-trace.zip` when the scenario traced the CDP path and no call may carry a secret; P4 §6.2: `RunResult.detail.snapshot` renders a `WEB` surface after the Swing windows) |
+| `failure/` (failures during steps or verify; never after the agent is lost) | `snapshot.json`, `app-state.json`, `dialogs.json`, `events.json` (the last 200 events; (Phase 8, built 2026-10-19, EW; P8 §5.1) as the ring holds them, masked at publish by the key rule and the registered `MaskPolicy`s) and `capture.png` (when `swing.capture.paint` is OK). The UI as indented text is also in `RunResult.detail.snapshot`. (Phase 4, built 2026-10-07; P4 §6.4: for a target with an indexed browser also `web-browsers.json` and, for each browser visible in Swing, at most four, `web-<ref>-aria.json` and `web-<ref>.png`, or `web-<ref>-error.txt` for a failed read; `web-trace.zip` when the scenario traced the CDP path and no call may carry a secret; P4 §6.2: `RunResult.detail.snapshot` renders a `WEB` surface after the Swing windows) |
 | `artifacts/capture.png` | kept on success when the scenario lists `artifacts: [capture]` |
 | `capabilities.json` (Phase 6, built 2026-10-09, CP; P6 §6.4, D130) | the matrix the run used, once final (after step 0b), in the wire shape of `GET /capabilities` (`CapabilityMatrix.toJson()`), ids sorted, masked; `run.jsonl` names its hash (`CapabilityMatrix.hash()`) in the `capabilities` record. `ExecutorSession.open` writes the same file into its output directory, the MCP server into its `--out` |
 | `inference.jsonl` (Phase 5, built 2026-10-08; P5 §7.4) | beside `cost-ledger.jsonl` (P2 §11.3): one masked record per gateway call of the run, with the provider, the requested and the answering model, the request id and fingerprint, the stop reason, the token counts, the cost and the masked structured answer; the masked prompt text only under `--log-prompts`. `re-resolve`, `triage` and `session` write one into their own output directories |
@@ -2739,7 +2764,8 @@ Built for the CLI **(1.x, built 2026-10-02)**:
   C1 control character, DEL, the line and paragraph separators and the bidirectional overrides and isolates are
   written as a backslash, `u` and four lower-case hex digits. Text that comes from the agent (component texts, error
   messages, event payloads) can therefore not drive the terminal. `--json` output stays valid JSON with the same
-  content.
+  content. (Phase 8, built 2026-10-19, EW; P8 §5.1) `skillroy events` prints the stream as the agent serves it: every
+  payload masked at publish by the key rule and the registered `MaskPolicy`s.
 - **S24.** An internal error in matcher or pack code (a `StackOverflowError` included) ends the command with exit
   code 70, and `run --junit` still writes its report with the results gathered so far and the environment failure
   "the run stopped after N of M scenarios: internal error: …".

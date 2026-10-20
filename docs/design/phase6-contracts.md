@@ -1256,7 +1256,11 @@ residue it leaves is in `health`. D119 and D236 are unchanged.
   never block or take a lock of the application"; `MaskPolicy`'s javadoc changes with it); a policy that throws
   counts as a handler failure (`Spy.counters()[2]`), the value is replaced by `<redacted>`, and the hook's health
   reports `ERROR("mask policy threw")`. Events keep their payloads otherwise unredacted (A34's rule for events of a
-  call), so a catalogue author must mark secret arguments and results: the catalogue reader warns on a `CAPTURE` hook
+  call) (Phase 8, built 2026-10-19, EW; P8 §5.1: a `CAPTURE` payload, and a Byteman `rule.fired` one, then pass the
+  ring's mask pass a second time at publish, under `event:hook.<id>` and `event:rule.fired` with the dotted columns
+  `args.0`, `bindings.0`, …, and the core's secret-key rule; harmless for an idempotent policy, a policy that is not
+  checks `sourceId`; `CaptureTest`, `BindingEncoderTest`, `EventBusTest`), so a catalogue author must mark secret
+  arguments and results: the catalogue reader warns on a `CAPTURE` hook
   whose method name contains `password`, `pin`, `secret`, `token` or `credential` (case-insensitive) with `secretArgs`
   empty, or with `capture.result` true and `secretResult` false, and `skillroy hooks status` prints the warning.
 - **Bounds**: the encoder counts the UTF-16 code units and elements it has read from the application's values and

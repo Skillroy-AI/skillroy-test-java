@@ -21,6 +21,7 @@ import ai.skillroy.testjava.agent.api.AgentContext;
 import ai.skillroy.testjava.agent.api.AgentModule;
 import ai.skillroy.testjava.agent.api.spi.CaptureMask;
 import ai.skillroy.testjava.agent.api.spi.ReadinessSource;
+import ai.skillroy.testjava.agent.api.spi.web.BrowserMask;
 import ai.skillroy.testjava.agent.api.spi.web.BrowserRegistryAdapter;
 import ai.skillroy.testjava.agent.api.spi.web.BrowserSeed;
 import ai.skillroy.testjava.samples.webhost.WebHostBrowsers;
@@ -42,11 +43,15 @@ import java.util.List;
  *       seeds give all three the tag a scenario selects them by ({@code by: {tag: front}});</li>
  *   <li>a {@link ReadinessSource}: ready once the host has registered its browsers (the registry holds the front
  *       browser), which the host does only when its pages have loaded;</li>
- *   <li>only with the agent option {@value #OPTION_MASK}{@code =}{@value #MASK_FRONT} (read once at install, so the
- *       system property {@code skillroy.agent.webhost.mask} sets it too): a {@link CaptureMask} that names the front
- *       card ({@link FrontCardMask}), for the web host's end-to-end check of a masked browser on real JCEF
- *       (phase7-contracts.md 13.2 item 10, gap 95). Without it the module registers no mask, and the web module makes
- *       no masked read.</li>
+ *   <li>only with the agent option {@value #OPTION_MASK} (read once at install, so the system property
+ *       {@code skillroy.agent.webhost.mask} sets it too), a comma-separated list (Phase 8, phase8-contracts.md 5.2,
+ *       12.3): {@value #MASK_FRONT} registers a {@link CaptureMask} that names the front card ({@link FrontCardMask}),
+ *       for the web host's end-to-end check of a masked browser on real JCEF (phase7-contracts.md 13.2 item 10, gap
+ *       95); {@value #MASK_RELEASE_DETACHED} registers a {@code BrowserMask} that releases the view-less
+ *       {@value #TAG_DETACHED} browser ({@link DetachedRelease}); {@value #MASK_TAG_BACK} registers a
+ *       {@code BrowserMask} that names the {@value #TAG_BACK} browser ({@link BackTagMask}); an unknown value is logged
+ *       at WARN and ignored. Without the option the module registers no mask, and the web module makes no masked
+ *       read.</li>
  * </ul>
  * It registers no primitive and declares no capability.
  *
@@ -72,10 +77,17 @@ public final class WebHostModule implements AgentModule {
     public static final String TAG_DETACHED = "detached";
     /** Id of the readiness source. */
     static final String READINESS_ID = "webhost.browsers";
-    /** Agent option: {@value #MASK_FRONT} registers {@link FrontCardMask}; anything else, or none, no mask. */
+    /**
+     * Agent option, a comma-separated list: {@value #MASK_FRONT}, {@value #MASK_RELEASE_DETACHED},
+     * {@value #MASK_TAG_BACK}; unknown values are logged and ignored; none, no mask.
+     */
     public static final String OPTION_MASK = "webhost.mask";
-    /** The one value of {@link #OPTION_MASK} the module acts on. */
+    /** A value of {@link #OPTION_MASK}: the {@link FrontCardMask}. */
     public static final String MASK_FRONT = "front";
+    /** A value of {@link #OPTION_MASK} (Phase 8): the {@link DetachedRelease} {@code BrowserMask}. */
+    public static final String MASK_RELEASE_DETACHED = "release-detached";
+    /** A value of {@link #OPTION_MASK} (Phase 8): the {@link BackTagMask} {@code BrowserMask}. */
+    public static final String MASK_TAG_BACK = "tag-back";
 
     private final List<AutoCloseable> registrations = new ArrayList<AutoCloseable>();
     private volatile AgentContext ctx;
@@ -99,9 +111,35 @@ public final class WebHostModule implements AgentModule {
         ctx = context;
         register(BrowserRegistryAdapter.class, new Seeds());
         register(ReadinessSource.class, new Readiness());
-        if (MASK_FRONT.equals(context.option(OPTION_MASK))) {
-            register(CaptureMask.class, new FrontCardMask());
-            context.log().info("webhost: " + OPTION_MASK + "=" + MASK_FRONT + ": the front card is masked");
+        registerMasks(context);
+    }
+
+    /** The masks the option {@value #OPTION_MASK} names, each once, in the list's order (Phase 8: a list). */
+    private void registerMasks(AgentContext context) {
+        String option = context.option(OPTION_MASK);
+        if (option == null) {
+            return;
+        }
+        java.util.Set<String> seen = new java.util.LinkedHashSet<String>();
+        for (String raw : option.split(",")) {
+            String value = raw.trim();
+            if (value.isEmpty() || !seen.add(value)) {
+                continue;
+            }
+            if (MASK_FRONT.equals(value)) {
+                register(CaptureMask.class, new FrontCardMask());
+                context.log().info("webhost: " + OPTION_MASK + "=" + MASK_FRONT + ": the front card is masked");
+            } else if (MASK_RELEASE_DETACHED.equals(value)) {
+                register(BrowserMask.class, new DetachedRelease());
+                context.log().info("webhost: " + OPTION_MASK + "=" + MASK_RELEASE_DETACHED + ": the " + TAG_DETACHED
+                        + " browser is released while it has no view");
+            } else if (MASK_TAG_BACK.equals(value)) {
+                register(BrowserMask.class, new BackTagMask());
+                context.log().info("webhost: " + OPTION_MASK + "=" + MASK_TAG_BACK + ": the " + TAG_BACK
+                        + " browser is masked by its tag");
+            } else {
+                context.log().warn("webhost: " + OPTION_MASK + " names an unknown value, ignored: " + value);
+            }
         }
     }
 

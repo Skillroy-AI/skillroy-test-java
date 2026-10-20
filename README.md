@@ -227,6 +227,12 @@ and `opentest4j-1.3.0.jar`. Without them the same command runs the web verbs thr
 driver (about 140 MB) on first use in each JVM, and never downloads a browser: it attaches to the one the application
 runs.
 
+The Playwright line (Phase 8): built and tested with Playwright 1.63.0. The CDP path runs with 1.61 and later in full,
+with 1.60 without tracing, and with 1.58 and 1.59 only under the operator's opt-in `-Dskillroy.cdp.allowDefaultOverrides=true`
+(Playwright's default-context overrides then apply to the application's browser context); a line below 1.58 is refused
+by the same rule and is otherwise untried. Only 1.63.0 was run; the attach records the line and what it could not apply
+in the `web.path` record.
+
 The Playwright driver inherits the controller's environment (Phase 6 security fix S48, SR). These change what it runs
 or what it logs, so set them only on purpose: `PLAYWRIGHT_NODEJS_PATH` and the system property `playwright.nodejs.path`
 (the Node.js executable it runs), `PLAYWRIGHT_DRIVER_DIR` (an extracted driver to use instead of the bundled one),

@@ -29,7 +29,9 @@ import java.util.concurrent.atomic.AtomicInteger;
 /**
  * A fake Swing walk: the components a test lists, showing as the test says, their states; counts the reads. A state's
  * {@code masked} follows the {@code CaptureMask}s registered in {@link #spi} (Phase 7 security fix S111), computed by
- * the module's own {@code ComponentReads.masked} over the component's parents.
+ * the module's own {@code ComponentReads.masked} over the component's parents; {@link #masked} (Phase 8, the rebuild's
+ * one read for all components) answers from the same registry, and {@link #masksRegistered()} counts the
+ * {@code BrowserMask}s too.
  */
 final class FakeWalk implements SeedWalk {
 
@@ -81,7 +83,31 @@ final class FakeWalk implements SeedWalk {
 
     @Override
     public boolean masksRegistered() {
-        return !masks().isEmpty();
+        ai.skillroy.testjava.agent.api.SpiRegistry r = spi;
+        return !masks().isEmpty() || r != null
+                && !r.all(ai.skillroy.testjava.agent.api.spi.web.BrowserMask.class).isEmpty();
+    }
+
+    /** How many times the rebuild's one masked read ran (Phase 8). */
+    final AtomicInteger maskedReads = new AtomicInteger();
+    /** When set, {@link #masked} throws it (the read failed). */
+    volatile RuntimeException maskedFailure;
+
+    @Override
+    public Map<Object, Boolean> masked(Collection<?> objects, long budgetMs) {
+        maskedReads.incrementAndGet();
+        if (failure != null) {
+            throw failure;
+        }
+        if (maskedFailure != null) {
+            throw maskedFailure;
+        }
+        Map<Object, Boolean> out = new IdentityHashMap<Object, Boolean>();
+        for (Object o : objects) {
+            out.put(o, Boolean.valueOf(!(o instanceof java.awt.Component)
+                    || ComponentReads.masked((java.awt.Component) o, masks())));
+        }
+        return out;
     }
 
     private List<ai.skillroy.testjava.agent.api.spi.CaptureMask> masks() {

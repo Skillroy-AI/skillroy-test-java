@@ -54,7 +54,7 @@ class WebSpiShapeTest {
             WebCapability.class, WebRendering.class, BitmapSource.class, CdpEndpoint.class, WebScriptException.class,
             WebFrameGoneException.class, BrowserRegistryAdapter.class, BrowserSeed.class, WebPointerEvent.class,
             WebPointerEvent.Builder.class, WebPointerEvent.Action.class, WebPointerEvent.Button.class,
-            WebPointerEvent.Modifier.class);
+            WebPointerEvent.Modifier.class, BrowserMask.class);
 
     @Test
     void everyCapabilityIsPresentByName() {
@@ -161,6 +161,35 @@ class WebSpiShapeTest {
         assertMembers(WebInitScript.class, WEB + "WebInitScript$Timing timing()");
         assertEquals(Arrays.<Type>asList(WebSubscription.class), Arrays.asList(WebInitScript.class.getInterfaces()));
         assertMembers(BrowserRegistryAdapter.class, "java.util.Collection<" + WEB + "BrowserSeed> seeds()");
+    }
+
+    /**
+     * Phase 8 (gap 110, A79; phase8-contracts.md 5.2): {@code BrowserMask} is a new interface with one abstract method
+     * and no default, whose signature names no AWT and no vendor type (it is called on an agent worker, never on the
+     * EDT, and a pack implements it without knowing a vendor type).
+     */
+    @Test
+    void browserMaskHasOneAbstractMethodAndNamesNoAwtType() throws Exception {
+        assertTrue(BrowserMask.class.isInterface());
+        assertEquals(0, BrowserMask.class.getInterfaces().length);
+        assertMembers(BrowserMask.class, "java.lang.Boolean masks(java.lang.String, java.lang.Object, boolean)");
+        Method masks = BrowserMask.class.getMethod("masks", String.class, Object.class, boolean.class);
+        assertTrue(Modifier.isAbstract(masks.getModifiers()), "abstract, not a default");
+        for (Method method : BrowserMask.class.getDeclaredMethods()) {
+            if (method.isSynthetic()) {
+                continue;
+            }
+            List<Type> named = new ArrayList<Type>(Arrays.asList(method.getGenericParameterTypes()));
+            named.add(method.getGenericReturnType());
+            for (Type type : named) {
+                String name = type.getTypeName();
+                assertTrue(!name.startsWith("java.awt.") && !name.startsWith("javax.swing."),
+                        method.toGenericString() + " names " + name);
+            }
+        }
+        BrowserMask lambda = (tag, vendor, hasView) -> "back".equals(tag) ? Boolean.TRUE : null;
+        assertEquals(Boolean.TRUE, lambda.masks("back", new Object(), true));
+        assertEquals(null, lambda.masks(null, new Object(), false));
     }
 
     @Test

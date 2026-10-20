@@ -79,7 +79,9 @@ class CdpWebPathCallTest {
                 .value("web.browsers", Map.of("browsers", List.of(
                         FakeAgent.browser("b-front", "T1", "front", true, "data:text/html,front"),
                         FakeAgent.browser("b-back", "T2", "back", false, "data:text/html,back"),
-                        FakeAgent.browser("b-detached", null, "detached", false, "data:text/html,detached"))));
+                        FakeAgent.browser("b-detached", null, "detached", false, "data:text/html,detached")),
+                        // Phase 8 (D548): an agent without masks says so; the masked cases set their own answers.
+                        "masksRegistered", false));
         TargetProbe probe = new TargetProbe(CdpEndpoint.local(9222), "FakeChrome/152", "1.3", List.of(
                 new TargetProbe.Target("T1", "page", front.url, "Front page", "ws://t1", true, 2, null),
                 new TargetProbe.Target("T2", "page", back.url, "Back page", "ws://t2", true, 2, null)), 4);
@@ -881,5 +883,190 @@ class CdpWebPathCallTest {
         assertTrue(((String) huge.payload().get("detail")).length() <= 1000 / 64 + 64);
         assertTrue(events.chars() <= 1000);
         assertEquals(64L << 20, PathEvents.MAX_CHARS);
+    }
+
+    // ---------------------------------------------------------------- Phase 8: masked and unmapped pages
+
+    /** The setUp's three entries with {@code masked: true} on the ones named, and the given flag (null: absent). */
+    private void agentBrowsers(Boolean masksRegistered, String... maskedRefs) {
+        Map<String, Object> listing = new LinkedHashMap<>();
+        List<Object> entries = new java.util.ArrayList<>();
+        for (Map<String, Object> b : List.of(
+                FakeAgent.browser("b-front", "T1", "front", true, "data:text/html,front"),
+                FakeAgent.browser("b-back", "T2", "back", false, "data:text/html,back"),
+                FakeAgent.browser("b-detached", "T3", "detached", false, ""))) {
+            if (List.of(maskedRefs).contains(b.get("ref"))) {
+                b.put("url", "");
+                b.remove("title");
+                b.put("masked", true);
+            }
+            entries.add(b);
+        }
+        listing.put("browsers", entries);
+        if (masksRegistered != null) {
+            listing.put("masksRegistered", masksRegistered);
+        }
+        agent.value("web.browsers", listing);
+        refresh();
+    }
+
+    /** Lets the path read the agent's list once more (a by.tag selection that matches nothing reads it). */
+    private void refresh() {
+        assertThrows(WebPathException.class, () -> call("web.dom.text", map("by", map("tag", "nobody"))));
+    }
+
+    private static final List<String> READS = List.of("web.dom.text", "web.ariaSnapshot", "web.bitmap",
+            "web.hitTest");
+
+    private static Map<String, Object> readArgs(String primitive, Object... selection) {
+        Map<String, Object> args = map(selection);
+        if (primitive.equals("web.hitTest")) {
+            args.put("point", map("x", 5, "y", 5));
+        }
+        return args;
+    }
+
+    /**
+     * Phase 8 (5.2 (iii)): a view-less browser the agent reports masked (the web host's {@code detached}, mapped by its
+     * target id) is handed to the agent for every read; {@code redact: false} reads it on the path.
+     */
+    @Test
+    void aViewlessBrowserTheAgentReportsMaskedIsHandedToTheAgent() throws Exception {
+        FakeWorld.FakePage detached = world.page("T3", "data:text/html,detached", "Detached page");
+        detached.engine = a -> FakeWorld.ok(Map.of("text", "detached", "truncated", false));
+        agentBrowsers(true, "b-detached");
+        for (String primitive : READS) {
+            String why = unsupported(primitive, readArgs(primitive, "browser", "b-detached"), null);
+            assertEquals("browser b-detached is masked: the agent answers " + primitive, why);
+        }
+        assertTrue(detached.evaluated.isEmpty(), "nothing reached the masked page");
+        assertEquals("detached", ((Map<?, ?>) call("web.dom.text", map("browser", "b-detached", "redact", false))
+                .value()).get("text"), "a person's redact: false reads it on the path");
+    }
+
+    /**
+     * Phase 8 (5.2 (iii), D551): a page the agent has no entry for (here: the browser left the agent's list between
+     * the selection and the read) is handed to the agent while it reports masks registered, or says nothing about
+     * them (an older agent), and served while it reports none.
+     */
+    @Test
+    void anUnmappedPagesReadsAreHandedToTheAgentWhileMasksAreRegistered() throws Exception {
+        front.engine = a -> FakeWorld.ok(Map.of("text", "front", "truncated", false));
+        for (Boolean flag : new Boolean[] {Boolean.TRUE, null, Boolean.FALSE}) {
+            java.util.concurrent.atomic.AtomicInteger asked = new java.util.concurrent.atomic.AtomicInteger();
+            agent.on("web.browsers", params -> {
+                Map<String, Object> listing = new LinkedHashMap<>();
+                // the first read selects b-front; the next one (the check before the read) no longer lists it
+                listing.put("browsers", asked.getAndIncrement() == 0 ? List.of(FakeAgent.browser("b-front", "T1",
+                        "front", true, "data:text/html,front")) : List.of());
+                if (flag != null) {
+                    listing.put("masksRegistered", flag);
+                }
+                return listing;
+            });
+            if (Boolean.FALSE.equals(flag)) {
+                assertEquals("front", ((Map<?, ?>) call("web.dom.text", map("by", map("tag", "front"))).value())
+                        .get("text"), "no masks: served as before");
+            } else {
+                String why = unsupported("web.dom.text", map("by", map("tag", "front")), null);
+                assertTrue(why.startsWith("the page maps to no browser of the agent while masks are registered"),
+                        flag + ": " + why);
+            }
+        }
+    }
+
+    /**
+     * Phase 8 (5.2 (iii), D551): a {@code by: {url|title}} selection is the agent's while it reports masks registered
+     * or says nothing about them; served on the path while it reports none.
+     */
+    @Test
+    void aUrlOrTitleSelectionIsTheAgentsWhileMasksAreRegistered() throws Exception {
+        back.engine = a -> FakeWorld.ok(Map.of("text", "back", "truncated", false));
+        agentBrowsers(true);
+        assertEquals("a by.url selection is the agent's while masks are registered",
+                unsupported("web.dom.text", map("by", map("url", "back$")), null));
+        assertEquals("a by.title selection is the agent's while masks are registered",
+                unsupported("web.dom.text", map("by", map("title", "^Back")), null));
+        agentBrowsers(null);
+        assertEquals("a by.url selection is the agent's while masks are registered",
+                unsupported("web.dom.text", map("by", map("url", "back$")), null), "an absent field counts true");
+        assertTrue(back.evaluated.isEmpty(), "nothing reached a page by its own URL or title");
+        agentBrowsers(false);
+        assertEquals("back", ((Map<?, ?>) call("web.dom.text", map("by", map("url", "back$"))).value()).get("text"));
+    }
+
+    /**
+     * Phase 8 (5.2 (iv), D637): {@code web.pointer}, {@code web.dom.click} and {@code web.dom.fill} of a page the agent
+     * reports masked, or of an unmapped page while masks are registered, are handed to the agent (which answers
+     * without page data); served while no mask is registered; {@code redact: false} keeps them on the path.
+     */
+    @Test
+    void theThreeActionsOfAMaskedOrUnmappedPageAreHandedToTheAgent() throws Exception {
+        back.engine = a -> FakeWorld.ok(hitValue("button", rect(1, 2, 30, 20), null));
+        Map<String, Map<String, Object>> actions = new LinkedHashMap<>();
+        actions.put("web.pointer", map("browser", "b-back", "action", "CLICK", "point", map("x", 10, "y", 12)));
+        actions.put("web.dom.click", map("browser", "b-back", "selector", "#go"));
+        actions.put("web.dom.fill", map("browser", "b-back", "selector", "#go", "text", "x"));
+        agentBrowsers(true, "b-back");
+        for (Map.Entry<String, Map<String, Object>> a : actions.entrySet()) {
+            assertEquals("browser b-back is masked: the agent answers " + a.getKey(),
+                    unsupported(a.getKey(), a.getValue(), null));
+        }
+        assertTrue(back.mouse.isEmpty() && back.evaluated.isEmpty(), "nothing reached the masked page");
+
+        agentBrowsers(false);
+        back.engine = a -> FakeWorld.ok(hitValue("button", rect(1, 2, 30, 20), null));
+        Map<?, ?> pointed = (Map<?, ?>) call("web.pointer", actions.get("web.pointer")).value();
+        assertTrue(pointed.containsKey("hit"), "no masks: served with its hit");
+
+        agentBrowsers(true, "b-back");
+        back.mouse.clear();
+        Map<String, Object> unredacted = new LinkedHashMap<>(actions.get("web.pointer"));
+        unredacted.put("redact", false);
+        assertTrue(((Map<?, ?>) call("web.pointer", unredacted).value()).containsKey("hit"),
+                "a person's redact: false keeps the path's answer");
+        assertEquals(3, back.mouse.size());
+
+        // the selection takes b-back from the path's cache; the agent's list read before the action no longer has it
+        agentBrowsers(true);
+        agent.value("web.browsers", Map.of("browsers", List.of(), "masksRegistered", true));
+        assertTrue(unsupported("web.dom.click", actions.get("web.dom.click"), null)
+                .startsWith("the page maps to no browser of the agent while masks are registered"));
+    }
+
+    /**
+     * Phase 8 (5.2 (iii), D551): the path's own events of a page the agent reports masked carry {@code url: ""}, no
+     * {@code detail} and {@code masked: true}; a step's {@code name} and {@code signal} stay.
+     */
+    @Test
+    void theOwnEventsOfAMaskedPageWithholdPageData() throws Exception {
+        agentBrowsers(true, "b-front");
+        front.engine = a -> FakeWorld.ok(Map.of("installed", 1L));
+        call("web.tap", map("browser", "b-front", "patterns", List.of("webhost.*"), "redact", false));
+        long seq = path.lastEventSeq();
+        front.fireLoad();
+        assertEquals(Map.of("browser", "b-front", "url", "", "kind", "LOAD_FINISHED", "cdpTargetId", "T1", "masked",
+                true), path.eventsSince(seq, "web.load").get(0).payload());
+        assertEquals(Map.of("browser", "b-front", "url", "", "signal", "LOAD", "masked", true),
+                path.eventsSince(seq, "web.ready").get(0).payload());
+        String drain = Scripts.call("drain", WebLib.DRAIN_CHARS);
+        front.engine = a -> drain.equals(a[0]) ? FakeWorld.ok(Map.of("events", List.of(map("name",
+                "webhost.member", "detail", map("name", "a member's name"))), "dropped", 0L))
+                : FakeWorld.ok(Map.of("installed", 0L));
+        seq = path.lastEventSeq();
+        path.pollOnce();
+        assertEquals(Map.of("browser", "b-front", "name", "webhost.member", "masked", true),
+                path.eventsSince(seq, "web.tap").get(0).payload());
+        assertEquals(Map.of("browser", "b-front", "url", "", "signal", "TAP", "name", "webhost.member", "masked",
+                true), path.eventsSince(seq, "web.ready").get(0).payload());
+        for (Event e : path.eventsSince(0, "*")) {
+            assertFalse(String.valueOf(e.payload()).contains("member's name"), String.valueOf(e.payload()));
+        }
+        agentBrowsers(false);
+        call("web.dom.text", map("browser", "b-front"));
+        seq = path.lastEventSeq();
+        front.fireLoad();
+        assertEquals(front.url, path.eventsSince(seq, "web.load").get(0).payload().get("url"),
+                "an unmasked page's events are as before");
     }
 }

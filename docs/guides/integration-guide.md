@@ -536,12 +536,13 @@ marked there; the design's table is design §2.6.
 | `DialogLocator` | dialogs drawn inside another window (glass pane, internal frame); whether they block input | in-window dialogs | EDT | – (P1 §4, A27) | P1 §4 |
 | `RegionResolver` | stable region ids inside a custom-painted component (a key pad's keys) | vision steps and pointer steps on painted surfaces | EDT | `LendingRegions` | P7 §3.7 |
 | `CaptureMask` | which components show a secret: blanked in captures, text withheld from every reader | every component that can show a secret, and every control that feeds one | EDT; fast, lock-free | `LendingCaptureMask` | P7 §3.6 |
-| `MaskPolicy` | masks values `data.query` returns, `CAPTURE` hook values and Byteman bindings | personal or secret columns | agent workers or the hooked thread; never blocks | `PasswordMask` | P1 §4; P6 §4.3 |
+| `MaskPolicy` | masks values `data.query` returns, `CAPTURE` hook values and Byteman bindings, and (Phase 8) every event payload at publish, `event:<topic>` | personal or secret columns and event fields | agent workers, the hooked thread, or the thread that publishes an event; never blocks, never waits on the EDT | `PasswordMask` | P1 §4; P6 §4.3; P8 §5.1 |
 | `RedactionKeys` | the application's own secret-looking keys in JVM arguments, properties, options | always worth one | any; thread-safe | `LendingSecrets` | P1 §4 (A21) |
 | `DataSourceProvider` | an in-process, credential-free read channel (`data.query`) | resolvers and stored-row checks against the application's own data | agent workers | `LendingDataSource` | P1 §4, §6 |
 | `DeviceAdapter` | peripherals as snapshot nodes and `device.*` actions | printers, scanners, readers, displays | `state`/`act` under `APP` | `PrinterDevice` | P1 §4; P3 §3.4 |
 | `ProductionMarker` | refuse to serve on production | always (§5.7) | agent worker, once | – (core tests: `ProductionGateTest`) | P1 §4, §5 |
 | `BrowserRegistryAdapter` | seeds for embedded browsers the Swing tree cannot see | cached, hidden or view-less browsers | agent workers; cheap | `WebHostModule` | P4 §3, §9.2 |
+| `BrowserMask` | (Phase 8) names (TRUE) or releases (FALSE) a browser by its seed tag or vendor object | a browser that shows a secret without a component a `CaptureMask` could name, or a pre-loaded view-less page a scenario must read while masks are registered | agent workers; fast, never calls the vendor object | `DetachedRelease`, `BackTagMask` (web host) | P4 §3 (A79); P8 §5.2 |
 | `WebEngineAdapter` | one per browser technology | an engine other than JCEF or JxBrowser | agent workers | built-ins `jcef`, `jxbrowser` | P4 §3, §4.5 |
 | `SurfaceSource` | non-Swing areas of the tree, for captures and hit-tests | rarely (the web module supplies one) | EDT | web module | P7 §3.7 |
 | `HookEngine` | hooks from Java instead of a catalogue | rarely (§9.5) | agent threads only | – | P6 §3.6 |
@@ -641,6 +642,13 @@ window; a tag gives scenarios a stable selection (`browser: {tag: …}`). `seeds
 already holds: it must never create, initialise or configure a browser or an engine, and must not block (P4 §3, §9.2;
 `WebHostModule`). Section 10 has the rest.
 
+(Phase 8, built 2026-10-19, EW; P8 §5.2.) While a layer registers any `CaptureMask` or `BrowserMask`, a browser the
+adapter reports no Swing component for (a pre-loaded or never-shown page) is **masked by default**: listed with no URL or
+title, its reads refused, its events without page data. A layer that masks anything and must read such a page registers
+a `BrowserMask` answering `FALSE` for it (the release form: `tag == "detached" ? Boolean.FALSE : null`); one that must
+mask a browser no `CaptureMask` can name answers `TRUE` by tag or by vendor object (compared by identity, never called).
+A `FALSE` never overrides a `CaptureMask` that names the browser's component once it has one.
+
 ### 6.9 The in-process data channel
 
 `DataSourceProvider` gives `data.query` (one guarded `SELECT` or `WITH`, at most 200 rows, a timeout) a connection to the
@@ -673,6 +681,12 @@ Four mechanisms, each for one route out of the JVM:
 | pixels and text of a component (captures, snapshot, hit-test, marks, dialog reader) | `CaptureMask` | name **every** component that can show a secret, and every control that feeds one (the sample masks its number pad while the entry field is masked); a password field is masked without one; a throwing mask masks |
 | secret-looking keys in JVM arguments, system properties, agent options | `RedactionKeys` | the application's own keys (`lending.pin` in the sample); a throwing provider makes every key secret |
 | rows read over the controller-side JDBC channel | `DomainPack.rowMasks()` | the controller-side twin of `MaskPolicy` (§8.5) |
+| event payloads (Phase 8, P8 §5.1) | `MaskPolicy` with `sourceId` `event:<topic>` and the dotted column (`detail.lines.name`; a list element adds no segment); the key rule always | mask before you publish; the ring pass is the backstop, and the pass is what `evt.query`, waits and run outputs see |
+
+**Migration (Phase 8).** A `MaskPolicy` written for rows that ignores `sourceId` now also masks event fields whose key
+equals a column it masks: check `sourceId.startsWith("event:")` (or the exact data source id) in each rule. Do not mask
+a field a wait or the executor matches on (a prompt's `id`, an acknowledgement's `inputId`, `web.tap`'s `name`). A
+browser without a view is masked while any mask is registered (§6.8); release it with a `BrowserMask`.
 
 What masking cannot do is in `SECURITY.md` ("Redaction hides a rectangle, not a value"; "A page's pixels are masked as a
 whole or not at all"): a mask blanks a rectangle, the layout stays visible, and a component no mask names reaches a
@@ -695,7 +709,10 @@ included, and never blocks; the bus is a bounded ring with increasing sequence n
 `evt.query` and the SSE stream (P1 §4, §5). Publish with your module id as `source` and small payloads (the ring is also
 bounded by characters, `eventRingChars`). A call's result carries the events published on its thread during the call and
 its `seq.before`, so waiting "since `seq.before`" never misses a consequence of the call (P1 §3). Event sinks run on
-the publishing thread and must not block.
+the publishing thread and must not block. (Phase 8, P8 §5.1) Every payload is masked before it is stored: a value under a
+secret-looking key becomes `<redacted>`, and the registered `MaskPolicy`s see every scalar as `event:<topic>`; mask
+personal values before you publish all the same, and prove it with `skillroy-junit`'s `OutputScan` (`Scope.EVENTS`)
+over a run.
 
 ### 6.14 Primitives of the module's own
 
@@ -739,7 +756,8 @@ framework must survive without harming the host).
    Bind a JDWP port of a test configuration to loopback (design §6, "Security").
 9. **Mask before anything leaves.** `MaskPolicy`, `CaptureMask`, `RedactionKeys` and `rowMasks()` before any value can
    reach a report, a prompt or a model; credentials only in `credentials.yaml`, never in a fixture, a scenario or a
-   prompt (P2 §4, §11.4; P5 §6; P7 §11).
+   prompt (P2 §4, §11.4; P5 §6; P7 §11). (Phase 8) Events too: mask personal values before you publish; the ring masks
+   every payload by key and by your `MaskPolicy`s (`event:<topic>`) as the backstop (P8 §5.1).
 10. **A model proposes, a person confirms.** Destructive primitives need `confirm`, which a model's or an MCP client's
     request never supplies; a layer's verbs and tools must not route around that (threat model §5; P5 D87; P6 D158).
 11. **Production is refused** (§5.7), and the enable flag is never set by the layer's code.
@@ -1095,6 +1113,13 @@ and `skillroy-cdp` is present, else the agent. `web.cdp.status` reports the port
 - The port is per process on JCEF and per engine on JxBrowser and must be unique per target instance on a shared host.
 - Pin Playwright to what attaches to the embedded Chromium; the newest is the default, and a pack pins older only when
   a spike shows the newest cannot attach (design §1.3, §3.8).
+- (Phase 8, P8 §5.3) **The floor.** Built and tested with Playwright 1.63.0. The CDP path runs with 1.61 and later in
+  full; with 1.60 without tracing (a traced run opens untraced); with 1.58 and 1.59 only under the operator's opt-in
+  `-Dskillroy.cdp.allowDefaultOverrides=true` on the controller (Playwright's download, focus and media overrides then
+  apply to the application's own browser context, logged at WARNING); a line below 1.58 is refused by the same rule and
+  is otherwise untried. The module's other Playwright API is older than 1.58 by its release notes, but no other line was
+  run: a layer that pins one spikes it and audits it. The `web.path` record says which line ran (`playwright`) and what
+  the attach applied (`connectOptions`).
 - Bind the port before any other process can, or run with `web.path: agent`: a process that holds the port first can
   redirect Playwright's handshake (`SECURITY.md`, "A squatted debug port").
 - Playwright's driver inherits the controller's environment; set `PLAYWRIGHT_*`, `NODE_OPTIONS` and `DEBUG=pw:*` only on
@@ -1112,7 +1137,12 @@ and `skillroy-cdp` is present, else the agent. `web.cdp.status` reports the port
   The web host's pack uses `readyTopics: [web.ready]` and no ack topic.
 - Masks: there is no mask for a DOM element. A page that shows personal data is masked by a `CaptureMask` on the whole
   browser component while it does, and a masked browser is masked on every route: no pixels, text or tree reach a model
-  or a client (`SECURITY.md`; P7 §3.6). The web host's `FrontCardMask` is the example.
+  or a client (`SECURITY.md`; P7 §3.6). The web host's `FrontCardMask` is the example. (Phase 8, P8 §5.2) A
+  `BrowserMask` names or releases a browser by its seed tag or vendor object (`BackTagMask`, `DetachedRelease`); a
+  browser without a view is masked while any mask is registered; a masked browser's `web.load`, `web.ready`,
+  `web.console` and `web.tap` withhold page data (`name` and `signal` stay, so waits still complete), `by: {url|title}`
+  never selects it (select it by `tag`), and `web.pointer`, `web.dom.click` and `web.dom.fill` on it answer without page
+  data (`redact: false` is a person's argument). The CDP path hands what it cannot judge to the agent.
 - Navigation is the application's: scenarios drive the application, which drives its web views.
 
 ### 10.5 Adding an adapter for another engine

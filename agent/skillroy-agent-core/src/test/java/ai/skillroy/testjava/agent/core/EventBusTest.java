@@ -501,6 +501,41 @@ class EventBusTest {
     }
 
     /**
+     * Phase 8 (5.1, section 13.1 row 18; the core half): a hook {@code CAPTURE} payload and a {@code rule.fired}
+     * payload, masked at their encoders by an idempotent policy and with a secret key already {@code <redacted>}, pass
+     * the second pass under {@code event:hook.<id>} and {@code event:rule.fired} unchanged and uncopied.
+     */
+    @Test
+    void anEncodersPayloadPassesTheSecondPassUnchangedUnderAnIdempotentPolicy() {
+        CoreSpiRegistry spi = new CoreSpiRegistry();
+        final List<String> seen = Collections.synchronizedList(new ArrayList<String>());
+        spi.register(MaskPolicy.class, new MaskPolicy() {
+            @Override
+            public Object mask(String sourceId, String column, Object value) {
+                seen.add(sourceId + " " + column);
+                return "STAFF-7".equals(value) || "STAFF-*".equals(value) ? "STAFF-*" : value;
+            }
+        });
+        EventMasks masks = new EventMasks(spi, Redactor.withExtraKeys(null, spi, log), log);
+        Map<String, Object> capture = new Event(0L, 0L, "hook.take", "hooks", null, null, payload("hook", "take",
+                "args", payload("0", "STAFF-*", "1", Long.valueOf(150), "2", Arrays.asList("STAFF-*", "x")),
+                "returned", payload("password", "<redacted>"))).payload();
+        assertSame(capture, masks.apply("hook.take", capture), "a CAPTURE payload passes unchanged, no copy");
+        assertTrue(seen.contains("event:hook.take args.0") && seen.contains("event:hook.take args.2"),
+                String.valueOf(seen));
+        seen.clear();
+        Map<String, Object> fired = new Event(0L, 0L, "rule.fired", "byteman", null, null, payload("rule", "limit",
+                "class", "a.b.Desk", "method", "lend", "bindings", payload("0", "STAFF-*", "1", Long.valueOf(150),
+                        "2", payload("staff", "STAFF-*", "password", "<redacted>")))).payload();
+        assertSame(fired, masks.apply("rule.fired", fired), "a rule.fired payload passes unchanged, no copy");
+        assertTrue(seen.contains("event:rule.fired bindings.0") && seen.contains("event:rule.fired bindings.2.staff"),
+                String.valueOf(seen));
+        RingEventBus bus = maskedBus(spi);
+        bus.publish("hook.take", "hooks", capture);
+        assertEquals(capture, only(bus).payload());
+    }
+
+    /**
      * The masked payload is the one object stored, delivered to a subscription, returned by since and await,
      * matched by the payload match and recorded for the call.
      */

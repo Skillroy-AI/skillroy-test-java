@@ -143,9 +143,19 @@ class WebModuleInstallTest {
                 "ai.skillroy.testjava.agent.web.");
         Set<Thread> threadsBefore = webThreads();
         FakeAgentContext ctx = new FakeAgentContext();
+        // Phase 8 (gap 110): a registered BrowserMask (the new SPI type) changes nothing the install loads.
+        ctx.spi.register(ai.skillroy.testjava.agent.api.spi.web.BrowserMask.class,
+                new ai.skillroy.testjava.agent.api.spi.web.BrowserMask() {
+                    @Override
+                    public Boolean masks(String tag, Object vendorObject, boolean hasView) {
+                        return null;
+                    }
+                });
         AgentModule module = (AgentModule) rec.loadClass(WebModule.class.getName()).getConstructor().newInstance();
         try {
             module.install(ctx);
+            module.onTargetReady(ctx);
+            ctx.probeAll();
             assertEquals(15, ctx.primitives.list().size());
             assertEquals(1, ctx.spi.all(ai.skillroy.testjava.agent.api.spi.SurfaceSource.class).size(),
                     "the SurfaceSource is registered at install (Phase 7, 4.8)");

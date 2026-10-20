@@ -1250,6 +1250,14 @@ recognised by its name or its signature (D-EW-6). (g) The end-to-end fixture is 
 `coretest.eventMask=on|throw` (a new discovered fixture module would change the module lists the lifecycle tests pin),
 exercised by the new `EventMaskingTest` (D-EW-5).
 
+**As built (Phase 8, EW, the body, 2026-10-19).** The sample's proof as specified (`staff.signedOn {code, name}` from
+`EngineEvents.stateChanged` after `state.changed`, `PasswordMask`'s event rule, `LoadModeChecks` slot 172). §13.1 row
+18: `skillroy-agent-hooks` and `skillroy-agent-byteman` do not depend on the core and cannot reach its package-private
+pass, so `CaptureTest` and `BindingEncoderTest` take the real encoders' payloads under an idempotent policy and re-apply
+the policy by this section's column rule (`event:hook.take`, `event:rule.fired`, dotted columns), and the core's
+`EventBusTest` publishes payloads of the same shapes, already masked and with a `<redacted>` secret key, through the real
+pass and asserts them stored unchanged and uncopied (D-EW-18).
+
 ### 5.2 The view-less browser and the `BrowserMask` SPI (gap 110; D545 to D551)
 
 **The rule (D545). Behaviour change.** While at least one `CaptureMask` or one `BrowserMask` is registered
@@ -1380,6 +1388,28 @@ rebuilds is seen at the next one (the per-call reads re-ask `component()`, so a 
 unmasked side); JxBrowser's view-less browsers and its off-screen `bitmap` are specified from the adapter's code and
 unverified against the real library (gap 41, the wall).
 
+**As built (Phase 8, EW, 2026-10-19).** As specified, with these completions. (a) Steps 1 to 4 live in one
+package-private class of the web module, `BrowserMasks`, which the index, the per-call reads and the selection share:
+the union stops at the first `TRUE`; a mask that throws, a registry that throws and a vendor object that cannot be read
+count `TRUE`; a failing mask is logged once per class by the exception's class name only (D-EW-7). (b) A `BrowserMask`
+`TRUE` masks a browser with a component too, also where `web.browsers` and `web.pointer` read the component's state in
+the call: the per-call test is "nothing registered: not masked; a `TRUE`: masked; no component: masked unless released;
+else the call's `CaptureMask` read (else the entry's flag)", so `masked(e, state)` above is completed by the `TRUE` of
+step 3, and every per-call judgement refreshes `Entry.masked` (D-EW-8). (c) The selection judges a view-less entry and a
+`TRUE` afresh without an EDT read and reads the entry's flag for a component-bearing one; a masked entry's title is never
+read for `by.title` (D-EW-9). (d) `SeedWalk.masked`'s default (a walk without a registry) and `SwingSeeds` without an
+event-dispatch thread answer every component masked; a registry that cannot answer counts as one with masks
+(`masksRegistered` true) (D-EW-10). (e) `web.dom.fill`'s `filled` keeps `tag` only (it has no `role`; `type` and `id`
+dropped), read literally from "role and tag only". (f) `web.pointer`, `web.dom.click` and `web.dom.fill` declare the
+parameter `redact` in their descriptors (a person's argument, now in `CallPolicy.MASKED_WEB_READS`), so that `/schema`
+names it as the four reads' descriptors do (D-EW-11). (g) The CDP path hands a `by: {url|title}` selection to the agent
+while masks are registered whatever `redact` says (the agent's rule (ii) ignores `redact`, so the two paths agree), after
+one fresh `web.browsers` read; the path's own events read its cached agent list (read at open and by every call that
+reads it), so a mask registered after the last read leaves the path's events of that browser unmasked until the next
+read (the restrictive side holds for every mask present at open) (D-EW-12). (h) The refusal's message names no SPI:
+"browser <ref> is masked (a pack's mask names it, or it has no view while a mask is registered), so its page is not
+read on this route (a person may pass redact: false)".
+
 ### 5.3 The Playwright line: version-gated options, the driver leak, the floor (gap 121; D552 to D555)
 
 **Today.** `CdpAttach.open` (`CdpAttach.java:357-363`) always calls `setNoDefaults` (Playwright 1.60) and `setIsLocal`
@@ -1443,6 +1473,18 @@ other Playwright API (`getByRole`, `Locator.waitFor`, `Tracing`, `CDPSession`, `
 another line spikes it (design §1.3) and audits it (the licence audit covers 1.63.0 only). The attach records what it
 could not apply.* `CdpAttach`'s Javadoc and the threat model's "Playwright 1.63 has no option to refuse" a redirect
 (`threat-model.md:232-236`) are unchanged: a redirect option is not on any line.
+
+**As built (Phase 8, EW, 2026-10-19).** As specified, with these completions. (a) The detection runs on the thread that
+first needs it: `CdpWebPath.open`, which must know `noDefaults` before any driver starts, reads `ConnectSupport` through
+a supplier (the tests' seam) on its caller's thread; `CdpAttach.connect` called directly reads it on its caller's thread
+too; memoised once per JVM either way (D-EW-13). (b) `CdpAttach.connect` also refuses, `PROTOCOL` before anything starts,
+a line without `noDefaults` whose options do not allow the overrides (defence in depth for a direct caller; the path's
+own refusal is the reason string), and passes no artifacts directory to a line without `artifactsDir` (logged at
+WARNING) (D-EW-14). (c) `connectOptions.noDefaults` and `isLocal` record the option's value where the line has it (true
+by default; `true | "unsupported"` above for the defaults) and `defaultOverridesAccepted: true` appears exactly when the
+line has no `noDefaults` (the attach then happened under the opt-in) (D-EW-15). (d) The `LinkageError` message is "the
+Playwright on the class path (<version or unknown>) lacks <the error's class and first line>; nothing was attached",
+and a `VirtualMachineError` still propagates as is.
 
 ### 5.4 Threads and bounds; the behaviour changes of this section
 
@@ -3568,7 +3610,11 @@ named per item host the agent-level half of a proof.
    on the agent path, handed off on the CDP path) while `front` and, off screen, `detached` are not; `by: {url:
    <back's marker>}` answers `NOT_FOUND` whose `data.browsers` lists `back` with `url: ""` and `masked: true` (the
    control: the same `by.url` finds it before the mask); on the CDP path the selection is handed to the agent and
-   answers the same.
+   answers the same. **As built (Phase 8, EW):** under `webhost.mask=tag-back` alone, `detached` (off screen) **is**
+   masked: any registered `BrowserMask` puts the view-less rule in force (§5.2, D545), so "and, off screen, detached are
+   not" is corrected and the check asserts it masked (D-EW-16); the control `by.url` runs under
+   `front,release-detached`; the item ends on a fresh agent without a mask, and `gap95e…` moves from `@Order(15)` to
+   `@Order(18)` so that it stays the launch's last act (it may leave the page unresponsive) (D-EW-17).
 18. **The Playwright line recorded** (EW). (`WebHostChecks`, new item `@Order(17)`, the launches with a port; the first
    half may instead extend `item3BorrowInPagePassesWithoutSleeping`, `@Order(3)`, which already reads that run's
    `web.path` record, leaving only the traced run at `@Order(17)`): a run of `borrow-in-page` over the CDP

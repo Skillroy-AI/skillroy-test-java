@@ -55,6 +55,15 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * options; pages come from {@code
  * contexts().get(0).pages()}: the attach never calls {@code newContext()} or {@code newPage()} (browser research §C4).
  *
+ * <p>The Playwright line (Phase 8, phase8-contracts.md 5.3, D552 to D554): each option's setter is called only when
+ * the line has its field ({@link ConnectSupport}): without {@code isLocal} the attach connects without it; without
+ * {@code noDefaults} it is refused with {@code PROTOCOL} before anything starts unless {@link
+ * CdpOptions#allowDefaultOverrides()} (then it connects without it and logs the accepted overrides at WARNING); without
+ * {@code artifactsDir} no directory is passed (and logged when one was asked for). A {@link LinkageError} (or any other
+ * {@link Error} that is not a {@link VirtualMachineError}) from the driver's start or the connect closes the pending
+ * Playwright and ends the attach's thread before {@code PROTOCOL} is thrown, so that an incompatible Playwright never
+ * leaves a driver process or a {@code skillroy-cdp-playwright} thread behind.
+ *
  * <p>Threads: Playwright Java is not thread-safe, so every Playwright call of an attach runs on its own platform
  * thread ({@code skillroy-cdp-playwright}); {@link #pageFor}, {@link #pagesByTargetId} and {@link #tracing()} hand
  * their work to it with a bound. {@link #browser()} and {@link #context()} expose the Playwright objects for callers
@@ -126,11 +135,29 @@ public final class CdpAttach implements AutoCloseable {
 
     static CdpAttach connect(CdpEndpoint endpoint, CdpOptions options, TargetProbe probe, PlaywrightFactory factory)
             throws CdpException {
+        return connect(endpoint, options, probe, factory, ConnectSupport.detected());
+    }
+
+    /**
+     * {@link #connect(CdpEndpoint, CdpOptions, TargetProbe)} with a given factory and a given Playwright line (the
+     * tests' seams).
+     *
+     * @throws CdpException also {@code PROTOCOL} when the line has no {@code noDefaults} and the options do not
+     *     {@link CdpOptions#allowDefaultOverrides() allow the overrides} (nothing is started), and when the driver's
+     *     start or the connect threw a {@link LinkageError} (the pending Playwright closed, the thread ended)
+     */
+    static CdpAttach connect(CdpEndpoint endpoint, CdpOptions options, TargetProbe probe, PlaywrightFactory factory,
+                             ConnectSupport support) throws CdpException {
         Objects.requireNonNull(endpoint, "endpoint");
         Objects.requireNonNull(options, "options");
         Objects.requireNonNull(factory, "factory");
+        Objects.requireNonNull(support, "support");
         if (probe != null && !probe.unresponsive().isEmpty()) {
             throw frozen(probe.unresponsive());
+        }
+        if (!support.noDefaults() && !options.allowDefaultOverrides()) {
+            throw new CdpException(CdpException.Kind.PROTOCOL, support.noDefaultsRefusal() + "; nothing was attached",
+                    targetsOf(probe));
         }
         // P2-L4-F1: with a probe, the attach dials the browser WebSocket the probe read, at the endpoint's own
         // authority, so that the driver reads no /json/version of its own (unbounded) and dials no host it names.
@@ -145,7 +172,8 @@ public final class CdpAttach implements AutoCloseable {
         PwThread pw = new PwThread("skillroy-cdp-playwright");
         Pending pending = new Pending();
         try {
-            Connected c = pw.call(() -> open(endpoint, url, options, factory, pending, start, deadlineMs), deadlineMs);
+            Connected c = pw.call(() -> open(endpoint, url, options, factory, support, pending, start, deadlineMs),
+                    deadlineMs);
             return new CdpAttach(probe, options, pw, c.playwright(), c.browser(), c.context(), elapsedMs(start));
         } catch (TimeoutException | InterruptedException e) {
             closeQuietly(pending.abandon(), CLOSE_GRACE_MS);
@@ -160,6 +188,16 @@ public final class CdpAttach implements AutoCloseable {
             closeQuietly(pending.abandon(), CLOSE_GRACE_MS);
             pw.shutdownNow();
             throw classify(endpoint, e, probe);
+        } catch (VirtualMachineError e) {
+            throw e;
+        } catch (Error e) {
+            // D554: an incompatible Playwright (NoSuchMethodError, NoClassDefFoundError, ...) never leaves a driver
+            // process or the attach's thread behind.
+            closeQuietly(pending.abandon(), CLOSE_GRACE_MS);
+            pw.shutdownNow();
+            throw new CdpException(CdpException.Kind.PROTOCOL, "the Playwright on the class path ("
+                    + (support.version() == null ? "unknown" : support.version()) + ") lacks " + firstLine(
+                    e.getClass().getName() + ": " + e.getMessage()) + "; nothing was attached", targetsOf(probe), e);
         }
     }
 
@@ -347,19 +385,32 @@ public final class CdpAttach implements AutoCloseable {
     }
 
     private static Connected open(CdpEndpoint endpoint, String url, CdpOptions options, PlaywrightFactory factory,
-                                  Pending pending, long start, long deadlineMs) {
+                                  ConnectSupport support, Pending pending, long start, long deadlineMs) {
         Playwright created = factory.create(PlaywrightFactory.environment());
         if (!pending.created(created)) {
             closeQuietly(created, CLOSE_GRACE_MS);
             throw new CancellationException("the connect deadline passed while the Playwright driver started");
         }
         long left = Math.max(1, deadlineMs - elapsedMs(start));
-        BrowserType.ConnectOverCDPOptions connect = new BrowserType.ConnectOverCDPOptions()
-                .setTimeout(left)
-                .setNoDefaults(options.noDefaults())
-                .setIsLocal(options.isLocal());
+        // D552: a setter only where the line has its field, so that an older line never links the missing method.
+        BrowserType.ConnectOverCDPOptions connect = new BrowserType.ConnectOverCDPOptions().setTimeout(left);
+        if (support.noDefaults()) {
+            connect.setNoDefaults(options.noDefaults());
+        } else {
+            LOG.log(System.Logger.Level.WARNING, "the Playwright on the class path (" + support.version() + ") has no"
+                    + " noDefaults: its download, focus and media overrides apply to the application's browser"
+                    + " context at " + endpoint + " (accepted by " + ConnectSupport.ALLOW_PROPERTY + ")");
+        }
+        if (support.isLocal()) {
+            connect.setIsLocal(options.isLocal());
+        }
         if (options.artifactsDir() != null) {
-            connect.setArtifactsDir(options.artifactsDir());
+            if (support.artifactsDir()) {
+                connect.setArtifactsDir(options.artifactsDir());
+            } else {
+                LOG.log(System.Logger.Level.WARNING, "the Playwright on the class path (" + support.version()
+                        + ") has no artifactsDir: no trace directory is passed to it");
+            }
         }
         Browser attached = created.chromium().connectOverCDP(url, connect);
         List<BrowserContext> contexts = attached.contexts();

@@ -16,6 +16,7 @@
 
 package ai.skillroy.testjava.agent.web;
 
+import ai.skillroy.testjava.agent.api.spi.web.BrowserMask;
 import ai.skillroy.testjava.agent.api.spi.web.BrowserRegistryAdapter;
 import ai.skillroy.testjava.agent.api.spi.web.BrowserSeed;
 import ai.skillroy.testjava.agent.api.spi.web.WebEval;
@@ -172,6 +173,50 @@ class SelectionTest {
             h.walk.showing.clear();
             RpcException none = h.ctx.error("web.dom.text", Harness.args());
             assertEquals(2, ((List<?>) none.error().data().get("browsers")).size(), "the default selection too");
+        }
+    }
+
+    /**
+     * Phase 8 (phase8-contracts.md 5.2 (ii), D550): {@code by: {url}} and {@code by: {title}} never match a masked
+     * browser (its title is not even read), the error data's summary withholds its URL and title and says
+     * {@code masked: true}, and {@code by: {tag}} still selects it.
+     */
+    @Test
+    void aMaskedBrowserIsNeverMatchedByUrlOrTitleAndItsSummaryWithholdsThem() throws Exception {
+        try (Harness h = harness()) {
+            String backRef = BrowserIndexTest.ref(h, back);
+            h.ctx.spi.register(BrowserMask.class, new BrowserMask() {
+                @Override
+                public Boolean masks(String tag, Object vendorObject, boolean hasView) {
+                    return "back".equals(tag) ? Boolean.TRUE : null;
+                }
+            });
+            h.ctx.call("web.browsers", Harness.args());
+            int backBefore = back.evals.size();
+            RpcException byUrl = h.ctx.error("web.dom.text", Harness.args("by", Harness.args("url", "^app://back/")));
+            assertEquals(ErrorCodes.NOT_FOUND, byUrl.error().code(), "the masked browser's URL is never matched");
+            Map<?, ?> summary = null;
+            for (Object o : (List<?>) byUrl.error().data().get("browsers")) {
+                if (backRef.equals(((Map<?, ?>) o).get("ref"))) {
+                    summary = (Map<?, ?>) o;
+                }
+            }
+            assertEquals("", summary.get("url"), String.valueOf(summary));
+            assertEquals(Boolean.TRUE, summary.get("masked"));
+            assertFalse(summary.containsKey("title"));
+            assertEquals("back", summary.get("tag"), "the tag stays");
+            RpcException byTitle = h.ctx.error("web.dom.text", Harness.args("by", Harness.args("title", "^Back")));
+            assertEquals(ErrorCodes.NOT_FOUND, byTitle.error().code());
+            assertFalse(String.valueOf(byTitle.error().data()).contains("Back page"),
+                    String.valueOf(byTitle.error().data()));
+            assertFalse(String.valueOf(byTitle.error().data()).contains("app://back"));
+            assertEquals(backBefore, back.evals.size(), "no title of a masked browser is read");
+            assertEquals("front", text(h, Harness.args("by", Harness.args("url", "index$"), "selector", "#who")),
+                    "the masked browser is no candidate");
+            assertEquals("back", text(h, Harness.args("by", Harness.args("tag", "back"), "selector", "#who",
+                    "redact", Boolean.FALSE)), "by.tag still selects it");
+            assertEquals(ErrorCodes.INVALID_PARAMS, h.ctx.error("web.dom.text", Harness.args("by",
+                    Harness.args("tag", "back"))).error().code(), "and its reads stay refused");
         }
     }
 

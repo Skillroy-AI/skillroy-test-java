@@ -25,10 +25,13 @@
  * (amendment A37), which an adapter overrides where its technology does better than the page's own
  * {@code location.reload()}.
  *
- * <p>A domain pack implements {@link BrowserRegistryAdapter} only: it hands the agent {@link BrowserSeed seeds} for
- * browsers the Swing-tree scan cannot see (cached, hidden or without a view) and needs to know no vendor type. A pack
- * that embeds a third technology also implements a {@link WebEngineAdapter} for it. Both are registered through
- * {@code AgentContext.spi()} ({@code SpiRegistry.register}) during {@code AgentModule.install}.
+ * <p>A domain pack implements two types of this package: {@link BrowserRegistryAdapter}, which hands the agent
+ * {@link BrowserSeed seeds} for browsers the Swing-tree scan cannot see (cached, hidden or without a view) and needs to
+ * know no vendor type, and (Phase 8, gap 110, amendment A79) {@link BrowserMask}, which names or releases a browser by
+ * its seed tag or its vendor object: while any {@code CaptureMask} or {@code BrowserMask} is registered, a browser
+ * without a view is masked unless a {@code BrowserMask} releases it. A pack that embeds a third technology also
+ * implements a {@link WebEngineAdapter} for it. All are registered through {@code AgentContext.spi()}
+ * ({@code SpiRegistry.register}) during {@code AgentModule.install}.
  *
  * <p>Java 8 and JDK types only ({@code java.awt.Component}, {@code java.awt.Dimension},
  * {@code java.awt.image.BufferedImage}, {@code java.util.concurrent.CompletableFuture}): no vendor type appears in any

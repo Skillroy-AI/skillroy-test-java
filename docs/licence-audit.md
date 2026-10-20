@@ -454,7 +454,9 @@ Notes:
   `skillroy-agent-dist` (type `zip`) is a test-scope dependency of `skillroy-sample-lending-scenarios` and is never
   put on a class path.
 - Playwright enters the build only as the compile dependency of the optional `skillroy-cdp` (D49,
-  `docs/design/phase4-contracts.md` section 14). Its `playwright` POM also names Java-WebSocket, slf4j-simple and two
+  `docs/design/phase4-contracts.md` section 14). (Phase 8, built 2026-10-19, EW; `docs/design/phase8-contracts.md`
+  5.3) 1.63.0 is the audited line and the only one run; the CDP path's gate lets a layer pin 1.58 or later, and a layer
+  that pins another line audits it. Its `playwright` POM also names Java-WebSocket, slf4j-simple and two
   JUnit artifacts, all at test scope in the parent POM, so Maven does not pass them on. The driver bundle holds the
   Node.js binary of five platforms (`mac-arm64`, `mac`, `linux-arm64`, `linux`, `win32_x64`), each beside a `LICENSE`
   that opens with Node's MIT-style grant and goes on with the notices of Node's own components (2,946 lines in the one

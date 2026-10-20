@@ -309,4 +309,137 @@ class CdpAttachTest {
             attach.close();
         }
     }
+
+    // ------------------------------------------------------------------------------------------------ Phase 8
+
+    /** The attach threads alive now. */
+    private static java.util.Set<Thread> playwrightThreads() {
+        java.util.Set<Thread> out = new java.util.HashSet<>();
+        for (Thread t : Thread.getAllStackTraces().keySet()) {
+            if (t.isAlive() && t.getName().equals("skillroy-cdp-playwright")) {
+                out.add(t);
+            }
+        }
+        return out;
+    }
+
+    /** The WARNING records CdpAttach logs while {@code body} runs (System.Logger goes to java.util.logging). */
+    private static List<String> warningsWhile(ThrowingRunnable body) throws Exception {
+        java.util.logging.Logger jul = java.util.logging.Logger.getLogger(CdpAttach.class.getName());
+        List<String> lines = new java.util.concurrent.CopyOnWriteArrayList<>();
+        java.util.logging.Handler handler = new java.util.logging.Handler() {
+            @Override
+            public void publish(java.util.logging.LogRecord r) {
+                if (r.getLevel().intValue() >= java.util.logging.Level.WARNING.intValue()) {
+                    lines.add(r.getMessage());
+                }
+            }
+
+            @Override
+            public void flush() {
+            }
+
+            @Override
+            public void close() {
+            }
+        };
+        jul.addHandler(handler);
+        try {
+            body.run();
+        } finally {
+            jul.removeHandler(handler);
+        }
+        return lines;
+    }
+
+    @FunctionalInterface
+    interface ThrowingRunnable {
+        void run() throws Exception;
+    }
+
+    /**
+     * Phase 8 (phase8-contracts.md 5.3, D553): on a line without {@code noDefaults} the attach is refused with {@code
+     * PROTOCOL} before anything starts unless the options accept the overrides; with the opt-in it connects without
+     * calling the setter (Playwright's field stays null) and logs the accepted overrides at WARNING.
+     */
+    @Test
+    void aLineWithoutNoDefaultsConnectsOnlyWithTheOptInAndWithoutTheSetter() throws Exception {
+        ConnectSupport line = ConnectSupport.of(java.util.Set.of("isLocal", "artifactsDir"), "1.59.0");
+        CdpException refused = assertThrows(CdpException.class, () -> CdpAttach.connect(ENDPOINT,
+                CdpOptions.defaults(), probe(page("A", true)), env -> {
+                    throw new AssertionError("nothing may start");
+                }, line));
+        assertEquals(CdpException.Kind.PROTOCOL, refused.kind());
+        assertTrue(refused.getMessage().startsWith(line.noDefaultsRefusal()), refused.getMessage());
+
+        FakeWorld world = new FakeWorld();
+        AtomicReference<Object[]> connectArgs = new AtomicReference<>();
+        AtomicInteger closed = new AtomicInteger();
+        List<String> warnings = warningsWhile(() -> {
+            CdpAttach attach = CdpAttach.connect(ENDPOINT, CdpOptions.defaults().withAllowDefaultOverrides(true),
+                    probe(page("A", true)), env -> playwright(a -> {
+                        connectArgs.set(a);
+                        return world.browser;
+                    }, closed, () -> { }), line);
+            attach.close();
+        });
+        BrowserType.ConnectOverCDPOptions o = (BrowserType.ConnectOverCDPOptions) connectArgs.get()[1];
+        assertNull(o.noDefaults, "the setter of a missing option is never called");
+        assertEquals(Boolean.TRUE, o.isLocal);
+        assertEquals(1, warnings.size(), String.valueOf(warnings));
+        assertTrue(warnings.get(0).contains("1.59.0") && warnings.get(0).contains("noDefaults")
+                && warnings.get(0).contains("skillroy.cdp.allowDefaultOverrides"), warnings.get(0));
+    }
+
+    /** Phase 8 (D553): a line without {@code isLocal} or {@code artifactsDir} gets neither, a traced attach no dir. */
+    @Test
+    void aLineWithoutIsLocalOrArtifactsDirGetsNeitherSetter(@TempDir Path artifacts) throws Exception {
+        FakeWorld world = new FakeWorld();
+        AtomicReference<Object[]> connectArgs = new AtomicReference<>();
+        CdpAttach attach = CdpAttach.connect(ENDPOINT, CdpOptions.defaults().withArtifactsDir(artifacts),
+                probe(page("A", true)), env -> playwright(a -> {
+                    connectArgs.set(a);
+                    return world.browser;
+                }, new AtomicInteger(), () -> { }), ConnectSupport.of(java.util.Set.of("noDefaults"), "1.57.0"));
+        try {
+            BrowserType.ConnectOverCDPOptions o = (BrowserType.ConnectOverCDPOptions) connectArgs.get()[1];
+            assertEquals(Boolean.TRUE, o.noDefaults);
+            assertNull(o.isLocal);
+            assertNull(o.artifactsDir, "no directory is passed to a line without the option");
+            assertEquals(0, world.traceStarts.size(), "the attach starts no tracing of its own");
+        } finally {
+            attach.close();
+        }
+    }
+
+    /**
+     * Phase 8 (D554, gap 121's defect): a connect that throws {@code NoSuchMethodError} (an incompatible Playwright)
+     * ends as {@code PROTOCOL}, closes the Playwright it created once and leaves no attach thread behind.
+     */
+    @Test
+    void aLinkageErrorClosesThePlaywrightAndEndsTheThread() throws Exception {
+        java.util.Set<Thread> before = playwrightThreads();
+        AtomicInteger closed = new AtomicInteger();
+        CdpException e = assertThrows(CdpException.class, () -> CdpAttach.connect(ENDPOINT, CdpOptions.defaults(),
+                probe(page("A", true)), env -> playwright(a -> {
+                    throw new NoSuchMethodError("'com.microsoft.playwright.BrowserType$ConnectOverCDPOptions"
+                            + " setNoDefaults(boolean)'");
+                }, closed, () -> { }), ConnectSupport.of(java.util.Set.of("noDefaults", "isLocal", "artifactsDir"),
+                        "1.59.0")));
+        assertEquals(CdpException.Kind.PROTOCOL, e.kind());
+        assertTrue(e.getMessage().startsWith("the Playwright on the class path (1.59.0) lacks"
+                + " java.lang.NoSuchMethodError: "), e.getMessage());
+        assertTrue(e.getMessage().endsWith("; nothing was attached"), e.getMessage());
+        assertTrue(e.getCause() instanceof NoSuchMethodError);
+        assertEquals(1, closed.get(), "the Playwright the connect created is closed once");
+        long until = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        java.util.Set<Thread> left = playwrightThreads();
+        left.removeAll(before);
+        while (!left.isEmpty() && System.nanoTime() < until) {
+            Thread.sleep(20);
+            left = playwrightThreads();
+            left.removeAll(before);
+        }
+        assertEquals(java.util.Set.of(), left, "no skillroy-cdp-playwright thread of this connect is left");
+    }
 }

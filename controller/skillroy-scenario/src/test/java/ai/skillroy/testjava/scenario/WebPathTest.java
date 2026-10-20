@@ -226,6 +226,11 @@ class WebPathTest {
         }
     }
 
+    /** The reason the CDP path's open gives on a Playwright line without {@code noDefaults} (Phase 8, D553). */
+    static final String OLD_PLAYWRIGHT = "the Playwright on the class path (1.59.0) cannot attach without overriding"
+            + " the application's browser context (no noDefaults; Playwright 1.60 or later has it); set"
+            + " -Dskillroy.cdp.allowDefaultOverrides=true to accept the overrides";
+
     @Test
     void autoTakesTheAgentPathAndRecordsWhyForEveryReasonTheCdpPathCannotBeUsed() throws Exception {
         String broken = "the web path cdp cannot be loaded: ";
@@ -244,6 +249,12 @@ class WebPathTest {
                     webCdp(CapabilityState.OK, null);
                     cdp.openReason = "no remote-debugging endpoint configured";
                 }, null, "the cdp path is not usable: no remote-debugging endpoint configured", true),
+                // Phase 8 (phase8-contracts.md 5.3, D553): a Playwright line without noDefaults is refused by the
+                // path's open with a reason before any driver starts; auto takes the agent path through this route.
+                new Case("old Playwright", () -> {
+                    webCdp(CapabilityState.OK, null);
+                    cdp.openReason = OLD_PLAYWRIGHT;
+                }, null, "the cdp path is not usable: " + OLD_PLAYWRIGHT, true),
                 new Case("attach failed", () -> {
                     webCdp(CapabilityState.OK, null);
                     cdp.openFailure = new WebPathOpenException(WebPathOpenException.Kind.TIMEOUT,
@@ -292,6 +303,11 @@ class WebPathTest {
                     cdp.openReason = "no page target";
                 }, null, FailureKind.PRECONDITION_FAILED, "web.path is cdp, but the cdp path is not usable: no page"
                         + " target"),
+                new Case("old Playwright", () -> {
+                    webCdp(CapabilityState.OK, null);
+                    cdp.openReason = OLD_PLAYWRIGHT;
+                }, null, FailureKind.PRECONDITION_FAILED, "web.path is cdp, but the cdp path is not usable: "
+                        + OLD_PLAYWRIGHT),
                 new Case("open threw", () -> {
                     webCdp(CapabilityState.OK, null);
                     cdp.openFailure = new IllegalStateException("driver missing");

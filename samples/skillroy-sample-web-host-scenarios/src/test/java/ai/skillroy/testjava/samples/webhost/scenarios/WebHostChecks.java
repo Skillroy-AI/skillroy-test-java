@@ -84,6 +84,7 @@ import javax.imageio.ImageIO;
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -268,6 +269,10 @@ abstract class WebHostChecks {
             Map<?, ?> cdp = (Map<?, ?>) path.get("cdp");
             assertEquals("127.0.0.1:" + target.port, cdp.get("endpoint"), String.valueOf(path));
             assertTrue(cdp.get("connectMs") instanceof Number, String.valueOf(path));
+            // Phase 8 (phase8-contracts.md 5.3, A80; 13.2 item 18, its first half): the line and what was applied.
+            assertEquals("1.63.0", cdp.get("playwright"), String.valueOf(path));
+            assertEquals(Map.of("noDefaults", true, "isLocal", true, "artifactsDir", false),
+                    cdp.get("connectOptions"), String.valueOf(path));
             ItEnv.timing("java=" + java + " launch=" + target.label + " cdpConnectMs=" + cdp.get("connectMs"));
         } else {
             assertTrue(String.valueOf(path.get("reason")).contains("web.cdp"), String.valueOf(path));
@@ -1198,6 +1203,11 @@ abstract class WebHostChecks {
                     assertEquals(List.of(), facade.executed, "nothing acted");
                 },
                 () -> {
+                    if (target.offScreen()) {
+                        viewlessDetachedIsMasked();
+                    }
+                },
+                () -> {
                     String text = snapshotText(runDir("gap95d-snapshot-masked"));
                     assertTrue(text.contains("[web " + frontRef + " masked]"), text);
                     for (String page : List.of(WebHostPages.title("front"), WebHostPages.marker("front"),
@@ -1209,6 +1219,214 @@ abstract class WebHostChecks {
     }
 
     /**
+     * Phase 8 (phase8-contracts.md 5.2, D545, D549; section 13.2 item 16), part of gap 95 (d)'s launch off screen: the
+     * view-less {@code detached} browser is masked by default while the front card's {@code CaptureMask} is
+     * registered: listed {@code masked: true} with no URL, title or frame names and {@code masksRegistered: true}; its
+     * four reads refused on the agent path and handed to the agent on the CDP path; a person's {@code redact: false}
+     * reads it (the control); the session snapshot shows it as one masked line; and after a reload its
+     * {@code web.load} and {@code web.ready} carry {@code url: ""} and {@code masked: true}.
+     */
+    void viewlessDetachedIsMasked() throws Exception {
+        Map<String, Object> listing = value(client().call("web.browsers", Map.of(), CALL));
+        assertEquals(Boolean.TRUE, listing.get("masksRegistered"), String.valueOf(listing.keySet()));
+        Map<String, Object> d = browser("detached");
+        assertEquals(Boolean.TRUE, d.get("masked"), "a browser without a view is masked: " + d);
+        assertEquals("", d.get("url"));
+        assertFalse(d.containsKey("title"), String.valueOf(d));
+        assertNull(d.get("component"), "it has no view");
+        for (Object o : (List<?>) d.get("frames")) {
+            Map<?, ?> frame = (Map<?, ?>) o;
+            assertEquals("", frame.get("name"), String.valueOf(frame));
+            assertEquals("", frame.get("url"), String.valueOf(frame));
+        }
+        String detachedRef = String.valueOf(d.get("ref"));
+        Map<String, Map<String, Object>> reads = maskedReads(detachedRef);
+        for (Map.Entry<String, Map<String, Object>> read : reads.entrySet()) {
+            AgentRpcException e = assertThrows(AgentRpcException.class,
+                    () -> client().call(read.getKey(), read.getValue(), CALL), read.getKey());
+            assertEquals(ErrorCodes.INVALID_PARAMS, e.error().code(), read.getKey() + ": " + e.getMessage());
+            assertEquals("masked", e.error().data().get("reason"), read.getKey());
+        }
+        String text = String.valueOf(value(client().call("web.dom.text", unredacted(reads.get("web.dom.text")),
+                CALL)).get("text"));
+        assertTrue(text.contains(WebHostPages.title("detached")), "the control: a person reads it: " + text);
+        if (withPort()) {
+            CdpWebPath path = new CdpWebPath();
+            try {
+                assertNull(path.open(client(), WebSettings.DEFAULT, null), "the CDP path opens");
+                for (Map.Entry<String, Map<String, Object>> read : reads.entrySet()) {
+                    WebPathException e = assertThrows(WebPathException.class, () -> path.call(read.getKey(),
+                            read.getValue(), CallOptions.defaults()), read.getKey() + " is handed to the agent");
+                    assertTrue(String.valueOf(e.getMessage()).contains("masked"), e.getMessage());
+                }
+            } finally {
+                path.close();
+            }
+        }
+        String snapshot = snapshotText(runDir("p8-detached-snapshot-masked"));
+        assertTrue(snapshot.contains("[web " + detachedRef + " masked]"), snapshot);
+        assertFalse(snapshot.contains(WebHostPages.marker("detached")), snapshot);
+        long since = lastSeq();
+        client().call("web.reload", Map.of("browser", detachedRef), CALL);
+        Event ready = client().await("web.ready", since, Map.of("browser", detachedRef), WAIT);
+        assertNotNull(ready, "the reloaded detached page's web.ready");
+        assertEquals("", ready.payload().get("url"), String.valueOf(ready.payload()));
+        assertEquals(Boolean.TRUE, ready.payload().get("masked"), String.valueOf(ready.payload()));
+        Map<String, Object> loads = value(client().call("evt.query", Map.of("since", since, "topics", "web.load"),
+                CALL));
+        boolean seen = false;
+        for (Object o : (List<?>) loads.get("events")) {
+            Map<?, ?> payload = (Map<?, ?>) ((Map<?, ?>) o).get("payload");
+            if (detachedRef.equals(payload.get("browser"))) {
+                seen = true;
+                assertEquals("", payload.get("url"), String.valueOf(payload));
+                assertEquals(Boolean.TRUE, payload.get("masked"), String.valueOf(payload));
+            }
+        }
+        assertTrue(seen, "a web.load of the detached page: " + loads);
+    }
+
+    /** The four reads a mask withholds, of the browser with this ref. */
+    Map<String, Map<String, Object>> maskedReads(String ref) throws Exception {
+        Map<String, Map<String, Object>> reads = new LinkedHashMap<>();
+        reads.put("web.bitmap", Map.of("browser", ref));
+        reads.put("web.dom.text", Map.of("browser", ref));
+        reads.put("web.ariaSnapshot", Map.of("browser", ref));
+        reads.put("web.hitTest", Map.of("browser", ref, "point", Map.of("x", 10L, "y", 10L)));
+        return reads;
+    }
+
+    /** {@code agent.disable}, then a fresh agent attached with the given options, ready. */
+    void reattach(Map<String, String> options) throws Exception {
+        disableAndAwaitStopped();
+        target.endpoint = target.attach(options);
+        target.client = AgentClient.connect(target.endpoint);
+        WebHostTarget.awaitReady(client());
+    }
+
+    /**
+     * Phase 8 (phase8-contracts.md 5.2, D546, D550; section 13.2 item 17): a {@code BrowserMask} releases or names a
+     * browser. With {@code webhost.mask=front,release-detached} the front card stays masked and, off screen, the
+     * view-less {@code detached} browser is listed with its URL and title and its text is read; {@code by: {url}}
+     * finds the back browser (the control). With {@code webhost.mask=tag-back} the back browser is masked on every
+     * route (its four reads refused on the agent path, handed to the agent on the CDP path) while the front one is not;
+     * {@code by: {url: <back's marker>}} answers {@code NOT_FOUND} whose {@code data.browsers} lists back with
+     * {@code url: ""} and {@code masked: true}, and on the CDP path the selection is handed to the agent. (As built:
+     * off screen, {@code detached} is masked under {@code tag-back} too, by the view-less rule, which any registered
+     * {@code BrowserMask} puts in force.) The launch ends on a fresh agent without a mask.
+     */
+    @Test
+    @Order(16)
+    void p8BrowserMasksReleaseOrNameABrowser() throws Exception {
+        reattach(Map.of(MASK_OPTION, MASK_FRONT + ",release-detached"));
+        Map<String, Object> byBackUrl = Map.of("by", Map.of("url", WebHostPages.marker("back")));
+        assertAll("Phase 8 item 17, release-detached, " + target.label,
+                () -> assertEquals(Boolean.TRUE, browser("front").get("masked"), "the front card stays masked"),
+                () -> {
+                    if (target.offScreen()) {
+                        Map<String, Object> d = browser("detached");
+                        assertNull(d.get("masked"), "released: " + d);
+                        assertTrue(String.valueOf(d.get("url")).contains(WebHostPages.marker("detached")),
+                                String.valueOf(d));
+                        assertEquals(WebHostPages.title("detached"), d.get("title"));
+                        String text = String.valueOf(value(client().call("web.dom.text", Map.of("browser",
+                                d.get("ref")), CALL)).get("text"));
+                        assertTrue(text.contains(WebHostPages.title("detached")), text);
+                    }
+                },
+                () -> assertTrue(String.valueOf(value(client().call("web.dom.text", byBackUrl, CALL)).get("text"))
+                        .contains(WebHostPages.title("back")), "the control: by.url finds the back browser"));
+
+        reattach(Map.of(MASK_OPTION, "tag-back"));
+        String backRef = ref("back");
+        assertAll("Phase 8 item 17, tag-back, " + target.label,
+                () -> {
+                    Map<String, Object> b = browser("back");
+                    assertEquals(Boolean.TRUE, b.get("masked"), "named by its tag: " + b);
+                    assertEquals("", b.get("url"));
+                    assertNotNull(b.get("component"), "a browser with a view, masked without a CaptureMask");
+                    Map<String, Object> f = browser("front");
+                    assertNull(f.get("masked"), "the front browser is not masked: " + f);
+                    assertEquals(WebHostPages.title("front"), f.get("title"));
+                    if (target.offScreen()) {
+                        assertEquals(Boolean.TRUE, browser("detached").get("masked"),
+                                "the view-less rule: a BrowserMask is registered");
+                    }
+                },
+                () -> {
+                    for (Map.Entry<String, Map<String, Object>> read : maskedReads(backRef).entrySet()) {
+                        AgentRpcException e = assertThrows(AgentRpcException.class,
+                                () -> client().call(read.getKey(), read.getValue(), CALL), read.getKey());
+                        assertEquals(ErrorCodes.INVALID_PARAMS, e.error().code(), read.getKey());
+                        assertEquals("masked", e.error().data().get("reason"), read.getKey());
+                    }
+                },
+                () -> {
+                    AgentRpcException e = assertThrows(AgentRpcException.class,
+                            () -> client().call("web.dom.text", byBackUrl, CALL));
+                    assertEquals(ErrorCodes.NOT_FOUND, e.error().code(), "by.url never matches a masked browser");
+                    Map<?, ?> listed = null;
+                    for (Object o : (List<?>) e.error().data().get("browsers")) {
+                        if (backRef.equals(((Map<?, ?>) o).get("ref"))) {
+                            listed = (Map<?, ?>) o;
+                        }
+                    }
+                    assertNotNull(listed, String.valueOf(e.error().data()));
+                    assertEquals("", listed.get("url"), String.valueOf(listed));
+                    assertEquals(Boolean.TRUE, listed.get("masked"), String.valueOf(listed));
+                    assertFalse(String.valueOf(e.error().data().get("browsers")).contains(WebHostPages.marker(
+                            "back")), "the error data's browsers withhold the back browser's URL (data.by echoes the"
+                            + " caller's own pattern)");
+                },
+                () -> {
+                    if (withPort()) {
+                        CdpWebPath path = new CdpWebPath();
+                        try {
+                            assertNull(path.open(client(), WebSettings.DEFAULT, null), "the CDP path opens");
+                            for (Map.Entry<String, Map<String, Object>> read : maskedReads(backRef).entrySet()) {
+                                WebPathException e = assertThrows(WebPathException.class, () -> path.call(
+                                        read.getKey(), read.getValue(), CallOptions.defaults()), read.getKey());
+                                assertTrue(String.valueOf(e.getMessage()).contains("masked"), e.getMessage());
+                            }
+                            WebPathException selection = assertThrows(WebPathException.class, () -> path.call(
+                                    "web.dom.text", byBackUrl, CallOptions.defaults()));
+                            assertTrue(selection.getMessage().contains("by.url"), selection.getMessage());
+                        } finally {
+                            path.close();
+                        }
+                    }
+                });
+        reattach(Map.of());
+    }
+
+    /**
+     * Phase 8 (phase8-contracts.md 5.3, A80; section 13.2 item 18, its second half; the first is item 3's): a run of
+     * {@code borrow-in-page} with {@code web.trace: true} over the CDP path records {@code connectOptions.artifactsDir:
+     * true}, the line's option applied (launches with a port).
+     */
+    @Test
+    @Order(17)
+    void p8TheTracedRunRecordsThePlaywrightLine() throws Exception {
+        assumeTrue(withPort(), "the CDP path needs a port");
+        Path dir = runDir("borrow-in-page-traced");
+        Files.createDirectories(dir);
+        Path yaml = dir.resolve("borrow-in-page.yaml");
+        String source = Files.readString(ItEnv.scenario("borrow-in-page.yaml"), StandardCharsets.UTF_8);
+        String traced = source.replace("web: { browser: { tag: front } }", "web: { browser: { tag: front }, trace: true }");
+        assertNotEquals(source, traced, "the scenario's web block was found");
+        Files.writeString(yaml, traced, StandardCharsets.UTF_8);
+        Runs.Outcome o = Runs.run(client(), ai.skillroy.testjava.scenario.PlanCompiler.compile(yaml, Runs.PACK),
+                dir.resolve("run"));
+        Runs.assertPassedWithoutSleeping(o);
+        Map<String, Object> path = Runs.records(dir.resolve("run"), "web.path").get(0);
+        assertEquals("cdp", path.get("path"), String.valueOf(path));
+        Map<?, ?> cdp = (Map<?, ?>) path.get("cdp");
+        assertEquals("1.63.0", cdp.get("playwright"), String.valueOf(path));
+        assertEquals(Map.of("noDefaults", true, "isLocal", true, "artifactsDir", true), cdp.get("connectOptions"),
+                String.valueOf(path));
+    }
+
+    /**
      * Gap 95 (e), phase7-contracts.md 13.2 item 10 (S110: what Chromium does with a synthetic middle click, which SI
      * stated from its behaviour; recorded in {@code timings.txt}, not asserted; the launch's last act, since it may
      * leave the page unresponsive): a person's {@code web.pointer {action: CLICK, button: MIDDLE}} at the Borrow
@@ -1217,7 +1435,7 @@ abstract class WebHostChecks {
      * counted, and whether the host's event dispatch thread and the back page still answer.
      */
     @Test
-    @Order(15)
+    @Order(18) // Phase 8 (D-EW): moved after the new items 16 and 17 so that it stays the launch's last act
     void gap95eWhatAPersonsMiddleClickDoesToTheRealPageIsRecorded() throws Exception {
         Map<String, Object> front = Map.of("tag", "front");
         Map<String, Object> point = borrowCentre();

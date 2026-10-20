@@ -256,6 +256,64 @@ class CaptureTest {
         assertTrue(seen.contains("hook.take/return"));
     }
 
+    /**
+     * Phase 8 (phase8-contracts.md 5.1, section 13.1 row 18): a {@code CAPTURE} payload masked at the encoder as
+     * {@code hook.<id>} passes the ring's second pass, {@code event:hook.<id>}, unchanged under an idempotent policy (one
+     * whose answer it answers again unchanged), so publishing it on the core's bus changes nothing.
+     */
+    @Test
+    void aCapturePayloadIsUnchangedByTheRingsSecondPassUnderAnIdempotentPolicy() {
+        final List<String> sources = new ArrayList<String>();
+        MaskPolicy idempotent = new MaskPolicy() {
+            @Override
+            public Object mask(String sourceId, String column, Object value) {
+                sources.add(sourceId);
+                return "STAFF-7".equals(value) || "STAFF-*".equals(value) ? "STAFF-*" : value;
+            }
+        };
+        harness.ctx.spi.register(MaskPolicy.class, idempotent);
+        Map<String, Object> p = take("STAFF-7", Integer.valueOf(150), Arrays.asList("STAFF-7", "x"));
+        assertEquals("STAFF-*", args(p).get("0"), "masked at the encoder");
+        assertTrue(sources.contains("hook.take"));
+        sources.clear();
+        Object again = secondPass(Arrays.asList(idempotent), "event:hook.take", null, p);
+        assertEquals(p, again, "the second pass changes nothing");
+        assertTrue(!sources.isEmpty() && sources.stream().allMatch("event:hook.take"::equals), String.valueOf(sources));
+    }
+
+    /**
+     * Phase 8 (phase8-contracts.md 5.1, section 13.1 row 18): what the core's ring pass does to a payload at publish,
+     * by the contract's rule (this module cannot see the core's package-private pass): every registered policy, in
+     * order, on every non-null scalar under {@code event:<topic>} and the dotted map keys (a list element adds no
+     * segment). Returns the payload as the pass would store it; the core's own EventBusTest proves the pass itself.
+     */
+    @SuppressWarnings("unchecked")
+    static Object secondPass(java.util.List<MaskPolicy> policies, String sourceId, String column, Object value) {
+        if (value instanceof Map) {
+            Map<String, Object> out = new java.util.LinkedHashMap<String, Object>();
+            for (Map.Entry<String, Object> e : ((Map<String, Object>) value).entrySet()) {
+                out.put(e.getKey(), secondPass(policies, sourceId, column == null ? e.getKey()
+                        : column + "." + e.getKey(), e.getValue()));
+            }
+            return out;
+        }
+        if (value instanceof java.util.List) {
+            java.util.List<Object> out = new java.util.ArrayList<Object>();
+            for (Object o : (java.util.List<Object>) value) {
+                out.add(secondPass(policies, sourceId, column, o));
+            }
+            return out;
+        }
+        Object v = value;
+        for (MaskPolicy p : policies) {
+            if (v == null) {
+                break;
+            }
+            v = p.mask(sourceId, column, v);
+        }
+        return v;
+    }
+
     @Test
     @SuppressWarnings("unchecked")
     void aPolicyThatThrowsRedactsTheValueCountsAFailureAndTheHookIsInError() throws Exception {

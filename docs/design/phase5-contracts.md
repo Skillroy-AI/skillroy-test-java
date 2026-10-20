@@ -1503,7 +1503,9 @@ tools follow the snake-case rule (`swing_hit_test`, `swing_rendering`, `web_hit_
 ### 9.4 Resources
 
 `skillroy://env/profile` (pack id and version, environment id, the capability matrix, the target's Java and pid);
-`skillroy://state/current` (the `app.state` fact, masked); `skillroy://events/recent` (the last 200 events, masked);
+`skillroy://state/current` (the `app.state` fact, masked); `skillroy://events/recent` (the last 200 events, masked;
+(Phase 8, built 2026-10-19, EW; P8 §5.1) masked by the agent too, at publish, by the secret-key rule and the
+registered `MaskPolicy`s under `event:<topic>`, before the server's own mask);
 `skillroy://schema/primitives` (the descriptors); `skillroy://schema/scenario` (the scenario JSON schema of §10.2 for
 this pack); `skillroy://run/<id>/run.jsonl`, `skillroy://run/<id>/journal.jsonl` and `skillroy://run/<id>/failure/<file>`
 for runs and sessions the server started. Resources are listed with `tools/list`-style annotations (`readOnly`) and

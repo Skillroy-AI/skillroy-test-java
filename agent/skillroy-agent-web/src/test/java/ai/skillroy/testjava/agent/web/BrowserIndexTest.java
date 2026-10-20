@@ -16,6 +16,8 @@
 
 package ai.skillroy.testjava.agent.web;
 
+import ai.skillroy.testjava.agent.api.spi.CaptureMask;
+import ai.skillroy.testjava.agent.api.spi.web.BrowserMask;
 import ai.skillroy.testjava.agent.api.spi.web.BrowserRegistryAdapter;
 import ai.skillroy.testjava.agent.api.spi.web.BrowserSeed;
 import ai.skillroy.testjava.agent.api.spi.web.WebEvent;
@@ -187,6 +189,65 @@ class BrowserIndexTest {
     }
 
     /** The ref the index gave the browser. */
+    /**
+     * Phase 8 (phase8-contracts.md 5.2, D547): every rebuild sets each entry's {@code masked} flag; the components are
+     * read once per rebuild, all together, and only while a mask is registered; a view-less browser costs no read; a
+     * read that fails masks every component-bearing entry.
+     */
+    @Test
+    void everyRebuildSetsTheMaskedFlagWithOneReadForAllComponentsOnlyWhileMasksAreRegistered() throws Exception {
+        ScriptedAdapter a = new ScriptedAdapter("scripted");
+        ScriptedBrowser named = a.add(new ScriptedBrowser("scripted"));
+        ScriptedBrowser plain = a.add(new ScriptedBrowser("scripted"));
+        ScriptedBrowser viewless = a.add(new ScriptedBrowser("scripted"));
+        final JPanel namedView = new JPanel();
+        JPanel plainView = new JPanel();
+        named.component = namedView;
+        plain.component = plainView;
+        try (Harness h = new Harness(a).install()) {
+            h.walk.components.addAll(Arrays.<Object>asList(namedView, plainView));
+            h.ready();
+            BrowserIndex index = h.module.indexForTest();
+            index.rebuild(BrowserIndex.BUDGET_MS);
+            assertEquals(0, h.walk.maskedReads.get(), "no read while nothing is registered");
+            for (Entry e : index.snapshot().entries) {
+                assertFalse(e.masked, e.toString());
+            }
+
+            AutoCloseable mask = h.ctx.spi.register(CaptureMask.class, new CaptureMask() {
+                @Override
+                public boolean masks(java.awt.Component c) {
+                    return c == namedView;
+                }
+            });
+            index.rebuild(BrowserIndex.BUDGET_MS);
+            assertEquals(1, h.walk.maskedReads.get(), "one read for the two components");
+            assertTrue(index.entryFor(named.vendorObject()).masked, "named by the CaptureMask");
+            assertFalse(index.entryFor(plain.vendorObject()).masked, "a component no mask names");
+            assertTrue(index.entryFor(viewless.vendorObject()).masked, "no view while a mask is registered");
+            index.rebuild(BrowserIndex.BUDGET_MS);
+            assertEquals(2, h.walk.maskedReads.get(), "one read per rebuild");
+
+            h.walk.maskedFailure = new IllegalStateException("EDT busy");
+            index.rebuild(BrowserIndex.BUDGET_MS);
+            assertTrue(index.entryFor(plain.vendorObject()).masked, "a failed read masks (the safe side)");
+            h.walk.maskedFailure = null;
+
+            mask.close();
+            h.ctx.spi.register(BrowserMask.class, new BrowserMask() {
+                @Override
+                public Boolean masks(String tag, Object vendorObject, boolean hasView) {
+                    return hasView ? null : Boolean.FALSE;
+                }
+            });
+            int reads = h.walk.maskedReads.get();
+            index.rebuild(BrowserIndex.BUDGET_MS);
+            assertFalse(index.entryFor(viewless.vendorObject()).masked, "released by a BrowserMask");
+            assertFalse(index.entryFor(named.vendorObject()).masked, "no CaptureMask names it any more");
+            assertEquals(reads + 1, h.walk.maskedReads.get(), "a BrowserMask alone also asks the components");
+        }
+    }
+
     static String ref(Harness h, ScriptedBrowser b) throws Exception {
         for (Object o : (List<?>) h.ctx.map("web.browsers", Harness.args("includeClosed", Boolean.TRUE))
                 .get("browsers")) {

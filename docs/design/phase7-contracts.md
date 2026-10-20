@@ -823,6 +823,15 @@ browser is therefore its `web-<ref>-error.txt` with the refusal, as the Swing fa
 page's text reached every session model through the snapshot and its pixels, text and tree reached a read-only MCP
 client through the raw reads, while the capture kept the surface grey (L5-S1). D471.
 
+**(Phase 8, built 2026-10-19, EW; P8 §5.2, D545 to D550, D637.)** "Every route" now also covers the events (a masked
+browser's `web.load`, `web.ready`, `web.console` and `web.tap` withhold page data and say `masked: true`), the
+selection (`by: {url|title}` never matches a masked browser; the error data's summaries withhold its URL and title) and
+the answers of the actions that stay allowed on it (`web.pointer` without `hit`; `web.dom.click`, `web.dom.fill` and an
+`AMBIGUOUS` answer's candidates with `role` and `tag` only; `redact: false` a person's argument there too); and a
+browser is masked by more than a `CaptureMask`: a `BrowserMask` (P4 §3, A79) names one by its tag or vendor object,
+and while any `CaptureMask` or `BrowserMask` is registered a browser the adapter reports no component for is masked
+unless a `BrowserMask` releases it. `SeedWalk.masksRegistered()` counts both SPIs.
+
 ### 3.7 `RegionResolver`, `SurfaceSource`, `LocatorResolver.describe` (A64)
 
 Three additions to `…agent.api.spi`, all called on the EDT, all fast and change nothing (the family's rule, P1 §4):
@@ -1167,7 +1176,10 @@ Playwright's `evaluate` has none, and an in-page timer cannot interrupt a page t
 check is what keeps the late click out (D478). (b) **A masked browser's reads are the agent's** (S111, D404's method):
 before `web.bitmap`, `web.dom.text`, `web.ariaSnapshot` and `web.hitTest` the path reads the agent's `web.browsers`
 once more and hands a browser the entry marks `masked: true` to the agent (`UNSUPPORTED`), which refuses the read
-(§3.6), unless `redact: false`; a `web.browsers` that fails hands the call to the agent too. (c) The inner size the
+(§3.6), unless `redact: false`; a `web.browsers` that fails hands the call to the agent too ((Phase 8, built 2026-10-19,
+EW; P8 §5.2 (iii), (iv)) and so are, while the agent reports masks registered or says nothing about them, the reads of
+a page the agent has no entry for, a `by: {url|title}` selection, and `web.pointer`, `web.dom.click` and `web.dom.fill`
+of a masked or unmapped page; the path's own events of a masked page withhold its URL and detail). (c) The inner size the
 path reads for `web.resize`'s answer is built in the page from `typeof` and two numbers (`{w, h}`, else `null`), so a
 page that redefines `innerWidth` chooses no long answer (S131). (d) The path's PNG scaling decodes and encodes through
 memory-cached image streams (S143, P2 §11.3).
@@ -2845,7 +2857,9 @@ they are there; the threat model's §8 carries the same facts):
 
 **Corrected by the security fixes (2026-10-11; `SECURITY.md` carries the corrected forms, written by the closing documentation
 pass):** (a) also: a mask's `regions` hide the text they cover, two masks combine by union, and a masked label's or button's
-name is withheld with its text (S106, S122, S123); (b) also: a masked browser is masked on every route (S111); (c) reads: V3
+name is withheld with its text (S106, S122, S123); (b) also: a masked browser is masked on every route (S111; (Phase 8,
+built 2026-10-19, EW; P8 §5.2) its events, its selection error data and its action answers included, a browser without a
+view masked while any mask is registered, the CDP path handing unmapped pages and the three actions to the agent); (c) reads: V3
 refuses a point in a minimised frame or a window it owns, a point no screen shows, a point under another window of the JVM
 and `modifiers` (S104, S105, S124), and still presses whatever is at the screen point when the desktop changed in the
 milliseconds between the agent's focus read and the press, when a covering window of another process cannot be seen, and

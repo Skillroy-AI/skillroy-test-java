@@ -16,6 +16,7 @@
 
 package ai.skillroy.testjava.agent.web;
 
+import ai.skillroy.testjava.agent.api.spi.CaptureMask;
 import ai.skillroy.testjava.agent.api.spi.web.WebCapability;
 import ai.skillroy.testjava.agent.api.spi.web.WebEval;
 import ai.skillroy.testjava.agent.api.spi.web.WebEvent;
@@ -102,6 +103,78 @@ class EventsAndTapTest {
             assertEquals(1, ready.size(), "web.ready LOAD for the main frame's load only");
             assertEquals(Harness.args("browser", ref, "url", "app://desk/2", "signal", "LOAD"),
                     ready.get(0).payload());
+        }
+    }
+
+    /**
+     * Phase 8 (phase8-contracts.md 5.2 (i), D549): a masked browser's {@code web.load}, {@code web.ready},
+     * {@code web.console} and {@code web.tap} withhold page data and say {@code masked: true}; {@code name} and
+     * {@code signal}, what a step waits on, stay. The flag is the entry's (no EDT read on the adapter's thread).
+     */
+    @Test
+    void aMaskedBrowsersEventsWithholdPageData() throws Exception {
+        try (Harness h = harness()) {
+            String ref = BrowserIndexTest.ref(h, browser);
+            final Object view = browser.component;
+            h.ctx.spi.register(CaptureMask.class, new CaptureMask() {
+                @Override
+                public boolean masks(java.awt.Component c) {
+                    return c == view;
+                }
+            });
+            h.ctx.call("web.browsers", Harness.args());
+            int stateReads = h.walk.stateReads.get();
+            long seq = h.ctx.events.lastSeq();
+            final long start = seq;
+            browser.fire(WebEvent.navigated("f2", "data:inner-secret"));
+            browser.fire(WebEvent.loadFailed(null, "app://gone-secret", "net::ERR secret"));
+            browser.fire(WebEvent.loadFinished(null, "app://desk/secret"));
+            browser.fire(WebEvent.console("warning", "member secret text", "app://desk/secret.js", 12));
+            List<Event> loads = h.ctx.events.since(seq, ai.skillroy.testjava.protocol.TopicFilter.parse("web.load"),
+                    100);
+            assertEquals(Harness.args("browser", ref, "url", "", "frameKey", "f2", "kind", "NAVIGATED", "masked",
+                    Boolean.TRUE), loads.get(0).payload());
+            assertEquals(Harness.args("browser", ref, "url", "", "kind", "LOAD_FAILED", "masked", Boolean.TRUE),
+                    loads.get(1).payload(), "no error text");
+            List<Event> ready = h.ctx.events.since(seq, ai.skillroy.testjava.protocol.TopicFilter.parse("web.ready"),
+                    100);
+            assertEquals(Harness.args("browser", ref, "url", "", "signal", "LOAD", "masked", Boolean.TRUE),
+                    ready.get(0).payload());
+            Event console = h.ctx.events.awaitTopic("web.console", seq, null, BOUND_MS);
+            assertEquals(Harness.args("browser", ref, "level", "warning", "text", "", "masked", Boolean.TRUE),
+                    console.payload(), "no text, source or line");
+
+            browser.responder = new ScriptedBrowser.Responder() {
+                private final java.util.concurrent.atomic.AtomicBoolean once
+                        = new java.util.concurrent.atomic.AtomicBoolean();
+
+                @Override
+                public CompletableFuture<String> answer(WebEval eval) {
+                    if (eval.expression().contains(".drain(")) {
+                        List<Object> events = once.compareAndSet(false, true)
+                                ? Arrays.<Object>asList(Harness.args("name", "desk.member", "detail",
+                                Harness.args("name", "secret member"))) : Collections.emptyList();
+                        return CompletableFuture.completedFuture(Harness.guarded(Harness.args("events", events,
+                                "dropped", Long.valueOf(0))));
+                    }
+                    return CompletableFuture.completedFuture(Harness.guarded(Harness.args("installed",
+                            Long.valueOf(1))));
+                }
+            };
+            seq = h.ctx.events.lastSeq();
+            h.ctx.map("web.tap", Harness.args("patterns", Arrays.asList("desk.*")));
+            Event tapped = h.ctx.events.awaitTopic("web.tap", seq, null, BOUND_MS);
+            assertNotNull(tapped);
+            assertEquals(Harness.args("browser", ref, "name", "desk.member", "masked", Boolean.TRUE),
+                    tapped.payload(), "the name a step waits on stays, the detail is withheld");
+            Event tapReady = h.ctx.events.awaitTopic("web.ready", seq, null, BOUND_MS);
+            assertEquals(Harness.args("browser", ref, "url", "", "signal", "TAP", "name", "desk.member", "masked",
+                    Boolean.TRUE), tapReady.payload());
+            assertEquals(stateReads, h.walk.stateReads.get(), "no EDT read for an event");
+            for (Event e : h.ctx.events.since(start, ai.skillroy.testjava.protocol.TopicFilter.parse("web.*"),
+                    1000)) {
+                assertFalse(String.valueOf(e.payload()).contains("secret"), String.valueOf(e.payload()));
+            }
         }
     }
 

@@ -487,6 +487,15 @@ runs unchanged (the A37 precedent). `RAW_PROTOCOL` stays reserved.
 
 ---
 
+**A79 (Phase 8, built 2026-10-19, EW; P8 §5.2, D546).** The package adds `BrowserMask {Boolean masks(String tag,
+Object vendorObject, boolean hasView)}` beside `BrowserRegistryAdapter`, the second type a domain pack implements:
+which embedded browsers show a secret, by the seed's tag and the vendor's browser object. `TRUE` masks the browser on
+every route whatever its view; `FALSE` releases it from the view-less rule while it has no view (never overriding a
+`CaptureMask` that names its component); null is no opinion; masks combine by union and a mask that throws masks.
+Called on an agent worker at each index rebuild and before each masked-read check, never on the EDT; it must be fast,
+must not block and must call no method of the vendor object. No AWT and no vendor type in its signature
+(`WebSpiShapeTest`).
+
 ## 4. `skillroy-agent-web` (module id `web`)
 
 ### 4.1 Install, readiness and the browser index
@@ -559,6 +568,13 @@ or default selection that finds the index older than 2 s or nothing in it that m
 
 A browser that disappeared from the index answers `STALE_HANDLE` to a call that names it (P1 §4 `HandleRegistry`);
 as built its ref is released, its subscription cancelled and `web.browsers.changed {added, removed}` published.
+
+**A79 (Phase 8, built 2026-10-19, EW; P8 §5.2, D545, D547).** The index sets each entry's `masked` flag at every
+rebuild: while no `CaptureMask` and no `BrowserMask` is registered nothing is masked and no mask is called; else a
+`BrowserMask` `TRUE` masks, a browser the adapter reports no Swing component for is masked unless a `BrowserMask`
+releases it (the view-less rule, no EDT read), and the components of the other entries are judged by one bounded EDT
+read for all of them together (`SeedWalk.masked`); a read that fails or has no time masks them. The per-call reads
+refresh the flag; the events and the selection read it.
 
 ### 4.2 Primitives
 
@@ -647,6 +663,20 @@ is ready (a property read of an element that does not exist yet) therefore waits
 2026-10-07 the CDP path ended the wait at the first poll that threw, with `SCRIPT_ERROR`, and the agent polled on
 through a compile error until its time was up.)
 
+**A79 (Phase 8, built 2026-10-19, EW; P8 §5.2, D545, D548, D550, D637).** A masked browser (a `CaptureMask` names its
+component, a `BrowserMask` names it, or it has no view while a mask is registered and no `BrowserMask` releases it) is
+masked on every route: `web.browsers` lists it `masked: true` with `url: ""`, no `title` and its frames' names and
+URLs blank, and the answer gains `masksRegistered: true|false` (what the walk answered for the call); the four reads
+`web.bitmap`, `web.dom.text`, `web.ariaSnapshot` and `web.hitTest` answer `INVALID_PARAMS {param: "redact", reason:
+"masked", browser}` before the page is evaluated unless `redact: false` (a view-less JCEF browser's `web.bitmap` is
+refused as masked before the adapter's `CAPABILITY_UNAVAILABLE`); `by: {url}` and `by: {title}` never match it (its
+title is not read) and the selection error data's summaries say `url: ""`, no `title`, `masked: true`, while `by:
+{tag}`, `by: {nativeId}` and `browser: <ref>` still select it; and the actions that stay allowed on it answer without
+page data: `web.pointer` carries no `hit` (the page is not hit-tested), `web.dom.click`'s `clicked`, `web.dom.fill`'s
+`filled` and an `AMBIGUOUS` answer's `candidates` keep `role` and `tag` only (`name`, `id` and `type` dropped, `count`
+kept). The three actions declare `redact` (a person's argument, `CallPolicy.MASKED_WEB_READS`): `false` keeps today's
+answers. `web.evaluate` and `web.waitFlag` stay S111's recorded residual.
+
 ### 4.3 Events
 
 Published on the agent's `EventBus` with source `web`; payload `browser` is the browser's ref. (As built 2026-10-07:
@@ -734,6 +764,14 @@ the page-sized first copy of each console event that arrives before the stop tak
 `Page` events whose URL a page chooses (bounded by Chromium's own URL limit and by item 1, not budgeted). Tests:
 `EventBudgetTest`, `JcefConsoleBudgetFakeTest` (both channels; the resumption), `JxBrowserConsoleBudgetFakeTest`, and
 the kit's item 14 (§10.1), which runs against real JCEF in the image. D266, D267 (`design/phase6-contracts.md` §16).
+
+**A79 (Phase 8, built 2026-10-19, EW; P8 §5.2 (i), D549).** A masked browser's events withhold page data, read from the
+entry's flag (a volatile read, no EDT read on the adapter's thread or the tap poller): `web.load {browser, url: "",
+frameKey?, kind, masked: true}` (no `error`), `web.ready {browser, url: "", signal, name?, masked: true}`, `web.console
+{browser, level, text: "", masked: true}` (no `source`, `line` or `truncated`), `web.tap {browser, name, masked: true}`
+(no `detail` or `truncated`); `web.closed` and `web.browsers.changed` are unchanged. A step that waits on `web.ready
+{signal: LOAD}` or `web.tap {name}` of a masked browser still completes. Every payload then passes the ring's mask pass
+(P1 §5, A78).
 
 ### 4.4 Capabilities
 
@@ -1272,6 +1310,20 @@ needs a deferred attach (D65 extended: no attach until the agent reports an id) 
 the residual is accepted by the owner (B28, 2026-10-10; D269, `design/phase6-contracts.md` §16). Tests: `TargetProbeTest`, `CdpAttachTest`, `CdpWebPathOpenTest`; `CdpAttachSoakIT`
 in the image.
 
+**A80 (Phase 8, built 2026-10-19, EW; P8 §5.3, D552 to D555).** `CdpOptions` gains `allowDefaultOverrides` (a seventh
+component, default false, `withAllowDefaultOverrides`; the six-component constructor kept): the operator's opt-in,
+read by `CdpWebPath.open` from the controller's system property `skillroy.cdp.allowDefaultOverrides`, never a
+scenario's or a model's. The package-private `ConnectSupport` decides once per JVM, by field presence on
+`BrowserType.ConnectOverCDPOptions`, which setters may be called, and `CdpAttach` calls each only when its field
+exists: without `isLocal` (before 1.58) the attach connects without it; without `noDefaults` (before 1.60) it is
+refused `PROTOCOL` before anything starts unless the options allow the overrides (then it connects without it and logs
+them at WARNING); without `artifactsDir` (before 1.61) no directory is passed. A `LinkageError` (or any `Error` that is
+not a `VirtualMachineError`) from the driver's start or the connect closes the pending Playwright and ends the attach's
+thread before `PROTOCOL` ("the Playwright on the class path (<version>) lacks …; nothing was attached"), so an
+incompatible line leaves no driver process behind. The floor: built and tested with Playwright 1.63.0; the CDP path
+runs with 1.61 and later in full, with 1.60 without tracing, with 1.58 and 1.59 only under the operator's opt-in; a line
+below 1.58 is refused by the same rule and is otherwise untried; only 1.63.0 was run.
+
 ### 5.2 `CdpWebPath`: the CDP implementation of the web verbs
 
 `skillroy-cdp` registers `…cdp.CdpWebPath` through `META-INF/services/ai.skillroy.testjava.scenario.web.WebPath`.
@@ -1340,6 +1392,20 @@ as well (§6.3), so a call the path served made three `evt.query` calls, the pat
 2026-10-08: the path reads no agent sequence; `seqBefore` and `seqAfter` are 0 (`CdpWebPath.NOT_READ`), and the
 executor writes the sequence it read before the call in place of both, §6.3, §16.2; a served call makes one
 `evt.query`, the executor's, and an agent whose `evt.query` fails no longer makes the path refuse a call.)
+
+**(Phase 8, built 2026-10-19, EW; P8 §5.2 (iii), (iv), §5.3, D548, D551, D553, D637.)** `open` returns the reason
+"the Playwright on the class path (<version or unknown>) cannot attach without overriding the application's browser
+context (no noDefaults; Playwright 1.60 or later has it); set -Dskillroy.cdp.allowDefaultOverrides=true to accept the
+overrides" before any driver starts on a line without `noDefaults` and without the opt-in (`WebRun` falls back to the
+agent path under `auto` and refuses `PRECONDITION_FAILED` under a pinned `cdp`), and opens a traced run untraced on a
+line without `artifactsDir` (no tracing starts, `saveTrace` writes nothing). `openInfo` gains `playwright` (the jar's
+`Implementation-Version`, or null) and `connectOptions {noDefaults: true | "unsupported", isLocal: true |
+"unsupported", artifactsDir: true | false | "unsupported", defaultOverridesAccepted?: true}`. The path keeps the agent's
+`web.browsers.masksRegistered` of its last read (`AgentBrowser.Listing`; an answer without it counts as true); unless
+`redact: false`, the four reads and `web.pointer`, `web.dom.click` and `web.dom.fill` of a page the agent reports
+`masked`, or of a page it has no entry for while masks are registered, are handed to the agent (`UNSUPPORTED`), and a
+`by: {url|title}` selection is handed to the agent while masks are registered; the path's own events of a masked page
+carry `url: ""`, no `detail` and `masked: true`.
 
 ### 5.3 Frozen targets
 
@@ -1578,6 +1644,11 @@ recorded as saved, `{ok: true, file}`, only when the path wrote a non-empty file
 them and never passes them through the run's secret mask (§8.3).
 
 ---
+
+**(Phase 8, built 2026-10-19, EW; P8 §5.2, §5.3.)** `failure/web-browsers.json` holds the agent's listing as it is,
+so a masked browser (a view-less one included while any mask is registered) appears with `masked: true` and no URL or
+title, and `masksRegistered` is in it; on a Playwright line without `artifactsDir` a traced run's `web.trace` record
+says `{ok: false, reason: "the cdp path wrote no trace"}` (the path ran untraced).
 
 ## 7. Scenario YAML and `plan.json` version 4
 
@@ -1823,6 +1894,12 @@ card: the component the host names `front` whose parent is the deck named `deck`
 nothing else; it reads the two names only, on the EDT, and changes nothing. Without the option, or with another value,
 it registers no mask (and so the web module makes no masked read, P7 §3.6), and install still touches no AWT class.
 Only P7 §13.2 item 10's gap-95 check (d) sets the option, on a fresh attach after `agent.disable`.
+
+**(Phase 8, built 2026-10-19, EW; P8 §5.2, §12.3.)** The option `webhost.mask` takes a comma-separated list: `front`
+(the `CaptureMask` `FrontCardMask`, as before), `release-detached` (a `BrowserMask`, `DetachedRelease`, answering FALSE
+for the tag `detached` and null otherwise) and `tag-back` (a `BrowserMask`, `BackTagMask`, answering TRUE for the tag
+`back` and null otherwise); a value named twice registers once; an unknown value is logged at WARN and ignored. The
+module's version becomes 0.3.0 in step R.
 
 ### 9.3 `skillroy-sample-web-host-scenarios` (Java 25): pack, scenarios, acceptance
 

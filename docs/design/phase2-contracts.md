@@ -335,6 +335,10 @@ name may be captured once per scenario and may not also appear in `resolve`.
 A pack verb captures through `PlannedCall.withCapture(CaptureSpec)` (§6.1) on a call whose sync is `EVENT` or whose
 primitive is `sync.await`.
 
+(Phase 8, built 2026-10-19, EW; P8 §5.1) A slot captures the payload as the agent's ring stores it: masked at publish by
+the secret-key rule and the registered `MaskPolicy`s (`event:<topic>`), so a field a pack masks in an event is
+captured masked; a pack must not mask a field a wait or a capture matches on.
+
 ---
 
 ## 4. `credentials.yaml`
@@ -1241,7 +1245,9 @@ sample it puts into provenance, whichever channel the row came from: a pack whos
 `MaskPolicy` still cannot leak the column through a bindings file. A pack should declare the same rule on both
 sides (the sample does, §13.2 and §13.3): the controller does not re-apply `rowMasks()` to the cells a `db` check reads
 over the agent channel (clarified 2026-10-03 with Phase 3's aggregates, P3 §7); there the agent's `MaskPolicy` is the
-mask.
+mask. (Phase 8, built 2026-10-19, EW; P8 §5.1) The agent's `MaskPolicy`s also mask every event payload at publish
+(`event:<topic>`); the controller applies no event mask of its own: what a run records of an event is what the ring
+stored. The CDP path's own events never pass the agent (gap 138).
 
 ### 7.4 Stored-row checks
 
@@ -2034,6 +2040,15 @@ owner's `{text}` locator (a text field's content) is never recorded in an entry.
 `failure/image-<label>-expected.png` and `-actual.png` hold the compared rasters with the comparison's masks blanked,
 so a step's `mask` hides its rectangle in run output as in the baseline.
 
+**(Phase 8, built 2026-10-19, EW; P8 §5.1, §11 rule 3.)** Never written: a personal value a registered `MaskPolicy`
+masks, in any event (the agent masks every payload at publish under `event:<topic>` and the dotted column, before the
+ring stores it, so `run.jsonl`'s `call`, `sync`, `prompt` and `capture` records, `failure/events.json`, the JUnit XML
+and every client see it masked), and a value under a secret-looking map key of any event payload (the core's key rule,
+whether or not a policy is registered). The masks' list is therefore: `SecretMask` (credentials by value), the key
+rule, `PromptMask`'s column rule, the agent's `MaskPolicy` on rows (`data.query`), hooks (`hook.<id>`), Byteman
+bindings (`rule.<name>`) and events (`event:<topic>`), and `rowMasks()` over JDBC. `skillroy-junit`'s `OutputScan`
+plants a value and scans a run (`Scope.EVENTS` for event-carrying outputs).
+
 ### 11.5 Reserved for interactive use (not built)
 
 The type names `ExecutorSession` (with `StepOutcome execute(PlannedCall call)`: one call with the step protocol,
@@ -2280,7 +2295,10 @@ or inactive staff member and the member's own flag (`Staff.autoSignOn()`, which 
 `MaskPolicy` is `PasswordMask`, registered in `install` and removed in `uninstall`: source exactly `lending` and a
 column label equal to `password` ignoring case; a non-null value becomes `<redacted>`, null stays null, and a column
 renamed in the statement (`password AS p`) is not masked, as for any rule by column name. The module's tests use
-`skillroy-agent-data` in test scope to show that the real `data.query` path returns no staff password.
+`skillroy-agent-data` in test scope to show that the real `data.query` path returns no staff password. (Phase 8, built
+2026-10-19, EW; P8 §5.1, §12.2) A second rule: `<personal>` for the source id exactly `event:staff.signedOn` and the
+column `name` (the event the module publishes at a sign-on, `{code, name}`); `code` and every other topic pass
+(`PasswordMaskTest`).
 `LendingModule.VERSION` stays `0.1.0`.
 
 ### 13.3 Pack: queries, resolvers, verifiers, oracles, fingerprinter, tables
