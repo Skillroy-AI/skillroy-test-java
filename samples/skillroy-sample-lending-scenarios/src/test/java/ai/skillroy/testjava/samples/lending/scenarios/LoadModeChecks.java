@@ -1147,8 +1147,10 @@ abstract class LoadModeChecks {
         List<String> all = new ArrayList<>(List.of("basic-loan", "basic-loan-ui", ScenarioB.ID, ScenarioA.ID,
                 ScenarioC.ID, ScenarioE.ID, ScenarioD.ID, "loan-table-visual-check", "vision-live-only",
                 "sign-on-by-number-pad", "keypad-image",
-                // phase8-contracts.md 12.4, 13.2 item 32 (ES; this branch's truth, D641)
-                "semantic-input-warnings", "sign-on-any", "scan-checked", "device-scan"));
+                // phase8-contracts.md 12.4, 13.2 item 32 (ES)
+                "semantic-input-warnings", "sign-on-any", "scan-checked", "device-scan",
+                // phase8-contracts.md 12.4 (EX)
+                "loan-counts-and-events"));
         List<String> ids = all.stream().filter(id -> !id.equals("loan-table-visual-check")
                 && !id.equals("vision-live-only") && !id.equals("device-scan")).toList();
         assertEquals(all.stream().sorted().toList(), names.subList(0, all.size()).stream().sorted().toList(),
@@ -1484,6 +1486,63 @@ abstract class LoadModeChecks {
         Map<?, ?> printer = ((List<?>) devices.get("devices")).stream().map(d -> (Map<?, ?>) d)
                 .filter(d -> "printer".equals(d.get("id"))).findFirst().orElseThrow();
         assertFalse(printer.containsKey("rungs"), "the printer's entry is unchanged");
+    }
+
+    // ------------------------------------------------------------------ phase8-contracts.md 13.2 items 32, 33 (EX)
+
+    /**
+     * phase8-contracts.md 13.2 items 32 and 33 (slot 176): {@code loan-counts-and-events} PASS without sleeping, its
+     * one {@code capture {source: facts}} taken on the open loan after the first scan ({@code scans: 1},
+     * {@code signOffs: 0}, {@code lines: 1}, {@code qty: "1"}), every expectation held; the real agent's stamping
+     * behind the source regex and the correlation-id filter (the Barcode acknowledgement of step s2 carries
+     * {@code loan-counts-and-events/s2/1}); the agent-side {@code {has}} rule: the waitFor ended on the DEPOSIT
+     * {@code input.requested} the DUE key produced, a raw {@code sync.await} from that event's sequence answers it for
+     * {@code {has: Key.DEPOSIT}}, is TIMEOUT for {@code {has: Key.RETURN}} and INVALID_PARAMS {@code {param: match}}
+     * for an unknown operator; the desk signed off after.
+     */
+    @Test
+    @Order(176)
+    @SuppressWarnings("unchecked")
+    void countsAndEventsScenarioPasses() throws Exception {
+        String id = "loan-counts-and-events";
+        Runs.Outcome outcome = Runs.run(client(), Runs.committed(id), ItEnv.runDir(mode().slug, id));
+        Runs.assertPassedWithoutSleeping(outcome);
+        List<Map<String, Object>> log = Runs.runLog(outcome.dir());
+        List<Map<String, Object>> captures = log.stream().filter(r -> "capture".equals(r.get("type"))).toList();
+        assertEquals(1, captures.size(), String.valueOf(captures));
+        assertEquals("facts", captures.get(0).get("source"));
+        assertEquals("s3", captures.get(0).get("step"));
+        assertEquals(Map.of("lines", 1L, "qty", "1", "scans", 1L, "signOffs", 0L), captures.get(0).get("value"));
+        assertEquals(11L, log.stream().filter(r -> "expect".equals(r.get("type"))).count(), "every one held");
+        Map<String, Object> wait = log.stream().filter(r -> "call".equals(r.get("type"))
+                && "sync.await".equals(r.get("primitive"))).findFirst().orElseThrow();
+        assertEquals(Boolean.TRUE, wait.get("ok"), String.valueOf(wait));
+        Map<String, Object> params = (Map<String, Object>) wait.get("params");
+        assertEquals(Map.of("state", "DEPOSIT", "validInputs", Map.of("has", "Key.DEPOSIT")), params.get("match"),
+                "the match as sent");
+        Map<String, Object> deposit = (Map<String, Object>) wait.get("value");
+        assertEquals("input.requested", deposit.get("topic"));
+        long depositSeq = ((Number) deposit.get("seq")).longValue();
+        List<Object> acks = (List<Object>) value(client().call("evt.query", Map.of("since", depositSeq - 200,
+                "topics", "input.acked", "limit", 200L), CALL)).get("events");
+        assertTrue(acks.stream().map(e -> (Map<String, Object>) e).anyMatch(e -> "lending".equals(e.get("source"))
+                && "Barcode".equals(((Map<String, Object>) e.get("payload")).get("source"))
+                && String.valueOf(e.get("correlationId")).equals(id + "/s2/1")), "the agent stamps the call's"
+                + " correlation id on the acknowledgement it publishes: " + acks);
+        Map<String, Object> answered = value(client().call("sync.await", Map.of("topics", "input.requested", "since",
+                depositSeq - 1, "match", Map.of("state", "DEPOSIT", "validInputs", Map.of("has", "Key.DEPOSIT")),
+                "timeoutMs", 500L), CALL));
+        assertEquals(depositSeq, ((Number) answered.get("seq")).longValue(), "a list member equal by text");
+        AgentRpcException timeout = assertThrows(AgentRpcException.class, () -> client().call("sync.await", Map.of(
+                "topics", "input.requested", "since", depositSeq - 1, "match", Map.of("state", "DEPOSIT", "validInputs",
+                        Map.of("has", "Key.RETURN")), "timeoutMs", 500L), CALL));
+        assertEquals(ErrorCodes.TIMEOUT, timeout.error().code(), "DEPOSIT does not take RETURN");
+        AgentRpcException invalid = assertThrows(AgentRpcException.class, () -> client().call("sync.await", Map.of(
+                "topics", "input.requested", "since", depositSeq - 1, "match", Map.of("validInputs", Map.of("in",
+                        List.of("x"))), "timeoutMs", 20_000L), CALL));
+        assertEquals(ErrorCodes.INVALID_PARAMS, invalid.error().code());
+        assertEquals("match", ((Map<?, ?>) invalid.error().data()).get("param"), "refused before any wait");
+        assertSignedOff();
     }
 
     // ------------------------------------------------------------------ item 7

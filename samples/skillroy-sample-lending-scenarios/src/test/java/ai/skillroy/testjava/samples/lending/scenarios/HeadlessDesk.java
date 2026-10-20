@@ -25,6 +25,7 @@ import ai.skillroy.testjava.protocol.Capability;
 import ai.skillroy.testjava.protocol.CapabilityState;
 import ai.skillroy.testjava.protocol.ErrorCodes;
 import ai.skillroy.testjava.protocol.Event;
+import ai.skillroy.testjava.protocol.PayloadMatch;
 import ai.skillroy.testjava.protocol.PrimitiveDescriptor;
 import ai.skillroy.testjava.protocol.Protocol;
 import ai.skillroy.testjava.protocol.RpcError;
@@ -72,7 +73,6 @@ import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.TreeMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -246,17 +246,9 @@ final class HeadlessDesk implements AgentConnection {
         }
     }
 
+    /** The agent's payload rule, {@code PayloadMatch} (phase8-contracts.md 8.9). */
     private static boolean matches(Event event, Map<String, Object> match) {
-        if (match == null) {
-            return true;
-        }
-        Map<String, Object> payload = event.payload() == null ? Map.of() : event.payload();
-        for (Map.Entry<String, Object> e : match.entrySet()) {
-            if (!Objects.equals(String.valueOf(e.getValue()), String.valueOf(payload.get(e.getKey())))) {
-                return false;
-            }
-        }
-        return true;
+        return PayloadMatch.matches(event.payload(), match);
     }
 
     private synchronized Map<String, Object> query(Map<String, Object> p) {

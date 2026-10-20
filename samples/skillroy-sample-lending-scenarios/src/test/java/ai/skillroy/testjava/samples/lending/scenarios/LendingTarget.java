@@ -78,7 +78,13 @@ final class LendingTarget implements AutoCloseable {
          * {@code -Dlending.scannerDriver=true}, so that the scanner device's PHYSICAL rung is there; no other leg sets
          * it, so the goldens hold {@code lending.scanner.physical} {@code UNAVAILABLE}.
          */
-        JAVAAGENT_SCANNER("javaagent-scanner", LoadMode.JAVAAGENT);
+        JAVAAGENT_SCANNER("javaagent-scanner", LoadMode.JAVAAGENT),
+        /**
+         * The small-ring leg (phase8-contracts.md 13.2 item 34): {@code -javaagent} with the agent option
+         * {@code eventRing=200}, so that a scenario that publishes more than the ring holds meets the {@code events}
+         * fact root's refusal; no other leg sets it.
+         */
+        JAVAAGENT_SMALL_RING("javaagent-small-ring", LoadMode.JAVAAGENT);
 
         final String slug;
         final LoadMode loadMode;
@@ -99,6 +105,8 @@ final class LendingTarget implements AutoCloseable {
     static final String ROBOT_OPTION = "robot";
     /** The desk's launch property of its scanner driver (phase8-contracts.md 12.1). */
     static final String SCANNER_DRIVER = "lending.scannerDriver";
+    /** The small-ring leg's ring (phase8-contracts.md 13.2 item 34): the agent option {@code eventRing}. */
+    static final String SMALL_RING = "200";
     /** The agent option naming the user's Byteman jar (phase6-contracts.md 3.7, 7.4). */
     static final String BYTEMAN_JAR = "byteman.jar";
     /**
@@ -227,10 +235,11 @@ final class LendingTarget implements AutoCloseable {
                 ? Map.of("discoveryDir", dir.toString(), OPTIONAL_MODULES, HOOKS_LEG_MODULES, BYTEMAN_JAR, bytemanJar())
                 : mode == Mode.JAVAAGENT_ROBOT ? Map.of("discoveryDir", dir.toString(), ROBOT_OPTION, "true")
                 : mode == Mode.JAVAAGENT_TOOLS ? Map.of("discoveryDir", dir.toString(), ROBOT_OPTION, "true")
+                : mode == Mode.JAVAAGENT_SMALL_RING ? Map.of("discoveryDir", dir.toString(), "eventRing", SMALL_RING)
                 : Map.of("discoveryDir", dir.toString());
         switch (mode) {
-            case JAVAAGENT, JAVAAGENT_HOOKS, JAVAAGENT_ROBOT, JAVAAGENT_TOOLS, JAVAAGENT_SCANNER ->
-                    builder.javaAgent(home, agentOptions);
+            case JAVAAGENT, JAVAAGENT_HOOKS, JAVAAGENT_ROBOT, JAVAAGENT_TOOLS, JAVAAGENT_SCANNER,
+                    JAVAAGENT_SMALL_RING -> builder.javaAgent(home, agentOptions);
             case JAVA_TOOL_OPTIONS -> builder.javaAgent(home, agentOptions).viaJavaToolOptions(true);
             case ATTACH -> {
                 // Launched without the agent; it is attached once the JVM runs.

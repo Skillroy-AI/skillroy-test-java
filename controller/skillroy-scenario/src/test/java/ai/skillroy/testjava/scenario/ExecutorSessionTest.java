@@ -111,6 +111,40 @@ class ExecutorSessionTest {
         }
     }
 
+    /**
+     * phase8-contracts.md 13.1 row 40 (8.7, decision D605): a session runs {@code captureFacts} where it stands, binds
+     * the slot (the step's {@code captured} detail carries it, a later step reads it), applies its mask always, and
+     * checks and reads with the Phase 8 paths and matchers.
+     */
+    @Test
+    void captureFactsInASessionBindsTheSlotUnderTheSessionsMask() throws Exception {
+        try (ExecutorSession session = fx.open()) {
+            assertEquals(Status.PASS, session.execute("enter", Map.of("value", "B2"), PERSON).status());
+            StepOutcome capture = session.execute("captureFacts", Map.of("slot", "before", "fields", Map.of("acks",
+                    Map.of("size", "events[*topic=input.acked]"), "total", "loan.total")), MODEL);
+            assertEquals(Status.PASS, capture.status(), capture.message());
+            assertEquals(0, capture.executed(), "no call");
+            assertEquals(Map.of("captured", Map.of("before", Map.of("acks", 1L, "total", "7.00"))), capture.detail());
+            assertEquals(Status.PASS, session.execute("enter", Map.of("value", "C3"), PERSON).status());
+            StepOutcome delta = session.execute("expect", Map.of("events[*topic=input.acked]", Map.of("size",
+                    Map.of("gt", "$before.acks"))), MODEL);
+            assertEquals(Status.PASS, delta.status(), delta.message());
+            assertTrue(session.check("loan.lines", Map.of("containsWhere", Map.of("code", "B2", "qty", 2L)), MODEL)
+                    .held());
+            assertTrue(session.check("events[*topic=input.acked][*payload.source=Entry]", Map.of("size", Map.of(
+                    "anyOf", List.of(2L, 3L))), MODEL).held());
+            assertEquals(List.of(Map.of("code", "B2", "qty", 2L)), session.fact("loan", "lines[*code=B2]"));
+            fx.state.put("pin", TestCredentials.PW_100);
+            SessionFixture.resolveItemAndAssistant(session, PERSON);
+            StepOutcome secret = session.execute("captureFacts", Map.of("slot", "pin", "fields", Map.of("pin",
+                    "state.pin")), PERSON);
+            assertEquals(Status.FAIL, secret.status(), "the session's mask always: " + secret.message());
+            assertEquals(FailureKind.ASSERTION, secret.failureKind());
+            assertEquals("captureFacts pin.pin: " + Matchers.HOLDS_A_SECRET, secret.message());
+            assertFalse(journalText().contains(TestCredentials.PW_100));
+        }
+    }
+
     @Test
     void aRawCallIsOneStepWithItsOwnSyncAndTimeout() throws Exception {
         try (ExecutorSession session = fx.open()) {

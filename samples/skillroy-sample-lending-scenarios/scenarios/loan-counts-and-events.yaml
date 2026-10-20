@@ -1,0 +1,45 @@
+# Counts, deltas, membership and the agent's own events as expectations (phase8-contracts.md 8, 12.4): sign on, scan
+# a garden spade once, capture the counts the loan and the event window hold then, scan it again, and assert what
+# changed: one line, more of it, one more Barcode acknowledgement; a deposit line where; the DEPOSIT state's valid
+# inputs by membership; a JSON text read back through [json]; in verify, nothing that must not have happened.
+# Seed A fixtures: assistant 100 (its password comes from credentials.yaml); YRD-001 at 3.50, in no active waiver
+# rule. The counts are captured on the open loan, so that a desk that recorded an earlier loan gives the same result.
+scenario: loan-counts-and-events
+pack: lending
+tags: [smoke, expectations]
+requires: [lending.input, lending.state, lending.loan, lending.slip]
+launchProperties: { lending.seed: A }
+resolve:
+  assistant: { fixture: { code: "100" }, credential: { realm: staff, key: code } }
+  item:      { fixture: { code: YRD-001, barcode: "5000000000017", deposit: "3.50" } }
+steps:
+  - signOn: { staff: $assistant }
+  - scan: { item: $item }
+  - captureFacts:
+      slot: before
+      fields:
+        scans:    { size: "events[*topic=input.acked][*payload.source=Barcode]" }
+        signOffs: { size: "events[*topic=input.acked][*payload.source=Key.SIGN_OFF]" }
+        lines:    { size: "loan.lines" }
+        qty:      "loan.lines[code=$item.code].qty"
+  - scan: { item: $item }
+  - expect:
+      "loan.lines[*code=$item.code]": { size: 1 }
+      "loan.lines": { size: $before.lines }
+      "loan.lines[code=$item.code].qty": { gt: $before.qty }
+      "events[*topic=input.acked][*payload.source=Barcode]": { size: { gt: $before.scans } }
+  - expect:
+      "loan.lines": { containsWhere: { code: $item.code, qty: 2, unitDeposit: $item.deposit } }
+  - key: { action: DUE }
+  - waitFor: { topic: input.requested, match: { state: DEPOSIT, validInputs: { has: Key.DEPOSIT } } }
+  - mark: { label: json-probe, attrs: { value: '{"qty":2,"code":"YRD-001"}' } }
+  - deposit: { amount: "10.00" }
+verify:
+  - { "loan.authorisations[*kind=RETURN_OVERRIDE]": { size: 0 } }
+  - { "loan.deposits": { containsWhere: { amount: "10.00" } } }
+  - { "slip.last.text": { anyOf: [ { contains: "NOT ON ANY SLIP" }, { contains: "DEPOSIT DUE" } ] } }
+  - { "events[*source~^lending$][*topic=loan.posted]": { size: 1 } }
+  - { "events[*topic=input.acked][*payload.source=Key.SIGN_OFF]": { size: $before.signOffs } }
+  - { "events[*topic=trace.mark][*payload.label=json-probe].last.payload.attrs.value[json].qty": 2 }
+on_prompt: { unexpected: fail }
+timeouts: { step: 30s }

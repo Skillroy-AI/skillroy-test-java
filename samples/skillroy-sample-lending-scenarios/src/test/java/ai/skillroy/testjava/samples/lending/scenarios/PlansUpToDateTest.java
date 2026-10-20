@@ -83,14 +83,15 @@ class PlansUpToDateTest {
     void everyCommittedPlanMatchesItsScenario() throws Exception {
         List<Path> scenarios = committedScenarios();
         assertEquals(List.of("basic-loan-ui.yaml", "basic-loan.yaml", "borrow-2-waive-1-slip.yaml",
-                "device-scan-physical.yaml", "device-scan.yaml", "keypad-image.yaml", "loan-table-visual-check.yaml",
-                "return-over-limit-needs-supervisor.yaml", "return-refunds-deposit.yaml",
-                "return-within-limit-observed.yaml", "scan-checked.yaml", "semantic-input-warnings.yaml",
+                "device-scan-physical.yaml", "device-scan.yaml", "keypad-image.yaml", "loan-counts-and-events.yaml",
+                "loan-table-visual-check.yaml", "return-over-limit-needs-supervisor.yaml",
+                "return-refunds-deposit.yaml", "return-within-limit-observed.yaml", "scan-checked.yaml",
+                "semantic-input-warnings.yaml",
                 "sign-on-any.yaml", "sign-on-by-number-pad.yaml", "supervisor-return-llm-sql.yaml",
                 "vision-live-only.yaml"),
                 scenarios.stream().map(p -> p.getFileName().toString()).toList(), "the Phase 7 scenarios with the"
-                + " earlier ones (phase7-contracts.md 12.4) and ES's of phase8-contracts.md 12.4, scanner/'s one"
-                + " among them (this branch's truth, D641)");
+                + " earlier ones (phase7-contracts.md 12.4) and Phase 8's (phase8-contracts.md 12.4: ES's five,"
+                + " scanner/'s one among them, and EX's one; D641)");
         // skillroy author writes <out>/plan/<id>.plan.json; a scenario it wrote into scenarios/ has its plan moved here
         // with the others, so that a plan's default bindings root (D31: beside its directory) is bindings/.
         assertFalse(Files.exists(moduleDir().resolve("scenarios").resolve("plan")), "the committed plans are in plan/");
@@ -129,7 +130,9 @@ class PlansUpToDateTest {
     static final List<String> SEED_A = List.of("basic-loan", "basic-loan-ui", "sign-on-by-number-pad",
             "loan-table-visual-check", "vision-live-only",
             // phase8-contracts.md 12.4 (ES)
-            "semantic-input-warnings", "sign-on-any", "scan-checked", "device-scan", "device-scan-physical");
+            "semantic-input-warnings", "sign-on-any", "scan-checked", "device-scan", "device-scan-physical",
+            // phase8-contracts.md 12.4 (EX)
+            "loan-counts-and-events");
 
     /**
      * Every call is followed by an event wait or the UI settle, or is itself a wait: a {@code sync.await}, or the
@@ -158,8 +161,10 @@ class PlansUpToDateTest {
                             && calls.get(i - 1).sync() == Sync.EVENT;
                     // phase7-contracts.md 8.1: an expectImage's capture is a read, compared at once (sync NONE).
                     boolean imageRead = call.primitive().equals("swing.capture") && step.verb().equals("expectImage");
+                    // phase8-contracts.md 8.5, 12.4: a mark publishes its event before it answers (sync NONE).
+                    boolean mark = call.primitive().equals("trace.mark") && step.verb().equals("mark");
                     boolean waitedOn = call.sync() != Sync.NONE || call.primitive().equals("sync.await")
-                            || settlesAnAwaitedUiCall || imageRead;
+                            || settlesAnAwaitedUiCall || imageRead || mark;
                     assertTrue(waitedOn, plan.scenarioId() + " " + step.id() + ": every call is followed by an "
                             + "event wait or the UI settle, or is itself a wait: " + call);
                 }
@@ -274,12 +279,12 @@ class PlansUpToDateTest {
         try (Stream<Path> files = Files.list(dir)) {
             List<Path> yamls = files.filter(p -> p.getFileName().toString().endsWith(".yaml")).sorted().toList();
             assertEquals(List.of("accept-unknown-code.yaml", "click-fallback-degraded.yaml", "click-strict-fails.yaml",
-                    "guarded-unavailable.yaml", "min-rung-without-ladder.yaml", "missing-capability.yaml",
-                    "modal-open-step.yaml", "no-item-in-range.yaml", "no-rule-of-kind.yaml", "prompt-left-open.yaml",
-                    "return-within-limit.yaml", "sign-on-any-password-required.yaml",
+                    "count-delta-fails.yaml", "guarded-unavailable.yaml", "min-rung-without-ladder.yaml",
+                    "missing-capability.yaml", "modal-open-step.yaml", "no-item-in-range.yaml", "no-rule-of-kind.yaml",
+                    "prompt-left-open.yaml", "return-within-limit.yaml", "sign-on-any-password-required.yaml",
                     "vetoed-click.yaml", // Phase 8, EA (phase8-contracts.md 12.4)
                     "waiver-guard-fails.yaml", "warning-not-accepted.yaml", "wrong-expectation.yaml"),
-                    yamls.stream().map(p -> p.getFileName().toString()).toList(), "EA's one and ES's four of"
+                    yamls.stream().map(p -> p.getFileName().toString()).toList(), "EA's one, ES's four and EX's one of"
                     + " phase8-contracts.md 12.4 among them (D641)");
             for (Path yaml : yamls) {
                 String refusal = COMPILE_ERRORS.get(yaml.getFileName().toString());

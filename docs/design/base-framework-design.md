@@ -298,6 +298,8 @@ acknowledgement never completes a later call's wait. **The step protocol carries
 was asked with a caveat (the input queued, its value coerced or dropped, another question answered by it, a pack's own
 code) says so in its result's envelope, and the step accepts the code (`accept: [CODE]`) or fails.
 
+**(Phase 8, built 2026-10-19, EX; P8 §8.6, §8.9.)** A payload match entry is a scalar (equal by text) or `{has: scalar}` (a list member equal by text), one Java 8 rule (`PayloadMatch`) shared by the agent and every controller-side wait. The agent's events are also a fact: the base root `events` is the bus's window since the run's start mark, so a count, a delta or "this never happened" (`{size: 0}`) is an expectation, and a window the ring no longer holds whole is a refusal, never a wrong pass.
+
 ### 2.6 Extension SPI and hook policy
 
 ```java
@@ -407,6 +409,8 @@ refuses (the vision module's scenario player runs it); the four verbs are base v
 locator with an optional region, row and image guard, `expectImage` to one redacted capture compared exactly with the
 baseline of the target's render key); `region` is a sibling argument of `by` on `pointer` and `expectImage`, a region id
 resolved by the agent, while `by`'s grammar is unchanged.
+
+**(Phase 8, built 2026-10-19, EX; P8 §8.)** Expectations count, compare and capture: a list filter `[*field=value]` (dotted filter fields) counted with `size`, the base verb `captureFacts` (a slot from facts, read once where the step stands) and a delta against it (`{size: {gt: $before.n}}`), `anyOf` and `containsWhere`, a `[json]` segment, the `events` root; negation is a count, not a wait. Plan version 7, with strict step and call keys.
 
 A fluent Java DSL is the secondary surface and produces the same plan (not built in Phase 1). Gherkin is deferred: it pays only when non-developers author scenarios (ai-inference §F20).
 
@@ -528,7 +532,7 @@ interface DomainPack {
 }
 ```
 
-A `FactProvider` names a root usable in expectation paths (`loan`, `slip`, `app`, `ui`) and how to fetch its current value. A pack is found by `ServiceLoader` on the controller's class path. Its agent half, the `AgentModule` with the same id, is named in the load options or, after Phase 1, uploaded through `POST /modules`.
+A `FactProvider` names a root usable in expectation paths (`loan`, `slip`, `app`, `ui`) and how to fetch its current value. **(Phase 8, built 2026-10-19, EX; P8 §8.6.)** The base roots, consulted after the pack's, are eight: `app`, `ui`, `dialogs`, `caps`, `devices`, `web`, `hooks`, `events`; a pack root of the same name hides a base root, so no pack breaks on a new one. A pack is found by `ServiceLoader` on the controller's class path. Its agent half, the `AgentModule` with the same id, is named in the load options or, after Phase 1, uploaded through `POST /modules`.
 
 A **tenant pack** is a `DomainPack` overlay for one deployment variant of the same application: it overrides resolvers, constants and the hook catalogue. Scenarios and the base stay untouched. That is the test of whether the SPI is cut in the right place. (Phase 6, built 2026-10-09, CP; P6 §11, D144-D146: `DomainPackOverlay {baseId, id, version, overlay(base)}`, found by `ServiceLoader` beside the packs and applied by `DomainPacks.discover` to the base it names (in id order, a missing base an error naming both ids); `DelegatingDomainPack` forwards every member, keeps the base's id and reports `<base>+<overlay>@<version>` as the version a plan records; `PackSettings` through `DomainPack.settings()` and every context's `settings()`, so that an overlay changes a constant without replacing the code that reads it; `DomainPack.hooks()` with `HookCatalogues.overlay`. Proven on the sample desk's branch edition with the overlay module `skillroy-sample-lending-pack-branch`: a resolver, a constant, the allow-list and the catalogue overridden, scenarios A, B and E unchanged.)
 

@@ -67,8 +67,11 @@ public interface EventBus {
     List<Event> since(long seqExclusive, TopicFilter filter, int limit);
 
     /**
-     * First event with seq > seqExclusive matching filter (and, if non-null, every payloadMatch entry by
-     * String.valueOf equality); null on timeout. Blocks the calling thread; never call it on the EDT.
+     * First event with seq > seqExclusive matching filter and, if non-null, every payloadMatch entry; null on timeout.
+     * A match entry is a scalar (the payload value of its key equal by {@code String.valueOf} text) or
+     * {@code {has: scalar}} (the payload value is a list with a member equal by text), the shared rule of
+     * {@code ai.skillroy.testjava.protocol.PayloadMatch} (phase8-contracts.md 8.9); any other entry never holds. Blocks
+     * the calling thread; never call it on the EDT.
      */
     Event await(long seqExclusive, TopicFilter filter, Map<String, Object> payloadMatch, long timeoutMs)
             throws InterruptedException;

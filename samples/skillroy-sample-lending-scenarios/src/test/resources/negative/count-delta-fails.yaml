@@ -1,0 +1,17 @@
+# Negative (phase8-contracts.md 8.7, 12.4): a count captured after sign-on and no scan after it, so the delta
+# {size: {gt: $before.scans}} cannot hold. Fails as ASSERTION with the captured operand in the message; the pack's
+# recover signs off.
+scenario: count-delta-fails
+pack: lending
+launchProperties: { lending.seed: A }
+resolve:
+  assistant: { fixture: { code: "100" }, credential: { realm: staff, key: code } }
+steps:
+  - signOn: { staff: $assistant }
+  - captureFacts:
+      slot: before
+      fields:
+        scans: { size: "events[*topic=input.acked][*payload.source=Barcode]" }
+  - expect:
+      "events[*topic=input.acked][*payload.source=Barcode]": { size: { gt: $before.scans } }
+timeouts: { step: 5s }

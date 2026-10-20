@@ -321,7 +321,7 @@ intact; from 1025 the load is refused with an `IOException` on the attaching sid
 | `readOnly` | `false` | reject primitives whose spec is `mutating` **or `script`** (Phase 6 security fix S42, A44, built 2026-10-09, SR; P6 D156: a `script` primitive evaluates a caller's expression in the target, `web.evaluate` and `web.waitFlag`) |
 | `discoveryDir` | `${java.io.tmpdir}/skillroy-<user>` | where discovery and token files are written; a per-user directory, see §2.5. **S8/S19 (1.x, built 2026-10-02):** when the option is absent and the default is occupied by another user, the fall-back `<user.home>/.skillroy/run` is used (§2.5); a directory named explicitly is never substituted |
 | `readyTimeoutMs` | `120000` | how long to wait for `ReadinessSource`s before reporting `target.ready` UNAVAILABLE (the agent keeps polling, §5); at most one day |
-| `eventRing` | `10000` | event ring-buffer size; at most 1000000 |
+| `eventRing` | `10000` | event ring-buffer size; at most 1000000. **(Phase 8, built 2026-10-19, EX; P8 §8.6.)** The base fact root `events` reads the ring for the run's window, so its window is bounded by the ring: when the ring has evicted any event since the run's start the root's read fails (ERROR / ENVIRONMENT naming this option) rather than answering fewer events |
 | `eventRingChars` | `67108864` | **(Phase 8, built 2026-10-19, EW; P8 §5.1.)** Unchanged; the character bound runs after the ring's mask pass (A78), so a stored event always honours it and a policy always sees whole values. **(Phase 6 security fix S43, A45, built 2026-10-09, SR.)** the ring is bounded by the total characters of its events' payloads as well as by `eventRing` (64 Mi characters by default; 1 Mi to 1 Gi): the oldest events leave first, and an event whose own payload exceeds the bound is published with `truncated: true` and each of its strings cut to 1/64 of the bound (or, when still over, with the payload `{truncated: true}` alone). A payload's size is the sum of its keys' and strings' characters and 8 for every other value |
 | `httpThreads` | `32` | the most threads the control server's pool may have (2 to 1024), see §5. **H1 (1.x, built 2026-10-02):** with one thread per connection it is also the most connections that can be open; the `WORKER` and `CALLER` pools are sized from it (S30, §5) |
 | `httpIdleTimeoutMs` | `120000` | **H1 (1.x, built 2026-10-02).** How long an authenticated kept-alive connection may wait idle for its next request head before the agent closes it (§5 "Control server"). Validated at start to 100 to 3600000 ms (one hour at most, because an idle connection holds one of the `httpThreads` threads; `AgentRuntime`, confirmed against the code 2026-10-02). The default is deliberately longer than the controller's HTTP client keep-alive (30 s), so that the client, not the agent, retires an idle connection and a request never meets a connection the agent has just closed |
@@ -927,7 +927,10 @@ public interface EventBus {
     long lastSeq();
     List<Event> since(long seqExclusive, TopicFilter filter, int limit);
     /** First event with seq > seqExclusive matching filter (and, if non-null, every payloadMatch entry by
-     *  String.valueOf equality); null on timeout. */
+     *  String.valueOf equality); null on timeout.
+     *  A90 (Phase 8, built 2026-10-19, EX; P8 §8.9): a payloadMatch entry is a scalar (equal by String.valueOf text)
+     *  or {has: scalar} (the payload value is a list with a member equal by text), the shared Java 8 rule
+     *  ai.skillroy.testjava.protocol.PayloadMatch; any other entry never holds. */
     Event await(long seqExclusive, TopicFilter filter, Map<String,Object> payloadMatch, long timeoutMs)
         throws InterruptedException;
     AutoCloseable subscribe(TopicFilter filter, EventSink sink);
@@ -1632,7 +1635,7 @@ without the key behaves exactly as in Phase 1.
 | `jvm.info` | – | `{javaVersion, javaVendor, vmName, pid, uptimeMs, mainCommand, inputArguments:[…], headless: string\|null, osName, osArch, user, heap:{used,max}}` (`mainCommand` and `inputArguments` redacted) |
 | `jvm.threads` | `stacks?:bool, nameContains?:string, maxDepth?:int (20)` | `{threads:[{id,name,state,daemon,stack?:[…]}]}` |
 | `jvm.properties` | `names:[string]` (at most 50) | `{properties:{name:value\|null}}`: only the named system properties, never a dump; secret values as `<redacted>` |
-| `sync.await` | `topics:string\|[string], since:long, match?:{k:v}, timeoutMs?:long (10000, capped at 600000)` | the matching event JSON; `TIMEOUT` error with `data.lastSeq` if none. `match` compares top-level payload values by their text. Dispatcher timeout = `timeoutMs + 1000` |
+| `sync.await` | `topics:string\|[string], since:long, match?:{k:v}, timeoutMs?:long (10000, capped at 600000)` | the matching event JSON; `TIMEOUT` error with `data.lastSeq` if none. `match` compares top-level payload values by their text. Dispatcher timeout = `timeoutMs + 1000`. **A90 (Phase 8, built 2026-10-19, EX; P8 §8.9):** a `match` value is a scalar (equal by text) or `{has: scalar}` (the payload value is a list with a member equal by text; no substring meaning, a map or list element never equals); any other value (a list, a map, `{has: null}`, another key) is `INVALID_PARAMS` with `data {param: "match", reason}` before any wait (`PayloadMatch.problem`), where it used to wait and time out |
 | `evt.query` | `since?:long (0), topics?, limit?:int (200, max 1000)` | `{events:[…], lastSeq, oldestSeq}` |
 | `trace.mark` | `label:string, attrs?:{}` | `{seq}`; publishes `trace.mark` |
 | `app.state` | – | `{providerId: {…}, …}` merged from every `AppStateProvider` (thread `APP`) |
@@ -2464,6 +2467,14 @@ acknowledgement at all: such a verb uses `EVENT` with the pack's ready topics in
 *(Phase 7, built 2026-10-10, VC; P7 §8.2.)* `plan.json` is version 6 (`images`, a `swing.pointer` call's `guard`, the
 `visual` and `image` checks, `inference: run`); the reader accepts 1 to 6.
 
+**A91 (Phase 8, built 2026-10-19, EX; P8 §8.2.)** `plan.json` is version 7, written always; the reader accepts 1 to 7
+("expected 1, 2, 3, 4, 5, 6 or 7"), reads a version 6 plan as 7, and names each Phase 8 item it refuses below 7 ("needs
+a version 7 plan": a list filter, a dotted filter field or `[json]` in a path, `anyOf` or `containsWhere` in a
+matcher, `{has}` in an await's or a `sync.await` call's `match`, a step's `facts`, a call's `accept`, `rungs` or
+`minRung`). From version 7 on a step object holds exactly `id, verb, source, calls, expect` and optionally `facts`, and
+a call object exactly `primitive, args, sync, timeoutMs, await, handlesPrompt, capture, guard` and the §7 keys
+`accept, rungs, minRung`: any other key is refused ("step sN: unknown key 'x'"), where every earlier reader dropped it.
+
 (Phase 8, built 2026-10-19, ES; P8 §7.3, §7.6, A87; the version is §8's, EX.) A call gains `accept` (the codes it
 accepts, sorted), `rungs` (`[{name, capability}]`, best first, 2 to 8 distinct names) and `minRung` (one of them),
 each written only when present and refused below plan version 7 ("call P: 'accept' needs a version 7 plan").
@@ -2579,9 +2590,10 @@ errors):
 | `type: {by\|target, text, enter?, mode?, clear?, force?, await?}` | `swing.type`, SETTLE; with `await`, EVENT then a settle call. **(1.x, built 2026-10-02)** `await` (A32) |
 | `press: {key, target?\|by?, modifiers?, force?, await?}` | `swing.key`, SETTLE; with `await`, EVENT then a settle call. **(1.x, built 2026-10-02)** `await` (A32) |
 | `dismiss: {button?, dialog?, close?}` | `swing.dismiss`, SETTLE; counts as handling a prompt |
-| `waitFor: {topic, match?, within?}` | `sync.await`; `within` defaults to the step timeout and is at most 119 s (the agent caps a call at 120 s). The executor adds `since`: the `seq.before` of the last call before it that was not a wait, a mark or a `swing.settle` (**A32, 1.x, built 2026-10-02:** no `swing.settle` call moves `since`, whether the executor emitted it for an `await` or a scenario sent it through `call`; the settle cannot be the action the wait refers to). A wait on a prompt topic counts as handling the prompt |
+| `waitFor: {topic, match?, within?}` | `sync.await`; `within` defaults to the step timeout and is at most 119 s (the agent caps a call at 120 s). The executor adds `since`: the `seq.before` of the last call before it that was not a wait, a mark or a `swing.settle` (**A32, 1.x, built 2026-10-02:** no `swing.settle` call moves `since`, whether the executor emitted it for an `await` or a scenario sent it through `call`; the settle cannot be the action the wait refers to). A wait on a prompt topic counts as handling the prompt. **A92 (Phase 8, built 2026-10-19, EX; P8 §8.9):** `match` is validated at compile, each value a scalar or `{has: scalar}` (a list or a map compiled and never matched; it is now a compile error), as is the `match` of every `sync.await` call a pack verb emits and every `await` |
 | `expect: {path: matcher, …}` | no calls; the expectations are attached to the step |
 | `mark: label` or `{label, attrs?}` | `trace.mark` |
+| `captureFacts: {slot, fields: {name: path \| {size: path}}}` (**A92, Phase 8, built 2026-10-19, EX; P8 §8.7**) | no calls; the step's `facts`: the fields (1 to 32) read once where the step stands, no retry, a path's value or a `size`'s count bound into the captured slot (`$slot.name` in later steps and `verify`); reserved for a pack, as `call` is |
 | `webClick`, `webFill`, `webDispatch`, `webWaitFlag`, `webResize`, `webTap` (Phase 4, built 2026-10-07; P4 §7.1) | `web.dom.click`, `web.dom.fill`, `web.dispatchEvent` and `web.resize` (SETTLE; with `await`, EVENT then a settle call, as A32), `web.waitFlag` (NONE; `timeoutMs` at most 119000), `web.tap` (NONE; a cleanup call removes it), each on the web path of P4 §6.1 |
 
 SETTLE covers the event-dispatch thread only. A UI step whose effect is produced by an application thread is
@@ -2635,6 +2647,13 @@ describes the run's steps only (a session counts from its own start mark). `METH
 
 *(Phase 7, built 2026-10-10, VC; P7 §8.1, §12.3.)* The base verbs are eighteen: `aiAct`, `aiExpect`, `pointer` and
 `expectImage` join them and stay reserved for a pack; `UI_VERBS` gains `pointer` (`fired: false` fails the step, A29).
+
+**A92 (Phase 8, built 2026-10-19, EX; P8 §8.6, §8.7.)** The base verbs are nineteen with `captureFacts` (reserved). An
+eighth base root `events`, after `hooks`: a list, oldest first, of `{seq, ts, topic, source, correlationId, payload}`
+for every event of the agent's bus after the run's start mark (a session's: its own), read with `evt.query {since,
+limit: 1000}` (no topics), at most ten pages; the read fails, rather than under-counts, when the ring evicted any event
+of the window or the tenth page is full. Filter it with the list form (`events[*topic=input.acked]`); a pack root named
+`events` hides it.
 `DomainPack.screenLegend()` (default null) is the pack's legend of its icon-only controls for a model that looks at the
 screen; `DelegatingDomainPack` forwards it.
 
@@ -2658,6 +2677,19 @@ of `{equals}`, `{contains}` (substring, or list membership), `{matches: regex}` 
 a full match), `{in: […]}`, `{gt|gte|lt|lte: n}`, `{size: n}` (list or map size, string length), `{exists: bool}`
 (the path resolves to a non-null value), `{not: matcher}`. When a path does not resolve, only `exists` (and `not` of
 it) can hold.
+
+**A93 (Phase 8, built 2026-10-19, EX; P8 §8.3-§8.5.)** The grammar gains the list form `[*field=value]` and
+`[*field~regex]`: on a list, the list (possibly empty) of every element that is a map on which `field` resolves and
+matches, in list order; on anything else the path does not resolve, so `{size: 0}` needs a real list. Filter fields
+are dotted sub-paths in both forms (`[*payload.source=Barcode]`, `[lines.0.code=X]`; a literal key holding a dot is no
+longer matched). `[json]` parses the current value, a string of at most 1 Mi characters, as JSON (depth 200) and
+continues (`…payload.value[json].qty`). `size` takes a nested matcher (built since Phase 1, documented now: `{size:
+{gt: $before.n}}`), which counts a filtered list. New matchers: `{anyOf: [m, …]}` (1 to 16; any holds; on an
+unresolved path only an `exists`/`not` form inside can hold) and `{containsWhere: {field: m, …}}` (1 to 32 dotted
+fields; some element of a list is a map on which every field's matcher holds, a field it lacks evaluated as
+unresolved); `containsWhere` is refused in a stored-row check (a cell is a scalar). Every `matches` of one top-level
+evaluation, nested ones included, shares one budget: S24's "one budget per matcher evaluation" now holds literally,
+and a later `matches` of a spent evaluation fails at once ("regex budget spent").
 
 Numeric equality: numbers compare as decimals, and a number equals a string holding the same decimal value, so
 `2 == "2.00"`. A string with a superfluous leading zero is text, not a number: `"0100"` never equals `"100"`, so

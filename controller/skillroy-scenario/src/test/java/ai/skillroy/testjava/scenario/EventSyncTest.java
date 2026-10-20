@@ -294,7 +294,7 @@ class EventSyncTest {
         "call: { primitive: toy.emit, sync: EVENT, await: { topics: [a, 1] } }#or 'topics' must be a topic",
         "call: { primitive: toy.emit, sync: EVENT, await: { topic: a, match: [1] } }#'match' must be a mapping",
         "call: { primitive: toy.emit, sync: EVENT, await: { topic: a, match: { a: { b: 1 } } } }#'match.a' must be"
-                + " a string, number, boolean or null",
+                + " a scalar or {has: scalar}, found a mapping with keys [b]",
         "call: { primitive: toy.emit, sync: EVENT, await: { topic: a, match: { a: [1] } } }#'match.a' must be a",
         "call: { primitive: toy.emit, sync: EVENT, await: { topic: a, within: 11m } }#call.await.within must be at"
                 + " most 600000 ms",
@@ -549,5 +549,78 @@ class EventSyncTest {
                 + " sync: EVENT, await: { topic: prompt.waiting } }\n");
         assertOutcome(unexpected, Status.FAIL, FailureKind.ASSERTION);
         assertTrue(unexpected.message().startsWith("unexpected prompt (prompt.waiting)"), unexpected.message());
+    }
+
+    // ------------------------------------------------------------------------------- {has: scalar} (8.9, P8)
+
+    /** phase8-contracts.md 13.1 row 40: an await with {@code has} completes, with a reference too. */
+    @Test
+    void anAwaitWithHasCompletesOnAListMember() throws Exception {
+        agent.on("toy.tag", params -> {
+            agent.publish("toy.done", Map.of("tags", List.of("a", "b"), "id", "x"));
+            agent.publish("toy.done", Map.of("tags", List.of("c", "d"), "id", "y"));
+            return Map.of();
+        });
+        RunResult result = run("""
+                resolve:
+                  item: { fixture: { tag: d, tags: [c, d] } }
+                steps:
+                  - call:
+                      primitive: toy.tag
+                      sync: EVENT
+                      await: { topic: toy.done, match: { tags: { has: c } } }
+                  - call:
+                      primitive: toy.tag
+                      sync: EVENT
+                      await: { topic: toy.done, match: { tags: { has: $item.tag } } }
+                  - call:
+                      primitive: toy.tag
+                      sync: EVENT
+                      await: { topic: toy.done, match: { tags: { has: z } }, within: 1s }
+                timeouts: { step: 2s }
+                """);
+        assertOutcome(result, Status.FAIL, FailureKind.SYNC_TIMEOUT);
+        assertEquals("s3", result.failedStepId(), "the first two waits found their event");
+        assertEquals(Map.of("tags", Map.of("has", "d")), agent.awaits.get(1).match(), "the reference resolved");
+    }
+
+    /** phase8-contracts.md 8.9: a reference that resolves to a list or a map where a scalar belongs is refused. */
+    @Test
+    void aReferenceThatResolvesToAListIsAResolutionFailure() throws Exception {
+        agent.value("toy.tag", Map.of());
+        for (String match : List.of("{ tags: $item.tags }", "{ tags: { has: $item.tags } }")) {
+            RunResult result = run("""
+                    resolve:
+                      item: { fixture: { tags: [c, d] } }
+                    steps:
+                      - call: { primitive: toy.tag, sync: EVENT, await: { topic: toy.done, match: %s } }
+                    """.formatted(match));
+            assertOutcome(result, Status.ERROR, FailureKind.RESOLUTION_FAILED);
+            assertTrue(result.message().equals("await match 'tags' resolved to a list; a match value is a scalar or"
+                    + " {has: scalar}"), result.message());
+            assertEquals("REFERENCE", result.detail().get("reason"));
+        }
+        assertTrue(agent.callsTo("toy.tag").isEmpty(), "nothing sent");
+    }
+
+    /** A waitFor's {@code has} goes to the agent's {@code sync.await} as written; the fake applies the agent's rule. */
+    @Test
+    void aWaitForWithHasEndsOnTheMatchingEvent() throws Exception {
+        agent.on("toy.tag", params -> {
+            agent.publish("input.requested", Map.of("state", "DEPOSIT", "validInputs", List.of("Entry",
+                    "Key.DEPOSIT")));
+            return Map.of();
+        });
+        RunResult result = run("""
+                steps:
+                  - call: { primitive: toy.tag }
+                  - waitFor: { topic: input.requested, match: { state: DEPOSIT, validInputs: { has: Key.DEPOSIT } } }
+                  - waitFor: { topic: input.requested, match: { validInputs: { has: Key.RETURN } }, within: 1s }
+                timeouts: { step: 2s }
+                """);
+        assertEquals("s3", result.failedStepId(), result.message());
+        List<FakeAgentConnection.Call> waits = agent.callsTo("sync.await");
+        assertEquals(Map.of("state", "DEPOSIT", "validInputs", Map.of("has", "Key.DEPOSIT")), waits.get(0).params()
+                .get("match"), "sent as written");
     }
 }

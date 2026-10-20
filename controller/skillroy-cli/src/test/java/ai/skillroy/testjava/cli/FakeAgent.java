@@ -21,6 +21,7 @@ import ai.skillroy.testjava.protocol.Capability;
 import ai.skillroy.testjava.protocol.CapabilityState;
 import ai.skillroy.testjava.protocol.ErrorCodes;
 import ai.skillroy.testjava.protocol.Event;
+import ai.skillroy.testjava.protocol.PayloadMatch;
 import ai.skillroy.testjava.protocol.Json;
 import ai.skillroy.testjava.protocol.JsonView;
 import ai.skillroy.testjava.protocol.LoadMode;
@@ -357,13 +358,9 @@ final class FakeAgent implements AutoCloseable {
         return TopicFilter.parse(value == null ? null : String.valueOf(value));
     }
 
+    /** The agent's payload rule, {@code PayloadMatch} (phase8-contracts.md 8.9). */
     private static boolean matches(Event event, Map<String, Object> match) {
-        for (Map.Entry<String, Object> e : match.entrySet()) {
-            if (!String.valueOf(e.getValue()).equals(String.valueOf(event.payload().get(e.getKey())))) {
-                return false;
-            }
-        }
-        return true;
+        return PayloadMatch.matches(event.payload(), match);
     }
 
     private void handle(HttpExchange exchange) throws IOException {

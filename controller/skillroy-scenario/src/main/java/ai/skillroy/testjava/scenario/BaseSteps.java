@@ -61,9 +61,15 @@ import java.util.TreeSet;
  *   <li>{@code waitFor: {topic, match?, within?, capture?}} -> {@code sync.await} with {@code timeoutMs} =
  *       {@code within}
  *       (default: the step timeout; at most 119 s, because the agent caps a call at 120 s); the executor adds
- *       {@code since}: the {@code seq.before} of the last call before it other than a wait or a mark.</li>
+ *       {@code since}: the {@code seq.before} of the last call before it other than a wait or a mark. Each
+ *       {@code match} value is a scalar (equal by text) or {@code {has: scalar}} (a list member equal by text), checked
+ *       here ({@code PayloadMatch}, phase8-contracts.md 8.9): a list or a map is a compile error.</li>
  *   <li>{@code expect: {path: matcher, …}}: no calls; the expectations are attached to the step.</li>
  *   <li>{@code mark: label} (or {@code {label, attrs?}}) -> {@code trace.mark}.</li>
+ *   <li>{@code captureFacts: {slot, fields: {name: path | {size: path}}}} (phase8-contracts.md 8.7, decision D604): no
+ *       calls; the compiler attaches the step's {@code facts} (a {@code Plan.FactCapture}), which the executor reads
+ *       once where the step stands and binds into the captured slot. Reserved for a pack
+ *       ({@link PlanCompiler#RESERVED_VERBS}).</li>
  * </ul>
  *
  * <p>{@code await: {topic|topics, match?, within?}} on {@code click}, {@code type} and {@code press} (amendment A32,
@@ -133,11 +139,11 @@ public final class BaseSteps implements StepLibrary {
 
     /**
      * The base verbs in documentation order (the web verbs since Phase 4, the four vision verbs since Phase 7,
-     * phase7-contracts.md 8.1, decision D310).
+     * phase7-contracts.md 8.1, decision D310, {@code captureFacts} since Phase 8, phase8-contracts.md 8.7).
      */
     public static final List<String> VERBS = List.of("call", "click", "type", "press", "dismiss", "waitFor",
             "expect", "mark", "webClick", "webFill", "webDispatch", "webWaitFlag", "webResize", "webTap", "aiAct",
-            "aiExpect", "pointer", "expectImage");
+            "aiExpect", "pointer", "expectImage", "captureFacts");
 
     /** The four Phase 7 verbs (phase7-contracts.md 8.1). */
     static final Set<String> VISION_VERBS = Set.of("aiAct", "aiExpect", "pointer", "expectImage");
@@ -260,6 +266,13 @@ public final class BaseSteps implements StepLibrary {
                 yield List.of();
             }
             case "mark" -> mark(args);
+            case "captureFacts" -> {
+                // phase8-contracts.md 8.7: no calls; the compiler checks the arguments and attaches the facts.
+                if (!(args instanceof Map<?, ?> m) || m.isEmpty()) {
+                    throw new ScenarioException("captureFacts: needs a mapping {slot, fields}");
+                }
+                yield List.of();
+            }
             case "webClick" -> webAction(verb, args, ctx, "web.dom.click", false);
             case "webFill" -> webAction(verb, args, ctx, "web.dom.fill", true);
             case "webDispatch" -> webDispatch(args, ctx);
@@ -1010,6 +1023,14 @@ public final class BaseSteps implements StepLibrary {
         Object match = a.get("match");
         if (match != null && !(match instanceof Map)) {
             throw new ScenarioException("waitFor: 'match' must be a mapping of payload key to value");
+        }
+        if (match != null) {
+            // phase8-contracts.md 8.9: a list or a map compiled and never matched; scalars and {has: scalar} only.
+            @SuppressWarnings("unchecked")
+            String problem = AwaitRules.checkMatch((Map<String, Object>) Values.normalise(match));
+            if (problem != null) {
+                throw new ScenarioException("waitFor: " + problem);
+            }
         }
         long within = a.containsKey("within") ? Durations.toMillis(a.get("within"), "waitFor.within")
                 : Math.min(ctx.stepTimeoutMs(), MAX_WAIT_MS);
